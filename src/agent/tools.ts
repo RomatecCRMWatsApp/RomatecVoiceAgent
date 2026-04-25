@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as crm from '../integrations/crm';
 import * as avalieimob from '../integrations/avalieimob';
 import * as calendar from '../integrations/calendar';
+import { saveMemory, searchMemory, listMemories, deleteMemory } from './memory';
 import { ResumoDia, ToolResult } from '../types';
 import axios from 'axios';
 
@@ -140,6 +141,48 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['event_id'],
     },
   },
+  {
+    name: 'salvar_memoria',
+    description: 'Salva um fato, preferência, decisão, contexto ou lembrete na memória persistente do ZAYRA.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        type:           { type: 'string', description: 'Tipo: fact | preference | decision | context | reminder' },
+        content:        { type: 'string', description: 'Conteúdo da memória' },
+        relevance_tags: { type: 'string', description: 'Tags separadas por vírgula para busca futura' },
+        expires_at:     { type: 'string', description: 'Data de expiração opcional (YYYY-MM-DD)' },
+      },
+      required: ['type', 'content'],
+    },
+  },
+  {
+    name: 'buscar_memoria',
+    description: 'Busca memórias persistentes relevantes por palavra-chave. Use antes de responder sobre o passado.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Palavra-chave ou frase para buscar' },
+        type:  { type: 'string', description: 'Filtrar por tipo (opcional): fact | preference | decision | context | reminder' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'listar_memorias',
+    description: 'Lista todas as memórias persistentes ativas, agrupadas por tipo.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'deletar_memoria',
+    description: 'Remove uma memória persistente por ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'ID da memória a deletar' },
+      },
+      required: ['id'],
+    },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
@@ -212,6 +255,27 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       case 'cancelar_evento':
         await calendar.cancelarEvento(input.event_id as string);
         data = { success: true, message: 'Evento cancelado.' };
+        break;
+      case 'salvar_memoria':
+        data = {
+          id: await saveMemory(
+            input.type as Parameters<typeof saveMemory>[0],
+            input.content as string,
+            input.relevance_tags as string | undefined,
+            input.expires_at as string | undefined,
+          ),
+          message: 'Memória salva com sucesso.',
+        };
+        break;
+      case 'buscar_memoria':
+        data = await searchMemory(input.query as string, input.type as string | undefined);
+        break;
+      case 'listar_memorias':
+        data = await listMemories();
+        break;
+      case 'deletar_memoria':
+        await deleteMemory(input.id as number);
+        data = { success: true, message: 'Memória deletada.' };
         break;
       default:
         return { toolName: name, success: false, error: `Tool desconhecida: ${name}` };

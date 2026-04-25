@@ -11,6 +11,7 @@ import * as avalieimob from './integrations/avalieimob';
 import { processMessage, sendReply, WaMessage } from './integrations/whatsapp';
 import { getAuthUrl, exchangeCode } from './integrations/calendar';
 import { addSSEClient, removeSSEClient, startProactiveNotifications } from './agent/proactive';
+import { initDb, loadSessionFromDb, listMemories } from './agent/memory';
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -147,10 +148,23 @@ app.get('/auth/google/callback', async (req: Request, res: Response) => {
   }
 });
 
+// ── Memory endpoint ───────────────────────────────────────────────────────────
+app.get('/memory', async (_req: Request, res: Response) => {
+  try {
+    const memories = await listMemories();
+    res.json({ agent: AGENT_IDENTITY.name, count: memories.length, memories });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 const PORT = process.env.PORT ?? 3000;
 app.listen(PORT, () => {
   console.log(`${AGENT_IDENTITY.name} v${AGENT_IDENTITY.version} rodando na porta ${PORT}`);
   startProactiveNotifications();
+  void initDb()
+    .then(() => loadSessionFromDb())
+    .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));
 });
 
 export default app;
