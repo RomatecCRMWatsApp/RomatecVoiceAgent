@@ -8,86 +8,36 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --bg:       #0a1a0f;
-      --bg2:      #0f2318;
-      --bg3:      #162d1e;
-      --neon:     #00ff88;
-      --neon-dim: rgba(0,255,136,.15);
-      --gold:     #c9a84c;
-      --gold-dim: rgba(201,168,76,.15);
-      --text:     #e8f5e9;
-      --text-dim: #7aab8a;
-      --red:      #ff4444;
-      --orange:   #ff8c00;
+      --bg: #0a1a0f; --bg2: #0f2318; --bg3: #162d1e;
+      --neon: #00ff88; --neon-dim: rgba(0,255,136,.15);
+      --gold: #c9a84c; --gold-dim: rgba(201,168,76,.15);
+      --text: #e8f5e9; --text-dim: #7aab8a; --red: #ff4444; --orange: #ff8c00;
     }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100dvh; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
+    #bgCanvas { position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .35; }
+    .wrap { position: relative; z-index: 1; width: 100%; max-width: 900px; padding: 24px 16px 48px; display: flex; flex-direction: column; align-items: center; gap: 28px; }
 
-    body {
-      font-family: 'Inter', system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100dvh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      overflow-x: hidden;
-    }
-
-    /* ── Canvas ── */
-    #canvas { position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .35; }
-
-    /* ── Layout ── */
-    .wrap {
-      position: relative; z-index: 1;
-      width: 100%; max-width: 900px;
-      padding: 24px 16px 48px;
-      display: flex; flex-direction: column; align-items: center; gap: 28px;
-    }
-
-    /* ── Activate overlay ── */
-    .activate-overlay {
-      position: fixed; inset: 0; z-index: 200;
-      background: rgba(10,26,15,.92);
-      display: flex; align-items: center; justify-content: center;
-      cursor: pointer;
-    }
-    .activate-card {
-      display: flex; flex-direction: column; align-items: center; gap: 20px;
-      text-align: center;
-    }
+    /* Activate */
+    .activate-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(10,26,15,.92); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .activate-card { display: flex; flex-direction: column; align-items: center; gap: 20px; text-align: center; }
     .activate-logo { font-size: 3.5rem; font-weight: 700; letter-spacing: 10px; color: var(--gold); text-shadow: 0 0 40px rgba(201,168,76,.5); }
     .activate-sub  { color: var(--text-dim); font-size: .9rem; letter-spacing: 2px; text-transform: uppercase; }
-    .activate-ring {
-      width: 64px; height: 64px; border-radius: 50%;
-      border: 2px solid var(--neon);
-      animation: ring-listen 1.2s infinite;
-      box-shadow: 0 0 20px var(--neon-dim);
-    }
-    @keyframes activate-pulse { 0%,100%{opacity:.5;transform:scale(.95)} 50%{opacity:1;transform:scale(1)} }
+    .activate-ring { width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--neon); animation: ring-listen 1.2s infinite; box-shadow: 0 0 20px var(--neon-dim); }
 
-    /* ── Header ── */
+    /* Header */
     .status-bar { width: 100%; display: flex; justify-content: space-between; align-items: center; }
     .logo { color: var(--gold); font-weight: 700; font-size: .85rem; letter-spacing: 2px; text-transform: uppercase; }
     .status-right { display: flex; align-items: center; gap: 10px; }
     .status-dot { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-dim); }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 6px var(--neon); animation: pulse-dot 2s infinite; }
     @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
-    .notif-badge {
-      background: var(--red); color: #fff; font-size: .7rem; font-weight: 700;
-      border-radius: 10px; padding: 2px 7px; min-width: 20px; text-align: center;
-      display: none; cursor: pointer;
-    }
+    .notif-badge { background: var(--red); color: #fff; font-size: .7rem; font-weight: 700; border-radius: 10px; padding: 2px 7px; min-width: 20px; text-align: center; display: none; cursor: pointer; }
 
-    /* ── Avatar ── */
+    /* Avatar wrap */
     .avatar-wrap { position: relative; width: 220px; height: 220px; display: flex; align-items: center; justify-content: center; }
-    .avatar-ring {
-      position: absolute; inset: -12px; border-radius: 50%;
-      border: 2px solid var(--neon);
-      box-shadow: 0 0 20px var(--neon-dim);
-      transition: all .3s;
-    }
-    .avatar-ring.passive  { animation: ring-passive 2s infinite; }
+    .avatar-ring { position: absolute; inset: -12px; border-radius: 50%; border: 2px solid var(--neon); box-shadow: 0 0 20px var(--neon-dim); transition: all .3s; }
+    .avatar-ring.passive      { animation: ring-passive 2s infinite; }
     .avatar-ring.active-voice { animation: ring-active .5s infinite; border-color: #00ffcc; box-shadow: 0 0 30px rgba(0,255,204,.5); }
     .avatar-ring.processing   { border-color: var(--gold); box-shadow: 0 0 30px var(--gold-dim); animation: ring-process .7s infinite; }
     .avatar-ring.speaking     { animation: ring-speak .7s infinite; box-shadow: 0 0 40px rgba(0,255,136,.6); }
@@ -96,36 +46,54 @@
     @keyframes ring-active  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1)} }
     @keyframes ring-process { 0%,100%{opacity:.5} 50%{opacity:1} }
     @keyframes ring-speak   { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1);opacity:.7} }
-
     .avatar-ring-2 { position: absolute; inset: -24px; border-radius: 50%; border: 1px solid rgba(0,255,136,.2); animation: ring-outer 3s infinite linear; }
     @keyframes ring-outer { to{transform:rotate(360deg)} }
 
-    .avatar-img { width: 200px; height: 200px; border-radius: 50%; object-fit: cover; border: 3px solid var(--bg3); box-shadow: 0 0 40px rgba(0,255,136,.2); transition: all .3s; }
-    .avatar-img.speaking { animation: avatar-pulse .8s infinite; }
-    @keyframes avatar-pulse { 0%,100%{box-shadow:0 0 40px rgba(0,255,136,.2)} 50%{box-shadow:0 0 80px rgba(0,255,136,.6)} }
+    /* 3D canvas */
+    #avatar3d { width: 200px; height: 200px; border-radius: 50%; display: none; cursor: pointer; border: 3px solid var(--bg3); box-shadow: 0 0 40px rgba(0,255,136,.2); transition: box-shadow .3s; }
+    #avatar3d:hover { box-shadow: 0 0 60px rgba(0,255,136,.35); }
+    #avatar3d.speaking { box-shadow: 0 0 80px rgba(0,255,136,.6); animation: canvas-pulse .8s infinite; }
+    @keyframes canvas-pulse { 0%,100%{box-shadow:0 0 40px rgba(0,255,136,.2)} 50%{box-shadow:0 0 80px rgba(0,255,136,.6)} }
 
-    /* ── Name ── */
+    /* 3D loading */
+    .av-loading { position: absolute; inset: 10px; border-radius: 50%; background: var(--bg2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 5; }
+    .av-load-z   { font-size: 2rem; font-weight: 700; color: var(--neon); animation: z-pulse 1.5s infinite; }
+    @keyframes z-pulse { 0%,100%{opacity:.3} 50%{opacity:.8} }
+    .av-load-track { width: 110px; height: 3px; background: rgba(0,255,136,.15); border-radius: 2px; overflow: hidden; }
+    .av-load-fill  { height: 100%; background: var(--neon); width: 5%; border-radius: 2px; transition: width .2s; }
+    .av-load-txt   { font-size: .65rem; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; }
+
+    /* Thinking particles */
+    .think-particles { position: absolute; top: 0; left: 50%; pointer-events: none; display: none; }
+    .think-dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 8px var(--gold); animation: think-float 1.8s ease-out infinite; opacity: 0; }
+    .think-dot:nth-child(1){left:-20px;animation-delay:0s}
+    .think-dot:nth-child(2){left:0px;animation-delay:.4s}
+    .think-dot:nth-child(3){left:20px;animation-delay:.8s}
+    .think-dot:nth-child(4){left:-10px;animation-delay:1.2s}
+    @keyframes think-float { 0%{opacity:0;transform:translateY(0) scale(.5)} 20%{opacity:.9;transform:translateY(-12px) scale(1)} 100%{opacity:0;transform:translateY(-60px) scale(.3)} }
+
+    /* Fallback image */
+    .avatar-img { width: 200px; height: 200px; border-radius: 50%; object-fit: cover; border: 3px solid var(--bg3); box-shadow: 0 0 40px rgba(0,255,136,.2); display: none; }
+    .avatar-img.speaking { animation: av-pulse .8s infinite; }
+    @keyframes av-pulse { 0%,100%{box-shadow:0 0 40px rgba(0,255,136,.2)} 50%{box-shadow:0 0 80px rgba(0,255,136,.6)} }
+
+    /* Name */
     .name-block { text-align: center; }
     .agent-name { font-size: 2.8rem; font-weight: 700; letter-spacing: 6px; color: var(--gold); text-shadow: 0 0 30px rgba(201,168,76,.4); }
     .agent-sub  { font-size: .85rem; color: var(--text-dim); margin-top: 4px; letter-spacing: 1px; }
 
-    /* ── Listen indicator ── */
+    /* Listen */
     .listen-state { display: flex; flex-direction: column; align-items: center; gap: 10px; }
     .listen-label { font-size: .8rem; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase; min-height: 20px; transition: color .3s; }
     .listen-label.active   { color: var(--neon); }
     .listen-label.speaking { color: var(--gold); }
     .listen-label.error    { color: var(--red); }
 
-    /* ── Fallback mic (hidden if SpeechRecognition works) ── */
-    .mic-btn {
-      width: 70px; height: 70px; border-radius: 50%;
-      border: 2px solid var(--neon); background: transparent;
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
-      transition: all .2s; box-shadow: 0 0 20px var(--neon-dim); color: var(--neon);
-    }
+    /* Fallback mic */
+    .mic-btn { width: 70px; height: 70px; border-radius: 50%; border: 2px solid var(--neon); background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .2s; box-shadow: 0 0 20px var(--neon-dim); color: var(--neon); }
     .mic-btn:hover { box-shadow: 0 0 40px rgba(0,255,136,.4); transform: scale(1.05); }
-    .mic-btn.recording { border-color: var(--red); color: var(--red); animation: btn-record .8s infinite; box-shadow: 0 0 30px rgba(255,68,68,.4); }
-    .mic-btn.processing { border-color: var(--gold); color: var(--gold); cursor: default; }
+    .mic-btn.recording      { border-color: var(--red); color: var(--red); animation: btn-record .8s infinite; box-shadow: 0 0 30px rgba(255,68,68,.4); }
+    .mic-btn.processing     { border-color: var(--gold); color: var(--gold); cursor: default; }
     .mic-btn.speaking-state { animation: btn-speak .6s infinite; box-shadow: 0 0 40px rgba(0,255,136,.5); }
     @keyframes btn-record { 0%,100%{opacity:1} 50%{opacity:.5} }
     @keyframes btn-speak  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
@@ -134,30 +102,13 @@
     @keyframes spin { to{transform:rotate(360deg)} }
     .mic-label { font-size: .75rem; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 6px; min-height: 18px; }
 
-    /* ── Briefing button ── */
-    .briefing-btn {
-      background: transparent; border: 1px solid var(--gold);
-      color: var(--gold); padding: 9px 24px; border-radius: 24px;
-      cursor: pointer; font-size: .78rem; letter-spacing: 2px; text-transform: uppercase;
-      font-family: inherit; transition: all .2s;
-    }
+    /* Briefing */
+    .briefing-btn { background: transparent; border: 1px solid var(--gold); color: var(--gold); padding: 9px 24px; border-radius: 24px; cursor: pointer; font-size: .78rem; letter-spacing: 2px; text-transform: uppercase; font-family: inherit; transition: all .2s; }
     .briefing-btn:hover { background: var(--gold-dim); box-shadow: 0 0 20px var(--gold-dim); }
 
-    /* ── Dashboard grid ── */
-    .dashboard-grid {
-      width: 100%;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-    .card {
-      background: var(--bg2);
-      border: 1px solid rgba(0,255,136,.12);
-      border-radius: 14px;
-      padding: 18px 16px 14px;
-      cursor: pointer;
-      transition: border-color .2s, box-shadow .2s;
-    }
+    /* Dashboard */
+    .dashboard-grid { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .card { background: var(--bg2); border: 1px solid rgba(0,255,136,.12); border-radius: 14px; padding: 18px 16px 14px; cursor: pointer; transition: border-color .2s, box-shadow .2s; }
     .card:hover { border-color: rgba(0,255,136,.35); box-shadow: 0 0 20px rgba(0,255,136,.08); }
     .card-title { font-size: .68rem; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
     .card-value { font-size: 2rem; font-weight: 700; color: var(--neon); line-height: 1; margin-bottom: 4px; }
@@ -165,7 +116,7 @@
     .card-meta  { font-size: .7rem; color: var(--gold); margin-top: 4px; }
     .card-updating { opacity: .5; }
 
-    /* ── Chat ── */
+    /* Chat */
     .chat-wrap { width: 100%; max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; }
     .chat-wrap::-webkit-scrollbar { width: 4px; }
     .chat-wrap::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 2px; }
@@ -178,16 +129,8 @@
     .bubble.user  .bubble-text { background: var(--bg3); border: 1px solid rgba(0,255,136,.15); border-bottom-right-radius: 4px; }
     .bubble.agent .bubble-text { background: rgba(0,255,136,.07); border: 1px solid rgba(0,255,136,.2); border-bottom-left-radius: 4px; color: var(--neon); }
 
-    /* ── Notification balloon ── */
-    .notif-balloon {
-      position: fixed; bottom: 24px; right: 24px; z-index: 150;
-      background: var(--bg2); border: 1px solid rgba(0,255,136,.3);
-      border-radius: 16px; padding: 16px; max-width: 320px; width: calc(100vw - 48px);
-      box-shadow: 0 0 40px rgba(0,255,136,.15);
-      transform: translateY(120%); opacity: 0;
-      transition: transform .35s ease, opacity .35s ease;
-      pointer-events: none;
-    }
+    /* Notification balloon */
+    .notif-balloon { position: fixed; bottom: 24px; right: 24px; z-index: 150; background: var(--bg2); border: 1px solid rgba(0,255,136,.3); border-radius: 16px; padding: 16px; max-width: 320px; width: calc(100vw - 48px); box-shadow: 0 0 40px rgba(0,255,136,.15); transform: translateY(120%); opacity: 0; transition: transform .35s ease, opacity .35s ease; pointer-events: none; }
     .notif-balloon.open { transform: translateY(0); opacity: 1; pointer-events: all; }
     .notif-balloon.urgency-high   { border-color: rgba(255,68,68,.5); box-shadow: 0 0 30px rgba(255,68,68,.15); }
     .notif-balloon.urgency-medium { border-color: rgba(255,140,0,.4); }
@@ -197,7 +140,7 @@
     .notif-close  { background: none; border: none; color: var(--text-dim); font-size: 1.2rem; cursor: pointer; line-height: 1; padding: 0; }
     .notif-text   { font-size: .8rem; color: var(--text-dim); line-height: 1.5; }
 
-    /* ── Modals ── */
+    /* Modals */
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
     .modal-overlay.open { display: flex; }
     .modal { background: var(--bg2); border: 1px solid rgba(201,168,76,.3); border-radius: 16px; max-width: 640px; width: 100%; max-height: 80dvh; overflow-y: auto; padding: 28px; box-shadow: 0 0 60px rgba(201,168,76,.1); }
@@ -207,23 +150,18 @@
     .modal-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
     .modal-item { background: var(--bg3); border-radius: 10px; padding: 12px 14px; font-size: .83rem; line-height: 1.6; }
     .modal-item strong { color: var(--neon); display: block; margin-bottom: 2px; }
-    .modal-item .badge {
-      display: inline-block; font-size: .65rem; padding: 2px 8px; border-radius: 8px; margin-left: 6px;
-      background: rgba(0,255,136,.15); color: var(--neon); text-transform: uppercase; letter-spacing: 1px;
-    }
-    .modal-item .badge.ativa    { background: rgba(0,255,136,.2); color: var(--neon); }
-    .modal-item .badge.pausada  { background: rgba(255,140,0,.2);  color: var(--orange); }
-    .modal-item .badge.pendente { background: rgba(255,140,0,.2);  color: var(--orange); }
-    .modal-item .badge.assinado { background: rgba(0,255,136,.15); color: var(--neon); }
-    .modal-item .badge.novo         { background: rgba(0,200,255,.15); color: #00c8ff; }
+    .modal-item .badge { display: inline-block; font-size: .65rem; padding: 2px 8px; border-radius: 8px; margin-left: 6px; background: rgba(0,255,136,.15); color: var(--neon); text-transform: uppercase; letter-spacing: 1px; }
+    .modal-item .badge.ativa      { background: rgba(0,255,136,.2); color: var(--neon); }
+    .modal-item .badge.pausada    { background: rgba(255,140,0,.2); color: var(--orange); }
+    .modal-item .badge.pendente   { background: rgba(255,140,0,.2); color: var(--orange); }
+    .modal-item .badge.novo       { background: rgba(0,200,255,.15); color: #00c8ff; }
     .modal-item .badge.em_atendimento { background: rgba(201,168,76,.2); color: var(--gold); }
   </style>
 </head>
 <body>
 
-<canvas id="canvas"></canvas>
+<canvas id="bgCanvas"></canvas>
 
-<!-- Activate overlay -->
 <div class="activate-overlay" id="activateOverlay">
   <div class="activate-card">
     <div class="activate-logo">ZAYRA</div>
@@ -234,89 +172,84 @@
 </div>
 
 <div class="wrap">
-
-  <!-- Status bar -->
   <div class="status-bar">
     <span class="logo">Romatec</span>
     <div class="status-right">
-      <div class="status-dot">
-        <div class="dot" id="statusDot"></div>
-        <span id="statusText">ZAYRA online</span>
-      </div>
-      <div class="notif-badge" id="notifBadge" title="Notificações">0</div>
+      <div class="status-dot"><div class="dot"></div><span>ZAYRA online</span></div>
+      <div class="notif-badge" id="notifBadge">0</div>
     </div>
   </div>
 
-  <!-- Avatar -->
-  <div class="avatar-wrap">
+  <div class="avatar-wrap" id="avatarWrap">
     <div class="avatar-ring-2"></div>
     <div class="avatar-ring passive" id="avatarRing"></div>
+    <div class="av-loading" id="avLoading">
+      <div class="av-load-z">Z</div>
+      <div class="av-load-track"><div class="av-load-fill" id="avLoadFill"></div></div>
+      <div class="av-load-txt">Carregando...</div>
+    </div>
+    <canvas id="avatar3d"></canvas>
+    <div class="think-particles" id="thinkParticles">
+      <div class="think-dot"></div><div class="think-dot"></div>
+      <div class="think-dot"></div><div class="think-dot"></div>
+    </div>
     <img class="avatar-img" id="avatarImg" src="/avatar.png" alt="ZAYRA"
       onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22><circle cx=%22100%22 cy=%22100%22 r=%22100%22 fill=%22%230f2318%22/><text x=%2250%25%22 y=%2254%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2280%22 fill=%22%2300ff88%22>Z</text></svg>'" />
   </div>
 
-  <!-- Name -->
   <div class="name-block">
     <div class="agent-name">ZAYRA</div>
     <div class="agent-sub">Assistente Executiva — Romatec Consultoria Imobiliária</div>
   </div>
 
-  <!-- Continuous listen indicator (primary) -->
   <div class="listen-state" id="listenState">
     <div class="listen-label" id="listenLabel">Ouvindo...</div>
   </div>
 
-  <!-- Fallback mic button (shown only if SpeechRecognition unavailable) -->
   <div id="fallbackControls" style="display:none;flex-direction:column;align-items:center;gap:0">
-    <button class="mic-btn" id="micBtn" title="Falar com ZAYRA">
+    <button class="mic-btn" id="micBtn">
       <svg id="micIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z"/>
         <path d="M19 10a7 7 0 0 1-14 0"/>
-        <line x1="12" y1="19" x2="12" y2="23"/>
-        <line x1="8"  y1="23" x2="16" y2="23"/>
+        <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
       </svg>
       <div class="spinner" id="spinner" style="display:none"></div>
     </button>
     <div class="mic-label" id="micLabel">Toque para falar</div>
   </div>
 
-  <!-- Briefing button -->
   <button class="briefing-btn" id="briefingBtn">Briefing do Dia</button>
 
-  <!-- Dashboard grid -->
-  <div class="dashboard-grid" id="dashboardGrid">
-    <div class="card card-updating" id="cardLeads" data-modal="leads">
+  <div class="dashboard-grid">
+    <div class="card card-updating" data-modal="leads">
       <div class="card-title">Leads Hoje</div>
       <div class="card-value" id="cardLeadsVal">—</div>
-      <div class="card-sub"  id="cardLeadsSub">carregando...</div>
+      <div class="card-sub" id="cardLeadsSub">carregando...</div>
       <div class="card-meta" id="cardLeadsMeta"></div>
     </div>
-    <div class="card card-updating" id="cardCampanhas" data-modal="campanhas">
+    <div class="card card-updating" data-modal="campanhas">
       <div class="card-title">Campanhas</div>
       <div class="card-value" id="cardCampanhasVal">—</div>
-      <div class="card-sub"  id="cardCampanhasSub">carregando...</div>
+      <div class="card-sub" id="cardCampanhasSub">carregando...</div>
       <div class="card-meta" id="cardCampanhasMeta"></div>
     </div>
-    <div class="card card-updating" id="cardAgenda" data-modal="agenda">
+    <div class="card card-updating" data-modal="agenda">
       <div class="card-title">Agenda Hoje</div>
       <div class="card-value" id="cardAgendaVal">—</div>
-      <div class="card-sub"  id="cardAgendaSub">Google Calendar</div>
+      <div class="card-sub" id="cardAgendaSub">Google Calendar</div>
       <div class="card-meta" id="cardAgendaMeta"></div>
     </div>
-    <div class="card card-updating" id="cardContratos" data-modal="contratos">
+    <div class="card card-updating" data-modal="contratos">
       <div class="card-title">Contratos</div>
       <div class="card-value" id="cardContratosVal">—</div>
-      <div class="card-sub"  id="cardContratosSub">pendentes</div>
+      <div class="card-sub" id="cardContratosSub">pendentes</div>
       <div class="card-meta" id="cardContratosMeta"></div>
     </div>
   </div>
 
-  <!-- Chat -->
   <div class="chat-wrap" id="chat"></div>
-
 </div>
 
-<!-- Notification balloon -->
 <div class="notif-balloon" id="notifBalloon">
   <div class="notif-header">
     <img class="notif-avatar" src="/avatar.png" alt="Z" onerror="this.style.display='none'" />
@@ -326,7 +259,6 @@
   <p class="notif-text" id="notifText"></p>
 </div>
 
-<!-- Modal briefing -->
 <div class="modal-overlay" id="briefingModal">
   <div class="modal">
     <button class="modal-close" id="briefingClose">×</button>
@@ -335,7 +267,6 @@
   </div>
 </div>
 
-<!-- Modal card detail -->
 <div class="modal-overlay" id="cardModal">
   <div class="modal">
     <button class="modal-close" id="cardModalClose">×</button>
@@ -344,354 +275,504 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
-// ── Canvas particles ──────────────────────────────────────────────────────────
-(function () {
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
-  let W, H, pts = [];
-  function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
-  window.addEventListener('resize', resize); resize();
+// ── Background particles ──────────────────────────────────────────────────────
+(function(){
+  const cv=document.getElementById('bgCanvas'),ctx=cv.getContext('2d');
+  let W,H,pts=[];
+  function resize(){W=cv.width=innerWidth;H=cv.height=innerHeight;}
+  addEventListener('resize',resize);resize();
   function rand(a,b){return a+Math.random()*(b-a);}
-  for(let i=0;i<60;i++) pts.push({x:rand(0,W),y:rand(0,H),vx:rand(-.3,.3),vy:rand(-.3,.3),r:rand(1,2.5),a:rand(.2,.6)});
-  function draw(){
+  for(let i=0;i<60;i++)pts.push({x:rand(0,W),y:rand(0,H),vx:rand(-.3,.3),vy:rand(-.3,.3),r:rand(1,2.5),a:rand(.2,.6)});
+  (function draw(){
     ctx.clearRect(0,0,W,H);
-    pts.forEach(p=>{
-      p.x+=p.vx; p.y+=p.vy;
-      if(p.x<0)p.x=W; if(p.x>W)p.x=0; if(p.y<0)p.y=H; if(p.y>H)p.y=0;
-      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-      ctx.fillStyle=`rgba(0,255,136,${p.a})`; ctx.fill();
-    });
-    for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++){
-      const dx=pts[i].x-pts[j].x, dy=pts[i].y-pts[j].y, d=Math.sqrt(dx*dx+dy*dy);
-      if(d<100){ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[j].x,pts[j].y);ctx.strokeStyle=`rgba(0,255,136,${.12*(1-d/100)})`;ctx.lineWidth=.5;ctx.stroke();}
-    }
+    pts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=W;if(p.x>W)p.x=0;if(p.y<0)p.y=H;if(p.y>H)p.y=0;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fillStyle=`rgba(0,255,136,${p.a})`;ctx.fill();});
+    for(let i=0;i<pts.length;i++)for(let j=i+1;j<pts.length;j++){const dx=pts[i].x-pts[j].x,dy=pts[i].y-pts[j].y,d=Math.sqrt(dx*dx+dy*dy);if(d<100){ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[j].x,pts[j].y);ctx.strokeStyle=`rgba(0,255,136,${.12*(1-d/100)})`;ctx.lineWidth=.5;ctx.stroke();}}
     requestAnimationFrame(draw);
-  }
-  draw();
+  })();
 })();
 
-// ── State & refs ──────────────────────────────────────────────────────────────
-const avatarRing   = document.getElementById('avatarRing');
-const avatarImg    = document.getElementById('avatarImg');
-const listenLabel  = document.getElementById('listenLabel');
-const listenState  = document.getElementById('listenState');
-const chat         = document.getElementById('chat');
+// ── AvatarController (Three.js) ───────────────────────────────────────────────
+const AVATAR_GLB = 'https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb?morphTargets=ARKit&textureAtlas=1024';
+
+class AvatarController {
+  constructor() {
+    this.cv = document.getElementById('avatar3d');
+    this.scene = new THREE.Scene();
+    this.clock = new THREE.Clock();
+    this.mixer = null; this.avatar = null;
+    this.bones = {}; this.morphs = {};
+    this.state = 'idle'; this.loaded = false;
+    this.headYaw = 0; this.tgtYaw = 0;
+    this.headPitch = 0; this.tgtPitch = 0;
+    this.headRoll = 0; this.breathT = 0;
+    this.blinkT = 0; this.nextBlink = 3 + Math.random() * 3;
+    this._blinking = false; this._blinkStart = 0;
+    this.greetT = -1; this.mouthVal = 0;
+    this._initRenderer();
+    this._initLights();
+    this._loadGLB();
+    this._bindInput();
+    this._loop();
+  }
+
+  _initRenderer() {
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.cv, alpha: true, antialias: true });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setSize(200, 200);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.setClearColor(0x000000, 0);
+    this.camera = new THREE.PerspectiveCamera(36, 1, 0.01, 100);
+    this.camera.position.set(0, 1.52, 0.72);
+    this.camera.lookAt(0, 1.58, 0);
+  }
+
+  _initLights() {
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const neon = new THREE.DirectionalLight(0x00ff88, 2.0);
+    neon.position.set(-1.5, 1.5, 1.5); neon.castShadow = true;
+    this.scene.add(neon);
+    const gold = new THREE.DirectionalLight(0xc9a84c, 1.3);
+    gold.position.set(2, 1, 1); this.scene.add(gold);
+    const rim = new THREE.DirectionalLight(0xffffff, 0.25);
+    rim.position.set(0, 1, -2); this.scene.add(rim);
+  }
+
+  _loadGLB() {
+    const loader = new THREE.GLTFLoader();
+    loader.load(
+      AVATAR_GLB,
+      gltf => this._onLoaded(gltf),
+      p => { if (p.total) document.getElementById('avLoadFill').style.width = Math.round(p.loaded / p.total * 100) + '%'; },
+      err => { console.warn('GLB load failed:', err); this._fallback(); }
+    );
+  }
+
+  _onLoaded(gltf) {
+    this.avatar = gltf.scene;
+    this.avatar.traverse(node => {
+      if (node.isMesh) {
+        node.castShadow = node.receiveShadow = true;
+        if (node.morphTargetDictionary) {
+          Object.entries(node.morphTargetDictionary).forEach(([k, i]) => {
+            if (!this.morphs[k]) this.morphs[k] = [];
+            this.morphs[k].push({ mesh: node, idx: i });
+          });
+        }
+      }
+      const n = node.name;
+      if (/^Head$/i.test(n))          this.bones.head  = node;
+      else if (/^Neck$/i.test(n))     this.bones.neck  = node;
+      else if (/^Spine$/i.test(n))    this.bones.spine = node;
+      else if (/^LeftEye$/i.test(n))  this.bones.eyeL  = node;
+      else if (/^RightEye$/i.test(n)) this.bones.eyeR  = node;
+    });
+    if (gltf.animations?.length) this.mixer = new THREE.AnimationMixer(this.avatar);
+    this.scene.add(this.avatar);
+    this.loaded = true;
+    document.getElementById('avLoading').style.display = 'none';
+    this.cv.style.display = 'block';
+    setTimeout(() => this.setState('greeting'), 600);
+  }
+
+  _fallback() {
+    document.getElementById('avLoading').style.display = 'none';
+    document.getElementById('avatarImg').style.display = 'block';
+  }
+
+  _setMorph(name, val) {
+    (this.morphs[name] || []).forEach(e => {
+      if (e.mesh.morphTargetInfluences) e.mesh.morphTargetInfluences[e.idx] = Math.max(0, Math.min(1, val));
+    });
+  }
+
+  _lerpMorph(name, tgt, a) {
+    (this.morphs[name] || []).forEach(e => {
+      if (!e.mesh.morphTargetInfluences) return;
+      const c = e.mesh.morphTargetInfluences[e.idx] || 0;
+      e.mesh.morphTargetInfluences[e.idx] = c + (tgt - c) * a;
+    });
+  }
+
+  setState(s) {
+    this.state = s;
+    document.getElementById('thinkParticles').style.display = s === 'thinking' ? 'block' : 'none';
+    if (s === 'greeting') this.greetT = 0;
+  }
+
+  updateLipSync(vol) { this.mouthVal = vol / 70; }
+
+  _bindInput() {
+    const wrap = document.getElementById('avatarWrap');
+    const track = (cx, cy) => {
+      const r = wrap.getBoundingClientRect();
+      this.tgtYaw   = ((cx - (r.left + r.width / 2))  / (innerWidth  / 2)) *  0.17;
+      this.tgtPitch = ((cy - (r.top  + r.height / 2)) / (innerHeight / 2)) * -0.087;
+    };
+    addEventListener('mousemove', e => track(e.clientX, e.clientY));
+    addEventListener('touchmove', e => { if (e.touches.length) track(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+    this.cv.addEventListener('click', () => {
+      this.setState('greeting');
+      fetch('/text', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Diga "Olá José Romário!" de forma breve e executiva.', voice: true })
+      }).then(r => r.ok ? r.blob() : null).then(b => { if (b) window._playBlob(b, 'Olá, José Romário!'); }).catch(() => {});
+    });
+  }
+
+  _loop() {
+    const tick = () => {
+      requestAnimationFrame(tick);
+      if (document.hidden) return;
+      const dt = Math.min(this.clock.getDelta(), 0.1);
+      this._update(dt);
+      this.renderer.render(this.scene, this.camera);
+    };
+    tick();
+  }
+
+  _update(dt) {
+    if (!this.loaded) return;
+    const t = this.clock.elapsedTime;
+    const ease = 1 - Math.pow(0.04, dt);
+    this.headYaw   += (this.tgtYaw   - this.headYaw)   * ease;
+    this.headPitch += (this.tgtPitch - this.headPitch) * ease;
+    this.breathT   += dt * 0.33;
+    if (this.bones.spine) this.bones.spine.scale.y = 1 + Math.sin(this.breathT * Math.PI * 2) * 0.005;
+
+    switch (this.state) {
+      case 'idle':      this._doIdle(t, dt);      break;
+      case 'listening': this._doListening(t, dt); break;
+      case 'thinking':  this._doThinking(t, dt);  break;
+      case 'speaking':  this._doSpeaking(t, dt);  break;
+      case 'alert':     this._doAlert(t, dt);     break;
+      case 'greeting':  this._doGreeting(t, dt);  break;
+    }
+    this._doBlink(dt);
+    if (this.bones.head) {
+      this.bones.head.rotation.y = this.headYaw + this.headRoll;
+      this.bones.head.rotation.x = this.headPitch;
+    }
+    if (this.mixer) this.mixer.update(dt);
+  }
+
+  _doIdle(t) {
+    this.headRoll += (Math.sin(t * 0.3) * 0.015 - this.headRoll) * 0.03;
+    this._lerpMorph('jawOpen', 0, 0.1);
+    this._lerpMorph('browInnerUp', 0, 0.05);
+    this._lerpMorph('mouthSmileLeft', 0, 0.03);
+    this._lerpMorph('mouthSmileRight', 0, 0.03);
+  }
+
+  _doListening() {
+    this.headRoll += (0.087 - this.headRoll) * 0.04;
+    this._lerpMorph('browInnerUp', 0.25, 0.04);
+  }
+
+  _doThinking(t) {
+    if (this.bones.eyeL) this.bones.eyeL.rotation.x += (-0.18 - this.bones.eyeL.rotation.x) * 0.04;
+    if (this.bones.eyeR) this.bones.eyeR.rotation.x += (-0.18 - this.bones.eyeR.rotation.x) * 0.04;
+    this.headRoll += (0.05 - this.headRoll) * 0.04;
+    this._lerpMorph('browInnerUp', 0.3 + Math.sin(t) * 0.1, 0.04);
+  }
+
+  _doSpeaking(t) {
+    const m = Math.max(0, Math.min(1, this.mouthVal));
+    this._lerpMorph('jawOpen',   m * 0.65, 0.35);
+    this._lerpMorph('viseme_aa', m * 0.5,  0.3);
+    this._lerpMorph('viseme_O',  m * 0.3,  0.25);
+    this.headRoll += (Math.sin(t * 1.6) * 0.008 - this.headRoll) * 0.05;
+    if (this.bones.head) this.bones.head.rotation.y = this.headYaw + Math.sin(t * 2.1) * 0.012;
+    this._lerpMorph('browInnerUp', 0.12 + Math.sin(t * 1.4) * 0.1, 0.05);
+  }
+
+  _doAlert() {
+    this.tgtYaw = 0; this.tgtPitch = 0;
+    this._lerpMorph('browDownLeft',  0.45, 0.05);
+    this._lerpMorph('browDownRight', 0.45, 0.05);
+    this.camera.position.z += (0.52 - this.camera.position.z) * 0.05;
+  }
+
+  _doGreeting(t, dt) {
+    this.greetT += dt;
+    if (this.greetT < 1.5 && this.bones.head)
+      this.bones.head.rotation.x += (Math.sin(this.greetT * Math.PI * 2) * 0.1 - this.bones.head.rotation.x) * 0.2;
+    this._lerpMorph('mouthSmileLeft',  0.5, 0.05);
+    this._lerpMorph('mouthSmileRight', 0.5, 0.05);
+    if (this.greetT > 2.5) { this.greetT = -1; this.setState('idle'); }
+  }
+
+  _doBlink(dt) {
+    this.blinkT += dt;
+    if (this.blinkT >= this.nextBlink) {
+      this._blinkStart = this.blinkT;
+      this._blinking   = true;
+      this.nextBlink   = this.blinkT + 3 + Math.random() * 3;
+    }
+    if (this._blinking) {
+      const dur = 0.13, el = this.blinkT - this._blinkStart;
+      const v = el < dur / 2 ? el / (dur / 2) : Math.max(0, 1 - (el - dur / 2) / (dur / 2));
+      this._setMorph('eyeBlinkLeft', v); this._setMorph('eyeBlinkRight', v);
+      if (el > dur) this._blinking = false;
+    }
+  }
+
+  dispose() { this.renderer.dispose(); }
+}
+
+// ── AudioController (lip sync) ────────────────────────────────────────────────
+class AudioController {
+  constructor() { this.ctx = null; this.analyser = null; this.source = null; this.data = null; }
+  init() {
+    if (this.ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    this.ctx = new AC();
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 256;
+    this.data = new Uint8Array(this.analyser.frequencyBinCount);
+    this.analyser.connect(this.ctx.destination);
+  }
+  connect(el) {
+    if (!this.ctx) return;
+    if (this.source) try { this.source.disconnect(); } catch {}
+    try { this.source = this.ctx.createMediaElementSource(el); this.source.connect(this.analyser); } catch {}
+  }
+  getVolume() {
+    if (!this.analyser) return 0;
+    this.analyser.getByteFrequencyData(this.data);
+    let s = 0; for (let i = 4; i < 60; i++) s += this.data[i]; return s / 56;
+  }
+}
+
+// ── Globals ───────────────────────────────────────────────────────────────────
+let avatarCtrl = null, audioCtrl = null;
+let appState = 'inactive', recognition = null, fallbackMode = false;
+let mediaRecorder = null, chunks = [], dashboardData = null, notifCount = 0;
+
+const avatarRing  = document.getElementById('avatarRing');
+const listenLabel = document.getElementById('listenLabel');
+const listenState = document.getElementById('listenState');
+const chat        = document.getElementById('chat');
 const notifBalloon = document.getElementById('notifBalloon');
 const notifBadge   = document.getElementById('notifBadge');
 
-let appState     = 'inactive'; // inactive|passive|active_voice|processing|speaking
-let recognition  = null;
-let fallbackMode = false;
-let mediaRecorder = null, chunks = [];
-let dashboardData = null;
-let notifCount   = 0;
+function detectExpr(text) {
+  const t = text.toLowerCase();
+  if (/urgente|atenção|alerta|crítico|emergência/.test(t)) return 'alert';
+  if (/olá|bom dia|boa tarde|boa noite/.test(t))           return 'greeting';
+  return 'speaking';
+}
 
+window._playBlob = function(blob, responseText = '') {
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  audio.crossOrigin = 'anonymous';
+  if (audioCtrl) audioCtrl.connect(audio);
+  const expr = detectExpr(responseText);
+  setAppState('speaking');
+  if (avatarCtrl) avatarCtrl.setState(expr === 'alert' ? 'alert' : 'speaking');
+  if (responseText) addBubble('agent', responseText);
+  let raf;
+  const lipLoop = () => { if (!audio.paused && !audio.ended) { if (avatarCtrl && audioCtrl) avatarCtrl.updateLipSync(audioCtrl.getVolume()); raf = requestAnimationFrame(lipLoop); } };
+  audio.onplay  = () => lipLoop();
+  audio.onended = () => { cancelAnimationFrame(raf); URL.revokeObjectURL(url); if (avatarCtrl) avatarCtrl.setState('idle'); resumeListening(); };
+  audio.onerror = () => { cancelAnimationFrame(raf); if (avatarCtrl) avatarCtrl.setState('idle'); resumeListening(); };
+  audio.play().catch(() => resumeListening());
+};
+
+// ── App state machine ─────────────────────────────────────────────────────────
 function setAppState(s) {
   appState = s;
   avatarRing.className = 'avatar-ring';
-  avatarImg.className  = 'avatar-img';
   listenLabel.className = 'listen-label';
+  const av3d = document.getElementById('avatar3d');
+  const avImg = document.getElementById('avatarImg');
+  if (av3d) av3d.classList.remove('speaking');
+  if (avImg) avImg.classList.remove('speaking');
 
   if (s === 'passive') {
     avatarRing.classList.add('passive');
-    listenLabel.textContent = 'Ouvindo...';
-    listenLabel.classList.add('active');
+    listenLabel.textContent = 'Ouvindo...'; listenLabel.classList.add('active');
+    if (avatarCtrl && avatarCtrl.state !== 'greeting') avatarCtrl.setState('idle');
   } else if (s === 'active_voice') {
     avatarRing.classList.add('active-voice');
-    listenLabel.textContent = 'Detectando voz...';
-    listenLabel.classList.add('active');
+    listenLabel.textContent = 'Detectando voz...'; listenLabel.classList.add('active');
+    if (avatarCtrl) avatarCtrl.setState('listening');
   } else if (s === 'processing') {
     avatarRing.classList.add('processing');
-    listenLabel.textContent = 'ZAYRA está pensando...';
-    listenLabel.classList.add('active');
+    listenLabel.textContent = 'ZAYRA está pensando...'; listenLabel.classList.add('active');
+    if (avatarCtrl) avatarCtrl.setState('thinking');
   } else if (s === 'speaking') {
     avatarRing.classList.add('speaking');
-    avatarImg.classList.add('speaking');
-    listenLabel.textContent = 'ZAYRA está falando...';
-    listenLabel.classList.add('speaking');
+    if (av3d && av3d.style.display !== 'none') av3d.classList.add('speaking');
+    else if (avImg) avImg.classList.add('speaking');
+    listenLabel.textContent = 'ZAYRA está falando...'; listenLabel.classList.add('speaking');
   } else if (s === 'inactive') {
     listenLabel.textContent = 'Aguardando ativação...';
   }
 
-  // sync fallback mic button
+  // sync fallback mic
   const micBtn = document.getElementById('micBtn');
   if (micBtn) {
     micBtn.className = 'mic-btn';
     document.getElementById('micIcon').style.display = 'block';
     document.getElementById('spinner').style.display = 'none';
     document.getElementById('micLabel').className = 'mic-label';
-    if (s === 'recording')   { micBtn.classList.add('recording');      document.getElementById('micLabel').textContent = 'Ouvindo...'; }
-    if (s === 'processing')  { micBtn.classList.add('processing');      document.getElementById('micIcon').style.display='none'; document.getElementById('spinner').style.display='block'; document.getElementById('micLabel').textContent = 'Pensando...'; }
-    if (s === 'speaking')    { micBtn.classList.add('speaking-state'); document.getElementById('micLabel').textContent = 'Falando...'; }
-    if (s === 'passive')     { document.getElementById('micLabel').textContent = 'Toque para falar'; }
+    if (s === 'recording')  { micBtn.classList.add('recording');      document.getElementById('micLabel').textContent = 'Ouvindo...'; }
+    if (s === 'processing') { micBtn.classList.add('processing');      document.getElementById('micIcon').style.display='none'; document.getElementById('spinner').style.display='block'; document.getElementById('micLabel').textContent = 'Pensando...'; }
+    if (s === 'speaking')   { micBtn.classList.add('speaking-state'); document.getElementById('micLabel').textContent = 'Falando...'; }
+    if (s === 'passive')    { document.getElementById('micLabel').textContent = 'Toque para falar'; }
   }
 }
 
-// ── Chat bubbles ──────────────────────────────────────────────────────────────
 function addBubble(role, text) {
-  const wrap = document.createElement('div');
-  wrap.className = `bubble ${role}`;
-  if (role === 'agent') {
-    const img = document.createElement('img');
-    img.className = 'bubble-avatar'; img.src = '/avatar.png'; img.alt = 'Z';
-    img.onerror = () => { img.style.display='none'; };
-    wrap.appendChild(img);
-  }
-  const p = document.createElement('div');
-  p.className = 'bubble-text'; p.textContent = text;
-  wrap.appendChild(p);
-  chat.appendChild(wrap);
-  chat.scrollTop = chat.scrollHeight;
+  const wrap = document.createElement('div'); wrap.className = `bubble ${role}`;
+  if (role === 'agent') { const img = document.createElement('img'); img.className='bubble-avatar'; img.src='/avatar.png'; img.alt='Z'; img.onerror=()=>img.style.display='none'; wrap.appendChild(img); }
+  const p = document.createElement('div'); p.className='bubble-text'; p.textContent=text; wrap.appendChild(p);
+  chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
 }
 
-// ── Send text → ZAYRA (voice response) ───────────────────────────────────────
 async function processText(text, silent = false) {
   if (appState === 'processing' || appState === 'speaking') return;
   if (recognition) try { recognition.abort(); } catch {}
   setAppState('processing');
   if (!silent) addBubble('user', text);
-
   try {
-    const res = await fetch('/text', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, voice: true }),
-    });
+    const res = await fetch('/text', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message: text, voice: true }) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const responseText = decodeURIComponent(res.headers.get('X-Response-Text') || '');
-    const audioBlob    = await res.blob();
-    const url          = URL.createObjectURL(audioBlob);
-    const audio        = new Audio(url);
-
-    setAppState('speaking');
-    if (!silent && responseText) addBubble('agent', responseText);
-
-    audio.onended = () => { URL.revokeObjectURL(url); resumeListening(); };
-    audio.onerror = () => resumeListening();
-    await audio.play();
+    const rt = decodeURIComponent(res.headers.get('X-Response-Text') || '');
+    window._playBlob(await res.blob(), silent ? '' : rt);
   } catch (err) {
-    console.error(err);
-    listenLabel.className = 'listen-label error';
-    listenLabel.textContent = 'Erro. Tentando novamente...';
+    console.error(err); listenLabel.className = 'listen-label error'; listenLabel.textContent = 'Erro...';
+    if (avatarCtrl) avatarCtrl.setState('idle');
     setTimeout(resumeListening, 2500);
   }
 }
 
-// Send raw audio blob (fallback mode)
 async function sendAudio(blob) {
   setAppState('processing');
-  const form = new FormData();
-  form.append('audio', blob, 'rec.webm');
+  const form = new FormData(); form.append('audio', blob, 'rec.webm');
   try {
-    const res = await fetch('/voice', { method: 'POST', body: form });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const transcription = decodeURIComponent(res.headers.get('X-Transcription') || '');
-    const responseText  = decodeURIComponent(res.headers.get('X-Response-Text')  || '');
-    if (transcription) addBubble('user', transcription);
-
-    const audioBlob = await res.blob();
-    const url = URL.createObjectURL(audioBlob);
-    const audio = new Audio(url);
-
-    setAppState('speaking');
-    if (responseText) addBubble('agent', responseText);
-    audio.onended = () => { URL.revokeObjectURL(url); setAppState('passive'); };
-    audio.onerror = () => setAppState('passive');
-    await audio.play();
-  } catch {
-    listenLabel.textContent = 'Erro ao processar.';
-    setTimeout(() => setAppState('passive'), 2000);
-  }
+    const res = await fetch('/voice', { method:'POST', body: form });
+    if (!res.ok) throw new Error();
+    const tr = decodeURIComponent(res.headers.get('X-Transcription') || '');
+    const rt = decodeURIComponent(res.headers.get('X-Response-Text') || '');
+    if (tr) addBubble('user', tr);
+    window._playBlob(await res.blob(), rt);
+  } catch { listenLabel.textContent = 'Erro.'; if (avatarCtrl) avatarCtrl.setState('idle'); setTimeout(() => setAppState('passive'), 2000); }
 }
 
 function resumeListening() {
   setAppState('passive');
-  if (!fallbackMode && recognition) {
-    try { recognition.start(); } catch {}
-  }
+  if (!fallbackMode && recognition) try { recognition.start(); } catch {}
 }
 
 // ── SpeechRecognition ─────────────────────────────────────────────────────────
-function initSpeechRecognition() {
+function initSR() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return false;
-
   recognition = new SR();
-  recognition.continuous      = true;
-  recognition.interimResults  = false;
-  recognition.lang            = 'pt-BR';
-  recognition.maxAlternatives = 1;
-
-  recognition.onspeechstart = () => {
-    if (appState === 'passive') setAppState('active_voice');
-  };
-  recognition.onspeechend = () => {
-    if (appState === 'active_voice') setAppState('passive');
-  };
-  recognition.onresult = (event) => {
+  recognition.continuous = true; recognition.interimResults = false;
+  recognition.lang = 'pt-BR'; recognition.maxAlternatives = 1;
+  recognition.onspeechstart = () => { if (appState === 'passive') setAppState('active_voice'); };
+  recognition.onspeechend   = () => { if (appState === 'active_voice') setAppState('passive'); };
+  recognition.onresult = e => {
     if (appState !== 'passive' && appState !== 'active_voice') return;
-    const last = event.results[event.results.length - 1];
+    const last = e.results[e.results.length - 1];
     if (!last.isFinal) return;
-    const transcript = last[0].transcript.trim();
-    if (transcript.length < 2) return;
-    void processText(transcript);
+    const t = last[0].transcript.trim();
+    if (t.length > 1) void processText(t);
   };
-  recognition.onend = () => {
-    if (appState === 'passive' || appState === 'active_voice') {
-      setTimeout(() => { try { recognition.start(); } catch {} }, 300);
-    }
-  };
-  recognition.onerror = (e) => {
-    if (e.error === 'no-speech' || e.error === 'aborted') return;
-    console.warn('SpeechRecognition error:', e.error);
-    if (appState === 'passive') setTimeout(() => { try { recognition.start(); } catch {} }, 1500);
-  };
+  recognition.onend = () => { if (appState === 'passive' || appState === 'active_voice') setTimeout(() => { try { recognition.start(); } catch {} }, 300); };
+  recognition.onerror = e => { if (e.error === 'no-speech' || e.error === 'aborted') return; if (appState === 'passive') setTimeout(() => { try { recognition.start(); } catch {} }, 1500); };
   return true;
 }
 
-// ── Fallback: MediaRecorder ───────────────────────────────────────────────────
 function setupFallbackMic() {
   document.getElementById('fallbackControls').style.display = 'flex';
   listenState.style.display = 'none';
-
   const micBtn = document.getElementById('micBtn');
   micBtn.addEventListener('click', async () => {
     if (appState === 'processing' || appState === 'speaking') return;
     if (appState === 'recording') { mediaRecorder.stop(); return; }
-
-    let stream;
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-    catch { document.getElementById('micLabel').textContent = 'Microfone negado.'; return; }
-
-    chunks = [];
-    mediaRecorder = new MediaRecorder(stream);
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { document.getElementById('micLabel').textContent = 'Microfone negado.'; return; }
+    chunks = []; mediaRecorder = new MediaRecorder(stream);
     mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-      stream.getTracks().forEach(t => t.stop());
-      void sendAudio(new Blob(chunks, { type: 'audio/webm' }));
-    };
-    mediaRecorder.start();
-    setAppState('recording');
+    mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); void sendAudio(new Blob(chunks, { type: 'audio/webm' })); };
+    mediaRecorder.start(); setAppState('recording');
   });
 }
 
-// ── Activation (first tap) ────────────────────────────────────────────────────
+// ── Activation ────────────────────────────────────────────────────────────────
 async function activate() {
   document.getElementById('activateOverlay').style.display = 'none';
-
-  const hasSR = initSpeechRecognition();
-  if (hasSR) {
-    try { recognition.start(); setAppState('passive'); }
-    catch { fallbackMode = true; }
+  audioCtrl = new AudioController(); audioCtrl.init();
+  if (typeof THREE !== 'undefined') {
+    try { avatarCtrl = new AvatarController(); } catch (e) { console.warn('3D avatar error:', e); }
   }
-  if (!hasSR || fallbackMode) {
-    fallbackMode = true;
-    setupFallbackMic();
-    setAppState('passive');
-  }
-
+  const hasSR = initSR();
+  if (hasSR) { try { recognition.start(); setAppState('passive'); } catch { fallbackMode = true; } }
+  if (!hasSR || fallbackMode) { fallbackMode = true; setupFallbackMic(); setAppState('passive'); }
   connectSSE();
   await loadDashboard(true);
 }
-
 document.getElementById('activateOverlay').addEventListener('click', () => void activate());
 
-// ── SSE notifications ─────────────────────────────────────────────────────────
+// ── SSE ───────────────────────────────────────────────────────────────────────
 function connectSSE() {
   let es = new EventSource('/notifications/stream');
-  es.onmessage = (e) => {
-    try { showNotification(JSON.parse(e.data)); } catch {}
-  };
-  es.onerror = () => {
-    es.close();
-    setTimeout(connectSSE, 5000);
-  };
+  es.onmessage = e => { try { showNotif(JSON.parse(e.data)); } catch {} };
+  es.onerror   = () => { es.close(); setTimeout(connectSSE, 5000); };
 }
 
-function showNotification(notif) {
-  notifCount++;
-  notifBadge.textContent = String(notifCount);
-  notifBadge.style.display = 'block';
-
-  document.getElementById('notifTitle').textContent = notif.title   || 'Alerta';
-  document.getElementById('notifText').textContent  = notif.message || '';
-  notifBalloon.className = `notif-balloon open urgency-${notif.urgency || 'medium'}`;
-
-  // Speak notification via Web Speech Synthesis (fast, no API call)
-  if ('speechSynthesis' in window) {
-    const utt = new SpeechSynthesisUtterance(notif.message);
-    utt.lang = 'pt-BR'; utt.rate = 1.05;
-    window.speechSynthesis.speak(utt);
-  }
-
-  setTimeout(() => notifBalloon.classList.remove('open'), 9000);
+function showNotif(n) {
+  notifCount++; notifBadge.textContent = String(notifCount); notifBadge.style.display = 'block';
+  document.getElementById('notifTitle').textContent = n.title   || 'Alerta';
+  document.getElementById('notifText').textContent  = n.message || '';
+  notifBalloon.className = `notif-balloon open urgency-${n.urgency || 'medium'}`;
+  if (avatarCtrl) avatarCtrl.setState('alert');
+  if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(n.message); u.lang='pt-BR'; u.rate=1.05; speechSynthesis.speak(u); }
+  setTimeout(() => { notifBalloon.classList.remove('open'); if (avatarCtrl && avatarCtrl.state === 'alert') avatarCtrl.setState('idle'); }, 9000);
 }
 
-document.getElementById('notifClose').addEventListener('click', () => notifBalloon.classList.remove('open'));
-notifBadge.addEventListener('click', () => {
-  notifCount = 0; notifBadge.style.display = 'none';
-});
+document.getElementById('notifClose').addEventListener('click', () => { notifBalloon.classList.remove('open'); if (avatarCtrl && avatarCtrl.state === 'alert') avatarCtrl.setState('idle'); });
+notifBadge.addEventListener('click', () => { notifCount = 0; notifBadge.style.display = 'none'; });
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 async function loadDashboard(greet = false) {
   document.querySelectorAll('.card').forEach(c => c.classList.add('card-updating'));
   try {
-    const res  = await fetch('/briefing');
-    const json = await res.json();
-    dashboardData = json.data;
-    renderDashboard(dashboardData);
-
+    const json = await (await fetch('/briefing')).json();
+    dashboardData = json.data; renderDashboard(dashboardData);
     if (greet) {
       const h = new Date().getHours();
-      const saudacao = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
-      const leads  = (dashboardData.leads || []).length;
-      const contr  = (dashboardData.contratos_pendentes || []).length;
-      const msg = `${saudacao} José Romário! Resumo: ${leads} lead(s) no CRM e ${contr} contrato(s) pendente(s) no AvalieImob. Estou pronta para seus comandos.`;
-      void processText(`Diga exatamente isso como saudação executiva de 2 frases para José Romário: "${msg}"`, true);
+      const s = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+      const leads = (dashboardData.leads || []).length;
+      const contr = (dashboardData.contratos_pendentes || []).length;
+      void processText(`Diga exatamente: "${s} José Romário! ${leads} lead(s) no CRM, ${contr} contrato(s) pendente(s). Pronta."`, true);
     }
-  } catch {
-    document.querySelectorAll('.card').forEach(c => c.classList.remove('card-updating'));
-  }
+  } catch { document.querySelectorAll('.card').forEach(c => c.classList.remove('card-updating')); }
 }
 
-function renderDashboard(data) {
-  const leads     = data.leads              || [];
-  const contratos = data.contratos_pendentes || [];
-  const campanhas = data.campanhas           || [];
-
-  // Leads card
-  const novos = leads.filter(l => l.status === 'novo').length;
-  const emAte = leads.filter(l => l.status === 'em_atendimento').length;
-  document.getElementById('cardLeadsVal').textContent  = String(leads.length);
-  document.getElementById('cardLeadsSub').textContent  = `${novos} novo(s)`;
-  document.getElementById('cardLeadsMeta').textContent = `${emAte} em atendimento`;
-
-  // Campanhas card
-  const ativas    = campanhas.filter(c => c.status === 'ativa').length;
-  const totalEnv  = campanhas.reduce((s,c) => s + (c.enviados||0), 0);
-  const totalResp = campanhas.reduce((s,c) => s + (c.respondidos||0), 0);
-  const taxa      = totalEnv > 0 ? Math.round(totalResp/totalEnv*100) : 0;
-  document.getElementById('cardCampanhasVal').textContent  = `${ativas}/${campanhas.length}`;
+function renderDashboard(d) {
+  const leads=d.leads||[], contr=d.contratos_pendentes||[], camps=d.campanhas||[];
+  document.getElementById('cardLeadsVal').textContent  = leads.length;
+  document.getElementById('cardLeadsSub').textContent  = `${leads.filter(l=>l.status==='novo').length} novo(s)`;
+  document.getElementById('cardLeadsMeta').textContent = `${leads.filter(l=>l.status==='em_atendimento').length} em atendimento`;
+  const ativas=camps.filter(c=>c.status==='ativa').length, tEnv=camps.reduce((s,c)=>s+(c.enviados||0),0), tRes=camps.reduce((s,c)=>s+(c.respondidos||0),0);
+  document.getElementById('cardCampanhasVal').textContent  = `${ativas}/${camps.length}`;
   document.getElementById('cardCampanhasSub').textContent  = 'ativas / total';
-  document.getElementById('cardCampanhasMeta').textContent = `${taxa}% taxa de resposta`;
-
-  // Agenda — placeholder (needs Google Calendar configured)
+  document.getElementById('cardCampanhasMeta').textContent = `${tEnv>0?Math.round(tRes/tEnv*100):0}% taxa de resposta`;
   document.getElementById('cardAgendaVal').textContent  = '—';
   document.getElementById('cardAgendaSub').textContent  = 'Configure Calendar';
   document.getElementById('cardAgendaMeta').textContent = '/auth/google';
-
-  // Contratos card
-  document.getElementById('cardContratosVal').textContent  = String(contratos.length);
+  document.getElementById('cardContratosVal').textContent  = contr.length;
   document.getElementById('cardContratosSub').textContent  = 'pendentes AvalieImob';
-  document.getElementById('cardContratosMeta').textContent = contratos.length > 0 ? 'Ação necessária' : 'Em dia';
-
+  document.getElementById('cardContratosMeta').textContent = contr.length > 0 ? 'Ação necessária' : 'Em dia';
   document.querySelectorAll('.card').forEach(c => c.classList.remove('card-updating'));
 }
-
-// Auto-refresh every 5 minutes
 setInterval(() => void loadDashboard(false), 5 * 60 * 1000);
 
 // ── Card modals ───────────────────────────────────────────────────────────────
@@ -699,62 +780,41 @@ document.querySelectorAll('[data-modal]').forEach(card => {
   card.addEventListener('click', () => {
     if (!dashboardData) return;
     const type = card.dataset.modal;
-    const modal = document.getElementById('cardModal');
-    const title = document.getElementById('cardModalTitle');
-    const body  = document.getElementById('cardModalBody');
-    body.innerHTML = '';
-
+    const body = document.getElementById('cardModalBody'); body.innerHTML = '';
+    document.getElementById('cardModalTitle').textContent = {leads:'Leads',campanhas:'Campanhas',contratos:'Contratos Pendentes',agenda:'Agenda'}[type]||'';
     if (type === 'leads') {
-      title.textContent = 'Leads';
-      const leads = dashboardData.leads || [];
-      if (!leads.length) { body.innerHTML = '<li class="modal-item">Nenhum lead encontrado.</li>'; }
-      else leads.slice(0,20).forEach(l => {
-        const li = document.createElement('li'); li.className = 'modal-item';
-        li.innerHTML = `<strong>${l.nome || '—'} <span class="badge ${l.status}">${l.status}</span></strong>${l.telefone || ''} ${l.email ? '· '+l.email : ''}`;
-        body.appendChild(li);
-      });
+      const arr = dashboardData.leads||[];
+      if (!arr.length) { body.innerHTML='<li class="modal-item">Nenhum lead.</li>'; }
+      else arr.slice(0,20).forEach(l => { const li=document.createElement('li'); li.className='modal-item'; li.innerHTML=`<strong>${l.nome||'—'} <span class="badge ${l.status}">${l.status}</span></strong>${l.telefone||''} ${l.email?'· '+l.email:''}`; body.appendChild(li); });
     } else if (type === 'campanhas') {
-      title.textContent = 'Campanhas';
-      const camps = dashboardData.campanhas || [];
-      if (!camps.length) { body.innerHTML = '<li class="modal-item">Nenhuma campanha.</li>'; }
-      else camps.forEach(c => {
-        const taxa = c.enviados > 0 ? Math.round(c.respondidos/c.enviados*100) : 0;
-        const li = document.createElement('li'); li.className = 'modal-item';
-        li.innerHTML = `<strong>${c.nome} <span class="badge ${c.status}">${c.status}</span></strong>Enviados: ${c.enviados} · Respondidos: ${c.respondidos} · Taxa: ${taxa}%`;
-        body.appendChild(li);
-      });
+      const arr = dashboardData.campanhas||[];
+      if (!arr.length) { body.innerHTML='<li class="modal-item">Nenhuma campanha.</li>'; }
+      else arr.forEach(c => { const li=document.createElement('li'); li.className='modal-item'; li.innerHTML=`<strong>${c.nome} <span class="badge ${c.status}">${c.status}</span></strong>Enviados: ${c.enviados} · Resp: ${c.respondidos}`; body.appendChild(li); });
     } else if (type === 'contratos') {
-      title.textContent = 'Contratos Pendentes';
-      const contr = dashboardData.contratos_pendentes || [];
-      if (!contr.length) { body.innerHTML = '<li class="modal-item">Nenhum contrato pendente.</li>'; }
-      else contr.forEach(c => {
-        const li = document.createElement('li'); li.className = 'modal-item';
-        li.innerHTML = `<strong>Contrato ${c.id} <span class="badge pendente">pendente</span></strong>Tipo: ${c.tipo||'—'} ${c.valor ? '· R$ '+c.valor : ''}`;
-        body.appendChild(li);
-      });
-    } else if (type === 'agenda') {
-      title.textContent = 'Agenda Google Calendar';
-      body.innerHTML = '<li class="modal-item">Acesse <b>/auth/google</b> para conectar o Google Calendar e visualizar eventos aqui.</li>';
+      const arr = dashboardData.contratos_pendentes||[];
+      if (!arr.length) { body.innerHTML='<li class="modal-item">Nenhum contrato pendente.</li>'; }
+      else arr.forEach(c => { const li=document.createElement('li'); li.className='modal-item'; li.innerHTML=`<strong>Contrato ${c.id} <span class="badge pendente">pendente</span></strong>${c.tipo||'—'}`; body.appendChild(li); });
+    } else {
+      body.innerHTML = '<li class="modal-item">Acesse <b>/auth/google</b> para conectar o Google Calendar.</li>';
     }
-
-    modal.classList.add('open');
+    document.getElementById('cardModal').classList.add('open');
   });
 });
 document.getElementById('cardModalClose').addEventListener('click', () => document.getElementById('cardModal').classList.remove('open'));
-document.getElementById('cardModal').addEventListener('click', e => { if (e.target === document.getElementById('cardModal')) document.getElementById('cardModal').classList.remove('open'); });
+document.getElementById('cardModal').addEventListener('click', e => { if(e.target===document.getElementById('cardModal')) document.getElementById('cardModal').classList.remove('open'); });
 
 // ── Briefing modal ────────────────────────────────────────────────────────────
 document.getElementById('briefingBtn').addEventListener('click', async () => {
   document.getElementById('briefingModal').classList.add('open');
   document.getElementById('briefingBody').textContent = 'Carregando...';
-  try {
-    const res = await fetch('/briefing');
-    const data = await res.json();
-    document.getElementById('briefingBody').textContent = data.briefing || 'Sem dados.';
-  } catch { document.getElementById('briefingBody').textContent = 'Erro ao carregar.'; }
+  try { const d=await(await fetch('/briefing')).json(); document.getElementById('briefingBody').textContent=d.briefing||'Sem dados.'; }
+  catch { document.getElementById('briefingBody').textContent='Erro.'; }
 });
 document.getElementById('briefingClose').addEventListener('click', () => document.getElementById('briefingModal').classList.remove('open'));
-document.getElementById('briefingModal').addEventListener('click', e => { if (e.target === document.getElementById('briefingModal')) document.getElementById('briefingModal').classList.remove('open'); });
+document.getElementById('briefingModal').addEventListener('click', e => { if(e.target===document.getElementById('briefingModal')) document.getElementById('briefingModal').classList.remove('open'); });
+
+// ── Cleanup ───────────────────────────────────────────────────────────────────
+addEventListener('beforeunload', () => { if (avatarCtrl) avatarCtrl.dispose(); });
 </script>
 </body>
 </html>
