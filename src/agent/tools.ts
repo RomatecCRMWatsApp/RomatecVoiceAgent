@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import * as crm from '../integrations/crm';
 import * as avalieimob from '../integrations/avalieimob';
+import * as calendar from '../integrations/calendar';
 import { ResumoDia, ToolResult } from '../types';
 import axios from 'axios';
 
@@ -103,6 +104,42 @@ export const toolDefinitions: Anthropic.Tool[] = [
     description: 'Gera um briefing completo do dia com dados dos dois sistemas.',
     input_schema: { type: 'object', properties: {} },
   },
+  {
+    name: 'criar_evento',
+    description: 'Cria um evento no Google Calendar.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        titulo:      { type: 'string', description: 'Título do evento' },
+        data:        { type: 'string', description: 'Data YYYY-MM-DD' },
+        hora_inicio: { type: 'string', description: 'Hora de início HH:MM' },
+        hora_fim:    { type: 'string', description: 'Hora de fim HH:MM' },
+        descricao:   { type: 'string', description: 'Descrição opcional' },
+      },
+      required: ['titulo', 'data', 'hora_inicio', 'hora_fim'],
+    },
+  },
+  {
+    name: 'listar_eventos_hoje',
+    description: 'Lista eventos do Google Calendar para hoje.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'listar_eventos_semana',
+    description: 'Lista eventos do Google Calendar para os próximos 7 dias.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'cancelar_evento',
+    description: 'Cancela um evento do Google Calendar pelo ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        event_id: { type: 'string', description: 'ID do evento' },
+      },
+      required: ['event_id'],
+    },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
@@ -163,6 +200,19 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         data = resumo;
         break;
       }
+      case 'criar_evento':
+        data = await calendar.criarEvento(input as Parameters<typeof calendar.criarEvento>[0]);
+        break;
+      case 'listar_eventos_hoje':
+        data = await calendar.listarEventosDia();
+        break;
+      case 'listar_eventos_semana':
+        data = await calendar.listarEventosSemana();
+        break;
+      case 'cancelar_evento':
+        await calendar.cancelarEvento(input.event_id as string);
+        data = { success: true, message: 'Evento cancelado.' };
+        break;
       default:
         return { toolName: name, success: false, error: `Tool desconhecida: ${name}` };
     }
