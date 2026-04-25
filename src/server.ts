@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import path from 'path';
 import express, { Request, Response } from 'express';
 import multer from 'multer';
 import { transcribeAudio } from './agent/transcribe';
@@ -12,9 +13,14 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 app.use((_req, res, next) => {
   res.set('X-Agent', `${AGENT_IDENTITY.name}/${AGENT_IDENTITY.version}`);
   next();
+});
+
+app.get('/', (_req: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 app.get('/health', (_req: Request, res: Response) => {

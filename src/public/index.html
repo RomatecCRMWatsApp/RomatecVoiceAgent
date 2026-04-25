@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZAYRA — Romatec</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0a1a0f;
+      --bg2:      #0f2318;
+      --bg3:      #162d1e;
+      --neon:     #00ff88;
+      --neon-dim: rgba(0,255,136,.15);
+      --gold:     #c9a84c;
+      --gold-dim: rgba(201,168,76,.15);
+      --text:     #e8f5e9;
+      --text-dim: #7aab8a;
+      --red:      #ff4444;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      overflow-x: hidden;
+    }
+
+    /* ── Canvas particles ── */
+    #canvas {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      opacity: .35;
+    }
+
+    /* ── Layout ── */
+    .wrap {
+      position: relative; z-index: 1;
+      width: 100%; max-width: 900px;
+      padding: 24px 16px 48px;
+      display: flex; flex-direction: column; align-items: center; gap: 32px;
+    }
+
+    /* ── Header status ── */
+    .status-bar {
+      width: 100%; display: flex; justify-content: space-between; align-items: center;
+    }
+    .logo { color: var(--gold); font-weight: 700; font-size: .85rem; letter-spacing: 2px; text-transform: uppercase; }
+    .status-dot {
+      display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-dim);
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--neon);
+      box-shadow: 0 0 6px var(--neon);
+      animation: pulse-dot 2s infinite;
+    }
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* ── Avatar ── */
+    .avatar-wrap {
+      position: relative; width: 220px; height: 220px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .avatar-ring {
+      position: absolute; inset: -12px; border-radius: 50%;
+      border: 2px solid var(--neon);
+      box-shadow: 0 0 20px var(--neon-dim);
+      transition: all .3s;
+    }
+    .avatar-ring.listening {
+      animation: ring-listen 1s infinite;
+      border-color: var(--red);
+      box-shadow: 0 0 30px rgba(255,68,68,.4);
+    }
+    .avatar-ring.speaking {
+      animation: ring-speak .8s infinite;
+      box-shadow: 0 0 40px rgba(0,255,136,.5);
+    }
+    @keyframes ring-listen { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+    @keyframes ring-speak  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1); opacity:.7} }
+
+    .avatar-ring-2 {
+      position: absolute; inset: -24px; border-radius: 50%;
+      border: 1px solid rgba(0,255,136,.2);
+      animation: ring-outer 3s infinite linear;
+    }
+    @keyframes ring-outer { to{transform:rotate(360deg)} }
+
+    .avatar-img {
+      width: 200px; height: 200px; border-radius: 50%;
+      object-fit: cover;
+      border: 3px solid var(--bg3);
+      box-shadow: 0 0 40px rgba(0,255,136,.2);
+      transition: all .3s;
+    }
+    .avatar-img.speaking { animation: avatar-pulse .8s infinite; }
+    @keyframes avatar-pulse { 0%,100%{box-shadow:0 0 40px rgba(0,255,136,.2)} 50%{box-shadow:0 0 70px rgba(0,255,136,.5)} }
+
+    /* ── Name block ── */
+    .name-block { text-align: center; }
+    .agent-name {
+      font-size: 2.8rem; font-weight: 700; letter-spacing: 6px;
+      color: var(--gold);
+      text-shadow: 0 0 30px rgba(201,168,76,.4);
+    }
+    .agent-sub { font-size: .85rem; color: var(--text-dim); margin-top: 4px; letter-spacing: 1px; }
+
+    /* ── Mic button ── */
+    .mic-btn {
+      width: 80px; height: 80px; border-radius: 50%;
+      border: 2px solid var(--neon);
+      background: transparent;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .2s;
+      box-shadow: 0 0 20px var(--neon-dim);
+      color: var(--neon);
+    }
+    .mic-btn:hover { box-shadow: 0 0 40px rgba(0,255,136,.4); transform: scale(1.05); }
+    .mic-btn.recording {
+      border-color: var(--red); color: var(--red);
+      animation: btn-record .8s infinite;
+      box-shadow: 0 0 30px rgba(255,68,68,.4);
+    }
+    .mic-btn.processing {
+      border-color: var(--gold); color: var(--gold);
+      cursor: default;
+      box-shadow: 0 0 30px var(--gold-dim);
+    }
+    .mic-btn.speaking-state {
+      border-color: var(--neon); color: var(--neon);
+      animation: btn-speak .6s infinite;
+      box-shadow: 0 0 40px rgba(0,255,136,.5);
+    }
+    @keyframes btn-record { 0%,100%{opacity:1} 50%{opacity:.5} }
+    @keyframes btn-speak  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+
+    .mic-btn svg { width: 32px; height: 32px; }
+    .spinner {
+      width: 32px; height: 32px; border: 3px solid transparent;
+      border-top-color: var(--gold); border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to{transform:rotate(360deg)} }
+
+    .mic-label {
+      font-size: .75rem; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase;
+      margin-top: 8px; min-height: 18px; transition: color .3s;
+    }
+    .mic-label.active { color: var(--neon); }
+    .mic-label.error  { color: var(--red); }
+
+    /* ── Briefing button ── */
+    .briefing-btn {
+      background: transparent; border: 1px solid var(--gold);
+      color: var(--gold); padding: 10px 28px; border-radius: 24px;
+      cursor: pointer; font-size: .8rem; letter-spacing: 2px; text-transform: uppercase;
+      font-family: inherit; transition: all .2s;
+    }
+    .briefing-btn:hover { background: var(--gold-dim); box-shadow: 0 0 20px var(--gold-dim); }
+
+    /* ── Chat history ── */
+    .chat-wrap {
+      width: 100%; max-height: 380px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 12px;
+      padding: 4px 2px;
+    }
+    .chat-wrap::-webkit-scrollbar { width: 4px; }
+    .chat-wrap::-webkit-scrollbar-track { background: transparent; }
+    .chat-wrap::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 2px; }
+
+    .bubble {
+      display: flex; align-items: flex-end; gap: 10px; max-width: 80%;
+      animation: fade-in .3s ease;
+    }
+    @keyframes fade-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+
+    .bubble.user  { align-self: flex-end; flex-direction: row-reverse; }
+    .bubble.agent { align-self: flex-start; }
+
+    .bubble-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      object-fit: cover; flex-shrink: 0;
+      border: 1px solid var(--neon);
+    }
+
+    .bubble-text {
+      padding: 10px 14px; border-radius: 16px;
+      font-size: .85rem; line-height: 1.5;
+    }
+    .bubble.user  .bubble-text { background: var(--bg3); border: 1px solid rgba(0,255,136,.15); border-bottom-right-radius: 4px; }
+    .bubble.agent .bubble-text { background: rgba(0,255,136,.07); border: 1px solid rgba(0,255,136,.2); border-bottom-left-radius: 4px; color: var(--neon); }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.75);
+      display: none; align-items: center; justify-content: center; z-index: 100;
+      padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--bg2); border: 1px solid rgba(201,168,76,.3);
+      border-radius: 16px; max-width: 640px; width: 100%;
+      max-height: 80dvh; overflow-y: auto; padding: 28px;
+      box-shadow: 0 0 60px rgba(201,168,76,.1);
+    }
+    .modal h2 { color: var(--gold); font-size: 1.1rem; margin-bottom: 16px; letter-spacing: 2px; }
+    .modal p  { font-size: .88rem; line-height: 1.7; color: var(--text-dim); white-space: pre-wrap; }
+    .modal-close {
+      float: right; background: transparent; border: none;
+      color: var(--text-dim); font-size: 1.4rem; cursor: pointer; line-height: 1;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div class="wrap">
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span class="logo">Romatec</span>
+    <div class="status-dot">
+      <div class="dot" id="statusDot"></div>
+      <span id="statusText">ZAYRA online</span>
+    </div>
+  </div>
+
+  <!-- Avatar -->
+  <div class="avatar-wrap">
+    <div class="avatar-ring-2"></div>
+    <div class="avatar-ring" id="avatarRing"></div>
+    <img class="avatar-img" id="avatarImg" src="/avatar.png" alt="ZAYRA" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22><circle cx=%22100%22 cy=%22100%22 r=%22100%22 fill=%22%230f2318%22/><text x=%2250%25%22 y=%2254%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2280%22 fill=%22%2300ff88%22>Z</text></svg>'" />
+  </div>
+
+  <!-- Name -->
+  <div class="name-block">
+    <div class="agent-name">ZAYRA</div>
+    <div class="agent-sub">Assistente Executiva — Romatec Consultoria Imobiliária</div>
+  </div>
+
+  <!-- Mic button -->
+  <div style="display:flex;flex-direction:column;align-items:center;gap:0">
+    <button class="mic-btn" id="micBtn" title="Falar com ZAYRA">
+      <svg id="micIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z"/>
+        <path d="M19 10a7 7 0 0 1-14 0"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8"  y1="23" x2="16" y2="23"/>
+      </svg>
+      <div class="spinner" id="spinner" style="display:none"></div>
+    </button>
+    <div class="mic-label" id="micLabel">Toque para falar</div>
+  </div>
+
+  <!-- Briefing -->
+  <button class="briefing-btn" id="briefingBtn">Briefing do Dia</button>
+
+  <!-- Chat -->
+  <div class="chat-wrap" id="chat"></div>
+
+</div>
+
+<!-- Modal briefing -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <button class="modal-close" id="modalClose">×</button>
+    <h2>Briefing do Dia</h2>
+    <p id="modalBody">Carregando...</p>
+  </div>
+</div>
+
+<script>
+// ── Canvas particles ──────────────────────────────────────────────────────────
+(function () {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, particles = [];
+
+  function resize() {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  for (let i = 0; i < 60; i++) {
+    particles.push({
+      x: rand(0, W), y: rand(0, H),
+      vx: rand(-.3, .3), vy: rand(-.3, .3),
+      r: rand(1, 2.5), alpha: rand(.2, .6)
+    });
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    particles.forEach(p => {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(0,255,136,${p.alpha})`;
+      ctx.fill();
+    });
+    // draw faint lines between nearby particles
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const d  = Math.sqrt(dx * dx + dy * dy);
+        if (d < 100) {
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = `rgba(0,255,136,${.12 * (1 - d / 100)})`;
+          ctx.lineWidth = .5;
+          ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ── Voice interface ───────────────────────────────────────────────────────────
+const micBtn     = document.getElementById('micBtn');
+const micIcon    = document.getElementById('micIcon');
+const spinner    = document.getElementById('spinner');
+const micLabel   = document.getElementById('micLabel');
+const avatarRing = document.getElementById('avatarRing');
+const avatarImg  = document.getElementById('avatarImg');
+const chat       = document.getElementById('chat');
+
+let mediaRecorder = null;
+let chunks = [];
+let state = 'idle'; // idle | recording | processing | speaking
+
+function setState(s) {
+  state = s;
+  micBtn.className = 'mic-btn';
+  avatarRing.className = 'avatar-ring';
+  avatarImg.className = 'avatar-img';
+  micIcon.style.display = 'block';
+  spinner.style.display = 'none';
+  micLabel.className = 'mic-label';
+
+  if (s === 'idle') {
+    micLabel.textContent = 'Toque para falar';
+  } else if (s === 'recording') {
+    micBtn.classList.add('recording');
+    avatarRing.classList.add('listening');
+    micLabel.classList.add('active');
+    micLabel.textContent = 'Ouvindo...';
+  } else if (s === 'processing') {
+    micBtn.classList.add('processing');
+    micIcon.style.display = 'none';
+    spinner.style.display = 'block';
+    micLabel.classList.add('active');
+    micLabel.textContent = 'ZAYRA está pensando...';
+  } else if (s === 'speaking') {
+    micBtn.classList.add('speaking-state');
+    avatarRing.classList.add('speaking');
+    avatarImg.classList.add('speaking');
+    micLabel.classList.add('active');
+    micLabel.textContent = 'ZAYRA está falando...';
+  }
+}
+
+function addBubble(role, text) {
+  const wrap = document.createElement('div');
+  wrap.className = `bubble ${role}`;
+  if (role === 'agent') {
+    const img = document.createElement('img');
+    img.className = 'bubble-avatar';
+    img.src = '/avatar.png';
+    img.alt = 'Z';
+    img.onerror = () => { img.style.display = 'none'; };
+    wrap.appendChild(img);
+  }
+  const p = document.createElement('div');
+  p.className = 'bubble-text';
+  p.textContent = text;
+  wrap.appendChild(p);
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function sendAudio(blob) {
+  setState('processing');
+  const form = new FormData();
+  form.append('audio', blob, 'recording.webm');
+
+  let transcription = '';
+  let responseText  = '';
+
+  try {
+    const res = await fetch('/voice', { method: 'POST', body: form });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    transcription = decodeURIComponent(res.headers.get('X-Transcription') || '');
+    responseText  = decodeURIComponent(res.headers.get('X-Response-Text') || '');
+
+    if (transcription) addBubble('user', transcription);
+
+    const audioBlob = await res.blob();
+    const url = URL.createObjectURL(audioBlob);
+    const audio = new Audio(url);
+
+    setState('speaking');
+    if (responseText) addBubble('agent', responseText);
+
+    audio.onended = () => { URL.revokeObjectURL(url); setState('idle'); };
+    audio.onerror = () => setState('idle');
+    await audio.play();
+  } catch (err) {
+    console.error(err);
+    micLabel.className = 'mic-label error';
+    micLabel.textContent = 'Erro ao processar. Tente novamente.';
+    setTimeout(() => setState('idle'), 3000);
+  }
+}
+
+micBtn.addEventListener('click', async () => {
+  if (state === 'processing' || state === 'speaking') return;
+
+  if (state === 'recording') {
+    mediaRecorder.stop();
+    return;
+  }
+
+  // start recording
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    micLabel.className = 'mic-label error';
+    micLabel.textContent = 'Permissão de microfone negada.';
+    setTimeout(() => setState('idle'), 3000);
+    return;
+  }
+
+  chunks = [];
+  mediaRecorder = new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    const blob = new Blob(chunks, { type: 'audio/webm' });
+    sendAudio(blob);
+  };
+  mediaRecorder.start();
+  setState('recording');
+});
+
+// ── Briefing modal ────────────────────────────────────────────────────────────
+const briefingBtn    = document.getElementById('briefingBtn');
+const modalOverlay   = document.getElementById('modalOverlay');
+const modalClose     = document.getElementById('modalClose');
+const modalBody      = document.getElementById('modalBody');
+
+briefingBtn.addEventListener('click', async () => {
+  modalOverlay.classList.add('open');
+  modalBody.textContent = 'Carregando...';
+  try {
+    const res = await fetch('/briefing');
+    const data = await res.json();
+    modalBody.textContent = data.briefing || 'Sem dados no momento.';
+  } catch {
+    modalBody.textContent = 'Erro ao carregar briefing.';
+  }
+});
+
+modalClose.addEventListener('click', () => modalOverlay.classList.remove('open'));
+modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) modalOverlay.classList.remove('open'); });
+</script>
+</body>
+</html>
