@@ -29,6 +29,10 @@ app.get('/', (_req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+app.get('/ping', (_req: Request, res: Response) => {
+  res.send('OK');
+});
+
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ agent: AGENT_IDENTITY.name, version: AGENT_IDENTITY.version, status: 'online', timestamp: new Date().toISOString() });
 });
