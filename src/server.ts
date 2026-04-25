@@ -11,7 +11,18 @@ import * as avalieimob from './integrations/avalieimob';
 import { processMessage, sendReply, WaMessage } from './integrations/whatsapp';
 import { getAuthUrl, exchangeCode } from './integrations/calendar';
 import { addSSEClient, removeSSEClient, startProactiveNotifications } from './agent/proactive';
-import { initDb, loadSessionFromDb, listMemories } from './agent/memory';
+import {
+  initDb,
+  loadSessionFromDb,
+  listMemories,
+  createChatSession,
+  listChatSessions,
+  getSessionMessages,
+  getSessionMeta,
+  deleteChatSession,
+  searchConversations,
+  newSessionId,
+} from './agent/memory';
 import { startDailyScheduler } from './agent/scheduler';
 import * as calendar from './integrations/calendar';
 
@@ -85,37 +96,108 @@ app.post('/voice', upload.single('audio'), async (req: Request, res: Response) =
     return;
   }
 
+  const sessionId = (req.body?.session_id as string | undefined) || undefined;
+
   const transcription = await transcribeAudio(req.file.buffer, req.file.mimetype);
-  const agentResponse = await think(transcription.text);
-  const audioBuffer = await speak(agentResponse.text);
+  const agentResponse = await think(transcription.text, { sessionId, channel: 'voice' });
+  const audioBuffer   = await speak(agentResponse.text);
 
   res.set({
-    'Content-Type': 'audio/mpeg',
-    'X-Transcription': encodeURIComponent(transcription.text),
-    'X-Response-Text': encodeURIComponent(agentResponse.text),
-    'X-Tools-Used': agentResponse.toolsUsed.join(','),
+    'Content-Type':     'audio/mpeg',
+    'X-Transcription':  encodeURIComponent(transcription.text),
+    'X-Response-Text':  encodeURIComponent(agentResponse.text),
+    'X-Tools-Used':     agentResponse.toolsUsed.join(','),
+    'X-Session-Id':     agentResponse.sessionId,
   });
   res.send(audioBuffer);
 });
 
 app.post('/text', async (req: Request, res: Response) => {
-  const { message, voice = false } = req.body as { message: string; voice?: boolean };
+  const { message, voice = false, session_id } = req.body as {
+    message:     string;
+    voice?:      boolean;
+    session_id?: string;
+  };
 
   if (!message) {
     res.status(400).json({ error: 'Campo "message" obrigatório.' });
     return;
   }
 
-  const agentResponse = await think(message);
+  const agentResponse = await think(message, { sessionId: session_id, channel: 'text' });
 
   if (voice) {
     const audioBuffer = await speak(agentResponse.text);
-    res.set({ 'Content-Type': 'audio/mpeg', 'X-Response-Text': encodeURIComponent(agentResponse.text) });
+    res.set({
+      'Content-Type':    'audio/mpeg',
+      'X-Response-Text': encodeURIComponent(agentResponse.text),
+      'X-Session-Id':    agentResponse.sessionId,
+    });
     res.send(audioBuffer);
     return;
   }
 
-  res.json({ agent: AGENT_IDENTITY.name, response: agentResponse.text, tools_used: agentResponse.toolsUsed });
+  res.json({
+    agent:      AGENT_IDENTITY.name,
+    response:   agentResponse.text,
+    tools_used: agentResponse.toolsUsed,
+    session_id: agentResponse.sessionId,
+  });
+});
+
+// ── Chat Sessions API ─────────────────────────────────────────────────────────
+app.post('/chat/sessions', async (req: Request, res: Response) => {
+  try {
+    const { title, channel } = (req.body ?? {}) as { title?: string; channel?: 'text' | 'voice' | 'whatsapp' | 'mixed' };
+    const id = await createChatSession(title, channel ?? 'text', newSessionId());
+    res.json({ id, title: title ?? null, channel: channel ?? 'text' });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get('/chat/sessions', async (req: Request, res: Response) => {
+  try {
+    const limit  = Math.min(parseInt(req.query.limit  as string) || 50, 200);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const sessions = await listChatSessions(limit, offset);
+    res.json({ count: sessions.length, sessions });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get('/chat/sessions/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const meta = await getSessionMeta(id);
+    if (!meta) { res.status(404).json({ error: 'Sessão não encontrada' }); return; }
+    const messages = await getSessionMessages(id, 500);
+    res.json({ session: meta, messages });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.delete('/chat/sessions/:id', async (req: Request, res: Response) => {
+  try {
+    await deleteChatSession(String(req.params.id));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get('/chat/search', async (req: Request, res: Response) => {
+  try {
+    const q = (req.query.q as string ?? '').trim();
+    if (!q) { res.json({ count: 0, hits: [] }); return; }
+    const limit = Math.min(parseInt(req.query.limit as string) || 30, 100);
+    const hits  = await searchConversations(q, limit);
+    res.json({ count: hits.length, hits });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 app.get('/briefing', async (_req: Request, res: Response) => {
@@ -170,12 +252,12 @@ app.post('/webhook/whatsapp', (req: Request, res: Response) => {
 });
 
 app.post('/zayra/whatsapp', async (req: Request, res: Response) => {
-  const { message, from } = req.body as { message: string; from?: string };
+  const { message, from, session_id } = req.body as { message: string; from?: string; session_id?: string };
   if (!message) { res.status(400).json({ error: 'message required' }); return; }
 
-  const agentResponse = await think(message);
+  const agentResponse = await think(message, { sessionId: session_id, channel: 'whatsapp' });
   if (from) void sendReply(from, agentResponse.text).catch(console.error);
-  res.json({ response: agentResponse.text, tools_used: agentResponse.toolsUsed });
+  res.json({ response: agentResponse.text, tools_used: agentResponse.toolsUsed, session_id: agentResponse.sessionId });
 });
 
 // ── Google Calendar OAuth ─────────────────────────────────────────────────────

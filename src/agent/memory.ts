@@ -19,7 +19,26 @@ export interface Memory extends RowDataPacket {
   expires_at:     Date | null;
 }
 
-// ── Level 1 — in-process session history ─────────────────────────────────────
+export interface ChatSession extends RowDataPacket {
+  id:         string;
+  title:      string | null;
+  channel:    'text' | 'voice' | 'whatsapp' | 'mixed';
+  msg_count:  number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ConversationRow extends RowDataPacket {
+  id:         number;
+  session_id: string;
+  role:       'user' | 'assistant';
+  content:    string;
+  created_at: Date;
+}
+
+export type Channel = 'text' | 'voice' | 'whatsapp' | 'mixed';
+
+// ── Level 1 — in-process session history (legacy global, voice fallback) ─────
 interface SessionMsg { role: 'user' | 'assistant'; content: string; }
 const sessionMsgs: SessionMsg[] = [];
 const MAX_SESSION = 20;
@@ -33,7 +52,6 @@ export function getSessionHistory(): SessionMsg[] {
   return [...sessionMsgs];
 }
 
-// Load last 50 conversations from DB to prime in-memory session on boot
 export async function loadSessionFromDb(): Promise<void> {
   try {
     const [rows] = await db().execute<RowDataPacket[]>(
@@ -99,6 +117,119 @@ export async function saveConversation(
     'INSERT INTO zayra_conversations (session_id, role, content) VALUES (?,?,?)',
     [session_id, role, content],
   );
+}
+
+// ── Chat Sessions ────────────────────────────────────────────────────────────
+export function newSessionId(): string {
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `chat_${Date.now()}_${rand}`;
+}
+
+export async function createChatSession(
+  title?:   string,
+  channel:  Channel = 'text',
+  id?:      string,
+): Promise<string> {
+  const sessionId = id ?? newSessionId();
+  await db().execute(
+    'INSERT INTO zayra_chat_sessions (id, title, channel) VALUES (?,?,?)',
+    [sessionId, title ?? null, channel],
+  );
+  return sessionId;
+}
+
+export async function ensureChatSession(
+  sessionId: string,
+  channel:   Channel = 'text',
+): Promise<void> {
+  await db().execute(
+    `INSERT IGNORE INTO zayra_chat_sessions (id, channel) VALUES (?, ?)`,
+    [sessionId, channel],
+  );
+}
+
+export async function bumpSession(
+  sessionId: string,
+  channel?:  Channel,
+): Promise<void> {
+  if (channel) {
+    await db().execute(
+      `UPDATE zayra_chat_sessions
+         SET msg_count = msg_count + 1,
+             channel = CASE WHEN channel = ? OR channel = 'mixed' THEN channel ELSE 'mixed' END
+       WHERE id = ?`,
+      [channel, sessionId],
+    );
+  } else {
+    await db().execute(
+      'UPDATE zayra_chat_sessions SET msg_count = msg_count + 1 WHERE id = ?',
+      [sessionId],
+    );
+  }
+}
+
+export async function setSessionTitle(sessionId: string, title: string): Promise<void> {
+  await db().execute(
+    'UPDATE zayra_chat_sessions SET title = ? WHERE id = ?',
+    [title.slice(0, 200), sessionId],
+  );
+}
+
+export async function getSessionMeta(sessionId: string): Promise<ChatSession | null> {
+  const [rows] = await db().execute<ChatSession[]>(
+    'SELECT * FROM zayra_chat_sessions WHERE id = ? LIMIT 1',
+    [sessionId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function listChatSessions(limit = 50, offset = 0): Promise<ChatSession[]> {
+  const [rows] = await db().query<ChatSession[]>(
+    'SELECT * FROM zayra_chat_sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?',
+    [limit, offset],
+  );
+  return rows;
+}
+
+export async function getSessionMessages(
+  sessionId: string,
+  limit = 200,
+): Promise<ConversationRow[]> {
+  const [rows] = await db().query<ConversationRow[]>(
+    `SELECT * FROM zayra_conversations
+     WHERE session_id = ?
+     ORDER BY created_at ASC, id ASC
+     LIMIT ?`,
+    [sessionId, limit],
+  );
+  return rows;
+}
+
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  await db().execute('DELETE FROM zayra_conversations WHERE session_id = ?', [sessionId]);
+  await db().execute('DELETE FROM zayra_chat_sessions WHERE id = ?', [sessionId]);
+}
+
+export interface SearchHit {
+  session_id:   string;
+  role:         'user' | 'assistant';
+  content:      string;
+  created_at:   Date;
+  session_title: string | null;
+}
+
+export async function searchConversations(query: string, limit = 30): Promise<SearchHit[]> {
+  const like = `%${query}%`;
+  const [rows] = await db().query<RowDataPacket[]>(
+    `SELECT c.session_id, c.role, c.content, c.created_at, s.title AS session_title
+       FROM zayra_conversations c
+       LEFT JOIN zayra_chat_sessions s ON s.id = c.session_id
+      WHERE c.content LIKE ?
+      ORDER BY c.created_at DESC
+      LIMIT ?`,
+    [like, limit],
+  );
+  return rows as SearchHit[];
 }
 
 // ── Context cache (refreshed every 5 min) ─────────────────────────────────────

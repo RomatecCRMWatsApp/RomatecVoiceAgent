@@ -3,7 +3,10 @@ import * as crm from '../integrations/crm';
 import * as avalieimob from '../integrations/avalieimob';
 import * as calendar from '../integrations/calendar';
 import { sendReply } from '../integrations/whatsapp';
-import { saveMemory, searchMemory, listMemories, deleteMemory, saveConversation } from './memory';
+import {
+  saveMemory, searchMemory, listMemories, deleteMemory,
+  saveConversation, searchConversations, listChatSessions, getSessionMessages,
+} from './memory';
 import { ResumoDia, ToolResult } from '../types';
 import axios from 'axios';
 
@@ -210,14 +213,24 @@ export const toolDefinitions: Anthropic.Tool[] = [
   },
   {
     name: 'buscar_historico',
-    description: 'Busca as últimas mensagens de uma sessão no histórico persistido.',
+    description: 'Busca em todas as conversas anteriores. Use "query" para buscar por palavra-chave/assunto (ex: "lead Maria"), ou "session_id" para retomar uma sessão específica.',
     input_schema: {
       type: 'object',
       properties: {
-        session_id: { type: 'string', description: 'ID da sessão' },
-        limit:      { type: 'number', description: 'Número máximo de mensagens (padrão 20)' },
+        query:      { type: 'string', description: 'Palavra-chave/assunto para buscar nas conversas anteriores' },
+        session_id: { type: 'string', description: 'ID de sessão específica para retornar todas as mensagens dela' },
+        limit:      { type: 'number', description: 'Número máximo de resultados (padrão 20)' },
       },
-      required: ['session_id'],
+    },
+  },
+  {
+    name: 'listar_conversas',
+    description: 'Lista as conversas anteriores mais recentes com título, canal e contagem de mensagens.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Quantas conversas listar (padrão 20)' },
+      },
     },
   },
   {
@@ -353,13 +366,36 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         data = { success: true };
         break;
       case 'buscar_historico': {
-        const limit = (input.limit as number | undefined) ?? 20;
-        const connModule = await import('../database/connection');
-        const [rows] = await connModule.default.execute<import('mysql2').RowDataPacket[]>(
-          'SELECT role, content, created_at FROM zayra_conversations WHERE session_id = ? ORDER BY created_at DESC LIMIT ?',
-          [input.session_id as string, limit],
-        );
-        data = [...rows].reverse();
+        const limit     = (input.limit as number | undefined) ?? 20;
+        const query     = input.query     as string | undefined;
+        const sessionId = input.session_id as string | undefined;
+        if (sessionId) {
+          const rows = await getSessionMessages(sessionId, limit);
+          data = rows.map(r => ({ role: r.role, content: r.content, created_at: r.created_at }));
+        } else if (query) {
+          const hits = await searchConversations(query, limit);
+          data = hits.map(h => ({
+            session_id:    h.session_id,
+            session_title: h.session_title,
+            role:          h.role,
+            content:       h.content,
+            created_at:    h.created_at,
+          }));
+        } else {
+          throw new Error('Informe "query" (busca por palavra-chave) ou "session_id".');
+        }
+        break;
+      }
+      case 'listar_conversas': {
+        const limit    = (input.limit as number | undefined) ?? 20;
+        const sessions = await listChatSessions(limit, 0);
+        data = sessions.map(s => ({
+          id:         s.id,
+          title:      s.title,
+          channel:    s.channel,
+          msg_count:  s.msg_count,
+          updated_at: s.updated_at,
+        }));
         break;
       }
       case 'enviar_whatsapp': {

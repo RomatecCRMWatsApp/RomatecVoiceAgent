@@ -5,100 +5,245 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ZAYRA — Romatec</title>
   <link rel="manifest" href="/manifest.json" />
-  <meta name="theme-color" content="#00ff88" />
+  <meta name="theme-color" content="#5b8cff" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="ZAYRA" />
   <link rel="apple-touch-icon" href="/avatar.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg: #0a1a0f; --bg2: #0f2318; --bg3: #162d1e;
-      --neon: #00ff88; --neon-dim: rgba(0,255,136,.15);
-      --gold: #c9a84c; --gold-dim: rgba(201,168,76,.15);
-      --text: #e8f5e9; --text-dim: #7aab8a; --red: #ff4444; --orange: #ff8c00;
+      --bg-deep: #050818;
+      --bg-mid:  #0b1230;
+      --bg-soft: #131a44;
+      --neon:    #5b8cff;
+      --neon-2:  #00e1ff;
+      --neon-3:  #b66bff;
+      --gold:    #f3c969;
+      --text:    #eaf0ff;
+      --text-dim:#7d8bbf;
+      --red:     #ff5577;
+      --orange:  #ff8c00;
+      --green:   #57f5a7;
     }
-    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100dvh; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
-    #bgCanvas { position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .35; }
-    .wrap { position: relative; z-index: 1; width: 100%; max-width: 900px; padding: 24px 16px 48px; display: flex; flex-direction: column; align-items: center; gap: 28px; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: radial-gradient(ellipse at 20% 0%, #1a1f5a 0%, var(--bg-mid) 35%, var(--bg-deep) 80%);
+      color: var(--text); min-height: 100dvh;
+      display: flex; flex-direction: column; align-items: center; overflow-x: hidden;
+    }
+
+    /* Animated gradient background layer */
+    #bgGradient {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background:
+        radial-gradient(circle at 15% 20%, rgba(91,140,255,.25), transparent 45%),
+        radial-gradient(circle at 85% 30%, rgba(182,107,255,.22), transparent 50%),
+        radial-gradient(circle at 50% 90%, rgba(0,225,255,.18), transparent 50%);
+      animation: bgShift 18s ease-in-out infinite alternate;
+      filter: blur(40px);
+    }
+    @keyframes bgShift {
+      0%   { transform: translate(0,0) scale(1); }
+      50%  { transform: translate(-3%,2%) scale(1.06); }
+      100% { transform: translate(2%,-2%) scale(1.03); }
+    }
+    #bgCanvas { position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity: .55; }
+
+    .wrap {
+      position: relative; z-index: 2; width: 100%; max-width: 900px;
+      padding: 24px 16px 48px; display: flex; flex-direction: column;
+      align-items: center; gap: 24px;
+    }
 
     /* Activate */
-    .activate-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(10,26,15,.92); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .activate-overlay {
+      position: fixed; inset: 0; z-index: 200;
+      background: radial-gradient(ellipse at center, rgba(11,18,48,.92), rgba(5,8,24,.98));
+      display: flex; align-items: center; justify-content: center; cursor: pointer;
+      backdrop-filter: blur(8px);
+    }
     .activate-card { display: flex; flex-direction: column; align-items: center; gap: 20px; text-align: center; }
-    .activate-logo { font-size: 3.5rem; font-weight: 700; letter-spacing: 10px; color: var(--gold); text-shadow: 0 0 40px rgba(201,168,76,.5); }
-    .activate-sub  { color: var(--text-dim); font-size: .9rem; letter-spacing: 2px; text-transform: uppercase; }
-    .activate-ring { width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--neon); animation: ring-listen 1.2s infinite; box-shadow: 0 0 20px var(--neon-dim); }
+    .activate-logo {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 3.8rem; font-weight: 700; letter-spacing: 12px;
+      background: linear-gradient(135deg, var(--neon), var(--neon-2), var(--neon-3));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      filter: drop-shadow(0 0 24px rgba(91,140,255,.55));
+      animation: logoGlow 3s ease-in-out infinite alternate;
+    }
+    @keyframes logoGlow {
+      0%   { filter: drop-shadow(0 0 16px rgba(91,140,255,.4)); }
+      100% { filter: drop-shadow(0 0 36px rgba(182,107,255,.7)); }
+    }
+    .activate-sub { color: var(--text-dim); font-size: .85rem; letter-spacing: 3px; text-transform: uppercase; }
+    .activate-ring {
+      width: 64px; height: 64px; border-radius: 50%;
+      border: 2px solid var(--neon); animation: ring-pulse 1.4s infinite;
+      box-shadow: 0 0 24px rgba(91,140,255,.5);
+    }
+    @keyframes ring-pulse { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.08);opacity:1} }
 
     /* Header */
     .status-bar { width: 100%; display: flex; justify-content: space-between; align-items: center; }
-    .logo { color: var(--gold); font-weight: 700; font-size: .85rem; letter-spacing: 2px; text-transform: uppercase; }
+    .logo {
+      font-family: 'Orbitron', sans-serif;
+      color: var(--gold); font-weight: 700; font-size: .85rem;
+      letter-spacing: 3px; text-transform: uppercase;
+    }
     .status-right { display: flex; align-items: center; gap: 10px; }
     .status-dot { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-dim); }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 6px var(--neon); animation: pulse-dot 2s infinite; }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green); box-shadow: 0 0 8px var(--green);
+      animation: pulse-dot 2s infinite;
+    }
     @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
-    .notif-badge { background: var(--red); color: #fff; font-size: .7rem; font-weight: 700; border-radius: 10px; padding: 2px 7px; min-width: 20px; text-align: center; display: none; cursor: pointer; }
+    .notif-badge {
+      background: var(--red); color: #fff; font-size: .7rem; font-weight: 700;
+      border-radius: 10px; padding: 2px 7px; min-width: 20px; text-align: center;
+      display: none; cursor: pointer;
+    }
 
-    /* Avatar wrap */
-    .avatar-wrap { position: relative; width: 220px; height: 220px; display: flex; align-items: center; justify-content: center; }
-    .avatar-ring { position: absolute; inset: -12px; border-radius: 50%; border: 2px solid var(--neon); box-shadow: 0 0 20px var(--neon-dim); transition: all .3s; }
-    .avatar-ring.passive      { animation: ring-passive 2s infinite; }
-    .avatar-ring.active-voice { animation: ring-active .5s infinite; border-color: #00ffcc; box-shadow: 0 0 30px rgba(0,255,204,.5); }
-    .avatar-ring.processing   { border-color: var(--gold); box-shadow: 0 0 30px var(--gold-dim); animation: ring-process .7s infinite; }
-    .avatar-ring.speaking     { animation: ring-speak .7s infinite; box-shadow: 0 0 40px rgba(0,255,136,.6); }
-    @keyframes ring-listen  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
-    @keyframes ring-passive { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.04);opacity:1} }
-    @keyframes ring-active  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1)} }
-    @keyframes ring-process { 0%,100%{opacity:.5} 50%{opacity:1} }
-    @keyframes ring-speak   { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1);opacity:.7} }
-    .avatar-ring-2 { position: absolute; inset: -24px; border-radius: 50%; border: 1px solid rgba(0,255,136,.2); animation: ring-outer 3s infinite linear; }
-    @keyframes ring-outer { to{transform:rotate(360deg)} }
+    /* ──────────── Avatar Stage ──────────── */
+    .avatar-stage {
+      position: relative; width: 280px; height: 280px;
+      display: flex; align-items: center; justify-content: center;
+    }
 
-    /* Thinking particles */
-    .think-particles { position: absolute; top: 0; left: 50%; pointer-events: none; display: none; }
-    .think-dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 8px var(--gold); animation: think-float 1.8s ease-out infinite; opacity: 0; }
-    .think-dot:nth-child(1){left:-20px;animation-delay:0s}
-    .think-dot:nth-child(2){left:0px;animation-delay:.4s}
-    .think-dot:nth-child(3){left:20px;animation-delay:.8s}
-    .think-dot:nth-child(4){left:-10px;animation-delay:1.2s}
-    @keyframes think-float { 0%{opacity:0;transform:translateY(0) scale(.5)} 20%{opacity:.9;transform:translateY(-12px) scale(1)} 100%{opacity:0;transform:translateY(-60px) scale(.3)} }
+    /* Aura halo behind avatar — color reflects state */
+    .avatar-aura {
+      position: absolute; inset: -40px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(91,140,255,.35), rgba(91,140,255,0) 65%);
+      filter: blur(18px);
+      transition: background .4s ease, transform .4s ease;
+      animation: aura-breathe 4s ease-in-out infinite;
+    }
+    @keyframes aura-breathe { 0%,100%{transform:scale(1);opacity:.85} 50%{transform:scale(1.08);opacity:1} }
 
-    /* Avatar image — primary display */
-    .avatar-img {
-      width: 200px; height: 200px; border-radius: 50%; object-fit: cover;
-      border: 3px solid var(--bg3);
-      box-shadow: 0 0 40px rgba(0,255,136,.2);
-      cursor: pointer;
+    .avatar-stage[data-state="listening"]  .avatar-aura { background: radial-gradient(circle, rgba(91,140,255,.55), transparent 65%); }
+    .avatar-stage[data-state="thinking"]   .avatar-aura { background: radial-gradient(circle, rgba(243,201,105,.5), transparent 65%); animation: aura-pulse 1s ease-in-out infinite; }
+    .avatar-stage[data-state="speaking"]   .avatar-aura { background: radial-gradient(circle, rgba(87,245,167,.5), transparent 65%); animation: aura-breathe 1.5s ease-in-out infinite; }
+    .avatar-stage[data-state="alert"]      .avatar-aura { background: radial-gradient(circle, rgba(255,85,119,.55), transparent 65%); animation: aura-pulse .7s ease-in-out infinite; }
+    @keyframes aura-pulse { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.15);opacity:1} }
+
+    /* Outer rotating ring */
+    .ring-outer {
+      position: absolute; inset: -22px; border-radius: 50%;
+      border: 1px solid rgba(91,140,255,.25);
+      border-top-color: rgba(0,225,255,.7);
+      animation: ring-rotate 6s linear infinite;
+    }
+    .ring-outer.fast { animation-duration: 1.6s; border-top-color: var(--gold); }
+    @keyframes ring-rotate { to { transform: rotate(360deg); } }
+
+    /* Inner reactive ring (audio level) */
+    .ring-inner {
+      position: absolute; inset: -8px; border-radius: 50%;
+      border: 2px solid rgba(91,140,255,.35);
+      box-shadow: 0 0 18px rgba(91,140,255,.25);
+      transition: transform .12s linear, border-color .3s, box-shadow .3s;
+    }
+    .avatar-stage[data-state="listening"] .ring-inner { border-color: var(--neon-2); box-shadow: 0 0 30px rgba(0,225,255,.45); }
+    .avatar-stage[data-state="thinking"]  .ring-inner { border-color: var(--gold);   box-shadow: 0 0 30px rgba(243,201,105,.4); }
+    .avatar-stage[data-state="speaking"]  .ring-inner { border-color: var(--green);  box-shadow: 0 0 35px rgba(87,245,167,.5); }
+    .avatar-stage[data-state="alert"]     .ring-inner { border-color: var(--red);    box-shadow: 0 0 30px rgba(255,85,119,.5); }
+
+    /* Energy waves (thinking) */
+    .energy-wave {
+      position: absolute; inset: 0; border-radius: 50%;
+      border: 1px solid rgba(243,201,105,.6);
+      opacity: 0; pointer-events: none;
+    }
+    .avatar-stage[data-state="thinking"] .energy-wave { animation: energy-out 1.6s ease-out infinite; }
+    .avatar-stage[data-state="thinking"] .energy-wave:nth-child(2) { animation-delay: .55s; }
+    .avatar-stage[data-state="thinking"] .energy-wave:nth-child(3) { animation-delay: 1.1s; }
+    @keyframes energy-out {
+      0%   { transform: scale(.7); opacity: .8; }
+      100% { transform: scale(1.5); opacity: 0; }
+    }
+
+    /* Avatar card (frame) */
+    .avatar-frame {
+      position: relative; width: 220px; height: 220px; border-radius: 50%;
+      overflow: hidden;
+      box-shadow:
+        0 0 40px rgba(91,140,255,.35),
+        inset 0 0 30px rgba(0,225,255,.18);
       will-change: transform, filter;
-      transition: filter .25s ease, box-shadow .25s ease;
+      cursor: pointer;
     }
-    .avatar-img:hover { filter: brightness(1.12); box-shadow: 0 0 55px rgba(0,255,136,.35); }
-    .avatar-img.speaking {
-      filter: brightness(1.3) drop-shadow(0 0 14px #00ff88);
-      box-shadow: 0 0 80px rgba(0,255,136,.6);
+    .avatar-frame::after {
+      content: ''; position: absolute; inset: 0; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.08);
+      pointer-events: none;
     }
-    /* Face overlay canvas */
-    #faceCanvas { position: absolute; border-radius: 50%; pointer-events: none; z-index: 5; width: 200px; height: 200px; }
+    .avatar-img {
+      width: 100%; height: 100%; object-fit: cover; display: block;
+      transition: filter .3s ease;
+    }
+    .avatar-stage[data-state="speaking"] .avatar-img { filter: brightness(1.15) saturate(1.1); }
 
-    /* Name */
+    /* Face overlay canvas — eyes & mouth */
+    #faceCanvas {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 5;
+      mix-blend-mode: normal;
+    }
+
+    /* Particles canvas around the avatar */
+    #avatarParticles {
+      position: absolute; inset: -60px; pointer-events: none; z-index: 0;
+    }
+
+    /* Identity */
     .name-block { text-align: center; }
-    .agent-name { font-size: 2.8rem; font-weight: 700; letter-spacing: 6px; color: var(--gold); text-shadow: 0 0 30px rgba(201,168,76,.4); }
-    .agent-sub  { font-size: .85rem; color: var(--text-dim); margin-top: 4px; letter-spacing: 1px; }
+    .agent-name {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 2.6rem; font-weight: 700; letter-spacing: 8px;
+      background: linear-gradient(135deg, var(--neon), var(--neon-2) 50%, var(--neon-3));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      filter: drop-shadow(0 0 18px rgba(91,140,255,.45));
+    }
+    .agent-sub { font-size: .82rem; color: var(--text-dim); margin-top: 6px; letter-spacing: 2px; }
 
-    /* Listen */
-    .listen-state { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-    .listen-label { font-size: .8rem; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase; min-height: 20px; transition: color .3s; }
-    .listen-label.active   { color: var(--neon); }
-    .listen-label.speaking { color: var(--gold); }
-    .listen-label.error    { color: var(--red); }
+    /* State chip */
+    .state-chip {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 8px 18px; border-radius: 999px;
+      background: rgba(11,18,48,.6); backdrop-filter: blur(10px);
+      border: 1px solid rgba(91,140,255,.25);
+      font-size: .78rem; letter-spacing: 2px; text-transform: uppercase;
+      color: var(--text-dim); transition: all .3s;
+    }
+    .state-chip .state-led {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--text-dim); box-shadow: 0 0 8px currentColor;
+      transition: background .3s, box-shadow .3s;
+    }
+    .state-chip[data-state="listening"]  { color: var(--neon-2); border-color: rgba(0,225,255,.4); }
+    .state-chip[data-state="listening"]  .state-led { background: var(--neon-2); animation: led-pulse 1.2s infinite; }
+    .state-chip[data-state="thinking"]   { color: var(--gold); border-color: rgba(243,201,105,.4); }
+    .state-chip[data-state="thinking"]   .state-led { background: var(--gold); animation: led-pulse .7s infinite; }
+    .state-chip[data-state="speaking"]   { color: var(--green); border-color: rgba(87,245,167,.4); }
+    .state-chip[data-state="speaking"]   .state-led { background: var(--green); animation: led-pulse .9s infinite; }
+    .state-chip[data-state="error"]      { color: var(--red);   border-color: rgba(255,85,119,.4); }
+    @keyframes led-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.3)} }
 
     /* Fallback mic */
-    .mic-btn { width: 70px; height: 70px; border-radius: 50%; border: 2px solid var(--neon); background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .2s; box-shadow: 0 0 20px var(--neon-dim); color: var(--neon); }
-    .mic-btn:hover { box-shadow: 0 0 40px rgba(0,255,136,.4); transform: scale(1.05); }
-    .mic-btn.recording      { border-color: var(--red); color: var(--red); animation: btn-record .8s infinite; box-shadow: 0 0 30px rgba(255,68,68,.4); }
-    .mic-btn.processing     { border-color: var(--gold); color: var(--gold); cursor: default; }
-    .mic-btn.speaking-state { animation: btn-speak .6s infinite; box-shadow: 0 0 40px rgba(0,255,136,.5); }
+    .mic-btn {
+      width: 70px; height: 70px; border-radius: 50%;
+      border: 2px solid var(--neon); background: rgba(11,18,48,.5); backdrop-filter: blur(8px);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all .2s; box-shadow: 0 0 20px rgba(91,140,255,.25); color: var(--neon);
+    }
+    .mic-btn:hover { box-shadow: 0 0 40px rgba(91,140,255,.5); transform: scale(1.05); }
+    .mic-btn.recording { border-color: var(--red); color: var(--red); animation: btn-record .8s infinite; box-shadow: 0 0 30px rgba(255,85,119,.4); }
+    .mic-btn.processing { border-color: var(--gold); color: var(--gold); cursor: default; }
+    .mic-btn.speaking-state { animation: btn-speak .6s infinite; box-shadow: 0 0 40px rgba(87,245,167,.5); }
     @keyframes btn-record { 0%,100%{opacity:1} 50%{opacity:.5} }
     @keyframes btn-speak  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
     .mic-btn svg { width: 28px; height: 28px; }
@@ -106,16 +251,27 @@
     @keyframes spin { to{transform:rotate(360deg)} }
     .mic-label { font-size: .75rem; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 6px; min-height: 18px; }
 
-    /* Briefing */
-    .briefing-btn { background: transparent; border: 1px solid var(--gold); color: var(--gold); padding: 9px 24px; border-radius: 24px; cursor: pointer; font-size: .78rem; letter-spacing: 2px; text-transform: uppercase; font-family: inherit; transition: all .2s; }
-    .briefing-btn:hover { background: var(--gold-dim); box-shadow: 0 0 20px var(--gold-dim); }
+    /* Briefing button */
+    .briefing-btn {
+      background: rgba(11,18,48,.5); backdrop-filter: blur(10px);
+      border: 1px solid var(--gold); color: var(--gold);
+      padding: 9px 24px; border-radius: 24px; cursor: pointer;
+      font-size: .78rem; letter-spacing: 2px; text-transform: uppercase;
+      font-family: inherit; transition: all .2s;
+    }
+    .briefing-btn:hover { background: rgba(243,201,105,.12); box-shadow: 0 0 20px rgba(243,201,105,.25); }
 
     /* Dashboard */
     .dashboard-grid { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .card { background: var(--bg2); border: 1px solid rgba(0,255,136,.12); border-radius: 14px; padding: 18px 16px 14px; cursor: pointer; transition: border-color .2s, box-shadow .2s; }
-    .card:hover { border-color: rgba(0,255,136,.35); box-shadow: 0 0 20px rgba(0,255,136,.08); }
+    .card {
+      background: rgba(11,18,48,.55); backdrop-filter: blur(12px);
+      border: 1px solid rgba(91,140,255,.18); border-radius: 14px;
+      padding: 18px 16px 14px; cursor: pointer;
+      transition: border-color .2s, box-shadow .2s, transform .2s;
+    }
+    .card:hover { border-color: rgba(91,140,255,.5); box-shadow: 0 0 22px rgba(91,140,255,.15); transform: translateY(-2px); }
     .card-title { font-size: .68rem; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
-    .card-value { font-size: 2rem; font-weight: 700; color: var(--neon); line-height: 1; margin-bottom: 4px; }
+    .card-value { font-size: 2rem; font-weight: 700; color: var(--neon-2); line-height: 1; margin-bottom: 4px; }
     .card-sub   { font-size: .75rem; color: var(--text-dim); }
     .card-meta  { font-size: .7rem; color: var(--gold); margin-top: 4px; }
     .card-updating { opacity: .5; }
@@ -123,47 +279,173 @@
     /* Chat */
     .chat-wrap { width: 100%; max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; }
     .chat-wrap::-webkit-scrollbar { width: 4px; }
-    .chat-wrap::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 2px; }
+    .chat-wrap::-webkit-scrollbar-thumb { background: var(--bg-soft); border-radius: 2px; }
     .bubble { display: flex; align-items: flex-end; gap: 10px; max-width: 82%; animation: fade-in .3s ease; }
     @keyframes fade-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
     .bubble.user  { align-self: flex-end; flex-direction: row-reverse; }
     .bubble.agent { align-self: flex-start; }
     .bubble-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 1px solid var(--neon); }
     .bubble-text { padding: 9px 13px; border-radius: 16px; font-size: .84rem; line-height: 1.5; }
-    .bubble.user  .bubble-text { background: var(--bg3); border: 1px solid rgba(0,255,136,.15); border-bottom-right-radius: 4px; }
-    .bubble.agent .bubble-text { background: rgba(0,255,136,.07); border: 1px solid rgba(0,255,136,.2); border-bottom-left-radius: 4px; color: var(--neon); }
+    .bubble.user  .bubble-text { background: rgba(19,26,68,.6); border: 1px solid rgba(91,140,255,.18); border-bottom-right-radius: 4px; }
+    .bubble.agent .bubble-text { background: rgba(0,225,255,.08); border: 1px solid rgba(0,225,255,.25); border-bottom-left-radius: 4px; color: var(--neon-2); }
 
-    /* Notification balloon */
-    .notif-balloon { position: fixed; bottom: 24px; right: 24px; z-index: 150; background: var(--bg2); border: 1px solid rgba(0,255,136,.3); border-radius: 16px; padding: 16px; max-width: 320px; width: calc(100vw - 48px); box-shadow: 0 0 40px rgba(0,255,136,.15); transform: translateY(120%); opacity: 0; transition: transform .35s ease, opacity .35s ease; pointer-events: none; }
+    /* Chat typing indicator */
+    .typing { display: flex; gap: 4px; padding: 9px 13px; }
+    .typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--neon-2); opacity: .5; animation: typing-bounce 1.2s infinite; }
+    .typing span:nth-child(2) { animation-delay: .15s; }
+    .typing span:nth-child(3) { animation-delay: .3s; }
+    @keyframes typing-bounce { 0%,80%,100% { transform: translateY(0); opacity: .4; } 40% { transform: translateY(-4px); opacity: 1; } }
+
+    /* Chat input bar */
+    .chat-input-bar {
+      width: 100%; display: flex; gap: 8px; align-items: flex-end;
+      background: rgba(11,18,48,.6); backdrop-filter: blur(10px);
+      border: 1px solid rgba(91,140,255,.25); border-radius: 16px;
+      padding: 10px 12px;
+    }
+    .chat-input-bar:focus-within { border-color: rgba(0,225,255,.5); box-shadow: 0 0 18px rgba(0,225,255,.15); }
+    .chat-textarea {
+      flex: 1; background: transparent; border: none; outline: none;
+      color: var(--text); font-family: inherit; font-size: .9rem; line-height: 1.4;
+      resize: none; max-height: 120px; min-height: 22px; padding: 4px 0;
+    }
+    .chat-textarea::placeholder { color: var(--text-dim); }
+    .chat-send-btn {
+      background: linear-gradient(135deg, var(--neon), var(--neon-3));
+      border: none; border-radius: 10px; width: 38px; height: 38px;
+      cursor: pointer; color: white; display: flex; align-items: center; justify-content: center;
+      transition: transform .15s, box-shadow .15s; flex-shrink: 0;
+    }
+    .chat-send-btn:hover:not(:disabled) { transform: scale(1.05); box-shadow: 0 0 18px rgba(91,140,255,.4); }
+    .chat-send-btn:disabled { opacity: .4; cursor: not-allowed; }
+    .chat-send-btn svg { width: 18px; height: 18px; }
+    .chat-history-btn {
+      background: rgba(11,18,48,.6); backdrop-filter: blur(10px);
+      border: 1px solid rgba(91,140,255,.25); border-radius: 10px;
+      width: 38px; height: 38px; cursor: pointer; color: var(--neon-2);
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s; flex-shrink: 0;
+    }
+    .chat-history-btn:hover { border-color: var(--neon-2); box-shadow: 0 0 14px rgba(0,225,255,.3); }
+    .chat-history-btn svg { width: 18px; height: 18px; }
+
+    /* History drawer */
+    .drawer-overlay {
+      position: fixed; inset: 0; background: rgba(5,8,24,.7); backdrop-filter: blur(6px);
+      z-index: 110; display: none;
+    }
+    .drawer-overlay.open { display: block; }
+    .drawer {
+      position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 92vw);
+      background: rgba(11,18,48,.96); border-left: 1px solid rgba(91,140,255,.3);
+      z-index: 120; padding: 20px; display: flex; flex-direction: column; gap: 14px;
+      transform: translateX(100%); transition: transform .3s ease;
+      box-shadow: -8px 0 40px rgba(0,0,0,.5);
+    }
+    .drawer.open { transform: translateX(0); }
+    .drawer-header { display: flex; align-items: center; justify-content: space-between; }
+    .drawer-header h2 {
+      font-family: 'Orbitron', sans-serif; color: var(--gold);
+      font-size: .95rem; letter-spacing: 2px;
+    }
+    .drawer-close { background: none; border: none; color: var(--text-dim); font-size: 1.6rem; cursor: pointer; line-height: 1; }
+    .drawer-actions { display: flex; gap: 8px; }
+    .drawer-btn {
+      flex: 1; background: rgba(91,140,255,.12); border: 1px solid rgba(91,140,255,.3);
+      color: var(--neon-2); padding: 8px 10px; border-radius: 8px; cursor: pointer;
+      font-size: .75rem; letter-spacing: 1px; text-transform: uppercase; font-family: inherit;
+      transition: background .15s;
+    }
+    .drawer-btn:hover { background: rgba(91,140,255,.22); }
+    .drawer-search {
+      width: 100%; background: rgba(19,26,68,.6); border: 1px solid rgba(91,140,255,.2);
+      color: var(--text); padding: 9px 12px; border-radius: 10px; font-family: inherit;
+      font-size: .85rem; outline: none;
+    }
+    .drawer-search:focus { border-color: var(--neon-2); }
+    .drawer-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+    .drawer-list::-webkit-scrollbar { width: 4px; }
+    .drawer-list::-webkit-scrollbar-thumb { background: var(--bg-soft); border-radius: 2px; }
+    .session-item {
+      background: rgba(19,26,68,.5); border: 1px solid rgba(91,140,255,.12);
+      border-radius: 10px; padding: 10px 12px; cursor: pointer;
+      transition: border-color .15s, background .15s; position: relative;
+    }
+    .session-item:hover { border-color: rgba(0,225,255,.4); background: rgba(19,26,68,.8); }
+    .session-item.active { border-color: var(--gold); background: rgba(243,201,105,.08); }
+    .session-title { font-size: .85rem; color: var(--text); font-weight: 500; margin-bottom: 4px; padding-right: 22px; line-height: 1.3; }
+    .session-meta { font-size: .7rem; color: var(--text-dim); display: flex; gap: 8px; }
+    .session-channel { text-transform: uppercase; letter-spacing: 1px; color: var(--neon-2); }
+    .session-delete {
+      position: absolute; top: 8px; right: 8px;
+      background: none; border: none; color: var(--text-dim); font-size: 1rem;
+      cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 4px;
+      opacity: 0; transition: opacity .15s;
+    }
+    .session-item:hover .session-delete { opacity: 1; }
+    .session-delete:hover { color: var(--red); background: rgba(255,85,119,.1); }
+    .drawer-empty { text-align: center; color: var(--text-dim); font-size: .8rem; padding: 20px; }
+    .search-hit {
+      background: rgba(19,26,68,.5); border: 1px solid rgba(91,140,255,.12);
+      border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: .78rem;
+      color: var(--text-dim); transition: border-color .15s;
+    }
+    .search-hit:hover { border-color: var(--neon-2); }
+    .search-hit mark { background: rgba(243,201,105,.25); color: var(--gold); padding: 0 2px; border-radius: 2px; }
+    .search-hit-meta { font-size: .68rem; color: var(--text-dim); margin-top: 4px; opacity: .7; }
+
+    /* Notifications */
+    .notif-balloon {
+      position: fixed; bottom: 24px; right: 24px; z-index: 150;
+      background: rgba(11,18,48,.85); backdrop-filter: blur(14px);
+      border: 1px solid rgba(91,140,255,.35); border-radius: 16px;
+      padding: 16px; max-width: 320px; width: calc(100vw - 48px);
+      box-shadow: 0 8px 40px rgba(0,0,0,.4), 0 0 30px rgba(91,140,255,.15);
+      transform: translateY(120%); opacity: 0;
+      transition: transform .35s ease, opacity .35s ease; pointer-events: none;
+    }
     .notif-balloon.open { transform: translateY(0); opacity: 1; pointer-events: all; }
-    .notif-balloon.urgency-high   { border-color: rgba(255,68,68,.5); box-shadow: 0 0 30px rgba(255,68,68,.15); }
+    .notif-balloon.urgency-high   { border-color: rgba(255,85,119,.5); box-shadow: 0 8px 40px rgba(0,0,0,.4), 0 0 30px rgba(255,85,119,.2); }
     .notif-balloon.urgency-medium { border-color: rgba(255,140,0,.4); }
     .notif-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
     .notif-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1px solid var(--neon); }
-    .notif-title  { flex: 1; font-size: .8rem; font-weight: 600; color: var(--neon); }
+    .notif-title  { flex: 1; font-size: .8rem; font-weight: 600; color: var(--neon-2); }
     .notif-close  { background: none; border: none; color: var(--text-dim); font-size: 1.2rem; cursor: pointer; line-height: 1; padding: 0; }
     .notif-text   { font-size: .8rem; color: var(--text-dim); line-height: 1.5; }
 
     /* Modals */
-    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(5,8,24,.75); backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
     .modal-overlay.open { display: flex; }
-    .modal { background: var(--bg2); border: 1px solid rgba(201,168,76,.3); border-radius: 16px; max-width: 640px; width: 100%; max-height: 80dvh; overflow-y: auto; padding: 28px; box-shadow: 0 0 60px rgba(201,168,76,.1); }
-    .modal h2 { color: var(--gold); font-size: 1.1rem; margin-bottom: 16px; letter-spacing: 2px; }
+    .modal { background: rgba(11,18,48,.95); border: 1px solid rgba(243,201,105,.3); border-radius: 16px; max-width: 640px; width: 100%; max-height: 80dvh; overflow-y: auto; padding: 28px; box-shadow: 0 0 60px rgba(91,140,255,.15); }
+    .modal h2 { color: var(--gold); font-size: 1.1rem; margin-bottom: 16px; letter-spacing: 2px; font-family: 'Orbitron', sans-serif; }
     .modal p  { font-size: .88rem; line-height: 1.7; color: var(--text-dim); white-space: pre-wrap; }
     .modal-close { float: right; background: transparent; border: none; color: var(--text-dim); font-size: 1.4rem; cursor: pointer; line-height: 1; }
     .modal-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
-    .modal-item { background: var(--bg3); border-radius: 10px; padding: 12px 14px; font-size: .83rem; line-height: 1.6; }
-    .modal-item strong { color: var(--neon); display: block; margin-bottom: 2px; }
-    .modal-item .badge { display: inline-block; font-size: .65rem; padding: 2px 8px; border-radius: 8px; margin-left: 6px; background: rgba(0,255,136,.15); color: var(--neon); text-transform: uppercase; letter-spacing: 1px; }
-    .modal-item .badge.ativa      { background: rgba(0,255,136,.2); color: var(--neon); }
+    .modal-item { background: rgba(19,26,68,.7); border-radius: 10px; padding: 12px 14px; font-size: .83rem; line-height: 1.6; }
+    .modal-item strong { color: var(--neon-2); display: block; margin-bottom: 2px; }
+    .modal-item .badge { display: inline-block; font-size: .65rem; padding: 2px 8px; border-radius: 8px; margin-left: 6px; background: rgba(91,140,255,.18); color: var(--neon-2); text-transform: uppercase; letter-spacing: 1px; }
+    .modal-item .badge.ativa      { background: rgba(87,245,167,.18); color: var(--green); }
     .modal-item .badge.pausada    { background: rgba(255,140,0,.2); color: var(--orange); }
     .modal-item .badge.pendente   { background: rgba(255,140,0,.2); color: var(--orange); }
-    .modal-item .badge.novo       { background: rgba(0,200,255,.15); color: #00c8ff; }
-    .modal-item .badge.em_atendimento { background: rgba(201,168,76,.2); color: var(--gold); }
+    .modal-item .badge.novo       { background: rgba(0,225,255,.18); color: var(--neon-2); }
+    .modal-item .badge.em_atendimento { background: rgba(243,201,105,.2); color: var(--gold); }
+
+    /* Mobile */
+    @media (max-width: 480px) {
+      .avatar-stage  { width: 240px; height: 240px; }
+      .avatar-frame  { width: 190px; height: 190px; }
+      .agent-name    { font-size: 2.1rem; letter-spacing: 6px; }
+      .activate-logo { font-size: 2.8rem; letter-spacing: 8px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
   </style>
 </head>
 <body>
 
+<div id="bgGradient"></div>
 <canvas id="bgCanvas"></canvas>
 
 <div class="activate-overlay" id="activateOverlay">
@@ -171,7 +453,7 @@
     <div class="activate-logo">ZAYRA</div>
     <div class="activate-sub">Assistente Executiva Romatec</div>
     <div class="activate-ring"></div>
-    <div class="activate-sub" style="font-size:.75rem;margin-top:4px">Toque para ativar</div>
+    <div class="activate-sub" style="font-size:.72rem;margin-top:4px">Toque para ativar</div>
   </div>
 </div>
 
@@ -184,15 +466,19 @@
     </div>
   </div>
 
-  <div class="avatar-wrap" id="avatarWrap">
-    <div class="avatar-ring-2"></div>
-    <div class="avatar-ring passive" id="avatarRing"></div>
-    <div class="think-particles" id="thinkParticles">
-      <div class="think-dot"></div><div class="think-dot"></div>
-      <div class="think-dot"></div><div class="think-dot"></div>
+  <div class="avatar-stage" id="avatarStage" data-state="idle">
+    <canvas id="avatarParticles"></canvas>
+    <div class="avatar-aura"></div>
+    <div class="ring-outer"></div>
+    <div class="ring-inner" id="ringInner"></div>
+    <div class="energy-wave"></div>
+    <div class="energy-wave"></div>
+    <div class="energy-wave"></div>
+    <div class="avatar-frame" id="avatarFrame">
+      <img class="avatar-img" id="avatarImg" src="/avatar.png" alt="ZAYRA"
+        onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%22 stop-color=%22%235b8cff%22/><stop offset=%221%22 stop-color=%22%23b66bff%22/></linearGradient></defs><circle cx=%22100%22 cy=%22100%22 r=%22100%22 fill=%22url(%23g)%22/><text x=%2250%25%22 y=%2256%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2290%22 font-family=%22Orbitron%22 fill=%22%23ffffff%22>Z</text></svg>'" />
+      <canvas id="faceCanvas" width="220" height="220"></canvas>
     </div>
-    <img class="avatar-img" id="avatarImg" src="/avatar.png" alt="ZAYRA"
-      onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22><circle cx=%22100%22 cy=%22100%22 r=%22100%22 fill=%22%230f2318%22/><text x=%2250%25%22 y=%2254%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2280%22 fill=%22%2300ff88%22>Z</text></svg>'" />
   </div>
 
   <div class="name-block">
@@ -200,8 +486,9 @@
     <div class="agent-sub">Assistente Executiva — Romatec Consultoria Imobiliária</div>
   </div>
 
-  <div class="listen-state" id="listenState">
-    <div class="listen-label" id="listenLabel">Ouvindo...</div>
+  <div class="state-chip" id="stateChip" data-state="idle">
+    <span class="state-led"></span>
+    <span id="stateLabel">Aguardando</span>
   </div>
 
   <div id="fallbackControls" style="display:none;flex-direction:column;align-items:center;gap:0">
@@ -249,7 +536,38 @@
   </div>
 
   <div class="chat-wrap" id="chat"></div>
+
+  <div class="chat-input-bar">
+    <button class="chat-history-btn" id="historyBtn" title="Histórico de conversas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+      </svg>
+    </button>
+    <textarea class="chat-textarea" id="chatInput" rows="1"
+      placeholder="Digite uma mensagem para a ZAYRA…"
+      aria-label="Mensagem para a ZAYRA"></textarea>
+    <button class="chat-send-btn" id="chatSendBtn" disabled title="Enviar (Enter)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+    </button>
+  </div>
 </div>
+
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-header">
+    <h2>Conversas</h2>
+    <button class="drawer-close" id="drawerClose" aria-label="Fechar">×</button>
+  </div>
+  <div class="drawer-actions">
+    <button class="drawer-btn" id="newChatBtn">+ Nova conversa</button>
+  </div>
+  <input type="search" class="drawer-search" id="drawerSearch" placeholder="Buscar nas conversas…" />
+  <div class="drawer-list" id="drawerList">
+    <div class="drawer-empty">Nenhuma conversa ainda.</div>
+  </div>
+</aside>
 
 <div class="notif-balloon" id="notifBalloon">
   <div class="notif-header">
@@ -277,63 +595,148 @@
 </div>
 
 <script>
-// ── Background particles ──────────────────────────────────────────────────────
+// ── Performance budget ────────────────────────────────────────────────────────
+const isMobile = matchMedia('(max-width: 768px)').matches || /Mobi|Android/i.test(navigator.userAgent);
+const TARGET_FPS = isMobile ? 30 : 60;
+const FRAME_MS   = 1000 / TARGET_FPS;
+
+// ── Background mesh particles ────────────────────────────────────────────────
 (function(){
-  const cv=document.getElementById('bgCanvas'),ctx=cv.getContext('2d');
-  let W,H,pts=[];
-  function resize(){W=cv.width=innerWidth;H=cv.height=innerHeight;}
-  addEventListener('resize',resize);resize();
-  function rand(a,b){return a+Math.random()*(b-a);}
-  for(let i=0;i<60;i++)pts.push({x:rand(0,W),y:rand(0,H),vx:rand(-.3,.3),vy:rand(-.3,.3),r:rand(1,2.5),a:rand(.2,.6)});
-  (function draw(){
-    ctx.clearRect(0,0,W,H);
-    pts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=W;if(p.x>W)p.x=0;if(p.y<0)p.y=H;if(p.y>H)p.y=0;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fillStyle=`rgba(0,255,136,${p.a})`;ctx.fill();});
-    for(let i=0;i<pts.length;i++)for(let j=i+1;j<pts.length;j++){const dx=pts[i].x-pts[j].x,dy=pts[i].y-pts[j].y,d=Math.sqrt(dx*dx+dy*dy);if(d<100){ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[j].x,pts[j].y);ctx.strokeStyle=`rgba(0,255,136,${.12*(1-d/100)})`;ctx.lineWidth=.5;ctx.stroke();}}
+  const cv = document.getElementById('bgCanvas'), ctx = cv.getContext('2d');
+  let W, H, pts = [];
+  const N = isMobile ? 28 : 60;
+  function resize(){ W = cv.width = innerWidth; H = cv.height = innerHeight; }
+  addEventListener('resize', resize); resize();
+  const rand = (a,b) => a + Math.random()*(b-a);
+  const colors = ['91,140,255', '0,225,255', '182,107,255'];
+  for (let i = 0; i < N; i++) pts.push({
+    x: rand(0,W), y: rand(0,H), vx: rand(-.25,.25), vy: rand(-.25,.25),
+    r: rand(1,2.4), a: rand(.25,.7), c: colors[i % colors.length]
+  });
+  let last = 0;
+  (function draw(t){
     requestAnimationFrame(draw);
-  })();
+    if (document.hidden) return;
+    if (t - last < FRAME_MS) return; last = t;
+    ctx.clearRect(0,0,W,H);
+    pts.forEach(p => {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(${p.c},${p.a})`; ctx.fill();
+    });
+    if (!isMobile) {
+      for (let i = 0; i < pts.length; i++)
+        for (let j = i+1; j < pts.length; j++) {
+          const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
+          const d = Math.sqrt(dx*dx + dy*dy);
+          if (d < 110) {
+            ctx.beginPath();
+            ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[j].x, pts[j].y);
+            ctx.strokeStyle = `rgba(91,140,255,${.15 * (1 - d/110)})`;
+            ctx.lineWidth = .5; ctx.stroke();
+          }
+        }
+    }
+  })(0);
 })();
 
-// ── FaceAnimator — avatar 2D animado CSS + Canvas ─────────────────────────────
+// ── Avatar particles (orbiting around the avatar) ─────────────────────────────
+(function(){
+  const cv = document.getElementById('avatarParticles'), ctx = cv.getContext('2d');
+  function resize(){
+    const rect = cv.parentElement.getBoundingClientRect();
+    cv.width = rect.width; cv.height = rect.height;
+  }
+  resize(); addEventListener('resize', resize);
+  const N = isMobile ? 14 : 24;
+  const parts = [];
+  for (let i = 0; i < N; i++) parts.push({
+    a: Math.random() * Math.PI * 2,
+    r: 110 + Math.random() * 50,
+    s: 0.0006 + Math.random() * 0.0012,
+    z: Math.random(),
+    hue: Math.random() < .5 ? '91,140,255' : (Math.random() < .5 ? '0,225,255' : '182,107,255'),
+    size: 1 + Math.random() * 2
+  });
+  let last = 0;
+  function tick(t){
+    requestAnimationFrame(tick);
+    if (document.hidden) return;
+    if (t - last < FRAME_MS) return; last = t;
+    const W = cv.width, H = cv.height, cx = W/2, cy = H/2;
+    ctx.clearRect(0,0,W,H);
+    const stateEl = document.getElementById('avatarStage');
+    const speedMul = stateEl.dataset.state === 'thinking' ? 4 : (stateEl.dataset.state === 'speaking' ? 2 : 1);
+    parts.forEach(p => {
+      p.a += p.s * speedMul * 16;
+      const x = cx + Math.cos(p.a) * p.r;
+      const y = cy + Math.sin(p.a) * p.r * 0.95;
+      const alpha = 0.4 + Math.sin(p.a * 2) * 0.3;
+      ctx.beginPath();
+      ctx.arc(x, y, p.size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${p.hue},${alpha})`;
+      ctx.shadowBlur = 8; ctx.shadowColor = `rgba(${p.hue},.8)`;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+  }
+  tick(0);
+})();
+
+// ── FaceAnimator ──────────────────────────────────────────────────────────────
 class FaceAnimator {
   constructor() {
-    this.img = document.getElementById('avatarImg');
+    this.frame = document.getElementById('avatarFrame');
+    this.img   = document.getElementById('avatarImg');
+    this.stage = document.getElementById('avatarStage');
+    this.face  = document.getElementById('faceCanvas');
+    this.ctx   = this.face.getContext('2d');
 
-    // Canvas overlay for blink + lip sync
-    this.ov = document.createElement('canvas');
-    this.ov.id = 'faceCanvas'; this.ov.width = 200; this.ov.height = 200;
-    document.getElementById('avatarWrap').appendChild(this.ov);
-    this.ctx = this.ov.getContext('2d');
+    // calibrate canvas to actual frame size
+    const r = this.frame.getBoundingClientRect();
+    this.face.width  = r.width;
+    this.face.height = r.height;
+    addEventListener('resize', () => {
+      const rr = this.frame.getBoundingClientRect();
+      this.face.width = rr.width; this.face.height = rr.height;
+    });
 
-    this.state    = 'idle';
-    this.mouthVal = 0;
-    this.headYaw  = 0; this.tgtYaw   = 0;
+    this.state = 'idle';
+    this.mouthVal = 0; this.mouthSmoothed = 0;
+    this.headYaw = 0;  this.tgtYaw = 0;
     this.headPitch = 0; this.tgtPitch = 0;
-    this._t  = 0; this._ts = performance.now();
+    this._t = 0; this._ts = performance.now();
+
     // Blink
     this.blinkT = 0; this.nextBlink = 3 + Math.random() * 4;
     this._blinking = false; this._blinkStart = 0;
+
+    // Smile / brow expression mood (0..1) — rises on greeting/speaking
+    this.smile = 0; this.targetSmile = 0;
 
     this._bindInput();
     this._loop();
   }
 
   _bindInput() {
-    // Head follows mouse globally
     addEventListener('mousemove', e => {
-      this.tgtYaw   = ((e.clientX - innerWidth  / 2) / (innerWidth  / 2)) *  8;
-      this.tgtPitch = ((e.clientY - innerHeight / 2) / (innerHeight / 2)) * -5;
+      this.tgtYaw   = ((e.clientX - innerWidth  / 2) / (innerWidth  / 2)) *  6;
+      this.tgtPitch = ((e.clientY - innerHeight / 2) / (innerHeight / 2)) * -4;
     });
     addEventListener('touchmove', e => {
       if (!e.touches.length) return;
-      this.tgtYaw   = ((e.touches[0].clientX - innerWidth  / 2) / (innerWidth  / 2)) *  8;
-      this.tgtPitch = ((e.touches[0].clientY - innerHeight / 2) / (innerHeight / 2)) * -5;
+      this.tgtYaw   = ((e.touches[0].clientX - innerWidth  / 2) / (innerWidth  / 2)) *  6;
+      this.tgtPitch = ((e.touches[0].clientY - innerHeight / 2) / (innerHeight / 2)) * -4;
     }, { passive: true });
 
-    // Click → flash + greeting
-    this.img.addEventListener('click', () => {
-      this.img.style.transition = 'filter .08s';
-      this.img.style.filter = 'brightness(2.2) drop-shadow(0 0 22px #00ff88)';
-      setTimeout(() => { this.img.style.filter = ''; setTimeout(() => { this.img.style.transition = 'filter .25s ease, box-shadow .25s ease'; }, 80); }, 120);
+    this.frame.addEventListener('click', () => {
+      this.targetSmile = 1;
+      setTimeout(() => { this.targetSmile = 0; }, 1800);
+      this.frame.style.transition = 'filter .08s';
+      this.frame.style.filter = 'brightness(1.6) drop-shadow(0 0 22px #5b8cff)';
+      setTimeout(() => { this.frame.style.filter = ''; setTimeout(() => { this.frame.style.transition = 'filter .25s ease'; }, 80); }, 140);
       fetch('/text', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ message: 'Diga apenas "Olá, José Romário!" de forma executiva.', voice: true })
       }).then(r => r.ok ? r.blob() : null).then(b => { if (b) window._playBlob(b, 'Olá, José Romário!'); }).catch(() => {});
@@ -342,95 +745,122 @@ class FaceAnimator {
 
   setState(s) {
     this.state = s;
-    const tp = document.getElementById('thinkParticles');
-    if (tp) tp.style.display = s === 'thinking' ? 'block' : 'none';
-    // Speaking → CSS brightness + glow via class
-    this.img.classList.toggle('speaking', s === 'speaking');
+    this.stage.dataset.state = s;
+    if (s === 'speaking' || s === 'greeting') this.targetSmile = 0.7;
+    else if (s !== 'alert') this.targetSmile = 0.1;
   }
 
-  updateLipSync(vol) { this.mouthVal = vol / 70; }
+  updateLipSync(vol) { this.mouthVal = Math.min(1, vol / 70); }
 
   _loop() {
-    const tick = () => {
+    let last = 0;
+    const tick = (t) => {
       requestAnimationFrame(tick);
       if (document.hidden) return;
-      const now = performance.now();
-      const dt = Math.min((now - this._ts) / 1000, 0.1);
-      this._ts = now; this._t += dt;
+      if (t - last < FRAME_MS) return;
+      const dt = Math.min((t - this._ts) / 1000, 0.1);
+      this._ts = t; this._t += dt; last = t;
       this._update(dt);
     };
-    tick();
+    tick(performance.now());
   }
 
   _update(dt) {
     const ease = 1 - Math.pow(0.04, dt);
     this.headYaw   += (this.tgtYaw   - this.headYaw)   * ease;
     this.headPitch += (this.tgtPitch - this.headPitch) * ease;
+    this.smile     += (this.targetSmile - this.smile)  * (1 - Math.pow(0.05, dt));
 
-    // Breathing: scale 1.0 → 1.02, period 3s
-    const breathScale = 1 + Math.sin(this._t * Math.PI * 2 / 3) * 0.01;
-    // Head tracking + breathing combined on the image
-    this.img.style.transform =
-      `perspective(700px) rotateY(${this.headYaw}deg) rotateX(${this.headPitch}deg) scale(${breathScale})`;
+    // Smooth mouth — natural lip sync (low-pass filter)
+    this.mouthSmoothed += (this.mouthVal - this.mouthSmoothed) * (1 - Math.pow(0.0001, dt));
 
-    // Blink timer (every ~5s with ±2s jitter)
+    // Breathing: subtle chest scale
+    const breathScale = 1 + Math.sin(this._t * Math.PI * 2 / 3.4) * 0.012;
+    this.frame.style.transform =
+      `perspective(720px) rotateY(${this.headYaw}deg) rotateX(${this.headPitch}deg) scale(${breathScale})`;
+
+    // Blink timer
     this.blinkT += dt;
     let blinkVal = 0;
     if (this.blinkT >= this.nextBlink && !this._blinking) {
-      this._blinkStart = this.blinkT;
-      this._blinking   = true;
-      this.nextBlink   = this.blinkT + 4 + Math.random() * 3;
+      this._blinkStart = this.blinkT; this._blinking = true;
+      this.nextBlink = this.blinkT + 3 + Math.random() * 3;
     }
     if (this._blinking) {
-      const dur = 0.15, el = this.blinkT - this._blinkStart;
+      const dur = 0.18, el = this.blinkT - this._blinkStart;
       blinkVal = el < dur / 2 ? el / (dur / 2) : Math.max(0, 1 - (el - dur / 2) / (dur / 2));
       if (el > dur) { this._blinking = false; blinkVal = 0; }
     }
 
-    // Ring pulse synced to audio volume
-    const ring = document.getElementById('avatarRing');
-    if (ring && this.state === 'speaking') {
-      const v = Math.max(0, Math.min(1, this.mouthVal));
-      ring.style.transform = `scale(${1 + v * 0.09})`;
-    } else if (ring) {
-      ring.style.transform = '';
+    // Reactive ring scale → breathing & audio
+    const ring = document.getElementById('ringInner');
+    if (ring) {
+      let scale = 1 + Math.sin(this._t * Math.PI * 2 / 3.4) * 0.015;
+      if (this.state === 'speaking') scale = 1 + this.mouthSmoothed * 0.10;
+      else if (this.state === 'thinking') scale = 1 + Math.sin(this._t * 8) * 0.015;
+      ring.style.transform = `scale(${scale})`;
     }
 
-    this._drawOverlay(blinkVal);
+    this._drawFace(blinkVal);
   }
 
-  _drawOverlay(blinkVal) {
-    const ctx = this.ctx, W = 200, H = 200;
+  _drawFace(blinkVal) {
+    const ctx = this.ctx, W = this.face.width, H = this.face.height;
     ctx.clearRect(0, 0, W, H);
     ctx.save();
-    // Clip to circle
     ctx.beginPath(); ctx.arc(W/2, H/2, W/2 - 1, 0, Math.PI*2); ctx.clip();
 
-    // ── Eye blink: y=42% (84px), height=8% (16px half=8), x=25%-75%
-    // Left eye cx=68 (34%), Right eye cx=132 (66%)
+    // Eye region — only render eyelid overlay during blink (subtle)
+    const eyeY  = H * 0.42;
+    const eyeRx = W * 0.085;
+    const eyeRyMax = H * 0.04;
+    const lEx = W * 0.34, rEx = W * 0.66;
+
     if (blinkVal > 0.02) {
-      const eyeY = 84, eyeRx = 18, eyeRy = 8;
-      [[68, eyeY], [132, eyeY]].forEach(([cx, cy]) => {
-        ctx.globalAlpha = Math.min(0.95, blinkVal);
-        ctx.fillStyle = '#0a1a0f';
+      ctx.globalAlpha = Math.min(0.85, blinkVal);
+      const grad = ctx.createLinearGradient(0, eyeY - eyeRyMax, 0, eyeY + eyeRyMax);
+      grad.addColorStop(0, 'rgba(8,12,32,.95)');
+      grad.addColorStop(1, 'rgba(20,28,60,.85)');
+      ctx.fillStyle = grad;
+      [lEx, rEx].forEach(cx => {
         ctx.beginPath();
-        ctx.ellipse(cx, cy, eyeRx, Math.max(1, eyeRy * blinkVal), 0, 0, Math.PI*2);
+        ctx.ellipse(cx, eyeY, eyeRx, Math.max(1, eyeRyMax * blinkVal), 0, 0, Math.PI*2);
         ctx.fill();
       });
       ctx.globalAlpha = 1;
     }
 
-    // ── Lip sync mouth: y=65% (130px), x=35%-65% → cx=100, rx max=30
-    const mouth = Math.max(0, Math.min(1, this.mouthVal));
-    if (mouth > 0.04 && this.state === 'speaking') {
-      const mX = 100, mY = 130;
-      const mRx = 16 + mouth * 14;   // 35%-65% → max 30px
-      const mRy = 2  + mouth * 10;
-      ctx.globalAlpha = Math.min(0.85, mouth * 1.4);
-      ctx.fillStyle = '#050f08';
-      ctx.beginPath(); ctx.ellipse(mX, mY, mRx, mRy, 0, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle = 'rgba(0,255,136,0.22)'; ctx.lineWidth = 1.5; ctx.stroke();
-      ctx.globalAlpha = 1;
+    // Mouth (lip sync) — only show when speaking
+    const mouth = this.mouthSmoothed;
+    if ((mouth > 0.04 || this.smile > 0.15) && this.state !== 'idle') {
+      const mX = W * 0.5;
+      const mY = H * 0.66;
+      const open = this.state === 'speaking' ? mouth : 0;
+      const mRx = W * 0.075 + open * W * 0.045;
+      const mRy = H * 0.012 + open * H * 0.038;
+
+      // Smile curve (offset bottom of mouth)
+      const smileLift = this.smile * H * 0.012;
+
+      // Outer lips
+      ctx.fillStyle = 'rgba(20,8,16,.85)';
+      ctx.strokeStyle = 'rgba(91,140,255,.4)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.ellipse(mX, mY - smileLift, mRx, mRy, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Inner mouth glow when speaking
+      if (open > 0.1) {
+        const innerGrad = ctx.createRadialGradient(mX, mY - smileLift, 0, mX, mY - smileLift, mRx);
+        innerGrad.addColorStop(0, 'rgba(91,140,255,.35)');
+        innerGrad.addColorStop(1, 'rgba(91,140,255,0)');
+        ctx.fillStyle = innerGrad;
+        ctx.beginPath();
+        ctx.ellipse(mX, mY - smileLift, mRx * 0.7, mRy * 0.7, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
     }
 
     ctx.restore();
@@ -449,6 +879,7 @@ class AudioController {
     this.ctx = new AC();
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 256;
+    this.analyser.smoothingTimeConstant = 0.6;
     this.data = new Uint8Array(this.analyser.frequencyBinCount);
     this.analyser.connect(this.ctx.destination);
   }
@@ -469,9 +900,8 @@ let avatarCtrl = null, audioCtrl = null;
 let appState = 'inactive', recognition = null, fallbackMode = false;
 let mediaRecorder = null, chunks = [], dashboardData = null, notifCount = 0;
 
-const avatarRing  = document.getElementById('avatarRing');
-const listenLabel = document.getElementById('listenLabel');
-const listenState = document.getElementById('listenState');
+const stateChip   = document.getElementById('stateChip');
+const stateLabel  = document.getElementById('stateLabel');
 const chat        = document.getElementById('chat');
 const notifBalloon = document.getElementById('notifBalloon');
 const notifBadge   = document.getElementById('notifBadge');
@@ -493,9 +923,18 @@ window._playBlob = function(blob, responseText = '') {
   if (avatarCtrl) avatarCtrl.setState(expr === 'alert' ? 'alert' : 'speaking');
   if (responseText) addBubble('agent', responseText);
   let raf;
-  const lipLoop = () => { if (!audio.paused && !audio.ended) { if (avatarCtrl && audioCtrl) avatarCtrl.updateLipSync(audioCtrl.getVolume()); raf = requestAnimationFrame(lipLoop); } };
+  const lipLoop = () => {
+    if (!audio.paused && !audio.ended) {
+      if (avatarCtrl && audioCtrl) avatarCtrl.updateLipSync(audioCtrl.getVolume());
+      raf = requestAnimationFrame(lipLoop);
+    }
+  };
   audio.onplay  = () => lipLoop();
-  audio.onended = () => { cancelAnimationFrame(raf); URL.revokeObjectURL(url); if (avatarCtrl) avatarCtrl.setState('idle'); resumeListening(); };
+  audio.onended = () => {
+    cancelAnimationFrame(raf); URL.revokeObjectURL(url);
+    if (avatarCtrl) { avatarCtrl.updateLipSync(0); avatarCtrl.setState('idle'); }
+    resumeListening();
+  };
   audio.onerror = () => { cancelAnimationFrame(raf); if (avatarCtrl) avatarCtrl.setState('idle'); resumeListening(); };
   audio.play().catch(() => resumeListening());
 };
@@ -503,36 +942,36 @@ window._playBlob = function(blob, responseText = '') {
 // ── App state machine ─────────────────────────────────────────────────────────
 function setAppState(s) {
   appState = s;
-  avatarRing.className = 'avatar-ring';
-  listenLabel.className = 'listen-label';
+  let chipState = 'idle', chipText = 'Aguardando';
 
   if (s === 'passive') {
-    avatarRing.classList.add('passive');
-    listenLabel.textContent = 'Ouvindo...'; listenLabel.classList.add('active');
+    chipState = 'listening'; chipText = 'Ouvindo';
     if (avatarCtrl) avatarCtrl.setState('idle');
   } else if (s === 'active_voice') {
-    avatarRing.classList.add('active-voice');
-    listenLabel.textContent = 'Detectando voz...'; listenLabel.classList.add('active');
+    chipState = 'listening'; chipText = 'Detectando voz';
+    if (avatarCtrl) avatarCtrl.setState('listening');
+  } else if (s === 'recording') {
+    chipState = 'listening'; chipText = 'Gravando';
     if (avatarCtrl) avatarCtrl.setState('listening');
   } else if (s === 'processing') {
-    avatarRing.classList.add('processing');
-    listenLabel.textContent = 'ZAYRA está pensando...'; listenLabel.classList.add('active');
+    chipState = 'thinking'; chipText = 'Processando';
     if (avatarCtrl) avatarCtrl.setState('thinking');
   } else if (s === 'speaking') {
-    avatarRing.classList.add('speaking');
+    chipState = 'speaking'; chipText = 'Falando';
     if (avatarCtrl) avatarCtrl.setState('speaking');
-    listenLabel.textContent = 'ZAYRA está falando...'; listenLabel.classList.add('speaking');
   } else if (s === 'inactive') {
-    listenLabel.textContent = 'Aguardando ativação...';
+    chipState = 'idle'; chipText = 'Aguardando ativação';
   }
 
-  // sync fallback mic
+  stateChip.dataset.state = chipState;
+  stateLabel.textContent  = chipText;
+
+  // Sync fallback mic
   const micBtn = document.getElementById('micBtn');
   if (micBtn) {
     micBtn.className = 'mic-btn';
     document.getElementById('micIcon').style.display = 'block';
     document.getElementById('spinner').style.display = 'none';
-    document.getElementById('micLabel').className = 'mic-label';
     if (s === 'recording')  { micBtn.classList.add('recording');      document.getElementById('micLabel').textContent = 'Ouvindo...'; }
     if (s === 'processing') { micBtn.classList.add('processing');      document.getElementById('micIcon').style.display='none'; document.getElementById('spinner').style.display='block'; document.getElementById('micLabel').textContent = 'Pensando...'; }
     if (s === 'speaking')   { micBtn.classList.add('speaking-state'); document.getElementById('micLabel').textContent = 'Falando...'; }
@@ -540,11 +979,33 @@ function setAppState(s) {
   }
 }
 
+// ── Chat session state ────────────────────────────────────────────────────────
+let currentSessionId = localStorage.getItem('zayra_session_id') || null;
+
+function setCurrentSessionId(id) {
+  currentSessionId = id;
+  if (id) localStorage.setItem('zayra_session_id', id);
+  else localStorage.removeItem('zayra_session_id');
+}
+
 function addBubble(role, text) {
   const wrap = document.createElement('div'); wrap.className = `bubble ${role}`;
   if (role === 'agent') { const img = document.createElement('img'); img.className='bubble-avatar'; img.src='/avatar.png'; img.alt='Z'; img.onerror=()=>img.style.display='none'; wrap.appendChild(img); }
   const p = document.createElement('div'); p.className='bubble-text'; p.textContent=text; wrap.appendChild(p);
   chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
+  return wrap;
+}
+
+function showTypingIndicator() {
+  const wrap = document.createElement('div'); wrap.className = 'bubble agent'; wrap.id = 'typingBubble';
+  const img = document.createElement('img'); img.className='bubble-avatar'; img.src='/avatar.png'; img.alt='Z'; img.onerror=()=>img.style.display='none'; wrap.appendChild(img);
+  const t = document.createElement('div'); t.className = 'bubble-text';
+  t.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+  wrap.appendChild(t);
+  chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
+}
+function hideTypingIndicator() {
+  const t = document.getElementById('typingBubble'); if (t) t.remove();
 }
 
 async function processText(text, silent = false) {
@@ -552,29 +1013,70 @@ async function processText(text, silent = false) {
   if (recognition) try { recognition.abort(); } catch {}
   setAppState('processing');
   if (!silent) addBubble('user', text);
+  showTypingIndicator();
   try {
-    const res = await fetch('/text', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message: text, voice: true }) });
+    const res = await fetch('/text', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ message: text, voice: true, session_id: currentSessionId || undefined }) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const sid = res.headers.get('X-Session-Id'); if (sid) setCurrentSessionId(sid);
     const rt = decodeURIComponent(res.headers.get('X-Response-Text') || '');
+    hideTypingIndicator();
     window._playBlob(await res.blob(), silent ? '' : rt);
   } catch (err) {
-    console.error(err); listenLabel.className = 'listen-label error'; listenLabel.textContent = 'Erro...';
+    console.error(err);
+    hideTypingIndicator();
+    stateChip.dataset.state = 'error';
+    stateLabel.textContent = 'Erro';
     if (avatarCtrl) avatarCtrl.setState('idle');
     setTimeout(resumeListening, 2500);
+  }
+}
+
+// Text-only send (no voice playback): used by the chat input box
+async function sendTextOnly(text) {
+  if (!text.trim()) return;
+  if (appState === 'processing' || appState === 'speaking') return;
+  if (recognition) try { recognition.abort(); } catch {}
+  setAppState('processing');
+  addBubble('user', text);
+  showTypingIndicator();
+  try {
+    const res = await fetch('/text', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ message: text, voice: false, session_id: currentSessionId || undefined }) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.session_id) setCurrentSessionId(data.session_id);
+    hideTypingIndicator();
+    addBubble('agent', data.response || '(sem resposta)');
+    setAppState('passive');
+  } catch (err) {
+    console.error(err);
+    hideTypingIndicator();
+    addBubble('agent', '⚠️ Erro ao processar mensagem.');
+    setAppState('passive');
   }
 }
 
 async function sendAudio(blob) {
   setAppState('processing');
   const form = new FormData(); form.append('audio', blob, 'rec.webm');
+  if (currentSessionId) form.append('session_id', currentSessionId);
+  showTypingIndicator();
   try {
     const res = await fetch('/voice', { method:'POST', body: form });
     if (!res.ok) throw new Error();
+    const sid = res.headers.get('X-Session-Id'); if (sid) setCurrentSessionId(sid);
     const tr = decodeURIComponent(res.headers.get('X-Transcription') || '');
     const rt = decodeURIComponent(res.headers.get('X-Response-Text') || '');
     if (tr) addBubble('user', tr);
+    hideTypingIndicator();
     window._playBlob(await res.blob(), rt);
-  } catch { listenLabel.textContent = 'Erro.'; if (avatarCtrl) avatarCtrl.setState('idle'); setTimeout(() => setAppState('passive'), 2000); }
+  } catch {
+    hideTypingIndicator();
+    stateChip.dataset.state = 'error'; stateLabel.textContent = 'Erro';
+    if (avatarCtrl) avatarCtrl.setState('idle');
+    setTimeout(() => setAppState('passive'), 2000);
+  }
 }
 
 function resumeListening() {
@@ -605,7 +1107,6 @@ function initSR() {
 
 function setupFallbackMic() {
   document.getElementById('fallbackControls').style.display = 'flex';
-  listenState.style.display = 'none';
   const micBtn = document.getElementById('micBtn');
   micBtn.addEventListener('click', async () => {
     if (appState === 'processing' || appState === 'speaking') return;
@@ -709,13 +1210,13 @@ document.querySelectorAll('[data-modal]').forEach(card => {
     } else if (type === 'agenda') {
       const arr = dashboardData.agenda_hoje || [];
       if (!arr.length) {
-        body.innerHTML = '<li class="modal-item">Nenhum evento hoje. <a href="/auth/google" style="color:var(--neon);text-decoration:none">→ Conectar Google Calendar</a></li>';
+        body.innerHTML = '<li class="modal-item">Nenhum evento hoje. <a href="/auth/google" style="color:var(--neon-2);text-decoration:none">→ Conectar Google Calendar</a></li>';
       } else {
         arr.forEach(ev => {
           const li = document.createElement('li'); li.className = 'modal-item';
           const inicio = ev.inicio ? ev.inicio.substring(11, 16) : '';
           const fim    = ev.fim    ? ev.fim.substring(11, 16)    : '';
-          li.innerHTML = `<strong>${ev.titulo}</strong>${inicio ? `${inicio} – ${fim}` : ''}${ev.link ? ` <a href="${ev.link}" target="_blank" style="color:var(--neon);font-size:.75rem">↗</a>` : ''}`;
+          li.innerHTML = `<strong>${ev.titulo}</strong>${inicio ? `${inicio} – ${fim}` : ''}${ev.link ? ` <a href="${ev.link}" target="_blank" style="color:var(--neon-2);font-size:.75rem">↗</a>` : ''}`;
           body.appendChild(li);
         });
       }
@@ -741,17 +1242,15 @@ document.getElementById('briefingModal').addEventListener('click', e => { if(e.t
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 addEventListener('beforeunload', () => { if (avatarCtrl) avatarCtrl.dispose(); });
 
-// ── PWA — Service Worker + Install Prompt ─────────────────────────────────────
+// ── PWA ───────────────────────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').then(reg => {
-    console.log('[SW] Registrado:', reg.scope);
-  }).catch(err => console.warn('[SW] Erro:', err));
+  navigator.serviceWorker.register('/sw.js').then(reg => console.log('[SW] Registrado:', reg.scope))
+    .catch(err => console.warn('[SW] Erro:', err));
 }
 
 let _deferredInstall = null;
 window.addEventListener('beforeinstallprompt', e => {
-  e.preventDefault();
-  _deferredInstall = e;
+  e.preventDefault(); _deferredInstall = e;
   const btn = document.getElementById('installBtn');
   if (btn) btn.style.display = 'block';
 });
@@ -770,13 +1269,178 @@ document.getElementById('installBtn')?.addEventListener('click', async () => {
 window.addEventListener('appinstalled', () => {
   const btn = document.getElementById('installBtn');
   if (btn) btn.style.display = 'none';
-  console.log('[PWA] ZAYRA instalada com sucesso!');
 });
 
-// Auto-briefing via parâmetro URL (atalho PWA)
 if (new URLSearchParams(location.search).get('acao') === 'briefing') {
   addEventListener('DOMContentLoaded', () => setTimeout(() => document.getElementById('briefingBtn')?.click(), 1500));
 }
+
+// ── Chat input wiring ────────────────────────────────────────────────────────
+(function(){
+  const input  = document.getElementById('chatInput');
+  const send   = document.getElementById('chatSendBtn');
+  if (!input || !send) return;
+
+  function autoResize() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    send.disabled = !input.value.trim();
+  }
+  input.addEventListener('input', autoResize);
+
+  function trySend() {
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = ''; autoResize();
+    sendTextOnly(text);
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); trySend(); }
+  });
+  send.addEventListener('click', trySend);
+})();
+
+// ── History drawer ───────────────────────────────────────────────────────────
+(function(){
+  const overlay = document.getElementById('drawerOverlay');
+  const drawer  = document.getElementById('drawer');
+  const openBtn = document.getElementById('historyBtn');
+  const closeBtn= document.getElementById('drawerClose');
+  const newBtn  = document.getElementById('newChatBtn');
+  const list    = document.getElementById('drawerList');
+  const search  = document.getElementById('drawerSearch');
+  if (!drawer) return;
+
+  function openDrawer() { drawer.classList.add('open'); overlay.classList.add('open'); drawer.setAttribute('aria-hidden','false'); loadSessions(); }
+  function closeDrawer(){ drawer.classList.remove('open'); overlay.classList.remove('open'); drawer.setAttribute('aria-hidden','true'); }
+
+  openBtn.addEventListener('click', openDrawer);
+  closeBtn.addEventListener('click', closeDrawer);
+  overlay.addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) closeDrawer(); });
+
+  newBtn.addEventListener('click', () => {
+    setCurrentSessionId(null);
+    chat.innerHTML = '';
+    closeDrawer();
+    document.getElementById('chatInput')?.focus();
+  });
+
+  function fmtDate(d) {
+    try {
+      const dt = new Date(d);
+      return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' +
+             dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    } catch { return ''; }
+  }
+
+  async function loadSessions() {
+    list.innerHTML = '<div class="drawer-empty">Carregando…</div>';
+    try {
+      const r = await fetch('/chat/sessions?limit=50');
+      const data = await r.json();
+      renderSessions(data.sessions || []);
+    } catch {
+      list.innerHTML = '<div class="drawer-empty">Erro ao carregar.</div>';
+    }
+  }
+
+  function renderSessions(sessions) {
+    list.innerHTML = '';
+    if (!sessions.length) { list.innerHTML = '<div class="drawer-empty">Nenhuma conversa ainda.</div>'; return; }
+    sessions.forEach(s => {
+      const item = document.createElement('div');
+      item.className = 'session-item' + (s.id === currentSessionId ? ' active' : '');
+      const title = s.title || '(sem título)';
+      item.innerHTML = `
+        <div class="session-title"></div>
+        <div class="session-meta">
+          <span class="session-channel">${s.channel || 'text'}</span>
+          <span>${s.msg_count || 0} msgs</span>
+          <span>${fmtDate(s.updated_at)}</span>
+        </div>
+        <button class="session-delete" title="Apagar">×</button>
+      `;
+      item.querySelector('.session-title').textContent = title;
+      item.addEventListener('click', (e) => {
+        if (e.target.classList.contains('session-delete')) return;
+        loadSessionMessages(s.id);
+      });
+      item.querySelector('.session-delete').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Apagar esta conversa?')) return;
+        await fetch('/chat/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' });
+        if (s.id === currentSessionId) { setCurrentSessionId(null); chat.innerHTML = ''; }
+        loadSessions();
+      });
+      list.appendChild(item);
+    });
+  }
+
+  async function loadSessionMessages(id) {
+    try {
+      const r = await fetch('/chat/sessions/' + encodeURIComponent(id));
+      if (!r.ok) throw new Error();
+      const data = await r.json();
+      chat.innerHTML = '';
+      (data.messages || []).forEach(m => addBubble(m.role === 'user' ? 'user' : 'agent', m.content));
+      setCurrentSessionId(id);
+      closeDrawer();
+      document.getElementById('chatInput')?.focus();
+    } catch {
+      alert('Erro ao carregar a conversa.');
+    }
+  }
+
+  let searchTimer = null;
+  search.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = search.value.trim();
+    if (!q) { loadSessions(); return; }
+    searchTimer = setTimeout(() => runSearch(q), 250);
+  });
+
+  function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function highlight(text, q) {
+    const safe = escapeHtml(text);
+    const re = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+    return safe.replace(re, '<mark>$1</mark>');
+  }
+
+  async function runSearch(q) {
+    list.innerHTML = '<div class="drawer-empty">Buscando…</div>';
+    try {
+      const r = await fetch('/chat/search?q=' + encodeURIComponent(q) + '&limit=30');
+      const data = await r.json();
+      list.innerHTML = '';
+      if (!data.hits?.length) { list.innerHTML = '<div class="drawer-empty">Nenhum resultado.</div>'; return; }
+      data.hits.forEach(h => {
+        const div = document.createElement('div');
+        div.className = 'search-hit';
+        const snippet = h.content.length > 200 ? h.content.slice(0,200) + '…' : h.content;
+        div.innerHTML = `<div>${highlight(snippet, q)}</div>
+          <div class="search-hit-meta">${escapeHtml(h.session_title || '(sem título)')} · ${h.role} · ${fmtDate(h.created_at)}</div>`;
+        div.addEventListener('click', () => loadSessionMessages(h.session_id));
+        list.appendChild(div);
+      });
+    } catch {
+      list.innerHTML = '<div class="drawer-empty">Erro na busca.</div>';
+    }
+  }
+})();
+
+// Restore last session messages on boot, if any
+(async function restoreSession(){
+  if (!currentSessionId) return;
+  try {
+    const r = await fetch('/chat/sessions/' + encodeURIComponent(currentSessionId));
+    if (!r.ok) { setCurrentSessionId(null); return; }
+    const data = await r.json();
+    chat.innerHTML = '';
+    (data.messages || []).forEach(m => addBubble(m.role === 'user' ? 'user' : 'agent', m.content));
+  } catch { /* ignore */ }
+})();
 </script>
 </body>
 </html>
