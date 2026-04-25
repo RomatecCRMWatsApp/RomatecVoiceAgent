@@ -1,8 +1,9 @@
 [build]
-builder = "dockerfile"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "npm run start"
-healthcheckPath = "/ping"
-healthcheckTimeout = 30
+healthcheckPath = "/health"
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
