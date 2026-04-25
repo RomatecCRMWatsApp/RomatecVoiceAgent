@@ -27,20 +27,13 @@ Você tem memória persistente. Use a tool salvar_memoria para guardar:
 - Contexto relevante de conversas
 - Lembretes com data de expiração
 
-Exemplos do que salvar:
-- 'José Romário prefere reuniões pela manhã'
-- 'Decisão: usar OpenAI TTS ao invés de ElevenLabs'
-- 'Lead João Silva tem alto interesse no lote 3'
-- 'Reunião com cliente amanhã às 10h'
-
 Use buscar_memoria antes de responder perguntas sobre preferências, decisões passadas ou contexto histórico.`;
 
 export async function think(userMessage: string): Promise<AgentResponse> {
-  const memCtx    = await getMemoryContext().catch(() => '');
+  const memCtx       = await getMemoryContext().catch(() => '');
   const systemPrompt = BASE_SYSTEM_PROMPT + memCtx;
 
-  // Prepend session history so ZAYRA has conversation context
-  const history = getSessionHistory();
+  const history  = getSessionHistory();
   const messages: Anthropic.MessageParam[] = [
     ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     { role: 'user', content: userMessage },
@@ -88,12 +81,11 @@ export async function think(userMessage: string): Promise<AgentResponse> {
   }
 
   const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
-  const text = textBlock?.text ?? 'Não consegui processar sua solicitação.';
+  const text      = textBlock?.text ?? 'Não consegui processar sua solicitação.';
 
-  // Persist exchange in session + DB (fire-and-forget for DB)
-  addToSession('user', userMessage);
+  addToSession('user',      userMessage);
   addToSession('assistant', text);
-  void saveConversation(SESSION_ID, 'user', userMessage).catch(() => {});
+  void saveConversation(SESSION_ID, 'user',      userMessage).catch(() => {});
   void saveConversation(SESSION_ID, 'assistant', text).catch(() => {});
 
   return { text, toolsUsed };

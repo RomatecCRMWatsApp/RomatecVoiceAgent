@@ -2,9 +2,21 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as crm from '../integrations/crm';
 import * as avalieimob from '../integrations/avalieimob';
 import * as calendar from '../integrations/calendar';
+import { sendReply } from '../integrations/whatsapp';
 import { saveMemory, searchMemory, listMemories, deleteMemory, saveConversation } from './memory';
 import { ResumoDia, ToolResult } from '../types';
 import axios from 'axios';
+
+interface Colaborador { nome: string; cargo: string; telefone: string; }
+
+function getColaboradores(): Colaborador[] {
+  if (process.env.TEAM_JSON) {
+    try { return JSON.parse(process.env.TEAM_JSON) as Colaborador[]; } catch {}
+  }
+  return [
+    { nome: 'José Romário', cargo: 'CEO', telefone: process.env.CEO_WHATSAPP_PHONE ?? '' },
+  ];
+}
 
 export const toolDefinitions: Anthropic.Tool[] = [
   {
@@ -208,6 +220,36 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['session_id'],
     },
   },
+  {
+    name: 'enviar_whatsapp',
+    description: 'Envia uma mensagem de texto via WhatsApp para um número específico através do CRM.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        para:     { type: 'string', description: 'Número do destinatário com DDI e DDD (ex: 5598991234567)' },
+        mensagem: { type: 'string', description: 'Texto da mensagem a enviar' },
+      },
+      required: ['para', 'mensagem'],
+    },
+  },
+  {
+    name: 'listar_colaboradores',
+    description: 'Lista os colaboradores da equipe Romatec com nome, cargo e telefone.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'delegar_tarefa',
+    description: 'Delega uma tarefa a um membro da equipe Romatec enviando uma mensagem formatada via WhatsApp.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        colaborador_nome: { type: 'string', description: 'Nome (ou parte do nome) do colaborador' },
+        tarefa:           { type: 'string', description: 'Descrição da tarefa a delegar' },
+        prazo:            { type: 'string', description: 'Prazo para conclusão (opcional, ex: "hoje às 18h", "sexta-feira")' },
+      },
+      required: ['colaborador_nome', 'tarefa'],
+    },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
@@ -318,6 +360,27 @@ export async function executeTool(name: string, input: Record<string, unknown>):
           [input.session_id as string, limit],
         );
         data = [...rows].reverse();
+        break;
+      }
+      case 'enviar_whatsapp': {
+        const { para, mensagem } = input as { para: string; mensagem: string };
+        await sendReply(para, mensagem);
+        data = { success: true, para, mensagem, enviado_em: new Date().toISOString() };
+        break;
+      }
+      case 'listar_colaboradores':
+        data = getColaboradores();
+        break;
+      case 'delegar_tarefa': {
+        const { colaborador_nome, tarefa, prazo } = input as { colaborador_nome: string; tarefa: string; prazo?: string };
+        const equipe = getColaboradores();
+        const membro = equipe.find(c => c.nome.toLowerCase().includes(colaborador_nome.toLowerCase()));
+        if (!membro) throw new Error(`Colaborador "${colaborador_nome}" não encontrado na equipe.`);
+        if (!membro.telefone) throw new Error(`Telefone não configurado para ${membro.nome} — adicione ao TEAM_JSON.`);
+        const prazoStr = prazo ? `\n*Prazo:* ${prazo}` : '';
+        const msg = `🤖 *ZAYRA — Romatec*\n\n*Delegação de Tarefa*\n\n*Para:* ${membro.nome}\n*Cargo:* ${membro.cargo}\n*Tarefa:* ${tarefa}${prazoStr}\n\n_Delegado pelo CEO José Romário_`;
+        await sendReply(membro.telefone, msg);
+        data = { success: true, delegado_para: membro.nome, tarefa };
         break;
       }
       default:

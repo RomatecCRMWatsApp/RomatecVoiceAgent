@@ -12,6 +12,8 @@ import { processMessage, sendReply, WaMessage } from './integrations/whatsapp';
 import { getAuthUrl, exchangeCode } from './integrations/calendar';
 import { addSSEClient, removeSSEClient, startProactiveNotifications } from './agent/proactive';
 import { initDb, loadSessionFromDb, listMemories } from './agent/memory';
+import { startDailyScheduler } from './agent/scheduler';
+import * as calendar from './integrations/calendar';
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -29,6 +31,48 @@ app.get('/', (_req: Request, res: Response) => {
 
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ agent: AGENT_IDENTITY.name, version: AGENT_IDENTITY.version, status: 'online', timestamp: new Date().toISOString() });
+});
+
+// ── Diagnóstico de providers ──────────────────────────────────────────────────
+app.get('/health/providers', async (_req: Request, res: Response) => {
+  const results: Record<string, unknown> = {
+    agent:     AGENT_IDENTITY.name,
+    version:   AGENT_IDENTITY.version,
+    timestamp: new Date().toISOString(),
+  };
+
+  // Groq
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    try {
+      const r = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: { Authorization: `Bearer ${groqKey}` },
+      });
+      const data = await r.json() as { data?: { id: string }[] };
+      const modelos = (data.data ?? []).map((m: { id: string }) => m.id).filter((id: string) => id.includes('whisper') || id.includes('llama'));
+      results.groq = { status: r.ok ? '✅ online' : '❌ erro', modelos };
+    } catch (err) {
+      results.groq = { status: '❌ falhou', erro: String(err) };
+    }
+  } else {
+    results.groq = { status: '⚠️ GROQ_API_KEY não configurado' };
+  }
+
+  // Claude
+  results.claude = process.env.ANTHROPIC_API_KEY
+    ? { status: '✅ configurado', modelo: 'claude-sonnet-4-6' }
+    : { status: '⚠️ ANTHROPIC_API_KEY não configurado' };
+
+  // OpenAI (TTS)
+  results.openai = process.env.OPENAI_API_KEY
+    ? { status: '✅ configurado', uso: 'TTS (síntese de voz)' }
+    : { status: '⚠️ OPENAI_API_KEY não configurado' };
+
+  // Modo ativo
+  results.transcricao = groqKey ? 'Groq Whisper (rápido)' : 'OpenAI Whisper';
+  results.raciocinio  = 'Claude Sonnet 4.6';
+
+  res.json(results);
 });
 
 app.post('/voice', upload.single('audio'), async (req: Request, res: Response) => {
@@ -71,23 +115,25 @@ app.post('/text', async (req: Request, res: Response) => {
 });
 
 app.get('/briefing', async (_req: Request, res: Response) => {
-  const [leads, contratos, campanhas, servicos] = await Promise.allSettled([
+  const [leads, contratos, campanhas, servicos, agendaHoje] = await Promise.allSettled([
     crm.listarLeads({ limite: 100 }),
     avalieimob.listarContratos({ status: 'pendente' }),
     crm.listarCampanhas(),
     avalieimob.statusServicos(),
+    calendar.listarEventosDia(),
   ]);
 
-  const briefingText = await think('Me dê um resumo executivo completo do dia, incluindo leads, contratos e campanhas.');
+  const briefingText = await think('Me dê um resumo executivo completo do dia, incluindo leads, contratos, campanhas e agenda.');
 
   res.json({
     agent: AGENT_IDENTITY.name,
     briefing: briefingText.text,
     data: {
-      leads: leads.status === 'fulfilled' ? leads.value : [],
-      contratos_pendentes: contratos.status === 'fulfilled' ? contratos.value : [],
-      campanhas: campanhas.status === 'fulfilled' ? campanhas.value : [],
-      servicos: servicos.status === 'fulfilled' ? servicos.value : { online: false },
+      leads:               leads.status       === 'fulfilled' ? leads.value       : [],
+      contratos_pendentes: contratos.status   === 'fulfilled' ? contratos.value   : [],
+      campanhas:           campanhas.status   === 'fulfilled' ? campanhas.value   : [],
+      servicos:            servicos.status    === 'fulfilled' ? servicos.value    : { online: false },
+      agenda_hoje:         agendaHoje.status  === 'fulfilled' ? agendaHoje.value  : [],
     },
   });
 });
@@ -162,6 +208,7 @@ const PORT = process.env.PORT ?? 3000;
 app.listen(PORT, () => {
   console.log(`${AGENT_IDENTITY.name} v${AGENT_IDENTITY.version} rodando na porta ${PORT}`);
   startProactiveNotifications();
+  startDailyScheduler();
   void initDb()
     .then(() => loadSessionFromDb())
     .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));

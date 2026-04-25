@@ -4,6 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ZAYRA — Romatec</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#00ff88" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ZAYRA" />
+  <link rel="apple-touch-icon" href="/avatar.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
@@ -210,7 +216,10 @@
     <div class="mic-label" id="micLabel">Toque para falar</div>
   </div>
 
-  <button class="briefing-btn" id="briefingBtn">Briefing do Dia</button>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center">
+    <button class="briefing-btn" id="briefingBtn">Briefing do Dia</button>
+    <button class="briefing-btn" id="installBtn" style="display:none;border-color:var(--neon);color:var(--neon)">+ Instalar App</button>
+  </div>
 
   <div class="dashboard-grid">
     <div class="card card-updating" data-modal="leads">
@@ -667,9 +676,10 @@ function renderDashboard(d) {
   document.getElementById('cardCampanhasVal').textContent  = `${ativas}/${camps.length}`;
   document.getElementById('cardCampanhasSub').textContent  = 'ativas / total';
   document.getElementById('cardCampanhasMeta').textContent = `${tEnv>0?Math.round(tRes/tEnv*100):0}% taxa de resposta`;
-  document.getElementById('cardAgendaVal').textContent  = '—';
-  document.getElementById('cardAgendaSub').textContent  = 'Configure Calendar';
-  document.getElementById('cardAgendaMeta').textContent = '/auth/google';
+  const agenda = d.agenda_hoje || [];
+  document.getElementById('cardAgendaVal').textContent  = agenda.length || '—';
+  document.getElementById('cardAgendaSub').textContent  = agenda.length ? agenda[0].titulo.substring(0, 32) : 'Nenhum evento hoje';
+  document.getElementById('cardAgendaMeta').textContent = agenda.length > 1 ? `+${agenda.length - 1} evento(s)` : (agenda.length && agenda[0].inicio ? agenda[0].inicio.substring(11, 16) + 'h' : '/auth/google');
   document.getElementById('cardContratosVal').textContent  = contr.length;
   document.getElementById('cardContratosSub').textContent  = 'pendentes AvalieImob';
   document.getElementById('cardContratosMeta').textContent = contr.length > 0 ? 'Ação necessária' : 'Em dia';
@@ -696,8 +706,21 @@ document.querySelectorAll('[data-modal]').forEach(card => {
       const arr = dashboardData.contratos_pendentes||[];
       if (!arr.length) { body.innerHTML='<li class="modal-item">Nenhum contrato pendente.</li>'; }
       else arr.forEach(c => { const li=document.createElement('li'); li.className='modal-item'; li.innerHTML=`<strong>Contrato ${c.id} <span class="badge pendente">pendente</span></strong>${c.tipo||'—'}`; body.appendChild(li); });
+    } else if (type === 'agenda') {
+      const arr = dashboardData.agenda_hoje || [];
+      if (!arr.length) {
+        body.innerHTML = '<li class="modal-item">Nenhum evento hoje. <a href="/auth/google" style="color:var(--neon);text-decoration:none">→ Conectar Google Calendar</a></li>';
+      } else {
+        arr.forEach(ev => {
+          const li = document.createElement('li'); li.className = 'modal-item';
+          const inicio = ev.inicio ? ev.inicio.substring(11, 16) : '';
+          const fim    = ev.fim    ? ev.fim.substring(11, 16)    : '';
+          li.innerHTML = `<strong>${ev.titulo}</strong>${inicio ? `${inicio} – ${fim}` : ''}${ev.link ? ` <a href="${ev.link}" target="_blank" style="color:var(--neon);font-size:.75rem">↗</a>` : ''}`;
+          body.appendChild(li);
+        });
+      }
     } else {
-      body.innerHTML = '<li class="modal-item">Acesse <b>/auth/google</b> para conectar o Google Calendar.</li>';
+      body.innerHTML = '<li class="modal-item">Nenhum dado disponível.</li>';
     }
     document.getElementById('cardModal').classList.add('open');
   });
@@ -717,6 +740,43 @@ document.getElementById('briefingModal').addEventListener('click', e => { if(e.t
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 addEventListener('beforeunload', () => { if (avatarCtrl) avatarCtrl.dispose(); });
+
+// ── PWA — Service Worker + Install Prompt ─────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    console.log('[SW] Registrado:', reg.scope);
+  }).catch(err => console.warn('[SW] Erro:', err));
+}
+
+let _deferredInstall = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _deferredInstall = e;
+  const btn = document.getElementById('installBtn');
+  if (btn) btn.style.display = 'block';
+});
+
+document.getElementById('installBtn')?.addEventListener('click', async () => {
+  if (!_deferredInstall) return;
+  _deferredInstall.prompt();
+  const { outcome } = await _deferredInstall.userChoice;
+  if (outcome === 'accepted') {
+    const btn = document.getElementById('installBtn');
+    if (btn) btn.style.display = 'none';
+  }
+  _deferredInstall = null;
+});
+
+window.addEventListener('appinstalled', () => {
+  const btn = document.getElementById('installBtn');
+  if (btn) btn.style.display = 'none';
+  console.log('[PWA] ZAYRA instalada com sucesso!');
+});
+
+// Auto-briefing via parâmetro URL (atalho PWA)
+if (new URLSearchParams(location.search).get('acao') === 'briefing') {
+  addEventListener('DOMContentLoaded', () => setTimeout(() => document.getElementById('briefingBtn')?.click(), 1500));
+}
 </script>
 </body>
 </html>
