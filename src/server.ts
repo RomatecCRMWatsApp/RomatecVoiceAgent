@@ -85,7 +85,9 @@ app.get('/health/providers', async (_req: Request, res: Response) => {
 
   // Modo ativo
   results.transcricao = groqKey ? 'Groq Whisper (rápido)' : 'OpenAI Whisper';
-  results.raciocinio  = 'Claude Sonnet 4.6';
+  results.raciocinio  = groqKey
+    ? `Groq ${process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'} (principal)`
+    : 'Claude Sonnet 4.6 (fallback)';
 
   res.json(results);
 });

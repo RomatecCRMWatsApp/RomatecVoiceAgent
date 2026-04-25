@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { toolDefinitions, executeTool } from './tools';
 import { AgentResponse, ToolResult } from '../types';
 import { AGENT_IDENTITY } from './identity';
@@ -16,7 +17,24 @@ import {
   type Channel,
 } from './memory';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Lazy-init clients — avoid crashing the boot when only one provider is configured.
+let _anthropic: Anthropic | null = null;
+function anthropicClient(): Anthropic {
+  if (!_anthropic) _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return _anthropic;
+}
+
+let _groq: OpenAI | null = null;
+function groqClient(): OpenAI {
+  if (!_groq) _groq = new OpenAI({
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: 'https://api.groq.com/openai/v1',
+  });
+  return _groq;
+}
+
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
 const DEFAULT_SESSION_ID = `default_${Date.now()}`;
 
@@ -43,6 +61,22 @@ export interface ThinkOptions {
   channel?:   Channel;
 }
 
+function useGroq(): boolean {
+  return !!process.env.GROQ_API_KEY;
+}
+
+// ── Convert Anthropic tool schema to OpenAI/Groq format ─────────────────────
+function toolsForOpenAI(): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  return toolDefinitions.map(t => ({
+    type: 'function',
+    function: {
+      name:        t.name,
+      description: t.description ?? '',
+      parameters:  (t.input_schema as Record<string, unknown>) ?? { type: 'object', properties: {} },
+    },
+  }));
+}
+
 export async function think(
   userMessage: string,
   options:     ThinkOptions = {},
@@ -58,12 +92,104 @@ export async function think(
   const memCtx       = await getMemoryContext().catch(() => '');
   const systemPrompt = BASE_SYSTEM_PROMPT + memCtx;
 
-  // History: if explicit session, load from DB; else use the in-memory singleton
   const history: { role: 'user' | 'assistant'; content: string }[] = isExplicitSession
     ? (await getSessionMessages(sessionId, 40).catch(() => []))
         .map(r => ({ role: r.role, content: r.content }))
     : getSessionHistory();
 
+  const result = useGroq()
+    ? await thinkWithGroq(systemPrompt, history, userMessage)
+    : await thinkWithClaude(systemPrompt, history, userMessage);
+
+  const text      = result.text;
+  const toolsUsed = result.toolsUsed;
+
+  if (!isExplicitSession) {
+    addToSession('user', userMessage);
+    addToSession('assistant', text);
+  }
+  void saveConversation(sessionId, 'user',      userMessage).catch(() => {});
+  void saveConversation(sessionId, 'assistant', text).catch(() => {});
+
+  if (isExplicitSession) {
+    void bumpSession(sessionId, channel).catch(() => {});
+    void maybeGenerateTitle(sessionId, userMessage, text).catch(() => {});
+  }
+
+  return { text, toolsUsed, sessionId };
+}
+
+// ── Provider: Groq (llama-3.3-70b-versatile) — PRIMARY ──────────────────────
+async function thinkWithGroq(
+  systemPrompt: string,
+  history:      { role: 'user' | 'assistant'; content: string }[],
+  userMessage:  string,
+): Promise<{ text: string; toolsUsed: string[] }> {
+  const tools = toolsForOpenAI();
+
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    { role: 'system', content: systemPrompt },
+    ...history.map(m => ({ role: m.role, content: m.content })),
+    { role: 'user', content: userMessage },
+  ];
+
+  const toolsUsed: string[] = [];
+
+  let response = await groqClient().chat.completions.create({
+    model:       GROQ_MODEL,
+    max_tokens:  1024,
+    messages,
+    tools,
+    tool_choice: 'auto',
+  });
+
+  let safety = 8; // hard cap on tool-loop iterations
+  while (
+    safety-- > 0 &&
+    response.choices[0]?.finish_reason === 'tool_calls' &&
+    response.choices[0].message.tool_calls?.length
+  ) {
+    const assistantMsg = response.choices[0].message;
+    const toolCalls    = assistantMsg.tool_calls ?? [];
+
+    const toolResults: ToolResult[] = await Promise.all(
+      toolCalls.map(tc => {
+        let parsed: Record<string, unknown> = {};
+        try { parsed = JSON.parse(tc.function.arguments || '{}'); } catch {}
+        return executeTool(tc.function.name, parsed);
+      }),
+    );
+
+    toolsUsed.push(...toolResults.map(r => r.toolName));
+
+    messages.push(assistantMsg);
+    toolCalls.forEach((tc, i) => {
+      messages.push({
+        role:        'tool',
+        tool_call_id: tc.id,
+        content:     JSON.stringify(toolResults[i].data ?? { error: toolResults[i].error }),
+      });
+    });
+
+    response = await groqClient().chat.completions.create({
+      model:       GROQ_MODEL,
+      max_tokens:  1024,
+      messages,
+      tools,
+      tool_choice: 'auto',
+    });
+  }
+
+  const text = response.choices[0]?.message?.content?.trim() || 'Não consegui processar sua solicitação.';
+  return { text, toolsUsed };
+}
+
+// ── Provider: Claude — FALLBACK when GROQ_API_KEY is absent ────────────────
+async function thinkWithClaude(
+  systemPrompt: string,
+  history:      { role: 'user' | 'assistant'; content: string }[],
+  userMessage:  string,
+): Promise<{ text: string; toolsUsed: string[] }> {
   const messages: Anthropic.MessageParam[] = [
     ...history.map(m => ({ role: m.role, content: m.content })),
     { role: 'user', content: userMessage },
@@ -71,8 +197,8 @@ export async function think(
 
   const toolsUsed: string[] = [];
 
-  let response = await anthropic.messages.create({
-    model:      'claude-sonnet-4-6',
+  let response = await anthropicClient().messages.create({
+    model:      CLAUDE_MODEL,
     max_tokens: 1024,
     system:     systemPrompt,
     tools:      toolDefinitions,
@@ -101,8 +227,8 @@ export async function think(
       })),
     });
 
-    response = await anthropic.messages.create({
-      model:      'claude-sonnet-4-6',
+    response = await anthropicClient().messages.create({
+      model:      CLAUDE_MODEL,
       max_tokens: 1024,
       system:     systemPrompt,
       tools:      toolDefinitions,
@@ -112,23 +238,10 @@ export async function think(
 
   const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
   const text      = textBlock?.text ?? 'Não consegui processar sua solicitação.';
-
-  // Persist
-  if (!isExplicitSession) {
-    addToSession('user', userMessage);
-    addToSession('assistant', text);
-  }
-  void saveConversation(sessionId, 'user',      userMessage).catch(() => {});
-  void saveConversation(sessionId, 'assistant', text).catch(() => {});
-
-  if (isExplicitSession) {
-    void bumpSession(sessionId, channel).catch(() => {});
-    void maybeGenerateTitle(sessionId, userMessage, text).catch(() => {});
-  }
-
-  return { text, toolsUsed, sessionId };
+  return { text, toolsUsed };
 }
 
+// ── Auto-title (uses Groq when available) ───────────────────────────────────
 async function maybeGenerateTitle(
   sessionId:    string,
   userMessage:  string,
@@ -137,20 +250,32 @@ async function maybeGenerateTitle(
   const meta = await getSessionMeta(sessionId);
   if (!meta || meta.title) return;
 
+  const prompt = `Pergunta do usuário: ${userMessage}\n\nResposta da assistente: ${assistantText}\n\nTítulo:`;
+  const sys    = 'Gere um título curto (máx 6 palavras, em português) que resuma o assunto da conversa. Responda apenas o título, sem aspas, sem pontuação final.';
+
+  let title = '';
   try {
-    const r = await anthropic.messages.create({
-      model:      'claude-sonnet-4-6',
-      max_tokens: 30,
-      system:     'Gere um título curto (máx 6 palavras, em português) que resuma o assunto da conversa. Responda apenas o título, sem aspas, sem pontuação final.',
-      messages: [
-        {
-          role:    'user',
-          content: `Pergunta do usuário: ${userMessage}\n\nResposta da assistente: ${assistantText}\n\nTítulo:`,
-        },
-      ],
-    });
-    const block = r.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
-    const title = (block?.text ?? '').trim().replace(/^["']|["']$/g, '').slice(0, 200);
+    if (useGroq()) {
+      const r = await groqClient().chat.completions.create({
+        model:      GROQ_MODEL,
+        max_tokens: 30,
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user',   content: prompt },
+        ],
+      });
+      title = (r.choices[0]?.message?.content ?? '').trim();
+    } else {
+      const r = await anthropicClient().messages.create({
+        model:      CLAUDE_MODEL,
+        max_tokens: 30,
+        system:     sys,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const block = r.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
+      title = (block?.text ?? '').trim();
+    }
+    title = title.replace(/^["']|["']$/g, '').slice(0, 200);
     if (title) await setSessionTitle(sessionId, title);
   } catch {
     /* ignore */
