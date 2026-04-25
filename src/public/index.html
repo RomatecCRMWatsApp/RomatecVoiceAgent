@@ -275,8 +275,6 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 // ── Background particles ──────────────────────────────────────────────────────
 (function(){
@@ -294,231 +292,154 @@
   })();
 })();
 
-// ── AvatarController (Three.js) ───────────────────────────────────────────────
-const AVATAR_GLB = 'https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb?morphTargets=ARKit&textureAtlas=1024';
-
-class AvatarController {
+// ── FaceAnimator — CSS 2D com canvas overlay (substitui Three.js) ─────────────
+class FaceAnimator {
   constructor() {
-    this.cv = document.getElementById('avatar3d');
-    this.scene = new THREE.Scene();
-    this.clock = new THREE.Clock();
-    this.mixer = null; this.avatar = null;
-    this.bones = {}; this.morphs = {};
-    this.state = 'idle'; this.loaded = false;
-    this.headYaw = 0; this.tgtYaw = 0;
+    // Show avatar.png immediately — no GLB loading
+    const avImg = document.getElementById('avatarImg');
+    avImg.style.display = 'block';
+    document.getElementById('avLoading').style.display = 'none';
+
+    // Transparent canvas overlay for blink + mouth animations
+    this.ov = document.createElement('canvas');
+    this.ov.width = 200; this.ov.height = 200;
+    Object.assign(this.ov.style, {
+      position: 'absolute', borderRadius: '50%', pointerEvents: 'none',
+      zIndex: '5', width: '200px', height: '200px', left: '0', top: '0',
+    });
+    document.getElementById('avatarWrap').appendChild(this.ov);
+    this.ctx = this.ov.getContext('2d');
+
+    this.state     = 'idle';
+    this.mouthVal  = 0;
+    this.headYaw   = 0; this.tgtYaw   = 0;
     this.headPitch = 0; this.tgtPitch = 0;
-    this.headRoll = 0; this.breathT = 0;
-    this.blinkT = 0; this.nextBlink = 3 + Math.random() * 3;
+    this._t        = 0; this._ts      = performance.now();
+    this.blinkT    = 0; this.nextBlink = 3 + Math.random() * 3;
     this._blinking = false; this._blinkStart = 0;
-    this.greetT = -1; this.mouthVal = 0;
-    this._initRenderer();
-    this._initLights();
-    this._loadGLB();
+
     this._bindInput();
     this._loop();
   }
-
-  _initRenderer() {
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.cv, alpha: true, antialias: true });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this.renderer.setSize(200, 200);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.setClearColor(0x000000, 0);
-    this.camera = new THREE.PerspectiveCamera(36, 1, 0.01, 100);
-    this.camera.position.set(0, 1.52, 0.72);
-    this.camera.lookAt(0, 1.58, 0);
-  }
-
-  _initLights() {
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const neon = new THREE.DirectionalLight(0x00ff88, 2.0);
-    neon.position.set(-1.5, 1.5, 1.5); neon.castShadow = true;
-    this.scene.add(neon);
-    const gold = new THREE.DirectionalLight(0xc9a84c, 1.3);
-    gold.position.set(2, 1, 1); this.scene.add(gold);
-    const rim = new THREE.DirectionalLight(0xffffff, 0.25);
-    rim.position.set(0, 1, -2); this.scene.add(rim);
-  }
-
-  _loadGLB() {
-    const loader = new THREE.GLTFLoader();
-    loader.load(
-      AVATAR_GLB,
-      gltf => this._onLoaded(gltf),
-      p => { if (p.total) document.getElementById('avLoadFill').style.width = Math.round(p.loaded / p.total * 100) + '%'; },
-      err => { console.warn('GLB load failed:', err); this._fallback(); }
-    );
-  }
-
-  _onLoaded(gltf) {
-    this.avatar = gltf.scene;
-    this.avatar.traverse(node => {
-      if (node.isMesh) {
-        node.castShadow = node.receiveShadow = true;
-        if (node.morphTargetDictionary) {
-          Object.entries(node.morphTargetDictionary).forEach(([k, i]) => {
-            if (!this.morphs[k]) this.morphs[k] = [];
-            this.morphs[k].push({ mesh: node, idx: i });
-          });
-        }
-      }
-      const n = node.name;
-      if (/^Head$/i.test(n))          this.bones.head  = node;
-      else if (/^Neck$/i.test(n))     this.bones.neck  = node;
-      else if (/^Spine$/i.test(n))    this.bones.spine = node;
-      else if (/^LeftEye$/i.test(n))  this.bones.eyeL  = node;
-      else if (/^RightEye$/i.test(n)) this.bones.eyeR  = node;
-    });
-    if (gltf.animations?.length) this.mixer = new THREE.AnimationMixer(this.avatar);
-    this.scene.add(this.avatar);
-    this.loaded = true;
-    document.getElementById('avLoading').style.display = 'none';
-    this.cv.style.display = 'block';
-    setTimeout(() => this.setState('greeting'), 600);
-  }
-
-  _fallback() {
-    document.getElementById('avLoading').style.display = 'none';
-    document.getElementById('avatarImg').style.display = 'block';
-  }
-
-  _setMorph(name, val) {
-    (this.morphs[name] || []).forEach(e => {
-      if (e.mesh.morphTargetInfluences) e.mesh.morphTargetInfluences[e.idx] = Math.max(0, Math.min(1, val));
-    });
-  }
-
-  _lerpMorph(name, tgt, a) {
-    (this.morphs[name] || []).forEach(e => {
-      if (!e.mesh.morphTargetInfluences) return;
-      const c = e.mesh.morphTargetInfluences[e.idx] || 0;
-      e.mesh.morphTargetInfluences[e.idx] = c + (tgt - c) * a;
-    });
-  }
-
-  setState(s) {
-    this.state = s;
-    document.getElementById('thinkParticles').style.display = s === 'thinking' ? 'block' : 'none';
-    if (s === 'greeting') this.greetT = 0;
-  }
-
-  updateLipSync(vol) { this.mouthVal = vol / 70; }
 
   _bindInput() {
     const wrap = document.getElementById('avatarWrap');
     const track = (cx, cy) => {
       const r = wrap.getBoundingClientRect();
-      this.tgtYaw   = ((cx - (r.left + r.width / 2))  / (innerWidth  / 2)) *  0.17;
-      this.tgtPitch = ((cy - (r.top  + r.height / 2)) / (innerHeight / 2)) * -0.087;
+      this.tgtYaw   = ((cx - (r.left + r.width  / 2)) / (innerWidth  / 2)) *  16;
+      this.tgtPitch = ((cy - (r.top  + r.height / 2)) / (innerHeight / 2)) * -9;
     };
     addEventListener('mousemove', e => track(e.clientX, e.clientY));
     addEventListener('touchmove', e => { if (e.touches.length) track(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
-    this.cv.addEventListener('click', () => {
-      this.setState('greeting');
+    // Click on avatar → greeting
+    wrap.addEventListener('click', () => {
       fetch('/text', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'Diga "Olá José Romário!" de forma breve e executiva.', voice: true })
+        body: JSON.stringify({ message: 'Diga apenas "Olá, José Romário!" de forma executiva.', voice: true })
       }).then(r => r.ok ? r.blob() : null).then(b => { if (b) window._playBlob(b, 'Olá, José Romário!'); }).catch(() => {});
     });
   }
+
+  setState(s) {
+    this.state = s;
+    const tp = document.getElementById('thinkParticles');
+    if (tp) tp.style.display = s === 'thinking' ? 'block' : 'none';
+  }
+
+  updateLipSync(vol) { this.mouthVal = vol / 70; }
 
   _loop() {
     const tick = () => {
       requestAnimationFrame(tick);
       if (document.hidden) return;
-      const dt = Math.min(this.clock.getDelta(), 0.1);
+      const now = performance.now();
+      const dt  = Math.min((now - this._ts) / 1000, 0.1);
+      this._ts  = now; this._t += dt;
       this._update(dt);
-      this.renderer.render(this.scene, this.camera);
     };
     tick();
   }
 
   _update(dt) {
-    if (!this.loaded) return;
-    const t = this.clock.elapsedTime;
     const ease = 1 - Math.pow(0.04, dt);
     this.headYaw   += (this.tgtYaw   - this.headYaw)   * ease;
     this.headPitch += (this.tgtPitch - this.headPitch) * ease;
-    this.breathT   += dt * 0.33;
-    if (this.bones.spine) this.bones.spine.scale.y = 1 + Math.sin(this.breathT * Math.PI * 2) * 0.005;
 
-    switch (this.state) {
-      case 'idle':      this._doIdle(t, dt);      break;
-      case 'listening': this._doListening(t, dt); break;
-      case 'thinking':  this._doThinking(t, dt);  break;
-      case 'speaking':  this._doSpeaking(t, dt);  break;
-      case 'alert':     this._doAlert(t, dt);     break;
-      case 'greeting':  this._doGreeting(t, dt);  break;
-    }
-    this._doBlink(dt);
-    if (this.bones.head) {
-      this.bones.head.rotation.y = this.headYaw + this.headRoll;
-      this.bones.head.rotation.x = this.headPitch;
-    }
-    if (this.mixer) this.mixer.update(dt);
-  }
+    // Head tracking + subtle breathing via CSS perspective transform
+    const breathY = Math.sin(this._t * 0.42) * 1.5;
+    const wrap = document.getElementById('avatarWrap');
+    wrap.style.transform = `perspective(700px) rotateY(${this.headYaw}deg) rotateX(${this.headPitch}deg) translateY(${breathY}px)`;
 
-  _doIdle(t) {
-    this.headRoll += (Math.sin(t * 0.3) * 0.015 - this.headRoll) * 0.03;
-    this._lerpMorph('jawOpen', 0, 0.1);
-    this._lerpMorph('browInnerUp', 0, 0.05);
-    this._lerpMorph('mouthSmileLeft', 0, 0.03);
-    this._lerpMorph('mouthSmileRight', 0, 0.03);
-  }
-
-  _doListening() {
-    this.headRoll += (0.087 - this.headRoll) * 0.04;
-    this._lerpMorph('browInnerUp', 0.25, 0.04);
-  }
-
-  _doThinking(t) {
-    if (this.bones.eyeL) this.bones.eyeL.rotation.x += (-0.18 - this.bones.eyeL.rotation.x) * 0.04;
-    if (this.bones.eyeR) this.bones.eyeR.rotation.x += (-0.18 - this.bones.eyeR.rotation.x) * 0.04;
-    this.headRoll += (0.05 - this.headRoll) * 0.04;
-    this._lerpMorph('browInnerUp', 0.3 + Math.sin(t) * 0.1, 0.04);
-  }
-
-  _doSpeaking(t) {
-    const m = Math.max(0, Math.min(1, this.mouthVal));
-    this._lerpMorph('jawOpen',   m * 0.65, 0.35);
-    this._lerpMorph('viseme_aa', m * 0.5,  0.3);
-    this._lerpMorph('viseme_O',  m * 0.3,  0.25);
-    this.headRoll += (Math.sin(t * 1.6) * 0.008 - this.headRoll) * 0.05;
-    if (this.bones.head) this.bones.head.rotation.y = this.headYaw + Math.sin(t * 2.1) * 0.012;
-    this._lerpMorph('browInnerUp', 0.12 + Math.sin(t * 1.4) * 0.1, 0.05);
-  }
-
-  _doAlert() {
-    this.tgtYaw = 0; this.tgtPitch = 0;
-    this._lerpMorph('browDownLeft',  0.45, 0.05);
-    this._lerpMorph('browDownRight', 0.45, 0.05);
-    this.camera.position.z += (0.52 - this.camera.position.z) * 0.05;
-  }
-
-  _doGreeting(t, dt) {
-    this.greetT += dt;
-    if (this.greetT < 1.5 && this.bones.head)
-      this.bones.head.rotation.x += (Math.sin(this.greetT * Math.PI * 2) * 0.1 - this.bones.head.rotation.x) * 0.2;
-    this._lerpMorph('mouthSmileLeft',  0.5, 0.05);
-    this._lerpMorph('mouthSmileRight', 0.5, 0.05);
-    if (this.greetT > 2.5) { this.greetT = -1; this.setState('idle'); }
-  }
-
-  _doBlink(dt) {
+    // Blink timer
     this.blinkT += dt;
-    if (this.blinkT >= this.nextBlink) {
+    let blinkVal = 0;
+    if (this.blinkT >= this.nextBlink && !this._blinking) {
       this._blinkStart = this.blinkT;
       this._blinking   = true;
-      this.nextBlink   = this.blinkT + 3 + Math.random() * 3;
+      this.nextBlink   = this.blinkT + 3.5 + Math.random() * 3;
     }
     if (this._blinking) {
-      const dur = 0.13, el = this.blinkT - this._blinkStart;
-      const v = el < dur / 2 ? el / (dur / 2) : Math.max(0, 1 - (el - dur / 2) / (dur / 2));
-      this._setMorph('eyeBlinkLeft', v); this._setMorph('eyeBlinkRight', v);
-      if (el > dur) this._blinking = false;
+      const dur = 0.14, el = this.blinkT - this._blinkStart;
+      blinkVal = el < dur / 2 ? el / (dur / 2) : Math.max(0, 1 - (el - dur / 2) / (dur / 2));
+      if (el > dur) { this._blinking = false; blinkVal = 0; }
     }
+
+    // Ring glow pulsed by audio volume when speaking
+    const ring = document.getElementById('avatarRing');
+    if (ring && this.state === 'speaking') {
+      const vol = Math.max(0, Math.min(1, this.mouthVal));
+      ring.style.transform = `scale(${1 + vol * 0.07})`;
+    } else if (ring) {
+      ring.style.transform = '';
+    }
+
+    this._drawOverlay(blinkVal);
   }
 
-  dispose() { this.renderer.dispose(); }
+  _drawOverlay(blinkVal) {
+    const ctx = this.ctx, W = 200, H = 200;
+    ctx.clearRect(0, 0, W, H);
+
+    // Clip to circular avatar shape
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2, W / 2 - 1, 0, Math.PI * 2);
+    ctx.clip();
+
+    // ── Eye blink (eyelid overlay at ~38% from top) ────────────────────────────
+    if (blinkVal > 0.03) {
+      // Left eye ≈ (72, 80), Right eye ≈ (128, 80)
+      [[72, 80], [128, 80]].forEach(([cx, cy]) => {
+        const rx = 18, ry = 13 * blinkVal;
+        ctx.globalAlpha = Math.min(0.9, blinkVal * 0.95);
+        ctx.fillStyle = '#0a1a0f';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy - ry * 0.3, rx, ry + 1, 0, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+    }
+
+    // ── Mouth open during speaking (at ~65% from top) ──────────────────────────
+    const mouth = Math.max(0, Math.min(1, this.mouthVal));
+    if (mouth > 0.05 && this.state === 'speaking') {
+      const mX = 100, mY = 136;
+      const mW = 22 + mouth * 12, mH = 3 + mouth * 13;
+
+      ctx.globalAlpha = Math.min(0.78, mouth * 1.2);
+      ctx.fillStyle = '#050f08';
+      ctx.beginPath();
+      ctx.ellipse(mX, mY, mW, mH, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,255,136,0.18)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+  }
+
+  dispose() {}
 }
 
 // ── AudioController (lip sync) ────────────────────────────────────────────────
@@ -709,9 +630,7 @@ function setupFallbackMic() {
 async function activate() {
   document.getElementById('activateOverlay').style.display = 'none';
   audioCtrl = new AudioController(); audioCtrl.init();
-  if (typeof THREE !== 'undefined') {
-    try { avatarCtrl = new AvatarController(); } catch (e) { console.warn('3D avatar error:', e); }
-  }
+  try { avatarCtrl = new FaceAnimator(); } catch (e) { console.warn('FaceAnimator error:', e); }
   const hasSR = initSR();
   if (hasSR) { try { recognition.start(); setAppState('passive'); } catch { fallbackMode = true; } }
   if (!hasSR || fallbackMode) { fallbackMode = true; setupFallbackMic(); setAppState('passive'); }

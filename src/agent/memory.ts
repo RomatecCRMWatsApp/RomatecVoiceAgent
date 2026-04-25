@@ -1,43 +1,11 @@
-import mysql from 'mysql2/promise';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
+import pool from '../database/connection';
+import { runMigrations } from '../database/migrations';
 
-// ── Connection pool ───────────────────────────────────────────────────────────
-const DB_URL =
-  process.env.DATABASE_URL ??
-  'mysql://root:mzhpVamVFtfKDLkQtfxGnjnlVLrVEaAf@mainline.proxy.rlwy.net:56439/railway';
+function db() { return pool; }
 
-let pool: mysql.Pool | null = null;
-
-function db(): mysql.Pool {
-  if (!pool) pool = mysql.createPool(DB_URL);
-  return pool;
-}
-
-// ── Schema ────────────────────────────────────────────────────────────────────
 export async function initDb(): Promise<void> {
-  await db().execute(`
-    CREATE TABLE IF NOT EXISTS zayra_memory (
-      id             INT AUTO_INCREMENT PRIMARY KEY,
-      type           ENUM('fact','preference','decision','context','reminder') NOT NULL,
-      content        TEXT NOT NULL,
-      relevance_tags VARCHAR(500),
-      created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      expires_at     TIMESTAMP NULL
-    )
-  `);
-
-  await db().execute(`
-    CREATE TABLE IF NOT EXISTS zayra_conversations (
-      id         INT AUTO_INCREMENT PRIMARY KEY,
-      session_id VARCHAR(100) NOT NULL,
-      role       ENUM('user','assistant') NOT NULL,
-      content    TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  console.log('[Memory] DB ready');
+  await runMigrations();
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────

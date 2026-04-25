@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as crm from '../integrations/crm';
 import * as avalieimob from '../integrations/avalieimob';
 import * as calendar from '../integrations/calendar';
-import { saveMemory, searchMemory, listMemories, deleteMemory } from './memory';
+import { saveMemory, searchMemory, listMemories, deleteMemory, saveConversation } from './memory';
 import { ResumoDia, ToolResult } from '../types';
 import axios from 'axios';
 
@@ -183,6 +183,31 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['id'],
     },
   },
+  {
+    name: 'salvar_mensagem',
+    description: 'Salva uma mensagem no histórico de conversas no banco de dados.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string', description: 'ID da sessão' },
+        role:       { type: 'string', description: '"user" ou "assistant"' },
+        content:    { type: 'string', description: 'Conteúdo da mensagem' },
+      },
+      required: ['session_id', 'role', 'content'],
+    },
+  },
+  {
+    name: 'buscar_historico',
+    description: 'Busca as últimas mensagens de uma sessão no histórico persistido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string', description: 'ID da sessão' },
+        limit:      { type: 'number', description: 'Número máximo de mensagens (padrão 20)' },
+      },
+      required: ['session_id'],
+    },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
@@ -277,6 +302,24 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         await deleteMemory(input.id as number);
         data = { success: true, message: 'Memória deletada.' };
         break;
+      case 'salvar_mensagem':
+        await saveConversation(
+          input.session_id as string,
+          input.role as 'user' | 'assistant',
+          input.content as string,
+        );
+        data = { success: true };
+        break;
+      case 'buscar_historico': {
+        const limit = (input.limit as number | undefined) ?? 20;
+        const connModule = await import('../database/connection');
+        const [rows] = await connModule.default.execute<import('mysql2').RowDataPacket[]>(
+          'SELECT role, content, created_at FROM zayra_conversations WHERE session_id = ? ORDER BY created_at DESC LIMIT ?',
+          [input.session_id as string, limit],
+        );
+        data = [...rows].reverse();
+        break;
+      }
       default:
         return { toolName: name, success: false, error: `Tool desconhecida: ${name}` };
     }
