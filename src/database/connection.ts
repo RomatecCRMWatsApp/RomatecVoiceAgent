@@ -1,10 +1,10 @@
 import mysql from 'mysql2/promise';
 
-const pool = mysql.createPool({
-  uri: process.env.DATABASE_URL ??
-    'mysql://root:mzhpVamVFtfKDLkQtfxGnjnlVLrVEaAf@mainline.proxy.rlwy.net:56439/railway',
-  waitForConnections: true,
-  connectionLimit:    10,
-});
+const DB_URL =
+  process.env.DATABASE_URL ??
+  'mysql://root:mzhpVamVFtfKDLkQtfxGnjnlVLrVEaAf@mainline.proxy.rlwy.net:56439/railway';
+
+// Pass URI as string — mysql2 createPool({ uri }) ignores the field in some versions
+const pool = mysql.createPool(DB_URL);
 
 export default pool;
