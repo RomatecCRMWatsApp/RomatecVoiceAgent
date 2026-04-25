@@ -11,12 +11,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
+    "@elevenlabs/elevenlabs-js": "^2.44.0",
     "axios": "^1.8.4",
     "dotenv": "^16.4.7",
-    "elevenlabs": "^1.50.4",
     "express": "^4.21.2",
     "form-data": "^4.0.1",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.1.1",
     "openai": "^4.96.0"
   },
   "devDependencies": {

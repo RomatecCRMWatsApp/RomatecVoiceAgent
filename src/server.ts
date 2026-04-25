@@ -4,6 +4,7 @@ import multer from 'multer';
 import { transcribeAudio } from './agent/transcribe';
 import { think } from './agent/think';
 import { speak } from './agent/speak';
+import { AGENT_IDENTITY } from './agent/identity';
 import * as crm from './integrations/crm';
 import * as avalieimob from './integrations/avalieimob';
 
@@ -11,9 +12,13 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 app.use(express.json());
+app.use((_req, res, next) => {
+  res.set('X-Agent', `${AGENT_IDENTITY.name}/${AGENT_IDENTITY.version}`);
+  next();
+});
 
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', agent: 'Roma', version: '1.0.0', timestamp: new Date().toISOString() });
+  res.json({ agent: AGENT_IDENTITY.name, version: AGENT_IDENTITY.version, status: 'online', timestamp: new Date().toISOString() });
 });
 
 app.post('/voice', upload.single('audio'), async (req: Request, res: Response) => {
@@ -52,7 +57,7 @@ app.post('/text', async (req: Request, res: Response) => {
     return;
   }
 
-  res.json({ response: agentResponse.text, tools_used: agentResponse.toolsUsed });
+  res.json({ agent: AGENT_IDENTITY.name, response: agentResponse.text, tools_used: agentResponse.toolsUsed });
 });
 
 app.get('/briefing', async (_req: Request, res: Response) => {
@@ -66,6 +71,7 @@ app.get('/briefing', async (_req: Request, res: Response) => {
   const briefingText = await think('Me dê um resumo executivo completo do dia, incluindo leads, contratos e campanhas.');
 
   res.json({
+    agent: AGENT_IDENTITY.name,
     briefing: briefingText.text,
     data: {
       leads: leads.status === 'fulfilled' ? leads.value : [],
@@ -78,7 +84,7 @@ app.get('/briefing', async (_req: Request, res: Response) => {
 
 const PORT = process.env.PORT ?? 3000;
 app.listen(PORT, () => {
-  console.log(`Roma Voice Agent rodando na porta ${PORT}`);
+  console.log(`${AGENT_IDENTITY.name} v${AGENT_IDENTITY.version} rodando na porta ${PORT}`);
 });
 
 export default app;

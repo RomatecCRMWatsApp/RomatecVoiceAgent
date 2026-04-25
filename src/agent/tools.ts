@@ -117,7 +117,7 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         data = await crm.buscarLead(input.id as string);
         break;
       case 'criar_agendamento':
-        data = await crm.criarAgendamento(input as Parameters<typeof crm.criarAgendamento>[0]);
+        data = await crm.criarAgendamento(input as unknown as Parameters<typeof crm.criarAgendamento>[0]);
         break;
       case 'listar_campanhas':
         data = await crm.listarCampanhas();

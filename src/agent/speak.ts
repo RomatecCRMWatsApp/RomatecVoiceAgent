@@ -1,17 +1,16 @@
-import { ElevenLabsClient } from 'elevenlabs';
+import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 
 const elevenlabs = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
 
 export async function speak(text: string): Promise<Buffer> {
   const voiceId = process.env.ELEVENLABS_VOICE_ID ?? 'pNInz6obpgDQGcFmaJgB';
 
-  const audioStream = await elevenlabs.generate({
-    voice: voiceId,
+  const audioStream = await elevenlabs.textToSpeech.convert(voiceId, {
     text,
-    model_id: 'eleven_multilingual_v2',
-    voice_settings: {
+    modelId: 'eleven_multilingual_v2',
+    voiceSettings: {
       stability: 0.5,
-      similarity_boost: 0.75,
+      similarityBoost: 0.75,
     },
   });
 
