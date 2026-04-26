@@ -519,6 +519,46 @@ export async function registrarDiarioObra(input: {
   return { ok: true, insertId: r.insertId, message: `Diário registrado (ID ${r.insertId}).` };
 }
 
+// ── Catálogo de profissões ───────────────────────────────────────────────────
+type ProfissaoRow = RowDataPacket & {
+  id: number; nome: string; categoria: string | null;
+  valor_dia_referencia: string | null;
+  salario_mensal_referencia: string | null;
+  descricao: string | null;
+};
+
+export async function listarProfissoesCatalogo() {
+  const [rows] = await pool.execute<ProfissaoRow[]>(
+    'SELECT * FROM romatec_obra_profissoes_catalogo ORDER BY categoria ASC, nome ASC',
+  );
+  return rows.map(r => ({
+    id: String(r.id), nome: r.nome, categoria: r.categoria,
+    valor_dia_referencia: num(r.valor_dia_referencia),
+    salario_mensal_referencia: num(r.salario_mensal_referencia),
+    descricao: r.descricao,
+  }));
+}
+
+export async function atualizarProfissaoCatalogo(input: {
+  id: string; valor_dia_referencia?: number; salario_mensal_referencia?: number;
+  descricao?: string; confirm?: boolean;
+}): Promise<MutationResult> {
+  if (!input.id) throw new Error('id obrigatório');
+  const fields: string[] = []; const params: (string | number | null)[] = [];
+  if (input.valor_dia_referencia !== undefined) { fields.push('valor_dia_referencia = ?'); params.push(input.valor_dia_referencia); }
+  if (input.salario_mensal_referencia !== undefined) { fields.push('salario_mensal_referencia = ?'); params.push(input.salario_mensal_referencia); }
+  if (input.descricao !== undefined) { fields.push('descricao = ?'); params.push(input.descricao); }
+  if (fields.length === 0) throw new Error('nada pra atualizar');
+  if (!input.confirm) {
+    return { preview: true, message: `[PREVIEW] Atualizar profissão ${input.id}: ${fields.join(', ')}. Reenvie com confirm:true.` };
+  }
+  params.push(input.id);
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE romatec_obra_profissoes_catalogo SET ${fields.join(', ')} WHERE id = ?`, params,
+  );
+  return { ok: true, affected: r.affectedRows, message: `Profissão ${input.id} atualizada.` };
+}
+
 // ── Dias trabalhados (integral / manhã / tarde) ──────────────────────────────
 type DiaRow = RowDataPacket & {
   id: number; funcionario_id: number; obra_id: number | null;

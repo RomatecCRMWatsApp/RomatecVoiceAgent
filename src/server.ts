@@ -548,6 +548,10 @@ app.post('/api/materiais/ajustar',  apiHandle(args => obras.ajustarEstoqueMateri
 app.get ('/api/diario', apiHandle(args => obras.listarDiarioObra(args as Parameters<typeof obras.listarDiarioObra>[0])));
 app.post('/api/diario', apiHandle(args => obras.registrarDiarioObra(args as Parameters<typeof obras.registrarDiarioObra>[0])));
 
+// Catálogo de profissões
+app.get('/api/profissoes-catalogo', apiHandle(() => obras.listarProfissoesCatalogo()));
+app.put('/api/profissoes-catalogo/:id', apiHandle(args => obras.atualizarProfissaoCatalogo(args as Parameters<typeof obras.atualizarProfissaoCatalogo>[0])));
+
 // Resumo
 app.get('/api/resumo-obras', apiHandle(() => obras.resumoObras()));
 

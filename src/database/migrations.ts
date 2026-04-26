@@ -193,6 +193,65 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.18: catálogo de profissões da construção civil (referência sindical)
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obra_profissoes_catalogo (
+      id                       INT AUTO_INCREMENT PRIMARY KEY,
+      nome                     VARCHAR(150) NOT NULL UNIQUE,
+      categoria                VARCHAR(80),
+      valor_dia_referencia     DECIMAL(10,2),
+      salario_mensal_referencia DECIMAL(12,2),
+      descricao                VARCHAR(500),
+      created_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Seed apenas se vazio
+  const [c] = await pool.execute<RowDataPacket[]>('SELECT COUNT(*) AS n FROM romatec_obra_profissoes_catalogo');
+  if (Number((c[0] as { n: number }).n) === 0) {
+    const profissoes: [string, string, number, number, string][] = [
+      // [nome, categoria, valor_dia_ref, salario_mensal_ref, descricao]
+      ['Servente',                  'Auxiliar',     115, 1800, 'Auxilia em todas as etapas, carga/descarga, mistura'],
+      ['Meio-oficial',              'Auxiliar',     150, 2300, 'Auxiliar especializado, em transição pra oficial'],
+      ['Pedreiro',                  'Alvenaria',    200, 3000, 'Alvenaria, contrapiso, reboco, assentamento'],
+      ['Pedreiro de acabamento',    'Alvenaria',    250, 3700, 'Acabamento fino, assentamento de cerâmica/porcelanato'],
+      ['Pedreiro fachadista',       'Alvenaria',    320, 4500, 'Especialista em fachadas, andaime, revestimento externo'],
+      ['Carpinteiro',               'Madeira',      230, 3400, 'Formas de concreto, esquadrias, telhado'],
+      ['Carpinteiro de fôrma',      'Madeira',      250, 3700, 'Especialista em fôrmas pra concreto armado'],
+      ['Marceneiro',                'Madeira',      260, 3800, 'Móveis sob medida, esquadrias finas'],
+      ['Armador (ferreiro)',        'Estrutura',    230, 3400, 'Corte, dobra e amarração de aço pra concreto armado'],
+      ['Soldador',                  'Estrutura',    300, 4400, 'Solda elétrica, MIG/MAG, estruturas metálicas'],
+      ['Eletricista predial',       'Instalações',  300, 4500, 'Instalação elétrica residencial e comercial'],
+      ['Eletricista industrial',    'Instalações',  380, 5500, 'Quadros, comandos, alta tensão, automação'],
+      ['Encanador (bombeiro hidráulico)', 'Instalações', 260, 3800, 'Hidráulica, esgoto, gás'],
+      ['Pintor',                    'Acabamento',   210, 3100, 'Pintura geral, massa corrida, textura'],
+      ['Pintor de epóxi',           'Acabamento',   320, 4500, 'Pisos industriais, garagens, áreas técnicas'],
+      ['Azulejista',                'Acabamento',   300, 4400, 'Assentamento de cerâmica, porcelanato, pastilha'],
+      ['Gesseiro',                  'Acabamento',   240, 3500, 'Forro, parede, sanca, drywall'],
+      ['Estucador',                 'Acabamento',   250, 3700, 'Reboco fino, decorações em massa'],
+      ['Impermeabilizador',         'Acabamento',   300, 4400, 'Manta asfáltica, lajes, banheiros, piscinas'],
+      ['Vidraceiro',                'Acabamento',   280, 4100, 'Instalação de vidros, box, espelhos, fachadas'],
+      ['Mestre de obras',           'Liderança',    420, 6000, 'Liderança da obra, decisão técnica em campo'],
+      ['Encarregado',               'Liderança',    300, 4500, 'Coordena equipes específicas (ex: alvenaria, instalação)'],
+      ['Apontador',                 'Apoio',        160, 2400, 'Controle de presença, materiais, diários'],
+      ['Almoxarife',                'Apoio',        180, 2700, 'Recebimento, estoque, distribuição de materiais'],
+      ['Vigia / Porteiro',          'Apoio',        130, 2000, 'Segurança patrimonial, controle de acesso'],
+      ['Auxiliar de limpeza',       'Apoio',        115, 1800, 'Limpeza pós-obra, varrição diária'],
+      ['Operador de máquinas',      'Operação',     320, 4700, 'Retroescavadeira, trator, betoneira grande'],
+      ['Operador de guincho',       'Operação',     280, 4100, 'Guincho de coluna, elevador de obra'],
+      ['Topógrafo',                 'Técnico',      450, 6500, 'Levantamento, locação de obra, nivelamento'],
+      ['Engenheiro civil',          'Técnico',      900, 13000, 'Responsável técnico, projeto executivo, ART'],
+      ['Arquiteto',                 'Técnico',      850, 12000, 'Projeto arquitetônico, compatibilização, RRT'],
+    ];
+    for (const [nome, categoria, vd, sm, desc] of profissoes) {
+      await pool.execute(
+        'INSERT IGNORE INTO romatec_obra_profissoes_catalogo (nome, categoria, valor_dia_referencia, salario_mensal_referencia, descricao) VALUES (?,?,?,?,?)',
+        [nome, categoria, vd, sm, desc],
+      );
+    }
+    console.log('[DB] Catálogo de profissões populado:', profissoes.length);
+  }
+
   // v1.17: marcação de dias trabalhados (integral / manhã / tarde)
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS romatec_obra_funcionario_dias (

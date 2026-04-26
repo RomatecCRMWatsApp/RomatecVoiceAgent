@@ -753,6 +753,26 @@ export const toolDefinitions: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'listar_profissoes_catalogo',
+    description: 'Lista todas as 30+ profissões da construção civil cadastradas no catálogo (com valor diária e salário mensal de referência sindical).',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'atualizar_profissao_catalogo',
+    description: 'Edita valores de referência de uma profissão. Use quando o CEO disser "no nosso acordo o pedreiro é R$220, ajusta o valor de referência". Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        valor_dia_referencia: { type: 'number' },
+        salario_mensal_referencia: { type: 'number' },
+        descricao: { type: 'string' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'marcar_dia_trabalhado',
     description: 'Marca um dia trabalhado pra um funcionário com período (integral, manha, tarde). Manhã/tarde valem 50% da diária. Confirm exigido.',
     input_schema: {
@@ -1114,6 +1134,12 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'registrar_diario_obra':
         data = await obras.registrarDiarioObra(input as Parameters<typeof obras.registrarDiarioObra>[0]);
+        break;
+      case 'listar_profissoes_catalogo':
+        data = await obras.listarProfissoesCatalogo();
+        break;
+      case 'atualizar_profissao_catalogo':
+        data = await obras.atualizarProfissaoCatalogo(input as Parameters<typeof obras.atualizarProfissaoCatalogo>[0]);
         break;
       case 'marcar_dia_trabalhado':
         data = await obras.marcarDiaTrabalhado(input as Parameters<typeof obras.marcarDiaTrabalhado>[0]);
