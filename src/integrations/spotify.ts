@@ -81,9 +81,9 @@ async function request<T>(config: AxiosRequestConfig): Promise<T> {
   try {
     return await exec();
   } catch (err) {
-    const ax = err as AxiosError<{ error?: { status?: number; message?: string } | string }>;
+    const ax = err as AxiosError;
     const status = ax.response?.status;
-    const rawData = ax.response?.data;
+    const rawData: unknown = ax.response?.data;
     // Log estruturado pra debug — fica nos logs do Railway
     console.error(
       '[Spotify request error]',
