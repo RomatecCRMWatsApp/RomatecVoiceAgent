@@ -32,13 +32,29 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+
+// Static files com Cache-Control inteligente:
+// HTML/SW/manifest = no-cache (browser revalida a cada request com ETag)
+// Imagens/outros = 1h (suficiente — ETag também garante consistência)
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('manifest.json')) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+    }
+  },
+}));
+
 app.use((_req, res, next) => {
   res.set('X-Agent', `${AGENT_IDENTITY.name}/${AGENT_IDENTITY.version}`);
   next();
 });
 
 app.get('/', (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-cache, must-revalidate');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
