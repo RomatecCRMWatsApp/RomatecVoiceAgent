@@ -268,7 +268,7 @@
       <p>ZAYRA · Romatec Consultoria Imobiliária</p>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
-      <span class="badge-zayra">v1.16</span>
+      <span class="badge-zayra" id="versionBadge">v...</span>
       <a href="/" style="color: var(--text-muted); text-decoration: none; font-size: 13px; padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius);">← ZAYRA Chat</a>
     </div>
   </div>
@@ -347,6 +347,15 @@
 
 <script>
 const API = window.location.origin;
+
+// Version badge sincroniza com /health
+fetch(API + '/health')
+  .then(r => r.json())
+  .then(d => {
+    const el = document.getElementById('versionBadge');
+    if (el && d.version) el.textContent = 'v' + d.version;
+  })
+  .catch(() => {});
 const state = {
   currentObra: null, currentTab: 'dashboard',
   obras: [], etapas: [], transacoes: [],
