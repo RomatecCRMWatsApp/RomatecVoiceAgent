@@ -332,7 +332,21 @@ function renderDashboard() {
     </div>`;
   }
 
+  const quickCreate = state.obras.length === 0 ? `
+    <div class="card" style="border-color: var(--gold-dim);">
+      <p class="section-title">⚡ Cadastrar primeira obra</p>
+      <p style="margin: 0 0 12px; font-size: 12px; color: var(--text-muted);">Comece criando uma obra. Depois você poderá adicionar etapas, transações, equipe e diário separadamente em cada uma.</p>
+      <div class="form-grid">
+        <input id="qNome" placeholder="Nome da obra *">
+        <select id="qTipo"><option value="residencial">Residencial</option><option value="comercial">Comercial</option><option value="industrial">Industrial</option><option value="reforma">Reforma</option><option value="publica">Pública</option></select>
+        <input id="qCliente" placeholder="Cliente">
+        <input id="qOrc" type="number" step="0.01" placeholder="Orçamento (R$)">
+      </div>
+      <button class="btn-primary" id="qSave">Criar obra e ir pra aba Obras</button>
+    </div>` : '';
+
   v.innerHTML = `${obraSelector()}
+    ${quickCreate}
     <div class="metrics-grid">
       <div class="metric-card"><p class="metric-label">Obras totais</p><p class="metric-value">${r.total_obras||0}</p></div>
       <div class="metric-card"><p class="metric-label">Em andamento</p><p class="metric-value" style="color: var(--neon);">${r.em_andamento||0}</p></div>
@@ -343,9 +357,28 @@ function renderDashboard() {
       <div class="metric-card"><p class="metric-label">Etapas atrasadas</p><p class="metric-value" style="color:${(r.etapas_atrasadas||0)>0?'var(--danger)':'inherit'};">${r.etapas_atrasadas||0}</p></div>
       <div class="metric-card"><p class="metric-label">Mat. em falta</p><p class="metric-value" style="color:${(r.materiais_baixos||0)>0?'var(--warning)':'inherit'};">${r.materiais_baixos||0}</p></div>
     </div>
-    ${info}
-    ${state.obras.length===0?'<div class="card empty">Nenhuma obra cadastrada. Vá na aba <strong>Obras</strong>.</div>':''}`;
+    ${info}`;
   attachSel();
+
+  const qBtn = document.getElementById('qSave');
+  if (qBtn) qBtn.onclick = async () => {
+    const nome = document.getElementById('qNome').value.trim();
+    if (!nome) return alert('Informe o nome da obra');
+    try {
+      await api('/api/obras', {
+        method: 'POST',
+        body: JSON.stringify({
+          nome,
+          tipo: document.getElementById('qTipo').value,
+          cliente: document.getElementById('qCliente').value.trim() || null,
+          orcamento: parseFloat(document.getElementById('qOrc').value) || null,
+          status: 'em_andamento',
+        }),
+      });
+      state.currentTab = 'obras';
+      render();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
 }
 
 // ── OBRAS ──
@@ -431,7 +464,10 @@ function renderObras() {
 // ── CRONOGRAMA ──
 function renderCronograma() {
   const v = document.getElementById('view-cronograma');
-  if (!state.currentObra) { v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro.</div>'; return; }
+  if (state.obras.length === 0) {
+    v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro na aba <strong>Obras</strong> ou no <strong>Painel</strong>.</div>';
+    return;
+  }
   const lista = state.etapas.map((e,i) => {
     const sb = {concluido:'badge-success',em_andamento:'badge-info',atrasado:'badge-danger',pendente:'badge-warning'}[e.status];
     return `<div class="card">
