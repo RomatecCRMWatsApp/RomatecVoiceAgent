@@ -4,6 +4,7 @@ import * as avalieimob from '../integrations/avalieimob';
 import * as calendar from '../integrations/calendar';
 import * as spotify from '../integrations/spotify';
 import * as telegram from '../integrations/telegram';
+import * as filesystem from '../integrations/filesystem';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -393,6 +394,72 @@ export const toolDefinitions: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'fs_listar',
+    description: 'Lista arquivos e subdiretórios de um caminho dentro dos diretórios autorizados (FS_ALLOWED_ROOTS). Use sem "caminho" pra listar a raiz padrão.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        caminho: { type: 'string', description: 'Caminho absoluto ou relativo à raiz autorizada (ex: "src/agent" ou "C:\\Users\\Ronicley Pinto\\Documents\\RomatecVoiceAgent\\src")' },
+      },
+    },
+  },
+  {
+    name: 'fs_ler',
+    description: 'Lê o conteúdo UTF-8 de um arquivo dentro dos diretórios autorizados. Trunca em 256KB.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        caminho: { type: 'string', description: 'Caminho do arquivo' },
+      },
+      required: ['caminho'],
+    },
+  },
+  {
+    name: 'fs_escrever',
+    description: 'Escreve um arquivo (texto UTF-8) dentro dos diretórios autorizados. DESTRUTIVO. Sempre rode primeiro sem "confirm" pra ver preview, peça autorização ao CEO, depois rode com "confirm: true". Modos: criar (default, falha se existir), sobrescrever, anexar.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        caminho:  { type: 'string', description: 'Caminho do arquivo' },
+        conteudo: { type: 'string', description: 'Conteúdo UTF-8 a gravar (máx 1 MB)' },
+        modo:     { type: 'string', enum: ['criar', 'sobrescrever', 'anexar'], description: 'criar = falha se já existir; sobrescrever = substitui; anexar = adiciona ao fim' },
+        confirm:  { type: 'boolean', description: 'Só passar true APÓS autorização explícita do CEO' },
+      },
+      required: ['caminho', 'conteudo'],
+    },
+  },
+  {
+    name: 'fs_apagar',
+    description: 'APAGA permanentemente arquivo ou diretório (recursivo). AÇÃO IRREVERSÍVEL. Sempre mostre preview ao CEO e EXIJA confirmação verbal antes de "confirm: true".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        caminho: { type: 'string', description: 'Caminho a remover' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['caminho'],
+    },
+  },
+  {
+    name: 'fs_buscar',
+    description: 'Busca regex em arquivos de texto dentro de uma raiz autorizada (estilo grep). Pula node_modules/.git/dist/build/.obsidian. Limita 100 hits.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        raiz:           { type: 'string', description: 'Raiz da busca (default: primeira raiz autorizada)' },
+        padrao:         { type: 'string', description: 'Regex a buscar (ex: "function think", "TODO|FIXME")' },
+        glob:           { type: 'string', description: 'Filtro de extensão (ex: "*.ts", "*.md")' },
+        case_sensitive: { type: 'boolean', description: 'Default false' },
+      },
+      required: ['padrao'],
+    },
+  },
+  {
+    name: 'fs_raizes',
+    description: 'Retorna lista de diretórios autorizados pra acesso ao filesystem (FS_ALLOWED_ROOTS).',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'delegar_tarefa',
     description: 'Delega uma tarefa a um membro da equipe Romatec enviando uma mensagem formatada via WhatsApp.',
     input_schema: {
@@ -595,6 +662,24 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'musica_atual':
         data = await spotify.musicaAtual();
+        break;
+      case 'fs_listar':
+        data = await filesystem.fsListar(input as { caminho?: string });
+        break;
+      case 'fs_ler':
+        data = await filesystem.fsLer(input as { caminho: string });
+        break;
+      case 'fs_escrever':
+        data = await filesystem.fsEscrever(input as Parameters<typeof filesystem.fsEscrever>[0]);
+        break;
+      case 'fs_apagar':
+        data = await filesystem.fsApagar(input as { caminho: string; confirm?: boolean });
+        break;
+      case 'fs_buscar':
+        data = await filesystem.fsBuscar(input as Parameters<typeof filesystem.fsBuscar>[0]);
+        break;
+      case 'fs_raizes':
+        data = filesystem.fsRoots();
         break;
       case 'delegar_tarefa': {
         const { colaborador_nome, tarefa, prazo } = input as { colaborador_nome: string; tarefa: string; prazo?: string };
