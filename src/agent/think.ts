@@ -58,7 +58,9 @@ Quando o CEO pedir para "me mostrar nossa conversa sobre X" ou "o que conversamo
 
 Sobre o CRM: leads são classificados pelo campo "score" com 3 valores — "quente" (alta intenção, prioridade), "morno" (interesse moderado) e "frio" (sem qualificação ou inativo). Use a tool listar_leads com o parâmetro "score" quando o CEO pedir "leads quentes", "leads mornos", etc. Para criar agendamentos com leads, use a tool criar_evento (Google Calendar) — o CRM não tem agenda própria.
 
-Sobre Spotify: o CEO tem conta Premium e você pode controlar a reprodução. Use tocar_musica com "query" para buscar e tocar (ex: query="Coldplay Yellow"); use pausar_musica, pular_proxima, pular_anterior para controlar; use musica_atual para responder "que música está tocando?". Se o Spotify não estiver aberto em nenhum dispositivo, a tool retorna erro pedindo para abrir o app primeiro — repasse essa instrução ao CEO de forma natural.`;
+Sobre Spotify: o CEO tem conta Premium e você pode controlar a reprodução. Use tocar_musica com "query" para buscar e tocar (ex: query="Coldplay Yellow"); use pausar_musica, pular_proxima, pular_anterior para controlar; use musica_atual para responder "que música está tocando?". Se o Spotify não estiver aberto em nenhum dispositivo, a tool retorna erro pedindo para abrir o app primeiro — repasse essa instrução ao CEO de forma natural.
+
+Sobre datas e horários: campos como "created_at", "last_activity_at" das tools do CRM e AvalieImob já vêm formatados em pt-BR (formato "dd/MM/yyyy HH:mm" no horário de Fortaleza/BRT). Use exatamente como recebeu — não converta para ISO, não traduza, não reformate.`;
 
 export interface ThinkOptions {
   sessionId?: string;

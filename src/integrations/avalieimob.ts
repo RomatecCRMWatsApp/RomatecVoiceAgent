@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosRequestConfig } from 'axios';
 import { Cliente, Contrato } from '../types';
+import { formatBR } from '../util/format';
 
 // AvalieImob é um SaaS multi-tenant (FastAPI + MongoDB) com JWT HS256 (168h).
 // ZAYRA loga com email+senha do CEO uma vez e cacheia o JWT até ~6 dias depois.
@@ -107,7 +108,7 @@ export async function listarContratos(filtros?: { status?: string }): Promise<Co
     tipo:       c.tipo_contrato ?? '',
     status:     c.status ?? 'pendente',
     valor:      undefined,
-    created_at: c.created_at ?? c.data_assinatura ?? new Date().toISOString(),
+    created_at: formatBR(c.created_at ?? c.data_assinatura ?? new Date()),
   }));
 }
 

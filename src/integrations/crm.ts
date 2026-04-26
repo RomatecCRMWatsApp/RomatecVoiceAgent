@@ -1,6 +1,7 @@
 import type { RowDataPacket } from 'mysql2';
 import pool from '../database/connection';
 import { Lead, Campanha } from '../types';
+import { formatBR } from '../util/format';
 
 // ZAYRA reads the same MySQL the CRM uses (Romatec_CRM_WhatsApp).
 // Tables of interest: leadQualifications, campaigns, messages.
@@ -46,8 +47,8 @@ const rowToLead = (r: LeadRow): Lead => ({
   score:          r.score,
   stage:          r.stage ?? null,
   campanha_origem: r.campanhaOrigem ?? null,
-  last_activity_at: r.lastActivityAt ? r.lastActivityAt.toISOString() : null,
-  created_at:     r.createdAt.toISOString(),
+  last_activity_at: r.lastActivityAt ? formatBR(r.lastActivityAt) : null,
+  created_at:     formatBR(r.createdAt),
 });
 
 const rowToCampanha = (r: CampaignRow): Campanha => ({
