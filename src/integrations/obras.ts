@@ -48,6 +48,7 @@ type EquipeRow = RowDataPacket & {
   observacoes: string | null;
   ativo: number;
   obras_ids: string | null;
+  obra_id: number | null;
 };
 
 type MaterialRow = RowDataPacket & {
@@ -57,6 +58,7 @@ type MaterialRow = RowDataPacket & {
   valor_unitario: string | null;
   fornecedor_principal: string | null;
   local_armazenamento: string | null;
+  obra_id: number | null;
 };
 
 type DiarioRow = RowDataPacket & {
@@ -368,19 +370,23 @@ export async function criarTransacaoObra(input: {
 }
 
 // ── Equipe ───────────────────────────────────────────────────────────────────
-export async function listarEquipe(input: { obra_id?: string } = {}) {
+export async function listarEquipe(input: { obra_id?: string; somente_geral?: boolean } = {}) {
   let sql = 'SELECT * FROM romatec_obra_equipe WHERE ativo = 1';
   const params: (string | number)[] = [];
-  if (input.obra_id) {
-    sql += ' AND FIND_IN_SET(?, obras_ids) > 0';
-    params.push(input.obra_id);
+  if (input.somente_geral) {
+    sql += ' AND obra_id IS NULL';
+  } else if (input.obra_id) {
+    // Mostra membros dessa obra OU sem obra (geral, alocáveis em qualquer)
+    sql += ' AND (obra_id = ? OR obra_id IS NULL OR FIND_IN_SET(?, obras_ids) > 0)';
+    params.push(input.obra_id, input.obra_id);
   }
-  sql += ' ORDER BY nome ASC';
+  sql += ' ORDER BY (obra_id IS NULL) ASC, nome ASC';
   const [rows] = await pool.execute<EquipeRow[]>(sql, params);
   return rows.map(r => ({
     id: String(r.id), nome: r.nome, funcao: r.funcao,
     tipo_contrato: r.tipo_contrato, telefone: r.telefone,
     valor_dia: num(r.valor_dia), especialidade: r.especialidade,
+    obra_id: r.obra_id ? String(r.obra_id) : null,
     obras_ids: (r.obras_ids ?? '').split(',').filter(Boolean),
   }));
 }
@@ -389,33 +395,45 @@ export async function criarMembroEquipe(input: {
   nome: string; funcao?: string; tipo_contrato?: string;
   cpf?: string; telefone?: string; valor_dia?: number;
   especialidade?: string; observacoes?: string;
-  obras_ids?: string[]; confirm?: boolean;
+  obras_ids?: string[]; obra_id?: string; confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.nome) throw new Error('nome obrigatório');
   if (!input.confirm) {
-    return { preview: true, message: `[PREVIEW] Criar ${input.nome} na equipe. Reenvie com confirm:true.` };
+    return { preview: true, message: `[PREVIEW] Criar ${input.nome} na equipe${input.obra_id ? ` (obra ${input.obra_id})` : ' (geral)'}. Reenvie com confirm:true.` };
   }
   const [r] = await pool.execute<ResultSetHeader>(
     `INSERT INTO romatec_obra_equipe
-      (nome, funcao, tipo_contrato, cpf, telefone, valor_dia, especialidade, observacoes, obras_ids)
-     VALUES (?,?,?,?,?,?,?,?,?)`,
+      (nome, funcao, tipo_contrato, cpf, telefone, valor_dia, especialidade, observacoes, obras_ids, obra_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
     [
       input.nome, input.funcao ?? null, input.tipo_contrato ?? 'diarista',
       input.cpf ?? null, input.telefone ?? null,
       input.valor_dia ?? null, input.especialidade ?? null,
       input.observacoes ?? null,
       (input.obras_ids ?? []).join(','),
+      input.obra_id ? Number(input.obra_id) : null,
     ],
   );
-  return { ok: true, insertId: r.insertId, message: `${input.nome} adicionado à equipe (ID ${r.insertId}).` };
+  return { ok: true, insertId: r.insertId, message: `${input.nome} adicionado${input.obra_id ? ` à obra ${input.obra_id}` : ' à equipe geral'} (ID ${r.insertId}).` };
 }
 
 // ── Materiais ────────────────────────────────────────────────────────────────
-export async function listarMateriais(input: { apenas_baixos?: boolean } = {}) {
+export async function listarMateriais(input: {
+  apenas_baixos?: boolean; obra_id?: string; somente_geral?: boolean;
+} = {}) {
   let sql = 'SELECT * FROM romatec_obra_materiais';
-  if (input.apenas_baixos) sql += ' WHERE estoque <= estoque_minimo';
-  sql += ' ORDER BY nome ASC';
-  const [rows] = await pool.execute<MaterialRow[]>(sql);
+  const params: (string | number)[] = [];
+  const where: string[] = [];
+  if (input.apenas_baixos) where.push('estoque <= estoque_minimo');
+  if (input.somente_geral) {
+    where.push('obra_id IS NULL');
+  } else if (input.obra_id) {
+    where.push('(obra_id = ? OR obra_id IS NULL)');
+    params.push(input.obra_id);
+  }
+  if (where.length > 0) sql += ' WHERE ' + where.join(' AND ');
+  sql += ' ORDER BY (obra_id IS NULL) ASC, nome ASC';
+  const [rows] = await pool.execute<MaterialRow[]>(sql, params);
   return rows.map(r => ({
     id: String(r.id), nome: r.nome, categoria: r.categoria,
     unidade: r.unidade, estoque: num(r.estoque),
@@ -423,6 +441,7 @@ export async function listarMateriais(input: { apenas_baixos?: boolean } = {}) {
     valor_unitario: num(r.valor_unitario),
     estoque_baixo: num(r.estoque) <= num(r.estoque_minimo),
     fornecedor: r.fornecedor_principal, local: r.local_armazenamento,
+    obra_id: r.obra_id ? String(r.obra_id) : null,
   }));
 }
 
@@ -430,24 +449,25 @@ export async function criarMaterial(input: {
   nome: string; categoria?: string; unidade?: string;
   estoque?: number; estoque_minimo?: number; valor_unitario?: number;
   fornecedor_principal?: string; local_armazenamento?: string;
-  confirm?: boolean;
+  obra_id?: string; confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.nome) throw new Error('nome obrigatório');
   if (!input.confirm) {
-    return { preview: true, message: `[PREVIEW] Criar material "${input.nome}". Reenvie com confirm:true.` };
+    return { preview: true, message: `[PREVIEW] Criar material "${input.nome}"${input.obra_id ? ` na obra ${input.obra_id}` : ' (estoque geral)'}. Reenvie com confirm:true.` };
   }
   const [r] = await pool.execute<ResultSetHeader>(
     `INSERT INTO romatec_obra_materiais
-      (nome, categoria, unidade, estoque, estoque_minimo, valor_unitario, fornecedor_principal, local_armazenamento)
-     VALUES (?,?,?,?,?,?,?,?)`,
+      (nome, categoria, unidade, estoque, estoque_minimo, valor_unitario, fornecedor_principal, local_armazenamento, obra_id)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
     [
       input.nome, input.categoria ?? null, input.unidade ?? 'un',
       input.estoque ?? 0, input.estoque_minimo ?? 0,
       input.valor_unitario ?? null,
       input.fornecedor_principal ?? null, input.local_armazenamento ?? null,
+      input.obra_id ? Number(input.obra_id) : null,
     ],
   );
-  return { ok: true, insertId: r.insertId, message: `Material "${input.nome}" criado (ID ${r.insertId}).` };
+  return { ok: true, insertId: r.insertId, message: `Material "${input.nome}" criado${input.obra_id ? ` na obra ${input.obra_id}` : ' (estoque geral)'} (ID ${r.insertId}).` };
 }
 
 export async function ajustarEstoqueMaterial(input: {

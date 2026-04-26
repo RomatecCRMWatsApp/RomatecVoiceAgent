@@ -397,7 +397,10 @@ async function loadTransacoes() {
   if (!state.currentObra) return state.transacoes = [];
   state.transacoes = await api('/api/transacoes?obra_id=' + state.currentObra);
 }
-async function loadEquipe() { state.equipe = await api('/api/equipe'); }
+async function loadEquipe() {
+  const q = state.currentObra ? '?obra_id=' + state.currentObra : '';
+  state.equipe = await api('/api/equipe' + q);
+}
 async function loadCatalogo() {
   if (state.catalogo.length === 0) state.catalogo = await api('/api/profissoes-catalogo');
 }
@@ -410,7 +413,10 @@ async function loadFolha() {
   const q = `ano=${state.folhaAno}&mes=${state.folhaMes}` + (state.folhaObraId ? `&obra_id=${state.folhaObraId}` : '');
   state.folha = await api('/api/relatorio-equipe?' + q);
 }
-async function loadMateriais() { state.materiais = await api('/api/materiais'); }
+async function loadMateriais() {
+  const q = state.currentObra ? '?obra_id=' + state.currentObra : '';
+  state.materiais = await api('/api/materiais' + q);
+}
 async function loadDiario() {
   if (!state.currentObra) return state.diario = [];
   state.diario = await api('/api/diario?obra_id=' + state.currentObra);
@@ -429,7 +435,7 @@ async function render() {
       cronograma: async () => { await Promise.all([loadObras(), loadEtapas()]); renderCronograma(); },
       financeiro: async () => { await Promise.all([loadObras(), loadTransacoes()]); renderFinanceiro(); },
       equipe: async () => { await Promise.all([loadObras(), loadEquipe(), loadCatalogo()]); renderEquipe(); },
-      materiais: async () => { await loadMateriais(); renderMateriais(); },
+      materiais: async () => { await Promise.all([loadObras(), loadMateriais()]); renderMateriais(); },
       diario: async () => { await Promise.all([loadObras(), loadDiario()]); renderDiario(); },
       folha: async () => { await Promise.all([loadObras(), loadFolha()]); renderFolha(); },
       vto:   async () => { await Promise.all([loadObras(), loadVistorias()]); renderVto(); },
@@ -782,11 +788,18 @@ function renderEquipe() {
       ).join('')}</optgroup>`,
     ).join('');
 
-  v.innerHTML = `<div class="card">
+  const obraOpts = '<option value="">Geral (todas as obras)</option>' +
+    state.obras.map(o => `<option value="${o.id}" ${o.id===state.currentObra?'selected':''}>${escape(o.nome)}</option>`).join('');
+
+  v.innerHTML = `${obraSelector()}<div class="card">
     <p class="section-title">Novo membro</p>
     <div style="margin-bottom:8px;">
       <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Profissão (catálogo sindical — editável depois)</label>
       <select id="pCat" style="width:100%; margin-top:4px;">${catOpts}</select>
+    </div>
+    <div style="margin-bottom:8px;">
+      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Obra (deixa "Geral" pra alocar livre depois)</label>
+      <select id="pObraId" style="width:100%; margin-top:4px;">${obraOpts}</select>
     </div>
     <div class="form-grid">
       <input id="pNome" placeholder="Nome *">
@@ -817,6 +830,7 @@ function renderEquipe() {
     }
   };
 
+  attachSel();
   document.getElementById('addEq').onclick = async () => {
     const nome = document.getElementById('pNome').value.trim();
     if (!nome) return alert('Informe o nome');
@@ -832,6 +846,7 @@ function renderEquipe() {
           valor_dia: parseFloat(document.getElementById('pVal').value) || null,
           especialidade: document.getElementById('pEsp').value.trim() || null,
           observacoes: document.getElementById('pObs').value.trim() || null,
+          obra_id: document.getElementById('pObraId').value || null,
         }),
       });
       render();
@@ -858,8 +873,15 @@ function renderMateriais() {
     </div>`;
   }).join('');
 
-  v.innerHTML = `<div class="card">
+  const obraOptsM = '<option value="">Estoque geral</option>' +
+    state.obras.map(o => `<option value="${o.id}" ${o.id===state.currentObra?'selected':''}>${escape(o.nome)}</option>`).join('');
+
+  v.innerHTML = `${obraSelector()}<div class="card">
     <p class="section-title">Novo material</p>
+    <div style="margin-bottom:8px;">
+      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Obra (Estoque geral = comum a todas)</label>
+      <select id="mObraId" style="width:100%; margin-top:4px;">${obraOptsM}</select>
+    </div>
     <div class="form-grid">
       <input id="mNome" placeholder="Nome *">
       <input id="mCat" placeholder="Categoria">
@@ -875,6 +897,7 @@ function renderMateriais() {
   <p class="section-title" style="margin-top:16px;">Materiais (${state.materiais.length})</p>
   ${lista || '<div class="card empty">Nenhum material.</div>'}`;
 
+  attachSel();
   document.getElementById('addM').onclick = async () => {
     const nome = document.getElementById('mNome').value.trim();
     if (!nome) return alert('Informe o nome');
@@ -890,6 +913,7 @@ function renderMateriais() {
           valor_unitario: parseFloat(document.getElementById('mVal').value) || null,
           fornecedor_principal: document.getElementById('mForn').value.trim() || null,
           local_armazenamento: document.getElementById('mLocal').value.trim() || null,
+          obra_id: document.getElementById('mObraId').value || null,
         }),
       });
       render();

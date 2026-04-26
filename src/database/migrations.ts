@@ -211,6 +211,33 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.23: Equipe e Materiais linkados por obra (preserva 'global' = NULL)
+  await pool.execute(`
+    ALTER TABLE romatec_obra_equipe
+      ADD COLUMN IF NOT EXISTS obra_id INT NULL AFTER ativo
+  `).catch(async () => {
+    // MySQL < 8.0 não suporta IF NOT EXISTS em ALTER ADD. Verifica antes.
+    const [c] = await pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'romatec_obra_equipe' AND COLUMN_NAME = 'obra_id'`
+    );
+    if (Number((c[0] as { n: number }).n) === 0) {
+      await pool.execute('ALTER TABLE romatec_obra_equipe ADD COLUMN obra_id INT NULL AFTER ativo');
+    }
+  });
+  await pool.execute(`
+    ALTER TABLE romatec_obra_materiais
+      ADD COLUMN IF NOT EXISTS obra_id INT NULL AFTER local_armazenamento
+  `).catch(async () => {
+    const [c] = await pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'romatec_obra_materiais' AND COLUMN_NAME = 'obra_id'`
+    );
+    if (Number((c[0] as { n: number }).n) === 0) {
+      await pool.execute('ALTER TABLE romatec_obra_materiais ADD COLUMN obra_id INT NULL AFTER local_armazenamento');
+    }
+  });
+
   // v1.21: VTO — Vistoria Técnica de Obra
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS romatec_obra_vistorias (
