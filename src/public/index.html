@@ -619,12 +619,6 @@
       <div class="card-sub" id="cardAgendaSub">Google Calendar</div>
       <div class="card-meta" id="cardAgendaMeta"></div>
     </div>
-    <div class="card card-updating" data-modal="contratos">
-      <div class="card-title">Contratos</div>
-      <div class="card-value" id="cardContratosVal">—</div>
-      <div class="card-sub" id="cardContratosSub">pendentes</div>
-      <div class="card-meta" id="cardContratosMeta"></div>
-    </div>
   </div>
 
   <div class="chat-wrap" id="chat"></div>
@@ -1135,9 +1129,6 @@ function renderDashboard(d) {
   document.getElementById('cardAgendaVal').textContent  = agenda.length || '—';
   document.getElementById('cardAgendaSub').textContent  = agenda.length ? agenda[0].titulo.substring(0, 32) : 'Nenhum evento hoje';
   document.getElementById('cardAgendaMeta').textContent = agenda.length > 1 ? `+${agenda.length - 1} evento(s)` : (agenda.length && agenda[0].inicio ? agenda[0].inicio.substring(11, 16) + 'h' : '/auth/google');
-  document.getElementById('cardContratosVal').textContent  = contr.length;
-  document.getElementById('cardContratosSub').textContent  = 'pendentes AvalieImob';
-  document.getElementById('cardContratosMeta').textContent = contr.length > 0 ? 'Ação necessária' : 'Em dia';
   document.querySelectorAll('.card').forEach(c => c.classList.remove('card-updating'));
 }
 setInterval(() => void loadDashboard(false), 5 * 60 * 1000);
