@@ -564,13 +564,15 @@ app.get ('/api/transacoes', apiHandle(args => obras.listarTransacoesObra(args as
 app.post('/api/transacoes', apiHandle(args => obras.criarTransacaoObra(args as Parameters<typeof obras.criarTransacaoObra>[0])));
 
 // Equipe
-app.get ('/api/equipe', apiHandle(args => obras.listarEquipe(args as { obra_id?: string })));
-app.post('/api/equipe', apiHandle(args => obras.criarMembroEquipe(args as Parameters<typeof obras.criarMembroEquipe>[0])));
+app.get   ('/api/equipe',     apiHandle(args => obras.listarEquipe(args as { obra_id?: string })));
+app.post  ('/api/equipe',     apiHandle(args => obras.criarMembroEquipe(args as Parameters<typeof obras.criarMembroEquipe>[0])));
+app.delete('/api/equipe/:id', apiHandle(args => obras.apagarMembroEquipe(args as { id: string; confirm?: boolean })));
 
 // Materiais
-app.get ('/api/materiais',          apiHandle(args => obras.listarMateriais(args as { apenas_baixos?: boolean })));
-app.post('/api/materiais',          apiHandle(args => obras.criarMaterial(args as Parameters<typeof obras.criarMaterial>[0])));
-app.post('/api/materiais/ajustar',  apiHandle(args => obras.ajustarEstoqueMaterial(args as { id: string; delta: number; confirm?: boolean })));
+app.get   ('/api/materiais',          apiHandle(args => obras.listarMateriais(args as { apenas_baixos?: boolean; obra_id?: string })));
+app.post  ('/api/materiais',          apiHandle(args => obras.criarMaterial(args as Parameters<typeof obras.criarMaterial>[0])));
+app.post  ('/api/materiais/ajustar',  apiHandle(args => obras.ajustarEstoqueMaterial(args as { id: string; delta: number; confirm?: boolean })));
+app.delete('/api/materiais/:id',      apiHandle(args => obras.apagarMaterial(args as { id: string; confirm?: boolean })));
 
 // Diário
 app.get ('/api/diario', apiHandle(args => obras.listarDiarioObra(args as Parameters<typeof obras.listarDiarioObra>[0])));

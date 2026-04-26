@@ -391,6 +391,39 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
   }));
 }
 
+export async function apagarMembroEquipe(input: {
+  id: string; confirm?: boolean;
+}): Promise<MutationResult> {
+  if (!input.id) throw new Error('id obrigatório');
+  if (!input.confirm) {
+    return {
+      preview: true,
+      message: `[PREVIEW] APAGAR membro ${input.id} + todas as marcações de dias trabalhados dele. IRREVERSÍVEL. Reenvie com confirm:true.`,
+    };
+  }
+  await pool.execute('DELETE FROM romatec_obra_funcionario_dias WHERE funcionario_id = ?', [input.id]);
+  const [r] = await pool.execute<ResultSetHeader>(
+    'DELETE FROM romatec_obra_equipe WHERE id = ?', [input.id],
+  );
+  return { ok: true, affected: r.affectedRows, message: `Membro ${input.id} removido.` };
+}
+
+export async function apagarMaterial(input: {
+  id: string; confirm?: boolean;
+}): Promise<MutationResult> {
+  if (!input.id) throw new Error('id obrigatório');
+  if (!input.confirm) {
+    return {
+      preview: true,
+      message: `[PREVIEW] APAGAR material ${input.id}. IRREVERSÍVEL. Reenvie com confirm:true.`,
+    };
+  }
+  const [r] = await pool.execute<ResultSetHeader>(
+    'DELETE FROM romatec_obra_materiais WHERE id = ?', [input.id],
+  );
+  return { ok: true, affected: r.affectedRows, message: `Material ${input.id} removido.` };
+}
+
 export async function criarMembroEquipe(input: {
   nome: string; funcao?: string; tipo_contrato?: string;
   cpf?: string; telefone?: string; valor_dia?: number;

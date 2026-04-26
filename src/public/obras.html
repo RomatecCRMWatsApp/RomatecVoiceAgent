@@ -761,15 +761,24 @@ function renderFinanceiro() {
 // ── EQUIPE ──
 function renderEquipe() {
   const v = document.getElementById('view-equipe');
+  const obraNome = id => {
+    const o = state.obras.find(o => o.id === id);
+    return o ? o.nome : null;
+  };
   const lista = state.equipe.map(p => {
+    const link = p.obra_id ? `<span class="badge badge-info">${escape(obraNome(p.obra_id) || 'Obra '+p.obra_id)}</span>` : '<span class="badge badge-warning">Geral</span>';
     return `<div class="card">
       <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
         <div style="flex:1; min-width:0;">
           <p style="margin:0; font-weight:500; font-size:15px;">${escape(p.nome)}</p>
           <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.funcao||'sem função')} · ${escape(p.tipo_contrato)} · <span style="color: var(--gold);">${fmt(p.valor_dia)}/dia</span></p>
+          <p style="margin:6px 0 2px;">${link}</p>
           <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.telefone||'-')}${p.especialidade?' · '+escape(p.especialidade):''}</p>
         </div>
-        <button class="btn-gold" data-cal="${p.id}" data-nome="${escape(p.nome)}" data-vd="${p.valor_dia}">📅 Marcar dias</button>
+        <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+          <button class="btn-gold" data-cal="${p.id}" data-nome="${escape(p.nome)}" data-vd="${p.valor_dia}">📅 Marcar dias</button>
+          <button class="btn-danger" data-del-eq="${p.id}" data-del-nome="${escape(p.nome)}">Excluir</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -820,6 +829,12 @@ function renderEquipe() {
     abrirCalendario(b.dataset.cal, b.dataset.nome, parseFloat(b.dataset.vd) || 0);
   });
 
+  v.querySelectorAll('[data-del-eq]').forEach(b => b.onclick = async () => {
+    if (!confirm(`Excluir "${b.dataset.delNome}" e TODAS as marcações de dias trabalhados dele? Irreversível.`)) return;
+    try { await api('/api/equipe/' + b.dataset.delEq, { method: 'DELETE' }); render(); }
+    catch (e) { alert('Erro: ' + e.message); }
+  });
+
   // Auto-preenche função e valor_dia ao escolher do catálogo
   const catSel = document.getElementById('pCat');
   catSel.onchange = () => {
@@ -857,17 +872,24 @@ function renderEquipe() {
 // ── MATERIAIS ──
 function renderMateriais() {
   const v = document.getElementById('view-materiais');
+  const obraNomeM = id => {
+    const o = state.obras.find(o => o.id === id);
+    return o ? o.nome : null;
+  };
   const lista = state.materiais.map(m => {
+    const link = m.obra_id ? `<span class="badge badge-info">${escape(obraNomeM(m.obra_id) || 'Obra '+m.obra_id)}</span>` : '<span class="badge badge-warning">Estoque geral</span>';
     return `<div class="card">
       <div style="display:flex; justify-content:space-between; gap:8px;">
         <div style="flex:1; min-width:0;">
           <p style="margin:0; font-weight:500;">${escape(m.nome)} ${m.estoque_baixo?'<span class="badge badge-danger">Estoque baixo</span>':''}</p>
           <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(m.categoria||'-')} · ${escape(m.fornecedor||'-')}</p>
-          <p style="margin:4px 0 0; font-size:13px;">Estoque: <strong>${m.estoque} ${escape(m.unidade)}</strong> · Mín: ${m.estoque_minimo} · ${fmt(m.valor_unitario)}/un</p>
+          <p style="margin:4px 0; font-size:13px;">Estoque: <strong>${m.estoque} ${escape(m.unidade)}</strong> · Mín: ${m.estoque_minimo} · ${fmt(m.valor_unitario)}/un</p>
+          <p style="margin:6px 0 0;">${link}</p>
         </div>
         <div style="display:flex; flex-direction:column; gap:4px;">
           <button data-add-m="${m.id}" style="font-size:11px;">+ Estoque</button>
           <button data-sub-m="${m.id}" style="font-size:11px;">− Uso</button>
+          <button class="btn-danger" data-del-m="${m.id}" data-del-mnome="${escape(m.nome)}" style="font-size:11px;">Excluir</button>
         </div>
       </div>
     </div>`;
@@ -919,6 +941,11 @@ function renderMateriais() {
       render();
     } catch (e) { alert('Erro: ' + e.message); }
   };
+  v.querySelectorAll('[data-del-m]').forEach(b => b.onclick = async () => {
+    if (!confirm(`Excluir material "${b.dataset.delMnome}"? Irreversível.`)) return;
+    try { await api('/api/materiais/' + b.dataset.delM, { method: 'DELETE' }); render(); }
+    catch (e) { alert('Erro: ' + e.message); }
+  });
   v.querySelectorAll('[data-add-m]').forEach(b => b.onclick = async () => {
     const q = parseFloat(prompt('Quantidade adicionada:'));
     if (!q || q <= 0) return;

@@ -686,6 +686,24 @@ export const toolDefinitions: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'apagar_membro_equipe',
+    description: 'APAGA membro da equipe + todas as marcações de dias trabalhados dele. IRREVERSÍVEL. Confirm exigido após autorização verbal.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, confirm: { type: 'boolean' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'apagar_material',
+    description: 'APAGA material do estoque. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, confirm: { type: 'boolean' } },
+      required: ['id'],
+    },
+  },
+  {
     name: 'listar_materiais',
     description: 'Lista materiais. Use apenas_baixos:true pra ver só os abaixo do estoque mínimo.',
     input_schema: {
@@ -1280,6 +1298,12 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'criar_membro_equipe':
         data = await obras.criarMembroEquipe(input as Parameters<typeof obras.criarMembroEquipe>[0]);
+        break;
+      case 'apagar_membro_equipe':
+        data = await obras.apagarMembroEquipe(input as { id: string; confirm?: boolean });
+        break;
+      case 'apagar_material':
+        data = await obras.apagarMaterial(input as { id: string; confirm?: boolean });
         break;
       case 'listar_materiais':
         data = await obras.listarMateriais(input as { apenas_baixos?: boolean });
