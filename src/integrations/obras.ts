@@ -391,6 +391,79 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
   }));
 }
 
+export async function atualizarMembroEquipe(input: {
+  id: string;
+  nome?: string; funcao?: string; tipo_contrato?: string;
+  cpf?: string; telefone?: string; valor_dia?: number;
+  especialidade?: string; observacoes?: string;
+  obra_id?: string | null; ativo?: boolean;
+  confirm?: boolean;
+}): Promise<MutationResult> {
+  if (!input.id) throw new Error('id obrigatório');
+  const fields: string[] = []; const params: (string | number | null)[] = [];
+  const map: Record<string, string> = {
+    nome: 'nome', funcao: 'funcao', tipo_contrato: 'tipo_contrato',
+    cpf: 'cpf', telefone: 'telefone', valor_dia: 'valor_dia',
+    especialidade: 'especialidade', observacoes: 'observacoes',
+  };
+  for (const [k, col] of Object.entries(map)) {
+    const v = (input as Record<string, unknown>)[k];
+    if (v !== undefined) { fields.push(`${col} = ?`); params.push(v as string | number); }
+  }
+  if (input.obra_id !== undefined) {
+    fields.push('obra_id = ?');
+    params.push(input.obra_id ? Number(input.obra_id) : null);
+  }
+  if (input.ativo !== undefined) {
+    fields.push('ativo = ?');
+    params.push(input.ativo ? 1 : 0);
+  }
+  if (fields.length === 0) throw new Error('nada pra atualizar');
+  if (!input.confirm) {
+    return { preview: true, message: `[PREVIEW] Atualizar membro ${input.id}: ${fields.join(', ')}. Reenvie com confirm:true.` };
+  }
+  params.push(input.id);
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE romatec_obra_equipe SET ${fields.join(', ')} WHERE id = ?`, params,
+  );
+  return { ok: true, affected: r.affectedRows, message: `Membro ${input.id} atualizado.` };
+}
+
+export async function atualizarMaterial(input: {
+  id: string;
+  nome?: string; categoria?: string; unidade?: string;
+  estoque?: number; estoque_minimo?: number; valor_unitario?: number;
+  fornecedor_principal?: string; local_armazenamento?: string;
+  obra_id?: string | null; confirm?: boolean;
+}): Promise<MutationResult> {
+  if (!input.id) throw new Error('id obrigatório');
+  const fields: string[] = []; const params: (string | number | null)[] = [];
+  const map: Record<string, string> = {
+    nome: 'nome', categoria: 'categoria', unidade: 'unidade',
+    estoque: 'estoque', estoque_minimo: 'estoque_minimo',
+    valor_unitario: 'valor_unitario',
+    fornecedor_principal: 'fornecedor_principal',
+    local_armazenamento: 'local_armazenamento',
+  };
+  for (const [k, col] of Object.entries(map)) {
+    const v = (input as Record<string, unknown>)[k];
+    if (v !== undefined) { fields.push(`${col} = ?`); params.push(v as string | number); }
+  }
+  if (input.obra_id !== undefined) {
+    fields.push('obra_id = ?');
+    params.push(input.obra_id ? Number(input.obra_id) : null);
+  }
+  if (fields.length === 0) throw new Error('nada pra atualizar');
+  if (!input.confirm) {
+    return { preview: true, message: `[PREVIEW] Atualizar material ${input.id}: ${fields.join(', ')}. Reenvie com confirm:true.` };
+  }
+  params.push(input.id);
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE romatec_obra_materiais SET ${fields.join(', ')} WHERE id = ?`, params,
+  );
+  return { ok: true, affected: r.affectedRows, message: `Material ${input.id} atualizado.` };
+}
+
 export async function apagarMembroEquipe(input: {
   id: string; confirm?: boolean;
 }): Promise<MutationResult> {

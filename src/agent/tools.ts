@@ -686,6 +686,36 @@ export const toolDefinitions: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'atualizar_membro_equipe',
+    description: 'Atualiza dados de um membro existente (mudar obra, função, valor diária, etc). Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' }, nome: { type: 'string' }, funcao: { type: 'string' },
+        tipo_contrato: { type: 'string' }, telefone: { type: 'string' },
+        valor_dia: { type: 'number' }, especialidade: { type: 'string' },
+        observacoes: { type: 'string' }, obra_id: { type: 'string' },
+        ativo: { type: 'boolean' }, confirm: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'atualizar_material',
+    description: 'Atualiza dados de um material existente. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' }, nome: { type: 'string' }, categoria: { type: 'string' },
+        unidade: { type: 'string' }, estoque: { type: 'number' },
+        estoque_minimo: { type: 'number' }, valor_unitario: { type: 'number' },
+        fornecedor_principal: { type: 'string' }, local_armazenamento: { type: 'string' },
+        obra_id: { type: 'string' }, confirm: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'apagar_membro_equipe',
     description: 'APAGA membro da equipe + todas as marcações de dias trabalhados dele. IRREVERSÍVEL. Confirm exigido após autorização verbal.',
     input_schema: {
@@ -1298,6 +1328,12 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'criar_membro_equipe':
         data = await obras.criarMembroEquipe(input as Parameters<typeof obras.criarMembroEquipe>[0]);
+        break;
+      case 'atualizar_membro_equipe':
+        data = await obras.atualizarMembroEquipe(input as Parameters<typeof obras.atualizarMembroEquipe>[0]);
+        break;
+      case 'atualizar_material':
+        data = await obras.atualizarMaterial(input as Parameters<typeof obras.atualizarMaterial>[0]);
         break;
       case 'apagar_membro_equipe':
         data = await obras.apagarMembroEquipe(input as { id: string; confirm?: boolean });

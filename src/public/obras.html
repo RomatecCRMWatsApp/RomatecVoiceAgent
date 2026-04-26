@@ -297,6 +297,20 @@
 </div>
 
 <button class="zayra-fab" id="zayraFab">Z</button>
+<div class="cal-overlay" id="editOverlay">
+  <div class="cal-modal" id="editModal" style="max-width: 480px;">
+    <div class="cal-head">
+      <h2 id="editTitle">Editar</h2>
+      <button id="editClose" style="border:none;background:transparent;color:var(--text-muted);font-size:22px;cursor:pointer;">×</button>
+    </div>
+    <div id="editBody" style="padding: 16px 20px;"></div>
+    <div style="padding: 0 20px 16px; display:flex; gap:8px; justify-content:flex-end;">
+      <button id="editCancel">Cancelar</button>
+      <button class="btn-primary" id="editSave">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <div class="cal-overlay" id="calOverlay">
   <div class="cal-modal" id="calModal">
     <div class="cal-head">
@@ -777,6 +791,7 @@ function renderEquipe() {
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
           <button class="btn-gold" data-cal="${p.id}" data-nome="${escape(p.nome)}" data-vd="${p.valor_dia}">📅 Marcar dias</button>
+          <button data-edit-eq="${p.id}">✏️ Editar</button>
           <button class="btn-danger" data-del-eq="${p.id}" data-del-nome="${escape(p.nome)}">Excluir</button>
         </div>
       </div>
@@ -835,6 +850,12 @@ function renderEquipe() {
     catch (e) { alert('Erro: ' + e.message); }
   });
 
+  v.querySelectorAll('[data-edit-eq]').forEach(b => b.onclick = () => {
+    const m = state.equipe.find(p => p.id === b.dataset.editEq);
+    if (!m) return;
+    abrirEditarMembro(m);
+  });
+
   // Auto-preenche função e valor_dia ao escolher do catálogo
   const catSel = document.getElementById('pCat');
   catSel.onchange = () => {
@@ -889,6 +910,7 @@ function renderMateriais() {
         <div style="display:flex; flex-direction:column; gap:4px;">
           <button data-add-m="${m.id}" style="font-size:11px;">+ Estoque</button>
           <button data-sub-m="${m.id}" style="font-size:11px;">− Uso</button>
+          <button data-edit-m="${m.id}" style="font-size:11px;">✏️ Editar</button>
           <button class="btn-danger" data-del-m="${m.id}" data-del-mnome="${escape(m.nome)}" style="font-size:11px;">Excluir</button>
         </div>
       </div>
@@ -941,6 +963,12 @@ function renderMateriais() {
       render();
     } catch (e) { alert('Erro: ' + e.message); }
   };
+  v.querySelectorAll('[data-edit-m]').forEach(b => b.onclick = () => {
+    const m = state.materiais.find(x => x.id === b.dataset.editM);
+    if (!m) return;
+    abrirEditarMaterial(m);
+  });
+
   v.querySelectorAll('[data-del-m]').forEach(b => b.onclick = async () => {
     if (!confirm(`Excluir material "${b.dataset.delMnome}"? Irreversível.`)) return;
     try { await api('/api/materiais/' + b.dataset.delM, { method: 'DELETE' }); render(); }
@@ -1252,6 +1280,106 @@ function fileToBase64(file) {
     reader.readAsDataURL(file);
   });
 }
+
+// ── EDIÇÃO (membro / material) ──
+let _editSaveHandler = null;
+
+function abrirEditar(titulo, bodyHtml, saveHandler) {
+  document.getElementById('editTitle').textContent = titulo;
+  document.getElementById('editBody').innerHTML = bodyHtml;
+  _editSaveHandler = saveHandler;
+  document.getElementById('editOverlay').classList.add('open');
+}
+
+function fecharEditar() {
+  document.getElementById('editOverlay').classList.remove('open');
+  _editSaveHandler = null;
+}
+
+function abrirEditarMembro(m) {
+  const obraOpts = '<option value="">Geral (todas as obras)</option>' +
+    state.obras.map(o => `<option value="${o.id}" ${o.id===m.obra_id?'selected':''}>${escape(o.nome)}</option>`).join('');
+  const tipos = ['diarista','clt','empreitada','terceirizado'];
+  const tipoOpts = tipos.map(t => `<option value="${t}" ${t===m.tipo_contrato?'selected':''}>${t}</option>`).join('');
+
+  const body = `
+    <div class="form-grid">
+      <input id="eNome" placeholder="Nome" value="${escape(m.nome||'')}">
+      <input id="eFunc" placeholder="Função" value="${escape(m.funcao||'')}">
+      <select id="eTipo">${tipoOpts}</select>
+      <input id="eTel" placeholder="Telefone" value="${escape(m.telefone||'')}">
+      <input id="eVal" type="number" step="0.01" placeholder="Valor diária (R$)" value="${m.valor_dia||''}">
+      <input id="eEsp" placeholder="Especialidade" value="${escape(m.especialidade||'')}">
+    </div>
+    <div style="margin-top:8px;">
+      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Obra</label>
+      <select id="eObraId" style="width:100%; margin-top:4px;">${obraOpts}</select>
+    </div>
+  `;
+  abrirEditar(`Editar membro — ${m.nome}`, body, async () => {
+    await api('/api/equipe/' + m.id, {
+      method: 'PUT',
+      body: JSON.stringify({
+        nome:          document.getElementById('eNome').value.trim() || null,
+        funcao:        document.getElementById('eFunc').value.trim() || null,
+        tipo_contrato: document.getElementById('eTipo').value,
+        telefone:      document.getElementById('eTel').value.trim() || null,
+        valor_dia:     parseFloat(document.getElementById('eVal').value) || null,
+        especialidade: document.getElementById('eEsp').value.trim() || null,
+        obra_id:       document.getElementById('eObraId').value || null,
+      }),
+    });
+  });
+}
+
+function abrirEditarMaterial(m) {
+  const obraOpts = '<option value="">Estoque geral</option>' +
+    state.obras.map(o => `<option value="${o.id}" ${o.id===m.obra_id?'selected':''}>${escape(o.nome)}</option>`).join('');
+  const body = `
+    <div class="form-grid">
+      <input id="eMNome" placeholder="Nome" value="${escape(m.nome||'')}">
+      <input id="eMCat" placeholder="Categoria" value="${escape(m.categoria||'')}">
+      <input id="eMUn" placeholder="Unidade" value="${escape(m.unidade||'un')}">
+      <input id="eMEst" type="number" step="0.01" placeholder="Estoque" value="${m.estoque||0}">
+      <input id="eMMin" type="number" step="0.01" placeholder="Mínimo" value="${m.estoque_minimo||0}">
+      <input id="eMVal" type="number" step="0.01" placeholder="Valor unit." value="${m.valor_unitario||''}">
+      <input id="eMForn" placeholder="Fornecedor" value="${escape(m.fornecedor||'')}">
+      <input id="eMLocal" placeholder="Local" value="${escape(m.local||'')}">
+    </div>
+    <div style="margin-top:8px;">
+      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Obra</label>
+      <select id="eMObraId" style="width:100%; margin-top:4px;">${obraOpts}</select>
+    </div>
+  `;
+  abrirEditar(`Editar material — ${m.nome}`, body, async () => {
+    await api('/api/materiais/' + m.id, {
+      method: 'PUT',
+      body: JSON.stringify({
+        nome:                 document.getElementById('eMNome').value.trim() || null,
+        categoria:            document.getElementById('eMCat').value.trim() || null,
+        unidade:              document.getElementById('eMUn').value.trim() || 'un',
+        estoque:              parseFloat(document.getElementById('eMEst').value) || 0,
+        estoque_minimo:       parseFloat(document.getElementById('eMMin').value) || 0,
+        valor_unitario:       parseFloat(document.getElementById('eMVal').value) || null,
+        fornecedor_principal: document.getElementById('eMForn').value.trim() || null,
+        local_armazenamento:  document.getElementById('eMLocal').value.trim() || null,
+        obra_id:              document.getElementById('eMObraId').value || null,
+      }),
+    });
+  });
+}
+
+document.getElementById('editClose').onclick = fecharEditar;
+document.getElementById('editCancel').onclick = fecharEditar;
+document.getElementById('editOverlay').onclick = e => { if (e.target.id === 'editOverlay') fecharEditar(); };
+document.getElementById('editSave').onclick = async () => {
+  if (!_editSaveHandler) return;
+  try {
+    await _editSaveHandler();
+    fecharEditar();
+    render();
+  } catch (e) { alert('Erro: ' + e.message); }
+};
 
 // ── ZAYRA ──
 const SUGESTOES = [
