@@ -32,6 +32,7 @@ import * as obras from './integrations/obras';
 import * as alarmes from './integrations/alarmes';
 import * as cofre from './integrations/cofre';
 import * as vistorias from './integrations/vistorias';
+import * as cowork from './integrations/cowork';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -555,6 +556,12 @@ app.post('/api/diario', apiHandle(args => obras.registrarDiarioObra(args as Para
 app.get('/api/profissoes-catalogo', apiHandle(() => obras.listarProfissoesCatalogo()));
 app.put('/api/profissoes-catalogo/:id', apiHandle(args => obras.atualizarProfissaoCatalogo(args as Parameters<typeof obras.atualizarProfissaoCatalogo>[0])));
 
+// Cowork (tarefas em background)
+app.get   ('/api/cowork',       apiHandle(args => cowork.listarTarefasCowork(args as Parameters<typeof cowork.listarTarefasCowork>[0])));
+app.get   ('/api/cowork/:id',   apiHandle(args => cowork.buscarTarefaCowork((args as { id: string }).id)));
+app.post  ('/api/cowork',       apiHandle(args => cowork.criarTarefaCowork(args as Parameters<typeof cowork.criarTarefaCowork>[0])));
+app.delete('/api/cowork/:id',   apiHandle(args => cowork.cancelarTarefaCowork(args as { id: string; confirm?: boolean })));
+
 // Vistorias VTO
 app.get   ('/api/vistorias',     apiHandle(args => vistorias.listarVistorias(args as Parameters<typeof vistorias.listarVistorias>[0])));
 app.get   ('/api/vistorias/:id', apiHandle(args => vistorias.buscarVistoria((args as { id: string }).id)));
@@ -641,6 +648,7 @@ app.listen(PORT, () => {
   startProactiveNotifications();
   startDailyScheduler();
   alarmes.startAlarmesTicker();
+  cowork.startCoworkWorker();
   void initDb()
     .then(() => loadSessionFromDb())
     .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));

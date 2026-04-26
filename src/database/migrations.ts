@@ -193,6 +193,24 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.22: Cowork — tarefas em background
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS zayra_tarefas (
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      descricao     VARCHAR(300) NOT NULL,
+      prompt        TEXT NOT NULL,
+      status        ENUM('pendente','executando','concluida','falhou','cancelada') DEFAULT 'pendente',
+      resultado     LONGTEXT,
+      tools_usadas  VARCHAR(500),
+      erro          TEXT,
+      session_id    VARCHAR(100),
+      criada_em     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      iniciada_em   TIMESTAMP NULL,
+      concluida_em  TIMESTAMP NULL,
+      INDEX idx_status (status, criada_em)
+    )
+  `);
+
   // v1.21: VTO — Vistoria Técnica de Obra
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS romatec_obra_vistorias (

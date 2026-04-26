@@ -10,6 +10,7 @@ import * as obras from '../integrations/obras';
 import * as alarmes from '../integrations/alarmes';
 import * as cofre from '../integrations/cofre';
 import * as vistorias from '../integrations/vistorias';
+import * as cowork from '../integrations/cowork';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -755,6 +756,50 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['obra_id', 'atividades'],
     },
   },
+  // ── Cowork — tarefas em background (v1.22) ──
+  {
+    name: 'criar_tarefa_cowork',
+    description: 'Cria uma tarefa pra você executar em BACKGROUND enquanto o CEO faz outra coisa. Você pega a tarefa numa instância paralela, executa via think() (com acesso a todas as tools), e quando termina notifica via push web + Telegram. Use quando o CEO disser "faz isso enquanto eu vou em outra coisa", "deixa rodando", "me avisa quando terminar". Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        descricao: { type: 'string', description: 'Resumo curto pra UI/notificação (ex: "Análise de leads quentes do mês")' },
+        prompt:    { type: 'string', description: 'Instrução completa que será executada pela ZAYRA paralela' },
+        confirm:   { type: 'boolean' },
+      },
+      required: ['descricao', 'prompt'],
+    },
+  },
+  {
+    name: 'listar_tarefas_cowork',
+    description: 'Lista tarefas em background (filtra por status: pendente, executando, concluida, falhou, cancelada).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['pendente','executando','concluida','falhou','cancelada'] },
+        limite: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'buscar_tarefa_cowork',
+    description: 'Retorna detalhes completos de uma tarefa cowork: prompt, resultado, tools usadas, tempos.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'cancelar_tarefa_cowork',
+    description: 'Cancela tarefa pendente ou em execução. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, confirm: { type: 'boolean' } },
+      required: ['id'],
+    },
+  },
+
   // ── VTO — Vistoria Técnica de Obra (v1.21) ──
   {
     name: 'listar_vistorias',
@@ -1250,6 +1295,18 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'registrar_diario_obra':
         data = await obras.registrarDiarioObra(input as Parameters<typeof obras.registrarDiarioObra>[0]);
+        break;
+      case 'criar_tarefa_cowork':
+        data = await cowork.criarTarefaCowork(input as Parameters<typeof cowork.criarTarefaCowork>[0]);
+        break;
+      case 'listar_tarefas_cowork':
+        data = await cowork.listarTarefasCowork(input as Parameters<typeof cowork.listarTarefasCowork>[0]);
+        break;
+      case 'buscar_tarefa_cowork':
+        data = await cowork.buscarTarefaCowork(input.id as string);
+        break;
+      case 'cancelar_tarefa_cowork':
+        data = await cowork.cancelarTarefaCowork(input as { id: string; confirm?: boolean });
         break;
       case 'listar_vistorias':
         data = await vistorias.listarVistorias(input as Parameters<typeof vistorias.listarVistorias>[0]);
