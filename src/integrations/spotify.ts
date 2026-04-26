@@ -81,8 +81,20 @@ async function request<T>(config: AxiosRequestConfig): Promise<T> {
   try {
     return await exec();
   } catch (err) {
-    const ax = err as AxiosError<{ error?: { status?: number; message?: string } }>;
+    const ax = err as AxiosError<{ error?: { status?: number; message?: string } | string }>;
     const status = ax.response?.status;
+    const rawData = ax.response?.data;
+    // Log estruturado pra debug — fica nos logs do Railway
+    console.error(
+      '[Spotify request error]',
+      JSON.stringify({
+        status,
+        url:    ax.config?.url,
+        method: ax.config?.method,
+        data:   rawData,
+      }),
+    );
+
     if (status === 401) {
       invalidateToken();
       return await exec();
@@ -97,8 +109,21 @@ async function request<T>(config: AxiosRequestConfig): Promise<T> {
       const retry = ax.response?.headers?.['retry-after'];
       throw new Error(`Spotify (429): rate limit excedido. Tente em ${retry ?? '?'} segundos.`);
     }
-    const msg = ax.response?.data?.error?.message ?? ax.message;
-    throw new Error(`Spotify: ${msg}`);
+
+    // Extrai mensagem real do Spotify (formato: { error: { status, message } } OU { error: "string" })
+    let detail = ax.message;
+    if (rawData && typeof rawData === 'object' && 'error' in rawData) {
+      const e = (rawData as { error?: unknown }).error;
+      if (typeof e === 'string') detail = e;
+      else if (e && typeof e === 'object' && 'message' in e) {
+        detail = String((e as { message?: unknown }).message ?? ax.message);
+      } else {
+        detail = JSON.stringify(rawData);
+      }
+    } else if (typeof rawData === 'string' && rawData.length) {
+      detail = rawData;
+    }
+    throw new Error(`Spotify (${status ?? '?'}): ${detail}`);
   }
 }
 
