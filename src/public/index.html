@@ -108,72 +108,19 @@
       display: none; cursor: pointer;
     }
 
-    /* ──────────── Avatar Stage ──────────── */
+    /* ──────────── Avatar Stage (modo limpo v1.7.4) ──────────── */
     .avatar-stage {
       position: relative; width: 280px; height: 280px;
       display: flex; align-items: center; justify-content: center;
     }
 
-    /* Aura halo behind avatar — color reflects state */
-    .avatar-aura {
-      position: absolute; inset: -40px; border-radius: 50%;
-      background: radial-gradient(circle, rgba(91,140,255,.35), rgba(91,140,255,0) 65%);
-      filter: blur(18px);
-      transition: background .4s ease, transform .4s ease;
-      animation: aura-breathe 4s ease-in-out infinite;
-    }
-    @keyframes aura-breathe { 0%,100%{transform:scale(1);opacity:.85} 50%{transform:scale(1.08);opacity:1} }
-
-    .avatar-stage[data-state="listening"]  .avatar-aura { background: radial-gradient(circle, rgba(91,140,255,.55), transparent 65%); }
-    .avatar-stage[data-state="thinking"]   .avatar-aura { background: radial-gradient(circle, rgba(243,201,105,.5), transparent 65%); animation: aura-pulse 1s ease-in-out infinite; }
-    .avatar-stage[data-state="speaking"]   .avatar-aura { background: radial-gradient(circle, rgba(87,245,167,.5), transparent 65%); animation: aura-breathe 1.5s ease-in-out infinite; }
-    .avatar-stage[data-state="alert"]      .avatar-aura { background: radial-gradient(circle, rgba(255,85,119,.55), transparent 65%); animation: aura-pulse .7s ease-in-out infinite; }
-    @keyframes aura-pulse { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.15);opacity:1} }
-
-    /* Outer rotating ring */
-    .ring-outer {
-      position: absolute; inset: -22px; border-radius: 50%;
-      border: 1px solid rgba(91,140,255,.25);
-      border-top-color: rgba(0,225,255,.7);
-      animation: ring-rotate 6s linear infinite;
-    }
-    .ring-outer.fast { animation-duration: 1.6s; border-top-color: var(--gold); }
-    @keyframes ring-rotate { to { transform: rotate(360deg); } }
-
-    /* Inner reactive ring (audio level) */
-    .ring-inner {
-      position: absolute; inset: -8px; border-radius: 50%;
-      border: 2px solid rgba(91,140,255,.35);
-      box-shadow: 0 0 18px rgba(91,140,255,.25);
-      transition: transform .12s linear, border-color .3s, box-shadow .3s;
-    }
-    .avatar-stage[data-state="listening"] .ring-inner { border-color: var(--neon-2); box-shadow: 0 0 30px rgba(0,225,255,.45); }
-    .avatar-stage[data-state="thinking"]  .ring-inner { border-color: var(--gold);   box-shadow: 0 0 30px rgba(243,201,105,.4); }
-    .avatar-stage[data-state="speaking"]  .ring-inner { border-color: var(--green);  box-shadow: 0 0 35px rgba(87,245,167,.5); }
-    .avatar-stage[data-state="alert"]     .ring-inner { border-color: var(--red);    box-shadow: 0 0 30px rgba(255,85,119,.5); }
-
-    /* Energy waves (thinking) */
-    .energy-wave {
-      position: absolute; inset: 0; border-radius: 50%;
-      border: 1px solid rgba(243,201,105,.6);
-      opacity: 0; pointer-events: none;
-    }
-    .avatar-stage[data-state="thinking"] .energy-wave { animation: energy-out 1.6s ease-out infinite; }
-    .avatar-stage[data-state="thinking"] .energy-wave:nth-child(2) { animation-delay: .55s; }
-    .avatar-stage[data-state="thinking"] .energy-wave:nth-child(3) { animation-delay: 1.1s; }
-    @keyframes energy-out {
-      0%   { transform: scale(.7); opacity: .8; }
-      100% { transform: scale(1.5); opacity: 0; }
-    }
-
-    /* Avatar card (frame) */
+    /* Avatar card (frame) — apenas foto + box-shadow estável */
     .avatar-frame {
       position: relative; width: 220px; height: 220px; border-radius: 50%;
       overflow: hidden;
       box-shadow:
         0 0 40px rgba(91,140,255,.35),
         inset 0 0 30px rgba(0,225,255,.18);
-      will-change: transform, filter;
       cursor: pointer;
     }
     .avatar-frame::after {
@@ -183,20 +130,6 @@
     }
     .avatar-img {
       width: 100%; height: 100%; object-fit: cover; display: block;
-      transition: filter .3s ease;
-    }
-    .avatar-stage[data-state="speaking"] .avatar-img { filter: brightness(1.15) saturate(1.1); }
-
-    /* Face overlay canvas — eyes & mouth */
-    #faceCanvas {
-      position: absolute; inset: 0; width: 100%; height: 100%;
-      pointer-events: none; z-index: 5;
-      mix-blend-mode: normal;
-    }
-
-    /* Particles canvas around the avatar */
-    #avatarParticles {
-      position: absolute; inset: -60px; pointer-events: none; z-index: 0;
     }
 
     /* Identity */
@@ -467,17 +400,9 @@
   </div>
 
   <div class="avatar-stage" id="avatarStage" data-state="idle">
-    <canvas id="avatarParticles"></canvas>
-    <div class="avatar-aura"></div>
-    <div class="ring-outer"></div>
-    <div class="ring-inner" id="ringInner"></div>
-    <div class="energy-wave"></div>
-    <div class="energy-wave"></div>
-    <div class="energy-wave"></div>
     <div class="avatar-frame" id="avatarFrame">
       <img class="avatar-img" id="avatarImg" src="/avatar.png" alt="ZAYRA"
         onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%22 stop-color=%22%235b8cff%22/><stop offset=%221%22 stop-color=%22%23b66bff%22/></linearGradient></defs><circle cx=%22100%22 cy=%22100%22 r=%22100%22 fill=%22url(%23g)%22/><text x=%2250%25%22 y=%2256%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2290%22 font-family=%22Orbitron%22 fill=%22%23ffffff%22>Z</text></svg>'" />
-      <canvas id="faceCanvas" width="220" height="220"></canvas>
     </div>
   </div>
 
@@ -642,231 +567,23 @@ const FRAME_MS   = 1000 / TARGET_FPS;
   })(0);
 })();
 
-// ── Avatar particles (orbiting around the avatar) ─────────────────────────────
-(function(){
-  const cv = document.getElementById('avatarParticles'), ctx = cv.getContext('2d');
-  function resize(){
-    const rect = cv.parentElement.getBoundingClientRect();
-    cv.width = rect.width; cv.height = rect.height;
-  }
-  resize(); addEventListener('resize', resize);
-  const N = isMobile ? 14 : 24;
-  const parts = [];
-  for (let i = 0; i < N; i++) parts.push({
-    a: Math.random() * Math.PI * 2,
-    r: 110 + Math.random() * 50,
-    s: 0.0006 + Math.random() * 0.0012,
-    z: Math.random(),
-    hue: Math.random() < .5 ? '91,140,255' : (Math.random() < .5 ? '0,225,255' : '182,107,255'),
-    size: 1 + Math.random() * 2
-  });
-  let last = 0;
-  function tick(t){
-    requestAnimationFrame(tick);
-    if (document.hidden) return;
-    if (t - last < FRAME_MS) return; last = t;
-    const W = cv.width, H = cv.height, cx = W/2, cy = H/2;
-    ctx.clearRect(0,0,W,H);
-    const stateEl = document.getElementById('avatarStage');
-    const speedMul = stateEl.dataset.state === 'thinking' ? 4 : (stateEl.dataset.state === 'speaking' ? 2 : 1);
-    parts.forEach(p => {
-      p.a += p.s * speedMul * 16;
-      const x = cx + Math.cos(p.a) * p.r;
-      const y = cy + Math.sin(p.a) * p.r * 0.95;
-      const alpha = 0.4 + Math.sin(p.a * 2) * 0.3;
-      ctx.beginPath();
-      ctx.arc(x, y, p.size, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${p.hue},${alpha})`;
-      ctx.shadowBlur = 8; ctx.shadowColor = `rgba(${p.hue},.8)`;
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    });
-  }
-  tick(0);
-})();
-
-// ── FaceAnimator ──────────────────────────────────────────────────────────────
+// ── FaceAnimator (stub no-op desde v1.7.4 — modo limpo) ─────────────────────
+//
+// O canvas faceCanvas e suas animações de olhos/boca foram removidas: estavam
+// renderizando como uma faixa preta retangular sobre a foto. Mantemos a classe
+// como stub para que as ~14 chamadas avatarCtrl.setState/updateLipSync/dispose
+// espalhadas pelo código continuem válidas sem efeito visual. O atributo
+// data-state no .avatar-stage continua sendo escrito, inerte mas inofensivo.
+//
 class FaceAnimator {
   constructor() {
-    this.frame = document.getElementById('avatarFrame');
-    this.img   = document.getElementById('avatarImg');
-    this.stage = document.getElementById('avatarStage');
-    this.face  = document.getElementById('faceCanvas');
-    this.ctx   = this.face.getContext('2d');
-
-    // calibrate canvas to actual frame size
-    const r = this.frame.getBoundingClientRect();
-    this.face.width  = r.width;
-    this.face.height = r.height;
-    addEventListener('resize', () => {
-      const rr = this.frame.getBoundingClientRect();
-      this.face.width = rr.width; this.face.height = rr.height;
-    });
-
     this.state = 'idle';
-    this.mouthVal = 0; this.mouthSmoothed = 0;
-    this.headYaw = 0;  this.tgtYaw = 0;
-    this.headPitch = 0; this.tgtPitch = 0;
-    this._t = 0; this._ts = performance.now();
-
-    // Blink
-    this.blinkT = 0; this.nextBlink = 3 + Math.random() * 4;
-    this._blinking = false; this._blinkStart = 0;
-
-    // Smile / brow expression mood (0..1) — rises on greeting/speaking
-    this.smile = 0; this.targetSmile = 0;
-
-    this._bindInput();
-    this._loop();
+    const stage = document.getElementById('avatarStage');
+    this.stage = stage; // mantido só pra setState escrever data-state (inerte agora)
   }
-
-  _bindInput() {
-    addEventListener('mousemove', e => {
-      this.tgtYaw   = ((e.clientX - innerWidth  / 2) / (innerWidth  / 2)) *  6;
-      this.tgtPitch = ((e.clientY - innerHeight / 2) / (innerHeight / 2)) * -4;
-    });
-    addEventListener('touchmove', e => {
-      if (!e.touches.length) return;
-      this.tgtYaw   = ((e.touches[0].clientX - innerWidth  / 2) / (innerWidth  / 2)) *  6;
-      this.tgtPitch = ((e.touches[0].clientY - innerHeight / 2) / (innerHeight / 2)) * -4;
-    }, { passive: true });
-
-    this.frame.addEventListener('click', () => {
-      this.targetSmile = 1;
-      setTimeout(() => { this.targetSmile = 0; }, 1800);
-      this.frame.style.transition = 'filter .08s';
-      this.frame.style.filter = 'brightness(1.6) drop-shadow(0 0 22px #5b8cff)';
-      setTimeout(() => { this.frame.style.filter = ''; setTimeout(() => { this.frame.style.transition = 'filter .25s ease'; }, 80); }, 140);
-      fetch('/text', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ message: 'Diga apenas "Olá, José Romário!" de forma executiva.', voice: true })
-      }).then(r => r.ok ? r.blob() : null).then(b => { if (b) window._playBlob(b, 'Olá, José Romário!'); }).catch(() => {});
-    });
-  }
-
-  setState(s) {
-    this.state = s;
-    this.stage.dataset.state = s;
-    if (s === 'speaking' || s === 'greeting') this.targetSmile = 0.7;
-    else if (s !== 'alert') this.targetSmile = 0.1;
-  }
-
-  updateLipSync(vol) { this.mouthVal = Math.min(1, vol / 70); }
-
-  _loop() {
-    let last = 0;
-    const tick = (t) => {
-      requestAnimationFrame(tick);
-      if (document.hidden) return;
-      if (t - last < FRAME_MS) return;
-      const dt = Math.min((t - this._ts) / 1000, 0.1);
-      this._ts = t; this._t += dt; last = t;
-      this._update(dt);
-    };
-    tick(performance.now());
-  }
-
-  _update(dt) {
-    const ease = 1 - Math.pow(0.04, dt);
-    this.headYaw   += (this.tgtYaw   - this.headYaw)   * ease;
-    this.headPitch += (this.tgtPitch - this.headPitch) * ease;
-    this.smile     += (this.targetSmile - this.smile)  * (1 - Math.pow(0.05, dt));
-
-    // Smooth mouth — natural lip sync (low-pass filter)
-    this.mouthSmoothed += (this.mouthVal - this.mouthSmoothed) * (1 - Math.pow(0.0001, dt));
-
-    // Breathing: subtle chest scale
-    const breathScale = 1 + Math.sin(this._t * Math.PI * 2 / 3.4) * 0.012;
-    this.frame.style.transform =
-      `perspective(720px) rotateY(${this.headYaw}deg) rotateX(${this.headPitch}deg) scale(${breathScale})`;
-
-    // Blink timer
-    this.blinkT += dt;
-    let blinkVal = 0;
-    if (this.blinkT >= this.nextBlink && !this._blinking) {
-      this._blinkStart = this.blinkT; this._blinking = true;
-      this.nextBlink = this.blinkT + 3 + Math.random() * 3;
-    }
-    if (this._blinking) {
-      const dur = 0.18, el = this.blinkT - this._blinkStart;
-      blinkVal = el < dur / 2 ? el / (dur / 2) : Math.max(0, 1 - (el - dur / 2) / (dur / 2));
-      if (el > dur) { this._blinking = false; blinkVal = 0; }
-    }
-
-    // Reactive ring scale → breathing & audio
-    const ring = document.getElementById('ringInner');
-    if (ring) {
-      let scale = 1 + Math.sin(this._t * Math.PI * 2 / 3.4) * 0.015;
-      if (this.state === 'speaking') scale = 1 + this.mouthSmoothed * 0.10;
-      else if (this.state === 'thinking') scale = 1 + Math.sin(this._t * 8) * 0.015;
-      ring.style.transform = `scale(${scale})`;
-    }
-
-    this._drawFace(blinkVal);
-  }
-
-  _drawFace(blinkVal) {
-    const ctx = this.ctx, W = this.face.width, H = this.face.height;
-    ctx.clearRect(0, 0, W, H);
-    ctx.save();
-    ctx.beginPath(); ctx.arc(W/2, H/2, W/2 - 1, 0, Math.PI*2); ctx.clip();
-
-    // Eye region — only render eyelid overlay during blink (subtle)
-    const eyeY  = H * 0.42;
-    const eyeRx = W * 0.085;
-    const eyeRyMax = H * 0.04;
-    const lEx = W * 0.34, rEx = W * 0.66;
-
-    if (blinkVal > 0.02) {
-      ctx.globalAlpha = Math.min(0.85, blinkVal);
-      const grad = ctx.createLinearGradient(0, eyeY - eyeRyMax, 0, eyeY + eyeRyMax);
-      grad.addColorStop(0, 'rgba(8,12,32,.95)');
-      grad.addColorStop(1, 'rgba(20,28,60,.85)');
-      ctx.fillStyle = grad;
-      [lEx, rEx].forEach(cx => {
-        ctx.beginPath();
-        ctx.ellipse(cx, eyeY, eyeRx, Math.max(1, eyeRyMax * blinkVal), 0, 0, Math.PI*2);
-        ctx.fill();
-      });
-      ctx.globalAlpha = 1;
-    }
-
-    // Mouth (lip sync) — only show when speaking
-    const mouth = this.mouthSmoothed;
-    if ((mouth > 0.04 || this.smile > 0.15) && this.state !== 'idle') {
-      const mX = W * 0.5;
-      const mY = H * 0.66;
-      const open = this.state === 'speaking' ? mouth : 0;
-      const mRx = W * 0.075 + open * W * 0.045;
-      const mRy = H * 0.012 + open * H * 0.038;
-
-      // Smile curve (offset bottom of mouth)
-      const smileLift = this.smile * H * 0.012;
-
-      // Outer lips
-      ctx.fillStyle = 'rgba(20,8,16,.85)';
-      ctx.strokeStyle = 'rgba(91,140,255,.4)';
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.ellipse(mX, mY - smileLift, mRx, mRy, 0, 0, Math.PI*2);
-      ctx.fill();
-      ctx.stroke();
-
-      // Inner mouth glow when speaking
-      if (open > 0.1) {
-        const innerGrad = ctx.createRadialGradient(mX, mY - smileLift, 0, mX, mY - smileLift, mRx);
-        innerGrad.addColorStop(0, 'rgba(91,140,255,.35)');
-        innerGrad.addColorStop(1, 'rgba(91,140,255,0)');
-        ctx.fillStyle = innerGrad;
-        ctx.beginPath();
-        ctx.ellipse(mX, mY - smileLift, mRx * 0.7, mRy * 0.7, 0, 0, Math.PI*2);
-        ctx.fill();
-      }
-    }
-
-    ctx.restore();
-  }
-
-  dispose() {}
+  setState(s) { this.state = s; if (this.stage) this.stage.dataset.state = s; }
+  updateLipSync(_vol) { /* no-op */ }
+  dispose() { /* no-op */ }
 }
 
 // ── AudioController (lip sync) ────────────────────────────────────────────────
