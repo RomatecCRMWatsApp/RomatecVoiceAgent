@@ -203,26 +203,64 @@ app.get('/chat/search', async (req: Request, res: Response) => {
 });
 
 app.get('/briefing', async (_req: Request, res: Response) => {
-  const [leads, contratos, campanhas, servicos, agendaHoje] = await Promise.allSettled([
-    crm.listarLeads({ limite: 100 }),
-    avalieimob.listarContratos({ status: 'pendente' }),
-    crm.listarCampanhas(),
-    avalieimob.statusServicos(),
-    calendar.listarEventosDia(),
+  // Per-integration timeout: 5s. Distinguishes "empty success" from "timeout error".
+  const TIMEOUT_MS = 5000;
+  const withTimeout = <T>(p: Promise<T>): Promise<T> => Promise.race([
+    p,
+    new Promise<T>((_, rej) => setTimeout(() => rej(new Error('integration_timeout')), TIMEOUT_MS)),
   ]);
 
-  const briefingText = await think('Me dê um resumo executivo completo do dia, incluindo leads, contratos, campanhas e agenda.');
+  const [leads, contratos, campanhas, servicos, agendaHoje] = await Promise.allSettled([
+    withTimeout(crm.listarLeads({ limite: 100 })),
+    withTimeout(avalieimob.listarContratos({ status: 'pendente' })),
+    withTimeout(crm.listarCampanhas()),
+    withTimeout(avalieimob.statusServicos()),
+    withTimeout(calendar.listarEventosDia()),
+  ]);
+
+  // Build a status map so the LLM (and the JSON consumer) can tell empty from offline.
+  const statusOf = (r: PromiseSettledResult<unknown>) => r.status === 'fulfilled' ? 'ok' : 'offline';
+  const integrations = {
+    crm_leads:     statusOf(leads),
+    crm_campanhas: statusOf(campanhas),
+    avalieimob_contratos: statusOf(contratos),
+    avalieimob_servicos:  statusOf(servicos),
+    google_calendar:      statusOf(agendaHoje),
+  };
+
+  const data = {
+    leads:               leads.status       === 'fulfilled' ? leads.value       : [],
+    contratos_pendentes: contratos.status   === 'fulfilled' ? contratos.value   : [],
+    campanhas:           campanhas.status   === 'fulfilled' ? campanhas.value   : [],
+    servicos:            servicos.status    === 'fulfilled' ? servicos.value    : { online: false },
+    agenda_hoje:         agendaHoje.status  === 'fulfilled' ? agendaHoje.value  : [],
+  };
+
+  // Tell the LLM exactly what is online vs offline so it can't hallucinate generalizations.
+  const integrationLines = Object.entries(integrations)
+    .map(([k, v]) => `- ${k}: ${v}`)
+    .join('\n');
+
+  const briefingText = await think(
+    `Gere um resumo executivo do dia em português, formato curto.
+
+Estado das integrações:
+${integrationLines}
+
+Dados disponíveis (apenas integrações com status "ok" são reais; "offline" significa que a integração não respondeu — não invente dados, e quando "ok" retornar lista vazia, isso significa "sem itens hoje", NÃO erro):
+- leads.length: ${data.leads.length}
+- contratos_pendentes.length: ${data.contratos_pendentes.length}
+- campanhas.length: ${data.campanhas.length}
+- agenda_hoje.length: ${data.agenda_hoje.length}
+
+Mencione apenas o que for relevante. Para integrações offline, diga apenas "{nome} indisponível no momento" — não trate como dado vazio.`,
+  );
 
   res.json({
     agent: AGENT_IDENTITY.name,
     briefing: briefingText.text,
-    data: {
-      leads:               leads.status       === 'fulfilled' ? leads.value       : [],
-      contratos_pendentes: contratos.status   === 'fulfilled' ? contratos.value   : [],
-      campanhas:           campanhas.status   === 'fulfilled' ? campanhas.value   : [],
-      servicos:            servicos.status    === 'fulfilled' ? servicos.value    : { online: false },
-      agenda_hoje:         agendaHoje.status  === 'fulfilled' ? agendaHoje.value  : [],
-    },
+    integrations,
+    data,
   });
 });
 
