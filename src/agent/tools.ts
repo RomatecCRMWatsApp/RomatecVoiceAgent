@@ -5,6 +5,7 @@ import * as calendar from '../integrations/calendar';
 import * as spotify from '../integrations/spotify';
 import * as telegram from '../integrations/telegram';
 import * as filesystem from '../integrations/filesystem';
+import * as system from '../integrations/system';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -455,6 +456,37 @@ export const toolDefinitions: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'disco_status',
+    description: 'Reporta espaço em disco (drives C:, D:, etc) e tamanho das pastas temporárias do Windows que podem ser limpas. Use quando o CEO falar "máquina lenta", "sem espaço", "tá pesado".',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'limpar_temp',
+    description: 'Limpa pastas temporárias do Windows pra liberar espaço e melhorar performance. DESTRUTIVO. Sempre rode primeiro sem "confirm" pra ver preview do que será apagado, peça autorização verbal ao CEO, depois rode com "confirm: true". Categorias: temp_usuario, temp_windows, cache_navegador, cache_inet, relatorios_erro, crashdumps, prefetch, delivery_optimization, thumbnails, ou "tudo" (todas).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        categoria: { type: 'string', description: 'Uma categoria específica ou "tudo" (default)' },
+        confirm:   { type: 'boolean', description: 'Só passar true APÓS autorização do CEO' },
+      },
+    },
+  },
+  {
+    name: 'limpar_lixeira',
+    description: 'Esvazia a Lixeira do Windows. IRREVERSÍVEL. Exige preview + confirmação verbal antes de "confirm: true".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        confirm: { type: 'boolean' },
+      },
+    },
+  },
+  {
+    name: 'listar_categorias_limpeza',
+    description: 'Lista as categorias de limpeza disponíveis com label, caminhos e idade mínima dos arquivos pra apagar.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'fs_raizes',
     description: 'Retorna lista de diretórios autorizados pra acesso ao filesystem (FS_ALLOWED_ROOTS).',
     input_schema: { type: 'object', properties: {} },
@@ -680,6 +712,18 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'fs_raizes':
         data = filesystem.fsRoots();
+        break;
+      case 'disco_status':
+        data = await system.discoStatus();
+        break;
+      case 'limpar_temp':
+        data = await system.limparTemp(input as { categoria?: string; confirm?: boolean });
+        break;
+      case 'limpar_lixeira':
+        data = await system.limparLixeira(input as { confirm?: boolean });
+        break;
+      case 'listar_categorias_limpeza':
+        data = system.listarCategorias();
         break;
       case 'delegar_tarefa': {
         const { colaborador_nome, tarefa, prazo } = input as { colaborador_nome: string; tarefa: string; prazo?: string };
