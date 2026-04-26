@@ -30,6 +30,7 @@ import { startDailyScheduler } from './agent/scheduler';
 import * as calendar from './integrations/calendar';
 import * as obras from './integrations/obras';
 import * as alarmes from './integrations/alarmes';
+import * as cofre from './integrations/cofre';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -552,6 +553,18 @@ app.post('/api/diario', apiHandle(args => obras.registrarDiarioObra(args as Para
 // Catálogo de profissões
 app.get('/api/profissoes-catalogo', apiHandle(() => obras.listarProfissoesCatalogo()));
 app.put('/api/profissoes-catalogo/:id', apiHandle(args => obras.atualizarProfissaoCatalogo(args as Parameters<typeof obras.atualizarProfissaoCatalogo>[0])));
+
+// Cofre Obsidian
+app.post('/api/cofre/sincronizar', apiHandle(() => cofre.sincronizarCofreMemoria()));
+app.get ('/api/cofre/exportar',    apiHandle(() => cofre.exportarVaultZip()));
+app.get ('/api/cofre/baixar', async (_req: Request, res: Response) => {
+  try {
+    const r = await cofre.exportarVaultZip();
+    res.download(r.path, `zayra_memoria_${new Date().toISOString().slice(0,10)}.md`);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
 
 // Alarmes
 app.get   ('/api/alarmes',     apiHandle(args => alarmes.listarAlarmes(args as Parameters<typeof alarmes.listarAlarmes>[0])));

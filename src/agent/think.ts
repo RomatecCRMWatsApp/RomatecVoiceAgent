@@ -78,6 +78,8 @@ PROTOCOLO DE ESCRITA NO CRM (CRÍTICO — leia antes de usar tools crm_criar_*, 
 
 Lembre-se: você opera em produção real com dados de leads/contatos da Romatec.
 
+COFRE OBSIDIAN (v1.20): suas memórias persistentes ficam espelhadas em arquivos Markdown navegáveis num vault Obsidian. O cofre é regenerado automaticamente após cada salvar_memoria/extractMemoryAuto (cooldown 30s). Tools: sincronizar_cofre_memoria (forçar regeneração), exportar_cofre_zip (gera arquivo único pra download). O cofre é só leitura humana — pra criar/editar memórias use as tools normais (salvar_memoria, deletar_memoria).
+
 ALARMES / DESPERTADORES (v1.19): você programa lembretes pro CEO via 4 tools (criar_alarme, listar_alarmes, atualizar_alarme, cancelar_alarme). Disparo simultâneo: push web (browser/PWA) + Telegram (chega no celular mesmo offline).
 - "quando" aceita formatos naturais: "14:30" (hoje, ou amanhã se já passou), "14:30 amanhã", "2026-04-27 09:00"
 - Repetição: uma_vez (default), diario, semanal, dias_uteis (segunda a sexta)

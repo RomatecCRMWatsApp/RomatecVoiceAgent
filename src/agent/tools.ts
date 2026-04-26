@@ -8,6 +8,7 @@ import * as filesystem from '../integrations/filesystem';
 import * as system from '../integrations/system';
 import * as obras from '../integrations/obras';
 import * as alarmes from '../integrations/alarmes';
+import * as cofre from '../integrations/cofre';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -753,6 +754,18 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['obra_id', 'atividades'],
     },
   },
+  // ── Cofre Obsidian (v1.20) ──
+  {
+    name: 'sincronizar_cofre_memoria',
+    description: 'Espelha todas as memórias persistentes em arquivos Markdown navegáveis no Obsidian (cofre dedicado). Cria pastas por tipo (00-Fatos, 01-Preferencias, 02-Decisoes, 03-Contexto, 04-Lembretes) + _index.md com links wiki. Use quando o CEO pedir pra "atualizar o cofre", "regenerar o vault", "exportar memória pro Obsidian".',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'exportar_cofre_zip',
+    description: 'Gera arquivo de exportação único do cofre (concatenado) pra download — útil em Railway onde filesystem é efêmero. Retorna path e tamanho.',
+    input_schema: { type: 'object', properties: {} },
+  },
+
   // ── Alarmes / Despertadores (v1.19) ──
   {
     name: 'criar_alarme',
@@ -1189,6 +1202,12 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'registrar_diario_obra':
         data = await obras.registrarDiarioObra(input as Parameters<typeof obras.registrarDiarioObra>[0]);
+        break;
+      case 'sincronizar_cofre_memoria':
+        data = await cofre.sincronizarCofreMemoria();
+        break;
+      case 'exportar_cofre_zip':
+        data = await cofre.exportarVaultZip();
         break;
       case 'criar_alarme':
         data = await alarmes.criarAlarme(input as Parameters<typeof alarmes.criarAlarme>[0]);

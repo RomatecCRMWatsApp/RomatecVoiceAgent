@@ -80,6 +80,8 @@ export async function saveMemory(
     [type, content, relevance_tags ?? null, expires_at ?? null],
   );
   invalidateContextCache();
+  // Auto-sync do cofre Obsidian (silencioso, fire-and-forget)
+  void import('../integrations/cofre').then(c => c.autoSyncCofre()).catch(() => {});
   return result.insertId;
 }
 
