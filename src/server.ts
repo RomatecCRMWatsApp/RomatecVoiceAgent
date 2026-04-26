@@ -9,7 +9,7 @@ import { speak } from './agent/speak';
 import { AGENT_IDENTITY } from './agent/identity';
 import * as crm from './integrations/crm';
 import * as avalieimob from './integrations/avalieimob';
-import { processMessage, sendReply, WaMessage } from './integrations/whatsapp';
+import { processMessage, sendReply, parseZapiWebhook, logInbound } from './integrations/whatsapp';
 import { getAuthUrl, exchangeCode } from './integrations/calendar';
 import * as spotify from './integrations/spotify';
 import { addSSEClient, removeSSEClient, startProactiveNotifications } from './agent/proactive';
@@ -305,17 +305,33 @@ app.get('/notifications/stream', (req: Request, res: Response) => {
   req.on('close', () => removeSSEClient(clientId));
 });
 
-// ── WhatsApp webhook ──────────────────────────────────────────────────────────
+// ── WhatsApp webhook (formato ZAPI) ──────────────────────────────────────────
+// ZAPI manda 1 mensagem por POST. Aceita também o formato antigo (Meta-style com messages[])
 app.post('/webhook/whatsapp', (req: Request, res: Response) => {
-  res.json({ status: 'ok' });
-  const msgs = (req.body?.messages ?? []) as WaMessage[];
+  res.json({ status: 'ok' }); // ack imediato — processa async pra não travar ZAPI
+  const body = req.body ?? {};
+
+  // Tenta formato ZAPI (1 mensagem por payload)
+  const msgsZapi = parseZapiWebhook(body);
+
+  // Fallback: formato Meta-like com array messages[]
+  const legacyMsgs = Array.isArray((body as { messages?: unknown[] }).messages)
+    ? (body as { messages: unknown[] }).messages
+    : [];
+
+  const allMsgs = msgsZapi.length > 0 ? msgsZapi : (legacyMsgs as Parameters<typeof processMessage>[0][]);
+
   void (async () => {
-    for (const msg of msgs) {
+    for (const msg of allMsgs) {
       try {
+        // Log inbound (fire-and-forget)
+        const userText = msg.type === 'text' ? msg.text.body : '[áudio]';
+        void logInbound(msg.from, userText, msg.id).catch(() => {});
+
         const reply = await processMessage(msg);
         await sendReply(msg.from, reply);
       } catch (err) {
-        console.error('[WhatsApp webhook]', err);
+        console.error('[WhatsApp webhook]', err instanceof Error ? err.message : err);
       }
     }
   })();
