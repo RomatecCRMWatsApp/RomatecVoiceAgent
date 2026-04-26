@@ -33,6 +33,8 @@ const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
 app.set('trust proxy', 1);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+// Multer separado pra anexos multimodais (imagens/PDFs) — Claude aceita até 32MB/PDF e ~5MB/imagem
+const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 32 * 1024 * 1024, files: 5 } });
 
 app.use(express.json());
 
@@ -141,20 +143,35 @@ app.post('/voice', upload.single('audio'), async (req: Request, res: Response) =
   }
 });
 
-app.post('/text', async (req: Request, res: Response) => {
+app.post('/text', docUpload.array('files', 5), async (req: Request, res: Response) => {
   try {
-    const { message, voice = false, session_id } = req.body as {
-      message:     string;
-      voice?:      boolean;
+    const { message = '', voice: voiceRaw = false, session_id } = (req.body ?? {}) as {
+      message?:    string;
+      voice?:      boolean | string;
       session_id?: string;
     };
+    const voice = voiceRaw === true || voiceRaw === 'true';
 
-    if (!message) {
-      res.status(400).json({ error: 'Campo "message" obrigatório.' });
+    // Multimodal: se vieram files (multipart/form-data), converte pra ThinkAttachment[]
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    const attachments = files
+      .filter(f => f.mimetype.startsWith('image/') || f.mimetype === 'application/pdf')
+      .map(f => ({
+        kind:   (f.mimetype === 'application/pdf' ? 'document' : 'image') as 'image' | 'document',
+        mime:   f.mimetype,
+        base64: f.buffer.toString('base64'),
+      }));
+
+    if (!message && attachments.length === 0) {
+      res.status(400).json({ error: 'Envie ao menos "message" ou um anexo.' });
       return;
     }
 
-    const agentResponse = await think(message, { sessionId: session_id, channel: 'text' });
+    const agentResponse = await think(message, {
+      sessionId: session_id,
+      channel:   'text',
+      attachments: attachments.length > 0 ? attachments : undefined,
+    });
 
     if (voice) {
       const audioBuffer = await speak(agentResponse.text);

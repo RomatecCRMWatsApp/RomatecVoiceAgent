@@ -370,6 +370,28 @@
       padding: 10px 12px;
     }
     .chat-input-bar:focus-within { border-color: rgba(57,255,133,.5); box-shadow: 0 0 18px rgba(57,255,133,.15); }
+    .chat-attachments {
+      display: flex; flex-wrap: wrap; gap: 6px; align-self: stretch;
+      max-width: 100%;
+    }
+    .chat-attachments:empty { display: none; }
+    .chat-attachment-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(0,255,136,.12); border: 1px solid rgba(0,255,136,.35);
+      border-radius: 8px; padding: 4px 8px;
+      font-size: .72rem; color: var(--text); max-width: 200px;
+    }
+    .chat-attachment-chip img {
+      width: 24px; height: 24px; border-radius: 4px; object-fit: cover;
+    }
+    .chat-attachment-chip .name {
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .chat-attachment-chip button {
+      background: none; border: none; color: var(--text-dim); cursor: pointer;
+      font-size: .9rem; padding: 0 2px; line-height: 1;
+    }
+    .chat-attachment-chip button:hover { color: var(--red); }
     .chat-textarea {
       flex: 1; background: transparent; border: none; outline: none;
       color: var(--text); font-family: inherit; font-size: .9rem; line-height: 1.4;
@@ -612,6 +634,13 @@
         <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
       </svg>
     </button>
+    <button class="chat-history-btn" id="attachBtn" title="Anexar imagem ou PDF">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+      </svg>
+    </button>
+    <input type="file" id="attachInput" accept="image/*,application/pdf" multiple style="display:none" />
+    <div class="chat-attachments" id="chatAttachments"></div>
     <textarea class="chat-textarea" id="chatInput" rows="1"
       placeholder="Digite uma mensagem para a ZAYRA…"
       aria-label="Mensagem para a ZAYRA"></textarea>
@@ -893,21 +922,45 @@ async function processText(text, silent = false) {
 }
 
 // Text-only send (no voice playback): used by the chat input box
+// v1.11: lista de attachments pendentes (File[]) — limpa após envio
+let pendingAttachments = [];
+
 async function sendTextOnly(text) {
-  if (!text.trim()) return;
+  const hasFiles = pendingAttachments.length > 0;
+  if (!text.trim() && !hasFiles) return;
   if (appState === 'processing' || appState === 'speaking') return;
   if (recognition) try { recognition.abort(); } catch {}
   setAppState('processing');
-  addBubble('user', text);
+  // Bubble user mostra texto + indicação de anexos
+  const bubbleText = hasFiles
+    ? `${text}${text ? '\n' : ''}📎 ${pendingAttachments.length} anexo(s): ${pendingAttachments.map(f => f.name).join(', ')}`
+    : text;
+  addBubble('user', bubbleText);
   showTypingIndicator();
+
   try {
-    const res = await fetch('/text', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ message: text, voice: false, session_id: currentSessionId || undefined }) });
+    let res;
+    if (hasFiles) {
+      const fd = new FormData();
+      fd.append('message', text || '');
+      fd.append('voice', 'false');
+      if (currentSessionId) fd.append('session_id', currentSessionId);
+      for (const f of pendingAttachments) fd.append('files', f);
+      res = await fetch('/text', { method: 'POST', body: fd });
+    } else {
+      res = await fetch('/text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, voice: false, session_id: currentSessionId || undefined }),
+      });
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data.session_id) setCurrentSessionId(data.session_id);
     hideTypingIndicator();
     addBubble('agent', data.response || '(sem resposta)');
+    pendingAttachments = [];
+    renderAttachments();
     setAppState('passive');
   } catch (err) {
     console.error(err);
@@ -915,6 +968,41 @@ async function sendTextOnly(text) {
     addBubble('agent', '⚠️ Erro ao processar mensagem.');
     setAppState('passive');
   }
+}
+
+// v1.11: render dos chips de anexos pendentes
+function renderAttachments() {
+  const wrap = document.getElementById('chatAttachments');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  pendingAttachments.forEach((f, idx) => {
+    const chip = document.createElement('div');
+    chip.className = 'chat-attachment-chip';
+    if (f.type.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(f);
+      img.onload = () => URL.revokeObjectURL(img.src);
+      chip.appendChild(img);
+    } else {
+      const span = document.createElement('span');
+      span.textContent = '📄';
+      chip.appendChild(span);
+    }
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = f.name;
+    chip.appendChild(name);
+    const rm = document.createElement('button');
+    rm.textContent = '×';
+    rm.title = 'Remover';
+    rm.onclick = () => { pendingAttachments.splice(idx, 1); renderAttachments(); };
+    chip.appendChild(rm);
+    wrap.appendChild(chip);
+  });
+  // habilita botão enviar mesmo sem texto se há anexo
+  const send = document.getElementById('chatSendBtn');
+  const input = document.getElementById('chatInput');
+  if (send) send.disabled = !(input?.value.trim() || pendingAttachments.length > 0);
 }
 
 async function sendAudio(blob) {
@@ -1141,20 +1229,22 @@ if (new URLSearchParams(location.search).get('acao') === 'briefing') {
 
 // ── Chat input wiring ────────────────────────────────────────────────────────
 (function(){
-  const input  = document.getElementById('chatInput');
-  const send   = document.getElementById('chatSendBtn');
+  const input    = document.getElementById('chatInput');
+  const send     = document.getElementById('chatSendBtn');
+  const attachBtn   = document.getElementById('attachBtn');
+  const attachInput = document.getElementById('attachInput');
   if (!input || !send) return;
 
   function autoResize() {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-    send.disabled = !input.value.trim();
+    send.disabled = !(input.value.trim() || pendingAttachments.length > 0);
   }
   input.addEventListener('input', autoResize);
 
   function trySend() {
     const text = input.value.trim();
-    if (!text) return;
+    if (!text && pendingAttachments.length === 0) return;
     input.value = ''; autoResize();
     sendTextOnly(text);
   }
@@ -1163,6 +1253,44 @@ if (new URLSearchParams(location.search).get('acao') === 'briefing') {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); trySend(); }
   });
   send.addEventListener('click', trySend);
+
+  // v1.11 — anexos
+  if (attachBtn && attachInput) {
+    attachBtn.addEventListener('click', () => attachInput.click());
+    attachInput.addEventListener('change', () => {
+      const files = Array.from(attachInput.files || []);
+      const MAX = 5 * 1024 * 1024;       // 5MB pra imagens
+      const PDF_MAX = 32 * 1024 * 1024;  // 32MB pra PDF
+      for (const f of files) {
+        const limit = f.type === 'application/pdf' ? PDF_MAX : MAX;
+        if (f.size > limit) {
+          addBubble('agent', `⚠️ "${f.name}" excede o tamanho máximo (${(limit / 1024 / 1024).toFixed(0)}MB).`);
+          continue;
+        }
+        if (pendingAttachments.length >= 5) {
+          addBubble('agent', '⚠️ Máximo de 5 anexos por mensagem.');
+          break;
+        }
+        pendingAttachments.push(f);
+      }
+      attachInput.value = ''; // permite re-selecionar mesmo arquivo depois
+      renderAttachments();
+    });
+  }
+
+  // Drag-and-drop também
+  const bar = document.querySelector('.chat-input-bar');
+  if (bar) {
+    ['dragover', 'dragenter'].forEach(ev => bar.addEventListener(ev, e => { e.preventDefault(); bar.style.borderColor = 'var(--neon)'; }));
+    ['dragleave', 'drop'].forEach(ev => bar.addEventListener(ev, e => { e.preventDefault(); bar.style.borderColor = ''; }));
+    bar.addEventListener('drop', e => {
+      const files = Array.from(e.dataTransfer?.files || [])
+        .filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
+      if (!files.length) return;
+      attachInput.files = e.dataTransfer.files;
+      attachInput.dispatchEvent(new Event('change'));
+    });
+  }
 })();
 
 // ── History drawer ───────────────────────────────────────────────────────────

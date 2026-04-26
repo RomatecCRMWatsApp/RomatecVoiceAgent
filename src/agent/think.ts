@@ -60,11 +60,26 @@ Sobre o CRM: leads são classificados pelo campo "score" com 3 valores — "quen
 
 Sobre Spotify: o CEO tem conta Premium e você pode controlar a reprodução. Use tocar_musica com "query" para buscar e tocar (ex: query="Coldplay Yellow"); use pausar_musica, pular_proxima, pular_anterior para controlar; use musica_atual para responder "que música está tocando?". Se o Spotify não estiver aberto em nenhum dispositivo, a tool retorna erro pedindo para abrir o app primeiro — repasse essa instrução ao CEO de forma natural.
 
-Sobre datas e horários: campos como "created_at", "last_activity_at" das tools do CRM e AvalieImob já vêm formatados em pt-BR (formato "dd/MM/yyyy HH:mm" no horário de Fortaleza/BRT). Use exatamente como recebeu — não converta para ISO, não traduza, não reformate.`;
+Sobre datas e horários: campos como "created_at", "last_activity_at" das tools do CRM e AvalieImob já vêm formatados em pt-BR (formato "dd/MM/yyyy HH:mm" no horário de Fortaleza/BRT). Use exatamente como recebeu — não converta para ISO, não traduza, não reformate.
+
+Sobre anexos (imagens e PDFs): quando o CEO enviar uma imagem ou PDF, analise visualmente e descreva o que vê com detalhes relevantes. Para imagens de imóveis: aponte características arquitetônicas, estado de conservação, área útil aparente, valor estimado por região se possível. Para imagens de documentos: extraia texto-chave (CPF/CNPJ, endereço, valores). Para PDFs: leia o conteúdo completo e responda especificamente o que o CEO perguntou. Vídeos não são suportados — se chegar um vídeo, peça ao CEO um print/frame específico.`;
+
+export interface ThinkAttachment {
+  /** image (image/png, image/jpeg, image/webp, image/gif) ou document (application/pdf) */
+  kind:    'image' | 'document';
+  /** MIME type completo, ex: image/png, application/pdf */
+  mime:    string;
+  /** dados em base64 (sem o prefixo "data:...,base64,") */
+  base64:  string;
+}
 
 export interface ThinkOptions {
-  sessionId?: string;
-  channel?:   Channel;
+  sessionId?:   string;
+  channel?:     Channel;
+  /** Anexos pra análise multimodal (imagens, PDFs). Forçam Claude (Groq llama
+   *  não suporta vision native). Vídeos não são aceitos pela API — extraia
+   *  frames e envie como image. */
+  attachments?: ThinkAttachment[];
 }
 
 function useGroq(): boolean {
@@ -136,7 +151,15 @@ export async function think(
     : getSessionHistory();
 
   let result: { text: string; toolsUsed: string[] };
-  if (useGroq()) {
+  const hasAttachments = !!options.attachments && options.attachments.length > 0;
+
+  if (hasAttachments) {
+    // Anexos exigem multimodal — Claude obrigatório (Groq llama-3.3 não tem vision)
+    if (!hasClaude()) {
+      throw new Error('Anexos (imagens/PDFs) exigem Claude. Configure ANTHROPIC_API_KEY.');
+    }
+    result = await thinkWithClaude(systemPrompt, history, userMessage, options.attachments);
+  } else if (useGroq()) {
     try {
       result = await thinkWithGroq(systemPrompt, history, userMessage);
     } catch (err) {
@@ -236,22 +259,48 @@ async function thinkWithGroq(
   return { text, toolsUsed };
 }
 
-// ── Provider: Claude — FALLBACK when GROQ_API_KEY is absent ────────────────
+// ── Provider: Claude — FALLBACK + multimodal (vision) ──────────────────────
 async function thinkWithClaude(
   systemPrompt: string,
   history:      { role: 'user' | 'assistant'; content: string }[],
   userMessage:  string,
+  attachments?: ThinkAttachment[],
 ): Promise<{ text: string; toolsUsed: string[] }> {
+  // Constrói content da última msg do user. Sem anexos = string simples (rápido).
+  // Com anexos = array de blocks: [image|document, text]
+  let userContent: Anthropic.MessageParam['content'];
+  if (attachments && attachments.length > 0) {
+    const blocks: Anthropic.ContentBlockParam[] = [];
+    for (const a of attachments) {
+      if (a.kind === 'image') {
+        blocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: a.mime as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif', data: a.base64 },
+        });
+      } else {
+        // PDF como document — Claude Sonnet 4 suporta nativamente
+        blocks.push({
+          type: 'document',
+          source: { type: 'base64', media_type: 'application/pdf', data: a.base64 },
+        } as Anthropic.ContentBlockParam);
+      }
+    }
+    blocks.push({ type: 'text', text: userMessage || 'Analise os anexos.' });
+    userContent = blocks;
+  } else {
+    userContent = userMessage;
+  }
+
   const messages: Anthropic.MessageParam[] = [
     ...history.map(m => ({ role: m.role, content: m.content })),
-    { role: 'user', content: userMessage },
+    { role: 'user', content: userContent },
   ];
 
   const toolsUsed: string[] = [];
 
   let response = await anthropicClient().messages.create({
     model:      CLAUDE_MODEL,
-    max_tokens: 1024,
+    max_tokens: attachments && attachments.length > 0 ? 4096 : 1024,
     system:     systemPrompt,
     tools:      toolDefinitions,
     messages,
