@@ -175,6 +175,89 @@
     cursor: pointer; color: var(--text-muted);
   }
   .sug-pill:hover { background: rgba(0,255,136,0.1); color: var(--neon); border-color: var(--border-strong); }
+
+  /* Calendário de dias trabalhados */
+  .cal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+    display: none; align-items: center; justify-content: center; z-index: 200;
+    padding: 16px;
+  }
+  .cal-overlay.open { display: flex; }
+  .cal-modal {
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    width: 100%; max-width: 540px; max-height: 90vh; overflow-y: auto;
+    box-shadow: 0 0 40px rgba(0,255,136,0.15), 0 16px 48px rgba(0,0,0,0.6);
+  }
+  .cal-head {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .cal-head h2 { margin: 0; font-size: 16px; color: var(--neon); letter-spacing: 0.5px; }
+  .cal-head p { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); }
+  .cal-nav {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+  }
+  .cal-nav button {
+    background: var(--bg-elev); border: 1px solid var(--border);
+    color: var(--text); padding: 6px 12px; border-radius: var(--radius); cursor: pointer;
+  }
+  .cal-month-label { font-size: 14px; color: var(--gold); font-weight: 500; text-transform: capitalize; }
+  .cal-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; padding: 12px 20px;
+  }
+  .cal-dow {
+    text-align: center; font-size: 10px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.5px; padding: 6px 0;
+  }
+  .cal-cell {
+    aspect-ratio: 1; border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 12px; color: var(--text); transition: all 0.15s;
+    background: var(--bg-elev); position: relative;
+    user-select: none;
+  }
+  .cal-cell:hover { border-color: var(--neon); }
+  .cal-cell.empty { opacity: 0.2; cursor: default; pointer-events: none; }
+  .cal-cell.today { box-shadow: 0 0 0 1px var(--gold); }
+  .cal-cell.integral {
+    background: rgba(0,255,136,0.18); border-color: var(--neon);
+    color: var(--neon); font-weight: 600;
+  }
+  .cal-cell.manha {
+    background: linear-gradient(180deg, rgba(201,168,76,0.3) 50%, var(--bg-elev) 50%);
+    border-color: var(--gold); color: var(--gold); font-weight: 600;
+  }
+  .cal-cell.tarde {
+    background: linear-gradient(180deg, var(--bg-elev) 50%, rgba(201,168,76,0.3) 50%);
+    border-color: var(--gold); color: var(--gold); font-weight: 600;
+  }
+  .cal-cell.full-day {
+    background: rgba(0,255,136,0.18); border-color: var(--neon);
+    color: var(--neon); font-weight: 600;
+  }
+  .cal-cell-label {
+    position: absolute; bottom: 2px; right: 4px;
+    font-size: 8px; opacity: 0.8;
+  }
+  .cal-summary {
+    padding: 16px 20px; border-top: 1px solid var(--border);
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+  }
+  .cal-stat { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; }
+  .cal-stat p { margin: 0; }
+  .cal-stat .l { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .cal-stat .v { font-size: 17px; color: var(--text); margin-top: 4px; font-weight: 500; }
+  .cal-legend {
+    padding: 0 20px 12px; display: flex; gap: 12px; flex-wrap: wrap;
+    font-size: 11px; color: var(--text-muted);
+  }
+  .cal-legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+  .cal-help {
+    padding: 0 20px 12px; font-size: 11px; color: var(--text-muted); line-height: 1.4;
+  }
 </style>
 </head>
 <body>
@@ -210,6 +293,38 @@
 </div>
 
 <button class="zayra-fab" id="zayraFab">Z</button>
+<div class="cal-overlay" id="calOverlay">
+  <div class="cal-modal" id="calModal">
+    <div class="cal-head">
+      <div>
+        <h2 id="calNome">—</h2>
+        <p id="calMeta">—</p>
+      </div>
+      <button id="calClose" style="border:none;background:transparent;color:var(--text-muted);font-size:22px;cursor:pointer;">×</button>
+    </div>
+    <div class="cal-nav">
+      <button id="calPrev">◀ Anterior</button>
+      <span class="cal-month-label" id="calMonthLabel">—</span>
+      <button id="calNext">Próximo ▶</button>
+    </div>
+    <div class="cal-help">
+      Clique numa data pra alternar: <strong>vazio → integral → meia manhã → meia tarde → vazio</strong>. Manhã+tarde do mesmo dia = 1 diária inteira.
+    </div>
+    <div class="cal-legend">
+      <span><span class="cal-legend-dot" style="background:rgba(0,255,136,0.4);"></span>Integral</span>
+      <span><span class="cal-legend-dot" style="background:linear-gradient(180deg,rgba(201,168,76,0.5) 50%,transparent 50%);"></span>Meia (manhã)</span>
+      <span><span class="cal-legend-dot" style="background:linear-gradient(180deg,transparent 50%,rgba(201,168,76,0.5) 50%);"></span>Meia (tarde)</span>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+    <div class="cal-summary">
+      <div class="cal-stat"><p class="l">Diárias integrais</p><p class="v" id="calIntegrais">0</p></div>
+      <div class="cal-stat"><p class="l">Manhãs</p><p class="v" id="calManhas">0</p></div>
+      <div class="cal-stat"><p class="l">Tardes</p><p class="v" id="calTardes">0</p></div>
+      <div class="cal-stat"><p class="l">Total a pagar</p><p class="v" id="calTotal" style="color:var(--gold);">R$ 0,00</p></div>
+    </div>
+  </div>
+</div>
+
 <div class="zayra-modal" id="zayraModal">
   <div class="zayra-header">
     <div>
@@ -609,9 +724,14 @@ function renderEquipe() {
   const v = document.getElementById('view-equipe');
   const lista = state.equipe.map(p => {
     return `<div class="card">
-      <p style="margin:0; font-weight:500;">${escape(p.nome)}</p>
-      <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.funcao||'-')} · ${escape(p.tipo_contrato)} · ${fmt(p.valor_dia)}/dia</p>
-      <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.telefone||'-')}</p>
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
+        <div style="flex:1; min-width:0;">
+          <p style="margin:0; font-weight:500; font-size:15px;">${escape(p.nome)}</p>
+          <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.funcao||'sem função')} · ${escape(p.tipo_contrato)} · <span style="color: var(--gold);">${fmt(p.valor_dia)}/dia</span></p>
+          <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.telefone||'-')}${p.especialidade?' · '+escape(p.especialidade):''}</p>
+        </div>
+        <button class="btn-gold" data-cal="${p.id}" data-nome="${escape(p.nome)}" data-vd="${p.valor_dia}">📅 Marcar dias</button>
+      </div>
     </div>`;
   }).join('');
 
@@ -631,6 +751,10 @@ function renderEquipe() {
   </div>
   <p class="section-title" style="margin-top:16px;">Equipe (${state.equipe.length})</p>
   ${lista || '<div class="card empty">Nenhum membro.</div>'}`;
+
+  v.querySelectorAll('[data-cal]').forEach(b => b.onclick = () => {
+    abrirCalendario(b.dataset.cal, b.dataset.nome, parseFloat(b.dataset.vd) || 0);
+  });
 
   document.getElementById('addEq').onclick = async () => {
     const nome = document.getElementById('pNome').value.trim();
@@ -819,6 +943,126 @@ function replaceLastMsg(txt) {
   const msgs = document.querySelectorAll('.msg');
   if (msgs.length) msgs[msgs.length-1].textContent = txt;
 }
+
+// ── CALENDÁRIO DE DIAS TRABALHADOS ──
+const cal = {
+  funcId: null, nome: '', valorDia: 0,
+  ano: 0, mes: 0, // mes 1-12
+  dias: [], // [{data, periodo, valor}]
+};
+
+function abrirCalendario(funcionarioId, nome, valorDia) {
+  cal.funcId = funcionarioId; cal.nome = nome; cal.valorDia = valorDia || 0;
+  const now = new Date();
+  cal.ano = now.getFullYear(); cal.mes = now.getMonth() + 1;
+  document.getElementById('calNome').textContent = nome;
+  document.getElementById('calMeta').textContent = 'Diária: R$ ' + (valorDia||0).toLocaleString('pt-BR', {minimumFractionDigits:2});
+  document.getElementById('calOverlay').classList.add('open');
+  carregarMesCalendario();
+}
+
+async function carregarMesCalendario() {
+  try {
+    cal.dias = await api(`/api/funcionarios/${cal.funcId}/dias?ano=${cal.ano}&mes=${cal.mes}`);
+  } catch (e) { cal.dias = []; }
+  desenharCalendario();
+}
+
+function desenharCalendario() {
+  const grid = document.getElementById('calGrid');
+  const monthLabel = new Date(cal.ano, cal.mes-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+  document.getElementById('calMonthLabel').textContent = monthLabel;
+
+  // Mapa data → array de períodos marcados
+  const marcado = {};
+  cal.dias.forEach(d => {
+    if (!marcado[d.data]) marcado[d.data] = new Set();
+    marcado[d.data].add(d.periodo);
+  });
+
+  const primeiroDia = new Date(cal.ano, cal.mes-1, 1);
+  const ultimoDia = new Date(cal.ano, cal.mes, 0).getDate();
+  const offset = primeiroDia.getDay(); // 0 = domingo
+  const todayIso = new Date().toISOString().slice(0,10);
+
+  let html = '';
+  const dows = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  dows.forEach(d => html += `<div class="cal-dow">${d}</div>`);
+
+  for (let i = 0; i < offset; i++) html += `<div class="cal-cell empty"></div>`;
+
+  for (let d = 1; d <= ultimoDia; d++) {
+    const dataIso = `${cal.ano}-${String(cal.mes).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const periodos = marcado[dataIso] || new Set();
+    let cls = '';
+    let label = '';
+    if (periodos.has('integral')) { cls = 'integral'; label = '1d'; }
+    else if (periodos.has('manha') && periodos.has('tarde')) { cls = 'full-day'; label = '½+½'; }
+    else if (periodos.has('manha')) { cls = 'manha'; label = 'M'; }
+    else if (periodos.has('tarde')) { cls = 'tarde'; label = 'T'; }
+    if (dataIso === todayIso) cls += ' today';
+    html += `<div class="cal-cell ${cls}" data-d="${dataIso}">${d}<span class="cal-cell-label">${label}</span></div>`;
+  }
+
+  grid.innerHTML = html;
+  grid.querySelectorAll('[data-d]').forEach(c => c.onclick = () => alternarDia(c.dataset.d));
+
+  // Resumo
+  const integrais = cal.dias.filter(d => d.periodo === 'integral').length;
+  const manhas = cal.dias.filter(d => d.periodo === 'manha').length;
+  const tardes = cal.dias.filter(d => d.periodo === 'tarde').length;
+  const total = cal.dias.reduce((s, d) => s + Number(d.valor||0), 0);
+  document.getElementById('calIntegrais').textContent = integrais;
+  document.getElementById('calManhas').textContent = manhas;
+  document.getElementById('calTardes').textContent = tardes;
+  document.getElementById('calTotal').textContent = 'R$ ' + total.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+async function alternarDia(dataIso) {
+  // Estado atual: vazio → integral → manha → tarde → vazio
+  const periodosAtuais = new Set(cal.dias.filter(d => d.data === dataIso).map(d => d.periodo));
+  let proximoEstado;
+  if (periodosAtuais.size === 0) proximoEstado = 'integral';
+  else if (periodosAtuais.has('integral')) proximoEstado = 'manha';
+  else if (periodosAtuais.has('manha') && !periodosAtuais.has('tarde')) proximoEstado = 'tarde';
+  else proximoEstado = 'vazio';
+
+  try {
+    if (proximoEstado === 'vazio') {
+      await api(`/api/funcionarios/${cal.funcId}/dias`, {
+        method: 'DELETE',
+        body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso }),
+      });
+    } else {
+      // Pra trocar de integral → manha, primeiro remove integral
+      if (proximoEstado === 'manha' && periodosAtuais.has('integral')) {
+        await api(`/api/funcionarios/${cal.funcId}/dias`, {
+          method: 'DELETE',
+          body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso, periodo: 'integral' }),
+        });
+      }
+      await api(`/api/funcionarios/${cal.funcId}/dias`, {
+        method: 'POST',
+        body: JSON.stringify({
+          funcionario_id: cal.funcId,
+          data: dataIso, periodo: proximoEstado,
+        }),
+      });
+    }
+    await carregarMesCalendario();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+document.getElementById('calClose').onclick = () => document.getElementById('calOverlay').classList.remove('open');
+document.getElementById('calOverlay').onclick = e => { if (e.target.id === 'calOverlay') document.getElementById('calOverlay').classList.remove('open'); };
+document.getElementById('calPrev').onclick = () => {
+  if (cal.mes === 1) { cal.mes = 12; cal.ano--; } else cal.mes--;
+  carregarMesCalendario();
+};
+document.getElementById('calNext').onclick = () => {
+  if (cal.mes === 12) { cal.mes = 1; cal.ano++; } else cal.mes++;
+  carregarMesCalendario();
+};
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => { state.currentTab = t.dataset.tab; render(); });
 document.getElementById('zayraFab').onclick = () => {

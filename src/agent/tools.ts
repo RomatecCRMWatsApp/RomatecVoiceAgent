@@ -753,6 +753,75 @@ export const toolDefinitions: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'marcar_dia_trabalhado',
+    description: 'Marca um dia trabalhado pra um funcionário com período (integral, manha, tarde). Manhã/tarde valem 50% da diária. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        funcionario_id: { type: 'string' },
+        data:           { type: 'string', description: 'YYYY-MM-DD' },
+        periodo:        { type: 'string', enum: ['integral','manha','tarde'] },
+        obra_id:        { type: 'string', description: 'opcional' },
+        observacoes:    { type: 'string' },
+        confirm:        { type: 'boolean' },
+      },
+      required: ['funcionario_id', 'data'],
+    },
+  },
+  {
+    name: 'desmarcar_dia_trabalhado',
+    description: 'Remove marcação de dia trabalhado. Sem periodo, remove TODAS as marcações daquele dia. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        funcionario_id: { type: 'string' },
+        data:           { type: 'string' },
+        periodo:        { type: 'string', enum: ['integral','manha','tarde'] },
+        confirm:        { type: 'boolean' },
+      },
+      required: ['funcionario_id', 'data'],
+    },
+  },
+  {
+    name: 'listar_dias_funcionario',
+    description: 'Lista dias trabalhados de um funcionário, opcionalmente filtrando por mês/ano.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        funcionario_id: { type: 'string' },
+        ano:            { type: 'number' },
+        mes:            { type: 'number', description: '1-12' },
+      },
+      required: ['funcionario_id'],
+    },
+  },
+  {
+    name: 'relatorio_mensal_funcionario',
+    description: 'Relatório mensal de um funcionário: integral, manhã, tarde, total dias equivalentes (manhã/tarde = 0,5 dia), total a pagar.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        funcionario_id: { type: 'string' },
+        ano:            { type: 'number' },
+        mes:            { type: 'number' },
+      },
+      required: ['funcionario_id', 'ano', 'mes'],
+    },
+  },
+  {
+    name: 'relatorio_mensal_equipe',
+    description: 'Folha mensal de toda equipe (ou de uma obra). Retorna por funcionário: dias trabalhados e total a pagar, mais o total geral.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ano:     { type: 'number' },
+        mes:     { type: 'number' },
+        obra_id: { type: 'string' },
+      },
+      required: ['ano', 'mes'],
+    },
+  },
+  {
     name: 'resumo_obras',
     description: 'Visão geral de TODAS as obras: total, em andamento, concluídas, paralisadas, orçamento total, saldo financeiro consolidado, etapas atrasadas, materiais em estoque baixo. Use quando o CEO pedir "como tão as obras", "panorama geral", "status das obras".',
     input_schema: { type: 'object', properties: {} },
@@ -1045,6 +1114,21 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'registrar_diario_obra':
         data = await obras.registrarDiarioObra(input as Parameters<typeof obras.registrarDiarioObra>[0]);
+        break;
+      case 'marcar_dia_trabalhado':
+        data = await obras.marcarDiaTrabalhado(input as Parameters<typeof obras.marcarDiaTrabalhado>[0]);
+        break;
+      case 'desmarcar_dia_trabalhado':
+        data = await obras.desmarcarDiaTrabalhado(input as Parameters<typeof obras.desmarcarDiaTrabalhado>[0]);
+        break;
+      case 'listar_dias_funcionario':
+        data = await obras.listarDiasFuncionario(input as Parameters<typeof obras.listarDiasFuncionario>[0]);
+        break;
+      case 'relatorio_mensal_funcionario':
+        data = await obras.relatorioMensalFuncionario(input as Parameters<typeof obras.relatorioMensalFuncionario>[0]);
+        break;
+      case 'relatorio_mensal_equipe':
+        data = await obras.relatorioMensalEquipe(input as Parameters<typeof obras.relatorioMensalEquipe>[0]);
         break;
       case 'resumo_obras':
         data = await obras.resumoObras();

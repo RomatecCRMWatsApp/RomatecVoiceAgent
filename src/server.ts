@@ -551,6 +551,18 @@ app.post('/api/diario', apiHandle(args => obras.registrarDiarioObra(args as Para
 // Resumo
 app.get('/api/resumo-obras', apiHandle(() => obras.resumoObras()));
 
+// Dias trabalhados
+app.get   ('/api/funcionarios/:funcionario_id/dias',
+  apiHandle(args => obras.listarDiasFuncionario(args as Parameters<typeof obras.listarDiasFuncionario>[0])));
+app.post  ('/api/funcionarios/:funcionario_id/dias',
+  apiHandle(args => obras.marcarDiaTrabalhado(args as Parameters<typeof obras.marcarDiaTrabalhado>[0])));
+app.delete('/api/funcionarios/:funcionario_id/dias',
+  apiHandle(args => obras.desmarcarDiaTrabalhado(args as Parameters<typeof obras.desmarcarDiaTrabalhado>[0])));
+app.get   ('/api/funcionarios/:funcionario_id/relatorio',
+  apiHandle(args => obras.relatorioMensalFuncionario(args as Parameters<typeof obras.relatorioMensalFuncionario>[0])));
+app.get   ('/api/relatorio-equipe',
+  apiHandle(args => obras.relatorioMensalEquipe(args as Parameters<typeof obras.relatorioMensalEquipe>[0])));
+
 // Pergunta pra ZAYRA via contexto de obras
 app.post('/api/obras/zayra', async (req: Request, res: Response) => {
   try {

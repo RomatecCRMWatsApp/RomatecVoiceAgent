@@ -519,6 +519,159 @@ export async function registrarDiarioObra(input: {
   return { ok: true, insertId: r.insertId, message: `Diário registrado (ID ${r.insertId}).` };
 }
 
+// ── Dias trabalhados (integral / manhã / tarde) ──────────────────────────────
+type DiaRow = RowDataPacket & {
+  id: number; funcionario_id: number; obra_id: number | null;
+  data: Date; periodo: 'integral' | 'manha' | 'tarde';
+  valor: string | null; observacoes: string | null;
+};
+
+export async function marcarDiaTrabalhado(input: {
+  funcionario_id: string; data: string;
+  periodo?: 'integral' | 'manha' | 'tarde';
+  obra_id?: string; observacoes?: string;
+  confirm?: boolean;
+}): Promise<MutationResult> {
+  if (!input.funcionario_id || !input.data) throw new Error('funcionario_id e data obrigatórios');
+  const periodo = input.periodo ?? 'integral';
+
+  // Pega valor diária do funcionário pra calcular o valor proporcional
+  const [funcs] = await pool.execute<EquipeRow[]>(
+    'SELECT * FROM romatec_obra_equipe WHERE id = ?', [input.funcionario_id],
+  );
+  if (funcs.length === 0) throw new Error(`Funcionário ${input.funcionario_id} não encontrado`);
+  const valor_dia = num(funcs[0].valor_dia);
+  const valor_calc = periodo === 'integral' ? valor_dia : valor_dia / 2;
+
+  if (!input.confirm) {
+    return {
+      preview: true,
+      message: `[PREVIEW] Marcar ${funcs[0].nome} em ${input.data} (${periodo}, R$ ${valor_calc.toFixed(2)}). Reenvie com confirm:true.`,
+    };
+  }
+
+  // ON DUPLICATE KEY UPDATE pra permitir re-marcar (atualiza obra_id/observacoes)
+  const [r] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO romatec_obra_funcionario_dias
+       (funcionario_id, obra_id, data, periodo, valor, observacoes)
+     VALUES (?,?,?,?,?,?)
+     ON DUPLICATE KEY UPDATE
+       obra_id = VALUES(obra_id),
+       valor = VALUES(valor),
+       observacoes = VALUES(observacoes)`,
+    [
+      input.funcionario_id,
+      input.obra_id ?? null,
+      input.data, periodo, valor_calc,
+      input.observacoes ?? null,
+    ],
+  );
+  return { ok: true, insertId: r.insertId, message: `${funcs[0].nome} marcado em ${input.data} (${periodo}) — R$ ${valor_calc.toFixed(2)}.` };
+}
+
+export async function desmarcarDiaTrabalhado(input: {
+  funcionario_id: string; data: string;
+  periodo?: 'integral' | 'manha' | 'tarde';
+  confirm?: boolean;
+}): Promise<MutationResult> {
+  if (!input.funcionario_id || !input.data) throw new Error('funcionario_id e data obrigatórios');
+  if (!input.confirm) {
+    return { preview: true, message: `[PREVIEW] Desmarcar funcionário ${input.funcionario_id} em ${input.data}${input.periodo ? ' ('+input.periodo+')' : ' (todos os períodos)'}. Reenvie com confirm:true.` };
+  }
+  let sql = 'DELETE FROM romatec_obra_funcionario_dias WHERE funcionario_id = ? AND data = ?';
+  const params: (string | number)[] = [input.funcionario_id, input.data];
+  if (input.periodo) { sql += ' AND periodo = ?'; params.push(input.periodo); }
+  const [r] = await pool.execute<ResultSetHeader>(sql, params);
+  return { ok: true, affected: r.affectedRows, message: `${r.affectedRows} marcação(ões) removida(s).` };
+}
+
+export async function listarDiasFuncionario(input: {
+  funcionario_id: string;
+  ano?: number; mes?: number;
+}) {
+  if (!input.funcionario_id) throw new Error('funcionario_id obrigatório');
+  const params: (string | number)[] = [input.funcionario_id];
+  let sql = 'SELECT * FROM romatec_obra_funcionario_dias WHERE funcionario_id = ?';
+  if (input.ano && input.mes) {
+    sql += ' AND YEAR(data) = ? AND MONTH(data) = ?';
+    params.push(input.ano, input.mes);
+  }
+  sql += ' ORDER BY data ASC';
+  const [rows] = await pool.execute<DiaRow[]>(sql, params);
+  return rows.map(r => ({
+    id: String(r.id),
+    data: r.data instanceof Date ? r.data.toISOString().slice(0, 10) : String(r.data),
+    periodo: r.periodo,
+    valor: num(r.valor),
+    obra_id: r.obra_id ? String(r.obra_id) : null,
+    observacoes: r.observacoes,
+  }));
+}
+
+export async function relatorioMensalFuncionario(input: {
+  funcionario_id: string; ano: number; mes: number;
+}) {
+  const dias = await listarDiasFuncionario(input);
+  const integral = dias.filter(d => d.periodo === 'integral').length;
+  const manha    = dias.filter(d => d.periodo === 'manha').length;
+  const tarde    = dias.filter(d => d.periodo === 'tarde').length;
+  const total_dias_equivalente = integral + (manha + tarde) * 0.5;
+  const total_pagar = dias.reduce((s, d) => s + d.valor, 0);
+
+  const [funcs] = await pool.execute<EquipeRow[]>(
+    'SELECT nome, funcao, valor_dia FROM romatec_obra_equipe WHERE id = ?',
+    [input.funcionario_id],
+  );
+  const f = funcs[0];
+
+  return {
+    funcionario: f ? { nome: f.nome, funcao: f.funcao, valor_dia: num(f.valor_dia) } : null,
+    periodo: `${String(input.mes).padStart(2,'0')}/${input.ano}`,
+    integral, manha, tarde,
+    total_dias_equivalente,
+    total_pagar,
+    dias,
+  };
+}
+
+export async function relatorioMensalEquipe(input: {
+  ano: number; mes: number; obra_id?: string;
+}) {
+  const params: (string | number)[] = [input.ano, input.mes];
+  let sql = `
+    SELECT d.funcionario_id, e.nome, e.funcao, e.valor_dia,
+           COUNT(CASE WHEN d.periodo = 'integral' THEN 1 END) AS integral,
+           COUNT(CASE WHEN d.periodo = 'manha'    THEN 1 END) AS manha,
+           COUNT(CASE WHEN d.periodo = 'tarde'    THEN 1 END) AS tarde,
+           COALESCE(SUM(d.valor), 0) AS total_pagar
+    FROM romatec_obra_funcionario_dias d
+    JOIN romatec_obra_equipe e ON e.id = d.funcionario_id
+    WHERE YEAR(d.data) = ? AND MONTH(d.data) = ?`;
+  if (input.obra_id) { sql += ' AND d.obra_id = ?'; params.push(input.obra_id); }
+  sql += ' GROUP BY d.funcionario_id, e.nome, e.funcao, e.valor_dia ORDER BY e.nome ASC';
+
+  const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
+  const lista = rows.map(r => ({
+    funcionario_id: String(r.funcionario_id),
+    nome: r.nome as string,
+    funcao: r.funcao as string | null,
+    valor_dia: num((r.valor_dia as string) ?? '0'),
+    integral: Number(r.integral),
+    manha:    Number(r.manha),
+    tarde:    Number(r.tarde),
+    total_dias_equivalente: Number(r.integral) + (Number(r.manha) + Number(r.tarde)) * 0.5,
+    total_pagar: num(String(r.total_pagar ?? '0')),
+  }));
+  const total_geral = lista.reduce((s, l) => s + l.total_pagar, 0);
+  return {
+    periodo: `${String(input.mes).padStart(2,'0')}/${input.ano}`,
+    obra_id: input.obra_id ?? null,
+    total_funcionarios: lista.length,
+    total_geral,
+    funcionarios: lista,
+  };
+}
+
 // ── Resumo Geral ─────────────────────────────────────────────────────────────
 export async function resumoObras() {
   const [obras] = await pool.execute<ObraRow[]>('SELECT * FROM romatec_obras');

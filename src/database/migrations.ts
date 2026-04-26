@@ -193,5 +193,22 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.17: marcação de dias trabalhados (integral / manhã / tarde)
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obra_funcionario_dias (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      funcionario_id  INT NOT NULL,
+      obra_id         INT,
+      data            DATE NOT NULL,
+      periodo         ENUM('integral','manha','tarde') NOT NULL DEFAULT 'integral',
+      valor           DECIMAL(10,2),
+      observacoes     TEXT,
+      created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_func_data_periodo (funcionario_id, data, periodo),
+      INDEX idx_func_mes (funcionario_id, data),
+      INDEX idx_obra_data (obra_id, data)
+    )
+  `);
+
   console.log('[DB] Migrations complete');
 }
