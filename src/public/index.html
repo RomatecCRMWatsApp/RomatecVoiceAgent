@@ -155,7 +155,7 @@
       display: flex; align-items: center; justify-content: center;
     }
 
-    /* Avatar card (frame) — apenas foto + box-shadow estável */
+    /* Avatar card (frame) — foto + box-shadow + animações v1.10 */
     .avatar-frame {
       position: relative; width: 220px; height: 220px; border-radius: 50%;
       overflow: hidden;
@@ -163,6 +163,7 @@
         0 0 40px rgba(0,255,136,.35),
         inset 0 0 30px rgba(57,255,133,.18);
       cursor: pointer;
+      transition: box-shadow .35s ease;
     }
     .avatar-frame::after {
       content: ''; position: absolute; inset: 0; border-radius: 50%;
@@ -171,6 +172,76 @@
     }
     .avatar-img {
       width: 100%; height: 100%; object-fit: cover; display: block;
+      animation: zayra-breathe 4s ease-in-out infinite;
+      will-change: transform;
+    }
+    @keyframes zayra-breathe {
+      0%, 100% { transform: scale(1); }
+      50%      { transform: scale(1.012); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .avatar-img { animation: none; }
+    }
+
+    /* SVG overlay com olhos + boca — DOM nativo, sem canvas (zero risco
+       da faixa preta que tinha em v1.7.3) */
+    .zayra-face {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      pointer-events: none; opacity: 0;
+      transition: opacity .35s ease;
+      mix-blend-mode: multiply;
+    }
+    .avatar-stage[data-state="listening"] .zayra-face,
+    .avatar-stage[data-state="thinking"]  .zayra-face,
+    .avatar-stage[data-state="speaking"]  .zayra-face,
+    .avatar-stage[data-state="alert"]     .zayra-face { opacity: .55; }
+
+    /* Olhos: piscam suave a cada ~4-5s, scaleY animado */
+    .zayra-eye {
+      transform-origin: center;
+      animation: zayra-blink 5s infinite;
+    }
+    .zayra-eye.right { animation-delay: 0.08s; }
+    @keyframes zayra-blink {
+      0%, 92%, 100% { transform: scaleY(1); }
+      94%, 96%      { transform: scaleY(0.08); }
+    }
+
+    /* Boca: animação CSS quando state=speaking — sem dependência de
+       Web Audio API. JS opcional sobrescreve com lip sync real. */
+    .zayra-mouth {
+      transform-origin: center;
+      transition: transform .12s linear;
+    }
+    .avatar-stage[data-state="speaking"] .zayra-mouth {
+      animation: zayra-speak 0.3s ease-in-out infinite alternate;
+    }
+    @keyframes zayra-speak {
+      0%   { transform: scaleY(0.6); }
+      100% { transform: scaleY(2.2); }
+    }
+
+    /* Indicadores de estado — aura sutil colorida por estado, SEM pulsar
+       agressivo (a queixa antiga era piscar/óleo glitch) */
+    .avatar-stage[data-state="listening"]  .avatar-frame {
+      box-shadow:
+        0 0 50px rgba(0,225,255,.55),
+        inset 0 0 30px rgba(0,225,255,.22);
+    }
+    .avatar-stage[data-state="thinking"]   .avatar-frame {
+      box-shadow:
+        0 0 50px rgba(201,168,76,.55),
+        inset 0 0 30px rgba(201,168,76,.22);
+    }
+    .avatar-stage[data-state="speaking"]   .avatar-frame {
+      box-shadow:
+        0 0 55px rgba(0,255,136,.65),
+        inset 0 0 30px rgba(0,255,136,.28);
+    }
+    .avatar-stage[data-state="alert"]      .avatar-frame {
+      box-shadow:
+        0 0 55px rgba(255,68,68,.65),
+        inset 0 0 30px rgba(255,68,68,.25);
     }
 
     /* Identity */
@@ -452,6 +523,15 @@
     <div class="avatar-frame" id="avatarFrame">
       <img class="avatar-img" id="avatarImg" src="/avatar.png" alt="ZAYRA"
         onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%22 stop-color=%22%2300ff88%22/><stop offset=%221%22 stop-color=%22%23c9a84c%22/></linearGradient></defs><circle cx=%22100%22 cy=%22100%22 r=%22100%22 fill=%22url(%23g)%22/><text x=%2250%25%22 y=%2256%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2290%22 font-family=%22Orbitron%22 fill=%22%23ffffff%22>Z</text></svg>'" />
+      <svg class="zayra-face" viewBox="0 0 220 220" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <!-- Olhos posicionados a ~42% da altura, com leve sombra pra integrar à foto -->
+        <ellipse class="zayra-eye"       cx="78"  cy="92"  rx="3.2" ry="1.6" fill="rgba(40,30,40,.85)"/>
+        <ellipse class="zayra-eye right" cx="142" cy="92"  rx="3.2" ry="1.6" fill="rgba(40,30,40,.85)"/>
+        <!-- Boca como elipse vazada em ~67% da altura, scaleY animado simula abrir/fechar -->
+        <ellipse class="zayra-mouth" id="zayraMouth"
+                 cx="110" cy="148" rx="11" ry="2.5"
+                 fill="rgba(80,30,40,.65)" stroke="rgba(0,0,0,.3)" stroke-width=".6"/>
+      </svg>
     </div>
   </div>
 
@@ -616,23 +696,35 @@ const FRAME_MS   = 1000 / TARGET_FPS;
   })(0);
 })();
 
-// ── FaceAnimator (stub no-op desde v1.7.4 — modo limpo) ─────────────────────
-//
-// O canvas faceCanvas e suas animações de olhos/boca foram removidas: estavam
-// renderizando como uma faixa preta retangular sobre a foto. Mantemos a classe
-// como stub para que as ~14 chamadas avatarCtrl.setState/updateLipSync/dispose
-// espalhadas pelo código continuem válidas sem efeito visual. O atributo
-// data-state no .avatar-stage continua sendo escrito, inerte mas inofensivo.
-//
+// ── FaceAnimator v1.10 — SVG overlay (sem canvas, sem faixa preta) ──────────
+// Olhos: piscam via CSS @keyframes
+// Boca: ry modulada por amplitude do TTS via Web Audio API; fallback CSS
+//       quando audioCtrl indisponível
 class FaceAnimator {
   constructor() {
     this.state = 'idle';
-    const stage = document.getElementById('avatarStage');
-    this.stage = stage; // mantido só pra setState escrever data-state (inerte agora)
+    this.stage = document.getElementById('avatarStage');
+    this.mouth = document.getElementById('zayraMouth');
+    this._smooth = 0;
   }
-  setState(s) { this.state = s; if (this.stage) this.stage.dataset.state = s; }
-  updateLipSync(_vol) { /* no-op */ }
-  dispose() { /* no-op */ }
+  setState(s) {
+    this.state = s;
+    if (this.stage) this.stage.dataset.state = s;
+    // Quando sai de speaking, devolve a boca pra ry baseline
+    if (s !== 'speaking' && this.mouth) {
+      this.mouth.setAttribute('ry', '2.5');
+    }
+  }
+  updateLipSync(vol) {
+    if (!this.mouth) return;
+    // vol vem do AudioController (0–~120 RMS)
+    const target = Math.min(1, vol / 70);
+    // smoothing low-pass — boca natural, não robotizada
+    this._smooth += (target - this._smooth) * 0.35;
+    const ry = 2.5 + this._smooth * 7.5;   // 2.5 (fechada) → ~10 (aberta)
+    this.mouth.setAttribute('ry', ry.toFixed(2));
+  }
+  dispose() {}
 }
 
 // ── AudioController (lip sync) ────────────────────────────────────────────────
