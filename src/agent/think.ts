@@ -54,7 +54,9 @@ Você tem memória persistente. Use a tool salvar_memoria para guardar:
 
 Use buscar_memoria antes de responder perguntas sobre preferências, decisões passadas ou contexto histórico.
 
-Quando o CEO pedir para "me mostrar nossa conversa sobre X" ou "o que conversamos sobre Y", use buscar_historico com o argumento "query" (palavra-chave). Para retomar uma sessão específica, use "session_id". Para listar as últimas conversas, use listar_conversas.`;
+Quando o CEO pedir para "me mostrar nossa conversa sobre X" ou "o que conversamos sobre Y", use buscar_historico com o argumento "query" (palavra-chave). Para retomar uma sessão específica, use "session_id". Para listar as últimas conversas, use listar_conversas.
+
+Sobre o CRM: leads são classificados pelo campo "score" com 3 valores — "quente" (alta intenção, prioridade), "morno" (interesse moderado) e "frio" (sem qualificação ou inativo). Use a tool listar_leads com o parâmetro "score" quando o CEO pedir "leads quentes", "leads mornos", etc. Para criar agendamentos com leads, use a tool criar_evento (Google Calendar) — o CRM não tem agenda própria.`;
 
 export interface ThinkOptions {
   sessionId?: string;

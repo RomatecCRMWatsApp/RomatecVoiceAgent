@@ -45,7 +45,7 @@ async function runCheck(): Promise<void> {
 
   if (leadsRes.status === 'fulfilled') {
     const semResposta = leadsRes.value.filter(
-      l => l.status === 'novo' && new Date(l.created_at) < twoHoursAgo,
+      l => l.score === 'frio' && new Date(l.created_at) < twoHoursAgo,
     );
     if (semResposta.length > 0) {
       broadcast({

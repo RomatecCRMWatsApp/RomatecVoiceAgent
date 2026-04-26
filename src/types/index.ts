@@ -21,19 +21,11 @@ export interface Lead {
   id: string;
   nome: string;
   telefone: string;
-  email?: string;
-  status: string;
-  interesse?: string;
+  score: 'quente' | 'morno' | 'frio';
+  stage?: string | null;
+  campanha_origem?: string | null;
+  last_activity_at?: string | null;
   created_at: string;
-}
-
-export interface Agendamento {
-  id?: string;
-  lead_id: string;
-  data: string;
-  hora: string;
-  tipo: string;
-  observacoes?: string;
 }
 
 export interface Campanha {

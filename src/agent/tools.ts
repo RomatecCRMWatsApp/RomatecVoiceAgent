@@ -24,12 +24,12 @@ function getColaboradores(): Colaborador[] {
 export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: 'listar_leads',
-    description: 'Lista leads do CRM WhatsApp, opcionalmente filtrando por status e limite.',
+    description: 'Lista leads do CRM WhatsApp (tabela leadQualifications), opcionalmente filtrando por score e limite.',
     input_schema: {
       type: 'object',
       properties: {
-        status: { type: 'string', description: 'Filtrar por status (ex: novo, em_atendimento, convertido)' },
-        limite: { type: 'number', description: 'Máximo de registros a retornar' },
+        score:  { type: 'string', enum: ['quente', 'morno', 'frio'], description: 'Filtrar por classificação do lead (quente, morno, frio)' },
+        limite: { type: 'number', description: 'Máximo de registros a retornar (padrão 50, máx 500)' },
       },
     },
   },
@@ -39,24 +39,9 @@ export const toolDefinitions: Anthropic.Tool[] = [
     input_schema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'ID do lead' },
+        id: { type: 'string', description: 'ID do lead (numérico, vindo do leadQualifications.id)' },
       },
       required: ['id'],
-    },
-  },
-  {
-    name: 'criar_agendamento',
-    description: 'Cria um agendamento de visita ou reunião para um lead.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lead_id: { type: 'string', description: 'ID do lead' },
-        data: { type: 'string', description: 'Data no formato YYYY-MM-DD' },
-        hora: { type: 'string', description: 'Hora no formato HH:MM' },
-        tipo: { type: 'string', description: 'Tipo de agendamento (visita, reunião, ligação)' },
-        observacoes: { type: 'string', description: 'Observações adicionais' },
-      },
-      required: ['lead_id', 'data', 'hora', 'tipo'],
     },
   },
   {
@@ -276,9 +261,6 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       case 'buscar_lead':
         data = await crm.buscarLead(input.id as string);
         break;
-      case 'criar_agendamento':
-        data = await crm.criarAgendamento(input as unknown as Parameters<typeof crm.criarAgendamento>[0]);
-        break;
       case 'listar_campanhas':
         data = await crm.listarCampanhas();
         break;
@@ -313,7 +295,9 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         ]);
         const resumo: ResumoDia = {
           data: new Date().toLocaleDateString('pt-BR'),
-          leads_novos: leads.status === 'fulfilled' ? leads.value.filter((l) => l.status === 'novo').length : 0,
+          leads_novos: leads.status === 'fulfilled'
+            ? leads.value.filter((l) => l.score === 'quente').length
+            : 0,
           agendamentos_hoje: 0,
           contratos_pendentes: contratos.status === 'fulfilled' ? contratos.value.length : 0,
           campanhas_ativas:
