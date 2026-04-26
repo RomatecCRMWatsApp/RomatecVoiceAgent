@@ -6,6 +6,7 @@ import * as spotify from '../integrations/spotify';
 import * as telegram from '../integrations/telegram';
 import * as filesystem from '../integrations/filesystem';
 import * as system from '../integrations/system';
+import * as obras from '../integrations/obras';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -491,6 +492,271 @@ export const toolDefinitions: Anthropic.Tool[] = [
     description: 'Retorna lista de diretórios autorizados pra acesso ao filesystem (FS_ALLOWED_ROOTS).',
     input_schema: { type: 'object', properties: {} },
   },
+  // ── Obras (v1.16) ─────────────────────────────────────────────────────────
+  {
+    name: 'listar_obras',
+    description: 'Lista obras da Romatec, opcionalmente filtrando por status (planejamento, em_andamento, paralisada, concluida).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['planejamento','em_andamento','paralisada','concluida'] },
+        limite: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'buscar_obra',
+    description: 'Retorna detalhes completos de uma obra: dados gerais + progresso + financeiro + etapas + transações recentes + diário recente.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'criar_obra',
+    description: 'Cria uma obra nova. DESTRUTIVO. Sempre rode primeiro sem confirm pra preview, peça autorização, depois confirm:true.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nome:                { type: 'string' },
+        tipo:                { type: 'string', enum: ['residencial','comercial','industrial','reforma','publica'] },
+        cliente:             { type: 'string' },
+        cliente_telefone:    { type: 'string' },
+        endereco:            { type: 'string' },
+        cidade:              { type: 'string' },
+        area_m2:             { type: 'number' },
+        orcamento:           { type: 'number' },
+        status:              { type: 'string', enum: ['planejamento','em_andamento','paralisada','concluida'] },
+        responsavel_tecnico: { type: 'string' },
+        data_inicio:         { type: 'string', description: 'YYYY-MM-DD' },
+        data_previsao:       { type: 'string', description: 'YYYY-MM-DD' },
+        observacoes:         { type: 'string' },
+        confirm:             { type: 'boolean' },
+      },
+      required: ['nome'],
+    },
+  },
+  {
+    name: 'atualizar_obra',
+    description: 'Atualiza campos de uma obra existente. Confirm exigido após autorização verbal.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:                  { type: 'string' },
+        nome:                { type: 'string' },
+        tipo:                { type: 'string' },
+        cliente:             { type: 'string' },
+        cliente_telefone:    { type: 'string' },
+        endereco:            { type: 'string' },
+        cidade:              { type: 'string' },
+        area_m2:             { type: 'number' },
+        orcamento:           { type: 'number' },
+        status:              { type: 'string' },
+        responsavel_tecnico: { type: 'string' },
+        data_inicio:         { type: 'string' },
+        data_previsao:       { type: 'string' },
+        observacoes:         { type: 'string' },
+        confirm:             { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'apagar_obra',
+    description: 'APAGA obra + todas as etapas/transações/diário. IRREVERSÍVEL. Exige confirmação verbal explícita antes de confirm:true.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, confirm: { type: 'boolean' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'listar_etapas_obra',
+    description: 'Lista etapas/cronograma de uma obra ordenadas pela ordem de execução.',
+    input_schema: {
+      type: 'object',
+      properties: { obra_id: { type: 'string' } },
+      required: ['obra_id'],
+    },
+  },
+  {
+    name: 'criar_etapa',
+    description: 'Cria etapa no cronograma. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        obra_id:     { type: 'string' },
+        nome:        { type: 'string' },
+        responsavel: { type: 'string' },
+        data_inicio: { type: 'string' },
+        data_fim:    { type: 'string' },
+        descricao:   { type: 'string' },
+        ordem:       { type: 'number' },
+        confirm:     { type: 'boolean' },
+      },
+      required: ['obra_id', 'nome'],
+    },
+  },
+  {
+    name: 'atualizar_etapa',
+    description: 'Atualiza status/dados de uma etapa. Use status=concluido pra marcar como pronto, em_andamento pra começar, atrasado pra sinalizar atraso.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:          { type: 'string' },
+        status:      { type: 'string', enum: ['pendente','em_andamento','concluido','atrasado'] },
+        nome:        { type: 'string' },
+        responsavel: { type: 'string' },
+        data_inicio: { type: 'string' },
+        data_fim:    { type: 'string' },
+        confirm:     { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'apagar_etapa',
+    description: 'APAGA etapa do cronograma. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, confirm: { type: 'boolean' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'listar_transacoes_obra',
+    description: 'Lista entradas/saídas financeiras de uma obra.',
+    input_schema: {
+      type: 'object',
+      properties: { obra_id: { type: 'string' }, limite: { type: 'number' } },
+      required: ['obra_id'],
+    },
+  },
+  {
+    name: 'criar_transacao_obra',
+    description: 'Registra entrada ou saída financeira em uma obra. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        obra_id:         { type: 'string' },
+        tipo:            { type: 'string', enum: ['entrada','saida'] },
+        descricao:       { type: 'string' },
+        valor:           { type: 'number' },
+        data:            { type: 'string', description: 'YYYY-MM-DD (default hoje)' },
+        categoria:       { type: 'string' },
+        fornecedor:      { type: 'string' },
+        nota_fiscal:     { type: 'string' },
+        forma_pagamento: { type: 'string', enum: ['dinheiro','pix','transferencia','cartao','boleto'] },
+        confirm:         { type: 'boolean' },
+      },
+      required: ['obra_id','tipo','descricao','valor'],
+    },
+  },
+  {
+    name: 'listar_equipe_obra',
+    description: 'Lista equipe — total ou de uma obra específica via obra_id.',
+    input_schema: {
+      type: 'object',
+      properties: { obra_id: { type: 'string' } },
+    },
+  },
+  {
+    name: 'criar_membro_equipe',
+    description: 'Adiciona membro à equipe de obras. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nome:          { type: 'string' },
+        funcao:        { type: 'string' },
+        tipo_contrato: { type: 'string', enum: ['clt','diarista','empreitada','terceirizado'] },
+        cpf:           { type: 'string' },
+        telefone:      { type: 'string' },
+        valor_dia:     { type: 'number' },
+        especialidade: { type: 'string' },
+        observacoes:   { type: 'string' },
+        obras_ids:     { type: 'array', items: { type: 'string' }, description: 'IDs das obras onde o membro está alocado' },
+        confirm:       { type: 'boolean' },
+      },
+      required: ['nome'],
+    },
+  },
+  {
+    name: 'listar_materiais',
+    description: 'Lista materiais. Use apenas_baixos:true pra ver só os abaixo do estoque mínimo.',
+    input_schema: {
+      type: 'object',
+      properties: { apenas_baixos: { type: 'boolean' } },
+    },
+  },
+  {
+    name: 'criar_material',
+    description: 'Cadastra material novo. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nome:                 { type: 'string' },
+        categoria:            { type: 'string' },
+        unidade:              { type: 'string', description: 'kg, sc, m, un, etc' },
+        estoque:              { type: 'number' },
+        estoque_minimo:       { type: 'number' },
+        valor_unitario:       { type: 'number' },
+        fornecedor_principal: { type: 'string' },
+        local_armazenamento:  { type: 'string' },
+        confirm:              { type: 'boolean' },
+      },
+      required: ['nome'],
+    },
+  },
+  {
+    name: 'ajustar_estoque_material',
+    description: 'Ajusta estoque de um material (delta positivo = compra/entrada, negativo = consumo). Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:      { type: 'string' },
+        delta:   { type: 'number', description: 'Positivo adiciona, negativo consome' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['id', 'delta'],
+    },
+  },
+  {
+    name: 'listar_diario_obra',
+    description: 'Lista registros do diário de uma obra (mais recentes primeiro).',
+    input_schema: {
+      type: 'object',
+      properties: { obra_id: { type: 'string' }, limite: { type: 'number' } },
+      required: ['obra_id'],
+    },
+  },
+  {
+    name: 'registrar_diario_obra',
+    description: 'Registra entrada no diário de obra (atividades, clima, equipe, ocorrências). Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        obra_id:                  { type: 'string' },
+        atividades:               { type: 'string' },
+        data:                     { type: 'string', description: 'YYYY-MM-DD (default hoje)' },
+        clima:                    { type: 'string', enum: ['sol','nublado','chuva','tempestade'] },
+        horario_inicio:           { type: 'string', description: 'HH:MM' },
+        horario_fim:              { type: 'string', description: 'HH:MM' },
+        quantidade_trabalhadores: { type: 'number' },
+        visitas:                  { type: 'string' },
+        equipe_presente:          { type: 'string' },
+        ocorrencias:              { type: 'string' },
+        fotos_urls:               { type: 'array', items: { type: 'string' } },
+        confirm:                  { type: 'boolean' },
+      },
+      required: ['obra_id', 'atividades'],
+    },
+  },
+  {
+    name: 'resumo_obras',
+    description: 'Visão geral de TODAS as obras: total, em andamento, concluídas, paralisadas, orçamento total, saldo financeiro consolidado, etapas atrasadas, materiais em estoque baixo. Use quando o CEO pedir "como tão as obras", "panorama geral", "status das obras".',
+    input_schema: { type: 'object', properties: {} },
+  },
   {
     name: 'delegar_tarefa',
     description: 'Delega uma tarefa a um membro da equipe Romatec enviando uma mensagem formatada via WhatsApp.',
@@ -724,6 +990,64 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'listar_categorias_limpeza':
         data = system.listarCategorias();
+        break;
+      // ── Obras (v1.16) ───────────────────────────────────────────────────
+      case 'listar_obras':
+        data = await obras.listarObras(input as { status?: string; limite?: number });
+        break;
+      case 'buscar_obra':
+        data = await obras.buscarObra(input.id as string);
+        break;
+      case 'criar_obra':
+        data = await obras.criarObra(input as Parameters<typeof obras.criarObra>[0]);
+        break;
+      case 'atualizar_obra':
+        data = await obras.atualizarObra(input as Parameters<typeof obras.atualizarObra>[0]);
+        break;
+      case 'apagar_obra':
+        data = await obras.apagarObra(input as { id: string; confirm?: boolean });
+        break;
+      case 'listar_etapas_obra':
+        data = await obras.listarEtapasObra(input.obra_id as string);
+        break;
+      case 'criar_etapa':
+        data = await obras.criarEtapa(input as Parameters<typeof obras.criarEtapa>[0]);
+        break;
+      case 'atualizar_etapa':
+        data = await obras.atualizarEtapa(input as Parameters<typeof obras.atualizarEtapa>[0]);
+        break;
+      case 'apagar_etapa':
+        data = await obras.apagarEtapa(input as { id: string; confirm?: boolean });
+        break;
+      case 'listar_transacoes_obra':
+        data = await obras.listarTransacoesObra(input as { obra_id: string; limite?: number });
+        break;
+      case 'criar_transacao_obra':
+        data = await obras.criarTransacaoObra(input as Parameters<typeof obras.criarTransacaoObra>[0]);
+        break;
+      case 'listar_equipe_obra':
+        data = await obras.listarEquipe(input as { obra_id?: string });
+        break;
+      case 'criar_membro_equipe':
+        data = await obras.criarMembroEquipe(input as Parameters<typeof obras.criarMembroEquipe>[0]);
+        break;
+      case 'listar_materiais':
+        data = await obras.listarMateriais(input as { apenas_baixos?: boolean });
+        break;
+      case 'criar_material':
+        data = await obras.criarMaterial(input as Parameters<typeof obras.criarMaterial>[0]);
+        break;
+      case 'ajustar_estoque_material':
+        data = await obras.ajustarEstoqueMaterial(input as { id: string; delta: number; confirm?: boolean });
+        break;
+      case 'listar_diario_obra':
+        data = await obras.listarDiarioObra(input as { obra_id: string; limite?: number });
+        break;
+      case 'registrar_diario_obra':
+        data = await obras.registrarDiarioObra(input as Parameters<typeof obras.registrarDiarioObra>[0]);
+        break;
+      case 'resumo_obras':
+        data = await obras.resumoObras();
         break;
       case 'delegar_tarefa': {
         const { colaborador_nome, tarefa, prazo } = input as { colaborador_nome: string; tarefa: string; prazo?: string };

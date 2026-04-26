@@ -84,5 +84,114 @@ export async function runMigrations(): Promise<void> {
     await pool.execute('CREATE INDEX idx_emb_created ON zayra_embeddings (created_at DESC)');
   }
 
+  // v1.16: módulo de gestão de obras
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obras (
+      id                  INT AUTO_INCREMENT PRIMARY KEY,
+      nome                VARCHAR(200) NOT NULL,
+      tipo                ENUM('residencial','comercial','industrial','reforma','publica') NOT NULL DEFAULT 'residencial',
+      cliente             VARCHAR(200),
+      cliente_telefone    VARCHAR(30),
+      endereco            VARCHAR(300),
+      cidade              VARCHAR(100),
+      area_m2             DECIMAL(10,2),
+      orcamento           DECIMAL(14,2),
+      status              ENUM('planejamento','em_andamento','paralisada','concluida') NOT NULL DEFAULT 'planejamento',
+      responsavel_tecnico VARCHAR(200),
+      data_inicio         DATE,
+      data_previsao       DATE,
+      observacoes         TEXT,
+      created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obra_etapas (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      obra_id      INT NOT NULL,
+      nome         VARCHAR(200) NOT NULL,
+      responsavel  VARCHAR(200),
+      data_inicio  DATE,
+      data_fim     DATE,
+      descricao    TEXT,
+      status       ENUM('pendente','em_andamento','concluido','atrasado') NOT NULL DEFAULT 'pendente',
+      ordem        INT DEFAULT 0,
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_obra (obra_id, ordem)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obra_transacoes (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      obra_id         INT NOT NULL,
+      tipo            ENUM('entrada','saida') NOT NULL,
+      categoria       VARCHAR(80),
+      descricao       VARCHAR(300) NOT NULL,
+      valor           DECIMAL(14,2) NOT NULL,
+      data            DATE NOT NULL,
+      fornecedor      VARCHAR(200),
+      nota_fiscal     VARCHAR(80),
+      forma_pagamento ENUM('dinheiro','pix','transferencia','cartao','boleto') DEFAULT 'pix',
+      created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_obra_data (obra_id, data DESC)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obra_equipe (
+      id             INT AUTO_INCREMENT PRIMARY KEY,
+      nome           VARCHAR(200) NOT NULL,
+      funcao         VARCHAR(120),
+      tipo_contrato  ENUM('clt','diarista','empreitada','terceirizado') DEFAULT 'diarista',
+      cpf            VARCHAR(20),
+      telefone       VARCHAR(30),
+      valor_dia      DECIMAL(10,2),
+      especialidade  VARCHAR(200),
+      observacoes    TEXT,
+      ativo          BOOLEAN DEFAULT TRUE,
+      obras_ids      VARCHAR(500),
+      created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obra_materiais (
+      id                   INT AUTO_INCREMENT PRIMARY KEY,
+      nome                 VARCHAR(200) NOT NULL,
+      categoria            VARCHAR(120),
+      unidade              VARCHAR(20) DEFAULT 'un',
+      estoque              DECIMAL(12,3) DEFAULT 0,
+      estoque_minimo       DECIMAL(12,3) DEFAULT 0,
+      valor_unitario       DECIMAL(12,2),
+      fornecedor_principal VARCHAR(200),
+      local_armazenamento  VARCHAR(200),
+      created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obra_diario (
+      id                       INT AUTO_INCREMENT PRIMARY KEY,
+      obra_id                  INT NOT NULL,
+      data                     DATE NOT NULL,
+      clima                    ENUM('sol','nublado','chuva','tempestade') DEFAULT 'sol',
+      horario_inicio           TIME,
+      horario_fim              TIME,
+      quantidade_trabalhadores INT,
+      visitas                  VARCHAR(300),
+      atividades               TEXT NOT NULL,
+      equipe_presente          TEXT,
+      ocorrencias              TEXT,
+      fotos_urls               TEXT,
+      created_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_obra_data (obra_id, data DESC)
+    )
+  `);
+
   console.log('[DB] Migrations complete');
 }
