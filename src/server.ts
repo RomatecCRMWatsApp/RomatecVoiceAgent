@@ -29,6 +29,7 @@ import {
 import { startDailyScheduler } from './agent/scheduler';
 import * as calendar from './integrations/calendar';
 import * as obras from './integrations/obras';
+import * as alarmes from './integrations/alarmes';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -552,6 +553,12 @@ app.post('/api/diario', apiHandle(args => obras.registrarDiarioObra(args as Para
 app.get('/api/profissoes-catalogo', apiHandle(() => obras.listarProfissoesCatalogo()));
 app.put('/api/profissoes-catalogo/:id', apiHandle(args => obras.atualizarProfissaoCatalogo(args as Parameters<typeof obras.atualizarProfissaoCatalogo>[0])));
 
+// Alarmes
+app.get   ('/api/alarmes',     apiHandle(args => alarmes.listarAlarmes(args as Parameters<typeof alarmes.listarAlarmes>[0])));
+app.post  ('/api/alarmes',     apiHandle(args => alarmes.criarAlarme(args as Parameters<typeof alarmes.criarAlarme>[0])));
+app.put   ('/api/alarmes/:id', apiHandle(args => alarmes.atualizarAlarme(args as Parameters<typeof alarmes.atualizarAlarme>[0])));
+app.delete('/api/alarmes/:id', apiHandle(args => alarmes.cancelarAlarme(args as { id: string; confirm?: boolean })));
+
 // Resumo
 app.get('/api/resumo-obras', apiHandle(() => obras.resumoObras()));
 
@@ -594,6 +601,7 @@ app.listen(PORT, () => {
   console.log(`${AGENT_IDENTITY.name} v${AGENT_IDENTITY.version} rodando na porta ${PORT}`);
   startProactiveNotifications();
   startDailyScheduler();
+  alarmes.startAlarmesTicker();
   void initDb()
     .then(() => loadSessionFromDb())
     .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));

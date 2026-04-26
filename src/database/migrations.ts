@@ -193,6 +193,23 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.19: alarmes/despertadores
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS zayra_alarmes (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      titulo          VARCHAR(200) NOT NULL,
+      descricao       TEXT,
+      trigger_at      DATETIME NOT NULL,
+      repeticao       ENUM('uma_vez','diario','semanal','dias_uteis') DEFAULT 'uma_vez',
+      canais          VARCHAR(120) DEFAULT 'sse,telegram',
+      status          ENUM('ativo','disparado','cancelado') DEFAULT 'ativo',
+      ultimo_disparo  DATETIME,
+      proximo_disparo DATETIME,
+      created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_proximo (proximo_disparo, status)
+    )
+  `);
+
   // v1.18: catálogo de profissões da construção civil (referência sindical)
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS romatec_obra_profissoes_catalogo (

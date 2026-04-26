@@ -32,6 +32,11 @@ function broadcast(n: Notification): void {
   }
 }
 
+// Push externo (alarmes, etc) usa o mesmo canal SSE.
+export function broadcastNotification(n: Notification): void {
+  broadcast(n);
+}
+
 async function runCheck(): Promise<void> {
   if (clients.length === 0) return;
 

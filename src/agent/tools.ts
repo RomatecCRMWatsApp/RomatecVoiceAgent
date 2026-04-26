@@ -7,6 +7,7 @@ import * as telegram from '../integrations/telegram';
 import * as filesystem from '../integrations/filesystem';
 import * as system from '../integrations/system';
 import * as obras from '../integrations/obras';
+import * as alarmes from '../integrations/alarmes';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -752,6 +753,60 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['obra_id', 'atividades'],
     },
   },
+  // ── Alarmes / Despertadores (v1.19) ──
+  {
+    name: 'criar_alarme',
+    description: 'Programa um alarme/despertador. Notifica via push web (browser/PWA) e Telegram (chega no celular mesmo offline). Aceita "quando" em formato livre: "14:30", "14:30 amanhã", "2026-04-27 09:00". Sem confirm primeiro pra preview.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        titulo:    { type: 'string', description: 'Ex: "Reunião com cliente Maria"' },
+        quando:    { type: 'string', description: '"HH:MM", "HH:MM amanhã", ou "YYYY-MM-DD HH:MM"' },
+        descricao: { type: 'string' },
+        repeticao: { type: 'string', enum: ['uma_vez', 'diario', 'semanal', 'dias_uteis'] },
+        canais:    { type: 'string', description: '"sse,telegram" (default), "sse", ou "telegram"' },
+        confirm:   { type: 'boolean' },
+      },
+      required: ['titulo', 'quando'],
+    },
+  },
+  {
+    name: 'listar_alarmes',
+    description: 'Lista alarmes programados. Default mostra ativos+disparados (não cancelados).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['ativo','disparado','cancelado'] },
+        limite: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'atualizar_alarme',
+    description: 'Edita alarme existente (mudar hora, título, repetição). Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:        { type: 'string' },
+        titulo:    { type: 'string' },
+        quando:    { type: 'string' },
+        descricao: { type: 'string' },
+        repeticao: { type: 'string', enum: ['uma_vez','diario','semanal','dias_uteis'] },
+        canais:    { type: 'string' },
+        confirm:   { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'cancelar_alarme',
+    description: 'Cancela um alarme. Confirm exigido.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, confirm: { type: 'boolean' } },
+      required: ['id'],
+    },
+  },
   {
     name: 'listar_profissoes_catalogo',
     description: 'Lista todas as 30+ profissões da construção civil cadastradas no catálogo (com valor diária e salário mensal de referência sindical).',
@@ -1134,6 +1189,18 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'registrar_diario_obra':
         data = await obras.registrarDiarioObra(input as Parameters<typeof obras.registrarDiarioObra>[0]);
+        break;
+      case 'criar_alarme':
+        data = await alarmes.criarAlarme(input as Parameters<typeof alarmes.criarAlarme>[0]);
+        break;
+      case 'listar_alarmes':
+        data = await alarmes.listarAlarmes(input as Parameters<typeof alarmes.listarAlarmes>[0]);
+        break;
+      case 'atualizar_alarme':
+        data = await alarmes.atualizarAlarme(input as Parameters<typeof alarmes.atualizarAlarme>[0]);
+        break;
+      case 'cancelar_alarme':
+        data = await alarmes.cancelarAlarme(input as { id: string; confirm?: boolean });
         break;
       case 'listar_profissoes_catalogo':
         data = await obras.listarProfissoesCatalogo();
