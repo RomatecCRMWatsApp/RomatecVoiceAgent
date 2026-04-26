@@ -29,36 +29,86 @@ export interface WaAudioMessage { type: 'audio'; from: string; id: string; audio
 export type WaMessage = WaTextMessage | WaAudioMessage;
 
 // ── Normaliza payload ZAPI (ReceivedCallback) → WaMessage ────────────────────
+// Z-API envia payloads com formatos variados (raiz vs data.*, message string vs
+// objeto, audio.audioUrl vs audioUrl vs mediaUrl). Lógica espelha o CRM.
+function pickStr(obj: Record<string, unknown>, ...paths: string[]): string {
+  for (const p of paths) {
+    const parts = p.split('.');
+    let cur: unknown = obj;
+    for (const k of parts) {
+      if (cur && typeof cur === 'object' && k in (cur as Record<string, unknown>)) {
+        cur = (cur as Record<string, unknown>)[k];
+      } else { cur = undefined; break; }
+    }
+    if (typeof cur === 'string' && cur) return cur;
+  }
+  return '';
+}
+
+function pickFlag(obj: Record<string, unknown>, ...paths: string[]): boolean {
+  for (const p of paths) {
+    const parts = p.split('.');
+    let cur: unknown = obj;
+    for (const k of parts) {
+      if (cur && typeof cur === 'object' && k in (cur as Record<string, unknown>)) {
+        cur = (cur as Record<string, unknown>)[k];
+      } else { cur = undefined; break; }
+    }
+    if (cur === true) return true;
+  }
+  return false;
+}
+
+const STATUS_EVENTS = new Set(['sent', 'delivered', 'read', 'failed', 'error', 'message_status', 'message.status']);
+
 export function parseZapiWebhook(body: unknown): WaMessage[] {
   if (!body || typeof body !== 'object') return [];
   const b = body as Record<string, unknown>;
 
-  // Ignora mensagens enviadas pela própria conta (loop)
-  if (b.fromMe === true) return [];
+  // 1. Ignora mensagens enviadas pela própria conta (loop)
+  if (pickFlag(b, 'fromMe', 'data.fromMe')) return [];
 
-  const phone = (b.phone ?? b.from ?? '') as string;
-  const id    = (b.messageId ?? b.id ?? `wa_${Date.now()}`) as string;
+  // 2. Ignora grupos
+  if (pickFlag(b, 'isGroup', 'isGroupMsg', 'data.isGroup')) return [];
 
-  // Texto
-  const text = (b.text as Record<string, unknown> | undefined);
-  if (text && typeof text === 'object' && typeof text.message === 'string') {
-    return [{ type: 'text', from: phone, id, text: { body: text.message } }];
-  }
-  if (typeof b.body === 'string')    return [{ type: 'text', from: phone, id, text: { body: b.body    } }];
-  if (typeof b.message === 'string') return [{ type: 'text', from: phone, id, text: { body: b.message } }];
+  // 3. Ignora status callbacks (sent/delivered/read etc.)
+  const eventType = pickStr(b, 'event', 'type', 'data.event', 'status').toLowerCase();
+  if (STATUS_EVENTS.has(eventType)) return [];
 
-  // Áudio
-  const audio = (b.audio as Record<string, unknown> | undefined);
-  if (audio && typeof audio === 'object' && typeof audio.audioUrl === 'string') {
+  const phone = pickStr(b, 'phone', 'from', 'data.phone').replace(/\D/g, '');
+  if (!phone) return [];
+
+  const id = pickStr(b, 'messageId', 'id', 'data.messageId') || `wa_${Date.now()}`;
+
+  // 4. Áudio (precedência, pra não cair no fallback de texto vazio)
+  const audioUrl = pickStr(b, 'audio.audioUrl', 'audioUrl', 'mediaUrl', 'data.audioUrl', 'media.url');
+  const isAudio = pickFlag(b, 'isAudio', 'data.isAudio') ||
+                  ['audio', 'ptt', 'voice'].includes(pickStr(b, 'type').toLowerCase()) ||
+                  !!audioUrl;
+  if (isAudio && audioUrl) {
     return [{
       type:  'audio',
       from:  phone,
       id,
-      audio: { id, mime_type: (audio.mimeType as string) ?? 'audio/ogg', url: audio.audioUrl as string },
+      audio: { id, mime_type: pickStr(b, 'audio.mimeType', 'mimeType') || 'audio/ogg', url: audioUrl },
     }];
   }
 
-  return []; // tipo não suportado (imagem/video/sticker etc) — silencioso
+  // 5. Texto — múltiplos formatos
+  let messageText = pickStr(b, 'text.message', 'text.body', 'message', 'body', 'data.message', 'data.text', 'content');
+
+  // Se message é objeto, tenta extrair string
+  if (!messageText) {
+    const m = b.message;
+    if (m && typeof m === 'object') {
+      const mo = m as Record<string, unknown>;
+      messageText = pickStr(mo, 'message', 'body', 'text', 'caption');
+    }
+  }
+  messageText = (messageText || '').trim();
+  if (!messageText) return []; // payload sem conteúdo útil
+
+  return [{ type: 'text', from: phone, id, text: { body: messageText } }];
 }
 
 // ── Outbound: envia texto via ZAPI direto ────────────────────────────────────
