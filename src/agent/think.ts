@@ -67,6 +67,20 @@ function useGroq(): boolean {
   return !!process.env.GROQ_API_KEY;
 }
 
+// Hora atual em Fortaleza/BRT (GMT-3 sem horário de verão), formato humano em pt-BR.
+// Injetado no system prompt para que ZAYRA tenha consciência temporal sem precisar de tool.
+function nowBR(): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Fortaleza',
+    weekday:  'long',
+    day:      '2-digit',
+    month:    'long',
+    year:     'numeric',
+    hour:     '2-digit',
+    minute:   '2-digit',
+  }).format(new Date());
+}
+
 function hasClaude(): boolean {
   return !!process.env.ANTHROPIC_API_KEY;
 }
@@ -107,7 +121,10 @@ export async function think(
   }
 
   const memCtx       = await getMemoryContext().catch(() => '');
-  const systemPrompt = BASE_SYSTEM_PROMPT + memCtx;
+  const systemPrompt =
+    BASE_SYSTEM_PROMPT
+    + memCtx
+    + `\n\nData/hora atual no servidor: ${nowBR()} (Fortaleza/BRT, GMT-3).`;
 
   const history: { role: 'user' | 'assistant'; content: string }[] = isExplicitSession
     ? (await getSessionMessages(sessionId, 40).catch(() => []))
