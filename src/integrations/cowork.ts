@@ -183,9 +183,12 @@ const MAX_PARALELO = 2;
 
 async function tickWorker(): Promise<void> {
   if (_runningCount >= MAX_PARALELO) return;
+  // mysql2 prepared statements têm bug com LIMIT ? — driver passa o number
+  // como STRING e MySQL retorna ER_WRONG_ARGUMENTS. Interpolação direta é
+  // segura aqui porque o valor é Math.max/min de constantes inteiras.
+  const limit = Math.max(1, MAX_PARALELO - _runningCount);
   const [rows] = await pool.execute<TarefaRow[]>(
-    `SELECT * FROM zayra_tarefas WHERE status = 'pendente' ORDER BY criada_em ASC LIMIT ?`,
-    [MAX_PARALELO - _runningCount],
+    `SELECT * FROM zayra_tarefas WHERE status = 'pendente' ORDER BY criada_em ASC LIMIT ${limit}`,
   );
   for (const t of rows) {
     _runningCount++;
