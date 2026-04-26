@@ -28,6 +28,7 @@ import {
 } from './agent/memory';
 import { startDailyScheduler } from './agent/scheduler';
 import * as calendar from './integrations/calendar';
+import * as obras from './integrations/obras';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -495,6 +496,72 @@ app.get('/memory', async (_req: Request, res: Response) => {
     res.json({ agent: AGENT_IDENTITY.name, count: memories.length, memories });
   } catch (err) {
     res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Obras (v1.16) — interface web + API REST ────────────────────────────────
+app.get('/obras', (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'obras.html'));
+});
+
+const apiHandle = (fn: (...args: never[]) => Promise<unknown> | unknown) =>
+  async (req: Request, res: Response) => {
+    try {
+      const args: Record<string, unknown> = {
+        ...req.query, ...req.params, ...(req.body ?? {}), confirm: true,
+      };
+      const data = await (fn as (a: typeof args) => Promise<unknown>)(args);
+      res.json(data);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  };
+
+// Obras
+app.get   ('/api/obras',     apiHandle(args => obras.listarObras(args as Parameters<typeof obras.listarObras>[0])));
+app.get   ('/api/obras/:id', apiHandle(args => obras.buscarObra((args as { id: string }).id)));
+app.post  ('/api/obras',     apiHandle(args => obras.criarObra(args as Parameters<typeof obras.criarObra>[0])));
+app.put   ('/api/obras/:id', apiHandle(args => obras.atualizarObra(args as Parameters<typeof obras.atualizarObra>[0])));
+app.delete('/api/obras/:id', apiHandle(args => obras.apagarObra(args as { id: string; confirm?: boolean })));
+
+// Etapas
+app.get   ('/api/etapas',     apiHandle(args => obras.listarEtapasObra((args as { obra_id: string }).obra_id)));
+app.post  ('/api/etapas',     apiHandle(args => obras.criarEtapa(args as Parameters<typeof obras.criarEtapa>[0])));
+app.put   ('/api/etapas/:id', apiHandle(args => obras.atualizarEtapa(args as Parameters<typeof obras.atualizarEtapa>[0])));
+app.delete('/api/etapas/:id', apiHandle(args => obras.apagarEtapa(args as { id: string; confirm?: boolean })));
+
+// Transações
+app.get ('/api/transacoes', apiHandle(args => obras.listarTransacoesObra(args as Parameters<typeof obras.listarTransacoesObra>[0])));
+app.post('/api/transacoes', apiHandle(args => obras.criarTransacaoObra(args as Parameters<typeof obras.criarTransacaoObra>[0])));
+
+// Equipe
+app.get ('/api/equipe', apiHandle(args => obras.listarEquipe(args as { obra_id?: string })));
+app.post('/api/equipe', apiHandle(args => obras.criarMembroEquipe(args as Parameters<typeof obras.criarMembroEquipe>[0])));
+
+// Materiais
+app.get ('/api/materiais',          apiHandle(args => obras.listarMateriais(args as { apenas_baixos?: boolean })));
+app.post('/api/materiais',          apiHandle(args => obras.criarMaterial(args as Parameters<typeof obras.criarMaterial>[0])));
+app.post('/api/materiais/ajustar',  apiHandle(args => obras.ajustarEstoqueMaterial(args as { id: string; delta: number; confirm?: boolean })));
+
+// Diário
+app.get ('/api/diario', apiHandle(args => obras.listarDiarioObra(args as Parameters<typeof obras.listarDiarioObra>[0])));
+app.post('/api/diario', apiHandle(args => obras.registrarDiarioObra(args as Parameters<typeof obras.registrarDiarioObra>[0])));
+
+// Resumo
+app.get('/api/resumo-obras', apiHandle(() => obras.resumoObras()));
+
+// Pergunta pra ZAYRA via contexto de obras
+app.post('/api/obras/zayra', async (req: Request, res: Response) => {
+  try {
+    const pergunta = String(req.body?.pergunta ?? '').trim();
+    const obraId   = req.body?.obra_id as string | undefined;
+    if (!pergunta) return res.status(400).json({ error: 'pergunta obrigatória' });
+    const ctx = obraId ? `\n\n[Contexto: foco na obra de ID ${obraId}]` : '';
+    const r = await think(pergunta + ctx, { channel: 'text' });
+    res.json({ resposta: r.text, tools: r.toolsUsed, sessionId: r.sessionId });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 

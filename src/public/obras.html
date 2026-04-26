@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestão de Obras · ZAYRA Romatec</title>
+<style>
+  :root {
+    --bg: #0a0e0a;
+    --bg-elev: #0f1410;
+    --surface: #131a14;
+    --border: rgba(0, 255, 136, 0.12);
+    --border-strong: rgba(0, 255, 136, 0.3);
+    --text: #e0f2e6;
+    --text-muted: #7a9988;
+    --neon: #00ff88;
+    --neon-dim: #00cc6e;
+    --gold: #c9a84c;
+    --gold-dim: #a8893a;
+    --danger: #ff5555;
+    --danger-bg: rgba(255, 85, 85, 0.12);
+    --warning: #ffaa33;
+    --warning-bg: rgba(255, 170, 51, 0.12);
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text); padding: 16px;
+    background-image: radial-gradient(circle at 0% 0%, rgba(0,255,136,0.04), transparent 50%),
+                      radial-gradient(circle at 100% 100%, rgba(201,168,76,0.04), transparent 50%);
+    min-height: 100vh;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  .header {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 16px 20px;
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; flex-wrap: wrap; gap: 12px;
+  }
+  .header h1 { margin: 0; font-size: 22px; font-weight: 500; color: var(--neon); letter-spacing: 1px; }
+  .header p { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); }
+  .badge-zayra {
+    background: linear-gradient(135deg, rgba(0,255,136,0.15), rgba(201,168,76,0.15));
+    border: 1px solid var(--border-strong);
+    padding: 4px 10px; border-radius: 12px;
+    font-size: 11px; color: var(--gold);
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  .tabs {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 16px;
+  }
+  .tab {
+    background: transparent; border: 1px solid transparent;
+    padding: 8px 14px; cursor: pointer;
+    color: var(--text-muted); border-radius: var(--radius); font-size: 13px;
+  }
+  .tab:hover { background: var(--bg-elev); color: var(--text); }
+  .tab.active {
+    background: rgba(0, 255, 136, 0.1);
+    color: var(--neon); border-color: var(--border-strong);
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: 12px;
+  }
+  .metric-card {
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px;
+  }
+  .metric-label { font-size: 12px; color: var(--text-muted); margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .metric-value { font-size: 22px; font-weight: 500; margin: 0; color: var(--text); }
+  .metrics-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; margin-bottom: 14px;
+  }
+  .form-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;
+  }
+  @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+  input, select, textarea, button {
+    font-family: inherit; font-size: 14px; padding: 8px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-elev); color: var(--text);
+  }
+  input::placeholder, textarea::placeholder { color: var(--text-muted); }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--neon); box-shadow: 0 0 0 2px rgba(0,255,136,0.15); }
+  textarea { width: 100%; resize: vertical; }
+  button { cursor: pointer; transition: all 0.15s; }
+  button:hover { background: var(--surface); border-color: var(--border-strong); }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--neon), var(--neon-dim));
+    color: #06120a; border: none; font-weight: 600;
+  }
+  .btn-primary:hover { filter: brightness(1.1); }
+  .btn-gold {
+    background: transparent; color: var(--gold); border: 1px solid var(--gold-dim);
+  }
+  .btn-gold:hover { background: rgba(201,168,76,0.1); }
+  .btn-danger { background: transparent; color: var(--danger); border: none; padding: 4px 8px; }
+  .badge {
+    font-size: 11px; padding: 3px 8px; border-radius: var(--radius); font-weight: 500;
+  }
+  .badge-success { background: rgba(0,255,136,0.15); color: var(--neon); }
+  .badge-info { background: rgba(201,168,76,0.15); color: var(--gold); }
+  .badge-warning { background: var(--warning-bg); color: var(--warning); }
+  .badge-danger { background: var(--danger-bg); color: var(--danger); }
+  .empty {
+    text-align: center; padding: 32px 16px; color: var(--text-muted); font-size: 13px;
+  }
+  .progress-bar {
+    width: 100%; height: 6px; background: var(--bg-elev);
+    border-radius: 3px; overflow: hidden; margin-top: 6px;
+    border: 1px solid var(--border);
+  }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--neon), var(--gold)); transition: width 0.3s; }
+  .row-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .row-item:last-child { border-bottom: none; }
+  .section-title { font-size: 15px; font-weight: 500; margin: 0 0 12px; color: var(--gold); text-transform: uppercase; letter-spacing: 1px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ZAYRA chat panel */
+  .zayra-fab {
+    position: fixed; bottom: 24px; right: 24px;
+    width: 60px; height: 60px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--neon), var(--gold));
+    color: #06120a; border: none; font-weight: 800;
+    box-shadow: 0 0 24px rgba(0,255,136,0.4), 0 4px 16px rgba(0,0,0,0.5);
+    cursor: pointer; font-size: 18px; z-index: 100;
+    letter-spacing: 1px;
+  }
+  .zayra-fab:hover { filter: brightness(1.15); transform: scale(1.05); }
+  .zayra-modal {
+    position: fixed; bottom: 96px; right: 24px;
+    width: min(420px, calc(100% - 48px));
+    max-height: 70vh; background: var(--surface);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+    box-shadow: 0 0 32px rgba(0,255,136,0.15), 0 8px 32px rgba(0,0,0,0.6);
+    display: none; flex-direction: column; z-index: 100;
+  }
+  .zayra-modal.open { display: flex; }
+  .zayra-header {
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .zayra-header strong { color: var(--neon); letter-spacing: 1px; }
+  .zayra-messages {
+    flex: 1; overflow-y: auto; padding: 12px 16px;
+    display: flex; flex-direction: column; gap: 10px; min-height: 200px;
+  }
+  .msg {
+    padding: 10px 12px; border-radius: var(--radius); font-size: 13px;
+    max-width: 90%; line-height: 1.5; white-space: pre-wrap;
+  }
+  .msg.user { background: rgba(0,255,136,0.1); color: var(--neon); align-self: flex-end; border: 1px solid var(--border-strong); }
+  .msg.assistant { background: var(--bg-elev); align-self: flex-start; border: 1px solid var(--border); }
+  .zayra-input-row {
+    padding: 12px 16px; border-top: 1px solid var(--border);
+    display: flex; gap: 8px;
+  }
+  .zayra-input-row input { flex: 1; }
+  .suggestions {
+    display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px;
+  }
+  .sug-pill {
+    font-size: 11px; padding: 4px 10px; border-radius: 12px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    cursor: pointer; color: var(--text-muted);
+  }
+  .sug-pill:hover { background: rgba(0,255,136,0.1); color: var(--neon); border-color: var(--border-strong); }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div>
+      <h1>GESTÃO DE OBRAS</h1>
+      <p>ZAYRA · Romatec Consultoria Imobiliária</p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <span class="badge-zayra">v1.16</span>
+      <a href="/" style="color: var(--text-muted); text-decoration: none; font-size: 13px; padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius);">← ZAYRA Chat</a>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="dashboard">Painel</button>
+    <button class="tab" data-tab="obras">Obras</button>
+    <button class="tab" data-tab="cronograma">Cronograma</button>
+    <button class="tab" data-tab="financeiro">Financeiro</button>
+    <button class="tab" data-tab="equipe">Equipe</button>
+    <button class="tab" data-tab="materiais">Materiais</button>
+    <button class="tab" data-tab="diario">Diário</button>
+  </div>
+
+  <div id="view-dashboard" class="view active"></div>
+  <div id="view-obras" class="view"></div>
+  <div id="view-cronograma" class="view"></div>
+  <div id="view-financeiro" class="view"></div>
+  <div id="view-equipe" class="view"></div>
+  <div id="view-materiais" class="view"></div>
+  <div id="view-diario" class="view"></div>
+</div>
+
+<button class="zayra-fab" id="zayraFab">Z</button>
+<div class="zayra-modal" id="zayraModal">
+  <div class="zayra-header">
+    <div>
+      <strong>ZAYRA</strong>
+      <p style="margin:0; font-size:11px; color: var(--text-muted);">Pergunte sobre suas obras</p>
+    </div>
+    <button id="zayraClose" style="border:none; background:transparent; color: var(--text-muted); font-size: 18px; cursor: pointer;">×</button>
+  </div>
+  <div class="suggestions" id="zayraSugs"></div>
+  <div class="zayra-messages" id="zayraMsgs"></div>
+  <div class="zayra-input-row">
+    <input id="zayraInput" placeholder="Pergunte sobre obras, custos, etapas...">
+    <button class="btn-primary" id="zayraSend">▶</button>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+const state = {
+  currentObra: null, currentTab: 'dashboard',
+  obras: [], etapas: [], transacoes: [],
+  equipe: [], materiais: [], diario: [], resumo: null,
+};
+
+const fmt = n => 'R$ ' + (Number(n)||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+const today = () => new Date().toISOString().split('T')[0];
+const escape = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(path, opts={}) {
+  const r = await fetch(API + path, {
+    headers: {'Content-Type':'application/json'},
+    ...opts,
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || 'Erro API');
+  return d;
+}
+
+async function loadDashboard() {
+  state.resumo = await api('/api/resumo-obras');
+}
+async function loadObras() {
+  state.obras = await api('/api/obras');
+  if (!state.currentObra && state.obras.length) state.currentObra = state.obras[0].id;
+}
+async function loadEtapas() {
+  if (!state.currentObra) return state.etapas = [];
+  state.etapas = await api('/api/etapas?obra_id=' + state.currentObra);
+}
+async function loadTransacoes() {
+  if (!state.currentObra) return state.transacoes = [];
+  state.transacoes = await api('/api/transacoes?obra_id=' + state.currentObra);
+}
+async function loadEquipe() { state.equipe = await api('/api/equipe'); }
+async function loadMateriais() { state.materiais = await api('/api/materiais'); }
+async function loadDiario() {
+  if (!state.currentObra) return state.diario = [];
+  state.diario = await api('/api/diario?obra_id=' + state.currentObra);
+}
+
+async function render() {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('view-' + state.currentTab).classList.add('active');
+  document.querySelector(`.tab[data-tab="${state.currentTab}"]`).classList.add('active');
+
+  try {
+    const fns = {
+      dashboard: async () => { await Promise.all([loadDashboard(), loadObras()]); renderDashboard(); },
+      obras: async () => { await loadObras(); renderObras(); },
+      cronograma: async () => { await Promise.all([loadObras(), loadEtapas()]); renderCronograma(); },
+      financeiro: async () => { await Promise.all([loadObras(), loadTransacoes()]); renderFinanceiro(); },
+      equipe: async () => { await Promise.all([loadObras(), loadEquipe()]); renderEquipe(); },
+      materiais: async () => { await loadMateriais(); renderMateriais(); },
+      diario: async () => { await Promise.all([loadObras(), loadDiario()]); renderDiario(); },
+    };
+    await fns[state.currentTab]();
+  } catch (e) {
+    document.getElementById('view-' + state.currentTab).innerHTML =
+      '<div class="card empty">Erro carregando dados: ' + escape(e.message) + '</div>';
+  }
+}
+
+function obraSelector() {
+  if (state.obras.length === 0) return '';
+  const opts = state.obras.map(o =>
+    `<option value="${o.id}" ${o.id===state.currentObra?'selected':''}>${escape(o.nome)}</option>`).join('');
+  return `<div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
+    <label style="font-size:12px; color:var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Obra ativa:</label>
+    <select id="selObra" style="flex:1; max-width:300px;">${opts}</select>
+  </div>`;
+}
+function attachSel() {
+  const s = document.getElementById('selObra');
+  if (s) s.onchange = e => { state.currentObra = e.target.value; render(); };
+}
+
+// ── DASHBOARD ──
+function renderDashboard() {
+  const v = document.getElementById('view-dashboard');
+  const r = state.resumo || {};
+  const obra = state.obras.find(o => o.id === state.currentObra);
+
+  let info = '';
+  if (obra) {
+    info = `<div class="card">
+      <p class="section-title">${escape(obra.nome)}</p>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div>
+          <p class="metric-label">Cliente</p>
+          <p style="margin:4px 0;">${escape(obra.cliente||'-')}</p>
+          <p style="margin:8px 0 4px; font-size:12px; color:var(--text-muted);">${escape(obra.endereco||'-')}, ${escape(obra.cidade||'-')}</p>
+        </div>
+        <div>
+          <p class="metric-label">Orçamento</p>
+          <p style="margin:4px 0; font-size:18px; color: var(--gold);">${fmt(obra.orcamento)}</p>
+          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">Status: <span class="badge badge-info">${escape(obra.status)}</span></p>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  v.innerHTML = `${obraSelector()}
+    <div class="metrics-grid">
+      <div class="metric-card"><p class="metric-label">Obras totais</p><p class="metric-value">${r.total_obras||0}</p></div>
+      <div class="metric-card"><p class="metric-label">Em andamento</p><p class="metric-value" style="color: var(--neon);">${r.em_andamento||0}</p></div>
+      <div class="metric-card"><p class="metric-label">Concluídas</p><p class="metric-value">${r.concluidas||0}</p></div>
+      <div class="metric-card"><p class="metric-label">Paralisadas</p><p class="metric-value" style="color: var(--warning);">${r.paralisadas||0}</p></div>
+      <div class="metric-card"><p class="metric-label">Orçamento total</p><p class="metric-value" style="font-size:15px; color: var(--gold);">${fmt(r.orcamento_total)}</p></div>
+      <div class="metric-card"><p class="metric-label">Saldo</p><p class="metric-value" style="font-size:15px; color:${(r.saldo||0)<0?'var(--danger)':'var(--neon)'};">${fmt(r.saldo)}</p></div>
+      <div class="metric-card"><p class="metric-label">Etapas atrasadas</p><p class="metric-value" style="color:${(r.etapas_atrasadas||0)>0?'var(--danger)':'inherit'};">${r.etapas_atrasadas||0}</p></div>
+      <div class="metric-card"><p class="metric-label">Mat. em falta</p><p class="metric-value" style="color:${(r.materiais_baixos||0)>0?'var(--warning)':'inherit'};">${r.materiais_baixos||0}</p></div>
+    </div>
+    ${info}
+    ${state.obras.length===0?'<div class="card empty">Nenhuma obra cadastrada. Vá na aba <strong>Obras</strong>.</div>':''}`;
+  attachSel();
+}
+
+// ── OBRAS ──
+function renderObras() {
+  const v = document.getElementById('view-obras');
+  const lista = state.obras.map(o => {
+    const sb = {em_andamento:'badge-success',concluida:'badge-info',paralisada:'badge-warning',planejamento:'badge-info'}[o.status];
+    return `<div class="card">
+      <div style="display:flex; justify-content:space-between; gap:8px;">
+        <div style="flex:1; min-width:0;">
+          <p style="margin:0; font-weight:500; font-size:15px; color: var(--text);">${escape(o.nome)}</p>
+          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">${escape(o.tipo)} · ${escape(o.endereco||'-')}, ${escape(o.cidade||'-')}</p>
+          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">Cliente: ${escape(o.cliente||'-')}</p>
+          <div style="display:flex; gap:6px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+            <span class="badge ${sb}">${escape(o.status)}</span>
+            <span style="font-size:12px; color: var(--gold);">${fmt(o.orcamento)}</span>
+          </div>
+        </div>
+        <button class="btn-danger" data-del-obra="${o.id}">Excluir</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  v.innerHTML = `<div class="card">
+    <p class="section-title">Nova obra</p>
+    <div class="form-grid">
+      <input id="oNome" placeholder="Nome da obra *">
+      <select id="oTipo"><option value="residencial">Residencial</option><option value="comercial">Comercial</option><option value="industrial">Industrial</option><option value="reforma">Reforma</option><option value="publica">Pública</option></select>
+      <input id="oCliente" placeholder="Cliente">
+      <input id="oTel" placeholder="Telefone">
+      <input id="oEnd" placeholder="Endereço">
+      <input id="oCidade" placeholder="Cidade">
+      <input id="oArea" type="number" placeholder="Área (m²)">
+      <input id="oOrc" type="number" step="0.01" placeholder="Orçamento (R$)">
+      <select id="oStatus">
+        <option value="planejamento">Planejamento</option>
+        <option value="em_andamento" selected>Em andamento</option>
+        <option value="paralisada">Paralisada</option>
+        <option value="concluida">Concluída</option>
+      </select>
+      <input id="oResp" placeholder="Responsável técnico">
+      <input id="oIni" type="date">
+      <input id="oPrev" type="date">
+    </div>
+    <textarea id="oObs" placeholder="Observações" rows="2" style="margin-bottom:8px;"></textarea>
+    <button class="btn-primary" id="addObra">Adicionar obra</button>
+  </div>
+  <p class="section-title" style="margin-top:16px;">Obras (${state.obras.length})</p>
+  ${lista || '<div class="card empty">Nenhuma obra ainda.</div>'}`;
+
+  document.getElementById('addObra').onclick = async () => {
+    const nome = document.getElementById('oNome').value.trim();
+    if (!nome) return alert('Informe o nome');
+    try {
+      await api('/api/obras', {
+        method: 'POST',
+        body: JSON.stringify({
+          nome,
+          tipo: document.getElementById('oTipo').value,
+          cliente: document.getElementById('oCliente').value.trim() || null,
+          cliente_telefone: document.getElementById('oTel').value.trim() || null,
+          endereco: document.getElementById('oEnd').value.trim() || null,
+          cidade: document.getElementById('oCidade').value.trim() || null,
+          area_m2: parseFloat(document.getElementById('oArea').value) || null,
+          orcamento: parseFloat(document.getElementById('oOrc').value) || null,
+          status: document.getElementById('oStatus').value,
+          responsavel_tecnico: document.getElementById('oResp').value.trim() || null,
+          data_inicio: document.getElementById('oIni').value || null,
+          data_previsao: document.getElementById('oPrev').value || null,
+          observacoes: document.getElementById('oObs').value.trim() || null,
+        }),
+      });
+      render();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+  v.querySelectorAll('[data-del-obra]').forEach(b => b.onclick = async () => {
+    if (!confirm('Excluir obra (e todas as etapas/transações/diário)?')) return;
+    try { await api('/api/obras/' + b.dataset.delObra, { method: 'DELETE' }); render(); }
+    catch (e) { alert('Erro: ' + e.message); }
+  });
+}
+
+// ── CRONOGRAMA ──
+function renderCronograma() {
+  const v = document.getElementById('view-cronograma');
+  if (!state.currentObra) { v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro.</div>'; return; }
+  const lista = state.etapas.map((e,i) => {
+    const sb = {concluido:'badge-success',em_andamento:'badge-info',atrasado:'badge-danger',pendente:'badge-warning'}[e.status];
+    return `<div class="card">
+      <div style="display:flex; justify-content:space-between; gap:8px;">
+        <div style="flex:1; min-width:0;">
+          <p style="margin:0; font-weight:500;">${i+1}. ${escape(e.nome)}</p>
+          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">${escape(e.data_inicio||'-')} → ${escape(e.data_fim||'-')}</p>
+          ${e.responsavel?`<p style="margin:2px 0; font-size:12px; color:var(--text-muted);">Resp: ${escape(e.responsavel)}</p>`:''}
+          <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+            <span class="badge ${sb}">${escape(e.status)}</span>
+            <select data-status="${e.id}" style="font-size:11px; padding:4px 8px;">
+              <option value="pendente" ${e.status==='pendente'?'selected':''}>Pendente</option>
+              <option value="em_andamento" ${e.status==='em_andamento'?'selected':''}>Em andamento</option>
+              <option value="concluido" ${e.status==='concluido'?'selected':''}>Concluído</option>
+              <option value="atrasado" ${e.status==='atrasado'?'selected':''}>Atrasado</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn-danger" data-del-et="${e.id}">Excluir</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  v.innerHTML = `${obraSelector()}
+  <div class="card">
+    <p class="section-title">Nova etapa</p>
+    <div class="form-grid">
+      <input id="eNome" placeholder="Nome da etapa *">
+      <input id="eResp" placeholder="Responsável">
+      <input id="eIni" type="date">
+      <input id="eFim" type="date">
+    </div>
+    <textarea id="eDesc" placeholder="Descrição" rows="2" style="margin-bottom:8px;"></textarea>
+    <button class="btn-primary" id="addEt">Adicionar etapa</button>
+  </div>
+  <p class="section-title" style="margin-top:16px;">Etapas (${state.etapas.length})</p>
+  ${lista || '<div class="card empty">Nenhuma etapa.</div>'}`;
+  attachSel();
+
+  document.getElementById('addEt').onclick = async () => {
+    const nome = document.getElementById('eNome').value.trim();
+    if (!nome) return alert('Informe o nome');
+    try {
+      await api('/api/etapas', {
+        method: 'POST',
+        body: JSON.stringify({
+          obra_id: state.currentObra, nome,
+          responsavel: document.getElementById('eResp').value.trim() || null,
+          data_inicio: document.getElementById('eIni').value || null,
+          data_fim: document.getElementById('eFim').value || null,
+          descricao: document.getElementById('eDesc').value.trim() || null,
+          ordem: state.etapas.length + 1,
+        }),
+      });
+      render();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+  v.querySelectorAll('[data-status]').forEach(s => s.onchange = async e => {
+    try { await api('/api/etapas/' + s.dataset.status, { method: 'PUT', body: JSON.stringify({ id: s.dataset.status, status: e.target.value }) }); render(); }
+    catch (err) { alert('Erro: ' + err.message); }
+  });
+  v.querySelectorAll('[data-del-et]').forEach(b => b.onclick = async () => {
+    try { await api('/api/etapas/' + b.dataset.delEt, { method: 'DELETE' }); render(); }
+    catch (e) { alert('Erro: ' + e.message); }
+  });
+}
+
+// ── FINANCEIRO ──
+function renderFinanceiro() {
+  const v = document.getElementById('view-financeiro');
+  if (!state.currentObra) { v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro.</div>'; return; }
+  const obra = state.obras.find(o => o.id === state.currentObra);
+  const ent = state.transacoes.filter(t => t.tipo === 'entrada').reduce((s,t) => s+Number(t.valor||0), 0);
+  const sai = state.transacoes.filter(t => t.tipo === 'saida').reduce((s,t) => s+Number(t.valor||0), 0);
+  const cons = obra && obra.orcamento ? Math.round(sai/obra.orcamento*100) : 0;
+
+  const lista = state.transacoes.map(t => `<div class="row-item">
+    <div style="flex:1; min-width:0;">
+      <p style="margin:0; font-size:13px;">${escape(t.descricao)}</p>
+      <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">${escape(t.data)} · ${escape(t.categoria||'Geral')}${t.fornecedor?' · '+escape(t.fornecedor):''}</p>
+    </div>
+    <span style="font-weight:500; color:${t.tipo==='entrada'?'var(--neon)':'var(--danger)'};">${t.tipo==='entrada'?'+':'−'} ${fmt(t.valor)}</span>
+  </div>`).join('');
+
+  v.innerHTML = `${obraSelector()}
+  <div class="metrics-grid">
+    <div class="metric-card"><p class="metric-label">Entradas</p><p class="metric-value" style="font-size:15px; color:var(--neon);">${fmt(ent)}</p></div>
+    <div class="metric-card"><p class="metric-label">Saídas</p><p class="metric-value" style="font-size:15px; color:var(--danger);">${fmt(sai)}</p></div>
+    <div class="metric-card"><p class="metric-label">Saldo</p><p class="metric-value" style="font-size:15px;">${fmt(ent-sai)}</p></div>
+    <div class="metric-card"><p class="metric-label">Orçamento usado</p><p class="metric-value" style="font-size:15px; color:${cons>100?'var(--danger)':cons>80?'var(--warning)':'inherit'};">${cons}%</p>
+    <div class="progress-bar"><div class="progress-fill" style="width:${Math.min(cons,100)}%;"></div></div></div>
+  </div>
+  <div class="card">
+    <p class="section-title">Nova transação</p>
+    <div class="form-grid">
+      <select id="tTipo"><option value="saida">Saída</option><option value="entrada">Entrada</option></select>
+      <select id="tCat"><option>Material</option><option>Mão de obra</option><option>Equipamento</option><option>Serviço terceirizado</option><option>Documentação</option><option>Pagamento cliente</option><option>Outros</option></select>
+      <input id="tDesc" placeholder="Descrição *">
+      <input id="tVal" type="number" step="0.01" placeholder="Valor (R$) *">
+      <input id="tData" type="date">
+      <input id="tForn" placeholder="Fornecedor">
+      <input id="tNF" placeholder="Nota fiscal">
+      <select id="tFP"><option value="pix">pix</option><option value="dinheiro">dinheiro</option><option value="transferencia">transferência</option><option value="cartao">cartão</option><option value="boleto">boleto</option></select>
+    </div>
+    <button class="btn-primary" id="addT">Adicionar</button>
+  </div>
+  <div class="card" style="margin-top:12px;">
+    <p class="section-title">Movimentações (${state.transacoes.length})</p>
+    ${lista || '<div class="empty">Sem transações.</div>'}
+  </div>`;
+  attachSel();
+  document.getElementById('tData').value = today();
+
+  document.getElementById('addT').onclick = async () => {
+    const desc = document.getElementById('tDesc').value.trim();
+    const val = parseFloat(document.getElementById('tVal').value);
+    if (!desc || !val) return alert('Preencha descrição e valor');
+    try {
+      await api('/api/transacoes', {
+        method: 'POST',
+        body: JSON.stringify({
+          obra_id: state.currentObra,
+          tipo: document.getElementById('tTipo').value,
+          categoria: document.getElementById('tCat').value,
+          descricao: desc, valor: val,
+          data: document.getElementById('tData').value || today(),
+          fornecedor: document.getElementById('tForn').value.trim() || null,
+          nota_fiscal: document.getElementById('tNF').value.trim() || null,
+          forma_pagamento: document.getElementById('tFP').value,
+        }),
+      });
+      render();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+}
+
+// ── EQUIPE ──
+function renderEquipe() {
+  const v = document.getElementById('view-equipe');
+  const lista = state.equipe.map(p => {
+    return `<div class="card">
+      <p style="margin:0; font-weight:500;">${escape(p.nome)}</p>
+      <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.funcao||'-')} · ${escape(p.tipo_contrato)} · ${fmt(p.valor_dia)}/dia</p>
+      <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.telefone||'-')}</p>
+    </div>`;
+  }).join('');
+
+  v.innerHTML = `<div class="card">
+    <p class="section-title">Novo membro</p>
+    <div class="form-grid">
+      <input id="pNome" placeholder="Nome *">
+      <input id="pFunc" placeholder="Função">
+      <select id="pTipo"><option value="diarista">Diarista</option><option value="clt">CLT</option><option value="empreitada">Empreitada</option><option value="terceirizado">Terceirizado</option></select>
+      <input id="pCPF" placeholder="CPF">
+      <input id="pTel" placeholder="Telefone">
+      <input id="pVal" type="number" step="0.01" placeholder="Valor diária (R$)">
+      <input id="pEsp" placeholder="Especialidade">
+    </div>
+    <textarea id="pObs" placeholder="Observações" rows="2" style="margin-bottom:8px;"></textarea>
+    <button class="btn-primary" id="addEq">Adicionar</button>
+  </div>
+  <p class="section-title" style="margin-top:16px;">Equipe (${state.equipe.length})</p>
+  ${lista || '<div class="card empty">Nenhum membro.</div>'}`;
+
+  document.getElementById('addEq').onclick = async () => {
+    const nome = document.getElementById('pNome').value.trim();
+    if (!nome) return alert('Informe o nome');
+    try {
+      await api('/api/equipe', {
+        method: 'POST',
+        body: JSON.stringify({
+          nome,
+          funcao: document.getElementById('pFunc').value.trim() || null,
+          tipo_contrato: document.getElementById('pTipo').value,
+          cpf: document.getElementById('pCPF').value.trim() || null,
+          telefone: document.getElementById('pTel').value.trim() || null,
+          valor_dia: parseFloat(document.getElementById('pVal').value) || null,
+          especialidade: document.getElementById('pEsp').value.trim() || null,
+          observacoes: document.getElementById('pObs').value.trim() || null,
+        }),
+      });
+      render();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+}
+
+// ── MATERIAIS ──
+function renderMateriais() {
+  const v = document.getElementById('view-materiais');
+  const lista = state.materiais.map(m => {
+    return `<div class="card">
+      <div style="display:flex; justify-content:space-between; gap:8px;">
+        <div style="flex:1; min-width:0;">
+          <p style="margin:0; font-weight:500;">${escape(m.nome)} ${m.estoque_baixo?'<span class="badge badge-danger">Estoque baixo</span>':''}</p>
+          <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(m.categoria||'-')} · ${escape(m.fornecedor||'-')}</p>
+          <p style="margin:4px 0 0; font-size:13px;">Estoque: <strong>${m.estoque} ${escape(m.unidade)}</strong> · Mín: ${m.estoque_minimo} · ${fmt(m.valor_unitario)}/un</p>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px;">
+          <button data-add-m="${m.id}" style="font-size:11px;">+ Estoque</button>
+          <button data-sub-m="${m.id}" style="font-size:11px;">− Uso</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  v.innerHTML = `<div class="card">
+    <p class="section-title">Novo material</p>
+    <div class="form-grid">
+      <input id="mNome" placeholder="Nome *">
+      <input id="mCat" placeholder="Categoria">
+      <input id="mUn" placeholder="Unidade (kg, sc, m, un)">
+      <input id="mEst" type="number" step="0.01" placeholder="Estoque atual">
+      <input id="mMin" type="number" step="0.01" placeholder="Estoque mínimo">
+      <input id="mVal" type="number" step="0.01" placeholder="Valor unitário (R$)">
+      <input id="mForn" placeholder="Fornecedor">
+      <input id="mLocal" placeholder="Local de armazenamento">
+    </div>
+    <button class="btn-primary" id="addM">Adicionar</button>
+  </div>
+  <p class="section-title" style="margin-top:16px;">Materiais (${state.materiais.length})</p>
+  ${lista || '<div class="card empty">Nenhum material.</div>'}`;
+
+  document.getElementById('addM').onclick = async () => {
+    const nome = document.getElementById('mNome').value.trim();
+    if (!nome) return alert('Informe o nome');
+    try {
+      await api('/api/materiais', {
+        method: 'POST',
+        body: JSON.stringify({
+          nome,
+          categoria: document.getElementById('mCat').value.trim() || null,
+          unidade: document.getElementById('mUn').value.trim() || 'un',
+          estoque: parseFloat(document.getElementById('mEst').value) || 0,
+          estoque_minimo: parseFloat(document.getElementById('mMin').value) || 0,
+          valor_unitario: parseFloat(document.getElementById('mVal').value) || null,
+          fornecedor_principal: document.getElementById('mForn').value.trim() || null,
+          local_armazenamento: document.getElementById('mLocal').value.trim() || null,
+        }),
+      });
+      render();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+  v.querySelectorAll('[data-add-m]').forEach(b => b.onclick = async () => {
+    const q = parseFloat(prompt('Quantidade adicionada:'));
+    if (!q || q <= 0) return;
+    try { await api('/api/materiais/ajustar', { method: 'POST', body: JSON.stringify({ id: b.dataset.addM, delta: q }) }); render(); }
+    catch (e) { alert('Erro: ' + e.message); }
+  });
+  v.querySelectorAll('[data-sub-m]').forEach(b => b.onclick = async () => {
+    const q = parseFloat(prompt('Quantidade utilizada:'));
+    if (!q || q <= 0) return;
+    try { await api('/api/materiais/ajustar', { method: 'POST', body: JSON.stringify({ id: b.dataset.subM, delta: -q }) }); render(); }
+    catch (e) { alert('Erro: ' + e.message); }
+  });
+}
+
+// ── DIÁRIO ──
+function renderDiario() {
+  const v = document.getElementById('view-diario');
+  if (!state.currentObra) { v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro.</div>'; return; }
+  const lista = state.diario.map(r => `<div class="card">
+    <p style="margin:0; font-weight:500;">${escape(r.data)} · ${escape(r.clima)}</p>
+    <p style="margin:6px 0; font-size:13px;"><strong>Atividades:</strong> ${escape(r.atividades)}</p>
+    ${r.equipe_presente?`<p style="margin:4px 0; font-size:12px;"><strong>Equipe:</strong> ${escape(r.equipe_presente)}</p>`:''}
+    ${r.ocorrencias?`<p style="margin:4px 0; font-size:12px; color:var(--warning);"><strong>Ocorrências:</strong> ${escape(r.ocorrencias)}</p>`:''}
+  </div>`).join('');
+
+  v.innerHTML = `${obraSelector()}
+  <div class="card">
+    <p class="section-title">Novo registro</p>
+    <div class="form-grid">
+      <input id="dData" type="date">
+      <select id="dClima"><option value="sol">Sol</option><option value="nublado">Nublado</option><option value="chuva">Chuva</option><option value="tempestade">Tempestade</option></select>
+      <input id="dHIni" type="time" placeholder="Hora início">
+      <input id="dHFim" type="time" placeholder="Hora fim">
+      <input id="dQtd" type="number" placeholder="Qtd trabalhadores">
+      <input id="dVisitas" placeholder="Visitas (fiscal, cliente)">
+    </div>
+    <textarea id="dAtiv" placeholder="Atividades realizadas *" rows="3" style="margin-bottom:8px;"></textarea>
+    <textarea id="dEq" placeholder="Equipe presente" rows="2" style="margin-bottom:8px;"></textarea>
+    <textarea id="dOcor" placeholder="Ocorrências/problemas" rows="2" style="margin-bottom:8px;"></textarea>
+    <button class="btn-primary" id="addD">Salvar registro</button>
+  </div>
+  <p class="section-title" style="margin-top:16px;">Histórico (${state.diario.length})</p>
+  ${lista || '<div class="card empty">Sem registros.</div>'}`;
+  attachSel();
+  document.getElementById('dData').value = today();
+
+  document.getElementById('addD').onclick = async () => {
+    const ativ = document.getElementById('dAtiv').value.trim();
+    if (!ativ) return alert('Descreva as atividades');
+    try {
+      await api('/api/diario', {
+        method: 'POST',
+        body: JSON.stringify({
+          obra_id: state.currentObra,
+          data: document.getElementById('dData').value || today(),
+          clima: document.getElementById('dClima').value,
+          horario_inicio: document.getElementById('dHIni').value || null,
+          horario_fim: document.getElementById('dHFim').value || null,
+          quantidade_trabalhadores: parseInt(document.getElementById('dQtd').value) || null,
+          visitas: document.getElementById('dVisitas').value.trim() || null,
+          atividades: ativ,
+          equipe_presente: document.getElementById('dEq').value.trim() || null,
+          ocorrencias: document.getElementById('dOcor').value.trim() || null,
+        }),
+      });
+      render();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+}
+
+// ── ZAYRA ──
+const SUGESTOES = [
+  'Como tão as obras?',
+  'Quanto gastei na obra atual?',
+  'Materiais em falta?',
+  'Etapas atrasadas?',
+  'Resumo executivo',
+];
+
+function renderSugs() {
+  const c = document.getElementById('zayraSugs');
+  c.innerHTML = SUGESTOES.map(s => `<span class="sug-pill" data-s="${escape(s)}">${escape(s)}</span>`).join('');
+  c.querySelectorAll('.sug-pill').forEach(p => p.onclick = () => askZayra(p.dataset.s));
+}
+
+async function askZayra(pergunta) {
+  addMsg('user', pergunta);
+  document.getElementById('zayraInput').value = '';
+  addMsg('assistant', '...');
+  try {
+    const r = await fetch(API + '/api/obras/zayra', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ pergunta, obra_id: state.currentObra }),
+    });
+    const d = await r.json();
+    replaceLastMsg(d.resposta || d.error || 'Sem resposta');
+  } catch (e) { replaceLastMsg('Erro: ' + e.message); }
+}
+function addMsg(role, txt) {
+  const c = document.getElementById('zayraMsgs');
+  const d = document.createElement('div');
+  d.className = 'msg ' + role; d.textContent = txt;
+  c.appendChild(d); c.scrollTop = c.scrollHeight;
+}
+function replaceLastMsg(txt) {
+  const msgs = document.querySelectorAll('.msg');
+  if (msgs.length) msgs[msgs.length-1].textContent = txt;
+}
+
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => { state.currentTab = t.dataset.tab; render(); });
+document.getElementById('zayraFab').onclick = () => {
+  const m = document.getElementById('zayraModal');
+  m.classList.toggle('open');
+  if (m.classList.contains('open')) renderSugs();
+};
+document.getElementById('zayraClose').onclick = () => document.getElementById('zayraModal').classList.remove('open');
+document.getElementById('zayraSend').onclick = () => {
+  const q = document.getElementById('zayraInput').value.trim();
+  if (q) askZayra(q);
+};
+document.getElementById('zayraInput').onkeydown = e => { if (e.key === 'Enter') document.getElementById('zayraSend').click(); };
+
+render();
+</script>
+</body>
+</html>
