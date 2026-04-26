@@ -30,6 +30,8 @@ import { startDailyScheduler } from './agent/scheduler';
 import * as calendar from './integrations/calendar';
 
 const app = express();
+// Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
+app.set('trust proxy', 1);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 app.use(express.json());
@@ -351,7 +353,9 @@ app.post('/webhook/telegram', (req: Request, res: Response) => {
 // Helper pra registrar webhook no Telegram (chame uma vez no browser)
 app.get('/auth/telegram/setup', async (req: Request, res: Response) => {
   try {
-    const baseUrl = (req.protocol + '://' + req.get('host')).replace(/\/$/, '');
+    // Railway/proxy: req.protocol vem 'http'; força 'https' (Telegram exige HTTPS)
+    const proto   = (req.get('x-forwarded-proto') as string | undefined)?.split(',')[0]?.trim() || 'https';
+    const baseUrl = `${proto}://${req.get('host')}`.replace(/\/$/, '');
     const target  = `${baseUrl}/webhook/telegram`;
     const result  = await telegram.setWebhook(target);
     const info    = await telegram.getBotInfo();
