@@ -283,6 +283,42 @@ export async function pularAnterior(): Promise<{ ok: true }> {
   return { ok: true };
 }
 
+// ── Auto-pausa pra microfone (v1.9.2) ──────────────────────────────────────
+// Pausa só se algo está tocando E lembra disso pra retomar depois.
+// Lembrar é importante: se o usuário já pausou manualmente antes de falar,
+// não queremos retomar contra a vontade dele.
+
+let _wasPlayingBeforeMicOpen = false;
+
+export async function pauseForMic(): Promise<{ paused: boolean; was_playing: boolean }> {
+  try {
+    const cur = await musicaAtual();
+    if (cur.is_playing && cur.tocando) {
+      _wasPlayingBeforeMicOpen = true;
+      await pausarMusica();
+      return { paused: true, was_playing: true };
+    }
+    _wasPlayingBeforeMicOpen = false;
+    return { paused: false, was_playing: false };
+  } catch (err) {
+    // Erros de auth ou device offline não devem bloquear o mic — silencioso
+    _wasPlayingBeforeMicOpen = false;
+    return { paused: false, was_playing: false };
+  }
+}
+
+export async function resumeAfterMic(): Promise<{ resumed: boolean }> {
+  if (!_wasPlayingBeforeMicOpen) return { resumed: false };
+  _wasPlayingBeforeMicOpen = false;
+  try {
+    // Sem args = retoma reprodução de onde parou
+    await tocarMusica({});
+    return { resumed: true };
+  } catch {
+    return { resumed: false };
+  }
+}
+
 export async function musicaAtual(): Promise<{
   tocando:      string | null;
   artistas?:    string;

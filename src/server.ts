@@ -340,6 +340,25 @@ app.post('/webhook/whatsapp', (req: Request, res: Response) => {
   })();
 });
 
+// ── Spotify auto-pause (v1.9.2) — chamados pela UI quando mic abre/fecha ───
+app.post('/spotify/pause', async (_req: Request, res: Response) => {
+  try {
+    const r = await spotify.pauseForMic();
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post('/spotify/resume', async (_req: Request, res: Response) => {
+  try {
+    const r = await spotify.resumeAfterMic();
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── Telegram webhook (v1.9.0) ────────────────────────────────────────────────
 app.post('/webhook/telegram', (req: Request, res: Response) => {
   res.json({ ok: true }); // ack imediato — Telegram reenvia se demorar >1s

@@ -652,6 +652,8 @@ window._playBlob = function(blob, responseText = '') {
     cancelAnimationFrame(raf); URL.revokeObjectURL(url);
     if (avatarCtrl) { avatarCtrl.updateLipSync(0); avatarCtrl.setState('idle'); }
     resumeListening();
+    // v1.9.2: retoma Spotify se estava tocando antes do mic abrir
+    fetch('/spotify/resume', { method: 'POST' }).catch(() => {});
   };
   audio.onerror = () => { cancelAnimationFrame(raf); if (avatarCtrl) avatarCtrl.setState('idle'); resumeListening(); };
   audio.play().catch(() => resumeListening());
@@ -809,7 +811,11 @@ function initSR() {
   recognition = new SR();
   recognition.continuous = true; recognition.interimResults = false;
   recognition.lang = 'pt-BR'; recognition.maxAlternatives = 1;
-  recognition.onspeechstart = () => { if (appState === 'passive') setAppState('active_voice'); };
+  recognition.onspeechstart = () => {
+    if (appState === 'passive') setAppState('active_voice');
+    // v1.9.2: pausa Spotify auto pra não competir com voz do CEO
+    fetch('/spotify/pause', { method: 'POST' }).catch(() => {});
+  };
   recognition.onspeechend   = () => { if (appState === 'active_voice') setAppState('passive'); };
   recognition.onresult = e => {
     if (appState !== 'passive' && appState !== 'active_voice') return;
