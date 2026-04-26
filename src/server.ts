@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import './util/logBR';            // side-effect: patches console.* with [HH:MM BRT] prefix
 import path from 'path';
 import express, { Request, Response } from 'express';
 import multer from 'multer';
