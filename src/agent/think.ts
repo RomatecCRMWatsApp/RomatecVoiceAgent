@@ -171,17 +171,18 @@ export async function think(
 
   const memCtx       = await getMemoryContext().catch(() => '');
 
-  // RAG semântico (v1.13): busca conversas similares em todo histórico
+  // RAG semântico (v1.13): busca conversas similares em todo histórico.
+  // v1.14.1: corte agressivo pra controlar token budget (Claude 30k/min input).
   let priorContext = '';
-  if (userMessage && userMessage.length > 8) {
-    const hits = await searchSimilar(userMessage, 5).catch(() => []);
+  if (userMessage && userMessage.length > 25) {
+    const hits = await searchSimilar(userMessage, 3).catch(() => []);
     if (hits.length > 0) {
       const lines = hits.map(h => {
         const when = h.created_at instanceof Date ? h.created_at.toISOString().slice(0, 10) : '';
         const who  = h.role === 'user' ? 'CEO' : 'ZAYRA';
-        return `- [${who}, ${when}]: ${h.content.slice(0, 220)}`;
+        return `- [${who}, ${when}]: ${h.content.slice(0, 90)}`;
       });
-      priorContext = `\n\nConversas anteriores semanticamente relevantes (use só se diretamente úteis pra responder o pedido atual; ignore se não for):\n${lines.join('\n')}`;
+      priorContext = `\n\nConversas relevantes:\n${lines.join('\n')}`;
     }
   }
 
@@ -191,8 +192,9 @@ export async function think(
     + `\n\nData/hora atual no servidor: ${nowBR()} (Fortaleza/BRT, GMT-3).`
     + priorContext;
 
+  // v1.14.1: 40 → 15 mensagens pra reduzir input tokens.
   const history: { role: 'user' | 'assistant'; content: string }[] = isExplicitSession
-    ? (await getSessionMessages(sessionId, 40).catch(() => []))
+    ? (await getSessionMessages(sessionId, 15).catch(() => []))
         .map(r => ({ role: r.role, content: r.content }))
     : getSessionHistory();
 

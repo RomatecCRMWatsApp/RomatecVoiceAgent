@@ -191,11 +191,17 @@ export async function searchSimilar(query: string, k = 5, threshold = 0.3): Prom
 // Após cada turno, Claude analisa user+assistant e decide se algo merece virar
 // memória estruturada permanente (fact/preference/decision/context/reminder).
 // Fire-and-forget — falha não bloqueia conversa.
+// Circuit breaker: quando Claude rate-limit, pausa extração por 5min.
+// Evita amplificar pressão em cima do mesmo provider que já tá saturado.
+let _extractCooldownUntil = 0;
+
 export async function extractMemoryAuto(userMsg: string, assistantMsg: string): Promise<void> {
   if (!process.env.ANTHROPIC_API_KEY) return;
   if (!userMsg?.trim() || !assistantMsg?.trim()) return;
   // Skip mensagens muito curtas (cumprimentos, "ok", etc.)
   if (userMsg.length < 15 && assistantMsg.length < 30) return;
+  // Circuit breaker — se Claude tá em rate limit, não força mais um call.
+  if (Date.now() < _extractCooldownUntil) return;
 
   try {
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
@@ -254,7 +260,13 @@ Se nada vale, retorne {"memories": []}.`,
       } catch { /* ignora individual */ }
     }
   } catch (err) {
-    console.warn('[memory] extractMemoryAuto falhou:', (err as Error).message);
+    const e = err as { status?: number; message?: string };
+    if (e?.status === 429) {
+      _extractCooldownUntil = Date.now() + 5 * 60 * 1000;
+      console.warn('[memory] extractMemoryAuto pausado por 5min (Claude 429)');
+    } else {
+      console.warn('[memory] extractMemoryAuto falhou:', e?.message);
+    }
   }
 }
 
