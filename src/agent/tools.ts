@@ -8,7 +8,7 @@ import {
   saveConversation, searchConversations, listChatSessions, getSessionMessages,
 } from './memory';
 import { ResumoDia, ToolResult } from '../types';
-import axios from 'axios';
+import pool from '../database/connection';
 
 interface Colaborador { nome: string; cargo: string; telefone: string; }
 
@@ -277,13 +277,13 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         data = await avalieimob.gerarAvaliacao(input as Parameters<typeof avalieimob.gerarAvaliacao>[0]);
         break;
       case 'status_railway': {
-        const [crmStatus, imobStatus] = await Promise.allSettled([
-          axios.get(`${process.env.CRM_BASE_URL}/health`, { timeout: 5000 }),
+        const [crmCheck, imobCheck] = await Promise.allSettled([
+          pool.query('SELECT 1'),
           avalieimob.statusServicos(),
         ]);
         data = {
-          crm: crmStatus.status === 'fulfilled' ? 'online' : 'offline',
-          avalieimob: imobStatus.status === 'fulfilled' ? 'online' : 'offline',
+          crm:        crmCheck.status  === 'fulfilled' ? 'online' : 'offline',
+          avalieimob: imobCheck.status === 'fulfilled' ? 'online' : 'offline',
         };
         break;
       }
