@@ -67,6 +67,21 @@ function useGroq(): boolean {
   return !!process.env.GROQ_API_KEY;
 }
 
+function hasClaude(): boolean {
+  return !!process.env.ANTHROPIC_API_KEY;
+}
+
+// True for transient provider issues where falling back to Claude makes sense.
+function isGroqFallbackable(err: unknown): boolean {
+  const e = err as { status?: number; code?: string; type?: string } | null;
+  if (!e || typeof e !== 'object') return false;
+  if (e.status === 429) return true;                     // rate limit
+  if (typeof e.status === 'number' && e.status >= 500) return true; // 5xx
+  if (e.code === 'rate_limit_exceeded') return true;
+  if (e.code === 'ETIMEDOUT' || e.code === 'ECONNRESET' || e.code === 'ECONNREFUSED') return true;
+  return false;
+}
+
 // ── Convert Anthropic tool schema to OpenAI/Groq format ─────────────────────
 function toolsForOpenAI(): OpenAI.Chat.Completions.ChatCompletionTool[] {
   return toolDefinitions.map(t => ({
@@ -99,9 +114,23 @@ export async function think(
         .map(r => ({ role: r.role, content: r.content }))
     : getSessionHistory();
 
-  const result = useGroq()
-    ? await thinkWithGroq(systemPrompt, history, userMessage)
-    : await thinkWithClaude(systemPrompt, history, userMessage);
+  let result: { text: string; toolsUsed: string[] };
+  if (useGroq()) {
+    try {
+      result = await thinkWithGroq(systemPrompt, history, userMessage);
+    } catch (err) {
+      if (isGroqFallbackable(err) && hasClaude()) {
+        console.warn('[think] Groq failed, falling back to Claude:', (err as Error).message ?? err);
+        result = await thinkWithClaude(systemPrompt, history, userMessage);
+      } else {
+        throw err;
+      }
+    }
+  } else if (hasClaude()) {
+    result = await thinkWithClaude(systemPrompt, history, userMessage);
+  } else {
+    throw new Error('Nenhum provider de IA configurado (faltam GROQ_API_KEY e ANTHROPIC_API_KEY).');
+  }
 
   const text      = result.text;
   const toolsUsed = result.toolsUsed;
@@ -255,32 +284,43 @@ async function maybeGenerateTitle(
   const prompt = `Pergunta do usuário: ${userMessage}\n\nResposta da assistente: ${assistantText}\n\nTítulo:`;
   const sys    = 'Gere um título curto (máx 6 palavras, em português) que resuma o assunto da conversa. Responda apenas o título, sem aspas, sem pontuação final.';
 
+  const tryGroq = async (): Promise<string> => {
+    const r = await groqClient().chat.completions.create({
+      model:      GROQ_MODEL,
+      max_tokens: 30,
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user',   content: prompt },
+      ],
+    });
+    return (r.choices[0]?.message?.content ?? '').trim();
+  };
+  const tryClaude = async (): Promise<string> => {
+    const r = await anthropicClient().messages.create({
+      model:      CLAUDE_MODEL,
+      max_tokens: 30,
+      system:     sys,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const block = r.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
+    return (block?.text ?? '').trim();
+  };
+
   let title = '';
   try {
     if (useGroq()) {
-      const r = await groqClient().chat.completions.create({
-        model:      GROQ_MODEL,
-        max_tokens: 30,
-        messages: [
-          { role: 'system', content: sys },
-          { role: 'user',   content: prompt },
-        ],
-      });
-      title = (r.choices[0]?.message?.content ?? '').trim();
-    } else {
-      const r = await anthropicClient().messages.create({
-        model:      CLAUDE_MODEL,
-        max_tokens: 30,
-        system:     sys,
-        messages: [{ role: 'user', content: prompt }],
-      });
-      const block = r.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
-      title = (block?.text ?? '').trim();
+      try { title = await tryGroq(); }
+      catch (err) {
+        if (isGroqFallbackable(err) && hasClaude()) title = await tryClaude();
+        else return; // silent — title is non-critical
+      }
+    } else if (hasClaude()) {
+      title = await tryClaude();
     }
     title = title.replace(/^["']|["']$/g, '').slice(0, 200);
     if (title) await setSessionTitle(sessionId, title);
   } catch {
-    /* ignore */
+    /* title is non-critical, swallow */
   }
 }
 

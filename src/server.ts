@@ -93,58 +93,70 @@ app.get('/health/providers', async (_req: Request, res: Response) => {
 });
 
 app.post('/voice', upload.single('audio'), async (req: Request, res: Response) => {
-  if (!req.file) {
-    res.status(400).json({ error: 'Nenhum arquivo de áudio enviado.' });
-    return;
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: 'Nenhum arquivo de áudio enviado.' });
+      return;
+    }
+
+    const sessionId = (req.body?.session_id as string | undefined) || undefined;
+
+    const transcription = await transcribeAudio(req.file.buffer, req.file.mimetype);
+    const agentResponse = await think(transcription.text, { sessionId, channel: 'voice' });
+    const audioBuffer   = await speak(agentResponse.text);
+
+    res.set({
+      'Content-Type':     'audio/mpeg',
+      'X-Transcription':  encodeURIComponent(transcription.text),
+      'X-Response-Text':  encodeURIComponent(agentResponse.text),
+      'X-Tools-Used':     agentResponse.toolsUsed.join(','),
+      'X-Session-Id':     agentResponse.sessionId,
+    });
+    res.send(audioBuffer);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[POST /voice]', msg);
+    res.status(500).json({ error: msg });
   }
-
-  const sessionId = (req.body?.session_id as string | undefined) || undefined;
-
-  const transcription = await transcribeAudio(req.file.buffer, req.file.mimetype);
-  const agentResponse = await think(transcription.text, { sessionId, channel: 'voice' });
-  const audioBuffer   = await speak(agentResponse.text);
-
-  res.set({
-    'Content-Type':     'audio/mpeg',
-    'X-Transcription':  encodeURIComponent(transcription.text),
-    'X-Response-Text':  encodeURIComponent(agentResponse.text),
-    'X-Tools-Used':     agentResponse.toolsUsed.join(','),
-    'X-Session-Id':     agentResponse.sessionId,
-  });
-  res.send(audioBuffer);
 });
 
 app.post('/text', async (req: Request, res: Response) => {
-  const { message, voice = false, session_id } = req.body as {
-    message:     string;
-    voice?:      boolean;
-    session_id?: string;
-  };
+  try {
+    const { message, voice = false, session_id } = req.body as {
+      message:     string;
+      voice?:      boolean;
+      session_id?: string;
+    };
 
-  if (!message) {
-    res.status(400).json({ error: 'Campo "message" obrigatório.' });
-    return;
-  }
+    if (!message) {
+      res.status(400).json({ error: 'Campo "message" obrigatório.' });
+      return;
+    }
 
-  const agentResponse = await think(message, { sessionId: session_id, channel: 'text' });
+    const agentResponse = await think(message, { sessionId: session_id, channel: 'text' });
 
-  if (voice) {
-    const audioBuffer = await speak(agentResponse.text);
-    res.set({
-      'Content-Type':    'audio/mpeg',
-      'X-Response-Text': encodeURIComponent(agentResponse.text),
-      'X-Session-Id':    agentResponse.sessionId,
+    if (voice) {
+      const audioBuffer = await speak(agentResponse.text);
+      res.set({
+        'Content-Type':    'audio/mpeg',
+        'X-Response-Text': encodeURIComponent(agentResponse.text),
+        'X-Session-Id':    agentResponse.sessionId,
+      });
+      res.send(audioBuffer);
+      return;
+    }
+
+    res.json({
+      agent:      AGENT_IDENTITY.name,
+      response:   agentResponse.text,
+      tools_used: agentResponse.toolsUsed,
+      session_id: agentResponse.sessionId,
     });
-    res.send(audioBuffer);
-    return;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[POST /text]', msg);
+    res.status(500).json({ error: msg });
   }
-
-  res.json({
-    agent:      AGENT_IDENTITY.name,
-    response:   agentResponse.text,
-    tools_used: agentResponse.toolsUsed,
-    session_id: agentResponse.sessionId,
-  });
 });
 
 // ── Chat Sessions API ─────────────────────────────────────────────────────────
@@ -328,6 +340,14 @@ app.get('/memory', async (_req: Request, res: Response) => {
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
+});
+
+// Last-resort guardrails: prevent transient provider/DB errors from killing the process
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
 });
 
 const PORT = process.env.PORT ?? 3000;
