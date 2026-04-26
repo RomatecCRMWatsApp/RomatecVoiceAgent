@@ -24,12 +24,19 @@ const MAX_LIST_ENTRIES = 500;
 const MAX_SEARCH_HITS  = 100;
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.cache', '.obsidian']);
+// Arquivos sensíveis bloqueados em qualquer operação (read/grep/write/delete).
+const BLOCKED_FILES = new Set(['.env', '.env.local', '.env.production', '.env.development', '.env.test']);
 const TEXT_EXT  = new Set([
   '.txt','.md','.json','.yaml','.yml','.toml','.js','.ts','.tsx','.jsx','.mjs','.cjs',
-  '.html','.htm','.css','.scss','.sass','.less','.xml','.svg','.csv','.log','.env',
+  '.html','.htm','.css','.scss','.sass','.less','.xml','.svg','.csv','.log',
   '.sh','.bash','.zsh','.ps1','.bat','.cmd','.py','.rb','.go','.rs','.java','.c','.cpp',
   '.h','.hpp','.sql','.gitignore','.dockerignore','.editorconfig','.prettierrc','.eslintrc',
 ]);
+
+function isBlockedFile(filename: string): boolean {
+  const base = path.basename(filename).toLowerCase();
+  return BLOCKED_FILES.has(base) || base.startsWith('.env.');
+}
 
 function getRoots(): string[] {
   const fromEnv = (process.env.FS_ALLOWED_ROOTS ?? '')
@@ -117,6 +124,9 @@ export async function fsLer(input: { caminho: string }): Promise<{
   truncated: boolean;
 }> {
   const target = await resolveSafe(input.caminho);
+  if (isBlockedFile(target)) {
+    throw new Error(`Acesso negado: "${path.basename(target)}" é um arquivo de credenciais e não pode ser lido.`);
+  }
   const stat   = await fs.stat(target);
   if (!stat.isFile()) {
     throw new Error(`"${target}" não é um arquivo.`);
@@ -154,6 +164,9 @@ export async function fsEscrever(input: {
   bytes?:   number;
 }> {
   const target = await resolveSafe(input.caminho);
+  if (isBlockedFile(target)) {
+    throw new Error(`Acesso negado: arquivos .env são protegidos contra escrita.`);
+  }
   const conteudo = input.conteudo ?? '';
   const modo = input.modo ?? 'criar';
 
@@ -196,6 +209,9 @@ export async function fsApagar(input: {
   confirm?: boolean;
 }): Promise<{ preview?: boolean; ok?: boolean; message: string; caminho?: string }> {
   const target = await resolveSafe(input.caminho);
+  if (isBlockedFile(target)) {
+    throw new Error(`Acesso negado: arquivos .env são protegidos contra exclusão.`);
+  }
   const stat   = await fs.stat(target);
 
   if (!input.confirm) {
@@ -263,6 +279,7 @@ export async function fsBuscar(input: {
         continue;
       }
       if (!d.isFile()) continue;
+      if (isBlockedFile(d.name)) continue;
       if (!isProbablyText(d.name)) continue;
       if (extFilter && path.extname(d.name).toLowerCase() !== extFilter) continue;
 
