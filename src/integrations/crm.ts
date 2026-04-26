@@ -65,7 +65,7 @@ export async function listarLeads(filtros?: {
   limite?: number;
 }): Promise<Lead[]> {
   const limit = Math.min(Math.max(filtros?.limite ?? 50, 1), 500);
-  const params: unknown[] = [];
+  const params: (string | number | boolean | null)[] = [];
   let sql = `SELECT id, phone, nome, score, stage, campanhaOrigem,
                     lastActivityAt, blockedUntil, discardReason, createdAt, updatedAt
              FROM leadQualifications`;
@@ -147,7 +147,7 @@ export async function atualizarLead(args: {
   if (!Number.isFinite(numId) || numId <= 0) throw new Error('id inválido.');
 
   const sets: string[] = [];
-  const params: unknown[] = [];
+  const params: (string | number | boolean | null)[] = [];
   if (args.nome !== undefined)          { sets.push('nome = ?');          params.push(args.nome); }
   if (args.score !== undefined)         { sets.push('score = ?');         params.push(args.score); }
   if (args.stage !== undefined)         { sets.push('stage = ?');         params.push(args.stage); }
@@ -199,7 +199,7 @@ export async function atualizarContato(args: {
   const numId = Number(args.id);
   if (!Number.isFinite(numId) || numId <= 0) throw new Error('id inválido.');
   const sets: string[] = [];
-  const params: unknown[] = [];
+  const params: (string | number | boolean | null)[] = [];
   if (args.name   !== undefined) { sets.push('name = ?');   params.push(args.name); }
   if (args.phone  !== undefined) { sets.push('phone = ?');  params.push(args.phone.replace(/\D/g, '')); }
   if (args.email  !== undefined) { sets.push('email = ?');  params.push(args.email); }
@@ -236,7 +236,7 @@ export async function atualizarCampanha(args: {
   const numId = Number(args.id);
   if (!Number.isFinite(numId) || numId <= 0) throw new Error('id inválido.');
   const sets: string[] = [];
-  const params: unknown[] = [];
+  const params: (string | number | boolean | null)[] = [];
   if (args.status      !== undefined) { sets.push('status = ?');      params.push(args.status); }
   if (args.name        !== undefined) { sets.push('name = ?');        params.push(args.name); }
   if (args.activeDay   !== undefined) { sets.push('activeDay = ?');   params.push(args.activeDay ? 1 : 0); }
