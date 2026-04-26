@@ -455,11 +455,24 @@ app.get('/auth/google/callback', async (req: Request, res: Response) => {
   if (!code) { res.status(400).send('Parâmetro code ausente.'); return; }
   try {
     const refreshToken = await exchangeCode(code);
-    res.send(
-      `<h2 style="font-family:sans-serif">✅ Google Calendar conectado!</h2>` +
-      `<p style="font-family:monospace">Adicione ao Railway:<br>` +
-      `<b>GOOGLE_REFRESH_TOKEN=${refreshToken}</b></p>`,
-    );
+    // Token vai pra clipboard via JS, NÃO pro DOM. Evita exposição em
+    // print, cache de browser, screenshare ou histórico de devtools.
+    res.set('Cache-Control', 'no-store');
+    res.send(`<!DOCTYPE html><html><body style="font-family:sans-serif;background:#0a1a0f;color:#e0f2e6;padding:24px">
+      <h2>✅ Google Calendar conectado</h2>
+      <p>Clique no botão abaixo para copiar o <code>GOOGLE_REFRESH_TOKEN</code> e cole no Railway → Variables.</p>
+      <p style="color:#c9a84c">⚠️ NÃO tire print desta página. O token é a senha do Google Calendar.</p>
+      <button id="cp" style="background:#00ff88;color:#000;border:0;padding:10px 20px;font-weight:600;cursor:pointer;border-radius:6px">📋 Copiar token (clipboard)</button>
+      <span id="ok" style="margin-left:12px;color:#00ff88;display:none">Copiado!</span>
+      <script>
+        const T=${JSON.stringify(refreshToken)};
+        document.getElementById('cp').onclick=async()=>{
+          await navigator.clipboard.writeText(T);
+          document.getElementById('ok').style.display='inline';
+          setTimeout(()=>{T=null;}, 30000);
+        };
+      </script>
+    </body></html>`);
   } catch (err) {
     res.status(500).send(`Erro: ${String(err)}`);
   }
@@ -482,12 +495,23 @@ app.get('/auth/spotify/callback', async (req: Request, res: Response) => {
   if (!code) { res.status(400).send('Parâmetro code ausente.'); return; }
   try {
     const refreshToken = await spotify.exchangeCode(code);
-    res.send(
-      `<h2 style="font-family:sans-serif">✅ Spotify conectado!</h2>` +
-      `<p style="font-family:sans-serif">Adicione esta variável ao Railway:</p>` +
-      `<pre style="font-family:monospace;background:#0a1a0f;color:#00ff88;padding:12px;border-radius:8px;overflow-x:auto">SPOTIFY_REFRESH_TOKEN=${refreshToken}</pre>` +
-      `<p style="font-family:sans-serif;color:#7aab8a;font-size:.85rem">Após adicionar e o Railway redeployar (~3min), abra o Spotify em algum dispositivo e teste com "ZAYRA, toca Coldplay".</p>`,
-    );
+    res.set('Cache-Control', 'no-store');
+    res.send(`<!DOCTYPE html><html><body style="font-family:sans-serif;background:#0a1a0f;color:#e0f2e6;padding:24px">
+      <h2>✅ Spotify conectado</h2>
+      <p>Clique para copiar o <code>SPOTIFY_REFRESH_TOKEN</code> e cole no Railway → Variables.</p>
+      <p style="color:#c9a84c">⚠️ NÃO tire print desta página. O token é a senha do Spotify.</p>
+      <button id="cp" style="background:#00ff88;color:#000;border:0;padding:10px 20px;font-weight:600;cursor:pointer;border-radius:6px">📋 Copiar token (clipboard)</button>
+      <span id="ok" style="margin-left:12px;color:#00ff88;display:none">Copiado!</span>
+      <p style="color:#7aab8a;font-size:.85rem;margin-top:18px">Após colar no Railway e o redeploy (~3min), abra o Spotify em algum dispositivo e teste com "ZAYRA, toca Coldplay".</p>
+      <script>
+        const T=${JSON.stringify(refreshToken)};
+        document.getElementById('cp').onclick=async()=>{
+          await navigator.clipboard.writeText(T);
+          document.getElementById('ok').style.display='inline';
+          setTimeout(()=>{T=null;}, 30000);
+        };
+      </script>
+    </body></html>`);
   } catch (err) {
     res.status(500).send(`Erro: ${String(err)}`);
   }
