@@ -10,6 +10,7 @@ import { AGENT_IDENTITY } from './agent/identity';
 import * as crm from './integrations/crm';
 import * as avalieimob from './integrations/avalieimob';
 import { processMessage, sendReply, parseZapiWebhook, logInbound } from './integrations/whatsapp';
+import * as telegram from './integrations/telegram';
 import { getAuthUrl, exchangeCode } from './integrations/calendar';
 import * as spotify from './integrations/spotify';
 import { addSSEClient, removeSSEClient, startProactiveNotifications } from './agent/proactive';
@@ -335,6 +336,36 @@ app.post('/webhook/whatsapp', (req: Request, res: Response) => {
       }
     }
   })();
+});
+
+// ── Telegram webhook (v1.9.0) ────────────────────────────────────────────────
+app.post('/webhook/telegram', (req: Request, res: Response) => {
+  res.json({ ok: true }); // ack imediato — Telegram reenvia se demorar >1s
+  const incoming = telegram.parseTelegramUpdate(req.body);
+  if (!incoming) return;
+  void telegram.processTelegramIncoming(incoming).catch(err =>
+    console.error('[Telegram webhook]', err instanceof Error ? err.message : err),
+  );
+});
+
+// Helper pra registrar webhook no Telegram (chame uma vez no browser)
+app.get('/auth/telegram/setup', async (req: Request, res: Response) => {
+  try {
+    const baseUrl = (req.protocol + '://' + req.get('host')).replace(/\/$/, '');
+    const target  = `${baseUrl}/webhook/telegram`;
+    const result  = await telegram.setWebhook(target);
+    const info    = await telegram.getBotInfo();
+    res.send(
+      `<h2 style="font-family:sans-serif;color:#00ff88">Telegram webhook setup</h2>` +
+      `<p style="font-family:sans-serif">Webhook URL: <code>${target}</code></p>` +
+      `<pre style="font-family:monospace;background:#0a1a0f;color:#00ff88;padding:12px;border-radius:8px">${JSON.stringify({ setWebhook: result, botInfo: info }, null, 2)}</pre>` +
+      (info.online
+        ? `<p style="font-family:sans-serif">Bot ativo: <b>@${info.username}</b>. Mande uma DM pra ele pra testar.</p>`
+        : `<p style="color:#ff5577">Bot não respondeu — verifique TELEGRAM_BOT_TOKEN no Railway.</p>`),
+    );
+  } catch (err) {
+    res.status(500).send(`Erro: ${String(err)}`);
+  }
 });
 
 app.post('/zayra/whatsapp', async (req: Request, res: Response) => {

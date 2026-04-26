@@ -3,6 +3,7 @@ import * as crm from '../integrations/crm';
 import * as avalieimob from '../integrations/avalieimob';
 import * as calendar from '../integrations/calendar';
 import * as spotify from '../integrations/spotify';
+import * as telegram from '../integrations/telegram';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -237,6 +238,23 @@ export const toolDefinitions: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'enviar_telegram',
+    description: 'Envia mensagem via Telegram para um chat_id autorizado. Use quando o CEO pedir para mandar algo via Telegram.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        chat_id:  { type: 'string', description: 'chat_id do Telegram (numérico)' },
+        mensagem: { type: 'string', description: 'Texto da mensagem (Markdown suportado)' },
+      },
+      required: ['chat_id', 'mensagem'],
+    },
+  },
+  {
+    name: 'status_telegram',
+    description: 'Verifica saúde do bot Telegram da ZAYRA — retorna online/offline, username, webhook configurado e quantos updates pendentes.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'tocar_musica',
     description: 'Toca música no Spotify. Pode buscar por nome (query) ou tocar uma URI específica. Sem args, retoma reprodução pausada. Requer Spotify Premium e algum dispositivo ativo.',
     input_schema: {
@@ -422,6 +440,15 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       }
       case 'listar_colaboradores':
         data = getColaboradores();
+        break;
+      case 'enviar_telegram': {
+        const { chat_id, mensagem } = input as { chat_id: string; mensagem: string };
+        await telegram.sendMessage(chat_id, mensagem);
+        data = { success: true, chat_id, mensagem, enviado_em: new Date().toISOString() };
+        break;
+      }
+      case 'status_telegram':
+        data = await telegram.getBotInfo();
         break;
       case 'tocar_musica':
         data = await spotify.tocarMusica(input as { query?: string; uri?: string });
