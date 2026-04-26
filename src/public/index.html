@@ -97,6 +97,46 @@
     }
     .status-right { display: flex; align-items: center; gap: 10px; }
     .status-dot { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-dim); }
+
+    /* Spotify widget no header (v1.9.3) */
+    .spotify-widget {
+      display: none;  /* mostra via JS quando há música */
+      align-items: center; gap: 8px;
+      background: rgba(0,255,136,.08);
+      border: 1px solid rgba(0,255,136,.25);
+      border-radius: 999px;
+      padding: 4px 12px 4px 4px;
+      max-width: 260px;
+      transition: border-color .2s, background .2s;
+    }
+    .spotify-widget.playing { border-color: rgba(0,255,136,.5); background: rgba(0,255,136,.12); }
+    .spotify-widget.paused  { opacity: .7; }
+    .spotify-widget__cover {
+      width: 28px; height: 28px; border-radius: 50%;
+      object-fit: cover; flex-shrink: 0;
+      background: rgba(0,255,136,.15);
+    }
+    .spotify-widget__text {
+      display: flex; flex-direction: column;
+      min-width: 0; line-height: 1.2;
+    }
+    .spotify-widget__title {
+      font-size: .75rem; font-weight: 600; color: var(--neon);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 200px;
+    }
+    .spotify-widget__artist {
+      font-size: .65rem; color: var(--text-dim);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 200px;
+    }
+    .spotify-widget__icon {
+      font-size: .8rem; flex-shrink: 0;
+    }
+    @media (max-width: 480px) {
+      .spotify-widget { max-width: 180px; }
+      .spotify-widget__title, .spotify-widget__artist { max-width: 130px; }
+    }
     .dot {
       width: 8px; height: 8px; border-radius: 50%;
       background: var(--green); box-shadow: 0 0 8px var(--green);
@@ -395,6 +435,14 @@
   <div class="status-bar">
     <span class="logo">Romatec</span>
     <div class="status-right">
+      <div class="spotify-widget" id="spotifyWidget" title="Tocando agora no Spotify">
+        <img class="spotify-widget__cover" id="spotifyCover" alt="" />
+        <div class="spotify-widget__text">
+          <span class="spotify-widget__title"  id="spotifyTitle"></span>
+          <span class="spotify-widget__artist" id="spotifyArtist"></span>
+        </div>
+        <span class="spotify-widget__icon" id="spotifyIcon">▶</span>
+      </div>
       <div class="status-dot"><div class="dot"></div><span>ZAYRA online</span></div>
       <div class="notif-badge" id="notifBadge">0</div>
     </div>
@@ -1152,6 +1200,51 @@ if (new URLSearchParams(location.search).get('acao') === 'briefing') {
       list.innerHTML = '<div class="drawer-empty">Erro na busca.</div>';
     }
   }
+})();
+
+// ── Spotify widget polling (v1.9.3) ─────────────────────────────────────────
+(function spotifyWidget(){
+  const widget = document.getElementById('spotifyWidget');
+  const cover  = document.getElementById('spotifyCover');
+  const title  = document.getElementById('spotifyTitle');
+  const artist = document.getElementById('spotifyArtist');
+  const icon   = document.getElementById('spotifyIcon');
+  if (!widget) return;
+
+  let timer = null;
+
+  async function refresh() {
+    try {
+      const r = await fetch('/spotify/now-playing-rich', { cache: 'no-store' });
+      if (!r.ok) { widget.style.display = 'none'; return; }
+      const d = await r.json();
+      if (!d.tocando) { widget.style.display = 'none'; return; }
+      widget.style.display = 'flex';
+      widget.classList.toggle('playing', d.is_playing === true);
+      widget.classList.toggle('paused',  d.is_playing === false);
+      icon.textContent = d.is_playing ? '▶' : '⏸';
+      title.textContent  = d.tocando;
+      artist.textContent = d.artistas || '';
+      if (d.capa_url && cover.src !== d.capa_url) cover.src = d.capa_url;
+      else if (!d.capa_url) cover.removeAttribute('src');
+    } catch {
+      // silencioso — widget some, sem alarmar UI
+      widget.style.display = 'none';
+    }
+  }
+
+  function start() {
+    refresh();
+    if (timer) clearInterval(timer);
+    timer = setInterval(refresh, 15000); // 15s
+  }
+  function stop() { if (timer) { clearInterval(timer); timer = null; } }
+
+  // Poll só quando aba ativa — economiza chamadas Spotify
+  if (document.visibilityState === 'visible') start();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') start(); else stop();
+  });
 })();
 
 // Restore last session messages on boot, if any

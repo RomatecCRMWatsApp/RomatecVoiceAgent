@@ -209,7 +209,7 @@ interface SpotifyTrack {
   uri:     string;
   name:    string;
   artists: { name: string }[];
-  album?:  { name: string };
+  album?:  { name: string; images?: { url: string; width: number; height: number }[] };
 }
 
 interface SpotifyCurrentlyPlaying {
@@ -339,6 +339,40 @@ export async function musicaAtual(): Promise<{
     };
   } catch (err) {
     // Se nada está tocando, alguns endpoints respondem 204; tratamos como null.
+    if ((err as Error).message.includes('204')) return { tocando: null };
+    throw err;
+  }
+}
+
+// Versão rica pra widget UI — inclui capa do álbum e duração
+export async function musicaAtualRich(): Promise<{
+  tocando:       string | null;
+  artistas?:     string;
+  album?:        string;
+  capa_url?:     string;
+  progresso_ms?: number;
+  duracao_ms?:   number;
+  is_playing?:   boolean;
+}> {
+  try {
+    const data = await request<(SpotifyCurrentlyPlaying & { item?: SpotifyTrack & { duration_ms?: number } }) | ''>({
+      method: 'GET',
+      url:    '/me/player/currently-playing',
+    });
+    if (!data || typeof data === 'string' || !data.item) return { tocando: null };
+    const images = data.item.album?.images ?? [];
+    // Pega a imagem média (~300x300) — não a maior (640) nem a menor (64)
+    const cover = images.find(i => i.width >= 200 && i.width <= 400) ?? images[0];
+    return {
+      tocando:      data.item.name,
+      artistas:     data.item.artists?.map(a => a.name).join(', '),
+      album:        data.item.album?.name,
+      capa_url:     cover?.url,
+      progresso_ms: data.progress_ms,
+      duracao_ms:   data.item.duration_ms,
+      is_playing:   data.is_playing,
+    };
+  } catch (err) {
     if ((err as Error).message.includes('204')) return { tocando: null };
     throw err;
   }

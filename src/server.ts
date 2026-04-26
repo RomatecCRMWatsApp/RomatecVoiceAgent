@@ -340,6 +340,29 @@ app.post('/webhook/whatsapp', (req: Request, res: Response) => {
   })();
 });
 
+// ── Spotify now-playing (v1.9.3) — usado pelo widget da UI ────────────────
+app.get('/spotify/now-playing', async (_req: Request, res: Response) => {
+  try {
+    const data = await spotify.musicaAtual();
+    // Cache curto pra reduzir chamadas Spotify se UI fizer polling agressivo
+    res.set('Cache-Control', 'public, max-age=10');
+    res.json(data);
+  } catch (err) {
+    res.status(200).json({ tocando: null, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Endpoint expandido pra trazer também a capa do álbum
+app.get('/spotify/now-playing-rich', async (_req: Request, res: Response) => {
+  try {
+    const data = await spotify.musicaAtualRich();
+    res.set('Cache-Control', 'public, max-age=10');
+    res.json(data);
+  } catch (err) {
+    res.status(200).json({ tocando: null, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── Spotify auto-pause (v1.9.2) — chamados pela UI quando mic abre/fecha ───
 app.post('/spotify/pause', async (_req: Request, res: Response) => {
   try {
