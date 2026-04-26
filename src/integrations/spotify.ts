@@ -172,6 +172,37 @@ export async function exchangeCode(code: string): Promise<string> {
   return resp.data.refresh_token;
 }
 
+// ── Device management (auto-transfer pra device disponível) ─────────────────
+
+interface SpotifyDevice {
+  id:         string | null;
+  is_active:  boolean;
+  is_restricted: boolean;
+  name:       string;
+  type:       string;
+}
+
+async function ensureActiveDevice(): Promise<string | null> {
+  const r = await request<{ devices: SpotifyDevice[] }>({ method: 'GET', url: '/me/player/devices' });
+  const devices = r.devices ?? [];
+  if (devices.length === 0) return null;
+
+  const active = devices.find(d => d.is_active && !d.is_restricted);
+  if (active && active.id) return active.id;
+
+  // Pega primeiro não-restrito; senão qualquer um com id
+  const target = devices.find(d => !d.is_restricted && d.id) ?? devices.find(d => d.id);
+  if (!target?.id) return null;
+
+  // Transfer playback pra esse device — não dispara play sozinho
+  await request<unknown>({
+    method: 'PUT',
+    url:    '/me/player',
+    data:   { device_ids: [target.id], play: false },
+  });
+  return target.id;
+}
+
 // ── Tools (consumidos por executeTool em src/agent/tools.ts) ────────────────
 
 interface SpotifyTrack {
@@ -192,6 +223,11 @@ interface SpotifySearchResult {
 }
 
 export async function tocarMusica(args: { query?: string; uri?: string }): Promise<{ tocando: string; uri: string }> {
+  const deviceId = await ensureActiveDevice();
+  if (!deviceId) {
+    throw new Error('Spotify: nenhum dispositivo disponível. Abra o Spotify (PC, celular, web player) e tente de novo.');
+  }
+
   let trackUri = args.uri;
   let label    = '(retomado)';
 
@@ -207,26 +243,43 @@ export async function tocarMusica(args: { query?: string; uri?: string }): Promi
     label    = `${item.name} — ${item.artists.map(a => a.name).join(', ')}`;
   }
 
-  if (trackUri) {
-    await request<unknown>({ method: 'PUT', url: '/me/player/play', data: { uris: [trackUri] } });
-  } else {
-    await request<unknown>({ method: 'PUT', url: '/me/player/play' });
-  }
+  const playConfig = {
+    method: 'PUT' as const,
+    url:    '/me/player/play',
+    params: { device_id: deviceId },
+    ...(trackUri ? { data: { uris: [trackUri] } } : {}),
+  };
+  await request<unknown>(playConfig);
   return { tocando: label, uri: trackUri ?? '' };
 }
 
 export async function pausarMusica(): Promise<{ ok: true }> {
-  await request<unknown>({ method: 'PUT', url: '/me/player/pause' });
+  const deviceId = await ensureActiveDevice();
+  await request<unknown>({
+    method: 'PUT',
+    url:    '/me/player/pause',
+    params: deviceId ? { device_id: deviceId } : undefined,
+  });
   return { ok: true };
 }
 
 export async function pularProxima(): Promise<{ ok: true }> {
-  await request<unknown>({ method: 'POST', url: '/me/player/next' });
+  const deviceId = await ensureActiveDevice();
+  await request<unknown>({
+    method: 'POST',
+    url:    '/me/player/next',
+    params: deviceId ? { device_id: deviceId } : undefined,
+  });
   return { ok: true };
 }
 
 export async function pularAnterior(): Promise<{ ok: true }> {
-  await request<unknown>({ method: 'POST', url: '/me/player/previous' });
+  const deviceId = await ensureActiveDevice();
+  await request<unknown>({
+    method: 'POST',
+    url:    '/me/player/previous',
+    params: deviceId ? { device_id: deviceId } : undefined,
+  });
   return { ok: true };
 }
 
