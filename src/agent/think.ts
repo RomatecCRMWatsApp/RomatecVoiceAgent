@@ -14,6 +14,9 @@ import {
   getSessionMeta,
   setSessionTitle,
   newSessionId,
+  searchSimilar,
+  indexConversation,
+  extractMemoryAuto,
   type Channel,
 } from './memory';
 
@@ -73,7 +76,14 @@ PROTOCOLO DE ESCRITA NO CRM (CRÍTICO — leia antes de usar tools crm_criar_*, 
 5. Para crm_atualizar_*: peça confirmação se a mudança for sensível (status, score). Atualizações cosméticas (nome) podem confirmar com menos cerimônia se o CEO já tiver pedido a mudança claramente.
 6. Erros, exceções ou ambiguidade: pare e pergunte. Não chute.
 
-Lembre-se: você opera em produção real com dados de leads/contatos da Romatec.`;
+Lembre-se: você opera em produção real com dados de leads/contatos da Romatec.
+
+MEMÓRIA INFINITA (v1.13): você tem acesso a 3 tipos de memória:
+1. Histórico recente da sessão atual (últimas mensagens trocadas).
+2. Memórias estruturadas permanentes (extraídas automaticamente após cada conversa — fatos, preferências, decisões, contextos, lembretes — visíveis acima como "Memórias persistentes ativas").
+3. RAG semântico: trechos de conversas anteriores semanticamente relevantes pra pergunta atual (visíveis acima como "Conversas anteriores semanticamente relevantes").
+
+Use essas 3 fontes pra dar respostas com continuidade ao longo do tempo. Se o CEO disser "manda mensagem pro amor" e o RAG trouxer uma conversa antiga onde "amor = Giegilla = +5599...", use esse número diretamente sem precisar perguntar de novo. Se há conflito entre fontes, priorize a mais recente.`;
 
 export interface ThinkAttachment {
   /** image (image/png, image/jpeg, image/webp, image/gif) ou document (application/pdf) */
@@ -151,10 +161,26 @@ export async function think(
   }
 
   const memCtx       = await getMemoryContext().catch(() => '');
+
+  // RAG semântico (v1.13): busca conversas similares em todo histórico
+  let priorContext = '';
+  if (userMessage && userMessage.length > 8) {
+    const hits = await searchSimilar(userMessage, 5).catch(() => []);
+    if (hits.length > 0) {
+      const lines = hits.map(h => {
+        const when = h.created_at instanceof Date ? h.created_at.toISOString().slice(0, 10) : '';
+        const who  = h.role === 'user' ? 'CEO' : 'ZAYRA';
+        return `- [${who}, ${when}]: ${h.content.slice(0, 220)}`;
+      });
+      priorContext = `\n\nConversas anteriores semanticamente relevantes (use só se diretamente úteis pra responder o pedido atual; ignore se não for):\n${lines.join('\n')}`;
+    }
+  }
+
   const systemPrompt =
     BASE_SYSTEM_PROMPT
     + memCtx
-    + `\n\nData/hora atual no servidor: ${nowBR()} (Fortaleza/BRT, GMT-3).`;
+    + `\n\nData/hora atual no servidor: ${nowBR()} (Fortaleza/BRT, GMT-3).`
+    + priorContext;
 
   const history: { role: 'user' | 'assistant'; content: string }[] = isExplicitSession
     ? (await getSessionMessages(sessionId, 40).catch(() => []))
@@ -194,8 +220,16 @@ export async function think(
     addToSession('user', userMessage);
     addToSession('assistant', text);
   }
-  void saveConversation(sessionId, 'user',      userMessage).catch(() => {});
-  void saveConversation(sessionId, 'assistant', text).catch(() => {});
+  // Persist + index pra RAG (v1.13). Indexa user e assistant em background.
+  void saveConversation(sessionId, 'user', userMessage)
+    .then(id => indexConversation(id, 'user', userMessage))
+    .catch(() => {});
+  void saveConversation(sessionId, 'assistant', text)
+    .then(id => indexConversation(id, 'assistant', text))
+    .catch(() => {});
+
+  // Auto-extração de memórias estruturadas (v1.13) — Claude background
+  void extractMemoryAuto(userMessage, text).catch(() => {});
 
   if (isExplicitSession) {
     void bumpSession(sessionId, channel).catch(() => {});

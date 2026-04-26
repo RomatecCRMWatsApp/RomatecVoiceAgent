@@ -66,5 +66,23 @@ export async function runMigrations(): Promise<void> {
     );
   }
 
+  // v1.13: embeddings vetoriais pra RAG semântico
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS zayra_embeddings (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      conversation_id INT NOT NULL,
+      role            ENUM('user','assistant') NOT NULL,
+      content_preview VARCHAR(255),
+      vector_json     JSON NOT NULL,
+      created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  if (!(await indexExists('zayra_embeddings', 'idx_emb_conv'))) {
+    await pool.execute('CREATE INDEX idx_emb_conv ON zayra_embeddings (conversation_id)');
+  }
+  if (!(await indexExists('zayra_embeddings', 'idx_emb_created'))) {
+    await pool.execute('CREATE INDEX idx_emb_created ON zayra_embeddings (created_at DESC)');
+  }
+
   console.log('[DB] Migrations complete');
 }
