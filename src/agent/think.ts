@@ -62,7 +62,18 @@ Sobre Spotify: o CEO tem conta Premium e você pode controlar a reprodução. Us
 
 Sobre datas e horários: campos como "created_at", "last_activity_at" das tools do CRM e AvalieImob já vêm formatados em pt-BR (formato "dd/MM/yyyy HH:mm" no horário de Fortaleza/BRT). Use exatamente como recebeu — não converta para ISO, não traduza, não reformate.
 
-Sobre anexos (imagens e PDFs): quando o CEO enviar uma imagem ou PDF, analise visualmente e descreva o que vê com detalhes relevantes. Para imagens de imóveis: aponte características arquitetônicas, estado de conservação, área útil aparente, valor estimado por região se possível. Para imagens de documentos: extraia texto-chave (CPF/CNPJ, endereço, valores). Para PDFs: leia o conteúdo completo e responda especificamente o que o CEO perguntou. Vídeos não são suportados — se chegar um vídeo, peça ao CEO um print/frame específico.`;
+Sobre anexos (imagens e PDFs): quando o CEO enviar uma imagem ou PDF, analise visualmente e descreva o que vê com detalhes relevantes. Para imagens de imóveis: aponte características arquitetônicas, estado de conservação, área útil aparente, valor estimado por região se possível. Para imagens de documentos: extraia texto-chave (CPF/CNPJ, endereço, valores). Para PDFs: leia o conteúdo completo e responda especificamente o que o CEO perguntou. Vídeos não são suportados — se chegar um vídeo, peça ao CEO um print/frame específico.
+
+PROTOCOLO DE ESCRITA NO CRM (CRÍTICO — leia antes de usar tools crm_criar_*, crm_atualizar_*, crm_apagar_*):
+
+1. NUNCA passe "confirm: true" na primeira chamada de uma tool destrutiva. Sempre rode SEM "confirm" primeiro pra obter um preview.
+2. Ao receber o preview, MOSTRE ao CEO o que será feito (a query, os parâmetros) e PEÇA AUTORIZAÇÃO EXPLÍCITA em linguagem natural ("Posso confirmar?", "Confirma essa exclusão?").
+3. Só passe "confirm: true" DEPOIS que o CEO disser claramente "sim", "confirmo", "pode apagar", "autorizado", "vai", ou equivalente. Se ele disser "não", "espera", ou qualquer dúvida, NÃO confirme.
+4. Para crm_apagar_*: extra cuidado. SEMPRE peça confirmação verbal ANTES de passar confirm: true. Apagar é irreversível.
+5. Para crm_atualizar_*: peça confirmação se a mudança for sensível (status, score). Atualizações cosméticas (nome) podem confirmar com menos cerimônia se o CEO já tiver pedido a mudança claramente.
+6. Erros, exceções ou ambiguidade: pare e pergunte. Não chute.
+
+Lembre-se: você opera em produção real com dados de leads/contatos da Romatec.`;
 
 export interface ThinkAttachment {
   /** image (image/png, image/jpeg, image/webp, image/gif) ou document (application/pdf) */

@@ -238,6 +238,113 @@ export const toolDefinitions: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'crm_criar_lead',
+    description: 'Cria um lead novo no CRM (tabela leadQualifications). DESTRUTIVO. Sempre rode primeiro sem "confirm" pra ver preview, peça autorização verbal ao CEO, depois rode com "confirm: true".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        phone:          { type: 'string', description: 'Telefone com DDI+DDD (só dígitos, ex: 5599999887766)' },
+        nome:           { type: 'string' },
+        score:          { type: 'string', enum: ['quente','morno','frio'] },
+        campanhaOrigem: { type: 'string' },
+        confirm:        { type: 'boolean', description: 'Só passar true APÓS autorização explícita do CEO' },
+      },
+      required: ['phone'],
+    },
+  },
+  {
+    name: 'crm_atualizar_lead',
+    description: 'Atualiza campos de um lead existente. DESTRUTIVO em produção — exige preview antes (sem confirm) + autorização verbal do CEO antes de "confirm: true".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:            { type: 'string' },
+        nome:          { type: 'string' },
+        score:         { type: 'string', enum: ['quente','morno','frio'] },
+        stage:         { type: 'string' },
+        discardReason: { type: 'string' },
+        confirm:       { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'crm_apagar_lead',
+    description: 'APAGA permanentemente um lead. AÇÃO IRREVERSÍVEL. Sempre mostre preview ao CEO e EXIJA confirmação verbal ("sim, apague") antes de passar "confirm: true".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:      { type: 'string' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'crm_criar_contato',
+    description: 'Cria contato no CRM. Exige confirm: true após autorização do CEO.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name:    { type: 'string' },
+        phone:   { type: 'string' },
+        email:   { type: 'string' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['name', 'phone'],
+    },
+  },
+  {
+    name: 'crm_atualizar_contato',
+    description: 'Atualiza contato existente. Exige confirm: true após autorização.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:      { type: 'string' },
+        name:    { type: 'string' },
+        phone:   { type: 'string' },
+        email:   { type: 'string' },
+        status:  { type: 'string', enum: ['active','blocked','inactive'] },
+        confirm: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'crm_apagar_contato',
+    description: 'APAGA contato. IRREVERSÍVEL. Confirmação verbal obrigatória antes de confirm: true.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, confirm: { type: 'boolean' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'crm_atualizar_campanha',
+    description: 'Atualiza campanha (status, nome, ativo dia/noite). Confirm exigido. Use status=running pra começar, paused pra pausar, completed pra encerrar.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:          { type: 'string' },
+        status:      { type: 'string', enum: ['draft','scheduled','running','paused','completed'] },
+        name:        { type: 'string' },
+        activeDay:   { type: 'boolean' },
+        activeNight: { type: 'boolean' },
+        confirm:     { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'crm_apagar_campanha',
+    description: 'APAGA campanha. Mensagens relacionadas permanecem (apenas a campanha sai). IRREVERSÍVEL — exige confirmação verbal.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, confirm: { type: 'boolean' } },
+      required: ['id'],
+    },
+  },
+  {
     name: 'enviar_telegram',
     description: 'Envia mensagem via Telegram para um chat_id autorizado. Use quando o CEO pedir para mandar algo via Telegram.',
     input_schema: {
@@ -440,6 +547,30 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       }
       case 'listar_colaboradores':
         data = getColaboradores();
+        break;
+      case 'crm_criar_lead':
+        data = await crm.criarLead(input as Parameters<typeof crm.criarLead>[0]);
+        break;
+      case 'crm_atualizar_lead':
+        data = await crm.atualizarLead(input as Parameters<typeof crm.atualizarLead>[0]);
+        break;
+      case 'crm_apagar_lead':
+        data = await crm.apagarLead(input as Parameters<typeof crm.apagarLead>[0]);
+        break;
+      case 'crm_criar_contato':
+        data = await crm.criarContato(input as Parameters<typeof crm.criarContato>[0]);
+        break;
+      case 'crm_atualizar_contato':
+        data = await crm.atualizarContato(input as Parameters<typeof crm.atualizarContato>[0]);
+        break;
+      case 'crm_apagar_contato':
+        data = await crm.apagarContato(input as Parameters<typeof crm.apagarContato>[0]);
+        break;
+      case 'crm_atualizar_campanha':
+        data = await crm.atualizarCampanha(input as Parameters<typeof crm.atualizarCampanha>[0]);
+        break;
+      case 'crm_apagar_campanha':
+        data = await crm.apagarCampanha(input as Parameters<typeof crm.apagarCampanha>[0]);
         break;
       case 'enviar_telegram': {
         const { chat_id, mensagem } = input as { chat_id: string; mensagem: string };
