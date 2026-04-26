@@ -183,42 +183,63 @@
       .avatar-img { animation: none; }
     }
 
-    /* SVG overlay com olhos + boca — DOM nativo, sem canvas (zero risco
-       da faixa preta que tinha em v1.7.3) */
-    .zayra-face {
-      position: absolute; inset: 0; width: 100%; height: 100%;
-      pointer-events: none; opacity: 0;
-      transition: opacity .35s ease;
-      mix-blend-mode: multiply;
+    /* HUD ring estilo JARVIS — 3 anéis concêntricos giratórios em torno
+       do avatar. Sem rosto sobreposto (olhos/boca SVG removidos em v1.10.1
+       a pedido — geravam manchas escuras na foto). */
+    .zayra-hud {
+      position: absolute; inset: -30px;
+      border-radius: 50%;
+      pointer-events: none;
+      will-change: transform;
     }
-    .avatar-stage[data-state="listening"] .zayra-face,
-    .avatar-stage[data-state="thinking"]  .zayra-face,
-    .avatar-stage[data-state="speaking"]  .zayra-face,
-    .avatar-stage[data-state="alert"]     .zayra-face { opacity: .55; }
+    /* Anel externo grosso — 60 tick marks finos em verde principal */
+    .zayra-hud--outer {
+      background: repeating-conic-gradient(
+        from 0deg,
+        transparent 0deg 5.4deg,
+        rgba(0,255,136,.75) 5.4deg 6deg
+      );
+      -webkit-mask: radial-gradient(circle, transparent 48.5%, #000 49%, #000 50.5%, transparent 51%);
+              mask: radial-gradient(circle, transparent 48.5%, #000 49%, #000 50.5%, transparent 51%);
+      animation: zayra-spin 28s linear infinite;
+    }
+    /* Anel intermediário — ticks longos, gira em sentido contrário */
+    .zayra-hud--mid {
+      inset: -16px;
+      background: repeating-conic-gradient(
+        from 12deg,
+        transparent 0deg 11deg,
+        rgba(57,255,133,.55) 11deg 12deg
+      );
+      -webkit-mask: radial-gradient(circle, transparent 47%, #000 47.5%, #000 49%, transparent 49.5%);
+              mask: radial-gradient(circle, transparent 47%, #000 47.5%, #000 49%, transparent 49.5%);
+      animation: zayra-spin 18s linear infinite reverse;
+    }
+    /* Arco dourado que percorre o anel — assinatura de "scanner" */
+    .zayra-hud--gold {
+      inset: -8px;
+      background: conic-gradient(
+        from 0deg,
+        transparent 0deg 285deg,
+        rgba(201,168,76,.85) 295deg 320deg,
+        transparent 330deg 360deg
+      );
+      -webkit-mask: radial-gradient(circle, transparent 49%, #000 49.3%, #000 50.2%, transparent 50.5%);
+              mask: radial-gradient(circle, transparent 49%, #000 49.3%, #000 50.2%, transparent 50.5%);
+      animation: zayra-spin 9s linear infinite;
+      opacity: .9;
+    }
+    @keyframes zayra-spin { to { transform: rotate(360deg); } }
 
-    /* Olhos: piscam suave a cada ~4-5s, scaleY animado */
-    .zayra-eye {
-      transform-origin: center;
-      animation: zayra-blink 5s infinite;
-    }
-    .zayra-eye.right { animation-delay: 0.08s; }
-    @keyframes zayra-blink {
-      0%, 92%, 100% { transform: scaleY(1); }
-      94%, 96%      { transform: scaleY(0.08); }
-    }
+    /* Acelera os anéis quando ZAYRA está pensando ou falando */
+    .avatar-stage[data-state="thinking"] .zayra-hud--outer { animation-duration: 8s; }
+    .avatar-stage[data-state="thinking"] .zayra-hud--gold  { animation-duration: 3s; }
+    .avatar-stage[data-state="speaking"] .zayra-hud--outer { animation-duration: 14s; }
+    .avatar-stage[data-state="speaking"] .zayra-hud--gold  { animation-duration: 5s; }
+    .avatar-stage[data-state="listening"] .zayra-hud--mid  { animation-duration: 9s; }
 
-    /* Boca: animação CSS quando state=speaking — sem dependência de
-       Web Audio API. JS opcional sobrescreve com lip sync real. */
-    .zayra-mouth {
-      transform-origin: center;
-      transition: transform .12s linear;
-    }
-    .avatar-stage[data-state="speaking"] .zayra-mouth {
-      animation: zayra-speak 0.3s ease-in-out infinite alternate;
-    }
-    @keyframes zayra-speak {
-      0%   { transform: scaleY(0.6); }
-      100% { transform: scaleY(2.2); }
+    @media (prefers-reduced-motion: reduce) {
+      .zayra-hud--outer, .zayra-hud--mid, .zayra-hud--gold { animation: none; }
     }
 
     /* Indicadores de estado — aura sutil colorida por estado, SEM pulsar
@@ -520,18 +541,12 @@
   </div>
 
   <div class="avatar-stage" id="avatarStage" data-state="idle">
+    <div class="zayra-hud zayra-hud--outer"></div>
+    <div class="zayra-hud zayra-hud--mid"></div>
+    <div class="zayra-hud zayra-hud--gold"></div>
     <div class="avatar-frame" id="avatarFrame">
       <img class="avatar-img" id="avatarImg" src="/avatar.png" alt="ZAYRA"
         onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%22 stop-color=%22%2300ff88%22/><stop offset=%221%22 stop-color=%22%23c9a84c%22/></linearGradient></defs><circle cx=%22100%22 cy=%22100%22 r=%22100%22 fill=%22url(%23g)%22/><text x=%2250%25%22 y=%2256%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2290%22 font-family=%22Orbitron%22 fill=%22%23ffffff%22>Z</text></svg>'" />
-      <svg class="zayra-face" viewBox="0 0 220 220" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-        <!-- Olhos posicionados a ~42% da altura, com leve sombra pra integrar à foto -->
-        <ellipse class="zayra-eye"       cx="78"  cy="92"  rx="3.2" ry="1.6" fill="rgba(40,30,40,.85)"/>
-        <ellipse class="zayra-eye right" cx="142" cy="92"  rx="3.2" ry="1.6" fill="rgba(40,30,40,.85)"/>
-        <!-- Boca como elipse vazada em ~67% da altura, scaleY animado simula abrir/fechar -->
-        <ellipse class="zayra-mouth" id="zayraMouth"
-                 cx="110" cy="148" rx="11" ry="2.5"
-                 fill="rgba(80,30,40,.65)" stroke="rgba(0,0,0,.3)" stroke-width=".6"/>
-      </svg>
     </div>
   </div>
 
@@ -696,34 +711,19 @@ const FRAME_MS   = 1000 / TARGET_FPS;
   })(0);
 })();
 
-// ── FaceAnimator v1.10 — SVG overlay (sem canvas, sem faixa preta) ──────────
-// Olhos: piscam via CSS @keyframes
-// Boca: ry modulada por amplitude do TTS via Web Audio API; fallback CSS
-//       quando audioCtrl indisponível
+// ── FaceAnimator v1.10.1 — JARVIS HUD (sem rosto sobreposto) ────────────────
+// Anéis HUD CSS reagem a data-state via animation-duration. Lip sync agora
+// só serve pra possíveis futuras visualizações de áudio (não mexe na foto).
 class FaceAnimator {
   constructor() {
     this.state = 'idle';
     this.stage = document.getElementById('avatarStage');
-    this.mouth = document.getElementById('zayraMouth');
-    this._smooth = 0;
   }
   setState(s) {
     this.state = s;
     if (this.stage) this.stage.dataset.state = s;
-    // Quando sai de speaking, devolve a boca pra ry baseline
-    if (s !== 'speaking' && this.mouth) {
-      this.mouth.setAttribute('ry', '2.5');
-    }
   }
-  updateLipSync(vol) {
-    if (!this.mouth) return;
-    // vol vem do AudioController (0–~120 RMS)
-    const target = Math.min(1, vol / 70);
-    // smoothing low-pass — boca natural, não robotizada
-    this._smooth += (target - this._smooth) * 0.35;
-    const ry = 2.5 + this._smooth * 7.5;   // 2.5 (fechada) → ~10 (aberta)
-    this.mouth.setAttribute('ry', ry.toFixed(2));
-  }
+  updateLipSync(_vol) { /* HUD não tem boca; intencional no estilo JARVIS */ }
   dispose() {}
 }
 
