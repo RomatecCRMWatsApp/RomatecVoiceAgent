@@ -85,8 +85,7 @@ export async function listarObras(input: { status?: string; limite?: number } = 
   const params: (string | number)[] = [];
   let sql = 'SELECT * FROM romatec_obras';
   if (input.status) { sql += ' WHERE status = ?'; params.push(input.status); }
-  sql += ' ORDER BY updated_at DESC LIMIT ?';
-  params.push(limit);
+  sql += ` ORDER BY updated_at DESC LIMIT ${limit}`;
   const [rows] = await pool.execute<ObraRow[]>(sql, params);
   return rows.map(r => ({
     id: String(r.id),
@@ -326,8 +325,8 @@ export async function apagarEtapa(input: { id: string; confirm?: boolean }): Pro
 export async function listarTransacoesObra(input: { obra_id: string; limite?: number }) {
   const limit = Math.min(Math.max(Number(input.limite) || 50, 1), 500);
   const [rows] = await pool.execute<TransacaoRow[]>(
-    'SELECT * FROM romatec_obra_transacoes WHERE obra_id = ? ORDER BY data DESC LIMIT ?',
-    [input.obra_id, limit],
+    `SELECT * FROM romatec_obra_transacoes WHERE obra_id = ? ORDER BY data DESC LIMIT ${limit}`,
+    [input.obra_id],
   );
   return rows.map(r => ({
     id: String(r.id), tipo: r.tipo, descricao: r.descricao,
@@ -473,8 +472,8 @@ export async function ajustarEstoqueMaterial(input: {
 export async function listarDiarioObra(input: { obra_id: string; limite?: number }) {
   const limit = Math.min(Math.max(Number(input.limite) || 30, 1), 200);
   const [rows] = await pool.execute<DiarioRow[]>(
-    'SELECT * FROM romatec_obra_diario WHERE obra_id = ? ORDER BY data DESC LIMIT ?',
-    [input.obra_id, limit],
+    `SELECT * FROM romatec_obra_diario WHERE obra_id = ? ORDER BY data DESC LIMIT ${limit}`,
+    [input.obra_id],
   );
   return rows.map(r => ({
     id: String(r.id), data: formatBRDate(r.data), clima: r.clima,

@@ -63,8 +63,7 @@ export async function listarTarefasCowork(input: {
   const params: (string | number)[] = [];
   let sql = 'SELECT * FROM zayra_tarefas';
   if (input.status) { sql += ' WHERE status = ?'; params.push(input.status); }
-  sql += ' ORDER BY criada_em DESC LIMIT ?';
-  params.push(limit);
+  sql += ` ORDER BY criada_em DESC LIMIT ${limit}`;
   const [rows] = await pool.execute<TarefaRow[]>(sql, params);
   return rows.map(r => ({
     id:           String(r.id),

@@ -113,8 +113,8 @@ export async function listarAlarmes(input: { status?: 'ativo' | 'disparado' | 'c
   let sql = 'SELECT * FROM zayra_alarmes';
   if (input.status) { sql += ' WHERE status = ?'; params.push(input.status); }
   else { sql += ' WHERE status != \'cancelado\''; }
-  sql += ' ORDER BY proximo_disparo ASC LIMIT ?';
-  params.push(Math.min(Math.max(Number(input.limite) || 50, 1), 200));
+  const limit = Math.min(Math.max(Number(input.limite) || 50, 1), 200);
+  sql += ` ORDER BY proximo_disparo ASC LIMIT ${limit}`;
   const [rows] = await pool.execute<AlarmeRow[]>(sql, params);
   return rows.map(r => ({
     id:              String(r.id),

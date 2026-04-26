@@ -42,8 +42,7 @@ export async function listarVistorias(input: { obra_id?: string; limite?: number
     LEFT JOIN romatec_obra_vistoria_fotos f ON f.vistoria_id = v.id
   `;
   if (input.obra_id) { sql += ' WHERE v.obra_id = ?'; params.push(input.obra_id); }
-  sql += ' GROUP BY v.id ORDER BY v.data DESC, v.id DESC LIMIT ?';
-  params.push(limit);
+  sql += ` GROUP BY v.id ORDER BY v.data DESC, v.id DESC LIMIT ${limit}`;
   const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
   return rows.map(r => ({
     id:           String(r.id),

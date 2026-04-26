@@ -337,9 +337,10 @@ export async function getSessionMeta(sessionId: string): Promise<ChatSession | n
 }
 
 export async function listChatSessions(limit = 50, offset = 0): Promise<ChatSession[]> {
+  const lim = Math.min(Math.max(Number(limit) || 50, 1), 500);
+  const off = Math.max(Number(offset) || 0, 0);
   const [rows] = await db().query<ChatSession[]>(
-    'SELECT * FROM zayra_chat_sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?',
-    [limit, offset],
+    `SELECT * FROM zayra_chat_sessions ORDER BY updated_at DESC LIMIT ${lim} OFFSET ${off}`,
   );
   return rows;
 }
@@ -348,12 +349,13 @@ export async function getSessionMessages(
   sessionId: string,
   limit = 200,
 ): Promise<ConversationRow[]> {
+  const lim = Math.min(Math.max(Number(limit) || 200, 1), 1000);
   const [rows] = await db().query<ConversationRow[]>(
     `SELECT * FROM zayra_conversations
      WHERE session_id = ?
      ORDER BY created_at ASC, id ASC
-     LIMIT ?`,
-    [sessionId, limit],
+     LIMIT ${lim}`,
+    [sessionId],
   );
   return rows;
 }
@@ -373,14 +375,15 @@ export interface SearchHit {
 
 export async function searchConversations(query: string, limit = 30): Promise<SearchHit[]> {
   const like = `%${query}%`;
+  const lim  = Math.min(Math.max(Number(limit) || 30, 1), 200);
   const [rows] = await db().query<RowDataPacket[]>(
     `SELECT c.session_id, c.role, c.content, c.created_at, s.title AS session_title
        FROM zayra_conversations c
        LEFT JOIN zayra_chat_sessions s ON s.id = c.session_id
       WHERE c.content LIKE ?
       ORDER BY c.created_at DESC
-      LIMIT ?`,
-    [like, limit],
+      LIMIT ${lim}`,
+    [like],
   );
   return rows as SearchHit[];
 }

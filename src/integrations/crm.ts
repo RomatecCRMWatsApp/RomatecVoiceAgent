@@ -70,8 +70,7 @@ export async function listarLeads(filtros?: {
                     lastActivityAt, blockedUntil, discardReason, createdAt, updatedAt
              FROM leadQualifications`;
   if (filtros?.score) { sql += ' WHERE score = ?'; params.push(filtros.score); }
-  sql += ' ORDER BY createdAt DESC LIMIT ?';
-  params.push(limit);
+  sql += ` ORDER BY createdAt DESC LIMIT ${limit}`;
 
   const [rows] = await pool.query<LeadRow[]>(sql, params);
   return rows.map(rowToLead);
