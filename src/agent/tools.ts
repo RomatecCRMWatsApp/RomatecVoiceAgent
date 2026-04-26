@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as crm from '../integrations/crm';
 import * as avalieimob from '../integrations/avalieimob';
 import * as calendar from '../integrations/calendar';
+import * as spotify from '../integrations/spotify';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -236,6 +237,37 @@ export const toolDefinitions: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'tocar_musica',
+    description: 'Toca música no Spotify. Pode buscar por nome (query) ou tocar uma URI específica. Sem args, retoma reprodução pausada. Requer Spotify Premium e algum dispositivo ativo.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Texto de busca (ex: "Coldplay Yellow", "Anitta")' },
+        uri:   { type: 'string', description: 'Spotify track URI (ex: spotify:track:abc123)' },
+      },
+    },
+  },
+  {
+    name: 'pausar_musica',
+    description: 'Pausa a reprodução atual no Spotify.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'pular_proxima',
+    description: 'Pula para a próxima música no Spotify.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'pular_anterior',
+    description: 'Volta para a música anterior no Spotify.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'musica_atual',
+    description: 'Retorna a música que está tocando agora no Spotify (nome, artistas, álbum, progresso).',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'delegar_tarefa',
     description: 'Delega uma tarefa a um membro da equipe Romatec enviando uma mensagem formatada via WhatsApp.',
     input_schema: {
@@ -390,6 +422,21 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       }
       case 'listar_colaboradores':
         data = getColaboradores();
+        break;
+      case 'tocar_musica':
+        data = await spotify.tocarMusica(input as { query?: string; uri?: string });
+        break;
+      case 'pausar_musica':
+        data = await spotify.pausarMusica();
+        break;
+      case 'pular_proxima':
+        data = await spotify.pularProxima();
+        break;
+      case 'pular_anterior':
+        data = await spotify.pularAnterior();
+        break;
+      case 'musica_atual':
+        data = await spotify.musicaAtual();
         break;
       case 'delegar_tarefa': {
         const { colaborador_nome, tarefa, prazo } = input as { colaborador_nome: string; tarefa: string; prazo?: string };

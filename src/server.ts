@@ -11,6 +11,7 @@ import * as crm from './integrations/crm';
 import * as avalieimob from './integrations/avalieimob';
 import { processMessage, sendReply, WaMessage } from './integrations/whatsapp';
 import { getAuthUrl, exchangeCode } from './integrations/calendar';
+import * as spotify from './integrations/spotify';
 import { addSSEClient, removeSSEClient, startProactiveNotifications } from './agent/proactive';
 import {
   initDb,
@@ -327,6 +328,34 @@ app.get('/auth/google/callback', async (req: Request, res: Response) => {
       `<h2 style="font-family:sans-serif">✅ Google Calendar conectado!</h2>` +
       `<p style="font-family:monospace">Adicione ao Railway:<br>` +
       `<b>GOOGLE_REFRESH_TOKEN=${refreshToken}</b></p>`,
+    );
+  } catch (err) {
+    res.status(500).send(`Erro: ${String(err)}`);
+  }
+});
+
+// ── Spotify OAuth ─────────────────────────────────────────────────────────────
+app.get('/auth/spotify', (_req: Request, res: Response) => {
+  try {
+    const state = `zayra_${Date.now().toString(36)}`;
+    res.redirect(spotify.getAuthUrl(state));
+  } catch (err) {
+    res.status(500).send(`Erro: ${String(err)}`);
+  }
+});
+
+app.get('/auth/spotify/callback', async (req: Request, res: Response) => {
+  const code  = req.query.code  as string | undefined;
+  const error = req.query.error as string | undefined;
+  if (error) { res.status(400).send(`<h2>❌ Spotify recusou: ${error}</h2>`); return; }
+  if (!code) { res.status(400).send('Parâmetro code ausente.'); return; }
+  try {
+    const refreshToken = await spotify.exchangeCode(code);
+    res.send(
+      `<h2 style="font-family:sans-serif">✅ Spotify conectado!</h2>` +
+      `<p style="font-family:sans-serif">Adicione esta variável ao Railway:</p>` +
+      `<pre style="font-family:monospace;background:#0a1a0f;color:#00ff88;padding:12px;border-radius:8px;overflow-x:auto">SPOTIFY_REFRESH_TOKEN=${refreshToken}</pre>` +
+      `<p style="font-family:sans-serif;color:#7aab8a;font-size:.85rem">Após adicionar e o Railway redeployar (~3min), abra o Spotify em algum dispositivo e teste com "ZAYRA, toca Coldplay".</p>`,
     );
   } catch (err) {
     res.status(500).send(`Erro: ${String(err)}`);
