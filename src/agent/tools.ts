@@ -9,6 +9,7 @@ import * as system from '../integrations/system';
 import * as obras from '../integrations/obras';
 import * as alarmes from '../integrations/alarmes';
 import * as cofre from '../integrations/cofre';
+import * as vistorias from '../integrations/vistorias';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -754,6 +755,53 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['obra_id', 'atividades'],
     },
   },
+  // ── VTO — Vistoria Técnica de Obra (v1.21) ──
+  {
+    name: 'listar_vistorias',
+    description: 'Lista vistorias técnicas (VTO). Filtre por obra com obra_id pra ver só de uma obra específica.',
+    input_schema: {
+      type: 'object',
+      properties: { obra_id: { type: 'string' }, limite: { type: 'number' } },
+    },
+  },
+  {
+    name: 'buscar_vistoria',
+    description: 'Retorna detalhes completos de uma vistoria + URLs das fotos.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'criar_vistoria',
+    description: 'Cria nova VTO com descrição, observações, pendências e status. Confirm exigido. Use sem fotos pelo chat (use a UI /obras → Vistorias pra anexar fotos), ou passe array de fotos com base64.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        obra_id:     { type: 'string' },
+        descricao:   { type: 'string' },
+        data:        { type: 'string', description: 'YYYY-MM-DD (default hoje)' },
+        titulo:      { type: 'string' },
+        vistoriador: { type: 'string' },
+        observacoes: { type: 'string' },
+        pendencias:  { type: 'string' },
+        status_obra: { type: 'string', enum: ['regular','atencao','critica'] },
+        confirm:     { type: 'boolean' },
+      },
+      required: ['obra_id', 'descricao'],
+    },
+  },
+  {
+    name: 'apagar_vistoria',
+    description: 'APAGA vistoria + fotos relacionadas. IRREVERSÍVEL. Confirm exigido após autorização verbal.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, confirm: { type: 'boolean' } },
+      required: ['id'],
+    },
+  },
+
   // ── Cofre Obsidian (v1.20) ──
   {
     name: 'sincronizar_cofre_memoria',
@@ -1202,6 +1250,18 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'registrar_diario_obra':
         data = await obras.registrarDiarioObra(input as Parameters<typeof obras.registrarDiarioObra>[0]);
+        break;
+      case 'listar_vistorias':
+        data = await vistorias.listarVistorias(input as Parameters<typeof vistorias.listarVistorias>[0]);
+        break;
+      case 'buscar_vistoria':
+        data = await vistorias.buscarVistoria(input.id as string);
+        break;
+      case 'criar_vistoria':
+        data = await vistorias.criarVistoria(input as Parameters<typeof vistorias.criarVistoria>[0]);
+        break;
+      case 'apagar_vistoria':
+        data = await vistorias.apagarVistoria(input as { id: string; confirm?: boolean });
         break;
       case 'sincronizar_cofre_memoria':
         data = await cofre.sincronizarCofreMemoria();

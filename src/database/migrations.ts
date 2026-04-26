@@ -193,6 +193,37 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.21: VTO — Vistoria Técnica de Obra
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obra_vistorias (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      obra_id      INT NOT NULL,
+      data         DATE NOT NULL,
+      titulo       VARCHAR(200),
+      vistoriador  VARCHAR(200),
+      descricao    TEXT NOT NULL,
+      observacoes  TEXT,
+      pendencias   TEXT,
+      status_obra  ENUM('regular','atencao','critica') DEFAULT 'regular',
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_obra_data (obra_id, data DESC)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obra_vistoria_fotos (
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      vistoria_id   INT NOT NULL,
+      legenda       VARCHAR(300),
+      mime          VARCHAR(50) DEFAULT 'image/jpeg',
+      data_base64   LONGTEXT NOT NULL,
+      ordem         INT DEFAULT 0,
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_vistoria (vistoria_id, ordem)
+    )
+  `);
+
   // v1.19: alarmes/despertadores
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS zayra_alarmes (

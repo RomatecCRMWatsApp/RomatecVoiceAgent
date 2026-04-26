@@ -31,6 +31,7 @@ import * as calendar from './integrations/calendar';
 import * as obras from './integrations/obras';
 import * as alarmes from './integrations/alarmes';
 import * as cofre from './integrations/cofre';
+import * as vistorias from './integrations/vistorias';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -39,7 +40,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 // Multer separado pra anexos multimodais (imagens/PDFs) — Claude aceita até 32MB/PDF e ~5MB/imagem
 const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 32 * 1024 * 1024, files: 5 } });
 
-app.use(express.json());
+app.use(express.json({ limit: '32mb' })); // VTO usa fotos base64 no body
 
 // Static files com Cache-Control inteligente:
 // HTML/SW/manifest = no-cache (browser revalida a cada request com ETag)
@@ -553,6 +554,31 @@ app.post('/api/diario', apiHandle(args => obras.registrarDiarioObra(args as Para
 // Catálogo de profissões
 app.get('/api/profissoes-catalogo', apiHandle(() => obras.listarProfissoesCatalogo()));
 app.put('/api/profissoes-catalogo/:id', apiHandle(args => obras.atualizarProfissaoCatalogo(args as Parameters<typeof obras.atualizarProfissaoCatalogo>[0])));
+
+// Vistorias VTO
+app.get   ('/api/vistorias',     apiHandle(args => vistorias.listarVistorias(args as Parameters<typeof vistorias.listarVistorias>[0])));
+app.get   ('/api/vistorias/:id', apiHandle(args => vistorias.buscarVistoria((args as { id: string }).id)));
+app.post  ('/api/vistorias',     apiHandle(args => vistorias.criarVistoria(args as Parameters<typeof vistorias.criarVistoria>[0])));
+app.delete('/api/vistorias/:id', apiHandle(args => vistorias.apagarVistoria(args as { id: string; confirm?: boolean })));
+app.post  ('/api/vistorias/:vistoria_id/fotos', apiHandle(args => vistorias.adicionarFotoVistoria(args as Parameters<typeof vistorias.adicionarFotoVistoria>[0])));
+app.delete('/api/vistorias/fotos/:foto_id',     apiHandle(args => vistorias.apagarFotoVistoria(args as { foto_id: string; confirm?: boolean })));
+app.get   ('/api/vistorias/:id/fotos/:foto_id/raw', async (req, res) => {
+  try {
+    const r = await vistorias.fotoRaw(req.params.foto_id);
+    if (!r) return res.status(404).end();
+    res.set('Content-Type', r.mime);
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(r.buffer);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.get('/api/vistorias/:id/relatorio', async (req, res) => {
+  try {
+    const html = await vistorias.gerarHtmlRelatorio(req.params.id);
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', 'no-cache');
+    res.send(html);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
 
 // Cofre Obsidian
 app.post('/api/cofre/sincronizar', apiHandle(() => cofre.sincronizarCofreMemoria()));

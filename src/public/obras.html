@@ -282,6 +282,7 @@
     <button class="tab" data-tab="materiais">Materiais</button>
     <button class="tab" data-tab="diario">Diário</button>
     <button class="tab" data-tab="folha">Folha Mensal</button>
+    <button class="tab" data-tab="vto">Vistoria (VTO)</button>
   </div>
 
   <div id="view-dashboard" class="view active"></div>
@@ -292,6 +293,7 @@
   <div id="view-materiais" class="view"></div>
   <div id="view-diario" class="view"></div>
   <div id="view-folha" class="view"></div>
+  <div id="view-vto" class="view"></div>
 </div>
 
 <button class="zayra-fab" id="zayraFab">Z</button>
@@ -353,6 +355,8 @@ const state = {
   folhaAno: new Date().getFullYear(),
   folhaMes: new Date().getMonth() + 1,
   folhaObraId: '',
+  vistorias: [], vistoriaAtual: null,
+  vtoFotos: [], // {legenda, mime, data_base64} antes de salvar
 };
 
 const fmt = n => 'R$ ' + (Number(n)||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -388,6 +392,11 @@ async function loadEquipe() { state.equipe = await api('/api/equipe'); }
 async function loadCatalogo() {
   if (state.catalogo.length === 0) state.catalogo = await api('/api/profissoes-catalogo');
 }
+async function loadVistorias() {
+  if (!state.currentObra) return state.vistorias = [];
+  state.vistorias = await api('/api/vistorias?obra_id=' + state.currentObra);
+}
+
 async function loadFolha() {
   const q = `ano=${state.folhaAno}&mes=${state.folhaMes}` + (state.folhaObraId ? `&obra_id=${state.folhaObraId}` : '');
   state.folha = await api('/api/relatorio-equipe?' + q);
@@ -414,6 +423,7 @@ async function render() {
       materiais: async () => { await loadMateriais(); renderMateriais(); },
       diario: async () => { await Promise.all([loadObras(), loadDiario()]); renderDiario(); },
       folha: async () => { await Promise.all([loadObras(), loadFolha()]); renderFolha(); },
+      vto:   async () => { await Promise.all([loadObras(), loadVistorias()]); renderVto(); },
     };
     await fns[state.currentTab]();
   } catch (e) {
@@ -1051,6 +1061,136 @@ function exportarFolhaPdf(monthLabel) {
   </body></html>`;
   const w = window.open('', '_blank');
   w.document.write(html); w.document.close();
+}
+
+// ── VTO (Vistoria Técnica de Obra) ──
+function renderVto() {
+  const v = document.getElementById('view-vto');
+  if (state.obras.length === 0) {
+    v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro.</div>';
+    return;
+  }
+
+  const lista = state.vistorias.map(vis => {
+    const sb = { regular:'badge-success', atencao:'badge-warning', critica:'badge-danger' }[vis.status_obra] || 'badge-info';
+    return `<div class="card">
+      <div style="display:flex; justify-content:space-between; gap:8px;">
+        <div style="flex:1; min-width:0;">
+          <p style="margin:0; font-weight:500;">${escape(vis.titulo || 'Vistoria ' + vis.id)}</p>
+          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">${escape(vis.data)} · ${escape(vis.vistoriador||'-')} · ${vis.qtd_fotos} foto(s)</p>
+          <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+            <span class="badge ${sb}">${escape(vis.status_obra)}</span>
+            <a class="badge badge-info" style="text-decoration:none;" href="/api/vistorias/${vis.id}/relatorio" target="_blank">📄 Imprimir/PDF</a>
+          </div>
+          <p style="margin:6px 0 0; font-size:12px; color:var(--text-muted);">${escape((vis.descricao||'').slice(0,150))}${(vis.descricao||'').length>150?'…':''}</p>
+        </div>
+        <button class="btn-danger" data-del-vto="${vis.id}">Excluir</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const fotosPreview = state.vtoFotos.map((f, i) => `
+    <div style="position:relative; display:inline-block; margin:4px;">
+      <img src="data:${f.mime};base64,${f.data_base64}" style="width:80px; height:80px; object-fit:cover; border-radius:4px; border:1px solid var(--border-strong);">
+      <input data-leg="${i}" placeholder="Legenda" value="${escape(f.legenda||'')}" style="display:block; width:80px; font-size:10px; padding:2px 4px; margin-top:2px;">
+      <button data-rm-foto="${i}" style="position:absolute; top:-6px; right:-6px; width:18px; height:18px; padding:0; border-radius:50%; background:var(--danger); color:white; border:none; cursor:pointer; font-size:10px;">×</button>
+    </div>
+  `).join('');
+
+  v.innerHTML = `${obraSelector()}
+  <div class="card">
+    <p class="section-title">Nova vistoria</p>
+    <div class="form-grid">
+      <input id="vData" type="date">
+      <input id="vTitulo" placeholder="Título (opcional)">
+      <input id="vVistoriador" placeholder="Vistoriador (engenheiro/arquiteto)">
+      <select id="vStatus">
+        <option value="regular">Status: Regular</option>
+        <option value="atencao">Status: Atenção</option>
+        <option value="critica">Status: Crítica</option>
+      </select>
+    </div>
+    <textarea id="vDesc" placeholder="Descrição da vistoria — o que foi visto, etapas em execução, qualidade do serviço *" rows="4" style="margin-bottom:8px;"></textarea>
+    <textarea id="vObs" placeholder="Observações" rows="2" style="margin-bottom:8px;"></textarea>
+    <textarea id="vPend" placeholder="Pendências / Não-conformidades" rows="2" style="margin-bottom:8px;"></textarea>
+
+    <div style="margin: 12px 0;">
+      <label class="btn-gold" style="display:inline-block;">
+        📷 Adicionar fotos
+        <input type="file" id="vFotos" accept="image/*" multiple style="display:none;">
+      </label>
+      <span style="margin-left:8px; font-size:12px; color:var(--text-muted);">${state.vtoFotos.length} foto(s) selecionada(s)</span>
+    </div>
+    ${state.vtoFotos.length > 0 ? `<div style="margin-bottom:12px;">${fotosPreview}</div>` : ''}
+
+    <button class="btn-primary" id="addVto">Salvar vistoria</button>
+  </div>
+
+  <p class="section-title" style="margin-top:16px;">Vistorias da obra (${state.vistorias.length})</p>
+  ${lista || '<div class="card empty">Nenhuma vistoria registrada.</div>'}`;
+
+  attachSel();
+  document.getElementById('vData').value = today();
+
+  document.getElementById('vFotos').onchange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    for (const f of files) {
+      if (f.size > 5 * 1024 * 1024) { alert(`Foto "${f.name}" maior que 5MB, ignorada.`); continue; }
+      const b64 = await fileToBase64(f);
+      state.vtoFotos.push({ mime: f.type || 'image/jpeg', data_base64: b64, legenda: '' });
+    }
+    e.target.value = '';
+    renderVto();
+  };
+
+  document.querySelectorAll('[data-rm-foto]').forEach(b => b.onclick = () => {
+    state.vtoFotos.splice(parseInt(b.dataset.rmFoto), 1); renderVto();
+  });
+  document.querySelectorAll('[data-leg]').forEach(i => i.oninput = e => {
+    state.vtoFotos[parseInt(i.dataset.leg)].legenda = e.target.value;
+  });
+
+  document.getElementById('addVto').onclick = async () => {
+    const desc = document.getElementById('vDesc').value.trim();
+    if (!desc) return alert('Descreva a vistoria');
+    try {
+      await api('/api/vistorias', {
+        method: 'POST',
+        body: JSON.stringify({
+          obra_id: state.currentObra,
+          data: document.getElementById('vData').value || today(),
+          titulo: document.getElementById('vTitulo').value.trim() || null,
+          vistoriador: document.getElementById('vVistoriador').value.trim() || null,
+          descricao: desc,
+          observacoes: document.getElementById('vObs').value.trim() || null,
+          pendencias: document.getElementById('vPend').value.trim() || null,
+          status_obra: document.getElementById('vStatus').value,
+          fotos: state.vtoFotos,
+        }),
+      });
+      state.vtoFotos = [];
+      render();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+
+  document.querySelectorAll('[data-del-vto]').forEach(b => b.onclick = async () => {
+    if (!confirm('Apagar vistoria + fotos?')) return;
+    try { await api('/api/vistorias/' + b.dataset.delVto, { method: 'DELETE' }); render(); }
+    catch (e) { alert('Erro: ' + e.message); }
+  });
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result);
+      const base64 = result.split(',')[1] || result;
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 // ── ZAYRA ──
