@@ -36,53 +36,58 @@ interface Chunk {
 
 // Quebra texto em chunks de ~CHUNK_SIZE chars com overlap, preferindo quebra
 // em fim de frase (.!?\n) pra não cortar argumentos no meio.
-function chunkear(texto: string): { conteudo: string; aproxPagina: number }[] {
+// IMPORTANTE: stride fixo (CHUNK_SIZE - CHUNK_OVERLAP) garante avanço
+// monotônico do cursor — antes podia entrar em loop infinito quando o
+// sentence-cut empurrava cut pra longe e o overlap voltava pro mesmo lugar.
+function chunkearTexto(
+  texto: string,
+  paginaInicial: (cursor: number) => number,
+): { conteudo: string; aproxPagina: number }[] {
   const out: { conteudo: string; aproxPagina: number }[] = [];
-  // Aproximar páginas: pdf-parse retorna texto contínuo. Usamos quebras
-  // \f (form-feed) ou contagem grosseira de chars/3000 = 1 página.
-  const pages = texto.split('\f');
-  let cursor = 0;
+  const STRIDE = CHUNK_SIZE - CHUNK_OVERLAP; // avanço mínimo garantido
+  if (texto.length === 0) return out;
 
-  if (pages.length > 1) {
-    // Tem form-feed — chunkear por página, respeitando size
-    pages.forEach((pageText, pageIdx) => {
-      const pageNum = pageIdx + 1;
-      let i = 0;
-      while (i < pageText.length) {
-        const end = Math.min(i + CHUNK_SIZE, pageText.length);
-        // tenta cortar em fim de frase no último 30% do chunk
-        let cut = end;
-        if (end < pageText.length) {
-          const tail = pageText.slice(i + Math.floor(CHUNK_SIZE * 0.7), end);
-          const sentenceEnd = tail.search(/[.!?]\s|\n\n/);
-          if (sentenceEnd > -1) cut = i + Math.floor(CHUNK_SIZE * 0.7) + sentenceEnd + 1;
-        }
-        const piece = pageText.slice(i, cut).trim();
-        if (piece.length > 50) out.push({ conteudo: piece, aproxPagina: pageNum });
-        i = cut - CHUNK_OVERLAP;
-        if (i <= 0 || i >= pageText.length) break;
-      }
-    });
-  } else {
-    // Sem form-feed — chunkear linear, calcular página aproximada
-    while (cursor < texto.length) {
-      const end = Math.min(cursor + CHUNK_SIZE, texto.length);
-      let cut = end;
-      if (end < texto.length) {
-        const tail = texto.slice(cursor + Math.floor(CHUNK_SIZE * 0.7), end);
+  let cursor = 0;
+  let safety = 100000; // hard cap contra qualquer loop bug
+  while (cursor < texto.length && safety-- > 0) {
+    const end = Math.min(cursor + CHUNK_SIZE, texto.length);
+    let cut = end;
+    // Tenta cortar em fim de frase no último 30% (só se tiver mais texto adiante)
+    if (end < texto.length) {
+      const tailStart = cursor + Math.floor(CHUNK_SIZE * 0.7);
+      if (tailStart < end) {
+        const tail = texto.slice(tailStart, end);
         const sentenceEnd = tail.search(/[.!?]\s|\n\n/);
-        if (sentenceEnd > -1) cut = cursor + Math.floor(CHUNK_SIZE * 0.7) + sentenceEnd + 1;
+        if (sentenceEnd > -1) cut = tailStart + sentenceEnd + 1;
       }
-      const piece = texto.slice(cursor, cut).trim();
-      if (piece.length > 50) {
-        const aproxPagina = Math.max(1, Math.floor(cursor / 3000) + 1);
-        out.push({ conteudo: piece, aproxPagina });
-      }
-      cursor = cut - CHUNK_OVERLAP;
-      if (cursor <= 0 || cursor >= texto.length) break;
     }
+    const piece = texto.slice(cursor, cut).trim();
+    if (piece.length > 50) {
+      out.push({ conteudo: piece, aproxPagina: paginaInicial(cursor) });
+    }
+    // Stride fixo — evita oscilação. Para se já cobriu o texto.
+    if (cut >= texto.length) break;
+    cursor += STRIDE;
+  }
+  if (safety <= 0) {
+    console.warn('[chunkear] safety cap atingido — texto chunkado parcialmente');
   }
   return out;
+}
+
+function chunkear(texto: string): { conteudo: string; aproxPagina: number }[] {
+  const pages = texto.split('\f');
+  if (pages.length > 1) {
+    // Tem form-feed — chunkeia por página
+    const out: { conteudo: string; aproxPagina: number }[] = [];
+    pages.forEach((pageText, pageIdx) => {
+      const pageNum = pageIdx + 1;
+      out.push(...chunkearTexto(pageText, () => pageNum));
+    });
+    return out;
+  }
+  // Sem form-feed — chunkeia linear, estima página por chars/3000
+  return chunkearTexto(texto, cursor => Math.max(1, Math.floor(cursor / 3000) + 1));
 }
 
 export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
