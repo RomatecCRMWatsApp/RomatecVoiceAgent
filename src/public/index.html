@@ -138,14 +138,27 @@ function setState(s,label){
 }
 function tx(text){document.getElementById('transcript').textContent=text;}
 
-/* MICROFONE → /voice */
+/* MICROFONE → /voice (com auto-stop por silêncio) */
 let audioCtx,analyser,dataArr,micStream,mediaRec,chunks=[],listening=false;
+let recordStartedAt=0,silenceStartedAt=0,maxRecordTimer=null;
+const SILENCE_RMS=0.025;        // limite abaixo do qual considera silêncio
+const SILENCE_HOLD_MS=1500;     // 1.5s de silêncio = parar e enviar
+const MIN_RECORD_MS=800;        // só pára depois de 0.8s gravando (evita disparo prematuro)
+const MAX_RECORD_MS=30000;      // hard cap 30s
 document.getElementById('micBtn').addEventListener('click',toggleListen);
+function autoStopRec(){
+  if(!listening)return;
+  listening=false;
+  document.getElementById('micBtn').classList.remove('active');
+  if(maxRecordTimer){clearTimeout(maxRecordTimer);maxRecordTimer=null;}
+  if(mediaRec&&mediaRec.state==='recording')mediaRec.stop();
+}
 
 async function toggleListen(){
   const btn=document.getElementById('micBtn');
   if(listening){
     listening=false;btn.classList.remove('active');
+    if(maxRecordTimer){clearTimeout(maxRecordTimer);maxRecordTimer=null;}
     if(mediaRec&&mediaRec.state==='recording')mediaRec.stop();
     return;
   }
@@ -177,7 +190,10 @@ async function toggleListen(){
     };
     mediaRec.onerror=e=>{tx('Erro mic: '+(e.error?.message||'desconhecido'));setState('idle');};
     mediaRec.start();
-    listening=true;btn.classList.add('active');setState('listening','Escutando…');tx('Gravando ('+realMime+')…');
+    listening=true;btn.classList.add('active');setState('listening','Fale agora…');
+    tx('🎙 Fale agora — eu paro sozinha quando você terminar (ou toque o mic pra parar)');
+    recordStartedAt=Date.now();silenceStartedAt=0;
+    maxRecordTimer=setTimeout(()=>{if(listening){tx('⏱ 30s — parando');autoStopRec();}},MAX_RECORD_MS);
     loopMic();
   }catch(e){
     setState('idle','Mic bloqueado');
@@ -188,7 +204,21 @@ async function toggleListen(){
 function loopMic(){if(!listening)return;
   analyser.getByteTimeDomainData(dataArr);let sum=0;
   for(let i=0;i<dataArr.length;i++){const v=(dataArr[i]-128)/128;sum+=v*v;}
-  target=Math.min(1,.25+Math.sqrt(sum/dataArr.length)*4);
+  const rms=Math.sqrt(sum/dataArr.length);
+  target=Math.min(1,.25+rms*4);
+  // Auto-stop por silêncio (depois do mínimo de gravação)
+  const elapsed=Date.now()-recordStartedAt;
+  if(elapsed>MIN_RECORD_MS){
+    if(rms<SILENCE_RMS){
+      if(silenceStartedAt===0)silenceStartedAt=Date.now();
+      else if(Date.now()-silenceStartedAt>SILENCE_HOLD_MS){
+        tx('⏸ silêncio detectado — enviando');
+        autoStopRec();return;
+      }
+    } else {
+      silenceStartedAt=0; // som de novo, reseta
+    }
+  }
   requestAnimationFrame(loopMic);
 }
 async function sendToZayra(blob,mime){
