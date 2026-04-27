@@ -1,6 +1,8 @@
 import { AgentResponse } from '../types';
 import { AGENT_IDENTITY } from './identity';
 import { pensarEmCascata } from '../services/aiCascade';
+import { buscarMemoria, formatarContexto } from '../services/ragSearch';
+import { supabaseConfigurado } from '../services/supabase';
 import {
   getSessionHistory,
   addToSession,
@@ -245,11 +247,35 @@ export async function think(
     }
   }
 
+  // v1.26.7: RAG IMPLÍCITO — busca automática nos PDFs ingeridos antes de
+  // chamar o LLM. Modelos pequenos (llama3.1-8b) ignoram a instrução de
+  // chamar memoria_buscar como tool. Injetando o contexto direto no prompt
+  // garante que ZAYRA sempre cite as fontes do Chefe quando existirem.
+  let knowledgeContext = '';
+  if (userMessage && userMessage.length > 10 && supabaseConfigurado()) {
+    try {
+      const t0 = Date.now();
+      const docs = await buscarMemoria(userMessage, { top_k: 4 });
+      if (docs.length > 0) {
+        knowledgeContext =
+          `\n\n═══ DOCUMENTOS RELEVANTES NA SUA MEMÓRIA (RAG) ═══\n` +
+          `Os trechos abaixo vieram dos PDFs próprios do Chefe. ` +
+          `BASEIE sua resposta neles e CITE a fonte (título + página).\n\n` +
+          formatarContexto(docs);
+        console.log(`[rag] busca implícita: ${docs.length} hits (+${Date.now()-t0}ms)`);
+      }
+    } catch (err) {
+      // RAG não-crítico — se falhar, segue sem
+      console.warn(`[rag] busca implícita falhou: ${(err as Error).message}`);
+    }
+  }
+
   const systemPrompt =
     BASE_SYSTEM_PROMPT
     + memCtx
     + `\n\nData/hora atual no servidor: ${nowBR()} (Fortaleza/BRT, GMT-3).`
-    + priorContext;
+    + priorContext
+    + knowledgeContext;
 
   // v1.25.0: history controlado por AI_MAX_HISTORY_MESSAGES (default 12).
   // pensarEmCascata também aplica truncarHistorico() como rede de segurança.
