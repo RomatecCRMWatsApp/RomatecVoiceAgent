@@ -1,0 +1,25 @@
+{
+  "name": "ZAYRA — Romatec",
+  "short_name": "ZAYRA",
+  "description": "Assistente Executiva da Romatec Consultoria Imobiliária — Açailândia/MA",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#020a07",
+  "theme_color": "#04140d",
+  "lang": "pt-BR",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icons/zayra-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/zayra-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Briefing do Dia",
+      "short_name": "Briefing",
+      "description": "Ver resumo executivo do dia",
+      "url": "/?acao=briefing"
+    }
+  ]
+}

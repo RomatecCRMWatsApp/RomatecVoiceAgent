@@ -50,8 +50,11 @@ app.use(express.static(path.join(__dirname, 'public'), {
   etag: true,
   lastModified: true,
   setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('manifest.json')) {
+    if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('manifest.json') || filePath.endsWith('.webmanifest')) {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+      if (filePath.endsWith('.webmanifest')) {
+        res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+      }
     } else {
       res.setHeader('Cache-Control', 'public, max-age=3600');
     }
@@ -137,8 +140,10 @@ app.post('/voice', upload.single('audio'), async (req: Request, res: Response) =
       'Content-Type':     'audio/mpeg',
       'X-Transcription':  encodeURIComponent(transcription.text),
       'X-Response-Text':  encodeURIComponent(agentResponse.text),
+      'X-Zayra-Text':     encodeURIComponent(agentResponse.text),
       'X-Tools-Used':     agentResponse.toolsUsed.join(','),
       'X-Session-Id':     agentResponse.sessionId,
+      'Access-Control-Expose-Headers': 'X-Transcription, X-Response-Text, X-Zayra-Text, X-Tools-Used, X-Session-Id',
     });
     res.send(audioBuffer);
   } catch (err) {

@@ -1,1476 +1,199 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ZAYRA — Romatec</title>
-  <link rel="manifest" href="/manifest.json" />
-  <meta name="theme-color" content="#00ff88" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="ZAYRA" />
-  <link rel="apple-touch-icon" href="/avatar.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      /* Paleta verde+dourado restaurada na v1.7.5 (era a paleta original pré-v1.5.0) */
-      --bg-deep: #0a1a0f;
-      --bg-mid:  #0f2318;
-      --bg-soft: #162d1e;
-      --neon:    #00ff88;     /* verde neon principal */
-      --neon-2:  #39ff85;     /* verde claro */
-      --neon-3:  #9cf5b0;     /* mint */
-      --gold:    #c9a84c;     /* dourado original */
-      --text:    #e8f5e9;
-      --text-dim:#7aab8a;
-      --red:     #ff4444;
-      --orange:  #ff8c00;
-      --green:   #00ff88;     /* alias do --neon, mantido pelo nome */
-    }
-    html, body { height: 100%; }
-    body {
-      font-family: 'Inter', system-ui, sans-serif;
-      background: radial-gradient(ellipse at 20% 0%, #1a1f5a 0%, var(--bg-mid) 35%, var(--bg-deep) 80%);
-      color: var(--text); min-height: 100dvh;
-      display: flex; flex-direction: column; align-items: center; overflow-x: hidden;
-    }
-
-    /* Animated gradient background layer */
-    #bgGradient {
-      position: fixed; inset: 0; z-index: 0; pointer-events: none;
-      background:
-        radial-gradient(circle at 15% 20%, rgba(0,255,136,.25), transparent 45%),
-        radial-gradient(circle at 85% 30%, rgba(156,245,176,.22), transparent 50%),
-        radial-gradient(circle at 50% 90%, rgba(57,255,133,.18), transparent 50%);
-      animation: bgShift 18s ease-in-out infinite alternate;
-      filter: blur(40px);
-    }
-    @keyframes bgShift {
-      0%   { transform: translate(0,0) scale(1); }
-      50%  { transform: translate(-3%,2%) scale(1.06); }
-      100% { transform: translate(2%,-2%) scale(1.03); }
-    }
-    #bgCanvas { position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity: .55; }
-
-    .wrap {
-      position: relative; z-index: 2; width: 100%; max-width: 900px;
-      padding: 24px 16px 48px; display: flex; flex-direction: column;
-      align-items: center; gap: 24px;
-    }
-
-    /* Activate */
-    .activate-overlay {
-      position: fixed; inset: 0; z-index: 200;
-      background: radial-gradient(ellipse at center, rgba(11,18,48,.92), rgba(5,8,24,.98));
-      display: flex; align-items: center; justify-content: center; cursor: pointer;
-      backdrop-filter: blur(8px);
-    }
-    .activate-card { display: flex; flex-direction: column; align-items: center; gap: 20px; text-align: center; }
-    .activate-logo {
-      font-family: 'Orbitron', sans-serif;
-      font-size: 3.8rem; font-weight: 700; letter-spacing: 12px;
-      background: linear-gradient(135deg, var(--neon), var(--neon-2), var(--gold));
-      -webkit-background-clip: text; background-clip: text; color: transparent;
-      filter: drop-shadow(0 0 24px rgba(0,255,136,.55));
-      animation: logoGlow 3s ease-in-out infinite alternate;
-    }
-    @keyframes logoGlow {
-      0%   { filter: drop-shadow(0 0 16px rgba(0,255,136,.4)); }
-      100% { filter: drop-shadow(0 0 36px rgba(156,245,176,.7)); }
-    }
-    .activate-sub { color: var(--text-dim); font-size: .85rem; letter-spacing: 3px; text-transform: uppercase; }
-    .activate-ring {
-      width: 64px; height: 64px; border-radius: 50%;
-      border: 2px solid var(--neon); animation: ring-pulse 1.4s infinite;
-      box-shadow: 0 0 24px rgba(0,255,136,.5);
-    }
-    @keyframes ring-pulse { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.08);opacity:1} }
-
-    /* Header */
-    .status-bar { width: 100%; display: flex; justify-content: space-between; align-items: center; }
-    .logo {
-      font-family: 'Orbitron', sans-serif;
-      color: var(--gold); font-weight: 700; font-size: .85rem;
-      letter-spacing: 3px; text-transform: uppercase;
-    }
-    .status-right { display: flex; align-items: center; gap: 10px; }
-    .status-dot { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-dim); }
-
-    /* Spotify widget no header (v1.9.3) */
-    .spotify-widget {
-      display: none;  /* mostra via JS quando há música */
-      align-items: center; gap: 8px;
-      background: rgba(0,255,136,.08);
-      border: 1px solid rgba(0,255,136,.25);
-      border-radius: 999px;
-      padding: 4px 12px 4px 4px;
-      max-width: 260px;
-      transition: border-color .2s, background .2s;
-    }
-    .spotify-widget.playing { border-color: rgba(0,255,136,.5); background: rgba(0,255,136,.12); }
-    .spotify-widget.paused  { opacity: .7; }
-    .spotify-widget__cover {
-      width: 28px; height: 28px; border-radius: 50%;
-      object-fit: cover; flex-shrink: 0;
-      background: rgba(0,255,136,.15);
-    }
-    .spotify-widget__text {
-      display: flex; flex-direction: column;
-      min-width: 0; line-height: 1.2;
-    }
-    .spotify-widget__title {
-      font-size: .75rem; font-weight: 600; color: var(--neon);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      max-width: 200px;
-    }
-    .spotify-widget__artist {
-      font-size: .65rem; color: var(--text-dim);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      max-width: 200px;
-    }
-    .spotify-widget__icon {
-      font-size: .8rem; flex-shrink: 0;
-    }
-    @media (max-width: 480px) {
-      .spotify-widget { max-width: 180px; }
-      .spotify-widget__title, .spotify-widget__artist { max-width: 130px; }
-    }
-    .dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--green); box-shadow: 0 0 8px var(--green);
-      animation: pulse-dot 2s infinite;
-    }
-    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
-    .notif-badge {
-      background: var(--red); color: #fff; font-size: .7rem; font-weight: 700;
-      border-radius: 10px; padding: 2px 7px; min-width: 20px; text-align: center;
-      display: none; cursor: pointer;
-    }
-
-    /* ──────────── Avatar Stage (modo limpo v1.7.4) ──────────── */
-    .avatar-stage {
-      position: relative; width: 280px; height: 280px;
-      display: flex; align-items: center; justify-content: center;
-    }
-
-    /* Avatar card (frame) — foto + box-shadow + animações v1.10 */
-    .avatar-frame {
-      position: relative; width: 220px; height: 220px; border-radius: 50%;
-      overflow: hidden;
-      box-shadow:
-        0 0 40px rgba(0,255,136,.35),
-        inset 0 0 30px rgba(57,255,133,.18);
-      cursor: pointer;
-      transition: box-shadow .35s ease;
-    }
-    .avatar-frame::after {
-      content: ''; position: absolute; inset: 0; border-radius: 50%;
-      border: 2px solid rgba(255,255,255,.08);
-      pointer-events: none;
-    }
-    .avatar-img {
-      width: 100%; height: 100%; object-fit: cover; display: block;
-      animation: zayra-breathe 4s ease-in-out infinite;
-      will-change: transform;
-    }
-    @keyframes zayra-breathe {
-      0%, 100% { transform: scale(1); }
-      50%      { transform: scale(1.012); }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .avatar-img { animation: none; }
-    }
-
-    /* HUD ring estilo JARVIS — 3 anéis concêntricos giratórios em torno
-       do avatar. Sem rosto sobreposto (olhos/boca SVG removidos em v1.10.1
-       a pedido — geravam manchas escuras na foto). */
-    .zayra-hud {
-      position: absolute; inset: -30px;
-      border-radius: 50%;
-      pointer-events: none;
-      will-change: transform;
-    }
-    /* Anel externo grosso — 60 tick marks finos em verde principal */
-    .zayra-hud--outer {
-      background: repeating-conic-gradient(
-        from 0deg,
-        transparent 0deg 5.4deg,
-        rgba(0,255,136,.75) 5.4deg 6deg
-      );
-      -webkit-mask: radial-gradient(circle, transparent 48.5%, #000 49%, #000 50.5%, transparent 51%);
-              mask: radial-gradient(circle, transparent 48.5%, #000 49%, #000 50.5%, transparent 51%);
-      animation: zayra-spin 28s linear infinite;
-    }
-    /* Anel intermediário — ticks longos, gira em sentido contrário */
-    .zayra-hud--mid {
-      inset: -16px;
-      background: repeating-conic-gradient(
-        from 12deg,
-        transparent 0deg 11deg,
-        rgba(57,255,133,.55) 11deg 12deg
-      );
-      -webkit-mask: radial-gradient(circle, transparent 47%, #000 47.5%, #000 49%, transparent 49.5%);
-              mask: radial-gradient(circle, transparent 47%, #000 47.5%, #000 49%, transparent 49.5%);
-      animation: zayra-spin 18s linear infinite reverse;
-    }
-    /* Arco dourado que percorre o anel — assinatura de "scanner" */
-    .zayra-hud--gold {
-      inset: -8px;
-      background: conic-gradient(
-        from 0deg,
-        transparent 0deg 285deg,
-        rgba(201,168,76,.85) 295deg 320deg,
-        transparent 330deg 360deg
-      );
-      -webkit-mask: radial-gradient(circle, transparent 49%, #000 49.3%, #000 50.2%, transparent 50.5%);
-              mask: radial-gradient(circle, transparent 49%, #000 49.3%, #000 50.2%, transparent 50.5%);
-      animation: zayra-spin 9s linear infinite;
-      opacity: .9;
-    }
-    @keyframes zayra-spin { to { transform: rotate(360deg); } }
-
-    /* Acelera os anéis quando ZAYRA está pensando ou falando */
-    .avatar-stage[data-state="thinking"] .zayra-hud--outer { animation-duration: 8s; }
-    .avatar-stage[data-state="thinking"] .zayra-hud--gold  { animation-duration: 3s; }
-    .avatar-stage[data-state="speaking"] .zayra-hud--outer { animation-duration: 14s; }
-    .avatar-stage[data-state="speaking"] .zayra-hud--gold  { animation-duration: 5s; }
-    .avatar-stage[data-state="listening"] .zayra-hud--mid  { animation-duration: 9s; }
-
-    @media (prefers-reduced-motion: reduce) {
-      .zayra-hud--outer, .zayra-hud--mid, .zayra-hud--gold { animation: none; }
-    }
-
-    /* Indicadores de estado — aura sutil colorida por estado, SEM pulsar
-       agressivo (a queixa antiga era piscar/óleo glitch) */
-    .avatar-stage[data-state="listening"]  .avatar-frame {
-      box-shadow:
-        0 0 50px rgba(0,225,255,.55),
-        inset 0 0 30px rgba(0,225,255,.22);
-    }
-    .avatar-stage[data-state="thinking"]   .avatar-frame {
-      box-shadow:
-        0 0 50px rgba(201,168,76,.55),
-        inset 0 0 30px rgba(201,168,76,.22);
-    }
-    .avatar-stage[data-state="speaking"]   .avatar-frame {
-      box-shadow:
-        0 0 55px rgba(0,255,136,.65),
-        inset 0 0 30px rgba(0,255,136,.28);
-    }
-    .avatar-stage[data-state="alert"]      .avatar-frame {
-      box-shadow:
-        0 0 55px rgba(255,68,68,.65),
-        inset 0 0 30px rgba(255,68,68,.25);
-    }
-
-    /* Identity */
-    .name-block { text-align: center; }
-    .agent-name {
-      font-family: 'Orbitron', sans-serif;
-      font-size: 2.6rem; font-weight: 700; letter-spacing: 8px;
-      background: linear-gradient(135deg, var(--neon), var(--neon-2) 50%, var(--gold));
-      -webkit-background-clip: text; background-clip: text; color: transparent;
-      filter: drop-shadow(0 0 18px rgba(0,255,136,.45));
-    }
-    .agent-sub { font-size: .82rem; color: var(--text-dim); margin-top: 6px; letter-spacing: 2px; }
-
-    /* State chip */
-    .state-chip {
-      display: inline-flex; align-items: center; gap: 10px;
-      padding: 8px 18px; border-radius: 999px;
-      background: rgba(11,18,48,.6); backdrop-filter: blur(10px);
-      border: 1px solid rgba(0,255,136,.25);
-      font-size: .78rem; letter-spacing: 2px; text-transform: uppercase;
-      color: var(--text-dim); transition: all .3s;
-    }
-    .state-chip .state-led {
-      width: 9px; height: 9px; border-radius: 50%;
-      background: var(--text-dim); box-shadow: 0 0 8px currentColor;
-      transition: background .3s, box-shadow .3s;
-    }
-    .state-chip[data-state="listening"]  { color: var(--neon-2); border-color: rgba(57,255,133,.4); }
-    .state-chip[data-state="listening"]  .state-led { background: var(--neon-2); animation: led-pulse 1.2s infinite; }
-    .state-chip[data-state="thinking"]   { color: var(--gold); border-color: rgba(201,168,76,.4); }
-    .state-chip[data-state="thinking"]   .state-led { background: var(--gold); animation: led-pulse .7s infinite; }
-    .state-chip[data-state="speaking"]   { color: var(--green); border-color: rgba(87,245,167,.4); }
-    .state-chip[data-state="speaking"]   .state-led { background: var(--green); animation: led-pulse .9s infinite; }
-    .state-chip[data-state="error"]      { color: var(--red);   border-color: rgba(255,85,119,.4); }
-    @keyframes led-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.3)} }
-
-    /* Fallback mic */
-    .mic-btn {
-      width: 70px; height: 70px; border-radius: 50%;
-      border: 2px solid var(--neon); background: rgba(11,18,48,.5); backdrop-filter: blur(8px);
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
-      transition: all .2s; box-shadow: 0 0 20px rgba(0,255,136,.25); color: var(--neon);
-    }
-    .mic-btn:hover { box-shadow: 0 0 40px rgba(0,255,136,.5); transform: scale(1.05); }
-    .mic-btn.recording { border-color: var(--red); color: var(--red); animation: btn-record .8s infinite; box-shadow: 0 0 30px rgba(255,85,119,.4); }
-    .mic-btn.processing { border-color: var(--gold); color: var(--gold); cursor: default; }
-    .mic-btn.speaking-state { animation: btn-speak .6s infinite; box-shadow: 0 0 40px rgba(87,245,167,.5); }
-    @keyframes btn-record { 0%,100%{opacity:1} 50%{opacity:.5} }
-    @keyframes btn-speak  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
-    .mic-btn svg { width: 28px; height: 28px; }
-    .spinner { width: 28px; height: 28px; border: 3px solid transparent; border-top-color: var(--gold); border-radius: 50%; animation: spin .7s linear infinite; }
-    @keyframes spin { to{transform:rotate(360deg)} }
-    .mic-label { font-size: .75rem; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 6px; min-height: 18px; }
-
-    /* Briefing button */
-    .briefing-btn {
-      background: rgba(11,18,48,.5); backdrop-filter: blur(10px);
-      border: 1px solid var(--gold); color: var(--gold);
-      padding: 9px 24px; border-radius: 24px; cursor: pointer;
-      font-size: .78rem; letter-spacing: 2px; text-transform: uppercase;
-      font-family: inherit; transition: all .2s;
-    }
-    .briefing-btn:hover { background: rgba(201,168,76,.12); box-shadow: 0 0 20px rgba(201,168,76,.25); }
-
-    /* Dashboard */
-    .dashboard-grid { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .card {
-      background: rgba(11,18,48,.55); backdrop-filter: blur(12px);
-      border: 1px solid rgba(0,255,136,.18); border-radius: 14px;
-      padding: 18px 16px 14px; cursor: pointer;
-      transition: border-color .2s, box-shadow .2s, transform .2s;
-    }
-    .card:hover { border-color: rgba(0,255,136,.5); box-shadow: 0 0 22px rgba(0,255,136,.15); transform: translateY(-2px); }
-    .card-title { font-size: .68rem; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
-    .card-value { font-size: 2rem; font-weight: 700; color: var(--neon-2); line-height: 1; margin-bottom: 4px; }
-    .card-sub   { font-size: .75rem; color: var(--text-dim); }
-    .card-meta  { font-size: .7rem; color: var(--gold); margin-top: 4px; }
-    .card-updating { opacity: .5; }
-
-    /* Chat */
-    .chat-wrap { width: 100%; max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; }
-    .chat-wrap::-webkit-scrollbar { width: 4px; }
-    .chat-wrap::-webkit-scrollbar-thumb { background: var(--bg-soft); border-radius: 2px; }
-    .bubble { display: flex; align-items: flex-end; gap: 10px; max-width: 82%; animation: fade-in .3s ease; }
-    @keyframes fade-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
-    .bubble.user  { align-self: flex-end; flex-direction: row-reverse; }
-    .bubble.agent { align-self: flex-start; }
-    .bubble-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 1px solid var(--neon); }
-    .bubble-text { padding: 9px 13px; border-radius: 16px; font-size: .84rem; line-height: 1.5; }
-    .bubble.user  .bubble-text { background: rgba(19,26,68,.6); border: 1px solid rgba(0,255,136,.18); border-bottom-right-radius: 4px; }
-    .bubble.agent .bubble-text { background: rgba(57,255,133,.08); border: 1px solid rgba(57,255,133,.25); border-bottom-left-radius: 4px; color: var(--neon-2); }
-
-    /* Chat typing indicator */
-    .typing { display: flex; gap: 4px; padding: 9px 13px; }
-    .typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--neon-2); opacity: .5; animation: typing-bounce 1.2s infinite; }
-    .typing span:nth-child(2) { animation-delay: .15s; }
-    .typing span:nth-child(3) { animation-delay: .3s; }
-    @keyframes typing-bounce { 0%,80%,100% { transform: translateY(0); opacity: .4; } 40% { transform: translateY(-4px); opacity: 1; } }
-
-    /* Chat input bar */
-    .chat-input-bar {
-      width: 100%; display: flex; gap: 8px; align-items: flex-end;
-      background: rgba(11,18,48,.6); backdrop-filter: blur(10px);
-      border: 1px solid rgba(0,255,136,.25); border-radius: 16px;
-      padding: 10px 12px;
-    }
-    .chat-input-bar:focus-within { border-color: rgba(57,255,133,.5); box-shadow: 0 0 18px rgba(57,255,133,.15); }
-    .chat-attachments {
-      display: flex; flex-wrap: wrap; gap: 6px; align-self: stretch;
-      max-width: 100%;
-    }
-    .chat-attachments:empty { display: none; }
-    .chat-attachment-chip {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: rgba(0,255,136,.12); border: 1px solid rgba(0,255,136,.35);
-      border-radius: 8px; padding: 4px 8px;
-      font-size: .72rem; color: var(--text); max-width: 200px;
-    }
-    .chat-attachment-chip img {
-      width: 24px; height: 24px; border-radius: 4px; object-fit: cover;
-    }
-    .chat-attachment-chip .name {
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .chat-attachment-chip button {
-      background: none; border: none; color: var(--text-dim); cursor: pointer;
-      font-size: .9rem; padding: 0 2px; line-height: 1;
-    }
-    .chat-attachment-chip button:hover { color: var(--red); }
-    .chat-textarea {
-      flex: 1; background: transparent; border: none; outline: none;
-      color: var(--text); font-family: inherit; font-size: .9rem; line-height: 1.4;
-      resize: none; max-height: 120px; min-height: 22px; padding: 4px 0;
-    }
-    .chat-textarea::placeholder { color: var(--text-dim); }
-    .chat-send-btn {
-      background: linear-gradient(135deg, var(--neon), var(--neon-3));
-      border: none; border-radius: 10px; width: 38px; height: 38px;
-      cursor: pointer; color: white; display: flex; align-items: center; justify-content: center;
-      transition: transform .15s, box-shadow .15s; flex-shrink: 0;
-    }
-    .chat-send-btn:hover:not(:disabled) { transform: scale(1.05); box-shadow: 0 0 18px rgba(0,255,136,.4); }
-    .chat-send-btn:disabled { opacity: .4; cursor: not-allowed; }
-    .chat-send-btn svg { width: 18px; height: 18px; }
-    .chat-history-btn {
-      background: rgba(11,18,48,.6); backdrop-filter: blur(10px);
-      border: 1px solid rgba(0,255,136,.25); border-radius: 10px;
-      width: 38px; height: 38px; cursor: pointer; color: var(--neon-2);
-      display: flex; align-items: center; justify-content: center;
-      transition: all .15s; flex-shrink: 0;
-    }
-    .chat-history-btn:hover { border-color: var(--neon-2); box-shadow: 0 0 14px rgba(57,255,133,.3); }
-    .chat-history-btn svg { width: 18px; height: 18px; }
-
-    /* History drawer */
-    .drawer-overlay {
-      position: fixed; inset: 0; background: rgba(5,8,24,.7); backdrop-filter: blur(6px);
-      z-index: 110; display: none;
-    }
-    .drawer-overlay.open { display: block; }
-    .drawer {
-      position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 92vw);
-      background: rgba(11,18,48,.96); border-left: 1px solid rgba(0,255,136,.3);
-      z-index: 120; padding: 20px; display: flex; flex-direction: column; gap: 14px;
-      transform: translateX(100%); transition: transform .3s ease;
-      box-shadow: -8px 0 40px rgba(0,0,0,.5);
-    }
-    .drawer.open { transform: translateX(0); }
-    .drawer-header { display: flex; align-items: center; justify-content: space-between; }
-    .drawer-header h2 {
-      font-family: 'Orbitron', sans-serif; color: var(--gold);
-      font-size: .95rem; letter-spacing: 2px;
-    }
-    .drawer-close { background: none; border: none; color: var(--text-dim); font-size: 1.6rem; cursor: pointer; line-height: 1; }
-    .drawer-actions { display: flex; gap: 8px; }
-    .drawer-btn {
-      flex: 1; background: rgba(0,255,136,.12); border: 1px solid rgba(0,255,136,.3);
-      color: var(--neon-2); padding: 8px 10px; border-radius: 8px; cursor: pointer;
-      font-size: .75rem; letter-spacing: 1px; text-transform: uppercase; font-family: inherit;
-      transition: background .15s;
-    }
-    .drawer-btn:hover { background: rgba(0,255,136,.22); }
-    .drawer-search {
-      width: 100%; background: rgba(19,26,68,.6); border: 1px solid rgba(0,255,136,.2);
-      color: var(--text); padding: 9px 12px; border-radius: 10px; font-family: inherit;
-      font-size: .85rem; outline: none;
-    }
-    .drawer-search:focus { border-color: var(--neon-2); }
-    .drawer-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
-    .drawer-list::-webkit-scrollbar { width: 4px; }
-    .drawer-list::-webkit-scrollbar-thumb { background: var(--bg-soft); border-radius: 2px; }
-    .session-item {
-      background: rgba(19,26,68,.5); border: 1px solid rgba(0,255,136,.12);
-      border-radius: 10px; padding: 10px 12px; cursor: pointer;
-      transition: border-color .15s, background .15s; position: relative;
-    }
-    .session-item:hover { border-color: rgba(57,255,133,.4); background: rgba(19,26,68,.8); }
-    .session-item.active { border-color: var(--gold); background: rgba(201,168,76,.08); }
-    .session-title { font-size: .85rem; color: var(--text); font-weight: 500; margin-bottom: 4px; padding-right: 22px; line-height: 1.3; }
-    .session-meta { font-size: .7rem; color: var(--text-dim); display: flex; gap: 8px; }
-    .session-channel { text-transform: uppercase; letter-spacing: 1px; color: var(--neon-2); }
-    .session-delete {
-      position: absolute; top: 8px; right: 8px;
-      background: none; border: none; color: var(--text-dim); font-size: 1rem;
-      cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 4px;
-      opacity: 0; transition: opacity .15s;
-    }
-    .session-item:hover .session-delete { opacity: 1; }
-    .session-delete:hover { color: var(--red); background: rgba(255,85,119,.1); }
-    .drawer-empty { text-align: center; color: var(--text-dim); font-size: .8rem; padding: 20px; }
-    .search-hit {
-      background: rgba(19,26,68,.5); border: 1px solid rgba(0,255,136,.12);
-      border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: .78rem;
-      color: var(--text-dim); transition: border-color .15s;
-    }
-    .search-hit:hover { border-color: var(--neon-2); }
-    .search-hit mark { background: rgba(201,168,76,.25); color: var(--gold); padding: 0 2px; border-radius: 2px; }
-    .search-hit-meta { font-size: .68rem; color: var(--text-dim); margin-top: 4px; opacity: .7; }
-
-    /* Notifications */
-    .notif-balloon {
-      position: fixed; bottom: 24px; right: 24px; z-index: 150;
-      background: rgba(11,18,48,.85); backdrop-filter: blur(14px);
-      border: 1px solid rgba(0,255,136,.35); border-radius: 16px;
-      padding: 16px; max-width: 320px; width: calc(100vw - 48px);
-      box-shadow: 0 8px 40px rgba(0,0,0,.4), 0 0 30px rgba(0,255,136,.15);
-      transform: translateY(120%); opacity: 0;
-      transition: transform .35s ease, opacity .35s ease; pointer-events: none;
-    }
-    .notif-balloon.open { transform: translateY(0); opacity: 1; pointer-events: all; }
-    .notif-balloon.urgency-high   { border-color: rgba(255,85,119,.5); box-shadow: 0 8px 40px rgba(0,0,0,.4), 0 0 30px rgba(255,85,119,.2); }
-    .notif-balloon.urgency-medium { border-color: rgba(255,140,0,.4); }
-    .notif-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-    .notif-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1px solid var(--neon); }
-    .notif-title  { flex: 1; font-size: .8rem; font-weight: 600; color: var(--neon-2); }
-    .notif-close  { background: none; border: none; color: var(--text-dim); font-size: 1.2rem; cursor: pointer; line-height: 1; padding: 0; }
-    .notif-text   { font-size: .8rem; color: var(--text-dim); line-height: 1.5; }
-
-    /* Modals */
-    .modal-overlay { position: fixed; inset: 0; background: rgba(5,8,24,.75); backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
-    .modal-overlay.open { display: flex; }
-    .modal { background: rgba(11,18,48,.95); border: 1px solid rgba(201,168,76,.3); border-radius: 16px; max-width: 640px; width: 100%; max-height: 80dvh; overflow-y: auto; padding: 28px; box-shadow: 0 0 60px rgba(0,255,136,.15); }
-    .modal h2 { color: var(--gold); font-size: 1.1rem; margin-bottom: 16px; letter-spacing: 2px; font-family: 'Orbitron', sans-serif; }
-    .modal p  { font-size: .88rem; line-height: 1.7; color: var(--text-dim); white-space: pre-wrap; }
-    .modal-close { float: right; background: transparent; border: none; color: var(--text-dim); font-size: 1.4rem; cursor: pointer; line-height: 1; }
-    .modal-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
-    .modal-item { background: rgba(19,26,68,.7); border-radius: 10px; padding: 12px 14px; font-size: .83rem; line-height: 1.6; }
-    .modal-item strong { color: var(--neon-2); display: block; margin-bottom: 2px; }
-    .modal-item .badge { display: inline-block; font-size: .65rem; padding: 2px 8px; border-radius: 8px; margin-left: 6px; background: rgba(0,255,136,.18); color: var(--neon-2); text-transform: uppercase; letter-spacing: 1px; }
-    .modal-item .badge.ativa      { background: rgba(87,245,167,.18); color: var(--green); }
-    .modal-item .badge.pausada    { background: rgba(255,140,0,.2); color: var(--orange); }
-    .modal-item .badge.pendente   { background: rgba(255,140,0,.2); color: var(--orange); }
-    .modal-item .badge.novo       { background: rgba(57,255,133,.18); color: var(--neon-2); }
-    .modal-item .badge.em_atendimento { background: rgba(201,168,76,.2); color: var(--gold); }
-
-    /* Mobile */
-    @media (max-width: 480px) {
-      .avatar-stage  { width: 240px; height: 240px; }
-      .avatar-frame  { width: 190px; height: 190px; }
-      .agent-name    { font-size: 2.1rem; letter-spacing: 6px; }
-      .activate-logo { font-size: 2.8rem; letter-spacing: 8px; }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-    }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="ZAYRA" />
+<meta name="theme-color" content="#04140d" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="apple-touch-icon" href="/icons/zayra-180.png" />
+<title>ZAYRA — Romatec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg-deep:#020a07;--bg-mid:#04140d;--neon:#3dffb0;--gold:#d4b878;--text:#cfeede;--text-dim:#6a8a7c}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg-deep);color:var(--text);font-family:'JetBrains Mono',monospace;overflow:hidden;-webkit-font-smoothing:antialiased}
+body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), transparent 60%),radial-gradient(900px 600px at 20% 110%, rgba(212,184,120,.08), transparent 60%),linear-gradient(180deg, var(--bg-deep), var(--bg-mid) 60%, #010705);min-height:100vh;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+#particles{position:fixed;inset:0;z-index:0;opacity:.55}
+.stage{position:relative;z-index:1;flex:1;display:flex;flex-direction:column;align-items:center;padding:18px;width:100%;max-width:480px;margin:0 auto}
+.topbar{width:100%;display:flex;justify-content:space-between;align-items:center}
+.brand{font-family:'Orbitron',sans-serif;font-weight:900;letter-spacing:.35em;font-size:13px;color:var(--gold)}
+.status{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.18em}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--neon);box-shadow:0 0 12px var(--neon);animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.85)}}
+.core-wrap{margin-top:14px;width:min(86vw,420px);aspect-ratio:1/1}
+#neural{width:100%;height:100%;display:block}
+.identity{margin-top:18px;text-align:center}
+.name{font-family:'Orbitron',sans-serif;font-weight:900;font-size:38px;letter-spacing:.55em;color:var(--neon);text-shadow:0 0 24px rgba(61,255,176,.55);padding-left:.55em}
+.role{margin-top:6px;font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--text-dim)}
+.state{margin-top:18px;display:inline-flex;align-items:center;gap:10px;padding:10px 22px;border:1px solid rgba(212,184,120,.45);border-radius:999px;background:rgba(7,32,24,.6);backdrop-filter:blur(6px);font-size:12px;letter-spacing:.28em;text-transform:uppercase;color:var(--gold)}
+.state .dot{width:8px;height:8px;border-radius:50%;background:var(--gold);box-shadow:0 0 10px var(--gold)}
+.state[data-state="listening"]{border-color:var(--neon);color:var(--neon)}
+.state[data-state="listening"] .dot{background:var(--neon);box-shadow:0 0 14px var(--neon);animation:pulse 1s infinite}
+.state[data-state="thinking"]{border-color:#ffd166;color:#ffd166}
+.state[data-state="speaking"]{border-color:#7fffd4;color:#7fffd4}
+.transcript{margin-top:14px;width:100%;min-height:60px;padding:14px;border:1px solid rgba(61,255,176,.15);border-radius:12px;background:rgba(4,20,13,.55);backdrop-filter:blur(8px);font-size:13px;color:var(--text);line-height:1.5;text-align:center}
+.transcript:empty::before{content:"Toque o microfone e fale com a ZAYRA";color:var(--text-dim);font-size:11px;letter-spacing:.18em;text-transform:uppercase}
+.mic{position:fixed;right:22px;bottom:calc(22px + env(safe-area-inset-bottom));width:64px;height:64px;border-radius:50%;border:1px solid var(--neon);background:radial-gradient(circle at 30% 30%,#0a3326,#020a07 70%);color:var(--neon);display:flex;align-items:center;justify-content:center;font-size:24px;cursor:pointer;box-shadow:0 0 30px rgba(61,255,176,.35);z-index:5}
+.mic.active{animation:micPulse 1.2s infinite}
+@keyframes micPulse{0%,100%{box-shadow:0 0 20px rgba(61,255,176,.4)}50%{box-shadow:0 0 50px rgba(61,255,176,.9)}}
+</style>
 </head>
 <body>
-
-<div id="bgGradient"></div>
-<canvas id="bgCanvas"></canvas>
-
-<div class="activate-overlay" id="activateOverlay">
-  <div class="activate-card">
-    <div class="activate-logo">ZAYRA</div>
-    <div class="activate-sub">Assistente Executiva Romatec</div>
-    <div class="activate-ring"></div>
-    <div class="activate-sub" style="font-size:.72rem;margin-top:4px">Toque para ativar</div>
+<canvas id="particles"></canvas>
+<div class="stage">
+  <div class="topbar">
+    <div class="brand">ROMATEC</div>
+    <div class="status"><span class="pulse"></span><span>ZAYRA online</span></div>
   </div>
+  <div class="core-wrap"><canvas id="neural"></canvas></div>
+  <div class="identity">
+    <div class="name">ZAYRA</div>
+    <div class="role">Assistente Executiva — Romatec</div>
+  </div>
+  <div class="state" id="stateChip" data-state="idle">
+    <span class="dot"></span><span id="stateLabel">Em Standby</span>
+  </div>
+  <div class="transcript" id="transcript"></div>
 </div>
-
-<div class="wrap">
-  <div class="status-bar">
-    <span class="logo">Romatec</span>
-    <div class="status-right">
-      <div class="spotify-widget" id="spotifyWidget" title="Tocando agora no Spotify">
-        <img class="spotify-widget__cover" id="spotifyCover" alt="" />
-        <div class="spotify-widget__text">
-          <span class="spotify-widget__title"  id="spotifyTitle"></span>
-          <span class="spotify-widget__artist" id="spotifyArtist"></span>
-        </div>
-        <span class="spotify-widget__icon" id="spotifyIcon">▶</span>
-      </div>
-      <div class="status-dot"><div class="dot"></div><span>ZAYRA online</span></div>
-      <div class="notif-badge" id="notifBadge">0</div>
-    </div>
-  </div>
-
-  <div class="avatar-stage" id="avatarStage" data-state="idle">
-    <div class="zayra-hud zayra-hud--outer"></div>
-    <div class="zayra-hud zayra-hud--mid"></div>
-    <div class="zayra-hud zayra-hud--gold"></div>
-    <div class="avatar-frame" id="avatarFrame">
-      <img class="avatar-img" id="avatarImg" src="/avatar.png" alt="ZAYRA"
-        onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%22 stop-color=%22%2300ff88%22/><stop offset=%221%22 stop-color=%22%23c9a84c%22/></linearGradient></defs><circle cx=%22100%22 cy=%22100%22 r=%22100%22 fill=%22url(%23g)%22/><text x=%2250%25%22 y=%2256%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2290%22 font-family=%22Orbitron%22 fill=%22%23ffffff%22>Z</text></svg>'" />
-    </div>
-  </div>
-
-  <div class="name-block">
-    <div class="agent-name">ZAYRA</div>
-    <div class="agent-sub">Assistente Executiva — Romatec Consultoria Imobiliária</div>
-  </div>
-
-  <div class="state-chip" id="stateChip" data-state="idle">
-    <span class="state-led"></span>
-    <span id="stateLabel">Aguardando</span>
-  </div>
-
-  <div id="fallbackControls" style="display:none;flex-direction:column;align-items:center;gap:0">
-    <button class="mic-btn" id="micBtn">
-      <svg id="micIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z"/>
-        <path d="M19 10a7 7 0 0 1-14 0"/>
-        <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
-      </svg>
-      <div class="spinner" id="spinner" style="display:none"></div>
-    </button>
-    <div class="mic-label" id="micLabel">Toque para falar</div>
-  </div>
-
-  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center">
-    <button class="briefing-btn" id="briefingBtn">Briefing do Dia</button>
-    <a class="briefing-btn" href="/obras" style="text-decoration:none;border-color:var(--neon);color:var(--neon)">🏗️ Gestão de Obras</a>
-    <button class="briefing-btn" id="installBtn" style="display:none;border-color:var(--neon);color:var(--neon)">+ Instalar App</button>
-  </div>
-
-  <div class="dashboard-grid">
-    <div class="card card-updating" data-modal="leads">
-      <div class="card-title">Leads Hoje</div>
-      <div class="card-value" id="cardLeadsVal">—</div>
-      <div class="card-sub" id="cardLeadsSub">carregando...</div>
-      <div class="card-meta" id="cardLeadsMeta"></div>
-    </div>
-    <div class="card card-updating" data-modal="campanhas">
-      <div class="card-title">Campanhas</div>
-      <div class="card-value" id="cardCampanhasVal">—</div>
-      <div class="card-sub" id="cardCampanhasSub">carregando...</div>
-      <div class="card-meta" id="cardCampanhasMeta"></div>
-    </div>
-    <div class="card card-updating" data-modal="agenda">
-      <div class="card-title">Agenda Hoje</div>
-      <div class="card-value" id="cardAgendaVal">—</div>
-      <div class="card-sub" id="cardAgendaSub">Google Calendar</div>
-      <div class="card-meta" id="cardAgendaMeta"></div>
-    </div>
-  </div>
-
-  <div class="chat-wrap" id="chat"></div>
-
-  <div class="chat-input-bar">
-    <button class="chat-history-btn" id="historyBtn" title="Histórico de conversas">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-      </svg>
-    </button>
-    <button class="chat-history-btn" id="attachBtn" title="Anexar imagem ou PDF">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-      </svg>
-    </button>
-    <input type="file" id="attachInput" accept="image/*,application/pdf" multiple style="display:none" />
-    <div class="chat-attachments" id="chatAttachments"></div>
-    <textarea class="chat-textarea" id="chatInput" rows="1"
-      placeholder="Digite uma mensagem para a ZAYRA…"
-      aria-label="Mensagem para a ZAYRA"></textarea>
-    <button class="chat-send-btn" id="chatSendBtn" disabled title="Enviar (Enter)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-      </svg>
-    </button>
-  </div>
-</div>
-
-<div class="drawer-overlay" id="drawerOverlay"></div>
-<aside class="drawer" id="drawer" aria-hidden="true">
-  <div class="drawer-header">
-    <h2>Conversas</h2>
-    <button class="drawer-close" id="drawerClose" aria-label="Fechar">×</button>
-  </div>
-  <div class="drawer-actions">
-    <button class="drawer-btn" id="newChatBtn">+ Nova conversa</button>
-    <a class="drawer-btn" href="/obras" style="display:block;text-align:center;text-decoration:none;margin-top:6px;">🏗️ Gestão de Obras</a>
-  </div>
-  <input type="search" class="drawer-search" id="drawerSearch" placeholder="Buscar nas conversas…" />
-  <div class="drawer-list" id="drawerList">
-    <div class="drawer-empty">Nenhuma conversa ainda.</div>
-  </div>
-</aside>
-
-<div class="notif-balloon" id="notifBalloon">
-  <div class="notif-header">
-    <img class="notif-avatar" src="/avatar.png" alt="Z" onerror="this.style.display='none'" />
-    <span class="notif-title" id="notifTitle">Alerta</span>
-    <button class="notif-close" id="notifClose">×</button>
-  </div>
-  <p class="notif-text" id="notifText"></p>
-</div>
-
-<div class="modal-overlay" id="briefingModal">
-  <div class="modal">
-    <button class="modal-close" id="briefingClose">×</button>
-    <h2>Briefing do Dia</h2>
-    <p id="briefingBody">Carregando...</p>
-  </div>
-</div>
-
-<div class="modal-overlay" id="cardModal">
-  <div class="modal">
-    <button class="modal-close" id="cardModalClose">×</button>
-    <h2 id="cardModalTitle">Detalhes</h2>
-    <ul class="modal-list" id="cardModalBody"></ul>
-  </div>
-</div>
-
+<button class="mic" id="micBtn" aria-label="Falar com a ZAYRA">🎙</button>
 <script>
-// ── Performance budget ────────────────────────────────────────────────────────
-const isMobile = matchMedia('(max-width: 768px)').matches || /Mobi|Android/i.test(navigator.userAgent);
-const TARGET_FPS = isMobile ? 30 : 60;
-const FRAME_MS   = 1000 / TARGET_FPS;
+/* PARTÍCULAS */
+(()=>{const c=document.getElementById('particles'),x=c.getContext('2d');let W,H,parts;
+function rs(){W=c.width=innerWidth;H=c.height=innerHeight;
+parts=Array.from({length:Math.min(80,Math.floor(W*H/16000))},()=>({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.25,vy:(Math.random()-.5)*.25,r:Math.random()*1.4+.3,a:Math.random()*.6+.2}));}
+rs();addEventListener('resize',rs);
+(function loop(){x.clearRect(0,0,W,H);for(const p of parts){p.x+=p.vx;p.y+=p.vy;
+if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
+x.beginPath();x.arc(p.x,p.y,p.r,0,Math.PI*2);x.fillStyle=`rgba(61,255,176,${p.a})`;x.fill();}
+requestAnimationFrame(loop);})();})();
 
-// ── Background mesh particles ────────────────────────────────────────────────
-(function(){
-  const cv = document.getElementById('bgCanvas'), ctx = cv.getContext('2d');
-  let W, H, pts = [];
-  const N = isMobile ? 28 : 60;
-  function resize(){ W = cv.width = innerWidth; H = cv.height = innerHeight; }
-  addEventListener('resize', resize); resize();
-  const rand = (a,b) => a + Math.random()*(b-a);
-  const colors = ['91,140,255', '0,225,255', '182,107,255'];
-  for (let i = 0; i < N; i++) pts.push({
-    x: rand(0,W), y: rand(0,H), vx: rand(-.25,.25), vy: rand(-.25,.25),
-    r: rand(1,2.4), a: rand(.25,.7), c: colors[i % colors.length]
-  });
-  let last = 0;
-  (function draw(t){
-    requestAnimationFrame(draw);
-    if (document.hidden) return;
-    if (t - last < FRAME_MS) return; last = t;
-    ctx.clearRect(0,0,W,H);
-    pts.forEach(p => {
-      p.x += p.vx; p.y += p.vy;
-      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
-      ctx.fillStyle = `rgba(${p.c},${p.a})`; ctx.fill();
-    });
-    if (!isMobile) {
-      for (let i = 0; i < pts.length; i++)
-        for (let j = i+1; j < pts.length; j++) {
-          const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
-          const d = Math.sqrt(dx*dx + dy*dy);
-          if (d < 110) {
-            ctx.beginPath();
-            ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[j].x, pts[j].y);
-            ctx.strokeStyle = `rgba(0,255,136,${.15 * (1 - d/110)})`;
-            ctx.lineWidth = .5; ctx.stroke();
-          }
-        }
-    }
-  })(0);
-})();
+/* NÚCLEO NEURAL */
+const cv=document.getElementById('neural'),ctx=cv.getContext('2d');
+const DPR=Math.min(devicePixelRatio||1,2);
+function fitCore(){const r=cv.getBoundingClientRect();cv.width=r.width*DPR;cv.height=r.height*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);}
+fitCore();addEventListener('resize',fitCore);
+const NODES=22;
+const nodes=Array.from({length:NODES},(_,i)=>({ang:(i/NODES)*Math.PI*2,rBase:.55+Math.random()*.25,phase:Math.random()*Math.PI*2,speed:.4+Math.random()*.6}));
+let amp=.15,target=.15;
+function drawCore(t){
+  const w=cv.clientWidth,h=cv.clientHeight,cx=w/2,cy=h/2,R=Math.min(w,h)/2-6;
+  ctx.clearRect(0,0,w,h);
+  const grad=ctx.createRadialGradient(cx,cy,R*.1,cx,cy,R);
+  grad.addColorStop(0,'rgba(61,255,176,.18)');grad.addColorStop(.6,'rgba(61,255,176,.05)');grad.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=grad;ctx.beginPath();ctx.arc(cx,cy,R,0,Math.PI*2);ctx.fill();
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(t*.0002);
+  ctx.strokeStyle='rgba(212,184,120,.55)';ctx.lineWidth=1;ctx.setLineDash([4,8]);
+  ctx.beginPath();ctx.arc(0,0,R-2,0,Math.PI*2);ctx.stroke();ctx.restore();
+  ctx.save();ctx.translate(cx,cy);
+  const innerR=R*0.66+amp*R*0.18;
+  ctx.strokeStyle=`rgba(61,255,176,${.35+amp*.5})`;ctx.lineWidth=1.2;ctx.setLineDash([]);
+  ctx.beginPath();ctx.arc(0,0,innerR,0,Math.PI*2);ctx.stroke();
+  for(let i=0;i<60;i++){const a=(i/60)*Math.PI*2+t*.0006;
+    const r1=innerR-2,r2=innerR-2-(2+amp*8);
+    ctx.beginPath();ctx.moveTo(Math.cos(a)*r1,Math.sin(a)*r1);ctx.lineTo(Math.cos(a)*r2,Math.sin(a)*r2);
+    ctx.strokeStyle=`rgba(61,255,176,${.15+amp*.6})`;ctx.stroke();}
+  ctx.restore();
+  ctx.save();ctx.translate(cx,cy);
+  const pos=[];
+  for(const n of nodes){const wob=Math.sin(t*.001*n.speed+n.phase)*.06;
+    const r=(n.rBase+wob)*R*(0.7+amp*0.15),ang=n.ang+t*.00015;
+    pos.push({x:Math.cos(ang)*r,y:Math.sin(ang)*r});}
+  for(let i=0;i<pos.length;i++)for(let j=i+1;j<pos.length;j++){
+    const a=pos[i],b=pos[j],d=Math.hypot(a.x-b.x,a.y-b.y);
+    if(d<R*0.55){const op=(1-d/(R*0.55))*(0.18+amp*.5);
+      ctx.strokeStyle=`rgba(61,255,176,${op})`;ctx.lineWidth=.7;
+      ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();}}
+  for(const p of pos){ctx.beginPath();ctx.arc(p.x,p.y,1.6+amp*1.6,0,Math.PI*2);
+    ctx.fillStyle='rgba(61,255,176,.95)';ctx.shadowColor='rgba(61,255,176,.9)';ctx.shadowBlur=8+amp*16;
+    ctx.fill();ctx.shadowBlur=0;}
+  ctx.restore();
+  ctx.save();ctx.translate(cx,cy);
+  const coreR=R*0.18+amp*R*0.05;
+  const cg=ctx.createRadialGradient(0,0,0,0,0,coreR);
+  cg.addColorStop(0,'rgba(255,255,255,.95)');cg.addColorStop(.4,'rgba(127,255,212,.7)');cg.addColorStop(1,'rgba(61,255,176,0)');
+  ctx.fillStyle=cg;ctx.beginPath();ctx.arc(0,0,coreR,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='rgba(212,184,120,.85)';ctx.lineWidth=1.2;
+  ctx.beginPath();ctx.arc(0,0,coreR*1.35,0,Math.PI*2);ctx.stroke();ctx.restore();
+}
+(function tick(t){amp+=(target-amp)*0.08;drawCore(t);requestAnimationFrame(tick);})();
 
-// ── FaceAnimator v1.10.1 — JARVIS HUD (sem rosto sobreposto) ────────────────
-// Anéis HUD CSS reagem a data-state via animation-duration. Lip sync agora
-// só serve pra possíveis futuras visualizações de áudio (não mexe na foto).
-class FaceAnimator {
-  constructor() {
-    this.state = 'idle';
-    this.stage = document.getElementById('avatarStage');
+/* ESTADOS */
+function setState(s,label){
+  const chip=document.getElementById('stateChip'),lbl=document.getElementById('stateLabel');
+  chip.dataset.state=s;
+  const map={idle:'Em Standby',listening:'Escutando…',thinking:'Processando…',speaking:'Falando…'};
+  lbl.textContent=label||map[s]||s;
+  target=s==='idle'?.12:s==='listening'?.55:s==='thinking'?.35:.8;
+}
+function tx(text){document.getElementById('transcript').textContent=text;}
+
+/* MICROFONE → /voice */
+let audioCtx,analyser,dataArr,micStream,mediaRec,chunks=[],listening=false;
+document.getElementById('micBtn').addEventListener('click',toggleListen);
+
+async function toggleListen(){
+  const btn=document.getElementById('micBtn');
+  if(listening){
+    listening=false;btn.classList.remove('active');
+    if(mediaRec&&mediaRec.state==='recording')mediaRec.stop();
+    return;
   }
-  setState(s) {
-    this.state = s;
-    if (this.stage) this.stage.dataset.state = s;
-  }
-  updateLipSync(_vol) { /* HUD não tem boca; intencional no estilo JARVIS */ }
-  dispose() {}
+  try{
+    micStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    audioCtx=audioCtx||new(window.AudioContext||window.webkitAudioContext)();
+    const src=audioCtx.createMediaStreamSource(micStream);
+    analyser=audioCtx.createAnalyser();analyser.fftSize=512;src.connect(analyser);
+    dataArr=new Uint8Array(analyser.frequencyBinCount);
+    chunks=[];
+    const mime=MediaRecorder.isTypeSupported('audio/webm')?'audio/webm':'audio/mp4';
+    mediaRec=new MediaRecorder(micStream,{mimeType:mime});
+    mediaRec.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+    mediaRec.onstop=async()=>{
+      micStream.getTracks().forEach(t=>t.stop());
+      const blob=new Blob(chunks,{type:mime});
+      await sendToZayra(blob);
+    };
+    mediaRec.start();
+    listening=true;btn.classList.add('active');setState('listening','Escutando…');tx('');
+    loopMic();
+  }catch(e){setState('thinking','Microfone bloqueado');console.error(e);}
 }
-
-// ── AudioController (lip sync) ────────────────────────────────────────────────
-class AudioController {
-  constructor() { this.ctx = null; this.analyser = null; this.source = null; this.data = null; }
-  init() {
-    if (this.ctx) return;
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    this.ctx = new AC();
-    this.analyser = this.ctx.createAnalyser();
-    this.analyser.fftSize = 256;
-    this.analyser.smoothingTimeConstant = 0.6;
-    this.data = new Uint8Array(this.analyser.frequencyBinCount);
-    this.analyser.connect(this.ctx.destination);
-  }
-  connect(el) {
-    if (!this.ctx) return;
-    if (this.source) try { this.source.disconnect(); } catch {}
-    try { this.source = this.ctx.createMediaElementSource(el); this.source.connect(this.analyser); } catch {}
-  }
-  getVolume() {
-    if (!this.analyser) return 0;
-    this.analyser.getByteFrequencyData(this.data);
-    let s = 0; for (let i = 4; i < 60; i++) s += this.data[i]; return s / 56;
-  }
+function loopMic(){if(!listening)return;
+  analyser.getByteTimeDomainData(dataArr);let sum=0;
+  for(let i=0;i<dataArr.length;i++){const v=(dataArr[i]-128)/128;sum+=v*v;}
+  target=Math.min(1,.25+Math.sqrt(sum/dataArr.length)*4);
+  requestAnimationFrame(loopMic);
 }
-
-// ── Globals ───────────────────────────────────────────────────────────────────
-let avatarCtrl = null, audioCtrl = null;
-let appState = 'inactive', recognition = null, fallbackMode = false;
-let mediaRecorder = null, chunks = [], dashboardData = null, notifCount = 0;
-
-const stateChip   = document.getElementById('stateChip');
-const stateLabel  = document.getElementById('stateLabel');
-const chat        = document.getElementById('chat');
-const notifBalloon = document.getElementById('notifBalloon');
-const notifBadge   = document.getElementById('notifBadge');
-
-function detectExpr(text) {
-  const t = text.toLowerCase();
-  if (/urgente|atenção|alerta|crítico|emergência/.test(t)) return 'alert';
-  if (/olá|bom dia|boa tarde|boa noite/.test(t))           return 'greeting';
-  return 'speaking';
-}
-
-window._playBlob = function(blob, responseText = '') {
-  const url = URL.createObjectURL(blob);
-  const audio = new Audio(url);
-  audio.crossOrigin = 'anonymous';
-  if (audioCtrl) audioCtrl.connect(audio);
-  const expr = detectExpr(responseText);
-  setAppState('speaking');
-  if (avatarCtrl) avatarCtrl.setState(expr === 'alert' ? 'alert' : 'speaking');
-  if (responseText) addBubble('agent', responseText);
-  let raf;
-  const lipLoop = () => {
-    if (!audio.paused && !audio.ended) {
-      if (avatarCtrl && audioCtrl) avatarCtrl.updateLipSync(audioCtrl.getVolume());
-      raf = requestAnimationFrame(lipLoop);
-    }
-  };
-  audio.onplay  = () => lipLoop();
-  audio.onended = () => {
-    cancelAnimationFrame(raf); URL.revokeObjectURL(url);
-    if (avatarCtrl) { avatarCtrl.updateLipSync(0); avatarCtrl.setState('idle'); }
-    resumeListening();
-    // v1.9.2: retoma Spotify se estava tocando antes do mic abrir
-    fetch('/spotify/resume', { method: 'POST' }).catch(() => {});
-  };
-  audio.onerror = () => { cancelAnimationFrame(raf); if (avatarCtrl) avatarCtrl.setState('idle'); resumeListening(); };
-  audio.play().catch(() => resumeListening());
-};
-
-// ── App state machine ─────────────────────────────────────────────────────────
-function setAppState(s) {
-  appState = s;
-  let chipState = 'idle', chipText = 'Aguardando';
-
-  if (s === 'passive') {
-    chipState = 'listening'; chipText = 'Ouvindo';
-    if (avatarCtrl) avatarCtrl.setState('idle');
-  } else if (s === 'active_voice') {
-    chipState = 'listening'; chipText = 'Detectando voz';
-    if (avatarCtrl) avatarCtrl.setState('listening');
-  } else if (s === 'recording') {
-    chipState = 'listening'; chipText = 'Gravando';
-    if (avatarCtrl) avatarCtrl.setState('listening');
-  } else if (s === 'processing') {
-    chipState = 'thinking'; chipText = 'Processando';
-    if (avatarCtrl) avatarCtrl.setState('thinking');
-  } else if (s === 'speaking') {
-    chipState = 'speaking'; chipText = 'Falando';
-    if (avatarCtrl) avatarCtrl.setState('speaking');
-  } else if (s === 'inactive') {
-    chipState = 'idle'; chipText = 'Aguardando ativação';
-  }
-
-  stateChip.dataset.state = chipState;
-  stateLabel.textContent  = chipText;
-
-  // Sync fallback mic
-  const micBtn = document.getElementById('micBtn');
-  if (micBtn) {
-    micBtn.className = 'mic-btn';
-    document.getElementById('micIcon').style.display = 'block';
-    document.getElementById('spinner').style.display = 'none';
-    if (s === 'recording')  { micBtn.classList.add('recording');      document.getElementById('micLabel').textContent = 'Ouvindo...'; }
-    if (s === 'processing') { micBtn.classList.add('processing');      document.getElementById('micIcon').style.display='none'; document.getElementById('spinner').style.display='block'; document.getElementById('micLabel').textContent = 'Pensando...'; }
-    if (s === 'speaking')   { micBtn.classList.add('speaking-state'); document.getElementById('micLabel').textContent = 'Falando...'; }
-    if (s === 'passive')    { document.getElementById('micLabel').textContent = 'Toque para falar'; }
-  }
-}
-
-// ── Chat session state ────────────────────────────────────────────────────────
-let currentSessionId = localStorage.getItem('zayra_session_id') || null;
-
-function setCurrentSessionId(id) {
-  currentSessionId = id;
-  if (id) localStorage.setItem('zayra_session_id', id);
-  else localStorage.removeItem('zayra_session_id');
-}
-
-function addBubble(role, text) {
-  const wrap = document.createElement('div'); wrap.className = `bubble ${role}`;
-  if (role === 'agent') { const img = document.createElement('img'); img.className='bubble-avatar'; img.src='/avatar.png'; img.alt='Z'; img.onerror=()=>img.style.display='none'; wrap.appendChild(img); }
-  const p = document.createElement('div'); p.className='bubble-text'; p.textContent=text; wrap.appendChild(p);
-  chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
-  return wrap;
-}
-
-function showTypingIndicator() {
-  const wrap = document.createElement('div'); wrap.className = 'bubble agent'; wrap.id = 'typingBubble';
-  const img = document.createElement('img'); img.className='bubble-avatar'; img.src='/avatar.png'; img.alt='Z'; img.onerror=()=>img.style.display='none'; wrap.appendChild(img);
-  const t = document.createElement('div'); t.className = 'bubble-text';
-  t.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
-  wrap.appendChild(t);
-  chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
-}
-function hideTypingIndicator() {
-  const t = document.getElementById('typingBubble'); if (t) t.remove();
-}
-
-async function processText(text, silent = false) {
-  if (appState === 'processing' || appState === 'speaking') return;
-  if (recognition) try { recognition.abort(); } catch {}
-  setAppState('processing');
-  if (!silent) addBubble('user', text);
-  showTypingIndicator();
-  try {
-    const res = await fetch('/text', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ message: text, voice: true, session_id: currentSessionId || undefined }) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const sid = res.headers.get('X-Session-Id'); if (sid) setCurrentSessionId(sid);
-    const rt = decodeURIComponent(res.headers.get('X-Response-Text') || '');
-    hideTypingIndicator();
-    window._playBlob(await res.blob(), silent ? '' : rt);
-  } catch (err) {
-    console.error(err);
-    hideTypingIndicator();
-    stateChip.dataset.state = 'error';
-    stateLabel.textContent = 'Erro';
-    if (avatarCtrl) avatarCtrl.setState('idle');
-    setTimeout(resumeListening, 2500);
-  }
-}
-
-// Text-only send (no voice playback): used by the chat input box
-// v1.11: lista de attachments pendentes (File[]) — limpa após envio
-let pendingAttachments = [];
-
-async function sendTextOnly(text) {
-  const hasFiles = pendingAttachments.length > 0;
-  if (!text.trim() && !hasFiles) return;
-  if (appState === 'processing' || appState === 'speaking') return;
-  if (recognition) try { recognition.abort(); } catch {}
-  setAppState('processing');
-  // Bubble user mostra texto + indicação de anexos
-  const bubbleText = hasFiles
-    ? `${text}${text ? '\n' : ''}📎 ${pendingAttachments.length} anexo(s): ${pendingAttachments.map(f => f.name).join(', ')}`
-    : text;
-  addBubble('user', bubbleText);
-  showTypingIndicator();
-
-  try {
-    let res;
-    if (hasFiles) {
-      const fd = new FormData();
-      fd.append('message', text || '');
-      fd.append('voice', 'false');
-      if (currentSessionId) fd.append('session_id', currentSessionId);
-      for (const f of pendingAttachments) fd.append('files', f);
-      res = await fetch('/text', { method: 'POST', body: fd });
+async function sendToZayra(blob){
+  setState('thinking','Processando…');
+  const fd=new FormData();
+  fd.append('audio',blob,'voice.webm');
+  try{
+    const r=await fetch('/voice',{method:'POST',body:fd});
+    const ctype=r.headers.get('content-type')||'';
+    if(ctype.includes('audio')){
+      const audioBlob=await r.blob();
+      const txtHdr=r.headers.get('x-zayra-text')||r.headers.get('x-response-text');
+      if(txtHdr) tx(decodeURIComponent(txtHdr));
+      setState('speaking','Falando…');
+      const audio=new Audio(URL.createObjectURL(audioBlob));
+      audio.onended=()=>setState('idle');
+      audio.play();
     } else {
-      res = await fetch('/text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, voice: false, session_id: currentSessionId || undefined }),
-      });
+      const data=await r.json();
+      tx(data.response||data.text||data.message||'(sem resposta)');
+      setState('idle');
     }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.session_id) setCurrentSessionId(data.session_id);
-    hideTypingIndicator();
-    addBubble('agent', data.response || '(sem resposta)');
-    pendingAttachments = [];
-    renderAttachments();
-    setAppState('passive');
-  } catch (err) {
-    console.error(err);
-    hideTypingIndicator();
-    addBubble('agent', '⚠️ Erro ao processar mensagem.');
-    setAppState('passive');
-  }
+  }catch(e){console.error(e);tx('Erro ao falar com a ZAYRA');setState('idle');}
 }
 
-// v1.11: render dos chips de anexos pendentes
-function renderAttachments() {
-  const wrap = document.getElementById('chatAttachments');
-  if (!wrap) return;
-  wrap.innerHTML = '';
-  pendingAttachments.forEach((f, idx) => {
-    const chip = document.createElement('div');
-    chip.className = 'chat-attachment-chip';
-    if (f.type.startsWith('image/')) {
-      const img = document.createElement('img');
-      img.src = URL.createObjectURL(f);
-      img.onload = () => URL.revokeObjectURL(img.src);
-      chip.appendChild(img);
-    } else {
-      const span = document.createElement('span');
-      span.textContent = '📄';
-      chip.appendChild(span);
-    }
-    const name = document.createElement('span');
-    name.className = 'name';
-    name.textContent = f.name;
-    chip.appendChild(name);
-    const rm = document.createElement('button');
-    rm.textContent = '×';
-    rm.title = 'Remover';
-    rm.onclick = () => { pendingAttachments.splice(idx, 1); renderAttachments(); };
-    chip.appendChild(rm);
-    wrap.appendChild(chip);
-  });
-  // habilita botão enviar mesmo sem texto se há anexo
-  const send = document.getElementById('chatSendBtn');
-  const input = document.getElementById('chatInput');
-  if (send) send.disabled = !(input?.value.trim() || pendingAttachments.length > 0);
-}
-
-async function sendAudio(blob) {
-  setAppState('processing');
-  const form = new FormData(); form.append('audio', blob, 'rec.webm');
-  if (currentSessionId) form.append('session_id', currentSessionId);
-  showTypingIndicator();
-  try {
-    const res = await fetch('/voice', { method:'POST', body: form });
-    if (!res.ok) throw new Error();
-    const sid = res.headers.get('X-Session-Id'); if (sid) setCurrentSessionId(sid);
-    const tr = decodeURIComponent(res.headers.get('X-Transcription') || '');
-    const rt = decodeURIComponent(res.headers.get('X-Response-Text') || '');
-    if (tr) addBubble('user', tr);
-    hideTypingIndicator();
-    window._playBlob(await res.blob(), rt);
-  } catch {
-    hideTypingIndicator();
-    stateChip.dataset.state = 'error'; stateLabel.textContent = 'Erro';
-    if (avatarCtrl) avatarCtrl.setState('idle');
-    setTimeout(() => setAppState('passive'), 2000);
-  }
-}
-
-function resumeListening() {
-  setAppState('passive');
-  if (!fallbackMode && recognition) try { recognition.start(); } catch {}
-}
-
-// ── SpeechRecognition ─────────────────────────────────────────────────────────
-function initSR() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return false;
-  recognition = new SR();
-  recognition.continuous = true; recognition.interimResults = false;
-  recognition.lang = 'pt-BR'; recognition.maxAlternatives = 1;
-  recognition.onspeechstart = () => {
-    if (appState === 'passive') setAppState('active_voice');
-    // v1.9.2: pausa Spotify auto pra não competir com voz do CEO
-    fetch('/spotify/pause', { method: 'POST' }).catch(() => {});
-  };
-  recognition.onspeechend   = () => { if (appState === 'active_voice') setAppState('passive'); };
-  recognition.onresult = e => {
-    if (appState !== 'passive' && appState !== 'active_voice') return;
-    const last = e.results[e.results.length - 1];
-    if (!last.isFinal) return;
-    const t = last[0].transcript.trim();
-    if (t.length > 1) void processText(t);
-  };
-  recognition.onend = () => { if (appState === 'passive' || appState === 'active_voice') setTimeout(() => { try { recognition.start(); } catch {} }, 300); };
-  recognition.onerror = e => { if (e.error === 'no-speech' || e.error === 'aborted') return; if (appState === 'passive') setTimeout(() => { try { recognition.start(); } catch {} }, 1500); };
-  return true;
-}
-
-function setupFallbackMic() {
-  document.getElementById('fallbackControls').style.display = 'flex';
-  const micBtn = document.getElementById('micBtn');
-  micBtn.addEventListener('click', async () => {
-    if (appState === 'processing' || appState === 'speaking') return;
-    if (appState === 'recording') { mediaRecorder.stop(); return; }
-    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { document.getElementById('micLabel').textContent = 'Microfone negado.'; return; }
-    chunks = []; mediaRecorder = new MediaRecorder(stream);
-    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-    mediaRecorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); void sendAudio(new Blob(chunks, { type: 'audio/webm' })); };
-    mediaRecorder.start(); setAppState('recording');
-  });
-}
-
-// ── Activation ────────────────────────────────────────────────────────────────
-async function activate() {
-  document.getElementById('activateOverlay').style.display = 'none';
-  audioCtrl = new AudioController(); audioCtrl.init();
-  try { avatarCtrl = new FaceAnimator(); } catch (e) { console.warn('FaceAnimator error:', e); }
-  const hasSR = initSR();
-  if (hasSR) { try { recognition.start(); setAppState('passive'); } catch { fallbackMode = true; } }
-  if (!hasSR || fallbackMode) { fallbackMode = true; setupFallbackMic(); setAppState('passive'); }
-  connectSSE();
-  await loadDashboard(true);
-}
-document.getElementById('activateOverlay').addEventListener('click', () => void activate());
-
-// ── SSE ───────────────────────────────────────────────────────────────────────
-function connectSSE() {
-  let es = new EventSource('/notifications/stream');
-  es.onmessage = e => { try { showNotif(JSON.parse(e.data)); } catch {} };
-  es.onerror   = () => { es.close(); setTimeout(connectSSE, 5000); };
-}
-
-function showNotif(n) {
-  notifCount++; notifBadge.textContent = String(notifCount); notifBadge.style.display = 'block';
-  document.getElementById('notifTitle').textContent = n.title   || 'Alerta';
-  document.getElementById('notifText').textContent  = n.message || '';
-  notifBalloon.className = `notif-balloon open urgency-${n.urgency || 'medium'}`;
-  if (avatarCtrl) avatarCtrl.setState('alert');
-  if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(n.message); u.lang='pt-BR'; u.rate=1.05; speechSynthesis.speak(u); }
-  setTimeout(() => { notifBalloon.classList.remove('open'); if (avatarCtrl && avatarCtrl.state === 'alert') avatarCtrl.setState('idle'); }, 9000);
-}
-
-document.getElementById('notifClose').addEventListener('click', () => { notifBalloon.classList.remove('open'); if (avatarCtrl && avatarCtrl.state === 'alert') avatarCtrl.setState('idle'); });
-notifBadge.addEventListener('click', () => { notifCount = 0; notifBadge.style.display = 'none'; });
-
-// ── Dashboard ─────────────────────────────────────────────────────────────────
-async function loadDashboard(greet = false) {
-  document.querySelectorAll('.card').forEach(c => c.classList.add('card-updating'));
-  try {
-    const json = await (await fetch('/briefing')).json();
-    dashboardData = json.data; renderDashboard(dashboardData);
-    if (greet) {
-      const h = new Date().getHours();
-      const s = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
-      const leads = (dashboardData.leads || []).length;
-      const contr = (dashboardData.contratos_pendentes || []).length;
-      void processText(`Diga exatamente: "${s} José Romário! ${leads} lead(s) no CRM, ${contr} contrato(s) pendente(s). Pronta."`, true);
-    }
-  } catch { document.querySelectorAll('.card').forEach(c => c.classList.remove('card-updating')); }
-}
-
-function renderDashboard(d) {
-  const leads=d.leads||[], contr=d.contratos_pendentes||[], camps=d.campanhas||[];
-  document.getElementById('cardLeadsVal').textContent  = leads.length;
-  document.getElementById('cardLeadsSub').textContent  = `${leads.filter(l=>l.status==='novo').length} novo(s)`;
-  document.getElementById('cardLeadsMeta').textContent = `${leads.filter(l=>l.status==='em_atendimento').length} em atendimento`;
-  const ativas=camps.filter(c=>c.status==='ativa').length, tEnv=camps.reduce((s,c)=>s+(c.enviados||0),0), tRes=camps.reduce((s,c)=>s+(c.respondidos||0),0);
-  document.getElementById('cardCampanhasVal').textContent  = `${ativas}/${camps.length}`;
-  document.getElementById('cardCampanhasSub').textContent  = 'ativas / total';
-  document.getElementById('cardCampanhasMeta').textContent = `${tEnv>0?Math.round(tRes/tEnv*100):0}% taxa de resposta`;
-  const agenda = d.agenda_hoje || [];
-  document.getElementById('cardAgendaVal').textContent  = agenda.length || '—';
-  document.getElementById('cardAgendaSub').textContent  = agenda.length ? agenda[0].titulo.substring(0, 32) : 'Nenhum evento hoje';
-  document.getElementById('cardAgendaMeta').textContent = agenda.length > 1 ? `+${agenda.length - 1} evento(s)` : (agenda.length && agenda[0].inicio ? agenda[0].inicio.substring(11, 16) + 'h' : '/auth/google');
-  document.querySelectorAll('.card').forEach(c => c.classList.remove('card-updating'));
-}
-setInterval(() => void loadDashboard(false), 5 * 60 * 1000);
-
-// ── Card modals ───────────────────────────────────────────────────────────────
-document.querySelectorAll('[data-modal]').forEach(card => {
-  card.addEventListener('click', () => {
-    if (!dashboardData) return;
-    const type = card.dataset.modal;
-    const body = document.getElementById('cardModalBody'); body.innerHTML = '';
-    document.getElementById('cardModalTitle').textContent = {leads:'Leads',campanhas:'Campanhas',contratos:'Contratos Pendentes',agenda:'Agenda'}[type]||'';
-    if (type === 'leads') {
-      const arr = dashboardData.leads||[];
-      if (!arr.length) { body.innerHTML='<li class="modal-item">Nenhum lead.</li>'; }
-      else arr.slice(0,20).forEach(l => { const li=document.createElement('li'); li.className='modal-item'; li.innerHTML=`<strong>${l.nome||'—'} <span class="badge ${l.status}">${l.status}</span></strong>${l.telefone||''} ${l.email?'· '+l.email:''}`; body.appendChild(li); });
-    } else if (type === 'campanhas') {
-      const arr = dashboardData.campanhas||[];
-      if (!arr.length) { body.innerHTML='<li class="modal-item">Nenhuma campanha.</li>'; }
-      else arr.forEach(c => { const li=document.createElement('li'); li.className='modal-item'; li.innerHTML=`<strong>${c.nome} <span class="badge ${c.status}">${c.status}</span></strong>Enviados: ${c.enviados} · Resp: ${c.respondidos}`; body.appendChild(li); });
-    } else if (type === 'contratos') {
-      const arr = dashboardData.contratos_pendentes||[];
-      if (!arr.length) { body.innerHTML='<li class="modal-item">Nenhum contrato pendente.</li>'; }
-      else arr.forEach(c => { const li=document.createElement('li'); li.className='modal-item'; li.innerHTML=`<strong>Contrato ${c.id} <span class="badge pendente">pendente</span></strong>${c.tipo||'—'}`; body.appendChild(li); });
-    } else if (type === 'agenda') {
-      const arr = dashboardData.agenda_hoje || [];
-      if (!arr.length) {
-        body.innerHTML = '<li class="modal-item">Nenhum evento hoje. <a href="/auth/google" style="color:var(--neon-2);text-decoration:none">→ Conectar Google Calendar</a></li>';
-      } else {
-        arr.forEach(ev => {
-          const li = document.createElement('li'); li.className = 'modal-item';
-          const inicio = ev.inicio ? ev.inicio.substring(11, 16) : '';
-          const fim    = ev.fim    ? ev.fim.substring(11, 16)    : '';
-          li.innerHTML = `<strong>${ev.titulo}</strong>${inicio ? `${inicio} – ${fim}` : ''}${ev.link ? ` <a href="${ev.link}" target="_blank" style="color:var(--neon-2);font-size:.75rem">↗</a>` : ''}`;
-          body.appendChild(li);
-        });
-      }
-    } else {
-      body.innerHTML = '<li class="modal-item">Nenhum dado disponível.</li>';
-    }
-    document.getElementById('cardModal').classList.add('open');
-  });
-});
-document.getElementById('cardModalClose').addEventListener('click', () => document.getElementById('cardModal').classList.remove('open'));
-document.getElementById('cardModal').addEventListener('click', e => { if(e.target===document.getElementById('cardModal')) document.getElementById('cardModal').classList.remove('open'); });
-
-// ── Briefing modal ────────────────────────────────────────────────────────────
-document.getElementById('briefingBtn').addEventListener('click', async () => {
-  document.getElementById('briefingModal').classList.add('open');
-  document.getElementById('briefingBody').textContent = 'Carregando...';
-  try { const d=await(await fetch('/briefing')).json(); document.getElementById('briefingBody').textContent=d.briefing||'Sem dados.'; }
-  catch { document.getElementById('briefingBody').textContent='Erro.'; }
-});
-document.getElementById('briefingClose').addEventListener('click', () => document.getElementById('briefingModal').classList.remove('open'));
-document.getElementById('briefingModal').addEventListener('click', e => { if(e.target===document.getElementById('briefingModal')) document.getElementById('briefingModal').classList.remove('open'); });
-
-// ── Cleanup ───────────────────────────────────────────────────────────────────
-addEventListener('beforeunload', () => { if (avatarCtrl) avatarCtrl.dispose(); });
-
-// ── PWA ───────────────────────────────────────────────────────────────────────
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').then(reg => console.log('[SW] Registrado:', reg.scope))
-    .catch(err => console.warn('[SW] Erro:', err));
-}
-
-let _deferredInstall = null;
-window.addEventListener('beforeinstallprompt', e => {
-  e.preventDefault(); _deferredInstall = e;
-  const btn = document.getElementById('installBtn');
-  if (btn) btn.style.display = 'block';
-});
-
-document.getElementById('installBtn')?.addEventListener('click', async () => {
-  if (!_deferredInstall) return;
-  _deferredInstall.prompt();
-  const { outcome } = await _deferredInstall.userChoice;
-  if (outcome === 'accepted') {
-    const btn = document.getElementById('installBtn');
-    if (btn) btn.style.display = 'none';
-  }
-  _deferredInstall = null;
-});
-
-window.addEventListener('appinstalled', () => {
-  const btn = document.getElementById('installBtn');
-  if (btn) btn.style.display = 'none';
-});
-
-if (new URLSearchParams(location.search).get('acao') === 'briefing') {
-  addEventListener('DOMContentLoaded', () => setTimeout(() => document.getElementById('briefingBtn')?.click(), 1500));
-}
-
-// ── Chat input wiring ────────────────────────────────────────────────────────
-(function(){
-  const input    = document.getElementById('chatInput');
-  const send     = document.getElementById('chatSendBtn');
-  const attachBtn   = document.getElementById('attachBtn');
-  const attachInput = document.getElementById('attachInput');
-  if (!input || !send) return;
-
-  function autoResize() {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-    send.disabled = !(input.value.trim() || pendingAttachments.length > 0);
-  }
-  input.addEventListener('input', autoResize);
-
-  function trySend() {
-    const text = input.value.trim();
-    if (!text && pendingAttachments.length === 0) return;
-    input.value = ''; autoResize();
-    sendTextOnly(text);
-  }
-
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); trySend(); }
-  });
-  send.addEventListener('click', trySend);
-
-  // v1.11 — anexos
-  if (attachBtn && attachInput) {
-    attachBtn.addEventListener('click', () => attachInput.click());
-    attachInput.addEventListener('change', () => {
-      const files = Array.from(attachInput.files || []);
-      const MAX = 5 * 1024 * 1024;       // 5MB pra imagens
-      const PDF_MAX = 32 * 1024 * 1024;  // 32MB pra PDF
-      for (const f of files) {
-        const limit = f.type === 'application/pdf' ? PDF_MAX : MAX;
-        if (f.size > limit) {
-          addBubble('agent', `⚠️ "${f.name}" excede o tamanho máximo (${(limit / 1024 / 1024).toFixed(0)}MB).`);
-          continue;
-        }
-        if (pendingAttachments.length >= 5) {
-          addBubble('agent', '⚠️ Máximo de 5 anexos por mensagem.');
-          break;
-        }
-        pendingAttachments.push(f);
-      }
-      attachInput.value = ''; // permite re-selecionar mesmo arquivo depois
-      renderAttachments();
-    });
-  }
-
-  // Drag-and-drop também
-  const bar = document.querySelector('.chat-input-bar');
-  if (bar) {
-    ['dragover', 'dragenter'].forEach(ev => bar.addEventListener(ev, e => { e.preventDefault(); bar.style.borderColor = 'var(--neon)'; }));
-    ['dragleave', 'drop'].forEach(ev => bar.addEventListener(ev, e => { e.preventDefault(); bar.style.borderColor = ''; }));
-    bar.addEventListener('drop', e => {
-      const files = Array.from(e.dataTransfer?.files || [])
-        .filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
-      if (!files.length) return;
-      attachInput.files = e.dataTransfer.files;
-      attachInput.dispatchEvent(new Event('change'));
-    });
-  }
-})();
-
-// ── History drawer ───────────────────────────────────────────────────────────
-(function(){
-  const overlay = document.getElementById('drawerOverlay');
-  const drawer  = document.getElementById('drawer');
-  const openBtn = document.getElementById('historyBtn');
-  const closeBtn= document.getElementById('drawerClose');
-  const newBtn  = document.getElementById('newChatBtn');
-  const list    = document.getElementById('drawerList');
-  const search  = document.getElementById('drawerSearch');
-  if (!drawer) return;
-
-  function openDrawer() { drawer.classList.add('open'); overlay.classList.add('open'); drawer.setAttribute('aria-hidden','false'); loadSessions(); }
-  function closeDrawer(){ drawer.classList.remove('open'); overlay.classList.remove('open'); drawer.setAttribute('aria-hidden','true'); }
-
-  openBtn.addEventListener('click', openDrawer);
-  closeBtn.addEventListener('click', closeDrawer);
-  overlay.addEventListener('click', closeDrawer);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) closeDrawer(); });
-
-  newBtn.addEventListener('click', () => {
-    setCurrentSessionId(null);
-    chat.innerHTML = '';
-    closeDrawer();
-    document.getElementById('chatInput')?.focus();
-  });
-
-  function fmtDate(d) {
-    try {
-      const dt = new Date(d);
-      return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' +
-             dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    } catch { return ''; }
-  }
-
-  async function loadSessions() {
-    list.innerHTML = '<div class="drawer-empty">Carregando…</div>';
-    try {
-      const r = await fetch('/chat/sessions?limit=50');
-      const data = await r.json();
-      renderSessions(data.sessions || []);
-    } catch {
-      list.innerHTML = '<div class="drawer-empty">Erro ao carregar.</div>';
-    }
-  }
-
-  function renderSessions(sessions) {
-    list.innerHTML = '';
-    if (!sessions.length) { list.innerHTML = '<div class="drawer-empty">Nenhuma conversa ainda.</div>'; return; }
-    sessions.forEach(s => {
-      const item = document.createElement('div');
-      item.className = 'session-item' + (s.id === currentSessionId ? ' active' : '');
-      const title = s.title || '(sem título)';
-      item.innerHTML = `
-        <div class="session-title"></div>
-        <div class="session-meta">
-          <span class="session-channel">${s.channel || 'text'}</span>
-          <span>${s.msg_count || 0} msgs</span>
-          <span>${fmtDate(s.updated_at)}</span>
-        </div>
-        <button class="session-delete" title="Apagar">×</button>
-      `;
-      item.querySelector('.session-title').textContent = title;
-      item.addEventListener('click', (e) => {
-        if (e.target.classList.contains('session-delete')) return;
-        loadSessionMessages(s.id);
-      });
-      item.querySelector('.session-delete').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (!confirm('Apagar esta conversa?')) return;
-        await fetch('/chat/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' });
-        if (s.id === currentSessionId) { setCurrentSessionId(null); chat.innerHTML = ''; }
-        loadSessions();
-      });
-      list.appendChild(item);
-    });
-  }
-
-  async function loadSessionMessages(id) {
-    try {
-      const r = await fetch('/chat/sessions/' + encodeURIComponent(id));
-      if (!r.ok) throw new Error();
-      const data = await r.json();
-      chat.innerHTML = '';
-      (data.messages || []).forEach(m => addBubble(m.role === 'user' ? 'user' : 'agent', m.content));
-      setCurrentSessionId(id);
-      closeDrawer();
-      document.getElementById('chatInput')?.focus();
-    } catch {
-      alert('Erro ao carregar a conversa.');
-    }
-  }
-
-  let searchTimer = null;
-  search.addEventListener('input', () => {
-    clearTimeout(searchTimer);
-    const q = search.value.trim();
-    if (!q) { loadSessions(); return; }
-    searchTimer = setTimeout(() => runSearch(q), 250);
-  });
-
-  function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-  function highlight(text, q) {
-    const safe = escapeHtml(text);
-    const re = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
-    return safe.replace(re, '<mark>$1</mark>');
-  }
-
-  async function runSearch(q) {
-    list.innerHTML = '<div class="drawer-empty">Buscando…</div>';
-    try {
-      const r = await fetch('/chat/search?q=' + encodeURIComponent(q) + '&limit=30');
-      const data = await r.json();
-      list.innerHTML = '';
-      if (!data.hits?.length) { list.innerHTML = '<div class="drawer-empty">Nenhum resultado.</div>'; return; }
-      data.hits.forEach(h => {
-        const div = document.createElement('div');
-        div.className = 'search-hit';
-        const snippet = h.content.length > 200 ? h.content.slice(0,200) + '…' : h.content;
-        div.innerHTML = `<div>${highlight(snippet, q)}</div>
-          <div class="search-hit-meta">${escapeHtml(h.session_title || '(sem título)')} · ${h.role} · ${fmtDate(h.created_at)}</div>`;
-        div.addEventListener('click', () => loadSessionMessages(h.session_id));
-        list.appendChild(div);
-      });
-    } catch {
-      list.innerHTML = '<div class="drawer-empty">Erro na busca.</div>';
-    }
-  }
-})();
-
-// ── Spotify widget polling (v1.9.3) ─────────────────────────────────────────
-(function spotifyWidget(){
-  const widget = document.getElementById('spotifyWidget');
-  const cover  = document.getElementById('spotifyCover');
-  const title  = document.getElementById('spotifyTitle');
-  const artist = document.getElementById('spotifyArtist');
-  const icon   = document.getElementById('spotifyIcon');
-  if (!widget) return;
-
-  let timer = null;
-
-  async function refresh() {
-    try {
-      const r = await fetch('/spotify/now-playing-rich', { cache: 'no-store' });
-      if (!r.ok) { widget.style.display = 'none'; return; }
-      const d = await r.json();
-      if (!d.tocando) { widget.style.display = 'none'; return; }
-      widget.style.display = 'flex';
-      widget.classList.toggle('playing', d.is_playing === true);
-      widget.classList.toggle('paused',  d.is_playing === false);
-      icon.textContent = d.is_playing ? '▶' : '⏸';
-      title.textContent  = d.tocando;
-      artist.textContent = d.artistas || '';
-      if (d.capa_url && cover.src !== d.capa_url) cover.src = d.capa_url;
-      else if (!d.capa_url) cover.removeAttribute('src');
-    } catch {
-      // silencioso — widget some, sem alarmar UI
-      widget.style.display = 'none';
-    }
-  }
-
-  function start() {
-    refresh();
-    if (timer) clearInterval(timer);
-    timer = setInterval(refresh, 15000); // 15s
-  }
-  function stop() { if (timer) { clearInterval(timer); timer = null; } }
-
-  // Poll só quando aba ativa — economiza chamadas Spotify
-  if (document.visibilityState === 'visible') start();
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') start(); else stop();
-  });
-})();
-
-// Restore last session messages on boot, if any
-(async function restoreSession(){
-  if (!currentSessionId) return;
-  try {
-    const r = await fetch('/chat/sessions/' + encodeURIComponent(currentSessionId));
-    if (!r.ok) { setCurrentSessionId(null); return; }
-    const data = await r.json();
-    chat.innerHTML = '';
-    (data.messages || []).forEach(m => addBubble(m.role === 'user' ? 'user' : 'agent', m.content));
-  } catch { /* ignore */ }
-})();
+/* PWA */
+if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 </script>
 </body>
 </html>

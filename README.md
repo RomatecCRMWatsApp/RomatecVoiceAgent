@@ -73,5 +73,46 @@ railway up
 
 ---
 
-CEO: José Romário — RomaTec Consultoria Total
+## Alarmes nativos no iPhone (v1.24.0+)
+
+ZAYRA pode disparar alarmes nativos do iPhone via **ntfy.sh + Atalhos**.
+
+### Configurar UMA vez (no iPhone do CEO)
+
+1. **Definir tópico secreto** no Railway:
+   ```env
+   IOS_NTFY_TOPIC=zayra-romatec-XXXXXXXX   # string difícil de adivinhar
+   IOS_NTFY_BASE=https://ntfy.sh
+   ```
+2. Instalar o app **ntfy** (App Store, grátis) → assinar o mesmo tópico do passo 1.
+3. Criar Atalho **ZAYRA-Alarme** no app *Atalhos*:
+   - Obter texto da entrada
+   - Obter dicionário do texto
+   - Obter valor da chave: `datetime`
+   - Obter data formatada (do ISO 8601)
+   - Criar alarme: horário = data acima, etiqueta = chave `titulo`
+4. No app **ntfy** → tópico → ativar **"Abrir Click ao tocar"**.
+
+A partir daí ZAYRA usa a tool `alarme_ios_criar` e o Atalho cria o alarme nativo automaticamente.
+
+---
+
+## Tools de expertise técnica (v1.24.0+)
+
+ZAYRA passou a consultar APIs públicas gratuitas para responder com dados reais
+em avaliação imobiliária, georreferenciamento e registro:
+
+| Tool | Fonte |
+|---|---|
+| `cep_buscar` | ViaCEP |
+| `bcb_indice` | Banco Central — SGS (IPCA, INCC, IGP-M, Selic, CUB) |
+| `ibge_municipio` | IBGE Localidades |
+| `geocodificar` | OpenStreetMap Nominatim |
+| `norma_buscar` | DuckDuckGo Instant Answer (ABNT NBR, IT Bombeiros, INCRA) |
+| `sigef_consulta_url` | SIGEF/INCRA |
+| `sicar_consulta_url` | CAR/SICAR |
+
+---
+
+CEO: José Romário — Romatec Consultoria Imobiliária
 # RomatecVoiceAgent

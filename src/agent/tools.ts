@@ -11,6 +11,11 @@ import * as alarmes from '../integrations/alarmes';
 import * as cofre from '../integrations/cofre';
 import * as vistorias from '../integrations/vistorias';
 import * as cowork from '../integrations/cowork';
+import { alarmeIosCriar } from '../integrations/iosAlarm';
+import {
+  viaCepBuscar, bcbIndice, ibgeMunicipio,
+  geocodificar, normaBuscar, sigefConsultaUrl, sicarConsultaUrl,
+} from '../integrations/expertiseApis';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -1068,6 +1073,84 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['colaborador_nome', 'tarefa'],
     },
   },
+
+  // ── v1.24.0: alarme nativo iPhone via ntfy + Atalhos ──────────────────────
+  {
+    name: 'alarme_ios_criar',
+    description: 'Cria alarme nativo no iPhone do Chefe via ntfy → Atalhos (app Shortcuts). Use para reuniões, vistorias, prazos. Requer IOS_NTFY_TOPIC e que o CEO tenha configurado o atalho "ZAYRA-Alarme".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        titulo:       { type: 'string', description: 'Etiqueta do alarme (ex: "Vistoria Lote 14")' },
+        datetime_iso: { type: 'string', description: 'ISO 8601 com timezone -03:00 (Fortaleza). Ex: 2026-04-27T08:30:00-03:00' },
+        notas:        { type: 'string', description: 'Notas opcionais' },
+      },
+      required: ['titulo', 'datetime_iso'],
+    },
+  },
+
+  // ── v1.24.0: APIs de expertise técnica ────────────────────────────────────
+  {
+    name: 'cep_buscar',
+    description: 'Endereço completo a partir de CEP brasileiro (ViaCEP). Use para preencher endereço de cliente, lote, contrato.',
+    input_schema: {
+      type: 'object',
+      properties: { cep: { type: 'string', description: 'CEP com ou sem hífen' } },
+      required: ['cep'],
+    },
+  },
+  {
+    name: 'bcb_indice',
+    description: 'Série temporal de IPCA, INCC, IGP-M, Selic ou CUB (Banco Central — SGS) para atualização monetária em laudos e contratos.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        indice: { type: 'string', enum: ['ipca', 'incc', 'igpm', 'selic', 'cub'] },
+        meses:  { type: 'integer', minimum: 1, maximum: 120, description: 'Quantidade de meses retroativos (default 12)' },
+      },
+      required: ['indice'],
+    },
+  },
+  {
+    name: 'ibge_municipio',
+    description: 'Busca município brasileiro pelo nome — retorna código IBGE, UF, microrregião. Útil para preencher dados oficiais em laudos.',
+    input_schema: {
+      type: 'object',
+      properties: { nome: { type: 'string' } },
+      required: ['nome'],
+    },
+  },
+  {
+    name: 'geocodificar',
+    description: 'Converte endereço em coordenadas (lat/lon) via OpenStreetMap Nominatim. Útil para georreferenciamento básico e mapas.',
+    input_schema: {
+      type: 'object',
+      properties: { endereco: { type: 'string' } },
+      required: ['endereco'],
+    },
+  },
+  {
+    name: 'norma_buscar',
+    description: 'Busca info atualizada sobre norma técnica (ABNT NBR, IT Bombeiros, INCRA, REURB, leis de loteamento). USE SEMPRE em dúvida sobre número de norma ou artigo de lei — nunca invente.',
+    input_schema: {
+      type: 'object',
+      properties: { termo: { type: 'string' } },
+      required: ['termo'],
+    },
+  },
+  {
+    name: 'sigef_consulta_url',
+    description: 'Link de consulta pública SIGEF/INCRA para imóvel rural certificado (georreferenciamento). Se receber código do certificado, monta URL direta da parcela.',
+    input_schema: {
+      type: 'object',
+      properties: { codigo_certificado: { type: 'string' } },
+    },
+  },
+  {
+    name: 'sicar_consulta_url',
+    description: 'Link de consulta pública do CAR (Cadastro Ambiental Rural — SICAR). Use quando o CEO precisar checar regularidade ambiental de imóvel rural.',
+    input_schema: { type: 'object', properties: {} },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
@@ -1434,6 +1517,35 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         data = { success: true, delegado_para: membro.nome, tarefa };
         break;
       }
+
+      // ── v1.24.0: alarme nativo iPhone via ntfy ────────────────────────────
+      case 'alarme_ios_criar':
+        data = await alarmeIosCriar(input as unknown as Parameters<typeof alarmeIosCriar>[0]);
+        break;
+
+      // ── v1.24.0: APIs de expertise técnica ────────────────────────────────
+      case 'cep_buscar':
+        data = await viaCepBuscar(input.cep as string);
+        break;
+      case 'bcb_indice':
+        data = await bcbIndice(input.indice as string, input.meses as number | undefined);
+        break;
+      case 'ibge_municipio':
+        data = await ibgeMunicipio(input.nome as string);
+        break;
+      case 'geocodificar':
+        data = await geocodificar(input.endereco as string);
+        break;
+      case 'norma_buscar':
+        data = await normaBuscar(input.termo as string);
+        break;
+      case 'sigef_consulta_url':
+        data = { url: sigefConsultaUrl(input.codigo_certificado as string | undefined) };
+        break;
+      case 'sicar_consulta_url':
+        data = { url: sicarConsultaUrl() };
+        break;
+
       default:
         return { toolName: name, success: false, error: `Tool desconhecida: ${name}` };
     }
