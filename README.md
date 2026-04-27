@@ -114,5 +114,86 @@ em avaliação imobiliária, georreferenciamento e registro:
 
 ---
 
+## Memória vetorial RAG (v1.26.0+)
+
+ZAYRA aprende com PDFs do Chefe (laudos, normas, contratos, manuais) e cita
+trechos exatos com fonte. Stack: **Supabase pgvector + Voyage AI embeddings**.
+
+### Setup inicial (uma vez)
+
+1. **Criar projeto Supabase** (https://supabase.com): grátis até 500MB.
+2. **Rodar SQL** no SQL Editor do Supabase:
+
+```sql
+create extension if not exists vector;
+
+create table if not exists rag_documentos (
+  id uuid primary key default gen_random_uuid(),
+  titulo text not null,
+  fonte text not null,
+  categoria text,
+  arquivo_nome text,
+  hash_sha256 text unique,
+  total_chunks int default 0,
+  metadata jsonb default '{}'::jsonb,
+  criado_em timestamptz default now()
+);
+
+create table if not exists rag_chunks (
+  id bigserial primary key,
+  documento_id uuid references rag_documentos(id) on delete cascade,
+  chunk_index int not null,
+  conteudo text not null,
+  pagina int,
+  embedding vector(1024) not null,
+  criado_em timestamptz default now()
+);
+
+create index if not exists rag_chunks_embedding_idx
+  on rag_chunks using hnsw (embedding vector_cosine_ops);
+create index if not exists rag_chunks_doc_idx on rag_chunks(documento_id);
+create index if not exists rag_documentos_categoria_idx on rag_documentos(categoria);
+
+create or replace function rag_buscar(
+  query_embedding vector(1024),
+  similarity_threshold float default 0.70,
+  match_count int default 5,
+  filtro_categoria text default null
+)
+returns table (
+  chunk_id bigint, documento_id uuid, titulo text, categoria text,
+  pagina int, conteudo text, similarity float
+)
+language sql stable
+as $$
+  select c.id, c.documento_id, d.titulo, d.categoria, c.pagina, c.conteudo,
+         1 - (c.embedding <=> query_embedding) as similarity
+  from rag_chunks c
+  join rag_documentos d on d.id = c.documento_id
+  where 1 - (c.embedding <=> query_embedding) > similarity_threshold
+    and (filtro_categoria is null or d.categoria = filtro_categoria)
+  order by c.embedding <=> query_embedding
+  limit match_count;
+$$;
+```
+
+3. **Variáveis no Railway**: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`,
+   `VOYAGE_API_KEY` (https://voyageai.com — 200M tokens/mês grátis).
+
+### Como usar
+
+| Forma | Como |
+|---|---|
+| **Web** | Acesse `/upload.html` na interface, faça upload do PDF |
+| **WhatsApp** | Envie o PDF como anexo pra ZAYRA |
+| **Telegram** | Envie o PDF como documento pra ZAYRA |
+| **CLI (lote)** | `npm run rag:ingest-folder ./knowledge-pdfs` |
+
+ZAYRA passa a buscar em RAG antes de responder qualquer pergunta técnica via
+tool `memoria_buscar` (ver `tools.ts`). Quando encontra trecho com >70% de
+relevância, cita com fonte e página.
+
+---
+
 CEO: José Romário — Romatec Consultoria Imobiliária
 # RomatecVoiceAgent

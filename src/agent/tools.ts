@@ -16,6 +16,8 @@ import {
   viaCepBuscar, bcbIndice, ibgeMunicipio,
   geocodificar, normaBuscar, sigefConsultaUrl, sicarConsultaUrl,
 } from '../integrations/expertiseApis';
+import { buscarMemoria, formatarContexto } from '../services/ragSearch';
+import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -1151,6 +1153,37 @@ export const toolDefinitions: Anthropic.Tool[] = [
     description: 'Link de consulta pública do CAR (Cadastro Ambiental Rural — SICAR). Use quando o CEO precisar checar regularidade ambiental de imóvel rural.',
     input_schema: { type: 'object', properties: {} },
   },
+
+  // ── v1.26.0: RAG (memória vetorial Supabase + Voyage AI) ──────────────────
+  {
+    name: 'memoria_buscar',
+    description: 'Busca semântica na memória de conhecimento da ZAYRA (laudos, normas, contratos, manuais já ingeridos). USE SEMPRE que a pergunta envolver expertise técnica antes de responder por conhecimento geral. Retorna trechos com fonte, página e relevância.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:     { type: 'string', description: 'Pergunta ou termo a buscar na biblioteca' },
+        categoria: { type: 'string', enum: ['norma', 'laudo', 'contrato', 'manual', 'outro'], description: 'Filtrar por tipo de documento (opcional)' },
+        top_k:     { type: 'integer', minimum: 1, maximum: 20, description: 'Quantos trechos retornar (default 5)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'memoria_listar',
+    description: 'Lista todos os documentos que a ZAYRA tem na memória vetorial — título, categoria, fonte (whatsapp/telegram/web/cli), data de ingestão.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'memoria_apagar',
+    description: 'Remove um documento da memória pelo ID (UUID retornado por memoria_listar). Operação IRREVERSÍVEL — confirme com o Chefe antes.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        documento_id: { type: 'string', description: 'UUID do documento a remover' },
+      },
+      required: ['documento_id'],
+    },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
@@ -1544,6 +1577,33 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'sicar_consulta_url':
         data = { url: sicarConsultaUrl() };
+        break;
+
+      // ── v1.26.0: RAG memória vetorial ───────────────────────────────────
+      case 'memoria_buscar': {
+        const q     = input.query as string;
+        const cat   = input.categoria as string | undefined;
+        const top_k = input.top_k as number | undefined;
+        const hits  = await buscarMemoria(q, { categoria: cat, top_k });
+        data = {
+          query:       q,
+          encontrados: hits.length,
+          contexto:    formatarContexto(hits),
+          fontes:      hits.map(h => ({
+            documento_id: h.documento_id,
+            titulo:       h.titulo,
+            categoria:    h.categoria,
+            pagina:       h.pagina,
+            relevancia:   Math.round(h.similarity * 100) + '%',
+          })),
+        };
+        break;
+      }
+      case 'memoria_listar':
+        data = await listarDocumentos();
+        break;
+      case 'memoria_apagar':
+        data = await apagarDocumento(input.documento_id as string);
         break;
 
       default:

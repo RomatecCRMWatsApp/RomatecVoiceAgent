@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#04140d" />
+<title>ZAYRA — Ensinar com PDF</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg-deep:#020a07;--bg-mid:#04140d;--neon:#3dffb0;--gold:#d4b878;--text:#cfeede;--text-dim:#6a8a7c;--err:#ff6b6b}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100vh;background:var(--bg-deep);color:var(--text);font-family:'JetBrains Mono',monospace;-webkit-font-smoothing:antialiased}
+body{background:radial-gradient(900px 600px at 50% -10%, rgba(61,255,176,.15), transparent 60%),linear-gradient(180deg,var(--bg-deep),var(--bg-mid) 60%,#010705);padding:24px;max-width:760px;margin:0 auto}
+h1{font-family:'Orbitron',sans-serif;font-weight:900;letter-spacing:.3em;color:var(--neon);font-size:18px;margin-bottom:6px}
+.sub{color:var(--text-dim);font-size:11px;letter-spacing:.18em;text-transform:uppercase;margin-bottom:24px}
+.back{display:inline-block;margin-bottom:18px;color:var(--gold);text-decoration:none;font-size:11px;letter-spacing:.22em;text-transform:uppercase;border:1px solid rgba(212,184,120,.35);padding:6px 14px;border-radius:999px}
+.back:hover{border-color:var(--neon);color:var(--neon)}
+.card{background:rgba(7,32,24,.55);border:1px solid rgba(61,255,176,.18);border-radius:14px;padding:22px;backdrop-filter:blur(8px);margin-bottom:20px}
+label{display:block;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px;margin-top:14px}
+label:first-of-type{margin-top:0}
+input[type=text],select,input[type=file]{width:100%;padding:12px;background:rgba(2,10,7,.7);border:1px solid rgba(61,255,176,.25);border-radius:8px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:13px}
+input[type=file]{cursor:pointer}
+input:focus,select:focus{outline:none;border-color:var(--neon);box-shadow:0 0 12px rgba(61,255,176,.2)}
+button{margin-top:18px;padding:14px 28px;background:var(--neon);color:var(--bg-deep);border:0;border-radius:10px;font-family:'Orbitron',sans-serif;font-weight:700;font-size:13px;letter-spacing:.18em;text-transform:uppercase;cursor:pointer;width:100%}
+button:hover{box-shadow:0 0 18px rgba(61,255,176,.5)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.status{margin-top:14px;padding:12px;border-radius:8px;font-size:12px;line-height:1.5}
+.status.ok{background:rgba(61,255,176,.1);border:1px solid rgba(61,255,176,.4);color:var(--neon)}
+.status.err{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.4);color:var(--err)}
+.status.info{background:rgba(212,184,120,.1);border:1px solid rgba(212,184,120,.4);color:var(--gold)}
+h2{font-family:'Orbitron',sans-serif;font-weight:700;color:var(--gold);font-size:13px;letter-spacing:.22em;margin-bottom:12px}
+.doc{display:flex;justify-content:space-between;align-items:center;padding:12px;border:1px solid rgba(212,184,120,.12);border-radius:8px;margin-bottom:8px;font-size:12px}
+.doc-title{flex:1;min-width:0}
+.doc-title b{color:var(--neon);display:block;margin-bottom:2px}
+.doc-title small{color:var(--text-dim);font-size:10px;letter-spacing:.05em}
+.doc-actions{margin-left:12px}
+.del{padding:6px 12px;background:transparent;border:1px solid var(--err);color:var(--err);border-radius:6px;font-size:10px;letter-spacing:.1em;cursor:pointer;width:auto;margin:0}
+.del:hover{background:rgba(255,107,107,.15)}
+.empty{text-align:center;color:var(--text-dim);padding:24px;font-size:11px;letter-spacing:.18em;text-transform:uppercase}
+</style>
+</head>
+<body>
+<a href="/" class="back">← ZAYRA</a>
+<h1>📚 ENSINAR ZAYRA</h1>
+<div class="sub">Memória vetorial RAG — Supabase + Voyage AI</div>
+
+<div class="card">
+  <form id="form">
+    <label>PDF (até 50 MB)</label>
+    <input type="file" id="pdf" accept="application/pdf" required>
+    <label>Título (opcional, default = nome do arquivo)</label>
+    <input type="text" id="titulo" placeholder="Ex: NBR 14653 parte 1 — Avaliação imobiliária">
+    <label>Categoria</label>
+    <select id="categoria">
+      <option value="">— auto-detectar pelo nome —</option>
+      <option value="norma">Norma técnica (ABNT/NBR/INCRA)</option>
+      <option value="laudo">Laudo / PTAM / avaliação</option>
+      <option value="contrato">Contrato / termo</option>
+      <option value="manual">Manual / guia</option>
+      <option value="outro">Outro</option>
+    </select>
+    <button type="submit" id="submitBtn">📥 Ensinar ZAYRA</button>
+  </form>
+  <div id="status" style="display:none"></div>
+</div>
+
+<div class="card">
+  <h2>📂 Documentos na memória</h2>
+  <div id="docs">Carregando…</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const status = (msg, cls) => { const s=$('status'); s.style.display='block'; s.className='status '+cls; s.textContent=msg; };
+
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const file = $('pdf').files[0];
+  if (!file) return;
+  $('submitBtn').disabled = true;
+  status(`📤 Enviando ${(file.size/1024/1024).toFixed(2)} MB…`, 'info');
+  const fd = new FormData();
+  fd.append('pdf', file);
+  if ($('titulo').value.trim()) fd.append('titulo', $('titulo').value.trim());
+  if ($('categoria').value)     fd.append('categoria', $('categoria').value);
+  fd.append('fonte', 'web');
+  try {
+    const r = await fetch('/rag/ingest', { method:'POST', body: fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Erro desconhecido');
+    if (data.ja_existia) status(`📚 "${data.titulo}" já estava na memória.`, 'info');
+    else status(`✅ Aprendi "${data.titulo}" (${data.chunks_inseridos} trechos, ${data.paginas} páginas)`, 'ok');
+    $('form').reset();
+    carregar();
+  } catch (err) {
+    status('❌ ' + err.message, 'err');
+  } finally {
+    $('submitBtn').disabled = false;
+  }
+});
+
+async function carregar() {
+  try {
+    const r = await fetch('/rag/documentos');
+    const docs = await r.json();
+    if (!Array.isArray(docs) || docs.length === 0) {
+      $('docs').innerHTML = '<div class="empty">Nenhum documento ainda</div>';
+      return;
+    }
+    $('docs').innerHTML = docs.map(d => `
+      <div class="doc">
+        <div class="doc-title">
+          <b>${escape(d.titulo)}</b>
+          <small>${escape(d.categoria||'-')} • ${d.total_chunks||0} trechos • via ${escape(d.fonte||'?')} • ${new Date(d.criado_em).toLocaleDateString('pt-BR')}</small>
+        </div>
+        <div class="doc-actions"><button class="del" data-id="${d.id}">🗑 Esquecer</button></div>
+      </div>
+    `).join('');
+    document.querySelectorAll('.del').forEach(b => b.addEventListener('click', () => apagar(b.dataset.id, b)));
+  } catch (err) {
+    $('docs').innerHTML = '<div class="empty">Erro: '+escape(err.message)+'</div>';
+  }
+}
+function escape(s){return String(s||'').replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));}
+async function apagar(id, btn) {
+  if (!confirm('Remover este documento da memória?')) return;
+  btn.disabled = true; btn.textContent='…';
+  try {
+    const r = await fetch('/rag/documentos/'+id, { method:'DELETE' });
+    if (!r.ok) throw new Error((await r.json()).error || 'Falhou');
+    carregar();
+  } catch (e) { alert('Erro: '+e.message); btn.disabled=false; btn.textContent='🗑 Esquecer'; }
+}
+carregar();
+</script>
+</body>
+</html>

@@ -1,6 +1,8 @@
 import axios from 'axios';
 import pool from '../database/connection';
 import { think } from '../agent/think';
+import { ingerirPdf, detectarCategoria } from '../services/ragIngest';
+import { supabaseConfigurado } from '../services/supabase';
 
 // Telegram Bot API direto. Bot dedicado pra ZAYRA — separado do bot do CRM.
 // Setup do bot: @BotFather → /newbot → copiar TELEGRAM_BOT_TOKEN pro Railway.
@@ -98,12 +100,19 @@ export async function setWebhook(url: string): Promise<{ ok: boolean; descriptio
 }
 
 // ── Inbound: parse Update do Telegram ───────────────────────────────────────
+export interface TelegramDocument {
+  file_id:   string;
+  mime_type: string;
+  filename:  string;
+  caption?:  string;
+}
 export interface TelegramIncoming {
   chatId:    number;
   userId:    number;
   username?: string;
   firstName?: string;
-  text:      string;
+  text:      string;             // vazio se for só documento
+  document?: TelegramDocument;
   messageId: number;
 }
 
@@ -111,12 +120,28 @@ export function parseTelegramUpdate(body: unknown): TelegramIncoming | null {
   if (!body || typeof body !== 'object') return null;
   const u = body as Record<string, unknown>;
   const msg = u.message as Record<string, unknown> | undefined;
-  if (!msg) return null; // só tratamos messages, não edited_messages/channel_post/etc
+  if (!msg) return null;
 
   const chat = msg.chat as Record<string, unknown> | undefined;
   const from = msg.from as Record<string, unknown> | undefined;
-  const text = msg.text as string | undefined;
-  if (!chat || !from || typeof text !== 'string' || !text.trim()) return null;
+  if (!chat || !from) return null;
+
+  const text    = (msg.text as string | undefined)    ?? '';
+  const caption = (msg.caption as string | undefined) ?? '';
+
+  let document: TelegramDocument | undefined;
+  const doc = msg.document as Record<string, unknown> | undefined;
+  if (doc && typeof doc === 'object') {
+    document = {
+      file_id:   String(doc.file_id ?? ''),
+      mime_type: String(doc.mime_type ?? 'application/octet-stream'),
+      filename:  String(doc.file_name ?? 'documento'),
+      caption:   caption || undefined,
+    };
+  }
+
+  // Se não tem texto nem documento, ignora
+  if (!text.trim() && !document) return null;
 
   return {
     chatId:    Number(chat.id),
@@ -124,20 +149,72 @@ export function parseTelegramUpdate(body: unknown): TelegramIncoming | null {
     username:  (from.username as string | undefined),
     firstName: (from.first_name as string | undefined),
     text:      text.trim(),
+    document,
     messageId: Number(msg.message_id),
   };
+}
+
+async function downloadTelegramFile(fileId: string): Promise<Buffer> {
+  // 1. getFile → file_path
+  const meta = await axios.get<{ ok: boolean; result: { file_path: string } }>(
+    botUrl('getFile'),
+    { params: { file_id: fileId }, timeout: 15000 },
+  );
+  if (!meta.data.ok) throw new Error('Telegram getFile falhou');
+  const filePath = meta.data.result.file_path;
+  // 2. download via api.telegram.org/file/bot{TOKEN}/{file_path}
+  const token = process.env.TELEGRAM_BOT_TOKEN!;
+  const r = await axios.get<ArrayBuffer>(
+    `${TELEGRAM_API}/file/bot${token}/${filePath}`,
+    { responseType: 'arraybuffer', timeout: 60000, maxContentLength: 50 * 1024 * 1024 },
+  );
+  return Buffer.from(r.data);
 }
 
 // ── Pipeline completo: recebe → autoriza → think() → responde ──────────────
 export async function processTelegramIncoming(incoming: TelegramIncoming): Promise<void> {
   // Log inbound (mesmo de não-autorizados, pra audit)
-  void logTelegram('inbound', String(incoming.chatId), incoming.text, incoming.username).catch(() => {});
+  const logText = incoming.text || (incoming.document ? `[PDF: ${incoming.document.filename}]` : '[vazio]');
+  void logTelegram('inbound', String(incoming.chatId), logText, incoming.username).catch(() => {});
 
   if (!isAuthorized(incoming.chatId)) {
     await sendMessage(
       incoming.chatId,
       `🚫 Não autorizado. Para liberar acesso, peça ao CEO José Romário para adicionar seu chat_id (\`${incoming.chatId}\`) à variável TELEGRAM_AUTHORIZED_USER_IDS no Railway.`,
     );
+    return;
+  }
+
+  // PDF → ingere na memória vetorial
+  if (incoming.document) {
+    if (!supabaseConfigurado()) {
+      await sendMessage(incoming.chatId, '⚠️ PDF recebido, mas Supabase não está configurado no servidor.');
+      return;
+    }
+    if (!incoming.document.mime_type.includes('pdf')) {
+      await sendMessage(incoming.chatId, `⚠️ Aceito só PDF (recebido: ${incoming.document.mime_type}).`);
+      return;
+    }
+    try {
+      await sendMessage(incoming.chatId, `📥 Recebi *${incoming.document.filename}*, processando…`);
+      const buf = await downloadTelegramFile(incoming.document.file_id);
+      const titulo    = (incoming.document.caption || incoming.document.filename).replace(/\.pdf$/i, '');
+      const categoria = detectarCategoria(incoming.document.filename);
+      const r = await ingerirPdf({
+        pdfBuffer:   buf,
+        titulo,
+        fonte:       'telegram',
+        categoria,
+        arquivoNome: incoming.document.filename,
+      });
+      const resposta = r.ja_existia
+        ? `📚 Já tinha *${r.titulo}* na memória, Chefe.`
+        : `✅ Aprendi: *${r.titulo}* (${r.chunks_inseridos} trechos, ${r.paginas} páginas, categoria: ${categoria})`;
+      await sendMessage(incoming.chatId, resposta);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await sendMessage(incoming.chatId, `❌ Falhei ingerindo o PDF: ${msg}`);
+    }
     return;
   }
 

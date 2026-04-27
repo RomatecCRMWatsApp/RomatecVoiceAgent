@@ -2,6 +2,8 @@ import axios from 'axios';
 import pool from '../database/connection';
 import { transcribeAudio } from '../agent/transcribe';
 import { think } from '../agent/think';
+import { ingerirPdf, detectarCategoria } from '../services/ragIngest';
+import { supabaseConfigurado } from '../services/supabase';
 
 // Z-API direto (sem passar pelo CRM). Mesmas credenciais que o CRM usa.
 const ZAPI_BASE_URL     = process.env.ZAPI_BASE_URL ?? 'https://api.z-api.io';
@@ -24,9 +26,10 @@ function zapiHeaders(): Record<string, string> {
 
 // ── Schema unificado de mensagem inbound (do webhook ZAPI) ───────────────────
 // ZAPI manda payloads em formatos diferentes (text/audio/image). Normalizamos.
-export interface WaTextMessage  { type: 'text';  from: string; id: string; text:  { body: string }; }
-export interface WaAudioMessage { type: 'audio'; from: string; id: string; audio: { id: string; mime_type: string; url?: string }; }
-export type WaMessage = WaTextMessage | WaAudioMessage;
+export interface WaTextMessage     { type: 'text';     from: string; id: string; text:     { body: string }; }
+export interface WaAudioMessage    { type: 'audio';    from: string; id: string; audio:    { id: string; mime_type: string; url?: string }; }
+export interface WaDocumentMessage { type: 'document'; from: string; id: string; document: { id: string; mime_type: string; url: string; filename: string; caption?: string }; }
+export type WaMessage = WaTextMessage | WaAudioMessage | WaDocumentMessage;
 
 // ── Normaliza payload ZAPI (ReceivedCallback) → WaMessage ────────────────────
 // Z-API envia payloads com formatos variados (raiz vs data.*, message string vs
@@ -94,6 +97,29 @@ export function parseZapiWebhook(body: unknown): WaMessage[] {
     }];
   }
 
+  // 4b. Documento (PDF) — Z-API entrega via document.documentUrl ou similar
+  const docUrl = pickStr(
+    b,
+    'document.documentUrl', 'document.url', 'documentUrl',
+    'data.documentUrl', 'media.url',
+  );
+  const docMime = pickStr(b, 'document.mimeType', 'document.mime_type', 'mimeType', 'data.mimeType');
+  const isDocType = ['document', 'file', 'pdf'].includes(pickStr(b, 'type').toLowerCase());
+  if ((isDocType || docMime.includes('pdf')) && docUrl) {
+    return [{
+      type:     'document',
+      from:     phone,
+      id,
+      document: {
+        id,
+        mime_type: docMime || 'application/pdf',
+        url:       docUrl,
+        filename:  pickStr(b, 'document.fileName', 'document.filename', 'fileName') || 'documento.pdf',
+        caption:   pickStr(b, 'document.caption', 'caption') || undefined,
+      },
+    }];
+  }
+
   // 5. Texto — múltiplos formatos
   let messageText = pickStr(b, 'text.message', 'text.body', 'message', 'body', 'data.message', 'data.text', 'content');
 
@@ -156,8 +182,34 @@ async function downloadAudio(msg: WaAudioMessage): Promise<Buffer> {
   return Buffer.from(r.data);
 }
 
-// ── Processa mensagem inbound: transcreve áudio se preciso, chama think() ───
+// ── Processa mensagem inbound: transcreve áudio, ingere PDF, ou chama think() ──
 export async function processMessage(msg: WaMessage): Promise<string> {
+  // PDF → ingere na memória vetorial (RAG)
+  if (msg.type === 'document') {
+    if (!supabaseConfigurado()) {
+      return '⚠️ Recebi seu PDF, Chefe, mas a memória vetorial (Supabase) não está configurada no servidor ainda.';
+    }
+    if (!msg.document.mime_type.includes('pdf')) {
+      return `⚠️ Aceito só PDF por enquanto (você mandou: ${msg.document.mime_type}).`;
+    }
+    try {
+      const buf = await downloadDocument(msg);
+      const titulo    = (msg.document.caption || msg.document.filename).replace(/\.pdf$/i, '');
+      const categoria = detectarCategoria(msg.document.filename);
+      const r = await ingerirPdf({
+        pdfBuffer:   buf,
+        titulo,
+        fonte:       'whatsapp',
+        categoria,
+        arquivoNome: msg.document.filename,
+      });
+      if (r.ja_existia) return `📚 Já tinha "${r.titulo}" na memória, Chefe.`;
+      return `✅ Aprendi: *${r.titulo}* (${r.chunks_inseridos} trechos, ${r.paginas} páginas, categoria: ${categoria})`;
+    } catch (err) {
+      return `❌ Falhei ingerindo o PDF: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
   let userText: string;
   if (msg.type === 'audio') {
     const buf = await downloadAudio(msg);
@@ -170,6 +222,15 @@ export async function processMessage(msg: WaMessage): Promise<string> {
   const sessionId = `wa_${msg.from}`;
   const resp = await think(userText, { sessionId, channel: 'whatsapp' });
   return resp.text;
+}
+
+async function downloadDocument(msg: WaDocumentMessage): Promise<Buffer> {
+  const r = await axios.get<ArrayBuffer>(msg.document.url, {
+    responseType: 'arraybuffer',
+    timeout:      60000,
+    maxContentLength: 50 * 1024 * 1024,
+  });
+  return Buffer.from(r.data);
 }
 
 // ── Schema próprio: zayra_whatsapp_log (não conflita com `messages` do CRM) ──

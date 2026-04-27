@@ -33,6 +33,7 @@ import * as alarmes from './integrations/alarmes';
 import * as cofre from './integrations/cofre';
 import * as vistorias from './integrations/vistorias';
 import * as cowork from './integrations/cowork';
+import ragRoutes from './routes/rag';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -42,6 +43,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 32 * 1024 * 1024, files: 5 } });
 
 app.use(express.json({ limit: '32mb' })); // VTO usa fotos base64 no body
+app.use('/rag', ragRoutes);                 // v1.26.0 — endpoints de memoria vetorial
 
 // Static files com Cache-Control inteligente:
 // HTML/SW/manifest = no-cache (browser revalida a cada request com ETag)
@@ -355,7 +357,9 @@ app.post('/webhook/whatsapp', (req: Request, res: Response) => {
     for (const msg of allMsgs) {
       try {
         // Log inbound (fire-and-forget)
-        const userText = msg.type === 'text' ? msg.text.body : '[áudio]';
+        const userText = msg.type === 'text' ? msg.text.body
+                       : msg.type === 'audio' ? '[áudio]'
+                       : `[PDF: ${msg.document.filename}]`;
         void logInbound(msg.from, userText, msg.id).catch(() => {});
 
         const reply = await processMessage(msg);
