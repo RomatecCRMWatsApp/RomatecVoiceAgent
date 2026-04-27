@@ -38,6 +38,9 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
 .state[data-state="speaking"]{border-color:#7fffd4;color:#7fffd4}
 .transcript{margin-top:14px;width:100%;min-height:60px;padding:14px;border:1px solid rgba(61,255,176,.15);border-radius:12px;background:rgba(4,20,13,.55);backdrop-filter:blur(8px);font-size:13px;color:var(--text);line-height:1.5;text-align:center}
 .transcript:empty::before{content:"Toque o microfone e fale com a ZAYRA";color:var(--text-dim);font-size:11px;letter-spacing:.18em;text-transform:uppercase}
+.nav-links{display:flex;gap:14px;align-items:center}
+.nav-links a{color:var(--gold);text-decoration:none;font-size:11px;letter-spacing:.22em;text-transform:uppercase;padding:6px 12px;border:1px solid rgba(212,184,120,.35);border-radius:999px;background:rgba(7,32,24,.45);transition:all .2s}
+.nav-links a:hover{border-color:var(--neon);color:var(--neon);box-shadow:0 0 12px rgba(61,255,176,.3)}
 .mic{position:fixed;right:22px;bottom:calc(22px + env(safe-area-inset-bottom));width:64px;height:64px;border-radius:50%;border:1px solid var(--neon);background:radial-gradient(circle at 30% 30%,#0a3326,#020a07 70%);color:var(--neon);display:flex;align-items:center;justify-content:center;font-size:24px;cursor:pointer;box-shadow:0 0 30px rgba(61,255,176,.35);z-index:5}
 .mic.active{animation:micPulse 1.2s infinite}
 @keyframes micPulse{0%,100%{box-shadow:0 0 20px rgba(61,255,176,.4)}50%{box-shadow:0 0 50px rgba(61,255,176,.9)}}
@@ -48,7 +51,10 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
 <div class="stage">
   <div class="topbar">
     <div class="brand">ROMATEC</div>
-    <div class="status"><span class="pulse"></span><span>ZAYRA online</span></div>
+    <div class="nav-links">
+      <a href="/obras" title="Gestão de Obras">🏗 Obras</a>
+      <div class="status"><span class="pulse"></span><span>ZAYRA online</span></div>
+    </div>
   </div>
   <div class="core-wrap"><canvas id="neural"></canvas></div>
   <div class="identity">
