@@ -86,8 +86,11 @@ function chunkear(texto: string): { conteudo: string; aproxPagina: number }[] {
 }
 
 export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
+  const t0   = Date.now();
+  const tag  = `[rag] ${input.titulo.slice(0, 40)}`;
   const sb   = supabase();
   const hash = crypto.createHash('sha256').update(input.pdfBuffer).digest('hex');
+  console.log(`${tag} ▶ start fonte=${input.fonte} ${(input.pdfBuffer.length/1024).toFixed(1)}KB hash=${hash.slice(0,12)}`);
 
   // Dedup
   const existing = await sb
@@ -97,6 +100,7 @@ export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
     .maybeSingle();
 
   if (existing.data) {
+    console.log(`${tag} ↩ duplicado (já existe id=${existing.data.id})`);
     return {
       ja_existia:       true,
       documento_id:     existing.data.id as string,
@@ -114,15 +118,28 @@ export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
     const result = await parser.getText();
     texto   = result.text || '';
     paginas = result.total || 0;
+  } catch (err) {
+    throw new Error(`PDFParse falhou: ${(err as Error).message}`);
   } finally {
     await parser.destroy().catch(() => {});
   }
+  console.log(`${tag} 📄 parsed ${paginas} pgs, ${texto.length} chars (+${Date.now()-t0}ms)`);
   if (!texto || texto.trim().length < 20) {
     throw new Error('PDF sem texto extraível (pode ser imagem escaneada — precisa OCR)');
   }
 
   const chunks = chunkear(texto);
+  console.log(`${tag} ✂ chunks=${chunks.length} (+${Date.now()-t0}ms)`);
   if (chunks.length === 0) throw new Error('Nenhum chunk gerado a partir do PDF');
+
+  // Embeddings em batch ANTES de inserir doc (se Voyage falhar, não deixa doc órfão)
+  let embeddings: number[][];
+  try {
+    embeddings = await gerarEmbeddings(chunks.map(c => c.conteudo), 'document');
+    console.log(`${tag} 🧠 embeddings=${embeddings.length} (+${Date.now()-t0}ms)`);
+  } catch (err) {
+    throw new Error(`Embeddings falharam: ${(err as Error).message}`);
+  }
 
   // Insere documento
   const docInsert = await sb
@@ -143,16 +160,13 @@ export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
     throw new Error(`Falha ao inserir documento: ${docInsert.error?.message}`);
   }
   const documentoId = docInsert.data.id as string;
+  console.log(`${tag} 💾 doc inserido id=${documentoId.slice(0,8)} (+${Date.now()-t0}ms)`);
 
-  // Embeddings em batch
-  const embeddings = await gerarEmbeddings(chunks.map(c => c.conteudo), 'document');
-
-  const rows: Chunk[] = chunks.map((c, i) => ({ index: i, conteudo: c.conteudo, pagina: c.aproxPagina }));
-  const insertRows = rows.map((r, i) => ({
+  const insertRows = chunks.map((c, i) => ({
     documento_id: documentoId,
-    chunk_index:  r.index,
-    conteudo:     r.conteudo,
-    pagina:       r.pagina,
+    chunk_index:  i,
+    conteudo:     c.conteudo,
+    pagina:       c.aproxPagina,
     embedding:    embeddings[i],
   }));
 
@@ -162,11 +176,13 @@ export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
     const slice = insertRows.slice(i, i + BATCH);
     const ins = await sb.from('rag_chunks').insert(slice);
     if (ins.error) {
+      console.error(`${tag} ❌ chunk insert ${i}-${i+slice.length}: ${ins.error.message}`);
       // rollback documento pra não deixar lixo
       await sb.from('rag_documentos').delete().eq('id', documentoId);
       throw new Error(`Falha ao inserir chunks: ${ins.error.message}`);
     }
   }
+  console.log(`${tag} ✅ ok ${chunks.length} chunks gravados em ${Date.now()-t0}ms`);
 
   return {
     ja_existia:       false,
