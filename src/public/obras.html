@@ -205,11 +205,12 @@
   }
   .cal-month-label { font-size: 14px; color: var(--gold); font-weight: 500; text-transform: capitalize; }
   .cal-grid {
-    display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; padding: 12px 20px;
+    display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; padding: 12px 20px;
   }
   .cal-dow {
     text-align: center; font-size: 10px; color: var(--text-muted);
     text-transform: uppercase; letter-spacing: 0.5px; padding: 6px 0;
+    min-width: 0; overflow: hidden;
   }
   .cal-cell {
     aspect-ratio: 1; border: 1px solid var(--border);
@@ -217,7 +218,10 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     font-size: 12px; color: var(--text); transition: all 0.15s;
     background: var(--bg-elev); position: relative;
-    user-select: none;
+    user-select: none; min-width: 0;
+  }
+  .cal-day-num {
+    position: relative; z-index: 1; line-height: 1; font-weight: 600;
   }
   .cal-cell:hover { border-color: var(--neon); }
   .cal-cell.empty { opacity: 0.2; cursor: default; pointer-events: none; }
@@ -241,10 +245,42 @@
   .cal-cell-label {
     position: absolute; bottom: 2px; right: 4px;
     font-size: 8px; opacity: 0.8;
+    pointer-events: none; z-index: 0;
   }
   .cal-summary {
     padding: 16px 20px; border-top: 1px solid var(--border);
     display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+  }
+
+  /* ── Mobile (<= 768px): calendário compacto, células maiores, summary empilhado ── */
+  @media (max-width: 768px) {
+    body { padding: 12px; }
+    .cal-grid {
+      gap: 4px; padding: 8px 8px;
+    }
+    .cal-dow { font-size: 9px; letter-spacing: 0; padding: 4px 0; }
+    .cal-cell {
+      aspect-ratio: auto;
+      min-height: 48px;
+      font-size: 14px;
+      border-radius: 6px;
+    }
+    .cal-day-num { font-size: 15px; }
+    .cal-cell-label { font-size: 9px; bottom: 3px; right: 4px; }
+    .cal-summary {
+      grid-template-columns: 1fr 1fr;
+      padding: 12px 12px;
+      gap: 8px;
+    }
+    .cal-stat { padding: 8px; }
+    .cal-stat .l { font-size: 9px; }
+    .cal-stat .v { font-size: 18px; }
+    .cal-legend { padding: 0 12px 10px; gap: 8px; font-size: 10px; }
+    .cal-help    { padding: 0 12px 10px; font-size: 11px; }
+    .cal-nav     { padding: 10px 12px; }
+  }
+  @media (max-width: 420px) {
+    .cal-summary { grid-template-columns: 1fr; }  /* 1 col em telas estreitas (iPhone SE/13 mini) */
   }
   .cal-stat { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; }
   .cal-stat p { margin: 0; }
@@ -1478,7 +1514,7 @@ function desenharCalendario() {
     else if (periodos.has('manha')) { cls = 'manha'; label = 'M'; }
     else if (periodos.has('tarde')) { cls = 'tarde'; label = 'T'; }
     if (dataIso === todayIso) cls += ' today';
-    html += `<div class="cal-cell ${cls}" data-d="${dataIso}">${d}<span class="cal-cell-label">${label}</span></div>`;
+    html += `<div class="cal-cell ${cls}" data-d="${dataIso}"><span class="cal-day-num">${d}</span><span class="cal-cell-label">${label}</span></div>`;
   }
 
   grid.innerHTML = html;
