@@ -27,7 +27,11 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.85)}}
 .core-wrap{margin-top:14px;width:min(86vw,420px);aspect-ratio:1/1}
 #neural{width:100%;height:100%;display:block}
-.identity{margin-top:18px;text-align:center}
+.clock{margin-top:14px;display:flex;flex-direction:column;align-items:center;gap:2px;font-family:'Orbitron',sans-serif;color:var(--gold);opacity:.78;text-align:center;line-height:1.1}
+.clock-time{font-weight:700;font-size:22px;letter-spacing:.18em;color:var(--neon);text-shadow:0 0 10px rgba(61,255,176,.35)}
+.clock-time .seconds{font-size:14px;letter-spacing:.12em;color:var(--gold);opacity:.85;margin-left:4px}
+.clock-date{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.32em;text-transform:uppercase;color:var(--text-dim)}
+.identity{margin-top:14px;text-align:center}
 .name{font-family:'Orbitron',sans-serif;font-weight:900;font-size:38px;letter-spacing:.55em;color:var(--neon);text-shadow:0 0 24px rgba(61,255,176,.55);padding-left:.55em}
 .role{margin-top:6px;font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--text-dim)}
 .state{margin-top:18px;display:inline-flex;align-items:center;gap:10px;padding:10px 22px;border:1px solid rgba(212,184,120,.45);border-radius:999px;background:rgba(7,32,24,.6);backdrop-filter:blur(6px);font-size:12px;letter-spacing:.28em;text-transform:uppercase;color:var(--gold)}
@@ -57,6 +61,10 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
     </div>
   </div>
   <div class="core-wrap"><canvas id="neural"></canvas></div>
+  <div class="clock" id="clock">
+    <div class="clock-time"><span id="clockHM">--:--</span><span class="seconds" id="clockS">--</span></div>
+    <div class="clock-date" id="clockDate">— — —</div>
+  </div>
   <div class="identity">
     <div class="name">ZAYRA</div>
     <div class="role">Assistente Executiva — Romatec</div>
@@ -68,6 +76,25 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
 </div>
 <button class="mic" id="micBtn" aria-label="Falar com a ZAYRA">🎙</button>
 <script>
+/* RELÓGIO — Fortaleza/BRT, com segundos discretos */
+(()=>{
+  const hm=document.getElementById('clockHM');
+  const ss=document.getElementById('clockS');
+  const dd=document.getElementById('clockDate');
+  const TZ='America/Fortaleza';
+  function pad(n){return String(n).padStart(2,'0');}
+  function tick(){
+    const now=new Date();
+    const fmtTime=new Intl.DateTimeFormat('pt-BR',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hour12:false});
+    const fmtSec =new Intl.DateTimeFormat('pt-BR',{timeZone:TZ,second:'2-digit'});
+    const fmtDate=new Intl.DateTimeFormat('pt-BR',{timeZone:TZ,weekday:'short',day:'2-digit',month:'short',year:'numeric'});
+    hm.textContent=fmtTime.format(now);
+    ss.textContent=':'+pad(parseInt(fmtSec.format(now),10));
+    dd.textContent=fmtDate.format(now).replace('.','').replace('.','');
+  }
+  tick();setInterval(tick,1000);
+})();
+
 /* PARTÍCULAS */
 (()=>{const c=document.getElementById('particles'),x=c.getContext('2d');let W,H,parts;
 function rs(){W=c.width=innerWidth;H=c.height=innerHeight;
