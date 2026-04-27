@@ -29,6 +29,13 @@ export function isAuthorized(chatId: string | number): boolean {
   return ids.has(String(chatId));
 }
 
+// Escapa caracteres que ativam Markdown V1 do Telegram (_*`[).
+// Sem isso, nomes de arquivo com underscore (provimento 195_2025) quebram
+// o parser com erro 400 "can't parse entities".
+export function escapeMd(s: string): string {
+  return String(s ?? '').replace(/([_*`\[])/g, '\\$1');
+}
+
 // ── Outbound: envia mensagem ────────────────────────────────────────────────
 export async function sendMessage(chatId: string | number, text: string): Promise<void> {
   try {
@@ -39,8 +46,28 @@ export async function sendMessage(chatId: string | number, text: string): Promis
       disable_web_page_preview: true,
     }, { timeout: 10000 });
   } catch (err) {
-    const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
-    const status = ax.response?.status ?? '?';
+    const ax = err as { response?: { status?: number; data?: { description?: string } }; message?: string };
+    const status = ax.response?.status ?? 0;
+    const desc   = ax.response?.data?.description ?? '';
+    // Rede de segurança: 400 com 'parse entities' = caractere markdown solto.
+    // Reenvia SEM parse_mode (texto cru) pra garantir entrega.
+    if (status === 400 && /parse entit/i.test(desc)) {
+      console.warn(`[Telegram sendMessage] Markdown explodiu (${desc.slice(0, 80)}), retry sem parse_mode`);
+      try {
+        await axios.post(botUrl('sendMessage'), {
+          chat_id: chatId,
+          text,
+          disable_web_page_preview: true,
+        }, { timeout: 10000 });
+        void logTelegram('outbound', String(chatId), text).catch(() => {});
+        return;
+      } catch (err2) {
+        const ax2 = err2 as { response?: { status?: number; data?: unknown }; message?: string };
+        const detail = JSON.stringify(ax2.response?.data ?? ax2.message ?? err2);
+        console.error('[Telegram sendMessage retry] falhou:', detail);
+        throw new Error(`Telegram retry: ${detail}`);
+      }
+    }
     const detail = JSON.stringify(ax.response?.data ?? ax.message ?? err);
     console.error('[Telegram sendMessage error]', JSON.stringify({ status, chatId, detail }));
     throw new Error(`Telegram (${status}): falha ao enviar para ${chatId} — ${detail}`);
@@ -196,7 +223,7 @@ export async function processTelegramIncoming(incoming: TelegramIncoming): Promi
       return;
     }
     try {
-      await sendMessage(incoming.chatId, `📥 Recebi *${incoming.document.filename}*, processando…`);
+      await sendMessage(incoming.chatId, `📥 Recebi *${escapeMd(incoming.document.filename)}*, processando…`);
       const buf = await downloadTelegramFile(incoming.document.file_id);
       const titulo    = (incoming.document.caption || incoming.document.filename).replace(/\.pdf$/i, '');
       const categoria = detectarCategoria(incoming.document.filename);
@@ -207,13 +234,14 @@ export async function processTelegramIncoming(incoming: TelegramIncoming): Promi
         categoria,
         arquivoNome: incoming.document.filename,
       });
+      const tituloSafe = escapeMd(r.titulo);
       const resposta = r.ja_existia
-        ? `📚 Já tinha *${r.titulo}* na memória, Chefe.`
-        : `✅ Aprendi: *${r.titulo}* (${r.chunks_inseridos} trechos, ${r.paginas} páginas, categoria: ${categoria})`;
+        ? `📚 Já tinha *${tituloSafe}* na memória, Chefe.`
+        : `✅ Aprendi: *${tituloSafe}* (${r.chunks_inseridos} trechos, ${r.paginas} páginas, categoria: ${categoria})`;
       await sendMessage(incoming.chatId, resposta);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await sendMessage(incoming.chatId, `❌ Falhei ingerindo o PDF: ${msg}`);
+      await sendMessage(incoming.chatId, `❌ Falhei ingerindo o PDF: ${escapeMd(msg)}`);
     }
     return;
   }
