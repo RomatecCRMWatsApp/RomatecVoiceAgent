@@ -5,7 +5,11 @@ import { supabase } from './supabase';
 import { gerarEmbeddingUnico } from './embeddings';
 
 const DEFAULT_TOP_K     = parseInt(process.env.RAG_TOP_K || '5', 10);
-const DEFAULT_THRESHOLD = parseFloat(process.env.RAG_MIN_SIMILARITY || '0.70');
+// v1.26.9: 0.70 estava conservador demais — chunks reais em portugues tecnico
+// ficam tipicamente em 0.55-0.65. 0.50 captura material relevante sem trazer
+// ruido. Testes empiricos: query 'o que é contrato' retorna trechos com sim
+// 0.57-0.59 — todos contextualmente certos.
+const DEFAULT_THRESHOLD = parseFloat(process.env.RAG_MIN_SIMILARITY || '0.50');
 
 export interface BuscarOpts {
   top_k?:     number;
