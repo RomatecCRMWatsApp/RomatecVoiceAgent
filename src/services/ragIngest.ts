@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { PDFParse } from 'pdf-parse';
 import { supabase } from './supabase';
 import { gerarEmbeddings } from './embeddings';
-import { sanitizarParaPostgres } from './textSanitize';
+import { sanitizarParaPostgres, validarQualidadeTexto } from './textSanitize';
 
 const CHUNK_SIZE    = 1000;
 const CHUNK_OVERLAP = 200;
@@ -138,6 +138,14 @@ export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
   // normaliza NFC). Sem isso, PDFs com fontes embedded geram erro
   // 'unsupported Unicode escape sequence' no insert.
   texto = sanitizarParaPostgres(texto);
+
+  // v1.26.8: valida qualidade ANTES de gravar. PDFs com CID fonts, assinatura
+  // digital ou scanneados geram texto gibberish que polui a base vetorial.
+  const qualidade = validarQualidadeTexto(texto);
+  console.log(`${tag} 🔍 qualidade ratio=${(qualidade.ratio * 100).toFixed(0)}% (+${Date.now()-t0}ms)`);
+  if (!qualidade.ok) {
+    throw new Error(qualidade.motivo!);
+  }
 
   const chunks = chunkear(texto);
   console.log(`${tag} ✂ chunks=${chunks.length} (+${Date.now()-t0}ms)`);
