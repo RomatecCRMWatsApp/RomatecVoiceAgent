@@ -277,9 +277,11 @@ export async function think(
     + `\n\nData/hora atual no servidor: ${nowBR()} (Fortaleza/BRT, GMT-3).`
     + priorContext;
 
-  // v1.14.1: 40 → 15 mensagens pra reduzir input tokens.
+  // v1.24.2: 15 → 8 mensagens — system prompt + 22 tools + RAG já pesam ~10k tokens,
+  // 15 msgs estourava limite TPM 12k do Groq free tier (llama-3.3-70b). RAG/MySQL
+  // cobre contexto antigo, então cortar histórico curto não compromete continuidade.
   const history: { role: 'user' | 'assistant'; content: string }[] = isExplicitSession
-    ? (await getSessionMessages(sessionId, 15).catch(() => []))
+    ? (await getSessionMessages(sessionId, 8).catch(() => []))
         .map(r => ({ role: r.role, content: r.content }))
     : getSessionHistory();
 
