@@ -15,9 +15,17 @@ import { GoogleGenerativeAI, type FunctionDeclaration, SchemaType } from '@googl
 import { toolDefinitions, executeTool } from '../agent/tools';
 import type { ThinkAttachment } from '../agent/think';
 
-const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'llama-3.3-70b';
-const GEMINI_MODEL   = process.env.GEMINI_MODEL   || 'gemini-2.0-flash-exp';
+const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'gpt-oss-120b';
+const GEMINI_MODEL   = process.env.GEMINI_MODEL   || 'gemini-2.5-flash';
 const CLAUDE_MODEL   = process.env.CLAUDE_FALLBACK_MODEL || 'claude-sonnet-4-5';
+
+// Log no boot — facilita debug de "qual modelo realmente está rodando".
+// Aparece UMA vez quando o módulo é carregado, mostrando o que será usado
+// até o próximo restart do container.
+console.log(
+  `[aiCascade] modelos ativos: Cerebras=${CEREBRAS_MODEL} | ` +
+  `Gemini=${GEMINI_MODEL} | Claude=${CLAUDE_MODEL}`
+);
 
 const MAX_HISTORY = parseInt(process.env.AI_MAX_HISTORY_MESSAGES || '12', 10);
 const MAX_OUTPUT  = parseInt(process.env.AI_MAX_TOKENS_OUTPUT    || '1024', 10);
