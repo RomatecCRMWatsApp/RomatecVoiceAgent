@@ -92,11 +92,55 @@ function chunkear(texto: string): { conteudo: string; aproxPagina: number }[] {
 }
 
 export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
+  // Extrai texto do PDF — pdf-parse v2 API
+  const parser = new PDFParse({ data: input.pdfBuffer });
+  let texto = '';
+  let paginas = 0;
+  try {
+    const result = await parser.getText();
+    texto   = result.text || '';
+    paginas = result.total || 0;
+  } catch (err) {
+    throw new Error(`PDFParse falhou: ${(err as Error).message}`);
+  } finally {
+    await parser.destroy().catch(() => {});
+  }
+  if (!texto || texto.trim().length < 20) {
+    throw new Error('PDF sem texto extraível (pode ser imagem escaneada — precisa OCR)');
+  }
+  return ingerirTexto({
+    texto,
+    titulo:       input.titulo,
+    fonte:        input.fonte,
+    categoria:    input.categoria,
+    arquivoNome:  input.arquivoNome,
+    metadata:     input.metadata,
+    paginas,
+    sourceBuffer: input.pdfBuffer, // hash baseado no PDF original
+  });
+}
+
+// Ingestão a partir de texto puro (Markdown, .txt, transcrições, etc).
+// Usado pelo script Obsidian e qualquer fonte que não seja PDF.
+export interface IngestTextoInput {
+  texto:        string;
+  titulo:       string;
+  fonte:        string;
+  categoria?:   string;
+  arquivoNome?: string;
+  metadata?:    Record<string, unknown>;
+  paginas?:     number;       // 0 ou indefinido = chunkear linear
+  sourceBuffer?: Buffer;      // se vier (do PDF), hash usa esse buffer; senão hash do texto
+}
+
+export async function ingerirTexto(input: IngestTextoInput): Promise<IngestResult> {
   const t0   = Date.now();
   const tag  = `[rag] ${input.titulo.slice(0, 40)}`;
   const sb   = supabase();
-  const hash = crypto.createHash('sha256').update(input.pdfBuffer).digest('hex');
-  console.log(`${tag} ▶ start fonte=${input.fonte} ${(input.pdfBuffer.length/1024).toFixed(1)}KB hash=${hash.slice(0,12)}`);
+  const fonteHashInput = input.sourceBuffer ?? Buffer.from(input.texto, 'utf8');
+  const hash = crypto.createHash('sha256').update(fonteHashInput).digest('hex');
+  const sizeKb = (fonteHashInput.length / 1024).toFixed(1);
+  console.log(`${tag} ▶ start fonte=${input.fonte} ${sizeKb}KB hash=${hash.slice(0,12)}`);
 
   // Dedup
   const existing = await sb
@@ -116,31 +160,11 @@ export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
     };
   }
 
-  // Extrai texto do PDF — pdf-parse v2 API
-  const parser = new PDFParse({ data: input.pdfBuffer });
-  let texto = '';
-  let paginas = 0;
-  try {
-    const result = await parser.getText();
-    texto   = result.text || '';
-    paginas = result.total || 0;
-  } catch (err) {
-    throw new Error(`PDFParse falhou: ${(err as Error).message}`);
-  } finally {
-    await parser.destroy().catch(() => {});
-  }
-  console.log(`${tag} 📄 parsed ${paginas} pgs, ${texto.length} chars (+${Date.now()-t0}ms)`);
-  if (!texto || texto.trim().length < 20) {
-    throw new Error('PDF sem texto extraível (pode ser imagem escaneada — precisa OCR)');
-  }
+  // Sanitiza pra Postgres TEXT
+  let texto = sanitizarParaPostgres(input.texto);
+  console.log(`${tag} 📄 ${input.paginas ?? 0} pgs, ${texto.length} chars (+${Date.now()-t0}ms)`);
 
-  // Sanitiza texto pra Postgres TEXT (remove NUL, ctrl chars, surrogates,
-  // normaliza NFC). Sem isso, PDFs com fontes embedded geram erro
-  // 'unsupported Unicode escape sequence' no insert.
-  texto = sanitizarParaPostgres(texto);
-
-  // v1.26.8: valida qualidade ANTES de gravar. PDFs com CID fonts, assinatura
-  // digital ou scanneados geram texto gibberish que polui a base vetorial.
+  // Valida qualidade
   const qualidade = validarQualidadeTexto(texto);
   console.log(`${tag} 🔍 qualidade ratio=${(qualidade.ratio * 100).toFixed(0)}% (+${Date.now()-t0}ms)`);
   if (!qualidade.ok) {
@@ -149,9 +173,9 @@ export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
 
   const chunks = chunkear(texto);
   console.log(`${tag} ✂ chunks=${chunks.length} (+${Date.now()-t0}ms)`);
-  if (chunks.length === 0) throw new Error('Nenhum chunk gerado a partir do PDF');
+  if (chunks.length === 0) throw new Error('Nenhum chunk gerado');
 
-  // Embeddings em batch ANTES de inserir doc (se Voyage falhar, não deixa doc órfão)
+  // Embeddings em batch ANTES de inserir doc (rollback gratuito se Voyage falhar)
   let embeddings: number[][];
   try {
     embeddings = await gerarEmbeddings(chunks.map(c => c.conteudo), 'document');
@@ -189,14 +213,12 @@ export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
     embedding:    embeddings[i],
   }));
 
-  // Insere chunks em batches de 100 (limite gentil pra payload Supabase)
   const BATCH = 100;
   for (let i = 0; i < insertRows.length; i += BATCH) {
     const slice = insertRows.slice(i, i + BATCH);
     const ins = await sb.from('rag_chunks').insert(slice);
     if (ins.error) {
       console.error(`${tag} ❌ chunk insert ${i}-${i+slice.length}: ${ins.error.message}`);
-      // rollback documento pra não deixar lixo
       await sb.from('rag_documentos').delete().eq('id', documentoId);
       throw new Error(`Falha ao inserir chunks: ${ins.error.message}`);
     }
@@ -208,7 +230,7 @@ export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
     documento_id:     documentoId,
     titulo:           input.titulo,
     chunks_inseridos: chunks.length,
-    paginas,
+    paginas:          input.paginas ?? 0,
   };
 }
 

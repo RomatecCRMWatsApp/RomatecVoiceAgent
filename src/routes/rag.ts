@@ -4,7 +4,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import {
-  ingerirPdf, listarDocumentos, apagarDocumento, detectarCategoria,
+  ingerirPdf, ingerirTexto, listarDocumentos, apagarDocumento, detectarCategoria,
 } from '../services/ragIngest';
 import { buscarMemoria } from '../services/ragSearch';
 import { supabaseConfigurado } from '../services/supabase';
@@ -35,6 +35,32 @@ router.post('/ingest', upload.single('pdf'), async (req: Request, res: Response)
       fonte,
       categoria,
       arquivoNome: req.file.originalname,
+    });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// v1.27.0: ingest de texto puro (Markdown, transcrições, notas).
+// Body JSON: { texto, titulo, fonte?, categoria?, arquivo_nome?, metadata? }
+router.post('/ingest-text', async (req: Request, res: Response) => {
+  try {
+    const b = (req.body ?? {}) as {
+      texto?: string; titulo?: string; fonte?: string;
+      categoria?: string; arquivo_nome?: string;
+      metadata?: Record<string, unknown>;
+    };
+    if (!b.texto || !b.titulo) {
+      return res.status(400).json({ error: 'Campos obrigatórios: "texto" e "titulo".' });
+    }
+    const r = await ingerirTexto({
+      texto:       b.texto,
+      titulo:      b.titulo,
+      fonte:       b.fonte || 'api',
+      categoria:   b.categoria || detectarCategoria(b.titulo),
+      arquivoNome: b.arquivo_nome,
+      metadata:    b.metadata,
     });
     res.json(r);
   } catch (err) {
