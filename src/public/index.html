@@ -198,8 +198,17 @@ async function sendToZayra(blob){
   }catch(e){console.error(e);tx('Erro ao falar com a ZAYRA');setState('idle');}
 }
 
-/* PWA */
-if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
+/* PWA — registra SW e força reload quando uma versão nova ativar */
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  navigator.serviceWorker.addEventListener('message', e=>{
+    if(e.data&&e.data.type==='SW_UPDATED'){
+      console.log('[ZAYRA] SW atualizado:',e.data.cache,'— recarregando');
+      // Pequeno delay pra evitar loop em iOS
+      setTimeout(()=>location.reload(),300);
+    }
+  });
+}
 </script>
 </body>
 </html>
