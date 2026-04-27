@@ -1,8 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
-import { toolDefinitions, executeTool } from './tools';
-import { AgentResponse, ToolResult } from '../types';
+import { AgentResponse } from '../types';
 import { AGENT_IDENTITY } from './identity';
+import { pensarEmCascata } from '../services/aiCascade';
 import {
   getSessionHistory,
   addToSession,
@@ -20,24 +18,15 @@ import {
   type Channel,
 } from './memory';
 
-// Lazy-init clients — avoid crashing the boot when only one provider is configured.
+// v1.25.0: providers de IA agora vivem em src/services/aiCascade.ts.
+// Cliente Claude permanece aqui APENAS para auto-titulação (não-crítico).
+import Anthropic from '@anthropic-ai/sdk';
 let _anthropic: Anthropic | null = null;
 function anthropicClient(): Anthropic {
   if (!_anthropic) _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   return _anthropic;
 }
-
-let _groq: OpenAI | null = null;
-function groqClient(): OpenAI {
-  if (!_groq) _groq = new OpenAI({
-    apiKey: process.env.GROQ_API_KEY,
-    baseURL: 'https://api.groq.com/openai/v1',
-  });
-  return _groq;
-}
-
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-const CLAUDE_MODEL = 'claude-sonnet-4-6';
+const TITLE_MODEL = process.env.CLAUDE_FALLBACK_MODEL || 'claude-sonnet-4-5';
 
 const DEFAULT_SESSION_ID = `default_${Date.now()}`;
 
@@ -197,10 +186,6 @@ export interface ThinkOptions {
   attachments?: ThinkAttachment[];
 }
 
-function useGroq(): boolean {
-  return !!process.env.GROQ_API_KEY;
-}
-
 // Hora atual em Fortaleza/BRT (GMT-3 sem horário de verão), formato humano em pt-BR.
 // Injetado no system prompt para que ZAYRA tenha consciência temporal sem precisar de tool.
 function nowBR(): string {
@@ -213,33 +198,6 @@ function nowBR(): string {
     hour:     '2-digit',
     minute:   '2-digit',
   }).format(new Date());
-}
-
-function hasClaude(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY;
-}
-
-// True for transient provider issues where falling back to Claude makes sense.
-function isGroqFallbackable(err: unknown): boolean {
-  const e = err as { status?: number; code?: string; type?: string } | null;
-  if (!e || typeof e !== 'object') return false;
-  if (e.status === 429) return true;                     // rate limit
-  if (typeof e.status === 'number' && e.status >= 500) return true; // 5xx
-  if (e.code === 'rate_limit_exceeded') return true;
-  if (e.code === 'ETIMEDOUT' || e.code === 'ECONNRESET' || e.code === 'ECONNREFUSED') return true;
-  return false;
-}
-
-// ── Convert Anthropic tool schema to OpenAI/Groq format ─────────────────────
-function toolsForOpenAI(): OpenAI.Chat.Completions.ChatCompletionTool[] {
-  return toolDefinitions.map(t => ({
-    type: 'function',
-    function: {
-      name:        t.name,
-      description: t.description ?? '',
-      parameters:  (t.input_schema as Record<string, unknown>) ?? { type: 'object', properties: {} },
-    },
-  }));
 }
 
 export async function think(
@@ -277,42 +235,18 @@ export async function think(
     + `\n\nData/hora atual no servidor: ${nowBR()} (Fortaleza/BRT, GMT-3).`
     + priorContext;
 
-  // v1.24.2: 15 → 8 mensagens — system prompt + 22 tools + RAG já pesam ~10k tokens,
-  // 15 msgs estourava limite TPM 12k do Groq free tier (llama-3.3-70b). RAG/MySQL
-  // cobre contexto antigo, então cortar histórico curto não compromete continuidade.
+  // v1.25.0: history controlado por AI_MAX_HISTORY_MESSAGES (default 12).
+  // pensarEmCascata também aplica truncarHistorico() como rede de segurança.
+  const HISTORY_LIMIT = parseInt(process.env.AI_MAX_HISTORY_MESSAGES || '12', 10);
   const history: { role: 'user' | 'assistant'; content: string }[] = isExplicitSession
-    ? (await getSessionMessages(sessionId, 8).catch(() => []))
+    ? (await getSessionMessages(sessionId, HISTORY_LIMIT).catch(() => []))
         .map(r => ({ role: r.role, content: r.content }))
     : getSessionHistory();
 
-  let result: { text: string; toolsUsed: string[] };
-  const hasAttachments = !!options.attachments && options.attachments.length > 0;
-
-  if (hasAttachments) {
-    // Anexos exigem multimodal — Claude obrigatório (Groq llama-3.3 não tem vision)
-    if (!hasClaude()) {
-      throw new Error('Anexos (imagens/PDFs) exigem Claude. Configure ANTHROPIC_API_KEY.');
-    }
-    result = await thinkWithClaude(systemPrompt, history, userMessage, options.attachments);
-  } else if (useGroq()) {
-    try {
-      result = await thinkWithGroq(systemPrompt, history, userMessage);
-    } catch (err) {
-      if (isGroqFallbackable(err) && hasClaude()) {
-        console.warn('[think] Groq failed, falling back to Claude:', (err as Error).message ?? err);
-        result = await thinkWithClaude(systemPrompt, history, userMessage);
-      } else {
-        throw err;
-      }
-    }
-  } else if (hasClaude()) {
-    result = await thinkWithClaude(systemPrompt, history, userMessage);
-  } else {
-    throw new Error('Nenhum provider de IA configurado (faltam GROQ_API_KEY e ANTHROPIC_API_KEY).');
-  }
-
-  const text      = result.text;
-  const toolsUsed = result.toolsUsed;
+  // v1.25.0: cascata Cerebras → Gemini → Claude com truncamento automático
+  const cascade = await pensarEmCascata(systemPrompt, history, userMessage, options.attachments);
+  const text      = cascade.text;
+  const toolsUsed = cascade.toolsUsed;
 
   if (!isExplicitSession) {
     addToSession('user', userMessage);
@@ -337,155 +271,7 @@ export async function think(
   return { text, toolsUsed, sessionId };
 }
 
-// ── Provider: Groq (llama-3.3-70b-versatile) — PRIMARY ──────────────────────
-async function thinkWithGroq(
-  systemPrompt: string,
-  history:      { role: 'user' | 'assistant'; content: string }[],
-  userMessage:  string,
-): Promise<{ text: string; toolsUsed: string[] }> {
-  const tools = toolsForOpenAI();
-
-  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: 'system', content: systemPrompt },
-    ...history.map(m => ({ role: m.role, content: m.content })),
-    { role: 'user', content: userMessage },
-  ];
-
-  const toolsUsed: string[] = [];
-
-  let response = await groqClient().chat.completions.create({
-    model:       GROQ_MODEL,
-    max_tokens:  1024,
-    messages,
-    tools,
-    tool_choice: 'auto',
-  });
-
-  let safety = 8; // hard cap on tool-loop iterations
-  while (
-    safety-- > 0 &&
-    response.choices[0]?.finish_reason === 'tool_calls' &&
-    response.choices[0].message.tool_calls?.length
-  ) {
-    const assistantMsg = response.choices[0].message;
-    const toolCalls    = assistantMsg.tool_calls ?? [];
-
-    const toolResults: ToolResult[] = await Promise.all(
-      toolCalls.map(tc => {
-        let parsed: Record<string, unknown> = {};
-        try { parsed = JSON.parse(tc.function.arguments || '{}'); } catch {}
-        return executeTool(tc.function.name, parsed);
-      }),
-    );
-
-    toolsUsed.push(...toolResults.map(r => r.toolName));
-
-    messages.push(assistantMsg);
-    toolCalls.forEach((tc, i) => {
-      messages.push({
-        role:        'tool',
-        tool_call_id: tc.id,
-        content:     JSON.stringify(toolResults[i].data ?? { error: toolResults[i].error }),
-      });
-    });
-
-    response = await groqClient().chat.completions.create({
-      model:       GROQ_MODEL,
-      max_tokens:  1024,
-      messages,
-      tools,
-      tool_choice: 'auto',
-    });
-  }
-
-  const text = response.choices[0]?.message?.content?.trim() || 'Não consegui processar sua solicitação.';
-  return { text, toolsUsed };
-}
-
-// ── Provider: Claude — FALLBACK + multimodal (vision) ──────────────────────
-async function thinkWithClaude(
-  systemPrompt: string,
-  history:      { role: 'user' | 'assistant'; content: string }[],
-  userMessage:  string,
-  attachments?: ThinkAttachment[],
-): Promise<{ text: string; toolsUsed: string[] }> {
-  // Constrói content da última msg do user. Sem anexos = string simples (rápido).
-  // Com anexos = array de blocks: [image|document, text]
-  let userContent: Anthropic.MessageParam['content'];
-  if (attachments && attachments.length > 0) {
-    const blocks: Anthropic.ContentBlockParam[] = [];
-    for (const a of attachments) {
-      if (a.kind === 'image') {
-        blocks.push({
-          type: 'image',
-          source: { type: 'base64', media_type: a.mime as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif', data: a.base64 },
-        });
-      } else {
-        // PDF como document — Claude Sonnet 4 suporta nativamente
-        blocks.push({
-          type: 'document',
-          source: { type: 'base64', media_type: 'application/pdf', data: a.base64 },
-        } as Anthropic.ContentBlockParam);
-      }
-    }
-    blocks.push({ type: 'text', text: userMessage || 'Analise os anexos.' });
-    userContent = blocks;
-  } else {
-    userContent = userMessage;
-  }
-
-  const messages: Anthropic.MessageParam[] = [
-    ...history.map(m => ({ role: m.role, content: m.content })),
-    { role: 'user', content: userContent },
-  ];
-
-  const toolsUsed: string[] = [];
-
-  let response = await anthropicClient().messages.create({
-    model:      CLAUDE_MODEL,
-    max_tokens: attachments && attachments.length > 0 ? 4096 : 1024,
-    system:     systemPrompt,
-    tools:      toolDefinitions,
-    messages,
-  });
-
-  while (response.stop_reason === 'tool_use') {
-    const toolUseBlocks = response.content.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
-    );
-
-    const toolResults: ToolResult[] = await Promise.all(
-      toolUseBlocks.map(block => executeTool(block.name, block.input as Record<string, unknown>)),
-    );
-
-    toolsUsed.push(...toolResults.map(r => r.toolName));
-
-    messages.push({ role: 'assistant', content: response.content });
-    messages.push({
-      role: 'user',
-      content: toolUseBlocks.map((block, i) => ({
-        type:        'tool_result' as const,
-        tool_use_id: block.id,
-        content:     JSON.stringify(toolResults[i].data ?? { error: toolResults[i].error }),
-        is_error:    !toolResults[i].success,
-      })),
-    });
-
-    response = await anthropicClient().messages.create({
-      model:      CLAUDE_MODEL,
-      max_tokens: 1024,
-      system:     systemPrompt,
-      tools:      toolDefinitions,
-      messages,
-    });
-  }
-
-  const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
-  const text      = textBlock?.text ?? 'Não consegui processar sua solicitação.';
-  return { text, toolsUsed };
-}
-
-// ── Auto-title (uses Groq when available) ───────────────────────────────────
+// ── Auto-title (Claude Sonnet — chamada barata, não-crítica) ───────────────
 async function maybeGenerateTitle(
   sessionId:    string,
   userMessage:  string,
@@ -494,42 +280,20 @@ async function maybeGenerateTitle(
   const meta = await getSessionMeta(sessionId);
   if (!meta || meta.title) return;
 
+  if (!process.env.ANTHROPIC_API_KEY) return;
+
   const prompt = `Pergunta do usuário: ${userMessage}\n\nResposta da assistente: ${assistantText}\n\nTítulo:`;
   const sys    = 'Gere um título curto (máx 6 palavras, em português) que resuma o assunto da conversa. Responda apenas o título, sem aspas, sem pontuação final.';
 
-  const tryGroq = async (): Promise<string> => {
-    const r = await groqClient().chat.completions.create({
-      model:      GROQ_MODEL,
-      max_tokens: 30,
-      messages: [
-        { role: 'system', content: sys },
-        { role: 'user',   content: prompt },
-      ],
-    });
-    return (r.choices[0]?.message?.content ?? '').trim();
-  };
-  const tryClaude = async (): Promise<string> => {
+  try {
     const r = await anthropicClient().messages.create({
-      model:      CLAUDE_MODEL,
+      model:      TITLE_MODEL,
       max_tokens: 30,
       system:     sys,
       messages: [{ role: 'user', content: prompt }],
     });
     const block = r.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
-    return (block?.text ?? '').trim();
-  };
-
-  let title = '';
-  try {
-    if (useGroq()) {
-      try { title = await tryGroq(); }
-      catch (err) {
-        if (isGroqFallbackable(err) && hasClaude()) title = await tryClaude();
-        else return; // silent — title is non-critical
-      }
-    } else if (hasClaude()) {
-      title = await tryClaude();
-    }
+    let title = (block?.text ?? '').trim();
     title = title.replace(/^["']|["']$/g, '').slice(0, 200);
     if (title) await setSessionTitle(sessionId, title);
   } catch {
