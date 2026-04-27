@@ -150,24 +150,40 @@ async function toggleListen(){
     return;
   }
   try{
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+      throw new Error('Mic API indisponível (precisa HTTPS + iOS 14.3+)');
+    }
+    if(typeof MediaRecorder==='undefined'){
+      throw new Error('MediaRecorder indisponível neste navegador');
+    }
     micStream=await navigator.mediaDevices.getUserMedia({audio:true});
     audioCtx=audioCtx||new(window.AudioContext||window.webkitAudioContext)();
     const src=audioCtx.createMediaStreamSource(micStream);
     analyser=audioCtx.createAnalyser();analyser.fftSize=512;src.connect(analyser);
     dataArr=new Uint8Array(analyser.frequencyBinCount);
     chunks=[];
-    const mime=MediaRecorder.isTypeSupported('audio/webm')?'audio/webm':'audio/mp4';
-    mediaRec=new MediaRecorder(micStream,{mimeType:mime});
+    let mime='';
+    if(MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))mime='audio/webm;codecs=opus';
+    else if(MediaRecorder.isTypeSupported('audio/webm'))mime='audio/webm';
+    else if(MediaRecorder.isTypeSupported('audio/mp4'))mime='audio/mp4';
+    else if(MediaRecorder.isTypeSupported('audio/aac'))mime='audio/aac';
+    mediaRec=mime?new MediaRecorder(micStream,{mimeType:mime}):new MediaRecorder(micStream);
+    const realMime=mediaRec.mimeType||mime||'audio/webm';
     mediaRec.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
     mediaRec.onstop=async()=>{
       micStream.getTracks().forEach(t=>t.stop());
-      const blob=new Blob(chunks,{type:mime});
-      await sendToZayra(blob);
+      const blob=new Blob(chunks,{type:realMime});
+      await sendToZayra(blob,realMime);
     };
+    mediaRec.onerror=e=>{tx('Erro mic: '+(e.error?.message||'desconhecido'));setState('idle');};
     mediaRec.start();
-    listening=true;btn.classList.add('active');setState('listening','Escutando…');tx('');
+    listening=true;btn.classList.add('active');setState('listening','Escutando…');tx('Gravando ('+realMime+')…');
     loopMic();
-  }catch(e){setState('thinking','Microfone bloqueado');console.error(e);}
+  }catch(e){
+    setState('idle','Mic bloqueado');
+    tx('❌ '+(e.message||e));
+    console.error('[mic]',e);
+  }
 }
 function loopMic(){if(!listening)return;
   analyser.getByteTimeDomainData(dataArr);let sum=0;
@@ -175,27 +191,46 @@ function loopMic(){if(!listening)return;
   target=Math.min(1,.25+Math.sqrt(sum/dataArr.length)*4);
   requestAnimationFrame(loopMic);
 }
-async function sendToZayra(blob){
+async function sendToZayra(blob,mime){
   setState('thinking','Processando…');
+  tx('Enviando '+(blob.size/1024).toFixed(1)+' KB…');
+  const ext=(mime||'').includes('mp4')?'mp4':(mime||'').includes('webm')?'webm':'audio';
   const fd=new FormData();
-  fd.append('audio',blob,'voice.webm');
+  fd.append('audio',blob,'voice.'+ext);
   try{
-    const r=await fetch('/voice',{method:'POST',body:fd});
+    const r=await fetch('/voice',{method:'POST',body:fd,cache:'no-store'});
+    if(!r.ok){
+      const errTxt=await r.text().catch(()=>'(sem corpo)');
+      tx('❌ HTTP '+r.status+' — '+errTxt.slice(0,200));
+      setState('idle');return;
+    }
     const ctype=r.headers.get('content-type')||'';
     if(ctype.includes('audio')){
       const audioBlob=await r.blob();
       const txtHdr=r.headers.get('x-zayra-text')||r.headers.get('x-response-text');
-      if(txtHdr) tx(decodeURIComponent(txtHdr));
+      const trHdr=r.headers.get('x-transcription');
+      const trans=trHdr?decodeURIComponent(trHdr):'';
+      const resp=txtHdr?decodeURIComponent(txtHdr):'';
+      tx((trans?'🎙 '+trans+'\n\n':'')+(resp||'(sem resposta)'));
       setState('speaking','Falando…');
       const audio=new Audio(URL.createObjectURL(audioBlob));
       audio.onended=()=>setState('idle');
-      audio.play();
+      audio.onerror=()=>{tx(tx.textContent+'\n⚠️ erro tocando áudio');setState('idle');};
+      try{ await audio.play(); }
+      catch(playErr){
+        tx((tx.textContent||'')+'\n⚠️ play() bloqueado: '+playErr.message);
+        setState('idle');
+      }
     } else {
       const data=await r.json();
       tx(data.response||data.text||data.message||'(sem resposta)');
       setState('idle');
     }
-  }catch(e){console.error(e);tx('Erro ao falar com a ZAYRA');setState('idle');}
+  }catch(e){
+    console.error('[fetch /voice]',e);
+    tx('❌ Falha de rede: '+(e.message||e));
+    setState('idle');
+  }
 }
 
 /* PWA — registra SW e força reload quando uma versão nova ativar */

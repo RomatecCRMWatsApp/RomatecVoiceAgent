@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ZAYRA — Reset Cache</title>
+<style>
+body{margin:0;padding:32px;font-family:-apple-system,sans-serif;background:#020a07;color:#cfeede;min-height:100vh}
+h1{color:#3dffb0;font-size:18px;letter-spacing:.2em}
+pre{background:#04140d;padding:14px;border-radius:8px;border:1px solid rgba(61,255,176,.2);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.ok{color:#3dffb0}.err{color:#ff6b6b}
+button{margin-top:20px;padding:14px 28px;background:#3dffb0;color:#020a07;border:0;border-radius:8px;font-weight:700;font-size:14px;letter-spacing:.1em}
+</style>
+</head>
+<body>
+<h1>ZAYRA — RESET DE CACHE</h1>
+<pre id="log">Limpando…</pre>
+<button onclick="location.href='/'">Voltar para ZAYRA</button>
+<script>
+(async()=>{
+  const log = document.getElementById('log');
+  const lines = [];
+  const w = (cls,msg)=>{lines.push(`<span class="${cls}">${msg}</span>`); log.innerHTML = lines.join('\n');};
+
+  try {
+    if('serviceWorker' in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      w('ok', `[SW] encontrados ${regs.length} registrations`);
+      for(const r of regs){
+        const ok = await r.unregister();
+        w(ok?'ok':'err', `[SW] unregister(${r.scope}) → ${ok}`);
+      }
+    } else {
+      w('err', '[SW] navigator.serviceWorker indisponível');
+    }
+  } catch(e){ w('err', `[SW] erro: ${e.message}`); }
+
+  try {
+    if('caches' in window){
+      const keys = await caches.keys();
+      w('ok', `[Cache] encontradas ${keys.length} caches: ${keys.join(', ')}`);
+      for(const k of keys){
+        const ok = await caches.delete(k);
+        w(ok?'ok':'err', `[Cache] delete(${k}) → ${ok}`);
+      }
+    }
+  } catch(e){ w('err', `[Cache] erro: ${e.message}`); }
+
+  try {
+    localStorage.clear();
+    sessionStorage.clear();
+    w('ok', '[Storage] localStorage + sessionStorage limpos');
+  } catch(e){ w('err', `[Storage] erro: ${e.message}`); }
+
+  w('ok', '');
+  w('ok', '✅ Reset completo. Agora:');
+  w('ok', '  1. FECHE o app (swipe-up no iPhone)');
+  w('ok', '  2. ABRA de novo da tela de início');
+  w('ok', '  3. ZAYRA vai baixar tudo do zero');
+})();
+</script>
+</body>
+</html>
