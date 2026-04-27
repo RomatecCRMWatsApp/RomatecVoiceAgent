@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { PDFParse } from 'pdf-parse';
 import { supabase } from './supabase';
 import { gerarEmbeddings } from './embeddings';
+import { sanitizarParaPostgres } from './textSanitize';
 
 const CHUNK_SIZE    = 1000;
 const CHUNK_OVERLAP = 200;
@@ -132,6 +133,11 @@ export async function ingerirPdf(input: IngestInput): Promise<IngestResult> {
   if (!texto || texto.trim().length < 20) {
     throw new Error('PDF sem texto extraível (pode ser imagem escaneada — precisa OCR)');
   }
+
+  // Sanitiza texto pra Postgres TEXT (remove NUL, ctrl chars, surrogates,
+  // normaliza NFC). Sem isso, PDFs com fontes embedded geram erro
+  // 'unsupported Unicode escape sequence' no insert.
+  texto = sanitizarParaPostgres(texto);
 
   const chunks = chunkear(texto);
   console.log(`${tag} ✂ chunks=${chunks.length} (+${Date.now()-t0}ms)`);
