@@ -36,7 +36,35 @@ console.log(
 const MAX_HISTORY = parseInt(process.env.AI_MAX_HISTORY_MESSAGES || '12', 10);
 const MAX_OUTPUT  = parseInt(process.env.AI_MAX_TOKENS_OUTPUT    || '1024', 10);
 
+// Limite de input tokens estimados pra pular Cerebras (llama3.1-8b tem 8k context).
+// Se o prompt total estimado passar disso, pulamos direto pro Gemini que tem 1M.
+const CEREBRAS_MAX_INPUT_TOKENS = parseInt(
+  process.env.CEREBRAS_MAX_INPUT_TOKENS || '7500', 10,
+);
+
 const TOOL_LOOP_CAP = 8; // hard cap em iterações de tool use
+
+// Estimativa rápida de tokens — heurística clássica chars/4 (~80% de precisão
+// pra pt-BR). Não precisa ser exata, só evitar request que SABEMOS que vai 400.
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+// Estima tokens totais que serão enviados pro provider (sem o overhead do JSON
+// das tools, que cada provider serializa diferente — chutamos +20%).
+function estimatePromptTokens(
+  systemPrompt: string,
+  history: CascadeMessage[],
+  userMessage: string,
+): number {
+  const sysTokens  = estimateTokens(systemPrompt);
+  const histTokens = history.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+  const userTokens = estimateTokens(userMessage);
+  // toolDefinitions (importado abaixo) — JSON grosseiro, 1 vez por request
+  const toolsJson  = JSON.stringify(toolDefinitions);
+  const toolTokens = estimateTokens(toolsJson);
+  return Math.ceil((sysTokens + histTokens + userTokens + toolTokens) * 1.1);
+}
 
 export interface CascadeMessage {
   role:    'user' | 'assistant';
@@ -359,14 +387,24 @@ export async function pensarEmCascata(
   const truncado = truncarHistorico(history);
   const hasAttachments = !!attachments && attachments.length > 0;
 
-  // Cerebras llama-3.3-70b NÃO suporta vision — pula direto pra Gemini se houver anexo
+  // Cerebras pulado se: (1) houver anexos (sem vision), OU (2) prompt estimado
+  // exceder a janela do modelo (llama3.1-8b = 8k tokens). Evita request que
+  // sabemos que vai retornar 400 antes mesmo de sair daqui.
   if (!hasAttachments && process.env.CEREBRAS_API_KEY) {
-    try {
-      const r = await chamarCerebras(systemPrompt, truncado, userMessage);
-      console.log(`[AI] ✅ ${r.provider}`);
-      return r;
-    } catch (err) {
-      console.warn(`[AI] ⚠️ Cerebras falhou: ${(err as Error).message ?? err}`);
+    const estimated = estimatePromptTokens(systemPrompt, truncado, userMessage);
+    if (estimated > CEREBRAS_MAX_INPUT_TOKENS) {
+      console.warn(
+        `[AI] ⚠️ Cerebras pulado: prompt ~${estimated} tokens > ` +
+        `${CEREBRAS_MAX_INPUT_TOKENS} (janela do modelo). Indo direto pro Gemini.`
+      );
+    } else {
+      try {
+        const r = await chamarCerebras(systemPrompt, truncado, userMessage);
+        console.log(`[AI] ✅ ${r.provider}`);
+        return r;
+      } catch (err) {
+        console.warn(`[AI] ⚠️ Cerebras falhou: ${(err as Error).message ?? err}`);
+      }
     }
   }
 
