@@ -15,7 +15,13 @@ import { GoogleGenerativeAI, type FunctionDeclaration, SchemaType } from '@googl
 import { toolDefinitions, executeTool } from '../agent/tools';
 import type { ThinkAttachment } from '../agent/think';
 
-const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'gpt-oss-120b';
+// Modelos válidos no Cerebras Cloud (verificado via GET /v1/models em 2026-04):
+//   - llama3.1-8b                       (production, 8B, free tier ✅)
+//   - gpt-oss-120b                      (production, 120B, requer waitlist)
+//   - qwen-3-235b-a22b-instruct-2507    (preview)
+//   - zai-glm-4.7                       (preview)
+// llama-3.3-70b foi DESCONTINUADO — não usar.
+const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'llama3.1-8b';
 const GEMINI_MODEL   = process.env.GEMINI_MODEL   || 'gemini-2.5-flash';
 const CLAUDE_MODEL   = process.env.CLAUDE_FALLBACK_MODEL || 'claude-sonnet-4-5';
 
