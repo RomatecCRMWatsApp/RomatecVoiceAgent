@@ -24,11 +24,18 @@ function openai(): OpenAI {
 }
 
 function isFallbackable(err: unknown): boolean {
-  const e = err as { status?: number; code?: string } | null;
+  const e = err as { status?: number; statusCode?: number; code?: string; message?: string } | null;
   if (!e || typeof e !== 'object') return false;
-  if (e.status === 429) return true;
-  if (typeof e.status === 'number' && e.status >= 500) return true;
+  if (e.status === 429 || e.statusCode === 429) return true;
+  if (typeof e.status     === 'number' && e.status     >= 500) return true;
+  if (typeof e.statusCode === 'number' && e.statusCode >= 500) return true;
   if (e.code === 'ETIMEDOUT' || e.code === 'ECONNRESET' || e.code === 'ECONNREFUSED') return true;
+  // VoyageAI SDK lança Error com texto "Status code: 429" sem setar e.status.
+  // Cobre também outras formas comuns de rate limit / quota / overload.
+  if (typeof e.message === 'string' &&
+      /status\s*code:?\s*(4(29|03)|5\d\d)|rate\s*limit|too many requests|quota|overloaded/i.test(e.message)) {
+    return true;
+  }
   return false;
 }
 
@@ -71,15 +78,30 @@ export async function gerarEmbeddings(
   if (texts.length === 0) return [];
   if (process.env.VOYAGE_API_KEY) {
     try {
-      return await embedViaVoyage(texts, inputType);
+      const r = await embedViaVoyage(texts, inputType);
+      console.log(`[embeddings] ✅ Voyage ${VOYAGE_MODEL} (${texts.length} textos)`);
+      return r;
     } catch (err) {
-      if (isFallbackable(err) && process.env.OPENAI_API_KEY) {
-        console.warn(`[embeddings] Voyage falhou, fallback OpenAI: ${(err as Error).message}`);
-        return await embedViaOpenAI(texts);
+      const msg = (err as Error).message ?? String(err);
+      const fall = isFallbackable(err);
+      if (fall && process.env.OPENAI_API_KEY) {
+        console.warn(`[embeddings] ⚠️ Voyage falhou (${msg.slice(0, 120)}) — fallback OpenAI text-embedding-3-small`);
+        const r = await embedViaOpenAI(texts);
+        console.log(`[embeddings] ✅ OpenAI fallback ok (${texts.length} textos)`);
+        return r;
+      }
+      if (fall && !process.env.OPENAI_API_KEY) {
+        throw new Error(
+          `Voyage 429/5xx e OPENAI_API_KEY ausente — sem fallback disponível. ` +
+          `Adicione OPENAI_API_KEY no Railway OU adicione método de pagamento ` +
+          `em https://dashboard.voyageai.com (sem custo extra: 200M tokens free continuam). ` +
+          `Original: ${msg.slice(0, 200)}`
+        );
       }
       throw err;
     }
   }
+  console.log(`[embeddings] ✅ OpenAI (sem Voyage configurado, ${texts.length} textos)`);
   return await embedViaOpenAI(texts);
 }
 
