@@ -438,11 +438,20 @@ const today = () => new Date().toISOString().split('T')[0];
 const escape = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 async function api(path, opts={}) {
-  const r = await fetch(API + path, {
-    headers: {'Content-Type':'application/json'},
-    cache: 'no-store',
-    ...opts,
-  });
+  // Cache-busting via query param só em GET (Safari iOS engasga com cache:'no-store' + Content-Type)
+  const method = (opts.method || 'GET').toUpperCase();
+  let url = API + path;
+  if (method === 'GET') {
+    url += (path.includes('?') ? '&' : '?') + '_t=' + Date.now();
+  }
+  // Content-Type só quando tem body (evita "The string did not match the expected pattern" no iOS)
+  const fetchOpts = { ...opts };
+  if (opts.body) {
+    fetchOpts.headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  } else if (opts.headers) {
+    fetchOpts.headers = opts.headers;
+  }
+  const r = await fetch(url, fetchOpts);
   const d = await r.json();
   if (!r.ok) throw new Error(d.error || 'Erro API');
   return d;
