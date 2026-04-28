@@ -59,6 +59,24 @@ RESPOSTA: APENAS JSON válido, sem markdown, sem texto antes ou depois, no forma
   ]
 }`;
 
+async function callClaudeSegmenter(texto: string, maxTokens: number): Promise<{ raw: string; stop: string }> {
+  const r = await claude().messages.create({
+    model:      SEGMENTER_MODEL,
+    max_tokens: maxTokens,
+    system:     SYSTEM_PROMPT,
+    messages: [{
+      role:    'user',
+      content: `Segmente o contrato abaixo em cláusulas conforme as regras.\n\n---CONTRATO---\n${texto}\n---FIM---`,
+    }],
+  });
+  const block = r.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
+  return { raw: (block?.text ?? '').trim(), stop: r.stop_reason ?? '' };
+}
+
+function stripFence(raw: string): string {
+  return raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+}
+
 export async function segmentarContrato(textoBruto: string): Promise<ResultadoSegmentacao> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY ausente — segmentacao precisa de Claude.');
@@ -69,28 +87,44 @@ export async function segmentarContrato(textoBruto: string): Promise<ResultadoSe
     ? textoBruto.slice(0, MAX_CHARS) + '\n\n[...texto truncado pra segmentacao]'
     : textoBruto;
 
-  const r = await claude().messages.create({
-    model:      SEGMENTER_MODEL,
-    max_tokens: 8000,
-    system:     SYSTEM_PROMPT,
-    messages: [{
-      role:    'user',
-      content: `Segmente o contrato abaixo em cláusulas conforme as regras.\n\n---CONTRATO---\n${texto}\n---FIM---`,
-    }],
-  });
+  // v1.27.4: tenta com 16k tokens. Se JSON vier truncado (max_tokens batido)
+  // OU stop_reason === 'max_tokens', retry com 32k. Se ainda assim falhar, 60k.
+  const TENTATIVAS = [16000, 32000, 60000];
+  let raw = '';
+  let parsed: ResultadoSegmentacao | null = null;
+  let lastErr: Error | null = null;
 
-  const block = r.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
-  const raw   = (block?.text ?? '').trim();
-  if (!raw) throw new Error('Claude retornou resposta vazia');
+  for (const maxTok of TENTATIVAS) {
+    const t0 = Date.now();
+    const out = await callClaudeSegmenter(texto, maxTok);
+    raw = out.raw;
+    console.log(`[segmentar] max_tokens=${maxTok} → ${raw.length} chars (stop=${out.stop}) +${Date.now()-t0}ms`);
+    if (!raw) { lastErr = new Error('Claude resposta vazia'); continue; }
+    if (out.stop === 'max_tokens') {
+      lastErr = new Error(`Resposta truncada (max_tokens=${maxTok} atingido)`);
+      console.warn(`[segmentar] truncou em max_tokens, retry com proximo nivel`);
+      continue;
+    }
+    try {
+      parsed = JSON.parse(stripFence(raw));
+      break;
+    } catch (err) {
+      lastErr = err as Error;
+      // Heurística: se erro de JSON parse + stop != 'end_turn', tenta de novo com mais tokens
+      if (/Unterminated|Unexpected end of JSON|in JSON at position/i.test(lastErr.message)) {
+        console.warn(`[segmentar] JSON parse falhou (provavel truncamento) — retry`);
+        continue;
+      }
+      // outros erros de parse: aborta sem retry (problema de formato)
+      throw new Error(`JSON invalido do segmentador: ${lastErr.message}\nResposta crua: ${raw.slice(0, 500)}`);
+    }
+  }
 
-  // Robusto contra eventual markdown fence
-  const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-
-  let parsed: ResultadoSegmentacao;
-  try {
-    parsed = JSON.parse(jsonStr);
-  } catch (err) {
-    throw new Error(`JSON invalido do segmentador: ${(err as Error).message}\nResposta crua: ${raw.slice(0, 300)}`);
+  if (!parsed) {
+    throw new Error(
+      `Segmentador falhou após ${TENTATIVAS.length} tentativas (max ${TENTATIVAS[TENTATIVAS.length-1]} tokens). ` +
+      `Ultimo erro: ${lastErr?.message}\nFinal raw: ${raw.slice(0, 300)}`
+    );
   }
 
   if (!Array.isArray(parsed.clausulas) || parsed.clausulas.length === 0) {
