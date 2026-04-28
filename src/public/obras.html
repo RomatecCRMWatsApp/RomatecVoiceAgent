@@ -376,6 +376,10 @@
       <div class="cal-stat"><p class="l">Tardes</p><p class="v" id="calTardes">0</p></div>
       <div class="cal-stat"><p class="l">Total a pagar</p><p class="v" id="calTotal" style="color:var(--gold);">R$ 0,00</p></div>
     </div>
+    <div style="padding: 12px 20px 16px; display:flex; gap:8px; flex-wrap:wrap; border-top: 1px solid var(--border);">
+      <button id="calResetMes" class="btn-danger" style="border:1px solid var(--danger); padding:6px 12px;">🗑️ Resetar mês</button>
+      <button id="calResetTudo" class="btn-danger" style="border:1px solid var(--danger); padding:6px 12px;">🗑️ Resetar tudo</button>
+    </div>
   </div>
 </div>
 
@@ -1753,33 +1757,84 @@ async function alternarDia(dataIso) {
   else if (periodosAtuais.has('tarde')) proximoEstado = 'vazio';
   else proximoEstado = 'vazio';
 
-  // Obra é obrigatória pra marcar diária (precisa pra Folha Mensal vincular)
-  if (proximoEstado !== 'vazio' && !state.currentObra) {
+  const obraId = cal.obraId || state.currentObra || null;
+  if (proximoEstado !== 'vazio' && !obraId) {
     alert('Selecione uma obra antes de marcar as diárias.');
     return;
   }
+
+  console.log('[alternarDia]', dataIso, 'atual:', [...periodosAtuais], '→', proximoEstado, 'obra:', obraId);
 
   try {
     // Sempre limpa o que tinha antes (período-específico ou tudo)
     await api(`/api/funcionarios/${cal.funcId}/dias`, {
       method: 'DELETE',
-      body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso }),
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso, confirm: true }),
     });
 
     if (proximoEstado !== 'vazio') {
       await api(`/api/funcionarios/${cal.funcId}/dias`, {
         method: 'POST',
+        headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
           funcionario_id: cal.funcId,
           data: dataIso, periodo: proximoEstado,
-          obra_id: state.currentObra || cal.obraId || null,
+          obra_id: obraId,
+          confirm: true,
         }),
       });
     }
     await carregarMesCalendario();
-    // Se calendário inline (Marcar Dias) estiver aberto, redesenha o resumo da obra
     if (state.currentTab === 'marcar') render();
-  } catch (e) { alert('Erro: ' + e.message); }
+  } catch (e) {
+    console.error('[alternarDia] erro:', e);
+    alert('Erro ao marcar/desmarcar dia: ' + e.message);
+  }
+}
+
+async function resetarMesCalendario() {
+  if (!confirm(`Apagar TODAS as marcações de ${cal.nome} no mês ${String(cal.mes).padStart(2,'0')}/${cal.ano}? Irreversível.`)) return;
+  try {
+    // Apaga dia a dia (rota DELETE aceita data específica)
+    const datas = [...new Set(cal.dias.map(d => d.data))];
+    for (const dataIso of datas) {
+      await api(`/api/funcionarios/${cal.funcId}/dias`, {
+        method: 'DELETE',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso, confirm: true }),
+      });
+    }
+    await carregarMesCalendario();
+    if (state.currentTab === 'marcar') render();
+    alert(`${datas.length} dia(s) apagado(s) de ${cal.nome} em ${cal.mes}/${cal.ano}.`);
+  } catch (e) {
+    console.error('[resetarMes] erro:', e);
+    alert('Erro: ' + e.message);
+  }
+}
+
+async function resetarTudoCalendario() {
+  if (!confirm(`Apagar TODAS as marcações de ${cal.nome} em TODOS os meses? Irreversível.`)) return;
+  if (!confirm(`Tem certeza? Confirme novamente apagar TUDO de ${cal.nome}.`)) return;
+  try {
+    // Carrega todos os dias do funcionário (sem filtro de mês)
+    const todos = await api(`/api/funcionarios/${cal.funcId}/dias`);
+    const datas = [...new Set(todos.map(d => d.data))];
+    for (const dataIso of datas) {
+      await api(`/api/funcionarios/${cal.funcId}/dias`, {
+        method: 'DELETE',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso, confirm: true }),
+      });
+    }
+    await carregarMesCalendario();
+    if (state.currentTab === 'marcar') render();
+    alert(`${datas.length} marcação(ões) apagada(s) de ${cal.nome} (todos os meses).`);
+  } catch (e) {
+    console.error('[resetarTudo] erro:', e);
+    alert('Erro: ' + e.message);
+  }
 }
 
 document.getElementById('calClose').onclick = () => document.getElementById('calOverlay').classList.remove('open');
@@ -1792,6 +1847,8 @@ document.getElementById('calNext').onclick = () => {
   if (cal.mes === 12) { cal.mes = 1; cal.ano++; } else cal.mes++;
   carregarMesCalendario();
 };
+document.getElementById('calResetMes').onclick = resetarMesCalendario;
+document.getElementById('calResetTudo').onclick = resetarTudoCalendario;
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => { state.currentTab = t.dataset.tab; render(); });
 document.getElementById('zayraFab').onclick = () => {
