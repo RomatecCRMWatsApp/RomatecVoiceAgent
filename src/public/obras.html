@@ -312,11 +312,10 @@
   <div class="tabs">
     <button class="tab active" data-tab="dashboard">Painel</button>
     <button class="tab" data-tab="obras">Obras</button>
-    <button class="tab" data-tab="cronograma">Cronograma</button>
     <button class="tab" data-tab="financeiro">Financeiro</button>
     <button class="tab" data-tab="equipe">Equipe</button>
     <button class="tab" data-tab="materiais">Materiais</button>
-    <button class="tab" data-tab="diario">Diário</button>
+    <button class="tab" data-tab="marcar">Marcar Dias</button>
     <button class="tab" data-tab="folha">Folha Mensal</button>
     <button class="tab" data-tab="vto">Vistoria (VTO)</button>
   </div>
@@ -327,6 +326,7 @@
   <div id="view-financeiro" class="view"></div>
   <div id="view-equipe" class="view"></div>
   <div id="view-materiais" class="view"></div>
+  <div id="view-marcar" class="view"></div>
   <div id="view-diario" class="view"></div>
   <div id="view-folha" class="view"></div>
   <div id="view-vto" class="view"></div>
@@ -362,7 +362,7 @@
       <button id="calNext">Próximo ▶</button>
     </div>
     <div class="cal-help">
-      Clique numa data pra alternar: <strong>vazio → integral → meia manhã → meia tarde → vazio</strong>. Manhã+tarde do mesmo dia = 1 diária inteira.
+      Clique numa data pra alternar: <strong>vazio → integral → meia (manhã) → meia (tarde) → vazio</strong>.
     </div>
     <div class="cal-legend">
       <span><span class="cal-legend-dot" style="background:rgba(0,255,136,0.4);"></span>Integral</span>
@@ -486,6 +486,12 @@ async function render() {
       financeiro: async () => { await Promise.all([loadObras(), loadTransacoes()]); renderFinanceiro(); },
       equipe: async () => { await Promise.all([loadObras(), loadEquipe(), loadCatalogo()]); renderEquipe(); },
       materiais: async () => { await Promise.all([loadObras(), loadMateriais()]); renderMateriais(); },
+      marcar: async () => {
+        await loadObras();
+        if (state.currentObra) state.folhaObraId = state.currentObra;
+        await Promise.all([loadEquipe(), loadFolha()]);
+        renderMarcarDias();
+      },
       diario: async () => { await Promise.all([loadObras(), loadDiario()]); renderDiario(); },
       folha: async () => { await Promise.all([loadObras(), loadFolha()]); renderFolha(); },
       vto:   async () => { await Promise.all([loadObras(), loadVistorias()]); renderVto(); },
@@ -867,7 +873,7 @@ function renderEquipe() {
       <select id="pTipo"><option value="diarista">Diarista</option><option value="clt">CLT</option><option value="empreitada">Empreitada</option><option value="terceirizado">Terceirizado</option></select>
       <input id="pCPF" placeholder="CPF">
       <input id="pTel" placeholder="Telefone">
-      <input id="pVal" type="number" step="0.01" placeholder="Valor diária (R$)">
+      <input id="pVal" type="number" step="0.01" placeholder="Valor diária (R$) *" required>
       <input id="pEsp" placeholder="Especialidade">
     </div>
     <textarea id="pObs" placeholder="Observações" rows="2" style="margin-bottom:8px;"></textarea>
@@ -877,7 +883,7 @@ function renderEquipe() {
   ${lista || '<div class="card empty">Nenhum membro.</div>'}`;
 
   v.querySelectorAll('[data-cal]').forEach(b => b.onclick = () => {
-    abrirCalendario(b.dataset.cal, b.dataset.nome, parseFloat(b.dataset.vd) || 0);
+    abrirCalendario(b.dataset.cal, b.dataset.nome, parseFloat(b.dataset.vd) || 0, state.currentObra);
   });
 
   v.querySelectorAll('[data-del-eq]').forEach(b => b.onclick = async () => {
@@ -906,6 +912,8 @@ function renderEquipe() {
   document.getElementById('addEq').onclick = async () => {
     const nome = document.getElementById('pNome').value.trim();
     if (!nome) return alert('Informe o nome');
+    const valorDia = parseFloat(document.getElementById('pVal').value);
+    if (!valorDia || valorDia <= 0) return alert('Informe o valor da diária (obrigatório pra calcular folha e recibos).');
     try {
       await api('/api/equipe', {
         method: 'POST',
@@ -915,7 +923,7 @@ function renderEquipe() {
           tipo_contrato: document.getElementById('pTipo').value,
           cpf: document.getElementById('pCPF').value.trim() || null,
           telefone: document.getElementById('pTel').value.trim() || null,
-          valor_dia: parseFloat(document.getElementById('pVal').value) || null,
+          valor_dia: valorDia,
           especialidade: document.getElementById('pEsp').value.trim() || null,
           observacoes: document.getElementById('pObs').value.trim() || null,
           obra_id: document.getElementById('pObraId').value || null,
@@ -1080,6 +1088,83 @@ function renderDiario() {
   };
 }
 
+// ── MARCAR DIAS ──
+function renderMarcarDias() {
+  const v = document.getElementById('view-marcar');
+  if (state.obras.length === 0) {
+    v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro na aba <strong>Obras</strong>.</div>';
+    return;
+  }
+  if (!state.currentObra) state.currentObra = state.obras[0].id;
+
+  // Equipe vinculada à obra atual (ou geral)
+  const equipeObra = state.equipe.filter(p =>
+    p.obra_id === state.currentObra ||
+    p.obra_id === null ||
+    (Array.isArray(p.obras_ids) && p.obras_ids.includes(state.currentObra)),
+  );
+
+  const f = state.folha || { funcionarios: [], total_geral: 0 };
+  const monthLabel = new Date(state.folhaAno, state.folhaMes-1, 1)
+    .toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+
+  // Mapa func_id → linha da folha do mês corrente
+  const stats = {};
+  f.funcionarios.forEach(p => stats[p.funcionario_id] = p);
+
+  const linhas = equipeObra.map(p => {
+    const s = stats[p.id] || { integral:0, manha:0, tarde:0, total_dias_equivalente:0, total_pagar:0 };
+    return `<div class="card" style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap;">
+      <div style="flex:1; min-width:180px;">
+        <p style="margin:0; font-weight:500;">${escape(p.nome)}</p>
+        <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">
+          ${escape(p.funcao||'sem função')} · <span style="color:var(--gold);">${fmt(p.valor_dia)}/dia</span>
+        </p>
+      </div>
+      <div style="display:flex; gap:14px; font-size:12px; color:var(--text-muted); flex-wrap:wrap;">
+        <span>Integ: <strong style="color:var(--neon);">${s.integral}</strong></span>
+        <span>Manhã: <strong style="color:var(--gold);">${s.manha}</strong></span>
+        <span>Tarde: <strong style="color:var(--gold);">${s.tarde}</strong></span>
+        <span>Equiv: <strong style="color:var(--text);">${s.total_dias_equivalente}</strong></span>
+        <span>Total: <strong style="color:var(--gold);">${fmt(s.total_pagar)}</strong></span>
+      </div>
+      <button class="btn-gold" data-cal-marcar="${p.id}" data-nome="${escape(p.nome)}" data-vd="${p.valor_dia}">📅 Marcar dias</button>
+    </div>`;
+  }).join('');
+
+  v.innerHTML = `${obraSelector()}
+    <div class="card" style="border-color: var(--gold-dim);">
+      <p class="section-title">Marcar Dias — ${monthLabel}</p>
+      <p style="margin:0 0 8px; font-size:12px; color:var(--text-muted);">
+        1) Selecione a obra acima · 2) Clique em <strong>📅 Marcar dias</strong> no funcionário · 3) Clique nos dias do calendário pra alternar entre <strong>integral → manhã → tarde → vazio</strong>
+      </p>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button id="mdPrev">◀ Mês anterior</button>
+        <span style="color: var(--gold); text-transform: capitalize; font-weight: 500;">${monthLabel}</span>
+        <button id="mdNext">Próximo ▶</button>
+        <span style="margin-left:auto; color:var(--gold); font-weight:500;">Total da obra: ${fmt(f.total_geral)}</span>
+      </div>
+    </div>
+    <p class="section-title" style="margin-top:16px;">Equipe da obra (${equipeObra.length})</p>
+    ${linhas || '<div class="card empty">Nenhum funcionário vinculado a esta obra. Cadastre na aba <strong>Equipe</strong>.</div>'}
+  `;
+
+  attachSel();
+
+  v.querySelectorAll('[data-cal-marcar]').forEach(b => b.onclick = () => {
+    abrirCalendario(b.dataset.calMarcar, b.dataset.nome, parseFloat(b.dataset.vd) || 0, state.currentObra);
+  });
+
+  document.getElementById('mdPrev').onclick = () => {
+    if (state.folhaMes === 1) { state.folhaMes = 12; state.folhaAno--; } else state.folhaMes--;
+    state.folha = null; render();
+  };
+  document.getElementById('mdNext').onclick = () => {
+    if (state.folhaMes === 12) { state.folhaMes = 1; state.folhaAno++; } else state.folhaMes++;
+    state.folha = null; render();
+  };
+}
+
 // ── FOLHA MENSAL ──
 function renderFolha() {
   const v = document.getElementById('view-folha');
@@ -1100,6 +1185,9 @@ function renderFolha() {
       <td style="text-align:center; color:var(--gold);">${p.tarde}</td>
       <td style="text-align:center;">${p.total_dias_equivalente}</td>
       <td style="text-align:right; color:var(--gold); font-weight:500;">${fmt(p.total_pagar)}</td>
+      <td style="text-align:center; padding:8px; border-bottom:1px solid var(--border);">
+        <button class="btn-gold" data-recibo="${p.funcionario_id}" style="font-size:11px; padding:4px 8px;">📄 Recibo</button>
+      </td>
     </tr>
   `).join('');
 
@@ -1111,13 +1199,15 @@ function renderFolha() {
         <button id="folhaNext">Próximo ▶</button>
         <select id="folhaObra" style="flex:1; min-width:200px;">${obraOpts}</select>
         <button id="folhaPdf" class="btn-gold">📄 Exportar PDF</button>
+        <button id="folhaCsv" class="btn-gold">📊 CSV</button>
       </div>
       <div class="metrics-grid">
         <div class="metric-card"><p class="metric-label">Funcionários ativos no mês</p><p class="metric-value">${f.total_funcionarios}</p></div>
         <div class="metric-card"><p class="metric-label">Total a pagar</p><p class="metric-value" style="color:var(--gold);">${fmt(f.total_geral)}</p></div>
       </div>
       ${f.funcionarios.length === 0 ? '<div class="empty">Nenhum dia trabalhado registrado neste mês.</div>' : `
-      <table style="width:100%; border-collapse:collapse; margin-top:8px;">
+      <div style="overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; margin-top:8px; min-width:680px;">
         <thead>
           <tr style="border-bottom:1px solid var(--border-strong);">
             <th style="text-align:left; padding:8px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Funcionário</th>
@@ -1126,10 +1216,12 @@ function renderFolha() {
             <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Tarde</th>
             <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Equiv.</th>
             <th style="text-align:right; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Total</th>
+            <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Recibo</th>
           </tr>
         </thead>
         <tbody>${linhas}</tbody>
-      </table>`}
+      </table>
+      </div>`}
     </div>
   `;
 
@@ -1145,6 +1237,121 @@ function renderFolha() {
     state.folhaObraId = e.target.value; state.folha = null; render();
   };
   document.getElementById('folhaPdf').onclick = () => exportarFolhaPdf(monthLabel);
+  document.getElementById('folhaCsv').onclick = () => exportarFolhaCsv(monthLabel);
+  v.querySelectorAll('[data-recibo]').forEach(b => b.onclick = () => gerarRecibo(b.dataset.recibo, monthLabel));
+}
+
+async function gerarRecibo(funcionarioId, monthLabel) {
+  const p = state.folha.funcionarios.find(x => x.funcionario_id === funcionarioId);
+  if (!p) return alert('Funcionário não encontrado.');
+  const obra = state.folhaObraId ? state.obras.find(o => o.id === state.folhaObraId) : null;
+
+  // Busca os dias detalhados desse funcionário no mês pra detalhar no recibo
+  let dias = [];
+  try {
+    dias = await api(`/api/funcionarios/${funcionarioId}/dias?ano=${state.folhaAno}&mes=${state.folhaMes}`);
+  } catch (e) { /* sem detalhe não impede recibo */ }
+  const linhasDias = dias.map(d => {
+    const dt = new Date(d.data + 'T00:00:00').toLocaleDateString('pt-BR');
+    const per = { integral:'Integral', manha:'½ Manhã', tarde:'½ Tarde' }[d.periodo] || d.periodo;
+    return `<tr><td>${dt}</td><td>${per}</td><td class="num">${fmt(d.valor)}</td></tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Recibo — ${p.nome} — ${monthLabel}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:780px;margin:0 auto;}
+      h1{margin:0 0 4px; font-size:22px;}
+      h2{margin:0 0 24px;color:#666;font-size:14px;font-weight:normal;}
+      .box{border:1px solid #ddd; border-radius:6px; padding:16px; margin-bottom:14px;}
+      .row{display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;}
+      .row > div{flex:1; min-width:200px;}
+      .label{font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px;}
+      .val{font-size:14px; margin-top:2px;}
+      .total{font-size:18px; color:#0a3d2a; font-weight:bold;}
+      table{width:100%; border-collapse:collapse; margin-top:8px; font-size:12px;}
+      th,td{padding:6px 8px; border-bottom:1px solid #eee; text-align:left;}
+      th{background:#0a3d2a; color:#fff;}
+      td.num{text-align:right;}
+      .declaracao{margin:24px 0; line-height:1.6; font-size:13px;}
+      .assinatura{margin-top:48px; text-align:center;}
+      .assinatura .linha{border-top:1px solid #333; width:60%; margin:0 auto 6px;}
+      .footer{margin-top:32px;font-size:11px;color:#888; text-align:center;}
+    </style></head><body>
+    <h1>RECIBO DE PAGAMENTO DE DIÁRIAS</h1>
+    <h2>Romatec Consultoria Imobiliária${obra ? ' · Obra: '+obra.nome : ''} · Período: ${monthLabel}</h2>
+
+    <div class="box">
+      <div class="row">
+        <div><div class="label">Funcionário</div><div class="val"><strong>${p.nome}</strong></div></div>
+        <div><div class="label">Função</div><div class="val">${p.funcao||'-'}</div></div>
+        <div><div class="label">Valor da diária</div><div class="val">${fmt(p.valor_dia)}</div></div>
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="row">
+        <div><div class="label">Diárias integrais</div><div class="val">${p.integral}</div></div>
+        <div><div class="label">Meia (manhã)</div><div class="val">${p.manha}</div></div>
+        <div><div class="label">Meia (tarde)</div><div class="val">${p.tarde}</div></div>
+        <div><div class="label">Equivalente</div><div class="val">${p.total_dias_equivalente} dia(s)</div></div>
+        <div><div class="label">Total a pagar</div><div class="val total">${fmt(p.total_pagar)}</div></div>
+      </div>
+    </div>
+
+    ${linhasDias ? `<div class="box">
+      <div class="label" style="margin-bottom:8px;">Detalhamento de dias trabalhados</div>
+      <table>
+        <thead><tr><th>Data</th><th>Período</th><th class="num">Valor</th></tr></thead>
+        <tbody>${linhasDias}</tbody>
+      </table>
+    </div>` : ''}
+
+    <p class="declaracao">
+      Declaro para os devidos fins que recebi de <strong>Romatec Consultoria Imobiliária</strong>
+      a importância de <strong>${fmt(p.total_pagar)}</strong> referente a
+      <strong>${p.total_dias_equivalente} diária(s) equivalente(s)</strong> trabalhada(s)
+      ${obra ? 'na obra <strong>'+obra.nome+'</strong>' : ''} no período de <strong>${monthLabel}</strong>,
+      dando plena, geral e irrevogável quitação pelo período mencionado.
+    </p>
+
+    <div class="assinatura">
+      <div class="linha"></div>
+      <div>${p.nome}</div>
+    </div>
+
+    <div class="footer">Gerado por ZAYRA · ${new Date().toLocaleString('pt-BR')}</div>
+    <script>window.onload=()=>window.print();<\/script>
+  </body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+}
+
+function exportarFolhaCsv(monthLabel) {
+  const f = state.folha;
+  if (!f || f.funcionarios.length === 0) return alert('Nada pra exportar.');
+  const obra = state.folhaObraId ? state.obras.find(o => o.id === state.folhaObraId) : null;
+  const sep = ';';
+  const head = ['Funcionário','Função','Valor diária','Integrais','Manhã','Tarde','Equivalente','Total'];
+  const rows = f.funcionarios.map(p => [
+    p.nome, p.funcao || '-',
+    Number(p.valor_dia||0).toFixed(2).replace('.',','),
+    p.integral, p.manha, p.tarde,
+    String(p.total_dias_equivalente).replace('.',','),
+    Number(p.total_pagar||0).toFixed(2).replace('.',','),
+  ]);
+  rows.push(['','','','','','','TOTAL', Number(f.total_geral||0).toFixed(2).replace('.',',')]);
+  const csv = [
+    `Folha Mensal — ${monthLabel}${obra ? ' — '+obra.nome : ''}`,
+    head.join(sep),
+    ...rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(sep)),
+  ].join('\n');
+  const blob = new Blob(['﻿' + csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `folha_${state.folhaAno}-${String(state.folhaMes).padStart(2,'0')}${obra?'_'+obra.nome.replace(/[^a-zA-Z0-9]/g,'_'):''}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function exportarFolhaPdf(monthLabel) {
@@ -1459,17 +1666,21 @@ function replaceLastMsg(txt) {
 
 // ── CALENDÁRIO DE DIAS TRABALHADOS ──
 const cal = {
-  funcId: null, nome: '', valorDia: 0,
+  funcId: null, nome: '', valorDia: 0, obraId: null,
   ano: 0, mes: 0, // mes 1-12
   dias: [], // [{data, periodo, valor}]
 };
 
-function abrirCalendario(funcionarioId, nome, valorDia) {
+function abrirCalendario(funcionarioId, nome, valorDia, obraId) {
   cal.funcId = funcionarioId; cal.nome = nome; cal.valorDia = valorDia || 0;
-  const now = new Date();
-  cal.ano = now.getFullYear(); cal.mes = now.getMonth() + 1;
+  cal.obraId = obraId || state.currentObra || null;
+  // Abre no mês corrente da Folha (pra alinhar a marcação com o mês visível)
+  cal.ano = state.folhaAno; cal.mes = state.folhaMes;
+  const obra = state.obras.find(o => o.id === cal.obraId);
   document.getElementById('calNome').textContent = nome;
-  document.getElementById('calMeta').textContent = 'Diária: R$ ' + (valorDia||0).toLocaleString('pt-BR', {minimumFractionDigits:2});
+  document.getElementById('calMeta').textContent =
+    'Diária: R$ ' + (valorDia||0).toLocaleString('pt-BR', {minimumFractionDigits:2}) +
+    (obra ? ' · Obra: ' + obra.nome : '');
   document.getElementById('calOverlay').classList.add('open');
   carregarMesCalendario();
 }
@@ -1532,38 +1743,42 @@ function desenharCalendario() {
 }
 
 async function alternarDia(dataIso) {
-  // Estado atual: vazio → integral → manha → tarde → vazio
+  // Ciclo: vazio → integral → manha → tarde → vazio (sempre limpa o anterior)
   const periodosAtuais = new Set(cal.dias.filter(d => d.data === dataIso).map(d => d.periodo));
   let proximoEstado;
   if (periodosAtuais.size === 0) proximoEstado = 'integral';
   else if (periodosAtuais.has('integral')) proximoEstado = 'manha';
-  else if (periodosAtuais.has('manha') && !periodosAtuais.has('tarde')) proximoEstado = 'tarde';
+  else if (periodosAtuais.has('manha') && periodosAtuais.has('tarde')) proximoEstado = 'vazio';
+  else if (periodosAtuais.has('manha')) proximoEstado = 'tarde';
+  else if (periodosAtuais.has('tarde')) proximoEstado = 'vazio';
   else proximoEstado = 'vazio';
 
+  // Obra é obrigatória pra marcar diária (precisa pra Folha Mensal vincular)
+  if (proximoEstado !== 'vazio' && !state.currentObra) {
+    alert('Selecione uma obra antes de marcar as diárias.');
+    return;
+  }
+
   try {
-    if (proximoEstado === 'vazio') {
-      await api(`/api/funcionarios/${cal.funcId}/dias`, {
-        method: 'DELETE',
-        body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso }),
-      });
-    } else {
-      // Pra trocar de integral → manha, primeiro remove integral
-      if (proximoEstado === 'manha' && periodosAtuais.has('integral')) {
-        await api(`/api/funcionarios/${cal.funcId}/dias`, {
-          method: 'DELETE',
-          body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso, periodo: 'integral' }),
-        });
-      }
+    // Sempre limpa o que tinha antes (período-específico ou tudo)
+    await api(`/api/funcionarios/${cal.funcId}/dias`, {
+      method: 'DELETE',
+      body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso }),
+    });
+
+    if (proximoEstado !== 'vazio') {
       await api(`/api/funcionarios/${cal.funcId}/dias`, {
         method: 'POST',
         body: JSON.stringify({
           funcionario_id: cal.funcId,
           data: dataIso, periodo: proximoEstado,
-          obra_id: state.currentObra || null,
+          obra_id: state.currentObra || cal.obraId || null,
         }),
       });
     }
     await carregarMesCalendario();
+    // Se calendário inline (Marcar Dias) estiver aberto, redesenha o resumo da obra
+    if (state.currentTab === 'marcar') render();
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
