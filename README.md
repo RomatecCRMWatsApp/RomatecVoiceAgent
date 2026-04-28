@@ -195,5 +195,102 @@ relevância, cita com fonte e página.
 
 ---
 
+## Geração de contratos com IA — Fase 1: indexação (v1.27.1+)
+
+Sistema de IA jurídica que aprende com contratos modelo. Esta primeira fase
+**indexa** contratos PDF/DOCX no banco vetorial — segmentando em cláusulas
+autônomas reutilizáveis. Geração (Fases 2+) virá depois de a base estar boa.
+
+### SQL adicional no Supabase (rodar UMA vez no SQL Editor)
+
+```sql
+create table if not exists contratos_indexados (
+  id uuid primary key default gen_random_uuid(),
+  titulo text not null,
+  tipo text,
+  fonte text not null,
+  arquivo_nome text,
+  hash_sha256 text unique,
+  texto_completo text not null,
+  resumo text,
+  resumo_embedding vector(1024) not null,
+  total_clausulas int default 0,
+  metadata jsonb default '{}'::jsonb,
+  criado_em timestamptz default now()
+);
+
+create table if not exists clausulas_juridicas (
+  id bigserial primary key,
+  contrato_id uuid references contratos_indexados(id) on delete cascade,
+  ordem int not null,
+  secao text,
+  titulo_clausula text,
+  texto text not null,
+  embedding vector(1024) not null,
+  metadata jsonb default '{}'::jsonb,
+  criado_em timestamptz default now()
+);
+
+create index if not exists clausulas_emb_idx
+  on clausulas_juridicas using hnsw (embedding vector_cosine_ops);
+create index if not exists clausulas_secao_idx on clausulas_juridicas(secao);
+create index if not exists clausulas_contrato_idx on clausulas_juridicas(contrato_id);
+create index if not exists contratos_resumo_emb_idx
+  on contratos_indexados using hnsw (resumo_embedding vector_cosine_ops);
+create index if not exists contratos_tipo_idx on contratos_indexados(tipo);
+
+-- RLS off (mesmo padrão do RAG geral)
+alter table contratos_indexados disable row level security;
+alter table clausulas_juridicas disable row level security;
+
+-- RPC pra busca de cláusulas por similaridade (uso futuro na Fase 2)
+create or replace function contratos_buscar_clausulas(
+  query_embedding vector(1024),
+  similarity_threshold float default 0.55,
+  match_count int default 8,
+  filtro_secao text default null,
+  filtro_tipo  text default null
+)
+returns table (
+  clausula_id bigint, contrato_id uuid, contrato_titulo text, contrato_tipo text,
+  ordem int, secao text, titulo_clausula text, texto text, similarity float
+)
+language sql stable
+as $$
+  select c.id, c.contrato_id, ci.titulo, ci.tipo,
+         c.ordem, c.secao, c.titulo_clausula, c.texto,
+         1 - (c.embedding <=> query_embedding) as similarity
+  from clausulas_juridicas c
+  join contratos_indexados ci on ci.id = c.contrato_id
+  where 1 - (c.embedding <=> query_embedding) > similarity_threshold
+    and (filtro_secao is null or c.secao = filtro_secao)
+    and (filtro_tipo  is null or ci.tipo = filtro_tipo)
+  order by c.embedding <=> query_embedding
+  limit match_count;
+$$;
+```
+
+### Endpoints
+
+| Método | Rota | Função |
+|---|---|---|
+| POST | `/contracts/index` | Indexa PDF/DOCX (multipart `arquivo`) ou JSON `{texto, titulo}` |
+| GET | `/contracts/indexados` | Lista contratos modelo |
+| DELETE | `/contracts/indexados/:id` | Remove contrato modelo |
+
+### CLI
+
+```bash
+# Aceita PDF ou DOCX. Usa o servidor remoto (sem credenciais Supabase locais).
+npm run contracts:ingest "C:/path/contrato.pdf"
+npm run contracts:ingest "C:/path/contrato.docx" "Compra e venda Lote 14"
+```
+
+Pipeline: extract texto (pdf-parse ou mammoth) → sanitize → valida qualidade →
+**Claude Sonnet segmenta em cláusulas + extrai tipo + resumo** → Voyage gera
+embeddings (resumo + cada cláusula) → Supabase salva tudo. Dedup via SHA-256.
+
+---
+
 CEO: José Romário — Romatec Consultoria Imobiliária
 # RomatecVoiceAgent

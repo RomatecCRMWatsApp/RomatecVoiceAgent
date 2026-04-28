@@ -34,6 +34,7 @@ import * as cofre from './integrations/cofre';
 import * as vistorias from './integrations/vistorias';
 import * as cowork from './integrations/cowork';
 import ragRoutes from './routes/rag';
+import contractsRoutes from './routes/contracts';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -44,6 +45,7 @@ const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 
 app.use(express.json({ limit: '32mb' })); // VTO usa fotos base64 no body
 app.use('/rag', ragRoutes);                 // v1.26.0 — endpoints de memoria vetorial
+app.use('/contracts', contractsRoutes);     // v1.27.1 — indexacao de contratos modelo (Fase 1)
 
 // Static files com Cache-Control inteligente:
 // HTML/SW/manifest = no-cache (browser revalida a cada request com ETag)
