@@ -1766,11 +1766,9 @@ async function alternarDia(dataIso) {
   console.log('[alternarDia]', dataIso, 'atual:', [...periodosAtuais], '→', proximoEstado, 'obra:', obraId);
 
   try {
-    // Sempre limpa o que tinha antes (período-específico ou tudo)
-    await api(`/api/funcionarios/${cal.funcId}/dias`, {
+    // DELETE via query string (Express nem sempre parseia body em DELETE)
+    await api(`/api/funcionarios/${cal.funcId}/dias?data=${encodeURIComponent(dataIso)}`, {
       method: 'DELETE',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso, confirm: true }),
     });
 
     if (proximoEstado !== 'vazio') {
@@ -1796,13 +1794,12 @@ async function alternarDia(dataIso) {
 async function resetarMesCalendario() {
   if (!confirm(`Apagar TODAS as marcações de ${cal.nome} no mês ${String(cal.mes).padStart(2,'0')}/${cal.ano}? Irreversível.`)) return;
   try {
-    // Apaga dia a dia (rota DELETE aceita data específica)
     const datas = [...new Set(cal.dias.map(d => d.data))];
+    if (datas.length === 0) { alert('Nenhuma marcação no mês.'); return; }
+    console.log('[resetarMes] apagando', datas.length, 'dias:', datas);
     for (const dataIso of datas) {
-      await api(`/api/funcionarios/${cal.funcId}/dias`, {
+      await api(`/api/funcionarios/${cal.funcId}/dias?data=${encodeURIComponent(dataIso)}`, {
         method: 'DELETE',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso, confirm: true }),
       });
     }
     await carregarMesCalendario();
@@ -1818,14 +1815,13 @@ async function resetarTudoCalendario() {
   if (!confirm(`Apagar TODAS as marcações de ${cal.nome} em TODOS os meses? Irreversível.`)) return;
   if (!confirm(`Tem certeza? Confirme novamente apagar TUDO de ${cal.nome}.`)) return;
   try {
-    // Carrega todos os dias do funcionário (sem filtro de mês)
     const todos = await api(`/api/funcionarios/${cal.funcId}/dias`);
     const datas = [...new Set(todos.map(d => d.data))];
+    if (datas.length === 0) { alert('Sem marcações pra apagar.'); return; }
+    console.log('[resetarTudo] apagando', datas.length, 'dias:', datas);
     for (const dataIso of datas) {
-      await api(`/api/funcionarios/${cal.funcId}/dias`, {
+      await api(`/api/funcionarios/${cal.funcId}/dias?data=${encodeURIComponent(dataIso)}`, {
         method: 'DELETE',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ funcionario_id: cal.funcId, data: dataIso, confirm: true }),
       });
     }
     await carregarMesCalendario();
