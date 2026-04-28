@@ -18,6 +18,7 @@ import {
 } from '../integrations/expertiseApis';
 import { buscarMemoria, formatarContexto } from '../services/ragSearch';
 import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
+import { listarContratosIndexados } from '../services/contratosIngest';
 import { sendReply } from '../integrations/whatsapp';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
@@ -1184,6 +1185,13 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['documento_id'],
     },
   },
+
+  // ── v1.28.1: contratos modelo indexados (Fase 1 do sistema de contratos) ──
+  {
+    name: 'memoria_contratos_listar',
+    description: 'Lista os contratos modelo já indexados na base vetorial (clausulas_juridicas + contratos_indexados). Use quando o Chefe perguntar "que contratos modelo eu tenho", "quais minutas estão na memória", "tem contrato de compra e venda?", etc. Retorna título, tipo (compra_venda/locacao/permuta/etc), categoria, número de cláusulas e data de indexação.',
+    input_schema: { type: 'object', properties: {} },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
@@ -1604,6 +1612,9 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'memoria_apagar':
         data = await apagarDocumento(input.documento_id as string);
+        break;
+      case 'memoria_contratos_listar':
+        data = await listarContratosIndexados();
         break;
 
       default:
