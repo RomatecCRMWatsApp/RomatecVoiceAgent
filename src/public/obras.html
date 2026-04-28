@@ -256,35 +256,112 @@
     display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
   }
 
-  /* ── Mobile (<= 768px): calendário compacto, células maiores, summary empilhado ── */
+  /* ── Mobile (<= 768px): layout otimizado pra celular ── */
   @media (max-width: 768px) {
-    body { padding: 12px; }
-    .cal-grid {
-      gap: 4px; padding: 8px 8px;
+    body { padding: 8px; }
+    .container { max-width: 100%; }
+
+    /* Header compacto */
+    .header { padding: 10px 12px; }
+    .header h1 { font-size: 17px; }
+    .header p { font-size: 10px; }
+
+    /* Tabs com scroll horizontal (não quebra mais linhas) */
+    .tabs {
+      flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+      padding-bottom: 8px; margin-bottom: 12px;
+      scrollbar-width: thin;
     }
+    .tabs::-webkit-scrollbar { height: 3px; }
+    .tabs::-webkit-scrollbar-thumb { background: var(--neon-dim); border-radius: 2px; }
+    .tab {
+      flex-shrink: 0; padding: 10px 14px; font-size: 13px; min-height: 40px;
+    }
+
+    /* Cards mais compactos */
+    .card { padding: 12px 14px; margin-bottom: 10px; }
+    .section-title { font-size: 13px; }
+
+    /* Inputs/botões touch-friendly (mín 44px conforme Apple HIG) */
+    input, select, textarea, button {
+      font-size: 16px;  /* 16px evita zoom automático do iOS no focus */
+      padding: 10px 12px; min-height: 44px;
+    }
+    .btn-danger { min-height: 36px; padding: 6px 10px; }
+
+    .form-grid { grid-template-columns: 1fr; gap: 8px; }
+    .metric-card { padding: 10px; }
+    .metric-value { font-size: 18px; }
+    .metric-label { font-size: 10px; }
+
+    /* Modal do calendário ocupa quase toda a tela */
+    .cal-overlay { padding: 6px; align-items: flex-start; padding-top: 12px; }
+    .cal-modal {
+      max-width: 100%; max-height: 96vh;
+      border-radius: 10px;
+    }
+    .cal-head { padding: 12px 14px; }
+    .cal-head h2 { font-size: 15px; }
+    .cal-head p { font-size: 11px; word-break: break-word; }
+
+    .cal-nav { padding: 10px 12px; }
+    .cal-nav button { font-size: 13px; padding: 8px 10px; min-height: 40px; }
+    .cal-month-label { font-size: 13px; }
+
+    .cal-help { padding: 8px 12px; font-size: 11px; line-height: 1.4; }
+    .cal-legend { padding: 0 12px 10px; gap: 8px; font-size: 10px; }
+
+    .cal-grid { gap: 4px; padding: 8px; }
     .cal-dow { font-size: 9px; letter-spacing: 0; padding: 4px 0; }
     .cal-cell {
       aspect-ratio: auto;
-      min-height: 48px;
+      min-height: 50px;
       font-size: 14px;
       border-radius: 6px;
     }
-    .cal-day-num { font-size: 15px; }
+    .cal-day-num { font-size: 16px; }
     .cal-cell-label { font-size: 9px; bottom: 3px; right: 4px; }
+
+    /* Action bar dos botões Integral/Manhã/Tarde/Limpar — grid 2x2 em mobile */
+    #calActions {
+      padding: 10px 12px;
+      display: grid !important;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    #calActions span#calSelInfo {
+      grid-column: 1 / -1;
+      margin: 0 0 4px;
+      text-align: center; font-size: 12px;
+    }
+    #calActions button {
+      min-height: 48px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
     .cal-summary {
       grid-template-columns: 1fr 1fr;
-      padding: 12px 12px;
+      padding: 10px 12px;
       gap: 8px;
     }
     .cal-stat { padding: 8px; }
     .cal-stat .l { font-size: 9px; }
-    .cal-stat .v { font-size: 18px; }
-    .cal-legend { padding: 0 12px 10px; gap: 8px; font-size: 10px; }
-    .cal-help    { padding: 0 12px 10px; font-size: 11px; }
-    .cal-nav     { padding: 10px 12px; }
+    .cal-stat .v { font-size: 17px; }
+
+    /* Reset mês/tudo: side-by-side ocupando largura toda */
+    .cal-modal > div:last-child { padding: 10px 12px !important; }
+    .cal-modal #calResetMes,
+    .cal-modal #calResetTudo {
+      flex: 1; min-height: 44px; font-size: 13px;
+    }
+
+    /* FAB ZAYRA não esconde botões */
+    .zayra-fab { width: 52px; height: 52px; bottom: 16px; right: 16px; font-size: 16px; }
+    .zayra-modal { bottom: 80px; right: 16px; left: 16px; max-height: 60vh; }
   }
   @media (max-width: 420px) {
-    .cal-summary { grid-template-columns: 1fr; }  /* 1 col em telas estreitas (iPhone SE/13 mini) */
+    .cal-summary { grid-template-columns: 1fr; }  /* 1 col em iPhone SE/13 mini */
   }
   .cal-stat { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; }
   .cal-stat p { margin: 0; }
