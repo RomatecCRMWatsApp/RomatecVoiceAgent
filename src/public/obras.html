@@ -238,6 +238,10 @@
     background: linear-gradient(180deg, var(--bg-elev) 50%, rgba(201,168,76,0.3) 50%);
     border-color: var(--gold); color: var(--gold); font-weight: 600;
   }
+  .cal-cell.selected {
+    box-shadow: 0 0 0 2px var(--neon), 0 0 12px rgba(0,255,136,0.5);
+    transform: scale(1.05);
+  }
   .cal-cell.full-day {
     background: rgba(0,255,136,0.18); border-color: var(--neon);
     color: var(--neon); font-weight: 600;
@@ -362,7 +366,7 @@
       <button id="calNext">Próximo ▶</button>
     </div>
     <div class="cal-help">
-      Clique numa data pra alternar: <strong>vazio → integral → meia (manhã) → meia (tarde) → vazio</strong>.
+      <strong>1)</strong> Clique nos dias pra <strong>selecionar</strong> (pode marcar vários). <strong>2)</strong> Aperte o botão do período pra aplicar.
     </div>
     <div class="cal-legend">
       <span><span class="cal-legend-dot" style="background:rgba(0,255,136,0.4);"></span>Integral</span>
@@ -370,6 +374,13 @@
       <span><span class="cal-legend-dot" style="background:linear-gradient(180deg,transparent 50%,rgba(201,168,76,0.5) 50%);"></span>Meia (tarde)</span>
     </div>
     <div class="cal-grid" id="calGrid"></div>
+    <div id="calActions" style="padding: 12px 20px; border-top: 1px solid var(--border); display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <span id="calSelInfo" style="font-size:12px; color:var(--text-muted); margin-right:auto;">Nenhum dia selecionado</span>
+      <button id="calBtnIntegral" class="btn-primary" style="padding:6px 12px;" disabled>🟢 Integral</button>
+      <button id="calBtnManha" class="btn-gold" style="padding:6px 12px;" disabled>🟡 Manhã</button>
+      <button id="calBtnTarde" class="btn-gold" style="padding:6px 12px;" disabled>🟡 Tarde</button>
+      <button id="calBtnLimpar" style="padding:6px 12px; border:1px solid var(--text-muted); color:var(--text-muted);" disabled>❌ Limpar</button>
+    </div>
     <div class="cal-summary">
       <div class="cal-stat"><p class="l">Diárias integrais</p><p class="v" id="calIntegrais">0</p></div>
       <div class="cal-stat"><p class="l">Manhãs</p><p class="v" id="calManhas">0</p></div>
@@ -1673,11 +1684,13 @@ const cal = {
   funcId: null, nome: '', valorDia: 0, obraId: null,
   ano: 0, mes: 0, // mes 1-12
   dias: [], // [{data, periodo, valor}]
+  selecionados: new Set(), // ISO dates selecionados pra aplicar período
 };
 
 function abrirCalendario(funcionarioId, nome, valorDia, obraId) {
   cal.funcId = funcionarioId; cal.nome = nome; cal.valorDia = valorDia || 0;
   cal.obraId = obraId || state.currentObra || null;
+  cal.selecionados = new Set();
   // Abre no mês corrente da Folha (pra alinhar a marcação com o mês visível)
   cal.ano = state.folhaAno; cal.mes = state.folhaMes;
   const obra = state.obras.find(o => o.id === cal.obraId);
@@ -1729,11 +1742,13 @@ function desenharCalendario() {
     else if (periodos.has('manha')) { cls = 'manha'; label = 'M'; }
     else if (periodos.has('tarde')) { cls = 'tarde'; label = 'T'; }
     if (dataIso === todayIso) cls += ' today';
+    if (cal.selecionados.has(dataIso)) cls += ' selected';
     html += `<div class="cal-cell ${cls}" data-d="${dataIso}"><span class="cal-day-num">${d}</span><span class="cal-cell-label">${label}</span></div>`;
   }
 
   grid.innerHTML = html;
-  grid.querySelectorAll('[data-d]').forEach(c => c.onclick = () => alternarDia(c.dataset.d));
+  grid.querySelectorAll('[data-d]').forEach(c => c.onclick = () => toggleSelecaoDia(c.dataset.d));
+  atualizarBarraAcoes();
 
   // Resumo
   const integrais = cal.dias.filter(d => d.periodo === 'integral').length;
@@ -1746,48 +1761,58 @@ function desenharCalendario() {
   document.getElementById('calTotal').textContent = 'R$ ' + total.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
-async function alternarDia(dataIso) {
-  // Ciclo: vazio → integral → manha → tarde → vazio (sempre limpa o anterior)
-  const periodosAtuais = new Set(cal.dias.filter(d => d.data === dataIso).map(d => d.periodo));
-  let proximoEstado;
-  if (periodosAtuais.size === 0) proximoEstado = 'integral';
-  else if (periodosAtuais.has('integral')) proximoEstado = 'manha';
-  else if (periodosAtuais.has('manha') && periodosAtuais.has('tarde')) proximoEstado = 'vazio';
-  else if (periodosAtuais.has('manha')) proximoEstado = 'tarde';
-  else if (periodosAtuais.has('tarde')) proximoEstado = 'vazio';
-  else proximoEstado = 'vazio';
+function toggleSelecaoDia(dataIso) {
+  if (cal.selecionados.has(dataIso)) cal.selecionados.delete(dataIso);
+  else cal.selecionados.add(dataIso);
+  desenharCalendario();
+}
 
+function atualizarBarraAcoes() {
+  const n = cal.selecionados.size;
+  const info = document.getElementById('calSelInfo');
+  if (info) info.textContent = n === 0
+    ? 'Nenhum dia selecionado'
+    : `${n} dia(s) selecionado(s) · clique no período pra aplicar`;
+  ['calBtnIntegral','calBtnManha','calBtnTarde','calBtnLimpar'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = n === 0;
+  });
+}
+
+async function aplicarPeriodoSelecionados(periodo) {
+  if (cal.selecionados.size === 0) return;
   const obraId = cal.obraId || state.currentObra || null;
-  if (proximoEstado !== 'vazio' && !obraId) {
+  if (periodo !== 'vazio' && !obraId) {
     alert('Selecione uma obra antes de marcar as diárias.');
     return;
   }
-
-  console.log('[alternarDia]', dataIso, 'atual:', [...periodosAtuais], '→', proximoEstado, 'obra:', obraId);
-
+  const datas = [...cal.selecionados];
+  console.log('[aplicarPeriodo]', periodo, 'em', datas.length, 'dia(s):', datas, 'obra:', obraId);
   try {
-    // DELETE via query string (Express nem sempre parseia body em DELETE)
-    await api(`/api/funcionarios/${cal.funcId}/dias?data=${encodeURIComponent(dataIso)}`, {
-      method: 'DELETE',
-    });
-
-    if (proximoEstado !== 'vazio') {
-      await api(`/api/funcionarios/${cal.funcId}/dias`, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          funcionario_id: cal.funcId,
-          data: dataIso, periodo: proximoEstado,
-          obra_id: obraId,
-          confirm: true,
-        }),
+    for (const dataIso of datas) {
+      // Sempre limpa antes (DELETE via query string)
+      await api(`/api/funcionarios/${cal.funcId}/dias?data=${encodeURIComponent(dataIso)}`, {
+        method: 'DELETE',
       });
+      if (periodo !== 'vazio') {
+        await api(`/api/funcionarios/${cal.funcId}/dias`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            funcionario_id: cal.funcId,
+            data: dataIso, periodo,
+            obra_id: obraId,
+            confirm: true,
+          }),
+        });
+      }
     }
+    cal.selecionados.clear();
     await carregarMesCalendario();
     if (state.currentTab === 'marcar') render();
   } catch (e) {
-    console.error('[alternarDia] erro:', e);
-    alert('Erro ao marcar/desmarcar dia: ' + e.message);
+    console.error('[aplicarPeriodo] erro:', e);
+    alert('Erro ao aplicar período: ' + e.message);
   }
 }
 
@@ -1845,6 +1870,10 @@ document.getElementById('calNext').onclick = () => {
 };
 document.getElementById('calResetMes').onclick = resetarMesCalendario;
 document.getElementById('calResetTudo').onclick = resetarTudoCalendario;
+document.getElementById('calBtnIntegral').onclick = () => aplicarPeriodoSelecionados('integral');
+document.getElementById('calBtnManha').onclick    = () => aplicarPeriodoSelecionados('manha');
+document.getElementById('calBtnTarde').onclick    = () => aplicarPeriodoSelecionados('tarde');
+document.getElementById('calBtnLimpar').onclick   = () => aplicarPeriodoSelecionados('vazio');
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => { state.currentTab = t.dataset.tab; render(); });
 document.getElementById('zayraFab').onclick = () => {
