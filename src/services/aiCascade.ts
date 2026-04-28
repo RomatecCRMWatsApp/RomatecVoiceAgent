@@ -11,6 +11,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import Cerebras from '@cerebras/cerebras_cloud_sdk';
+import OpenAI from 'openai';
 import { GoogleGenerativeAI, type FunctionDeclaration, SchemaType } from '@google/generative-ai';
 import { toolDefinitions, executeTool } from '../agent/tools';
 import type { ThinkAttachment } from '../agent/think';
@@ -21,16 +22,18 @@ import type { ThinkAttachment } from '../agent/think';
 //   - qwen-3-235b-a22b-instruct-2507    (preview)
 //   - zai-glm-4.7                       (preview)
 // llama-3.3-70b foi DESCONTINUADO — não usar.
-const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'llama3.1-8b';
-const GEMINI_MODEL   = process.env.GEMINI_MODEL   || 'gemini-2.5-flash';
-const CLAUDE_MODEL   = process.env.CLAUDE_FALLBACK_MODEL || 'claude-sonnet-4-5';
+const CEREBRAS_MODEL    = process.env.CEREBRAS_MODEL       || 'llama3.1-8b';
+const GEMINI_MODEL      = process.env.GEMINI_MODEL         || 'gemini-2.5-flash';
+const CLAUDE_MODEL      = process.env.CLAUDE_FALLBACK_MODEL || 'claude-sonnet-4-5';
+// v1.27.3: Groq Chat (separado do Whisper que vive em transcribe.ts) e OpenRouter
+// como 4º e 5º elos da cascata. Tudo OpenAI-compatible — reusa o pattern Cerebras.
+const GROQ_CHAT_MODEL   = process.env.GROQ_CHAT_MODEL      || 'llama-3.3-70b-versatile';
+const OPENROUTER_MODEL  = process.env.OPENROUTER_MODEL     || 'meta-llama/llama-3.1-70b-instruct:free';
 
-// Log no boot — facilita debug de "qual modelo realmente está rodando".
-// Aparece UMA vez quando o módulo é carregado, mostrando o que será usado
-// até o próximo restart do container.
 console.log(
   `[aiCascade] modelos ativos: Cerebras=${CEREBRAS_MODEL} | ` +
-  `Gemini=${GEMINI_MODEL} | Claude=${CLAUDE_MODEL}`
+  `Gemini=${GEMINI_MODEL} | Claude=${CLAUDE_MODEL} | ` +
+  `Groq=${GROQ_CHAT_MODEL} | OpenRouter=${OPENROUTER_MODEL}`
 );
 
 const MAX_HISTORY = parseInt(process.env.AI_MAX_HISTORY_MESSAGES || '12', 10);
@@ -41,6 +44,11 @@ const MAX_OUTPUT  = parseInt(process.env.AI_MAX_TOKENS_OUTPUT    || '1024', 10);
 const CEREBRAS_MAX_INPUT_TOKENS = parseInt(
   process.env.CEREBRAS_MAX_INPUT_TOKENS || '7500', 10,
 );
+// Groq llama-3.3-70b free tier: 128k context mas TPM 6k — pré-flight pra evitar 413.
+const GROQ_MAX_INPUT_TOKENS = parseInt(
+  process.env.GROQ_MAX_INPUT_TOKENS || '5500', 10,
+);
+// OpenRouter free: contexto grande mas requests/dia limitado. Sem pré-flight de tokens.
 
 const TOOL_LOOP_CAP = 8; // hard cap em iterações de tool use
 
@@ -100,6 +108,29 @@ function claudeClient(): Anthropic {
   return _claude;
 }
 
+let _groqChat: OpenAI | null = null;
+function groqChatClient(): OpenAI {
+  if (!_groqChat) _groqChat = new OpenAI({
+    apiKey:  process.env.GROQ_API_KEY,
+    baseURL: 'https://api.groq.com/openai/v1',
+  });
+  return _groqChat;
+}
+
+let _openRouter: OpenAI | null = null;
+function openRouterClient(): OpenAI {
+  if (!_openRouter) _openRouter = new OpenAI({
+    apiKey:  process.env.OPENROUTER_API_KEY,
+    baseURL: 'https://openrouter.ai/api/v1',
+    defaultHeaders: {
+      // OpenRouter exige esses headers pra atribuir uso ao app
+      'HTTP-Referer': process.env.OPENROUTER_REFERER || 'https://romatecvoiceagent-production.up.railway.app',
+      'X-Title':      'ZAYRA Romatec',
+    },
+  });
+  return _openRouter;
+}
+
 // ── Conversores de schema ───────────────────────────────────────────────────
 function toolsParaOpenAI(): any[] {
   return toolDefinitions.map(t => ({
@@ -152,13 +183,17 @@ function toolsParaGemini(): FunctionDeclaration[] {
   }));
 }
 
-// ── CEREBRAS (primário) ─────────────────────────────────────────────────────
-async function chamarCerebras(
-  systemPrompt: string,
-  history:      CascadeMessage[],
-  userMessage:  string,
+// ── Helper genérico pra qualquer provider OpenAI-compatible ────────────────
+// (Cerebras, Groq, OpenRouter — todos usam o mesmo SDK com baseURL diferente)
+async function chamarOpenAICompatible(
+  client:        Cerebras | OpenAI,
+  model:         string,
+  providerName:  string,
+  systemPrompt:  string,
+  history:       CascadeMessage[],
+  userMessage:   string,
 ): Promise<CascadeResult> {
-  const tools    = toolsParaOpenAI();
+  const tools = toolsParaOpenAI();
   const messages: any[] = [
     { role: 'system', content: systemPrompt },
     ...history.map(m => ({ role: m.role, content: m.content })),
@@ -168,13 +203,15 @@ async function chamarCerebras(
   const toolsUsed: string[] = [];
   let totalIn = 0, totalOut = 0;
 
-  let response: any = await cerebrasClient().chat.completions.create({
-    model:                 CEREBRAS_MODEL,
+  const create = (msgs: any[]) => (client as OpenAI).chat.completions.create({
+    model,
     max_completion_tokens: MAX_OUTPUT,
-    messages,
+    messages: msgs,
     tools,
-    tool_choice:           'auto',
-  });
+    tool_choice: 'auto',
+  } as any);
+
+  let response: any = await create(messages);
   totalIn  += response.usage?.prompt_tokens     ?? 0;
   totalOut += response.usage?.completion_tokens ?? 0;
 
@@ -203,13 +240,7 @@ async function chamarCerebras(
       });
     });
 
-    response = await cerebrasClient().chat.completions.create({
-      model:                 CEREBRAS_MODEL,
-      max_completion_tokens: MAX_OUTPUT,
-      messages,
-      tools,
-      tool_choice:           'auto',
-    });
+    response = await create(messages);
     totalIn  += response.usage?.prompt_tokens     ?? 0;
     totalOut += response.usage?.completion_tokens ?? 0;
   }
@@ -218,8 +249,44 @@ async function chamarCerebras(
   return {
     text,
     toolsUsed,
-    provider: `Cerebras ${CEREBRAS_MODEL} (${totalIn} in / ${totalOut} out)`,
+    provider: `${providerName} ${model} (${totalIn} in / ${totalOut} out)`,
   };
+}
+
+// ── CEREBRAS (1º elo da cascata) ───────────────────────────────────────────
+async function chamarCerebras(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    cerebrasClient(), CEREBRAS_MODEL, 'Cerebras',
+    systemPrompt, history, userMessage,
+  );
+}
+
+// ── GROQ chat (4º elo) ──────────────────────────────────────────────────────
+async function chamarGroqChat(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    groqChatClient(), GROQ_CHAT_MODEL, 'Groq',
+    systemPrompt, history, userMessage,
+  );
+}
+
+// ── OPENROUTER (5º elo) ─────────────────────────────────────────────────────
+async function chamarOpenRouter(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    openRouterClient(), OPENROUTER_MODEL, 'OpenRouter',
+    systemPrompt, history, userMessage,
+  );
 }
 
 // ── GEMINI (fallback intermediário) ─────────────────────────────────────────
@@ -430,10 +497,45 @@ export async function pensarEmCascata(
   }
 
   if (process.env.ANTHROPIC_API_KEY) {
-    const r = await chamarClaude(systemPrompt, truncado, userMessage, attachments);
-    console.log(`[AI] ✅ ${r.provider}`);
-    return r;
+    try {
+      const r = await chamarClaude(systemPrompt, truncado, userMessage, attachments);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      console.warn(`[AI] ⚠️ Claude falhou: ${(err as Error).message ?? err}`);
+    }
   }
 
-  throw new Error('Nenhum provider de IA configurado (faltam CEREBRAS_API_KEY, GEMINI_API_KEY e ANTHROPIC_API_KEY).');
+  // 4º elo: Groq Chat (llama-3.3-70b-versatile, free tier 30 RPM mas TPM 6k).
+  // Não suporta vision — só usa se não houver attachments.
+  if (!hasAttachments && process.env.GROQ_API_KEY) {
+    const estimated = estimatePromptTokens(systemPrompt, truncado, userMessage);
+    if (estimated > GROQ_MAX_INPUT_TOKENS) {
+      console.warn(`[AI] ⚠️ Groq pulado: prompt ~${estimated} tokens > ${GROQ_MAX_INPUT_TOKENS} (TPM free tier).`);
+    } else {
+      try {
+        const r = await chamarGroqChat(systemPrompt, truncado, userMessage);
+        console.log(`[AI] ✅ ${r.provider}`);
+        return r;
+      } catch (err) {
+        console.warn(`[AI] ⚠️ Groq falhou: ${(err as Error).message ?? err}`);
+      }
+    }
+  }
+
+  // 5º elo (último recurso): OpenRouter free tier.
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      const r = await chamarOpenRouter(systemPrompt, truncado, userMessage);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      console.warn(`[AI] ⚠️ OpenRouter falhou: ${(err as Error).message ?? err}`);
+    }
+  }
+
+  throw new Error(
+    'Cascata IA esgotada — todos os providers configurados falharam. ' +
+    'Verifique CEREBRAS_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY (saldo!), GROQ_API_KEY, OPENROUTER_API_KEY.'
+  );
 }
