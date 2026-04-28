@@ -1,6 +1,10 @@
 import axios from 'axios';
+import FormData from 'form-data';
+import fs from 'fs/promises';
+import { transcribeAudio } from '../agent/transcribe';
 import pool from '../database/connection';
 import { think } from '../agent/think';
+import { speak } from '../agent/speak';
 import { ingerirPdf, detectarCategoria } from '../services/ragIngest';
 import { supabaseConfigurado } from '../services/supabase';
 
@@ -133,12 +137,19 @@ export interface TelegramDocument {
   filename:  string;
   caption?:  string;
 }
+export interface TelegramVoice {
+  file_id:   string;
+  mime_type: string;
+  duration:  number;             // segundos
+  file_size?: number;
+}
 export interface TelegramIncoming {
   chatId:    number;
   userId:    number;
   username?: string;
   firstName?: string;
-  text:      string;             // vazio se for só documento
+  text:      string;             // vazio se for só voice/documento
+  voice?:    TelegramVoice;
   document?: TelegramDocument;
   messageId: number;
 }
@@ -156,6 +167,18 @@ export function parseTelegramUpdate(body: unknown): TelegramIncoming | null {
   const text    = (msg.text as string | undefined)    ?? '';
   const caption = (msg.caption as string | undefined) ?? '';
 
+  // voice (mensagem de voz nativa) tem precedência sobre audio file
+  let voice: TelegramVoice | undefined;
+  const v = (msg.voice ?? msg.audio) as Record<string, unknown> | undefined;
+  if (v && typeof v === 'object') {
+    voice = {
+      file_id:   String(v.file_id ?? ''),
+      mime_type: String(v.mime_type ?? 'audio/ogg'),
+      duration:  Number(v.duration ?? 0),
+      file_size: v.file_size ? Number(v.file_size) : undefined,
+    };
+  }
+
   let document: TelegramDocument | undefined;
   const doc = msg.document as Record<string, unknown> | undefined;
   if (doc && typeof doc === 'object') {
@@ -167,8 +190,8 @@ export function parseTelegramUpdate(body: unknown): TelegramIncoming | null {
     };
   }
 
-  // Se não tem texto nem documento, ignora
-  if (!text.trim() && !document) return null;
+  // Se não tem texto, voice nem documento, ignora
+  if (!text.trim() && !voice && !document) return null;
 
   return {
     chatId:    Number(chat.id),
@@ -176,6 +199,7 @@ export function parseTelegramUpdate(body: unknown): TelegramIncoming | null {
     username:  (from.username as string | undefined),
     firstName: (from.first_name as string | undefined),
     text:      text.trim(),
+    voice,
     document,
     messageId: Number(msg.message_id),
   };
@@ -201,7 +225,10 @@ async function downloadTelegramFile(fileId: string): Promise<Buffer> {
 // ── Pipeline completo: recebe → autoriza → think() → responde ──────────────
 export async function processTelegramIncoming(incoming: TelegramIncoming): Promise<void> {
   // Log inbound (mesmo de não-autorizados, pra audit)
-  const logText = incoming.text || (incoming.document ? `[PDF: ${incoming.document.filename}]` : '[vazio]');
+  const logText = incoming.text
+    || (incoming.document ? `[PDF: ${incoming.document.filename}]`
+    :   incoming.voice    ? `[voz: ${incoming.voice.duration}s]`
+    :   '[vazio]');
   void logTelegram('inbound', String(incoming.chatId), logText, incoming.username).catch(() => {});
 
   if (!isAuthorized(incoming.chatId)) {
@@ -209,6 +236,44 @@ export async function processTelegramIncoming(incoming: TelegramIncoming): Promi
       incoming.chatId,
       `🚫 Não autorizado. Para liberar acesso, peça ao CEO José Romário para adicionar seu chat_id (\`${incoming.chatId}\`) à variável TELEGRAM_AUTHORIZED_USER_IDS no Railway.`,
     );
+    return;
+  }
+
+  // VOZ → Whisper transcreve → think → speak (TTS) → sendVoice de volta
+  if (incoming.voice) {
+    if (incoming.voice.duration > 600) {
+      await sendMessage(incoming.chatId, '⚠️ Áudio muito longo (>10 min). Manda menor ou usa texto, Chefe.');
+      return;
+    }
+    try {
+      void sendChatAction(incoming.chatId, 'typing').catch(() => {});
+      const ogg = await downloadTelegramFile(incoming.voice.file_id);
+      const tx  = await transcribeAudio(ogg, incoming.voice.mime_type);
+      console.log(`[telegram-voice] chat=${incoming.chatId} ${incoming.voice.duration}s → "${tx.text.slice(0, 80)}"`);
+      if (!tx.text || tx.text.trim().length < 2) {
+        await sendMessage(incoming.chatId, '⚠️ Não entendi seu áudio. Tenta de novo ou manda texto.');
+        return;
+      }
+
+      const sessionId = `tg_${incoming.chatId}`;
+      const resp = await think(tx.text, { sessionId, channel: 'voice' });
+
+      // Resposta dupla: texto (pra ler) + áudio (voz da ZAYRA via OpenAI TTS)
+      await sendMessage(incoming.chatId, `🎙 _você disse: ${escapeMd(tx.text.slice(0, 200))}_\n\n${resp.text}`);
+
+      void sendChatAction(incoming.chatId, 'record_voice').catch(() => {});
+      // Limita TTS a 2000 chars pra não estourar custo / tempo. Acima disso, só texto.
+      const textoTTS = resp.text.length > 2000 ? resp.text.slice(0, 2000) + '...' : resp.text;
+      try {
+        const mp3 = await speak(textoTTS);
+        await sendVoiceFromBuffer(incoming.chatId, mp3, 'zayra-resposta.mp3');
+      } catch (ttsErr) {
+        console.warn('[telegram-voice] TTS falhou:', (ttsErr as Error).message);
+      }
+    } catch (err) {
+      console.error('[telegram-voice]', err instanceof Error ? err.message : err);
+      await sendMessage(incoming.chatId, `⚠️ Erro processando áudio: ${escapeMd((err as Error).message ?? String(err))}`);
+    }
     return;
   }
 
@@ -261,6 +326,59 @@ export async function processTelegramIncoming(incoming: TelegramIncoming): Promi
       `⚠️ Erro ao processar sua mensagem: ${err instanceof Error ? err.message : 'desconhecido'}`,
     );
   }
+}
+
+// ── Outbound rich: chat action, voz, documento ─────────────────────────────
+// chatAction: 'typing' | 'upload_document' | 'record_voice' | 'upload_voice'
+export async function sendChatAction(chatId: string | number, action: string): Promise<void> {
+  await axios.post(botUrl('sendChatAction'), { chat_id: chatId, action }, { timeout: 5000 });
+}
+
+// Envia áudio MP3 (do speak()) como audio attachment. Telegram aceita MP3
+// nativamente — mostra player com waveform, ignora restrição de OGG/Opus
+// que só vale pro 'voice message' nativo. Pra usuário final é igual.
+export async function sendVoiceFromBuffer(
+  chatId: string | number,
+  audioBuffer: Buffer,
+  filename = 'zayra.mp3',
+): Promise<void> {
+  const fd = new FormData();
+  fd.append('chat_id', String(chatId));
+  fd.append('audio', audioBuffer, { filename, contentType: 'audio/mpeg' });
+  fd.append('title', 'ZAYRA');
+  fd.append('performer', 'Romatec');
+  await axios.post(botUrl('sendAudio'), fd, {
+    headers:          fd.getHeaders(),
+    timeout:          60000,
+    maxContentLength: 50 * 1024 * 1024,
+    maxBodyLength:    50 * 1024 * 1024,
+  });
+  void logTelegram('outbound', String(chatId), `[áudio: ${filename} ${(audioBuffer.length/1024).toFixed(1)}KB]`).catch(() => {});
+}
+
+// Envia documento (DOCX/PDF gerado pelo agent — usado por contratos Fase 2+).
+// Aceita Buffer + filename OU path local.
+export async function sendDocument(
+  chatId: string | number,
+  source:   Buffer | string,
+  filename: string,
+  caption?: string,
+): Promise<void> {
+  const fd = new FormData();
+  fd.append('chat_id', String(chatId));
+  const buf = Buffer.isBuffer(source) ? source : await fs.readFile(source);
+  fd.append('document', buf, { filename });
+  if (caption) {
+    fd.append('caption', caption);
+    fd.append('parse_mode', 'Markdown');
+  }
+  await axios.post(botUrl('sendDocument'), fd, {
+    headers:          fd.getHeaders(),
+    timeout:          60000,
+    maxContentLength: 50 * 1024 * 1024,
+    maxBodyLength:    50 * 1024 * 1024,
+  });
+  void logTelegram('outbound', String(chatId), `[doc: ${filename} ${(buf.length/1024).toFixed(1)}KB]`).catch(() => {});
 }
 
 // ── Log próprio (mesmo padrão de zayra_whatsapp_log) ────────────────────────
