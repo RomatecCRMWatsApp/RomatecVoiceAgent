@@ -236,11 +236,22 @@ async function chamarGemini(
     generationConfig:  { maxOutputTokens: MAX_OUTPUT },
   });
 
-  // Converte histórico pra formato Gemini (role 'assistant' → 'model')
+  // Converte histórico pra formato Gemini (role 'assistant' → 'model').
+  // Gemini EXIGE que history comece com role 'user' E alterne user/model.
+  // Se começar com 'model' (raro mas possível após truncamento), drop até user.
   const geminiHistory = history.map(m => ({
     role:  m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }],
   }));
+  while (geminiHistory.length > 0 && geminiHistory[0].role === 'model') {
+    geminiHistory.shift();
+  }
+  // Garante alternância: remove duplicatas consecutivas do mesmo role
+  for (let i = geminiHistory.length - 1; i > 0; i--) {
+    if (geminiHistory[i].role === geminiHistory[i - 1].role) {
+      geminiHistory.splice(i, 1);
+    }
+  }
 
   const chat = model.startChat({ history: geminiHistory });
   const toolsUsed: string[] = [];
