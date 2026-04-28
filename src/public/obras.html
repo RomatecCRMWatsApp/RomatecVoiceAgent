@@ -440,6 +440,7 @@ const escape = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&l
 async function api(path, opts={}) {
   const r = await fetch(API + path, {
     headers: {'Content-Type':'application/json'},
+    cache: 'no-store',
     ...opts,
   });
   const d = await r.json();

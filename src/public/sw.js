@@ -1,7 +1,7 @@
 // Service Worker da ZAYRA — versão atrelada à versão do app pra forçar
 // rotação de cache em todo deploy. Se você bumpar a versão do app, bumpe esta
 // constante também (ou no futuro, gere via build).
-const CACHE = 'zayra-v1.30.0';
+const CACHE = 'zayra-v1.30.1';
 
 // App shell — recursos pequenos que podem ser cacheados.
 // HTML NÃO está aqui de propósito — é network-first.
@@ -42,7 +42,7 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
   // Rotas de API: sempre rede, nunca cacheia
-  const apiRoutes = ['/text', '/voice', '/briefing', '/memory', '/notifications', '/webhook', '/zayra', '/auth', '/chat', '/health'];
+  const apiRoutes = ['/api/', '/text', '/voice', '/briefing', '/memory', '/notifications', '/webhook', '/zayra', '/auth', '/chat', '/health'];
   if (apiRoutes.some(r => url.pathname.startsWith(r)) || e.request.method !== 'GET') {
     e.respondWith(
       fetch(e.request).catch(() => new Response('{"error":"offline"}', {
