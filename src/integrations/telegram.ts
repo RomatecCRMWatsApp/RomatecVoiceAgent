@@ -6,6 +6,7 @@ import pool from '../database/connection';
 import { think } from '../agent/think';
 import { speak } from '../agent/speak';
 import { ingerirPdf, detectarCategoria } from '../services/ragIngest';
+import { indexarContratoModelo } from '../services/contratosIngest';
 import { supabaseConfigurado } from '../services/supabase';
 
 // Telegram Bot API direto. Bot dedicado pra ZAYRA — separado do bot do CRM.
@@ -277,14 +278,64 @@ export async function processTelegramIncoming(incoming: TelegramIncoming): Promi
     return;
   }
 
-  // PDF → ingere na memória vetorial
+  // PDF/DOCX → ingere na memória vetorial.
+  // Se caption contém "contrato" / "modelo" / "minuta", vai pra base de contratos
+  // (segmentação Claude → cláusulas + embeddings em contratos_indexados).
+  // Senão, vai pro RAG geral (rag_chunks).
+  // Webhook Telegram é assíncrono → sem timeout 502 do gateway Railway.
   if (incoming.document) {
     if (!supabaseConfigurado()) {
-      await sendMessage(incoming.chatId, '⚠️ PDF recebido, mas Supabase não está configurado no servidor.');
+      await sendMessage(incoming.chatId, '⚠️ Documento recebido, mas Supabase não está configurado no servidor.');
       return;
     }
-    if (!incoming.document.mime_type.includes('pdf')) {
-      await sendMessage(incoming.chatId, `⚠️ Aceito só PDF (recebido: ${incoming.document.mime_type}).`);
+    const mime = incoming.document.mime_type;
+    const isPdf  = mime.includes('pdf');
+    const isDocx = mime.includes('wordprocessingml') || mime.includes('officedocument') ||
+                   incoming.document.filename.toLowerCase().endsWith('.docx');
+    if (!isPdf && !isDocx) {
+      await sendMessage(incoming.chatId, `⚠️ Aceito PDF ou DOCX (recebido: ${mime}).`);
+      return;
+    }
+
+    const captionLower = (incoming.document.caption || '').toLowerCase();
+    const ehContratoModelo = /\b(contrato|modelo|minuta|template)\b/.test(captionLower);
+
+    // ── ROTA A: contrato modelo (Fase 1 — segmentação Claude) ──
+    if (ehContratoModelo) {
+      try {
+        await sendMessage(incoming.chatId,
+          `📥 Recebi *${escapeMd(incoming.document.filename)}*, segmentando como contrato modelo… ` +
+          `_pode levar 1-3 min, te aviso quando terminar_`);
+        const buf = await downloadTelegramFile(incoming.document.file_id);
+        const r = await indexarContratoModelo({
+          buffer:       buf,
+          fonteArquivo: isDocx ? 'docx' : 'pdf',
+          tituloHint:   incoming.document.caption?.replace(/\b(contrato|modelo|minuta|template)\b/gi, '').trim() || undefined,
+          arquivoNome:  incoming.document.filename,
+          fonte:        'telegram',
+        });
+        const tituloSafe = escapeMd(r.titulo);
+        if (r.ja_existia) {
+          await sendMessage(incoming.chatId, `📚 Já tinha *${tituloSafe}* na base de contratos, Chefe.`);
+        } else {
+          const secoesStr = Object.entries(r.secoes).map(([k, v]) => `${k}=${v}`).join(' | ');
+          await sendMessage(incoming.chatId,
+            `✅ Indexei contrato: *${tituloSafe}*\n` +
+            `tipo: \`${escapeMd(r.tipo)}\`\n` +
+            `cláusulas: ${r.total_clausulas}\n` +
+            `seções: ${escapeMd(secoesStr)}\n\n` +
+            `_resumo:_ ${escapeMd(r.resumo.slice(0, 300))}${r.resumo.length>300?'...':''}`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await sendMessage(incoming.chatId, `❌ Falhei indexando o contrato: ${escapeMd(msg)}`);
+      }
+      return;
+    }
+
+    // ── ROTA B: documento geral pro RAG ──
+    if (!isPdf) {
+      await sendMessage(incoming.chatId, `⚠️ Pra RAG geral aceito só PDF. Pra indexar como contrato modelo, manda com caption "contrato" ou "minuta".`);
       return;
     }
     try {
