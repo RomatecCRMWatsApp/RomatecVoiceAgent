@@ -1346,22 +1346,35 @@ function renderFolha() {
 // CSS comum dos relatórios (recibo + folha) — header com logo Romatec
 const ROMATEC_HEADER_CSS = `
 .romatec-header{display:flex;align-items:center;gap:16px;border-bottom:3px solid #0a3d2a;padding-bottom:14px;margin-bottom:18px;}
-.romatec-header .logo{flex-shrink:0;}
-.romatec-header .logo img{height:60px;display:block;}
-.romatec-header .logo-fallback{height:60px;width:60px;border:2px solid #0a3d2a;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:Georgia,serif;font-weight:bold;color:#0a3d2a;font-size:20px;}
+.romatec-header .logo{flex-shrink:0;width:90px;height:90px;}
+.romatec-header .logo img{width:100%;height:100%;object-fit:contain;display:block;}
+.romatec-header .logo svg{width:100%;height:100%;display:block;}
 .romatec-header .empresa-info{flex:1;}
-.romatec-header .empresa-info .nome{font-family:Georgia,serif;font-size:24px;font-weight:bold;color:#0a3d2a;line-height:1.1;}
-.romatec-header .empresa-info .tagline{font-size:11px;color:#0a3d2a;letter-spacing:2px;text-transform:uppercase;margin-top:2px;}
-.romatec-header .empresa-info .subtagline{font-size:13px;color:#1e7a4a;font-weight:600;margin-top:4px;}
+.romatec-header .empresa-info .nome{font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:bold;color:#0a3d2a;line-height:1;letter-spacing:1px;}
+.romatec-header .empresa-info .nome .accent{color:#c00; font-size:18px; vertical-align:top; margin-left:-2px;}
+.romatec-header .empresa-info .tagline{font-size:11px;color:#444;letter-spacing:6px;text-transform:uppercase;margin-top:3px;font-weight:600;}
+.romatec-header .empresa-info .subtagline{font-size:14px;color:#0a3d2a;font-weight:bold;margin-top:6px;letter-spacing:.5px;}
 `;
+// SVG inline da bússola Romatec (substituto da logo PNG enquanto não é uploadada)
+const ROMATEC_LOGO_SVG = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#bfa75a"/><stop offset="1" stop-color="#8a7335"/></linearGradient></defs>
+  <circle cx="50" cy="50" r="44" fill="none" stroke="url(#g)" stroke-width="3"/>
+  <circle cx="50" cy="50" r="36" fill="#f5f5f5"/>
+  <text x="50" y="14" text-anchor="middle" font-family="Georgia" font-weight="bold" font-size="9" fill="#0a3d2a">N</text>
+  <text x="50" y="93" text-anchor="middle" font-family="Georgia" font-weight="bold" font-size="9" fill="#0a3d2a">S</text>
+  <text x="89" y="54" text-anchor="middle" font-family="Georgia" font-weight="bold" font-size="9" fill="#0a3d2a">E</text>
+  <text x="11" y="54" text-anchor="middle" font-family="Georgia" font-weight="bold" font-size="9" fill="#0a3d2a">W</text>
+  <polygon points="50,22 56,50 50,46 44,50" fill="#c00"/>
+  <polygon points="50,78 44,50 50,54 56,50" fill="#0a3d2a"/>
+  <circle cx="50" cy="50" r="3" fill="#c9a84c"/>
+</svg>`;
 const ROMATEC_HEADER_HTML = `
 <div class="romatec-header">
   <div class="logo">
-    <img src="/logo-romatec.png" alt="Romatec" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-    <div class="logo-fallback" style="display:none;">R</div>
+    <img src="/logo-romatec.png" alt="Romatec" onerror="this.outerHTML = ${JSON.stringify(ROMATEC_LOGO_SVG)};">
   </div>
   <div class="empresa-info">
-    <div class="nome">RÔMATEC</div>
+    <div class="nome">R<span class="accent">▲</span>MATEC</div>
     <div class="tagline">Consultoria Total</div>
     <div class="subtagline">Engenharia e Agrimensura</div>
   </div>
