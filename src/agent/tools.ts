@@ -21,7 +21,11 @@ import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
 import { listarContratosIndexados } from '../services/contratosIngest';
 import { sendReply } from '../integrations/whatsapp';
 import { pesquisarWeb } from '../integrations/braveSearch';
-import { consultarCnpj, consultarCep, consultarBanco, feriadosNacionais } from '../integrations/brasilApi';
+import {
+  consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
+  consultarDdd, fipeMarcas, fipePreco, consultarTaxas,
+  consultarPixParticipantes, climaCidade, consultarIsbn,
+} from '../integrations/brasilApi';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
   saveConversation, searchConversations, listChatSessions, getSessionMessages,
@@ -1244,6 +1248,64 @@ export const toolDefinitions: Anthropic.Tool[] = [
       properties: { ano: { type: 'number', description: 'Ano (4 dígitos). Default: ano atual.' } },
     },
   },
+
+  // ── v1.33.0: BrasilAPI expandida ──
+  {
+    name: 'consultar_ddd',
+    description: 'Descobre estado e cidades de um DDD (2 dígitos). Use quando o Chefe receber lead/contato com telefone novo e quiser saber a região (ex: DDD 98 = Maranhão, capital + Imperatriz; DDD 11 = SP capital).',
+    input_schema: {
+      type: 'object',
+      properties: { ddd: { type: 'string', description: 'DDD com 2 dígitos (ex: 98, 11, 21)' } },
+      required: ['ddd'],
+    },
+  },
+  {
+    name: 'fipe_marcas',
+    description: 'Lista marcas de veículos da Tabela FIPE (carros, motos ou caminhões). Use antes de fipe_preco quando o Chefe perguntar valor de carro pra avaliação patrimonial ou garantia.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tipo: { type: 'string', enum: ['carros','motos','caminhoes'], description: 'Default: carros' },
+      },
+    },
+  },
+  {
+    name: 'fipe_preco',
+    description: 'Consulta valor FIPE atualizado de um veículo pelo código FIPE (ex: 001234-5). Retorna valor, marca, modelo, ano, mês de referência. Use pra avaliação de bens em PTAM, garantia em contratos, comparativo patrimonial.',
+    input_schema: {
+      type: 'object',
+      properties: { codigo_fipe: { type: 'string', description: 'Código FIPE no formato XXXXXX-X (ex: 001234-5)' } },
+      required: ['codigo_fipe'],
+    },
+  },
+  {
+    name: 'consultar_taxas',
+    description: 'Retorna taxas oficiais ATUALIZADAS de Selic, CDI, IPCA. Mais confiável que pesquisar_web pra esses indicadores específicos. Use quando o Chefe perguntar "qual a Selic hoje", "CDI atual", "IPCA do mês", etc.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'pix_participantes',
+    description: 'Lista os principais bancos cadastrados no PIX (50 primeiros). Útil pra verificar se um banco aceita PIX, descobrir ISPB pra TED, conferir nomes oficiais.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'clima_cidade',
+    description: 'Previsão do tempo dos próximos 6 dias via CPTEC/INPE (NÃO previsão de cidade qualquer — só capitais e cidades cadastradas no CPTEC). Use pra planejar cronograma de obra (chuva atrasa concretagem, alvenaria externa, etc), agendar vistorias, programar transporte de material. Cidades que funcionam: capitais e principais cidades do Maranhão (São Luís, Imperatriz, Caxias, Bacabal).',
+    input_schema: {
+      type: 'object',
+      properties: { cidade: { type: 'string', description: 'Nome da cidade (ex: São Luís, Imperatriz, Açailândia)' } },
+      required: ['cidade'],
+    },
+  },
+  {
+    name: 'consultar_isbn',
+    description: 'Consulta dados de um livro pelo ISBN (10 ou 13 dígitos). Útil pra biblioteca técnica de avaliações (NBRs, manuais, normas), citações em laudos.',
+    input_schema: {
+      type: 'object',
+      properties: { isbn: { type: 'string', description: 'ISBN com ou sem traços' } },
+      required: ['isbn'],
+    },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
@@ -1685,6 +1747,29 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'feriados_nacionais':
         data = await feriadosNacionais(input as { ano?: number });
+        break;
+
+      // ── v1.33.0: BrasilAPI expandida ──
+      case 'consultar_ddd':
+        data = await consultarDdd(input as { ddd: string | number });
+        break;
+      case 'fipe_marcas':
+        data = await fipeMarcas(input as { tipo?: 'carros' | 'motos' | 'caminhoes' });
+        break;
+      case 'fipe_preco':
+        data = await fipePreco(input as { codigo_fipe: string });
+        break;
+      case 'consultar_taxas':
+        data = await consultarTaxas();
+        break;
+      case 'pix_participantes':
+        data = await consultarPixParticipantes();
+        break;
+      case 'clima_cidade':
+        data = await climaCidade(input as { cidade: string });
+        break;
+      case 'consultar_isbn':
+        data = await consultarIsbn(input as { isbn: string });
         break;
 
       default:
