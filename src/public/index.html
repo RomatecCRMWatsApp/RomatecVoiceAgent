@@ -180,14 +180,14 @@ function unlockAudioPlayback(){
   if(audioUnlocked)return;
   audioUnlocked=true;
   try{
-    // Web Audio API (pra AudioContext do mic)
+    // Web Audio API: cria audioCtx global se nao existe e destrava com buffer silencioso
     const Ctx=window.AudioContext||window.webkitAudioContext;
     if(Ctx){
-      const ctx=new Ctx();
-      if(ctx.state==='suspended')ctx.resume().catch(()=>{});
-      const buf=ctx.createBuffer(1,1,22050);
-      const src=ctx.createBufferSource();
-      src.buffer=buf;src.connect(ctx.destination);src.start(0);
+      if(!audioCtx) audioCtx=new Ctx();
+      if(audioCtx.state==='suspended') audioCtx.resume().catch(()=>{});
+      const buf=audioCtx.createBuffer(1,1,22050);
+      const src=audioCtx.createBufferSource();
+      src.buffer=buf;src.connect(audioCtx.destination);src.start(0);
     }
   }catch(e){console.warn('[unlock webaudio]',e.message);}
   try{
@@ -307,13 +307,29 @@ async function sendToZayra(blob,mime){
       const resp=txtHdr?decodeURIComponent(txtHdr):'';
       tx((trans?'🎙 '+trans+'\n\n':'')+(resp||'(sem resposta)'));
       setState('speaking','Falando…');
-      const audio=new Audio(URL.createObjectURL(audioBlob));
-      audio.onended=()=>setState('idle');
-      audio.onerror=()=>{tx(tx.textContent+'\n⚠️ erro tocando áudio');setState('idle');};
-      try{ await audio.play(); }
-      catch(playErr){
-        tx((tx.textContent||'')+'\n⚠️ play() bloqueado: '+playErr.message);
-        setState('idle');
+      // Toca via Web Audio API (audioCtx ja foi desbloqueado pelo mic do user).
+      // iOS Safari nao bloqueia AudioContext apos resume(), so HTMLAudioElement.
+      try{
+        if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+        if(audioCtx.state==='suspended') await audioCtx.resume();
+        const arr=await audioBlob.arrayBuffer();
+        const buf=await audioCtx.decodeAudioData(arr.slice(0));
+        const src=audioCtx.createBufferSource();
+        src.buffer=buf;src.connect(audioCtx.destination);
+        src.onended=()=>setState('idle');
+        src.start(0);
+      }catch(playErr){
+        // Fallback: tenta HTMLAudioElement se Web Audio API falhar (codec etc)
+        console.warn('[Web Audio fallback]',playErr.message);
+        try{
+          const audio=new Audio(URL.createObjectURL(audioBlob));
+          audio.onended=()=>setState('idle');
+          audio.onerror=()=>{tx(tx.textContent+'\n⚠️ erro tocando áudio');setState('idle');};
+          await audio.play();
+        }catch(htmlErr){
+          tx((tx.textContent||'')+'\n⚠️ play() bloqueado: '+htmlErr.message);
+          setState('idle');
+        }
       }
     } else {
       const data=await r.json();
