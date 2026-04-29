@@ -29,11 +29,15 @@ const CLAUDE_MODEL      = process.env.CLAUDE_FALLBACK_MODEL || 'claude-sonnet-4-
 // como 4º e 5º elos da cascata. Tudo OpenAI-compatible — reusa o pattern Cerebras.
 const GROQ_CHAT_MODEL   = process.env.GROQ_CHAT_MODEL      || 'llama-3.3-70b-versatile';
 const OPENROUTER_MODEL  = process.env.OPENROUTER_MODEL     || 'meta-llama/llama-3.1-70b-instruct:free';
+// v1.32.0: GitHub Models e Cloudflare Workers AI (6º e 7º elos da cascata).
+const GITHUB_MODEL      = process.env.GITHUB_MODEL         || 'gpt-4o-mini';
+const CLOUDFLARE_MODEL  = process.env.CLOUDFLARE_MODEL     || '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 console.log(
   `[aiCascade] modelos ativos: Cerebras=${CEREBRAS_MODEL} | ` +
   `Gemini=${GEMINI_MODEL} | Claude=${CLAUDE_MODEL} | ` +
-  `Groq=${GROQ_CHAT_MODEL} | OpenRouter=${OPENROUTER_MODEL}`
+  `Groq=${GROQ_CHAT_MODEL} | OpenRouter=${OPENROUTER_MODEL} | ` +
+  `GitHub=${GITHUB_MODEL} | Cloudflare=${CLOUDFLARE_MODEL}`
 );
 
 const MAX_HISTORY = parseInt(process.env.AI_MAX_HISTORY_MESSAGES || '12', 10);
@@ -129,6 +133,29 @@ function openRouterClient(): OpenAI {
     },
   });
   return _openRouter;
+}
+
+// GitHub Models (6º elo) — endpoint OpenAI-compatible que dá acesso a GPT-4o,
+// Phi-4, Llama-3.3-70B, Mistral-large e outros, autenticando com GITHUB_TOKEN.
+// Free tier generoso (rate-limit por modelo, sem cobrança).
+let _githubModels: OpenAI | null = null;
+function githubModelsClient(): OpenAI {
+  if (!_githubModels) _githubModels = new OpenAI({
+    apiKey:  process.env.GITHUB_TOKEN,
+    baseURL: 'https://models.inference.ai.azure.com',
+  });
+  return _githubModels;
+}
+
+// Cloudflare Workers AI (7º elo) — edge brasileiro (latência < 100ms BR).
+// Endpoint OpenAI-compatible: /v1/chat/completions. Auth via Bearer + ACCOUNT_ID.
+let _cloudflare: OpenAI | null = null;
+function cloudflareClient(): OpenAI {
+  if (!_cloudflare) _cloudflare = new OpenAI({
+    apiKey:  process.env.CLOUDFLARE_API_TOKEN,
+    baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`,
+  });
+  return _cloudflare;
 }
 
 // ── Conversores de schema ───────────────────────────────────────────────────
@@ -285,6 +312,30 @@ async function chamarOpenRouter(
 ): Promise<CascadeResult> {
   return chamarOpenAICompatible(
     openRouterClient(), OPENROUTER_MODEL, 'OpenRouter',
+    systemPrompt, history, userMessage,
+  );
+}
+
+// ── GITHUB MODELS (6º elo) — GPT-4o-mini/Phi-4/Llama via GitHub ────────────
+async function chamarGitHub(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    githubModelsClient(), GITHUB_MODEL, 'GitHub',
+    systemPrompt, history, userMessage,
+  );
+}
+
+// ── CLOUDFLARE WORKERS AI (7º elo) — Llama-3.3 em edge BR ──────────────────
+async function chamarCloudflare(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    cloudflareClient(), CLOUDFLARE_MODEL, 'Cloudflare',
     systemPrompt, history, userMessage,
   );
 }
@@ -523,7 +574,7 @@ export async function pensarEmCascata(
     }
   }
 
-  // 5º elo (último recurso): OpenRouter free tier.
+  // 5º elo: OpenRouter free tier.
   if (process.env.OPENROUTER_API_KEY) {
     try {
       const r = await chamarOpenRouter(systemPrompt, truncado, userMessage);
@@ -534,8 +585,31 @@ export async function pensarEmCascata(
     }
   }
 
+  // 6º elo: GitHub Models — GPT-4o-mini/Phi-4 free com GITHUB_TOKEN.
+  if (!hasAttachments && process.env.GITHUB_TOKEN) {
+    try {
+      const r = await chamarGitHub(systemPrompt, truncado, userMessage);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      console.warn(`[AI] ⚠️ GitHub Models falhou: ${(err as Error).message ?? err}`);
+    }
+  }
+
+  // 7º elo (último recurso): Cloudflare Workers AI — edge BR, latência baixa.
+  if (!hasAttachments && process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID) {
+    try {
+      const r = await chamarCloudflare(systemPrompt, truncado, userMessage);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      console.warn(`[AI] ⚠️ Cloudflare falhou: ${(err as Error).message ?? err}`);
+    }
+  }
+
   throw new Error(
     'Cascata IA esgotada — todos os providers configurados falharam. ' +
-    'Verifique CEREBRAS_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY (saldo!), GROQ_API_KEY, OPENROUTER_API_KEY.'
+    'Verifique CEREBRAS_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY, ' +
+    'OPENROUTER_API_KEY, GITHUB_TOKEN, CLOUDFLARE_API_TOKEN.'
   );
 }

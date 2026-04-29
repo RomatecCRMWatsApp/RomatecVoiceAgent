@@ -20,6 +20,8 @@ import { buscarMemoria, formatarContexto } from '../services/ragSearch';
 import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
 import { listarContratosIndexados } from '../services/contratosIngest';
 import { sendReply } from '../integrations/whatsapp';
+import { pesquisarWeb } from '../integrations/braveSearch';
+import { consultarCnpj, consultarCep, consultarBanco, feriadosNacionais } from '../integrations/brasilApi';
 import {
   saveMemory, searchMemory, listMemories, deleteMemory,
   saveConversation, searchConversations, listChatSessions, getSessionMessages,
@@ -1192,6 +1194,56 @@ export const toolDefinitions: Anthropic.Tool[] = [
     description: 'Lista os contratos modelo já indexados na base vetorial (clausulas_juridicas + contratos_indexados). Use quando o Chefe perguntar "que contratos modelo eu tenho", "quais minutas estão na memória", "tem contrato de compra e venda?", etc. Retorna título, tipo (compra_venda/locacao/permuta/etc), categoria, número de cláusulas e data de indexação.',
     input_schema: { type: 'object', properties: {} },
   },
+
+  // ── v1.32.0: Brave Search + BrasilAPI (busca web e dados públicos) ──
+  {
+    name: 'pesquisar_web',
+    description: 'Pesquisa na web em tempo real via Brave Search. Use pra buscar preços de mercado, índices CUB/INCC atualizados, notícias do setor imobiliário, dados de empresas/pessoas, ou qualquer info que não está nos sistemas internos. Retorna até 10 resultados com título, URL e resumo.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:     { type: 'string', description: 'Termo de busca (em pt-BR de preferência)' },
+        limite:    { type: 'number', description: 'Quantos resultados (default 5, max 20)' },
+        freshness: { type: 'string', enum: ['pd','pw','pm','py'], description: 'Filtra por idade: pd=24h, pw=semana, pm=mês, py=ano' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'consultar_cnpj',
+    description: 'Consulta dados oficiais de uma empresa pelo CNPJ na Receita Federal (via BrasilAPI). Retorna razão social, nome fantasia, endereço, CNAE, capital social, situação cadastral. Use ao receber um CNPJ pra pré-preencher cadastro de cliente/fornecedor.',
+    input_schema: {
+      type: 'object',
+      properties: { cnpj: { type: 'string', description: 'CNPJ com ou sem formatação (14 dígitos)' } },
+      required: ['cnpj'],
+    },
+  },
+  {
+    name: 'consultar_cep',
+    description: 'Consulta endereço completo a partir do CEP (BrasilAPI v2 — ViaCEP + WideNet + OpenCEP). Retorna logradouro, bairro, cidade, UF. Use pra preencher endereço de obra/cliente automaticamente.',
+    input_schema: {
+      type: 'object',
+      properties: { cep: { type: 'string', description: 'CEP com ou sem traço (8 dígitos)' } },
+      required: ['cep'],
+    },
+  },
+  {
+    name: 'consultar_banco',
+    description: 'Consulta nome e ISPB de um banco pelo código FEBRABAN (3 dígitos). Útil pra confirmar dados de pagamento/boleto.',
+    input_schema: {
+      type: 'object',
+      properties: { codigo: { type: 'string', description: 'Código FEBRABAN do banco (ex: 001 = Banco do Brasil, 341 = Itaú, 260 = Nubank)' } },
+      required: ['codigo'],
+    },
+  },
+  {
+    name: 'feriados_nacionais',
+    description: 'Lista todos os feriados nacionais brasileiros de um ano (default = ano atual). Útil pra calcular prazos de obra, descontar dias do contrato, agendar entregas.',
+    input_schema: {
+      type: 'object',
+      properties: { ano: { type: 'number', description: 'Ano (4 dígitos). Default: ano atual.' } },
+    },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
@@ -1615,6 +1667,23 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'memoria_contratos_listar':
         data = await listarContratosIndexados();
+        break;
+
+      // ── v1.32.0: Brave Search + BrasilAPI ──
+      case 'pesquisar_web':
+        data = await pesquisarWeb(input as { query: string; limite?: number; freshness?: 'pd'|'pw'|'pm'|'py' });
+        break;
+      case 'consultar_cnpj':
+        data = await consultarCnpj(input as { cnpj: string });
+        break;
+      case 'consultar_cep':
+        data = await consultarCep(input as { cep: string });
+        break;
+      case 'consultar_banco':
+        data = await consultarBanco(input as { codigo: string | number });
+        break;
+      case 'feriados_nacionais':
+        data = await feriadosNacionais(input as { ano?: number });
         break;
 
       default:
