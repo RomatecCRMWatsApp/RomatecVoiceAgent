@@ -48,14 +48,22 @@ export async function pesquisarWeb(input: {
   });
   if (input.freshness) params.set('freshness', input.freshness);
 
+  const cleanKey = apiKey.trim();  // Remove espaços/quebra de linha que podem ter sido coladas
+  console.log(`[Brave] query: "${input.query}" | key length: ${cleanKey.length} | starts with: ${cleanKey.slice(0,4)}...`);
+
   const r = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
     headers: {
       Accept:                  'application/json',
-      'X-Subscription-Token':  apiKey,
+      'X-Subscription-Token':  cleanKey,
     },
   });
   if (!r.ok) {
     const txt = await r.text().catch(() => '');
+    console.error(`[Brave] HTTP ${r.status}:`, txt.slice(0, 300));
+    if (r.status === 401) throw new Error('Brave Search 401: chave inválida ou subscription não ativada (verifique em api-dashboard.search.brave.com → Subscriptions)');
+    if (r.status === 403) throw new Error('Brave Search 403: subscription expirada ou plano free não assinado (assine em Available plans)');
+    if (r.status === 422) throw new Error(`Brave Search 422: query rejeitada — ${txt.slice(0, 100)}`);
+    if (r.status === 429) throw new Error('Brave Search 429: limite de 1 query/segundo do free tier excedido — aguarde');
     throw new Error(`Brave Search ${r.status}: ${txt.slice(0, 200)}`);
   }
   const data = await r.json() as BraveResponse;
