@@ -52,24 +52,32 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
 .nav-links{display:flex;gap:14px;align-items:center}
 .nav-links a{color:var(--gold);text-decoration:none;font-size:11px;letter-spacing:.22em;text-transform:uppercase;padding:6px 12px;border:1px solid rgba(212,184,120,.35);border-radius:999px;background:rgba(7,32,24,.45);transition:all .2s}
 .nav-links a:hover{border-color:var(--neon);color:var(--neon);box-shadow:0 0 12px rgba(61,255,176,.3)}
-.mic{position:fixed;right:22px;bottom:calc(22px + env(safe-area-inset-bottom));width:64px;height:64px;border-radius:50%;border:1px solid var(--neon);background:radial-gradient(circle at 30% 30%,#0a3326,#020a07 70%);color:var(--neon);display:flex;align-items:center;justify-content:center;font-size:24px;cursor:pointer;box-shadow:0 0 30px rgba(61,255,176,.35);z-index:5}
+.mic{position:fixed;right:22px;bottom:calc(78px + env(safe-area-inset-bottom));width:60px;height:60px;border-radius:50%;border:1px solid var(--neon);background:radial-gradient(circle at 30% 30%,#0a3326,#020a07 70%);color:var(--neon);display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;box-shadow:0 0 30px rgba(61,255,176,.35);z-index:11}
 .mic.active{animation:micPulse 1.2s infinite}
 @keyframes micPulse{0%,100%{box-shadow:0 0 20px rgba(61,255,176,.4)}50%{box-shadow:0 0 50px rgba(61,255,176,.9)}}
 
-/* ── CHAT PANEL (v1.35) ──────────────────────────────────────────── */
-.chat-fab{position:fixed;left:22px;bottom:calc(22px + env(safe-area-inset-bottom));width:54px;height:54px;border-radius:50%;border:1px solid var(--gold);background:radial-gradient(circle at 30% 30%,#3a2f15,#020a07 70%);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;box-shadow:0 0 20px rgba(212,184,120,.3);z-index:5}
-.chat-fab:hover{filter:brightness(1.2)}
-.chat-fab.has-unread::after{content:'';position:absolute;top:6px;right:6px;width:10px;height:10px;border-radius:50%;background:#ff5555;box-shadow:0 0 8px #ff5555}
+/* ── CHAT PANEL (v1.37) — docked embaixo, estilo WhatsApp Web ──────── */
+.chat-fab{display:none}  /* removido — chat sempre visível agora */
 
-.chat-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:10;display:none;align-items:flex-end;justify-content:center;padding:0}
-.chat-overlay.open{display:flex}
-.chat-modal{width:100%;max-width:520px;height:90vh;background:linear-gradient(180deg,#04140d,#020a07);border:1px solid rgba(61,255,176,.25);border-radius:16px 16px 0 0;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 -8px 40px rgba(61,255,176,.15)}
-@media (min-width:560px){.chat-modal{height:80vh;border-radius:16px;margin-bottom:20px}}
+.chat-overlay{position:fixed;left:0;right:0;bottom:0;background:transparent;z-index:10;display:flex;flex-direction:column;align-items:stretch;pointer-events:none}
+.chat-overlay > *{pointer-events:auto}
+.chat-modal{width:100%;max-width:560px;margin:0 auto;background:linear-gradient(180deg,rgba(4,20,13,.98),rgba(2,10,7,.98));border:1px solid rgba(61,255,176,.25);border-bottom:none;border-radius:16px 16px 0 0;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 -8px 40px rgba(61,255,176,.18);transition:height .25s ease;backdrop-filter:blur(8px)}
+.chat-modal{height:60px}
+.chat-overlay.open .chat-modal{height:min(75vh,640px)}
+/* Quando recolhido, esconde tudo exceto header. Quando aberto, mostra tudo. */
+.chat-msgs,.chat-attachments,.chat-rec-info,.chat-status,.chat-input-row,.chat-toggle-voice{display:none}
+.chat-overlay.open .chat-msgs{display:flex}
+.chat-overlay.open .chat-input-row{display:flex}
+.chat-overlay.open .chat-toggle-voice{display:flex}
 
-.chat-header{padding:14px 18px;border-bottom:1px solid rgba(61,255,176,.15);display:flex;justify-content:space-between;align-items:center;background:rgba(7,32,24,.5)}
-.chat-header h3{font-family:'Orbitron',sans-serif;font-weight:700;font-size:15px;letter-spacing:.2em;color:var(--neon)}
-.chat-header .close{background:transparent;border:none;color:var(--text-dim);font-size:24px;cursor:pointer;padding:4px 10px}
+.chat-header{padding:14px 18px;border-bottom:1px solid rgba(61,255,176,.15);display:flex;justify-content:space-between;align-items:center;background:rgba(7,32,24,.5);cursor:pointer;flex-shrink:0;height:60px;box-sizing:border-box}
+.chat-header h3{font-family:'Orbitron',sans-serif;font-weight:700;font-size:15px;letter-spacing:.2em;color:var(--neon);display:flex;align-items:center;gap:10px}
+.chat-header h3::before{content:'💬';font-size:18px;letter-spacing:0}
+.chat-header .close{background:transparent;border:none;color:var(--text-dim);font-size:22px;cursor:pointer;padding:4px 10px;transition:transform .25s}
+.chat-overlay.open .chat-header .close{transform:rotate(45deg)}
 .chat-header .close:hover{color:var(--neon)}
+/* Espaço pra que a barra fixa não tampe o conteúdo principal */
+body.has-chat-bar .stage{padding-bottom:90px}
 
 .chat-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;-webkit-overflow-scrolling:touch}
 .msg-bubble{max-width:85%;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap}
@@ -149,8 +157,8 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
 <div class="chat-overlay" id="chatOverlay">
   <div class="chat-modal">
     <div class="chat-header">
-      <h3>ZAYRA · CHAT</h3>
-      <button class="close" id="chatClose" aria-label="Fechar chat">×</button>
+      <h3>Conversar com ZAYRA</h3>
+      <button class="close" id="chatClose" aria-label="Abrir/fechar chat">+</button>
     </div>
     <div class="chat-msgs" id="chatMsgs">
       <div class="chat-empty">
@@ -725,8 +733,20 @@ async function chatSendAudio(blob, mime){
   }
 }
 
-// Wire up
-$('chatFab').onclick = () => { $('chatOverlay').classList.add('open'); $('chatInput').focus(); };
+// Wire up — chat docked: header inteiro funciona como toggle abrir/fechar
+document.body.classList.add('has-chat-bar');  // libera espaço pra barra do chat
+const chatHeader = document.querySelector('.chat-header');
+if(chatHeader){
+  chatHeader.onclick = (e) => {
+    if(e.target.closest('.close')){
+      $('chatOverlay').classList.remove('open');
+      return;
+    }
+    const wasOpen = $('chatOverlay').classList.contains('open');
+    $('chatOverlay').classList.toggle('open');
+    if(!wasOpen) setTimeout(() => $('chatInput').focus(), 250);
+  };
+}
 $('chatClose').onclick = () => $('chatOverlay').classList.remove('open');
 $('chatSend').onclick = chatSend;
 $('chatInput').onkeydown = e => {
