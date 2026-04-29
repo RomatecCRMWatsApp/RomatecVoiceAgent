@@ -1247,6 +1247,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
+  console.log(`[Tool] → ${name}`, JSON.stringify(input).slice(0, 200));
   try {
     let data: unknown;
 
