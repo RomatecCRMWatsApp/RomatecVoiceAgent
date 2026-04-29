@@ -1343,17 +1343,19 @@ function renderFolha() {
   v.querySelectorAll('[data-recibo]').forEach(b => b.onclick = () => gerarRecibo(b.dataset.recibo, monthLabel));
 }
 
-// CSS comum dos relatórios (recibo + folha) — header com logo Romatec
+// CSS do header dos relatórios. Logo carrega centralizada (a imagem que o CEO
+// subiu já tem o nome+tagline embutidos, então não precisa repetir em texto).
 const ROMATEC_HEADER_CSS = `
-.romatec-header{display:flex;align-items:center;gap:16px;border-bottom:3px solid #0a3d2a;padding-bottom:14px;margin-bottom:18px;}
-.romatec-header .logo{flex-shrink:0;width:90px;height:90px;}
-.romatec-header .logo img{width:100%;height:100%;object-fit:contain;display:block;}
-.romatec-header .logo svg{width:100%;height:100%;display:block;}
-.romatec-header .empresa-info{flex:1;}
-.romatec-header .empresa-info .nome{font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:bold;color:#0a3d2a;line-height:1;letter-spacing:1px;}
-.romatec-header .empresa-info .nome .accent{color:#c00; font-size:18px; vertical-align:top; margin-left:-2px;}
-.romatec-header .empresa-info .tagline{font-size:11px;color:#444;letter-spacing:6px;text-transform:uppercase;margin-top:3px;font-weight:600;}
-.romatec-header .empresa-info .subtagline{font-size:14px;color:#0a3d2a;font-weight:bold;margin-top:6px;letter-spacing:.5px;}
+.romatec-header{display:flex;align-items:center;justify-content:center;border-bottom:3px solid #0a3d2a;padding-bottom:14px;margin-bottom:18px;}
+.romatec-header .logo{max-width:100%;}
+.romatec-header .logo img{max-height:100px;max-width:100%;width:auto;display:block;}
+.romatec-header .logo svg{width:90px;height:90px;display:block;margin:0 auto;}
+.romatec-header.fallback{justify-content:flex-start;gap:16px;}
+.romatec-header.fallback .empresa-info{flex:1;}
+.romatec-header.fallback .empresa-info .nome{font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:bold;color:#0a3d2a;line-height:1;letter-spacing:1px;}
+.romatec-header.fallback .empresa-info .nome .accent{color:#c00; font-size:18px; vertical-align:top; margin-left:-2px;}
+.romatec-header.fallback .empresa-info .tagline{font-size:11px;color:#444;letter-spacing:6px;text-transform:uppercase;margin-top:3px;font-weight:600;}
+.romatec-header.fallback .empresa-info .subtagline{font-size:14px;color:#0a3d2a;font-weight:bold;margin-top:6px;letter-spacing:.5px;}
 `;
 // SVG inline da bússola Romatec (substituto da logo PNG enquanto não é uploadada)
 const ROMATEC_LOGO_SVG = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
@@ -1368,15 +1370,20 @@ const ROMATEC_LOGO_SVG = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/20
   <polygon points="50,78 44,50 50,54 56,50" fill="#0a3d2a"/>
   <circle cx="50" cy="50" r="3" fill="#c9a84c"/>
 </svg>`;
-const ROMATEC_HEADER_HTML = `
-<div class="romatec-header">
-  <div class="logo">
-    <img src="/logo-romatec.png" alt="Romatec" onerror="this.outerHTML = ${JSON.stringify(ROMATEC_LOGO_SVG)};">
-  </div>
+// O CEO subiu o arquivo como "LOGO ROMATEC ATUAL.jpg" no src/public/.
+// Quando a img falha, troca o header inteiro pro fallback com SVG bússola + texto.
+const ROMATEC_FALLBACK_HEADER_HTML = `<div class="romatec-header fallback">
+  <div class="logo">${ROMATEC_LOGO_SVG}</div>
   <div class="empresa-info">
     <div class="nome">R<span class="accent">▲</span>MATEC</div>
     <div class="tagline">Consultoria Total</div>
     <div class="subtagline">Engenharia e Agrimensura</div>
+  </div>
+</div>`;
+const ROMATEC_HEADER_HTML = `
+<div class="romatec-header" id="romatec-header-${Date.now()}">
+  <div class="logo">
+    <img src="/LOGO%20ROMATEC%20ATUAL.jpg" alt="Romatec — Consultoria Total · Engenharia e Agrimensura" onerror="this.closest('.romatec-header').outerHTML = ${JSON.stringify(ROMATEC_FALLBACK_HEADER_HTML)};">
   </div>
 </div>
 `;
