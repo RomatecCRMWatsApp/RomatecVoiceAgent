@@ -34,8 +34,9 @@ export async function pesquisarWeb(input: {
   if (!input.query?.trim()) throw new Error('query obrigatória');
   // Aceita BRAVE_API_KEY (padrão) ou CHAVE_API_BRAVE (PT-BR no Railway)
   const apiKey = process.env.BRAVE_API_KEY || process.env.CHAVE_API_BRAVE;
+  console.log(`[Brave] env check: BRAVE_API_KEY=${process.env.BRAVE_API_KEY ? 'set('+process.env.BRAVE_API_KEY.length+'chars)' : 'undefined'} | CHAVE_API_BRAVE=${process.env.CHAVE_API_BRAVE ? 'set('+process.env.CHAVE_API_BRAVE.length+'chars)' : 'undefined'}`);
   if (!apiKey) {
-    throw new Error('BRAVE_API_KEY não configurada — gere em api.search.brave.com');
+    throw new Error('BRAVE_API_KEY não configurada no ambiente. Variavel deve ser BRAVE_API_KEY ou CHAVE_API_BRAVE com valor da api.search.brave.com');
   }
 
   const limit = Math.min(Math.max(input.limite ?? 5, 1), 20);
