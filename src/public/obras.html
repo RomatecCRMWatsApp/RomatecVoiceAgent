@@ -1371,22 +1371,28 @@ const ROMATEC_HEADER_HTML = `
 // Detecta mobile (iOS/Android) pra usar fluxo de Blob URL em vez de window.open+document.write
 const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-// Abre HTML em nova aba/download de forma compatível com iOS (que bloqueia document.write em popup)
-function abrirRelatorioHtml(html, fileNameSugerido) {
+// Abre HTML em nova aba inline (renderizado, não como download).
+// iOS Safari renderiza Blob URL com type=text/html como página normal — desde que NÃO tenha
+// o atributo download (que força tratamento como arquivo).
+function abrirRelatorioHtml(html, _fileNameSugerido) {
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
 
-  // Cria link com download como fallback E target='_blank' pra abrir em nova aba.
-  // iOS Safari respeita <a target="_blank"> com Blob URL e abre em nova aba.
-  const a = document.createElement('a');
-  a.href = url;
-  a.target = '_blank';
-  a.rel = 'noopener';
-  // Em mobile, sugere download (user pode escolher abrir ou salvar). Em desktop, só abre.
-  if (isMobileDevice && fileNameSugerido) a.download = fileNameSugerido;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  // Em iOS, atribuir location.href é mais confiável que <a target=_blank> (sem download attribute)
+  if (isMobileDevice) {
+    // Tenta abrir em nova aba via window.open. Se bloqueado (raro), navega na mesma aba.
+    const w = window.open(url, '_blank');
+    if (!w) location.href = url;
+  } else {
+    // Desktop: nova aba via <a>
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
   // Libera o URL depois de 60s pra dar tempo de carregar
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
