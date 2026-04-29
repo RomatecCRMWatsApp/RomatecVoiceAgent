@@ -165,6 +165,35 @@ function setState(s,label){
 }
 function tx(text){document.getElementById('transcript').textContent=text;}
 
+/* DESBLOQUEIO DE ÁUDIO iOS — iOS Safari bloqueia .play() fora de user gesture.
+   Solução: na PRIMEIRA interação (toque/clique), tocar um áudio silencioso
+   sincronicamente. Isso autoriza todas as reproduções futuras na sessão. */
+let audioUnlocked=false;
+function unlockAudioPlayback(){
+  if(audioUnlocked)return;
+  audioUnlocked=true;
+  try{
+    // Web Audio API (pra AudioContext do mic)
+    const Ctx=window.AudioContext||window.webkitAudioContext;
+    if(Ctx){
+      const ctx=new Ctx();
+      if(ctx.state==='suspended')ctx.resume().catch(()=>{});
+      const buf=ctx.createBuffer(1,1,22050);
+      const src=ctx.createBufferSource();
+      src.buffer=buf;src.connect(ctx.destination);src.start(0);
+    }
+  }catch(e){console.warn('[unlock webaudio]',e.message);}
+  try{
+    // HTMLAudioElement (pra new Audio() da resposta de voz da ZAYRA)
+    const a=new Audio('data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV');
+    a.volume=0;
+    a.play().then(()=>{a.pause();}).catch(()=>{});
+  }catch(e){console.warn('[unlock html5]',e.message);}
+}
+// Liga o desbloqueio na primeira interação em qualquer lugar da página
+document.addEventListener('touchstart',unlockAudioPlayback,{once:true,passive:true});
+document.addEventListener('click',unlockAudioPlayback,{once:true});
+
 /* MICROFONE → /voice (com auto-stop por silêncio) */
 let audioCtx,analyser,dataArr,micStream,mediaRec,chunks=[],listening=false;
 let recordStartedAt=0,silenceStartedAt=0,maxRecordTimer=null;
@@ -182,6 +211,7 @@ function autoStopRec(){
 }
 
 async function toggleListen(){
+  unlockAudioPlayback(); // Garante áudio desbloqueado mesmo se mic for o 1º toque
   const btn=document.getElementById('micBtn');
   if(listening){
     listening=false;btn.classList.remove('active');
