@@ -276,7 +276,12 @@ async function chamarOpenAICompatible(
     totalOut += response.usage?.completion_tokens ?? 0;
   }
 
-  const text = response.choices?.[0]?.message?.content?.trim() || 'Não consegui processar.';
+  const text = response.choices?.[0]?.message?.content?.trim() || '';
+  // Trata resposta vazia como falha pra continuar a cascata (em vez de retornar
+  // "Não consegui processar" e parar nesse provider)
+  if (!text || text.length < 3) {
+    throw new Error(`${providerName} retornou resposta vazia (${totalIn} in / ${totalOut} out)`);
+  }
   return {
     text,
     toolsUsed,
@@ -408,7 +413,10 @@ async function chamarGemini(
     result = await chat.sendMessage(responses);
   }
 
-  const text  = (result.response.text() || '').trim() || 'Não consegui processar.';
+  const text  = (result.response.text() || '').trim();
+  if (!text || text.length < 3) {
+    throw new Error(`Gemini retornou resposta vazia (provavelmente quota excedida ou tool loop falhou)`);
+  }
   const usage = result.response.usageMetadata;
   return {
     text,
