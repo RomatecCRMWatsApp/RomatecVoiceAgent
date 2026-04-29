@@ -29,38 +29,67 @@ function clean(s: string): string {
   return String(s ?? '').replace(/\D/g, '');
 }
 
+async function fetchWithRetry(url: string, opts: RequestInit = {}, retries = 2): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const r = await fetch(url, opts);
+    if (r.ok || r.status === 404) return r;
+    if (r.status === 403 || r.status === 429) {
+      if (attempt < retries) {
+        const wait = (attempt + 1) * 1500; // 1.5s, 3s
+        console.warn(`[BrasilAPI] ${r.status} em ${url} — retry ${attempt + 1}/${retries} em ${wait}ms`);
+        await new Promise(res => setTimeout(res, wait));
+        continue;
+      }
+    }
+    return r;
+  }
+  throw new Error('unreachable');
+}
+
 export async function consultarCnpj(input: { cnpj: string }): Promise<CnpjResultado> {
   const cnpj = clean(input.cnpj);
   if (cnpj.length !== 14) throw new Error(`CNPJ inválido: ${input.cnpj} (esperado 14 dígitos)`);
 
-  const r = await fetch(`${BASE}/cnpj/v1/${cnpj}`);
+  // Tenta BrasilAPI com retry, fallback pra OpenCNPJ se persistir 403
+  let r = await fetchWithRetry(`${BASE}/cnpj/v1/${cnpj}`);
+  if ((r.status === 403 || r.status === 429) && !r.ok) {
+    console.warn(`[BrasilAPI] CNPJ ${cnpj}: BrasilAPI bloqueou (${r.status}) — fallback OpenCNPJ`);
+    r = await fetch(`https://api.opencnpj.org/${cnpj}`);
+  }
   if (r.status === 404) throw new Error(`CNPJ ${cnpj} não encontrado na Receita Federal`);
-  if (!r.ok) throw new Error(`BrasilAPI CNPJ ${r.status}`);
+  if (!r.ok) throw new Error(`Consulta CNPJ falhou (HTTP ${r.status})`);
   const d = await r.json() as Record<string, unknown>;
   const s = (k: string) => String(d[k] ?? '');
   const n = (k: string) => Number(d[k] ?? 0);
+
+  // Normaliza formato BrasilAPI vs OpenCNPJ (campos diferentes pra mesma info)
+  const isBrasilApi = 'descricao_situacao_cadastral' in d;
+  const situacao = isBrasilApi ? s('descricao_situacao_cadastral') : s('situacao_cadastral');
+  const cnaeCodigo = isBrasilApi ? s('cnae_fiscal') : s('cnae_principal');
+  const cnaeDescricao = isBrasilApi ? s('cnae_fiscal_descricao') : (s('cnae_principal_descricao') || '');
+  const tipoLogradouro = isBrasilApi ? s('descricao_tipo_de_logradouro') : s('tipo_logradouro');
+  const telefone = isBrasilApi
+    ? (d.ddd_telefone_1 ? s('ddd_telefone_1') : null)
+    : (d.telefone ? s('telefone') : (d.ddd ? `${s('ddd')} ${s('telefone')}` : null));
 
   return {
     cnpj:                s('cnpj'),
     razao_social:        s('razao_social'),
     nome_fantasia:       d.nome_fantasia ? s('nome_fantasia') : null,
-    situacao_cadastral:  s('descricao_situacao_cadastral'),
+    situacao_cadastral:  situacao,
     data_situacao:       s('data_situacao_cadastral'),
-    cnae_principal:      {
-      codigo:    s('cnae_fiscal'),
-      descricao: s('cnae_fiscal_descricao'),
-    },
+    cnae_principal:      { codigo: cnaeCodigo, descricao: cnaeDescricao },
     natureza_juridica:   s('natureza_juridica'),
     endereco: {
-      logradouro: `${s('descricao_tipo_de_logradouro')} ${s('logradouro')}`.trim(),
+      logradouro: `${tipoLogradouro} ${s('logradouro')}`.trim(),
       numero:     s('numero') || 's/n',
       complemento: s('complemento'),
       bairro:     s('bairro'),
       cep:        s('cep'),
-      municipio:  s('municipio'),
-      uf:         s('uf'),
+      municipio:  s('municipio') || s('cidade') || '',
+      uf:         s('uf') || s('estado') || '',
     },
-    telefone:            d.ddd_telefone_1 ? s('ddd_telefone_1') : null,
+    telefone,
     email:               d.email ? s('email') : null,
     capital_social:      n('capital_social'),
     porte:               s('porte'),
