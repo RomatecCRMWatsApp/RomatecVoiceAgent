@@ -86,6 +86,78 @@ async function buscarModelo(tipo: string, modeloId?: string): Promise<{
   return r.data as { id: string; titulo: string; tipo: string; texto_completo: string } | null;
 }
 
+// Templates padrão (fallback quando não há modelo indexado).
+// Claude usa esses como guia de estrutura jurídica brasileira correta.
+const TEMPLATES_FALLBACK: Record<string, { titulo: string; instrucoes: string }> = {
+  locacao: {
+    titulo: 'Contrato de Locação Comercial — Lei 8.245/91',
+    instrucoes: `Use a Lei do Inquilinato (Lei nº 8.245/1991) como base. Cláusulas obrigatórias:
+1. Qualificação completa das partes (LOCADOR e LOCATÁRIO, com cônjuge se houver)
+2. Identificação precisa do imóvel locado
+3. Finalidade da locação (residencial/comercial — obrigatória especificar)
+4. Prazo da locação (com data de início e término)
+5. Valor do aluguel mensal e forma de pagamento (data, conta bancária)
+6. Reajuste anual (IGP-M ou IPCA, conforme negociado)
+7. Garantia (caução/fiador/seguro-fiança/título de capitalização)
+8. Obrigações do LOCATÁRIO (uso adequado, pagamento, conservação, IPTU se acordado)
+9. Obrigações do LOCADOR (entregar imóvel em condições, manutenção estrutural)
+10. Multa rescisória (3 aluguéis ou proporcional ao prazo restante)
+11. Vistoria de entrada e saída
+12. Foro de eleição (cidade do imóvel)
+13. Disposições finais e assinaturas`,
+  },
+  compra_venda: {
+    titulo: 'Contrato de Compra e Venda de Imóvel',
+    instrucoes: `Use o Código Civil (arts. 481 a 532) como base. Cláusulas obrigatórias:
+1. Qualificação completa das partes (VENDEDOR e COMPRADOR, com cônjuges)
+2. Descrição precisa do imóvel (matrícula, área, confrontações se possível)
+3. Preço total e forma de pagamento (à vista/parcelado/financiado)
+4. Quitação ou cronograma de pagamento detalhado
+5. Posse e responsabilidade pela escritura
+6. Despesas (ITBI, escritura, registro)
+7. Cláusula de evicção (garantia da propriedade)
+8. Foro de eleição
+9. Disposições finais e assinaturas (COM 2 testemunhas)`,
+  },
+  permuta: {
+    titulo: 'Contrato de Permuta de Imóvel',
+    instrucoes: `Use o Código Civil (arts. 533) como base. Inclua:
+1. Qualificação das partes
+2. Descrição completa dos DOIS imóveis permutados
+3. Avaliação de cada bem e eventual torna (diferença em dinheiro)
+4. Responsabilidade pelas escrituras e ITBI
+5. Cláusulas de evicção mútua
+6. Foro e assinaturas`,
+  },
+  comodato: {
+    titulo: 'Contrato de Comodato (Empréstimo Gratuito de Imóvel)',
+    instrucoes: `Use o Código Civil (arts. 579 a 585). Cláusulas obrigatórias:
+1. Qualificação das partes (COMODANTE e COMODATÁRIO)
+2. Identificação do imóvel
+3. GRATUIDADE do empréstimo (essencial — diferencia da locação)
+4. Prazo determinado ou indeterminado
+5. Finalidade do uso
+6. Obrigações de conservação pelo comodatário
+7. Despesas correntes (água, luz, etc)
+8. Cláusulas de devolução e foro`,
+  },
+  corretagem: {
+    titulo: 'Contrato de Corretagem Imobiliária',
+    instrucoes: `Use o Código Civil (arts. 722 a 729) e Lei 6.530/78 (CRECI). Inclua:
+1. Qualificação das partes (CONTRATANTE e CORRETOR/IMOBILIÁRIA com CRECI)
+2. Imóvel objeto da intermediação
+3. Comissão (% sobre valor do negócio — usual 6% venda, 1 aluguel locação)
+4. Exclusividade (se houver)
+5. Prazo de validade do contrato
+6. Obrigações do corretor (divulgação, intermediação)
+7. Foro e assinaturas`,
+  },
+  outro: {
+    titulo: 'Contrato',
+    instrucoes: 'Gere conforme legislação brasileira aplicável.',
+  },
+};
+
 function formatBR(n: number): string {
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -232,12 +304,22 @@ export async function gerarContrato(input: GerarContratoInput): Promise<GerarCon
   if (!_claude) throw new Error('ANTHROPIC_API_KEY não configurada — necessário pra geração');
   if (!input.tipo) throw new Error('tipo de contrato obrigatório (compra_venda, locacao, permuta, comodato, corretagem, outro)');
 
-  // 1) Busca modelo
-  const modelo = await buscarModelo(input.tipo, input.contrato_modelo_id);
+  // 1) Busca modelo indexado; se não houver, usa template fallback baseado em legislação
+  let modelo = await buscarModelo(input.tipo, input.contrato_modelo_id);
+  let usandoFallback = false;
   if (!modelo) {
-    throw new Error(`Nenhum modelo de contrato indexado pra tipo "${input.tipo}". Indexe um modelo primeiro via memoria_contratos_listar / contracts:ingest.`);
+    const tpl = TEMPLATES_FALLBACK[input.tipo] || TEMPLATES_FALLBACK.outro;
+    modelo = {
+      id:             'fallback-template',
+      titulo:         tpl.titulo,
+      tipo:           input.tipo,
+      texto_completo: `[TEMPLATE FALLBACK — gerar contrato baseado em legislação brasileira]\n\n${tpl.instrucoes}`,
+    };
+    usandoFallback = true;
+    console.log(`[gerarContrato] sem modelo indexado pra "${input.tipo}" — usando fallback template (legislação BR)`);
+  } else {
+    console.log(`[gerarContrato] modelo: "${modelo.titulo}" (${modelo.id.slice(0, 8)}, tipo=${modelo.tipo})`);
   }
-  console.log(`[gerarContrato] modelo: "${modelo.titulo}" (${modelo.id.slice(0, 8)}, tipo=${modelo.tipo})`);
 
   // 2) Claude personaliza
   const prompt = montarPromptGeracao(modelo, input);
@@ -267,16 +349,16 @@ export async function gerarContrato(input: GerarContratoInput): Promise<GerarCon
   const docxBuffer = await gerarDocx(titulo, textoContrato);
   console.log(`[gerarContrato] DOCX gerado ${docxBuffer.length} bytes`);
 
-  // 5) Salva no banco (histórico)
+  // 5) Salva no banco (histórico). Se modelo é fallback, não vincula contrato_modelo_id (FK falharia)
   const sb = supabase();
   const ins = await sb.from('contratos_gerados').insert({
     tipo:                 input.tipo,
     titulo,
-    contrato_modelo_id:   modelo.id,
+    contrato_modelo_id:   usandoFallback ? null : modelo.id,
     cliente_nome:         input.comprador?.nome || input.vendedor?.nome || 'sem cliente',
     valor_total:          input.condicoes?.valor_total || 0,
     texto:                textoContrato,
-    metadata:             input as unknown as Record<string, unknown>,
+    metadata:             { ...(input as unknown as Record<string, unknown>), usou_fallback: usandoFallback },
   }).select('id').single();
 
   // Se a tabela não existir ainda, ignora silenciosamente (apenas avisa)
