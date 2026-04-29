@@ -97,8 +97,13 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
 .attach-chip button:hover{color:#ff5555}
 
 .chat-input-row{padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:1px solid rgba(61,255,176,.15);display:flex;gap:8px;align-items:flex-end;background:rgba(4,20,13,.6)}
-.chat-input-row .icon-btn{flex-shrink:0;width:40px;height:40px;border-radius:50%;border:1px solid rgba(212,184,120,.4);background:rgba(7,32,24,.6);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;padding:0}
+.chat-input-row .icon-btn{flex-shrink:0;width:40px;height:40px;border-radius:50%;border:1px solid rgba(212,184,120,.4);background:rgba(7,32,24,.6);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;padding:0;transition:all .15s}
 .chat-input-row .icon-btn:hover{border-color:var(--neon);color:var(--neon)}
+.chat-input-row .icon-btn.recording{border-color:#ff5555;color:#ff5555;background:rgba(255,85,85,.15);animation:recPulse 1s infinite}
+@keyframes recPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,85,85,.6)}50%{box-shadow:0 0 0 8px rgba(255,85,85,0)}}
+.chat-rec-info{padding:8px 14px;font-size:12px;color:#ff5555;text-align:center;letter-spacing:.1em;background:rgba(255,85,85,.08);border-top:1px solid rgba(255,85,85,.2);display:none}
+.chat-rec-info.active{display:flex;justify-content:center;gap:10px;align-items:center}
+.chat-rec-info .rec-dot{width:8px;height:8px;background:#ff5555;border-radius:50%;animation:pulse 1s infinite}
 .chat-input-row textarea{flex:1;min-height:40px;max-height:120px;padding:10px 14px;background:rgba(2,10,7,.8);border:1px solid rgba(61,255,176,.2);border-radius:20px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:14px;resize:none;outline:none}
 .chat-input-row textarea:focus{border-color:var(--neon);box-shadow:0 0 10px rgba(61,255,176,.2)}
 .chat-input-row textarea::placeholder{color:var(--text-dim)}
@@ -159,11 +164,16 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
       <span class="dots"><span></span><span></span><span></span></span>
     </div>
     <div class="chat-attachments" id="chatAttachments"></div>
+    <div class="chat-rec-info" id="chatRecInfo">
+      <span class="rec-dot"></span>
+      <span>Gravando… <span id="chatRecTimer">0s</span> · clique no mic pra parar e enviar</span>
+    </div>
     <div class="chat-input-row">
       <input type="file" id="fileInput" multiple accept="image/*,application/pdf" style="display:none">
       <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none">
       <button class="icon-btn" id="btnAttach" title="Anexar arquivo (PDF/imagem)">📎</button>
       <button class="icon-btn" id="btnCamera" title="Tirar foto">📷</button>
+      <button class="icon-btn" id="btnMicChat" title="Gravar áudio (clique pra gravar, clique pra enviar)">🎙</button>
       <textarea id="chatInput" placeholder="Mensagem pra ZAYRA..." rows="1"></textarea>
       <button class="send-btn" id="chatSend" title="Enviar (Enter)">▶</button>
     </div>
@@ -596,6 +606,125 @@ async function handleFiles(files){
   chatRenderAttachments();
 }
 
+// ── GRAVAÇÃO DE AUDIO NO CHAT (v1.36) ─────────────────────────────────────
+const chatRec = { active:false, mediaRec:null, stream:null, chunks:[], startedAt:0, mime:'', timer:null };
+
+async function chatStartRecording(){
+  try{
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error('Mic API indisponível (precisa HTTPS)');
+    if(typeof MediaRecorder==='undefined') throw new Error('MediaRecorder indisponível');
+    chatRec.stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    let mime = '';
+    if(MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mime='audio/webm;codecs=opus';
+    else if(MediaRecorder.isTypeSupported('audio/webm')) mime='audio/webm';
+    else if(MediaRecorder.isTypeSupported('audio/mp4')) mime='audio/mp4';
+    else if(MediaRecorder.isTypeSupported('audio/aac')) mime='audio/aac';
+    chatRec.mediaRec = mime ? new MediaRecorder(chatRec.stream,{mimeType:mime}) : new MediaRecorder(chatRec.stream);
+    chatRec.mime = chatRec.mediaRec.mimeType || mime || 'audio/webm';
+    chatRec.chunks = [];
+    chatRec.mediaRec.ondataavailable = e => { if(e.data.size>0) chatRec.chunks.push(e.data); };
+    chatRec.mediaRec.onstop = async () => {
+      chatRec.stream?.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chatRec.chunks, { type: chatRec.mime });
+      await chatSendAudio(blob, chatRec.mime);
+    };
+    chatRec.mediaRec.start();
+    chatRec.active = true;
+    chatRec.startedAt = Date.now();
+    $('btnMicChat').classList.add('recording');
+    $('btnMicChat').textContent = '⏹';
+    $('chatRecInfo').classList.add('active');
+    chatRec.timer = setInterval(() => {
+      const sec = Math.floor((Date.now() - chatRec.startedAt) / 1000);
+      $('chatRecTimer').textContent = sec + 's';
+      if(sec >= 90){ chatStopRecording(); }   // hard cap 90s
+    }, 250);
+  }catch(e){
+    console.error('[chatRec start]', e);
+    alert('Não consegui ligar o microfone: ' + e.message);
+    chatRec.active = false;
+  }
+}
+
+function chatStopRecording(){
+  if(!chatRec.active) return;
+  chatRec.active = false;
+  if(chatRec.timer){ clearInterval(chatRec.timer); chatRec.timer = null; }
+  $('btnMicChat').classList.remove('recording');
+  $('btnMicChat').textContent = '🎙';
+  $('chatRecInfo').classList.remove('active');
+  if(chatRec.mediaRec && chatRec.mediaRec.state === 'recording') chatRec.mediaRec.stop();
+}
+
+async function chatSendAudio(blob, mime){
+  if(blob.size < 1000){ alert('Áudio muito curto. Grave por mais tempo.'); return; }
+
+  const ts = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  const sec = Math.floor((Date.now() - chatRec.startedAt) / 1000);
+  // Bubble do user com placeholder enquanto transcreve
+  const userIdx = chatState.msgs.length;
+  chatState.msgs.push({ role:'user', text:`🎙 Áudio (${sec}s) — transcrevendo…`, ts });
+  chatRender();
+
+  chatState.busy = true;
+  $('chatSend').disabled = true;
+  unlockAudioPlayback();
+  chatSetStatus('transcrevendo áudio');
+
+  try{
+    const ext = (mime||'').includes('mp4') ? 'mp4' : (mime||'').includes('webm') ? 'webm' : 'audio';
+    const fd = new FormData();
+    fd.append('audio', blob, 'voice.' + ext);
+    if(chatState.sessionId) fd.append('session_id', chatState.sessionId);
+
+    const r = await fetch('/voice', { method:'POST', body: fd, cache:'no-store' });
+    if(!r.ok){
+      const txt = await r.text().catch(()=>'(sem corpo)');
+      chatState.msgs[userIdx].text = `🎙 Áudio (${sec}s)`;
+      chatState.msgs.push({ role:'zayra', text:`❌ Erro ${r.status}: ${txt.slice(0,200)}`, ts: new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) });
+      chatRender();
+      return;
+    }
+
+    const ctype = r.headers.get('content-type') || '';
+    const transcription = decodeURIComponent(r.headers.get('x-transcription')||'');
+    const respText = decodeURIComponent(r.headers.get('x-response-text')||r.headers.get('x-zayra-text')||'');
+    const sessionId = r.headers.get('x-session-id');
+    if(sessionId) chatState.sessionId = sessionId;
+
+    // Atualiza bubble do user com a transcrição real
+    chatState.msgs[userIdx].text = `🎙 ${transcription || `Áudio (${sec}s)`}`;
+
+    if(ctype.includes('audio')){
+      const audioBlob = await r.blob();
+      chatState.msgs.push({ role:'zayra', text: respText || '(resposta em áudio)', ts: new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) });
+      chatRender();
+      // Toca via Web Audio API (escapa de iOS)
+      try{
+        if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        if(audioCtx.state==='suspended') await audioCtx.resume();
+        const arr = await audioBlob.arrayBuffer();
+        const buf = await audioCtx.decodeAudioData(arr.slice(0));
+        const src = audioCtx.createBufferSource();
+        src.buffer = buf; src.connect(audioCtx.destination);
+        src.start(0);
+      }catch(e){ console.warn('[chat audio]', e.message); }
+    } else {
+      const data = await r.json();
+      chatState.msgs.push({ role:'zayra', text: data.response || data.text || '(sem resposta)', tools: data.tools_used, ts: new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) });
+      chatRender();
+    }
+  }catch(e){
+    console.error('[chatSendAudio]', e);
+    chatState.msgs.push({ role:'zayra', text:`❌ Falha: ${e.message}`, ts: new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) });
+    chatRender();
+  }finally{
+    chatState.busy = false;
+    $('chatSend').disabled = false;
+    chatSetStatus(null);
+  }
+}
+
 // Wire up
 $('chatFab').onclick = () => { $('chatOverlay').classList.add('open'); $('chatInput').focus(); };
 $('chatClose').onclick = () => $('chatOverlay').classList.remove('open');
@@ -609,6 +738,10 @@ $('chatInput').oninput = e => {
 };
 $('btnAttach').onclick = () => $('fileInput').click();
 $('btnCamera').onclick = () => $('cameraInput').click();
+$('btnMicChat').onclick = () => {
+  unlockAudioPlayback();
+  if(chatRec.active) chatStopRecording(); else chatStartRecording();
+};
 $('fileInput').onchange = e => { handleFiles(e.target.files); e.target.value = ''; };
 $('cameraInput').onchange = e => { handleFiles(e.target.files); e.target.value = ''; };
 
