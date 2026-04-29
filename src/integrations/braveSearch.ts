@@ -32,7 +32,9 @@ export async function pesquisarWeb(input: {
   freshness?: 'pd' | 'pw' | 'pm' | 'py';  // dia/semana/mês/ano
 }): Promise<PesquisaResultado> {
   if (!input.query?.trim()) throw new Error('query obrigatória');
-  if (!process.env.BRAVE_API_KEY) {
+  // Aceita BRAVE_API_KEY (padrão) ou CHAVE_API_BRAVE (PT-BR no Railway)
+  const apiKey = process.env.BRAVE_API_KEY || process.env.CHAVE_API_BRAVE;
+  if (!apiKey) {
     throw new Error('BRAVE_API_KEY não configurada — gere em api.search.brave.com');
   }
 
@@ -49,7 +51,7 @@ export async function pesquisarWeb(input: {
   const r = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
     headers: {
       Accept:                  'application/json',
-      'X-Subscription-Token':  process.env.BRAVE_API_KEY,
+      'X-Subscription-Token':  apiKey,
     },
   });
   if (!r.ok) {

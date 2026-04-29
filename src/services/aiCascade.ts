@@ -96,7 +96,9 @@ export function truncarHistorico<T>(historico: T[]): T[] {
 // ── Lazy clients ────────────────────────────────────────────────────────────
 let _cerebras: Cerebras | null = null;
 function cerebrasClient(): Cerebras {
-  if (!_cerebras) _cerebras = new Cerebras({ apiKey: process.env.CEREBRAS_API_KEY! });
+  if (!_cerebras) _cerebras = new Cerebras({
+    apiKey: process.env.CEREBRAS_API_KEY || process.env.CHAVE_API_CEREBRAS!,
+  });
   return _cerebras;
 }
 
@@ -151,9 +153,11 @@ function githubModelsClient(): OpenAI {
 // Endpoint OpenAI-compatible: /v1/chat/completions. Auth via Bearer + ACCOUNT_ID.
 let _cloudflare: OpenAI | null = null;
 function cloudflareClient(): OpenAI {
+  const token   = process.env.CLOUDFLARE_API_TOKEN  || process.env.TOKEN_API_CLOUDFLARE;
+  const account = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.ID_CONTA_CLOUDFLARE;
   if (!_cloudflare) _cloudflare = new OpenAI({
-    apiKey:  process.env.CLOUDFLARE_API_TOKEN,
-    baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`,
+    apiKey:  token,
+    baseURL: `https://api.cloudflare.com/client/v4/accounts/${account}/ai/v1`,
   });
   return _cloudflare;
 }
