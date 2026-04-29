@@ -1368,17 +1368,33 @@ const ROMATEC_HEADER_HTML = `
 </div>
 `;
 
+// Detecta mobile (iOS/Android) pra usar fluxo de Blob URL em vez de window.open+document.write
+const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+// Abre HTML em nova aba/download de forma compatível com iOS (que bloqueia document.write em popup)
+function abrirRelatorioHtml(html, fileNameSugerido) {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  // Cria link com download como fallback E target='_blank' pra abrir em nova aba.
+  // iOS Safari respeita <a target="_blank"> com Blob URL e abre em nova aba.
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  // Em mobile, sugere download (user pode escolher abrir ou salvar). Em desktop, só abre.
+  if (isMobileDevice && fileNameSugerido) a.download = fileNameSugerido;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Libera o URL depois de 60s pra dar tempo de carregar
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 async function gerarRecibo(funcionarioId, monthLabel) {
   const p = state.folha.funcionarios.find(x => x.funcionario_id === funcionarioId);
   if (!p) return alert('Funcionário não encontrado.');
   const obra = state.folhaObraId ? state.obras.find(o => o.id === state.folhaObraId) : null;
-
-  // FIX iOS: abre a janela IMEDIATAMENTE no gesto do user (antes de qualquer await).
-  // iOS Safari bloqueia window.open() chamado depois de await porque perde o user-gesture context.
-  const w = window.open('', '_blank');
-  if (w) {
-    w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Carregando recibo…</title></head><body style="font-family:sans-serif;padding:24px;text-align:center;color:#0a3d2a;">⏳ Gerando recibo de ' + p.nome + '…</body></html>');
-  }
 
   // Busca os dias detalhados
   let dias = [];
@@ -1467,22 +1483,8 @@ async function gerarRecibo(funcionarioId, monthLabel) {
     <div class="footer">Gerado por ZAYRA · ${new Date().toLocaleString('pt-BR')}</div>
   </body></html>`;
 
-  if (w) {
-    // Substitui o conteúdo "carregando" pelo recibo final
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-  } else {
-    // Fallback iOS: se window.open foi bloqueado, baixa como arquivo HTML
-    const blob = new Blob([html], {type:'text/html;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Recibo_${p.nome.replace(/[^a-zA-Z0-9]/g,'_')}_${monthLabel.replace(/\s+/g,'_')}.html`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    alert('Recibo baixado como arquivo HTML. Abra no navegador pra imprimir/salvar PDF.');
-  }
+  const fileName = `Recibo_${p.nome.replace(/[^a-zA-Z0-9]/g,'_')}_${monthLabel.replace(/\s+/g,'_')}.html`;
+  abrirRelatorioHtml(html, fileName);
 }
 
 function exportarFolhaCsv(monthLabel) {
@@ -1559,20 +1561,8 @@ function exportarFolhaPdf(monthLabel) {
     </div>
     <div class="footer">Gerado por ZAYRA · ${new Date().toLocaleString('pt-BR')}</div>
   </body></html>`;
-  const w = window.open('', '_blank');
-  if (w) {
-    w.document.write(html); w.document.close();
-  } else {
-    // Fallback iOS: download como HTML
-    const blob = new Blob([html], {type:'text/html;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Folha_${state.folhaAno}-${String(state.folhaMes).padStart(2,'0')}.html`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    alert('Folha baixada como arquivo HTML. Abra no navegador pra imprimir/salvar PDF.');
-  }
+  const fileName = `Folha_${state.folhaAno}-${String(state.folhaMes).padStart(2,'0')}${obra?'_'+obra.nome.replace(/[^a-zA-Z0-9]/g,'_'):''}.html`;
+  abrirRelatorioHtml(html, fileName);
 }
 
 // ── VTO (Vistoria Técnica de Obra) ──
