@@ -53,7 +53,7 @@ export async function pesquisarWeb(input: {
     q:             input.query,
     count:         String(limit),
     country:       input.pais ?? 'BR',
-    search_lang:   'pt',
+    search_lang:   'pt-br',
     safesearch:    'moderate',
   });
   if (input.freshness) params.set('freshness', input.freshness);
