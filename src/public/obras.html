@@ -1343,12 +1343,44 @@ function renderFolha() {
   v.querySelectorAll('[data-recibo]').forEach(b => b.onclick = () => gerarRecibo(b.dataset.recibo, monthLabel));
 }
 
+// CSS comum dos relatórios (recibo + folha) — header com logo Romatec
+const ROMATEC_HEADER_CSS = `
+.romatec-header{display:flex;align-items:center;gap:16px;border-bottom:3px solid #0a3d2a;padding-bottom:14px;margin-bottom:18px;}
+.romatec-header .logo{flex-shrink:0;}
+.romatec-header .logo img{height:60px;display:block;}
+.romatec-header .logo-fallback{height:60px;width:60px;border:2px solid #0a3d2a;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:Georgia,serif;font-weight:bold;color:#0a3d2a;font-size:20px;}
+.romatec-header .empresa-info{flex:1;}
+.romatec-header .empresa-info .nome{font-family:Georgia,serif;font-size:24px;font-weight:bold;color:#0a3d2a;line-height:1.1;}
+.romatec-header .empresa-info .tagline{font-size:11px;color:#0a3d2a;letter-spacing:2px;text-transform:uppercase;margin-top:2px;}
+.romatec-header .empresa-info .subtagline{font-size:13px;color:#1e7a4a;font-weight:600;margin-top:4px;}
+`;
+const ROMATEC_HEADER_HTML = `
+<div class="romatec-header">
+  <div class="logo">
+    <img src="/logo-romatec.png" alt="Romatec" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+    <div class="logo-fallback" style="display:none;">R</div>
+  </div>
+  <div class="empresa-info">
+    <div class="nome">RÔMATEC</div>
+    <div class="tagline">Consultoria Total</div>
+    <div class="subtagline">Engenharia e Agrimensura</div>
+  </div>
+</div>
+`;
+
 async function gerarRecibo(funcionarioId, monthLabel) {
   const p = state.folha.funcionarios.find(x => x.funcionario_id === funcionarioId);
   if (!p) return alert('Funcionário não encontrado.');
   const obra = state.folhaObraId ? state.obras.find(o => o.id === state.folhaObraId) : null;
 
-  // Busca os dias detalhados desse funcionário no mês pra detalhar no recibo
+  // FIX iOS: abre a janela IMEDIATAMENTE no gesto do user (antes de qualquer await).
+  // iOS Safari bloqueia window.open() chamado depois de await porque perde o user-gesture context.
+  const w = window.open('', '_blank');
+  if (w) {
+    w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Carregando recibo…</title></head><body style="font-family:sans-serif;padding:24px;text-align:center;color:#0a3d2a;">⏳ Gerando recibo de ' + p.nome + '…</body></html>');
+  }
+
+  // Busca os dias detalhados
   let dias = [];
   try {
     dias = await api(`/api/funcionarios/${funcionarioId}/dias?ano=${state.folhaAno}&mes=${state.folhaMes}`);
@@ -1359,10 +1391,13 @@ async function gerarRecibo(funcionarioId, monthLabel) {
     return `<tr><td>${dt}</td><td>${per}</td><td class="num">${fmt(d.valor)}</td></tr>`;
   }).join('');
 
+  const baseUrl = window.location.origin;
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Recibo — ${p.nome} — ${monthLabel}</title>
+    <base href="${baseUrl}/">
     <style>
+      ${ROMATEC_HEADER_CSS}
       body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:780px;margin:0 auto;}
-      h1{margin:0 0 4px; font-size:22px;}
+      h1{margin:0 0 4px; font-size:22px; color:#0a3d2a;}
       h2{margin:0 0 24px;color:#666;font-size:14px;font-weight:normal;}
       .box{border:1px solid #ddd; border-radius:6px; padding:16px; margin-bottom:14px;}
       .row{display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;}
@@ -1378,9 +1413,13 @@ async function gerarRecibo(funcionarioId, monthLabel) {
       .assinatura{margin-top:48px; text-align:center;}
       .assinatura .linha{border-top:1px solid #333; width:60%; margin:0 auto 6px;}
       .footer{margin-top:32px;font-size:11px;color:#888; text-align:center;}
+      .actions{margin-top:24px; text-align:center; padding:12px; background:#f5f5f5; border-radius:6px; print-only:none;}
+      .actions button{padding:10px 20px; margin:0 8px; background:#0a3d2a; color:white; border:none; border-radius:6px; font-size:14px; cursor:pointer;}
+      @media print{ .actions{display:none;} }
     </style></head><body>
+    ${ROMATEC_HEADER_HTML}
     <h1>RECIBO DE PAGAMENTO DE DIÁRIAS</h1>
-    <h2>Romatec Consultoria Imobiliária${obra ? ' · Obra: '+obra.nome : ''} · Período: ${monthLabel}</h2>
+    <h2>Romatec Consultoria Total · Engenharia e Agrimensura${obra ? ' · Obra: '+obra.nome : ''} · Período: ${monthLabel}</h2>
 
     <div class="box">
       <div class="row">
@@ -1409,7 +1448,7 @@ async function gerarRecibo(funcionarioId, monthLabel) {
     </div>` : ''}
 
     <p class="declaracao">
-      Declaro para os devidos fins que recebi de <strong>Romatec Consultoria Imobiliária</strong>
+      Declaro para os devidos fins que recebi de <strong>Romatec Consultoria Total</strong>
       a importância de <strong>${fmt(p.total_pagar)}</strong> referente a
       <strong>${p.total_dias_equivalente} diária(s) equivalente(s)</strong> trabalhada(s)
       ${obra ? 'na obra <strong>'+obra.nome+'</strong>' : ''} no período de <strong>${monthLabel}</strong>,
@@ -1421,11 +1460,29 @@ async function gerarRecibo(funcionarioId, monthLabel) {
       <div>${p.nome}</div>
     </div>
 
+    <div class="actions">
+      <button onclick="window.print()">🖨 Imprimir / Salvar PDF</button>
+    </div>
+
     <div class="footer">Gerado por ZAYRA · ${new Date().toLocaleString('pt-BR')}</div>
-    <script>window.onload=()=>window.print();<\/script>
   </body></html>`;
-  const w = window.open('', '_blank');
-  w.document.write(html); w.document.close();
+
+  if (w) {
+    // Substitui o conteúdo "carregando" pelo recibo final
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  } else {
+    // Fallback iOS: se window.open foi bloqueado, baixa como arquivo HTML
+    const blob = new Blob([html], {type:'text/html;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Recibo_${p.nome.replace(/[^a-zA-Z0-9]/g,'_')}_${monthLabel.replace(/\s+/g,'_')}.html`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    alert('Recibo baixado como arquivo HTML. Abra no navegador pra imprimir/salvar PDF.');
+  }
 }
 
 function exportarFolhaCsv(monthLabel) {
@@ -1460,19 +1517,27 @@ function exportarFolhaPdf(monthLabel) {
   const f = state.folha;
   if (!f || f.funcionarios.length === 0) return alert('Nada pra exportar.');
   const obra = state.folhaObraId ? state.obras.find(o => o.id === state.folhaObraId) : null;
+  const baseUrl = window.location.origin;
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Folha ${monthLabel}</title>
+    <base href="${baseUrl}/">
     <style>
-      body{font-family:Arial,sans-serif;padding:24px;color:#222;}
-      h1{margin:0 0 4px;}h2{margin:0 0 16px;color:#666;font-size:14px;font-weight:normal;}
+      ${ROMATEC_HEADER_CSS}
+      body{font-family:Arial,sans-serif;padding:24px;color:#222;max-width:900px;margin:0 auto;}
+      h1{margin:0 0 4px;color:#0a3d2a;}
+      h2{margin:0 0 16px;color:#666;font-size:14px;font-weight:normal;}
       table{width:100%;border-collapse:collapse;margin-top:16px;}
       th,td{padding:8px;border-bottom:1px solid #ddd;font-size:13px;}
       th{background:#0a3d2a;color:#fff;text-align:left;}
       td.num{text-align:right;}td.cen{text-align:center;}
       .total{font-weight:bold;background:#f5f5f5;}
       .footer{margin-top:24px;font-size:11px;color:#888;}
+      .actions{margin-top:24px; text-align:center; padding:12px; background:#f5f5f5; border-radius:6px;}
+      .actions button{padding:10px 20px; background:#0a3d2a; color:white; border:none; border-radius:6px; font-size:14px; cursor:pointer;}
+      @media print{ .actions{display:none;} }
     </style></head><body>
+    ${ROMATEC_HEADER_HTML}
     <h1>Folha Mensal — ${monthLabel}</h1>
-    <h2>Romatec Consultoria Imobiliária${obra ? ' · Obra: '+obra.nome : ' · Todas as obras'}</h2>
+    <h2>Romatec Consultoria Total · Engenharia e Agrimensura${obra ? ' · Obra: '+obra.nome : ' · Todas as obras'}</h2>
     <table>
       <thead><tr><th>Funcionário</th><th>Função</th><th>Diária</th><th>Integ.</th><th>Manhã</th><th>Tarde</th><th>Equiv.</th><th>Total</th></tr></thead>
       <tbody>
@@ -1489,11 +1554,25 @@ function exportarFolhaPdf(monthLabel) {
         <tr class="total"><td colspan="7">TOTAL GERAL</td><td class="num">${fmt(f.total_geral)}</td></tr>
       </tbody>
     </table>
+    <div class="actions">
+      <button onclick="window.print()">🖨 Imprimir / Salvar PDF</button>
+    </div>
     <div class="footer">Gerado por ZAYRA · ${new Date().toLocaleString('pt-BR')}</div>
-    <script>window.onload=()=>window.print();<\/script>
   </body></html>`;
   const w = window.open('', '_blank');
-  w.document.write(html); w.document.close();
+  if (w) {
+    w.document.write(html); w.document.close();
+  } else {
+    // Fallback iOS: download como HTML
+    const blob = new Blob([html], {type:'text/html;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Folha_${state.folhaAno}-${String(state.folhaMes).padStart(2,'0')}.html`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    alert('Folha baixada como arquivo HTML. Abra no navegador pra imprimir/salvar PDF.');
+  }
 }
 
 // ── VTO (Vistoria Técnica de Obra) ──
