@@ -19,6 +19,7 @@ import {
 import { buscarMemoria, formatarContexto } from '../services/ragSearch';
 import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
 import { listarContratosIndexados } from '../services/contratosIngest';
+import { gerarContrato, listarContratosGerados } from '../services/contratosGerar';
 import { sendReply } from '../integrations/whatsapp';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
@@ -1306,6 +1307,89 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['isbn'],
     },
   },
+
+  // ── v1.34.0: Geracao automatica de contratos (Fase 2) ──
+  {
+    name: 'gerar_contrato',
+    description: 'Gera contrato Romatec a partir de modelos indexados (Fase 1) preenchendo com dados reais do CEO. Retorna texto + DOCX (base64). USE quando o Chefe pedir "gera contrato de compra e venda com X", "monta locacao do apartamento Y", "faz permuta entre A e B" etc. Sempre confirme dados criticos (CPF, valor, endereco) antes de gerar. O DOCX retornado vai ser enviado por Telegram automaticamente.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tipo: {
+          type: 'string',
+          enum: ['compra_venda','locacao','permuta','comodato','corretagem','outro'],
+          description: 'Tipo de contrato — escolhe o modelo indexado correto',
+        },
+        vendedor: {
+          type: 'object',
+          description: 'Vendedor (compra_venda) ou Locador (locacao). Inclua o maximo de dados.',
+          properties: {
+            nome:         { type: 'string' },
+            cpf_cnpj:     { type: 'string' },
+            rg:           { type: 'string' },
+            endereco:     { type: 'string' },
+            estado_civil: { type: 'string' },
+            profissao:    { type: 'string' },
+            telefone:     { type: 'string' },
+            email:        { type: 'string' },
+          },
+        },
+        comprador: {
+          type: 'object',
+          description: 'Comprador (compra_venda) ou Locatario (locacao). Inclua o maximo de dados.',
+          properties: {
+            nome:         { type: 'string' },
+            cpf_cnpj:     { type: 'string' },
+            rg:           { type: 'string' },
+            endereco:     { type: 'string' },
+            estado_civil: { type: 'string' },
+            profissao:    { type: 'string' },
+            telefone:     { type: 'string' },
+            email:        { type: 'string' },
+          },
+        },
+        imovel: {
+          type: 'object',
+          properties: {
+            endereco:   { type: 'string' },
+            cidade:     { type: 'string' },
+            uf:         { type: 'string' },
+            cep:        { type: 'string' },
+            area_m2:    { type: 'number' },
+            matricula:  { type: 'string' },
+            cartorio:   { type: 'string' },
+            tipo:       { type: 'string', description: 'residencial/comercial/terreno/rural' },
+            descricao:  { type: 'string' },
+          },
+        },
+        condicoes: {
+          type: 'object',
+          properties: {
+            valor_total:     { type: 'number', description: 'Valor TOTAL do contrato (obrigatorio)' },
+            forma_pagamento: { type: 'string', description: 'pix/boleto/transferencia/financiamento etc' },
+            parcelas:        { type: 'number' },
+            valor_entrada:   { type: 'number' },
+            data_entrega:    { type: 'string', description: 'YYYY-MM-DD' },
+            prazo_meses:     { type: 'number' },
+            juros_aa_pct:    { type: 'number' },
+            observacoes:     { type: 'string' },
+          },
+        },
+        cidade_foro:      { type: 'string', description: 'Cidade do foro de eleicao. Default: Acailandia/MA' },
+        contrato_modelo_id: { type: 'string', description: 'ID especifico do modelo indexado, se quiser forcar um' },
+        observacoes_ceo:  { type: 'string', description: 'Instrucoes extras do CEO pro Claude personalizar (ex: "Inclui clausula de retomada se atrasar 3 meses")' },
+      },
+      required: ['tipo'],
+    },
+  },
+  {
+    name: 'listar_contratos_gerados',
+    description: 'Lista contratos JÁ GERADOS pela ZAYRA (historico). Use quando o Chefe perguntar "que contratos eu gerei", "ultimos contratos", "contratos do mes" etc. NÃO confunde com memoria_contratos_listar (esse lista MODELOS indexados, nao contratos preenchidos).',
+    input_schema: {
+      type: 'object',
+      properties: { limite: { type: 'number', description: 'Default 50' } },
+    },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
@@ -1770,6 +1854,41 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'consultar_isbn':
         data = await consultarIsbn(input as { isbn: string });
+        break;
+
+      // ── v1.34.0: Geracao de contratos (Fase 2) ──
+      case 'gerar_contrato': {
+        const result = await gerarContrato(input as unknown as Parameters<typeof gerarContrato>[0]);
+        // Envia DOCX direto por Telegram (em vez de retornar base64 enorme no contexto)
+        try {
+          const ceoIds = (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+          if (ceoIds.length > 0 && process.env.TELEGRAM_BOT_TOKEN) {
+            const buf = Buffer.from(result.docx_base64, 'base64');
+            const fileName = `${result.titulo.replace(/[^a-zA-Z0-9-_]/g, '_')}_${Date.now()}.docx`;
+            const fd = new FormData();
+            fd.append('chat_id', ceoIds[0]);
+            fd.append('document', new Blob([buf as unknown as ArrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), fileName);
+            fd.append('caption', `📄 ${result.titulo}\n${result.total_clausulas} cláusulas\nModelo: ${result.modelo_usado}`);
+            await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendDocument`, { method: 'POST', body: fd });
+            console.log(`[gerar_contrato] DOCX enviado pra Telegram chat ${ceoIds[0]}`);
+          }
+        } catch (e) {
+          console.warn(`[gerar_contrato] falha ao enviar DOCX por Telegram: ${(e as Error).message}`);
+        }
+        // Retorna pro LLM apenas metadata + preview do texto (não o base64 inteiro)
+        data = {
+          contrato_gerado_id: result.contrato_gerado_id,
+          titulo:             result.titulo,
+          modelo_usado:       result.modelo_usado,
+          total_clausulas:    result.total_clausulas,
+          preview_texto:      result.texto.slice(0, 500) + '...',
+          docx_enviado_telegram: true,
+          tamanho_bytes:      Buffer.from(result.docx_base64, 'base64').length,
+        };
+        break;
+      }
+      case 'listar_contratos_gerados':
+        data = await listarContratosGerados(input as { limite?: number });
         break;
 
       default:
