@@ -32,8 +32,17 @@ export async function pesquisarWeb(input: {
   freshness?: 'pd' | 'pw' | 'pm' | 'py';  // dia/semana/mês/ano
 }): Promise<PesquisaResultado> {
   if (!input.query?.trim()) throw new Error('query obrigatória');
-  // Aceita BRAVE_API_KEY (padrão) ou CHAVE_API_BRAVE (PT-BR no Railway)
-  const apiKey = process.env.BRAVE_API_KEY || process.env.CHAVE_API_BRAVE;
+  // Aceita qualquer variavel que contenha "BRAVE" no nome (mais flexivel)
+  let apiKey = process.env.BRAVE_API_KEY || process.env.CHAVE_API_BRAVE;
+  if (!apiKey) {
+    // Procura QUALQUER env var que contenha "BRAVE" caso nome diferente
+    const allBraveVars = Object.keys(process.env).filter(k => k.toUpperCase().includes('BRAVE'));
+    console.log(`[Brave] env vars com BRAVE: ${allBraveVars.length === 0 ? 'NENHUMA' : allBraveVars.join(', ')}`);
+    if (allBraveVars.length > 0) {
+      apiKey = process.env[allBraveVars[0]];
+      console.log(`[Brave] usando variavel alternativa: ${allBraveVars[0]} (${apiKey?.length} chars)`);
+    }
+  }
   console.log(`[Brave] env check: BRAVE_API_KEY=${process.env.BRAVE_API_KEY ? 'set('+process.env.BRAVE_API_KEY.length+'chars)' : 'undefined'} | CHAVE_API_BRAVE=${process.env.CHAVE_API_BRAVE ? 'set('+process.env.CHAVE_API_BRAVE.length+'chars)' : 'undefined'}`);
   if (!apiKey) {
     throw new Error('BRAVE_API_KEY não configurada no ambiente. Variavel deve ser BRAVE_API_KEY ou CHAVE_API_BRAVE com valor da api.search.brave.com');
