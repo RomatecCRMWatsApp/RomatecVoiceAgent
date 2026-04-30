@@ -341,7 +341,12 @@ app.get('/notifications/stream', (req: Request, res: Response) => {
 
 // ── WhatsApp webhook (formato ZAPI) ──────────────────────────────────────────
 // ZAPI manda 1 mensagem por POST. Aceita também o formato antigo (Meta-style com messages[])
-app.post('/webhook/whatsapp', (req: Request, res: Response) => {
+// v1.38.5: alias /webhook/zapi pro caso da instância Z-API estar configurada
+// com esse path (era o caminho usado pelo CRM antigo). Mesmo handler, paths distintos.
+app.post('/webhook/zapi', (req: Request, res: Response) => handleWhatsAppWebhook(req, res));
+app.post('/webhook/whatsapp', (req: Request, res: Response) => handleWhatsAppWebhook(req, res));
+
+function handleWhatsAppWebhook(req: Request, res: Response) {
   res.json({ status: 'ok' }); // ack imediato — processa async pra não travar ZAPI
   const body = req.body ?? {};
 
@@ -371,7 +376,7 @@ app.post('/webhook/whatsapp', (req: Request, res: Response) => {
       }
     }
   })();
-});
+}
 
 // ── Spotify now-playing (v1.9.3) — usado pelo widget da UI ────────────────
 app.get('/spotify/now-playing', async (_req: Request, res: Response) => {
