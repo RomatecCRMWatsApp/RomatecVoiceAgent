@@ -19,38 +19,45 @@ import type { ThinkAttachment } from '../agent/think';
 // Modelos válidos no Cerebras Cloud (verificado via GET /v1/models em 2026-04):
 //   - llama3.1-8b                       (production, 8B, free tier ✅)
 //   - gpt-oss-120b                      (production, 120B, requer waitlist)
-//   - qwen-3-235b-a22b-instruct-2507    (preview)
+//   - qwen-3-235b-a22b-instruct-2507    (preview, 32k ctx) — escolhido v1.49
 //   - zai-glm-4.7                       (preview)
-// llama-3.3-70b foi DESCONTINUADO — não usar.
-const CEREBRAS_MODEL    = process.env.CEREBRAS_MODEL       || 'llama3.1-8b';
+// llama-3.3-70b foi DESCONTINUADO no Cerebras — não usar.
+// v1.49.0: default vira qwen-3-235b (32k ctx, suporta o prompt enxuto + tools + history).
+const CEREBRAS_MODEL    = process.env.CEREBRAS_MODEL       || 'qwen-3-235b-a22b-instruct-2507';
 const GEMINI_MODEL      = process.env.GEMINI_MODEL         || 'gemini-2.5-flash';
 const CLAUDE_MODEL      = process.env.CLAUDE_FALLBACK_MODEL || 'claude-sonnet-4-5';
 // v1.27.3: Groq Chat (separado do Whisper que vive em transcribe.ts) e OpenRouter
-// como 4º e 5º elos da cascata. Tudo OpenAI-compatible — reusa o pattern Cerebras.
+// como elos da cascata. Tudo OpenAI-compatible — reusa o pattern Cerebras.
 const GROQ_CHAT_MODEL   = process.env.GROQ_CHAT_MODEL      || 'llama-3.3-70b-versatile';
 const OPENROUTER_MODEL  = process.env.OPENROUTER_MODEL     || 'meta-llama/llama-3.1-70b-instruct:free';
-// v1.32.0: GitHub Models e Cloudflare Workers AI (6º e 7º elos da cascata).
+// v1.32.0: GitHub Models e Cloudflare Workers AI (elos da cascata).
 const GITHUB_MODEL      = process.env.GITHUB_MODEL         || 'gpt-4o-mini';
 const CLOUDFLARE_MODEL  = process.env.CLOUDFLARE_MODEL     || '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+// v1.49.0: OpenAI direto (gpt-4o-mini) — ativa se OPENAI_API_KEY existir. Custa
+// US$0.15/1M tokens input, sempre disponível, sem rate limits agressivos.
+const OPENAI_MODEL      = process.env.OPENAI_MODEL         || 'gpt-4o-mini';
 
 console.log(
   `[aiCascade] modelos ativos: Cerebras=${CEREBRAS_MODEL} | ` +
   `Gemini=${GEMINI_MODEL} | Claude=${CLAUDE_MODEL} | ` +
   `Groq=${GROQ_CHAT_MODEL} | OpenRouter=${OPENROUTER_MODEL} | ` +
-  `GitHub=${GITHUB_MODEL} | Cloudflare=${CLOUDFLARE_MODEL}`
+  `GitHub=${GITHUB_MODEL} | Cloudflare=${CLOUDFLARE_MODEL} | ` +
+  `OpenAI=${OPENAI_MODEL}${process.env.OPENAI_API_KEY ? '' : ' (sem chave)'}`
 );
 
 const MAX_HISTORY = parseInt(process.env.AI_MAX_HISTORY_MESSAGES || '12', 10);
 const MAX_OUTPUT  = parseInt(process.env.AI_MAX_TOKENS_OUTPUT    || '1024', 10);
 
-// Limite de input tokens estimados pra pular Cerebras (llama3.1-8b tem 8k context).
-// Se o prompt total estimado passar disso, pulamos direto pro Gemini que tem 1M.
+// Limite de input tokens estimados pra pular Cerebras.
+// v1.49.0: qwen-3-235b tem 32k ctx — bumpamos a janela. Se voltar pra llama3.1-8b
+// (env var CEREBRAS_MODEL=llama3.1-8b), define CEREBRAS_MAX_INPUT_TOKENS=7500.
 const CEREBRAS_MAX_INPUT_TOKENS = parseInt(
-  process.env.CEREBRAS_MAX_INPUT_TOKENS || '7500', 10,
+  process.env.CEREBRAS_MAX_INPUT_TOKENS || '28000', 10,
 );
-// Groq llama-3.3-70b free tier: 128k context mas TPM 6k — pré-flight pra evitar 413.
+// Groq llama-3.3-70b free tier: 128k context mas TPM ~6k — pré-flight pra evitar 413.
+// v1.49.0: bumpado de 5500 pra 6500 (com prompt enxuto v1.48 vai caber em mais casos).
 const GROQ_MAX_INPUT_TOKENS = parseInt(
-  process.env.GROQ_MAX_INPUT_TOKENS || '5500', 10,
+  process.env.GROQ_MAX_INPUT_TOKENS || '6500', 10,
 );
 // OpenRouter free: contexto grande mas requests/dia limitado. Sem pré-flight de tokens.
 
@@ -160,6 +167,14 @@ function cloudflareClient(): OpenAI {
     baseURL: `https://api.cloudflare.com/client/v4/accounts/${account}/ai/v1`,
   });
   return _cloudflare;
+}
+
+// v1.49.0: OpenAI direto — backbone alternativo quando Claude está sem crédito.
+// gpt-4o-mini é ~70× mais barato que Claude e raramente falha.
+let _openai: OpenAI | null = null;
+function openaiClient(): OpenAI {
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _openai;
 }
 
 // ── Conversores de schema ───────────────────────────────────────────────────
@@ -349,6 +364,18 @@ async function chamarCloudflare(
   );
 }
 
+// ── OPENAI direto (v1.49.0) — backbone alternativo barato ──────────────────
+async function chamarOpenAI(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    openaiClient(), OPENAI_MODEL, 'OpenAI',
+    systemPrompt, history, userMessage,
+  );
+}
+
 // ── GEMINI (fallback intermediário) ─────────────────────────────────────────
 async function chamarGemini(
   systemPrompt: string,
@@ -527,101 +554,149 @@ export async function pensarEmCascata(
 ): Promise<CascadeResult> {
   const truncado = truncarHistorico(history);
   const hasAttachments = !!attachments && attachments.length > 0;
+  const tentativas: { provider: string; razao: string }[] = [];
 
-  // Cerebras pulado se: (1) houver anexos (sem vision), OU (2) prompt estimado
-  // exceder a janela do modelo (llama3.1-8b = 8k tokens). Evita request que
-  // sabemos que vai retornar 400 antes mesmo de sair daqui.
-  if (!hasAttachments && process.env.CEREBRAS_API_KEY) {
-    const estimated = estimatePromptTokens(systemPrompt, truncado, userMessage);
-    if (estimated > CEREBRAS_MAX_INPUT_TOKENS) {
-      console.warn(
-        `[AI] ⚠️ Cerebras pulado: prompt ~${estimated} tokens > ` +
-        `${CEREBRAS_MAX_INPUT_TOKENS} (janela do modelo). Indo direto pro Gemini.`
-      );
-    } else {
-      try {
-        const r = await chamarCerebras(systemPrompt, truncado, userMessage);
-        console.log(`[AI] ✅ ${r.provider}`);
-        return r;
-      } catch (err) {
-        console.warn(`[AI] ⚠️ Cerebras falhou: ${(err as Error).message ?? err}`);
-      }
-    }
-  }
+  // v1.49.0 — Nova ordem da cascata:
+  // 1) Gemini  (1M ctx, free tier 20 req/dia, paid muito barato — barato + robusto)
+  // 2) Cerebras (qwen-3-235b 32k ctx, free tier rápido, sem vision)
+  // 3) Claude   (200k ctx, sempre cabe, principal pago — só se Anthropic OK)
+  // 4) OpenAI   (gpt-4o-mini, ~$0.15/1M tokens — backbone se Claude offline)
+  // 5) Groq     (llama-3.3-70b free, mas TPM ~6k limita)
+  // 6) OpenRouter (free, sem pré-flight)
+  // 7) GitHub Models (gpt-4o-mini free, max 8k tokens)
+  // 8) Cloudflare Workers AI (edge BR)
 
+  // ── 1) GEMINI ────────────────────────────────────────────────────────────
   if (process.env.GEMINI_API_KEY) {
     try {
       const r = await chamarGemini(systemPrompt, truncado, userMessage, attachments);
       console.log(`[AI] ✅ ${r.provider}`);
       return r;
     } catch (err) {
-      console.warn(`[AI] ⚠️ Gemini falhou: ${(err as Error).message ?? err}`);
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ Gemini falhou: ${m}`);
+      tentativas.push({ provider: 'Gemini', razao: m.slice(0, 200) });
     }
+  } else {
+    tentativas.push({ provider: 'Gemini', razao: 'GEMINI_API_KEY não setada' });
   }
 
+  // ── 2) CEREBRAS (sem vision) ─────────────────────────────────────────────
+  if (!hasAttachments && process.env.CEREBRAS_API_KEY) {
+    const estimated = estimatePromptTokens(systemPrompt, truncado, userMessage);
+    if (estimated > CEREBRAS_MAX_INPUT_TOKENS) {
+      const razao = `prompt ~${estimated} > janela ${CEREBRAS_MAX_INPUT_TOKENS}`;
+      console.warn(`[AI] ⚠️ Cerebras pulado: ${razao}`);
+      tentativas.push({ provider: 'Cerebras', razao });
+    } else {
+      try {
+        const r = await chamarCerebras(systemPrompt, truncado, userMessage);
+        console.log(`[AI] ✅ ${r.provider}`);
+        return r;
+      } catch (err) {
+        const m = (err as Error).message ?? String(err);
+        console.warn(`[AI] ⚠️ Cerebras falhou: ${m}`);
+        tentativas.push({ provider: 'Cerebras', razao: m.slice(0, 200) });
+      }
+    }
+  } else if (hasAttachments) {
+    tentativas.push({ provider: 'Cerebras', razao: 'sem suporte a anexos (vision)' });
+  }
+
+  // ── 3) CLAUDE ────────────────────────────────────────────────────────────
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const r = await chamarClaude(systemPrompt, truncado, userMessage, attachments);
       console.log(`[AI] ✅ ${r.provider}`);
       return r;
     } catch (err) {
-      console.warn(`[AI] ⚠️ Claude falhou: ${(err as Error).message ?? err}`);
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ Claude falhou: ${m}`);
+      tentativas.push({ provider: 'Claude', razao: m.slice(0, 200) });
     }
+  } else {
+    tentativas.push({ provider: 'Claude', razao: 'ANTHROPIC_API_KEY não setada' });
   }
 
-  // 4º elo: Groq Chat (llama-3.3-70b-versatile, free tier 30 RPM mas TPM 6k).
-  // Não suporta vision — só usa se não houver attachments.
+  // ── 4) OPENAI direto (v1.49.0) ───────────────────────────────────────────
+  if (!hasAttachments && process.env.OPENAI_API_KEY) {
+    try {
+      const r = await chamarOpenAI(systemPrompt, truncado, userMessage);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ OpenAI falhou: ${m}`);
+      tentativas.push({ provider: 'OpenAI', razao: m.slice(0, 200) });
+    }
+  } else if (!process.env.OPENAI_API_KEY) {
+    tentativas.push({ provider: 'OpenAI', razao: 'OPENAI_API_KEY não setada (opcional)' });
+  }
+
+  // ── 5) GROQ ──────────────────────────────────────────────────────────────
   if (!hasAttachments && process.env.GROQ_API_KEY) {
     const estimated = estimatePromptTokens(systemPrompt, truncado, userMessage);
     if (estimated > GROQ_MAX_INPUT_TOKENS) {
-      console.warn(`[AI] ⚠️ Groq pulado: prompt ~${estimated} tokens > ${GROQ_MAX_INPUT_TOKENS} (TPM free tier).`);
+      const razao = `prompt ~${estimated} > TPM ${GROQ_MAX_INPUT_TOKENS}`;
+      console.warn(`[AI] ⚠️ Groq pulado: ${razao}`);
+      tentativas.push({ provider: 'Groq', razao });
     } else {
       try {
         const r = await chamarGroqChat(systemPrompt, truncado, userMessage);
         console.log(`[AI] ✅ ${r.provider}`);
         return r;
       } catch (err) {
-        console.warn(`[AI] ⚠️ Groq falhou: ${(err as Error).message ?? err}`);
+        const m = (err as Error).message ?? String(err);
+        console.warn(`[AI] ⚠️ Groq falhou: ${m}`);
+        tentativas.push({ provider: 'Groq', razao: m.slice(0, 200) });
       }
     }
   }
 
-  // 5º elo: OpenRouter free tier.
+  // ── 6) OPENROUTER ────────────────────────────────────────────────────────
   if (process.env.OPENROUTER_API_KEY) {
     try {
       const r = await chamarOpenRouter(systemPrompt, truncado, userMessage);
       console.log(`[AI] ✅ ${r.provider}`);
       return r;
     } catch (err) {
-      console.warn(`[AI] ⚠️ OpenRouter falhou: ${(err as Error).message ?? err}`);
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ OpenRouter falhou: ${m}`);
+      tentativas.push({ provider: 'OpenRouter', razao: m.slice(0, 200) });
     }
   }
 
-  // 6º elo: GitHub Models — GPT-4o-mini/Phi-4 free com GITHUB_TOKEN.
+  // ── 7) GITHUB MODELS ─────────────────────────────────────────────────────
   if (!hasAttachments && process.env.GITHUB_TOKEN) {
     try {
       const r = await chamarGitHub(systemPrompt, truncado, userMessage);
       console.log(`[AI] ✅ ${r.provider}`);
       return r;
     } catch (err) {
-      console.warn(`[AI] ⚠️ GitHub Models falhou: ${(err as Error).message ?? err}`);
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ GitHub Models falhou: ${m}`);
+      tentativas.push({ provider: 'GitHub', razao: m.slice(0, 200) });
     }
   }
 
-  // 7º elo (último recurso): Cloudflare Workers AI — edge BR, latência baixa.
+  // ── 8) CLOUDFLARE (último elo) ───────────────────────────────────────────
   if (!hasAttachments && process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID) {
     try {
       const r = await chamarCloudflare(systemPrompt, truncado, userMessage);
       console.log(`[AI] ✅ ${r.provider}`);
       return r;
     } catch (err) {
-      console.warn(`[AI] ⚠️ Cloudflare falhou: ${(err as Error).message ?? err}`);
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ Cloudflare falhou: ${m}`);
+      tentativas.push({ provider: 'Cloudflare', razao: m.slice(0, 200) });
     }
   }
 
+  // v1.49.0: erro detalhado por provider em vez de checklist genérico
+  const detalhes = tentativas.map(t => `  • ${t.provider}: ${t.razao}`).join('\n');
   throw new Error(
-    'Cascata IA esgotada — todos os providers configurados falharam. ' +
-    'Verifique CEREBRAS_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY, ' +
-    'OPENROUTER_API_KEY, GITHUB_TOKEN, CLOUDFLARE_API_TOKEN.'
+    `Cascata IA esgotada (${tentativas.length} providers tentados):\n${detalhes}\n\n` +
+    `Ações sugeridas: recarregar Anthropic (https://console.anthropic.com/settings/billing), ` +
+    `ativar billing Gemini, ou setar OPENAI_API_KEY.`
   );
 }
