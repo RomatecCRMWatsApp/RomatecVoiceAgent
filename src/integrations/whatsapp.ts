@@ -15,7 +15,11 @@ const ZAPI_TOKEN        = process.env.ZAPI_TOKEN_ZAYRA        ?? process.env.ZAP
 const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN_ZAYRA ?? process.env.ZAPI_CLIENT_TOKEN ?? '';
 
 const usandoInstanciaZayra = !!process.env.ZAPI_INSTANCE_ID_ZAYRA;
-console.log(`[ZAPI] usando instância ${usandoInstanciaZayra ? 'DEDICADA ZAYRA' : 'compartilhada com CRM'} (${ZAPI_INSTANCE_ID.slice(0, 8)}…)`);
+console.log(
+  `[ZAPI] config: instância=${ZAPI_INSTANCE_ID.slice(0,8)}… (${usandoInstanciaZayra ? 'DEDICADA ZAYRA' : 'CRM compartilhada'}) | ` +
+  `token=${ZAPI_TOKEN ? 'set('+ZAPI_TOKEN.length+'chars)' : 'VAZIO ❌'} | ` +
+  `client-token=${ZAPI_CLIENT_TOKEN ? 'set('+ZAPI_CLIENT_TOKEN.length+'chars)' : 'VAZIO ❌'}`,
+);
 
 function zapiBase(): string {
   if (!ZAPI_INSTANCE_ID || !ZAPI_TOKEN) {
