@@ -20,7 +20,7 @@ import { buscarMemoria, formatarContexto } from '../services/ragSearch';
 import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
 import { listarContratosIndexados } from '../services/contratosIngest';
 import { gerarContrato, listarContratosGerados } from '../services/contratosGerar';
-import { sendReply } from '../integrations/whatsapp';
+import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS } from '../integrations/whatsapp';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
   consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
@@ -244,14 +244,72 @@ export const toolDefinitions: Anthropic.Tool[] = [
   },
   {
     name: 'enviar_whatsapp',
-    description: 'Envia uma mensagem de texto via WhatsApp para um número específico através do CRM.',
+    description: 'Envia mensagem de TEXTO pelo WhatsApp do CEO (instancia Z-API dedicada ZAYRA). DESTRUTIVO — afeta WhatsApp pessoal do CEO. Sempre rode primeiro SEM confirm pra ver preview, peca autorizacao verbal ao Chefe ("pode mandar?"), so depois rode com confirm:true. NUNCA envie sem o CEO autorizar a mensagem exata.',
     input_schema: {
       type: 'object',
       properties: {
-        para:     { type: 'string', description: 'Número do destinatário com DDI e DDD (ex: 5598991234567)' },
-        mensagem: { type: 'string', description: 'Texto da mensagem a enviar' },
+        para:     { type: 'string', description: 'Número do destinatário (aceita formatos: 5598999999999, 98 9 9999-9999, +55 98 99999-9999)' },
+        mensagem: { type: 'string', description: 'Texto da mensagem a enviar (sem markdown — WhatsApp não renderiza)' },
+        confirm:  { type: 'boolean', description: 'true APÓS autorização verbal do CEO. Sem isso, retorna preview.' },
       },
       required: ['para', 'mensagem'],
+    },
+  },
+  {
+    name: 'enviar_audio_whatsapp',
+    description: 'Envia AUDIO (PTT/push-to-talk) pelo WhatsApp do CEO. ZAYRA gera o audio via Edge TTS (voz pt-BR Francisca/Antonio) a partir do texto fornecido e envia pra contato. DESTRUTIVO — exige confirm. Use quando o CEO pedir "manda audio pra X explicando Y" ou "fala com Z em audio sobre W". Texto max 800 chars (audio nao pode ser muito longo).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        para:    { type: 'string', description: 'Número destinatário' },
+        texto:   { type: 'string', description: 'Texto que ZAYRA vai falar (max 800 chars, gera audio neural pt-BR)' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['para', 'texto'],
+    },
+  },
+  {
+    name: 'enviar_imagem_whatsapp',
+    description: 'Envia IMAGEM (foto, captura de tela, logo, plant baixa) pelo WhatsApp do CEO. Aceita URL pública (https://...) ou data URI base64 (data:image/jpeg;base64,...). Suporta caption (legenda da imagem). DESTRUTIVO — exige confirm.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        para:     { type: 'string', description: 'Número destinatário' },
+        imageUrl: { type: 'string', description: 'URL pública (https) ou data URI base64 da imagem' },
+        caption:  { type: 'string', description: 'Legenda opcional da imagem' },
+        confirm:  { type: 'boolean' },
+      },
+      required: ['para', 'imageUrl'],
+    },
+  },
+  {
+    name: 'enviar_documento_whatsapp',
+    description: 'Envia DOCUMENTO (PDF, DOCX, XLSX, TXT, CSV) pelo WhatsApp do CEO. Combina perfeito com gerar_contrato (que retorna DOCX base64) — depois de gerar contrato, pode mandar direto pro contato pelo WhatsApp. DESTRUTIVO — exige confirm.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        para:      { type: 'string', description: 'Número destinatário' },
+        docBase64: { type: 'string', description: 'Conteúdo do arquivo em base64 (sem prefixo data:..., só os bytes)' },
+        fileName:  { type: 'string', description: 'Nome do arquivo (ex: "Contrato_Locacao.docx")' },
+        confirm:   { type: 'boolean' },
+      },
+      required: ['para', 'docBase64', 'fileName'],
+    },
+  },
+  {
+    name: 'enviar_localizacao_whatsapp',
+    description: 'Envia LOCALIZAÇÃO GPS (lat/lng) pelo WhatsApp do CEO. Útil pra mandar endereço de obra, ponto de encontro, lote/imóvel pra cliente. Coordenadas em decimal (Açailândia/MA: lat=-4.946, lng=-47.501). DESTRUTIVO — exige confirm.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        para:      { type: 'string' },
+        latitude:  { type: 'number', description: 'Latitude decimal (ex: -4.946)' },
+        longitude: { type: 'number', description: 'Longitude decimal (ex: -47.501)' },
+        title:     { type: 'string', description: 'Nome do local (ex: "Obra Posto Chapadão")' },
+        address:   { type: 'string', description: 'Endereço opcional' },
+        confirm:   { type: 'boolean' },
+      },
+      required: ['para', 'latitude', 'longitude'],
     },
   },
   {
@@ -1526,9 +1584,55 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       }
       case 'enviar_whatsapp': {
-        const { para, mensagem } = input as { para: string; mensagem: string };
-        await sendReply(para, mensagem);
-        data = { success: true, para, mensagem, enviado_em: new Date().toISOString() };
+        const inp = input as { para: string; mensagem: string; confirm?: boolean };
+        if (!inp.confirm) {
+          data = { preview: true, message: `[PREVIEW] Vou enviar pelo WhatsApp do Chefe pra ${inp.para}: "${inp.mensagem}". Reenvie com confirm:true após autorização.` };
+        } else {
+          const r = await sendReply(inp.para, inp.mensagem);
+          data = { success: true, para: r.phone, mensagem: inp.mensagem, messageId: r.messageId, enviado_em: new Date().toISOString() };
+        }
+        break;
+      }
+      case 'enviar_audio_whatsapp': {
+        const inp = input as { para: string; texto: string; confirm?: boolean };
+        if (!inp.confirm) {
+          data = { preview: true, message: `[PREVIEW] Vou gerar áudio TTS e enviar pra ${inp.para}: "${inp.texto.slice(0, 120)}${inp.texto.length > 120 ? '…' : ''}". Reenvie com confirm:true.` };
+        } else {
+          const r = await enviarAudioTTS(inp.para, inp.texto);
+          data = { success: true, para: r.phone, segundos_estimados: r.segundos, messageId: r.messageId };
+        }
+        break;
+      }
+      case 'enviar_imagem_whatsapp': {
+        const inp = input as { para: string; imageUrl: string; caption?: string; confirm?: boolean };
+        if (!inp.confirm) {
+          const tipo = inp.imageUrl.startsWith('data:') ? 'imagem (base64)' : `imagem (${inp.imageUrl.slice(0, 60)}…)`;
+          data = { preview: true, message: `[PREVIEW] Vou enviar ${tipo} pra ${inp.para}${inp.caption ? ' com legenda "' + inp.caption + '"' : ''}. Reenvie com confirm:true.` };
+        } else {
+          const r = await sendImage(inp.para, inp.imageUrl, inp.caption);
+          data = { success: true, para: r.phone, messageId: r.messageId, caption: inp.caption };
+        }
+        break;
+      }
+      case 'enviar_documento_whatsapp': {
+        const inp = input as { para: string; docBase64: string; fileName: string; confirm?: boolean };
+        if (!inp.confirm) {
+          const sizeKb = Math.round((inp.docBase64.length * 3 / 4) / 1024);
+          data = { preview: true, message: `[PREVIEW] Vou enviar documento "${inp.fileName}" (${sizeKb}KB) pra ${inp.para}. Reenvie com confirm:true.` };
+        } else {
+          const r = await sendDocument(inp.para, inp.docBase64, inp.fileName);
+          data = { success: true, para: r.phone, fileName: inp.fileName, messageId: r.messageId };
+        }
+        break;
+      }
+      case 'enviar_localizacao_whatsapp': {
+        const inp = input as { para: string; latitude: number; longitude: number; title?: string; address?: string; confirm?: boolean };
+        if (!inp.confirm) {
+          data = { preview: true, message: `[PREVIEW] Vou enviar localização (${inp.latitude}, ${inp.longitude})${inp.title ? ' "' + inp.title + '"' : ''} pra ${inp.para}. Reenvie com confirm:true.` };
+        } else {
+          const r = await sendLocation(inp.para, inp.latitude, inp.longitude, inp.title, inp.address);
+          data = { success: true, para: r.phone, messageId: r.messageId, coordenadas: { lat: inp.latitude, lng: inp.longitude } };
+        }
         break;
       }
       case 'listar_colaboradores':
