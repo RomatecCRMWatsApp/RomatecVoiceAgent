@@ -5,15 +5,21 @@ import { think } from '../agent/think';
 import { ingerirPdf, detectarCategoria } from '../services/ragIngest';
 import { supabaseConfigurado } from '../services/supabase';
 
-// Z-API direto (sem passar pelo CRM). Mesmas credenciais que o CRM usa.
-const ZAPI_BASE_URL     = process.env.ZAPI_BASE_URL ?? 'https://api.z-api.io';
-const ZAPI_INSTANCE_ID  = process.env.ZAPI_INSTANCE_ID ?? '';
-const ZAPI_TOKEN        = process.env.ZAPI_TOKEN ?? '';
-const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN ?? '';
+// Z-API direto. Aceita instância dedicada da ZAYRA (vars _ZAYRA) com fallback
+// pras vars antigas (compatível com CRM que pode estar em outra instância).
+// CEO criou nova instância exclusiva pra ZAYRA enquanto WhatsApp do CRM está
+// em manutenção (aguardando Meta Cloud API).
+const ZAPI_BASE_URL     = process.env.ZAPI_BASE_URL_ZAYRA     ?? process.env.ZAPI_BASE_URL     ?? 'https://api.z-api.io';
+const ZAPI_INSTANCE_ID  = process.env.ZAPI_INSTANCE_ID_ZAYRA  ?? process.env.ZAPI_INSTANCE_ID  ?? '';
+const ZAPI_TOKEN        = process.env.ZAPI_TOKEN_ZAYRA        ?? process.env.ZAPI_TOKEN        ?? '';
+const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN_ZAYRA ?? process.env.ZAPI_CLIENT_TOKEN ?? '';
+
+const usandoInstanciaZayra = !!process.env.ZAPI_INSTANCE_ID_ZAYRA;
+console.log(`[ZAPI] usando instância ${usandoInstanciaZayra ? 'DEDICADA ZAYRA' : 'compartilhada com CRM'} (${ZAPI_INSTANCE_ID.slice(0, 8)}…)`);
 
 function zapiBase(): string {
   if (!ZAPI_INSTANCE_ID || !ZAPI_TOKEN) {
-    throw new Error('ZAPI: faltam ZAPI_INSTANCE_ID e/ou ZAPI_TOKEN no Railway.');
+    throw new Error('ZAPI: faltam ZAPI_INSTANCE_ID(_ZAYRA) e/ou ZAPI_TOKEN(_ZAYRA) no Railway.');
   }
   return `${ZAPI_BASE_URL}/instances/${ZAPI_INSTANCE_ID}/token/${ZAPI_TOKEN}`;
 }
@@ -22,6 +28,16 @@ function zapiHeaders(): Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
   if (ZAPI_CLIENT_TOKEN) h['Client-Token'] = ZAPI_CLIENT_TOKEN;
   return h;
+}
+
+// Sanitiza número de telefone pro formato Z-API (só dígitos, com DDI 55 se faltar)
+function normalizarTelefone(numero: string): string {
+  const digits = numero.replace(/\D/g, '');
+  // Se já tem 13 (5598999999999) ou 12 (559899999999) dígitos, ok
+  if (digits.length === 13 || digits.length === 12) return digits;
+  // Se tem 11 (98999999999) ou 10 (9899999999), prefixa 55
+  if (digits.length === 11 || digits.length === 10) return '55' + digits;
+  throw new Error(`Telefone inválido: "${numero}" — informe com DDD (ex: 5598999999999 ou 98 9 9999-9999)`);
 }
 
 // ── Schema unificado de mensagem inbound (do webhook ZAPI) ───────────────────
@@ -138,9 +154,9 @@ export function parseZapiWebhook(body: unknown): WaMessage[] {
 }
 
 // ── Outbound: envia texto via ZAPI direto ────────────────────────────────────
-export async function sendReply(to: string, message: string): Promise<void> {
-  const phone = String(to).replace(/\D/g, ''); // só dígitos
-  if (!phone) throw new Error('WhatsApp: número de destino vazio.');
+export async function sendReply(to: string, message: string): Promise<{ messageId?: string; phone: string }> {
+  const phone = normalizarTelefone(to);
+  if (!message?.trim()) throw new Error('WhatsApp: mensagem vazia.');
 
   const url = `${zapiBase()}/send-text`;
   let zApiMessageId: string | undefined;
@@ -159,10 +175,143 @@ export async function sendReply(to: string, message: string): Promise<void> {
     throw new Error(`ZAPI (${status}): falha ao enviar para ${phone} — ${detail}`);
   }
 
-  // Log fire-and-forget no MySQL compartilhado (zayra_whatsapp_log)
   void logOutbound(phone, message, zApiMessageId).catch(err =>
     console.warn('[ZAPI sendReply] log falhou (ignorado):', (err as Error).message),
   );
+  return { messageId: zApiMessageId, phone };
+}
+
+// ── Outbound: imagem (URL ou base64) ─────────────────────────────────────────
+export async function sendImage(to: string, imageUrl: string, caption?: string): Promise<{ messageId?: string; phone: string }> {
+  const phone = normalizarTelefone(to);
+  if (!imageUrl) throw new Error('WhatsApp: imageUrl obrigatória.');
+
+  // Z-API aceita: data:image/jpeg;base64,xxx OU https://url-publica/imagem.jpg
+  const isBase64 = imageUrl.startsWith('data:image/');
+  const isUrl    = imageUrl.startsWith('http://') || imageUrl.startsWith('https://');
+  if (!isBase64 && !isUrl) {
+    throw new Error('imageUrl deve ser URL pública (https://) ou data URI base64 (data:image/...)');
+  }
+
+  const url = `${zapiBase()}/send-image`;
+  try {
+    const r = await axios.post<{ messageId?: string; id?: string }>(
+      url,
+      { phone, image: imageUrl, caption: caption ?? '' },
+      { headers: zapiHeaders(), timeout: 30000 },
+    );
+    const messageId = r.data?.messageId ?? r.data?.id;
+    void logOutbound(phone, `[IMAGEM]${caption ? ' ' + caption : ''}`, messageId).catch(() => {});
+    return { messageId, phone };
+  } catch (err) {
+    const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+    const detail = JSON.stringify(ax.response?.data ?? ax.message ?? err);
+    throw new Error(`ZAPI send-image: ${detail}`);
+  }
+}
+
+// ── Outbound: áudio (base64 MP3 ou OGG) ──────────────────────────────────────
+export async function sendAudio(to: string, audioBase64: string, asPtt = true): Promise<{ messageId?: string; phone: string }> {
+  const phone = normalizarTelefone(to);
+  if (!audioBase64) throw new Error('WhatsApp: audioBase64 obrigatório.');
+
+  // Z-API espera data:audio/mp3;base64,xxx ou data:audio/ogg;base64,xxx
+  const audio = audioBase64.startsWith('data:audio/')
+    ? audioBase64
+    : `data:audio/mp3;base64,${audioBase64}`;
+
+  const url = `${zapiBase()}/send-audio`;
+  try {
+    const r = await axios.post<{ messageId?: string; id?: string }>(
+      url,
+      { phone, audio, waveform: true, viewOnce: false, async: false },
+      { headers: zapiHeaders(), timeout: 60000 },
+    );
+    const messageId = r.data?.messageId ?? r.data?.id;
+    void logOutbound(phone, '[ÁUDIO]', messageId).catch(() => {});
+    return { messageId, phone };
+  } catch (err) {
+    const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+    const detail = JSON.stringify(ax.response?.data ?? ax.message ?? err);
+    throw new Error(`ZAPI send-audio: ${detail}`);
+  }
+}
+
+// ── Outbound: documento (DOCX/PDF/etc — base64) ──────────────────────────────
+export async function sendDocument(to: string, docBase64: string, fileName: string, extension?: string): Promise<{ messageId?: string; phone: string }> {
+  const phone = normalizarTelefone(to);
+  if (!docBase64 || !fileName) throw new Error('WhatsApp: docBase64 e fileName obrigatórios.');
+
+  // Detecta extensão pelo nome se não vier explícita
+  const ext = (extension || fileName.split('.').pop() || '').toLowerCase().replace(/^\./, '');
+  if (!ext) throw new Error('Não consegui detectar extensão do arquivo (use fileName tipo "contrato.docx")');
+
+  // Z-API aceita: data:application/pdf;base64,xxx OU URL https
+  const mimeMap: Record<string, string> = {
+    pdf:  'application/pdf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    doc:  'application/msword',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    xls:  'application/vnd.ms-excel',
+    txt:  'text/plain',
+    csv:  'text/csv',
+  };
+  const mime = mimeMap[ext] || 'application/octet-stream';
+  const document = docBase64.startsWith('data:')
+    ? docBase64
+    : `data:${mime};base64,${docBase64}`;
+
+  const url = `${zapiBase()}/send-document/${ext}`;
+  try {
+    const r = await axios.post<{ messageId?: string; id?: string }>(
+      url,
+      { phone, document, fileName },
+      { headers: zapiHeaders(), timeout: 60000 },
+    );
+    const messageId = r.data?.messageId ?? r.data?.id;
+    void logOutbound(phone, `[DOC] ${fileName}`, messageId).catch(() => {});
+    return { messageId, phone };
+  } catch (err) {
+    const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+    const detail = JSON.stringify(ax.response?.data ?? ax.message ?? err);
+    throw new Error(`ZAPI send-document: ${detail}`);
+  }
+}
+
+// ── Outbound: localização (lat/lng) ──────────────────────────────────────────
+export async function sendLocation(to: string, latitude: number, longitude: number, title?: string, address?: string): Promise<{ messageId?: string; phone: string }> {
+  const phone = normalizarTelefone(to);
+  if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+    throw new Error('latitude e longitude obrigatórios (números, ex: -4.946 / -47.501)');
+  }
+
+  const url = `${zapiBase()}/send-location`;
+  try {
+    const r = await axios.post<{ messageId?: string; id?: string }>(
+      url,
+      { phone, latitude, longitude, title: title ?? 'Localização', address: address ?? '' },
+      { headers: zapiHeaders(), timeout: 10000 },
+    );
+    const messageId = r.data?.messageId ?? r.data?.id;
+    void logOutbound(phone, `[LOC] ${title ?? ''} (${latitude},${longitude})`, messageId).catch(() => {});
+    return { messageId, phone };
+  } catch (err) {
+    const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+    const detail = JSON.stringify(ax.response?.data ?? ax.message ?? err);
+    throw new Error(`ZAPI send-location: ${detail}`);
+  }
+}
+
+// ── High-level: TTS (Edge) + envia áudio gravado ─────────────────────────────
+export async function enviarAudioTTS(to: string, texto: string): Promise<{ messageId?: string; phone: string; segundos: number }> {
+  const { speak } = await import('../agent/speak');
+  if (texto.length > 800) throw new Error('Texto muito longo pra áudio (max 800 chars). Reduza ou divida em mensagens.');
+
+  const audioBuf = await speak(texto);
+  const segundos = Math.ceil(audioBuf.length / (24000 * 0.5)); // estimativa: 24kHz mono ~6KB/s
+  const audioBase64 = audioBuf.toString('base64');
+  const r = await sendAudio(to, audioBase64, true);
+  return { ...r, segundos };
 }
 
 // ── Inbound: baixa áudio via ZAPI ────────────────────────────────────────────
