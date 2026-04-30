@@ -29,6 +29,7 @@ import {
   simularFinanciamento, calcularCorrecaoMonetaria, calcularVPL,
   converterTaxa, calcularParcelamento,
 } from '../services/calculadoraFinanceira';
+import { calcularItbi, listarMunicipiosValidados } from '../services/calcularItbi';
 import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
@@ -592,6 +593,27 @@ export const toolDefinitions: Anthropic.Tool[] = [
       },
       required: ['taxa_pct','de','para'],
     },
+  },
+  {
+    name: 'calcular_itbi',
+    description: 'Calcula ITBI (Imposto sobre Transmissão de Bens Imóveis) de um imóvel urbano. Fórmula: max(valor_venda, valor_venal) × alíquota. Açailândia/MA validada (Lei 234/2008): 2% padrão, 0,5% SFH 1º imóvel. Outros municípios usam fallback (2%/0,5%) com aviso pra confirmar na Prefeitura. Imóvel rural retorna 0 e avisa que paga ITR (federal). Doação retorna 0 e avisa ITCMD (estadual). Use quando o Chefe perguntar "quanto fica o ITBI de X" ou "calcula o ITBI dessa venda".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        valor_venda:    { type: 'number', description: 'Valor da venda em BRL (ex: 350000)' },
+        valor_venal:    { type: 'number', description: 'Valor venal do IPTU em BRL (opcional — se omitido usa valor_venda). Se for maior que venda, é a base.' },
+        municipio:      { type: 'string', description: 'Nome do município (ex: "Açailândia")' },
+        uf:             { type: 'string', description: 'UF (ex: "MA")' },
+        tipo_operacao:  { type: 'string', description: 'compra_venda (default) | sfh_primeiro_imovel (alíquota reduzida) | permuta | doacao' },
+        imovel_rural:   { type: 'boolean', description: 'true se é imóvel rural (paga ITR, não ITBI). Default false.' },
+      },
+      required: ['valor_venda', 'municipio'],
+    },
+  },
+  {
+    name: 'listar_municipios_itbi',
+    description: 'Lista os municípios que a ZAYRA tem alíquotas ITBI validadas (atualmente: Açailândia/MA). Use quando o Chefe perguntar "quais cidades você sabe calcular ITBI" ou "tem São Luís?".',
+    input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'calcular_parcelamento',
@@ -2225,6 +2247,12 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'calcular_parcelamento':
         data = calcularParcelamento(input as unknown as Parameters<typeof calcularParcelamento>[0]);
+        break;
+      case 'calcular_itbi':
+        data = calcularItbi(input as unknown as Parameters<typeof calcularItbi>[0]);
+        break;
+      case 'listar_municipios_itbi':
+        data = listarMunicipiosValidados();
         break;
 
       // ── v1.40.0: Briefing semanal + diagnóstico banco ──

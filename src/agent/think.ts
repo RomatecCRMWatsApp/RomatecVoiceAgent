@@ -68,6 +68,7 @@ OCR DE DOCUMENTOS: extrair_dados_rg, extrair_dados_cnh, extrair_comprovante_ende
 WHATSAPP PESSOAL (Z-API, 1-a-1, NUNCA em massa): enviar_whatsapp/_audio/_imagem/_documento/_localizacao_whatsapp. Áudio TTS max 800 chars. Aceita vários formatos de telefone — função normaliza.
 TELEGRAM: enviar_telegram, status_telegram.
 CALCULADORA FINANCEIRA: simular_financiamento (Price/SAC), calcular_correcao_monetaria, calcular_vpl, converter_taxa, calcular_parcelamento.
+ITBI: calcular_itbi (max(venda,venal)×alíquota; Açailândia/MA validada 2%/0,5% SFH 1º imóvel; rural→ITR; doação→ITCMD), listar_municipios_itbi.
 DRIVE GOOGLE: drive_upload_arquivo (pasta default Romatec/{Avaliacoes,Contratos,Atas,Relatorios,Vistorias,Documentos}, cria árvore se faltar), drive_listar, drive_buscar, drive_compartilhar (link público OU email), drive_apagar (admin-only), drive_status. Após gerar contrato/PTAM/ata, OFEREÇA arquivar e devolva o webViewLink.
 EQUIPE: adicionar_membro_equipe, listar_membros_equipe, alterar_role_membro, remover_membro_equipe, delegar_para_membro (admin-only menos listar). Pra membro pegar chat_id: /start no @userinfobot.
 ALERTAS PROATIVOS: listar_alertas_pendentes, rodar_detectores_agora, silenciar_alerta, reconhecer_alerta.
