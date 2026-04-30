@@ -691,6 +691,7 @@ app.listen(PORT, () => {
   console.log(`${AGENT_IDENTITY.name} v${AGENT_IDENTITY.version} rodando na porta ${PORT}`);
   startProactiveNotifications();
   startDailyScheduler();
+  void import('./agent/briefingSemanal').then(m => m.startWeeklyBriefingScheduler()).catch(() => {});
   alarmes.startAlarmesTicker();
   cowork.startCoworkWorker();
   void initDb()

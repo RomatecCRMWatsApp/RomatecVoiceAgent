@@ -23,6 +23,8 @@ import { gerarContrato, listarContratosGerados } from '../services/contratosGera
 import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS, statusInstancia, infoInstancia } from '../integrations/whatsapp';
 import { listarAlertasPendentes, silenciarAlerta, reconhecerAlerta, rodarDetectoresAgora } from './proactive';
 import { sincronizarContatosCRM, buscarContatoMemoria } from '../services/syncContatosCRM';
+import { gerarBriefingSemanal, enviarBriefingSemanal } from './briefingSemanal';
+import poolDb from '../database/connection';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
   consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
@@ -298,6 +300,23 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['para', 'docBase64', 'fileName'],
     },
   },
+  // ── v1.40.0: Briefing semanal + diagnóstico banco ──
+  {
+    name: 'gerar_briefing_semanal',
+    description: 'Gera o briefing semanal executivo da Romatec (obras em andamento + progresso, equipe + folha da semana, financeiro + categorias de gasto, leads CRM, vistorias). Não envia — só retorna o texto formatado pra revisão. Use rodar_briefing_semanal_agora pra também enviar pro Telegram.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'rodar_briefing_semanal_agora',
+    description: 'Gera o briefing semanal E ENVIA agora pelo Telegram do CEO (não espera sexta 17h). Use quando o Chefe pedir "me dá um relatório agora" ou "como tá a semana?".',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'diagnostico_banco',
+    description: 'Lista TODAS as tabelas do MySQL atual e quantas linhas cada uma tem. Use quando suspeitar de tabela renomeada, banco trocado, ou pra confirmar que dados do CRM estão acessíveis. Útil pra debugar erros tipo "tabela não existe".',
+    input_schema: { type: 'object', properties: {} },
+  },
+
   // ── v1.39.1: Sync de contatos CRM → memória ZAYRA ──
   {
     name: 'sincronizar_contatos_crm',
@@ -1688,6 +1707,36 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         }
         break;
       }
+      // ── v1.40.0: Briefing semanal + diagnóstico banco ──
+      case 'gerar_briefing_semanal': {
+        const r = await gerarBriefingSemanal();
+        data = { texto: r.texto, dados: r.dados };
+        break;
+      }
+      case 'rodar_briefing_semanal_agora':
+        data = await enviarBriefingSemanal();
+        break;
+      case 'diagnostico_banco': {
+        type Row = import('mysql2').RowDataPacket & { name: string; rows: number };
+        const [tables] = await poolDb.execute<Row[]>(
+          `SELECT TABLE_NAME AS name, TABLE_ROWS AS rows
+           FROM information_schema.TABLES
+           WHERE TABLE_SCHEMA = DATABASE()
+           ORDER BY TABLE_NAME ASC`,
+        );
+        const [dbInfo] = await poolDb.execute<import('mysql2').RowDataPacket[]>(
+          'SELECT DATABASE() AS db, VERSION() AS version, USER() AS user',
+        );
+        data = {
+          banco_atual:    (dbInfo[0] as { db: string }).db,
+          mysql_version:  (dbInfo[0] as { version: string }).version,
+          mysql_user:     (dbInfo[0] as { user: string }).user,
+          total_tabelas:  tables.length,
+          tabelas:        tables.map(t => ({ nome: t.name, linhas_aprox: Number(t.rows) })),
+        };
+        break;
+      }
+
       // ── v1.39.1: Sync contatos CRM → memória ZAYRA ──
       case 'sincronizar_contatos_crm':
         data = await sincronizarContatosCRM();
