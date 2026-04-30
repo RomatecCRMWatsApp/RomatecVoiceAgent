@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZAYRA — Painel Romatec</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --card: #131927;
+      --card-2: #1a2235;
+      --border: #232c44;
+      --text: #e8edf7;
+      --muted: #8a96b3;
+      --accent: #f7c948;
+      --green: #3ddc97;
+      --red: #ff5c7a;
+      --blue: #4ea1ff;
+      --orange: #ff9f43;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+    h1 .accent { color: var(--accent); }
+    .meta { color: var(--muted); font-size: 13px; }
+    .pill {
+      background: var(--card-2);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .card:hover { border-color: #2e3a5a; }
+    .card h3 {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .stat-num {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .stat-num.small { font-size: 22px; }
+    .stat-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+    .stats-row { display: flex; gap: 24px; flex-wrap: wrap; }
+    .stats-row > div { flex: 1; min-width: 100px; }
+    .row-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .green { color: var(--green); }
+    .red { color: var(--red); }
+    .blue { color: var(--blue); }
+    .orange { color: var(--orange); }
+    .accent { color: var(--accent); }
+    .chart-wrap { position: relative; height: 200px; margin-top: 8px; }
+    .lista { list-style: none; }
+    .lista li {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .lista li:last-child { border-bottom: none; }
+    .lista li .titulo { color: var(--text); }
+    .lista li .extra { color: var(--muted); font-size: 12px; }
+    .empty { color: var(--muted); font-size: 13px; font-style: italic; padding: 12px 0; }
+    .footer-note {
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 24px;
+    }
+    .indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      margin-right: 6px;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .error-banner {
+      background: rgba(255, 92, 122, 0.1);
+      border: 1px solid var(--red);
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: var(--red);
+    }
+    @media (max-width: 600px) {
+      body { padding: 16px; }
+      h1 { font-size: 20px; }
+      .stat-num { font-size: 26px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1><span class="accent">ZAYRA</span> · Painel Romatec</h1>
+      <div class="meta">
+        <span class="indicator"></span>
+        <span id="status-text">conectando…</span>
+        ·
+        <span id="updated">—</span>
+      </div>
+    </div>
+    <div class="pill" id="version-pill">v1.47.0</div>
+  </header>
+
+  <div id="error-zone"></div>
+
+  <div class="grid">
+    <!-- Obras -->
+    <div class="card">
+      <h3>🏗️ Obras</h3>
+      <div class="stat-num" id="obras-total">—</div>
+      <div class="stat-sub">
+        <span class="green" id="obras-andamento">—</span> em andamento ·
+        <span id="obras-concluidas">—</span> concluídas ·
+        <span class="red" id="obras-paralisadas">—</span> paralisadas
+      </div>
+    </div>
+
+    <!-- Financeiro -->
+    <div class="card">
+      <h3>💰 Financeiro consolidado</h3>
+      <div class="stat-num" id="fin-saldo">—</div>
+      <div class="stats-row" style="margin-top: 12px;">
+        <div>
+          <div class="row-label">Entradas</div>
+          <div class="stat-num small green" id="fin-entradas">—</div>
+        </div>
+        <div>
+          <div class="row-label">Saídas</div>
+          <div class="stat-num small red" id="fin-saidas">—</div>
+        </div>
+      </div>
+      <div class="stat-sub" style="margin-top: 8px;">Orçamento total: <span id="fin-orcamento">—</span></div>
+    </div>
+
+    <!-- Alertas -->
+    <div class="card">
+      <h3>🚨 Alertas pendentes</h3>
+      <div class="stat-num orange" id="alertas-total">—</div>
+      <div class="chart-wrap">
+        <canvas id="chart-alertas"></canvas>
+      </div>
+    </div>
+
+    <!-- CRM -->
+    <div class="card">
+      <h3>👥 CRM — Leads</h3>
+      <div class="stat-num blue" id="crm-total">—</div>
+      <div class="stat-sub">
+        <span class="green" id="crm-novos">—</span> novos nos últimos 30 dias
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart-crm"></canvas>
+      </div>
+    </div>
+
+    <!-- Equipe -->
+    <div class="card">
+      <h3>🧑‍💼 Equipe Romatec</h3>
+      <div class="stat-num" id="equipe-total">—</div>
+      <div class="chart-wrap">
+        <canvas id="chart-equipe"></canvas>
+      </div>
+    </div>
+
+    <!-- Vistorias -->
+    <div class="card">
+      <h3>🔍 Vistorias recentes</h3>
+      <ul class="lista" id="vistorias-lista">
+        <li class="empty">Carregando…</li>
+      </ul>
+    </div>
+
+    <!-- Obras ativas -->
+    <div class="card">
+      <h3>🏠 Obras ativas</h3>
+      <ul class="lista" id="obras-lista">
+        <li class="empty">Carregando…</li>
+      </ul>
+    </div>
+
+    <!-- Memória / RAG -->
+    <div class="card">
+      <h3>🧠 Memória ZAYRA</h3>
+      <div class="stats-row">
+        <div>
+          <div class="row-label">Fatos salvos</div>
+          <div class="stat-num small" id="mem-facts">—</div>
+        </div>
+        <div>
+          <div class="row-label">Docs RAG</div>
+          <div class="stat-num small" id="mem-rag">—</div>
+        </div>
+      </div>
+      <div class="stat-sub" style="margin-top: 12px;">
+        Etapas atrasadas: <span class="red" id="obras-etapas-atrasadas">—</span> ·
+        Materiais baixos: <span class="orange" id="obras-mat-baixos">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    Auto-refresh a cada 60s · ZAYRA — Zona de Automação e Yield Romatec Agent · Romatec Consultoria Imobiliária
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fmtBRL = (n) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(n) || 0);
+    const fmtNum = (n) => new Intl.NumberFormat('pt-BR').format(Number(n) || 0);
+
+    let chartAlertas, chartCrm, chartEquipe;
+
+    function renderChart(ctx, existing, data, palette) {
+      if (existing) existing.destroy();
+      const labels = Object.keys(data);
+      const values = Object.values(data);
+      if (labels.length === 0) {
+        return new Chart(ctx, {
+          type: 'doughnut',
+          data: { labels: ['—'], datasets: [{ data: [1], backgroundColor: ['#232c44'], borderWidth: 0 }] },
+          options: { plugins: { legend: { display: false } }, cutout: '60%' },
+        });
+      }
+      return new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: labels.map((_, i) => palette[i % palette.length]),
+            borderColor: '#131927',
+            borderWidth: 2,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '60%',
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: '#8a96b3', font: { size: 11 }, boxWidth: 10, padding: 8 },
+            },
+          },
+        },
+      });
+    }
+
+    async function carregar() {
+      try {
+        const r = await fetch('/api/painel/stats', { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const s = await r.json();
+
+        $('error-zone').innerHTML = '';
+        $('status-text').textContent = s.cached ? 'em cache' : 'ao vivo';
+        $('updated').textContent = 'atualizado ' + new Date(s.generated_at).toLocaleTimeString('pt-BR');
+
+        // Obras
+        $('obras-total').textContent = fmtNum(s.obras.total);
+        $('obras-andamento').textContent = fmtNum(s.obras.em_andamento);
+        $('obras-concluidas').textContent = fmtNum(s.obras.concluidas);
+        $('obras-paralisadas').textContent = fmtNum(s.obras.paralisadas);
+        $('obras-etapas-atrasadas').textContent = fmtNum(s.obras.etapas_atrasadas);
+        $('obras-mat-baixos').textContent = fmtNum(s.obras.materiais_baixos);
+
+        // Financeiro
+        const saldoEl = $('fin-saldo');
+        saldoEl.textContent = fmtBRL(s.obras.saldo);
+        saldoEl.className = 'stat-num ' + (s.obras.saldo >= 0 ? 'green' : 'red');
+        $('fin-entradas').textContent = fmtBRL(s.obras.entradas);
+        $('fin-saidas').textContent = fmtBRL(s.obras.saidas);
+        $('fin-orcamento').textContent = fmtBRL(s.obras.orcamento_total);
+
+        // Alertas
+        $('alertas-total').textContent = fmtNum(s.alertas.pendentes);
+        chartAlertas = renderChart(
+          $('chart-alertas').getContext('2d'),
+          chartAlertas,
+          s.alertas.por_urgencia,
+          ['#ff5c7a', '#ff9f43', '#f7c948', '#4ea1ff'],
+        );
+
+        // CRM
+        if (s.crm.erro) {
+          $('crm-total').textContent = '—';
+          $('crm-novos').textContent = '0';
+          $('error-zone').innerHTML = `<div class="error-banner">CRM: ${s.crm.erro}</div>`;
+        } else {
+          $('crm-total').textContent = fmtNum(s.crm.total_leads);
+          $('crm-novos').textContent = fmtNum(s.crm.leads_novos_30d);
+        }
+        chartCrm = renderChart(
+          $('chart-crm').getContext('2d'),
+          chartCrm,
+          s.crm.por_status || {},
+          ['#4ea1ff', '#3ddc97', '#f7c948', '#ff9f43', '#ff5c7a', '#a78bfa'],
+        );
+
+        // Equipe
+        $('equipe-total').textContent = fmtNum(s.equipe.total);
+        chartEquipe = renderChart(
+          $('chart-equipe').getContext('2d'),
+          chartEquipe,
+          s.equipe.por_role,
+          ['#f7c948', '#3ddc97', '#4ea1ff', '#ff9f43', '#a78bfa'],
+        );
+
+        // Vistorias
+        const vistEl = $('vistorias-lista');
+        if (s.vistorias.ultimas.length === 0) {
+          vistEl.innerHTML = '<li class="empty">Nenhuma vistoria recente.</li>';
+        } else {
+          vistEl.innerHTML = s.vistorias.ultimas.map(v =>
+            `<li><span class="titulo">${escapeHtml(v.titulo)}</span><span class="extra">${escapeHtml(v.data || '')}</span></li>`
+          ).join('');
+        }
+
+        // Obras ativas
+        const obrasEl = $('obras-lista');
+        if (s.obras.ativas.length === 0) {
+          obrasEl.innerHTML = '<li class="empty">Nenhuma obra em andamento.</li>';
+        } else {
+          obrasEl.innerHTML = s.obras.ativas.slice(0, 8).map(o =>
+            `<li><span class="titulo">${escapeHtml(o.nome)}</span><span class="extra">${fmtBRL(o.orcamento)}</span></li>`
+          ).join('');
+        }
+
+        // Memória
+        $('mem-facts').textContent = fmtNum(s.memoria.total_facts);
+        $('mem-rag').textContent = fmtNum(s.memoria.rag_docs);
+      } catch (err) {
+        $('status-text').textContent = 'offline';
+        $('error-zone').innerHTML = `<div class="error-banner">Erro ao carregar: ${err.message}</div>`;
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    carregar();
+    setInterval(carregar, 60_000);
+  </script>
+</body>
+</html>
