@@ -225,19 +225,51 @@ export async function sendAudio(to: string, audioBase64: string, asPtt = true): 
     : `data:audio/mp3;base64,${audioBase64}`;
 
   const url = `${zapiBase()}/send-audio`;
+  console.log(`[ZAPI sendAudio] ▶ POST ${url.replace(/token\/[^/]+/, 'token/***')} (phone=${phone}, audioSize=${(audio.length/1024).toFixed(1)}KB)`);
   try {
-    const r = await axios.post<{ messageId?: string; id?: string }>(
+    const r = await axios.post<Record<string, unknown>>(
       url,
       { phone, audio, waveform: true, viewOnce: false, async: false },
       { headers: zapiHeaders(), timeout: 60000 },
     );
-    const messageId = r.data?.messageId ?? r.data?.id;
+    console.log(`[ZAPI sendAudio] ◀ HTTP ${r.status} body=${JSON.stringify(r.data).slice(0, 300)}`);
+    const messageId = (r.data?.messageId ?? r.data?.id ?? r.data?.zaapId) as string | undefined;
+    if (!messageId && !r.data?.success) {
+      console.warn(`[ZAPI sendAudio] ⚠️ resposta sem messageId — Z-API pode ter rejeitado silenciosamente`);
+    }
     void logOutbound(phone, '[ÁUDIO]', messageId).catch(() => {});
     return { messageId, phone };
   } catch (err) {
-    const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+    const ax = err as { response?: { status?: number; data?: unknown; statusText?: string }; message?: string };
+    const status = ax.response?.status ?? '?';
     const detail = JSON.stringify(ax.response?.data ?? ax.message ?? err);
-    throw new Error(`ZAPI send-audio: ${detail}`);
+    console.error(`[ZAPI sendAudio] ❌ HTTP ${status}: ${detail}`);
+    throw new Error(`ZAPI send-audio HTTP ${status}: ${detail}`);
+  }
+}
+
+// ── Status da instância Z-API (verifica se WhatsApp está conectado) ──────────
+export async function statusInstancia(): Promise<{
+  connected:    boolean;
+  smartphoneConnected?: boolean;
+  needQrCode?:  boolean;
+  raw:          Record<string, unknown>;
+}> {
+  const url = `${zapiBase()}/status`;
+  try {
+    const r = await axios.get<Record<string, unknown>>(url, { headers: zapiHeaders(), timeout: 10000 });
+    const raw = r.data || {};
+    return {
+      connected:           Boolean(raw.connected),
+      smartphoneConnected: raw.smartphoneConnected as boolean | undefined,
+      needQrCode:          !raw.connected,
+      raw,
+    };
+  } catch (err) {
+    const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+    const status = ax.response?.status ?? '?';
+    const detail = JSON.stringify(ax.response?.data ?? ax.message ?? err);
+    throw new Error(`ZAPI /status HTTP ${status}: ${detail}`);
   }
 }
 

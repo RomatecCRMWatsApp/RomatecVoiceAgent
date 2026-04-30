@@ -20,7 +20,7 @@ import { buscarMemoria, formatarContexto } from '../services/ragSearch';
 import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
 import { listarContratosIndexados } from '../services/contratosIngest';
 import { gerarContrato, listarContratosGerados } from '../services/contratosGerar';
-import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS } from '../integrations/whatsapp';
+import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS, statusInstancia } from '../integrations/whatsapp';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
   consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
@@ -295,6 +295,11 @@ export const toolDefinitions: Anthropic.Tool[] = [
       },
       required: ['para', 'docBase64', 'fileName'],
     },
+  },
+  {
+    name: 'status_whatsapp',
+    description: 'Verifica se a instância Z-API da ZAYRA está conectada (WhatsApp do CEO online). Use ANTES de tentar enviar mensagens se houver suspeita de problema. Retorna { connected, smartphoneConnected, needQrCode }. Se needQrCode=true, CEO precisa escanear novo QR no painel Z-API.',
+    input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'enviar_localizacao_whatsapp',
@@ -1625,6 +1630,9 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         }
         break;
       }
+      case 'status_whatsapp':
+        data = await statusInstancia();
+        break;
       case 'enviar_localizacao_whatsapp': {
         const inp = input as { para: string; latitude: number; longitude: number; title?: string; address?: string; confirm?: boolean };
         if (!inp.confirm) {
