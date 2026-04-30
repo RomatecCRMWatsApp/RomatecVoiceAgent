@@ -362,5 +362,27 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.39.0: alertas proativos (push notifications inteligentes)
+  // Cada detector escreve aqui com alert_key único pra dedup (não spamma o CEO).
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_proactive_alerts (
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      alert_key        VARCHAR(255) NOT NULL UNIQUE,
+      detector         VARCHAR(50) NOT NULL,
+      type             VARCHAR(20) NOT NULL DEFAULT 'alert',
+      urgency          ENUM('low','medium','high','urgent') DEFAULT 'medium',
+      title            VARCHAR(200) NOT NULL,
+      message          TEXT NOT NULL,
+      payload          JSON,
+      first_detected   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_sent        TIMESTAMP NULL,
+      send_count       INT DEFAULT 0,
+      acknowledged_at  TIMESTAMP NULL,
+      silenced_until   TIMESTAMP NULL,
+      INDEX idx_silenced (silenced_until),
+      INDEX idx_detector (detector, first_detected DESC)
+    )
+  `);
+
   console.log('[DB] Migrations complete');
 }

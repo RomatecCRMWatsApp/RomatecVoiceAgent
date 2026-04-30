@@ -21,6 +21,7 @@ import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
 import { listarContratosIndexados } from '../services/contratosIngest';
 import { gerarContrato, listarContratosGerados } from '../services/contratosGerar';
 import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS, statusInstancia, infoInstancia } from '../integrations/whatsapp';
+import { listarAlertasPendentes, silenciarAlerta, reconhecerAlerta, rodarDetectoresAgora } from './proactive';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
   consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
@@ -294,6 +295,41 @@ export const toolDefinitions: Anthropic.Tool[] = [
         confirm:   { type: 'boolean' },
       },
       required: ['para', 'docBase64', 'fileName'],
+    },
+  },
+  // ── v1.39.0: Push notifications proativas ──
+  {
+    name: 'listar_alertas_pendentes',
+    description: 'Lista alertas proativos pendentes (não reconhecidos). Use quando o Chefe perguntar "tem algum alerta?", "o que precisa atenção?", "tô em dia com tudo?". Retorna alertas de: material em estoque baixo, etapa de obra atrasada, lead sem follow-up há 7+ dias, funcionário sem dias marcados, obra estourando orçamento.',
+    input_schema: {
+      type: 'object',
+      properties: { limite: { type: 'number', description: 'Default 30' } },
+    },
+  },
+  {
+    name: 'rodar_detectores_agora',
+    description: 'Força rodar TODOS os detectores proativos AGORA (não aguarda o ciclo de 30 min). Útil quando o Chefe quer um "scan executivo" completo. Retorna número de alertas detectados + lista. Notifica via Telegram automaticamente os novos.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'silenciar_alerta',
+    description: 'Silencia um alerta proativo por X horas (default 24h, max 720h=30dias). Use quando o Chefe disser "já vi", "deixa pra depois", "não me alerta mais hoje sobre X". Recebe alert_key (vem da listar_alertas_pendentes).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        alert_key: { type: 'string', description: 'Chave do alerta (ex: "material_baixo:42")' },
+        horas:     { type: 'number', description: 'Horas pra silenciar (default 24)' },
+      },
+      required: ['alert_key'],
+    },
+  },
+  {
+    name: 'reconhecer_alerta',
+    description: 'Marca um alerta como RESOLVIDO/visto. ZAYRA não vai mais notificar até o problema voltar a aparecer no detector. Use quando o Chefe disser "já resolvi isso", "tomei providência".',
+    input_schema: {
+      type: 'object',
+      properties: { alert_key: { type: 'string' } },
+      required: ['alert_key'],
     },
   },
   {
@@ -1635,6 +1671,19 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         }
         break;
       }
+      // ── v1.39.0: Push notifications proativas ──
+      case 'listar_alertas_pendentes':
+        data = await listarAlertasPendentes(input as { limite?: number });
+        break;
+      case 'rodar_detectores_agora':
+        data = await rodarDetectoresAgora();
+        break;
+      case 'silenciar_alerta':
+        data = await silenciarAlerta(input as { alert_key: string; horas?: number });
+        break;
+      case 'reconhecer_alerta':
+        data = await reconhecerAlerta(input as { alert_key: string });
+        break;
       case 'status_whatsapp':
         data = await statusInstancia();
         break;
