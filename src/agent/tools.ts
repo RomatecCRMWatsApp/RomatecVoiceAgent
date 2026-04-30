@@ -33,6 +33,10 @@ import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
 } from '../services/meetingNotes';
+import {
+  consultarNormaImobiliaria, gerarRascunhoPtam, validarLaudoAvaliacao,
+  sugerirMetodologiaAvaliacao, analisarComparativos,
+} from '../services/avaliacaoImobiliaria';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
   consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
@@ -308,6 +312,91 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['para', 'docBase64', 'fileName'],
     },
   },
+  // ── v1.43.0: Roma_IA Avaliação Imobiliária ──
+  {
+    name: 'consultar_norma_imobiliaria',
+    description: 'Busca trechos da NBR 14653 ou Tabela TVI Romatec na biblioteca indexada (RAG). Use quando precisa fundamentar decisão técnica em norma específica. Retorna chunks relevantes com título, página, relevância. Filtre por categoria pra precisão (ex: "nbr14653", "tvi", "jurisprudencia").',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:     { type: 'string', description: 'O que buscar (ex: "fatores de homogeneização imóvel urbano")' },
+        categoria: { type: 'string', description: 'Filtra biblioteca (opcional)' },
+        top_k:     { type: 'number', description: 'Quantos chunks (default 5)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'gerar_rascunho_ptam',
+    description: 'Gera RASCUNHO de PTAM (Parecer Técnico de Avaliação Mercadológica) conforme NBR 14653. Estrutura completa de 10 seções (identificação, objetivo, metodologia, pesquisa de mercado, estimativa, conclusão, etc). Sinaliza "[RASCUNHO — REVISAR]" no topo. Use quando o engenheiro Chefe estiver começando um laudo novo e quiser uma base estruturada. NÃO substitui o engenheiro humano — lista próximas ações que precisam ser feitas (vistoria, ART, etc).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        finalidade:      { type: 'string', enum: ['compra_venda','garantia','judicial','inventario','locacao','desapropriacao'] },
+        tipo_imovel:     { type: 'string', description: 'urbano_residencial | urbano_comercial | rural | terreno_urbano | terreno_rural | semovente' },
+        endereco:        { type: 'string' },
+        area_terreno:    { type: 'number', description: 'm²' },
+        area_construida: { type: 'number', description: 'm²' },
+        caracteristicas: { type: 'string', description: 'idade, padrão, conservação, descrição livre' },
+        comparativos: {
+          type: 'array',
+          description: 'Comparativos de mercado pra pesquisa',
+          items: { type: 'object', properties: {
+            endereco: { type: 'string' }, area: { type: 'number' }, valor: { type: 'number' }, data: { type: 'string' },
+          }},
+        },
+        metodologia_sugerida: { type: 'string', enum: ['comparativo_dados_mercado','evolutivo','involutivo','renda','custo'] },
+        observacoes:     { type: 'string' },
+      },
+      required: ['finalidade','tipo_imovel','endereco'],
+    },
+  },
+  {
+    name: 'validar_laudo_avaliacao',
+    description: 'Revisa um LAUDO de avaliação (texto completo) contra NBR 14653 e retorna conformidades, divergências (com severidade critica/alta/media/baixa), pontuação 0-100 e parecer geral. Use pra revisão técnica antes de assinar/entregar laudo seu, OU pra avaliar laudo de terceiro (perícia, contraditório, due diligence).',
+    input_schema: {
+      type: 'object',
+      properties: { texto_laudo: { type: 'string', description: 'Texto completo do laudo a revisar' } },
+      required: ['texto_laudo'],
+    },
+  },
+  {
+    name: 'sugerir_metodologia_avaliacao',
+    description: 'Sugere metodologia adequada conforme NBR 14653 baseado no tipo de imóvel, finalidade e disponibilidade de dados. Retorna método principal, parte da NBR aplicável e justificativa. Use logo no início pra alinhar abordagem antes de coletar dados.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tipo_imovel:        { type: 'string' },
+        finalidade:         { type: 'string' },
+        tem_comparativos:   { type: 'boolean' },
+        tem_renda_locativa: { type: 'boolean' },
+        caracteristicas:    { type: 'string' },
+      },
+      required: ['tipo_imovel','finalidade'],
+    },
+  },
+  {
+    name: 'analisar_comparativos',
+    description: 'Análise estatística de comparativos de mercado: média/mediana de valor por m², desvio padrão, coeficiente de variação (CV), valor estimado do imóvel-subjeito. Aplica fatores de homogeneização (idade, padrão, conservação) se fornecidos. Avisa se CV>30% (amostra dispersa) ou se <3 amostras (insuficiente pra grau II NBR).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        area_subjeito: { type: 'number', description: 'Área do imóvel sendo avaliado em m²' },
+        comparativos: {
+          type: 'array',
+          items: { type: 'object', properties: {
+            endereco: { type: 'string' }, area: { type: 'number' }, valor: { type: 'number' }, data: { type: 'string' },
+            fator_idade: { type: 'number', description: 'Default 1 (sem ajuste)' },
+            fator_padrao: { type: 'number', description: 'Default 1' },
+            fator_conservacao: { type: 'number', description: 'Default 1' },
+          }, required: ['endereco','area','valor'] },
+        },
+        data_referencia: { type: 'string' },
+      },
+      required: ['area_subjeito','comparativos'],
+    },
+  },
+
   // ── v1.42.0: Meeting Note-Taker ──
   {
     name: 'gerar_ata_de_texto',
@@ -1829,6 +1918,23 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         }
         break;
       }
+      // ── v1.43.0: Roma_IA Avaliação Imobiliária ──
+      case 'consultar_norma_imobiliaria':
+        data = await consultarNormaImobiliaria(input as Parameters<typeof consultarNormaImobiliaria>[0]);
+        break;
+      case 'gerar_rascunho_ptam':
+        data = await gerarRascunhoPtam(input as unknown as Parameters<typeof gerarRascunhoPtam>[0]);
+        break;
+      case 'validar_laudo_avaliacao':
+        data = await validarLaudoAvaliacao(input as { texto_laudo: string });
+        break;
+      case 'sugerir_metodologia_avaliacao':
+        data = await sugerirMetodologiaAvaliacao(input as Parameters<typeof sugerirMetodologiaAvaliacao>[0]);
+        break;
+      case 'analisar_comparativos':
+        data = analisarComparativos(input as unknown as Parameters<typeof analisarComparativos>[0]);
+        break;
+
       // ── v1.42.0: Meeting Note-Taker ──
       case 'gerar_ata_de_texto':
         data = await gerarAtaDeTranscricao(input as Parameters<typeof gerarAtaDeTranscricao>[0]);
