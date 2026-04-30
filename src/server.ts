@@ -696,6 +696,27 @@ app.listen(PORT, () => {
   void initDb()
     .then(() => loadSessionFromDb())
     .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));
+
+  // v1.39.1: sync contatos CRM → memória ZAYRA (1x ao boot + 1x/dia 04:00 BRT)
+  void import('./services/syncContatosCRM').then(({ sincronizarContatosCRM }) => {
+    // Boot: aguarda 60s (DB conectar) e roda
+    setTimeout(() => {
+      void sincronizarContatosCRM().catch(err =>
+        console.warn('[syncContatos boot]', (err as Error).message),
+      );
+    }, 60_000);
+    // Daily: roda às 04h BRT (07h UTC)
+    setInterval(() => {
+      const now = new Date();
+      const brtHour = (now.getUTCHours() + 21) % 24;  // BRT = UTC-3
+      const brtMin  = now.getUTCMinutes();
+      if (brtHour === 4 && brtMin === 0) {
+        void sincronizarContatosCRM().catch(err =>
+          console.warn('[syncContatos daily]', (err as Error).message),
+        );
+      }
+    }, 60_000);
+  }).catch(() => {});
 });
 
 export default app;

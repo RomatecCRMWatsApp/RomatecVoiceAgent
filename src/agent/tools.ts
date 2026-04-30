@@ -22,6 +22,7 @@ import { listarContratosIndexados } from '../services/contratosIngest';
 import { gerarContrato, listarContratosGerados } from '../services/contratosGerar';
 import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS, statusInstancia, infoInstancia } from '../integrations/whatsapp';
 import { listarAlertasPendentes, silenciarAlerta, reconhecerAlerta, rodarDetectoresAgora } from './proactive';
+import { sincronizarContatosCRM, buscarContatoMemoria } from '../services/syncContatosCRM';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
   consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
@@ -297,6 +298,22 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['para', 'docBase64', 'fileName'],
     },
   },
+  // ── v1.39.1: Sync de contatos CRM → memória ZAYRA ──
+  {
+    name: 'sincronizar_contatos_crm',
+    description: 'Lê todos os leads (leadQualifications) e contatos (contacts) do CRM e grava na memória persistente da ZAYRA (zayra_memory) como type=fact. Idempotente: não duplica, atualiza nome/score se mudou. Usa marker [crm:lead:ID] e [crm:contact:ID]. Rode uma vez pra carga inicial; depois roda automático 1x/dia. Retorna estatísticas (lidos/inseridos/atualizados).',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'buscar_contato_memoria',
+    description: 'Busca contato/lead na memória ZAYRA por nome ou telefone (não precisa consultar o CRM em tempo real — usa a memória sincronizada). Use quando o Chefe perguntar "quem é Karoliny?", "qual o telefone do Danny?", "tenho lead com sobrenome Silva?". Retorna lista com nome, telefone, tipo (lead/contato) e resumo.',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'Nome, sobrenome ou telefone (parcial OK)' } },
+      required: ['query'],
+    },
+  },
+
   // ── v1.39.0: Push notifications proativas ──
   {
     name: 'listar_alertas_pendentes',
@@ -1671,6 +1688,14 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         }
         break;
       }
+      // ── v1.39.1: Sync contatos CRM → memória ZAYRA ──
+      case 'sincronizar_contatos_crm':
+        data = await sincronizarContatosCRM();
+        break;
+      case 'buscar_contato_memoria':
+        data = await buscarContatoMemoria((input as { query: string }).query);
+        break;
+
       // ── v1.39.0: Push notifications proativas ──
       case 'listar_alertas_pendentes':
         data = await listarAlertasPendentes(input as { limite?: number });
