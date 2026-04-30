@@ -53,6 +53,7 @@ import {
 } from './memory';
 import { ResumoDia, ToolResult } from '../types';
 import pool from '../database/connection';
+import * as drive from '../integrations/driveGoogle';
 import {
   adicionarMembro as tmAdicionar,
   listarMembros as tmListar,
@@ -81,6 +82,7 @@ const ADMIN_ONLY_TOOLS = new Set<string>([
   'crm_apagar_lead', 'crm_apagar_contato', 'crm_apagar_campanha',
   'apagar_obra', 'apagar_etapa', 'apagar_membro_equipe', 'apagar_material',
   'apagar_vistoria', 'fs_apagar', 'limpar_temp', 'limpar_lixeira',
+  'drive_apagar',
 ]);
 
 interface Colaborador { nome: string; cargo: string; telefone: string; }
@@ -1837,6 +1839,74 @@ export const toolDefinitions: Anthropic.Tool[] = [
     },
   },
 
+  // ── v1.46.0: Google Drive integrado ────────────────────────────────────────
+  {
+    name: 'drive_upload_arquivo',
+    description: 'Sobe um arquivo (base64) pro Google Drive do CEO José Romário. Cria a pasta automaticamente se não existir. Pastas-padrão Romatec: "Romatec/Avaliacoes" (PTAMs), "Romatec/Contratos" (gerados), "Romatec/Atas" (reuniões), "Romatec/Relatorios" (briefings). Use após gerar_contrato/gerar_rascunho_ptam/gerar_ata pra arquivar permanentemente. Retorna webViewLink (link de visualização).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        arquivo_base64: { type: 'string', description: 'Conteúdo do arquivo em base64' },
+        filename:       { type: 'string', description: 'Nome do arquivo com extensão (ex: "PTAM-Casa-João-2026-04-30.docx")' },
+        pasta:          { type: 'string', description: 'Caminho da pasta no Drive (ex: "Romatec/Avaliacoes"). Cria se não existir. Default: raiz.' },
+        mime_type:      { type: 'string', description: 'MIME type explícito (auto-detect por extensão se omitir)' },
+        publico:        { type: 'boolean', description: 'Se true, libera link público "anyone with link". Default false (só CEO).' },
+      },
+      required: ['arquivo_base64', 'filename'],
+    },
+  },
+  {
+    name: 'drive_listar',
+    description: 'Lista arquivos do Drive do CEO. Pode filtrar por pasta e/ou por busca textual no nome.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pasta:  { type: 'string', description: 'Filtra por pasta (ex: "Romatec/Avaliacoes")' },
+        query:  { type: 'string', description: 'Busca por nome/conteúdo (ex: "PTAM João")' },
+        limite: { type: 'number', description: 'Default 30' },
+      },
+    },
+  },
+  {
+    name: 'drive_buscar',
+    description: 'Atalho pra buscar arquivos pelo nome no Drive inteiro. Use quando o Chefe perguntar "onde está o contrato do Pedro" ou "tem a ata de ontem no Drive?".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nome:   { type: 'string', description: 'Trecho do nome do arquivo' },
+        limite: { type: 'number', description: 'Default 10' },
+      },
+      required: ['nome'],
+    },
+  },
+  {
+    name: 'drive_apagar',
+    description: 'Apaga um arquivo do Drive permanentemente. ADMIN-ONLY. Use somente quando o Chefe pedir explicitamente "apaga isso do Drive".',
+    input_schema: {
+      type: 'object',
+      properties: { file_id: { type: 'string' } },
+      required: ['file_id'],
+    },
+  },
+  {
+    name: 'drive_compartilhar',
+    description: 'Compartilha um arquivo do Drive — gera link "anyone with link" ou compartilha com e-mail específico. Útil pra mandar PTAM pro cliente, contrato pro advogado, etc.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        file_id: { type: 'string' },
+        email:   { type: 'string', description: 'E-mail destinatário (omite pra link público)' },
+        role:    { type: 'string', description: 'reader | writer | commenter. Default reader.' },
+      },
+      required: ['file_id'],
+    },
+  },
+  {
+    name: 'drive_status',
+    description: 'Status da integração Google Drive (online?, email da conta, quota usada/total). Use pra diagnosticar quando upload falhar.',
+    input_schema: { type: 'object', properties: {} },
+  },
+
   // ── v1.45.0: equipe Romatec (multi-tenant) ─────────────────────────────────
   {
     name: 'adicionar_membro_equipe',
@@ -2582,6 +2652,36 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       }
       case 'listar_contratos_gerados':
         data = await listarContratosGerados(input as { limite?: number });
+        break;
+
+      // ── v1.46.0: Google Drive ────────────────────────────────────────────
+      case 'drive_upload_arquivo': {
+        const inp = input as { arquivo_base64: string; filename: string; pasta?: string; mime_type?: string; publico?: boolean };
+        if (!inp.arquivo_base64) throw new Error('arquivo_base64 obrigatório.');
+        const buf = Buffer.from(inp.arquivo_base64, 'base64');
+        data = await drive.uploadArquivo({
+          buffer:   buf,
+          filename: inp.filename,
+          pasta:    inp.pasta,
+          mimeType: inp.mime_type,
+          publico:  inp.publico,
+        });
+        break;
+      }
+      case 'drive_listar':
+        data = await drive.listarArquivos(input as { pasta?: string; query?: string; limite?: number });
+        break;
+      case 'drive_buscar':
+        data = await drive.buscarPorNome(input.nome as string, input.limite as number | undefined);
+        break;
+      case 'drive_apagar':
+        data = await drive.apagarArquivo(input.file_id as string);
+        break;
+      case 'drive_compartilhar':
+        data = await drive.compartilharArquivo(input as Parameters<typeof drive.compartilharArquivo>[0]);
+        break;
+      case 'drive_status':
+        data = await drive.statusDrive();
         break;
 
       // ── v1.45.0: equipe Romatec ──────────────────────────────────────────
