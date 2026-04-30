@@ -12,6 +12,7 @@ import * as avalieimob from './integrations/avalieimob';
 import { processMessage, sendReply, parseZapiWebhook, logInbound } from './integrations/whatsapp';
 import * as telegram from './integrations/telegram';
 import { getAuthUrl, exchangeCode } from './integrations/calendar';
+import { getDriveAuthUrl } from './integrations/driveGoogle';
 import * as spotify from './integrations/spotify';
 import { addSSEClient, removeSSEClient, startProactiveNotifications } from './agent/proactive';
 import {
@@ -466,6 +467,12 @@ app.post('/zayra/whatsapp', async (req: Request, res: Response) => {
 // ── Google Calendar OAuth ─────────────────────────────────────────────────────
 app.get('/auth/google', (_req: Request, res: Response) => {
   res.redirect(getAuthUrl());
+});
+
+// v1.47.1: reautoriza incluindo Drive + Calendar (mesmo callback,
+// só muda o scope da URL de consent). Use depois de adicionar Drive.
+app.get('/auth/google/drive', (_req: Request, res: Response) => {
+  res.redirect(getDriveAuthUrl());
 });
 
 app.get('/auth/google/callback', async (req: Request, res: Response) => {
