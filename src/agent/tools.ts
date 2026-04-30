@@ -37,6 +37,10 @@ import {
   consultarNormaImobiliaria, gerarRascunhoPtam, validarLaudoAvaliacao,
   sugerirMetodologiaAvaliacao, analisarComparativos,
 } from '../services/avaliacaoImobiliaria';
+import {
+  extrairDadosRG, extrairDadosCNH, extrairComprovanteEndereco,
+  extrairDocumentoImovel, analisarVisualImovel,
+} from '../services/ocrDocumentos';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
   consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
@@ -312,6 +316,68 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['para', 'docBase64', 'fileName'],
     },
   },
+  // ── v1.44.0: OCR Documentos brasileiros ──
+  {
+    name: 'extrair_dados_rg',
+    description: 'OCR estruturado de RG/Carteira de Identidade. Recebe foto em base64, retorna JSON com nome, RG, CPF, data nascimento, filiação, naturalidade. Use quando o Chefe enviar foto de RG pra cadastrar cliente. NÃO inventa dados — campos faltantes vêm vazios.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        base64: { type: 'string', description: 'Imagem do RG em base64 (sem prefixo data:)' },
+        mime:   { type: 'string', description: 'image/jpeg, image/png, etc (auto-detect se omitir)' },
+      },
+      required: ['base64'],
+    },
+  },
+  {
+    name: 'extrair_dados_cnh',
+    description: 'OCR estruturado de CNH (Carteira Nacional de Habilitação). Retorna nome, CPF, RG, categoria, primeira habilitação, validade, observações médicas. Indica "vencida: true" se validade já passou.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        base64: { type: 'string' },
+        mime:   { type: 'string' },
+      },
+      required: ['base64'],
+    },
+  },
+  {
+    name: 'extrair_comprovante_endereco',
+    description: 'OCR de comprovante de endereço (conta de luz, água, telefone, internet, IPTU). Extrai titular, endereço completo, CEP, fornecedor, valor, vencimento. Use pra cadastrar cliente sem digitar endereço manualmente.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        base64: { type: 'string' },
+        mime:   { type: 'string' },
+      },
+      required: ['base64'],
+    },
+  },
+  {
+    name: 'extrair_documento_imovel',
+    description: 'OCR de documento imobiliário (matrícula, IPTU, escritura, contrato, habite-se, alvará). Extrai matrícula, cartório, proprietário+CPF, endereço completo, áreas (terreno/construída), valor venal, ônus/gravames. Use ao receber documentação de imóvel pra avaliação ou contrato.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        base64: { type: 'string' },
+        mime:   { type: 'string' },
+      },
+      required: ['base64'],
+    },
+  },
+  {
+    name: 'analisar_visual_imovel',
+    description: 'Analisa FOTO DE IMÓVEL (fachada, interior, terreno) com olhar de engenheira avaliadora. Retorna tipo, estado de conservação, padrão construtivo, áreas estimadas, acabamentos visíveis, pontos de atenção (rachaduras, infiltração, etc), idade estimada. Útil pra pré-avaliação e composição de laudo.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        base64: { type: 'string' },
+        mime:   { type: 'string' },
+      },
+      required: ['base64'],
+    },
+  },
+
   // ── v1.43.0: Roma_IA Avaliação Imobiliária ──
   {
     name: 'consultar_norma_imobiliaria',
@@ -1918,6 +1984,23 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         }
         break;
       }
+      // ── v1.44.0: OCR Documentos ──
+      case 'extrair_dados_rg':
+        data = await extrairDadosRG(input as { base64: string; mime?: string });
+        break;
+      case 'extrair_dados_cnh':
+        data = await extrairDadosCNH(input as { base64: string; mime?: string });
+        break;
+      case 'extrair_comprovante_endereco':
+        data = await extrairComprovanteEndereco(input as { base64: string; mime?: string });
+        break;
+      case 'extrair_documento_imovel':
+        data = await extrairDocumentoImovel(input as { base64: string; mime?: string });
+        break;
+      case 'analisar_visual_imovel':
+        data = await analisarVisualImovel(input as { base64: string; mime?: string });
+        break;
+
       // ── v1.43.0: Roma_IA Avaliação Imobiliária ──
       case 'consultar_norma_imobiliaria':
         data = await consultarNormaImobiliaria(input as Parameters<typeof consultarNormaImobiliaria>[0]);
