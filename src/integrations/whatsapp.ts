@@ -163,14 +163,19 @@ export async function sendReply(to: string, message: string): Promise<{ messageI
   if (!message?.trim()) throw new Error('WhatsApp: mensagem vazia.');
 
   const url = `${zapiBase()}/send-text`;
+  console.log(`[ZAPI sendReply] ▶ POST send-text (phone=${phone}, msgLen=${message.length})`);
   let zApiMessageId: string | undefined;
   try {
-    const r = await axios.post<{ messageId?: string; id?: string; zaapId?: string }>(
+    const r = await axios.post<Record<string, unknown>>(
       url,
       { phone, message },
       { headers: zapiHeaders(), timeout: 10000 },
     );
-    zApiMessageId = r.data?.messageId ?? r.data?.id ?? r.data?.zaapId;
+    console.log(`[ZAPI sendReply] ◀ HTTP ${r.status} body=${JSON.stringify(r.data).slice(0, 300)}`);
+    zApiMessageId = (r.data?.messageId ?? r.data?.id ?? r.data?.zaapId) as string | undefined;
+    if (!zApiMessageId && !r.data?.success) {
+      console.warn(`[ZAPI sendReply] ⚠️ resposta sem messageId — Z-API pode ter rejeitado silenciosamente. body=${JSON.stringify(r.data)}`);
+    }
   } catch (err) {
     const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
     const status = ax.response?.status ?? '?';
@@ -183,6 +188,25 @@ export async function sendReply(to: string, message: string): Promise<{ messageI
     console.warn('[ZAPI sendReply] log falhou (ignorado):', (err as Error).message),
   );
   return { messageId: zApiMessageId, phone };
+}
+
+// ── Info do número/aparelho conectado na instância (debug) ───────────────────
+export async function infoInstancia(): Promise<Record<string, unknown>> {
+  const baseInst = `${ZAPI_BASE_URL}/instances/${ZAPI_INSTANCE_ID}/token/${ZAPI_TOKEN}`;
+  const headers = zapiHeaders();
+  const out: Record<string, unknown> = { instance_id: ZAPI_INSTANCE_ID.slice(0, 12) + '…' };
+  // Tenta vários endpoints de info da Z-API (variam por versão)
+  const endpoints = ['/device', '/phone-info', '/me', '/profile-info'];
+  for (const ep of endpoints) {
+    try {
+      const r = await axios.get<Record<string, unknown>>(`${baseInst}${ep}`, { headers, timeout: 8000 });
+      out[ep] = r.data;
+    } catch (err) {
+      const ax = err as { response?: { status?: number; data?: unknown } };
+      out[ep] = { error: ax.response?.status ?? 'erro', body: ax.response?.data };
+    }
+  }
+  return out;
 }
 
 // ── Outbound: imagem (URL ou base64) ─────────────────────────────────────────

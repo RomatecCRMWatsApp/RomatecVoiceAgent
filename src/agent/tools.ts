@@ -20,7 +20,7 @@ import { buscarMemoria, formatarContexto } from '../services/ragSearch';
 import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
 import { listarContratosIndexados } from '../services/contratosIngest';
 import { gerarContrato, listarContratosGerados } from '../services/contratosGerar';
-import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS, statusInstancia } from '../integrations/whatsapp';
+import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS, statusInstancia, infoInstancia } from '../integrations/whatsapp';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
   consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
@@ -299,6 +299,11 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: 'status_whatsapp',
     description: 'Verifica se a instância Z-API da ZAYRA está conectada (WhatsApp do CEO online). Use ANTES de tentar enviar mensagens se houver suspeita de problema. Retorna { connected, smartphoneConnected, needQrCode }. Se needQrCode=true, CEO precisa escanear novo QR no painel Z-API.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'info_whatsapp',
+    description: 'Retorna info DETALHADA da instância Z-API: qual número está conectado, perfil, dados do aparelho. Use quando suspeitar que mensagens não estão chegando (talvez a Z-API esteja conectada mas no número errado). Tenta vários endpoints (/device, /phone-info, /me, /profile-info) e retorna tudo que conseguir.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -1632,6 +1637,9 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       }
       case 'status_whatsapp':
         data = await statusInstancia();
+        break;
+      case 'info_whatsapp':
+        data = await infoInstancia();
         break;
       case 'enviar_localizacao_whatsapp': {
         const inp = input as { para: string; latitude: number; longitude: number; title?: string; address?: string; confirm?: boolean };
