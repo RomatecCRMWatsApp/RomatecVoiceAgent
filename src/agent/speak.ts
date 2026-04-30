@@ -26,9 +26,25 @@ export async function speak(text: string): Promise<Buffer> {
   try {
     const buf = await speakEdge(text);
     if (buf.length < 100) throw new Error('Edge TTS retornou áudio vazio');
+    console.log(`[TTS] ✅ Edge gerou ${buf.length} bytes (${(buf.length/1024).toFixed(1)} KB)`);
     return buf;
   } catch (err) {
-    console.warn('[TTS] Edge falhou, fallback OpenAI:', (err as Error).message);
-    return speakOpenAI(text);
+    const e = err as Error;
+    const msg = e?.message || e?.toString() || 'erro sem mensagem';
+    const stack = e?.stack?.split('\n').slice(0, 3).join(' | ') || '';
+    console.warn(`[TTS] ⚠️ Edge falhou: ${msg} | ${stack}`);
+    if (!openai) {
+      console.error('[TTS] ❌ Edge falhou E OPENAI_API_KEY não configurada — sem fallback disponível');
+      throw new Error(`TTS indisponível: Edge falhou (${msg}) e OpenAI não está configurada. Configure OPENAI_API_KEY ou TTS_PROVIDER no Railway.`);
+    }
+    try {
+      const buf = await speakOpenAI(text);
+      console.log(`[TTS] ✅ OpenAI fallback gerou ${buf.length} bytes`);
+      return buf;
+    } catch (oerr) {
+      const oe = oerr as Error;
+      console.error('[TTS] ❌ OpenAI fallback também falhou:', oe.message);
+      throw new Error(`TTS falhou em ambos providers. Edge: ${msg}. OpenAI: ${oe.message}`);
+    }
   }
 }
