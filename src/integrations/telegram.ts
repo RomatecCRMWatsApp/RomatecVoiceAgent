@@ -34,6 +34,32 @@ export function isAuthorized(chatId: string | number): boolean {
   return ids.has(String(chatId));
 }
 
+// v1.45.0: combina env var (CEO) + tabela romatec_team_members (equipe).
+// Async porque consulta DB. Usado em processTelegramIncoming antes de
+// passar pra think(); o role do membro vai pro contexto da request.
+export async function isAuthorizedExtended(chatId: string | number): Promise<{
+  authorized: boolean;
+  role?: 'admin' | 'engenheiro' | 'corretor' | 'comercial' | 'leitura';
+  membro_nome?: string;
+  via: 'env' | 'db' | 'none';
+}> {
+  // Env var primeiro (CEO + legacy)
+  if (isAuthorized(chatId)) {
+    return { authorized: true, role: 'admin', membro_nome: 'CEO José Romário', via: 'env' };
+  }
+  // Tabela da equipe
+  try {
+    const { isAuthorizedByDb } = await import('../services/teamMembers');
+    const r = await isAuthorizedByDb(chatId);
+    if (r.authorized && r.member) {
+      return { authorized: true, role: r.member.role, membro_nome: r.member.nome, via: 'db' };
+    }
+  } catch (err) {
+    console.warn('[telegram.isAuthorizedExtended] DB lookup falhou:', (err as Error).message);
+  }
+  return { authorized: false, via: 'none' };
+}
+
 // Escapa caracteres que ativam Markdown V1 do Telegram (_*`[).
 // Sem isso, nomes de arquivo com underscore (provimento 195_2025) quebram
 // o parser com erro 400 "can't parse entities".
@@ -232,10 +258,11 @@ export async function processTelegramIncoming(incoming: TelegramIncoming): Promi
     :   '[vazio]');
   void logTelegram('inbound', String(incoming.chatId), logText, incoming.username).catch(() => {});
 
-  if (!isAuthorized(incoming.chatId)) {
+  const auth = await isAuthorizedExtended(incoming.chatId);
+  if (!auth.authorized) {
     await sendMessage(
       incoming.chatId,
-      `🚫 Não autorizado. Para liberar acesso, peça ao CEO José Romário para adicionar seu chat_id (\`${incoming.chatId}\`) à variável TELEGRAM_AUTHORIZED_USER_IDS no Railway.`,
+      `🚫 Não autorizado. Peça ao CEO José Romário para te adicionar à equipe Romatec (chat_id: \`${incoming.chatId}\`).`,
     );
     return;
   }
@@ -257,7 +284,10 @@ export async function processTelegramIncoming(incoming: TelegramIncoming): Promi
       }
 
       const sessionId = `tg_${incoming.chatId}`;
-      const resp = await think(tx.text, { sessionId, channel: 'voice' });
+      const callerOpt = auth.role && auth.membro_nome ? {
+        caller: { role: auth.role, nome: auth.membro_nome, via: auth.via === 'env' ? 'env' as const : 'db' as const },
+      } : {};
+      const resp = await think(tx.text, { sessionId, channel: 'voice', ...callerOpt });
 
       // Resposta dupla: texto (pra ler) + áudio (voz da ZAYRA via OpenAI TTS)
       await sendMessage(incoming.chatId, `🎙 _você disse: ${escapeMd(tx.text.slice(0, 200))}_\n\n${resp.text}`);
@@ -365,7 +395,10 @@ export async function processTelegramIncoming(incoming: TelegramIncoming): Promi
   // Autorizado — passa pra ZAYRA via think()
   const sessionId = `tg_${incoming.chatId}`;
   try {
-    const resp = await think(incoming.text, { sessionId, channel: 'whatsapp' });
+    const callerOpt = auth.role && auth.membro_nome ? {
+      caller: { role: auth.role, nome: auth.membro_nome, via: auth.via === 'env' ? 'env' as const : 'db' as const },
+    } : {};
+    const resp = await think(incoming.text, { sessionId, channel: 'whatsapp', ...callerOpt });
     // 'whatsapp' como channel mais próximo até v1.9.0 — schema da memory.ts
     // só tem 'text'/'voice'/'whatsapp'/'mixed'. Pra um valor 'telegram' precisamos
     // alterar o ENUM da migration; fica pra v1.9.x.

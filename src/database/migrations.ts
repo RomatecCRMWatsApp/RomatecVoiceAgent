@@ -362,6 +362,25 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.45.0: equipe Romatec (multi-tenant pra Eldemberto, Rosielma, etc)
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_team_members (
+      id                 INT AUTO_INCREMENT PRIMARY KEY,
+      nome               VARCHAR(150) NOT NULL,
+      telegram_chat_id   VARCHAR(50) UNIQUE,
+      whatsapp_phone     VARCHAR(20),
+      email              VARCHAR(200),
+      role               ENUM('admin','engenheiro','corretor','comercial','leitura') NOT NULL DEFAULT 'leitura',
+      cargo              VARCHAR(100),
+      ativo              TINYINT(1) DEFAULT 1,
+      observacoes        TEXT,
+      criado_em          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_telegram (telegram_chat_id),
+      INDEX idx_ativo_role (ativo, role)
+    )
+  `);
+
   // v1.39.0: alertas proativos (push notifications inteligentes)
   // Cada detector escreve aqui com alert_key único pra dedup (não spamma o CEO).
   await pool.execute(`

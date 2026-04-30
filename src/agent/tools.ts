@@ -53,6 +53,35 @@ import {
 } from './memory';
 import { ResumoDia, ToolResult } from '../types';
 import pool from '../database/connection';
+import {
+  adicionarMembro as tmAdicionar,
+  listarMembros as tmListar,
+  atualizarMembro as tmAtualizar,
+  alterarRole as tmAlterarRole,
+  removerMembro as tmRemover,
+  buscarMembroPorNome as tmBuscarPorNome,
+  delegarTarefaParaMembro as tmDelegar,
+  temPermissao,
+  type TeamRole,
+} from '../services/teamMembers';
+
+// v1.45.0: scope do interlocutor atual. think() seta antes de chamar a cascata
+// e limpa no finally; executeTool checa permissão por role. Default = admin.
+let _currentCaller: { role: TeamRole; nome: string } | null = null;
+export function setCurrentCaller(c: { role: TeamRole; nome: string } | null): void {
+  _currentCaller = c;
+}
+export function getCurrentCaller(): { role: TeamRole; nome: string } | null {
+  return _currentCaller;
+}
+
+// Tools que admin-only (sempre — independente do role configurado)
+const ADMIN_ONLY_TOOLS = new Set<string>([
+  'adicionar_membro_equipe', 'alterar_role_membro', 'remover_membro_equipe',
+  'crm_apagar_lead', 'crm_apagar_contato', 'crm_apagar_campanha',
+  'apagar_obra', 'apagar_etapa', 'apagar_membro_equipe', 'apagar_material',
+  'apagar_vistoria', 'fs_apagar', 'limpar_temp', 'limpar_lixeira',
+]);
 
 interface Colaborador { nome: string; cargo: string; telefone: string; }
 
@@ -1807,10 +1836,89 @@ export const toolDefinitions: Anthropic.Tool[] = [
       properties: { limite: { type: 'number', description: 'Default 50' } },
     },
   },
+
+  // ── v1.45.0: equipe Romatec (multi-tenant) ─────────────────────────────────
+  {
+    name: 'adicionar_membro_equipe',
+    description: 'Cadastra um novo membro da equipe Romatec (Eldemberto, Rosielma, etc) com role específico. ADMIN-ONLY. Após cadastrado com telegram_chat_id, o membro pode interagir com a ZAYRA dentro do escopo do role dele. Roles disponíveis: admin (tudo), engenheiro (avaliações/NBR/PTAM), corretor (CRM/leads), comercial (contratos/financeiro), leitura (só consulta).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nome:             { type: 'string', description: 'Nome completo do membro' },
+        telegram_chat_id: { type: 'string', description: 'chat_id do Telegram do membro (peça pra ele rodar /start no @userinfobot). Sem isso ele não consegue conversar com a ZAYRA.' },
+        whatsapp_phone:   { type: 'string', description: 'Telefone WhatsApp com DDI (5598..., opcional, fallback de delegação)' },
+        email:            { type: 'string' },
+        role:             { type: 'string', description: 'admin | engenheiro | corretor | comercial | leitura. Default: leitura.' },
+        cargo:            { type: 'string', description: 'Ex: Engenheiro Avaliador, Corretora Sênior, Diretor Comercial' },
+        observacoes:      { type: 'string' },
+      },
+      required: ['nome'],
+    },
+  },
+  {
+    name: 'listar_membros_equipe',
+    description: 'Lista membros da equipe Romatec cadastrados na ZAYRA. Pode filtrar por role e por ativos.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        role:          { type: 'string', description: 'Filtra por role (admin/engenheiro/corretor/comercial/leitura)' },
+        ativos_apenas: { type: 'boolean', description: 'Default true. Use false pra ver inativos também.' },
+      },
+    },
+  },
+  {
+    name: 'alterar_role_membro',
+    description: 'Promove/rebaixa um membro da equipe (muda o role). ADMIN-ONLY. Use quando o CEO falar "promove a Rosielma pra comercial" ou "deixa o Pedro só como leitura".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:        { type: 'number', description: 'ID do membro (de listar_membros_equipe)' },
+        nome:      { type: 'string', description: 'Alternativa ao id: nome (ou parte) do membro' },
+        novo_role: { type: 'string', description: 'admin | engenheiro | corretor | comercial | leitura' },
+      },
+      required: ['novo_role'],
+    },
+  },
+  {
+    name: 'remover_membro_equipe',
+    description: 'Desativa um membro da equipe (soft-delete: ativo=0, mantém histórico). ADMIN-ONLY. Após desativar ele perde acesso à ZAYRA pelo Telegram.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:   { type: 'number' },
+        nome: { type: 'string', description: 'Alternativa ao id: nome do membro' },
+      },
+    },
+  },
+  {
+    name: 'delegar_para_membro',
+    description: 'Delega uma tarefa pra um membro específico da equipe Romatec, enviando mensagem pelo Telegram dele (ou WhatsApp como fallback). Diferente de delegar_tarefa (que usa lista hard-coded de colaboradores), esse usa a tabela romatec_team_members. Use quando o Chefe falar "manda o Eldemberto fazer X" ou "fala com a Rosielma pra Y".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        membro_nome: { type: 'string', description: 'Nome (ou parte) do membro' },
+        tarefa:      { type: 'string', description: 'Descrição da tarefa' },
+        prazo:       { type: 'string', description: 'Prazo opcional (ex: "hoje 18h", "sexta")' },
+      },
+      required: ['membro_nome', 'tarefa'],
+    },
+  },
 ];
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
   console.log(`[Tool] → ${name}`, JSON.stringify(input).slice(0, 200));
+
+  // v1.45.0: gate por role (multi-tenant). Admin/CEO passam direto.
+  const caller = _currentCaller;
+  if (caller && caller.role !== 'admin') {
+    if (ADMIN_ONLY_TOOLS.has(name)) {
+      return { toolName: name, success: false, error: `Acesso negado: a tool "${name}" é restrita ao CEO/admin. Seu papel: ${caller.role}.` };
+    }
+    if (!temPermissao(caller.role, name)) {
+      return { toolName: name, success: false, error: `Acesso negado: ${caller.nome} (${caller.role}) não tem permissão para "${name}". Peça ao CEO José Romário.` };
+    }
+  }
+
   try {
     let data: unknown;
 
@@ -2474,6 +2582,42 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       }
       case 'listar_contratos_gerados':
         data = await listarContratosGerados(input as { limite?: number });
+        break;
+
+      // ── v1.45.0: equipe Romatec ──────────────────────────────────────────
+      case 'adicionar_membro_equipe':
+        data = await tmAdicionar(input as Parameters<typeof tmAdicionar>[0]);
+        break;
+      case 'listar_membros_equipe':
+        data = await tmListar(input as { ativos_apenas?: boolean; role?: TeamRole });
+        break;
+      case 'alterar_role_membro': {
+        const id = typeof input.id === 'number' ? input.id : undefined;
+        const novoRole = input.novo_role as TeamRole;
+        let alvoId = id;
+        if (!alvoId && input.nome) {
+          const m = await tmBuscarPorNome(input.nome as string);
+          if (!m) throw new Error(`Membro "${input.nome}" não encontrado.`);
+          alvoId = m.id;
+        }
+        if (!alvoId) throw new Error('Informe id ou nome do membro.');
+        data = await tmAlterarRole(alvoId, novoRole);
+        break;
+      }
+      case 'remover_membro_equipe': {
+        const id = typeof input.id === 'number' ? input.id : undefined;
+        let alvoId = id;
+        if (!alvoId && input.nome) {
+          const m = await tmBuscarPorNome(input.nome as string);
+          if (!m) throw new Error(`Membro "${input.nome}" não encontrado.`);
+          alvoId = m.id;
+        }
+        if (!alvoId) throw new Error('Informe id ou nome do membro.');
+        data = await tmRemover(alvoId);
+        break;
+      }
+      case 'delegar_para_membro':
+        data = await tmDelegar(input as Parameters<typeof tmDelegar>[0]);
         break;
 
       default:

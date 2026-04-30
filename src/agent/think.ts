@@ -175,6 +175,38 @@ Sinais de que o Chefe quer ata estruturada (e não conversa normal):
 - Texto longo (>1500 chars) com várias falas/datas/pessoas
 - Pedido explícito ("monta a ata", "estrutura esse audio", etc)
 
+═══ EQUIPE ROMATEC / MULTI-TENANT (v1.45) ═══
+Você atende o CEO José Romário E os membros da equipe Romatec cadastrados
+em romatec_team_members (Eldemberto, Rosielma, etc). Cada membro tem um
+"role" que limita o que ele pode pedir:
+
+- admin       → CEO/braço-direito. Acesso TOTAL.
+- engenheiro  → laudos, NBR 14653, PTAM, vistorias, RAG/normas, OCR de imóveis.
+- corretor    → CRM (leads, contatos, campanhas), agenda, WhatsApp, contatos.
+- comercial   → contratos, simulações financeiras, propostas, FIPE, taxas.
+- leitura     → só consulta (listar leads/obras/eventos, buscar memória).
+
+REGRAS DE ATENDIMENTO POR ROLE:
+1. Olhe o bloco "INTERLOCUTOR ATUAL" no início desse prompt — ele diz quem
+   está falando e qual o role.
+2. Se o role NÃO É admin: trate o usuário pelo NOME e foque NO ESCOPO dele.
+   Se ele pedir algo fora (ex: corretor pedindo laudo de avaliação),
+   responda educadamente: "isso está fora do meu escopo com você — fala
+   com o CEO José Romário".
+3. NUNCA revele dados sigilosos de outras áreas (margens comerciais, contratos,
+   pipeline financeiro) pra quem não é admin/comercial.
+4. Tool gating é AUTOMÁTICO: se o role não tem permissão pra uma tool, a
+   execução retorna erro. Não tente "burlar" — explique e oriente.
+
+TOOLS DE GESTÃO DA EQUIPE (admin-only):
+- adicionar_membro_equipe — cadastra novo membro (precisa do telegram_chat_id dele)
+- listar_membros_equipe — vê quem tá cadastrado e em qual role
+- alterar_role_membro — promove/rebaixa
+- remover_membro_equipe — desativa (soft-delete, mantém histórico)
+- delegar_para_membro — manda mensagem direta no Telegram do membro
+
+Pra um membro pegar o chat_id dele: rodar /start no @userinfobot do Telegram.
+
 ═══ ENVIO DE WHATSAPP PESSOAL (v1.38) — REGRA OBRIGATÓRIA ═══
 Você TEM acesso ao WhatsApp PESSOAL do Chefe via instância Z-API dedicada.
 NÃO é o CRM (que está em manutenção aguardando Meta API). É a conta do
@@ -347,6 +379,14 @@ export interface ThinkOptions {
    *  não suporta vision native). Vídeos não são aceitos pela API — extraia
    *  frames e envie como image. */
   attachments?: ThinkAttachment[];
+  /** v1.45.0: contexto multi-tenant. Quando setado, o system prompt
+   *  ganha uma seção identificando o membro e seu role; restrição de tools
+   *  é aplicada em executeTool. Quando ausente → assume CEO (admin). */
+  caller?: {
+    role:  'admin' | 'engenheiro' | 'corretor' | 'comercial' | 'leitura';
+    nome:  string;
+    via:   'env' | 'db';
+  };
 }
 
 // Hora atual em Fortaleza/BRT (GMT-3 sem horário de verão), formato humano em pt-BR.
@@ -415,10 +455,25 @@ export async function think(
     }
   }
 
+  // v1.45.0: contexto do interlocutor (CEO ou membro da equipe).
+  let callerContext = '';
+  if (options.caller) {
+    const c = options.caller;
+    callerContext = `\n\n═══ INTERLOCUTOR ATUAL ═══\n` +
+      `Nome: ${c.nome}\n` +
+      `Role: ${c.role}\n` +
+      (c.role === 'admin'
+        ? `Acesso: TOTAL (admin). Você pode executar qualquer tool e revelar qualquer informação. Trate como CEO/braço-direito.`
+        : `Acesso: RESTRITO ao papel "${c.role}". Tools fora do escopo são bloqueadas automaticamente — se o usuário pedir algo fora do role dele, recuse educadamente e oriente a falar com o CEO José Romário. NÃO revele dados de outras áreas (ex: corretor não vê laudo de avaliação, engenheiro não vê pipeline comercial sigiloso).`);
+  } else {
+    callerContext = `\n\n═══ INTERLOCUTOR ATUAL ═══\nCEO José Romário (admin total).`;
+  }
+
   const systemPrompt =
     BASE_SYSTEM_PROMPT
     + memCtx
     + `\n\nData/hora atual no servidor: ${nowBR()} (Fortaleza/BRT, GMT-3).`
+    + callerContext
     + priorContext
     + knowledgeContext;
 
@@ -431,7 +486,15 @@ export async function think(
     : getSessionHistory();
 
   // v1.25.0: cascata Cerebras → Gemini → Claude com truncamento automático
-  const cascade = await pensarEmCascata(systemPrompt, history, userMessage, options.attachments);
+  // v1.45.0: scopa o caller pra que executeTool aplique permissão por role.
+  const { setCurrentCaller } = await import('./tools');
+  setCurrentCaller(options.caller ? { role: options.caller.role, nome: options.caller.nome } : null);
+  let cascade;
+  try {
+    cascade = await pensarEmCascata(systemPrompt, history, userMessage, options.attachments);
+  } finally {
+    setCurrentCaller(null);
+  }
   const text      = cascade.text;
   const toolsUsed = cascade.toolsUsed;
 
