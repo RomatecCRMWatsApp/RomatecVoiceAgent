@@ -30,6 +30,7 @@ import {
   converterTaxa, calcularParcelamento,
 } from '../services/calculadoraFinanceira';
 import { calcularItbi, listarMunicipiosValidados } from '../services/calcularItbi';
+import { calcularIptu, listarMunicipiosIptu } from '../services/calcularIptu';
 import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
@@ -613,6 +614,27 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: 'listar_municipios_itbi',
     description: 'Lista os municípios que a ZAYRA tem alíquotas ITBI validadas (atualmente: Açailândia/MA). Use quando o Chefe perguntar "quais cidades você sabe calcular ITBI" ou "tem São Luís?".',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'calcular_iptu_estimado',
+    description: 'ESTIMA o IPTU anual de um imóvel urbano. Açailândia/MA: 0,5% predial residencial, 1,0% comercial, 1,5% territorial (alíquotas plausíveis pra interior MA, NÃO validadas com lei específica — deixa claro pro Chefe que é estimativa). Retorna anual à vista (com desconto típico 10%), parcelado 5x e 10x. Imóvel rural retorna 0 e avisa que paga ITR. SEMPRE diga ao Chefe que valor exato vem só no carnê da Prefeitura (ela usa coeficientes de PGV — Planta Genérica de Valores — sobre idade, localização, padrão construtivo).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        valor_venal:  { type: 'number', description: 'Valor venal cadastrado na Prefeitura (NÃO o valor de mercado — geralmente 60-80% do mercado).' },
+        municipio:    { type: 'string', description: 'Ex: "Açailândia"' },
+        uf:           { type: 'string', description: 'Ex: "MA"' },
+        tipo:         { type: 'string', description: 'predial_residencial (default) | predial_comercial | territorial (terreno baldio)' },
+        imovel_rural: { type: 'boolean', description: 'true se rural (paga ITR, não IPTU)' },
+        ano:          { type: 'number', description: 'Ano de referência (default ano atual)' },
+      },
+      required: ['valor_venal', 'municipio'],
+    },
+  },
+  {
+    name: 'listar_municipios_iptu',
+    description: 'Lista municípios com alíquotas IPTU configuradas na ZAYRA. Use quando perguntarem "quais cidades de IPTU você cobre".',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -2253,6 +2275,12 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'listar_municipios_itbi':
         data = listarMunicipiosValidados();
+        break;
+      case 'calcular_iptu_estimado':
+        data = calcularIptu(input as unknown as Parameters<typeof calcularIptu>[0]);
+        break;
+      case 'listar_municipios_iptu':
+        data = listarMunicipiosIptu();
         break;
 
       // ── v1.40.0: Briefing semanal + diagnóstico banco ──
