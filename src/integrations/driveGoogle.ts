@@ -198,12 +198,28 @@ export async function compartilharArquivo(input: {
 
 // ── Status / quota ──────────────────────────────────────────────────────────
 export async function statusDrive(): Promise<{
-  online:        boolean;
-  email?:        string;
-  quotaTotal?:   string;
-  quotaUsada?:   string;
+  online:         boolean;
+  email?:         string;
+  quotaTotal?:    string;
+  quotaUsada?:    string;
   arquivosCount?: number;
+  erro?:          string;
+  causa?:         string;
+  diagnostico?:   { client_id: boolean; client_secret: boolean; refresh_token: boolean };
 }> {
+  const diagnostico = {
+    client_id:     !!process.env.GOOGLE_CLIENT_ID,
+    client_secret: !!process.env.GOOGLE_CLIENT_SECRET,
+    refresh_token: !!process.env.GOOGLE_REFRESH_TOKEN,
+  };
+  if (!diagnostico.client_id || !diagnostico.client_secret || !diagnostico.refresh_token) {
+    return {
+      online: false,
+      erro: 'Credenciais OAuth ausentes',
+      causa: `Faltam env vars: ${Object.entries(diagnostico).filter(([,v]) => !v).map(([k]) => k.toUpperCase()).join(', ')}`,
+      diagnostico,
+    };
+  }
   try {
     const drive = driveClient();
     const about = await drive.about.get({ fields: 'user(emailAddress),storageQuota(limit,usage)' });
@@ -212,10 +228,23 @@ export async function statusDrive(): Promise<{
       email:      about.data.user?.emailAddress ?? undefined,
       quotaTotal: about.data.storageQuota?.limit ?? undefined,
       quotaUsada: about.data.storageQuota?.usage ?? undefined,
+      diagnostico,
     };
   } catch (err) {
-    console.warn('[drive.status]', (err as Error).message);
-    return { online: false };
+    const e = err as { message?: string; code?: number; response?: { data?: { error?: string; error_description?: string } } };
+    const apiErr = e.response?.data;
+    const causa = apiErr?.error_description || apiErr?.error || e.message || String(err);
+    console.warn('[drive.status] ERRO COMPLETO:', JSON.stringify({
+      message: e.message,
+      code: e.code,
+      apiError: apiErr,
+    }));
+    return {
+      online: false,
+      erro:   e.message ?? 'unknown',
+      causa,
+      diagnostico,
+    };
   }
 }
 
