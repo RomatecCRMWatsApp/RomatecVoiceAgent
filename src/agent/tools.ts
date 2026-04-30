@@ -29,6 +29,10 @@ import {
   simularFinanciamento, calcularCorrecaoMonetaria, calcularVPL,
   converterTaxa, calcularParcelamento,
 } from '../services/calculadoraFinanceira';
+import {
+  gerarAtaDeTranscricao, gerarAtaDeAudio,
+  listarAtas, consultarAta,
+} from '../services/meetingNotes';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
   consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
@@ -304,6 +308,51 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['para', 'docBase64', 'fileName'],
     },
   },
+  // ── v1.42.0: Meeting Note-Taker ──
+  {
+    name: 'gerar_ata_de_texto',
+    description: 'Gera ata estruturada de reunião a partir de uma TRANSCRIÇÃO já em texto. Use quando o Chefe colar uma transcrição de áudio que já foi feita por terceiros, ou copiar conteúdo de uma reunião escrita. Claude estrutura: resumo executivo, decisões, action items (com responsável/prazo), datas mencionadas, pessoas envolvidas, tópicos, pontos de atenção. Salva no banco e retorna ata em Markdown.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        transcricao:      { type: 'string', description: 'Texto completo da reunião' },
+        data_reuniao:     { type: 'string', description: 'YYYY-MM-DD (default = hoje)' },
+        duracao_segundos: { type: 'number', description: 'Opcional, duração da reunião em segundos' },
+      },
+      required: ['transcricao'],
+    },
+  },
+  {
+    name: 'gerar_ata_de_audio',
+    description: 'Gera ata de reunião a partir de ÁUDIO em base64 (até 25MB). Pipeline: Whisper transcreve → Claude estrutura → salva no banco → retorna ata em Markdown + transcrição completa. Use quando o Chefe gravar reunião pelo celular e mandar o áudio (ou se Telegram receber áudio longo com flag de ata).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        audio_base64: { type: 'string', description: 'Áudio em base64 (sem prefixo data:)' },
+        mime_type:    { type: 'string', description: 'Default audio/webm. Pode ser audio/ogg, audio/mp4, audio/mp3' },
+        data_reuniao: { type: 'string', description: 'YYYY-MM-DD (default = hoje)' },
+      },
+      required: ['audio_base64'],
+    },
+  },
+  {
+    name: 'listar_atas',
+    description: 'Lista atas de reunião salvas (mais recentes primeiro). Use quando o Chefe perguntar "que reuniões teve essa semana?", "quais foram as últimas atas?". Retorna ID, título, data, resumo, total de action items e decisões.',
+    input_schema: {
+      type: 'object',
+      properties: { limite: { type: 'number', description: 'Default 30' } },
+    },
+  },
+  {
+    name: 'consultar_ata',
+    description: 'Retorna ata completa por ID (com transcrição completa, todas as decisões, action items detalhados em Markdown). Use após listar_atas pra abrir uma específica.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'ID retornado por listar_atas' } },
+      required: ['id'],
+    },
+  },
+
   // ── v1.41.0: Calculadora financeira ──
   {
     name: 'simular_financiamento',
@@ -1780,6 +1829,20 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         }
         break;
       }
+      // ── v1.42.0: Meeting Note-Taker ──
+      case 'gerar_ata_de_texto':
+        data = await gerarAtaDeTranscricao(input as Parameters<typeof gerarAtaDeTranscricao>[0]);
+        break;
+      case 'gerar_ata_de_audio':
+        data = await gerarAtaDeAudio(input as Parameters<typeof gerarAtaDeAudio>[0]);
+        break;
+      case 'listar_atas':
+        data = await listarAtas(input as { limite?: number });
+        break;
+      case 'consultar_ata':
+        data = await consultarAta(input as { id: string });
+        break;
+
       // ── v1.41.0: Calculadora financeira ──
       case 'simular_financiamento':
         data = simularFinanciamento(input as unknown as Parameters<typeof simularFinanciamento>[0]);
