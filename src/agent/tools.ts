@@ -25,6 +25,10 @@ import { listarAlertasPendentes, silenciarAlerta, reconhecerAlerta, rodarDetecto
 import { sincronizarContatosCRM, buscarContatoMemoria } from '../services/syncContatosCRM';
 import { gerarBriefingSemanal, enviarBriefingSemanal } from './briefingSemanal';
 import poolDb from '../database/connection';
+import {
+  simularFinanciamento, calcularCorrecaoMonetaria, calcularVPL,
+  converterTaxa, calcularParcelamento,
+} from '../services/calculadoraFinanceira';
 import { pesquisarWeb } from '../integrations/braveSearch';
 import {
   consultarCnpj, consultarCep, consultarBanco, feriadosNacionais,
@@ -300,6 +304,75 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ['para', 'docBase64', 'fileName'],
     },
   },
+  // ── v1.41.0: Calculadora financeira ──
+  {
+    name: 'simular_financiamento',
+    description: 'Simula financiamento imobiliário/veicular pelas tabelas Price (parcela fixa) ou SAC (parcela decrescente). Use quando cliente perguntar "quanto fica em X meses?", "qual a parcela?", ou pra montar proposta. Retorna primeira/última/média parcela, total pago, total juros e amortização detalhada das primeiras 6 + últimas 3 parcelas.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        valor_financiado:  { type: 'number', description: 'Valor total a financiar em reais (ex: 350000)' },
+        taxa_juros_mensal: { type: 'number', description: 'Taxa de juros AO MÊS em % (ex: 1.0 pra 1% a.m.)' },
+        prazo_meses:       { type: 'number', description: 'Prazo em meses (ex: 360 pra 30 anos)' },
+        sistema:           { type: 'string', enum: ['price','sac'], description: 'price=parcela fixa (mais comum), sac=decrescente. Default price.' },
+      },
+      required: ['valor_financiado','taxa_juros_mensal','prazo_meses'],
+    },
+  },
+  {
+    name: 'calcular_correcao_monetaria',
+    description: 'Calcula correção monetária de um valor entre 2 datas usando índice anual fornecido (IPCA, IGP-M, INCC, Selic). Use pra atualizar valores de contratos antigos, calcular reajuste de aluguel, ajustar preço de imóvel pelo tempo. ATENÇÃO: usa índice constante (não puxa do BCB em tempo real). Pra precisão use índices oficiais depois.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        valor_inicial:    { type: 'number' },
+        data_inicial:     { type: 'string', description: 'YYYY-MM-DD' },
+        data_final:       { type: 'string', description: 'YYYY-MM-DD (opcional, default = hoje)' },
+        indice_anual_pct: { type: 'number', description: 'Índice anual em % (ex: 4.5 pra IPCA de 4.5% a.a.)' },
+      },
+      required: ['valor_inicial','data_inicial','indice_anual_pct'],
+    },
+  },
+  {
+    name: 'calcular_vpl',
+    description: 'Calcula Valor Presente Líquido (VPL/NPV) de um fluxo de caixa mensal. Use pra avaliar viabilidade de investimento imobiliário, projeto de obra, compra/venda. Recebe taxa de desconto anual e array de fluxos mensais (negativos=saída, positivos=entrada). Retorna VPL e decisão (investir/não investir).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        taxa_desconto_anual_pct: { type: 'number' },
+        fluxos_mensais:          { type: 'array', items: { type: 'number' }, description: 'Item 0 = mês 0 (investimento inicial NEGATIVO). Demais = receitas/despesas mensais.' },
+      },
+      required: ['taxa_desconto_anual_pct','fluxos_mensais'],
+    },
+  },
+  {
+    name: 'converter_taxa',
+    description: 'Converte taxa de juros entre mensal e anual (capitalização composta). Útil pra "1% a.m. dá quanto ao ano?".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        taxa_pct: { type: 'number' },
+        de:       { type: 'string', enum: ['mensal','anual'] },
+        para:     { type: 'string', enum: ['mensal','anual'] },
+      },
+      required: ['taxa_pct','de','para'],
+    },
+  },
+  {
+    name: 'calcular_parcelamento',
+    description: 'Calcula parcelamento simples de um valor (com ou sem juros, com ou sem entrada). Use pra propostas comerciais rápidas tipo "vendo por R$ 50k, entrada 10k e 12x sem juros, qual a parcela?".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        valor:         { type: 'number' },
+        entrada:       { type: 'number', description: 'Default 0' },
+        n_parcelas:    { type: 'number' },
+        juros_mes_pct: { type: 'number', description: 'Default 0 (sem juros)' },
+      },
+      required: ['valor','n_parcelas'],
+    },
+  },
+
   // ── v1.40.0: Briefing semanal + diagnóstico banco ──
   {
     name: 'gerar_briefing_semanal',
@@ -1707,6 +1780,23 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         }
         break;
       }
+      // ── v1.41.0: Calculadora financeira ──
+      case 'simular_financiamento':
+        data = simularFinanciamento(input as unknown as Parameters<typeof simularFinanciamento>[0]);
+        break;
+      case 'calcular_correcao_monetaria':
+        data = calcularCorrecaoMonetaria(input as unknown as Parameters<typeof calcularCorrecaoMonetaria>[0]);
+        break;
+      case 'calcular_vpl':
+        data = calcularVPL(input as unknown as Parameters<typeof calcularVPL>[0]);
+        break;
+      case 'converter_taxa':
+        data = converterTaxa(input as unknown as Parameters<typeof converterTaxa>[0]);
+        break;
+      case 'calcular_parcelamento':
+        data = calcularParcelamento(input as unknown as Parameters<typeof calcularParcelamento>[0]);
+        break;
+
       // ── v1.40.0: Briefing semanal + diagnóstico banco ──
       case 'gerar_briefing_semanal': {
         const r = await gerarBriefingSemanal();
