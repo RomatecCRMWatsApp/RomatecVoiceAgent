@@ -703,6 +703,8 @@ app.listen(PORT, () => {
   void import('./agent/briefingSemanal').then(m => m.startWeeklyBriefingScheduler()).catch(() => {});
   alarmes.startAlarmesTicker();
   cowork.startCoworkWorker();
+  // v1.61.0: limpa drafts WhatsApp expirados (status awaiting_confirmation com TTL vencido)
+  void import('./services/whatsappDrafts').then(m => m.startDraftCleanup()).catch(() => {});
   void initDb()
     .then(() => loadSessionFromDb())
     .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));

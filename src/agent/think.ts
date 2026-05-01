@@ -66,6 +66,7 @@ CONTRATOS: gerar_contrato (Fase 2: monta DOCX a partir de modelo indexado, exige
 ATAS: gerar_ata_de_texto, gerar_ata_de_audio (Whisper+Claude), listar_atas, consultar_ata. Gatilhos: áudio >3 min, texto >1500 chars com várias falas, ou pedido explícito.
 OCR DE DOCUMENTOS: extrair_dados_rg, extrair_dados_cnh, extrair_comprovante_endereco, extrair_documento_imovel, analisar_visual_imovel. Após extrair, pergunte se cadastra no CRM, gera contrato ou monta PTAM.
 WHATSAPP PESSOAL (Z-API, 1-a-1, NUNCA em massa): enviar_whatsapp/_audio/_imagem/_documento/_localizacao_whatsapp. Áudio TTS max 800 chars. Aceita vários formatos de telefone — função normaliza.
+WORKFLOW DRAFTS WHATSAPP (v1.61.0, OBRIGATÓRIO): tools enviar_whatsapp/_audio/_imagem/_documento usam fila persistente. (1) Primeira chamada SEM confirm — passa "para"+conteúdo — cria DRAFT no DB e retorna draft_id + preview. (2) MOSTRA o preview ao Chefe e pergunta "pode mandar?". (3) APÓS o "sim", segunda chamada com confirm:true + draft_id — service busca o conteúdo no banco e envia (NÃO precisa repassar o conteúdo no input). Se você esquecer o draft_id ou ele cair do contexto, chama listar_drafts_whatsapp_pendentes pra recuperar TODOS os drafts ativos da sessão. TTL de 30 min — depois disso o draft expira e tem que recriar.
 TELEGRAM: enviar_telegram, status_telegram.
 CALCULADORA FINANCEIRA: simular_financiamento (Price/SAC), calcular_correcao_monetaria, calcular_vpl, converter_taxa, calcular_parcelamento.
 ITBI: calcular_itbi (max(venda,venal)×alíquota; Açailândia/MA validada 2%/0,5% SFH 1º imóvel; rural→ITR; doação→ITCMD), listar_municipios_itbi.
@@ -218,13 +219,17 @@ export async function think(
 
   // v1.25.0: cascata Cerebras → Gemini → Claude com truncamento automático
   // v1.45.0: scopa o caller pra que executeTool aplique permissão por role.
-  const { setCurrentCaller } = await import('./tools');
+  // v1.61.0: scopa o sessionId pra que tools de drafts WhatsApp consigam
+  //          associar/listar drafts da sessão certa.
+  const { setCurrentCaller, setCurrentSessionId } = await import('./tools');
   setCurrentCaller(options.caller ? { role: options.caller.role, nome: options.caller.nome } : null);
+  setCurrentSessionId(sessionId);
   let cascade;
   try {
     cascade = await pensarEmCascata(systemPrompt, history, userMessage, options.attachments);
   } finally {
     setCurrentCaller(null);
+    setCurrentSessionId(null);
   }
   const text      = cascade.text;
   const toolsUsed = cascade.toolsUsed;
