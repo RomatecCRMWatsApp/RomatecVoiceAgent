@@ -7,6 +7,7 @@ import * as telegram from '../integrations/telegram';
 import * as filesystem from '../integrations/filesystem';
 import * as system from '../integrations/system';
 import * as obras from '../integrations/obras';
+import * as recibos from '../services/recibosQuinzena';
 import * as alarmes from '../integrations/alarmes';
 import * as cofre from '../integrations/cofre';
 import * as vistorias from '../integrations/vistorias';
@@ -1424,6 +1425,33 @@ const _allToolDefinitions: Anthropic.Tool[] = [
     input_schema: {
       type: 'object',
       properties: { obra_id: { type: 'string' } },
+    },
+  },
+  // ── Recibos Quinzenais (v1.65.13 — PR B.2) ──────────────────────────────
+  // 2 tools. Período no formato "YYYY-MM-1" (dias 1-15) ou "YYYY-MM-2" (16-fim).
+  // Sem período → calcula a quinzena atual baseado em hoje.
+  {
+    name: 'disparar_recibos_quinzena',
+    description: 'Dispara recibos quinzenais via WhatsApp para todos colaboradores ativos com dias trabalhados ou ajustes no período. SEMPRE chamar primeiro SEM confirm:true para gerar o PREVIEW (lista quem vai receber, valores, total, alertas) e mostrar ao Chefe. APENAS depois do Chefe confirmar verbalmente, chamar de novo COM confirm:true. NUNCA dispare sem confirmação verbal explícita do Chefe — mexe em fluxo financeiro real com colaboradores. Detecta lote duplicado pra mesma quinzena (use force:true só se Chefe insistir).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        periodo: { type: 'string', description: 'Formato "YYYY-MM-1" (dias 1-15) ou "YYYY-MM-2" (dias 16-fim). Omitir = quinzena atual.' },
+        confirm: { type: 'boolean', description: 'true = dispara de verdade. Sem confirm = só preview.' },
+        force:   { type: 'boolean', description: 'true = força criar novo lote mesmo se já existir lote ativo pra essa quinzena. NÃO usar sem ordem explícita.' },
+        criado_por: { type: 'string', description: 'Identificação de quem comandou (ex: "ZAYRA via Telegram CEO Romário").' },
+      },
+    },
+  },
+  {
+    name: 'status_lote_recibos',
+    description: 'Retorna status consolidado do lote de recibos quinzenais — quem confirmou, quem falta, quem contestou, valores, timestamps. Use lote_id quando souber, ou periodo (YYYY-MM-1) pra pegar o último lote daquela quinzena.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lote_id: { type: 'string' },
+        periodo: { type: 'string', description: 'YYYY-MM-1 ou YYYY-MM-2 (alternativa ao lote_id).' },
+      },
     },
   },
   {
@@ -2850,6 +2878,17 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'listar_equipe_obra':
         data = await obras.listarEquipe(input as { obra_id?: string });
+        break;
+      // ── Recibos Quinzenais (PR B.2) ──────────────────────────────
+      case 'disparar_recibos_quinzena':
+        data = await recibos.dispararRecibosQuinzena(
+          input as Parameters<typeof recibos.dispararRecibosQuinzena>[0]
+        );
+        break;
+      case 'status_lote_recibos':
+        data = await recibos.statusLote(
+          input as Parameters<typeof recibos.statusLote>[0]
+        );
         break;
       case 'criar_membro_equipe':
         data = await obras.criarMembroEquipe(input as Parameters<typeof obras.criarMembroEquipe>[0]);
