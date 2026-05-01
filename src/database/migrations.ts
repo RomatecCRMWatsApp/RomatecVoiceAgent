@@ -879,6 +879,41 @@ export async function runMigrations(): Promise<void> {
     }
   }
 
+  // v1.65.12 — PR B.1: ajustes do recibo quinzenal + emissões com hash de validação.
+  // Período no formato "YYYY-MM-1" (dias 1-15) ou "YYYY-MM-2" (dias 16-fim).
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS recibos_ajustes (
+      id          INT AUTO_INCREMENT PRIMARY KEY,
+      membro_id   INT NOT NULL,
+      periodo     VARCHAR(10) NOT NULL,
+      tipo        ENUM('desconto','adiantamento','bonus','horas_extras') NOT NULL,
+      valor       DECIMAL(10,2) NOT NULL,
+      descricao   VARCHAR(255),
+      criado_em   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      criado_por  VARCHAR(80),
+      INDEX idx_membro_periodo (membro_id, periodo)
+    )
+  `);
+  // Snapshot dos recibos emitidos (assinatura digital via QR-code).
+  // Armazena o estado congelado do recibo no momento da emissão.
+  // Re-emitir mesma quinzena cria novo registro com novo hash — assim
+  // recibos antigos continuam validáveis mesmo após edições.
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS recibos_quinzena_emitidos (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      hash            VARCHAR(64) NOT NULL UNIQUE,
+      membro_id       INT NOT NULL,
+      periodo         VARCHAR(10) NOT NULL,
+      total_dias      DECIMAL(5,1) NOT NULL,
+      valor_diarias   DECIMAL(10,2) NOT NULL,
+      total_ajustes   DECIMAL(10,2) NOT NULL DEFAULT 0,
+      total_liquido   DECIMAL(10,2) NOT NULL,
+      snapshot_json   JSON NOT NULL,
+      emitido_em      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_membro_periodo (membro_id, periodo, emitido_em)
+    )
+  `);
+
   console.log('[DB] Migrations complete');
 }
 

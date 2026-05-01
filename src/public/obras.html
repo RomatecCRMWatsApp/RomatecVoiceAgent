@@ -1394,7 +1394,10 @@ function renderMarcarDias() {
         <span>Equiv: <strong style="color:var(--text);">${s.total_dias_equivalente}</strong></span>
         <span>Total: <strong style="color:var(--gold);">${fmt(s.total_pagar)}</strong></span>
       </div>
-      <button class="btn-gold" data-cal-marcar="${p.id}" data-nome="${escape(p.nome)}" data-vd="${p.valor_dia}">📅 Marcar dias</button>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <button class="btn-gold" data-cal-marcar="${p.id}" data-nome="${escape(p.nome)}" data-vd="${p.valor_dia}">📅 Marcar dias</button>
+        <button data-recibo-q="${p.id}" data-nome="${escape(p.nome)}" title="Recibo quinzenal + ajustes">💰 Recibo</button>
+      </div>
     </div>`;
   }).join('');
 
@@ -1419,6 +1422,9 @@ function renderMarcarDias() {
 
   v.querySelectorAll('[data-cal-marcar]').forEach(b => b.onclick = () => {
     abrirCalendario(b.dataset.calMarcar, b.dataset.nome, parseFloat(b.dataset.vd) || 0, state.currentObra);
+  });
+  v.querySelectorAll('[data-recibo-q]').forEach(b => b.onclick = () => {
+    abrirModalReciboQuinzena(b.dataset.reciboQ, b.dataset.nome);
   });
 
   document.getElementById('mdPrev').onclick = () => {
@@ -2519,6 +2525,11 @@ let _editSaveHandler = null;
 function abrirEditar(titulo, bodyHtml, saveHandler) {
   document.getElementById('editTitle').textContent = titulo;
   document.getElementById('editBody').innerHTML = bodyHtml;
+  // Reset estado visual dos botões (caso modal anterior tenha customizado)
+  const sb = document.getElementById('editSave');
+  if (sb) { sb.style.display = ''; sb.textContent = 'Salvar'; }
+  const cb = document.getElementById('editCancel');
+  if (cb) cb.textContent = 'Cancelar';
   _editSaveHandler = saveHandler;
   document.getElementById('editOverlay').classList.add('open');
 }
@@ -2613,6 +2624,130 @@ function abrirEditarMembro(m) {
 }
 
 // v1.62.0: editar transação financeira (admin/CEO only via X-CEO-Token).
+// v1.65.12 (PR B.1): Modal de recibo quinzenal — gerencia ajustes (descontos,
+// adiantamentos, bônus, horas extras) por colaborador/período e gera PDF preview.
+function periodoQuinzenaAtual() {
+  const d = new Date();
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const q = d.getDate() <= 15 ? 1 : 2;
+  return `${ano}-${mes}-${q}`;
+}
+function periodoLabel(codigo) {
+  const m = /^(\d{4})-(\d{2})-([12])$/.exec(codigo || '');
+  if (!m) return codigo;
+  const meses = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  return `${m[3]}ª quinzena de ${meses[Number(m[2])]}/${m[1]}`;
+}
+
+async function abrirModalReciboQuinzena(membroId, nome) {
+  const periodoIni = periodoQuinzenaAtual();
+  // Gera 6 períodos pra trás + o atual
+  const opts = [];
+  const d = new Date();
+  for (let i = 0; i < 6; i++) {
+    const ano = d.getFullYear();
+    const mes = String(d.getMonth() + 1).padStart(2, '0');
+    opts.push(`${ano}-${mes}-2`);
+    opts.push(`${ano}-${mes}-1`);
+    d.setMonth(d.getMonth() - 1);
+  }
+  const periodoOpts = Array.from(new Set(opts)).sort().reverse()
+    .map(p => `<option value="${p}" ${p === periodoIni ? 'selected' : ''}>${escape(periodoLabel(p))}</option>`)
+    .join('');
+
+  const body = `
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+      <label style="flex:1; min-width:180px;">
+        <span style="font-size:12px; color:var(--text-muted);">Período</span>
+        <select id="rqPeriodo">${periodoOpts}</select>
+      </label>
+      <button id="rqVerPdf" title="Visualizar PDF preview">📄 Gerar PDF</button>
+    </div>
+    <p class="section-title" style="margin:8px 0 4px; font-size:13px;">Ajustes deste período</p>
+    <div id="rqAjustesLista" style="font-size:12px;">
+      <p style="color:var(--text-muted); text-align:center; padding:12px;">Carregando…</p>
+    </div>
+    <hr style="border:none; border-top:1px solid var(--border-strong); margin:10px 0;">
+    <p style="font-size:12px; color:var(--text-muted); margin:0 0 6px;">Adicionar ajuste:</p>
+    <div class="form-grid">
+      <select id="rqTipo">
+        <option value="desconto">Desconto</option>
+        <option value="adiantamento">Adiantamento</option>
+        <option value="bonus">Bônus</option>
+        <option value="horas_extras">Horas extras</option>
+      </select>
+      <input id="rqValor" type="number" step="0.01" min="0.01" placeholder="Valor R$">
+      <input id="rqDesc" placeholder="Descrição (opcional)" style="grid-column:1/-1;">
+      <button id="rqAddAjuste" class="btn-primary" style="grid-column:1/-1;">+ Adicionar ajuste</button>
+    </div>
+  `;
+
+  // Reusa abrirEditar mas substitui o "Salvar" por um botão Fechar (modal informativo).
+  abrirEditar(`💰 Recibo Quinzenal — ${nome}`, body, async () => fecharEditar());
+
+  // Esconde botão padrão "Salvar" do modal e renomeia "Cancelar" pra "Fechar"
+  const saveBtn = document.getElementById('editSave');
+  if (saveBtn) saveBtn.style.display = 'none';
+  const cancelBtn = document.getElementById('editCancel');
+  if (cancelBtn) cancelBtn.textContent = 'Fechar';
+
+  const recarregarAjustes = async () => {
+    const periodo = document.getElementById('rqPeriodo').value;
+    const lista = document.getElementById('rqAjustesLista');
+    try {
+      const r = await api(`/api/recibos/ajustes?membro_id=${membroId}&periodo=${periodo}`);
+      if (!r.length) {
+        lista.innerHTML = '<p style="color:var(--text-muted); text-align:center; padding:8px;">Sem ajustes neste período.</p>';
+        return;
+      }
+      const tipoLabel = { desconto: 'Desconto', adiantamento: 'Adiantamento', bonus: 'Bônus', horas_extras: 'Horas extras' };
+      const sinal = (t) => (t === 'desconto' || t === 'adiantamento') ? '−' : '+';
+      const cor   = (t) => (t === 'desconto' || t === 'adiantamento') ? 'var(--danger)' : 'var(--neon)';
+      lista.innerHTML = r.map(a => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border);">
+          <div style="flex:1; min-width:0;">
+            <span>${escape(tipoLabel[a.tipo])}</span>${a.descricao ? ` <span style="color:var(--text-muted);">— ${escape(a.descricao)}</span>` : ''}
+          </div>
+          <span style="color:${cor(a.tipo)}; font-weight:500; margin:0 8px;">${sinal(a.tipo)} ${fmt(a.valor)}</span>
+          <button class="btn-danger" data-rm-ajuste="${a.id}" title="Remover" style="padding:2px 8px;">×</button>
+        </div>
+      `).join('');
+      lista.querySelectorAll('[data-rm-ajuste]').forEach(b => b.onclick = async () => {
+        if (!await confirmarAcao({ titulo:'Remover ajuste', mensagem:'Tem certeza?', textoConfirmar:'Remover', perigoso:true })) return;
+        try { await api('/api/recibos/ajustes/' + b.dataset.rmAjuste, { method:'DELETE' }); await recarregarAjustes(); }
+        catch (e) { mostrarErroApi(e); }
+      });
+    } catch (e) {
+      lista.innerHTML = `<p style="color:var(--danger); text-align:center; padding:8px;">Erro: ${escape(e.message)}</p>`;
+    }
+  };
+
+  document.getElementById('rqPeriodo').onchange = recarregarAjustes;
+  document.getElementById('rqAddAjuste').onclick = async () => {
+    const periodo = document.getElementById('rqPeriodo').value;
+    const tipo    = document.getElementById('rqTipo').value;
+    const valor   = Number(document.getElementById('rqValor').value);
+    const descr   = document.getElementById('rqDesc').value.trim();
+    if (!isFinite(valor) || valor <= 0) { alert('Valor deve ser > 0.'); return; }
+    try {
+      await api('/api/recibos/ajustes', {
+        method: 'POST',
+        body: JSON.stringify({ membro_id: membroId, periodo, tipo, valor, descricao: descr || undefined })
+      });
+      document.getElementById('rqValor').value = '';
+      document.getElementById('rqDesc').value  = '';
+      await recarregarAjustes();
+    } catch (e) { mostrarErroApi(e); }
+  };
+  document.getElementById('rqVerPdf').onclick = () => {
+    const periodo = document.getElementById('rqPeriodo').value;
+    window.open(API + `/api/recibos/quinzena/${membroId}/pdf?periodo=${periodo}`, '_blank');
+  };
+
+  await recarregarAjustes();
+}
+
 function abrirEditarTransacao(t) {
   const tipos = ['saida', 'entrada'];
   const tipoOpts = tipos.map(x => `<option value="${x}" ${x===t.tipo?'selected':''}>${x === 'entrada' ? 'Entrada' : 'Saída'}</option>`).join('');
