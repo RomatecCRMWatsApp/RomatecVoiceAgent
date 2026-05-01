@@ -36,13 +36,23 @@ const CLOUDFLARE_MODEL  = process.env.CLOUDFLARE_MODEL     || '@cf/meta/llama-3.
 // v1.49.0: OpenAI direto (gpt-4o-mini) — ativa se OPENAI_API_KEY existir. Custa
 // US$0.15/1M tokens input, sempre disponível, sem rate limits agressivos.
 const OPENAI_MODEL      = process.env.OPENAI_MODEL         || 'gpt-4o-mini';
+// v1.58.0: 3 providers extra grátis — todos OpenAI-compatible.
+// Mistral free tier: 1 req/s, 500k TPM, 1B tokens/mês. Suporta tools nativamente.
+// Together: US$5 grátis no signup, 100+ modelos open-source.
+// Fireworks: US$1 grátis no signup, latência baixa.
+const MISTRAL_MODEL     = process.env.MISTRAL_MODEL        || 'mistral-large-latest';
+const TOGETHER_MODEL    = process.env.TOGETHER_MODEL       || 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
+const FIREWORKS_MODEL   = process.env.FIREWORKS_MODEL      || 'accounts/fireworks/models/llama-v3p3-70b-instruct';
 
 console.log(
   `[aiCascade] modelos ativos: Cerebras=${CEREBRAS_MODEL} | ` +
   `Gemini=${GEMINI_MODEL} | Claude=${CLAUDE_MODEL} | ` +
   `Groq=${GROQ_CHAT_MODEL} | OpenRouter=${OPENROUTER_MODEL} | ` +
   `GitHub=${GITHUB_MODEL} | Cloudflare=${CLOUDFLARE_MODEL} | ` +
-  `OpenAI=${OPENAI_MODEL}${process.env.OPENAI_API_KEY ? '' : ' (sem chave)'}`
+  `OpenAI=${OPENAI_MODEL}${process.env.OPENAI_API_KEY ? '' : ' (sem chave)'} | ` +
+  `Mistral=${MISTRAL_MODEL}${process.env.MISTRAL_API_KEY ? '' : ' (sem chave)'} | ` +
+  `Together=${TOGETHER_MODEL}${process.env.TOGETHER_API_KEY ? '' : ' (sem chave)'} | ` +
+  `Fireworks=${FIREWORKS_MODEL}${process.env.FIREWORKS_API_KEY ? '' : ' (sem chave)'}`
 );
 
 const MAX_HISTORY = parseInt(process.env.AI_MAX_HISTORY_MESSAGES || '12', 10);
@@ -175,6 +185,36 @@ let _openai: OpenAI | null = null;
 function openaiClient(): OpenAI {
   if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   return _openai;
+}
+
+// v1.58.0: Mistral via API OpenAI-compatible.
+let _mistral: OpenAI | null = null;
+function mistralClient(): OpenAI {
+  if (!_mistral) _mistral = new OpenAI({
+    apiKey:  process.env.MISTRAL_API_KEY,
+    baseURL: 'https://api.mistral.ai/v1',
+  });
+  return _mistral;
+}
+
+// v1.58.0: Together AI — 100+ modelos open-source, OpenAI-compatible.
+let _together: OpenAI | null = null;
+function togetherClient(): OpenAI {
+  if (!_together) _together = new OpenAI({
+    apiKey:  process.env.TOGETHER_API_KEY,
+    baseURL: 'https://api.together.xyz/v1',
+  });
+  return _together;
+}
+
+// v1.58.0: Fireworks AI — latência baixa, OpenAI-compatible.
+let _fireworks: OpenAI | null = null;
+function fireworksClient(): OpenAI {
+  if (!_fireworks) _fireworks = new OpenAI({
+    apiKey:  process.env.FIREWORKS_API_KEY,
+    baseURL: 'https://api.fireworks.ai/inference/v1',
+  });
+  return _fireworks;
 }
 
 // ── Conversores de schema ───────────────────────────────────────────────────
@@ -376,6 +416,42 @@ async function chamarOpenAI(
   );
 }
 
+// ── MISTRAL (v1.58.0) — free tier alto, suporta tools ─────────────────────
+async function chamarMistral(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    mistralClient(), MISTRAL_MODEL, 'Mistral',
+    systemPrompt, history, userMessage,
+  );
+}
+
+// ── TOGETHER AI (v1.58.0) — Llama 3.3 70B Turbo ───────────────────────────
+async function chamarTogether(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    togetherClient(), TOGETHER_MODEL, 'Together',
+    systemPrompt, history, userMessage,
+  );
+}
+
+// ── FIREWORKS AI (v1.58.0) — latência baixa ───────────────────────────────
+async function chamarFireworks(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    fireworksClient(), FIREWORKS_MODEL, 'Fireworks',
+    systemPrompt, history, userMessage,
+  );
+}
+
 // ── GEMINI (fallback intermediário) ─────────────────────────────────────────
 async function chamarGemini(
   systemPrompt: string,
@@ -556,15 +632,18 @@ export async function pensarEmCascata(
   const hasAttachments = !!attachments && attachments.length > 0;
   const tentativas: { provider: string; razao: string }[] = [];
 
-  // v1.49.0 — Nova ordem da cascata:
-  // 1) Gemini  (1M ctx, free tier 20 req/dia, paid muito barato — barato + robusto)
-  // 2) Cerebras (qwen-3-235b 32k ctx, free tier rápido, sem vision)
-  // 3) Claude   (200k ctx, sempre cabe, principal pago — só se Anthropic OK)
-  // 4) OpenAI   (gpt-4o-mini, ~$0.15/1M tokens — backbone se Claude offline)
-  // 5) Groq     (llama-3.3-70b free, mas TPM ~6k limita)
-  // 6) OpenRouter (free, sem pré-flight)
-  // 7) GitHub Models (gpt-4o-mini free, max 8k tokens)
-  // 8) Cloudflare Workers AI (edge BR)
+  // v1.58.0 — Cascata de 11 elos:
+  // 1) Gemini    (1M ctx, free 20/dia, paid muito barato)
+  // 2) Cerebras  (qwen-3-235b 32k ctx, free, rápido)
+  // 3) Claude    (200k ctx, principal pago)
+  // 4) OpenAI    (gpt-4o-mini, $0.15/1M — backbone se Claude offline)
+  // 5) Mistral   (v1.58 — free tier alto, tools nativos)
+  // 6) Together  (v1.58 — Llama 3.3 70B Turbo, US$5 grátis signup)
+  // 7) Fireworks (v1.58 — Llama 3.3 70B, latência baixa)
+  // 8) Groq      (llama-3.3-70b, TPM ~6k)
+  // 9) OpenRouter (free)
+  // 10) GitHub Models (gpt-4o-mini free, max 8k)
+  // 11) Cloudflare (edge BR)
 
   // ── 1) GEMINI ────────────────────────────────────────────────────────────
   if (process.env.GEMINI_API_KEY) {
@@ -633,7 +712,52 @@ export async function pensarEmCascata(
     tentativas.push({ provider: 'OpenAI', razao: 'OPENAI_API_KEY não setada (opcional)' });
   }
 
-  // ── 5) GROQ ──────────────────────────────────────────────────────────────
+  // ── 5) MISTRAL (v1.58.0) — free tier alto, suporta tools ───────────────
+  if (!hasAttachments && process.env.MISTRAL_API_KEY) {
+    try {
+      const r = await chamarMistral(systemPrompt, truncado, userMessage);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ Mistral falhou: ${m}`);
+      tentativas.push({ provider: 'Mistral', razao: m.slice(0, 200) });
+    }
+  } else if (!process.env.MISTRAL_API_KEY) {
+    tentativas.push({ provider: 'Mistral', razao: 'MISTRAL_API_KEY não setada (opcional)' });
+  }
+
+  // ── 6) TOGETHER AI (v1.58.0) — Llama 3.3 70B Turbo ─────────────────────
+  if (!hasAttachments && process.env.TOGETHER_API_KEY) {
+    try {
+      const r = await chamarTogether(systemPrompt, truncado, userMessage);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ Together falhou: ${m}`);
+      tentativas.push({ provider: 'Together', razao: m.slice(0, 200) });
+    }
+  } else if (!process.env.TOGETHER_API_KEY) {
+    tentativas.push({ provider: 'Together', razao: 'TOGETHER_API_KEY não setada (opcional)' });
+  }
+
+  // ── 7) FIREWORKS AI (v1.58.0) — latência baixa ─────────────────────────
+  if (!hasAttachments && process.env.FIREWORKS_API_KEY) {
+    try {
+      const r = await chamarFireworks(systemPrompt, truncado, userMessage);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ Fireworks falhou: ${m}`);
+      tentativas.push({ provider: 'Fireworks', razao: m.slice(0, 200) });
+    }
+  } else if (!process.env.FIREWORKS_API_KEY) {
+    tentativas.push({ provider: 'Fireworks', razao: 'FIREWORKS_API_KEY não setada (opcional)' });
+  }
+
+  // ── 8) GROQ ──────────────────────────────────────────────────────────────
   if (!hasAttachments && process.env.GROQ_API_KEY) {
     const estimated = estimatePromptTokens(systemPrompt, truncado, userMessage);
     if (estimated > GROQ_MAX_INPUT_TOKENS) {
