@@ -749,8 +749,20 @@ export async function runMigrations(): Promise<void> {
     INSERT IGNORE INTO tenant_settings
       (tenant_id, brand_name, brand_short_name, logo_path, primary_color, cnpj, telefone, email)
     VALUES
-      (1, 'Romatec Consultoria Imobiliária', 'Romatec', '/romatec-logo.jpg', '#10b981',
+      (1, 'Romatec Consultoria Imobiliária', 'Romatec', '/logo_R-removebg-preview.png', '#10b981',
        NULL, NULL, 'romateccrm@gmail.com')
+  `);
+  // v1.65.1: migra logos antigos (jpg, removebg-preview anterior) pro novo PNG transparente
+  await pool.execute(`
+    UPDATE tenant_settings
+       SET logo_path = '/logo_R-removebg-preview.png'
+     WHERE tenant_id = 1
+       AND logo_path IN (
+         '/romatec-logo.jpg',
+         '/LOGO ROMATEC ATUAL.jpg',
+         '/LOGO%20ROMATEC%20ATUAL.jpg',
+         '/romatec-logo-removebg-preview.png'
+       )
   `);
 
   // v1.65.0: Implementação 1 — Proposta de Mão de Obra (schema + catálogo SINAPI)
