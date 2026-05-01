@@ -33,6 +33,7 @@ import { calcularItbi, listarMunicipiosValidados } from '../services/calcularItb
 import { calcularIptu, listarMunicipiosIptu } from '../services/calcularIptu';
 import { consultarProcesso as datajudConsultarProcesso, listarTribunaisDataJud, diagnosticarDataJud } from '../integrations/datajud';
 import { buscarCartorio, montarUrlConsultaOnr, listarMunicipiosComCartorio } from '../integrations/cartoriosOnr';
+import { calcularComissao, listarTabelaComissao } from '../services/calcularComissao';
 import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
@@ -689,6 +690,39 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: 'listar_municipios_cartorio',
     description: 'Lista os municípios que a ZAYRA tem cartório de Registro de Imóveis cadastrado. Use quando perguntarem "quais cidades você sabe o cartório".',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'calcular_comissao_corretagem',
+    description: 'Calcula comissão de corretagem usando tabela sugestiva CRECI/MA: 6% venda urbana, 10% rural, 8% industrial/comercial, 4% permuta sobre maior valor, 1 aluguel + 8-10% mensal pra locação. Suporta split customizado entre captador/vendedor/imobiliária (default Romatec: 50/50 imobiliária+corretor). Aplica IRRF 27,5% e INSS 11% (opcional) pra pessoa física. Retorna comissão bruta + valor por participante (bruto/IRRF/INSS/líquido). Use quando o Chefe perguntar "quanto fica de comissão dessa venda" ou "quanto a Daniele recebe da venda do imóvel X".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tipo: { type: 'string', description: 'venda_urbano | venda_rural | venda_industrial | permuta | locacao_residencial | locacao_comercial | administracao | avaliacao' },
+        valor_negocio: { type: 'number', description: 'Venda: valor da venda. Locação: aluguel mensal. Permuta: maior valor. Avaliação: valor avaliado.' },
+        meses_locacao: { type: 'number', description: 'Só pra locação — projeta administração por N meses. Default 12.' },
+        imposto_renda_pct: { type: 'number', description: 'Alíquota IRRF (0-1). Default 0,275 (27,5%, máxima).' },
+        recolhe_inss: { type: 'boolean', description: 'Se true, aplica INSS 11% sobre PF. Default false.' },
+        percentual_custom: { type: 'number', description: 'Override da tabela CRECI (0-1, ex: 0.07 pra 7%). Use quando negociou taxa diferente.' },
+        split: {
+          type: 'array',
+          description: 'Divisão da comissão entre participantes. Default 50/50 imobiliária+corretor. Exemplo: [{"nome":"Romatec","papel":"imobiliaria","percentual":0.4},{"nome":"Daniele","papel":"vendedor","percentual":0.6}]. Soma deve ser 1.0.',
+          items: {
+            type: 'object',
+            properties: {
+              nome:       { type: 'string' },
+              papel:      { type: 'string', description: 'captador | vendedor | imobiliaria | corretor_unico | outro' },
+              percentual: { type: 'number', description: 'Fração 0-1 (ex: 0.5 = 50%)' },
+            },
+          },
+        },
+      },
+      required: ['tipo', 'valor_negocio'],
+    },
+  },
+  {
+    name: 'listar_tabela_comissao',
+    description: 'Mostra a tabela CRECI/MA sugestiva (% por tipo de operação). Use quando o Chefe perguntar "qual o percentual padrão" ou "quanto cobra venda rural".',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -2353,6 +2387,12 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'listar_municipios_cartorio':
         data = listarMunicipiosComCartorio();
+        break;
+      case 'calcular_comissao_corretagem':
+        data = calcularComissao(input as unknown as Parameters<typeof calcularComissao>[0]);
+        break;
+      case 'listar_tabela_comissao':
+        data = listarTabelaComissao();
         break;
 
       // ── v1.40.0: Briefing semanal + diagnóstico banco ──
