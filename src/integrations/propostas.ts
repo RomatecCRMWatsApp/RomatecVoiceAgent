@@ -717,51 +717,71 @@ export async function gerarPdfProposta(id: string): Promise<Buffer> {
   doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.4);
 
-  const tableTop = doc.y;
-  const colX = { idx: 48, desc: 70, un: 320, qtd: 360, vu: 410, sub: 480 };
-  const colW = { sub: 67 };
-  // Header
-  doc.fontSize(9).fillColor('#444').font('Helvetica-Bold');
-  doc.text('#',          colX.idx,  tableTop, { width: 16 });
-  doc.text('Descrição',  colX.desc, tableTop, { width: 245 });
-  doc.text('Un',         colX.un,   tableTop, { width: 30 });
-  doc.text('Qtd',        colX.qtd,  tableTop, { width: 45,  align: 'right' });
-  doc.text('V.Unit',     colX.vu,   tableTop, { width: 65,  align: 'right' });
-  doc.text('Subtotal',   colX.sub,  tableTop, { width: colW.sub, align: 'right' });
-  doc.font('Helvetica');
-  doc.moveDown(0.3);
-  doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#888').lineWidth(0.5).stroke();
-  doc.moveDown(0.2);
+  // v1.65.8: layout reescrito — calcula altura real de cada linha pra não
+  // sobrepor descrições longas, e reseta cursor.x após tabela pra evitar que
+  // o "VALOR TOTAL" herde a largura da última coluna.
+  const PAGE_BOTTOM = 760;
+  const colX = { idx: 48, desc: 70, un: 322, qtd: 358, vu: 408, sub: 480 };
+  const colW = { idx: 18, desc: 248, un: 32, qtd: 46, vu: 66, sub: 67 };
 
-  // Linhas
+  const drawHeader = (yTop: number) => {
+    doc.fontSize(9).fillColor('#444').font('Helvetica-Bold');
+    doc.text('#',         colX.idx,  yTop, { width: colW.idx });
+    doc.text('Descrição', colX.desc, yTop, { width: colW.desc });
+    doc.text('Un',        colX.un,   yTop, { width: colW.un });
+    doc.text('Qtd',       colX.qtd,  yTop, { width: colW.qtd, align: 'right' });
+    doc.text('V.Unit',    colX.vu,   yTop, { width: colW.vu,  align: 'right' });
+    doc.text('Subtotal',  colX.sub,  yTop, { width: colW.sub, align: 'right' });
+    doc.font('Helvetica');
+    const sepY = yTop + 12;
+    doc.moveTo(48, sepY).lineTo(547, sepY).strokeColor('#888').lineWidth(0.5).stroke();
+    return sepY + 4; // próxima Y disponível
+  };
+
+  let cursorY = drawHeader(doc.y);
+
   doc.fontSize(9).fillColor('#111');
   for (let i = 0; i < p.itens.length; i++) {
     const it = p.itens[i];
-    const y = doc.y;
-    // quebra de página se chegar perto do fim
-    if (y > 720) { doc.addPage(); }
-    const yy = doc.y;
-    doc.text(String(i + 1), colX.idx,  yy, { width: 16 });
-    doc.text(it.descricao,  colX.desc, yy, { width: 245 });
-    doc.text(it.unidade,    colX.un,   yy, { width: 30 });
-    doc.text(it.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 2 }), colX.qtd, yy, { width: 45, align: 'right' });
-    doc.text(formatBRL(it.valor_unitario).replace('R$', ''), colX.vu, yy, { width: 65, align: 'right' });
-    doc.text(formatBRL(it.valor_total).replace('R$', ''),    colX.sub, yy, { width: colW.sub, align: 'right' });
-    doc.moveDown(0.4);
+    const descTxt = it.descricao;
+    // calcula altura ocupada pela descrição (a coluna mais larga é a referência)
+    const hDesc = doc.heightOfString(descTxt, { width: colW.desc });
+    const lineHeight = Math.max(hDesc, 12);
+
+    // quebra de página se a próxima linha ultrapassa o fundo
+    if (cursorY + lineHeight > PAGE_BOTTOM) {
+      doc.addPage();
+      cursorY = drawHeader(doc.y);
+    }
+
+    doc.text(String(i + 1), colX.idx,  cursorY, { width: colW.idx });
+    doc.text(descTxt,       colX.desc, cursorY, { width: colW.desc });
+    doc.text(it.unidade,    colX.un,   cursorY, { width: colW.un });
+    doc.text(it.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 2 }),
+             colX.qtd, cursorY, { width: colW.qtd, align: 'right' });
+    doc.text(formatBRL(it.valor_unitario).replace('R$', ''),
+             colX.vu,  cursorY, { width: colW.vu,  align: 'right' });
+    doc.text(formatBRL(it.valor_total).replace('R$', ''),
+             colX.sub, cursorY, { width: colW.sub, align: 'right' });
+
+    cursorY += lineHeight + 4; // padding entre linhas
   }
 
-  doc.moveDown(0.4);
-  doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor(corHex).lineWidth(1).stroke();
-  doc.moveDown(0.4);
-  // Total
-  doc.fontSize(12).font('Helvetica-Bold').fillColor('#111')
-     .text(`VALOR TOTAL: ${formatBRL(p.valor_total)}`, { align: 'right' });
-  doc.font('Helvetica');
-  doc.moveDown(0.6);
+  // Linha separadora forte antes do total
+  doc.moveTo(48, cursorY + 2).lineTo(547, cursorY + 2).strokeColor(corHex).lineWidth(1).stroke();
+  cursorY += 10;
 
-  doc.fontSize(9).fillColor('#444');
-  doc.text(`Data: ${p.data_proposta}    ·    Validade: ${p.validade_dias} dias`);
-  doc.moveDown(0.4);
+  // Total — sempre alinhado à direita na largura cheia da página (48 → 547 = 499)
+  doc.fontSize(13).font('Helvetica-Bold').fillColor('#111')
+     .text(`VALOR TOTAL: ${formatBRL(p.valor_total)}`, 48, cursorY, { width: 499, align: 'right' });
+  doc.font('Helvetica');
+  cursorY += 22;
+
+  doc.fontSize(9).fillColor('#444')
+     .text(`Data: ${p.data_proposta}    ·    Validade: ${p.validade_dias} dias`, 48, cursorY, { width: 499 });
+  cursorY += 16;
+  doc.x = 48;
+  doc.y = cursorY;
 
   // Responsável técnico / indicador
   if (p.gestor_nome || p.gestor_cargo || p.gestor_telefone) {
