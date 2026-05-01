@@ -852,6 +852,20 @@ export async function runMigrations(): Promise<void> {
   // Desambiguação por descricao (não tem UNIQUE — confiamos no IGNORE de PRIMARY).
   await popularCatalogoSinapi();
 
+  // v1.65.5: campos do gestor/indicador da proposta (sai no relatório)
+  for (const col of [
+    "ADD COLUMN gestor_cargo    VARCHAR(40)  DEFAULT NULL AFTER criada_por",
+    "ADD COLUMN gestor_nome     VARCHAR(150) DEFAULT NULL AFTER gestor_cargo",
+    "ADD COLUMN gestor_telefone VARCHAR(20)  DEFAULT NULL AFTER gestor_nome",
+  ]) {
+    try { await pool.execute(`ALTER TABLE propostas ${col}`); }
+    catch (err) {
+      if (!/Duplicate column|already exists/i.test((err as Error).message)) {
+        console.warn('[migrations] alter propostas falhou (não-bloqueante):', (err as Error).message.slice(0, 100));
+      }
+    }
+  }
+
   console.log('[DB] Migrations complete');
 }
 
