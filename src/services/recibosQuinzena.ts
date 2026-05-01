@@ -1381,6 +1381,48 @@ interface EnvioPendenteRow extends RowDataPacket {
   status: string; recibo_hash: string | null;
 }
 
+// v1.65.18: identifica se o phone do remetente é de um colaborador ativo
+// da Equipe. Usado pra BLOQUEAR ZAYRA de responder mensagens de colaboradores
+// — se for, ou processamos como resposta de recibo, ou repassamos ao CEO.
+// Em hipótese nenhuma a ZAYRA conversa livremente com colaborador.
+export async function isPhoneDeColaborador(phone: string): Promise<{
+  membroId: string; nome: string; funcao: string | null;
+} | null> {
+  const digits = (phone || '').replace(/\D/g, '');
+  if (digits.length < 10) return null;
+  const sufixo = digits.slice(-10);
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, nome, funcao
+       FROM romatec_obra_equipe
+      WHERE ativo = 1
+        AND telefone IS NOT NULL
+        AND REGEXP_REPLACE(telefone, '[^0-9]', '') LIKE ?
+      LIMIT 1`,
+    [`%${sufixo}`]
+  );
+  if (!rows.length) return null;
+  return {
+    membroId: String(rows[0].id),
+    nome: String(rows[0].nome),
+    funcao: rows[0].funcao as string | null,
+  };
+}
+
+// v1.65.18: notifica CEO quando colaborador manda mensagem que não bate
+// com nenhum fluxo conhecido de recibo. ZAYRA não responde — CEO decide.
+export async function notificarCeoMensagemColaborador(input: {
+  phone: string; text: string;
+  membroId: string; nome: string; funcao: string | null;
+}): Promise<void> {
+  await notificarCeo(
+    `🔔 Mensagem de colaborador (sem fluxo ativo)\n\n` +
+    `${input.nome}${input.funcao ? ' ('+input.funcao+')' : ''}\n` +
+    `${input.phone}\n\n` +
+    `Disse: "${input.text.slice(0, 400)}"\n\n` +
+    `_(Não respondi — você decide.)_`
+  );
+}
+
 async function buscarEnvioPendentePorPhone(phone: string): Promise<EnvioPendenteRow | null> {
   const digits = (phone || '').replace(/\D/g, '');
   if (digits.length < 10) {
