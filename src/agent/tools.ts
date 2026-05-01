@@ -2531,22 +2531,24 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         data = await enviarBriefingSemanal();
         break;
       case 'diagnostico_banco': {
-        type Row = import('mysql2').RowDataPacket & { name: string; rows: number };
+        // v1.59.1: `rows` é palavra reservada (Window Functions MySQL 8). Usa row_count.
+        type Row = import('mysql2').RowDataPacket & { tbl_name: string; row_count: number };
         const [tables] = await poolDb.execute<Row[]>(
-          `SELECT TABLE_NAME AS name, TABLE_ROWS AS rows
+          `SELECT TABLE_NAME AS tbl_name, TABLE_ROWS AS row_count
            FROM information_schema.TABLES
            WHERE TABLE_SCHEMA = DATABASE()
            ORDER BY TABLE_NAME ASC`,
         );
         const [dbInfo] = await poolDb.execute<import('mysql2').RowDataPacket[]>(
-          'SELECT DATABASE() AS db, VERSION() AS version, USER() AS user',
+          'SELECT DATABASE() AS db, VERSION() AS ver, USER() AS usr',
         );
+        const info = dbInfo[0] as { db: string; ver: string; usr: string };
         data = {
-          banco_atual:    (dbInfo[0] as { db: string }).db,
-          mysql_version:  (dbInfo[0] as { version: string }).version,
-          mysql_user:     (dbInfo[0] as { user: string }).user,
+          banco_atual:    info.db,
+          mysql_version:  info.ver,
+          mysql_user:     info.usr,
           total_tabelas:  tables.length,
-          tabelas:        tables.map(t => ({ nome: t.name, linhas_aprox: Number(t.rows) })),
+          tabelas:        tables.map(t => ({ nome: t.tbl_name, linhas_aprox: Number(t.row_count) })),
         };
         break;
       }
