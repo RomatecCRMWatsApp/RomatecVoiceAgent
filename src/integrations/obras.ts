@@ -527,6 +527,10 @@ export async function atualizarMembroEquipe(input: {
   const [r] = await pool.execute<ResultSetHeader>(
     `UPDATE romatec_obra_equipe SET ${fields.join(', ')} WHERE id = ?`, params,
   );
+  // v1.65.10: re-sync após edição (cargo/telefone/email/ativo podem ter mudado)
+  void import('../services/syncEquipeMembro')
+    .then(s => s.syncEquipeMembro(Number(input.id)))
+    .catch(err => console.warn('[syncEquipe] falhou após atualizar:', (err as Error).message));
   return { ok: true, affected: r.affectedRows, message: `Membro ${input.id} atualizado.` };
 }
 
@@ -579,6 +583,14 @@ export async function apagarMembroEquipe(input: {
   const [r] = await pool.execute<ResultSetHeader>(
     'DELETE FROM romatec_obra_equipe WHERE id = ?', [input.id],
   );
+  // v1.65.10: limpa memória ZAYRA do colaborador apagado.
+  // Não toca em contacts — o registro pode ser referenciado em outros lugares
+  // (cliente/fornecedor noutro fluxo); só deslinkar é mais seguro.
+  void pool.execute(
+    `DELETE FROM zayra_memory WHERE relevance_tags LIKE ?`,
+    [`%equipe_membro_id_${input.id}%`]
+  ).then(() => import('../agent/memory').then(m => m.invalidateContextCache?.()))
+   .catch(err => console.warn('[syncEquipe] limpeza memória falhou:', (err as Error).message));
   return { ok: true, affected: r.affectedRows, message: `Membro ${input.id} removido.` };
 }
 
@@ -635,6 +647,11 @@ export async function criarMembroEquipe(input: {
       input.obra_id ? Number(input.obra_id) : null,
     ],
   );
+  // v1.65.10: sync Equipe → contacts → zayra_memory (fire-and-forget,
+  // não bloqueia retorno; falha não derruba criação)
+  void import('../services/syncEquipeMembro')
+    .then(s => s.syncEquipeMembro(r.insertId))
+    .catch(err => console.warn('[syncEquipe] falhou após criar:', (err as Error).message));
   return { ok: true, insertId: r.insertId, message: `${input.nome} adicionado${input.obra_id ? ` à obra ${input.obra_id}` : ' à equipe geral'} (ID ${r.insertId}).` };
 }
 
