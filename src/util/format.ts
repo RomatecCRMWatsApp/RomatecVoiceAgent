@@ -38,3 +38,20 @@ export function formatBRDate(d: Date | string | number | null | undefined): stri
   if (Number.isNaN(date.getTime())) return '';
   return _fmtDateOnly.format(date);
 }
+
+const _fmtBRL = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/**
+ * Formata valor monetário em BRL: "R$ 1.234,56".
+ */
+export function formatBRL(v: number | string | null | undefined): string {
+  if (v === null || v === undefined || v === '') return 'R$ 0,00';
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n)) return 'R$ 0,00';
+  return _fmtBRL.format(n);
+}
