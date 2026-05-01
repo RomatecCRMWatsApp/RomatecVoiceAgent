@@ -32,6 +32,7 @@ import {
 import { calcularItbi, listarMunicipiosValidados } from '../services/calcularItbi';
 import { calcularIptu, listarMunicipiosIptu } from '../services/calcularIptu';
 import { consultarProcesso as datajudConsultarProcesso, listarTribunaisDataJud, diagnosticarDataJud } from '../integrations/datajud';
+import { buscarCartorio, montarUrlConsultaOnr, listarMunicipiosComCartorio } from '../integrations/cartoriosOnr';
 import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
@@ -658,6 +659,36 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: 'diagnostico_datajud',
     description: 'Diagnostica a conexão com o DataJud (CNJ): testa autenticação contra o TJMA, retorna status HTTP, qual formato de header funcionou ("APIKey" ou "ApiKey"), chave em uso (mascarada) e se veio de env var. Use SEMPRE que consultar_processo_tj falhar com 401/403 — a chave pública do CNJ rotaciona ocasionalmente.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'buscar_cartorio_competente',
+    description: 'Retorna o(s) cartório(s) de Registro de Imóveis (CRI) competente(s) num município. Cobre municípios da operação Romatec: Açailândia, Imperatriz (1ª/2ª zona), São Luís (7 zonas), Caxias, Codó, Timon, Bacabal, Santa Inês, Pinheiro, Cidelândia, São Pedro da Água Branca, Vila Nova dos Martírios, Itinga do Maranhão, Buritirama. Retorna nome, endereço, telefone, abrangência. Pra cidade fora da tabela, retorna URL de busca no portal ONR. Use quando o Chefe perguntar "qual cartório atende em X" ou "onde tiro a matrícula desse imóvel".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        municipio: { type: 'string', description: 'Ex: "Açailândia"' },
+        uf:        { type: 'string', description: 'Default MA' },
+      },
+      required: ['municipio'],
+    },
+  },
+  {
+    name: 'montar_url_consulta_onr',
+    description: 'Monta URLs pré-preenchidas pra consulta de matrícula no portal ONR (Operador Nacional do Registro — registradores.org.br). NÃO faz a consulta — só gera o link pro Chefe abrir e pagar manualmente (consulta é PAGA: R$ 5–200 dependendo do tipo). Retorna 3 URLs: buscar cartório, pedir certidão, acompanhar pedido + tabela de custos aproximados. Use quando o Chefe pedir "abre o ONR pra eu consultar matrícula X".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        municipio: { type: 'string' },
+        uf:        { type: 'string', description: 'Default MA' },
+        matricula: { type: 'string', description: 'Número da matrícula (opcional, só pra contexto)' },
+      },
+      required: ['municipio'],
+    },
+  },
+  {
+    name: 'listar_municipios_cartorio',
+    description: 'Lista os municípios que a ZAYRA tem cartório de Registro de Imóveis cadastrado. Use quando perguntarem "quais cidades você sabe o cartório".',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -2313,6 +2344,15 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'diagnostico_datajud':
         data = await diagnosticarDataJud();
+        break;
+      case 'buscar_cartorio_competente':
+        data = buscarCartorio(input as unknown as Parameters<typeof buscarCartorio>[0]);
+        break;
+      case 'montar_url_consulta_onr':
+        data = montarUrlConsultaOnr(input as unknown as Parameters<typeof montarUrlConsultaOnr>[0]);
+        break;
+      case 'listar_municipios_cartorio':
+        data = listarMunicipiosComCartorio();
         break;
 
       // ── v1.40.0: Briefing semanal + diagnóstico banco ──
