@@ -170,6 +170,8 @@ async function detectarObraEstourandoOrcamento(): Promise<Alert[]> {
 
 // ── Orquestrador: roda todos os detectores ───────────────────────────────────
 export async function rodarTodosDetectores(): Promise<Alert[]> {
+  // Import dinâmico pra evitar dependência circular (documentosVencimento importa Alert daqui).
+  const { detectarDocumentosVencendo } = await import('../services/documentosVencimento');
   const results = await Promise.allSettled([
     detectarMaterialBaixo(),
     detectarEtapaAtrasada(),
@@ -177,9 +179,10 @@ export async function rodarTodosDetectores(): Promise<Alert[]> {
     detectarAniversarioCliente(),
     detectarFuncionarioInativo(),
     detectarObraEstourandoOrcamento(),
+    detectarDocumentosVencendo(),
   ]);
   const alerts: Alert[] = [];
-  const detectorNames = ['material_baixo', 'etapa_atrasada', 'lead_esquecido', 'aniversario', 'func_inativo', 'obra_orcamento'];
+  const detectorNames = ['material_baixo', 'etapa_atrasada', 'lead_esquecido', 'aniversario', 'func_inativo', 'obra_orcamento', 'documentos_vencimento'];
   results.forEach((r, i) => {
     if (r.status === 'fulfilled') {
       alerts.push(...r.value);

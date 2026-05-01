@@ -36,6 +36,10 @@ import { buscarCartorio, montarUrlConsultaOnr, listarMunicipiosComCartorio } fro
 import { calcularComissao, listarTabelaComissao } from '../services/calcularComissao';
 import { dashboardRomatec } from '../services/dashboardRomatec';
 import {
+  cadastrarDocumento, listarDocumentos, marcarRenovado, apagarDocumento,
+  listarTiposDocumento,
+} from '../services/documentosVencimento';
+import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
 } from '../services/meetingNotes';
@@ -724,6 +728,67 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: 'listar_tabela_comissao',
     description: 'Mostra a tabela CRECI/MA sugestiva (% por tipo de operação). Use quando o Chefe perguntar "qual o percentual padrão" ou "quanto cobra venda rural".',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'cadastrar_documento_vencimento',
+    description: 'Cadastra um documento com data de vencimento pra ZAYRA monitorar e avisar antes de vencer. Tipos: art_crea, anuidade_crea, cnd_federal, cnd_estadual, cnd_municipal, cnd_trabalhista, matricula, onus_reais, ccir, car_sicar, alvara, avcb, iptu, boleto, compromisso_venda, locacao, apolice_seguro, outro. Alertas automáticos disparam em D-30, D-15, D-7, D-3, D-1 e D+0 (vencido). Use quando o Chefe falar "lembra eu da ART tal" ou "minha CNAE federal vence em X".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        descricao:        { type: 'string', description: 'Ex: "ART vistoria fazenda São Pedro" ou "CND Federal CPF Romário"' },
+        tipo:             { type: 'string', description: 'Veja lista em listar_tipos_documento' },
+        data_vencimento:  { type: 'string', description: 'YYYY-MM-DD' },
+        numero_doc:       { type: 'string', description: 'Número do documento (ex: ART 12345)' },
+        data_emissao:     { type: 'string', description: 'YYYY-MM-DD (opcional)' },
+        obra_id:          { type: 'number', description: 'Vincula à obra (opcional)' },
+        contato_nome:     { type: 'string', description: 'Titular/cliente (ex: "João da Silva")' },
+        responsavel:      { type: 'string', description: 'Quem vai providenciar a renovação' },
+        observacoes:      { type: 'string' },
+      },
+      required: ['descricao', 'tipo', 'data_vencimento'],
+    },
+  },
+  {
+    name: 'listar_documentos_vencimento',
+    description: 'Lista documentos cadastrados pra monitoramento. Filtros: vencendo_em (próximos N dias), vencidos (passados), tipo, obra_id. Use "quais documentos vencem este mês" → vencendo_em:30, "quais venceram" → vencidos:true.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vencendo_em:    { type: 'number', description: 'Próximos N dias (ex: 30)' },
+        vencidos:       { type: 'boolean', description: 'Mostra só os já vencidos' },
+        tipo:           { type: 'string' },
+        obra_id:        { type: 'number' },
+        apenas_ativos:  { type: 'boolean', description: 'Default true' },
+      },
+    },
+  },
+  {
+    name: 'marcar_documento_renovado',
+    description: 'Atualiza a data de vencimento de um documento (renovação). Use quando o Chefe disser "renovei a ART, novo vencimento é Y" ou "tirei nova CND, vence dia Z". Mantém histórico nas observações.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:                   { type: 'number' },
+        nova_data_vencimento: { type: 'string', description: 'YYYY-MM-DD' },
+        novo_numero_doc:      { type: 'string', description: 'Se o número mudou na renovação' },
+        observacoes:          { type: 'string' },
+      },
+      required: ['id', 'nova_data_vencimento'],
+    },
+  },
+  {
+    name: 'apagar_documento_vencimento',
+    description: 'Desativa monitoramento de um documento (soft-delete, mantém histórico). Use quando o documento perdeu relevância (ex: contrato encerrado, imóvel vendido).',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'number' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'listar_tipos_documento',
+    description: 'Lista os tipos de documento que a ZAYRA monitora (ART, CND, matrícula, alvará, AVCB, etc) com seus rótulos amigáveis.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -2407,6 +2472,21 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'dashboard_romatec':
         data = await dashboardRomatec(input as { dias?: number });
+        break;
+      case 'cadastrar_documento_vencimento':
+        data = await cadastrarDocumento(input as unknown as Parameters<typeof cadastrarDocumento>[0]);
+        break;
+      case 'listar_documentos_vencimento':
+        data = await listarDocumentos(input as unknown as Parameters<typeof listarDocumentos>[0]);
+        break;
+      case 'marcar_documento_renovado':
+        data = await marcarRenovado(input as unknown as Parameters<typeof marcarRenovado>[0]);
+        break;
+      case 'apagar_documento_vencimento':
+        data = await apagarDocumento(Number(input.id));
+        break;
+      case 'listar_tipos_documento':
+        data = listarTiposDocumento();
         break;
 
       // ── v1.40.0: Briefing semanal + diagnóstico banco ──
