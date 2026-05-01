@@ -753,5 +753,241 @@ export async function runMigrations(): Promise<void> {
        NULL, NULL, 'romateccrm@gmail.com')
   `);
 
+  // v1.65.0: Implementação 1 — Proposta de Mão de Obra (schema + catálogo SINAPI)
+  // 4 tabelas: catálogo de serviços, clientes da proposta (separado do CRM),
+  // propostas e itens de cada proposta.
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS sinapi_servicos (
+      id                   INT AUTO_INCREMENT PRIMARY KEY,
+      codigo_sinapi        VARCHAR(20),
+      categoria            VARCHAR(80) NOT NULL,
+      subcategoria         VARCHAR(80),
+      descricao            VARCHAR(255) NOT NULL,
+      unidade              VARCHAR(10) NOT NULL,
+      valor_referencia     DECIMAL(10,2),
+      valor_e_referencial  BOOLEAN DEFAULT TRUE,
+      ativo                BOOLEAN DEFAULT TRUE,
+      atualizado_em        TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_categoria  (categoria, ativo),
+      INDEX idx_codigo     (codigo_sinapi)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS propostas_clientes (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      nome            VARCHAR(150) NOT NULL,
+      cpf_cnpj        VARCHAR(20),
+      telefone        VARCHAR(20),
+      email           VARCHAR(150),
+      endereco        VARCHAR(255),
+      cidade          VARCHAR(80),
+      estado          VARCHAR(2),
+      cep             VARCHAR(10),
+      observacoes     TEXT,
+      criado_em       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      deleted_at      TIMESTAMP NULL,
+      INDEX idx_nome  (nome),
+      INDEX idx_del   (deleted_at)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS propostas (
+      id                INT AUTO_INCREMENT PRIMARY KEY,
+      numero            VARCHAR(20) NOT NULL UNIQUE,
+      cliente_id        INT NOT NULL,
+      endereco_obra     VARCHAR(255),
+      data_proposta     DATE NOT NULL,
+      validade_dias     INT DEFAULT 15,
+      valor_total       DECIMAL(12,2) NOT NULL DEFAULT 0,
+      observacoes       TEXT,
+      status            ENUM('rascunho','enviada','aceita','recusada','expirada') DEFAULT 'rascunho',
+      pdf_path          VARCHAR(500),
+      enviada_whatsapp  BOOLEAN DEFAULT FALSE,
+      enviada_em        TIMESTAMP NULL,
+      criada_por        VARCHAR(80),
+      criado_em         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      deleted_at        TIMESTAMP NULL,
+      INDEX idx_status  (status, deleted_at),
+      INDEX idx_cliente (cliente_id),
+      INDEX idx_numero  (numero)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS proposta_itens (
+      id                INT AUTO_INCREMENT PRIMARY KEY,
+      proposta_id       INT NOT NULL,
+      servico_id        INT,
+      descricao         VARCHAR(255) NOT NULL,
+      unidade           VARCHAR(10) NOT NULL,
+      quantidade        DECIMAL(10,2) NOT NULL,
+      valor_unitario    DECIMAL(10,2) NOT NULL,
+      valor_total       DECIMAL(12,2) NOT NULL,
+      ordem             INT DEFAULT 0,
+      criado_em         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_proposta (proposta_id, ordem)
+    )
+  `);
+
+  // Catálogo SINAPI inicial — ~100 itens em 12 categorias.
+  // Valores são ESTIMATIVAS de mercado (briefing autorizou: valor_e_referencial=TRUE).
+  // Atualizar manualmente quando SINAPI oficial for consultada.
+  // INSERT IGNORE em chunks pra não duplicar se rodar de novo.
+  // Desambiguação por descricao (não tem UNIQUE — confiamos no IGNORE de PRIMARY).
+  await popularCatalogoSinapi();
+
   console.log('[DB] Migrations complete');
+}
+
+// v1.65.0: catálogo SINAPI inicial (~100 itens em 12 categorias).
+// Idempotente via INSERT IGNORE (UNIQUE descricao+unidade).
+// Adiciona UNIQUE KEY se ainda não existe.
+async function popularCatalogoSinapi(): Promise<void> {
+  // Adiciona UNIQUE pra desambiguar (idempotente)
+  try {
+    await pool.execute(`ALTER TABLE sinapi_servicos ADD UNIQUE KEY uk_desc_unidade (descricao, unidade)`);
+  } catch (err) {
+    if (!/Duplicate key|already exists/i.test((err as Error).message)) {
+      console.warn('[sinapi] add unique key falhou (não-bloqueante):', (err as Error).message.slice(0, 80));
+    }
+  }
+
+  // Verifica se já tem dados — se sim, pula populacao (não força update de valores).
+  // Atualizar valores SINAPI no futuro deve ser via tool dedicada, não no boot.
+  type Cnt = { c: number };
+  const [rowsAny] = await pool.execute(`SELECT COUNT(*) AS c FROM sinapi_servicos`);
+  const c = Number((rowsAny as Cnt[])[0]?.c ?? 0);
+  if (c >= 80) {
+    return; // já populado
+  }
+
+  // [categoria, subcategoria, codigo_sinapi(opcional), descricao, unidade, valor_referencia]
+  const itens: Array<[string, string | null, string | null, string, string, number]> = [
+    // Cobertura/Telhado (8)
+    ['Cobertura', 'Cerâmico',     '94209', 'Telha cerâmica colonial — assentamento + estrutura simples',        'm²',  85.00],
+    ['Cobertura', 'Cerâmico',     null,    'Telha cerâmica francesa — assentamento + estrutura',                 'm²',  90.00],
+    ['Cobertura', 'Fibrocimento', '94216', 'Telha fibrocimento 6mm — assentamento + tesouras de madeira',        'm²',  60.00],
+    ['Cobertura', 'Metálico',     null,    'Telha metálica trapezoidal — instalação',                            'm²',  70.00],
+    ['Cobertura', 'Manta',        null,    'Manta asfáltica aluminizada — aplicação',                            'm²',  35.00],
+    ['Cobertura', 'Acessórios',   null,    'Calha em chapa galvanizada — instalação',                            'm',   45.00],
+    ['Cobertura', 'Acessórios',   null,    'Rufo em chapa galvanizada — instalação',                             'm',   38.00],
+    ['Cobertura', 'Demolição',    null,    'Remoção de cobertura existente (telhas + estrutura)',                'm²',  30.00],
+    // Alvenaria/Estrutura (10)
+    ['Alvenaria', 'Tijolo',       '87504', 'Elevação de parede — tijolo cerâmico 9x19x19 — espessura ½ vez',     'm²',  90.00],
+    ['Alvenaria', 'Bloco',        null,    'Elevação de parede — bloco de concreto 14x19x39 — espessura ½ vez',  'm²',  95.00],
+    ['Alvenaria', 'Tijolo',       null,    'Elevação de parede — tijolo cerâmico 9x14x19 — espessura 1 vez',     'm²', 130.00],
+    ['Alvenaria', 'Demolição',    null,    'Demolição de parede de alvenaria (com remoção de entulho)',          'm²',  45.00],
+    ['Alvenaria', 'Reboco',       '87775', 'Reboco interno (massa única) — espessura 2cm',                       'm²',  35.00],
+    ['Alvenaria', 'Reboco',       null,    'Reboco externo — espessura 2,5cm',                                   'm²',  42.00],
+    ['Alvenaria', 'Chapisco',     '87878', 'Chapisco de cimento e areia 1:3',                                    'm²',  12.00],
+    ['Alvenaria', 'Estrutural',   null,    'Concreto estrutural — laje pré-moldada (mão de obra)',               'm²', 110.00],
+    ['Alvenaria', 'Estrutural',   null,    'Pilar de concreto armado — execução (forma + ferro + concreto)',     'm³', 850.00],
+    ['Alvenaria', 'Estrutural',   null,    'Viga de concreto armado — execução',                                 'm³', 800.00],
+    // Pisos (10)
+    ['Pisos',     'Cerâmico',     '87248', 'Assentamento piso cerâmico 45x45 (excl. material)',                  'm²',  55.00],
+    ['Pisos',     'Porcelanato',  '87263', 'Assentamento piso porcelanato 60x60 (excl. material)',               'm²',  75.00],
+    ['Pisos',     'Porcelanato',  null,    'Assentamento piso porcelanato 80x80 retificado',                     'm²',  85.00],
+    ['Pisos',     'Esmaltado',    null,    'Assentamento piso esmaltado padrão',                                 'm²',  50.00],
+    ['Pisos',     'Laminado',     null,    'Instalação piso laminado 7mm — clicado',                             'm²',  45.00],
+    ['Pisos',     'Vinílico',     null,    'Instalação piso vinílico em manta',                                  'm²',  55.00],
+    ['Pisos',     'Contrapiso',   '87752', 'Contrapiso de concreto magro — espessura 5cm',                       'm²',  38.00],
+    ['Pisos',     'Regularização',null,    'Regularização de piso com argamassa — espessura 3cm',                'm²',  28.00],
+    ['Pisos',     'Rejunte',      null,    'Aplicação de rejunte (até 3mm)',                                     'm²',   8.00],
+    ['Pisos',     'Demolição',    null,    'Demolição de piso cerâmico/porcelanato com remoção',                 'm²',  35.00],
+    // Revestimento de paredes (10)
+    ['Revestimento','Azulejo',    '87264', 'Assentamento azulejo 30x40 — banheiro/cozinha (excl. material)',     'm²',  60.00],
+    ['Revestimento','Cerâmica',   null,    'Assentamento cerâmica padrão 25x40 em parede',                       'm²',  55.00],
+    ['Revestimento','Porcelanato',null,    'Porcelanato em parede 60x60 retificado',                             'm²',  90.00],
+    ['Revestimento','Gesso',      null,    'Aplicação de gesso liso em paredes — interior',                      'm²',  25.00],
+    ['Revestimento','Massa',      '88485', 'Massa corrida em paredes (2 demãos)',                                'm²',  18.00],
+    ['Revestimento','Pintura',    '88489', 'Pintura látex acrílica — paredes (2 demãos)',                        'm²',  22.00],
+    ['Revestimento','Pintura',    null,    'Pintura esmalte sintético em portas/grades (3 demãos)',              'm²',  35.00],
+    ['Revestimento','Pintura',    null,    'Pintura textura projetada (1 demão)',                                'm²',  28.00],
+    ['Revestimento','Pintura',    null,    'Pintura epóxi piso/área molhada',                                    'm²',  45.00],
+    ['Revestimento','Lixamento',  null,    'Lixamento e preparo de parede pra pintura',                          'm²',  10.00],
+    // Hidráulica (10)
+    ['Hidráulica','Banheiro',     null,    'Instalação hidráulica completa de banheiro padrão (água+esgoto)',    'vb', 1800.00],
+    ['Hidráulica','Cozinha',      null,    'Instalação hidráulica completa de cozinha padrão',                   'vb', 1500.00],
+    ['Hidráulica','Área serviço', null,    'Instalação hidráulica área de serviço (tanque+máquina+ralo)',        'vb',  900.00],
+    ['Hidráulica','Tubulação',    null,    'Tubulação PVC água fria 25mm — m linear instalado',                  'm',   18.00],
+    ['Hidráulica','Tubulação',    null,    'Tubulação PVC esgoto 100mm — m linear instalado',                    'm',   28.00],
+    ['Hidráulica','Registro',     null,    'Instalação de registro/válvula descarga',                            'un', 120.00],
+    ['Hidráulica','Caixa',        null,    'Instalação caixa de água 1000L — fibra (excl. material)',            'un', 350.00],
+    ['Hidráulica','Caixa',        null,    'Instalação caixa de passagem/inspeção esgoto',                       'un', 180.00],
+    ['Hidráulica','Aquecedor',    null,    'Instalação de aquecedor a gás de passagem',                          'un', 280.00],
+    ['Hidráulica','Reparo',       null,    'Conserto de vazamento (até 2h de serviço)',                          'h',   80.00],
+    // Sanitária (6)
+    ['Sanitária', 'Bacia',        null,    'Instalação de bacia sanitária com caixa acoplada',                   'un', 180.00],
+    ['Sanitária', 'Lavatório',    null,    'Instalação de lavatório com coluna ou bancada',                      'un', 150.00],
+    ['Sanitária', 'Chuveiro',     null,    'Instalação de chuveiro elétrico ou ducha',                           'un', 120.00],
+    ['Sanitária', 'Acessórios',   null,    'Instalação de ralo sifonado',                                        'un',  60.00],
+    ['Sanitária', 'Acessórios',   null,    'Instalação de papeleira/saboneteira/toalheiro (jogo 5 peças)',       'vb', 120.00],
+    ['Sanitária', 'Bidê',         null,    'Instalação de bidê',                                                 'un', 150.00],
+    // Elétrica (10)
+    ['Elétrica',  'Completa',     null,    'Instalação elétrica completa (residência até 80m²)',                 'vb', 4500.00],
+    ['Elétrica',  'Completa',     null,    'Instalação elétrica completa (residência 80-150m²)',                 'vb', 7500.00],
+    ['Elétrica',  'Fiação',       null,    'Troca de fiação ponto a ponto — m de fiação',                        'm',   12.00],
+    ['Elétrica',  'Quadro',       null,    'Instalação de quadro de distribuição até 12 disjuntores',            'un', 380.00],
+    ['Elétrica',  'Tomada',       null,    'Instalação de tomada 2P+T 10A/20A',                                  'un',  35.00],
+    ['Elétrica',  'Interruptor',  null,    'Instalação de interruptor simples/paralelo',                         'un',  30.00],
+    ['Elétrica',  'Luminária',    null,    'Instalação de luminária de teto (plafon, painel LED)',               'un',  45.00],
+    ['Elétrica',  'Luminária',    null,    'Instalação de spot/embutido com furo no gesso',                      'un',  55.00],
+    ['Elétrica',  'Eletroduto',   null,    'Eletroduto PVC ½" — passagem em alvenaria (m linear)',               'm',   18.00],
+    ['Elétrica',  'Aterramento',  null,    'Sistema de aterramento (haste + cabo até 10m)',                      'vb', 280.00],
+    // Esquadrias (6)
+    ['Esquadrias','Porta',        null,    'Instalação de porta de madeira completa (folha + batente + alizar)', 'un', 280.00],
+    ['Esquadrias','Porta',        null,    'Instalação de porta de alumínio para banheiro',                      'un', 220.00],
+    ['Esquadrias','Janela',       null,    'Instalação de janela de alumínio 1,2 x 1m com vidro',                'un', 320.00],
+    ['Esquadrias','Janela',       null,    'Instalação de janela basculante 0,6x0,5m',                           'un', 180.00],
+    ['Esquadrias','Fechadura',    null,    'Troca/instalação de fechadura simples',                              'un',  90.00],
+    ['Esquadrias','Vidro',        null,    'Vidro temperado 8mm — instalação (m²)',                              'm²', 350.00],
+    // Forros (4)
+    ['Forros',    'Gesso',        null,    'Instalação de forro de gesso liso',                                  'm²',  65.00],
+    ['Forros',    'Gesso',        null,    'Forro de gesso com sancas/rebaixos',                                 'm²',  85.00],
+    ['Forros',    'PVC',          null,    'Instalação de forro de PVC',                                         'm²',  55.00],
+    ['Forros',    'Madeira',      null,    'Forro de réguas de madeira (lambri)',                                'm²',  90.00],
+    // Externos (6)
+    ['Externos',  'Calçada',      null,    'Calçada de concreto desempenado — espessura 7cm',                    'm²',  85.00],
+    ['Externos',  'Calçada',      null,    'Calçada com pedra portuguesa/intertravado',                          'm²', 110.00],
+    ['Externos',  'Muro',         null,    'Construção de muro de alvenaria H=2m com pintura',                   'm', 280.00],
+    ['Externos',  'Portão',       null,    'Instalação de portão social metálico',                               'un', 450.00],
+    ['Externos',  'Portão',       null,    'Instalação de portão de garagem basculante manual',                  'un', 850.00],
+    ['Externos',  'Jardim',       null,    'Plantio e preparo de gramado em rolo',                               'm²',  35.00],
+    // Pacotes completos (4)
+    ['Pacotes',   'Banheiro',     null,    'Banheiro completo padrão (3m²) — mão de obra completa',              'vb', 5500.00],
+    ['Pacotes',   'Banheiro',     null,    'Banheiro de luxo (5m²) — mão de obra completa',                      'vb', 8500.00],
+    ['Pacotes',   'Cozinha',      null,    'Cozinha completa padrão (10m²) — mão de obra completa',              'vb', 7500.00],
+    ['Pacotes',   'Cozinha',      null,    'Cozinha gourmet com bancada (15m²) — mão de obra completa',          'vb',12000.00],
+    // Serviços diversos (8)
+    ['Serviços',  'Limpeza',      null,    'Limpeza pós-obra (faxina pesada)',                                   'm²',  12.00],
+    ['Serviços',  'Limpeza',      null,    'Limpeza fina pré-entrega (vidros, polimento)',                       'm²',  18.00],
+    ['Serviços',  'Entulho',      null,    'Remoção de entulho (caçamba até 4m³)',                               'un', 380.00],
+    ['Serviços',  'Transporte',   null,    'Transporte de material — frete por viagem (cidade)',                 'vb', 250.00],
+    ['Serviços',  'Mestre',       null,    'Mestre de obras — diária supervisão',                                'h',   45.00],
+    ['Serviços',  'Pedreiro',     null,    'Pedreiro — mão de obra direta',                                      'h',   30.00],
+    ['Serviços',  'Servente',     null,    'Servente/ajudante — mão de obra direta',                             'h',   18.00],
+    ['Serviços',  'ART',          null,    'ART CREA — emissão de Anotação de Responsabilidade Técnica',         'un', 350.00],
+  ];
+
+  let inseridos = 0;
+  for (const [cat, subcat, cod, desc, un, val] of itens) {
+    try {
+      const [r] = await pool.execute(
+        `INSERT IGNORE INTO sinapi_servicos
+           (categoria, subcategoria, codigo_sinapi, descricao, unidade, valor_referencia, valor_e_referencial)
+         VALUES (?,?,?,?,?,?,TRUE)`,
+        [cat, subcat, cod, desc, un, val],
+      );
+      if ((r as { affectedRows: number }).affectedRows > 0) inseridos++;
+    } catch (err) {
+      console.warn(`[sinapi] insert "${desc}" falhou:`, (err as Error).message.slice(0, 80));
+    }
+  }
+  if (inseridos > 0) {
+    console.log(`[sinapi] catálogo populado: ${inseridos}/${itens.length} itens novos inseridos`);
+  }
 }

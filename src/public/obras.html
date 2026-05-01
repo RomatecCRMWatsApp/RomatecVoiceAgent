@@ -1471,9 +1471,12 @@ const ROMATEC_HEADER_CSS = `
 .romatec-header{text-align:center;border-bottom:3px solid #0a3d2a;padding-bottom:14px;margin-bottom:18px;}
 .romatec-header img{max-height:100px;max-width:80%;height:auto;display:inline-block;}
 `;
+// v1.65.0: logo path veio pra /romatec-logo.jpg após limpeza de arquivos
+// (PR #12). Antes: /LOGO%20ROMATEC%20ATUAL.jpg (deletado, dava 404 nos recibos/PDFs).
+// alt-text mantido conservador; brand vem do tenant_settings via JS quando relevante.
 const ROMATEC_HEADER_HTML = `
 <div class="romatec-header">
-  <img src="/LOGO%20ROMATEC%20ATUAL.jpg" alt="Romatec Consultoria Total — Engenharia e Agrimensura">
+  <img src="/romatec-logo.jpg" alt="Romatec Consultoria Total — Engenharia e Agrimensura">
 </div>
 `;
 
