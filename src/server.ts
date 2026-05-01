@@ -633,6 +633,13 @@ app.get   ('/api/equipe',     apiHandle(args => obras.listarEquipe(args as { obr
 app.post  ('/api/equipe',     apiHandle(args => obras.criarMembroEquipe(args as Parameters<typeof obras.criarMembroEquipe>[0])));
 app.put   ('/api/equipe/:id', apiHandle(args => obras.atualizarMembroEquipe(args as Parameters<typeof obras.atualizarMembroEquipe>[0])));
 app.delete('/api/equipe/:id', apiHandle(args => obras.apagarMembroEquipe(args as { id: string; confirm?: boolean })));
+// v1.65.10: backfill manual de sync Equipe→contacts→zayra_memory.
+// Útil para popular tudo após deploy desta migração; depois disso, criar/editar
+// membro dispara sync automaticamente via hook em obras.ts.
+app.post('/api/equipe/sync-all', requireCeoToken, apiHandle(async () => {
+  const m = await import('./services/syncEquipeMembro');
+  return m.syncTodaEquipe();
+}));
 
 // Materiais
 app.get   ('/api/materiais',          apiHandle(args => obras.listarMateriais(args as { apenas_baixos?: boolean; obra_id?: string })));

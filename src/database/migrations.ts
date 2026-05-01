@@ -712,6 +712,19 @@ export async function runMigrations(): Promise<void> {
     `ALTER TABLE romatec_obra_equipe ADD COLUMN endereco_estado   VARCHAR(2)   NULL`,
     `ALTER TABLE romatec_obra_equipe ADD COLUMN endereco_cep      VARCHAR(10)  NULL`,
     `ALTER TABLE romatec_obra_equipe ADD COLUMN foto_url          VARCHAR(500) NULL`,
+    // v1.65.10 — PR A: sync Equipe ↔ contacts ↔ memória ZAYRA
+    // contacts ganha tratamento (Eng./Sr./Sra./Dr./...) + tom (formal/informal)
+    // + tipo (cliente/colaborador/fornecedor/...) + tags (JSON array de strings)
+    `ALTER TABLE contacts ADD COLUMN tratamento VARCHAR(40)  NULL`,
+    `ALTER TABLE contacts ADD COLUMN tom        VARCHAR(20)  NULL DEFAULT 'formal'`,
+    `ALTER TABLE contacts ADD COLUMN tipo       VARCHAR(40)  NULL`,
+    `ALTER TABLE contacts ADD COLUMN tags       JSON         NULL`,
+    `ALTER TABLE contacts ADD INDEX idx_tipo (tipo)`,
+    // romatec_obra_equipe ganha link pra contacts + chave PIX (futuro fluxo de recibos)
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN contact_id              INT          NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN chave_pix               VARCHAR(150) NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN chave_pix_atualizada_em TIMESTAMP    NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD INDEX idx_contact (contact_id)`,
   ]) {
     try {
       await pool.execute(stmt);
