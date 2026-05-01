@@ -974,18 +974,17 @@ function renderFinanceiro() {
   const sai = state.transacoes.filter(t => t.tipo === 'saida').reduce((s,t) => s+Number(t.valor||0), 0);
   const cons = obra && obra.orcamento ? Math.round(sai/obra.orcamento*100) : 0;
 
-  // v1.62.0: botões editar/excluir só pra admin/CEO (token configurado)
-  const isAdmin = temCeoToken();
+  // v1.65.6: botões editar/excluir SEMPRE visíveis (CEO pediu).
+  // Backend mantém PUT/DELETE protegidos por requireCeoToken — sem token o clique
+  // recebe 403 e cai no alert com instrução pra configurar via botão "Admin".
   const lista = state.transacoes.map((t, idx) => `<div class="row-item">
     <div style="flex:1; min-width:0;">
       <p style="margin:0; font-size:13px;">${escape(t.descricao)}</p>
       <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">${escape(t.data)} · ${escape(t.categoria||'Geral')}${t.fornecedor?' · '+escape(t.fornecedor):''}</p>
     </div>
-    <span style="font-weight:500; color:${t.tipo==='entrada'?'var(--neon)':'var(--danger)'}; margin-right:${isAdmin?'8px':'0'};">${t.tipo==='entrada'?'+':'−'} ${fmt(t.valor)}</span>
-    ${isAdmin ? `
-      <button class="btn-icon" data-tx-edit="${idx}" title="Editar transação" style="background:transparent; border:0; color:var(--text-muted); cursor:pointer; padding:4px 6px; font-size:14px;">✏️</button>
-      <button class="btn-icon" data-tx-del="${idx}" title="Excluir transação" style="background:transparent; border:0; color:var(--text-muted); cursor:pointer; padding:4px 6px; font-size:14px;">🗑️</button>
-    ` : ''}
+    <span style="font-weight:500; color:${t.tipo==='entrada'?'var(--neon)':'var(--danger)'}; margin-right:8px;">${t.tipo==='entrada'?'+':'−'} ${fmt(t.valor)}</span>
+    <button class="btn-icon" data-tx-edit="${idx}" title="Editar transação" style="background:transparent; border:0; color:var(--text-muted); cursor:pointer; padding:4px 6px; font-size:14px;">✏️</button>
+    <button class="btn-icon" data-tx-del="${idx}" title="Excluir transação" style="background:transparent; border:0; color:var(--danger); cursor:pointer; padding:4px 6px; font-size:14px;">🗑️</button>
   </div>`).join('');
 
   v.innerHTML = `${obraSelector()}
@@ -2556,7 +2555,7 @@ async function excluirTransacao(t) {
   try {
     await api('/api/transacoes/' + t.id, { method: 'DELETE' });
     render();
-  } catch (e) { alert('Erro: ' + e.message); }
+  } catch (e) { mostrarErroApi(e); }
 }
 
 function abrirEditarMaterial(m) {
@@ -2599,13 +2598,23 @@ function abrirEditarMaterial(m) {
 document.getElementById('editClose').onclick = fecharEditar;
 document.getElementById('editCancel').onclick = fecharEditar;
 document.getElementById('editOverlay').onclick = e => { if (e.target.id === 'editOverlay') fecharEditar(); };
+// v1.65.6: helper que detecta 403 (CEO_TOKEN ausente) e orienta o operador.
+function mostrarErroApi(e) {
+  const msg = String(e?.message || e);
+  if (/Forbidden|X-CEO-Token|403/i.test(msg)) {
+    alert('Acesso negado: configure o token CEO no botão "Admin" (canto superior) antes de editar/excluir.');
+  } else {
+    alert('Erro: ' + msg);
+  }
+}
+
 document.getElementById('editSave').onclick = async () => {
   if (!_editSaveHandler) return;
   try {
     await _editSaveHandler();
     fecharEditar();
     render();
-  } catch (e) { alert('Erro: ' + e.message); }
+  } catch (e) { mostrarErroApi(e); }
 };
 
 // ── ZAYRA ──
