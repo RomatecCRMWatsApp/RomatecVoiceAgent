@@ -980,11 +980,15 @@ export async function criarLoteRecibos(input: {
     if (it.status_preview === 'telefone_invalido')    st = 'pulado_sem_telefone';
     // duplicado_provavel: se chegou aqui é porque force=true. Cria normalmente
     // e CEO assume o risco de duplicidade.
+    // v1.65.18: normaliza telefone pra só dígitos antes do INSERT — assim
+    // o lookup posterior (no webhook) bate com qualquer formato de cadastro
+    // (com ou sem parênteses/hífens/espaços).
+    const telNorm = it.telefone ? it.telefone.replace(/\D/g, '') : null;
     await pool.execute<ResultSetHeader>(
       `INSERT INTO recibos_envios (lote_id, membro_id, telefone, valor, status, ultimo_erro)
        VALUES (?,?,?,?,?,?)`,
       [
-        loteId, Number(it.membro_id), it.telefone, it.total_liquido.toFixed(2), st,
+        loteId, Number(it.membro_id), telNorm, it.total_liquido.toFixed(2), st,
         it.status_preview === 'telefone_invalido'
           ? `Telefone inválido (menos de 10 dígitos): "${it.telefone}"`
           : null,
@@ -1377,19 +1381,74 @@ interface EnvioPendenteRow extends RowDataPacket {
   status: string; recibo_hash: string | null;
 }
 
-async function buscarEnvioPendentePorPhone(phone: string): Promise<EnvioPendenteRow | null> {
+// v1.65.18: identifica se o phone do remetente é de um colaborador ativo
+// da Equipe. Usado pra BLOQUEAR ZAYRA de responder mensagens de colaboradores
+// — se for, ou processamos como resposta de recibo, ou repassamos ao CEO.
+// Em hipótese nenhuma a ZAYRA conversa livremente com colaborador.
+export async function isPhoneDeColaborador(phone: string): Promise<{
+  membroId: string; nome: string; funcao: string | null;
+} | null> {
   const digits = (phone || '').replace(/\D/g, '');
   if (digits.length < 10) return null;
   const sufixo = digits.slice(-10);
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, nome, funcao
+       FROM romatec_obra_equipe
+      WHERE ativo = 1
+        AND telefone IS NOT NULL
+        AND REGEXP_REPLACE(telefone, '[^0-9]', '') LIKE ?
+      LIMIT 1`,
+    [`%${sufixo}`]
+  );
+  if (!rows.length) return null;
+  return {
+    membroId: String(rows[0].id),
+    nome: String(rows[0].nome),
+    funcao: rows[0].funcao as string | null,
+  };
+}
+
+// v1.65.18: notifica CEO quando colaborador manda mensagem que não bate
+// com nenhum fluxo conhecido de recibo. ZAYRA não responde — CEO decide.
+export async function notificarCeoMensagemColaborador(input: {
+  phone: string; text: string;
+  membroId: string; nome: string; funcao: string | null;
+}): Promise<void> {
+  await notificarCeo(
+    `🔔 Mensagem de colaborador (sem fluxo ativo)\n\n` +
+    `${input.nome}${input.funcao ? ' ('+input.funcao+')' : ''}\n` +
+    `${input.phone}\n\n` +
+    `Disse: "${input.text.slice(0, 400)}"\n\n` +
+    `_(Não respondi — você decide.)_`
+  );
+}
+
+async function buscarEnvioPendentePorPhone(phone: string): Promise<EnvioPendenteRow | null> {
+  const digits = (phone || '').replace(/\D/g, '');
+  if (digits.length < 10) {
+    console.warn(`[recibos] phone inválido pra lookup: "${phone}" (${digits.length} dígitos)`);
+    return null;
+  }
+  const sufixo = digits.slice(-10);
+  // v1.65.18: usa REGEXP_REPLACE pra extrair só os dígitos do telefone
+  // armazenado em recibos_envios. Antes usávamos REPLACE encadeado removendo
+  // '+', '-', ' ', '(' — mas faltava o ')', causando mismatch quando
+  // o cadastro tinha "(99) 99180-2135". Com REGEXP_REPLACE qualquer formato
+  // funciona. MySQL 8.0+ tem REGEXP_REPLACE; Railway usa 9.4, OK.
   const [rows] = await pool.execute<EnvioPendenteRow[]>(
     `SELECT *
        FROM recibos_envios
       WHERE status IN ('enviado_aguardando_confirmacao', 'confirmado_aguardando_pix')
         AND telefone IS NOT NULL
-        AND REPLACE(REPLACE(REPLACE(REPLACE(telefone, '+', ''), '-', ''), ' ', ''), '(', '') LIKE ?
+        AND REGEXP_REPLACE(telefone, '[^0-9]', '') LIKE ?
       ORDER BY enviado_em DESC LIMIT 1`,
     [`%${sufixo}`]
   );
+  if (!rows.length) {
+    console.warn(`[recibos] lookup sem match — phone=${phone} digits=${digits} sufixo=${sufixo}`);
+  } else {
+    console.log(`[recibos] lookup match — phone=${phone} → envio=${rows[0].id} status=${rows[0].status}`);
+  }
   return rows[0] ?? null;
 }
 

@@ -374,25 +374,37 @@ function handleWhatsAppWebhook(req: Request, res: Response) {
         void logInbound(msg.from, userText, msg.id).catch(() => {});
 
         // v1.65.15 — PR B.3: roteamento contextual de respostas de recibo.
-        // Antes de chamar processMessage (que invoca think), checa se este
-        // phone tem um envio de recibo aguardando resposta (1/2/PIX). Se
-        // sim, processa internamente sem ZAYRA — ela manteria o histórico
-        // e poderia confundir o fluxo financeiro estruturado.
-        if (msg.type === 'text') {
-          try {
-            const m = await import('./services/recibosQuinzena');
+        // v1.65.18 — bloqueio total: ZAYRA NÃO responde mensagem de colaborador.
+        // Ordem:
+        //   1) tenta rotear como resposta de recibo (1/2/PIX)
+        //   2) se não roteou e o remetente é colaborador, repassa ao CEO
+        //      e silencia (não chama think)
+        //   3) só não-colaboradores caem no fluxo normal da ZAYRA
+        try {
+          const m = await import('./services/recibosQuinzena');
+          if (msg.type === 'text') {
             const r = await m.processarRespostaRecibo({
               phone: msg.from,
               text: msg.text.body,
               messageId: msg.id,
             });
-            if (r.handled) {
-              console.log(`[recibos] resposta roteada: phone=${msg.from} acao=${r.acao} envio=${r.envio_id}`);
-              continue; // não chama processMessage/think
-            }
-          } catch (err) {
-            console.warn('[recibos] roteamento falhou — caindo no fluxo normal:', (err as Error).message);
+            console.log(`[recibos] roteamento phone=${msg.from} text="${msg.text.body.slice(0,40)}" handled=${r.handled} acao=${r.acao ?? '-'}`);
+            if (r.handled) continue;
           }
+          const colab = await m.isPhoneDeColaborador(msg.from);
+          if (colab) {
+            const txt = msg.type === 'text' ? msg.text.body
+                      : msg.type === 'audio' ? '[áudio]'
+                      : `[doc: ${msg.document.filename}]`;
+            console.log(`[recibos] msg de colaborador sem fluxo ativo: ${colab.nome} (${msg.from}). Repasso CEO, ZAYRA silenciada.`);
+            await m.notificarCeoMensagemColaborador({
+              phone: msg.from, text: txt,
+              membroId: colab.membroId, nome: colab.nome, funcao: colab.funcao,
+            }).catch(err => console.warn('[recibos] notificarCeo falhou:', (err as Error).message));
+            continue; // ZAYRA NÃO responde colaborador
+          }
+        } catch (err) {
+          console.warn('[recibos] roteamento/bloqueio falhou — caindo no fluxo normal:', (err as Error).message);
         }
 
         const reply = await processMessage(msg);
