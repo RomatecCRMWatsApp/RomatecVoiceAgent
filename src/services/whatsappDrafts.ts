@@ -66,14 +66,71 @@ export interface DraftPreview {
 }
 
 /**
+ * Busca draft idêntico já pendente na mesma sessão+destinatário+conteúdo+tipo.
+ * Usado como guard pelo `criarDraft` pra evitar duplicação quando o LLM
+ * chama a tool repetidamente com mesmos args (bug observado em produção
+ * pós-PR #7: Claude/gpt-4o-mini ocasionalmente chamam `enviar_whatsapp` com
+ * `para`+`mensagem` na 2ª chamada em vez de `confirm:true`+`draft_id`).
+ */
+export async function buscarDraftDuplicado(input: {
+  sessionId:    string;
+  destinatario: string;
+  conteudo:     string;
+  tipo:         DraftTipo;
+}): Promise<DraftRow | null> {
+  const [rows] = await pool.execute<DraftRow[]>(
+    `SELECT * FROM zayra_whatsapp_drafts
+      WHERE session_id   = ?
+        AND destinatario = ?
+        AND conteudo     = ?
+        AND tipo         = ?
+        AND status       = 'awaiting_confirmation'
+        AND expira_em    > NOW()
+      ORDER BY criado_em DESC
+      LIMIT 1`,
+    [input.sessionId, input.destinatario, input.conteudo, input.tipo],
+  );
+  return rows[0] ?? null;
+}
+
+/**
  * Cria um draft em status `awaiting_confirmation`.
  * Retorna draft_id que o LLM deve repassar quando o CEO confirmar.
+ *
+ * GUARD ANTI-DUPLICATA: se já existir draft idêntico pendente na mesma
+ * sessão, retorna o draft EXISTENTE (com flag duplicada=true) em vez de
+ * criar novo. Defesa em profundidade contra LLM chamando 2x com args iguais.
  */
-export async function criarDraft(input: CriarDraftInput): Promise<DraftPreview> {
+export async function criarDraft(input: CriarDraftInput): Promise<DraftPreview & { duplicada?: boolean }> {
   if (!input.sessionId)    throw new Error('sessionId obrigatório');
   if (!input.destinatario) throw new Error('destinatario obrigatório');
   if (!input.conteudo)     throw new Error('conteudo obrigatório');
   if (!input.tipo)         throw new Error('tipo obrigatório');
+
+  // Camada 1 anti-duplicate: se LLM chamou de novo com mesmos args, devolve
+  // o draft existente em vez de criar duplicata. LLM percebe pelo flag e
+  // pelo aviso no preview que precisa usar confirm:true+draft_id.
+  const existente = await buscarDraftDuplicado({
+    sessionId:    input.sessionId,
+    destinatario: input.destinatario,
+    conteudo:     input.conteudo,
+    tipo:         input.tipo,
+  });
+  if (existente) {
+    console.log(`[whatsappDrafts] ⚠️ DUPLICATA detectada — devolvendo draft existente id=${existente.id} em vez de criar novo`);
+    return {
+      draft_id:     existente.id,
+      expira_em:    new Date(existente.expira_em).toISOString(),
+      ttl_minutos:  ttlMinutes(),
+      destinatario: existente.destinatario,
+      tipo:         existente.tipo,
+      preview:
+        `⚠️ Já existe draft idêntico pendente (id=${existente.id}). NÃO foi criado novo. ` +
+        `Pra enviar, chame essa MESMA tool de novo com confirm:true + draft_id="${existente.id}" (NÃO repasse "para" nem "mensagem"). ` +
+        `Pra cancelar, mostre ao Chefe e peça orientação.`,
+      duplicada: true,
+    };
+  }
 
   const id  = randomUUID();
   const ttl = input.ttlMinutes ?? ttlMinutes();
