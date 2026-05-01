@@ -703,10 +703,13 @@ app.listen(PORT, () => {
   void import('./agent/briefingSemanal').then(m => m.startWeeklyBriefingScheduler()).catch(() => {});
   alarmes.startAlarmesTicker();
   cowork.startCoworkWorker();
-  // v1.61.0: limpa drafts WhatsApp expirados (status awaiting_confirmation com TTL vencido)
-  void import('./services/whatsappDrafts').then(m => m.startDraftCleanup()).catch(() => {});
+  // v1.61.1: cleanup de drafts roda APÓS migrations criarem a tabela.
+  // Antes (v1.61.0), startDraftCleanup era chamado direto e a 1ª execução
+  // falhava com ER_NO_SUCH_TABLE pq runMigrations ainda nem tinha rodado.
   void initDb()
     .then(() => loadSessionFromDb())
+    .then(() => import('./services/whatsappDrafts'))
+    .then(m => m.startDraftCleanup())
     .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));
 
   // v1.39.1: sync contatos CRM → memória ZAYRA (1x ao boot + 1x/dia 04:00 BRT)

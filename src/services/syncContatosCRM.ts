@@ -18,7 +18,9 @@ interface LeadRow extends RowDataPacket {
   score:              string | null;
   stage:              string | null;
   campanhaOrigem:     string | null;
-  created_at:         Date | null;
+  // Schema CRM (Drizzle) usa camelCase. Antes da v1.61.1 estava 'created_at'
+  // (snake_case) e quebrava com ER_BAD_FIELD_ERROR. Mesmo bug do PR #4.
+  createdAt:          Date | null;
 }
 
 interface ContactRow extends RowDataPacket {
@@ -50,7 +52,7 @@ function leadToContent(lead: LeadRow): string {
   if (lead.score) partes.push(`Score: ${lead.score}`);
   if (lead.stage) partes.push(`Estágio: ${lead.stage}`);
   if (lead.campanhaOrigem) partes.push(`Origem: ${lead.campanhaOrigem}`);
-  if (lead.created_at) partes.push(`Cadastrado em: ${new Date(lead.created_at).toLocaleDateString('pt-BR')}`);
+  if (lead.createdAt) partes.push(`Cadastrado em: ${new Date(lead.createdAt).toLocaleDateString('pt-BR')}`);
   return partes.join(' · ');
 }
 
@@ -101,7 +103,7 @@ export async function sincronizarContatosCRM(): Promise<SyncResult> {
   let leads: LeadRow[] = [];
   try {
     const [rows] = await pool.execute<LeadRow[]>(
-      `SELECT id, phone, nome, score, stage, campanhaOrigem, created_at
+      `SELECT id, phone, nome, score, stage, campanhaOrigem, createdAt
        FROM leadQualifications
        ORDER BY id DESC LIMIT 5000`,
     );
