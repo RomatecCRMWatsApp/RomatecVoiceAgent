@@ -386,8 +386,8 @@ function handleWhatsAppWebhook(req: Request, res: Response) {
               text: msg.text.body,
               messageId: msg.id,
             });
+            console.log(`[recibos] tentativa de roteamento phone=${msg.from} text="${msg.text.body.slice(0,40)}" handled=${r.handled} acao=${r.acao ?? '-'}`);
             if (r.handled) {
-              console.log(`[recibos] resposta roteada: phone=${msg.from} acao=${r.acao} envio=${r.envio_id}`);
               continue; // não chama processMessage/think
             }
           } catch (err) {
