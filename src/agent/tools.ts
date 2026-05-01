@@ -31,6 +31,7 @@ import {
 } from '../services/calculadoraFinanceira';
 import { calcularItbi, listarMunicipiosValidados } from '../services/calcularItbi';
 import { calcularIptu, listarMunicipiosIptu } from '../services/calcularIptu';
+import { consultarProcesso as datajudConsultarProcesso, listarTribunaisDataJud } from '../integrations/datajud';
 import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
@@ -635,6 +636,23 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: 'listar_municipios_iptu',
     description: 'Lista municípios com alíquotas IPTU configuradas na ZAYRA. Use quando perguntarem "quais cidades de IPTU você cobre".',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'consultar_processo_tj',
+    description: 'Consulta um processo judicial via API Pública DataJud (CNJ). Funciona com TJ-MA, TJ-CE, TJ-PI, TJ-PA, TJ-TO, TJ-SP, TJ-RJ, TJ-MG, TJ-BA, TJ-PE, TRF1-5, TRT16, STJ, TST. Retorna: classe, assuntos, data ajuizamento, órgão julgador, grau, formato, últimos 30 movimentos. Atualização D+1 (CNJ consolida 1×/dia). Use quando o Chefe perguntar "como tá o processo X" ou "tem processo nesse imóvel?". Aceita número CNJ com ou sem máscara (NNNNNNN-DD.AAAA.J.TR.OOOO ou só os 20 dígitos).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        numero_cnj: { type: 'string', description: 'Número CNJ do processo (ex: "0000123-45.2024.8.10.0028" ou "00001234520248100028")' },
+        tribunal:   { type: 'string', description: 'Sigla do tribunal (tjma, tjce, tjpi, tjsp, trf1, trt16, stj, etc). Default Romatec: tjma.' },
+      },
+      required: ['numero_cnj', 'tribunal'],
+    },
+  },
+  {
+    name: 'listar_tribunais_datajud',
+    description: 'Lista todos os tribunais cobertos pela tool consultar_processo_tj. Use quando o Chefe perguntar "quais tribunais você consulta".',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -2281,6 +2299,12 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'listar_municipios_iptu':
         data = listarMunicipiosIptu();
+        break;
+      case 'consultar_processo_tj':
+        data = await datajudConsultarProcesso(input as unknown as Parameters<typeof datajudConsultarProcesso>[0]);
+        break;
+      case 'listar_tribunais_datajud':
+        data = listarTribunaisDataJud();
         break;
 
       // ── v1.40.0: Briefing semanal + diagnóstico banco ──
