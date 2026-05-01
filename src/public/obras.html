@@ -386,6 +386,7 @@
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
       <span class="badge-zayra" id="versionBadge">v...</span>
+      <button id="btnCeoToken" title="Login admin/CEO" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); cursor:pointer; padding:6px 10px; border-radius:var(--radius); font-size:12px;">🔒 Admin</button>
       <a href="/" style="color: var(--text-muted); text-decoration: none; font-size: 13px; padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius);">← ZAYRA Chat</a>
     </div>
   </div>
@@ -498,6 +499,40 @@ fetch(API + '/health')
     if (el && d.version) el.textContent = 'v' + d.version;
   })
   .catch(() => {});
+
+// v1.62.0: botão de login admin (CEO_API_TOKEN). Token vai pra localStorage e
+// é injetado em X-CEO-Token nas chamadas de API. Sem token, lista financeiro
+// continua somente leitura (botões editar/excluir não aparecem).
+function atualizarBotaoCeo() {
+  const btn = document.getElementById('btnCeoToken');
+  if (!btn) return;
+  const tem = !!localStorage.getItem('ceo_token');
+  btn.textContent = tem ? '🔓 Admin' : '🔒 Admin';
+  btn.style.color = tem ? 'var(--neon)' : 'var(--text-muted)';
+}
+document.addEventListener('DOMContentLoaded', () => {
+  atualizarBotaoCeo();
+  const btn = document.getElementById('btnCeoToken');
+  if (!btn) return;
+  btn.onclick = () => {
+    const atual = localStorage.getItem('ceo_token') || '';
+    if (atual) {
+      if (confirm('Já existe token CEO armazenado. Remover?')) {
+        localStorage.removeItem('ceo_token');
+        atualizarBotaoCeo();
+        if (typeof render === 'function') render();
+      }
+      return;
+    }
+    const t = prompt('Cole o token CEO_API_TOKEN do Railway:');
+    if (t && t.trim()) {
+      localStorage.setItem('ceo_token', t.trim());
+      atualizarBotaoCeo();
+      if (typeof render === 'function') render();
+      alert('Token salvo. Botões editar/excluir devem aparecer.');
+    }
+  };
+});
 const state = {
   currentObra: null, currentTab: 'dashboard',
   obras: [], etapas: [], transacoes: [],
@@ -514,6 +549,16 @@ const fmt = n => 'R$ ' + (Number(n)||0).toLocaleString('pt-BR', {minimumFraction
 const today = () => new Date().toISOString().split('T')[0];
 const escape = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
+// v1.62.0: token CEO opcional em localStorage. Quando setado, injeta header
+// X-CEO-Token em TODAS as chamadas. Permissão admin (PUT/DELETE financeiro)
+// só funciona com token válido (validado no servidor).
+function getCeoToken() { return localStorage.getItem('ceo_token') || ''; }
+function setCeoToken(t) {
+  if (t && t.trim()) localStorage.setItem('ceo_token', t.trim());
+  else localStorage.removeItem('ceo_token');
+}
+function temCeoToken() { return !!getCeoToken(); }
+
 async function api(path, opts={}) {
   // Cache-busting via query param só em GET (Safari iOS engasga com cache:'no-store' + Content-Type)
   const method = (opts.method || 'GET').toUpperCase();
@@ -523,10 +568,14 @@ async function api(path, opts={}) {
   }
   // Content-Type só quando tem body (evita "The string did not match the expected pattern" no iOS)
   const fetchOpts = { ...opts };
+  const baseHeaders = { ...(opts.headers || {}) };
+  // Injeta X-CEO-Token quando existir (servidor exige só pra mutações sensíveis)
+  const ceoTok = getCeoToken();
+  if (ceoTok) baseHeaders['X-CEO-Token'] = ceoTok;
   if (opts.body) {
-    fetchOpts.headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
-  } else if (opts.headers) {
-    fetchOpts.headers = opts.headers;
+    fetchOpts.headers = { 'Content-Type': 'application/json', ...baseHeaders };
+  } else if (Object.keys(baseHeaders).length > 0) {
+    fetchOpts.headers = baseHeaders;
   }
   const r = await fetch(url, fetchOpts);
   const d = await r.json();
@@ -856,12 +905,18 @@ function renderFinanceiro() {
   const sai = state.transacoes.filter(t => t.tipo === 'saida').reduce((s,t) => s+Number(t.valor||0), 0);
   const cons = obra && obra.orcamento ? Math.round(sai/obra.orcamento*100) : 0;
 
-  const lista = state.transacoes.map(t => `<div class="row-item">
+  // v1.62.0: botões editar/excluir só pra admin/CEO (token configurado)
+  const isAdmin = temCeoToken();
+  const lista = state.transacoes.map((t, idx) => `<div class="row-item">
     <div style="flex:1; min-width:0;">
       <p style="margin:0; font-size:13px;">${escape(t.descricao)}</p>
       <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">${escape(t.data)} · ${escape(t.categoria||'Geral')}${t.fornecedor?' · '+escape(t.fornecedor):''}</p>
     </div>
-    <span style="font-weight:500; color:${t.tipo==='entrada'?'var(--neon)':'var(--danger)'};">${t.tipo==='entrada'?'+':'−'} ${fmt(t.valor)}</span>
+    <span style="font-weight:500; color:${t.tipo==='entrada'?'var(--neon)':'var(--danger)'}; margin-right:${isAdmin?'8px':'0'};">${t.tipo==='entrada'?'+':'−'} ${fmt(t.valor)}</span>
+    ${isAdmin ? `
+      <button class="btn-icon" data-tx-edit="${idx}" title="Editar transação" style="background:transparent; border:0; color:var(--text-muted); cursor:pointer; padding:4px 6px; font-size:14px;">✏️</button>
+      <button class="btn-icon" data-tx-del="${idx}" title="Excluir transação" style="background:transparent; border:0; color:var(--text-muted); cursor:pointer; padding:4px 6px; font-size:14px;">🗑️</button>
+    ` : ''}
   </div>`).join('');
 
   v.innerHTML = `${obraSelector()}
@@ -914,6 +969,22 @@ function renderFinanceiro() {
       render();
     } catch (e) { alert('Erro: ' + e.message); }
   };
+
+  // v1.62.0: bind dos botões editar/excluir nas linhas de transação
+  v.querySelectorAll('[data-tx-edit]').forEach(btn => {
+    btn.onclick = () => {
+      const idx = Number(btn.getAttribute('data-tx-edit'));
+      const t = state.transacoes[idx];
+      if (t) abrirEditarTransacao(t);
+    };
+  });
+  v.querySelectorAll('[data-tx-del]').forEach(btn => {
+    btn.onclick = () => {
+      const idx = Number(btn.getAttribute('data-tx-del'));
+      const t = state.transacoes[idx];
+      if (t) excluirTransacao(t);
+    };
+  });
 }
 
 // ── EQUIPE ──
@@ -1687,7 +1758,54 @@ function fileToBase64(file) {
   });
 }
 
-// ── EDIÇÃO (membro / material) ──
+// ── CONFIRMAÇÃO GENÉRICA (v1.62.0, reutilizável pra qualquer ação destrutiva) ──
+// Cria modal dinâmico com mensagem + botões Confirmar/Cancelar.
+// Resolve uma Promise<boolean> (true=confirmado, false=cancelado).
+function confirmarAcao({ titulo, mensagem, textoConfirmar, perigoso }) {
+  return new Promise((resolve) => {
+    let overlay = document.getElementById('confAcaoOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'confAcaoOverlay';
+      overlay.className = 'overlay';
+      overlay.innerHTML = `
+        <div class="modal" style="max-width:420px;">
+          <div class="modal-header">
+            <h3 id="confAcaoTitle">Confirmar</h3>
+            <button class="btn-close" id="confAcaoX">×</button>
+          </div>
+          <div class="modal-body">
+            <p id="confAcaoMsg" style="margin:8px 0;"></p>
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+              <button class="btn-secondary" id="confAcaoCancel">Cancelar</button>
+              <button class="btn-primary" id="confAcaoOk"></button>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+    }
+    document.getElementById('confAcaoTitle').textContent = titulo || 'Confirmar';
+    document.getElementById('confAcaoMsg').innerHTML = mensagem || 'Tem certeza?';
+    const okBtn = document.getElementById('confAcaoOk');
+    okBtn.textContent = textoConfirmar || 'Confirmar';
+    okBtn.style.background = perigoso ? 'var(--danger)' : '';
+    okBtn.style.color      = perigoso ? '#fff' : '';
+
+    const fechar = (resp) => {
+      overlay.classList.remove('open');
+      okBtn.onclick = null;
+      document.getElementById('confAcaoCancel').onclick = null;
+      document.getElementById('confAcaoX').onclick = null;
+      resolve(resp);
+    };
+    okBtn.onclick = () => fechar(true);
+    document.getElementById('confAcaoCancel').onclick = () => fechar(false);
+    document.getElementById('confAcaoX').onclick = () => fechar(false);
+    overlay.classList.add('open');
+  });
+}
+
+// ── EDIÇÃO (membro / material / transação) ──
 let _editSaveHandler = null;
 
 function abrirEditar(titulo, bodyHtml, saveHandler) {
@@ -1708,11 +1826,13 @@ function abrirEditarMembro(m) {
   const tipos = ['diarista','clt','empreitada','terceirizado'];
   const tipoOpts = tipos.map(t => `<option value="${t}" ${t===m.tipo_contrato?'selected':''}>${t}</option>`).join('');
 
+  // v1.62.0: modal completo — adicionados CPF e Observações (faltavam pre-1.62)
   const body = `
     <div class="form-grid">
-      <input id="eNome" placeholder="Nome" value="${escape(m.nome||'')}">
+      <input id="eNome" placeholder="Nome *" value="${escape(m.nome||'')}">
       <input id="eFunc" placeholder="Função" value="${escape(m.funcao||'')}">
       <select id="eTipo">${tipoOpts}</select>
+      <input id="eCpf" placeholder="CPF" value="${escape(m.cpf||'')}">
       <input id="eTel" placeholder="Telefone" value="${escape(m.telefone||'')}">
       <input id="eVal" type="number" step="0.01" placeholder="Valor diária (R$)" value="${m.valor_dia||''}">
       <input id="eEsp" placeholder="Especialidade" value="${escape(m.especialidade||'')}">
@@ -1721,21 +1841,92 @@ function abrirEditarMembro(m) {
       <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Obra</label>
       <select id="eObraId" style="width:100%; margin-top:4px;">${obraOpts}</select>
     </div>
+    <div style="margin-top:8px;">
+      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Observações</label>
+      <textarea id="eObs" rows="3" style="width:100%; margin-top:4px; resize:vertical;">${escape(m.observacoes||'')}</textarea>
+    </div>
   `;
   abrirEditar(`Editar membro — ${m.nome}`, body, async () => {
+    const nome = document.getElementById('eNome').value.trim();
+    if (!nome) { alert('Nome é obrigatório'); throw new Error('Nome obrigatório'); }
     await api('/api/equipe/' + m.id, {
       method: 'PUT',
       body: JSON.stringify({
-        nome:          document.getElementById('eNome').value.trim() || null,
+        nome,
         funcao:        document.getElementById('eFunc').value.trim() || null,
         tipo_contrato: document.getElementById('eTipo').value,
+        cpf:           document.getElementById('eCpf').value.trim() || null,
         telefone:      document.getElementById('eTel').value.trim() || null,
         valor_dia:     parseFloat(document.getElementById('eVal').value) || null,
         especialidade: document.getElementById('eEsp').value.trim() || null,
+        observacoes:   document.getElementById('eObs').value.trim() || null,
         obra_id:       document.getElementById('eObraId').value || null,
       }),
     });
   });
+}
+
+// v1.62.0: editar transação financeira (admin/CEO only via X-CEO-Token).
+function abrirEditarTransacao(t) {
+  const tipos = ['saida', 'entrada'];
+  const tipoOpts = tipos.map(x => `<option value="${x}" ${x===t.tipo?'selected':''}>${x === 'entrada' ? 'Entrada' : 'Saída'}</option>`).join('');
+  const cats = ['Material','Mão de obra','Equipamento','Serviço terceirizado','Documentação','Pagamento cliente','Outros'];
+  const catOpts = cats.map(c => `<option ${c===t.categoria?'selected':''}>${c}</option>`).join('');
+  const fps = ['pix','dinheiro','transferencia','cartao','boleto'];
+  const fpOpts = fps.map(f => `<option value="${f}" ${f===t.forma_pagamento?'selected':''}>${f}</option>`).join('');
+
+  // Data vem formatada pt-BR ("01/05/2026") — converter pra YYYY-MM-DD pra input[type=date]
+  let dataIso = '';
+  if (t.data) {
+    const m = String(t.data).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    dataIso = m ? `${m[3]}-${m[2]}-${m[1]}` : t.data;
+  }
+
+  const body = `
+    <div class="form-grid">
+      <select id="etTipo">${tipoOpts}</select>
+      <select id="etCat">${catOpts}</select>
+      <input id="etDesc" placeholder="Descrição *" value="${escape(t.descricao||'')}">
+      <input id="etVal" type="number" step="0.01" placeholder="Valor (R$) *" value="${t.valor||''}">
+      <input id="etData" type="date" value="${dataIso}">
+      <input id="etForn" placeholder="Fornecedor" value="${escape(t.fornecedor||'')}">
+      <input id="etNF" placeholder="Nota fiscal" value="${escape(t.nota_fiscal||'')}">
+      <select id="etFP">${fpOpts}</select>
+    </div>
+  `;
+  abrirEditar(`Editar transação — ${t.descricao}`, body, async () => {
+    const desc = document.getElementById('etDesc').value.trim();
+    const val  = parseFloat(document.getElementById('etVal').value);
+    if (!desc) { alert('Descrição é obrigatória'); throw new Error('Descrição obrigatória'); }
+    if (!val || val <= 0) { alert('Valor deve ser > 0'); throw new Error('Valor inválido'); }
+    await api('/api/transacoes/' + t.id, {
+      method: 'PUT',
+      body: JSON.stringify({
+        tipo:            document.getElementById('etTipo').value,
+        categoria:       document.getElementById('etCat').value,
+        descricao:       desc,
+        valor:           val,
+        data:            document.getElementById('etData').value || null,
+        fornecedor:      document.getElementById('etForn').value.trim() || null,
+        nota_fiscal:     document.getElementById('etNF').value.trim() || null,
+        forma_pagamento: document.getElementById('etFP').value,
+      }),
+    });
+  });
+}
+
+async function excluirTransacao(t) {
+  const ok = await confirmarAcao({
+    titulo:        'Excluir transação',
+    mensagem:      `Excluir <b>${escape(t.descricao)}</b> de <b>${fmt(t.valor)}</b> (${escape(t.data||'')}/${escape(t.categoria||'')})?<br><small style="color:var(--text-muted);">A transação não conta mais nos totais. Histórico preservado no banco.</small>`,
+    textoConfirmar: 'Excluir',
+    perigoso:       true,
+  });
+  if (!ok) return;
+  try {
+    await api('/api/transacoes/' + t.id, { method: 'DELETE' });
+    render();
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 function abrirEditarMaterial(m) {
