@@ -669,6 +669,29 @@ app.put   ('/api/proposta-itens/:id',                   apiHandle(args => propos
 app.delete('/api/proposta-itens/:id',                   apiHandle(args => propostas.removerItemProposta(args as { id: string })));
 app.post  ('/api/propostas/:proposta_id/itens/reordenar', apiHandle(args => propostas.reordenarItensProposta(args as Parameters<typeof propostas.reordenarItensProposta>[0])));
 
+// v1.65.4: Relatório HTML / PDF / envio Z-API
+app.get('/api/propostas/:id/relatorio', async (req: Request, res: Response) => {
+  try {
+    const html = await propostas.gerarHtmlPropostaRelatorio(String(req.params.id));
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) {
+    res.status(404).send(`<pre>Erro: ${(err as Error).message}</pre>`);
+  }
+});
+app.get('/api/propostas/:id/pdf', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const buf = await propostas.gerarPdfProposta(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Proposta_${id}.pdf"`);
+    res.send(buf);
+  } catch (err) {
+    res.status(404).json({ error: (err as Error).message });
+  }
+});
+app.post('/api/propostas/:id/enviar-whatsapp', apiHandle(args => propostas.enviarPropostaWhatsApp(args as Parameters<typeof propostas.enviarPropostaWhatsApp>[0])));
+
 // Cowork (tarefas em background)
 app.get   ('/api/cowork',       apiHandle(args => cowork.listarTarefasCowork(args as Parameters<typeof cowork.listarTarefasCowork>[0])));
 app.get   ('/api/cowork/:id',   apiHandle(args => cowork.buscarTarefaCowork((args as { id: string }).id)));
