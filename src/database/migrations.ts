@@ -749,8 +749,18 @@ export async function runMigrations(): Promise<void> {
     INSERT IGNORE INTO tenant_settings
       (tenant_id, brand_name, brand_short_name, logo_path, primary_color, cnpj, telefone, email)
     VALUES
-      (1, 'Romatec Consultoria Imobiliária', 'Romatec', '/romatec-logo.jpg', '#10b981',
+      (1, 'Romatec Consultoria Imobiliária', 'Romatec', '/romatec-logo-removebg-preview.png', '#10b981',
        NULL, NULL, 'romateccrm@gmail.com')
+  `);
+
+  // v1.65.0: migra logo_path antigo (.jpg) pro novo PNG com fundo transparente.
+  // Idempotente: só atualiza se ainda estiver no path antigo. Se admin trocou
+  // manualmente via PUT /api/tenant-settings depois, esse UPDATE não dispara.
+  await pool.execute(`
+    UPDATE tenant_settings
+       SET logo_path = '/romatec-logo-removebg-preview.png'
+     WHERE tenant_id = 1
+       AND logo_path IN ('/romatec-logo.jpg', '/LOGO ROMATEC ATUAL.jpg')
   `);
 
   // v1.65.0: Implementação 1 — Proposta de Mão de Obra (schema + catálogo SINAPI)
