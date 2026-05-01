@@ -41,6 +41,9 @@ type PropostaRow = RowDataPacket & {
   pdf_path: string | null;
   enviada_whatsapp: number; enviada_em: Date | null;
   criada_por: string | null;
+  gestor_cargo: string | null;
+  gestor_nome: string | null;
+  gestor_telefone: string | null;
   criado_em: Date; atualizado_em: Date;
 };
 
@@ -236,6 +239,9 @@ export async function listarPropostas(input: {
     enviada_whatsapp: !!r.enviada_whatsapp,
     enviada_em: r.enviada_em ? formatBRDate(r.enviada_em) : null,
     criada_por: r.criada_por,
+    gestor_cargo: r.gestor_cargo,
+    gestor_nome: r.gestor_nome,
+    gestor_telefone: r.gestor_telefone,
   }));
 }
 
@@ -282,6 +288,9 @@ export async function buscarProposta(id: string) {
     enviada_whatsapp: !!p.enviada_whatsapp,
     enviada_em: p.enviada_em ? formatBRDate(p.enviada_em) : null,
     criada_por: p.criada_por,
+    gestor_cargo: p.gestor_cargo,
+    gestor_nome: p.gestor_nome,
+    gestor_telefone: p.gestor_telefone,
     itens: itens.map(i => ({
       id: String(i.id),
       servico_id: i.servico_id ? String(i.servico_id) : null,
@@ -303,6 +312,9 @@ export async function criarProposta(input: {
   validade_dias?: number;
   observacoes?: string;
   criada_por?: string;
+  gestor_cargo?: string;
+  gestor_nome?: string;
+  gestor_telefone?: string;
 }): Promise<MutationResult> {
   const cliId = Number(input.cliente_id);
   if (!cliId) throw new Error('cliente_id obrigatório');
@@ -312,8 +324,9 @@ export async function criarProposta(input: {
     : new Date().toISOString().slice(0, 10);
   const [r] = await pool.execute<ResultSetHeader>(
     `INSERT INTO propostas
-       (numero, cliente_id, endereco_obra, data_proposta, validade_dias, observacoes, criada_por)
-     VALUES (?,?,?,?,?,?,?)`,
+       (numero, cliente_id, endereco_obra, data_proposta, validade_dias, observacoes, criada_por,
+        gestor_cargo, gestor_nome, gestor_telefone)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
     [
       numero, cliId,
       input.endereco_obra ?? null,
@@ -321,6 +334,9 @@ export async function criarProposta(input: {
       Number(input.validade_dias) || 15,
       input.observacoes ?? null,
       input.criada_por ?? null,
+      input.gestor_cargo ?? null,
+      input.gestor_nome ?? null,
+      input.gestor_telefone ?? null,
     ]
   );
   return { ok: true, insertId: r.insertId, message: `Proposta ${numero} criada.` };
@@ -333,6 +349,9 @@ export async function atualizarProposta(input: {
   validade_dias?: number;
   observacoes?: string;
   status?: 'rascunho' | 'enviada' | 'aceita' | 'recusada' | 'expirada';
+  gestor_cargo?: string;
+  gestor_nome?: string;
+  gestor_telefone?: string;
 }): Promise<MutationResult> {
   const id = Number(input.id);
   if (!id) throw new Error('id inválido');
@@ -346,6 +365,9 @@ export async function atualizarProposta(input: {
   if (input.validade_dias !== undefined) { fields.push('validade_dias = ?'); params.push(Number(input.validade_dias)); }
   set('observacoes', input.observacoes);
   set('status', input.status);
+  set('gestor_cargo',    input.gestor_cargo);
+  set('gestor_nome',     input.gestor_nome);
+  set('gestor_telefone', input.gestor_telefone);
   if (!fields.length) return { ok: true, affected: 0, message: 'Nada a atualizar.' };
   params.push(id);
   const [r] = await pool.execute<ResultSetHeader>(
@@ -505,11 +527,16 @@ function escapeHtml(s: string | null | undefined): string {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// v1.65.5: relatórios usam o logo "tradicional" (/romatec-logo.jpg).
+// O logo R (/logo_R-removebg-preview.png) fica reservado pra UI do app
+// (cabeçalho da tela "Gestão de Obras"), pois é decisão do CEO separar.
+const LOGO_RELATORIO = '/romatec-logo.jpg';
+
 export async function gerarHtmlPropostaRelatorio(id: string): Promise<string> {
   const p = await buscarProposta(id);
   const t = await getTenantSettings(1).catch(() => null);
   const brand = t?.brand_name || 'Romatec Consultoria Imobiliária';
-  const logo  = t?.logo_path  || '/logo_R-removebg-preview.png';
+  const logo  = LOGO_RELATORIO;
   const cor   = t?.primary_color || '#10b981';
 
   const itensHtml = p.itens.map((it, idx) => `
@@ -600,6 +627,15 @@ export async function gerarHtmlPropostaRelatorio(id: string): Promise<string> {
     <div><span class="label">Validade:</span> ${p.validade_dias} dias</div>
   </div>
 
+  ${(p.gestor_nome || p.gestor_cargo || p.gestor_telefone) ? `
+  <h2>Responsável Técnico / Indicador</h2>
+  <div class="grid2">
+    ${p.gestor_cargo    ? `<div><p class="label">Cargo</p><p style="margin:0;">${escapeHtml(p.gestor_cargo)}</p></div>` : ''}
+    ${p.gestor_nome     ? `<div><p class="label">Nome</p><p style="margin:0; font-weight:500;">${escapeHtml(p.gestor_nome)}</p></div>` : ''}
+    ${p.gestor_telefone ? `<div><p class="label">Telefone</p><p style="margin:0;">${escapeHtml(p.gestor_telefone)}</p></div>` : ''}
+  </div>
+  ` : ''}
+
   ${p.observacoes ? `<div class="obs"><strong>Observações:</strong><br>${escapeHtml(p.observacoes).replace(/\n/g, '<br>')}</div>` : ''}
 
   <div class="footer">
@@ -617,8 +653,8 @@ export async function gerarHtmlPropostaRelatorio(id: string): Promise<string> {
 export async function gerarPdfProposta(id: string): Promise<Buffer> {
   const p = await buscarProposta(id);
   const t = await getTenantSettings(1).catch(() => null);
-  const brand = t?.brand_name || 'Romatec Consultoria Imobiliária';
-  const logoPath = t?.logo_path || '/logo_R-removebg-preview.png';
+  const brand    = t?.brand_name || 'Romatec Consultoria Imobiliária';
+  const logoPath = LOGO_RELATORIO; // v1.65.5: logo "tradicional" nos PDFs
   const corHex   = t?.primary_color || '#10b981';
 
   const doc = new PDFDocument({ size: 'A4', margin: 48, info: {
@@ -720,6 +756,20 @@ export async function gerarPdfProposta(id: string): Promise<Buffer> {
   doc.fontSize(9).fillColor('#444');
   doc.text(`Data: ${p.data_proposta}    ·    Validade: ${p.validade_dias} dias`);
   doc.moveDown(0.4);
+
+  // Responsável técnico / indicador
+  if (p.gestor_nome || p.gestor_cargo || p.gestor_telefone) {
+    doc.fontSize(11).fillColor(corHex).text('Responsável Técnico / Indicador');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    doc.fontSize(10).fillColor('#111');
+    const partes: string[] = [];
+    if (p.gestor_cargo)    partes.push(p.gestor_cargo);
+    if (p.gestor_nome)     partes.push(p.gestor_nome);
+    doc.text(partes.join(' — ') || '-');
+    if (p.gestor_telefone) doc.text(`Tel: ${p.gestor_telefone}`);
+    doc.moveDown(0.4);
+  }
 
   if (p.observacoes) {
     doc.fontSize(10).fillColor(corHex).text('Observações');

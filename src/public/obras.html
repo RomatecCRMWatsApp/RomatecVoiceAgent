@@ -1513,12 +1513,12 @@ const ROMATEC_HEADER_CSS = `
 .romatec-header{text-align:center;border-bottom:3px solid #0a3d2a;padding-bottom:14px;margin-bottom:18px;}
 .romatec-header img{max-height:100px;max-width:80%;height:auto;display:inline-block;}
 `;
-// v1.65.1: troca pro logo R em PNG transparente (logo_R-removebg-preview.png).
-// Histórico: /LOGO%20ROMATEC%20ATUAL.jpg (deletado) → /romatec-logo.jpg → atual.
-// brand vem do tenant_settings via JS quando relevante.
+// v1.65.5: relatórios/recibos voltam pro logo "tradicional" /romatec-logo.jpg
+// por decisão do CEO. O logo R (logo_R-removebg-preview.png) fica reservado
+// pra UI da tela "Gestão de Obras" (header da app via tenant_settings.logo_path).
 const ROMATEC_HEADER_HTML = `
 <div class="romatec-header">
-  <img src="/logo_R-removebg-preview.png" alt="Romatec Consultoria Total — Engenharia e Agrimensura">
+  <img src="/romatec-logo.jpg" alt="Romatec Consultoria Total — Engenharia e Agrimensura">
 </div>
 `;
 
@@ -1968,6 +1968,25 @@ async function abrirNovaProposta() {
         <input id="npValidade" type="number" min="1" value="15">
       </label>
       <textarea id="npObs" rows="2" placeholder="Observações (opcional)" style="grid-column:1/-1;"></textarea>
+      <hr style="grid-column:1/-1; border:none; border-top:1px solid var(--border-strong); margin:8px 0;">
+      <p style="grid-column:1/-1; margin:0; font-size:12px; color:var(--text-muted);">
+        Responsável Técnico / Indicador (sai no relatório):
+      </p>
+      <label><span style="font-size:12px; color:var(--text-muted);">Cargo</span>
+        <select id="npGestorCargo">
+          <option value="">— Selecionar —</option>
+          <option>Engenheiro</option>
+          <option>Arquiteto</option>
+          <option>Técnico em Edificações</option>
+          <option>Mestre de Obra</option>
+          <option>Pedreiro</option>
+          <option>Encarregado</option>
+          <option>Indicador</option>
+          <option>Outro</option>
+        </select>
+      </label>
+      <input id="npGestorNome" placeholder="Nome do responsável">
+      <input id="npGestorTel" placeholder="Telefone (com DDD)" style="grid-column:1/-1;">
     </div>
   `;
   abrirEditar('Nova proposta', body, async () => {
@@ -1994,6 +2013,9 @@ async function abrirNovaProposta() {
         data_proposta: document.getElementById('npData').value,
         validade_dias: Number(document.getElementById('npValidade').value) || 15,
         observacoes: document.getElementById('npObs').value.trim() || undefined,
+        gestor_cargo:    document.getElementById('npGestorCargo').value || undefined,
+        gestor_nome:     document.getElementById('npGestorNome').value.trim() || undefined,
+        gestor_telefone: document.getElementById('npGestorTel').value.trim() || undefined,
       })
     });
     fecharEditar();
@@ -2098,6 +2120,16 @@ function renderPropostaEditor() {
           <input data-h="validade_dias" type="number" min="1" value="${p.validade_dias}">
         </label>
         <textarea data-h="observacoes" rows="2" placeholder="Observações" style="grid-column:1/-1;">${escape(p.observacoes||'')}</textarea>
+        <hr style="grid-column:1/-1; border:none; border-top:1px solid var(--border-strong); margin:6px 0;">
+        <p style="grid-column:1/-1; margin:0; font-size:12px; color:var(--text-muted);">Responsável Técnico / Indicador (sai no relatório):</p>
+        <label><span style="font-size:12px; color:var(--text-muted);">Cargo</span>
+          <select data-h="gestor_cargo">
+            ${['','Engenheiro','Arquiteto','Técnico em Edificações','Mestre de Obra','Pedreiro','Encarregado','Indicador','Outro']
+              .map(c => `<option value="${escape(c)}" ${ (p.gestor_cargo||'')===c?'selected':'' }>${c||'— Selecionar —'}</option>`).join('')}
+          </select>
+        </label>
+        <input data-h="gestor_nome" placeholder="Nome do responsável" value="${escape(p.gestor_nome||'')}">
+        <input data-h="gestor_telefone" placeholder="Telefone (com DDD)" value="${escape(p.gestor_telefone||'')}" style="grid-column:1/-1;">
       </div>
       <button data-salvar-header style="margin-top:8px;">Salvar cabeçalho</button>
     </div>
@@ -2197,6 +2229,10 @@ function renderPropostaEditor() {
         data_proposta: document.querySelector('[data-h="data_proposta"]').value || undefined,
         validade_dias: Number(document.querySelector('[data-h="validade_dias"]').value) || undefined,
         observacoes:   document.querySelector('[data-h="observacoes"]').value.trim() || undefined,
+        // v1.65.5: gestor/indicador
+        gestor_cargo:    document.querySelector('[data-h="gestor_cargo"]').value || '',
+        gestor_nome:     document.querySelector('[data-h="gestor_nome"]').value.trim(),
+        gestor_telefone: document.querySelector('[data-h="gestor_telefone"]').value.trim(),
       };
       await api('/api/propostas/' + p.id, { method: 'PUT', body: JSON.stringify(body) });
       await loadProposta(p.id);
