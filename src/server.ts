@@ -641,6 +641,57 @@ app.post('/api/equipe/sync-all', requireCeoToken, apiHandle(async () => {
   return m.syncTodaEquipe();
 }));
 
+// v1.65.12 — PR B.1: recibo quinzenal (ajustes + PDF + validação por hash)
+app.get   ('/api/recibos/ajustes', apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.listarAjustes(args as { membro_id: string; periodo?: string });
+}));
+app.post  ('/api/recibos/ajustes', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.criarAjuste(args as Parameters<typeof m.criarAjuste>[0]);
+}));
+app.delete('/api/recibos/ajustes/:id', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.removerAjuste(args as { id: string });
+}));
+
+// PDF do recibo quinzenal (preview / download / fonte para o envio em B.2)
+app.get('/api/recibos/quinzena/:membro_id/pdf', async (req: Request, res: Response) => {
+  try {
+    const periodo = String(req.query.periodo || '');
+    if (!periodo) {
+      res.status(400).json({ error: 'parâmetro ?periodo=YYYY-MM-1 obrigatório' });
+      return;
+    }
+    const m = await import('./services/recibosQuinzena');
+    const proto = (req.get('x-forwarded-proto') as string | undefined)?.split(',')[0]?.trim() || 'https';
+    const baseUrl = `${proto}://${req.get('host')}`.replace(/\/$/, '');
+    const r = await m.gerarReciboQuinzenalPdf({
+      membro_id: String(req.params.membro_id),
+      periodo,
+      baseUrl,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition',
+      `inline; filename="Recibo_${r.data.membro.nome.replace(/[^a-zA-Z0-9]/g, '_')}_${periodo}.pdf"`);
+    res.send(r.buffer);
+  } catch (err) {
+    res.status(404).json({ error: (err as Error).message });
+  }
+});
+
+// Página pública acessada via QR-code (validação)
+app.get('/recibos/validar/:hash', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/recibosQuinzena');
+    const html = await m.gerarHtmlValidacao(String(req.params.hash));
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) {
+    res.status(500).send(`<pre>Erro: ${(err as Error).message}</pre>`);
+  }
+});
+
 // Materiais
 app.get   ('/api/materiais',          apiHandle(args => obras.listarMateriais(args as { apenas_baixos?: boolean; obra_id?: string })));
 app.post  ('/api/materiais',          apiHandle(args => obras.criarMaterial(args as Parameters<typeof obras.criarMaterial>[0])));
