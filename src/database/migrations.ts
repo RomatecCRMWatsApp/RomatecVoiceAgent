@@ -664,5 +664,30 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.61.0: drafts persistentes de WhatsApp.
+  // Antes, o draft (preview→confirmação) só vivia no histórico do LLM (truncado em
+  // AI_MAX_HISTORY_MESSAGES=12). Quando a conversa passava de 12 turnos OU trocava
+  // de provider, o LLM esquecia o conteúdo e pedia reenvio. Solução: persistência
+  // em DB com TTL (default 30 min). Tools criam/listam/confirmam/cancelam.
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS zayra_whatsapp_drafts (
+      id              VARCHAR(36) PRIMARY KEY,
+      session_id      VARCHAR(100) NOT NULL,
+      destinatario    VARCHAR(20)  NOT NULL,
+      conteudo        MEDIUMTEXT   NOT NULL,
+      tipo            ENUM('texto','audio','imagem','documento') NOT NULL,
+      filename        VARCHAR(255) NULL,
+      caption         TEXT         NULL,
+      status          ENUM('awaiting_confirmation','sent','cancelled','expired') NOT NULL DEFAULT 'awaiting_confirmation',
+      criado_em       TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+      expira_em       TIMESTAMP    NOT NULL,
+      enviado_em      TIMESTAMP    NULL,
+      cancelado_em    TIMESTAMP    NULL,
+      message_id_zapi VARCHAR(100) NULL,
+      INDEX idx_sess_status (session_id, status, expira_em),
+      INDEX idx_status_exp  (status, expira_em)
+    )
+  `);
+
   console.log('[DB] Migrations complete');
 }

@@ -21,6 +21,14 @@ import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
 import { listarContratosIndexados } from '../services/contratosIngest';
 import { gerarContrato, listarContratosGerados } from '../services/contratosGerar';
 import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS, statusInstancia, infoInstancia } from '../integrations/whatsapp';
+import {
+  criarDraft as criarDraftWa,
+  buscarDraft as buscarDraftWa,
+  listarDraftsPendentes as listarDraftsPendentesWa,
+  marcarEnviado as marcarDraftEnviado,
+  cancelarDraft as cancelarDraftWa,
+  type DraftTipo,
+} from '../services/whatsappDrafts';
 import { listarAlertasPendentes, silenciarAlerta, reconhecerAlerta, rodarDetectoresAgora } from './proactive';
 import { sincronizarContatosCRM, buscarContatoMemoria } from '../services/syncContatosCRM';
 import { gerarBriefingSemanal, enviarBriefingSemanal } from './briefingSemanal';
@@ -82,12 +90,24 @@ import {
 
 // v1.45.0: scope do interlocutor atual. think() seta antes de chamar a cascata
 // e limpa no finally; executeTool checa permissão por role. Default = admin.
+// ⚠️ Mesma issue P0 #2 (race condition em multi-tenant) que se aplica ao
+//    _currentSessionId abaixo. Não ampliamos o escopo do bug — só reusamos.
 let _currentCaller: { role: TeamRole; nome: string } | null = null;
 export function setCurrentCaller(c: { role: TeamRole; nome: string } | null): void {
   _currentCaller = c;
 }
 export function getCurrentCaller(): { role: TeamRole; nome: string } | null {
   return _currentCaller;
+}
+
+// v1.61.0: session_id da chamada atual de think(). Usado pelas tools de
+// drafts WhatsApp pra associar/listar drafts da sessão certa.
+let _currentSessionId: string | null = null;
+export function setCurrentSessionId(s: string | null): void {
+  _currentSessionId = s;
+}
+export function getCurrentSessionId(): string | null {
+  return _currentSessionId;
 }
 
 // Tools que admin-only (sempre — independente do role configurado)
@@ -345,57 +365,62 @@ const _allToolDefinitions: Anthropic.Tool[] = [
   },
   {
     name: 'enviar_whatsapp',
-    description: 'Envia mensagem de TEXTO pelo WhatsApp do CEO (instancia Z-API dedicada ZAYRA). DESTRUTIVO — afeta WhatsApp pessoal do CEO. Sempre rode primeiro SEM confirm pra ver preview, peca autorizacao verbal ao Chefe ("pode mandar?"), so depois rode com confirm:true. NUNCA envie sem o CEO autorizar a mensagem exata.',
+    description: 'Envia mensagem de TEXTO pelo WhatsApp do CEO (instancia Z-API dedicada ZAYRA). DESTRUTIVO. WORKFLOW: (1) Primeira chamada SEM confirm — passa "para" + "mensagem" — cria DRAFT persistente, retorna draft_id + preview. (2) Mostra preview ao Chefe e pede autorização verbal. (3) Após autorização, segunda chamada com confirm:true + draft_id (NÃO precisa repassar "mensagem" — service busca no DB pelo draft_id). Se você esqueceu o draft_id, chama listar_drafts_whatsapp_pendentes pra recuperar. TTL de 30 min — após isso o draft expira e tem que refazer.',
     input_schema: {
       type: 'object',
       properties: {
-        para:     { type: 'string', description: 'Número do destinatário (aceita formatos: 5598999999999, 98 9 9999-9999, +55 98 99999-9999)' },
-        mensagem: { type: 'string', description: 'Texto da mensagem a enviar (sem markdown — WhatsApp não renderiza)' },
-        confirm:  { type: 'boolean', description: 'true APÓS autorização verbal do CEO. Sem isso, retorna preview.' },
+        para:     { type: 'string', description: 'Número do destinatário (aceita formatos: 5598999999999, 98 9 9999-9999, +55 98 99999-9999). OBRIGATÓRIO na 1ª chamada.' },
+        mensagem: { type: 'string', description: 'Texto da mensagem (sem markdown). OBRIGATÓRIO na 1ª chamada.' },
+        confirm:  { type: 'boolean', description: 'true APÓS autorização verbal do CEO.' },
+        draft_id: { type: 'string', description: 'UUID do draft criado na 1ª chamada. OBRIGATÓRIO quando confirm:true.' },
       },
-      required: ['para', 'mensagem'],
     },
   },
   {
     name: 'enviar_audio_whatsapp',
-    description: 'Envia AUDIO (PTT/push-to-talk) pelo WhatsApp do CEO. ZAYRA gera o audio via Edge TTS (voz pt-BR Francisca/Antonio) a partir do texto fornecido e envia pra contato. DESTRUTIVO — exige confirm. Use quando o CEO pedir "manda audio pra X explicando Y" ou "fala com Z em audio sobre W". Texto max 800 chars (audio nao pode ser muito longo).',
+    description: 'Envia AUDIO TTS pelo WhatsApp do CEO. WORKFLOW: 1ª chamada sem confirm cria DRAFT; 2ª com confirm:true + draft_id envia. Max 800 chars no texto.',
     input_schema: {
       type: 'object',
       properties: {
-        para:    { type: 'string', description: 'Número destinatário' },
-        texto:   { type: 'string', description: 'Texto que ZAYRA vai falar (max 800 chars, gera audio neural pt-BR)' },
-        confirm: { type: 'boolean' },
+        para:     { type: 'string', description: 'Número destinatário (1ª chamada)' },
+        texto:    { type: 'string', description: 'Texto pra TTS, max 800 chars (1ª chamada)' },
+        confirm:  { type: 'boolean' },
+        draft_id: { type: 'string', description: 'UUID do draft (obrigatório quando confirm:true)' },
       },
-      required: ['para', 'texto'],
     },
   },
   {
     name: 'enviar_imagem_whatsapp',
-    description: 'Envia IMAGEM (foto, captura de tela, logo, plant baixa) pelo WhatsApp do CEO. Aceita URL pública (https://...) ou data URI base64 (data:image/jpeg;base64,...). Suporta caption (legenda da imagem). DESTRUTIVO — exige confirm.',
+    description: 'Envia IMAGEM pelo WhatsApp do CEO. WORKFLOW: 1ª chamada sem confirm cria DRAFT; 2ª com confirm:true + draft_id envia. Aceita URL pública ou data URI base64.',
     input_schema: {
       type: 'object',
       properties: {
-        para:     { type: 'string', description: 'Número destinatário' },
-        imageUrl: { type: 'string', description: 'URL pública (https) ou data URI base64 da imagem' },
-        caption:  { type: 'string', description: 'Legenda opcional da imagem' },
+        para:     { type: 'string', description: 'Número destinatário (1ª chamada)' },
+        imageUrl: { type: 'string', description: 'URL ou base64 (1ª chamada)' },
+        caption:  { type: 'string', description: 'Legenda opcional (1ª chamada)' },
         confirm:  { type: 'boolean' },
+        draft_id: { type: 'string', description: 'UUID do draft (obrigatório quando confirm:true)' },
       },
-      required: ['para', 'imageUrl'],
     },
   },
   {
     name: 'enviar_documento_whatsapp',
-    description: 'Envia DOCUMENTO (PDF, DOCX, XLSX, TXT, CSV) pelo WhatsApp do CEO. Combina perfeito com gerar_contrato (que retorna DOCX base64) — depois de gerar contrato, pode mandar direto pro contato pelo WhatsApp. DESTRUTIVO — exige confirm.',
+    description: 'Envia DOCUMENTO pelo WhatsApp do CEO (PDF/DOCX/XLSX/etc). WORKFLOW: 1ª chamada sem confirm cria DRAFT; 2ª com confirm:true + draft_id envia.',
     input_schema: {
       type: 'object',
       properties: {
-        para:      { type: 'string', description: 'Número destinatário' },
-        docBase64: { type: 'string', description: 'Conteúdo do arquivo em base64 (sem prefixo data:..., só os bytes)' },
-        fileName:  { type: 'string', description: 'Nome do arquivo (ex: "Contrato_Locacao.docx")' },
+        para:      { type: 'string', description: 'Número destinatário (1ª chamada)' },
+        docBase64: { type: 'string', description: 'Arquivo em base64 (1ª chamada)' },
+        fileName:  { type: 'string', description: 'Nome do arquivo (1ª chamada)' },
         confirm:   { type: 'boolean' },
+        draft_id:  { type: 'string', description: 'UUID do draft (obrigatório quando confirm:true)' },
       },
-      required: ['para', 'docBase64', 'fileName'],
     },
+  },
+  {
+    name: 'listar_drafts_whatsapp_pendentes',
+    description: 'Lista drafts de mensagem WhatsApp em status `awaiting_confirmation` da sessão atual (não expirados). USE quando você esquecer o draft_id de uma confirmação pendente — recuperar pela lista. Retorna id, destinatário, tipo, preview e expira_em de cada draft.',
+    input_schema: { type: 'object', properties: {} },
   },
   // ── v1.44.0: OCR Documentos brasileiros ──
   {
@@ -2402,46 +2427,119 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         }));
         break;
       }
+      // v1.61.0: WhatsApp com fila de drafts persistente.
+      // 1ª chamada: cria draft no DB, retorna draft_id + preview.
+      // 2ª chamada (confirm:true + draft_id): busca conteúdo no DB e envia.
       case 'enviar_whatsapp': {
-        const inp = input as { para: string; mensagem: string; confirm?: boolean };
+        const inp = input as { para?: string; mensagem?: string; confirm?: boolean; draft_id?: string };
         if (!inp.confirm) {
-          data = { preview: true, message: `[PREVIEW] Vou enviar pelo WhatsApp do Chefe pra ${inp.para}: "${inp.mensagem}". Reenvie com confirm:true após autorização.` };
+          if (!inp.para || !inp.mensagem) {
+            data = { erro: '1ª chamada exige `para` e `mensagem`.' };
+            break;
+          }
+          const sessionId = getCurrentSessionId() ?? 'unknown_session';
+          data = await criarDraftWa({
+            sessionId, destinatario: inp.para, conteudo: inp.mensagem, tipo: 'texto',
+          });
         } else {
-          const r = await sendReply(inp.para, inp.mensagem);
-          data = { success: true, para: r.phone, mensagem: inp.mensagem, messageId: r.messageId, enviado_em: new Date().toISOString() };
+          if (!inp.draft_id) {
+            data = { erro: 'confirm:true exige `draft_id`. Use listar_drafts_whatsapp_pendentes pra recuperar.' };
+            break;
+          }
+          const d = await buscarDraftWa(inp.draft_id);
+          const r = await sendReply(d.destinatario, d.conteudo);
+          await marcarDraftEnviado(inp.draft_id, r.messageId ?? '');
+          data = { success: true, draft_id: inp.draft_id, para: r.phone, mensagem: d.conteudo, messageId: r.messageId, enviado_em: new Date().toISOString() };
         }
         break;
       }
       case 'enviar_audio_whatsapp': {
-        const inp = input as { para: string; texto: string; confirm?: boolean };
+        const inp = input as { para?: string; texto?: string; confirm?: boolean; draft_id?: string };
         if (!inp.confirm) {
-          data = { preview: true, message: `[PREVIEW] Vou gerar áudio TTS e enviar pra ${inp.para}: "${inp.texto.slice(0, 120)}${inp.texto.length > 120 ? '…' : ''}". Reenvie com confirm:true.` };
+          if (!inp.para || !inp.texto) {
+            data = { erro: '1ª chamada exige `para` e `texto`.' };
+            break;
+          }
+          const sessionId = getCurrentSessionId() ?? 'unknown_session';
+          data = await criarDraftWa({
+            sessionId, destinatario: inp.para, conteudo: inp.texto, tipo: 'audio',
+          });
         } else {
-          const r = await enviarAudioTTS(inp.para, inp.texto);
-          data = { success: true, para: r.phone, segundos_estimados: r.segundos, messageId: r.messageId };
+          if (!inp.draft_id) {
+            data = { erro: 'confirm:true exige `draft_id`.' };
+            break;
+          }
+          const d = await buscarDraftWa(inp.draft_id);
+          const r = await enviarAudioTTS(d.destinatario, d.conteudo);
+          await marcarDraftEnviado(inp.draft_id, r.messageId ?? '');
+          data = { success: true, draft_id: inp.draft_id, para: r.phone, segundos_estimados: r.segundos, messageId: r.messageId };
         }
         break;
       }
       case 'enviar_imagem_whatsapp': {
-        const inp = input as { para: string; imageUrl: string; caption?: string; confirm?: boolean };
+        const inp = input as { para?: string; imageUrl?: string; caption?: string; confirm?: boolean; draft_id?: string };
         if (!inp.confirm) {
-          const tipo = inp.imageUrl.startsWith('data:') ? 'imagem (base64)' : `imagem (${inp.imageUrl.slice(0, 60)}…)`;
-          data = { preview: true, message: `[PREVIEW] Vou enviar ${tipo} pra ${inp.para}${inp.caption ? ' com legenda "' + inp.caption + '"' : ''}. Reenvie com confirm:true.` };
+          if (!inp.para || !inp.imageUrl) {
+            data = { erro: '1ª chamada exige `para` e `imageUrl`.' };
+            break;
+          }
+          const sessionId = getCurrentSessionId() ?? 'unknown_session';
+          data = await criarDraftWa({
+            sessionId, destinatario: inp.para, conteudo: inp.imageUrl, tipo: 'imagem', caption: inp.caption,
+          });
         } else {
-          const r = await sendImage(inp.para, inp.imageUrl, inp.caption);
-          data = { success: true, para: r.phone, messageId: r.messageId, caption: inp.caption };
+          if (!inp.draft_id) {
+            data = { erro: 'confirm:true exige `draft_id`.' };
+            break;
+          }
+          const d = await buscarDraftWa(inp.draft_id);
+          const r = await sendImage(d.destinatario, d.conteudo, d.caption ?? undefined);
+          await marcarDraftEnviado(inp.draft_id, r.messageId ?? '');
+          data = { success: true, draft_id: inp.draft_id, para: r.phone, messageId: r.messageId, caption: d.caption };
         }
         break;
       }
       case 'enviar_documento_whatsapp': {
-        const inp = input as { para: string; docBase64: string; fileName: string; confirm?: boolean };
+        const inp = input as { para?: string; docBase64?: string; fileName?: string; confirm?: boolean; draft_id?: string };
         if (!inp.confirm) {
-          const sizeKb = Math.round((inp.docBase64.length * 3 / 4) / 1024);
-          data = { preview: true, message: `[PREVIEW] Vou enviar documento "${inp.fileName}" (${sizeKb}KB) pra ${inp.para}. Reenvie com confirm:true.` };
+          if (!inp.para || !inp.docBase64 || !inp.fileName) {
+            data = { erro: '1ª chamada exige `para`, `docBase64` e `fileName`.' };
+            break;
+          }
+          const sessionId = getCurrentSessionId() ?? 'unknown_session';
+          data = await criarDraftWa({
+            sessionId, destinatario: inp.para, conteudo: inp.docBase64, tipo: 'documento', filename: inp.fileName,
+          });
         } else {
-          const r = await sendDocument(inp.para, inp.docBase64, inp.fileName);
-          data = { success: true, para: r.phone, fileName: inp.fileName, messageId: r.messageId };
+          if (!inp.draft_id) {
+            data = { erro: 'confirm:true exige `draft_id`.' };
+            break;
+          }
+          const d = await buscarDraftWa(inp.draft_id);
+          const r = await sendDocument(d.destinatario, d.conteudo, d.filename ?? 'documento.bin');
+          await marcarDraftEnviado(inp.draft_id, r.messageId ?? '');
+          data = { success: true, draft_id: inp.draft_id, para: r.phone, fileName: d.filename, messageId: r.messageId };
         }
+        break;
+      }
+      case 'listar_drafts_whatsapp_pendentes': {
+        const sessionId = getCurrentSessionId() ?? 'unknown_session';
+        const drafts = await listarDraftsPendentesWa(sessionId);
+        data = {
+          total: drafts.length,
+          session_id: sessionId,
+          drafts: drafts.map(d => ({
+            draft_id:     d.id,
+            destinatario: d.destinatario,
+            tipo:         d.tipo,
+            preview:      d.tipo === 'texto' ? d.conteudo.slice(0, 200)
+                        : d.tipo === 'audio' ? d.conteudo.slice(0, 100) + (d.conteudo.length > 100 ? '...' : '')
+                        : d.tipo === 'imagem' ? `imagem ${d.caption ? '("' + d.caption + '")' : ''}`
+                        : `${d.filename}`,
+            criado_em:    d.criado_em,
+            expira_em:    d.expira_em,
+          })),
+        };
         break;
       }
       // ── v1.44.0: OCR Documentos ──
