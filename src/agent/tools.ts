@@ -42,6 +42,7 @@ import {
   apagarDocumento    as apagarDocVenc,
   listarTiposDocumento,
 } from '../services/documentosVencimento';
+import { gerarProposta } from '../services/propostaComercial';
 import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
@@ -793,6 +794,31 @@ export const toolDefinitions: Anthropic.Tool[] = [
     name: 'listar_tipos_documento',
     description: 'Lista os tipos de documento que a ZAYRA monitora (ART, CND, matrícula, alvará, AVCB, etc) com seus rótulos amigáveis.',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'gerar_proposta_comercial',
+    description: 'Gera proposta comercial Romatec em DOCX (cabeçalho institucional + identificação cliente + apresentação + objeto + escopo + investimento + prazos + validade + aceite). Diferente de gerar_contrato (que precisa de modelo indexado e tem implicação jurídica), proposta é APRESENTAÇÃO de oferta pré-fechamento. Retorna base64 + filename + numero_proposta + preview. Use quando o Chefe pedir "monta proposta de avaliação pra fulano R$ X" ou "manda proposta comercial pra cliente Y". DESTRUTIVA NÃO É — pode gerar à vontade. Após gerar, pergunte se quer enviar via WhatsApp (enviar_documento_whatsapp) ou arquivar no Drive (drive_upload_arquivo em Romatec/Propostas).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cliente_nome:      { type: 'string' },
+        cliente_cpf_cnpj:  { type: 'string' },
+        cliente_endereco:  { type: 'string' },
+        cliente_telefone:  { type: 'string' },
+        cliente_email:     { type: 'string' },
+        objeto:            { type: 'string', description: '1 frase descrevendo a proposta (ex: "Avaliação NBR 14653 de imóvel residencial em Açailândia/MA")' },
+        escopo:            { type: 'array', items: { type: 'string' }, description: 'Lista de itens/entregáveis (ex: ["Vistoria técnica do imóvel", "Pesquisa de mercado", "Laudo PTAM grau II", "ART CREA-MA"])' },
+        valor_total:       { type: 'number', description: 'Valor em BRL' },
+        forma_pagamento:   { type: 'string', description: 'ex: "50% no aceite + 50% na entrega" ou "à vista no fechamento"' },
+        prazo_execucao:    { type: 'string', description: 'ex: "10 dias úteis após assinatura"' },
+        validade_dias:     { type: 'number', description: 'Default 15' },
+        observacoes:       { type: 'string' },
+        responsavel:       { type: 'string', description: 'Default "José Romário — CEO Romatec"' },
+        cidade_emissao:    { type: 'string', description: 'Default "Açailândia"' },
+        uf_emissao:        { type: 'string', description: 'Default "MA"' },
+      },
+      required: ['cliente_nome', 'objeto', 'escopo', 'valor_total'],
+    },
   },
   {
     name: 'dashboard_romatec',
@@ -2490,6 +2516,9 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'listar_tipos_documento':
         data = listarTiposDocumento();
+        break;
+      case 'gerar_proposta_comercial':
+        data = await gerarProposta(input as unknown as Parameters<typeof gerarProposta>[0]);
         break;
 
       // ── v1.40.0: Briefing semanal + diagnóstico banco ──
