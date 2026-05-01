@@ -394,6 +394,31 @@ export async function processTelegramIncoming(incoming: TelegramIncoming): Promi
 
   // Autorizado — passa pra ZAYRA via think()
   const sessionId = `tg_${incoming.chatId}`;
+
+  // v1.65.11: comandos administrativos da sessão Telegram.
+  // /clear, /limpar, /reset, /novachat → apaga histórico desta conversa
+  // (zayra_conversations) + esvazia buffer em memória + invalida contexto.
+  // Útil quando ZAYRA mantém infos antigas (ex: transações já excluídas
+  // no banco mas ainda mencionadas no chat).
+  const cmd = (incoming.text || '').trim().toLowerCase();
+  if (/^\/(clear|limpar|reset|novachat)\b/.test(cmd)) {
+    try {
+      const m = await import('../agent/memory');
+      const r = await m.clearSession(sessionId);
+      await sendMessage(
+        incoming.chatId,
+        `🧹 Histórico desta conversa zerado (${r.apagadas} mensagens apagadas).\n\n` +
+        `Comece agora — vou consultar tudo do zero pelas tools.`,
+      );
+    } catch (err) {
+      await sendMessage(
+        incoming.chatId,
+        `⚠️ Falhei ao limpar: ${escapeMd((err as Error).message ?? String(err))}`,
+      );
+    }
+    return;
+  }
+
   try {
     const callerOpt = auth.role && auth.membro_nome ? {
       caller: { role: auth.role, nome: auth.membro_nome, via: auth.via === 'env' ? 'env' as const : 'db' as const },

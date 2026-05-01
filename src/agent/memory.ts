@@ -53,6 +53,25 @@ export function getSessionHistory(): SessionMsg[] {
   return [...sessionMsgs];
 }
 
+// v1.65.11: limpa o histórico de uma sessão específica (DB) + esvazia o
+// buffer global em memória + invalida cache de contexto. Chamada pelos
+// comandos /clear, /limpar, /reset no Telegram (e potencialmente no chat web).
+export async function clearSession(sessionId: string): Promise<{ apagadas: number }> {
+  let apagadas = 0;
+  try {
+    const [r] = await db().execute<ResultSetHeader>(
+      'DELETE FROM zayra_conversations WHERE session_id = ?',
+      [sessionId],
+    );
+    apagadas = r.affectedRows ?? 0;
+  } catch (err) {
+    console.warn('[Memory] clearSession DB falhou:', (err as Error).message);
+  }
+  sessionMsgs.length = 0;
+  invalidateContextCache();
+  return { apagadas };
+}
+
 export async function loadSessionFromDb(): Promise<void> {
   try {
     const [rows] = await db().execute<RowDataPacket[]>(
