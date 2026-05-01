@@ -403,5 +403,266 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // v1.59.0: Schema do CRM WhatsApp (replicado do projeto Romatec_CRM_WhatsApp).
+  // Os nomes seguem o original do CRM (camelCase, sem prefixo romatec_) pra
+  // que o CRM possa apontar pro mesmo banco no futuro sem precisar
+  // remigrar. ZAYRA lê essas tabelas via integrations/crm.ts e
+  // services/syncContatosCRM.ts.
+  // ═══════════════════════════════════════════════════════════════════════════
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS users (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      openId       VARCHAR(64) NOT NULL UNIQUE,
+      name         TEXT,
+      email        VARCHAR(320),
+      loginMethod  VARCHAR(64),
+      role         ENUM('user','admin') NOT NULL DEFAULT 'user',
+      createdAt    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      lastSignedIn TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS contacts (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      name         VARCHAR(255) NOT NULL,
+      phone        VARCHAR(20)  NOT NULL UNIQUE,
+      email        VARCHAR(255),
+      status       ENUM('active','blocked','inactive') NOT NULL DEFAULT 'active',
+      blockedUntil TIMESTAMP NULL,
+      createdAt    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_status (status),
+      INDEX idx_created (createdAt DESC)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS properties (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      denomination    VARCHAR(255) NOT NULL,
+      address         TEXT NOT NULL,
+      city            VARCHAR(255),
+      state           VARCHAR(2),
+      cep             VARCHAR(10),
+      price           DECIMAL(12,2) NOT NULL,
+      offerPrice      DECIMAL(12,2),
+      description     TEXT,
+      images          JSON,
+      videoUrl        TEXT,
+      plantaBaixaUrl  TEXT,
+      areaConstruida  DECIMAL(10,2),
+      areaCasa        DECIMAL(10,2),
+      areaTerreno     DECIMAL(10,2),
+      bedrooms        INT,
+      bathrooms       INT,
+      garageSpaces    INT,
+      propertyType    VARCHAR(100),
+      publicSlug      VARCHAR(255),
+      finalidade      VARCHAR(20) NOT NULL DEFAULT 'venda',
+      status          ENUM('available','sold','inactive') NOT NULL DEFAULT 'available',
+      createdAt       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_status   (status),
+      INDEX idx_city     (city, state),
+      INDEX idx_slug     (publicSlug)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS campaigns (
+      id                       INT AUTO_INCREMENT PRIMARY KEY,
+      propertyId               INT NOT NULL,
+      name                     VARCHAR(255) NOT NULL,
+      status                   ENUM('draft','scheduled','running','paused','completed') NOT NULL DEFAULT 'draft',
+      messageVariations        JSON,
+      totalContacts            INT DEFAULT 2,
+      sentCount                INT DEFAULT 0,
+      failedCount              INT DEFAULT 0,
+      messagesPerHour          INT DEFAULT 1,
+      startDate                TIMESTAMP NULL,
+      endDate                  TIMESTAMP NULL,
+      activeDay                BOOLEAN NOT NULL DEFAULT FALSE,
+      activeNight              BOOLEAN NOT NULL DEFAULT FALSE,
+      cycleActivationUpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      createdAt                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_status   (status),
+      INDEX idx_property (propertyId)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS campaignContacts (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      campaignId      INT NOT NULL,
+      contactId       INT NOT NULL,
+      messagesSent    INT DEFAULT 0,
+      lastMessageSent TIMESTAMP NULL,
+      status          ENUM('pending','sent','failed','blocked') NOT NULL DEFAULT 'pending',
+      createdAt       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_camp     (campaignId, status),
+      INDEX idx_contact  (contactId),
+      UNIQUE KEY uniq_camp_contact (campaignId, contactId)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      campaignId    INT NOT NULL,
+      contactId     INT NOT NULL,
+      propertyId    INT NOT NULL,
+      messageText   TEXT NOT NULL,
+      status        ENUM('pending','sent','delivered','failed','blocked') NOT NULL DEFAULT 'pending',
+      zApiMessageId VARCHAR(255),
+      sentAt        TIMESTAMP NULL,
+      deliveredAt   TIMESTAMP NULL,
+      errorMessage  TEXT,
+      createdAt     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_campaign (campaignId, status),
+      INDEX idx_contact  (contactId, sentAt),
+      INDEX idx_zapi     (zApiMessageId)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS companyConfig (
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      companyName      VARCHAR(255) NOT NULL,
+      phone            VARCHAR(20)  NOT NULL,
+      address          TEXT,
+      zApiInstanceId   VARCHAR(255),
+      zApiToken        VARCHAR(255),
+      zApiClientToken  VARCHAR(255),
+      zApiConnected    BOOLEAN DEFAULT FALSE,
+      zApiLastChecked  TIMESTAMP NULL,
+      telegramBotToken VARCHAR(255),
+      telegramChatId   VARCHAR(100),
+      openAiApiKey     VARCHAR(255),
+      createdAt        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS interactions (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      messageId    INT NOT NULL,
+      contactId    INT NOT NULL,
+      campaignId   INT NOT NULL,
+      responseText TEXT,
+      sentiment    ENUM('positive','negative','neutral','unknown') DEFAULT 'unknown',
+      responseTime INT,
+      createdAt    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_contact   (contactId, createdAt DESC),
+      INDEX idx_campaign  (campaignId)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS contactCampaignHistory (
+      id             INT AUTO_INCREMENT PRIMARY KEY,
+      contactId      INT NOT NULL,
+      campaignId     INT NOT NULL,
+      lastCampaignId INT,
+      sentAt         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      createdAt      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_contact (contactId, sentAt DESC)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS campaignSchedules (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      hourCycle       INT NOT NULL DEFAULT 0,
+      campaign1Id     INT NOT NULL,
+      campaign2Id     INT NOT NULL,
+      message1SentAt  TIMESTAMP NULL,
+      message2SentAt  TIMESTAMP NULL,
+      status          ENUM('pending','running','completed','failed') NOT NULL DEFAULT 'pending',
+      createdAt       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_status (status, createdAt DESC)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS messageVariations (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      campaignId   INT NOT NULL,
+      messageText  TEXT NOT NULL,
+      messageOrder INT NOT NULL DEFAULT 0,
+      createdAt    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_campaign (campaignId, messageOrder)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS dailyReports (
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      date          VARCHAR(10) NOT NULL,
+      totalSent     INT NOT NULL DEFAULT 0,
+      totalFailed   INT NOT NULL DEFAULT 0,
+      totalBlocked  INT NOT NULL DEFAULT 0,
+      executionTime INT NOT NULL DEFAULT 0,
+      successRate   DECIMAL(5,2) DEFAULT 0,
+      createdAt     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_date (date)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS schedulerState (
+      id                 INT AUTO_INCREMENT PRIMARY KEY,
+      status             ENUM('stopped','running','paused') NOT NULL DEFAULT 'stopped',
+      currentPairIndex   INT NOT NULL DEFAULT 0,
+      cycleNumber        INT NOT NULL DEFAULT 0,
+      messagesThisCycle  INT NOT NULL DEFAULT 0,
+      startedAt          TIMESTAMP NULL,
+      cycleStartedAt     TIMESTAMP NULL,
+      stateJson          JSON,
+      updatedAt          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS leadQualifications (
+      id                INT AUTO_INCREMENT PRIMARY KEY,
+      contactId         INT,
+      campaignId        INT,
+      phone             VARCHAR(20) NOT NULL,
+      answers           JSON,
+      nome              VARCHAR(255),
+      valorParcela      VARCHAR(100),
+      valorEntrada      VARCHAR(100),
+      tipoEmprego       VARCHAR(100),
+      restricaoCPF      VARCHAR(100),
+      prazo             VARCHAR(100),
+      primeiroImovel    VARCHAR(100),
+      stage             VARCHAR(50) DEFAULT 'qual_etapa_1',
+      score             ENUM('quente','morno','frio') NOT NULL DEFAULT 'frio',
+      campanhaOrigem    VARCHAR(255),
+      lastActivityAt    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      blockedUntil      TIMESTAMP NULL,
+      discardReason     VARCHAR(255),
+      createdAt         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_phone        (phone),
+      INDEX idx_score_act    (score, lastActivityAt DESC),
+      INDEX idx_stage        (stage),
+      INDEX idx_campaign     (campaignId),
+      INDEX idx_contact      (contactId)
+    )
+  `);
+
   console.log('[DB] Migrations complete');
 }
