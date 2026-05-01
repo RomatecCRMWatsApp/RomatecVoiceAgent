@@ -36,7 +36,10 @@ import { buscarCartorio, montarUrlConsultaOnr, listarMunicipiosComCartorio } fro
 import { calcularComissao, listarTabelaComissao } from '../services/calcularComissao';
 import { dashboardRomatec } from '../services/dashboardRomatec';
 import {
-  cadastrarDocumento, listarDocumentos, marcarRenovado, apagarDocumento,
+  cadastrarDocumento as cadastrarDocVenc,
+  listarDocumentos   as listarDocsVenc,
+  marcarRenovado     as marcarDocRenovado,
+  apagarDocumento    as apagarDocVenc,
   listarTiposDocumento,
 } from '../services/documentosVencimento';
 import {
@@ -2474,16 +2477,16 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         data = await dashboardRomatec(input as { dias?: number });
         break;
       case 'cadastrar_documento_vencimento':
-        data = await cadastrarDocumento(input as unknown as Parameters<typeof cadastrarDocumento>[0]);
+        data = await cadastrarDocVenc(input as unknown as Parameters<typeof cadastrarDocVenc>[0]);
         break;
       case 'listar_documentos_vencimento':
-        data = await listarDocumentos(input as unknown as Parameters<typeof listarDocumentos>[0]);
+        data = await listarDocsVenc(input as unknown as Parameters<typeof listarDocsVenc>[0]);
         break;
       case 'marcar_documento_renovado':
-        data = await marcarRenovado(input as unknown as Parameters<typeof marcarRenovado>[0]);
+        data = await marcarDocRenovado(input as unknown as Parameters<typeof marcarDocRenovado>[0]);
         break;
       case 'apagar_documento_vencimento':
-        data = await apagarDocumento(Number(input.id));
+        data = await apagarDocVenc(Number(input.id));
         break;
       case 'listar_tipos_documento':
         data = listarTiposDocumento();
