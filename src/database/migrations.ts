@@ -717,12 +717,41 @@ export async function runMigrations(): Promise<void> {
       await pool.execute(stmt);
     } catch (err) {
       const msg = (err as Error).message ?? '';
-      // Ignora "Duplicate column name" / "Duplicate key name" — coluna/index já existe (idempotência manual).
       if (!/Duplicate column|Duplicate key/i.test(msg)) {
         console.warn(`[DB] migration ALTER falhou (não-bloqueante): ${msg.slice(0, 120)}`);
       }
     }
   }
+
+  // v1.64.0: tenant_settings — preparação white-label estrutural.
+  // Mono-tenant agora (Romatec). Estrutura pronta pra trocar logo/marca via UPDATE
+  // quando virar SaaS. NÃO inclui multi-tenant real (auth, isolamento, billing).
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS tenant_settings (
+      id                 INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id          INT NOT NULL DEFAULT 1,
+      brand_name         VARCHAR(150) NOT NULL,
+      brand_short_name   VARCHAR(50),
+      logo_path          VARCHAR(500),
+      primary_color      VARCHAR(7) DEFAULT '#10b981',
+      document_footer    TEXT,
+      cnpj               VARCHAR(20),
+      endereco           VARCHAR(255),
+      telefone           VARCHAR(20),
+      email              VARCHAR(150),
+      site               VARCHAR(150),
+      atualizado_em      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uk_tenant (tenant_id)
+    )
+  `);
+  // Insert padrão Romatec (idempotente — INSERT IGNORE não falha se já existir)
+  await pool.execute(`
+    INSERT IGNORE INTO tenant_settings
+      (tenant_id, brand_name, brand_short_name, logo_path, primary_color, cnpj, telefone, email)
+    VALUES
+      (1, 'Romatec Consultoria Imobiliária', 'Romatec', '/romatec-logo.jpg', '#10b981',
+       NULL, NULL, 'romateccrm@gmail.com')
+  `);
 
   console.log('[DB] Migrations complete');
 }

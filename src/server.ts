@@ -602,6 +602,25 @@ function requireCeoToken(req: Request, res: Response, next: () => void): void {
   next();
 }
 
+// v1.64.0: tenant settings (white-label estrutural). GET é público, PUT só CEO.
+app.get('/api/tenant-settings', async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./services/tenantSettings');
+    res.json(await m.getTenantSettings(1));
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+app.put('/api/tenant-settings', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/tenantSettings');
+    const updated = await m.atualizarTenantSettings(1, req.body ?? {});
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
 // Transações
 app.get ('/api/transacoes', apiHandle(args => obras.listarTransacoesObra(args as Parameters<typeof obras.listarTransacoesObra>[0])));
 app.post('/api/transacoes', apiHandle(args => obras.criarTransacaoObra(args as Parameters<typeof obras.criarTransacaoObra>[0])));

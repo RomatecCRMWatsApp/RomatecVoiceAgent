@@ -380,9 +380,12 @@
 <body>
 <div class="container">
   <div class="header">
-    <div>
-      <h1>GESTÃO DE OBRAS</h1>
-      <p>ZAYRA · Romatec Consultoria Imobiliária</p>
+    <div style="display:flex; align-items:center; gap:14px;">
+      <img id="brandLogo" src="" alt="" style="display:none; max-height:42px; max-width:80px; border-radius:6px;">
+      <div>
+        <h1 id="brandTitle">GESTÃO DE OBRAS</h1>
+        <p id="brandSubtitle">ZAYRA · Romatec Consultoria Imobiliária</p>
+      </div>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
       <span class="badge-zayra" id="versionBadge">v...</span>
@@ -497,6 +500,30 @@ fetch(API + '/health')
   .then(d => {
     const el = document.getElementById('versionBadge');
     if (el && d.version) el.textContent = 'v' + d.version;
+  })
+  .catch(() => {});
+
+// v1.64.0: tenant_settings (white-label estrutural).
+// Busca logo + brand_name dinamicamente. Default Romatec se API offline.
+fetch(API + '/api/tenant-settings')
+  .then(r => r.json())
+  .then(t => {
+    if (!t) return;
+    const img = document.getElementById('brandLogo');
+    if (img && t.logo_path) {
+      img.src = t.logo_path;
+      img.alt = t.brand_short_name || t.brand_name || '';
+      img.style.display = 'inline-block';
+      img.onerror = () => { img.style.display = 'none'; };  // some se logo falhar
+    }
+    if (t.brand_name) {
+      const sub = document.getElementById('brandSubtitle');
+      if (sub) sub.textContent = `ZAYRA · ${t.brand_name}`;
+    }
+    // Cor primária (CSS variable opcional — não muda hoje pra preservar visual)
+    if (t.primary_color && t.primary_color !== '#10b981') {
+      document.documentElement.style.setProperty('--neon', t.primary_color);
+    }
   })
   .catch(() => {});
 
