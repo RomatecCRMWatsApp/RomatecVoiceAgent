@@ -344,6 +344,7 @@ export async function criarProposta(input: {
 
 export async function atualizarProposta(input: {
   id: string;
+  cliente_id?: string;
   endereco_obra?: string;
   data_proposta?: string;
   validade_dias?: number;
@@ -358,6 +359,11 @@ export async function atualizarProposta(input: {
   const fields: string[] = [];
   const params: (string | number | null)[] = [];
   const set = (k: string, v: unknown) => { if (v !== undefined) { fields.push(`${k} = ?`); params.push((v as string) ?? null); } };
+  if (input.cliente_id !== undefined) {
+    const cliId = Number(input.cliente_id);
+    if (!cliId) throw new Error('cliente_id inválido');
+    fields.push('cliente_id = ?'); params.push(cliId);
+  }
   set('endereco_obra', input.endereco_obra);
   if (input.data_proposta && /^\d{4}-\d{2}-\d{2}$/.test(input.data_proposta)) {
     fields.push('data_proposta = ?'); params.push(input.data_proposta);
