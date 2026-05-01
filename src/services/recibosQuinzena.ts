@@ -624,8 +624,17 @@ interface PreviewItem {
   telefone: string | null;
   total_liquido: number;
   qtd_dias: number;
-  status_preview: 'ok' | 'sem_telefone' | 'telefone_invalido' | 'sem_dias_e_sem_ajustes' | 'duplicado_provavel';
-  duplicado_com?: string[];   // IDs dos outros membros que parecem ser a mesma pessoa
+  status_preview: 'ok' | 'sem_telefone' | 'telefone_invalido' | 'sem_dias_e_sem_ajustes';
+  // v1.65.14: avisos informativos. CEO confirmou que tanto cargos de gestão
+  // quanto operacionais podem ter múltiplos cadastros legítimos (operacional
+  // pode iniciar quinzena na obra A e terminar na B). Não é erro, não
+  // bloqueia. Cada cadastro envia seu próprio recibo filtrado pelos dias
+  // daquela obra (comportamento atual do coletarDadosRecibo).
+  multi_cadastro_ids?: string[]; // outros membro_ids com mesmo nome+telefone
+  // Conflito real: 2 cadastros do mesmo colaborador (mesmo nome+telefone)
+  // marcaram o MESMO dia + período (integral/manha/tarde) em obras diferentes.
+  // Operacionalmente impossível — alguém errou ao marcar dias.
+  conflitos_datas?: Array<{ data: string; periodo: string; obras: string[] }>;
 }
 
 export interface PreviewLote {
@@ -759,9 +768,10 @@ export async function previewLoteQuinzena(input: { periodo?: string } = {}): Pro
     });
   }
 
-  // 2ª passada: detecta duplicações por (nome canônico + sufixo do telefone).
-  // Marca todos os itens do grupo como 'duplicado_provavel' e desconta valor
-  // do total — Chefe precisa decidir/limpar antes de disparar.
+  // 2ª passada: detecta múltiplos cadastros por (nome canônico + sufixo do
+  // telefone). NÃO bloqueia — só informa. CEO confirmou que é caso legítimo
+  // tanto pra gestão (Eng./Mestre/Téc. atuando em várias frentes) quanto
+  // operacional (Pedreiro inicia quinzena numa obra e termina em outra).
   const grupos = new Map<string, PreviewItem[]>();
   for (const it of itens) {
     if (it.status_preview === 'sem_dias_e_sem_ajustes') continue;
@@ -775,19 +785,57 @@ export async function previewLoteQuinzena(input: { periodo?: string } = {}): Pro
   for (const [chave, group] of grupos) {
     if (group.length < 2) continue;
     const ids = group.map(g => g.membro_id);
-    duplicacoes.push({
-      chave,
-      membro_ids: ids,
-      nome: group[0].nome,
-      telefone: group[0].telefone,
-    });
+    // Marca cada item com lista de cadastros gêmeos (informativo)
     for (const it of group) {
-      // só desconta do total se ele estava contando (status 'ok')
-      if (it.status_preview === 'ok') {
-        totalValor -= it.total_liquido;
+      it.multi_cadastro_ids = ids.filter(id => id !== it.membro_id);
+    }
+    duplicacoes.push({
+      chave, membro_ids: ids,
+      nome: group[0].nome, telefone: group[0].telefone,
+    });
+
+    // 3ª passada: detecta CONFLITO real — mesmo colaborador (vários
+    // cadastros) marcou o mesmo dia + periodo em obras diferentes.
+    // Isso é operacionalmente impossível (alguém marcou errado).
+    const memberIds = ids.map(Number);
+    const [diasRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT d.funcionario_id, d.data, d.periodo, d.obra_id, o.nome AS obra_nome
+         FROM romatec_obra_funcionario_dias d
+         LEFT JOIN romatec_obras o ON o.id = d.obra_id
+        WHERE d.funcionario_id IN (${memberIds.map(() => '?').join(',')})
+          AND d.data BETWEEN ? AND ?
+        ORDER BY d.data, d.periodo`,
+      [...memberIds, periodo.dataInicio, periodo.dataFim]
+    );
+    type Hit = { data: string; periodo: string; obras: Map<string, string>; funcs: Set<number> };
+    const hits = new Map<string, Hit>();
+    for (const r of diasRows) {
+      const isoData = (r.data instanceof Date)
+        ? r.data.toISOString().slice(0, 10)
+        : String(r.data).slice(0, 10);
+      const key = `${isoData}|${r.periodo}`;
+      if (!hits.has(key)) hits.set(key, {
+        data: isoData, periodo: String(r.periodo),
+        obras: new Map(), funcs: new Set(),
+      });
+      const h = hits.get(key)!;
+      h.funcs.add(Number(r.funcionario_id));
+      if (r.obra_id != null) h.obras.set(String(r.obra_id), String(r.obra_nome ?? '?'));
+    }
+    const conflitos: NonNullable<PreviewItem['conflitos_datas']> = [];
+    for (const h of hits.values()) {
+      // Conflito = mesmo dia/periodo aparece em 2+ funcionarios distintos
+      // (cadastros gêmeos do mesmo colaborador real)
+      if (h.funcs.size >= 2) {
+        conflitos.push({
+          data: h.data.split('-').reverse().join('/'),
+          periodo: h.periodo,
+          obras: Array.from(h.obras.values()),
+        });
       }
-      it.status_preview = 'duplicado_provavel';
-      it.duplicado_com = ids.filter(id => id !== it.membro_id);
+    }
+    if (conflitos.length) {
+      for (const it of group) it.conflitos_datas = conflitos;
     }
   }
 
@@ -799,6 +847,7 @@ export async function previewLoteQuinzena(input: { periodo?: string } = {}): Pro
       : null,
     itens,
     total_valor: totalValor,
+    // status 'ok' (inclui multi-cadastro, que segue como ok agora) conta como válido
     total_colaboradores_validos: itens.filter(i => i.status_preview === 'ok').length,
     total_pulados_sem_telefone: pulados,
     total_telefone_invalido: invalidos,
@@ -854,18 +903,25 @@ export async function criarLoteRecibos(input: {
   if (preview.total_colaboradores_validos === 0) {
     throw new Error(
       `Nenhum colaborador válido pra ${preview.periodo.label}. ` +
-      `(${preview.total_pulados_sem_telefone} sem telefone, ${preview.total_telefone_invalido} com telefone inválido, ${preview.total_sem_atividade} sem atividade, ${preview.duplicacoes_detectadas.length} grupo(s) de duplicação.)`
+      `(${preview.total_pulados_sem_telefone} sem telefone, ${preview.total_telefone_invalido} com telefone inválido, ${preview.total_sem_atividade} sem atividade.)`
     );
   }
-  // v1.65.14: bloqueia disparo se há duplicações suspeitas, a não ser que CEO force.
-  if (preview.duplicacoes_detectadas.length > 0 && !input.force) {
-    const detalhe = preview.duplicacoes_detectadas
-      .map(d => `${d.nome} (IDs ${d.membro_ids.join(', ')})`).join('; ');
+  // v1.65.14: conflito de datas (mesmo colaborador marcado no mesmo dia+periodo
+  // em obras diferentes) bloqueia disparo a menos de force:true. CEO precisa
+  // limpar a marcação antes de disparar — caso contrário o colaborador recebe
+  // recibos "inflados".
+  const itensComConflito = preview.itens.filter(i => i.conflitos_datas && i.conflitos_datas.length);
+  if (itensComConflito.length > 0 && !input.force) {
+    const detalhes = itensComConflito.map(i => {
+      const dias = (i.conflitos_datas ?? [])
+        .map(c => `${c.data}/${c.periodo} em [${c.obras.join(' + ')}]`)
+        .join(', ');
+      return `${i.nome} (ID ${i.membro_id}): ${dias}`;
+    }).join('; ');
     throw new Error(
-      `${preview.duplicacoes_detectadas.length} grupo(s) de duplicação detectado(s) — ` +
-      `mesmo nome+telefone em registros diferentes da equipe. ` +
-      `Limpa o cadastro na aba Equipe e gera novo preview, OU passa force:true pra disparar mesmo assim. ` +
-      `Detalhes: ${detalhe}.`
+      `Conflito de datas detectado em ${itensComConflito.length / 2} colaborador(es) — ` +
+      `mesmo dia+período marcado em obras diferentes. Corrija na aba "Marcar Dias" antes de disparar, ` +
+      `OU passe force:true pra ignorar. Detalhes: ${detalhes}.`
     );
   }
 
@@ -1084,26 +1140,36 @@ export async function dispararRecibosQuinzena(input: {
     const linhas = preview.itens
       .filter(i => i.status_preview !== 'sem_dias_e_sem_ajustes')
       .map(i => {
-        let tag = '';
-        if (i.status_preview === 'sem_telefone')        tag = '⚠️ sem WhatsApp';
-        else if (i.status_preview === 'telefone_invalido') tag = `⚠️ telefone inválido ("${i.telefone}")`;
-        else if (i.status_preview === 'duplicado_provavel') tag = `🔁 DUPLICADO? gêmeo de ${i.duplicado_com?.join(', ')}`;
+        const tags: string[] = [];
+        if (i.status_preview === 'sem_telefone')        tags.push('⚠️ sem WhatsApp');
+        if (i.status_preview === 'telefone_invalido')   tags.push(`⚠️ telefone inválido ("${i.telefone}")`);
+        if (i.multi_cadastro_ids?.length)               tags.push(`👥 multi-cadastro (junto com ${i.multi_cadastro_ids.join(', ')})`);
+        if (i.conflitos_datas?.length)                  tags.push(`🔴 ${i.conflitos_datas.length} conflito(s) de data`);
         const trat = i.tratamento ? `${i.tratamento} ` : '';
-        return `• [${i.membro_id}] ${trat}${i.nome}${i.funcao ? ' ('+i.funcao+')' : ''} — ${formatBRL(i.total_liquido)} ${tag}`;
+        return `• [${i.membro_id}] ${trat}${i.nome}${i.funcao ? ' ('+i.funcao+')' : ''} — ${formatBRL(i.total_liquido)} ${tags.join(' ')}`;
       })
       .join('\n');
 
     const avisoLote = preview.ja_existe_lote_ativo
       ? `\n⚠️ Já existe lote ativo pra ${preview.periodo.label}: ${preview.ja_existe_lote_ativo.numero} (${preview.ja_existe_lote_ativo.status}). Use force:true pra criar paralelo.`
       : '';
-    const avisoDup = preview.duplicacoes_detectadas.length > 0
-      ? `\n\n🔁 ${preview.duplicacoes_detectadas.length} grupo(s) de duplicação detectado(s):\n` +
+    const avisoMulti = preview.duplicacoes_detectadas.length > 0
+      ? `\n\n👥 ${preview.duplicacoes_detectadas.length} colaborador(es) com múltiplos cadastros (frentes diferentes):\n` +
         preview.duplicacoes_detectadas.map(d =>
           `  - ${d.nome} (IDs ${d.membro_ids.join(', ')})`
         ).join('\n') +
-        `\n\nLimpa a duplicação na aba Equipe ANTES de disparar (ou use force:true pra ignorar e enviar mesmo assim — colaborador receberá múltiplos recibos).`
+        `\n  → cada cadastro recebe seu próprio recibo (cada obra tem seus dias).`
       : '';
-    const aviso = avisoLote + avisoDup;
+    const itensConflito = preview.itens.filter(i => i.conflitos_datas?.length);
+    const avisoConflito = itensConflito.length
+      ? `\n\n🔴 CONFLITO de datas detectado: o mesmo colaborador foi marcado no MESMO dia+período em obras diferentes (operacionalmente impossível):\n` +
+        itensConflito.map(i =>
+          `  - ${i.nome} [ID ${i.membro_id}]: ` +
+          (i.conflitos_datas ?? []).map(c => `${c.data}/${c.periodo} em [${c.obras.join(' + ')}]`).join('; ')
+        ).join('\n') +
+        `\n\nCorrija na aba "Marcar Dias" ANTES de disparar (ou use force:true pra ignorar — não recomendado).`
+      : '';
+    const aviso = avisoLote + avisoMulti + avisoConflito;
 
     return {
       modo: 'preview',
@@ -1113,14 +1179,13 @@ export async function dispararRecibosQuinzena(input: {
         `${preview.total_colaboradores_validos} envio(s) válido(s)` +
         (preview.total_pulados_sem_telefone ? `, ${preview.total_pulados_sem_telefone} sem WhatsApp` : '') +
         (preview.total_telefone_invalido ? `, ${preview.total_telefone_invalido} telefone inválido` : '') +
-        (preview.duplicacoes_detectadas.length ? `, ${preview.duplicacoes_detectadas.length} grupo(s) duplicado(s)` : '') +
         (preview.total_sem_atividade ? `, ${preview.total_sem_atividade} sem atividade` : '') + '.\n\n' +
         linhas + '\n\n' +
         `Total a pagar (válidos): ${formatBRL(preview.total_valor)}` +
         aviso +
-        (preview.duplicacoes_detectadas.length === 0
+        (itensConflito.length === 0
           ? `\n\nConfirma o disparo? Reenvie com confirm:true.`
-          : `\n\n⚠️ Disparo bloqueado por duplicação. Resolve primeiro.`),
+          : `\n\n🔴 Disparo bloqueado por conflito de datas. Corrija a marcação primeiro.`),
     };
   }
 
