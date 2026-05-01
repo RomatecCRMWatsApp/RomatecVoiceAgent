@@ -30,6 +30,7 @@ import {
 import { startDailyScheduler } from './agent/scheduler';
 import * as calendar from './integrations/calendar';
 import * as obras from './integrations/obras';
+import * as propostas from './integrations/propostas';
 import * as alarmes from './integrations/alarmes';
 import * as cofre from './integrations/cofre';
 import * as vistorias from './integrations/vistorias';
@@ -647,6 +648,26 @@ app.post('/api/diario', apiHandle(args => obras.registrarDiarioObra(args as Para
 // Catálogo de profissões
 app.get('/api/profissoes-catalogo', apiHandle(() => obras.listarProfissoesCatalogo()));
 app.put('/api/profissoes-catalogo/:id', apiHandle(args => obras.atualizarProfissaoCatalogo(args as Parameters<typeof obras.atualizarProfissaoCatalogo>[0])));
+
+// v1.65.2: Propostas de Mão de Obra (catálogo SINAPI + clientes + propostas + itens)
+app.get   ('/api/sinapi-servicos',       apiHandle(args => propostas.listarCatalogoSinapi(args as Parameters<typeof propostas.listarCatalogoSinapi>[0])));
+app.get   ('/api/sinapi-categorias',     apiHandle(() => propostas.listarCategoriasSinapi()));
+
+app.get   ('/api/propostas-clientes',    apiHandle(args => propostas.listarClientesProposta(args as Parameters<typeof propostas.listarClientesProposta>[0])));
+app.post  ('/api/propostas-clientes',    apiHandle(args => propostas.criarClienteProposta(args as Parameters<typeof propostas.criarClienteProposta>[0])));
+app.put   ('/api/propostas-clientes/:id', requireCeoToken, apiHandle(args => propostas.atualizarClienteProposta(args as Parameters<typeof propostas.atualizarClienteProposta>[0])));
+app.delete('/api/propostas-clientes/:id', requireCeoToken, apiHandle(args => propostas.apagarClienteProposta(args as { id: string })));
+
+app.get   ('/api/propostas',             apiHandle(args => propostas.listarPropostas(args as Parameters<typeof propostas.listarPropostas>[0])));
+app.get   ('/api/propostas/:id',         apiHandle(args => propostas.buscarProposta((args as { id: string }).id)));
+app.post  ('/api/propostas',             apiHandle(args => propostas.criarProposta(args as Parameters<typeof propostas.criarProposta>[0])));
+app.put   ('/api/propostas/:id',         apiHandle(args => propostas.atualizarProposta(args as Parameters<typeof propostas.atualizarProposta>[0])));
+app.delete('/api/propostas/:id',         requireCeoToken, apiHandle(args => propostas.apagarProposta(args as { id: string })));
+
+app.post  ('/api/propostas/:proposta_id/itens',         apiHandle(args => propostas.adicionarItemProposta(args as Parameters<typeof propostas.adicionarItemProposta>[0])));
+app.put   ('/api/proposta-itens/:id',                   apiHandle(args => propostas.atualizarItemProposta(args as Parameters<typeof propostas.atualizarItemProposta>[0])));
+app.delete('/api/proposta-itens/:id',                   apiHandle(args => propostas.removerItemProposta(args as { id: string })));
+app.post  ('/api/propostas/:proposta_id/itens/reordenar', apiHandle(args => propostas.reordenarItensProposta(args as Parameters<typeof propostas.reordenarItensProposta>[0])));
 
 // Cowork (tarefas em background)
 app.get   ('/api/cowork',       apiHandle(args => cowork.listarTarefasCowork(args as Parameters<typeof cowork.listarTarefasCowork>[0])));

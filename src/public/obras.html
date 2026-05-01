@@ -403,6 +403,7 @@
     <button class="tab" data-tab="marcar">Marcar Dias</button>
     <button class="tab" data-tab="folha">Folha Mensal</button>
     <button class="tab" data-tab="vto">Vistoria (VTO)</button>
+    <button class="tab" data-tab="proposta">Proposta</button>
   </div>
 
   <div id="view-dashboard" class="view active"></div>
@@ -415,6 +416,7 @@
   <div id="view-diario" class="view"></div>
   <div id="view-folha" class="view"></div>
   <div id="view-vto" class="view"></div>
+  <div id="view-proposta" class="view"></div>
 </div>
 
 <button class="zayra-fab" id="zayraFab">Z</button>
@@ -570,6 +572,14 @@ const state = {
   folhaObraId: '',
   vistorias: [], vistoriaAtual: null,
   vtoFotos: [], // {legenda, mime, data_base64} antes de salvar
+  // v1.65.2: Propostas
+  propostas: [],
+  propostaAtual: null,           // proposta sendo editada (com itens)
+  sinapiCategorias: [],          // ['ALVENARIA', 'PINTURA', ...]
+  sinapiAgrupado: null,          // { categoria → [items] }
+  sinapiBusca: '',               // filtro autocomplete
+  propostasClientes: [],         // cache de clientes
+  propostaCategoriaAberta: '',   // qual acordeão de categoria está aberto
 };
 
 const fmt = n => 'R$ ' + (Number(n)||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -650,6 +660,24 @@ async function loadDiario() {
   state.diario = await api('/api/diario?obra_id=' + state.currentObra);
 }
 
+// v1.65.2: Propostas
+async function loadPropostas() {
+  state.propostas = await api('/api/propostas');
+}
+async function loadPropostasClientes() {
+  state.propostasClientes = await api('/api/propostas-clientes');
+}
+async function loadSinapiAgrupado() {
+  if (!state.sinapiAgrupado) {
+    const r = await api('/api/sinapi-servicos?agrupado=1');
+    state.sinapiAgrupado = r.categorias || {};
+    state.sinapiCategorias = Object.keys(state.sinapiAgrupado).sort();
+  }
+}
+async function loadProposta(id) {
+  state.propostaAtual = await api('/api/propostas/' + id);
+}
+
 async function render() {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -673,6 +701,17 @@ async function render() {
       diario: async () => { await Promise.all([loadObras(), loadDiario()]); renderDiario(); },
       folha: async () => { await Promise.all([loadObras(), loadFolha()]); renderFolha(); },
       vto:   async () => { await Promise.all([loadObras(), loadVistorias()]); renderVto(); },
+      proposta: async () => {
+        await loadPropostas();
+        if (state.propostaAtual) {
+          // se tem proposta aberta, recarrega ela e renderiza editor
+          await loadProposta(state.propostaAtual.id);
+          await Promise.all([loadPropostasClientes(), loadSinapiAgrupado()]);
+          renderPropostaEditor();
+        } else {
+          renderPropostasLista();
+        }
+      },
     };
     await fns[state.currentTab]();
   } catch (e) {
@@ -1798,6 +1837,389 @@ function renderVto() {
     try { await api('/api/vistorias/' + b.dataset.delVto, { method: 'DELETE' }); render(); }
     catch (e) { alert('Erro: ' + e.message); }
   });
+}
+
+// ── PROPOSTA (v1.65.2) ──
+// Lista de propostas + editor com cabeçalho + acordeão SINAPI + edição inline.
+function renderPropostasLista() {
+  const v = document.getElementById('view-proposta');
+  const linhas = state.propostas.map(p => {
+    const sb = {
+      rascunho: 'badge-info', enviada: 'badge-warning',
+      aceita: 'badge-success', recusada: 'badge-danger', expirada: 'badge-danger'
+    }[p.status] || 'badge-info';
+    return `<div class="card">
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
+        <div style="flex:1; min-width:0;">
+          <p style="margin:0; font-weight:600;">${escape(p.numero)} · ${escape(p.cliente_nome || '(cliente removido)')}</p>
+          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">
+            ${escape(p.data_proposta)} · validade ${p.validade_dias}d · <strong>${escape(p.valor_total_br)}</strong>
+            ${p.enviada_whatsapp ? ' · 📱 enviada' : ''}
+          </p>
+          <span class="badge ${sb}">${escape(p.status)}</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px;">
+          <button data-edit-prop="${p.id}">Abrir</button>
+          <button class="btn-danger" data-del-prop="${p.id}">Excluir</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="card empty">Nenhuma proposta ainda.</div>';
+
+  v.innerHTML = `
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+      <p class="section-title" style="margin:0;">Propostas de Mão de Obra</p>
+      <button data-nova-prop>+ Nova proposta</button>
+    </div>
+  </div>
+  ${linhas}`;
+
+  document.querySelector('[data-nova-prop]').onclick = abrirNovaProposta;
+  document.querySelectorAll('[data-edit-prop]').forEach(b => b.onclick = async () => {
+    try {
+      await loadProposta(b.dataset.editProp);
+      await Promise.all([loadPropostasClientes(), loadSinapiAgrupado()]);
+      renderPropostaEditor();
+    } catch (e) { alert('Erro: ' + e.message); }
+  });
+  document.querySelectorAll('[data-del-prop]').forEach(b => b.onclick = async () => {
+    const ok = await confirmarAcao({
+      titulo: 'Excluir proposta',
+      mensagem: 'A proposta será removida (soft delete). Itens permanecem no histórico do banco.',
+      textoConfirmar: 'Excluir', perigoso: true,
+    });
+    if (!ok) return;
+    try { await api('/api/propostas/' + b.dataset.delProp, { method: 'DELETE' }); render(); }
+    catch (e) { alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : '')); }
+  });
+}
+
+async function abrirNovaProposta() {
+  await loadPropostasClientes();
+  const cliOpts = state.propostasClientes.map(c =>
+    `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
+  ).join('');
+
+  const body = `
+    <div class="form-grid">
+      <label style="grid-column:1/-1;">
+        <span style="font-size:12px; color:var(--text-muted);">Cliente existente</span>
+        <select id="npCliente">
+          <option value="">— Selecionar cliente cadastrado —</option>
+          ${cliOpts}
+        </select>
+      </label>
+      <p style="grid-column:1/-1; margin:4px 0; font-size:12px; color:var(--text-muted);">
+        Ou cadastre um novo cliente:
+      </p>
+      <input id="npNovoNome" placeholder="Nome do novo cliente">
+      <input id="npNovoTel" placeholder="Telefone (com DDD)">
+      <input id="npNovoCpf" placeholder="CPF/CNPJ">
+      <input id="npNovoEmail" type="email" placeholder="E-mail">
+      <hr style="grid-column:1/-1; border:none; border-top:1px solid var(--border-strong); margin:8px 0;">
+      <input id="npEnderecoObra" placeholder="Endereço da obra (opcional)" style="grid-column:1/-1;">
+      <label><span style="font-size:12px; color:var(--text-muted);">Data</span>
+        <input id="npData" type="date" value="${today()}">
+      </label>
+      <label><span style="font-size:12px; color:var(--text-muted);">Validade (dias)</span>
+        <input id="npValidade" type="number" min="1" value="15">
+      </label>
+      <textarea id="npObs" rows="2" placeholder="Observações (opcional)" style="grid-column:1/-1;"></textarea>
+    </div>
+  `;
+  abrirEditar('Nova proposta', body, async () => {
+    let cliente_id = document.getElementById('npCliente').value;
+    const novoNome = document.getElementById('npNovoNome').value.trim();
+    if (!cliente_id && !novoNome) throw new Error('Selecione ou cadastre um cliente.');
+    if (!cliente_id && novoNome) {
+      const r = await api('/api/propostas-clientes', {
+        method: 'POST',
+        body: JSON.stringify({
+          nome: novoNome,
+          telefone: document.getElementById('npNovoTel').value.trim() || undefined,
+          cpf_cnpj: document.getElementById('npNovoCpf').value.trim() || undefined,
+          email:    document.getElementById('npNovoEmail').value.trim() || undefined,
+        })
+      });
+      cliente_id = String(r.insertId);
+    }
+    const criada = await api('/api/propostas', {
+      method: 'POST',
+      body: JSON.stringify({
+        cliente_id,
+        endereco_obra: document.getElementById('npEnderecoObra').value.trim() || undefined,
+        data_proposta: document.getElementById('npData').value,
+        validade_dias: Number(document.getElementById('npValidade').value) || 15,
+        observacoes: document.getElementById('npObs').value.trim() || undefined,
+      })
+    });
+    fecharEditar();
+    await loadProposta(String(criada.insertId));
+    await loadSinapiAgrupado();
+    renderPropostaEditor();
+  });
+}
+
+function renderPropostaEditor() {
+  const v = document.getElementById('view-proposta');
+  const p = state.propostaAtual;
+  if (!p) return renderPropostasLista();
+
+  // Itens da proposta
+  const itensHtml = (p.itens || []).map((it, idx) => `
+    <tr data-item="${it.id}">
+      <td style="text-align:center; color:var(--text-muted); font-size:12px;">${idx + 1}</td>
+      <td><input data-fld="descricao" value="${escape(it.descricao)}" style="width:100%;"></td>
+      <td><input data-fld="unidade" value="${escape(it.unidade)}" style="width:60px;"></td>
+      <td><input data-fld="quantidade" type="number" step="0.01" min="0.01" value="${it.quantidade}" style="width:80px; text-align:right;"></td>
+      <td><input data-fld="valor_unitario" type="number" step="0.01" min="0" value="${it.valor_unitario}" style="width:100px; text-align:right;"></td>
+      <td style="text-align:right; white-space:nowrap;" data-total>${escape(it.valor_total_br)}</td>
+      <td><button class="btn-danger" data-rm-item="${it.id}" title="Remover">×</button></td>
+    </tr>
+  `).join('');
+
+  // Acordeão SINAPI
+  const cats = state.sinapiCategorias || [];
+  const aberta = state.propostaCategoriaAberta;
+  const sinapiHtml = cats.map(cat => {
+    const items = (state.sinapiAgrupado[cat] || []);
+    const filtrados = state.sinapiBusca
+      ? items.filter(s => s.descricao.toLowerCase().includes(state.sinapiBusca.toLowerCase()))
+      : items;
+    if (state.sinapiBusca && filtrados.length === 0) return '';
+    const aberto = aberta === cat || (state.sinapiBusca && filtrados.length > 0);
+    const linhas = aberto ? filtrados.map(s => `
+      <tr>
+        <td style="font-size:12px;">${escape(s.descricao)}</td>
+        <td style="font-size:12px; color:var(--text-muted);">${escape(s.unidade)}</td>
+        <td style="font-size:12px; text-align:right;">${fmt(s.valor_referencia)}</td>
+        <td><button data-add-sinapi="${s.id}" data-desc="${escape(s.descricao)}" data-un="${escape(s.unidade)}" data-vu="${s.valor_referencia}">+</button></td>
+      </tr>
+    `).join('') : '';
+    return `
+      <div class="card" style="padding:8px; margin:4px 0;">
+        <button data-toggle-cat="${escape(cat)}" style="width:100%; text-align:left; background:transparent; border:none; padding:4px 8px; color:var(--text); cursor:pointer; font-weight:500;">
+          ${aberto ? '▼' : '▶'} ${escape(cat)} <span style="color:var(--text-muted); font-weight:400; font-size:12px;">(${items.length})</span>
+        </button>
+        ${aberto ? `
+          <table style="width:100%; margin-top:4px; font-size:12px;">
+            <tbody>${linhas}</tbody>
+          </table>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+
+  const sb = {
+    rascunho: 'badge-info', enviada: 'badge-warning',
+    aceita: 'badge-success', recusada: 'badge-danger', expirada: 'badge-danger'
+  }[p.status] || 'badge-info';
+
+  v.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <button data-voltar-prop>← Voltar para lista</button>
+        <p class="section-title" style="margin:0; flex:1;">${escape(p.numero)} <span class="badge ${sb}">${escape(p.status)}</span></p>
+        <select data-status-prop>
+          <option value="rascunho" ${p.status==='rascunho'?'selected':''}>rascunho</option>
+          <option value="enviada" ${p.status==='enviada'?'selected':''}>enviada</option>
+          <option value="aceita" ${p.status==='aceita'?'selected':''}>aceita</option>
+          <option value="recusada" ${p.status==='recusada'?'selected':''}>recusada</option>
+          <option value="expirada" ${p.status==='expirada'?'selected':''}>expirada</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="section-title">Cabeçalho</p>
+      <div class="form-grid">
+        <div style="grid-column:1/-1;">
+          <span style="font-size:12px; color:var(--text-muted);">Cliente</span>
+          <p style="margin:2px 0; font-weight:500;">${escape(p.cliente?.nome || '(removido)')}</p>
+          <p style="margin:0; font-size:12px; color:var(--text-muted);">
+            ${escape(p.cliente?.cpf_cnpj || '')} ${p.cliente?.telefone ? '· ' + escape(p.cliente.telefone) : ''}
+          </p>
+        </div>
+        <input data-h="endereco_obra" placeholder="Endereço da obra" value="${escape(p.endereco_obra||'')}" style="grid-column:1/-1;">
+        <label><span style="font-size:12px; color:var(--text-muted);">Data</span>
+          <input data-h="data_proposta" type="date" value="${escape(parseDataBR(p.data_proposta))}">
+        </label>
+        <label><span style="font-size:12px; color:var(--text-muted);">Validade (dias)</span>
+          <input data-h="validade_dias" type="number" min="1" value="${p.validade_dias}">
+        </label>
+        <textarea data-h="observacoes" rows="2" placeholder="Observações" style="grid-column:1/-1;">${escape(p.observacoes||'')}</textarea>
+      </div>
+      <button data-salvar-header style="margin-top:8px;">Salvar cabeçalho</button>
+    </div>
+
+    <div class="card">
+      <p class="section-title">Itens (${(p.itens||[]).length}) — Total: <span id="propTotal">${escape(p.valor_total_br)}</span></p>
+      <div style="overflow-x:auto;">
+        <table style="width:100%; min-width:600px; font-size:13px;">
+          <thead>
+            <tr style="text-align:left; color:var(--text-muted); font-size:11px;">
+              <th style="width:30px;">#</th>
+              <th>Descrição</th>
+              <th style="width:60px;">Un</th>
+              <th style="width:80px; text-align:right;">Qtd</th>
+              <th style="width:100px; text-align:right;">V. Unit</th>
+              <th style="width:110px; text-align:right;">Subtotal</th>
+              <th style="width:40px;"></th>
+            </tr>
+          </thead>
+          <tbody id="propItensTbody">${itensHtml || '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:12px;">Nenhum item ainda. Selecione abaixo.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin:6px 0 0;">Edite qtd/valor unit/descrição direto na tabela. Salva ao sair do campo (blur).</p>
+    </div>
+
+    <div class="card">
+      <p class="section-title">Catálogo SINAPI</p>
+      <input id="sinapiBuscaInput" placeholder="Buscar serviço (ex: 'concreto', 'pintura', 'piso cerâmico')…" value="${escape(state.sinapiBusca)}" style="width:100%; margin-bottom:8px;">
+      <p style="font-size:11px; color:var(--text-muted); margin:0 0 6px;">Clique numa categoria pra abrir. Valores são referenciais (estimativa de mercado) — ajuste o V. Unit após adicionar.</p>
+      <div id="sinapiCategoriasList">${sinapiHtml || '<div class="card empty">Catálogo vazio.</div>'}</div>
+    </div>
+
+    <div class="card">
+      <p style="font-size:12px; color:var(--text-muted); margin:0 0 6px;">Adicionar item manual (fora do catálogo):</p>
+      <div class="form-grid">
+        <input id="manDesc" placeholder="Descrição" style="grid-column:1/-1;">
+        <input id="manUn" placeholder="Unidade (m², h, un, kg…)">
+        <input id="manQtd" type="number" step="0.01" min="0.01" placeholder="Quantidade">
+        <input id="manVu" type="number" step="0.01" min="0" placeholder="Valor unitário">
+        <button id="manAdd">+ Adicionar manual</button>
+      </div>
+    </div>
+  `;
+
+  // Voltar
+  document.querySelector('[data-voltar-prop]').onclick = () => {
+    state.propostaAtual = null;
+    state.sinapiBusca = '';
+    state.propostaCategoriaAberta = '';
+    render();
+  };
+
+  // Mudar status
+  document.querySelector('[data-status-prop]').onchange = async (ev) => {
+    try {
+      await api('/api/propostas/' + p.id, { method: 'PUT', body: JSON.stringify({ status: ev.target.value }) });
+      await loadProposta(p.id);
+      renderPropostaEditor();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+
+  // Salvar header
+  document.querySelector('[data-salvar-header]').onclick = async () => {
+    try {
+      const body = {
+        endereco_obra: document.querySelector('[data-h="endereco_obra"]').value.trim() || undefined,
+        data_proposta: document.querySelector('[data-h="data_proposta"]').value || undefined,
+        validade_dias: Number(document.querySelector('[data-h="validade_dias"]').value) || undefined,
+        observacoes:   document.querySelector('[data-h="observacoes"]').value.trim() || undefined,
+      };
+      await api('/api/propostas/' + p.id, { method: 'PUT', body: JSON.stringify(body) });
+      await loadProposta(p.id);
+      renderPropostaEditor();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+
+  // Toggle categoria
+  document.querySelectorAll('[data-toggle-cat]').forEach(b => b.onclick = () => {
+    state.propostaCategoriaAberta = state.propostaCategoriaAberta === b.dataset.toggleCat ? '' : b.dataset.toggleCat;
+    renderPropostaEditor();
+  });
+
+  // Busca SINAPI
+  const buscaInput = document.getElementById('sinapiBuscaInput');
+  let buscaTimer;
+  buscaInput.oninput = () => {
+    clearTimeout(buscaTimer);
+    buscaTimer = setTimeout(() => {
+      state.sinapiBusca = buscaInput.value;
+      renderPropostaEditor();
+      const novoInput = document.getElementById('sinapiBuscaInput');
+      if (novoInput) { novoInput.focus(); novoInput.setSelectionRange(novoInput.value.length, novoInput.value.length); }
+    }, 200);
+  };
+
+  // Adicionar do catálogo SINAPI
+  document.querySelectorAll('[data-add-sinapi]').forEach(b => b.onclick = async () => {
+    try {
+      await api('/api/propostas/' + p.id + '/itens', {
+        method: 'POST',
+        body: JSON.stringify({
+          proposta_id: p.id,
+          servico_id: b.dataset.addSinapi,
+          descricao: b.dataset.desc,
+          unidade: b.dataset.un,
+          quantidade: 1,
+          valor_unitario: Number(b.dataset.vu) || 0,
+        })
+      });
+      await loadProposta(p.id);
+      renderPropostaEditor();
+    } catch (e) { alert('Erro: ' + e.message); }
+  });
+
+  // Adicionar manual
+  document.getElementById('manAdd').onclick = async () => {
+    try {
+      const desc = document.getElementById('manDesc').value.trim();
+      const un   = document.getElementById('manUn').value.trim();
+      const qtd  = Number(document.getElementById('manQtd').value);
+      const vu   = Number(document.getElementById('manVu').value);
+      if (!desc || !un || !isFinite(qtd) || qtd <= 0 || !isFinite(vu) || vu < 0) {
+        return alert('Preencha descrição, unidade, qtd > 0 e valor unit ≥ 0.');
+      }
+      await api('/api/propostas/' + p.id + '/itens', {
+        method: 'POST',
+        body: JSON.stringify({
+          proposta_id: p.id,
+          descricao: desc, unidade: un, quantidade: qtd, valor_unitario: vu,
+        })
+      });
+      await loadProposta(p.id);
+      renderPropostaEditor();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+
+  // Edição inline (blur salva)
+  document.querySelectorAll('#propItensTbody tr[data-item]').forEach(tr => {
+    const itemId = tr.dataset.item;
+    tr.querySelectorAll('input[data-fld]').forEach(inp => {
+      inp.onblur = async () => {
+        const fld = inp.dataset.fld;
+        const val = ['quantidade','valor_unitario'].includes(fld) ? Number(inp.value) : inp.value;
+        try {
+          await api('/api/proposta-itens/' + itemId, {
+            method: 'PUT',
+            body: JSON.stringify({ id: itemId, [fld]: val }),
+          });
+          await loadProposta(p.id);
+          renderPropostaEditor();
+        } catch (e) { alert('Erro: ' + e.message); }
+      };
+    });
+  });
+
+  // Remover item
+  document.querySelectorAll('[data-rm-item]').forEach(b => b.onclick = async () => {
+    try {
+      await api('/api/proposta-itens/' + b.dataset.rmItem, { method: 'DELETE' });
+      await loadProposta(p.id);
+      renderPropostaEditor();
+    } catch (e) { alert('Erro: ' + e.message); }
+  });
+}
+
+// Helper: converte data BR (dd/MM/yyyy) pra ISO (yyyy-MM-dd) pra input type=date
+function parseDataBR(s) {
+  if (!s) return today();
+  const m = String(s).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  return s;
 }
 
 function fileToBase64(file) {
