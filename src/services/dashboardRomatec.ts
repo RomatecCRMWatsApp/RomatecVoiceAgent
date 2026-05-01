@@ -157,79 +157,63 @@ export async function dashboardRomatec(input?: { dias?: number }): Promise<Dashb
     por_score:  {} as Record<string, number>,
     erro_tabela: undefined as string | undefined,
   };
+  // leadQualifications usa camelCase (Drizzle schema do CRM): createdAt, não created_at.
+  // leadQualifications NÃO tem coluna `status` — só tem `score` e `stage`. Removido a query de status.
   try {
     const [t] = await pool.execute<CountRow[]>(`SELECT COUNT(*) AS c FROM leadQualifications`);
     crm.total_leads = Number(t[0]?.c ?? 0);
 
     const [p] = await pool.execute<CountRow[]>(
-      `SELECT COUNT(*) AS c FROM leadQualifications WHERE created_at >= ?`,
+      `SELECT COUNT(*) AS c FROM leadQualifications WHERE createdAt >= ?`,
       [inicioStr],
     );
     crm.leads_periodo = Number(p[0]?.c ?? 0);
 
-    const [st] = await pool.execute<RowDataPacket[]>(`SELECT status, COUNT(*) AS c FROM leadQualifications GROUP BY status`);
-    for (const r of st as { status: string; c: number }[]) crm.por_status[r.status ?? 'sem_status'] = Number(r.c);
+    const [st] = await pool.execute<RowDataPacket[]>(`SELECT stage, COUNT(*) AS c FROM leadQualifications GROUP BY stage`);
+    for (const r of st as { stage: string; c: number }[]) crm.por_status[r.stage ?? 'sem_stage'] = Number(r.c);
 
     const [sc] = await pool.execute<RowDataPacket[]>(`SELECT score, COUNT(*) AS c FROM leadQualifications GROUP BY score`);
     for (const r of sc as { score: string; c: number }[]) crm.por_score[r.score ?? 'sem_score'] = Number(r.c);
   } catch (err) {
-    crm.erro_tabela = 'Tabela leadQualifications inacessível — CRM não migrado ainda no Railway.';
+    crm.erro_tabela = formatErro('leadQualifications', err);
     indisponiveis.push('leadQualifications');
   }
 
   // ── Contratos gerados ─────────────────────────────────────────────────────
+  // ATENÇÃO: contratos_gerados vive no Supabase (PostgreSQL), não no MySQL Railway.
+  // Esse dashboard só consulta MySQL, então essa seção fica como placeholder até
+  // refatoração que use o cliente Supabase. Issue separada vai trackar.
   const contratos = {
     total_gerados: 0, gerados_periodo: 0,
     valor_total: 0, ticket_medio: 0,
     por_tipo: {} as Record<string, number>,
-    erro_tabela: undefined as string | undefined,
+    erro_tabela: 'Tabela contratos_gerados está no Supabase (PostgreSQL), não no MySQL — leitura via dashboard pendente. Use listar_contratos_gerados pra ver dados reais.' as string | undefined,
   };
-  try {
-    const [t] = await pool.execute<CountRow[]>(`SELECT COUNT(*) AS c FROM contratos_gerados`);
-    contratos.total_gerados = Number(t[0]?.c ?? 0);
+  indisponiveis.push('contratos_gerados (Supabase, não MySQL)');
 
-    const [p] = await pool.execute<CountRow[]>(
-      `SELECT COUNT(*) AS c FROM contratos_gerados WHERE criado_em >= ?`,
-      [inicioStr],
-    );
-    contratos.gerados_periodo = Number(p[0]?.c ?? 0);
-
-    const [v] = await pool.execute<SumRow[]>(`SELECT COALESCE(SUM(valor_total),0) AS s FROM contratos_gerados`);
-    contratos.valor_total = Number(v[0]?.s ?? 0);
-    contratos.ticket_medio = contratos.total_gerados > 0
-      ? contratos.valor_total / contratos.total_gerados
-      : 0;
-
-    const [tipos] = await pool.execute<RowDataPacket[]>(`SELECT tipo, COUNT(*) AS c FROM contratos_gerados GROUP BY tipo`);
-    for (const r of tipos as { tipo: string; c: number }[]) contratos.por_tipo[r.tipo ?? 'sem_tipo'] = Number(r.c);
-  } catch (err) {
-    contratos.erro_tabela = 'Tabela contratos_gerados não existe (ainda nenhum contrato foi gerado pela ZAYRA?).';
-    indisponiveis.push('contratos_gerados');
-  }
-
-  // ── Vistorias ─────────────────────────────────────────────────────────────
+  // ── Vistorias (tabela real é romatec_obra_vistorias, não romatec_vistorias) ──
   const vistorias = { total: 0, periodo: 0, por_status_obra: {} as Record<string, number> };
   try {
-    const [t] = await pool.execute<CountRow[]>(`SELECT COUNT(*) AS c FROM romatec_vistorias`);
+    const [t] = await pool.execute<CountRow[]>(`SELECT COUNT(*) AS c FROM romatec_obra_vistorias`);
     vistorias.total = Number(t[0]?.c ?? 0);
     const [p] = await pool.execute<CountRow[]>(
-      `SELECT COUNT(*) AS c FROM romatec_vistorias WHERE data >= ?`, [inicioStr],
+      `SELECT COUNT(*) AS c FROM romatec_obra_vistorias WHERE data >= ?`, [inicioStr],
     );
     vistorias.periodo = Number(p[0]?.c ?? 0);
-    const [s] = await pool.execute<RowDataPacket[]>(`SELECT status_obra, COUNT(*) AS c FROM romatec_vistorias GROUP BY status_obra`);
+    const [s] = await pool.execute<RowDataPacket[]>(`SELECT status_obra, COUNT(*) AS c FROM romatec_obra_vistorias GROUP BY status_obra`);
     for (const r of s as { status_obra: string; c: number }[]) vistorias.por_status_obra[r.status_obra ?? 'sem_status'] = Number(r.c);
-  } catch { indisponiveis.push('romatec_vistorias'); }
+  } catch (err) { indisponiveis.push(`romatec_obra_vistorias (${formatErroCurto(err)})`); }
 
-  // ── Atas ──────────────────────────────────────────────────────────────────
+  // ── Atas (coluna real é data_reuniao, não data) ──────────────────────────
   const atas = { total: 0, periodo: 0 };
   try {
     const [t] = await pool.execute<CountRow[]>(`SELECT COUNT(*) AS c FROM romatec_atas_reuniao`);
     atas.total = Number(t[0]?.c ?? 0);
     const [p] = await pool.execute<CountRow[]>(
-      `SELECT COUNT(*) AS c FROM romatec_atas_reuniao WHERE data >= ?`, [inicioStr],
+      `SELECT COUNT(*) AS c FROM romatec_atas_reuniao WHERE data_reuniao >= ?`, [inicioStr],
     );
     atas.periodo = Number(p[0]?.c ?? 0);
-  } catch { indisponiveis.push('romatec_atas_reuniao'); }
+  } catch (err) { indisponiveis.push(`romatec_atas_reuniao (${formatErroCurto(err)})`); }
 
   // ── Alertas proativos ─────────────────────────────────────────────────────
   const alertas = {
@@ -248,7 +232,7 @@ export async function dashboardRomatec(input?: { dias?: number }): Promise<Dashb
     for (const r of u as { urgency: string; c: number }[]) alertas.por_urgencia[r.urgency ?? 'medium'] = Number(r.c);
     const [s] = await pool.execute<CountRow[]>(`SELECT COUNT(*) AS c FROM romatec_proactive_alerts WHERE acknowledged_at IS NOT NULL`);
     alertas.silenciados = Number(s[0]?.c ?? 0);
-  } catch { indisponiveis.push('romatec_proactive_alerts'); }
+  } catch (err) { indisponiveis.push(`romatec_proactive_alerts (${formatErroCurto(err)})`); }
 
   // ── Equipe ────────────────────────────────────────────────────────────────
   const equipe = {
@@ -262,7 +246,7 @@ export async function dashboardRomatec(input?: { dias?: number }): Promise<Dashb
     equipe.membros_ativos = Number(a[0]?.c ?? 0);
     const [r] = await pool.execute<RowDataPacket[]>(`SELECT role, COUNT(*) AS c FROM romatec_team_members WHERE ativo = 1 GROUP BY role`);
     for (const row of r as { role: string; c: number }[]) equipe.por_role[row.role] = Number(row.c);
-  } catch { indisponiveis.push('romatec_team_members'); }
+  } catch (err) { indisponiveis.push(`romatec_team_members (${formatErroCurto(err)})`); }
 
   // ── Produtividade ZAYRA (logs Telegram + sessões) ────────────────────────
   const prod = { mensagens_inbound: 0, mensagens_outbound: 0, sessoes_ativas: 0 };
@@ -282,7 +266,7 @@ export async function dashboardRomatec(input?: { dias?: number }): Promise<Dashb
       [inicioStr],
     );
     prod.sessoes_ativas = Number(s[0]?.c ?? 0);
-  } catch { indisponiveis.push('zayra_telegram_log'); }
+  } catch (err) { indisponiveis.push(`zayra_telegram_log (${formatErroCurto(err)})`); }
 
   // ── Rankings ──────────────────────────────────────────────────────────────
   const rankings = {
@@ -300,17 +284,7 @@ export async function dashboardRomatec(input?: { dias?: number }): Promise<Dashb
       status: String((x as unknown as { status: string }).status ?? '?'),
     }));
   } catch { /* ignore */ }
-  try {
-    const [r] = await pool.execute<RowDataPacket[]>(
-      `SELECT tipo, valor_total AS valor, criado_em FROM contratos_gerados
-       WHERE valor_total > 0 ORDER BY valor_total DESC LIMIT 5`,
-    );
-    rankings.contratos_maior_valor = (r as RankRow[]).map(x => ({
-      tipo: String(x.nome ?? (x as unknown as { tipo: string }).tipo ?? ''),
-      valor: Number(x.valor),
-      data: String((x as unknown as { criado_em: string }).criado_em ?? ''),
-    }));
-  } catch { /* ignore */ }
+  // contratos_gerados está no Supabase — ranking pendente até refatoração separada.
 
   // ── Observações automáticas ──────────────────────────────────────────────
   if (indisponiveis.length > 0) {
@@ -344,4 +318,30 @@ export async function dashboardRomatec(input?: { dias?: number }): Promise<Dashb
     observacoes,
     tabelas_indisponiveis: indisponiveis,
   };
+}
+
+// ── Helpers de erro ──────────────────────────────────────────────────────────
+// Antes da v1.60.x, qualquer erro virava "Tabela X inacessível" — escondia o
+// motivo real (coluna errada, syntax, etc) e custava tempo de diagnóstico.
+// Agora extraímos sqlMessage/code do erro mysql2 pra deixar a causa exposta.
+
+interface MysqlError {
+  message?:    string;
+  sqlMessage?: string;
+  code?:       string;
+  errno?:      number;
+}
+
+function formatErro(tabela: string, err: unknown): string {
+  const e = err as MysqlError;
+  const code = e.code ?? '';
+  const msg  = e.sqlMessage ?? e.message ?? String(err);
+  // Curtinho: se tem código, mostra; senão mostra mensagem truncada
+  const detail = code ? `${code}: ${msg.slice(0, 120)}` : msg.slice(0, 150);
+  return `${tabela} — ${detail}`;
+}
+
+function formatErroCurto(err: unknown): string {
+  const e = err as MysqlError;
+  return e.code ?? (e.sqlMessage ?? e.message ?? 'erro desconhecido').slice(0, 60);
 }
