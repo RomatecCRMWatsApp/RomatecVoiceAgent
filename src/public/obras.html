@@ -2462,24 +2462,34 @@ function confirmarAcao({ titulo, mensagem, textoConfirmar, perigoso }) {
   return new Promise((resolve) => {
     let overlay = document.getElementById('confAcaoOverlay');
     if (!overlay) {
+      // v1.65.9: usa as classes 'cal-overlay'/'cal-modal'/'cal-head' (existentes
+      // no CSS) em vez de 'overlay'/'modal' (não existiam) — antes o modal saía
+      // sem estilo, ancorado no canto inferior esquerdo da página.
       overlay = document.createElement('div');
       overlay.id = 'confAcaoOverlay';
-      overlay.className = 'overlay';
+      overlay.className = 'cal-overlay';
       overlay.innerHTML = `
-        <div class="modal" style="max-width:420px;">
-          <div class="modal-header">
-            <h3 id="confAcaoTitle">Confirmar</h3>
-            <button class="btn-close" id="confAcaoX">×</button>
+        <div class="cal-modal" style="max-width:440px;">
+          <div class="cal-head">
+            <h2 id="confAcaoTitle">Confirmar</h2>
+            <button id="confAcaoX" style="border:none;background:transparent;color:var(--text-muted);font-size:22px;cursor:pointer;">×</button>
           </div>
-          <div class="modal-body">
-            <p id="confAcaoMsg" style="margin:8px 0;"></p>
-            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
-              <button class="btn-secondary" id="confAcaoCancel">Cancelar</button>
+          <div style="padding:16px 20px;">
+            <p id="confAcaoMsg" style="margin:0 0 16px;"></p>
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+              <button id="confAcaoCancel">Cancelar</button>
               <button class="btn-primary" id="confAcaoOk"></button>
             </div>
           </div>
         </div>`;
       document.body.appendChild(overlay);
+      // Fecha clicando fora (no backdrop)
+      overlay.addEventListener('click', (e) => {
+        if (e.target.id === 'confAcaoOverlay') {
+          const cancel = document.getElementById('confAcaoCancel');
+          if (cancel) cancel.click();
+        }
+      });
     }
     document.getElementById('confAcaoTitle').textContent = titulo || 'Confirmar';
     document.getElementById('confAcaoMsg').innerHTML = mensagem || 'Tem certeza?';
@@ -2487,6 +2497,7 @@ function confirmarAcao({ titulo, mensagem, textoConfirmar, perigoso }) {
     okBtn.textContent = textoConfirmar || 'Confirmar';
     okBtn.style.background = perigoso ? 'var(--danger)' : '';
     okBtn.style.color      = perigoso ? '#fff' : '';
+    okBtn.style.border     = perigoso ? '1px solid var(--danger)' : '';
 
     const fechar = (resp) => {
       overlay.classList.remove('open');
