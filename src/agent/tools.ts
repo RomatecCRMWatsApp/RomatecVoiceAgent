@@ -34,6 +34,7 @@ import { calcularIptu, listarMunicipiosIptu } from '../services/calcularIptu';
 import { consultarProcesso as datajudConsultarProcesso, listarTribunaisDataJud, diagnosticarDataJud } from '../integrations/datajud';
 import { buscarCartorio, montarUrlConsultaOnr, listarMunicipiosComCartorio } from '../integrations/cartoriosOnr';
 import { calcularComissao, listarTabelaComissao } from '../services/calcularComissao';
+import { dashboardRomatec } from '../services/dashboardRomatec';
 import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
@@ -724,6 +725,16 @@ export const toolDefinitions: Anthropic.Tool[] = [
     name: 'listar_tabela_comissao',
     description: 'Mostra a tabela CRECI/MA sugestiva (% por tipo de operação). Use quando o Chefe perguntar "qual o percentual padrão" ou "quanto cobra venda rural".',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'dashboard_romatec',
+    description: 'Snapshot executivo Romatec: KPIs consolidados de obras (total/em andamento/concluídas/orçamento/saldo/etapas atrasadas/materiais baixos), CRM (leads totais e do período + por status/score), contratos gerados (qtd/valor total/ticket médio/por tipo), vistorias, atas, alertas proativos, equipe, produtividade da ZAYRA (msgs Telegram in/out + sessões ativas) e rankings (top 5 obras por orçamento + top 5 contratos por valor). Resiliente a tabelas faltantes — informa quais não estão disponíveis sem quebrar. Use quando o Chefe pedir "panorama Romatec", "como está a operação", "indicadores do mês", "dashboard".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        dias: { type: 'number', description: 'Janela de comparação em dias (default 30). Use 7 pra "última semana", 90 pra "trimestre".' },
+      },
+    },
   },
   {
     name: 'calcular_parcelamento',
@@ -2393,6 +2404,9 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'listar_tabela_comissao':
         data = listarTabelaComissao();
+        break;
+      case 'dashboard_romatec':
+        data = await dashboardRomatec(input as { dias?: number });
         break;
 
       // ── v1.40.0: Briefing semanal + diagnóstico banco ──
