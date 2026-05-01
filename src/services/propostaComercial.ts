@@ -87,15 +87,15 @@ function paragrafo(texto: string, opts?: { negrito?: boolean; tamanho?: number; 
   });
 }
 
-function titulo(texto: string, nivel: HeadingLevel = HeadingLevel.HEADING_2): Paragraph {
+function titulo(texto: string, h1 = false): Paragraph {
   return new Paragraph({
-    heading:  nivel,
+    heading:  h1 ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2,
     spacing:  { before: 200, after: 100 },
     children: [
       new TextRun({
         text:  texto,
         bold:  true,
-        size:  nivel === HeadingLevel.HEADING_1 ? 32 : 26,
+        size:  h1 ? 32 : 26,
         color: COR_AMARELO_ROMATEC,
         font:  'Calibri',
       }),
