@@ -110,7 +110,43 @@ function getColaboradores(): Colaborador[] {
   ];
 }
 
-export const toolDefinitions: Anthropic.Tool[] = [
+// v1.60.0: cresceu pra 182 tools, OpenAI tem limite hard de 128 e o JSON
+// schema inflou o prompt além das janelas de Cerebras/Groq. Solução: lista
+// de tools "desabilitadas" — code preservado, só não vai pros providers.
+// Pode reativar tirando da lista quando precisar (ex: voltar Spotify).
+const DISABLED_TOOLS = new Set<string>([
+  // Spotify (não usado em produção Romatec)
+  'tocar_musica', 'pausar_musica', 'pular_proxima', 'pular_anterior', 'musica_atual',
+  // Filesystem local (não roda em Railway/produção)
+  'fs_listar', 'fs_ler', 'fs_escrever', 'fs_apagar', 'fs_buscar',
+  'disco_status', 'limpar_temp', 'limpar_lixeira', 'listar_categorias_limpeza', 'fs_raizes',
+  // Cofre Obsidian (raro)
+  'sincronizar_cofre_memoria', 'exportar_cofre_zip',
+  // Cowork (background tasks — não usado ainda)
+  'criar_tarefa_cowork', 'listar_tarefas_cowork', 'buscar_tarefa_cowork', 'cancelar_tarefa_cowork',
+  // Lookups que o system prompt já cobre (info estática)
+  'listar_municipios_itbi', 'listar_municipios_iptu', 'listar_municipios_cartorio',
+  'listar_tipos_documento', 'listar_tribunais_datajud', 'listar_tabela_comissao',
+  // BrasilAPI raros pra Romatec
+  'consultar_isbn', 'fipe_marcas', 'fipe_preco', 'pix_participantes',
+  'feriados_nacionais', 'consultar_ddd', 'consultar_banco', 'clima_cidade',
+  // ExpertiseApis com duplicação ou pouco uso
+  'bcb_indice', 'ibge_municipio', 'geocodificar',
+  'sigef_consulta_url', 'sicar_consulta_url', 'norma_buscar',
+  // Legacy AvalieImob (substituídos pelas skills v1.43+)
+  'gerar_avaliacao', 'buscar_cliente', 'listar_contratos',
+  // Duplicados / consolidados
+  'delegar_tarefa', 'listar_colaboradores', 'info_whatsapp',
+  'analisar_visual_imovel', 'cep_buscar',
+  'atualizar_profissao_catalogo', 'listar_profissoes_catalogo',
+  'desmarcar_dia_trabalhado', 'relatorio_mensal_equipe',
+  'ajustar_estoque_material',
+  // Debug/troubleshoot — só ativar quando necessário
+  'diagnostico_datajud', 'gerar_briefing_semanal',
+  'listar_dias_funcionario', 'enviar_telegram',
+]);
+
+const _allToolDefinitions: Anthropic.Tool[] = [
   {
     name: 'listar_leads',
     description: 'Lista leads do CRM WhatsApp (tabela leadQualifications), opcionalmente filtrando por score e limite.',
@@ -2211,6 +2247,15 @@ export const toolDefinitions: Anthropic.Tool[] = [
     },
   },
 ];
+
+// v1.60.0: lista filtrada — sem as desabilitadas em DISABLED_TOOLS.
+// Esse é o que vai pros providers (Anthropic/OpenAI/Gemini/etc).
+// executeTool continua aceitando todas (incluindo desabilitadas) caso
+// alguém chame por nome — não quebra integrações internas.
+export const toolDefinitions: Anthropic.Tool[] = _allToolDefinitions.filter(
+  t => !DISABLED_TOOLS.has(t.name),
+);
+console.log(`[tools] ${toolDefinitions.length} tools ativas (${_allToolDefinitions.length} totais, ${DISABLED_TOOLS.size} desabilitadas)`);
 
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
   console.log(`[Tool] → ${name}`, JSON.stringify(input).slice(0, 200));
