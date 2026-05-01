@@ -47,6 +47,8 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 32 * 1024 * 1024, files: 5 } });
 
 app.use(express.json({ limit: '32mb' })); // VTO usa fotos base64 no body
+// v1.65.19: forms HTML do /recibos/confirmar/:token (POST application/x-www-form-urlencoded)
+app.use(express.urlencoded({ extended: false, limit: '128kb' }));
 app.use('/rag', ragRoutes);                 // v1.26.0 — endpoints de memoria vetorial
 app.use('/contracts', contractsRoutes);     // v1.27.1 — indexacao de contratos modelo (Fase 1)
 app.use(painelRoutes);                      // v1.47.0 — dashboard /painel + /api/painel/stats
@@ -768,6 +770,41 @@ app.post('/api/recibos/expirar', requireCeoToken, apiHandle(async (args) => {
   const m = await import('./services/recibosQuinzena');
   return m.expirarRecibosAntigos(args as Parameters<typeof m.expirarRecibosAntigos>[0]);
 }));
+
+// v1.65.19 — Confirmação web por token (link clicável → vira botão no WhatsApp)
+app.get('/recibos/confirmar/:token', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/recibosQuinzena');
+    const html = await m.gerarHtmlConfirmacaoWeb(String(req.params.token));
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) {
+    res.status(500).send(`<pre>Erro: ${(err as Error).message}</pre>`);
+  }
+});
+app.post('/recibos/confirmar/:token/:acao(confirma|contesta|recebido|pix)', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/recibosQuinzena');
+    const acao = String(req.params.acao) as 'confirma' | 'contesta' | 'recebido' | 'pix';
+    const ip = (req.get('x-forwarded-for') as string | undefined)?.split(',')[0]?.trim() || req.ip || '?';
+    const ua = (req.get('user-agent') as string | undefined) || '';
+    const r = await m.confirmarRecibosViaWeb({
+      token: String(req.params.token),
+      acao,
+      chave_pix: req.body?.chave_pix,
+      tipo_chave_pix: req.body?.tipo_chave_pix,
+      ip, userAgent: ua,
+    });
+    // Re-renderiza a página com mensagem flash + estado novo
+    const html = await m.gerarHtmlConfirmacaoWeb(String(req.params.token), {
+      tipo: r.ok ? 'ok' : 'erro', texto: r.mensagem,
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) {
+    res.status(500).send(`<pre>Erro: ${(err as Error).message}</pre>`);
+  }
+});
 
 // Página pública acessada via QR-code (validação)
 app.get('/recibos/validar/:hash', async (req: Request, res: Response) => {

@@ -725,6 +725,9 @@ export async function runMigrations(): Promise<void> {
     `ALTER TABLE romatec_obra_equipe ADD COLUMN chave_pix               VARCHAR(150) NULL`,
     `ALTER TABLE romatec_obra_equipe ADD COLUMN chave_pix_atualizada_em TIMESTAMP    NULL`,
     `ALTER TABLE romatec_obra_equipe ADD INDEX idx_contact (contact_id)`,
+    // v1.65.19 — PR confirmação web: token único por envio (link clicável que vira botão no WhatsApp)
+    `ALTER TABLE recibos_envios ADD COLUMN token_confirmacao VARCHAR(36) NULL`,
+    `ALTER TABLE recibos_envios ADD UNIQUE INDEX uniq_token_confirmacao (token_confirmacao)`,
   ]) {
     try {
       await pool.execute(stmt);

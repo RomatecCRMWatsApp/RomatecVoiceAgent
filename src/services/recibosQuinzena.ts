@@ -892,19 +892,42 @@ function saudacaoBR(d: Date = new Date()): string {
 function montarMensagemEnvio(input: {
   nome: string; tratamento: string | null; tom: string | null;
   periodo: Periodo; valor: number;
+  linkConfirmacao?: string;   // v1.65.19: link clicável (vira botão no WhatsApp)
 }): string {
   const saud = saudacaoBR();
   const tratNome = input.tratamento ? `${input.tratamento} ${input.nome.split(' ')[0]}` : input.nome.split(' ')[0];
-  return (
+  const cabecalho =
     `${saud}, ${tratNome}.\n\n` +
     `Segue seu recibo da ${input.periodo.label}.\n` +
     `Período: ${input.periodo.dataInicio.split('-').reverse().join('/')} a ${input.periodo.dataFim.split('-').reverse().join('/')}.\n` +
-    `Valor: ${formatBRL(input.valor)}\n\n` +
+    `Valor: ${formatBRL(input.valor)}`;
+
+  if (input.linkConfirmacao) {
+    return (
+      cabecalho + '\n\n' +
+      `Confirme tocando no link abaixo:\n` +
+      `${input.linkConfirmacao}\n\n` +
+      `Ou responda por aqui:\n` +
+      `*1* — Confirmo, está tudo certo\n` +
+      `*2* — Não está correto`
+    );
+  }
+  return (
+    cabecalho + '\n\n' +
     `Confirme o recebimento e a conformidade do valor:\n\n` +
     `*1* — Confirmo, está tudo certo\n` +
     `*2* — Não está correto\n\n` +
     `(responda apenas com o número da opção)`
   );
+}
+
+// v1.65.19: gera UUID v4 simples (sem dependência externa).
+function gerarToken(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 // Cria o lote (status 'aguardando_confirmacao_ceo') sem disparar nada.
@@ -1077,21 +1100,38 @@ export async function dispararLote(input: {
       );
       const m = mRows[0] || { nome: 'Colaborador', tratamento: null, tom: null };
 
-      // 3. Manda PDF (ZAPI send-document, que não suporta caption)
+      // 3. Gera token único de confirmação web (link clicável que vira
+      // botão no WhatsApp) — só se ainda não tem
+      let token: string;
+      const [exTok] = await pool.execute<RowDataPacket[]>(
+        `SELECT token_confirmacao FROM recibos_envios WHERE id = ?`, [e.id]
+      );
+      if (exTok[0]?.token_confirmacao) {
+        token = String(exTok[0].token_confirmacao);
+      } else {
+        token = gerarToken();
+        await pool.execute(`UPDATE recibos_envios SET token_confirmacao = ? WHERE id = ?`, [token, e.id]);
+      }
+      const linkConfirmacao = input.baseUrl
+        ? `${input.baseUrl.replace(/\/$/, '')}/recibos/confirmar/${token}`
+        : undefined;
+
+      // 4. Manda PDF (ZAPI send-document, que não suporta caption)
       const fileName = `Recibo_${String(m.nome).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}_${periodo.codigo}.pdf`;
       const docRes = await sendDocument(e.telefone, pdf.buffer.toString('base64'), fileName);
 
-      // 4. Manda texto com instrução 1/2 (mensagem separada)
+      // 5. Manda texto com link clicável + fallback 1/2 (mensagem separada)
       const txt = montarMensagemEnvio({
         nome: String(m.nome),
         tratamento: m.tratamento as string | null,
         tom: m.tom as string | null,
         periodo,
         valor: Number(e.valor),
+        linkConfirmacao,
       });
       const txtRes = await sendReply(e.telefone, txt);
 
-      // 5. Atualiza envio pra "enviado_aguardando_confirmacao"
+      // 6. Atualiza envio pra "enviado_aguardando_confirmacao"
       await pool.execute(
         `UPDATE recibos_envios
             SET status = 'enviado_aguardando_confirmacao',
@@ -1533,9 +1573,9 @@ export async function processarRespostaRecibo(input: {
       );
       const msg2 = (
         `Perfeito, ${tratNome}. Confirmação registrada. ✅\n\n` +
-        `Para finalizar o pagamento, me envie sua chave PIX:\n\n` +
-        `• CPF\n• Telefone\n• E-mail\n• Chave aleatória\n\n` +
-        `(mesmo que tenha enviado em quinzenas anteriores, preciso da confirmação atual.)`
+        `Para finalizar:\n\n` +
+        `🅰️ *Se ainda NÃO recebeu o pagamento*: me envie sua chave PIX (CPF / Telefone / E-mail / Chave aleatória).\n\n` +
+        `🅱️ *Se JÁ recebeu o pagamento*: responda *"recebi"* que registramos como pago.`
       );
       const r = await sendReply(phone, msg2);
       await logarMensagemEnvio(envio.id, 'saida', 'solicitacao_pix', msg2, r.messageId);
@@ -1577,8 +1617,35 @@ export async function processarRespostaRecibo(input: {
     return { handled: true, acao: 'ambiguo', envio_id: String(envio.id), detalhe: 'aguardando_confirmacao_resposta_inesperada' };
   }
 
-  // ── ESTADO 2: confirmado_aguardando_pix → espera chave PIX ──
+  // ── ESTADO 2: confirmado_aguardando_pix → espera chave PIX OU "já recebi" ──
   if (envio.status === 'confirmado_aguardando_pix') {
+    // v1.65.19: opção "já recebi" pula PIX e marca como pago direto
+    if (/^\s*(recebi|j[áa]\s*recebi|recebido|pago|já\s*pago|paguei|👌|ok\s*recebi)\s*\.?\s*$/i.test(text)) {
+      await pool.execute(
+        `UPDATE recibos_envios
+            SET status = 'pago', pago_em = NOW(),
+                pix_recebido_em = COALESCE(pix_recebido_em, NOW()),
+                chave_pix = COALESCE(chave_pix, 'recebido_sem_pix_informado')
+          WHERE id = ?`,
+        [envio.id]
+      );
+      const msgFinal2 = (
+        `Show, ${tratNome}! ✅\n\n` +
+        `Recebimento confirmado por você. Marquei como pago.\n\n` +
+        `Obrigado!`
+      );
+      const r = await sendReply(phone, msgFinal2);
+      await logarMensagemEnvio(envio.id, 'entrada', 'pix', `[CONFIRMOU JÁ RECEBIDO] ${text}`, input.messageId);
+      await logarMensagemEnvio(envio.id, 'saida', 'aviso', msgFinal2, r.messageId);
+      await notificarCeo(
+        `✅ ${m.nome} confirmou que JÁ RECEBEU\n\n` +
+        `Lote: ${numeroLote}\n` +
+        `Valor: ${formatBRL(Number(envio.valor))}\n\n` +
+        `Status: pago. _(Sem chave PIX — pagamento prévio.)_`
+      );
+      return { handled: true, acao: 'pix_registrado', envio_id: String(envio.id), detalhe: 'pago_sem_pix' };
+    }
+
     const det = detectarTipoPix(text);
     if (det.tipo && !det.ambiguo) {
       await pool.execute(
@@ -1637,6 +1704,244 @@ export async function processarRespostaRecibo(input: {
 
   // Status inesperado — não toca, deixa fluxo normal seguir
   return { handled: false };
+}
+
+// ╔═════════════════════════════════════════════════════════════════════════╗
+// ║ v1.65.19 — CONFIRMAÇÃO WEB (link clicável que vira botão no WhatsApp)    ║
+// ║ Página pública /recibos/confirmar/:token mostra dados + botões objetivos.║
+// ║ Mesma state machine do webhook texto: enviado → confirmado → pix → pago. ║
+// ╚═════════════════════════════════════════════════════════════════════════╝
+
+interface EnvioConfirmacaoRow extends RowDataPacket {
+  id: number; lote_id: number; membro_id: number;
+  telefone: string | null; valor: string;
+  status: string; recibo_hash: string | null;
+  token_confirmacao: string;
+  enviado_em: Date | null; confirmado_em: Date | null; pago_em: Date | null;
+}
+
+async function buscarEnvioPorToken(token: string): Promise<EnvioConfirmacaoRow | null> {
+  if (!token || token.length < 10) return null;
+  const [rows] = await pool.execute<EnvioConfirmacaoRow[]>(
+    `SELECT * FROM recibos_envios WHERE token_confirmacao = ? LIMIT 1`, [token]
+  );
+  return rows[0] ?? null;
+}
+
+export async function gerarHtmlConfirmacaoWeb(token: string, mensagemFlash?: { tipo: 'ok'|'erro'; texto: string }): Promise<string> {
+  const envio = await buscarEnvioPorToken(token);
+  if (!envio) {
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Recibo não encontrado</title>
+<style>body{font-family:sans-serif;text-align:center;padding:40px;background:#0a1a0f;color:#e5e7eb;}h1{color:#ef4444;}</style>
+</head><body><h1>⚠️ Link inválido ou expirado</h1>
+<p>Esse link de confirmação não corresponde a nenhum recibo. Procure o seu administrador.</p>
+</body></html>`;
+  }
+  const [mRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT e.nome, e.cpf, e.funcao, c.tratamento
+       FROM romatec_obra_equipe e
+       LEFT JOIN contacts c ON c.id = e.contact_id
+      WHERE e.id = ?`, [envio.membro_id]
+  );
+  const m = mRows[0] ?? { nome: 'Colaborador', cpf: null, funcao: null, tratamento: null };
+  const [loteRows] = await pool.execute<LoteRow[]>(`SELECT * FROM recibos_envios_lotes WHERE id = ?`, [envio.lote_id]);
+  const lote = loteRows[0];
+  const periodo = parsePeriodo(lote.periodo);
+  const t = await getTenantSettings(1).catch(() => null);
+  const brand = t?.brand_name || 'Romatec Consultoria Imobiliária';
+  const cor   = t?.primary_color || '#10b981';
+  const trat  = m.tratamento ? `${m.tratamento} ` : '';
+  const nomeCheio = `${trat}${m.nome}`;
+  const valor = Number(envio.valor);
+
+  const flash = mensagemFlash
+    ? `<div style="background:${mensagemFlash.tipo === 'ok' ? '#dcfce7' : '#fee2e2'};color:${mensagemFlash.tipo === 'ok' ? '#15803d' : '#b91c1c'};padding:12px;border-radius:8px;margin-bottom:16px;text-align:center;font-weight:600;">${mensagemFlash.texto}</div>`
+    : '';
+
+  // Conteúdo varia por estado
+  let conteudo: string;
+  if (envio.status === 'enviado_aguardando_confirmacao') {
+    conteudo = `
+      <p style="font-size:15px; line-height:1.6;">Olá, <strong>${nomeCheio}</strong>.</p>
+      <p style="font-size:15px; line-height:1.6;">Recibo da <strong>${periodo.label}</strong>, no valor de <strong style="color:${cor};">${formatBRL(valor)}</strong>.</p>
+      <p style="font-size:14px; color:#666; line-height:1.5;">Confirme se está tudo certo:</p>
+      <form method="POST" action="/recibos/confirmar/${token}/confirma" style="margin:18px 0;">
+        <button type="submit" style="width:100%; padding:18px; background:${cor}; color:#fff; border:0; border-radius:10px; font-size:16px; font-weight:600; cursor:pointer;">✅ Confirmo, está tudo certo</button>
+      </form>
+      <form method="POST" action="/recibos/confirmar/${token}/contesta" onsubmit="return confirm('Tem certeza que o valor está incorreto? O administrador será avisado.');">
+        <button type="submit" style="width:100%; padding:14px; background:#fff; color:#b91c1c; border:2px solid #b91c1c; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer;">⚠️ Não está correto</button>
+      </form>
+    `;
+  } else if (envio.status === 'confirmado_aguardando_pix') {
+    conteudo = `
+      <p style="font-size:15px; line-height:1.6;">Olá, <strong>${nomeCheio}</strong>. Confirmação registrada ✅</p>
+      <p style="font-size:15px; line-height:1.6;">Valor: <strong style="color:${cor};">${formatBRL(valor)}</strong></p>
+      <hr style="margin:18px 0; border:none; border-top:1px solid #374151;">
+      <h3 style="color:${cor}; margin:0 0 8px;">🅱️ Já recebeu o pagamento?</h3>
+      <form method="POST" action="/recibos/confirmar/${token}/recebido" style="margin-bottom:18px;">
+        <button type="submit" style="width:100%; padding:14px; background:#15803d; color:#fff; border:0; border-radius:10px; font-size:15px; font-weight:600; cursor:pointer;">✅ Sim, já recebi — registrar como pago</button>
+      </form>
+      <hr style="margin:18px 0; border:none; border-top:1px solid #374151;">
+      <h3 style="color:${cor}; margin:0 0 8px;">🅰️ Ainda NÃO recebeu? Envie sua chave PIX:</h3>
+      <form method="POST" action="/recibos/confirmar/${token}/pix">
+        <select name="tipo_chave_pix" required style="width:100%; padding:12px; margin-bottom:8px; border-radius:8px; background:#1f2937; color:#fff; border:1px solid #374151;">
+          <option value="">— Tipo da chave —</option>
+          <option value="cpf">CPF</option>
+          <option value="cnpj">CNPJ</option>
+          <option value="email">E-mail</option>
+          <option value="telefone">Telefone</option>
+          <option value="aleatoria">Chave aleatória (UUID)</option>
+        </select>
+        <input name="chave_pix" required placeholder="Chave PIX" style="width:100%; padding:12px; margin-bottom:8px; border-radius:8px; background:#1f2937; color:#fff; border:1px solid #374151; font-size:15px;">
+        <button type="submit" style="width:100%; padding:16px; background:${cor}; color:#fff; border:0; border-radius:10px; font-size:16px; font-weight:600; cursor:pointer;">Enviar PIX</button>
+      </form>
+    `;
+  } else if (envio.status === 'pix_recebido' || envio.status === 'pago') {
+    const labelStatus = envio.status === 'pago' ? 'PAGO ✅' : 'PIX recebido — pagamento em curso ⏳';
+    conteudo = `
+      <p style="font-size:15px; line-height:1.6;">Olá, <strong>${nomeCheio}</strong>.</p>
+      <div style="background:#dcfce7; color:#15803d; padding:18px; border-radius:10px; text-align:center; font-weight:600; font-size:17px; margin:18px 0;">${labelStatus}</div>
+      <p style="font-size:14px; color:#888;">Valor: <strong>${formatBRL(valor)}</strong> · ${periodo.label}</p>
+      <p style="font-size:13px; color:#666; margin-top:18px;">Se houver alguma divergência, fale direto com o administrador.</p>
+    `;
+  } else if (envio.status === 'contestado') {
+    conteudo = `
+      <p style="font-size:15px; line-height:1.6;">Olá, <strong>${nomeCheio}</strong>.</p>
+      <div style="background:#fef3c7; color:#92400e; padding:18px; border-radius:10px; text-align:center; font-weight:600; font-size:15px; margin:18px 0;">⚠️ Sua contestação foi registrada.</div>
+      <p style="font-size:14px; color:#888;">O administrador vai entrar em contato para resolver.</p>
+    `;
+  } else {
+    conteudo = `<p style="font-size:14px; color:#888;">Status atual: <code>${envio.status}</code>. Sem ação disponível neste momento.</p>`;
+  }
+
+  return `<!DOCTYPE html><html lang="pt-BR"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recibo — ${nomeCheio} — ${periodo.label}</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a1a0f;color:#e5e7eb;margin:0;padding:0;min-height:100vh;}
+  .wrap{max-width:480px;margin:0 auto;padding:24px;}
+  .header{text-align:center;border-bottom:3px solid ${cor};padding-bottom:16px;margin-bottom:20px;}
+  .header h1{margin:8px 0 4px;font-size:18px;color:${cor};}
+  .header p{margin:0;font-size:12px;color:#888;}
+  .card{background:#0f1f15;border:1px solid #1e3a2a;border-radius:12px;padding:20px;margin-bottom:16px;}
+  button:hover{opacity:0.92;}
+  input,select{font-family:inherit;}
+  a{color:${cor};}
+</style>
+</head><body><div class="wrap">
+  <div class="header">
+    <h1>${brand}</h1>
+    <p>Confirmação de Recibo</p>
+  </div>
+  ${flash}
+  <div class="card">${conteudo}</div>
+  <p style="text-align:center;font-size:11px;color:#555;margin-top:18px;">Gerado por ZAYRA</p>
+</div></body></html>`;
+}
+
+// Processadores das ações via web (POST). Reutilizam a state machine
+// do webhook texto pra manter comportamento consistente.
+export async function confirmarRecibosViaWeb(input: {
+  token: string; acao: 'confirma' | 'contesta' | 'pix' | 'recebido';
+  chave_pix?: string; tipo_chave_pix?: TipoChavePix;
+  ip?: string; userAgent?: string;
+}): Promise<{ ok: boolean; status: string; mensagem: string; novoStatus?: string }> {
+  const envio = await buscarEnvioPorToken(input.token);
+  if (!envio) return { ok: false, status: 'token_invalido', mensagem: 'Link inválido ou expirado.' };
+
+  const audit = `web (${input.ip ?? '?'} | ${(input.userAgent ?? '').slice(0, 80)})`;
+
+  // Buscar dados membro/lote pra notificações
+  const [mRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT e.nome, c.tratamento FROM romatec_obra_equipe e
+       LEFT JOIN contacts c ON c.id = e.contact_id WHERE e.id = ?`, [envio.membro_id]
+  );
+  const m = mRows[0] ?? { nome: 'Colaborador', tratamento: null };
+  const [loteRows] = await pool.execute<LoteRow[]>(`SELECT numero FROM recibos_envios_lotes WHERE id = ?`, [envio.lote_id]);
+  const numeroLote = loteRows[0]?.numero ?? `lote#${envio.lote_id}`;
+  const valorBR = formatBRL(Number(envio.valor));
+
+  if (input.acao === 'confirma') {
+    if (envio.status !== 'enviado_aguardando_confirmacao') {
+      return { ok: false, status: envio.status, mensagem: 'Já confirmado anteriormente.' };
+    }
+    await pool.execute(
+      `UPDATE recibos_envios
+          SET status = 'confirmado_aguardando_pix', confirmado_em = NOW(),
+              confirmacao_resposta = ?, confirmacao_numero_origem = ?
+        WHERE id = ?`,
+      [`[WEB] ${audit}`, envio.telefone ?? null, envio.id]
+    );
+    await logarMensagemEnvio(envio.id, 'entrada', 'confirmacao', `[WEB] confirmou via link — ${audit}`, null);
+    return { ok: true, status: 'confirmado_aguardando_pix', mensagem: 'Confirmação registrada.', novoStatus: 'confirmado_aguardando_pix' };
+  }
+
+  if (input.acao === 'contesta') {
+    if (envio.status !== 'enviado_aguardando_confirmacao') {
+      return { ok: false, status: envio.status, mensagem: 'Status já alterado anteriormente.' };
+    }
+    await pool.execute(
+      `UPDATE recibos_envios
+          SET status = 'contestado',
+              contestacao_motivo = ?, contestacao_repassada_ceo_em = NOW()
+        WHERE id = ?`,
+      [`[WEB] contestado via link — ${audit}`, envio.id]
+    );
+    await logarMensagemEnvio(envio.id, 'entrada', 'contestacao', `[WEB] contestou via link — ${audit}`, null);
+    await notificarCeo(
+      `⚠️ CONTESTAÇÃO via link\n\n${m.nome}\nLote: ${numeroLote}\nValor: ${valorBR}\n\n_(Marcou "Não está correto" no link.)_`
+    );
+    return { ok: true, status: 'contestado', mensagem: 'Sua contestação foi registrada. O administrador vai te procurar.', novoStatus: 'contestado' };
+  }
+
+  if (input.acao === 'recebido') {
+    if (!['enviado_aguardando_confirmacao', 'confirmado_aguardando_pix'].includes(envio.status)) {
+      return { ok: false, status: envio.status, mensagem: 'Esta etapa já foi finalizada.' };
+    }
+    await pool.execute(
+      `UPDATE recibos_envios
+          SET status = 'pago', pago_em = NOW(),
+              pix_recebido_em = COALESCE(pix_recebido_em, NOW()),
+              chave_pix = COALESCE(chave_pix, 'recebido_sem_pix_informado'),
+              confirmado_em = COALESCE(confirmado_em, NOW())
+        WHERE id = ?`,
+      [envio.id]
+    );
+    await logarMensagemEnvio(envio.id, 'entrada', 'pix', `[WEB] confirmou já recebido — ${audit}`, null);
+    await notificarCeo(
+      `✅ ${m.nome} marcou JÁ RECEBIDO via link\n\nLote: ${numeroLote}\nValor: ${valorBR}\nStatus: pago. _(Sem chave PIX — pagamento prévio.)_`
+    );
+    return { ok: true, status: 'pago', mensagem: 'Recebimento confirmado. Marcado como pago.', novoStatus: 'pago' };
+  }
+
+  if (input.acao === 'pix') {
+    if (envio.status !== 'confirmado_aguardando_pix') {
+      return { ok: false, status: envio.status, mensagem: 'Para enviar PIX, primeiro confirme o recibo.' };
+    }
+    const chave = (input.chave_pix ?? '').trim();
+    const tipo  = input.tipo_chave_pix;
+    if (!chave || !tipo) {
+      return { ok: false, status: envio.status, mensagem: 'Tipo e chave PIX são obrigatórios.' };
+    }
+    await pool.execute(
+      `UPDATE recibos_envios
+          SET status = 'pix_recebido', pix_recebido_em = NOW(),
+              chave_pix = ?, tipo_chave_pix = ?
+        WHERE id = ?`,
+      [chave.slice(0, 150), tipo, envio.id]
+    );
+    await pool.execute(
+      `UPDATE romatec_obra_equipe SET chave_pix = ?, chave_pix_atualizada_em = NOW() WHERE id = ?`,
+      [chave.slice(0, 150), envio.membro_id]
+    );
+    await logarMensagemEnvio(envio.id, 'entrada', 'pix', `[WEB] ${tipo}: ${chave} — ${audit}`, null);
+    await notificarCeo(
+      `💳 PIX recebido via link\n\n${m.nome}\nLote: ${numeroLote}\nValor: ${valorBR}\nTipo: ${tipo}\nChave: ${chave}\n\nPronto pra pagar.`
+    );
+    return { ok: true, status: 'pix_recebido', mensagem: 'Chave PIX registrada. Pagamento será efetuado em breve.', novoStatus: 'pix_recebido' };
+  }
+
+  return { ok: false, status: envio.status, mensagem: 'Ação inválida.' };
 }
 
 // ╔═════════════════════════════════════════════════════════════════════════╗
@@ -1801,6 +2106,25 @@ export async function reenviarRecibos(input: ReenviarInput): Promise<{
       );
       const m = mRows2[0] || { nome: 'Colaborador', tratamento: null, tom: null };
 
+      // Reusa token existente ou gera novo (se foi um envio inicial sem token)
+      let token: string;
+      if (v.recibo_hash && (v as unknown as { token_confirmacao?: string }).token_confirmacao) {
+        token = String((v as unknown as { token_confirmacao: string }).token_confirmacao);
+      } else {
+        const [tokRows] = await pool.execute<RowDataPacket[]>(
+          `SELECT token_confirmacao FROM recibos_envios WHERE id = ?`, [v.id]
+        );
+        if (tokRows[0]?.token_confirmacao) {
+          token = String(tokRows[0].token_confirmacao);
+        } else {
+          token = gerarToken();
+          await pool.execute(`UPDATE recibos_envios SET token_confirmacao = ? WHERE id = ?`, [token, v.id]);
+        }
+      }
+      const linkConfirmacao = input.baseUrl
+        ? `${input.baseUrl.replace(/\/$/, '')}/recibos/confirmar/${token}`
+        : undefined;
+
       const fileName = `Recibo_${String(m.nome).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}_${periodo.codigo}.pdf`;
       const docRes = await sendDocument(v.telefone, pdf.buffer.toString('base64'), fileName);
       const txt = montarMensagemEnvio({
@@ -1809,6 +2133,7 @@ export async function reenviarRecibos(input: ReenviarInput): Promise<{
         tom: m.tom as string | null,
         periodo,
         valor: Number(v.valor),
+        linkConfirmacao,
       }) + `\n\n_(reenvio — caso já tenha respondido, ignore)_`;
       const txtRes = await sendReply(v.telefone, txt);
 
