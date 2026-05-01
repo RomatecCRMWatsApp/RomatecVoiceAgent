@@ -1291,3 +1291,268 @@ export async function statusLote(input: { lote_id?: string; periodo?: string }):
     })),
   };
 }
+
+// ╔═════════════════════════════════════════════════════════════════════════╗
+// ║ PR B.3 — WEBHOOK HANDLER DE RESPOSTAS                                    ║
+// ║ Processa respostas inbound dos colaboradores no WhatsApp:                ║
+// ║   - "1"/sim/ok → confirma → dispara mensagem 2 pedindo PIX               ║
+// ║   - "2"/não/errado → contesta → repassa pro CEO em silêncio              ║
+// ║   - chave PIX → registra → manda agradecimento                           ║
+// ║   - ambíguo → repassa pro CEO sem responder colaborador                  ║
+// ╚═════════════════════════════════════════════════════════════════════════╝
+
+const REGEX_CONFIRMA = /^\s*(1|1[\.\)]|sim|ok|okay|confirmo|confirmado|de\s*acordo|t[au]\s*certo|tudo\s*certo|certo|👍|✅)\s*\.?\s*$/i;
+const REGEX_CONTESTA = /^\s*(2|2[\.\)]|n[ãa]o|incorreto|errado|t[au]\s*errado|valor\s*errado|n[ãa]o\s*est[áa]\s*certo|❌)\s*\.?\s*$/i;
+
+export type TipoChavePix = 'cpf' | 'cnpj' | 'email' | 'telefone' | 'aleatoria';
+
+export function detectarTipoPix(raw: string): {
+  tipo: TipoChavePix | null;
+  chave: string;       // chave normalizada
+  ambiguo: boolean;
+} {
+  const trim = raw.trim();
+  if (!trim) return { tipo: null, chave: '', ambiguo: true };
+
+  // E-mail
+  if (/^[\w._%+-]+@[\w.-]+\.[a-z]{2,}$/i.test(trim)) {
+    return { tipo: 'email', chave: trim.toLowerCase(), ambiguo: false };
+  }
+  // Aleatória (UUID v4 padrão Bacen)
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trim)) {
+    return { tipo: 'aleatoria', chave: trim.toLowerCase(), ambiguo: false };
+  }
+  // Numérico — pode ser CPF (11), CNPJ (14), telefone (10-13)
+  const digits = trim.replace(/\D/g, '');
+  if (digits.length === 11) {
+    // Pode ser CPF ou celular com 9 (sem DDI). Heurística: se tem formatação
+    // típica de CPF (XXX.XXX.XXX-XX) → CPF; se tem (XX) ou + → telefone;
+    // ambíguo puro → assume CPF (mais comum para pessoa física como chave).
+    if (/[()+\s-]/.test(trim) && /\(\d{2}\)/.test(trim)) {
+      return { tipo: 'telefone', chave: digits, ambiguo: false };
+    }
+    if (/\d{3}\.\d{3}\.\d{3}-\d{2}/.test(trim)) {
+      return { tipo: 'cpf', chave: digits, ambiguo: false };
+    }
+    // 11 dígitos puros: provavelmente celular (DDD + 9 dígitos). Mas pode ser
+    // CPF sem formatação. Assume CPF (chave PIX mais comum para pessoa física).
+    // Marca ambíguo pra avisar o CEO se necessário, mas aceita CPF.
+    return { tipo: 'cpf', chave: digits, ambiguo: false };
+  }
+  if (digits.length === 14) {
+    return { tipo: 'cnpj', chave: digits, ambiguo: false };
+  }
+  if (digits.length >= 10 && digits.length <= 13) {
+    return { tipo: 'telefone', chave: digits, ambiguo: false };
+  }
+  return { tipo: null, chave: trim, ambiguo: true };
+}
+
+interface EnvioPendenteRow extends RowDataPacket {
+  id: number; lote_id: number; membro_id: number;
+  telefone: string | null; valor: string;
+  status: string; recibo_hash: string | null;
+}
+
+async function buscarEnvioPendentePorPhone(phone: string): Promise<EnvioPendenteRow | null> {
+  const digits = (phone || '').replace(/\D/g, '');
+  if (digits.length < 10) return null;
+  const sufixo = digits.slice(-10);
+  const [rows] = await pool.execute<EnvioPendenteRow[]>(
+    `SELECT *
+       FROM recibos_envios
+      WHERE status IN ('enviado_aguardando_confirmacao', 'confirmado_aguardando_pix')
+        AND telefone IS NOT NULL
+        AND REPLACE(REPLACE(REPLACE(REPLACE(telefone, '+', ''), '-', ''), ' ', ''), '(', '') LIKE ?
+      ORDER BY enviado_em DESC LIMIT 1`,
+    [`%${sufixo}`]
+  );
+  return rows[0] ?? null;
+}
+
+async function logarMensagemEnvio(
+  envioId: number, direcao: 'saida' | 'entrada',
+  tipo: 'pdf_recibo'|'solicitacao_confirmacao'|'solicitacao_pix'|'confirmacao'|'pix'|'contestacao'|'aviso'|'outro',
+  conteudo: string, messageIdZapi?: string | null,
+): Promise<void> {
+  await pool.execute(
+    `INSERT INTO recibos_envios_mensagens (envio_id, direcao, tipo, conteudo, message_id_zapi)
+     VALUES (?,?,?,?,?)`,
+    [envioId, direcao, tipo, conteudo.slice(0, 4000), messageIdZapi ?? null]
+  );
+}
+
+// Notifica o CEO via WhatsApp (CEO_WHATSAPP_PHONE).
+// Silencioso se a env var não estiver configurada — apenas loga warn.
+async function notificarCeo(texto: string): Promise<void> {
+  const ceoPhone = process.env.CEO_WHATSAPP_PHONE;
+  if (!ceoPhone) {
+    console.warn('[recibos] CEO_WHATSAPP_PHONE não configurado — mensagem perdida:', texto.slice(0, 80));
+    return;
+  }
+  try {
+    await sendReply(ceoPhone, texto);
+  } catch (err) {
+    console.warn('[recibos] notificarCeo falhou:', (err as Error).message);
+  }
+}
+
+export interface RespostaProcessada {
+  handled: boolean;
+  acao?: 'confirmou' | 'contestou' | 'pix_registrado' | 'ambiguo';
+  envio_id?: string;
+  detalhe?: string;
+}
+
+export async function processarRespostaRecibo(input: {
+  phone: string; text: string; messageId?: string;
+}): Promise<RespostaProcessada> {
+  const phone = input.phone || '';
+  const text = (input.text || '').trim();
+  if (!text) return { handled: false };
+
+  const envio = await buscarEnvioPendentePorPhone(phone);
+  if (!envio) return { handled: false };
+
+  // Sempre registra a mensagem inbound na trilha de auditoria
+  await logarMensagemEnvio(envio.id, 'entrada', 'outro', text, input.messageId);
+
+  // Buscar dados do membro pra mensagens personalizadas
+  const [mRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT e.nome, e.contact_id, c.tratamento
+       FROM romatec_obra_equipe e
+       LEFT JOIN contacts c ON c.id = e.contact_id
+      WHERE e.id = ?`,
+    [envio.membro_id]
+  );
+  const m = mRows[0] ?? { nome: 'Colaborador', tratamento: null };
+  const primeiroNome = String(m.nome).split(' ')[0];
+  const tratNome = m.tratamento ? `${m.tratamento} ${primeiroNome}` : primeiroNome;
+
+  // Buscar info do lote pra mensagem ao CEO se necessário
+  const [loteRows] = await pool.execute<LoteRow[]>(
+    `SELECT * FROM recibos_envios_lotes WHERE id = ?`, [envio.lote_id]
+  );
+  const lote = loteRows[0];
+  const numeroLote = lote?.numero ?? `lote#${envio.lote_id}`;
+
+  // ── ESTADO 1: enviado_aguardando_confirmacao → espera 1/2 ──
+  if (envio.status === 'enviado_aguardando_confirmacao') {
+    if (REGEX_CONFIRMA.test(text)) {
+      await pool.execute(
+        `UPDATE recibos_envios
+            SET status = 'confirmado_aguardando_pix',
+                confirmado_em = NOW(),
+                confirmacao_resposta = ?,
+                confirmacao_numero_origem = ?,
+                confirmacao_message_id = ?
+          WHERE id = ?`,
+        [text.slice(0, 1000), phone, input.messageId ?? null, envio.id]
+      );
+      const msg2 = (
+        `Perfeito, ${tratNome}. Confirmação registrada. ✅\n\n` +
+        `Para finalizar o pagamento, me envie sua chave PIX:\n\n` +
+        `• CPF\n• Telefone\n• E-mail\n• Chave aleatória\n\n` +
+        `(mesmo que tenha enviado em quinzenas anteriores, preciso da confirmação atual.)`
+      );
+      const r = await sendReply(phone, msg2);
+      await logarMensagemEnvio(envio.id, 'saida', 'solicitacao_pix', msg2, r.messageId);
+      return { handled: true, acao: 'confirmou', envio_id: String(envio.id) };
+    }
+
+    if (REGEX_CONTESTA.test(text) || /errad|incorret|valor\s*err|n[ãa]o\s*confer|t[au]\s*err/i.test(text)) {
+      await pool.execute(
+        `UPDATE recibos_envios
+            SET status = 'contestado',
+                contestacao_motivo = ?,
+                contestacao_repassada_ceo_em = NOW()
+          WHERE id = ?`,
+        [text.slice(0, 1000), envio.id]
+      );
+      await logarMensagemEnvio(envio.id, 'entrada', 'contestacao', text, input.messageId);
+      // Repassa ao CEO (silêncio com colaborador — nem confirma recebimento)
+      await notificarCeo(
+        `⚠️ CONTESTAÇÃO de recibo\n\n` +
+        `Colaborador: ${m.nome} (${phone})\n` +
+        `Lote: ${numeroLote}\n` +
+        `Valor enviado: ${formatBRL(Number(envio.valor))}\n` +
+        `Resposta dele: "${text.slice(0, 400)}"\n\n` +
+        `Aguardando sua decisão. Use a aba Folha/Marcar pra revisar.`
+      );
+      return { handled: true, acao: 'contestou', envio_id: String(envio.id) };
+    }
+
+    // Ambíguo: repassa ao CEO mas NÃO responde colaborador (evita engessar
+    // num caminho errado). CEO decide o que fazer.
+    await notificarCeo(
+      `🔔 Resposta inesperada sobre recibo\n\n` +
+      `Colaborador: ${m.nome} (${phone})\n` +
+      `Lote: ${numeroLote}\n` +
+      `Valor: ${formatBRL(Number(envio.valor))}\n` +
+      `Esperando confirmação 1/2 — recebi: "${text.slice(0, 400)}"\n\n` +
+      `Eu não respondi. Você decide.`
+    );
+    return { handled: true, acao: 'ambiguo', envio_id: String(envio.id), detalhe: 'aguardando_confirmacao_resposta_inesperada' };
+  }
+
+  // ── ESTADO 2: confirmado_aguardando_pix → espera chave PIX ──
+  if (envio.status === 'confirmado_aguardando_pix') {
+    const det = detectarTipoPix(text);
+    if (det.tipo && !det.ambiguo) {
+      await pool.execute(
+        `UPDATE recibos_envios
+            SET status = 'pix_recebido',
+                pix_recebido_em = NOW(),
+                chave_pix = ?,
+                tipo_chave_pix = ?
+          WHERE id = ?`,
+        [det.chave.slice(0, 150), det.tipo, envio.id]
+      );
+      // Atualiza histórico no membro (chave atual + timestamp)
+      await pool.execute(
+        `UPDATE romatec_obra_equipe
+            SET chave_pix = ?, chave_pix_atualizada_em = NOW()
+          WHERE id = ?`,
+        [det.chave.slice(0, 150), envio.membro_id]
+      );
+      const msgFinal = (
+        `Recebido, ${tratNome}. Chave PIX confirmada. ✅\n\n` +
+        `Seu pagamento de ${formatBRL(Number(envio.valor))} será efetuado em breve.\n\n` +
+        `Obrigado!`
+      );
+      const r = await sendReply(phone, msgFinal);
+      await logarMensagemEnvio(envio.id, 'entrada', 'pix', `${det.tipo}: ${det.chave}`, input.messageId);
+      await logarMensagemEnvio(envio.id, 'saida', 'aviso', msgFinal, r.messageId);
+      // Notifica CEO pra ele saber que tem PIX pronto pra pagar
+      await notificarCeo(
+        `💳 PIX confirmado\n\n` +
+        `Colaborador: ${m.nome}\n` +
+        `Lote: ${numeroLote}\n` +
+        `Valor: ${formatBRL(Number(envio.valor))}\n` +
+        `Tipo: ${det.tipo}\n` +
+        `Chave: ${det.chave}\n\n` +
+        `Pronto pra pagar.`
+      );
+      return { handled: true, acao: 'pix_registrado', envio_id: String(envio.id) };
+    }
+
+    // Ambíguo: repassa ao CEO + pergunta confirmação suave ao colaborador
+    const msgConfirma = (
+      `${tratNome}, recebi: "${text.slice(0, 100)}"\n\n` +
+      `Não consegui identificar como chave PIX. Pode reenviar no formato:\n` +
+      `CPF (só números) / Telefone com DDD / E-mail / Chave aleatória?`
+    );
+    const r = await sendReply(phone, msgConfirma);
+    await logarMensagemEnvio(envio.id, 'saida', 'aviso', msgConfirma, r.messageId);
+    await notificarCeo(
+      `🔔 Chave PIX ambígua de ${m.nome}\n\n` +
+      `Lote: ${numeroLote}\n` +
+      `Recebi: "${text.slice(0, 200)}"\n\n` +
+      `Pedi pra ele reenviar formatado. Acompanha.`
+    );
+    return { handled: true, acao: 'ambiguo', envio_id: String(envio.id), detalhe: 'pix_ambiguo' };
+  }
+
+  // Status inesperado — não toca, deixa fluxo normal seguir
+  return { handled: false };
+}
