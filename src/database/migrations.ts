@@ -690,14 +690,28 @@ export async function runMigrations(): Promise<void> {
   `);
 
   // v1.62.0: campos de auditoria pra romatec_obra_transacoes (soft delete + tracking).
+  // v1.63.0: 9 colunas novas em romatec_obra_equipe (cadastro completo de membro:
+  //          RG, email, data_admissao, endereço completo, foto).
   // Idempotente: cada ALTER em try/catch porque ALTER TABLE ADD COLUMN não tem IF NOT EXISTS no MySQL 5.7/8.0
   // (existe em MariaDB 10.4+ e MySQL 8.0.29+, mas Railway usa imagens variáveis).
   for (const stmt of [
+    // v1.62.0
     `ALTER TABLE romatec_obra_transacoes ADD COLUMN deleted_at TIMESTAMP NULL`,
     `ALTER TABLE romatec_obra_transacoes ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
     `ALTER TABLE romatec_obra_transacoes ADD COLUMN updated_by VARCHAR(80) NULL`,
     `ALTER TABLE romatec_obra_transacoes ADD COLUMN deleted_by VARCHAR(80) NULL`,
     `ALTER TABLE romatec_obra_transacoes ADD INDEX idx_obra_deleted (obra_id, deleted_at)`,
+    // v1.63.0 — cadastro completo de membro
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN rg                VARCHAR(20)  NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN email             VARCHAR(150) NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN data_admissao     DATE         NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN endereco_rua      VARCHAR(200) NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN endereco_numero   VARCHAR(20)  NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN endereco_bairro   VARCHAR(120) NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN endereco_cidade   VARCHAR(120) NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN endereco_estado   VARCHAR(2)   NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN endereco_cep      VARCHAR(10)  NULL`,
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN foto_url          VARCHAR(500) NULL`,
   ]) {
     try {
       await pool.execute(stmt);
@@ -705,7 +719,7 @@ export async function runMigrations(): Promise<void> {
       const msg = (err as Error).message ?? '';
       // Ignora "Duplicate column name" / "Duplicate key name" — coluna/index já existe (idempotência manual).
       if (!/Duplicate column|Duplicate key/i.test(msg)) {
-        console.warn(`[DB] migration v1.62.0 stmt falhou (não-bloqueante): ${msg.slice(0, 120)}`);
+        console.warn(`[DB] migration ALTER falhou (não-bloqueante): ${msg.slice(0, 120)}`);
       }
     }
   }

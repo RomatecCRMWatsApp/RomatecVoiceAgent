@@ -1041,15 +1041,30 @@ function renderEquipe() {
       <select id="pObraId" style="width:100%; margin-top:4px;">${obraOpts}</select>
     </div>
     <div class="form-grid">
-      <input id="pNome" placeholder="Nome *">
+      <input id="pNome" placeholder="Nome completo *">
       <input id="pFunc" placeholder="Função (auto)">
-      <select id="pTipo"><option value="diarista">Diarista</option><option value="clt">CLT</option><option value="empreitada">Empreitada</option><option value="terceirizado">Terceirizado</option></select>
+      <select id="pTipo"><option value="diarista">Diarista</option><option value="clt">CLT</option><option value="empreitada">Empreitada</option><option value="terceirizado">Terceirizado</option><option value="pj">PJ</option></select>
       <input id="pCPF" placeholder="CPF">
+      <input id="pRG" placeholder="RG">
       <input id="pTel" placeholder="Telefone">
+      <input id="pEmail" type="email" placeholder="E-mail">
+      <input id="pDtAdm" type="date" placeholder="Data admissão">
       <input id="pVal" type="number" step="0.01" placeholder="Valor diária (R$) *" required>
       <input id="pEsp" placeholder="Especialidade">
     </div>
-    <textarea id="pObs" placeholder="Observações" rows="2" style="margin-bottom:8px;"></textarea>
+    <p style="margin:14px 0 6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Endereço (opcional)</p>
+    <div class="form-grid">
+      <input id="pEndRua" placeholder="Rua / Logradouro" style="grid-column: span 2;">
+      <input id="pEndNum" placeholder="Número">
+      <input id="pEndBairro" placeholder="Bairro">
+      <input id="pEndCidade" placeholder="Cidade">
+      <select id="pEndUf"><option value="">UF</option>${['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(u=>`<option>${u}</option>`).join('')}</select>
+      <input id="pEndCep" placeholder="CEP">
+    </div>
+    <div style="margin-top:8px;">
+      <input id="pFoto" placeholder="Foto (URL — opcional)" style="width:100%;">
+    </div>
+    <textarea id="pObs" placeholder="Observações" rows="2" style="margin:8px 0;"></textarea>
     <button class="btn-primary" id="addEq">Adicionar membro</button>
   </div>
   <p class="section-title" style="margin-top:16px;">Equipe (${state.equipe.length})</p>
@@ -1092,14 +1107,24 @@ function renderEquipe() {
         method: 'POST',
         body: JSON.stringify({
           nome,
-          funcao: document.getElementById('pFunc').value.trim() || null,
-          tipo_contrato: document.getElementById('pTipo').value,
-          cpf: document.getElementById('pCPF').value.trim() || null,
-          telefone: document.getElementById('pTel').value.trim() || null,
-          valor_dia: valorDia,
-          especialidade: document.getElementById('pEsp').value.trim() || null,
-          observacoes: document.getElementById('pObs').value.trim() || null,
-          obra_id: document.getElementById('pObraId').value || null,
+          funcao:          document.getElementById('pFunc').value.trim() || null,
+          tipo_contrato:   document.getElementById('pTipo').value,
+          cpf:             document.getElementById('pCPF').value.trim() || null,
+          rg:              document.getElementById('pRG').value.trim() || null,
+          telefone:        document.getElementById('pTel').value.trim() || null,
+          email:           document.getElementById('pEmail').value.trim() || null,
+          data_admissao:   document.getElementById('pDtAdm').value || null,
+          valor_dia:       valorDia,
+          especialidade:   document.getElementById('pEsp').value.trim() || null,
+          endereco_rua:    document.getElementById('pEndRua').value.trim() || null,
+          endereco_numero: document.getElementById('pEndNum').value.trim() || null,
+          endereco_bairro: document.getElementById('pEndBairro').value.trim() || null,
+          endereco_cidade: document.getElementById('pEndCidade').value.trim() || null,
+          endereco_estado: document.getElementById('pEndUf').value || null,
+          endereco_cep:    document.getElementById('pEndCep').value.trim() || null,
+          foto_url:        document.getElementById('pFoto').value.trim() || null,
+          observacoes:     document.getElementById('pObs').value.trim() || null,
+          obra_id:         document.getElementById('pObraId').value || null,
         }),
       });
       render();
@@ -1823,44 +1848,82 @@ function fecharEditar() {
 function abrirEditarMembro(m) {
   const obraOpts = '<option value="">Geral (todas as obras)</option>' +
     state.obras.map(o => `<option value="${o.id}" ${o.id===m.obra_id?'selected':''}>${escape(o.nome)}</option>`).join('');
-  const tipos = ['diarista','clt','empreitada','terceirizado'];
+  const tipos = ['diarista','clt','empreitada','terceirizado','pj'];
   const tipoOpts = tipos.map(t => `<option value="${t}" ${t===m.tipo_contrato?'selected':''}>${t}</option>`).join('');
+  const ufs = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+  const ufOpts = '<option value="">UF</option>' + ufs.map(u => `<option ${u===m.endereco_estado?'selected':''}>${u}</option>`).join('');
+  const dtAdm = m.data_admissao ? String(m.data_admissao).slice(0, 10) : '';
 
-  // v1.62.0: modal completo — adicionados CPF e Observações (faltavam pre-1.62)
+  // v1.63.0: modal espelho do form de cadastro — 15 campos completos
   const body = `
     <div class="form-grid">
-      <input id="eNome" placeholder="Nome *" value="${escape(m.nome||'')}">
-      <input id="eFunc" placeholder="Função" value="${escape(m.funcao||'')}">
+      <input id="eNome" placeholder="Nome completo *" value="${escape(m.nome||'')}">
+      <input id="eFunc" placeholder="Cargo / Função" value="${escape(m.funcao||'')}">
       <select id="eTipo">${tipoOpts}</select>
       <input id="eCpf" placeholder="CPF" value="${escape(m.cpf||'')}">
+      <input id="eRg" placeholder="RG" value="${escape(m.rg||'')}">
       <input id="eTel" placeholder="Telefone" value="${escape(m.telefone||'')}">
-      <input id="eVal" type="number" step="0.01" placeholder="Valor diária (R$)" value="${m.valor_dia||''}">
+      <input id="eEmail" type="email" placeholder="E-mail" value="${escape(m.email||'')}">
+      <input id="eDtAdm" type="date" placeholder="Data admissão" value="${dtAdm}">
+      <input id="eVal" type="number" step="0.01" placeholder="Valor diária / salário (R$)" value="${m.valor_dia||''}">
       <input id="eEsp" placeholder="Especialidade" value="${escape(m.especialidade||'')}">
     </div>
-    <div style="margin-top:8px;">
-      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Obra</label>
+    <p style="margin:14px 0 6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Endereço</p>
+    <div class="form-grid">
+      <input id="eEndRua" placeholder="Rua / Logradouro" value="${escape(m.endereco_rua||'')}" style="grid-column: span 2;">
+      <input id="eEndNum" placeholder="Número" value="${escape(m.endereco_numero||'')}">
+      <input id="eEndBairro" placeholder="Bairro" value="${escape(m.endereco_bairro||'')}">
+      <input id="eEndCidade" placeholder="Cidade" value="${escape(m.endereco_cidade||'')}">
+      <select id="eEndUf">${ufOpts}</select>
+      <input id="eEndCep" placeholder="CEP" value="${escape(m.endereco_cep||'')}">
+    </div>
+    <div style="margin-top:14px;">
+      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Obra principal</label>
       <select id="eObraId" style="width:100%; margin-top:4px;">${obraOpts}</select>
+    </div>
+    <div style="margin-top:8px;">
+      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Foto (URL)</label>
+      <input id="eFoto" placeholder="https://..." value="${escape(m.foto_url||'')}" style="width:100%; margin-top:4px;">
     </div>
     <div style="margin-top:8px;">
       <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Observações</label>
       <textarea id="eObs" rows="3" style="width:100%; margin-top:4px; resize:vertical;">${escape(m.observacoes||'')}</textarea>
     </div>
+    <div style="margin-top:12px; display:flex; gap:6px; align-items:center;">
+      <input type="checkbox" id="eAtivo" ${m.ativo===false || m.ativo===0?'':'checked'}>
+      <label for="eAtivo" style="font-size:13px; color:var(--text-muted);">Membro ativo</label>
+    </div>
   `;
   abrirEditar(`Editar membro — ${m.nome}`, body, async () => {
     const nome = document.getElementById('eNome').value.trim();
     if (!nome) { alert('Nome é obrigatório'); throw new Error('Nome obrigatório'); }
+    const email = document.getElementById('eEmail').value.trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      alert('E-mail inválido'); throw new Error('Email inválido');
+    }
     await api('/api/equipe/' + m.id, {
       method: 'PUT',
       body: JSON.stringify({
         nome,
-        funcao:        document.getElementById('eFunc').value.trim() || null,
-        tipo_contrato: document.getElementById('eTipo').value,
-        cpf:           document.getElementById('eCpf').value.trim() || null,
-        telefone:      document.getElementById('eTel').value.trim() || null,
-        valor_dia:     parseFloat(document.getElementById('eVal').value) || null,
-        especialidade: document.getElementById('eEsp').value.trim() || null,
-        observacoes:   document.getElementById('eObs').value.trim() || null,
-        obra_id:       document.getElementById('eObraId').value || null,
+        funcao:          document.getElementById('eFunc').value.trim() || null,
+        tipo_contrato:   document.getElementById('eTipo').value,
+        cpf:             document.getElementById('eCpf').value.trim() || null,
+        rg:              document.getElementById('eRg').value.trim() || null,
+        telefone:        document.getElementById('eTel').value.trim() || null,
+        email:           email || null,
+        data_admissao:   document.getElementById('eDtAdm').value || null,
+        valor_dia:       parseFloat(document.getElementById('eVal').value) || null,
+        especialidade:   document.getElementById('eEsp').value.trim() || null,
+        endereco_rua:    document.getElementById('eEndRua').value.trim() || null,
+        endereco_numero: document.getElementById('eEndNum').value.trim() || null,
+        endereco_bairro: document.getElementById('eEndBairro').value.trim() || null,
+        endereco_cidade: document.getElementById('eEndCidade').value.trim() || null,
+        endereco_estado: document.getElementById('eEndUf').value || null,
+        endereco_cep:    document.getElementById('eEndCep').value.trim() || null,
+        foto_url:        document.getElementById('eFoto').value.trim() || null,
+        observacoes:     document.getElementById('eObs').value.trim() || null,
+        ativo:           document.getElementById('eAtivo').checked,
+        obra_id:         document.getElementById('eObraId').value || null,
       }),
     });
   });

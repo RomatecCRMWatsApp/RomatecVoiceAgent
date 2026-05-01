@@ -483,17 +483,29 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
 export async function atualizarMembroEquipe(input: {
   id: string;
   nome?: string; funcao?: string; tipo_contrato?: string;
-  cpf?: string; telefone?: string; valor_dia?: number;
+  cpf?: string; rg?: string; telefone?: string; email?: string;
+  valor_dia?: number;
   especialidade?: string; observacoes?: string;
+  data_admissao?: string;
+  endereco_rua?: string; endereco_numero?: string; endereco_bairro?: string;
+  endereco_cidade?: string; endereco_estado?: string; endereco_cep?: string;
+  foto_url?: string;
   obra_id?: string | null; ativo?: boolean;
   confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.id) throw new Error('id obrigatório');
   const fields: string[] = []; const params: (string | number | null)[] = [];
+  // v1.63.0: aceita 9 colunas novas (RG, email, data_admissao, endereço, foto)
   const map: Record<string, string> = {
     nome: 'nome', funcao: 'funcao', tipo_contrato: 'tipo_contrato',
-    cpf: 'cpf', telefone: 'telefone', valor_dia: 'valor_dia',
+    cpf: 'cpf', rg: 'rg', telefone: 'telefone', email: 'email',
+    valor_dia: 'valor_dia',
     especialidade: 'especialidade', observacoes: 'observacoes',
+    data_admissao: 'data_admissao',
+    endereco_rua: 'endereco_rua', endereco_numero: 'endereco_numero',
+    endereco_bairro: 'endereco_bairro', endereco_cidade: 'endereco_cidade',
+    endereco_estado: 'endereco_estado', endereco_cep: 'endereco_cep',
+    foto_url: 'foto_url',
   };
   for (const [k, col] of Object.entries(map)) {
     const v = (input as Record<string, unknown>)[k];
@@ -509,7 +521,7 @@ export async function atualizarMembroEquipe(input: {
   }
   if (fields.length === 0) throw new Error('nada pra atualizar');
   if (!input.confirm) {
-    return { preview: true, message: `[PREVIEW] Atualizar membro ${input.id}: ${fields.join(', ')}. Reenvie com confirm:true.` };
+    return { preview: true, message: `[PREVIEW] Atualizar membro ${input.id}: ${fields.length} campo(s). Reenvie com confirm:true.` };
   }
   params.push(input.id);
   const [r] = await pool.execute<ResultSetHeader>(
@@ -588,23 +600,37 @@ export async function apagarMaterial(input: {
 
 export async function criarMembroEquipe(input: {
   nome: string; funcao?: string; tipo_contrato?: string;
-  cpf?: string; telefone?: string; valor_dia?: number;
+  cpf?: string; rg?: string; telefone?: string; email?: string;
+  valor_dia?: number;
   especialidade?: string; observacoes?: string;
+  data_admissao?: string;
+  endereco_rua?: string; endereco_numero?: string; endereco_bairro?: string;
+  endereco_cidade?: string; endereco_estado?: string; endereco_cep?: string;
+  foto_url?: string;
   obras_ids?: string[]; obra_id?: string; confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.nome) throw new Error('nome obrigatório');
   if (!input.confirm) {
     return { preview: true, message: `[PREVIEW] Criar ${input.nome} na equipe${input.obra_id ? ` (obra ${input.obra_id})` : ' (geral)'}. Reenvie com confirm:true.` };
   }
+  // v1.63.0: insert com 18 colunas (9 novas)
   const [r] = await pool.execute<ResultSetHeader>(
     `INSERT INTO romatec_obra_equipe
-      (nome, funcao, tipo_contrato, cpf, telefone, valor_dia, especialidade, observacoes, obras_ids, obra_id)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      (nome, funcao, tipo_contrato, cpf, rg, telefone, email, valor_dia,
+       especialidade, observacoes, data_admissao,
+       endereco_rua, endereco_numero, endereco_bairro, endereco_cidade,
+       endereco_estado, endereco_cep, foto_url, obras_ids, obra_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       input.nome, input.funcao ?? null, input.tipo_contrato ?? 'diarista',
-      input.cpf ?? null, input.telefone ?? null,
+      input.cpf ?? null, input.rg ?? null,
+      input.telefone ?? null, input.email ?? null,
       input.valor_dia ?? null, input.especialidade ?? null,
-      input.observacoes ?? null,
+      input.observacoes ?? null, input.data_admissao ?? null,
+      input.endereco_rua ?? null, input.endereco_numero ?? null,
+      input.endereco_bairro ?? null, input.endereco_cidade ?? null,
+      input.endereco_estado ?? null, input.endereco_cep ?? null,
+      input.foto_url ?? null,
       (input.obras_ids ?? []).join(','),
       input.obra_id ? Number(input.obra_id) : null,
     ],
