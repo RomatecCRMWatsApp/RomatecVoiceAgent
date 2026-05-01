@@ -737,6 +737,26 @@ app.get('/api/recibos/lote-do-periodo/:periodo', requireCeoToken, apiHandle(asyn
   return m.statusLote({ periodo: (args as { periodo: string }).periodo });
 }));
 
+// v1.65.16 — PR B.4: comandos de gerenciamento (marcar pago / reenviar / expirar)
+app.post('/api/recibos/marcar-pago', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.marcarReciboPago(args as Parameters<typeof m.marcarReciboPago>[0]);
+}));
+app.post('/api/recibos/reenviar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/recibosQuinzena');
+    const proto = (req.get('x-forwarded-proto') as string | undefined)?.split(',')[0]?.trim() || 'https';
+    const baseUrl = `${proto}://${req.get('host')}`.replace(/\/$/, '');
+    res.json(await m.reenviarRecibos({ ...req.body, baseUrl }));
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+app.post('/api/recibos/expirar', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.expirarRecibosAntigos(args as Parameters<typeof m.expirarRecibosAntigos>[0]);
+}));
+
 // Página pública acessada via QR-code (validação)
 app.get('/recibos/validar/:hash', async (req: Request, res: Response) => {
   try {
@@ -908,6 +928,8 @@ app.listen(PORT, () => {
     .then(() => loadSessionFromDb())
     .then(() => import('./services/whatsappDrafts'))
     .then(m => m.startDraftCleanup())
+    .then(() => import('./services/recibosQuinzena'))
+    .then(m => m.startExpiracaoRecibosTicker()) // v1.65.16: expira recibos sem resposta há mais de 48h (ticker a cada 6h)
     .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));
 
   // v1.39.1: sync contatos CRM → memória ZAYRA (1x ao boot + 1x/dia 04:00 BRT)
