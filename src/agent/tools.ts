@@ -1454,6 +1454,44 @@ const _allToolDefinitions: Anthropic.Tool[] = [
       },
     },
   },
+  // ── PR B.4 — Comandos de gerenciamento do lote ──
+  {
+    name: 'marcar_recibo_pago',
+    description: 'Marca recibos como pagos (status pix_recebido → pago). Use envio_id pra um único colaborador, lote_id pra todos os PIX recebidos de um lote, ou todos_pix_recebidos:true pra marcar TODOS sem filtro (cuidado, requer ordem explícita do Chefe). Não pode marcar como pago quem ainda não enviou PIX.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        envio_id: { type: 'string', description: 'ID do envio individual (mais seguro)' },
+        lote_id:  { type: 'string', description: 'ID do lote — marca todos pix_recebido daquele lote' },
+        todos_pix_recebidos: { type: 'boolean', description: 'true marca TODOS os pix_recebidos de qualquer lote — cuidado' },
+        pago_por: { type: 'string', description: 'Quem marcou (ex: "CEO Romário via WhatsApp"). Default null.' },
+      },
+    },
+  },
+  {
+    name: 'reenviar_recibos_lote',
+    description: 'Reenvia recibos pendentes ou expirados — gera novo PDF + texto e dispara via Z-API. SEMPRE chamar primeiro sem confirm:true para gerar PREVIEW (lista quem será reenviado). Após Chefe confirmar verbalmente, chamar com confirm:true. Por padrão pega envios com status enviado_aguardando_confirmacao parados há mais de 24h. Pode filtrar por lote_id, status_alvo específico (enviado_aguardando_confirmacao, confirmado_aguardando_pix, falha_envio, expirado) ou horas_minimas customizadas.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lote_id: { type: 'string' },
+        status_alvo: { type: 'string', enum: ['enviado_aguardando_confirmacao','confirmado_aguardando_pix','falha_envio','expirado'] },
+        horas_minimas: { type: 'number', description: 'Mínimo de horas desde o envio. Default 24h.' },
+        confirm: { type: 'boolean' },
+      },
+    },
+  },
+  {
+    name: 'expirar_recibos_antigos',
+    description: 'Marca como expirados os recibos enviados há mais de N horas (default 48) sem confirmação do colaborador. Útil pra limpar o painel antes de decidir reenviar/contato direto. Notifica o Chefe via WhatsApp com a lista, a menos de notificar_ceo:false.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        horas: { type: 'number', description: 'Default 48' },
+        notificar_ceo: { type: 'boolean', description: 'Default true — manda WhatsApp pro CEO com a lista' },
+      },
+    },
+  },
   {
     name: 'criar_membro_equipe',
     description: 'Adiciona membro à equipe de obras. Confirm exigido.',
@@ -2888,6 +2926,21 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       case 'status_lote_recibos':
         data = await recibos.statusLote(
           input as Parameters<typeof recibos.statusLote>[0]
+        );
+        break;
+      case 'marcar_recibo_pago':
+        data = await recibos.marcarReciboPago(
+          input as Parameters<typeof recibos.marcarReciboPago>[0]
+        );
+        break;
+      case 'reenviar_recibos_lote':
+        data = await recibos.reenviarRecibos(
+          input as Parameters<typeof recibos.reenviarRecibos>[0]
+        );
+        break;
+      case 'expirar_recibos_antigos':
+        data = await recibos.expirarRecibosAntigos(
+          input as Parameters<typeof recibos.expirarRecibosAntigos>[0]
         );
         break;
       case 'criar_membro_equipe':

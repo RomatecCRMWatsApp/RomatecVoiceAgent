@@ -1556,3 +1556,282 @@ export async function processarRespostaRecibo(input: {
   // Status inesperado — não toca, deixa fluxo normal seguir
   return { handled: false };
 }
+
+// ╔═════════════════════════════════════════════════════════════════════════╗
+// ║ PR B.4 — COMANDOS DO CEO (gerenciar lote em curso)                       ║
+// ║   - marcar_recibo_pago: status pix_recebido → pago                       ║
+// ║   - reenviar_recibos_lote: refaz disparo dos pendentes / expirados       ║
+// ║   - expirar_recibos_antigos: status → expirado se mais de N horas sem    ║
+// ║     resposta (também roda em ticker automático a cada 6h)                ║
+// ╚═════════════════════════════════════════════════════════════════════════╝
+
+interface MarcarPagoInput {
+  envio_id?: string;          // marca apenas 1
+  lote_id?: string;           // todos pix_recebidos do lote
+  todos_pix_recebidos?: boolean; // todos pix_recebidos sem filtro de lote (cuidado!)
+  pago_por?: string;          // ex: 'CEO Romário via WhatsApp'
+}
+export async function marcarReciboPago(input: MarcarPagoInput): Promise<{
+  ok: true; total: number; envios: Array<{ id: string; nome: string; valor: number }>; message: string;
+}> {
+  let where = '';
+  const params: (string | number)[] = [];
+
+  if (input.envio_id) {
+    where = 'id = ?';
+    params.push(Number(input.envio_id));
+  } else if (input.lote_id) {
+    where = "lote_id = ? AND status = 'pix_recebido'";
+    params.push(Number(input.lote_id));
+  } else if (input.todos_pix_recebidos) {
+    where = "status = 'pix_recebido'";
+  } else {
+    throw new Error('informe envio_id, lote_id ou todos_pix_recebidos:true');
+  }
+
+  // Lista os envios afetados antes do UPDATE pra retornar nomes
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT v.id, v.valor, e.nome
+       FROM recibos_envios v
+       LEFT JOIN romatec_obra_equipe e ON e.id = v.membro_id
+      WHERE ${where}
+        AND v.status IN ('pix_recebido', 'pago')`,
+    params
+  );
+  if (!rows.length) {
+    return { ok: true, total: 0, envios: [], message: 'Nenhum envio elegível encontrado (precisa estar em pix_recebido ou pago).' };
+  }
+
+  await pool.execute(
+    `UPDATE recibos_envios
+        SET status = 'pago',
+            pago_em = COALESCE(pago_em, NOW())
+      WHERE ${where}
+        AND status = 'pix_recebido'`,
+    params
+  );
+
+  const envios = rows.map(r => ({
+    id: String(r.id), nome: String(r.nome ?? '(removido)'), valor: Number(r.valor),
+  }));
+
+  // Auditoria: registra "pago" como mensagem do tipo aviso
+  for (const e of envios) {
+    await logarMensagemEnvio(Number(e.id), 'saida', 'aviso',
+      `Marcado como pago${input.pago_por ? ' por ' + input.pago_por : ''}`, null);
+  }
+
+  return {
+    ok: true,
+    total: envios.length,
+    envios,
+    message: `${envios.length} envio(s) marcado(s) como pago.`,
+  };
+}
+
+// Re-dispara recibos pendentes (sem confirmação) ou expirados.
+// Por padrão pega os com status enviado_aguardando_confirmacao há mais de 24h.
+// CEO pode forçar status_alvo específico ou horas mínimas customizadas.
+interface ReenviarInput {
+  lote_id?: string;
+  status_alvo?: 'enviado_aguardando_confirmacao' | 'confirmado_aguardando_pix' | 'falha_envio' | 'expirado';
+  horas_minimas?: number;
+  baseUrl?: string;
+  confirm?: boolean;          // sem confirm → preview
+}
+export async function reenviarRecibos(input: ReenviarInput): Promise<{
+  modo: 'preview' | 'reenviado';
+  candidatos?: Array<{ id: string; nome: string; status: string; tentativas: number; horas_desde_envio: number }>;
+  total?: number; sucesso?: number; falhas?: number;
+  message: string;
+}> {
+  const status = input.status_alvo || 'enviado_aguardando_confirmacao';
+  const horas = Number(input.horas_minimas ?? (status === 'enviado_aguardando_confirmacao' ? 24 : 0));
+
+  let where = `v.status = ?`;
+  const params: (string | number)[] = [status];
+  if (input.lote_id) {
+    where += ` AND v.lote_id = ?`;
+    params.push(Number(input.lote_id));
+  }
+  if (horas > 0) {
+    where += ` AND v.enviado_em IS NOT NULL AND v.enviado_em < (NOW() - INTERVAL ? HOUR)`;
+    params.push(horas);
+  }
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT v.id, v.lote_id, v.membro_id, v.telefone, v.valor, v.status,
+            v.tentativas_envio, v.enviado_em, e.nome,
+            TIMESTAMPDIFF(HOUR, v.enviado_em, NOW()) AS horas_desde_envio
+       FROM recibos_envios v
+       LEFT JOIN romatec_obra_equipe e ON e.id = v.membro_id
+      WHERE ${where}
+      ORDER BY v.enviado_em ASC`,
+    params
+  );
+
+  const candidatos = rows.map(r => ({
+    id: String(r.id),
+    nome: String(r.nome ?? '(removido)'),
+    status: String(r.status),
+    tentativas: Number(r.tentativas_envio ?? 0),
+    horas_desde_envio: Number(r.horas_desde_envio ?? 0),
+  }));
+
+  if (!input.confirm) {
+    return {
+      modo: 'preview',
+      candidatos,
+      message: candidatos.length === 0
+        ? `Nenhum envio elegível para reenvio (status=${status}${horas ? `, parado há mais de ${horas}h` : ''}).`
+        : `[PREVIEW REENVIO] ${candidatos.length} envio(s) candidato(s):\n` +
+          candidatos.slice(0, 30).map(c => `• ${c.nome} — status ${c.status} há ${c.horas_desde_envio}h (${c.tentativas} tentativa[s])`).join('\n') +
+          `\n\nReenvie com confirm:true pra disparar de novo.`,
+    };
+  }
+
+  // Re-dispara: gera PDF + manda novamente. Reusa lógica de dispararLote
+  // mas iterando manualmente porque dispararLote pega só status='pendente_envio'.
+  let sucesso = 0, falhas = 0;
+  for (const c of candidatos) {
+    try {
+      const [vRows] = await pool.execute<EnvioRow[]>(
+        `SELECT * FROM recibos_envios WHERE id = ?`, [Number(c.id)]
+      );
+      const v = vRows[0];
+      if (!v?.telefone) { falhas++; continue; }
+
+      const [loteRows] = await pool.execute<LoteRow[]>(
+        `SELECT * FROM recibos_envios_lotes WHERE id = ?`, [v.lote_id]
+      );
+      const lote = loteRows[0];
+      const periodo = parsePeriodo(lote.periodo);
+
+      const pdf = await gerarReciboQuinzenalPdf({
+        membro_id: String(v.membro_id), periodo: periodo.codigo, baseUrl: input.baseUrl,
+      });
+
+      const [mRows2] = await pool.execute<RowDataPacket[]>(
+        `SELECT e.nome, c.tratamento, c.tom
+           FROM romatec_obra_equipe e
+           LEFT JOIN contacts c ON c.id = e.contact_id
+          WHERE e.id = ?`, [v.membro_id]
+      );
+      const m = mRows2[0] || { nome: 'Colaborador', tratamento: null, tom: null };
+
+      const fileName = `Recibo_${String(m.nome).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}_${periodo.codigo}.pdf`;
+      const docRes = await sendDocument(v.telefone, pdf.buffer.toString('base64'), fileName);
+      const txt = montarMensagemEnvio({
+        nome: String(m.nome),
+        tratamento: m.tratamento as string | null,
+        tom: m.tom as string | null,
+        periodo,
+        valor: Number(v.valor),
+      }) + `\n\n_(reenvio — caso já tenha respondido, ignore)_`;
+      const txtRes = await sendReply(v.telefone, txt);
+
+      await pool.execute(
+        `UPDATE recibos_envios
+            SET status = 'enviado_aguardando_confirmacao',
+                enviado_em = NOW(),
+                tentativas_envio = tentativas_envio + 1,
+                recibo_hash = ?,
+                ultimo_erro = NULL
+          WHERE id = ?`,
+        [pdf.hash, v.id]
+      );
+      await logarMensagemEnvio(v.id, 'saida', 'pdf_recibo', `[REENVIO] ${fileName}`, docRes.messageId ?? null);
+      await logarMensagemEnvio(v.id, 'saida', 'solicitacao_confirmacao', txt, txtRes.messageId ?? null);
+      sucesso++;
+    } catch (err) {
+      falhas++;
+      console.warn(`[recibos] reenvio falhou pro envio ${c.id}:`, (err as Error).message);
+    }
+  }
+
+  return {
+    modo: 'reenviado',
+    candidatos,
+    total: candidatos.length,
+    sucesso, falhas,
+    message: `Reenvio concluído: ${sucesso} sucesso(s), ${falhas} falha(s) de ${candidatos.length} candidato(s).`,
+  };
+}
+
+// Marca como expirado quem está em enviado_aguardando_confirmacao há mais
+// de N horas (default 48) e notifica o CEO. Roda manualmente ou via ticker.
+export async function expirarRecibosAntigos(input: { horas?: number; notificar_ceo?: boolean } = {}): Promise<{
+  ok: true; total_expirados: number;
+  expirados: Array<{ id: string; nome: string; valor: number; horas: number; lote_numero: string }>;
+}> {
+  const horas = Number(input.horas ?? 48);
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT v.id, v.valor, v.lote_id,
+            TIMESTAMPDIFF(HOUR, v.enviado_em, NOW()) AS horas,
+            e.nome, l.numero AS lote_numero
+       FROM recibos_envios v
+       LEFT JOIN romatec_obra_equipe e ON e.id = v.membro_id
+       LEFT JOIN recibos_envios_lotes l ON l.id = v.lote_id
+      WHERE v.status = 'enviado_aguardando_confirmacao'
+        AND v.enviado_em IS NOT NULL
+        AND v.enviado_em < (NOW() - INTERVAL ? HOUR)
+      ORDER BY v.enviado_em ASC`,
+    [horas]
+  );
+  if (!rows.length) return { ok: true, total_expirados: 0, expirados: [] };
+
+  const expirados = rows.map(r => ({
+    id: String(r.id),
+    nome: String(r.nome ?? '(removido)'),
+    valor: Number(r.valor),
+    horas: Number(r.horas),
+    lote_numero: String(r.lote_numero ?? '?'),
+  }));
+
+  await pool.execute(
+    `UPDATE recibos_envios
+        SET status = 'expirado'
+      WHERE status = 'enviado_aguardando_confirmacao'
+        AND enviado_em IS NOT NULL
+        AND enviado_em < (NOW() - INTERVAL ? HOUR)`,
+    [horas]
+  );
+
+  for (const e of expirados) {
+    await logarMensagemEnvio(Number(e.id), 'saida', 'aviso',
+      `Expirado automaticamente após ${e.horas}h sem confirmação`, null);
+  }
+
+  if (input.notificar_ceo !== false) {
+    await notificarCeo(
+      `⏰ ${expirados.length} recibo(s) expirado(s) sem resposta após ${horas}h:\n\n` +
+      expirados.slice(0, 30).map(e =>
+        `• ${e.nome} — ${formatBRL(e.valor)} (lote ${e.lote_numero}, ${e.horas}h sem resposta)`
+      ).join('\n') +
+      `\n\nQuer que eu reenvie? Diga "ZAYRA, reenvia os recibos expirados".`
+    );
+  }
+
+  return { ok: true, total_expirados: expirados.length, expirados };
+}
+
+// Ticker automático: roda a cada 6h e expira recibos com mais de 48h.
+// Iniciado em src/server.ts no boot. Silencioso em DEV (sem CEO_WHATSAPP_PHONE).
+let _expiracaoTickerStarted = false;
+export function startExpiracaoRecibosTicker(): void {
+  if (_expiracaoTickerStarted) return;
+  _expiracaoTickerStarted = true;
+  const HOURS = 6;
+  const ms = HOURS * 60 * 60 * 1000;
+  console.log(`[recibos] ticker de expiração iniciado (a cada ${HOURS}h, limite 48h sem resposta)`);
+  setInterval(() => {
+    expirarRecibosAntigos({ horas: 48 })
+      .then(r => {
+        if (r.total_expirados > 0) {
+          console.log(`[recibos] ${r.total_expirados} envio(s) expirado(s) automaticamente`);
+        }
+      })
+      .catch(err => console.warn('[recibos] ticker expiração falhou:', (err as Error).message));
+  }, ms);
+}
