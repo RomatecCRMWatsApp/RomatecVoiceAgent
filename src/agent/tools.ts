@@ -365,7 +365,7 @@ const _allToolDefinitions: Anthropic.Tool[] = [
   },
   {
     name: 'enviar_whatsapp',
-    description: 'Envia mensagem de TEXTO pelo WhatsApp do CEO (instancia Z-API dedicada ZAYRA). DESTRUTIVO. WORKFLOW: (1) Primeira chamada SEM confirm — passa "para" + "mensagem" — cria DRAFT persistente, retorna draft_id + preview. (2) Mostra preview ao Chefe e pede autorização verbal. (3) Após autorização, segunda chamada com confirm:true + draft_id (NÃO precisa repassar "mensagem" — service busca no DB pelo draft_id). Se você esqueceu o draft_id, chama listar_drafts_whatsapp_pendentes pra recuperar. TTL de 30 min — após isso o draft expira e tem que refazer.',
+    description: 'Envia TEXTO pelo WhatsApp do CEO (Z-API). FLUXO OBRIGATÓRIO em 2 PASSOS:\n\nPASSO 1 (preview): chame com "para"+"mensagem" SEM confirm. Cria DRAFT, retorna draft_id (UUID). Mostre preview ao Chefe e PEÇA AUTORIZAÇÃO.\n\nPASSO 2 (envio): após CEO autorizar (sim/manda/confirma/autorizada/pode), chame de novo com APENAS confirm:true + draft_id. **NUNCA REPASSE "para" NEM "mensagem" no PASSO 2** — vai criar draft duplicado e a mensagem NÃO sai. Se esqueceu o draft_id, chame listar_drafts_whatsapp_pendentes ANTES.\n\nTTL 30 min. Detecta duplicatas: se chamar 2x com mesmos args, devolve draft existente com aviso.',
     input_schema: {
       type: 'object',
       properties: {
@@ -378,7 +378,7 @@ const _allToolDefinitions: Anthropic.Tool[] = [
   },
   {
     name: 'enviar_audio_whatsapp',
-    description: 'Envia AUDIO TTS pelo WhatsApp do CEO. WORKFLOW: 1ª chamada sem confirm cria DRAFT; 2ª com confirm:true + draft_id envia. Max 800 chars no texto.',
+    description: 'Envia AUDIO TTS pelo WhatsApp do CEO. 2 PASSOS:\nPASSO 1: "para"+"texto" SEM confirm → DRAFT.\nPASSO 2: APENAS confirm:true + draft_id (NUNCA repasse "para" nem "texto") → envia.\nMax 800 chars.',
     input_schema: {
       type: 'object',
       properties: {
@@ -391,7 +391,7 @@ const _allToolDefinitions: Anthropic.Tool[] = [
   },
   {
     name: 'enviar_imagem_whatsapp',
-    description: 'Envia IMAGEM pelo WhatsApp do CEO. WORKFLOW: 1ª chamada sem confirm cria DRAFT; 2ª com confirm:true + draft_id envia. Aceita URL pública ou data URI base64.',
+    description: 'Envia IMAGEM pelo WhatsApp do CEO. 2 PASSOS:\nPASSO 1: "para"+"imageUrl"+caption SEM confirm → DRAFT.\nPASSO 2: APENAS confirm:true + draft_id (NUNCA repasse "para" nem "imageUrl") → envia.',
     input_schema: {
       type: 'object',
       properties: {
@@ -405,7 +405,7 @@ const _allToolDefinitions: Anthropic.Tool[] = [
   },
   {
     name: 'enviar_documento_whatsapp',
-    description: 'Envia DOCUMENTO pelo WhatsApp do CEO (PDF/DOCX/XLSX/etc). WORKFLOW: 1ª chamada sem confirm cria DRAFT; 2ª com confirm:true + draft_id envia.',
+    description: 'Envia DOCUMENTO pelo WhatsApp do CEO. 2 PASSOS:\nPASSO 1: "para"+"docBase64"+"fileName" SEM confirm → DRAFT.\nPASSO 2: APENAS confirm:true + draft_id (NUNCA repasse "para"/"docBase64"/"fileName") → envia.',
     input_schema: {
       type: 'object',
       properties: {
