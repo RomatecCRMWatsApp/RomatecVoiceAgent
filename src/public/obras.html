@@ -2024,6 +2024,81 @@ async function abrirNovaProposta() {
   });
 }
 
+// v1.65.7: editar dados do cliente da proposta (15 campos completos)
+function abrirEditarClienteProposta(cli, onSaved) {
+  const ufs = ['','AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+  const ufOpts = ufs.map(u => `<option value="${u}" ${u===(cli.estado||'')?'selected':''}>${u||'UF'}</option>`).join('');
+  const body = `
+    <div class="form-grid">
+      <input id="ecNome" placeholder="Nome *" value="${escape(cli.nome||'')}" style="grid-column:1/-1;">
+      <input id="ecCpf" placeholder="CPF/CNPJ" value="${escape(cli.cpf_cnpj||'')}">
+      <input id="ecTel" placeholder="Telefone (com DDD)" value="${escape(cli.telefone||'')}">
+      <input id="ecEmail" type="email" placeholder="E-mail" value="${escape(cli.email||'')}" style="grid-column:1/-1;">
+      <input id="ecEnd" placeholder="Endereço" value="${escape(cli.endereco||'')}" style="grid-column:1/-1;">
+      <input id="ecCid" placeholder="Cidade" value="${escape(cli.cidade||'')}">
+      <select id="ecUf">${ufOpts}</select>
+      <input id="ecCep" placeholder="CEP" value="${escape(cli.cep||'')}">
+      <textarea id="ecObs" rows="2" placeholder="Observações" style="grid-column:1/-1;">${escape(cli.observacoes||'')}</textarea>
+    </div>
+  `;
+  abrirEditar(`Editar cliente — ${cli.nome}`, body, async () => {
+    const nome = document.getElementById('ecNome').value.trim();
+    if (!nome) { alert('Nome obrigatório.'); throw new Error('Nome obrigatório'); }
+    await api('/api/propostas-clientes/' + cli.id, {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: cli.id,
+        nome,
+        cpf_cnpj: document.getElementById('ecCpf').value.trim(),
+        telefone: document.getElementById('ecTel').value.trim(),
+        email:    document.getElementById('ecEmail').value.trim(),
+        endereco: document.getElementById('ecEnd').value.trim(),
+        cidade:   document.getElementById('ecCid').value.trim(),
+        estado:   document.getElementById('ecUf').value.trim(),
+        cep:      document.getElementById('ecCep').value.trim(),
+        observacoes: document.getElementById('ecObs').value.trim(),
+      })
+    });
+    if (typeof onSaved === 'function') await onSaved();
+  });
+}
+
+// v1.65.7: cadastrar novo cliente sem fechar a proposta atual
+function abrirNovoClienteProposta(onCreated) {
+  const ufs = ['','AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+  const ufOpts = ufs.map(u => `<option value="${u}">${u||'UF'}</option>`).join('');
+  const body = `
+    <div class="form-grid">
+      <input id="ncNome" placeholder="Nome *" style="grid-column:1/-1;">
+      <input id="ncCpf" placeholder="CPF/CNPJ">
+      <input id="ncTel" placeholder="Telefone (com DDD)">
+      <input id="ncEmail" type="email" placeholder="E-mail" style="grid-column:1/-1;">
+      <input id="ncEnd" placeholder="Endereço" style="grid-column:1/-1;">
+      <input id="ncCid" placeholder="Cidade">
+      <select id="ncUf">${ufOpts}</select>
+      <input id="ncCep" placeholder="CEP">
+    </div>
+  `;
+  abrirEditar('Cadastrar novo cliente', body, async () => {
+    const nome = document.getElementById('ncNome').value.trim();
+    if (!nome) { alert('Nome obrigatório.'); throw new Error('Nome obrigatório'); }
+    const r = await api('/api/propostas-clientes', {
+      method: 'POST',
+      body: JSON.stringify({
+        nome,
+        cpf_cnpj: document.getElementById('ncCpf').value.trim() || undefined,
+        telefone: document.getElementById('ncTel').value.trim() || undefined,
+        email:    document.getElementById('ncEmail').value.trim() || undefined,
+        endereco: document.getElementById('ncEnd').value.trim() || undefined,
+        cidade:   document.getElementById('ncCid').value.trim() || undefined,
+        estado:   document.getElementById('ncUf').value.trim() || undefined,
+        cep:      document.getElementById('ncCep').value.trim() || undefined,
+      })
+    });
+    if (typeof onCreated === 'function') await onCreated(r.insertId);
+  });
+}
+
 function renderPropostaEditor() {
   const v = document.getElementById('view-proposta');
   const p = state.propostaAtual;
@@ -2106,9 +2181,17 @@ function renderPropostaEditor() {
       <div class="form-grid">
         <div style="grid-column:1/-1;">
           <span style="font-size:12px; color:var(--text-muted);">Cliente</span>
-          <p style="margin:2px 0; font-weight:500;">${escape(p.cliente?.nome || '(removido)')}</p>
-          <p style="margin:0; font-size:12px; color:var(--text-muted);">
-            ${escape(p.cliente?.cpf_cnpj || '')} ${p.cliente?.telefone ? '· ' + escape(p.cliente.telefone) : ''}
+          <div style="display:flex; gap:8px; align-items:center; margin-top:2px; flex-wrap:wrap;">
+            <select data-h="cliente_id" style="flex:1; min-width:200px;">
+              ${state.propostasClientes.map(c =>
+                `<option value="${c.id}" ${String(c.id)===String(p.cliente_id)?'selected':''}>${escape(c.nome)}${c.cpf_cnpj?' · '+escape(c.cpf_cnpj):''}</option>`
+              ).join('')}
+            </select>
+            <button data-edit-cliente-prop title="Editar dados do cliente">✏️ Editar dados</button>
+            <button data-novo-cliente-prop title="Cadastrar e usar um novo cliente">+ Novo</button>
+          </div>
+          <p style="margin:6px 0 0; font-size:12px; color:var(--text-muted);">
+            ${escape(p.cliente?.cpf_cnpj || '')} ${p.cliente?.telefone ? '· ' + escape(p.cliente.telefone) : ''} ${p.cliente?.email ? '· ' + escape(p.cliente.email) : ''}
           </p>
         </div>
         <input data-h="endereco_obra" placeholder="Endereço da obra" value="${escape(p.endereco_obra||'')}" style="grid-column:1/-1;">
@@ -2224,6 +2307,8 @@ function renderPropostaEditor() {
   document.querySelector('[data-salvar-header]').onclick = async () => {
     try {
       const body = {
+        // v1.65.7: cliente_id editável (CEO pode trocar via select)
+        cliente_id:    document.querySelector('[data-h="cliente_id"]')?.value || undefined,
         endereco_obra: document.querySelector('[data-h="endereco_obra"]').value.trim() || undefined,
         data_proposta: document.querySelector('[data-h="data_proposta"]').value || undefined,
         validade_dias: Number(document.querySelector('[data-h="validade_dias"]').value) || undefined,
@@ -2234,9 +2319,30 @@ function renderPropostaEditor() {
         gestor_telefone: document.querySelector('[data-h="gestor_telefone"]').value.trim(),
       };
       await api('/api/propostas/' + p.id, { method: 'PUT', body: JSON.stringify(body) });
-      await loadProposta(p.id);
+      await Promise.all([loadProposta(p.id), loadPropostasClientes()]);
       renderPropostaEditor();
     } catch (e) { alert('Erro: ' + e.message); }
+  };
+
+  // v1.65.7: editar dados do cliente atual (modal completo)
+  document.querySelector('[data-edit-cliente-prop]').onclick = () => {
+    const cli = p.cliente;
+    if (!cli) return alert('Cliente não encontrado.');
+    abrirEditarClienteProposta(cli, async () => {
+      await Promise.all([loadProposta(p.id), loadPropostasClientes()]);
+      renderPropostaEditor();
+    });
+  };
+  // v1.65.7: cadastrar novo cliente e linkar à proposta
+  document.querySelector('[data-novo-cliente-prop]').onclick = () => {
+    abrirNovoClienteProposta(async (novoId) => {
+      await api('/api/propostas/' + p.id, {
+        method: 'PUT',
+        body: JSON.stringify({ cliente_id: String(novoId) })
+      });
+      await Promise.all([loadProposta(p.id), loadPropostasClientes()]);
+      renderPropostaEditor();
+    });
   };
 
   // Toggle categoria
