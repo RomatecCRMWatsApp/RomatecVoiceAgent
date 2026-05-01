@@ -673,6 +673,22 @@ function chaveDuplicacao(nome: string, telefone: string | null | undefined): str
   return `${nomeCanon}|${telKey}`;
 }
 
+// v1.65.17: cargos de gestão podem legitimamente estar marcados integral em
+// múltiplas obras no mesmo dia (cada obra paga sua diária pelo serviço de
+// gestão — o profissional supervisiona/visita as duas, divide o tempo, mas
+// cada uma reconhece o dia integral). Para esses, "conflito" não bloqueia.
+// Operacionais (pedreiro/servente/etc) NÃO podem — fisicamente impossível —
+// e o conflito continua sendo bloqueio.
+const CARGOS_GESTAO_PADRAO = [
+  'engenheir', 'arquitet', 'mestre', 'técnico', 'tecnico',
+  'encarregado', 'coordenador', 'supervisor', 'gestor', 'fiscal',
+];
+function isCargoGestao(funcao: string | null): boolean {
+  if (!funcao) return false;
+  const f = funcao.toLowerCase();
+  return CARGOS_GESTAO_PADRAO.some(c => f.includes(c));
+}
+
 function gerarNumeroLote(periodo: Periodo): string {
   return `QUINZ-${periodo.ano}-${String(periodo.mes).padStart(2, '0')}-${periodo.quinzena}`;
 }
@@ -796,7 +812,14 @@ export async function previewLoteQuinzena(input: { periodo?: string } = {}): Pro
 
     // 3ª passada: detecta CONFLITO real — mesmo colaborador (vários
     // cadastros) marcou o mesmo dia + periodo em obras diferentes.
-    // Isso é operacionalmente impossível (alguém marcou errado).
+    // Para OPERACIONAIS é impossível e bloqueia. Para cargos de GESTÃO
+    // (Mestre/Eng./Téc./Encarregado) é prática legítima — cada obra paga
+    // sua diária pelo serviço de supervisão; pulamos a detecção.
+    const todosGestao = group.every(g => isCargoGestao(g.funcao));
+    if (todosGestao) {
+      // só log, não cria conflito_datas no item, não bloqueia disparo
+      continue;
+    }
     const memberIds = ids.map(Number);
     const [diasRows] = await pool.execute<RowDataPacket[]>(
       `SELECT d.funcionario_id, d.data, d.periodo, d.obra_id, o.nome AS obra_nome
