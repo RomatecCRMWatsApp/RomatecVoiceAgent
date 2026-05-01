@@ -373,6 +373,28 @@ function handleWhatsAppWebhook(req: Request, res: Response) {
                        : `[PDF: ${msg.document.filename}]`;
         void logInbound(msg.from, userText, msg.id).catch(() => {});
 
+        // v1.65.15 — PR B.3: roteamento contextual de respostas de recibo.
+        // Antes de chamar processMessage (que invoca think), checa se este
+        // phone tem um envio de recibo aguardando resposta (1/2/PIX). Se
+        // sim, processa internamente sem ZAYRA — ela manteria o histórico
+        // e poderia confundir o fluxo financeiro estruturado.
+        if (msg.type === 'text') {
+          try {
+            const m = await import('./services/recibosQuinzena');
+            const r = await m.processarRespostaRecibo({
+              phone: msg.from,
+              text: msg.text.body,
+              messageId: msg.id,
+            });
+            if (r.handled) {
+              console.log(`[recibos] resposta roteada: phone=${msg.from} acao=${r.acao} envio=${r.envio_id}`);
+              continue; // não chama processMessage/think
+            }
+          } catch (err) {
+            console.warn('[recibos] roteamento falhou — caindo no fluxo normal:', (err as Error).message);
+          }
+        }
+
         const reply = await processMessage(msg);
         await sendReply(msg.from, reply);
       } catch (err) {
