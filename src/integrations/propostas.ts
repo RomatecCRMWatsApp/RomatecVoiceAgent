@@ -5,7 +5,7 @@
 
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import pool from '../database/connection';
-import { formatBR, formatBRDate } from '../util/format';
+import { formatBRDate, formatBRL } from '../util/format';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type SinapiRow = RowDataPacket & {
@@ -225,7 +225,7 @@ export async function listarPropostas(input: {
     data_proposta: formatBRDate(r.data_proposta),
     validade_dias: r.validade_dias,
     valor_total: num(r.valor_total),
-    valor_total_br: formatBR(num(r.valor_total)),
+    valor_total_br: formatBRL(num(r.valor_total)),
     status: r.status,
     pdf_path: r.pdf_path,
     enviada_whatsapp: !!r.enviada_whatsapp,
@@ -270,7 +270,7 @@ export async function buscarProposta(id: string) {
     data_proposta: formatBRDate(p.data_proposta),
     validade_dias: p.validade_dias,
     valor_total: num(p.valor_total),
-    valor_total_br: formatBR(num(p.valor_total)),
+    valor_total_br: formatBRL(num(p.valor_total)),
     observacoes: p.observacoes,
     status: p.status,
     pdf_path: p.pdf_path,
@@ -285,7 +285,7 @@ export async function buscarProposta(id: string) {
       quantidade: num(i.quantidade),
       valor_unitario: num(i.valor_unitario),
       valor_total: num(i.valor_total),
-      valor_total_br: formatBR(num(i.valor_total)),
+      valor_total_br: formatBRL(num(i.valor_total)),
       ordem: i.ordem,
     })),
   };
