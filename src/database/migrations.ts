@@ -879,6 +879,85 @@ export async function runMigrations(): Promise<void> {
     }
   }
 
+  // v1.65.13 — PR B.2: lotes de envio quinzenal (estado de cada disparo +
+  // trilha de auditoria de toda mensagem trocada). PR B.3 adicionará handler
+  // de respostas (1/2/PIX) que vai mutar status pra confirmado_aguardando_pix
+  // / contestado / pix_recebido.
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS recibos_envios_lotes (
+      id                   INT AUTO_INCREMENT PRIMARY KEY,
+      numero               VARCHAR(30) NOT NULL UNIQUE,
+      periodo              VARCHAR(10) NOT NULL,
+      periodo_inicio       DATE NOT NULL,
+      periodo_fim          DATE NOT NULL,
+      total_colaboradores  INT NOT NULL DEFAULT 0,
+      total_valor          DECIMAL(12,2) NOT NULL DEFAULT 0,
+      status               ENUM('rascunho','aguardando_confirmacao_ceo','enviando','concluido','cancelado')
+                             NOT NULL DEFAULT 'rascunho',
+      criado_por           VARCHAR(80),
+      criado_em            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      confirmado_em        TIMESTAMP NULL,
+      concluido_em         TIMESTAMP NULL,
+      observacoes          TEXT,
+      INDEX idx_periodo_status (periodo, status)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS recibos_envios (
+      id                            INT AUTO_INCREMENT PRIMARY KEY,
+      lote_id                       INT NOT NULL,
+      membro_id                     INT NOT NULL,
+      telefone                      VARCHAR(20),
+      recibo_hash                   VARCHAR(64),
+      valor                         DECIMAL(10,2) NOT NULL DEFAULT 0,
+      status                        ENUM(
+                                      'pendente_envio',
+                                      'enviado_aguardando_confirmacao',
+                                      'confirmado_aguardando_pix',
+                                      'pix_recebido',
+                                      'contestado',
+                                      'expirado',
+                                      'pago',
+                                      'pulado_sem_telefone',
+                                      'falha_envio'
+                                    ) NOT NULL DEFAULT 'pendente_envio',
+      enviado_em                    TIMESTAMP NULL,
+      confirmado_em                 TIMESTAMP NULL,
+      pix_recebido_em               TIMESTAMP NULL,
+      pago_em                       TIMESTAMP NULL,
+      confirmacao_resposta          TEXT,
+      confirmacao_numero_origem     VARCHAR(20),
+      confirmacao_message_id        VARCHAR(120),
+      chave_pix                     VARCHAR(150),
+      tipo_chave_pix                ENUM('cpf','cnpj','email','telefone','aleatoria') NULL,
+      contestacao_motivo            TEXT,
+      contestacao_repassada_ceo_em  TIMESTAMP NULL,
+      tentativas_envio              INT NOT NULL DEFAULT 0,
+      ultimo_erro                   TEXT,
+      criado_em                     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em                 TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_lote_status   (lote_id, status),
+      INDEX idx_membro        (membro_id),
+      INDEX idx_telefone      (telefone),
+      INDEX idx_status        (status)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS recibos_envios_mensagens (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      envio_id        INT NOT NULL,
+      direcao         ENUM('saida','entrada') NOT NULL,
+      tipo            ENUM('pdf_recibo','solicitacao_confirmacao','solicitacao_pix',
+                           'confirmacao','pix','contestacao','aviso','outro') NOT NULL,
+      conteudo        TEXT,
+      message_id_zapi VARCHAR(120),
+      enviado_em      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_envio (envio_id, enviado_em)
+    )
+  `);
+
   // v1.65.12 — PR B.1: ajustes do recibo quinzenal + emissões com hash de validação.
   // Período no formato "YYYY-MM-1" (dias 1-15) ou "YYYY-MM-2" (dias 16-fim).
   await pool.execute(`

@@ -12,6 +12,7 @@ import QRCode from 'qrcode';
 import pool from '../database/connection';
 import { formatBRL } from '../util/format';
 import { getTenantSettings } from './tenantSettings';
+import { sendDocument, sendReply } from '../integrations/whatsapp';
 
 const LOGO_RELATORIO = '/romatec-logo.jpg';
 
@@ -588,4 +589,540 @@ export async function gerarHtmlValidacao(hash: string): Promise<string> {
   <hr style="margin-top:30px; border:none; border-top:1px solid #ddd;">
   <p style="text-align:center; font-size:11px; color:#888;">${brand} — gerado por ZAYRA</p>
 </body></html>`;
+}
+
+// ╔═════════════════════════════════════════════════════════════════════════╗
+// ║ PR B.2 — LOTES DE ENVIO QUINZENAL VIA Z-API                              ║
+// ║ Estado: rascunho → aguardando_confirmacao_ceo → enviando → concluido    ║
+// ║ Uma quinzena = um lote ativo. Re-disparar mesma quinzena com lote ativo  ║
+// ║ é detectado e bloqueado (a menos de force=true).                         ║
+// ╚═════════════════════════════════════════════════════════════════════════╝
+
+interface LoteRow extends RowDataPacket {
+  id: number; numero: string; periodo: string;
+  periodo_inicio: Date; periodo_fim: Date;
+  total_colaboradores: number; total_valor: string;
+  status: 'rascunho' | 'aguardando_confirmacao_ceo' | 'enviando' | 'concluido' | 'cancelado';
+  criado_por: string | null;
+  criado_em: Date; confirmado_em: Date | null; concluido_em: Date | null;
+  observacoes: string | null;
+}
+
+interface CandidatoRow extends RowDataPacket {
+  id: number; nome: string; funcao: string | null;
+  telefone: string | null; tipo_contrato: string | null;
+  valor_dia: string | null;
+  tratamento: string | null;  // do contacts
+  tom: string | null;          // do contacts
+}
+
+interface PreviewItem {
+  membro_id: string;
+  nome: string;
+  funcao: string | null;
+  tratamento: string | null;
+  telefone: string | null;
+  total_liquido: number;
+  qtd_dias: number;
+  status_preview: 'ok' | 'sem_telefone' | 'sem_dias_e_sem_ajustes';
+}
+
+export interface PreviewLote {
+  periodo: Periodo;
+  numero: string;
+  ja_existe_lote_ativo: { id: string; numero: string; status: string } | null;
+  itens: PreviewItem[];
+  total_valor: number;
+  total_colaboradores_validos: number;     // exclui sem_telefone e sem_dias_e_sem_ajustes
+  total_pulados_sem_telefone: number;
+  total_sem_atividade: number;
+}
+
+function gerarNumeroLote(periodo: Periodo): string {
+  return `QUINZ-${periodo.ano}-${String(periodo.mes).padStart(2, '0')}-${periodo.quinzena}`;
+}
+
+// Lista colaboradores ativos com dias OU ajustes na quinzena.
+// Junta info de contacts (tratamento + tom) via romatec_obra_equipe.contact_id.
+async function listarCandidatosLote(periodo: Periodo): Promise<CandidatoRow[]> {
+  const [rows] = await pool.execute<CandidatoRow[]>(
+    `SELECT DISTINCT
+            e.id, e.nome, e.funcao, e.telefone, e.tipo_contrato, e.valor_dia,
+            c.tratamento, c.tom
+       FROM romatec_obra_equipe e
+       LEFT JOIN contacts c ON c.id = e.contact_id
+      WHERE e.ativo = 1
+        AND (
+          EXISTS (
+            SELECT 1 FROM romatec_obra_funcionario_dias d
+             WHERE d.funcionario_id = e.id
+               AND d.data BETWEEN ? AND ?
+          )
+          OR EXISTS (
+            SELECT 1 FROM recibos_ajustes a
+             WHERE a.membro_id = e.id AND a.periodo = ?
+          )
+        )
+      ORDER BY e.nome ASC`,
+    [periodo.dataInicio, periodo.dataFim, periodo.codigo]
+  );
+  return rows;
+}
+
+// Verifica se já existe lote ativo (não cancelado, não concluído) pra esse período
+async function buscarLoteAtivo(periodoCodigo: string): Promise<LoteRow | null> {
+  const [rows] = await pool.execute<LoteRow[]>(
+    `SELECT * FROM recibos_envios_lotes
+      WHERE periodo = ?
+        AND status IN ('rascunho','aguardando_confirmacao_ceo','enviando')
+      ORDER BY criado_em DESC LIMIT 1`,
+    [periodoCodigo]
+  );
+  return rows[0] ?? null;
+}
+
+// Calcula o total_liquido de cada candidato (sem persistir snapshot ainda — preview)
+async function calcularTotalLiquido(membroId: string, periodo: Periodo): Promise<{ total: number; qtdDias: number }> {
+  const data = await coletarDadosRecibo(membroId, periodo.codigo);
+  return { total: data.totais.total_liquido, qtdDias: data.totais.qtd_dias };
+}
+
+export async function previewLoteQuinzena(input: { periodo?: string } = {}): Promise<PreviewLote> {
+  const periodo = input.periodo ? parsePeriodo(input.periodo) : calcularPeriodoAtual();
+  const numero  = gerarNumeroLote(periodo);
+
+  const loteAtivo = await buscarLoteAtivo(periodo.codigo);
+  const candidatos = await listarCandidatosLote(periodo);
+
+  const itens: PreviewItem[] = [];
+  let totalValor = 0;
+  let pulados = 0;
+  let semAtividade = 0;
+
+  for (const c of candidatos) {
+    const r = await calcularTotalLiquido(String(c.id), periodo);
+    const semDiasESemAjustes = r.qtdDias === 0 && r.total === 0;
+    const semTelefone = !c.telefone || !/\d/.test(c.telefone);
+
+    let statusPreview: PreviewItem['status_preview'] = 'ok';
+    if (semDiasESemAjustes) {
+      statusPreview = 'sem_dias_e_sem_ajustes';
+      semAtividade++;
+    } else if (semTelefone) {
+      statusPreview = 'sem_telefone';
+      pulados++;
+    } else {
+      totalValor += r.total;
+    }
+
+    itens.push({
+      membro_id: String(c.id),
+      nome: c.nome,
+      funcao: c.funcao,
+      tratamento: c.tratamento,
+      telefone: c.telefone,
+      total_liquido: r.total,
+      qtd_dias: r.qtdDias,
+      status_preview: statusPreview,
+    });
+  }
+
+  return {
+    periodo,
+    numero,
+    ja_existe_lote_ativo: loteAtivo
+      ? { id: String(loteAtivo.id), numero: loteAtivo.numero, status: loteAtivo.status }
+      : null,
+    itens,
+    total_valor: totalValor,
+    total_colaboradores_validos: itens.filter(i => i.status_preview === 'ok').length,
+    total_pulados_sem_telefone: pulados,
+    total_sem_atividade: semAtividade,
+  };
+}
+
+// Saudação por horário (Fortaleza). Não personalizada — texto base.
+function saudacaoBR(d: Date = new Date()): string {
+  const h = Number(new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Fortaleza', hour: '2-digit', hour12: false,
+  }).format(d));
+  if (h < 12) return 'Bom dia';
+  if (h < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+
+function montarMensagemEnvio(input: {
+  nome: string; tratamento: string | null; tom: string | null;
+  periodo: Periodo; valor: number;
+}): string {
+  const saud = saudacaoBR();
+  const tratNome = input.tratamento ? `${input.tratamento} ${input.nome.split(' ')[0]}` : input.nome.split(' ')[0];
+  return (
+    `${saud}, ${tratNome}.\n\n` +
+    `Segue seu recibo da ${input.periodo.label}.\n` +
+    `Período: ${input.periodo.dataInicio.split('-').reverse().join('/')} a ${input.periodo.dataFim.split('-').reverse().join('/')}.\n` +
+    `Valor: ${formatBRL(input.valor)}\n\n` +
+    `Confirme o recebimento e a conformidade do valor:\n\n` +
+    `*1* — Confirmo, está tudo certo\n` +
+    `*2* — Não está correto\n\n` +
+    `(responda apenas com o número da opção)`
+  );
+}
+
+// Cria o lote (status 'aguardando_confirmacao_ceo') sem disparar nada.
+// Posterior chamada com confirm:true muda pra 'enviando' + dispara cada envio.
+export async function criarLoteRecibos(input: {
+  periodo?: string; criado_por?: string; force?: boolean;
+}): Promise<{
+  ok: true; lote_id: string; numero: string; preview: PreviewLote;
+  message: string;
+}> {
+  const preview = await previewLoteQuinzena({ periodo: input.periodo });
+  if (preview.ja_existe_lote_ativo && !input.force) {
+    throw new Error(
+      `Já existe lote ativo pra ${preview.periodo.label}: ` +
+      `${preview.ja_existe_lote_ativo.numero} (status ${preview.ja_existe_lote_ativo.status}). ` +
+      `Use force:true pra criar um lote paralelo (não recomendado).`
+    );
+  }
+  if (preview.total_colaboradores_validos === 0) {
+    throw new Error(
+      `Nenhum colaborador válido pra ${preview.periodo.label}. ` +
+      `(${preview.total_pulados_sem_telefone} sem telefone, ${preview.total_sem_atividade} sem atividade.)`
+    );
+  }
+
+  // Ajusta numero pra evitar colisão se force=true (lote paralelo na mesma quinzena)
+  let numero = preview.numero;
+  if (preview.ja_existe_lote_ativo) {
+    numero = `${preview.numero}-R${Date.now().toString(36).slice(-4)}`;
+  }
+
+  const [r] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO recibos_envios_lotes
+       (numero, periodo, periodo_inicio, periodo_fim,
+        total_colaboradores, total_valor, status, criado_por)
+     VALUES (?,?,?,?,?,?,?,?)`,
+    [
+      numero, preview.periodo.codigo,
+      preview.periodo.dataInicio, preview.periodo.dataFim,
+      preview.total_colaboradores_validos,
+      preview.total_valor.toFixed(2),
+      'aguardando_confirmacao_ceo',
+      input.criado_por ?? null,
+    ]
+  );
+  const loteId = r.insertId;
+
+  // Cria envio pendente pra cada candidato (mesmo os pulados ficam registrados
+  // como pulado_sem_telefone — útil pra trilha de auditoria do que foi
+  // descartado neste lote)
+  for (const it of preview.itens) {
+    let st: 'pendente_envio' | 'pulado_sem_telefone' = 'pendente_envio';
+    if (it.status_preview === 'sem_telefone')                 st = 'pulado_sem_telefone';
+    if (it.status_preview === 'sem_dias_e_sem_ajustes')        continue; // não cria envio
+    await pool.execute<ResultSetHeader>(
+      `INSERT INTO recibos_envios (lote_id, membro_id, telefone, valor, status)
+       VALUES (?,?,?,?,?)`,
+      [loteId, Number(it.membro_id), it.telefone, it.total_liquido.toFixed(2), st]
+    );
+  }
+
+  return {
+    ok: true,
+    lote_id: String(loteId),
+    numero,
+    preview,
+    message: `Lote ${numero} criado com ${preview.total_colaboradores_validos} envio(s) pendente(s) (${preview.total_pulados_sem_telefone} pulados sem tel). Aguardando confirmação do CEO.`,
+  };
+}
+
+interface EnvioRow extends RowDataPacket {
+  id: number; lote_id: number; membro_id: number;
+  telefone: string | null; valor: string;
+  status: string; tentativas_envio: number;
+}
+
+// Dispara todos os envios pendentes do lote — gera PDF de cada um, manda
+// via Z-API (PDF + texto separados, na ordem PDF → texto), atualiza status.
+export async function dispararLote(input: {
+  lote_id: string; baseUrl?: string;
+}): Promise<{
+  ok: true;
+  total: number; sucesso: number; falhas: number; pulados: number;
+  mensagens: string[];
+}> {
+  const loteId = Number(input.lote_id);
+  if (!loteId) throw new Error('lote_id inválido');
+
+  const [loteRows] = await pool.execute<LoteRow[]>(
+    `SELECT * FROM recibos_envios_lotes WHERE id = ?`, [loteId]
+  );
+  if (!loteRows.length) throw new Error(`lote ${loteId} não encontrado`);
+  const lote = loteRows[0];
+  if (!['aguardando_confirmacao_ceo','enviando'].includes(lote.status)) {
+    throw new Error(`lote ${loteId} está em status "${lote.status}" — não pode disparar`);
+  }
+
+  await pool.execute(
+    `UPDATE recibos_envios_lotes SET status = 'enviando', confirmado_em = COALESCE(confirmado_em, NOW()) WHERE id = ?`,
+    [loteId]
+  );
+
+  const periodo = parsePeriodo(lote.periodo);
+
+  const [envios] = await pool.execute<EnvioRow[]>(
+    `SELECT * FROM recibos_envios WHERE lote_id = ? AND status = 'pendente_envio' ORDER BY id ASC`,
+    [loteId]
+  );
+
+  const tenant = await getTenantSettings(1).catch(() => null);
+  const brand  = tenant?.brand_name || 'Romatec';
+
+  let sucesso = 0, falhas = 0, pulados = 0;
+  const mensagens: string[] = [];
+
+  for (const e of envios) {
+    if (!e.telefone) {
+      pulados++;
+      await pool.execute(
+        `UPDATE recibos_envios SET status = 'pulado_sem_telefone' WHERE id = ?`, [e.id]
+      );
+      continue;
+    }
+
+    try {
+      // 1. Gera PDF + persiste snapshot (idempotente — re-uso de hash se existe)
+      const pdf = await gerarReciboQuinzenalPdf({
+        membro_id: String(e.membro_id),
+        periodo: periodo.codigo,
+        baseUrl: input.baseUrl,
+      });
+
+      // 2. Pega dados do membro pra mensagem (tratamento/tom via contacts)
+      const [mRows] = await pool.execute<RowDataPacket[]>(
+        `SELECT e.nome, c.tratamento, c.tom
+           FROM romatec_obra_equipe e
+           LEFT JOIN contacts c ON c.id = e.contact_id
+          WHERE e.id = ?`,
+        [e.membro_id]
+      );
+      const m = mRows[0] || { nome: 'Colaborador', tratamento: null, tom: null };
+
+      // 3. Manda PDF (ZAPI send-document, que não suporta caption)
+      const fileName = `Recibo_${String(m.nome).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}_${periodo.codigo}.pdf`;
+      const docRes = await sendDocument(e.telefone, pdf.buffer.toString('base64'), fileName);
+
+      // 4. Manda texto com instrução 1/2 (mensagem separada)
+      const txt = montarMensagemEnvio({
+        nome: String(m.nome),
+        tratamento: m.tratamento as string | null,
+        tom: m.tom as string | null,
+        periodo,
+        valor: Number(e.valor),
+      });
+      const txtRes = await sendReply(e.telefone, txt);
+
+      // 5. Atualiza envio pra "enviado_aguardando_confirmacao"
+      await pool.execute(
+        `UPDATE recibos_envios
+            SET status = 'enviado_aguardando_confirmacao',
+                enviado_em = NOW(),
+                tentativas_envio = tentativas_envio + 1,
+                recibo_hash = ?,
+                ultimo_erro = NULL
+          WHERE id = ?`,
+        [pdf.hash, e.id]
+      );
+
+      // 6. Auditoria
+      await pool.execute(
+        `INSERT INTO recibos_envios_mensagens (envio_id, direcao, tipo, conteudo, message_id_zapi)
+         VALUES (?, 'saida', 'pdf_recibo', ?, ?)`,
+        [e.id, fileName, docRes.messageId ?? null]
+      );
+      await pool.execute(
+        `INSERT INTO recibos_envios_mensagens (envio_id, direcao, tipo, conteudo, message_id_zapi)
+         VALUES (?, 'saida', 'solicitacao_confirmacao', ?, ?)`,
+        [e.id, txt, txtRes.messageId ?? null]
+      );
+
+      sucesso++;
+      mensagens.push(`✅ ${m.nome} (${e.telefone}) — ${formatBRL(Number(e.valor))}`);
+    } catch (err) {
+      falhas++;
+      const errMsg = (err as Error).message ?? String(err);
+      await pool.execute(
+        `UPDATE recibos_envios
+            SET status = 'falha_envio',
+                tentativas_envio = tentativas_envio + 1,
+                ultimo_erro = ?
+          WHERE id = ?`,
+        [errMsg.slice(0, 1000), e.id]
+      );
+      mensagens.push(`❌ envio ${e.id}: ${errMsg.slice(0, 80)}`);
+      console.warn(`[recibos] disparo falhou pro envio ${e.id}:`, errMsg);
+    }
+  }
+
+  // Lote vai pra concluido quando não há mais nada pendente E já houve disparo
+  await pool.execute(
+    `UPDATE recibos_envios_lotes
+        SET status = 'concluido', concluido_em = NOW()
+      WHERE id = ?`,
+    [loteId]
+  );
+
+  return {
+    ok: true,
+    total: envios.length,
+    sucesso, falhas, pulados,
+    mensagens,
+  };
+}
+
+// Helper de alto nível: prepara preview ou dispara em uma única chamada.
+// É a interface que a tool da ZAYRA usa.
+export async function dispararRecibosQuinzena(input: {
+  periodo?: string; confirm?: boolean; force?: boolean;
+  criado_por?: string; baseUrl?: string;
+}): Promise<{
+  modo: 'preview' | 'criado' | 'disparado';
+  preview?: PreviewLote;
+  lote_id?: string; numero?: string;
+  total?: number; sucesso?: number; falhas?: number; pulados?: number;
+  message: string;
+}> {
+  // Sem confirm → só preview, não cria nada
+  if (!input.confirm) {
+    const preview = await previewLoteQuinzena({ periodo: input.periodo });
+    const linhas = preview.itens
+      .filter(i => i.status_preview !== 'sem_dias_e_sem_ajustes')
+      .map(i => {
+        const tag = i.status_preview === 'sem_telefone' ? '⚠️ sem WhatsApp' : '';
+        const trat = i.tratamento ? `${i.tratamento} ` : '';
+        return `• ${trat}${i.nome}${i.funcao ? ' ('+i.funcao+')' : ''} — ${formatBRL(i.total_liquido)} ${tag}`;
+      })
+      .join('\n');
+
+    const aviso = preview.ja_existe_lote_ativo
+      ? `\n\n⚠️ Já existe lote ativo pra ${preview.periodo.label}: ${preview.ja_existe_lote_ativo.numero} (${preview.ja_existe_lote_ativo.status}). Use force:true pra criar paralelo.\n`
+      : '';
+
+    return {
+      modo: 'preview',
+      preview,
+      message:
+        `[PREVIEW LOTE ${preview.numero}] ${preview.periodo.label}\n\n` +
+        `${preview.total_colaboradores_validos} envio(s) válido(s)` +
+        (preview.total_pulados_sem_telefone ? `, ${preview.total_pulados_sem_telefone} pulado(s) sem WhatsApp` : '') +
+        (preview.total_sem_atividade ? `, ${preview.total_sem_atividade} sem atividade` : '') + '.\n\n' +
+        linhas + '\n\n' +
+        `Total: ${formatBRL(preview.total_valor)}` +
+        aviso +
+        `\n\nConfirma o disparo? Reenvie com confirm:true.`,
+    };
+  }
+
+  // Com confirm:true → cria lote + dispara
+  const criado = await criarLoteRecibos({
+    periodo: input.periodo,
+    criado_por: input.criado_por,
+    force: input.force,
+  });
+  const disparo = await dispararLote({ lote_id: criado.lote_id, baseUrl: input.baseUrl });
+
+  return {
+    modo: 'disparado',
+    lote_id: criado.lote_id,
+    numero: criado.numero,
+    total: disparo.total,
+    sucesso: disparo.sucesso,
+    falhas: disparo.falhas,
+    pulados: disparo.pulados,
+    message:
+      `Lote ${criado.numero} disparado.\n` +
+      `✅ Sucesso: ${disparo.sucesso}\n` +
+      (disparo.falhas ? `❌ Falhas: ${disparo.falhas}\n` : '') +
+      (disparo.pulados ? `⏭ Pulados (sem tel): ${disparo.pulados}\n` : '') +
+      `\nDetalhes:\n${disparo.mensagens.slice(0, 30).join('\n')}`,
+  };
+}
+
+// Status consolidado de um lote (pra comando "como tá a quinzena?")
+export async function statusLote(input: { lote_id?: string; periodo?: string }): Promise<{
+  lote: {
+    id: string; numero: string; periodo: string; status: string;
+    total_colaboradores: number; total_valor: number;
+    criado_em: string; confirmado_em: string | null; concluido_em: string | null;
+  };
+  por_status: Record<string, number>;
+  envios: Array<{
+    id: string; membro: string; telefone: string | null;
+    valor: number; status: string;
+    enviado_em: string | null; confirmado_em: string | null;
+    pix_recebido_em: string | null; pago_em: string | null;
+    tentativas: number; ultimo_erro: string | null;
+  }>;
+}> {
+  let loteRow: LoteRow | undefined;
+  if (input.lote_id) {
+    const [r] = await pool.execute<LoteRow[]>(
+      `SELECT * FROM recibos_envios_lotes WHERE id = ?`, [Number(input.lote_id)]
+    );
+    loteRow = r[0];
+  } else {
+    const periodo = input.periodo ? parsePeriodo(input.periodo) : calcularPeriodoAtual();
+    const [r] = await pool.execute<LoteRow[]>(
+      `SELECT * FROM recibos_envios_lotes WHERE periodo = ? ORDER BY criado_em DESC LIMIT 1`,
+      [periodo.codigo]
+    );
+    loteRow = r[0];
+  }
+  if (!loteRow) throw new Error('lote não encontrado');
+
+  const [enviosRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT v.id, e.nome AS membro, v.telefone, v.valor, v.status,
+            v.enviado_em, v.confirmado_em, v.pix_recebido_em, v.pago_em,
+            v.tentativas_envio, v.ultimo_erro
+       FROM recibos_envios v
+       LEFT JOIN romatec_obra_equipe e ON e.id = v.membro_id
+      WHERE v.lote_id = ?
+      ORDER BY v.id ASC`,
+    [loteRow.id]
+  );
+
+  const porStatus: Record<string, number> = {};
+  for (const e of enviosRows) porStatus[String(e.status)] = (porStatus[String(e.status)] ?? 0) + 1;
+
+  const fmtTs = (d: Date | null): string | null =>
+    d ? new Date(d).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' }) : null;
+
+  return {
+    lote: {
+      id: String(loteRow.id),
+      numero: loteRow.numero,
+      periodo: loteRow.periodo,
+      status: loteRow.status,
+      total_colaboradores: loteRow.total_colaboradores,
+      total_valor: Number(loteRow.total_valor),
+      criado_em: fmtTs(loteRow.criado_em) ?? '',
+      confirmado_em: fmtTs(loteRow.confirmado_em),
+      concluido_em: fmtTs(loteRow.concluido_em),
+    },
+    por_status: porStatus,
+    envios: enviosRows.map(r => ({
+      id: String(r.id),
+      membro: String(r.membro ?? '(removido)'),
+      telefone: r.telefone as string | null,
+      valor: Number(r.valor),
+      status: String(r.status),
+      enviado_em: fmtTs(r.enviado_em as Date | null),
+      confirmado_em: fmtTs(r.confirmado_em as Date | null),
+      pix_recebido_em: fmtTs(r.pix_recebido_em as Date | null),
+      pago_em: fmtTs(r.pago_em as Date | null),
+      tentativas: Number(r.tentativas_envio ?? 0),
+      ultimo_erro: r.ultimo_erro as string | null,
+    })),
+  };
 }

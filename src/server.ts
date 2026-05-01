@@ -680,6 +680,41 @@ app.get('/api/recibos/quinzena/:membro_id/pdf', async (req: Request, res: Respon
   }
 });
 
+// v1.65.13 — PR B.2: lote + disparo via Z-API.
+// POST /api/recibos/preview-lote → preview (não cria nada). Body: { periodo? }
+// POST /api/recibos/disparar     → cria lote + dispara. Body: { periodo?, confirm:true, force? }
+// POST /api/recibos/disparar     → sem confirm:true também devolve preview (idêntico ao preview-lote)
+// GET  /api/recibos/lote/:id     → status consolidado
+app.post('/api/recibos/preview-lote', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.previewLoteQuinzena(args as { periodo?: string });
+}));
+app.post('/api/recibos/disparar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/recibosQuinzena');
+    const proto = (req.get('x-forwarded-proto') as string | undefined)?.split(',')[0]?.trim() || 'https';
+    const baseUrl = `${proto}://${req.get('host')}`.replace(/\/$/, '');
+    const out = await m.dispararRecibosQuinzena({
+      periodo: req.body?.periodo,
+      confirm: !!req.body?.confirm,
+      force:   !!req.body?.force,
+      criado_por: req.body?.criado_por,
+      baseUrl,
+    });
+    res.json(out);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+app.get('/api/recibos/lote/:id', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.statusLote({ lote_id: (args as { id: string }).id });
+}));
+app.get('/api/recibos/lote-do-periodo/:periodo', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.statusLote({ periodo: (args as { periodo: string }).periodo });
+}));
+
 // Página pública acessada via QR-code (validação)
 app.get('/recibos/validar/:hash', async (req: Request, res: Response) => {
   try {
