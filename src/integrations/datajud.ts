@@ -17,8 +17,10 @@
 import axios from 'axios';
 
 const DATAJUD_BASE = 'https://api-publica.datajud.cnj.jus.br';
-// Chave pública oficial do CNJ — copy-paste do wiki público (datajud-wiki.cnj.jus.br)
-const DATAJUD_PUBLIC_KEY = 'cDZHYzlZa0JadVREZDJCendQbXY6QU1lY0FtZ09SZi1fZGZ3WkN1VHRwQQ==';
+// Chave pública oficial do CNJ — copy-paste do wiki público (datajud-wiki.cnj.jus.br/api-publica/acesso).
+// Pode ser sobrescrita via env var DATAJUD_API_KEY se o CNJ rotacionar a chave.
+const DATAJUD_PUBLIC_KEY = process.env.DATAJUD_API_KEY
+  || 'cDZHYzlZa0JadVREZDJCendQbXY6QU1lY0FtZ09SZi1fZGZ3WkN1VHRwQQ==';
 
 // Mapeamento sigla → índice ES. Lista completa em datajud-wiki.cnj.jus.br
 // (>90 tribunais cobertos — TJ estaduais, TRT, TRF, STJ, TST, TSE).
@@ -92,26 +94,45 @@ export async function consultarProcesso(input: {
   const numeroFormatado = normalizarNumeroCnj(input.numero_cnj);
   const numeroSomenteDigitos = numeroFormatado.replace(/\D/g, '');
 
+  // CNJ aceita "APIKey <chave>" — se rotacionar pode mudar pra "ApiKey".
+  // Tentamos os dois formatos; se ambos falharem, jogamos erro detalhado.
+  const headerFormats = ['APIKey', 'ApiKey'];
+  const body = {
+    query: { match: { numeroProcesso: numeroSomenteDigitos } },
+    size: 1,
+  };
+
   let resp;
-  try {
-    resp = await axios.post(
-      `${DATAJUD_BASE}/${trib.indice}/_search`,
-      {
-        query: { match: { numeroProcesso: numeroSomenteDigitos } },
-        size: 1,
-      },
-      {
-        headers: {
-          'Authorization': `APIKey ${DATAJUD_PUBLIC_KEY}`,
-          'Content-Type':  'application/json',
+  let lastErr: { status?: number; body?: unknown; format?: string } | null = null;
+  for (const fmt of headerFormats) {
+    try {
+      resp = await axios.post(
+        `${DATAJUD_BASE}/${trib.indice}/_search`,
+        body,
+        {
+          headers: {
+            'Authorization': `${fmt} ${DATAJUD_PUBLIC_KEY}`,
+            'Content-Type':  'application/json',
+          },
+          timeout: 15000,
         },
-        timeout: 15000,
-      },
+      );
+      break;
+    } catch (err) {
+      const e = err as { response?: { status?: number; data?: unknown }; message?: string };
+      lastErr = { status: e.response?.status, body: e.response?.data ?? e.message, format: fmt };
+      console.warn(`[datajud] ${fmt} falhou (${e.response?.status}):`, JSON.stringify(e.response?.data ?? e.message).slice(0, 200));
+      // Se for 401/403 tenta o próximo formato; outros erros (404/500/timeout) param aqui.
+      if (e.response?.status !== 401 && e.response?.status !== 403) break;
+    }
+  }
+  if (!resp) {
+    throw new Error(
+      `DataJud falhou (status ${lastErr?.status ?? '?'}, formato testado: ${lastErr?.format}): ` +
+      `${JSON.stringify(lastErr?.body).slice(0, 300)}. ` +
+      `Se for 401/403, a chave pública do CNJ pode ter rotacionado — confira em datajud-wiki.cnj.jus.br/api-publica/acesso ` +
+      `e seta DATAJUD_API_KEY no Railway.`
     );
-  } catch (err) {
-    const e = err as { response?: { status?: number; data?: unknown }; message?: string };
-    const detail = JSON.stringify(e.response?.data ?? e.message ?? err);
-    throw new Error(`DataJud falhou (${e.response?.status ?? '?'}): ${detail.slice(0, 300)}`);
   }
 
   const hits = resp.data?.hits?.hits;
@@ -153,4 +174,62 @@ export async function consultarProcesso(input: {
 
 export function listarTribunaisDataJud(): Array<{ sigla: string; nome: string }> {
   return Object.values(TRIBUNAIS).map(t => ({ sigla: t.sigla, nome: t.nome }));
+}
+
+// Diagnóstico — testa conectividade + autenticação contra o índice TJMA com
+// uma query que sempre retorna match_all 0 hits. Útil pra isolar problemas.
+export async function diagnosticarDataJud(): Promise<{
+  online:      boolean;
+  status?:     number;
+  formato_que_funcionou?: string;
+  detalhes:    string;
+  chave_em_uso: string;
+  via_env_var: boolean;
+}> {
+  const chaveEmUso  = DATAJUD_PUBLIC_KEY;
+  const viaEnvVar   = !!process.env.DATAJUD_API_KEY;
+  const chaveMascarada = chaveEmUso.slice(0, 8) + '...' + chaveEmUso.slice(-6);
+
+  for (const fmt of ['APIKey', 'ApiKey']) {
+    try {
+      const r = await axios.post(
+        `${DATAJUD_BASE}/api_publica_tjma/_search`,
+        { query: { match_all: {} }, size: 0 },
+        {
+          headers: {
+            'Authorization': `${fmt} ${chaveEmUso}`,
+            'Content-Type':  'application/json',
+          },
+          timeout: 10000,
+        },
+      );
+      const total = r.data?.hits?.total?.value ?? r.data?.hits?.total ?? '?';
+      return {
+        online: true,
+        status: 200,
+        formato_que_funcionou: fmt,
+        detalhes: `Conexão OK. TJMA retornou total=${total} processos no índice. Header testado que funciona: "${fmt}".`,
+        chave_em_uso: chaveMascarada,
+        via_env_var:  viaEnvVar,
+      };
+    } catch (err) {
+      const e = err as { response?: { status?: number; data?: unknown }; message?: string };
+      const status = e.response?.status;
+      if (status === 401 || status === 403) continue; // tenta próximo formato
+      return {
+        online: false,
+        status,
+        detalhes: `Falhou no formato "${fmt}": ${JSON.stringify(e.response?.data ?? e.message).slice(0, 300)}`,
+        chave_em_uso: chaveMascarada,
+        via_env_var:  viaEnvVar,
+      };
+    }
+  }
+  return {
+    online: false,
+    status: 401,
+    detalhes: `Ambos os formatos (APIKey + ApiKey) retornaram 401/403. Chave provavelmente foi rotacionada pelo CNJ. Confira em datajud-wiki.cnj.jus.br/api-publica/acesso e atualize DATAJUD_API_KEY no Railway.`,
+    chave_em_uso: chaveMascarada,
+    via_env_var:  viaEnvVar,
+  };
 }

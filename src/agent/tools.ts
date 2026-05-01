@@ -31,7 +31,7 @@ import {
 } from '../services/calculadoraFinanceira';
 import { calcularItbi, listarMunicipiosValidados } from '../services/calcularItbi';
 import { calcularIptu, listarMunicipiosIptu } from '../services/calcularIptu';
-import { consultarProcesso as datajudConsultarProcesso, listarTribunaisDataJud } from '../integrations/datajud';
+import { consultarProcesso as datajudConsultarProcesso, listarTribunaisDataJud, diagnosticarDataJud } from '../integrations/datajud';
 import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
@@ -653,6 +653,11 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: 'listar_tribunais_datajud',
     description: 'Lista todos os tribunais cobertos pela tool consultar_processo_tj. Use quando o Chefe perguntar "quais tribunais você consulta".',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'diagnostico_datajud',
+    description: 'Diagnostica a conexão com o DataJud (CNJ): testa autenticação contra o TJMA, retorna status HTTP, qual formato de header funcionou ("APIKey" ou "ApiKey"), chave em uso (mascarada) e se veio de env var. Use SEMPRE que consultar_processo_tj falhar com 401/403 — a chave pública do CNJ rotaciona ocasionalmente.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -2305,6 +2310,9 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         break;
       case 'listar_tribunais_datajud':
         data = listarTribunaisDataJud();
+        break;
+      case 'diagnostico_datajud':
+        data = await diagnosticarDataJud();
         break;
 
       // ── v1.40.0: Briefing semanal + diagnóstico banco ──
