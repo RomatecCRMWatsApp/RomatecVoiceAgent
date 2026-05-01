@@ -6,6 +6,11 @@
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import pool from '../database/connection';
 import { formatBRDate, formatBRL } from '../util/format';
+import { sendDocument } from './whatsapp';
+import { getTenantSettings } from '../services/tenantSettings';
+import PDFDocument from 'pdfkit';
+import path from 'path';
+import fs from 'fs';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type SinapiRow = RowDataPacket & {
@@ -490,4 +495,274 @@ export async function reordenarItensProposta(input: {
     i++;
   }
   return { ok: true, affected: i, message: 'Ordem atualizada.' };
+}
+
+// ── HTML Relatório (preview/imprimir/PDF via browser) ────────────────────────
+function escapeHtml(s: string | null | undefined): string {
+  if (!s) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+export async function gerarHtmlPropostaRelatorio(id: string): Promise<string> {
+  const p = await buscarProposta(id);
+  const t = await getTenantSettings(1).catch(() => null);
+  const brand = t?.brand_name || 'Romatec Consultoria Imobiliária';
+  const logo  = t?.logo_path  || '/logo_R-removebg-preview.png';
+  const cor   = t?.primary_color || '#10b981';
+
+  const itensHtml = p.itens.map((it, idx) => `
+    <tr>
+      <td style="text-align:center;">${idx + 1}</td>
+      <td>${escapeHtml(it.descricao)}</td>
+      <td style="text-align:center;">${escapeHtml(it.unidade)}</td>
+      <td style="text-align:right;">${it.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</td>
+      <td style="text-align:right;">${formatBRL(it.valor_unitario)}</td>
+      <td style="text-align:right;">${formatBRL(it.valor_total)}</td>
+    </tr>
+  `).join('');
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR"><head>
+<meta charset="UTF-8">
+<title>Proposta ${escapeHtml(p.numero)} — ${escapeHtml(p.cliente?.nome || '')}</title>
+<style>
+  @page { margin: 18mm 16mm; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#111; font-size:13px; line-height:1.5; max-width:800px; margin:0 auto; padding:20px; }
+  .romatec-header { text-align:center; border-bottom:3px solid ${cor}; padding-bottom:14px; margin-bottom:18px; }
+  .romatec-header img { max-height:90px; max-width:80%; }
+  h1 { font-size:18px; margin:14px 0 4px; text-align:center; letter-spacing:1px; }
+  h2 { font-size:14px; margin:18px 0 8px; color:${cor}; border-bottom:1px solid #ddd; padding-bottom:4px; }
+  table { width:100%; border-collapse: collapse; margin-top:8px; }
+  th, td { padding:6px 8px; border-bottom:1px solid #e5e5e5; vertical-align:top; }
+  th { background:#f3f4f6; text-align:left; font-size:12px; }
+  .label { color:#666; font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+  .total-box { margin-top:14px; padding:12px 16px; background:#f9fafb; border-left:4px solid ${cor}; display:flex; justify-content:space-between; font-weight:600; font-size:15px; }
+  .obs { margin-top:14px; padding:10px 12px; background:#fffbeb; border-left:3px solid #f59e0b; font-size:12px; }
+  .footer { margin-top:30px; padding-top:14px; border-top:1px solid #ddd; text-align:center; font-size:11px; color:#666; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:4px; background:#e5e7eb; font-size:11px; text-transform:uppercase; }
+  @media print { .no-print { display:none; } body { padding:0; } }
+</style>
+</head><body>
+  <div class="romatec-header">
+    <img src="${escapeHtml(logo)}" alt="${escapeHtml(brand)}">
+  </div>
+
+  <h1>PROPOSTA DE MÃO DE OBRA</h1>
+  <p style="text-align:center; margin:0;">
+    <strong>Nº ${escapeHtml(p.numero)}</strong>
+    &nbsp;·&nbsp; <span class="badge">${escapeHtml(p.status)}</span>
+  </p>
+
+  <h2>Cliente</h2>
+  <div class="grid2">
+    <div>
+      <p class="label">Nome</p>
+      <p style="margin:0; font-weight:500;">${escapeHtml(p.cliente?.nome || '-')}</p>
+    </div>
+    <div>
+      <p class="label">CPF/CNPJ · Telefone</p>
+      <p style="margin:0;">${escapeHtml(p.cliente?.cpf_cnpj || '-')} ${p.cliente?.telefone ? '· ' + escapeHtml(p.cliente.telefone) : ''}</p>
+    </div>
+    ${p.cliente?.email ? `<div><p class="label">E-mail</p><p style="margin:0;">${escapeHtml(p.cliente.email)}</p></div>` : ''}
+    ${p.cliente?.endereco ? `<div><p class="label">Endereço</p><p style="margin:0;">${escapeHtml(p.cliente.endereco)}${p.cliente.cidade ? ', ' + escapeHtml(p.cliente.cidade) : ''}${p.cliente.estado ? '-' + escapeHtml(p.cliente.estado) : ''}</p></div>` : ''}
+  </div>
+
+  ${p.endereco_obra ? `
+  <h2>Endereço da Obra</h2>
+  <p style="margin:0;">${escapeHtml(p.endereco_obra)}</p>
+  ` : ''}
+
+  <h2>Itens da Proposta</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:30px;">#</th>
+        <th>Descrição</th>
+        <th style="width:50px;">Un</th>
+        <th style="width:70px; text-align:right;">Qtd</th>
+        <th style="width:90px; text-align:right;">V. Unit.</th>
+        <th style="width:100px; text-align:right;">Subtotal</th>
+      </tr>
+    </thead>
+    <tbody>${itensHtml || '<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Sem itens.</td></tr>'}</tbody>
+  </table>
+
+  <div class="total-box">
+    <span>VALOR TOTAL DA PROPOSTA</span>
+    <span>${formatBRL(p.valor_total)}</span>
+  </div>
+
+  <div class="grid2" style="margin-top:14px; font-size:12px;">
+    <div><span class="label">Data:</span> ${escapeHtml(p.data_proposta)}</div>
+    <div><span class="label">Validade:</span> ${p.validade_dias} dias</div>
+  </div>
+
+  ${p.observacoes ? `<div class="obs"><strong>Observações:</strong><br>${escapeHtml(p.observacoes).replace(/\n/g, '<br>')}</div>` : ''}
+
+  <div class="footer">
+    <p>${escapeHtml(brand)}</p>
+    <p>Proposta válida por ${p.validade_dias} dias a partir de ${escapeHtml(p.data_proposta)}.</p>
+  </div>
+
+  <div class="no-print" style="text-align:center; margin-top:20px;">
+    <button onclick="window.print()" style="padding:10px 22px; background:${cor}; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px;">Imprimir / Salvar PDF</button>
+  </div>
+</body></html>`;
+}
+
+// ── PDF via PDFKit (binário) ─────────────────────────────────────────────────
+export async function gerarPdfProposta(id: string): Promise<Buffer> {
+  const p = await buscarProposta(id);
+  const t = await getTenantSettings(1).catch(() => null);
+  const brand = t?.brand_name || 'Romatec Consultoria Imobiliária';
+  const logoPath = t?.logo_path || '/logo_R-removebg-preview.png';
+  const corHex   = t?.primary_color || '#10b981';
+
+  const doc = new PDFDocument({ size: 'A4', margin: 48, info: {
+    Title: `Proposta ${p.numero}`,
+    Author: brand,
+    Subject: `Proposta de mão de obra para ${p.cliente?.nome || ''}`,
+  }});
+  const chunks: Buffer[] = [];
+  doc.on('data', (c: Buffer) => chunks.push(c));
+
+  // Logo (se o arquivo existir em src/public/)
+  const logoFile = path.join(__dirname, '..', 'public', logoPath.replace(/^\//, ''));
+  if (fs.existsSync(logoFile)) {
+    try { doc.image(logoFile, { fit: [120, 60], align: 'center' }); }
+    catch { /* logo opcional */ }
+  } else {
+    doc.fontSize(16).fillColor(corHex).text(brand, { align: 'center' });
+  }
+  doc.moveDown(0.5);
+  doc.strokeColor(corHex).lineWidth(2).moveTo(48, doc.y).lineTo(547, doc.y).stroke();
+  doc.moveDown(0.8);
+
+  // Título
+  doc.fontSize(16).fillColor('#111').text('PROPOSTA DE MÃO DE OBRA', { align: 'center', characterSpacing: 1 });
+  doc.fontSize(11).fillColor('#444').text(`Nº ${p.numero}  ·  ${p.status.toUpperCase()}`, { align: 'center' });
+  doc.moveDown(1);
+
+  // Cliente
+  doc.fontSize(12).fillColor(corHex).text('Cliente');
+  doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.3);
+  doc.fontSize(10).fillColor('#111');
+  doc.text(`Nome: ${p.cliente?.nome || '-'}`);
+  if (p.cliente?.cpf_cnpj || p.cliente?.telefone) {
+    doc.text(`${p.cliente?.cpf_cnpj || '-'} ${p.cliente?.telefone ? ' · ' + p.cliente.telefone : ''}`);
+  }
+  if (p.cliente?.email)    doc.text(`E-mail: ${p.cliente.email}`);
+  if (p.cliente?.endereco) {
+    const cidEst = [p.cliente.cidade, p.cliente.estado].filter(Boolean).join('-');
+    doc.text(`Endereço: ${p.cliente.endereco}${cidEst ? ', ' + cidEst : ''}`);
+  }
+  doc.moveDown(0.6);
+
+  if (p.endereco_obra) {
+    doc.fontSize(12).fillColor(corHex).text('Endereço da Obra');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.3);
+    doc.fontSize(10).fillColor('#111').text(p.endereco_obra);
+    doc.moveDown(0.6);
+  }
+
+  // Tabela de itens
+  doc.fontSize(12).fillColor(corHex).text('Itens da Proposta');
+  doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.4);
+
+  const tableTop = doc.y;
+  const colX = { idx: 48, desc: 70, un: 320, qtd: 360, vu: 410, sub: 480 };
+  const colW = { sub: 67 };
+  // Header
+  doc.fontSize(9).fillColor('#444').font('Helvetica-Bold');
+  doc.text('#',          colX.idx,  tableTop, { width: 16 });
+  doc.text('Descrição',  colX.desc, tableTop, { width: 245 });
+  doc.text('Un',         colX.un,   tableTop, { width: 30 });
+  doc.text('Qtd',        colX.qtd,  tableTop, { width: 45,  align: 'right' });
+  doc.text('V.Unit',     colX.vu,   tableTop, { width: 65,  align: 'right' });
+  doc.text('Subtotal',   colX.sub,  tableTop, { width: colW.sub, align: 'right' });
+  doc.font('Helvetica');
+  doc.moveDown(0.3);
+  doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#888').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+
+  // Linhas
+  doc.fontSize(9).fillColor('#111');
+  for (let i = 0; i < p.itens.length; i++) {
+    const it = p.itens[i];
+    const y = doc.y;
+    // quebra de página se chegar perto do fim
+    if (y > 720) { doc.addPage(); }
+    const yy = doc.y;
+    doc.text(String(i + 1), colX.idx,  yy, { width: 16 });
+    doc.text(it.descricao,  colX.desc, yy, { width: 245 });
+    doc.text(it.unidade,    colX.un,   yy, { width: 30 });
+    doc.text(it.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 2 }), colX.qtd, yy, { width: 45, align: 'right' });
+    doc.text(formatBRL(it.valor_unitario).replace('R$', ''), colX.vu, yy, { width: 65, align: 'right' });
+    doc.text(formatBRL(it.valor_total).replace('R$', ''),    colX.sub, yy, { width: colW.sub, align: 'right' });
+    doc.moveDown(0.4);
+  }
+
+  doc.moveDown(0.4);
+  doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor(corHex).lineWidth(1).stroke();
+  doc.moveDown(0.4);
+  // Total
+  doc.fontSize(12).font('Helvetica-Bold').fillColor('#111')
+     .text(`VALOR TOTAL: ${formatBRL(p.valor_total)}`, { align: 'right' });
+  doc.font('Helvetica');
+  doc.moveDown(0.6);
+
+  doc.fontSize(9).fillColor('#444');
+  doc.text(`Data: ${p.data_proposta}    ·    Validade: ${p.validade_dias} dias`);
+  doc.moveDown(0.4);
+
+  if (p.observacoes) {
+    doc.fontSize(10).fillColor(corHex).text('Observações');
+    doc.fontSize(9).fillColor('#111').text(p.observacoes, { width: 499 });
+    doc.moveDown(0.4);
+  }
+
+  // Footer
+  const footerY = 800;
+  doc.fontSize(8).fillColor('#888')
+     .text(`${brand} — Proposta válida por ${p.validade_dias} dias.`, 48, footerY, { width: 499, align: 'center' });
+
+  doc.end();
+  await new Promise<void>(resolve => doc.on('end', () => resolve()));
+  return Buffer.concat(chunks);
+}
+
+// ── Envio Z-API ─────────────────────────────────────────────────────────────
+export async function enviarPropostaWhatsApp(input: { id: string; telefone?: string }): Promise<MutationResult & { messageId?: string; phone?: string }> {
+  const id = Number(input.id);
+  if (!id) throw new Error('id obrigatório');
+  const p = await buscarProposta(input.id);
+  const tel = (input.telefone?.trim()) || p.cliente?.telefone || '';
+  if (!tel) throw new Error('Telefone obrigatório (informe ou cadastre no cliente).');
+
+  const pdfBuf = await gerarPdfProposta(input.id);
+  const fileName = `Proposta_${p.numero}_${(p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+  const r = await sendDocument(tel, pdfBuf.toString('base64'), fileName);
+
+  // Marca como enviada (status rascunho → enviada; mantém outros status)
+  await pool.execute(
+    `UPDATE propostas
+        SET enviada_whatsapp = 1,
+            enviada_em = CURRENT_TIMESTAMP,
+            status = IF(status = 'rascunho', 'enviada', status)
+      WHERE id = ?`,
+    [id]
+  );
+
+  return {
+    ok: true,
+    message: `Proposta ${p.numero} enviada para ${r.phone} (msgId ${r.messageId || '?'}).`,
+    messageId: r.messageId,
+    phone: r.phone,
+  };
 }

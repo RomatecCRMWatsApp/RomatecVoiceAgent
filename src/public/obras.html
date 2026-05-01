@@ -702,11 +702,14 @@ async function render() {
       folha: async () => { await Promise.all([loadObras(), loadFolha()]); renderFolha(); },
       vto:   async () => { await Promise.all([loadObras(), loadVistorias()]); renderVto(); },
       proposta: async () => {
-        await loadPropostas();
+        await Promise.all([loadPropostas(), loadPropostasClientes()]);
+        // Cache cliente_id → telefone pro input de envio rápido na lista
+        state.propostasClientesTel = {};
+        for (const c of state.propostasClientes) state.propostasClientesTel[c.id] = c.telefone || '';
         if (state.propostaAtual) {
           // se tem proposta aberta, recarrega ela e renderiza editor
           await loadProposta(state.propostaAtual.id);
-          await Promise.all([loadPropostasClientes(), loadSinapiAgrupado()]);
+          await loadSinapiAgrupado();
           renderPropostaEditor();
         } else {
           renderPropostasLista();
@@ -1848,9 +1851,10 @@ function renderPropostasLista() {
       rascunho: 'badge-info', enviada: 'badge-warning',
       aceita: 'badge-success', recusada: 'badge-danger', expirada: 'badge-danger'
     }[p.status] || 'badge-info';
+    const telDefault = state.propostasClientesTel?.[p.cliente_id] || '';
     return `<div class="card">
-      <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
-        <div style="flex:1; min-width:0;">
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
           <p style="margin:0; font-weight:600;">${escape(p.numero)} · ${escape(p.cliente_nome || '(cliente removido)')}</p>
           <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">
             ${escape(p.data_proposta)} · validade ${p.validade_dias}d · <strong>${escape(p.valor_total_br)}</strong>
@@ -1858,9 +1862,17 @@ function renderPropostasLista() {
           </p>
           <span class="badge ${sb}">${escape(p.status)}</span>
         </div>
-        <div style="display:flex; flex-direction:column; gap:4px;">
-          <button data-edit-prop="${p.id}">Abrir</button>
-          <button class="btn-danger" data-del-prop="${p.id}">Excluir</button>
+        <div style="display:flex; flex-direction:column; gap:6px; min-width:230px;">
+          <input data-tel-prop="${p.id}" placeholder="WhatsApp p/ envio (ex: 5598...)" value="${escape(telDefault)}" style="font-size:12px; padding:6px 8px;">
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-view-prop="${p.id}" title="Visualizar HTML" style="flex:1; min-width:70px;">👁 Ver</button>
+            <button data-pdf-prop="${p.id}"  title="Baixar PDF"      style="flex:1; min-width:70px;">📄 PDF</button>
+            <button data-send-prop="${p.id}" title="Enviar WhatsApp" style="flex:1; min-width:80px; background:var(--success); color:#fff; border-color:var(--success);">📱 Enviar</button>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button data-edit-prop="${p.id}" style="flex:1;">Abrir</button>
+            <button class="btn-danger" data-del-prop="${p.id}" style="flex:1;">Excluir</button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -1892,6 +1904,36 @@ function renderPropostasLista() {
     if (!ok) return;
     try { await api('/api/propostas/' + b.dataset.delProp, { method: 'DELETE' }); render(); }
     catch (e) { alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : '')); }
+  });
+
+  // v1.65.4: Visualizar HTML, baixar PDF, enviar WhatsApp
+  document.querySelectorAll('[data-view-prop]').forEach(b => b.onclick = () => {
+    window.open(API + '/api/propostas/' + b.dataset.viewProp + '/relatorio', '_blank');
+  });
+  document.querySelectorAll('[data-pdf-prop]').forEach(b => b.onclick = () => {
+    window.open(API + '/api/propostas/' + b.dataset.pdfProp + '/pdf', '_blank');
+  });
+  document.querySelectorAll('[data-send-prop]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.sendProp;
+    const telInput = document.querySelector(`[data-tel-prop="${id}"]`);
+    const tel = telInput?.value?.trim() || '';
+    if (!tel) { alert('Informe o WhatsApp de destino.'); telInput?.focus(); return; }
+    const ok = await confirmarAcao({
+      titulo: 'Enviar proposta via WhatsApp',
+      mensagem: `A proposta será enviada como anexo PDF para ${tel}. Confirma?`,
+      textoConfirmar: 'Enviar', perigoso: false,
+    });
+    if (!ok) return;
+    b.disabled = true; b.textContent = '⏳ Enviando…';
+    try {
+      const r = await api('/api/propostas/' + id + '/enviar-whatsapp', {
+        method: 'POST',
+        body: JSON.stringify({ id, telefone: tel }),
+      });
+      alert('✅ ' + r.message);
+      render();
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { b.disabled = false; b.textContent = '📱 Enviar'; }
   });
 }
 
@@ -2029,6 +2071,13 @@ function renderPropostaEditor() {
           <option value="expirada" ${p.status==='expirada'?'selected':''}>expirada</option>
         </select>
       </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center;">
+        <input id="editTelEnvio" placeholder="WhatsApp p/ envio (ex: 5598...)" value="${escape(p.cliente?.telefone || '')}" style="flex:1; min-width:180px; font-size:13px;">
+        <button id="editView">👁 Visualizar</button>
+        <button id="editPdf">📄 Baixar PDF</button>
+        <button id="editSend" style="background:var(--success); color:#fff; border-color:var(--success);">📱 Enviar WhatsApp</button>
+      </div>
+      ${p.enviada_whatsapp ? `<p style="margin:6px 0 0; font-size:12px; color:var(--success);">✅ Enviada em ${escape(p.enviada_em || '?')}</p>` : ''}
     </div>
 
     <div class="card">
@@ -2099,6 +2148,36 @@ function renderPropostaEditor() {
     state.sinapiBusca = '';
     state.propostaCategoriaAberta = '';
     render();
+  };
+
+  // v1.65.4: Visualizar / PDF / Enviar WhatsApp (no editor)
+  document.getElementById('editView').onclick = () => {
+    window.open(API + '/api/propostas/' + p.id + '/relatorio', '_blank');
+  };
+  document.getElementById('editPdf').onclick = () => {
+    window.open(API + '/api/propostas/' + p.id + '/pdf', '_blank');
+  };
+  document.getElementById('editSend').onclick = async () => {
+    const tel = document.getElementById('editTelEnvio').value.trim();
+    if (!tel) { alert('Informe o WhatsApp de destino.'); return; }
+    const ok = await confirmarAcao({
+      titulo: 'Enviar proposta via WhatsApp',
+      mensagem: `Anexar PDF e enviar para ${tel}?`,
+      textoConfirmar: 'Enviar', perigoso: false,
+    });
+    if (!ok) return;
+    const btn = document.getElementById('editSend');
+    btn.disabled = true; btn.textContent = '⏳ Enviando…';
+    try {
+      const r = await api('/api/propostas/' + p.id + '/enviar-whatsapp', {
+        method: 'POST',
+        body: JSON.stringify({ id: p.id, telefone: tel }),
+      });
+      alert('✅ ' + r.message);
+      await loadProposta(p.id);
+      renderPropostaEditor();
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { btn.disabled = false; btn.textContent = '📱 Enviar WhatsApp'; }
   };
 
   // Mudar status
