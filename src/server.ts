@@ -584,9 +584,29 @@ app.post  ('/api/etapas',     apiHandle(args => obras.criarEtapa(args as Paramet
 app.put   ('/api/etapas/:id', apiHandle(args => obras.atualizarEtapa(args as Parameters<typeof obras.atualizarEtapa>[0])));
 app.delete('/api/etapas/:id', apiHandle(args => obras.apagarEtapa(args as { id: string; confirm?: boolean })));
 
+// v1.62.0: middleware de admin pra endpoints de mutação sensíveis (financeiro).
+// Header X-CEO-Token validado contra env var CEO_API_TOKEN. Sem token configurado
+// no servidor, libera tudo (dev local). Em produção SETAR a env var.
+function requireCeoToken(req: Request, res: Response, next: () => void): void {
+  const expected = process.env.CEO_API_TOKEN;
+  if (!expected) {
+    // Sem env var em produção = warning visível
+    console.warn('[auth] CEO_API_TOKEN não setado — endpoint admin LIBERADO. Configure no Railway pra proteger.');
+    return next();
+  }
+  const got = (req.headers['x-ceo-token'] || req.headers['X-CEO-Token']) as string | undefined;
+  if (got !== expected) {
+    res.status(403).json({ error: 'Forbidden — header X-CEO-Token ausente ou inválido.' });
+    return;
+  }
+  next();
+}
+
 // Transações
 app.get ('/api/transacoes', apiHandle(args => obras.listarTransacoesObra(args as Parameters<typeof obras.listarTransacoesObra>[0])));
 app.post('/api/transacoes', apiHandle(args => obras.criarTransacaoObra(args as Parameters<typeof obras.criarTransacaoObra>[0])));
+app.put   ('/api/transacoes/:id', requireCeoToken, apiHandle(args => obras.atualizarTransacaoObra(args as Parameters<typeof obras.atualizarTransacaoObra>[0])));
+app.delete('/api/transacoes/:id', requireCeoToken, apiHandle(args => obras.apagarTransacaoObra(args as { id: string; deleted_by?: string; confirm?: boolean })));
 
 // Equipe
 app.get   ('/api/equipe',     apiHandle(args => obras.listarEquipe(args as { obra_id?: string })));

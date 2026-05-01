@@ -326,8 +326,13 @@ export async function apagarEtapa(input: { id: string; confirm?: boolean }): Pro
 // ── Transações Financeiras ───────────────────────────────────────────────────
 export async function listarTransacoesObra(input: { obra_id: string; limite?: number }) {
   const limit = Math.min(Math.max(Number(input.limite) || 50, 1), 500);
+  // v1.62.0: filtra soft-deleted. Inclui condição "OR deleted_at IS NULL" pra
+  // sobreviver ao caso onde a coluna ainda não foi adicionada (banco antigo).
   const [rows] = await pool.execute<TransacaoRow[]>(
-    `SELECT * FROM romatec_obra_transacoes WHERE obra_id = ? ORDER BY data DESC LIMIT ${limit}`,
+    `SELECT * FROM romatec_obra_transacoes
+      WHERE obra_id = ?
+        AND deleted_at IS NULL
+      ORDER BY data DESC LIMIT ${limit}`,
     [input.obra_id],
   );
   return rows.map(r => ({
@@ -336,6 +341,90 @@ export async function listarTransacoesObra(input: { obra_id: string; limite?: nu
     data: formatBRDate(r.data), fornecedor: r.fornecedor,
     nota_fiscal: r.nota_fiscal, forma_pagamento: r.forma_pagamento,
   }));
+}
+
+// v1.62.0: edição e soft-delete de transações financeiras.
+// Soft delete (deleted_at) preserva histórico, evita perda acidental.
+// updated_by/deleted_by são VARCHAR — aceita 'CEO' ou identificador qualquer.
+export async function atualizarTransacaoObra(input: {
+  id:               string;
+  tipo?:            'entrada' | 'saida';
+  categoria?:       string | null;
+  descricao?:       string;
+  valor?:           number;
+  data?:            string;
+  fornecedor?:      string | null;
+  nota_fiscal?:     string | null;
+  forma_pagamento?: string;
+  updated_by?:      string;
+  confirm?:         boolean;
+}): Promise<MutationResult> {
+  const numId = Number(input.id);
+  if (!Number.isFinite(numId)) throw new Error(`ID inválido: ${input.id}`);
+
+  // Coleta apenas campos que vieram (não atualiza com null silencioso)
+  const sets: string[] = [];
+  const params: (string | number | null)[] = [];
+  for (const k of ['tipo','categoria','descricao','valor','data','fornecedor','nota_fiscal','forma_pagamento'] as const) {
+    if (input[k] !== undefined) {
+      sets.push(`${k} = ?`);
+      params.push(input[k] as string | number | null);
+    }
+  }
+  if (sets.length === 0) {
+    return { preview: true, message: '[PREVIEW] Nenhum campo pra atualizar.' };
+  }
+  if (input.updated_by) {
+    sets.push('updated_by = ?');
+    params.push(input.updated_by);
+  }
+  // updated_at é auto via ON UPDATE CURRENT_TIMESTAMP
+
+  if (!input.confirm) {
+    return {
+      preview: true,
+      message: `[PREVIEW] Atualizar transação ${numId}: ${sets.length} campo(s) (${sets.map(s=>s.split(' = ')[0]).join(', ')}). Reenvie com confirm:true.`,
+    };
+  }
+
+  params.push(numId);
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE romatec_obra_transacoes
+        SET ${sets.join(', ')}
+      WHERE id = ? AND deleted_at IS NULL`,
+    params,
+  );
+  if (r.affectedRows === 0) {
+    throw new Error(`Transação ${numId} não encontrada ou já foi excluída.`);
+  }
+  return { ok: true, affected: r.affectedRows, message: `Transação ${numId} atualizada.` };
+}
+
+export async function apagarTransacaoObra(input: {
+  id:         string;
+  deleted_by?: string;
+  confirm?:   boolean;
+}): Promise<MutationResult> {
+  const numId = Number(input.id);
+  if (!Number.isFinite(numId)) throw new Error(`ID inválido: ${input.id}`);
+
+  if (!input.confirm) {
+    return {
+      preview: true,
+      message: `[PREVIEW] Soft-delete da transação ${numId} (registro mantido em histórico, sai da lista). Reenvie com confirm:true.`,
+    };
+  }
+
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE romatec_obra_transacoes
+        SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?
+      WHERE id = ? AND deleted_at IS NULL`,
+    [input.deleted_by ?? 'sistema', numId],
+  );
+  if (r.affectedRows === 0) {
+    throw new Error(`Transação ${numId} não encontrada ou já estava excluída.`);
+  }
+  return { ok: true, affected: r.affectedRows, message: `Transação ${numId} excluída (soft delete).` };
 }
 
 export async function criarTransacaoObra(input: {
