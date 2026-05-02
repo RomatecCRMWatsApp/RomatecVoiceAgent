@@ -2664,6 +2664,17 @@ async function abrirModalReciboQuinzena(membroId, nome) {
       </label>
       <button id="rqVerPdf" title="Visualizar PDF preview">📄 Gerar PDF</button>
     </div>
+
+    <!-- v1.65.20: LEDs de status do envio + ações manuais -->
+    <div id="rqStatusBox" style="border:1px solid var(--border-strong); border-radius:8px; padding:10px; margin-bottom:10px; background:var(--surface-1);">
+      <p style="margin:0 0 6px; font-size:12px; color:var(--text-muted);">Status do envio (WhatsApp)</p>
+      <div id="rqStatusLeds" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:12px;">
+        <span style="color:var(--text-muted);">Carregando…</span>
+      </div>
+      <div id="rqStatusInfo" style="margin-top:6px; font-size:11px; color:var(--text-muted);"></div>
+      <div id="rqStatusAcoes" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;"></div>
+    </div>
+
     <p class="section-title" style="margin:8px 0 4px; font-size:13px;">Ajustes deste período</p>
     <div id="rqAjustesLista" style="font-size:12px;">
       <p style="color:var(--text-muted); text-align:center; padding:12px;">Carregando…</p>
@@ -2723,7 +2734,158 @@ async function abrirModalReciboQuinzena(membroId, nome) {
     }
   };
 
-  document.getElementById('rqPeriodo').onchange = recarregarAjustes;
+  // v1.65.20: status box com LEDs + ações manuais
+  const ESTADOS = [
+    { st: 'enviado_aguardando_confirmacao', label: 'Enviado',     dot: '🟡' },
+    { st: 'confirmado_aguardando_pix',      label: 'Confirmou',   dot: '🟢' },
+    { st: 'pix_recebido',                   label: 'PIX recebido', dot: '🔵' },
+    { st: 'pago',                           label: 'PAGO',        dot: '✅' },
+  ];
+  const recarregarStatus = async () => {
+    const periodo = document.getElementById('rqPeriodo').value;
+    const ledsEl   = document.getElementById('rqStatusLeds');
+    const infoEl   = document.getElementById('rqStatusInfo');
+    const acoesEl  = document.getElementById('rqStatusAcoes');
+    try {
+      const r = await api(`/api/recibos/envio-status?membro_id=${membroId}&periodo=${periodo}`);
+      const env = r.envio;
+
+      if (!env) {
+        ledsEl.innerHTML = `<span style="color:var(--text-muted);">⚪ ainda não enviado neste período</span>`;
+        infoEl.textContent = '';
+        acoesEl.innerHTML = `
+          <button id="rqDispararIndiv" class="btn-primary" style="background:var(--success); color:#fff; border-color:var(--success);">📤 Enviar agora via WhatsApp</button>
+        `;
+        document.getElementById('rqDispararIndiv').onclick = async () => {
+          const ok = await confirmarAcao({
+            titulo: 'Enviar recibo individual',
+            mensagem: `Enviar agora o recibo via WhatsApp para ${escape(nome)} referente a ${escape(periodoLabel(periodo))}?<br><br><small>Será criado um lote individual e o PDF disparado.</small>`,
+            textoConfirmar: 'Enviar', perigoso: false,
+          });
+          if (!ok) return;
+          const btn = document.getElementById('rqDispararIndiv');
+          btn.disabled = true; btn.textContent = '⏳ Enviando…';
+          try {
+            const out = await api('/api/recibos/disparar-individual', {
+              method: 'POST',
+              body: JSON.stringify({ membro_id: membroId, periodo }),
+            });
+            alert('✅ ' + (out.message || 'Disparado.'));
+            await recarregarStatus();
+          } catch (e) { mostrarErroApi(e); btn.disabled = false; btn.textContent = '📤 Enviar agora via WhatsApp'; }
+        };
+        return;
+      }
+
+      // Renderiza linha de LEDs (1 ativo conforme status atual)
+      const idxAtual = ESTADOS.findIndex(e => e.st === env.status);
+      const isContestado = env.status === 'contestado';
+      const isExpirado   = env.status === 'expirado';
+      const isFalha      = env.status === 'falha_envio' || env.status === 'pulado_sem_telefone';
+
+      let ledsHtml;
+      if (isContestado) {
+        ledsHtml = `<span style="color:var(--danger); font-weight:600;">🔴 CONTESTADO</span>`;
+      } else if (isExpirado) {
+        ledsHtml = `<span style="color:var(--warning); font-weight:600;">⏰ EXPIRADO (sem resposta 48h+)</span>`;
+      } else if (isFalha) {
+        ledsHtml = `<span style="color:var(--danger);">❌ ${escape(env.status)}</span>`;
+      } else {
+        ledsHtml = ESTADOS.map((e, i) => {
+          const ativo = i <= idxAtual;
+          return `<span style="opacity:${ativo ? 1 : 0.25}; ${i===idxAtual ? 'font-weight:600;' : ''}">${e.dot} ${e.label}</span>`;
+        }).join(' <span style="color:var(--text-muted);">→</span> ');
+      }
+      ledsEl.innerHTML = ledsHtml;
+
+      const partes = [];
+      partes.push(`Lote ${escape(env.lote_numero)} · ID#${env.id}`);
+      partes.push(`Valor: ${fmt(Number(env.valor))}`);
+      if (env.telefone) partes.push(`Tel: ${escape(env.telefone)}`);
+      if (env.tentativas_envio) partes.push(`${env.tentativas_envio} tentativa(s)`);
+      if (env.enviado_em)        partes.push(`Enviado: ${new Date(env.enviado_em).toLocaleString('pt-BR')}`);
+      if (env.confirmado_em)     partes.push(`Confirmado: ${new Date(env.confirmado_em).toLocaleString('pt-BR')}`);
+      if (env.pago_em)           partes.push(`Pago: ${new Date(env.pago_em).toLocaleString('pt-BR')}`);
+      if (env.chave_pix)         partes.push(`PIX (${escape(env.tipo_chave_pix||'?')}): ${escape(env.chave_pix)}`);
+      if (env.contestacao_motivo)partes.push(`<span style="color:var(--danger);">Motivo: ${escape(env.contestacao_motivo)}</span>`);
+      if (env.ultimo_erro)       partes.push(`<span style="color:var(--danger);">Erro: ${escape(env.ultimo_erro)}</span>`);
+      infoEl.innerHTML = partes.join(' · ');
+
+      // Botões de ação manual conforme estado
+      const btns = [];
+      // Sempre permite reenviar (gera novo PDF + texto + link)
+      btns.push(`<button id="rqReenviar" title="Reenvia o recibo + texto via WhatsApp">📤 Reenviar</button>`);
+      if (env.status === 'enviado_aguardando_confirmacao') {
+        btns.push(`<button id="rqMarcarConfirmou" style="background:#15803d; color:#fff; border-color:#15803d;">✅ Marcar Confirmou</button>`);
+        btns.push(`<button id="rqMarcarContestou" class="btn-danger">⚠️ Marcar Contestou</button>`);
+      }
+      if (['enviado_aguardando_confirmacao','confirmado_aguardando_pix'].includes(env.status)) {
+        btns.push(`<button id="rqMarcarPixRec" style="background:#1d4ed8; color:#fff; border-color:#1d4ed8;">💳 Marcar PIX recebido</button>`);
+      }
+      if (['enviado_aguardando_confirmacao','confirmado_aguardando_pix','pix_recebido'].includes(env.status)) {
+        btns.push(`<button id="rqMarcarPago" style="background:var(--success); color:#fff; border-color:var(--success);">💰 Marcar como PAGO</button>`);
+      }
+      if (env.token_confirmacao) {
+        btns.push(`<a href="${API}/recibos/confirmar/${escape(env.token_confirmacao)}" target="_blank" style="text-decoration:none;"><button>🔗 Abrir link de confirmação</button></a>`);
+      }
+      acoesEl.innerHTML = btns.join('');
+
+      // Wire buttons
+      const rebind = async (statusNovo, motivo) => {
+        const ok = await confirmarAcao({
+          titulo: `Marcar como ${statusNovo}`,
+          mensagem: `Forçar status do envio do ${escape(nome)} para <strong>${statusNovo}</strong>?<br><br><small>Sem mandar nenhuma mensagem ao colaborador.</small>`,
+          textoConfirmar: 'Marcar', perigoso: statusNovo === 'contestado',
+        });
+        if (!ok) return;
+        try {
+          await api(`/api/recibos/envio/${env.id}/status-manual`, {
+            method: 'POST',
+            body: JSON.stringify({ envio_id: String(env.id), status: statusNovo, motivo, marcador: 'CEO via UI Marcar Dias' }),
+          });
+          await recarregarStatus();
+        } catch (e) { mostrarErroApi(e); }
+      };
+      const reenvBtn = document.getElementById('rqReenviar');
+      if (reenvBtn) reenvBtn.onclick = async () => {
+        const ok = await confirmarAcao({
+          titulo: 'Reenviar recibo',
+          mensagem: `Vai gerar novo PDF e mandar de novo via WhatsApp para ${escape(nome)}.`,
+          textoConfirmar: 'Reenviar', perigoso: false,
+        });
+        if (!ok) return;
+        try {
+          await api('/api/recibos/reenviar', {
+            method: 'POST',
+            body: JSON.stringify({
+              lote_id: String(env.lote_id),
+              status_alvo: env.status,
+              horas_minimas: 0,
+              confirm: true,
+            }),
+          });
+          await recarregarStatus();
+        } catch (e) { mostrarErroApi(e); }
+      };
+      const map = {
+        rqMarcarConfirmou: 'confirmado_aguardando_pix',
+        rqMarcarContestou: 'contestado',
+        rqMarcarPixRec:    'pix_recebido',
+        rqMarcarPago:      'pago',
+      };
+      for (const [id, st] of Object.entries(map)) {
+        const el = document.getElementById(id);
+        if (el) el.onclick = () => rebind(st);
+      }
+    } catch (e) {
+      ledsEl.innerHTML = `<span style="color:var(--danger);">Erro: ${escape(e.message)}</span>`;
+      infoEl.textContent = ''; acoesEl.innerHTML = '';
+    }
+  };
+
+  document.getElementById('rqPeriodo').onchange = async () => {
+    await Promise.all([recarregarAjustes(), recarregarStatus()]);
+  };
   document.getElementById('rqAddAjuste').onclick = async () => {
     const periodo = document.getElementById('rqPeriodo').value;
     const tipo    = document.getElementById('rqTipo').value;
@@ -2745,7 +2907,7 @@ async function abrirModalReciboQuinzena(membroId, nome) {
     window.open(API + `/api/recibos/quinzena/${membroId}/pdf?periodo=${periodo}`, '_blank');
   };
 
-  await recarregarAjustes();
+  await Promise.all([recarregarAjustes(), recarregarStatus()]);
 }
 
 function abrirEditarTransacao(t) {

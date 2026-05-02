@@ -2033,7 +2033,10 @@ export async function reenviarRecibos(input: ReenviarInput): Promise<{
   message: string;
 }> {
   const status = input.status_alvo || 'enviado_aguardando_confirmacao';
-  const horas = Number(input.horas_minimas ?? (status === 'enviado_aguardando_confirmacao' ? 24 : 0));
+  // v1.65.20: se CEO especificou lote_id, ele já escolheu — sem proteção anti-spam.
+  // Default 24h só vale pra reenvio "geral" (sem lote). Filtrado por lote → 0h.
+  const defaultHoras = (status === 'enviado_aguardando_confirmacao' && !input.lote_id) ? 24 : 0;
+  const horas = Number(input.horas_minimas ?? defaultHoras);
 
   let where = `v.status = ?`;
   const params: (string | number)[] = [status];
@@ -2241,4 +2244,199 @@ export function startExpiracaoRecibosTicker(): void {
       })
       .catch(err => console.warn('[recibos] ticker expiração falhou:', (err as Error).message));
   }, ms);
+}
+
+// ╔═════════════════════════════════════════════════════════════════════════╗
+// ║ v1.65.20 — Controle MANUAL individual no modal Recibo (CEO)              ║
+// ║ Endpoints pra:                                                            ║
+// ║   1) buscar status do envio mais recente desse colaborador no período    ║
+// ║   2) disparar mini-lote só pra UM colaborador (sem precisar quinzena    ║
+// ║      inteira)                                                             ║
+// ║   3) avançar status manualmente sem passar pelo fluxo do colaborador      ║
+// ╚═════════════════════════════════════════════════════════════════════════╝
+
+interface EnvioStatusRow extends RowDataPacket {
+  id: number; lote_id: number; lote_numero: string;
+  membro_id: number; telefone: string | null;
+  valor: string; status: string;
+  enviado_em: Date | null; confirmado_em: Date | null;
+  pix_recebido_em: Date | null; pago_em: Date | null;
+  chave_pix: string | null; tipo_chave_pix: string | null;
+  contestacao_motivo: string | null;
+  tentativas_envio: number; ultimo_erro: string | null;
+  recibo_hash: string | null; token_confirmacao: string | null;
+}
+
+export async function buscarStatusEnvioColaborador(input: {
+  membro_id: string; periodo: string;
+}): Promise<{ envio: EnvioStatusRow | null; mensagens: Array<{ direcao: string; tipo: string; conteudo: string; enviado_em: Date }> }> {
+  const [rows] = await pool.execute<EnvioStatusRow[]>(
+    `SELECT v.*, l.numero AS lote_numero
+       FROM recibos_envios v
+       JOIN recibos_envios_lotes l ON l.id = v.lote_id
+      WHERE v.membro_id = ? AND l.periodo = ?
+      ORDER BY v.criado_em DESC LIMIT 1`,
+    [Number(input.membro_id), input.periodo]
+  );
+  const envio = rows[0] ?? null;
+  if (!envio) return { envio: null, mensagens: [] };
+
+  const [msgs] = await pool.execute<RowDataPacket[]>(
+    `SELECT direcao, tipo, conteudo, enviado_em
+       FROM recibos_envios_mensagens
+      WHERE envio_id = ? ORDER BY enviado_em ASC LIMIT 30`,
+    [envio.id]
+  );
+  return {
+    envio,
+    mensagens: msgs.map(r => ({
+      direcao: String(r.direcao), tipo: String(r.tipo),
+      conteudo: String(r.conteudo ?? ''), enviado_em: r.enviado_em as Date,
+    })),
+  };
+}
+
+// Cria mini-lote de 1 colaborador e dispara (sem preview prévio).
+// Útil pro CEO mandar recibo individual de quem ele quiser.
+export async function dispararEnvioIndividual(input: {
+  membro_id: string; periodo: string;
+  telefone_override?: string;  // se quiser usar outro número que não o cadastrado
+  baseUrl?: string;
+  criado_por?: string;
+}): Promise<{
+  ok: true; lote_id: string; envio_id: string; status: string; message: string;
+}> {
+  const periodo = parsePeriodo(input.periodo);
+
+  // Coleta dados (valida que tem dias/ajustes no período)
+  const data = await coletarDadosRecibo(input.membro_id, periodo.codigo);
+  if (data.totais.qtd_dias === 0 && data.totais.total_ajustes === 0) {
+    throw new Error('Colaborador sem dias trabalhados ou ajustes no período — nada pra cobrar.');
+  }
+
+  // Telefone: usa override se passou, senão valor_dia do cadastro
+  const [memRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT telefone FROM romatec_obra_equipe WHERE id = ?`, [Number(input.membro_id)]
+  );
+  const telefoneRaw = input.telefone_override || (memRows[0]?.telefone as string | undefined) || '';
+  const telefoneNorm = telefoneRaw.replace(/\D/g, '');
+  if (telefoneNorm.length < 10) {
+    throw new Error(`Telefone inválido: "${telefoneRaw}". Cadastre o telefone do colaborador ou informe um override.`);
+  }
+
+  // Cria lote dedicado (numero com sufixo "IND-" + timestamp)
+  const numeroLote = `QUINZ-${periodo.ano}-${String(periodo.mes).padStart(2, '0')}-${periodo.quinzena}-IND-${Date.now().toString(36).slice(-5)}`;
+  const [r] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO recibos_envios_lotes
+       (numero, periodo, periodo_inicio, periodo_fim, total_colaboradores, total_valor, status, criado_por)
+     VALUES (?,?,?,?,?,?,?,?)`,
+    [
+      numeroLote, periodo.codigo, periodo.dataInicio, periodo.dataFim,
+      1, data.totais.total_liquido.toFixed(2),
+      'aguardando_confirmacao_ceo', input.criado_por ?? 'envio-individual',
+    ]
+  );
+  const loteId = r.insertId;
+
+  const token = gerarToken();
+  const [r2] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO recibos_envios (lote_id, membro_id, telefone, valor, status, token_confirmacao)
+     VALUES (?,?,?,?,?,?)`,
+    [loteId, Number(input.membro_id), telefoneNorm, data.totais.total_liquido.toFixed(2),
+     'pendente_envio', token]
+  );
+  const envioId = r2.insertId;
+
+  // Dispara (gera PDF + manda WhatsApp + atualiza status)
+  await dispararLote({ lote_id: String(loteId), baseUrl: input.baseUrl });
+
+  // Re-lê status final
+  const [vRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT status FROM recibos_envios WHERE id = ?`, [envioId]
+  );
+  const finalStatus = String(vRows[0]?.status ?? '?');
+
+  return {
+    ok: true,
+    lote_id: String(loteId),
+    envio_id: String(envioId),
+    status: finalStatus,
+    message: finalStatus === 'enviado_aguardando_confirmacao'
+      ? `Recibo enviado pra ${telefoneNorm}. Aguardando confirmação.`
+      : `Disparo concluído com status ${finalStatus}.`,
+  };
+}
+
+// Avança status manualmente (CEO marca direto, sem passar pelo fluxo do colaborador)
+type StatusManual =
+  | 'enviado_aguardando_confirmacao'
+  | 'confirmado_aguardando_pix'
+  | 'pix_recebido'
+  | 'pago'
+  | 'contestado'
+  | 'expirado';
+
+export async function alterarStatusManual(input: {
+  envio_id: string;
+  status: StatusManual;
+  motivo?: string;
+  marcador?: string;
+  notificar_ceo?: boolean;
+}): Promise<{ ok: true; status: string; message: string }> {
+  const id = Number(input.envio_id);
+  if (!id) throw new Error('envio_id inválido');
+
+  const [rows] = await pool.execute<EnvioStatusRow[]>(
+    `SELECT v.*, l.numero AS lote_numero, e.nome
+       FROM recibos_envios v
+       LEFT JOIN recibos_envios_lotes l ON l.id = v.lote_id
+       LEFT JOIN romatec_obra_equipe e ON e.id = v.membro_id
+      WHERE v.id = ?`, [id]
+  );
+  const envio = rows[0];
+  if (!envio) throw new Error(`envio ${id} não encontrado`);
+
+  // Monta SET dinâmico — preserva timestamps + adiciona o novo
+  const sets: string[] = ['status = ?'];
+  const params: (string | number | null)[] = [input.status];
+  if (input.status === 'confirmado_aguardando_pix') {
+    sets.push("confirmado_em = COALESCE(confirmado_em, NOW())");
+    sets.push("confirmacao_resposta = COALESCE(confirmacao_resposta, ?)");
+    params.push(`[MANUAL] ${input.marcador ?? 'CEO'} marcou via UI`);
+  }
+  if (input.status === 'pix_recebido') {
+    sets.push("confirmado_em = COALESCE(confirmado_em, NOW())");
+    sets.push("pix_recebido_em = COALESCE(pix_recebido_em, NOW())");
+  }
+  if (input.status === 'pago') {
+    sets.push("confirmado_em = COALESCE(confirmado_em, NOW())");
+    sets.push("pix_recebido_em = COALESCE(pix_recebido_em, NOW())");
+    sets.push("pago_em = COALESCE(pago_em, NOW())");
+  }
+  if (input.status === 'contestado') {
+    sets.push("contestacao_motivo = COALESCE(contestacao_motivo, ?)");
+    params.push(input.motivo ?? '[MANUAL] marcado pelo CEO');
+    sets.push("contestacao_repassada_ceo_em = COALESCE(contestacao_repassada_ceo_em, NOW())");
+  }
+  params.push(id);
+
+  await pool.execute(
+    `UPDATE recibos_envios SET ${sets.join(', ')} WHERE id = ?`, params
+  );
+
+  await logarMensagemEnvio(id, 'saida', 'aviso',
+    `[MANUAL] status alterado para "${input.status}"${input.motivo ? ' — motivo: ' + input.motivo : ''}${input.marcador ? ' por ' + input.marcador : ''}`,
+    null);
+
+  if (input.notificar_ceo === false) {
+    // ignore
+  } else {
+    // Não re-notifica CEO (foi ele mesmo que marcou)
+  }
+
+  return {
+    ok: true,
+    status: input.status,
+    message: `Envio ${id} (${envio.nome}): status atualizado para ${input.status}.`,
+  };
 }

@@ -771,6 +771,30 @@ app.post('/api/recibos/expirar', requireCeoToken, apiHandle(async (args) => {
   return m.expirarRecibosAntigos(args as Parameters<typeof m.expirarRecibosAntigos>[0]);
 }));
 
+// v1.65.20: controle manual individual no modal Recibo (aba Marcar Dias)
+// GET status do envio mais recente do colaborador no período
+app.get('/api/recibos/envio-status', apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.buscarStatusEnvioColaborador(args as { membro_id: string; periodo: string });
+}));
+// POST disparar individual (mini-lote de 1)
+app.post('/api/recibos/disparar-individual', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/recibosQuinzena');
+    const proto = (req.get('x-forwarded-proto') as string | undefined)?.split(',')[0]?.trim() || 'https';
+    const baseUrl = `${proto}://${req.get('host')}`.replace(/\/$/, '');
+    const out = await m.dispararEnvioIndividual({ ...req.body, baseUrl });
+    res.json(out);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+// POST avançar status manualmente
+app.post('/api/recibos/envio/:envio_id/status-manual', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.alterarStatusManual(args as Parameters<typeof m.alterarStatusManual>[0]);
+}));
+
 // v1.65.19 — Confirmação web por token (link clicável → vira botão no WhatsApp)
 app.get('/recibos/confirmar/:token', async (req: Request, res: Response) => {
   try {
