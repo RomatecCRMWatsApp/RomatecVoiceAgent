@@ -947,31 +947,42 @@ function gerarToken(): string {
   });
 }
 
-// v1.65.21: envia mensagem de confirmação com botões nativos do WhatsApp
-// (Z-API send-button-actions). Se a instância não suportar, faz fallback
-// automático pro sendReply texto+link. Retorna { messageId, viaBotoes }.
+// v1.65.21: envia mensagem de confirmação. Estratégia em 2 camadas:
+//   1. SEMPRE manda o texto+link (sendReply) — garante que o colaborador
+//      receba a instrução, mesmo se a instância Z-API for free/limitada.
+//   2. Adicionalmente, se RECIBOS_USE_BUTTONS=true, tenta enviar botões
+//      nativos via send-button-actions. Funciona como UX bônus em
+//      instâncias business; se falhar, ignora (texto já chegou).
+// Em v1.65.21 inicial, eu tentava botões PRIMEIRO e fallback texto, mas
+// algumas instâncias Z-API retornam 200 OK silencioso mesmo sem entregar
+// — o colaborador ficava sem texto. Inverter prioridade resolve.
 export async function enviarMensagemConfirmacao(input: {
   telefone: string;
-  cabecalho: string;        // texto principal (sem o bloco de opções 1/2)
-  linkConfirmacao?: string; // URL pra botão URL (vira CTA quando suportado)
-  textoFallback: string;    // mensagem completa estilo 1/2 caso botões falhem
+  cabecalho: string;
+  linkConfirmacao?: string;
+  textoFallback: string;
 }): Promise<{ messageId?: string; viaBotoes: boolean }> {
-  const buttons: ZapiButtonInput[] = [
-    { id: 'recibo-confirma', label: '1️⃣ Confirmo', type: 'REPLY' },
-    { id: 'recibo-contesta', label: '2️⃣ Não confere', type: 'REPLY' },
-  ];
-  if (input.linkConfirmacao) {
-    buttons.push({ id: 'recibo-detalhes', label: '🔗 Ver detalhes', type: 'URL', url: input.linkConfirmacao });
+  // 1. SEMPRE manda o texto (essencial pra colaborador entender o que fazer)
+  const r = await sendReply(input.telefone, input.textoFallback);
+
+  // 2. Tenta botões nativos se opt-in via env var (UX bônus)
+  if (process.env.RECIBOS_USE_BUTTONS === 'true' || process.env.RECIBOS_USE_BUTTONS === '1') {
+    const buttons: ZapiButtonInput[] = [
+      { id: 'recibo-confirma', label: '1️⃣ Confirmo', type: 'REPLY' },
+      { id: 'recibo-contesta', label: '2️⃣ Não confere', type: 'REPLY' },
+    ];
+    if (input.linkConfirmacao) {
+      buttons.push({ id: 'recibo-detalhes', label: '🔗 Ver detalhes', type: 'URL', url: input.linkConfirmacao });
+    }
+    try {
+      await sendButtonActions(input.telefone, input.cabecalho, buttons);
+      console.log('[recibos] botões nativos enviados (bônus além do texto)');
+      return { messageId: r.messageId, viaBotoes: true };
+    } catch (err) {
+      console.warn('[recibos] botões nativos falharam (texto já foi):', (err as Error).message.slice(0, 100));
+    }
   }
-  try {
-    const r = await sendButtonActions(input.telefone, input.cabecalho, buttons);
-    return { messageId: r.messageId, viaBotoes: true };
-  } catch (err) {
-    // Fallback texto+link (comportamento anterior)
-    console.warn('[recibos] botões nativos falharam, fallback texto:', (err as Error).message.slice(0, 100));
-    const r = await sendReply(input.telefone, input.textoFallback);
-    return { messageId: r.messageId, viaBotoes: false };
-  }
+  return { messageId: r.messageId, viaBotoes: false };
 }
 
 // Tipo local pra evitar import duplo de whatsapp (já importamos sendButtonActions)
