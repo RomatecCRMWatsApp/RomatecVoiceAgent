@@ -12,7 +12,7 @@ import QRCode from 'qrcode';
 import pool from '../database/connection';
 import { formatBRL } from '../util/format';
 import { getTenantSettings } from './tenantSettings';
-import { sendDocument, sendReply } from '../integrations/whatsapp';
+import { sendDocument, sendReply, sendButtonActions } from '../integrations/whatsapp';
 
 const LOGO_RELATORIO = '/romatec-logo.jpg';
 
@@ -889,6 +889,23 @@ function saudacaoBR(d: Date = new Date()): string {
   return 'Boa noite';
 }
 
+// v1.65.21: cabeçalho enxuto pra mensagem com botões nativos
+// (sem o bloco de opções 1/2 — botões substituem).
+function montarCabecalhoMensagem(input: {
+  nome: string; tratamento: string | null;
+  periodo: Periodo; valor: number;
+}): string {
+  const saud = saudacaoBR();
+  const tratNome = input.tratamento ? `${input.tratamento} ${input.nome.split(' ')[0]}` : input.nome.split(' ')[0];
+  return (
+    `${saud}, ${tratNome}.\n\n` +
+    `Segue seu recibo da ${input.periodo.label}.\n` +
+    `Período: ${input.periodo.dataInicio.split('-').reverse().join('/')} a ${input.periodo.dataFim.split('-').reverse().join('/')}.\n` +
+    `Valor: ${formatBRL(input.valor)}\n\n` +
+    `Toque em um dos botões abaixo:`
+  );
+}
+
 function montarMensagemEnvio(input: {
   nome: string; tratamento: string | null; tom: string | null;
   periodo: Periodo; valor: number;
@@ -929,6 +946,40 @@ function gerarToken(): string {
     return v.toString(16);
   });
 }
+
+// v1.65.21: envia mensagem de confirmação com botões nativos do WhatsApp
+// (Z-API send-button-actions). Se a instância não suportar, faz fallback
+// automático pro sendReply texto+link. Retorna { messageId, viaBotoes }.
+export async function enviarMensagemConfirmacao(input: {
+  telefone: string;
+  cabecalho: string;        // texto principal (sem o bloco de opções 1/2)
+  linkConfirmacao?: string; // URL pra botão URL (vira CTA quando suportado)
+  textoFallback: string;    // mensagem completa estilo 1/2 caso botões falhem
+}): Promise<{ messageId?: string; viaBotoes: boolean }> {
+  const buttons: ZapiButtonInput[] = [
+    { id: 'recibo-confirma', label: '1️⃣ Confirmo', type: 'REPLY' },
+    { id: 'recibo-contesta', label: '2️⃣ Não confere', type: 'REPLY' },
+  ];
+  if (input.linkConfirmacao) {
+    buttons.push({ id: 'recibo-detalhes', label: '🔗 Ver detalhes', type: 'URL', url: input.linkConfirmacao });
+  }
+  try {
+    const r = await sendButtonActions(input.telefone, input.cabecalho, buttons);
+    return { messageId: r.messageId, viaBotoes: true };
+  } catch (err) {
+    // Fallback texto+link (comportamento anterior)
+    console.warn('[recibos] botões nativos falharam, fallback texto:', (err as Error).message.slice(0, 100));
+    const r = await sendReply(input.telefone, input.textoFallback);
+    return { messageId: r.messageId, viaBotoes: false };
+  }
+}
+
+// Tipo local pra evitar import duplo de whatsapp (já importamos sendButtonActions)
+type ZapiButtonInput = {
+  id: string; label: string;
+  type: 'REPLY' | 'URL' | 'CALL';
+  url?: string; phone?: string;
+};
 
 // Cria o lote (status 'aguardando_confirmacao_ceo') sem disparar nada.
 // Posterior chamada com confirm:true muda pra 'enviando' + dispara cada envio.
@@ -1120,8 +1171,14 @@ export async function dispararLote(input: {
       const fileName = `Recibo_${String(m.nome).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}_${periodo.codigo}.pdf`;
       const docRes = await sendDocument(e.telefone, pdf.buffer.toString('base64'), fileName);
 
-      // 5. Manda texto com link clicável + fallback 1/2 (mensagem separada)
-      const txt = montarMensagemEnvio({
+      // 5. Manda texto com botões nativos (fallback texto+link se Z-API recusar)
+      const cabecalho = montarCabecalhoMensagem({
+        nome: String(m.nome),
+        tratamento: m.tratamento as string | null,
+        periodo,
+        valor: Number(e.valor),
+      });
+      const txtFallback = montarMensagemEnvio({
         nome: String(m.nome),
         tratamento: m.tratamento as string | null,
         tom: m.tom as string | null,
@@ -1129,7 +1186,12 @@ export async function dispararLote(input: {
         valor: Number(e.valor),
         linkConfirmacao,
       });
-      const txtRes = await sendReply(e.telefone, txt);
+      const txtRes = await enviarMensagemConfirmacao({
+        telefone: e.telefone,
+        cabecalho,
+        linkConfirmacao,
+        textoFallback: txtFallback,
+      });
 
       // 6. Atualiza envio pra "enviado_aguardando_confirmacao"
       await pool.execute(
@@ -1152,7 +1214,7 @@ export async function dispararLote(input: {
       await pool.execute(
         `INSERT INTO recibos_envios_mensagens (envio_id, direcao, tipo, conteudo, message_id_zapi)
          VALUES (?, 'saida', 'solicitacao_confirmacao', ?, ?)`,
-        [e.id, txt, txtRes.messageId ?? null]
+        [e.id, txtRes.viaBotoes ? `[BOTÕES] ${cabecalho}` : txtFallback, txtRes.messageId ?? null]
       );
 
       sucesso++;
@@ -1368,8 +1430,13 @@ export async function statusLote(input: { lote_id?: string; periodo?: string }):
 // ║   - ambíguo → repassa pro CEO sem responder colaborador                  ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 
-const REGEX_CONFIRMA = /^\s*(1|1[\.\)]|sim|ok|okay|confirmo|confirmado|de\s*acordo|t[au]\s*certo|tudo\s*certo|certo|👍|✅)\s*\.?\s*$/i;
-const REGEX_CONTESTA = /^\s*(2|2[\.\)]|n[ãa]o|incorreto|errado|t[au]\s*errado|valor\s*errado|n[ãa]o\s*est[áa]\s*certo|❌)\s*\.?\s*$/i;
+// v1.65.21: regex tolerante pra aceitar labels de botões nativos do WhatsApp
+// (ex: "1️⃣ Confirmo", "2️⃣ Não confere") + emojis + texto livre.
+// Estratégia: testa CONTESTA primeiro (palavras "não", "errado", etc) — se
+// matchar, é contesta. Senão testa CONFIRMA. Mais fácil de manter que regex
+// gigante.
+const REGEX_CONTESTA = /^\s*(2[\.\)\s️⃣]*\s*(n[ãa]o|errado|incorreto|n[ãa]o\s*confere)?|n[ãa]o(\s+(confere|est[áa]\s*certo|confir|t[áa]\s*certo))?|incorret\w*|errad\w*|valor\s*errad\w*|❌)\s*\.?\s*$/i;
+const REGEX_CONFIRMA = /^\s*(1[\.\)\s️⃣]*\s*(confirmo|sim|ok)?|sim|ok+|confirm\w*|de\s*acordo|t[au]\s*certo|tudo\s*certo|certo|👍|✅|de\s*acordo)\s*\.?\s*$/i;
 
 export type TipoChavePix = 'cpf' | 'cnpj' | 'email' | 'telefone' | 'aleatoria';
 
@@ -1558,9 +1625,37 @@ export async function processarRespostaRecibo(input: {
   const lote = loteRows[0];
   const numeroLote = lote?.numero ?? `lote#${envio.lote_id}`;
 
+  // v1.65.21: normaliza emojis tipo 1️⃣ 2️⃣ ✅ ❌ pros regex baterem.
+  // Remove variation selector + keycap combiner que aparecem em "1️⃣"
+  // (sequência U+0031 U+FE0F U+20E3). Também remove emojis genéricos pra
+  // sobrar só palavras + dígitos.
+  const textNorm = text.replace(/[️⃣]/g, '').replace(/^\s*[\p{Emoji}\s]+/u, '').trim();
+
+  // Testa CONTESTA antes de CONFIRMA pra "não confirmo"/"não confere" caírem corretos
   // ── ESTADO 1: enviado_aguardando_confirmacao → espera 1/2 ──
   if (envio.status === 'enviado_aguardando_confirmacao') {
-    if (REGEX_CONFIRMA.test(text)) {
+    if (REGEX_CONTESTA.test(textNorm) || /errad|incorret|valor\s*err|n[ãa]o\s*confer|t[au]\s*err|n[ãa]o\s*est[áa]\s*certo|n[ãa]o\s*confir/i.test(textNorm)) {
+      await pool.execute(
+        `UPDATE recibos_envios
+            SET status = 'contestado',
+                contestacao_motivo = ?,
+                contestacao_repassada_ceo_em = NOW()
+          WHERE id = ?`,
+        [text.slice(0, 1000), envio.id]
+      );
+      await logarMensagemEnvio(envio.id, 'entrada', 'contestacao', text, input.messageId);
+      await notificarCeo(
+        `⚠️ CONTESTAÇÃO de recibo\n\n` +
+        `Colaborador: ${m.nome} (${phone})\n` +
+        `Lote: ${numeroLote}\n` +
+        `Valor enviado: ${formatBRL(Number(envio.valor))}\n` +
+        `Resposta dele: "${text.slice(0, 400)}"\n\n` +
+        `Aguardando sua decisão.`
+      );
+      return { handled: true, acao: 'contestou', envio_id: String(envio.id) };
+    }
+
+    if (REGEX_CONFIRMA.test(textNorm)) {
       await pool.execute(
         `UPDATE recibos_envios
             SET status = 'confirmado_aguardando_pix',
@@ -1580,28 +1675,6 @@ export async function processarRespostaRecibo(input: {
       const r = await sendReply(phone, msg2);
       await logarMensagemEnvio(envio.id, 'saida', 'solicitacao_pix', msg2, r.messageId);
       return { handled: true, acao: 'confirmou', envio_id: String(envio.id) };
-    }
-
-    if (REGEX_CONTESTA.test(text) || /errad|incorret|valor\s*err|n[ãa]o\s*confer|t[au]\s*err/i.test(text)) {
-      await pool.execute(
-        `UPDATE recibos_envios
-            SET status = 'contestado',
-                contestacao_motivo = ?,
-                contestacao_repassada_ceo_em = NOW()
-          WHERE id = ?`,
-        [text.slice(0, 1000), envio.id]
-      );
-      await logarMensagemEnvio(envio.id, 'entrada', 'contestacao', text, input.messageId);
-      // Repassa ao CEO (silêncio com colaborador — nem confirma recebimento)
-      await notificarCeo(
-        `⚠️ CONTESTAÇÃO de recibo\n\n` +
-        `Colaborador: ${m.nome} (${phone})\n` +
-        `Lote: ${numeroLote}\n` +
-        `Valor enviado: ${formatBRL(Number(envio.valor))}\n` +
-        `Resposta dele: "${text.slice(0, 400)}"\n\n` +
-        `Aguardando sua decisão. Use a aba Folha/Marcar pra revisar.`
-      );
-      return { handled: true, acao: 'contestou', envio_id: String(envio.id) };
     }
 
     // Ambíguo: repassa ao CEO mas NÃO responde colaborador (evita engessar
@@ -2130,6 +2203,12 @@ export async function reenviarRecibos(input: ReenviarInput): Promise<{
 
       const fileName = `Recibo_${String(m.nome).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}_${periodo.codigo}.pdf`;
       const docRes = await sendDocument(v.telefone, pdf.buffer.toString('base64'), fileName);
+      const cabecalho = montarCabecalhoMensagem({
+        nome: String(m.nome),
+        tratamento: m.tratamento as string | null,
+        periodo,
+        valor: Number(v.valor),
+      }) + `\n\n_(reenvio — caso já tenha respondido, ignore)_`;
       const txt = montarMensagemEnvio({
         nome: String(m.nome),
         tratamento: m.tratamento as string | null,
@@ -2138,7 +2217,12 @@ export async function reenviarRecibos(input: ReenviarInput): Promise<{
         valor: Number(v.valor),
         linkConfirmacao,
       }) + `\n\n_(reenvio — caso já tenha respondido, ignore)_`;
-      const txtRes = await sendReply(v.telefone, txt);
+      const txtRes = await enviarMensagemConfirmacao({
+        telefone: v.telefone,
+        cabecalho,
+        linkConfirmacao,
+        textoFallback: txt,
+      });
 
       await pool.execute(
         `UPDATE recibos_envios
