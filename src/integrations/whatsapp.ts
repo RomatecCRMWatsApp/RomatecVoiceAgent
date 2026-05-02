@@ -338,6 +338,50 @@ export async function sendDocument(to: string, docBase64: string, fileName: stri
   }
 }
 
+// ── Outbound: botões interativos Z-API (v1.65.21) ────────────────────────────
+// Z-API endpoint /send-button-actions aceita até 3 botões, tipos REPLY (resposta
+// rápida) ou URL (link). Algumas instâncias não-business retornam erro — chamadores
+// devem capturar e fazer fallback pro sendReply de texto.
+export interface ZapiButton {
+  id: string;        // identificador interno (vai no callback)
+  label: string;     // texto visível no botão (~25 chars)
+  type: 'REPLY' | 'URL' | 'CALL';
+  url?: string;      // só pra type=URL
+  phone?: string;    // só pra type=CALL
+}
+export async function sendButtonActions(
+  to: string,
+  message: string,
+  buttons: ZapiButton[],
+): Promise<{ messageId?: string; phone: string }> {
+  const phone = normalizarTelefone(to);
+  if (!buttons.length || buttons.length > 3) {
+    throw new Error('Z-API send-button-actions aceita 1-3 botões.');
+  }
+  const buttonActions = buttons.map(b => {
+    const base: Record<string, string> = { id: b.id, type: b.type, label: b.label.slice(0, 25) };
+    if (b.type === 'URL'  && b.url)   base.url   = b.url;
+    if (b.type === 'CALL' && b.phone) base.phone = b.phone;
+    return base;
+  });
+
+  const url = `${zapiBase()}/send-button-actions`;
+  try {
+    const r = await axios.post<{ messageId?: string; id?: string }>(
+      url,
+      { phone, message, buttonActions },
+      { headers: zapiHeaders(), timeout: 15000 },
+    );
+    const messageId = r.data?.messageId ?? r.data?.id;
+    void logOutbound(phone, `[BTN] ${message.slice(0, 80)}`, messageId).catch(() => {});
+    return { messageId, phone };
+  } catch (err) {
+    const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+    const detail = JSON.stringify(ax.response?.data ?? ax.message ?? err);
+    throw new Error(`ZAPI send-button-actions: ${detail}`);
+  }
+}
+
 // ── Outbound: localização (lat/lng) ──────────────────────────────────────────
 export async function sendLocation(to: string, latitude: number, longitude: number, title?: string, address?: string): Promise<{ messageId?: string; phone: string }> {
   const phone = normalizarTelefone(to);
