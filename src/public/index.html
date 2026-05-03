@@ -53,9 +53,11 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
 .transcript::-webkit-scrollbar-thumb{background:linear-gradient(180deg,rgba(61,255,176,.6),rgba(61,255,176,.25));border-radius:8px;border:1px solid rgba(61,255,176,.2)}
 .transcript::-webkit-scrollbar-thumb:hover{background:rgba(61,255,176,.8)}
 .transcript:empty::before{content:"Toque o microfone e fale com a ZAYRA";color:var(--text-dim);font-size:11px;letter-spacing:.18em;text-transform:uppercase}
-.nav-links{display:flex;gap:14px;align-items:center}
+.nav-links{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .nav-links a{color:var(--gold);text-decoration:none;font-size:11px;letter-spacing:.22em;text-transform:uppercase;padding:6px 12px;border:1px solid rgba(212,184,120,.35);border-radius:999px;background:rgba(7,32,24,.45);transition:all .2s}
 .nav-links a:hover{border-color:var(--neon);color:var(--neon);box-shadow:0 0 12px rgba(61,255,176,.3)}
+/* v1.65.31: badge de versao do app — combina com o de obras.html */
+.version-badge{background:linear-gradient(135deg,rgba(61,255,176,.15),rgba(212,184,120,.15));border:1px solid rgba(61,255,176,.35);color:var(--neon);padding:4px 10px;border-radius:999px;font-size:10px;letter-spacing:.18em;text-transform:uppercase;font-weight:600;font-family:'Orbitron',sans-serif}
 /* v1.65.28: mic menor (52px) e mais alto pra nao cobrir o transcript.
    Tambem encolhi a fonte pra ficar mais discreto. */
 .mic{position:fixed;right:14px;bottom:calc(82px + env(safe-area-inset-bottom));width:52px;height:52px;border-radius:50%;border:1px solid var(--neon);background:radial-gradient(circle at 30% 30%,#0a3326,#020a07 70%);color:var(--neon);display:flex;align-items:center;justify-content:center;font-size:19px;cursor:pointer;box-shadow:0 0 30px rgba(61,255,176,.35);z-index:11}
@@ -140,6 +142,7 @@ body.has-chat-bar .stage{padding-bottom:calc(160px + env(safe-area-inset-bottom)
   <div class="topbar">
     <div class="brand">ROMATEC</div>
     <div class="nav-links">
+      <span class="version-badge" id="versionBadge" title="Versão do app">v...</span>
       <a href="/obras" title="Gestão de Obras">🏗 Obras</a>
       <div class="status"><span class="pulse"></span><span>ZAYRA online</span></div>
     </div>
@@ -199,6 +202,18 @@ body.has-chat-bar .stage{padding-bottom:calc(160px + env(safe-area-inset-bottom)
   </div>
 </div>
 <script>
+/* v1.65.31: badge de versao sincroniza com /health (mesma logica do obras.html) */
+fetch('/health')
+  .then(r => r.json())
+  .then(d => {
+    const el = document.getElementById('versionBadge');
+    if (el && d && d.version) el.textContent = 'v' + d.version;
+  })
+  .catch(() => {
+    const el = document.getElementById('versionBadge');
+    if (el) el.textContent = '—';
+  });
+
 /* RELÓGIO — Fortaleza/BRT, com segundos discretos */
 (()=>{
   const hm=document.getElementById('clockHM');
