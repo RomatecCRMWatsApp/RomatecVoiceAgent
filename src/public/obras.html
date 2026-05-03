@@ -946,13 +946,16 @@ async function abrirVisualizarObra(obraId) {
   const total = parcelas.reduce((s, p) => s + Number(p.valor || 0), 0);
   const pago = parcelas.filter(p => p.pago).reduce((s, p) => s + Number(p.valor || 0), 0);
 
+  const baseUrl = window.location.origin;
   const html = `<!DOCTYPE html>
 <html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <title>Obra ${escape(o.nome)} — Romatec</title>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 880px; margin: 24px auto; padding: 24px; color: #1a1a1a; }
-  h1 { color: #0a3d2a; border-bottom: 3px solid #c9a84c; padding-bottom: 8px; }
+  .romatec-header { text-align: center; border-bottom: 3px solid #0a3d2a; padding-bottom: 14px; margin-bottom: 20px; }
+  .romatec-header img { max-height: 90px; max-width: 80%; height: auto; display: inline-block; }
+  h1 { color: #0a3d2a; border-bottom: 3px solid #c9a84c; padding-bottom: 8px; margin-top: 0; }
   h2 { color: #0a3d2a; margin-top: 22px; font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
   table { width:100%; border-collapse: collapse; margin: 8px 0; }
   th, td { padding: 8px; border: 1px solid #ddd; font-size: 13px; text-align: left; }
@@ -971,6 +974,10 @@ async function abrirVisualizarObra(obraId) {
 <div class="actions">
   <button onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
   <button onclick="window.close()" style="background:#888; border-color:#888;">Fechar</button>
+</div>
+
+<div class="romatec-header">
+  <img src="${baseUrl}/romatec-logo.jpg" alt="Romatec Consultoria Total — Engenharia e Agrimensura" onerror="this.style.display='none'">
 </div>
 
 <h1>Obra: ${escape(o.nome)}</h1>
@@ -1286,25 +1293,56 @@ function abrirEditarObra(obraId) {
           await recarregarParcelas();
         } catch (e) { alert('Erro: ' + (e?.message || e)); }
       });
-      // v1.65.41: salvar edicao inline (quinzena_inicio/fim, valor, vencimento)
-      box.querySelectorAll('[data-save-parc]').forEach(b => b.onclick = async () => {
-        const id = b.dataset.saveParc;
+      // v1.65.41/v1.65.43: salvar edicao inline + auto-save on change.
+      // Cliente pode flexibilizar valores das parcelas — qualquer campo da
+      // linha (quinzena_inicio/fim, valor, vencimento) ao mudar dispara save.
+      const salvarParcelaInline = async (id, btnFeedback) => {
         const qIni = box.querySelector(`[data-pq-ini="${id}"]`).value || null;
         const qFim = box.querySelector(`[data-pq-fim="${id}"]`).value || null;
-        const valor = parseFloat(box.querySelector(`[data-pq-val="${id}"]`).value) || 0;
+        const valor = parseFloat(box.querySelector(`[data-pq-val="${id}"]`).value);
         const venc = box.querySelector(`[data-pq-venc="${id}"]`).value || null;
-        if (!venc) return alert('Vencimento obrigatório.');
-        if (valor <= 0) return alert('Valor inválido.');
+        if (!venc) { alert('Vencimento obrigatório.'); return false; }
+        if (!isFinite(valor) || valor <= 0) { alert('Valor inválido.'); return false; }
+        const body = { id: String(id), quinzena_inicio: qIni, quinzena_fim: qFim, valor, vencimento: venc };
+        console.log('[parcela] PUT /api/parcelas/' + id, body);
         try {
-          await api('/api/parcelas/' + id, {
-            method: 'PUT',
-            body: JSON.stringify({
-              id, quinzena_inicio: qIni, quinzena_fim: qFim,
-              valor, vencimento: venc,
-            }),
-          });
-          await recarregarParcelas();
-        } catch (e) { alert('Erro: ' + (e?.message || e)); }
+          const out = await api('/api/parcelas/' + id, { method: 'PUT', body: JSON.stringify(body) });
+          console.log('[parcela] resposta:', out);
+          if (btnFeedback) {
+            const original = btnFeedback.textContent;
+            btnFeedback.textContent = '✓';
+            btnFeedback.style.background = 'var(--success)';
+            btnFeedback.style.color = '#fff';
+            setTimeout(() => {
+              btnFeedback.textContent = original;
+              btnFeedback.style.background = '';
+              btnFeedback.style.color = '';
+            }, 1500);
+          }
+          return true;
+        } catch (e) {
+          console.error('[parcela] save falhou:', e);
+          alert('Erro ao salvar: ' + (e?.message || e));
+          return false;
+        }
+      };
+
+      // Botao 💾 manual
+      box.querySelectorAll('[data-save-parc]').forEach(b => b.onclick = async () => {
+        const ok = await salvarParcelaInline(b.dataset.saveParc, b);
+        if (ok) await recarregarParcelas();
+      });
+
+      // Auto-save: ao perder foco em qualquer input da linha, salva
+      box.querySelectorAll('[data-pq-ini], [data-pq-fim], [data-pq-val], [data-pq-venc]').forEach(inp => {
+        inp.onblur = async () => {
+          const id = inp.dataset.pqIni || inp.dataset.pqFim || inp.dataset.pqVal || inp.dataset.pqVenc;
+          if (!id) return;
+          // Marca temporariamente que tem mudanca pendente
+          const btn = box.querySelector(`[data-save-parc="${id}"]`);
+          if (btn) btn.style.background = 'var(--gold)';
+          await salvarParcelaInline(id, btn);
+        };
       });
       document.getElementById('eoAutoGerar').onclick = async () => {
         const dataIni = document.getElementById('eoIni').value;
