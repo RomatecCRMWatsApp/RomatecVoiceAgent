@@ -447,6 +447,7 @@
     <button class="tab" data-tab="vto">Vistoria (VTO)</button>
     <button class="tab" data-tab="proposta">Proposta</button>
     <button class="tab" data-tab="materiais">Materiais</button>
+    <button class="tab" data-tab="calculos">🧮 Cálculos</button>
   </div>
 
   <div id="view-dashboard" class="view active"></div>
@@ -460,6 +461,7 @@
   <div id="view-folha" class="view"></div>
   <div id="view-vto" class="view"></div>
   <div id="view-proposta" class="view"></div>
+  <div id="view-calculos" class="view"></div>
 </div>
 
 <button class="zayra-fab" id="zayraFab">Z</button>
@@ -758,6 +760,7 @@ async function render() {
           renderPropostasLista();
         }
       },
+      calculos: async () => { renderCalculos(); },
     };
     await fns[state.currentTab]();
   } catch (e) {
@@ -4237,6 +4240,612 @@ document.getElementById('calBtnIntegral').onclick = () => aplicarPeriodoSelecion
 document.getElementById('calBtnManha').onclick    = () => aplicarPeriodoSelecionados('manha');
 document.getElementById('calBtnTarde').onclick    = () => aplicarPeriodoSelecionados('tarde');
 document.getElementById('calBtnLimpar').onclick   = () => aplicarPeriodoSelecionados('vazio');
+
+// ═════════════════════════════════════════════════════════════════════
+// v1.65.49: ABA CÁLCULOS — calculadoras de engenharia civil
+// Modular: cada calculadora é uma entry em CALCULADORAS e tem render próprio.
+// ═════════════════════════════════════════════════════════════════════
+
+const CALCULADORAS = {
+  fossa: {
+    nome: 'Fossa Séptica + Filtro + Sumidouro',
+    icone: '🚽',
+    desc: 'NBR 7229/13969 · pré-dimensionamento completo',
+    render: renderCalcFossa,
+  },
+  concreto: {
+    nome: 'Concreto Estrutural',
+    icone: '🧱',
+    desc: 'Volume + traço + sacos cimento + brita + areia',
+    render: renderCalcConcreto,
+  },
+  alvenaria: {
+    nome: 'Alvenaria',
+    icone: '🧱',
+    desc: 'Tijolos/blocos por m² + argamassa de assentamento',
+    render: renderCalcAlvenaria,
+  },
+  argamassa: {
+    nome: 'Argamassa',
+    icone: '🪣',
+    desc: 'Chapisco · Reboco · Contrapiso · Assentamento',
+    render: renderCalcArgamassa,
+  },
+  pintura: {
+    nome: 'Pintura',
+    icone: '🎨',
+    desc: 'Litros de tinta por m² + demãos + selador',
+    render: renderCalcPintura,
+  },
+  agua: {
+    nome: 'Reservatório de Água',
+    icone: '💧',
+    desc: 'NBR 5626 · dimensionamento da caixa d\'água',
+    render: renderCalcReservatorio,
+  },
+};
+
+let CALC_ATIVA = null;
+
+function renderCalculos() {
+  const v = document.getElementById('view-calculos');
+  if (!CALC_ATIVA) {
+    // Menu principal de calculadoras
+    v.innerHTML = `
+      <p class="section-title">🧮 Cálculos de Engenharia</p>
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
+        Calculadoras técnicas para pré-dimensionamento. Resultados são estimativas — projeto executivo deve ser elaborado e assinado por engenheiro habilitado com ART.
+      </p>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:12px;">
+        ${Object.entries(CALCULADORAS).map(([key, c]) => `
+          <div class="card" style="cursor:pointer; transition: all 0.15s;" data-calc="${key}">
+            <div style="font-size:32px; margin-bottom:6px;">${c.icone}</div>
+            <p style="font-weight:600; font-size:14px; margin-bottom:4px;">${c.nome}</p>
+            <p style="font-size:11px; color:var(--text-muted);">${c.desc}</p>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    v.querySelectorAll('[data-calc]').forEach(c => c.onclick = () => {
+      CALC_ATIVA = c.dataset.calc;
+      renderCalculos();
+    });
+  } else {
+    // Render da calculadora ativa + botão voltar
+    v.innerHTML = `
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+        <button id="calcVoltar">← Voltar</button>
+        <p style="font-size:14px; font-weight:600; margin:0;">${CALCULADORAS[CALC_ATIVA].icone} ${CALCULADORAS[CALC_ATIVA].nome}</p>
+      </div>
+      <div id="calcContent"></div>
+    `;
+    document.getElementById('calcVoltar').onclick = () => { CALC_ATIVA = null; renderCalculos(); };
+    CALCULADORAS[CALC_ATIVA].render();
+  }
+}
+
+// ─── 1. FOSSA SÉPTICA + FILTRO + SUMIDOURO ────────────────────────────
+const FOSSA_TIPOS = {
+  residencia_padrao:   { C: 160, Lf: 1.0, label: "Residência padrão" },
+  residencia_luxo:     { C: 160, Lf: 1.0, label: "Residência de luxo" },
+  residencia_popular:  { C: 130, Lf: 1.0, label: "Residência popular" },
+  escritorio:          { C: 50,  Lf: 0.2, label: "Escritório" },
+  bar:                 { C: 6,   Lf: 0.1, label: "Bar/Lanchonete" },
+  restaurante:         { C: 25,  Lf: 0.1, label: "Restaurante" },
+  escola_externato:    { C: 50,  Lf: 0.2, label: "Escola externato" },
+  escola_internato:    { C: 150, Lf: 1.0, label: "Escola internato" },
+  hotel:               { C: 100, Lf: 1.0, label: "Hotel" },
+  hospital:            { C: 250, Lf: 1.0, label: "Hospital" },
+  fabrica:             { C: 70,  Lf: 0.3, label: "Fábrica sem cozinha" },
+  posto_combustivel:   { C: 100, Lf: 0.5, label: "Posto de combustíveis" },
+  shopping:            { C: 50,  Lf: 0.2, label: "Shopping center / loja" },
+  igreja:              { C: 4,   Lf: 0.1, label: "Igreja / templo" },
+  cinema:              { C: 4,   Lf: 0.1, label: "Cinema / teatro" },
+  ginasio:             { C: 25,  Lf: 0.1, label: "Ginásio / academia" },
+  lavanderia:          { C: 200, Lf: 1.0, label: "Lavanderia industrial" },
+  oficina:             { C: 50,  Lf: 0.3, label: "Oficina mecânica" },
+  acougue:             { C: 30,  Lf: 0.1, label: "Açougue / mercado" },
+};
+const FOSSA_K = { 1: 94, 2: 134, 3: 174, 4: 214, 5: 254 };
+
+function renderCalcFossa() {
+  document.getElementById('calcContent').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div class="card">
+        <p class="section-title">Parâmetros</p>
+        <div class="form-grid">
+          <select id="fsTipo" style="grid-column: span 2;">
+            ${Object.entries(FOSSA_TIPOS).map(([k,t]) => `<option value="${k}">${t.label} (C=${t.C} L/p·dia)</option>`).join('')}
+          </select>
+          <input id="fsN" type="number" placeholder="Nº pessoas" value="5" min="1">
+          <select id="fsAnos">
+            <option value="1">Limpeza 1 ano</option>
+            <option value="2">Limpeza 2 anos</option>
+            <option value="3" selected>Limpeza 3 anos</option>
+            <option value="4">Limpeza 4 anos</option>
+            <option value="5">Limpeza 5 anos</option>
+          </select>
+          <select id="fsTemp">
+            <option value="alta">Clima quente (>25°C)</option>
+            <option value="media" selected>Clima ameno (15-25°C)</option>
+            <option value="baixa">Clima frio (<15°C)</option>
+          </select>
+          <select id="fsFormato">
+            <option value="retangular" selected>Retangular</option>
+            <option value="cilindrica">Cilíndrica</option>
+          </select>
+          <select id="fsSolo" style="grid-column: span 2;">
+            <option value="200">Areia grossa/pedregulho — 200 L/m²·dia</option>
+            <option value="160" selected>Areia média a fina — 160</option>
+            <option value="120">Solo arenoso c/ argila — 120</option>
+            <option value="90">Argila arenosa — 90</option>
+            <option value="60">Argila c/ areia/silte — 60</option>
+            <option value="40">Argila compacta — 40</option>
+            <option value="20">Argila muito compacta — 20 ⚠</option>
+          </select>
+          <input id="fsProfSum" type="number" step="0.1" placeholder="Prof. sumidouro (m)" value="3.0" min="1.5" max="5">
+        </div>
+        <button class="btn-primary" id="fsCalc" style="margin-top:10px; width:100%;">▶ Calcular</button>
+      </div>
+      <div class="card" id="fsResultado">
+        <p class="section-title">Resultados</p>
+        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha e clique em Calcular</p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('fsCalc').onclick = () => {
+    const tipo = FOSSA_TIPOS[document.getElementById('fsTipo').value];
+    const N = parseInt(document.getElementById('fsN').value);
+    const anos = parseInt(document.getElementById('fsAnos').value);
+    const K = FOSSA_K[anos];
+    const tempClima = document.getElementById('fsTemp').value;
+    const formato = document.getElementById('fsFormato').value;
+    const Ci = parseFloat(document.getElementById('fsSolo').value);
+    const profSum = parseFloat(document.getElementById('fsProfSum').value);
+    if (!N || N < 1) return alert('Informe o número de pessoas.');
+
+    const C = tipo.C, Lf = tipo.Lf;
+    const volumeDia = N * C;
+    let T;
+    if (volumeDia <= 1500) T = 1.00;
+    else if (volumeDia <= 3000) T = 0.92;
+    else if (volumeDia <= 4500) T = 0.83;
+    else if (volumeDia <= 6000) T = 0.75;
+    else if (volumeDia <= 7500) T = 0.67;
+    else if (volumeDia <= 9000) T = 0.58;
+    else T = 0.50;
+    if (tempClima === 'baixa') T *= 1.20;
+    if (tempClima === 'alta') T *= 0.85;
+
+    const V_litros = 1000 + N * (C * T + K * Lf);
+    const V_final = Math.max(V_litros / 1000, 1.25);
+    let prof_fs;
+    if (V_final <= 6) prof_fs = 1.50;
+    else if (V_final <= 10) prof_fs = 1.80;
+    else if (V_final <= 25) prof_fs = 2.20;
+    else prof_fs = 2.50;
+    const area_fs = V_final / prof_fs;
+    const B_fs = Math.max(Math.sqrt(area_fs / 2), 0.80);
+    const L_fs = area_fs / B_fs;
+    const D_fs = Math.max(2 * Math.sqrt(area_fs / Math.PI), 1.10);
+
+    const Vu_filtro_L = 1.6 * N * C * Math.max(T, 1.0);
+    const V_filtro_final = Math.max(Vu_filtro_L / 1000, 1.25);
+    const D_filtro = Math.max(2 * Math.sqrt(V_filtro_final/1.20 / Math.PI), 0.95);
+
+    const A_inf = volumeDia / Ci;
+    const D_sum = Math.max(A_inf / (Math.PI * profSum), 1.20);
+    const V_sum = Math.PI * Math.pow(D_sum/2, 2) * profSum;
+    const aviso = Ci <= 20 ? '<p style="color:var(--danger); font-weight:600; margin-top:8px;">⚠ Solo de absorção muito baixa! Considere vala de filtração ou ETE compacta.</p>' : '';
+
+    document.getElementById('fsResultado').innerHTML = `
+      <p class="section-title">Resultados — ${tipo.label}</p>
+      <div style="display:grid; gap:8px; font-size:13px;">
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--gold);">
+          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Fossa Séptica</p>
+          <p style="font-size:18px; font-weight:600; color:var(--gold);">${fmt(V_final)} m³</p>
+          <p style="font-size:12px;">${formato === 'retangular' ? `${fmt(L_fs)} × ${fmt(B_fs)} × ${fmt(prof_fs)} m` : `Ø ${fmt(D_fs)} × ${fmt(prof_fs)} m`}</p>
+        </div>
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--neon);">
+          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Filtro Anaeróbio</p>
+          <p style="font-size:18px; font-weight:600; color:var(--neon);">${fmt(V_filtro_final)} m³</p>
+          <p style="font-size:12px;">Ø ${fmt(D_filtro)} × 2,10 m · brita nº 4 (h leito = 1,20m)</p>
+        </div>
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid #4aa3ff;">
+          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Sumidouro</p>
+          <p style="font-size:18px; font-weight:600; color:#4aa3ff;">Ø ${fmt(D_sum)} × ${fmt(profSum)} m</p>
+          <p style="font-size:12px;">${fmt(V_sum)} m³ · área de infiltração: ${fmt(A_inf)} m²</p>
+        </div>
+        <div style="padding:8px 10px; background:var(--surface-2); font-size:11px; color:var(--text-muted); margin-top:6px;">
+          <p><b>Fórmula NBR 7229:</b> V = 1000 + N×(C×T + K×Lf)</p>
+          <p>= 1000 + ${N}×(${C}×${fmt(T,2)} + ${K}×${fmt(Lf,1)}) = <b>${fmt(V_litros,0)} L</b></p>
+          <p>T = ${fmt(T,2)} dias · K = ${K} dias · Q efluente = ${fmt(volumeDia,0)} L/dia</p>
+        </div>
+        ${aviso}
+        <p style="font-size:10px; color:var(--text-muted); font-style:italic; margin-top:6px;">⚠ Pré-dimensionamento. Afastamentos mínimos NBR 7229: 1,5m construções · 3m árvores · 15m poços.</p>
+      </div>
+    `;
+  };
+}
+
+// ─── 2. CONCRETO ───────────────────────────────────────────────────────
+function renderCalcConcreto() {
+  document.getElementById('calcContent').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div class="card">
+        <p class="section-title">Concreto Estrutural</p>
+        <div class="form-grid">
+          <select id="cElem" style="grid-column: span 2;">
+            <option value="laje">Laje</option>
+            <option value="viga">Viga</option>
+            <option value="pilar">Pilar</option>
+            <option value="sapata">Sapata</option>
+            <option value="contrapiso">Contrapiso</option>
+            <option value="livre" selected>Volume livre (L × B × H)</option>
+          </select>
+          <input id="cL" type="number" step="0.01" placeholder="Comprimento (m)" value="5">
+          <input id="cB" type="number" step="0.01" placeholder="Largura (m)" value="3">
+          <input id="cH" type="number" step="0.01" placeholder="Altura/espessura (m)" value="0.10">
+          <select id="cFck" style="grid-column: span 2;">
+            <option value="20">fck 20 MPa (1:2,5:3)</option>
+            <option value="25" selected>fck 25 MPa (1:2:3) — padrão estrutural</option>
+            <option value="30">fck 30 MPa (1:1,7:2,8)</option>
+            <option value="35">fck 35 MPa (1:1,5:2,5)</option>
+          </select>
+          <input id="cPerda" type="number" step="0.01" placeholder="% perda" value="5">
+        </div>
+        <button class="btn-primary" id="cCalc" style="margin-top:10px; width:100%;">▶ Calcular</button>
+      </div>
+      <div class="card" id="cResultado">
+        <p class="section-title">Resultados</p>
+        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha e clique em Calcular</p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('cCalc').onclick = () => {
+    const L = parseFloat(document.getElementById('cL').value);
+    const B = parseFloat(document.getElementById('cB').value);
+    const H = parseFloat(document.getElementById('cH').value);
+    const fck = parseInt(document.getElementById('cFck').value);
+    const perda = parseFloat(document.getElementById('cPerda').value) / 100;
+    if (!L || !B || !H) return alert('Preencha todas as dimensões.');
+
+    const volume = L * B * H;
+    const volume_total = volume * (1 + perda);
+
+    // Traços (sacos cimento por m³ de concreto)
+    const tracos = {
+      20: { cimento: 270, areia: 0.83, brita: 0.83, agua: 162 },
+      25: { cimento: 320, areia: 0.78, brita: 0.78, agua: 176 },
+      30: { cimento: 360, areia: 0.74, brita: 0.74, agua: 187 },
+      35: { cimento: 400, areia: 0.70, brita: 0.70, agua: 200 },
+    };
+    const t = tracos[fck];
+    const cimento_kg = t.cimento * volume_total;
+    const sacos = Math.ceil(cimento_kg / 50);
+    const areia_m3 = t.areia * volume_total;
+    const brita_m3 = t.brita * volume_total;
+    const agua_l = t.agua * volume_total;
+
+    document.getElementById('cResultado').innerHTML = `
+      <p class="section-title">Resultados</p>
+      <div style="display:grid; gap:6px; font-size:13px;">
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--gold);">
+          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Volume final (com ${(perda*100).toFixed(0)}% de perda)</p>
+          <p style="font-size:22px; font-weight:600; color:var(--gold);">${fmt(volume_total,3)} m³</p>
+          <p style="font-size:11px; color:var(--text-muted);">Volume bruto: ${fmt(volume,3)} m³</p>
+        </div>
+        <div style="padding:10px; background:var(--surface-1);">
+          <p style="font-weight:600; margin-bottom:4px;">Materiais (fck ${fck} MPa)</p>
+          <p>Cimento CP-II: <b>${sacos} sacos</b> de 50kg (${fmt(cimento_kg,0)} kg)</p>
+          <p>Areia média: <b>${fmt(areia_m3,2)} m³</b></p>
+          <p>Brita nº 1: <b>${fmt(brita_m3,2)} m³</b></p>
+          <p>Água: <b>${fmt(agua_l,0)} L</b></p>
+        </div>
+        <p style="font-size:10px; color:var(--text-muted); font-style:italic;">Traços estimados — confirmar com dosagem do projeto.</p>
+      </div>
+    `;
+  };
+}
+
+// ─── 3. ALVENARIA ──────────────────────────────────────────────────────
+function renderCalcAlvenaria() {
+  document.getElementById('calcContent').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div class="card">
+        <p class="section-title">Alvenaria</p>
+        <div class="form-grid">
+          <select id="aTipo" style="grid-column: span 2;">
+            <option value="bloco_ceram_9x19x19">Bloco cerâmico 9×19×19 (28 un/m²)</option>
+            <option value="bloco_ceram_14x19x29" selected>Bloco cerâmico 14×19×29 (16 un/m²)</option>
+            <option value="bloco_concr_14x19x39">Bloco concreto 14×19×39 (12,5 un/m²)</option>
+            <option value="bloco_concr_19x19x39">Bloco concreto 19×19×39 (12,5 un/m²)</option>
+            <option value="tijolo_macico">Tijolo maciço 5,5×9×19 (76 un/m²)</option>
+            <option value="tijolo_baiano">Tijolo baiano 9×14×24 (33 un/m²)</option>
+          </select>
+          <input id="aL" type="number" step="0.01" placeholder="Comprimento (m)" value="10">
+          <input id="aH" type="number" step="0.01" placeholder="Altura (m)" value="2.7">
+          <input id="aDescontos" type="number" step="0.01" placeholder="Descontar vãos (m²)" value="2.5">
+          <input id="aPerda" type="number" step="0.01" placeholder="% perda" value="5">
+        </div>
+        <button class="btn-primary" id="aCalc" style="margin-top:10px; width:100%;">▶ Calcular</button>
+      </div>
+      <div class="card" id="aResultado">
+        <p class="section-title">Resultados</p>
+        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha e clique em Calcular</p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('aCalc').onclick = () => {
+    const L = parseFloat(document.getElementById('aL').value);
+    const H = parseFloat(document.getElementById('aH').value);
+    const desc = parseFloat(document.getElementById('aDescontos').value) || 0;
+    const perda = parseFloat(document.getElementById('aPerda').value) / 100;
+    const tipo = document.getElementById('aTipo').value;
+
+    const consumos = {
+      bloco_ceram_9x19x19:    { qtd: 28,   arg: 0.0095, label: 'Bloco cerâmico 9×19×19' },
+      bloco_ceram_14x19x29:   { qtd: 16,   arg: 0.013,  label: 'Bloco cerâmico 14×19×29' },
+      bloco_concr_14x19x39:   { qtd: 12.5, arg: 0.013,  label: 'Bloco concreto 14×19×39' },
+      bloco_concr_19x19x39:   { qtd: 12.5, arg: 0.018,  label: 'Bloco concreto 19×19×39' },
+      tijolo_macico:          { qtd: 76,   arg: 0.025,  label: 'Tijolo maciço 5,5×9×19' },
+      tijolo_baiano:          { qtd: 33,   arg: 0.014,  label: 'Tijolo baiano 9×14×24' },
+    };
+    const t = consumos[tipo];
+    const area = (L * H) - desc;
+    const qtd_total = Math.ceil(area * t.qtd * (1 + perda));
+    const arg_total = area * t.arg * (1 + perda);
+    const cimento_kg = arg_total * 220;  // ~220 kg cimento/m³ argamassa 1:6
+    const sacos = Math.ceil(cimento_kg / 50);
+    const areia_m3 = arg_total * 1.05;
+
+    document.getElementById('aResultado').innerHTML = `
+      <p class="section-title">Resultados — ${t.label}</p>
+      <div style="display:grid; gap:6px; font-size:13px;">
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--gold);">
+          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Área de alvenaria</p>
+          <p style="font-size:18px; font-weight:600; color:var(--gold);">${fmt(area,2)} m²</p>
+          <p style="font-size:11px; color:var(--text-muted);">${fmt(L*H,2)} m² brutos − ${fmt(desc,2)} m² (vãos)</p>
+        </div>
+        <div style="padding:10px; background:var(--surface-1);">
+          <p>Quantidade: <b>${qtd_total.toLocaleString('pt-BR')} unidades</b> (com ${(perda*100).toFixed(0)}% perda)</p>
+          <p>Argamassa de assentamento: <b>${fmt(arg_total,3)} m³</b></p>
+          <p>Cimento p/ argamassa: <b>${sacos} sacos</b> (${fmt(cimento_kg,0)} kg)</p>
+          <p>Areia: <b>${fmt(areia_m3,2)} m³</b></p>
+        </div>
+      </div>
+    `;
+  };
+}
+
+// ─── 4. ARGAMASSA ──────────────────────────────────────────────────────
+function renderCalcArgamassa() {
+  document.getElementById('calcContent').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div class="card">
+        <p class="section-title">Argamassa</p>
+        <div class="form-grid">
+          <select id="agTipo" style="grid-column: span 2;">
+            <option value="chapisco">Chapisco (1:3, 5mm)</option>
+            <option value="reboco" selected>Reboco / Massa única (1:4:8, 20mm)</option>
+            <option value="emboco">Emboço (1:2:8, 25mm)</option>
+            <option value="contrapiso">Contrapiso (1:4, 30mm)</option>
+          </select>
+          <input id="agArea" type="number" step="0.01" placeholder="Área (m²)" value="50">
+          <input id="agPerda" type="number" step="0.01" placeholder="% perda" value="10">
+        </div>
+        <button class="btn-primary" id="agCalc" style="margin-top:10px; width:100%;">▶ Calcular</button>
+      </div>
+      <div class="card" id="agResultado">
+        <p class="section-title">Resultados</p>
+        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha e clique em Calcular</p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('agCalc').onclick = () => {
+    const tipo = document.getElementById('agTipo').value;
+    const area = parseFloat(document.getElementById('agArea').value);
+    const perda = parseFloat(document.getElementById('agPerda').value) / 100;
+    const tracos = {
+      chapisco:    { esp: 0.005, cim: 350, areia: 1.0, cal: 0,    label: 'Chapisco 1:3' },
+      reboco:      { esp: 0.020, cim: 180, areia: 1.0, cal: 0.5,  label: 'Reboco 1:4:8' },
+      emboco:      { esp: 0.025, cim: 220, areia: 1.0, cal: 0.25, label: 'Emboço 1:2:8' },
+      contrapiso:  { esp: 0.030, cim: 280, areia: 1.0, cal: 0,    label: 'Contrapiso 1:4' },
+    };
+    const t = tracos[tipo];
+    const vol = area * t.esp * (1 + perda);
+    const cim_kg = vol * t.cim;
+    const sacos = Math.ceil(cim_kg / 50);
+    const areia_m3 = vol * 1.10;
+    const cal_kg = vol * t.cim * t.cal;
+
+    document.getElementById('agResultado').innerHTML = `
+      <p class="section-title">Resultados — ${t.label}</p>
+      <div style="display:grid; gap:6px; font-size:13px;">
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--gold);">
+          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Volume de argamassa</p>
+          <p style="font-size:18px; font-weight:600; color:var(--gold);">${fmt(vol,3)} m³</p>
+          <p style="font-size:11px; color:var(--text-muted);">Espessura: ${(t.esp*1000).toFixed(0)}mm · com ${(perda*100).toFixed(0)}% perda</p>
+        </div>
+        <div style="padding:10px; background:var(--surface-1);">
+          <p>Cimento: <b>${sacos} sacos</b> (${fmt(cim_kg,0)} kg)</p>
+          <p>Areia média peneirada: <b>${fmt(areia_m3,2)} m³</b></p>
+          ${t.cal > 0 ? `<p>Cal hidratada: <b>${fmt(cal_kg,0)} kg</b> (${Math.ceil(cal_kg/20)} sacos 20kg)</p>` : ''}
+        </div>
+      </div>
+    `;
+  };
+}
+
+// ─── 5. PINTURA ────────────────────────────────────────────────────────
+function renderCalcPintura() {
+  document.getElementById('calcContent').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div class="card">
+        <p class="section-title">Pintura</p>
+        <div class="form-grid">
+          <select id="pTipo" style="grid-column: span 2;">
+            <option value="latex">Tinta látex (8 m²/L · interna)</option>
+            <option value="acrilica" selected>Tinta acrílica (10 m²/L · externa)</option>
+            <option value="esmalte">Esmalte sintético (12 m²/L · madeira/metal)</option>
+            <option value="textura">Textura (3 m²/kg)</option>
+            <option value="grafiato">Grafiato (2,5 m²/kg)</option>
+            <option value="impermeab">Impermeabilizante manta líquida (2 m²/kg)</option>
+          </select>
+          <input id="pArea" type="number" step="0.01" placeholder="Área (m²)" value="100">
+          <input id="pDemaos" type="number" placeholder="Demãos" value="2" min="1" max="5">
+          <select id="pSelador" style="grid-column: span 2;">
+            <option value="1" selected>Aplicar selador/massa corrida (1 demão)</option>
+            <option value="0">Sem selador</option>
+          </select>
+          <input id="pPerda" type="number" step="0.01" placeholder="% perda" value="10">
+        </div>
+        <button class="btn-primary" id="pCalc" style="margin-top:10px; width:100%;">▶ Calcular</button>
+      </div>
+      <div class="card" id="pResultado">
+        <p class="section-title">Resultados</p>
+        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha e clique em Calcular</p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('pCalc').onclick = () => {
+    const tipo = document.getElementById('pTipo').value;
+    const area = parseFloat(document.getElementById('pArea').value);
+    const demaos = parseInt(document.getElementById('pDemaos').value);
+    const selador = parseInt(document.getElementById('pSelador').value);
+    const perda = parseFloat(document.getElementById('pPerda').value) / 100;
+    const rendimentos = {
+      latex:     { rend: 8,  unit: 'L', label: 'Látex' },
+      acrilica:  { rend: 10, unit: 'L', label: 'Acrílica' },
+      esmalte:   { rend: 12, unit: 'L', label: 'Esmalte' },
+      textura:   { rend: 3,  unit: 'kg', label: 'Textura' },
+      grafiato:  { rend: 2.5, unit: 'kg', label: 'Grafiato' },
+      impermeab: { rend: 2,  unit: 'kg', label: 'Impermeab.' },
+    };
+    const t = rendimentos[tipo];
+    const consumo_demao = area / t.rend;
+    const total = consumo_demao * demaos * (1 + perda);
+    const galoes_18L = Math.ceil(total / 18);
+    const latas_36L = Math.ceil(total / 3.6);
+    const selador_consumo = selador ? area / 12 * (1 + perda) : 0;
+
+    document.getElementById('pResultado').innerHTML = `
+      <p class="section-title">Resultados — ${t.label}</p>
+      <div style="display:grid; gap:6px; font-size:13px;">
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--gold);">
+          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Consumo total (${demaos} demãos)</p>
+          <p style="font-size:22px; font-weight:600; color:var(--gold);">${fmt(total,1)} ${t.unit}</p>
+        </div>
+        <div style="padding:10px; background:var(--surface-1);">
+          ${t.unit === 'L' ? `
+            <p>Galões 18L: <b>${galoes_18L}</b> (${fmt(galoes_18L*18)} L)</p>
+            <p>Latas 3,6L: <b>${latas_36L}</b></p>
+          ` : `
+            <p>Sacos 25kg: <b>${Math.ceil(total/25)}</b></p>
+          `}
+          ${selador ? `<p style="margin-top:6px;">Selador (1 demão): <b>${fmt(selador_consumo,1)} L</b> (${Math.ceil(selador_consumo/18)} galões 18L)</p>` : ''}
+          <p style="font-size:11px; color:var(--text-muted); margin-top:6px;">Rendimento usado: 1 ${t.unit} → ${t.rend} m² · perda ${(perda*100).toFixed(0)}%</p>
+        </div>
+      </div>
+    `;
+  };
+}
+
+// ─── 6. RESERVATÓRIO DE ÁGUA ──────────────────────────────────────────
+function renderCalcReservatorio() {
+  document.getElementById('calcContent').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div class="card">
+        <p class="section-title">Reservatório de Água — NBR 5626</p>
+        <div class="form-grid">
+          <select id="rTipo" style="grid-column: span 2;">
+            <option value="residencia">Residência (200 L/pessoa·dia)</option>
+            <option value="apartamento">Apartamento (150 L/pessoa·dia)</option>
+            <option value="hotel">Hotel/pousada (200 L/hóspede·dia)</option>
+            <option value="escritorio">Escritório (50 L/pessoa·dia)</option>
+            <option value="escola">Escola externato (50 L/aluno·dia)</option>
+            <option value="hospital">Hospital (250 L/leito·dia)</option>
+            <option value="restaurante">Restaurante (25 L/refeição)</option>
+            <option value="posto">Posto de combustível (100 L/funcionário·dia)</option>
+            <option value="industria">Indústria/fábrica (70 L/operário·dia)</option>
+          </select>
+          <input id="rN" type="number" placeholder="Nº pessoas/leitos/refeições" value="5">
+          <select id="rReserva">
+            <option value="2" selected>Reserva 2 dias (recomendado)</option>
+            <option value="1">Reserva 1 dia</option>
+            <option value="3">Reserva 3 dias</option>
+          </select>
+          <select id="rDistrib" style="grid-column: span 2;">
+            <option value="60_40" selected>60% inferior + 40% superior</option>
+            <option value="50_50">50% inferior + 50% superior</option>
+            <option value="100_sup">100% superior (sem cisterna)</option>
+          </select>
+        </div>
+        <button class="btn-primary" id="rCalc" style="margin-top:10px; width:100%;">▶ Calcular</button>
+      </div>
+      <div class="card" id="rResultado">
+        <p class="section-title">Resultados</p>
+        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha e clique em Calcular</p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('rCalc').onclick = () => {
+    const consumos = {
+      residencia: 200, apartamento: 150, hotel: 200, escritorio: 50,
+      escola: 50, hospital: 250, restaurante: 25, posto: 100, industria: 70,
+    };
+    const labels = {
+      residencia: 'Residência', apartamento: 'Apartamento', hotel: 'Hotel',
+      escritorio: 'Escritório', escola: 'Escola', hospital: 'Hospital',
+      restaurante: 'Restaurante', posto: 'Posto de combustível', industria: 'Indústria',
+    };
+    const tipo = document.getElementById('rTipo').value;
+    const C = consumos[tipo];
+    const N = parseInt(document.getElementById('rN').value);
+    const dias = parseInt(document.getElementById('rReserva').value);
+    const distrib = document.getElementById('rDistrib').value;
+    const consumo_dia = N * C;
+    const reserva_total = consumo_dia * dias;
+    let inf, sup;
+    if (distrib === '60_40') { inf = reserva_total * 0.60; sup = reserva_total * 0.40; }
+    else if (distrib === '50_50') { inf = reserva_total * 0.50; sup = reserva_total * 0.50; }
+    else { inf = 0; sup = reserva_total; }
+
+    // Caixas comerciais comuns: 100, 150, 250, 310, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000 L
+    const padroes = [100, 150, 250, 310, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000, 15000, 20000];
+    const proximo = (v) => padroes.find(p => p >= v) || (Math.ceil(v / 1000) * 1000);
+
+    document.getElementById('rResultado').innerHTML = `
+      <p class="section-title">Resultados — ${labels[tipo]}</p>
+      <div style="display:grid; gap:6px; font-size:13px;">
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--gold);">
+          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Reserva total (${dias} dia${dias>1?'s':''})</p>
+          <p style="font-size:22px; font-weight:600; color:var(--gold);">${fmt(reserva_total,0)} L</p>
+          <p style="font-size:11px; color:var(--text-muted);">Consumo diário: ${fmt(consumo_dia,0)} L (${N} × ${C} L/pessoa)</p>
+        </div>
+        ${inf > 0 ? `
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid #4aa3ff;">
+          <p style="font-weight:600;">Cisterna (inferior)</p>
+          <p>Calculado: <b>${fmt(inf,0)} L</b></p>
+          <p>Caixa comercial: <b>${fmt(proximo(inf),0)} L</b></p>
+        </div>
+        ` : ''}
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--neon);">
+          <p style="font-weight:600;">Caixa superior</p>
+          <p>Calculado: <b>${fmt(sup,0)} L</b></p>
+          <p>Caixa comercial: <b>${fmt(proximo(sup),0)} L</b></p>
+        </div>
+        <p style="font-size:10px; color:var(--text-muted); font-style:italic;">⚠ NBR 5626 recomenda reserva mínima de 24h. Considerar bomba de recalque + autônoma se cisterna+superior.</p>
+      </div>
+    `;
+  };
+}
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => { state.currentTab = t.dataset.tab; render(); });
 document.getElementById('zayraFab').onclick = () => {
