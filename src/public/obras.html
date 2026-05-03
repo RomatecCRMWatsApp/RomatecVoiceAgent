@@ -3013,10 +3013,21 @@ document.getElementById('editClose').onclick = fecharEditar;
 document.getElementById('editCancel').onclick = fecharEditar;
 document.getElementById('editOverlay').onclick = e => { if (e.target.id === 'editOverlay') fecharEditar(); };
 // v1.65.6: helper que detecta 403 (CEO_TOKEN ausente) e orienta o operador.
+// v1.65.29: em vez de só alertar, oferece prompt direto pra colar o token —
+// CEO no celular nao precisa mais sair desse modal e ir no botao Admin.
 function mostrarErroApi(e) {
   const msg = String(e?.message || e);
   if (/Forbidden|X-CEO-Token|403/i.test(msg)) {
-    alert('Acesso negado: configure o token CEO no botão "Admin" (canto superior) antes de editar/excluir.');
+    if (typeof setCeoToken === 'function' && !getCeoToken()) {
+      const t = prompt('Acesso restrito ao CEO. Cole o CEO_API_TOKEN do Railway pra liberar editar/marcar PAGO/reenviar:');
+      if (t && t.trim()) {
+        setCeoToken(t.trim());
+        if (typeof atualizarBotaoCeo === 'function') atualizarBotaoCeo();
+        alert('Token salvo. Tente a acao novamente.');
+        return;
+      }
+    }
+    alert('Acesso negado: configure o token CEO no botao "Admin" (canto superior) antes de editar/excluir.');
   } else {
     alert('Erro: ' + msg);
   }
