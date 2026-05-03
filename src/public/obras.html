@@ -4283,6 +4283,18 @@ const CALCULADORAS = {
     desc: 'NBR 5626 · dimensionamento da caixa d\'água',
     render: renderCalcReservatorio,
   },
+  pisos: {
+    nome: 'Pisos e Revestimentos',
+    icone: '🟫',
+    desc: 'Porcelanato · Cerâmica · Pastilha · argamassa + rejunte',
+    render: renderCalcPisos,
+  },
+  cobertura: {
+    nome: 'Cobertura e Telhado',
+    icone: '🏠',
+    desc: 'Telhas + madeiramento completo (caibros · ripas · terças)',
+    render: renderCalcCobertura,
+  },
 };
 
 let CALC_ATIVA = null;
@@ -4842,6 +4854,221 @@ function renderCalcReservatorio() {
           <p>Caixa comercial: <b>${fmt(proximo(sup),0)} L</b></p>
         </div>
         <p style="font-size:10px; color:var(--text-muted); font-style:italic;">⚠ NBR 5626 recomenda reserva mínima de 24h. Considerar bomba de recalque + autônoma se cisterna+superior.</p>
+      </div>
+    `;
+  };
+}
+
+// ─── 7. PISOS E REVESTIMENTOS ─────────────────────────────────────────
+const PISOS_TIPOS = {
+  porc_45:    { dim: '45×45 cm',   m2_caixa: 2.10, perda: 0.10, cola: 4.5,  rej: 0.20, label: 'Porcelanato 45×45' },
+  porc_60:    { dim: '60×60 cm',   m2_caixa: 1.44, perda: 0.10, cola: 5.0,  rej: 0.20, label: 'Porcelanato 60×60' },
+  porc_80:    { dim: '80×80 cm',   m2_caixa: 1.92, perda: 0.12, cola: 5.5,  rej: 0.15, label: 'Porcelanato 80×80' },
+  porc_90:    { dim: '90×90 cm',   m2_caixa: 1.62, perda: 0.15, cola: 6.0,  rej: 0.15, label: 'Porcelanato 90×90' },
+  porc_120:   { dim: '120×60 cm',  m2_caixa: 1.44, perda: 0.15, cola: 6.0,  rej: 0.15, label: 'Porcelanato retificado 120×60' },
+  cer_45:     { dim: '45×45 cm',   m2_caixa: 2.43, perda: 0.10, cola: 4.0,  rej: 0.30, label: 'Cerâmica 45×45' },
+  cer_60:     { dim: '60×60 cm',   m2_caixa: 2.16, perda: 0.10, cola: 4.5,  rej: 0.25, label: 'Cerâmica 60×60' },
+  rev_3060:   { dim: '30×60 cm',   m2_caixa: 1.62, perda: 0.10, cola: 4.0,  rej: 0.25, label: 'Revestimento parede 30×60' },
+  rev_3345:   { dim: '33×45 cm',   m2_caixa: 1.93, perda: 0.10, cola: 4.0,  rej: 0.25, label: 'Revestimento parede 33×45' },
+  pastilha:   { dim: '5×5 cm',     m2_caixa: 1.00, perda: 0.10, cola: 6.0,  rej: 0.50, label: 'Pastilha cerâmica/vidro 5×5' },
+  granilite:  { dim: 'placa',      m2_caixa: 1.00, perda: 0.05, cola: 0,    rej: 0,    label: 'Granilite (in loco)' },
+  laminado:   { dim: 'régua',      m2_caixa: 2.50, perda: 0.10, cola: 0.30, rej: 0,    label: 'Piso laminado / vinílico' },
+};
+
+function renderCalcPisos() {
+  document.getElementById('calcContent').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div class="card">
+        <p class="section-title">Pisos / Revestimentos</p>
+        <div class="form-grid">
+          <select id="psTipo" style="grid-column: span 2;">
+            ${Object.entries(PISOS_TIPOS).map(([k,t]) => `<option value="${k}">${t.label} (${t.dim})</option>`).join('')}
+          </select>
+          <input id="psL" type="number" step="0.01" placeholder="Comprimento (m)" value="5">
+          <input id="psB" type="number" step="0.01" placeholder="Largura (m)" value="4">
+          <input id="psDesc" type="number" step="0.01" placeholder="Descontar (m²)" value="0">
+          <input id="psPerdaExtra" type="number" step="0.01" placeholder="% perda extra (corte/recortes)" value="0">
+          <select id="psRejColor" style="grid-column: span 2;">
+            <option value="cinza" selected>Rejunte cinza claro (junta 3mm)</option>
+            <option value="branco">Rejunte branco (junta 2mm)</option>
+            <option value="preto">Rejunte preto/escuro (junta 5mm)</option>
+            <option value="colorido">Rejunte colorido</option>
+          </select>
+        </div>
+        <button class="btn-primary" id="psCalc" style="margin-top:10px; width:100%;">▶ Calcular</button>
+      </div>
+      <div class="card" id="psResultado">
+        <p class="section-title">Resultados</p>
+        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha e clique em Calcular</p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('psCalc').onclick = () => {
+    const tipoKey = document.getElementById('psTipo').value;
+    const t = PISOS_TIPOS[tipoKey];
+    const L = parseFloat(document.getElementById('psL').value);
+    const B = parseFloat(document.getElementById('psB').value);
+    const desc = parseFloat(document.getElementById('psDesc').value) || 0;
+    const perdaExtra = parseFloat(document.getElementById('psPerdaExtra').value) / 100 || 0;
+
+    const area_bruta = L * B - desc;
+    const perda_total = t.perda + perdaExtra;
+    const area_total = area_bruta * (1 + perda_total);
+    const caixas = t.m2_caixa > 0 ? Math.ceil(area_total / t.m2_caixa) : 0;
+    const cola_kg = area_total * t.cola;
+    const sacos_cola = Math.ceil(cola_kg / 20);
+    const rejunte_kg = area_total * t.rej;
+    const sacos_rej = Math.ceil(rejunte_kg / 1);
+
+    document.getElementById('psResultado').innerHTML = `
+      <p class="section-title">Resultados — ${t.label}</p>
+      <div style="display:grid; gap:6px; font-size:13px;">
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--gold);">
+          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Área final (com perda)</p>
+          <p style="font-size:22px; font-weight:600; color:var(--gold);">${fmt(area_total,2)} m²</p>
+          <p style="font-size:11px; color:var(--text-muted);">${fmt(area_bruta,2)} m² brutos · perda ${(perda_total*100).toFixed(0)}%</p>
+        </div>
+        <div style="padding:10px; background:var(--surface-1);">
+          <p style="font-weight:600; margin-bottom:4px;">Compra</p>
+          ${caixas > 0 ? `<p>${t.label}: <b>${caixas} caixas</b> de ${fmt(t.m2_caixa,2)} m² (${fmt(caixas*t.m2_caixa,2)} m² total)</p>` : '<p>Material a granel/in loco</p>'}
+          ${t.cola > 0 ? `<p>Argamassa colante AC-II: <b>${sacos_cola} sacos</b> de 20kg (${fmt(cola_kg,1)} kg · ${t.cola} kg/m²)</p>` : ''}
+          ${t.rej > 0 ? `<p>Rejunte (1kg): <b>${sacos_rej} pacotes</b> (${fmt(rejunte_kg,1)} kg · ${t.rej} kg/m²)</p>` : ''}
+        </div>
+        <p style="font-size:10px; color:var(--text-muted); font-style:italic;">⚠ Perda recomendada: 10% (peças retas) · 12-15% (45° / paginação especial). Comprar pelo menos 1 caixa extra de reserva.</p>
+      </div>
+    `;
+  };
+}
+
+// ─── 8. COBERTURA E TELHADO ───────────────────────────────────────────
+const TELHAS_TIPOS = {
+  ceram_colonial:    { peso_m2: 45, qtd_m2: 16, inc_min: 30, label: 'Cerâmica colonial', madeiramento: 'completo' },
+  ceram_portuguesa:  { peso_m2: 50, qtd_m2: 16, inc_min: 30, label: 'Cerâmica portuguesa', madeiramento: 'completo' },
+  ceram_romana:      { peso_m2: 50, qtd_m2: 16, inc_min: 30, label: 'Cerâmica romana', madeiramento: 'completo' },
+  ceram_plan:        { peso_m2: 60, qtd_m2: 26, inc_min: 35, label: 'Cerâmica plan (capa/canal)', madeiramento: 'completo' },
+  ceram_francesa:    { peso_m2: 50, qtd_m2: 16, inc_min: 35, label: 'Cerâmica francesa', madeiramento: 'completo' },
+  concreto:          { peso_m2: 50, qtd_m2: 10, inc_min: 30, label: 'Concreto', madeiramento: 'reduzido' },
+  fibrocim_15:       { peso_m2: 18, qtd_m2: 0.6, inc_min: 15, label: 'Fibrocimento 1,53×1,10m (6mm)', madeiramento: 'reduzido' },
+  fibrocim_24:       { peso_m2: 18, qtd_m2: 0.4, inc_min: 15, label: 'Fibrocimento 2,44×1,10m (8mm)', madeiramento: 'reduzido' },
+  metalica_trap:     { peso_m2: 5,  qtd_m2: 0.45, inc_min: 5, label: 'Metálica trapezoidal galvalume', madeiramento: 'minimo' },
+  metalica_sand:     { peso_m2: 12, qtd_m2: 0.45, inc_min: 5, label: 'Metálica sanduíche c/ isolamento', madeiramento: 'minimo' },
+  shingle:           { peso_m2: 12, qtd_m2: 1, inc_min: 17, label: 'Shingle (asfáltica)', madeiramento: 'completo' },
+  policarbonato:     { peso_m2: 8,  qtd_m2: 0.5, inc_min: 5, label: 'Policarbonato', madeiramento: 'minimo' },
+};
+
+function renderCalcCobertura() {
+  document.getElementById('calcContent').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div class="card">
+        <p class="section-title">Cobertura e Telhado</p>
+        <div class="form-grid">
+          <select id="cbTipo" style="grid-column: span 2;">
+            ${Object.entries(TELHAS_TIPOS).map(([k,t]) => `<option value="${k}">${t.label} (${t.qtd_m2 < 1 ? `${t.qtd_m2.toFixed(2)} un/m²` : `${t.qtd_m2} un/m²`})</option>`).join('')}
+          </select>
+          <input id="cbL" type="number" step="0.01" placeholder="Comprimento da casa (m)" value="10">
+          <input id="cbB" type="number" step="0.01" placeholder="Largura da casa (m)" value="8">
+          <input id="cbBeiral" type="number" step="0.01" placeholder="Beiral/avanço (m)" value="0.6">
+          <input id="cbInc" type="number" step="0.01" placeholder="Inclinação (%)" value="35">
+          <select id="cbAguas" style="grid-column: span 2;">
+            <option value="2" selected>2 águas (mais comum)</option>
+            <option value="4">4 águas (telhado piramidal)</option>
+            <option value="1">1 água (cobertura única inclinada)</option>
+          </select>
+          <input id="cbPerda" type="number" step="0.01" placeholder="% perda" value="10">
+        </div>
+        <button class="btn-primary" id="cbCalc" style="margin-top:10px; width:100%;">▶ Calcular</button>
+      </div>
+      <div class="card" id="cbResultado">
+        <p class="section-title">Resultados</p>
+        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha e clique em Calcular</p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('cbCalc').onclick = () => {
+    const tKey = document.getElementById('cbTipo').value;
+    const t = TELHAS_TIPOS[tKey];
+    const L = parseFloat(document.getElementById('cbL').value);
+    const B = parseFloat(document.getElementById('cbB').value);
+    const beiral = parseFloat(document.getElementById('cbBeiral').value) || 0;
+    const inc = parseFloat(document.getElementById('cbInc').value) || 30;
+    const aguas = parseInt(document.getElementById('cbAguas').value);
+    const perda = parseFloat(document.getElementById('cbPerda').value) / 100;
+
+    if (inc < t.inc_min) {
+      alert(`⚠ Inclinação ${inc}% abaixo do mínimo recomendado (${t.inc_min}%) para ${t.label}. Risco de infiltração.`);
+    }
+
+    // Área projetada (planta + beiral)
+    const L_total = L + 2 * beiral;
+    const B_total = B + 2 * beiral;
+    const area_proj = L_total * B_total;
+
+    // Fator de inclinação (área inclinada / área projetada)
+    const angulo = Math.atan(inc / 100);
+    const fator = 1 / Math.cos(angulo);
+    const area_inclinada = area_proj * fator;
+
+    // Quantidade de telhas
+    const qtd_telhas = Math.ceil(area_inclinada * t.qtd_m2 * (1 + perda));
+    const peso_total = area_inclinada * t.peso_m2;
+
+    // Madeiramento
+    let madInfo;
+    if (t.madeiramento === 'completo') {
+      // Cerâmica/Shingle: caibros @50cm + ripas @32cm + terças @1.5m
+      const caibros_m = area_inclinada * 2;  // 2 m de caibro por m² de telhado
+      const ripas_m = area_inclinada * 3.1;  // 3,1 m de ripa por m²
+      const tercas_m = area_inclinada * 0.7; // 0,7 m de terça por m²
+      const tesouras = aguas === 4 ? Math.ceil(L / 3) + Math.ceil(B / 3) : Math.ceil(L / 3);
+      madInfo = `
+        <p style="font-weight:600; margin-bottom:4px;">Madeiramento (estrutura completa)</p>
+        <p>Caibros 6×8cm: <b>${fmt(caibros_m, 1)} m</b> (vendido em peças de 4-5m)</p>
+        <p>Ripas 2×5cm: <b>${fmt(ripas_m, 1)} m</b></p>
+        <p>Terças/frechais 6×12cm: <b>${fmt(tercas_m, 1)} m</b></p>
+        <p>Tesouras (mão francesa): <b>${tesouras} unidades</b></p>
+        <p style="font-size:11px; color:var(--text-muted); margin-top:4px;">Madeira tipo Maçaranduba, Cumaru ou Eucalipto autoclavado</p>
+      `;
+    } else if (t.madeiramento === 'reduzido') {
+      // Fibrocim/Concreto: só terças e tesouras (sem ripas/caibros pequenos)
+      const tercas_m = area_inclinada * 1.5; // mais terças
+      const tesouras = aguas === 4 ? Math.ceil(L / 3.5) + Math.ceil(B / 3.5) : Math.ceil(L / 3.5);
+      madInfo = `
+        <p style="font-weight:600; margin-bottom:4px;">Madeiramento (estrutura simplificada)</p>
+        <p>Terças 6×12cm a cada ~1,5m: <b>${fmt(tercas_m, 1)} m</b></p>
+        <p>Tesouras: <b>${tesouras} unidades</b></p>
+        <p style="font-size:11px; color:var(--text-muted); margin-top:4px;">Telha auto-portante reduz necessidade de caibros/ripas</p>
+      `;
+    } else {
+      // Metálica/Policarbonato: só estrutura metálica básica
+      const tercas_m = area_inclinada * 1.0;
+      madInfo = `
+        <p style="font-weight:600; margin-bottom:4px;">Estrutura metálica</p>
+        <p>Terças metálicas (perfil U/W): <b>${fmt(tercas_m, 1)} m</b></p>
+        <p>Parafusos auto-brocantes: <b>${Math.ceil(area_inclinada * 6)} unidades</b></p>
+        <p style="font-size:11px; color:var(--text-muted); margin-top:4px;">Estrutura leve · vão livre maior possível</p>
+      `;
+    }
+
+    document.getElementById('cbResultado').innerHTML = `
+      <p class="section-title">Resultados — ${t.label}</p>
+      <div style="display:grid; gap:6px; font-size:13px;">
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--gold);">
+          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Área inclinada do telhado</p>
+          <p style="font-size:22px; font-weight:600; color:var(--gold);">${fmt(area_inclinada,2)} m²</p>
+          <p style="font-size:11px; color:var(--text-muted);">Projetada: ${fmt(area_proj,2)} m² · fator inclinação: ${fmt(fator,3)} · ${aguas} água(s)</p>
+        </div>
+        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--neon);">
+          <p style="font-weight:600; margin-bottom:4px;">Telhas</p>
+          <p>Quantidade: <b>${qtd_telhas.toLocaleString('pt-BR')} unidades</b></p>
+          <p>Peso total: <b>${fmt(peso_total,0)} kg</b> (${fmt(t.peso_m2)} kg/m²)</p>
+          <p style="font-size:11px; color:var(--text-muted);">Inclinação mínima: ${t.inc_min}% (atual: ${inc}%) ${inc < t.inc_min ? '⚠' : '✓'}</p>
+        </div>
+        <div style="padding:10px; background:var(--surface-1);">
+          ${madInfo}
+        </div>
+        <p style="font-size:10px; color:var(--text-muted); font-style:italic;">⚠ Verificar capacidade da estrutura suportar peso. Cerâmica = ~50kg/m² · Fibrocimento = ~18 · Metálica = ~5.</p>
       </div>
     `;
   };
