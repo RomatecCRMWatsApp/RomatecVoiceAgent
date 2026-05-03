@@ -830,6 +830,13 @@ app.post('/api/recibos/envio/:envio_id/apagar', requireCeoToken, apiHandle(async
   return m.apagarEnvio(args as Parameters<typeof m.apagarEnvio>[0]);
 }));
 
+// v1.65.36: diagnostico — lista TODOS os envios de 1 membro em todos os
+// periodos. Util pra investigar "PAGO sumiu" / "estado errado".
+app.get('/api/recibos/historico-membro/:membro_id', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.historicoEnviosMembro(String((args as { membro_id: string }).membro_id));
+}));
+
 // v1.65.19 — Confirmação web por token (link clicável → vira botão no WhatsApp)
 app.get('/recibos/confirmar/:token', async (req: Request, res: Response) => {
   try {

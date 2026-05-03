@@ -2638,6 +2638,51 @@ export async function alterarStatusManual(input: {
   };
 }
 
+// v1.65.36: lista todos os envios de um membro (todos os periodos).
+// Util pra debug: "marquei Abril como PAGO mas sumiu, cade?"
+export async function historicoEnviosMembro(membroId: string): Promise<{
+  membro_id: string;
+  envios: Array<{
+    envio_id: string;
+    lote_id: string;
+    lote_numero: string;
+    periodo: string;
+    status: string;
+    valor: number;
+    enviado_em: Date | null;
+    pago_em: Date | null;
+    criado_em: Date;
+  }>;
+}> {
+  const id = Number(membroId);
+  if (!id) throw new Error('membro_id invalido');
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT v.id AS envio_id, v.lote_id, l.numero AS lote_numero,
+            l.periodo, v.status, v.valor, v.enviado_em, v.pago_em, v.criado_em
+       FROM recibos_envios v
+       LEFT JOIN recibos_envios_lotes l ON l.id = v.lote_id
+      WHERE v.membro_id = ?
+      ORDER BY l.periodo DESC, v.criado_em DESC`,
+    [id]
+  );
+
+  return {
+    membro_id: membroId,
+    envios: rows.map(r => ({
+      envio_id: String(r.envio_id),
+      lote_id: String(r.lote_id),
+      lote_numero: String(r.lote_numero ?? '?'),
+      periodo: String(r.periodo ?? '?'),
+      status: String(r.status),
+      valor: Number(r.valor),
+      enviado_em: r.enviado_em as Date | null,
+      pago_em: r.pago_em as Date | null,
+      criado_em: r.criado_em as Date,
+    })),
+  };
+}
+
 // v1.65.35: apagar envio (e suas mensagens) — caso de uso: lote disparado
 // errado / em testes que precisa ser limpo pra quinzena voltar a ABERTA.
 // Se o lote ficar sem envios, tambem apaga o lote vazio (cleanup).
