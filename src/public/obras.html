@@ -835,6 +835,7 @@ function renderObras() {
           </div>
         </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:flex-start;">
+          <button data-view-obra="${o.id}" title="Visualizar / Imprimir / PDF">👁️ Ver</button>
           <button class="btn-gold" data-edit-obra="${o.id}">✏️ Editar</button>
           <button class="btn-danger" data-del-obra="${o.id}">Excluir</button>
         </div>
@@ -842,32 +843,55 @@ function renderObras() {
     </div>`;
   }).join('');
 
-  v.innerHTML = `<div class="card">
-    <p class="section-title">Nova obra</p>
-    <div class="form-grid">
-      <input id="oNome" placeholder="Nome da obra *">
-      <select id="oTipo"><option value="residencial">Residencial</option><option value="comercial">Comercial</option><option value="industrial">Industrial</option><option value="reforma">Reforma</option><option value="publica">Pública</option></select>
-      <input id="oCliente" placeholder="Cliente">
-      <input id="oTel" placeholder="Telefone">
-      <input id="oEnd" placeholder="Endereço">
-      <input id="oCidade" placeholder="Cidade">
-      <input id="oArea" type="number" placeholder="Área (m²)">
-      <input id="oOrc" type="number" step="0.01" placeholder="Orçamento (R$)">
-      <select id="oStatus">
-        <option value="planejamento">Planejamento</option>
-        <option value="em_andamento" selected>Em andamento</option>
-        <option value="paralisada">Paralisada</option>
-        <option value="concluida">Concluída</option>
-      </select>
-      <input id="oResp" placeholder="Responsável técnico">
-      <input id="oIni" type="date">
-      <input id="oPrev" type="date">
+  // v1.65.42: lista PRIMEIRO, form retratil no fim. Botao "+ Nova obra"
+  // toggle abre/fecha o form embaixo.
+  v.innerHTML = `
+    <p class="section-title">Obras (${state.obras.length})</p>
+    ${lista || '<div class="card empty">Nenhuma obra ainda. Use o botão "+ Nova obra" abaixo.</div>'}
+
+    <div style="margin-top:18px; display:flex; justify-content:flex-end;">
+      <button id="toggleNovaObra" class="btn-primary">➕ Nova obra</button>
     </div>
-    <textarea id="oObs" placeholder="Observações" rows="2" style="margin-bottom:8px;"></textarea>
-    <button class="btn-primary" id="addObra">Adicionar obra</button>
-  </div>
-  <p class="section-title" style="margin-top:16px;">Obras (${state.obras.length})</p>
-  ${lista || '<div class="card empty">Nenhuma obra ainda.</div>'}`;
+
+    <div id="novaObraBox" class="card" style="display:none; margin-top:10px;">
+      <p class="section-title">Cadastrar nova obra</p>
+      <div class="form-grid">
+        <input id="oNome" placeholder="Nome da obra *">
+        <select id="oTipo"><option value="residencial">Residencial</option><option value="comercial">Comercial</option><option value="industrial">Industrial</option><option value="reforma">Reforma</option><option value="publica">Pública</option></select>
+        <input id="oCliente" placeholder="Cliente">
+        <input id="oTel" placeholder="Telefone">
+        <input id="oEnd" placeholder="Endereço">
+        <input id="oCidade" placeholder="Cidade">
+        <input id="oArea" type="number" placeholder="Área (m²)">
+        <input id="oOrc" type="number" step="0.01" placeholder="Orçamento (R$)">
+        <select id="oStatus">
+          <option value="planejamento">Planejamento</option>
+          <option value="em_andamento" selected>Em andamento</option>
+          <option value="paralisada">Paralisada</option>
+          <option value="concluida">Concluída</option>
+        </select>
+        <input id="oResp" placeholder="Responsável técnico">
+        <input id="oIni" type="date">
+        <input id="oPrev" type="date">
+      </div>
+      <textarea id="oObs" placeholder="Observações" rows="2" style="margin-bottom:8px; width:100%;"></textarea>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button id="cancelNovaObra">Cancelar</button>
+        <button class="btn-primary" id="addObra">Adicionar obra</button>
+      </div>
+    </div>
+  `;
+
+  // Toggle do form de nova obra
+  const toggleBtn = document.getElementById('toggleNovaObra');
+  const novaBox = document.getElementById('novaObraBox');
+  toggleBtn.onclick = () => {
+    const aberto = novaBox.style.display !== 'none';
+    novaBox.style.display = aberto ? 'none' : 'block';
+    toggleBtn.textContent = aberto ? '➕ Nova obra' : '✕ Fechar formulário';
+    if (!aberto) novaBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  document.getElementById('cancelNovaObra').onclick = () => toggleBtn.click();
 
   document.getElementById('addObra').onclick = async () => {
     const nome = document.getElementById('oNome').value.trim();
@@ -901,6 +925,119 @@ function renderObras() {
   });
   // v1.65.39: editar obra completa (todos os campos do form em modal)
   v.querySelectorAll('[data-edit-obra]').forEach(b => b.onclick = () => abrirEditarObra(b.dataset.editObra));
+  // v1.65.42: visualizar / imprimir / PDF
+  v.querySelectorAll('[data-view-obra]').forEach(b => b.onclick = () => abrirVisualizarObra(b.dataset.viewObra));
+}
+
+// v1.65.42: abre janela print-friendly com todos os dados da obra +
+// parcelas. Usuario pode usar Ctrl+P / "Salvar como PDF" do navegador.
+async function abrirVisualizarObra(obraId) {
+  const o = state.obras.find(x => String(x.id) === String(obraId));
+  if (!o) return alert('Obra nao encontrada.');
+
+  let parcelas = [];
+  try { parcelas = await api(`/api/obras/${obraId}/parcelas`); } catch {}
+
+  const fmtBR = (s) => {
+    if (!s) return '-';
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s));
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : String(s);
+  };
+  const total = parcelas.reduce((s, p) => s + Number(p.valor || 0), 0);
+  const pago = parcelas.filter(p => p.pago).reduce((s, p) => s + Number(p.valor || 0), 0);
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR"><head>
+<meta charset="UTF-8">
+<title>Obra ${escape(o.nome)} — Romatec</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 880px; margin: 24px auto; padding: 24px; color: #1a1a1a; }
+  h1 { color: #0a3d2a; border-bottom: 3px solid #c9a84c; padding-bottom: 8px; }
+  h2 { color: #0a3d2a; margin-top: 22px; font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  table { width:100%; border-collapse: collapse; margin: 8px 0; }
+  th, td { padding: 8px; border: 1px solid #ddd; font-size: 13px; text-align: left; }
+  th { background: #0a3d2a; color: #fff; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 13px; }
+  .label { color: #666; font-weight: 600; }
+  .badge { padding: 3px 10px; border-radius: 4px; font-size: 11px; }
+  .badge-pago { background: #1f7a3d; color: #fff; }
+  .badge-pend { background: #c9a84c; color: #fff; }
+  .footer { margin-top: 30px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 11px; color: #666; text-align: center; }
+  .actions { margin: 14px 0; display: flex; gap: 10px; }
+  .actions button { padding: 8px 16px; cursor: pointer; border-radius: 4px; border: 1px solid #0a3d2a; background: #0a3d2a; color: #fff; font-size: 13px; }
+  @media print { .actions { display: none; } body { margin: 0; max-width: none; } }
+</style>
+</head><body>
+<div class="actions">
+  <button onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
+  <button onclick="window.close()" style="background:#888; border-color:#888;">Fechar</button>
+</div>
+
+<h1>Obra: ${escape(o.nome)}</h1>
+
+<h2>Dados Gerais</h2>
+<div class="grid">
+  <div><span class="label">Tipo:</span> ${escape(o.tipo||'-')}</div>
+  <div><span class="label">Status:</span> ${escape(o.status||'-')}</div>
+  <div><span class="label">Cliente:</span> ${escape(o.cliente||'-')}</div>
+  <div><span class="label">Telefone:</span> ${escape(o.cliente_telefone||'-')}</div>
+  <div><span class="label">Endereço:</span> ${escape(o.endereco||'-')}</div>
+  <div><span class="label">Cidade:</span> ${escape(o.cidade||'-')}</div>
+  <div><span class="label">Área:</span> ${o.area_m2 ? o.area_m2 + ' m²' : '-'}</div>
+  <div><span class="label">Responsável técnico:</span> ${escape(o.responsavel_tecnico||'-')}</div>
+</div>
+
+<h2>Cronograma</h2>
+<div class="grid">
+  <div><span class="label">Início oficial:</span> ${fmtBR(o.data_inicio)}</div>
+  <div><span class="label">Entrega/Conclusão:</span> ${fmtBR(o.data_previsao)}</div>
+  <div><span class="label">Prazo (dias corridos):</span> ${o.prazo_dias || '-'}</div>
+  <div><span class="label">Prazo (dias úteis):</span> ${o.prazo_dias_uteis || '-'}</div>
+</div>
+
+<h2>Financeiro</h2>
+<div class="grid">
+  <div><span class="label">Orçamento (custo interno):</span> ${o.orcamento ? fmt(o.orcamento) : '-'}</div>
+  <div><span class="label">Valor do contrato (receita):</span> ${o.valor_contrato ? fmt(o.valor_contrato) : '-'}</div>
+</div>
+
+${parcelas.length > 0 ? `
+<h2>Parcelas de Pagamento do Cliente</h2>
+<table>
+  <thead><tr>
+    <th>Nº</th><th>Quinzena início</th><th>Quinzena fim</th><th>Valor</th><th>Vencimento</th><th>Status</th>
+  </tr></thead>
+  <tbody>
+    ${parcelas.map(p => `<tr>
+      <td>${p.numero}ª</td>
+      <td>${fmtBR(p.quinzena_inicio)}</td>
+      <td>${fmtBR(p.quinzena_fim)}</td>
+      <td>${fmt(p.valor)}</td>
+      <td>${escape(p.vencimento || '-')}</td>
+      <td><span class="badge badge-${p.pago ? 'pago' : 'pend'}">${p.pago ? '✓ PAGO' : 'Pendente'}</span></td>
+    </tr>`).join('')}
+  </tbody>
+  <tfoot><tr style="background:#f5f5f5; font-weight:600;">
+    <td colspan="3">Total</td>
+    <td>${fmt(total)}</td>
+    <td colspan="2">Pago: ${fmt(pago)} · Pendente: ${fmt(total - pago)}</td>
+  </tr></tfoot>
+</table>
+` : ''}
+
+${o.observacoes ? `<h2>Observações</h2><p>${escape(o.observacoes)}</p>` : ''}
+
+<div class="footer">
+  <strong>ROMATEC CONSULTORIA TOTAL</strong> · J R P BEZERRA LTDA · CNPJ 17.261.987/0001-09<br>
+  Açailândia-MA · CEP 65.930-000 · Gerado em ${new Date().toLocaleString('pt-BR')}
+</div>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) return alert('Pop-up bloqueado pelo navegador. Permita pop-ups e tente de novo.');
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
 
 function abrirEditarObra(obraId) {
@@ -1449,45 +1586,68 @@ function renderEquipe() {
   const obraOpts = '<option value="">Geral (todas as obras)</option>' +
     state.obras.map(o => `<option value="${o.id}" ${o.id===state.currentObra?'selected':''}>${escape(o.nome)}</option>`).join('');
 
-  v.innerHTML = `${obraSelector()}<div class="card">
-    <p class="section-title">Novo membro</p>
-    <div style="margin-bottom:8px;">
-      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Profissão (catálogo sindical — editável depois)</label>
-      <select id="pCat" style="width:100%; margin-top:4px;">${catOpts}</select>
+  // v1.65.42: form retratil em cima + lista logo abaixo. Botao "+ Novo membro"
+  // toggle abre/fecha o form.
+  v.innerHTML = `${obraSelector()}
+    <div style="display:flex; justify-content:flex-end; margin-bottom:8px;">
+      <button id="toggleNovoMembro" class="btn-primary">➕ Novo membro</button>
     </div>
-    <div style="margin-bottom:8px;">
-      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Obra (deixa "Geral" pra alocar livre depois)</label>
-      <select id="pObraId" style="width:100%; margin-top:4px;">${obraOpts}</select>
+
+    <div id="novoMembroBox" class="card" style="display:none; margin-bottom:14px;">
+      <p class="section-title">Cadastrar novo membro</p>
+      <div style="margin-bottom:8px;">
+        <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Profissão (catálogo sindical — editável depois)</label>
+        <select id="pCat" style="width:100%; margin-top:4px;">${catOpts}</select>
+      </div>
+      <div style="margin-bottom:8px;">
+        <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Obra (deixa "Geral" pra alocar livre depois)</label>
+        <select id="pObraId" style="width:100%; margin-top:4px;">${obraOpts}</select>
+      </div>
+      <div class="form-grid">
+        <input id="pNome" placeholder="Nome completo *">
+        <input id="pFunc" placeholder="Função (auto)">
+        <select id="pTipo"><option value="diarista">Diarista</option><option value="clt">CLT</option><option value="empreitada">Empreitada</option><option value="terceirizado">Terceirizado</option><option value="pj">PJ</option></select>
+        <input id="pCPF" placeholder="CPF">
+        <input id="pRG" placeholder="RG">
+        <input id="pTel" placeholder="Telefone">
+        <input id="pEmail" type="email" placeholder="E-mail">
+        <input id="pDtAdm" type="date" placeholder="Data admissão">
+        <input id="pVal" type="number" step="0.01" placeholder="Valor diária (R$) *" required>
+        <input id="pEsp" placeholder="Especialidade">
+      </div>
+      <p style="margin:14px 0 6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Endereço (opcional)</p>
+      <div class="form-grid">
+        <input id="pEndRua" placeholder="Rua / Logradouro" style="grid-column: span 2;">
+        <input id="pEndNum" placeholder="Número">
+        <input id="pEndBairro" placeholder="Bairro">
+        <input id="pEndCidade" placeholder="Cidade">
+        <select id="pEndUf"><option value="">UF</option>${['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(u=>`<option>${u}</option>`).join('')}</select>
+        <input id="pEndCep" placeholder="CEP">
+      </div>
+      <div style="margin-top:8px;">
+        <input id="pFoto" placeholder="Foto (URL — opcional)" style="width:100%;">
+      </div>
+      <textarea id="pObs" placeholder="Observações" rows="2" style="margin:8px 0; width:100%;"></textarea>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button id="cancelNovoMembro">Cancelar</button>
+        <button class="btn-primary" id="addEq">Adicionar membro</button>
+      </div>
     </div>
-    <div class="form-grid">
-      <input id="pNome" placeholder="Nome completo *">
-      <input id="pFunc" placeholder="Função (auto)">
-      <select id="pTipo"><option value="diarista">Diarista</option><option value="clt">CLT</option><option value="empreitada">Empreitada</option><option value="terceirizado">Terceirizado</option><option value="pj">PJ</option></select>
-      <input id="pCPF" placeholder="CPF">
-      <input id="pRG" placeholder="RG">
-      <input id="pTel" placeholder="Telefone">
-      <input id="pEmail" type="email" placeholder="E-mail">
-      <input id="pDtAdm" type="date" placeholder="Data admissão">
-      <input id="pVal" type="number" step="0.01" placeholder="Valor diária (R$) *" required>
-      <input id="pEsp" placeholder="Especialidade">
-    </div>
-    <p style="margin:14px 0 6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Endereço (opcional)</p>
-    <div class="form-grid">
-      <input id="pEndRua" placeholder="Rua / Logradouro" style="grid-column: span 2;">
-      <input id="pEndNum" placeholder="Número">
-      <input id="pEndBairro" placeholder="Bairro">
-      <input id="pEndCidade" placeholder="Cidade">
-      <select id="pEndUf"><option value="">UF</option>${['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(u=>`<option>${u}</option>`).join('')}</select>
-      <input id="pEndCep" placeholder="CEP">
-    </div>
-    <div style="margin-top:8px;">
-      <input id="pFoto" placeholder="Foto (URL — opcional)" style="width:100%;">
-    </div>
-    <textarea id="pObs" placeholder="Observações" rows="2" style="margin:8px 0;"></textarea>
-    <button class="btn-primary" id="addEq">Adicionar membro</button>
-  </div>
-  <p class="section-title" style="margin-top:16px;">Equipe (${state.equipe.length})</p>
-  ${lista || '<div class="card empty">Nenhum membro.</div>'}`;
+
+    <p class="section-title">Equipe (${state.equipe.length})</p>
+    ${lista || '<div class="card empty">Nenhum membro. Use o botão "+ Novo membro" acima.</div>'}
+  `;
+
+  // Toggle do form
+  const tEq = document.getElementById('toggleNovoMembro');
+  const bEq = document.getElementById('novoMembroBox');
+  tEq.onclick = () => {
+    const aberto = bEq.style.display !== 'none';
+    bEq.style.display = aberto ? 'none' : 'block';
+    tEq.textContent = aberto ? '➕ Novo membro' : '✕ Fechar formulário';
+    if (!aberto) bEq.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  document.getElementById('cancelNovoMembro').onclick = () => tEq.click();
 
   v.querySelectorAll('[data-cal]').forEach(b => b.onclick = () => {
     abrirCalendario(b.dataset.cal, b.dataset.nome, parseFloat(b.dataset.vd) || 0, state.currentObra);
