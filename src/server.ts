@@ -817,6 +817,13 @@ app.post('/api/recibos/envio/:envio_id/status-manual', requireCeoToken, apiHandl
   return m.alterarStatusManual(args as Parameters<typeof m.alterarStatusManual>[0]);
 }));
 
+// v1.65.32: registra pagamento offline (sem enviar WhatsApp).
+// Caso de uso: pagamento foi em maos / banco — CEO so registra no sistema.
+app.post('/api/recibos/marcar-pago-offline', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.marcarPagoOffline(args as Parameters<typeof m.marcarPagoOffline>[0]);
+}));
+
 // v1.65.19 — Confirmação web por token (link clicável → vira botão no WhatsApp)
 app.get('/recibos/confirmar/:token', async (req: Request, res: Response) => {
   try {

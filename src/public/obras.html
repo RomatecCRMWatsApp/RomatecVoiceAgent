@@ -2798,6 +2798,7 @@ async function abrirModalReciboQuinzena(membroId, nome) {
         infoEl.textContent = '';
         acoesEl.innerHTML = `
           <button id="rqDispararIndiv" class="btn-primary" style="background:var(--success); color:#fff; border-color:var(--success);">📤 Enviar agora via WhatsApp</button>
+          <button id="rqMarcarPagoOffline" title="Pagamento foi em mãos/banco — só registra como PAGO sem mandar WhatsApp" style="background:rgba(34,197,94,.15); border:1px solid var(--success); color:var(--success);">✅ Marcar PAGO sem enviar</button>
         `;
         document.getElementById('rqDispararIndiv').onclick = async () => {
           const ok = await confirmarAcao({
@@ -2816,6 +2817,25 @@ async function abrirModalReciboQuinzena(membroId, nome) {
             alert('✅ ' + (out.message || 'Disparado.'));
             await recarregarStatus();
           } catch (e) { mostrarErroApi(e); btn.disabled = false; btn.textContent = '📤 Enviar agora via WhatsApp'; }
+        };
+        // v1.65.32: registra pagamento offline (sem WhatsApp)
+        document.getElementById('rqMarcarPagoOffline').onclick = async () => {
+          const ok = await confirmarAcao({
+            titulo: 'Marcar como PAGO sem enviar',
+            mensagem: `Registrar que o pagamento de ${escape(nome)} (${escape(periodoLabel(periodo))}) já foi feito (em mãos / banco), <strong>SEM enviar WhatsApp</strong>?<br><br><small>O recibo é criado e marcado direto como PAGO. Útil quando você já pagou offline e só quer registrar.</small>`,
+            textoConfirmar: 'Registrar PAGO', perigoso: false,
+          });
+          if (!ok) return;
+          const btn = document.getElementById('rqMarcarPagoOffline');
+          btn.disabled = true; btn.textContent = '⏳ Registrando…';
+          try {
+            const out = await api('/api/recibos/marcar-pago-offline', {
+              method: 'POST',
+              body: JSON.stringify({ membro_id: membroId, periodo, marcador: 'CEO via UI Marcar Dias' }),
+            });
+            alert('✅ ' + (out.message || 'Registrado como PAGO.'));
+            await recarregarStatus();
+          } catch (e) { mostrarErroApi(e); btn.disabled = false; btn.textContent = '✅ Marcar PAGO sem enviar'; }
         };
         return;
       }
@@ -2867,6 +2887,18 @@ async function abrirModalReciboQuinzena(membroId, nome) {
       }
       if (['enviado_aguardando_confirmacao','confirmado_aguardando_pix','pix_recebido'].includes(env.status)) {
         btns.push(`<button id="rqMarcarPago" style="background:var(--success); color:#fff; border-color:var(--success);">💰 Marcar como PAGO</button>`);
+      }
+      // v1.65.32: corrigir status — voltar 1 passo na maquina de estados.
+      // CEO marcou errado? Desfaz pro estado anterior. So aparece em estados
+      // "avancados" (confirmado pra cima). Marca DESPAGAR explicito quando
+      // ja esta em PAGO. ID rqDesfazer e diferenciado por estado destino.
+      const idxAtualSeq = ESTADOS.findIndex(e => e.st === env.status);
+      if (idxAtualSeq > 0) {
+        const anterior = ESTADOS[idxAtualSeq - 1];
+        const labelDesfazer = env.status === 'pago'
+          ? `↩️ Desmarcar PAGO (volta pra ${anterior.label})`
+          : `↩️ Desfazer (volta pra ${anterior.label})`;
+        btns.push(`<button id="rqDesfazer" data-prev="${escape(anterior.st)}" class="btn-danger" style="background:rgba(212,184,120,.18); border-color:var(--gold); color:var(--gold);">${labelDesfazer}</button>`);
       }
       if (env.token_confirmacao) {
         btns.push(`<a href="${API}/recibos/confirmar/${escape(env.token_confirmacao)}" target="_blank" style="text-decoration:none;"><button>🔗 Abrir link de confirmação</button></a>`);
@@ -2920,6 +2952,24 @@ async function abrirModalReciboQuinzena(membroId, nome) {
         const el = document.getElementById(id);
         if (el) el.onclick = () => rebind(st);
       }
+      // v1.65.32: botao desfazer (volta 1 estado, util pra corrigir clique errado)
+      const desfBtn = document.getElementById('rqDesfazer');
+      if (desfBtn) desfBtn.onclick = async () => {
+        const prevStatus = desfBtn.dataset.prev;
+        const ok = await confirmarAcao({
+          titulo: 'Voltar status do recibo',
+          mensagem: `Confirma reverter o status atual <strong>(${escape(env.status)})</strong> de volta pra <strong>${escape(prevStatus)}</strong>?<br><br><small>Use isso quando marcou errado por engano. As datas/timestamps de fases posteriores nao sao limpos automaticamente — apenas o status muda.</small>`,
+          textoConfirmar: 'Voltar status', perigoso: true,
+        });
+        if (!ok) return;
+        try {
+          await api(`/api/recibos/envio/${env.id}/status-manual`, {
+            method: 'POST',
+            body: JSON.stringify({ envio_id: String(env.id), status: prevStatus, motivo: 'desfazer status anterior', marcador: 'CEO via UI Marcar Dias' }),
+          });
+          await recarregarStatus();
+        } catch (e) { mostrarErroApi(e); }
+      };
     } catch (e) {
       ledsEl.innerHTML = `<span style="color:var(--danger);">Erro: ${escape(e.message)}</span>`;
       infoEl.textContent = ''; acoesEl.innerHTML = '';

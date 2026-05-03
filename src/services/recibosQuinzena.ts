@@ -2462,6 +2462,108 @@ export async function dispararEnvioIndividual(input: {
   };
 }
 
+// v1.65.32: marcar PAGO direto sem enviar WhatsApp.
+// Caso de uso: pagamento foi em maos / via banco, CEO so quer registrar
+// que ja pagou. Cria o recibo (mesmo que nunca tenha sido disparado),
+// gera PDF/snapshot pra historico, mas NAO manda mensagem nenhuma.
+export async function marcarPagoOffline(input: {
+  membro_id: string;
+  periodo: string;
+  observacao?: string;
+  marcador?: string;
+}): Promise<{
+  ok: true; lote_id: string; envio_id: string; message: string;
+}> {
+  const periodo = parsePeriodo(input.periodo);
+
+  // Verifica se ja existe envio nesse periodo pra evitar duplicar
+  const [existRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT v.id, v.lote_id, v.status FROM recibos_envios v
+       JOIN recibos_envios_lotes l ON l.id = v.lote_id
+      WHERE v.membro_id = ? AND l.periodo = ?
+      ORDER BY v.id DESC LIMIT 1`,
+    [Number(input.membro_id), periodo.codigo]
+  );
+  if (existRows.length > 0) {
+    const existing = existRows[0] as { id: number; lote_id: number; status: string };
+    if (existing.status === 'pago') {
+      return {
+        ok: true,
+        lote_id: String(existing.lote_id),
+        envio_id: String(existing.id),
+        message: `Ja estava marcado como PAGO no envio ${existing.id}. Nada feito.`,
+      };
+    }
+    // Atualiza pra pago direto
+    await pool.execute(
+      `UPDATE recibos_envios SET
+         status = 'pago',
+         confirmado_em = COALESCE(confirmado_em, NOW()),
+         pix_recebido_em = COALESCE(pix_recebido_em, NOW()),
+         pago_em = COALESCE(pago_em, NOW())
+       WHERE id = ?`,
+      [existing.id]
+    );
+    await logarMensagemEnvio(existing.id, 'saida', 'aviso',
+      `[OFFLINE] marcado como PAGO sem envio de WhatsApp${input.observacao ? ' — ' + input.observacao : ''}${input.marcador ? ' por ' + input.marcador : ''}`,
+      null);
+    return {
+      ok: true,
+      lote_id: String(existing.lote_id),
+      envio_id: String(existing.id),
+      message: `Envio ${existing.id} atualizado pra PAGO sem envio de mensagem.`,
+    };
+  }
+
+  // Coleta dados (valida que tem dias/ajustes no periodo)
+  const data = await coletarDadosRecibo(input.membro_id, periodo.codigo);
+  if (data.totais.qtd_dias === 0 && data.totais.total_ajustes === 0) {
+    throw new Error('Colaborador sem dias trabalhados ou ajustes no periodo — nao da pra registrar pagamento.');
+  }
+
+  // Telefone (so pra registro — nao envia)
+  const [memRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT telefone FROM romatec_obra_equipe WHERE id = ?`, [Number(input.membro_id)]
+  );
+  const telefoneNorm = String(memRows[0]?.telefone ?? '').replace(/\D/g, '') || null;
+
+  // Lote dedicado com sufixo OFFLINE
+  const numeroLote = `QUINZ-${periodo.ano}-${String(periodo.mes).padStart(2, '0')}-${periodo.quinzena}-OFFLINE-${Date.now().toString(36).slice(-5)}`;
+  const [r] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO recibos_envios_lotes
+       (numero, periodo, periodo_inicio, periodo_fim, total_colaboradores, total_valor, status, criado_por)
+     VALUES (?,?,?,?,?,?,?,?)`,
+    [
+      numeroLote, periodo.codigo, periodo.dataInicio, periodo.dataFim,
+      1, data.totais.total_liquido.toFixed(2),
+      'concluido', input.marcador ?? 'pago-offline',
+    ]
+  );
+  const loteId = r.insertId;
+
+  const token = gerarToken();
+  const [r2] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO recibos_envios
+       (lote_id, membro_id, telefone, valor, status, token_confirmacao,
+        confirmado_em, pix_recebido_em, pago_em)
+     VALUES (?,?,?,?,?,?,NOW(),NOW(),NOW())`,
+    [loteId, Number(input.membro_id), telefoneNorm, data.totais.total_liquido.toFixed(2),
+     'pago', token]
+  );
+  const envioId = r2.insertId;
+
+  await logarMensagemEnvio(envioId, 'saida', 'aviso',
+    `[OFFLINE] recibo registrado como PAGO direto, sem envio de WhatsApp${input.observacao ? ' — ' + input.observacao : ''}${input.marcador ? ' por ' + input.marcador : ''}`,
+    null);
+
+  return {
+    ok: true,
+    lote_id: String(loteId),
+    envio_id: String(envioId),
+    message: `Pagamento offline registrado pra ${data.membro.nome}. Lote ${numeroLote}.`,
+  };
+}
+
 // Avança status manualmente (CEO marca direto, sem passar pelo fluxo do colaborador)
 type StatusManual =
   | 'enviado_aguardando_confirmacao'
