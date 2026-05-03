@@ -160,8 +160,11 @@ export async function buscarObra(id: string) {
 export async function criarObra(input: {
   nome: string; tipo?: string; cliente?: string; cliente_telefone?: string;
   endereco?: string; cidade?: string; area_m2?: number; orcamento?: number;
+  valor_contrato?: number;
   status?: string; responsavel_tecnico?: string;
-  data_inicio?: string; data_previsao?: string; observacoes?: string;
+  data_inicio?: string; data_previsao?: string;
+  prazo_dias?: number; prazo_dias_uteis?: number;
+  observacoes?: string;
   confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.nome) throw new Error('Nome da obra é obrigatório');
@@ -176,8 +179,9 @@ export async function criarObra(input: {
   const [r] = await pool.execute<ResultSetHeader>(
     `INSERT INTO romatec_obras
       (nome, tipo, cliente, cliente_telefone, endereco, cidade, area_m2,
-       orcamento, status, responsavel_tecnico, data_inicio, data_previsao, observacoes)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       orcamento, valor_contrato, status, responsavel_tecnico,
+       data_inicio, data_previsao, prazo_dias, prazo_dias_uteis, observacoes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       input.nome,
       input.tipo ?? 'residencial',
@@ -187,10 +191,13 @@ export async function criarObra(input: {
       input.cidade ?? null,
       input.area_m2 ?? null,
       input.orcamento ?? null,
+      input.valor_contrato ?? null,
       input.status ?? 'planejamento',
       input.responsavel_tecnico ?? null,
       input.data_inicio ?? null,
       input.data_previsao ?? null,
+      input.prazo_dias ?? null,
+      input.prazo_dias_uteis ?? null,
       input.observacoes ?? null,
     ],
   );
@@ -201,8 +208,11 @@ export async function atualizarObra(input: {
   id: string;
   nome?: string; tipo?: string; cliente?: string; cliente_telefone?: string;
   endereco?: string; cidade?: string; area_m2?: number; orcamento?: number;
+  valor_contrato?: number;
   status?: string; responsavel_tecnico?: string;
-  data_inicio?: string; data_previsao?: string; observacoes?: string;
+  data_inicio?: string; data_previsao?: string;
+  prazo_dias?: number; prazo_dias_uteis?: number;
+  observacoes?: string;
   confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.id) throw new Error('id obrigatório');
@@ -211,8 +221,11 @@ export async function atualizarObra(input: {
   const map: Record<string, string> = {
     nome: 'nome', tipo: 'tipo', cliente: 'cliente', cliente_telefone: 'cliente_telefone',
     endereco: 'endereco', cidade: 'cidade', area_m2: 'area_m2', orcamento: 'orcamento',
+    valor_contrato: 'valor_contrato',
     status: 'status', responsavel_tecnico: 'responsavel_tecnico',
-    data_inicio: 'data_inicio', data_previsao: 'data_previsao', observacoes: 'observacoes',
+    data_inicio: 'data_inicio', data_previsao: 'data_previsao',
+    prazo_dias: 'prazo_dias', prazo_dias_uteis: 'prazo_dias_uteis',
+    observacoes: 'observacoes',
   };
   for (const [k, col] of Object.entries(map)) {
     const v = (input as Record<string, unknown>)[k];
@@ -996,4 +1009,183 @@ export async function resumoObras() {
       .filter(o => o.status === 'em_andamento')
       .map(o => ({ id: String(o.id), nome: o.nome, orcamento: num(o.orcamento) })),
   };
+}
+
+// ── Parcelas de pagamento do cliente (v1.65.40) ──────────────────────────────
+// Receita da Romatec por obra. Diferente dos recibos quinzenais (que sao
+// pagamento dos trabalhadores). ZAYRA pode usar pra criar evento Calendar
+// + lembrete de NF.
+
+export async function listarParcelasObra(obraId: string) {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, obra_id, numero, valor, vencimento, prazo_dias, pago, pago_em,
+            observacoes, calendar_event_id, nf_numero, nf_emitida_em,
+            created_at, updated_at
+       FROM romatec_obra_parcelas
+      WHERE obra_id = ?
+      ORDER BY numero ASC, vencimento ASC`,
+    [obraId]
+  );
+  return rows.map((r: RowDataPacket) => ({
+    id: String(r.id),
+    obra_id: String(r.obra_id),
+    numero: Number(r.numero),
+    valor: num(r.valor),
+    vencimento: r.vencimento ? formatBRDate(r.vencimento as Date) : null,
+    vencimento_iso: r.vencimento ? new Date(r.vencimento as Date).toISOString().slice(0,10) : null,
+    prazo_dias: r.prazo_dias != null ? Number(r.prazo_dias) : null,
+    pago: !!r.pago,
+    pago_em: r.pago_em as Date | null,
+    observacoes: r.observacoes as string | null,
+    calendar_event_id: r.calendar_event_id as string | null,
+    nf_numero: r.nf_numero as string | null,
+    nf_emitida_em: r.nf_emitida_em as Date | null,
+  }));
+}
+
+export async function criarParcela(input: {
+  obra_id: string;
+  numero?: number;
+  valor: number;
+  vencimento: string;       // YYYY-MM-DD
+  prazo_dias?: number;
+  observacoes?: string;
+}): Promise<MutationResult> {
+  if (!input.obra_id) throw new Error('obra_id obrigatorio');
+  if (!input.valor || input.valor <= 0) throw new Error('valor invalido');
+  if (!input.vencimento) throw new Error('vencimento obrigatorio');
+
+  // Auto-numera se nao passou
+  let numero = input.numero;
+  if (!numero) {
+    const [c] = await pool.execute<RowDataPacket[]>(
+      `SELECT COALESCE(MAX(numero), 0) + 1 AS proximo FROM romatec_obra_parcelas WHERE obra_id = ?`,
+      [input.obra_id]
+    );
+    numero = Number((c[0] as { proximo: number }).proximo);
+  }
+
+  const [r] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO romatec_obra_parcelas
+       (obra_id, numero, valor, vencimento, prazo_dias, observacoes)
+     VALUES (?,?,?,?,?,?)`,
+    [
+      input.obra_id, numero, input.valor, input.vencimento,
+      input.prazo_dias ?? null, input.observacoes ?? null,
+    ]
+  );
+  return { ok: true, insertId: r.insertId, affected: r.affectedRows, message: `Parcela ${numero} criada (id ${r.insertId}).` };
+}
+
+export async function atualizarParcela(input: {
+  id: string;
+  numero?: number; valor?: number; vencimento?: string;
+  prazo_dias?: number; pago?: boolean; observacoes?: string;
+  calendar_event_id?: string; nf_numero?: string;
+  confirm?: boolean;
+}): Promise<MutationResult> {
+  if (!input.id) throw new Error('id obrigatorio');
+  const fields: string[] = [];
+  const params: (string | number | null)[] = [];
+  const map: Record<string, string> = {
+    numero: 'numero', valor: 'valor', vencimento: 'vencimento',
+    prazo_dias: 'prazo_dias', observacoes: 'observacoes',
+    calendar_event_id: 'calendar_event_id', nf_numero: 'nf_numero',
+  };
+  for (const [k, col] of Object.entries(map)) {
+    const v = (input as Record<string, unknown>)[k];
+    if (v !== undefined) { fields.push(`${col} = ?`); params.push(v as string | number); }
+  }
+  if (input.pago !== undefined) {
+    fields.push('pago = ?');
+    params.push(input.pago ? 1 : 0);
+    if (input.pago) {
+      fields.push('pago_em = COALESCE(pago_em, NOW())');
+    } else {
+      fields.push('pago_em = NULL');
+    }
+  }
+  if (fields.length === 0) throw new Error('Nenhum campo pra atualizar');
+  params.push(input.id);
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE romatec_obra_parcelas SET ${fields.join(', ')} WHERE id = ?`, params,
+  );
+  return { ok: true, affected: r.affectedRows, message: `Parcela ${input.id} atualizada.` };
+}
+
+export async function apagarParcela(input: { id: string }): Promise<MutationResult> {
+  if (!input.id) throw new Error('id obrigatorio');
+  const [r] = await pool.execute<ResultSetHeader>(
+    `DELETE FROM romatec_obra_parcelas WHERE id = ?`, [input.id]
+  );
+  return { ok: true, affected: r.affectedRows, message: `Parcela ${input.id} apagada.` };
+}
+
+// Auto-gera N parcelas quinzenais a partir da data_inicio da obra.
+// Apaga as parcelas existentes (nao pagas) antes de criar — recriacao limpa.
+export async function gerarParcelasAutomaticas(input: {
+  obra_id: string;
+  qtd_parcelas: number;
+  valor_total: number;
+  data_inicio: string;       // YYYY-MM-DD
+  intervalo_dias?: number;   // default 14 (quinzenal)
+  primeiro_vencimento_em?: number;  // default 14 dias apos data_inicio
+}): Promise<{ ok: true; parcelas_criadas: number; valor_parcela: number }> {
+  if (!input.obra_id) throw new Error('obra_id obrigatorio');
+  if (!input.qtd_parcelas || input.qtd_parcelas < 1) throw new Error('qtd_parcelas deve ser >= 1');
+  if (!input.valor_total || input.valor_total <= 0) throw new Error('valor_total invalido');
+  if (!input.data_inicio) throw new Error('data_inicio obrigatoria');
+
+  const intervalo = input.intervalo_dias ?? 14;
+  const primeiroVenc = input.primeiro_vencimento_em ?? intervalo;
+  const valorParcela = Math.round((input.valor_total / input.qtd_parcelas) * 100) / 100;
+
+  // Apaga parcelas existentes nao pagas (preserva pagas)
+  await pool.execute(
+    `DELETE FROM romatec_obra_parcelas WHERE obra_id = ? AND pago = 0`,
+    [input.obra_id]
+  );
+
+  const inicio = new Date(input.data_inicio + 'T00:00:00');
+  for (let i = 0; i < input.qtd_parcelas; i++) {
+    const venc = new Date(inicio);
+    venc.setDate(venc.getDate() + primeiroVenc + (i * intervalo));
+    const vencIso = venc.toISOString().slice(0, 10);
+    const prazoDias = primeiroVenc + (i * intervalo);
+    await pool.execute(
+      `INSERT INTO romatec_obra_parcelas
+         (obra_id, numero, valor, vencimento, prazo_dias)
+       VALUES (?,?,?,?,?)`,
+      [input.obra_id, i + 1, valorParcela.toFixed(2), vencIso, prazoDias]
+    );
+  }
+
+  return { ok: true, parcelas_criadas: input.qtd_parcelas, valor_parcela: valorParcela };
+}
+
+// Retorna parcelas vencendo nos proximos N dias (default 7) — uso da ZAYRA
+// pra lembrete proativo + criacao de evento Google Calendar.
+export async function parcelasVencendo(diasAFrente = 7) {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT p.id, p.obra_id, p.numero, p.valor, p.vencimento, p.pago,
+            o.nome AS obra_nome, o.cliente, o.cliente_telefone
+       FROM romatec_obra_parcelas p
+       JOIN romatec_obras o ON o.id = p.obra_id
+      WHERE p.pago = 0
+        AND p.vencimento >= CURDATE()
+        AND p.vencimento <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
+      ORDER BY p.vencimento ASC`,
+    [diasAFrente]
+  );
+  return rows.map((r: RowDataPacket) => ({
+    id: String(r.id),
+    obra_id: String(r.obra_id),
+    obra_nome: String(r.obra_nome),
+    cliente: r.cliente as string | null,
+    cliente_telefone: r.cliente_telefone as string | null,
+    numero: Number(r.numero),
+    valor: num(r.valor),
+    vencimento: formatBRDate(r.vencimento as Date),
+    vencimento_iso: new Date(r.vencimento as Date).toISOString().slice(0,10),
+  }));
 }

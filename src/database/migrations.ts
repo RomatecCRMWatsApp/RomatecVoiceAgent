@@ -106,6 +106,55 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.65.40: campos do contrato/cronograma da obra. Adicionados via ALTER
+  // pra nao quebrar bancos existentes. Idempotente — IF NOT EXISTS no MySQL
+  // 8+ + try/catch fallback pro 5.7.
+  for (const col of [
+    `ADD COLUMN IF NOT EXISTS valor_contrato DECIMAL(14,2) NULL AFTER orcamento`,
+    `ADD COLUMN IF NOT EXISTS prazo_dias INT NULL AFTER data_previsao`,
+    `ADD COLUMN IF NOT EXISTS prazo_dias_uteis INT NULL AFTER prazo_dias`,
+  ]) {
+    await pool.execute(`ALTER TABLE romatec_obras ${col}`).catch(async () => {
+      // MySQL < 8 nao suporta IF NOT EXISTS no ADD COLUMN. Verifica antes.
+      const colName = (/ADD COLUMN IF NOT EXISTS (\w+)/.exec(col) || [])[1];
+      if (!colName) return;
+      const [c] = await pool.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'romatec_obras' AND COLUMN_NAME = ?`,
+        [colName]
+      );
+      if (Number((c[0] as { n: number }).n) === 0) {
+        const sql = col.replace('IF NOT EXISTS ', '');
+        await pool.execute(`ALTER TABLE romatec_obras ${sql}`);
+      }
+    });
+  }
+
+  // v1.65.40: parcelas de pagamento do cliente (receita da Romatec).
+  // Diferente dos recibos quinzenais (pagamento dos trabalhadores).
+  // Cada obra tem N parcelas com vencimento+valor. Ao gerar, ZAYRA pode
+  // criar evento no Google Calendar pra lembrete + emissao de NF.
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_obra_parcelas (
+      id                INT AUTO_INCREMENT PRIMARY KEY,
+      obra_id           INT NOT NULL,
+      numero            INT NOT NULL,
+      valor             DECIMAL(14,2) NOT NULL,
+      vencimento        DATE NOT NULL,
+      prazo_dias        INT,
+      pago              TINYINT(1) DEFAULT 0,
+      pago_em           TIMESTAMP NULL,
+      observacoes       VARCHAR(300),
+      calendar_event_id VARCHAR(120),
+      nf_numero         VARCHAR(50),
+      nf_emitida_em     TIMESTAMP NULL,
+      created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_obra (obra_id),
+      INDEX idx_venc (vencimento, pago)
+    )
+  `);
+
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS romatec_obra_etapas (
       id           INT AUTO_INCREMENT PRIMARY KEY,

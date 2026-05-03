@@ -909,12 +909,14 @@ function abrirEditarObra(obraId) {
 
   const overlay = document.getElementById('editOverlay');
   const modal = document.getElementById('editModal');
+  modal.style.maxWidth = '720px';
   modal.innerHTML = `
     <div class="cal-head">
       <h2>✏️ Editar obra — ${escape(o.nome)}</h2>
       <button id="editObraX" style="border:none;background:transparent;color:var(--text-muted);font-size:22px;cursor:pointer;">×</button>
     </div>
-    <div style="padding:14px 18px;">
+    <div style="padding:14px 18px; max-height: 78vh; overflow-y: auto;">
+      <p style="margin:0 0 8px; font-size:13px; color:var(--gold); font-weight:600;">📋 Dados gerais</p>
       <div class="form-grid">
         <input id="eoNome" placeholder="Nome da obra *" value="${escape(o.nome||'')}">
         <select id="eoTipo">
@@ -929,7 +931,6 @@ function abrirEditarObra(obraId) {
         <input id="eoEnd" placeholder="Endereço" value="${escape(o.endereco||'')}">
         <input id="eoCidade" placeholder="Cidade" value="${escape(o.cidade||'')}">
         <input id="eoArea" type="number" placeholder="Área (m²)" value="${o.area_m2||''}">
-        <input id="eoOrc" type="number" step="0.01" placeholder="Orçamento (R$)" value="${o.orcamento||''}">
         <select id="eoStatus">
           <option value="planejamento" ${o.status==='planejamento'?'selected':''}>Planejamento</option>
           <option value="em_andamento" ${o.status==='em_andamento'?'selected':''}>Em andamento</option>
@@ -937,11 +938,48 @@ function abrirEditarObra(obraId) {
           <option value="concluida" ${o.status==='concluida'?'selected':''}>Concluída</option>
         </select>
         <input id="eoResp" placeholder="Responsável técnico" value="${escape(o.responsavel_tecnico||'')}">
-        <label style="display:block; font-size:11px; color:var(--text-muted); grid-column:1/-1; margin-top:6px;">📅 Data de início (define o ciclo das quinzenas dessa obra)</label>
-        <input id="eoIni" type="date" value="${(o.data_inicio||'').slice(0,10)}">
-        <input id="eoPrev" type="date" value="${(o.data_previsao||'').slice(0,10)}">
       </div>
-      <textarea id="eoObs" placeholder="Observações" rows="2" style="width:100%; margin:10px 0;">${escape(o.observacoes||'')}</textarea>
+
+      <p style="margin:14px 0 8px; font-size:13px; color:var(--gold); font-weight:600;">💰 Financeiro</p>
+      <div class="form-grid">
+        <label style="display:flex; flex-direction:column; gap:4px;">
+          <span style="font-size:11px; color:var(--text-muted);">Orçamento (custo interno)</span>
+          <input id="eoOrc" type="number" step="0.01" placeholder="R$" value="${o.orcamento||''}">
+        </label>
+        <label style="display:flex; flex-direction:column; gap:4px;">
+          <span style="font-size:11px; color:var(--text-muted);">Valor do contrato (receita)</span>
+          <input id="eoVal" type="number" step="0.01" placeholder="R$" value="${o.valor_contrato||''}">
+        </label>
+      </div>
+
+      <p style="margin:14px 0 8px; font-size:13px; color:var(--gold); font-weight:600;">📅 Cronograma</p>
+      <div class="form-grid">
+        <label style="display:flex; flex-direction:column; gap:4px;">
+          <span style="font-size:11px; color:var(--text-muted);">Data início oficial *</span>
+          <input id="eoIni" type="date" value="${(o.data_inicio||'').slice(0,10)}">
+        </label>
+        <label style="display:flex; flex-direction:column; gap:4px;">
+          <span style="font-size:11px; color:var(--text-muted);">Entrega/Conclusão prevista</span>
+          <input id="eoPrev" type="date" value="${(o.data_previsao||'').slice(0,10)}">
+        </label>
+        <label style="display:flex; flex-direction:column; gap:4px;">
+          <span style="font-size:11px; color:var(--text-muted);">Prazo total (dias corridos)</span>
+          <input id="eoPzd" type="number" placeholder="Ex: 60" value="${o.prazo_dias||''}">
+        </label>
+        <label style="display:flex; flex-direction:column; gap:4px;">
+          <span style="font-size:11px; color:var(--text-muted);">Prazo (dias úteis seg-sex)</span>
+          <input id="eoPzu" type="number" placeholder="Ex: 45" value="${o.prazo_dias_uteis||''}">
+        </label>
+      </div>
+
+      <p style="margin:14px 0 8px; font-size:13px; color:var(--gold); font-weight:600;">💳 Parcelas de pagamento do cliente</p>
+      <div id="eoParcelasBox" style="border:1px solid var(--border); border-radius:8px; padding:10px; background:var(--surface-1); margin-bottom:10px;">
+        <p style="margin:0; font-size:12px; color:var(--text-muted);">⏳ carregando parcelas…</p>
+      </div>
+
+      <p style="margin:14px 0 8px; font-size:13px; color:var(--gold); font-weight:600;">📝 Observações</p>
+      <textarea id="eoObs" placeholder="Observações" rows="2" style="width:100%; margin-bottom:10px;">${escape(o.observacoes||'')}</textarea>
+
       <div style="display:flex; gap:8px; justify-content:flex-end;">
         <button id="editObraCancel">Cancelar</button>
         <button class="btn-primary" id="editObraSave">💾 Salvar alteracoes</button>
@@ -953,6 +991,107 @@ function abrirEditarObra(obraId) {
   const fechar = () => overlay.classList.remove('open');
   document.getElementById('editObraX').onclick = fechar;
   document.getElementById('editObraCancel').onclick = fechar;
+
+  // Carrega + renderiza parcelas
+  const recarregarParcelas = async () => {
+    const box = document.getElementById('eoParcelasBox');
+    try {
+      const parcelas = await api(`/api/obras/${obraId}/parcelas`);
+      const total = parcelas.reduce((s, p) => s + Number(p.valor || 0), 0);
+      const totalPago = parcelas.filter(p => p.pago).reduce((s, p) => s + Number(p.valor || 0), 0);
+      box.innerHTML = `
+        ${parcelas.length === 0
+          ? '<p style="margin:0 0 10px; font-size:12px; color:var(--text-muted);">Nenhuma parcela cadastrada. Use o botão Auto-gerar abaixo ou adicione manualmente.</p>'
+          : `<table style="width:100%; font-size:12px; border-collapse:collapse;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <th style="text-align:left; padding:6px 4px;">Nº</th>
+                  <th style="text-align:left; padding:6px 4px;">Valor</th>
+                  <th style="text-align:left; padding:6px 4px;">Vencimento</th>
+                  <th style="text-align:left; padding:6px 4px;">Status</th>
+                  <th style="text-align:right; padding:6px 4px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${parcelas.map(p => `
+                  <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <td style="padding:6px 4px;">${p.numero}</td>
+                    <td style="padding:6px 4px;">${fmt(p.valor)}</td>
+                    <td style="padding:6px 4px;">${escape(p.vencimento || '-')}</td>
+                    <td style="padding:6px 4px;">${p.pago ? '<span style="color:var(--success);">✅ Pago</span>' : '<span style="color:var(--gold);">⏳ Pendente</span>'}</td>
+                    <td style="padding:6px 4px; text-align:right;">
+                      <button data-toggle-pago="${p.id}" data-pago="${p.pago ? 1 : 0}" style="padding:3px 8px; font-size:11px;">${p.pago ? 'Desmarcar' : 'Marcar pago'}</button>
+                      <button data-del-parc="${p.id}" class="btn-danger" style="padding:3px 8px; font-size:11px;">🗑️</button>
+                    </td>
+                  </tr>`).join('')}
+              </tbody>
+              <tfoot>
+                <tr style="border-top:2px solid var(--border);">
+                  <td colspan="2" style="padding:6px 4px; font-weight:600;">Total: ${fmt(total)}</td>
+                  <td colspan="3" style="padding:6px 4px; text-align:right; color:var(--success);">Pago: ${fmt(totalPago)} · Pendente: ${fmt(total - totalPago)}</td>
+                </tr>
+              </tfoot>
+            </table>`}
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">
+          <button id="eoAutoGerar" class="btn-gold">⚙️ Auto-gerar parcelas</button>
+          <button id="eoAddParc">➕ Adicionar parcela manual</button>
+        </div>
+      `;
+      // Wire actions
+      box.querySelectorAll('[data-toggle-pago]').forEach(b => b.onclick = async () => {
+        const id = b.dataset.togglePago;
+        const novo = b.dataset.pago === '1' ? false : true;
+        try {
+          await api('/api/parcelas/' + id, { method: 'PUT', body: JSON.stringify({ id, pago: novo }) });
+          await recarregarParcelas();
+        } catch (e) { alert('Erro: ' + (e?.message || e)); }
+      });
+      box.querySelectorAll('[data-del-parc]').forEach(b => b.onclick = async () => {
+        if (!confirm('Apagar essa parcela?')) return;
+        try {
+          await api('/api/parcelas/' + b.dataset.delParc, { method: 'DELETE' });
+          await recarregarParcelas();
+        } catch (e) { alert('Erro: ' + (e?.message || e)); }
+      });
+      document.getElementById('eoAutoGerar').onclick = async () => {
+        const dataIni = document.getElementById('eoIni').value;
+        if (!dataIni) return alert('Preencha "Data início oficial" primeiro pra calcular vencimentos.');
+        const valorTotal = parseFloat(document.getElementById('eoVal').value) || 0;
+        if (valorTotal <= 0) return alert('Preencha "Valor do contrato" primeiro.');
+        const qtd = parseInt(prompt('Quantas parcelas? (ex: 4 = 4 quinzenais)', '4'));
+        if (!qtd || qtd < 1) return;
+        const intervalo = parseInt(prompt('Intervalo entre parcelas em dias (14 = quinzenal):', '14')) || 14;
+        const primeiroVenc = parseInt(prompt('Primeiro vencimento em quantos dias após o início?', String(intervalo))) || intervalo;
+        try {
+          const out = await api(`/api/obras/${obraId}/parcelas/auto-gerar`, {
+            method: 'POST',
+            body: JSON.stringify({
+              obra_id: String(obraId), qtd_parcelas: qtd, valor_total: valorTotal,
+              data_inicio: dataIni, intervalo_dias: intervalo, primeiro_vencimento_em: primeiroVenc,
+            }),
+          });
+          alert(`✅ ${out.parcelas_criadas} parcelas criadas (${fmt(out.valor_parcela)} cada).`);
+          await recarregarParcelas();
+        } catch (e) { alert('Erro: ' + (e?.message || e)); }
+      };
+      document.getElementById('eoAddParc').onclick = async () => {
+        const valor = parseFloat(prompt('Valor da parcela (R$):'));
+        if (!valor || valor <= 0) return;
+        const venc = prompt('Vencimento (YYYY-MM-DD):');
+        if (!venc || !/^\d{4}-\d{2}-\d{2}$/.test(venc)) return alert('Data inválida. Use YYYY-MM-DD.');
+        try {
+          await api('/api/parcelas', {
+            method: 'POST',
+            body: JSON.stringify({ obra_id: String(obraId), valor, vencimento: venc }),
+          });
+          await recarregarParcelas();
+        } catch (e) { alert('Erro: ' + (e?.message || e)); }
+      };
+    } catch (e) {
+      box.innerHTML = `<p style="color:var(--danger);">Erro ao carregar: ${escape(e?.message || String(e))}</p>`;
+    }
+  };
+  recarregarParcelas();
 
   document.getElementById('editObraSave').onclick = async () => {
     const nome = document.getElementById('eoNome').value.trim();
@@ -970,10 +1109,13 @@ function abrirEditarObra(obraId) {
           cidade: document.getElementById('eoCidade').value.trim() || null,
           area_m2: parseFloat(document.getElementById('eoArea').value) || null,
           orcamento: parseFloat(document.getElementById('eoOrc').value) || null,
+          valor_contrato: parseFloat(document.getElementById('eoVal').value) || null,
           status: document.getElementById('eoStatus').value,
           responsavel_tecnico: document.getElementById('eoResp').value.trim() || null,
           data_inicio: document.getElementById('eoIni').value || null,
           data_previsao: document.getElementById('eoPrev').value || null,
+          prazo_dias: parseInt(document.getElementById('eoPzd').value) || null,
+          prazo_dias_uteis: parseInt(document.getElementById('eoPzu').value) || null,
           observacoes: document.getElementById('eoObs').value.trim() || null,
           confirm: true,
         }),
@@ -1603,6 +1745,19 @@ function renderFolha() {
   const obraOpts = '<option value="">Todas as obras</option>' + state.obras.map(o =>
     `<option value="${o.id}" ${o.id===state.folhaObraId?'selected':''}>${escape(o.nome)}</option>`).join('');
 
+  // v1.65.40: chip de status da quinzena ao lado do botao Recibo na Folha
+  // Mensal — espelha o que ja existe em Marcar Dias.
+  const periodoFolhaAtual = (() => {
+    const hoje = new Date();
+    const anoH = hoje.getFullYear(), mesH = hoje.getMonth() + 1;
+    let q;
+    if (state.folhaAno === anoH && state.folhaMes === mesH) {
+      q = hoje.getDate() <= 15 ? 1 : 2;
+    } else {
+      q = 2;
+    }
+    return `${state.folhaAno}-${String(state.folhaMes).padStart(2,'0')}-${q}`;
+  })();
   const linhas = f.funcionarios.map(p => `
     <tr>
       <td style="padding:8px; border-bottom:1px solid var(--border);">
@@ -1614,8 +1769,9 @@ function renderFolha() {
       <td style="text-align:center; color:var(--gold);">${p.tarde}</td>
       <td style="text-align:center;">${p.total_dias_equivalente}</td>
       <td style="text-align:right; color:var(--gold); font-weight:500;">${fmt(p.total_pagar)}</td>
-      <td style="text-align:center; padding:8px; border-bottom:1px solid var(--border);">
-        <button class="btn-gold" data-recibo="${p.funcionario_id}" style="font-size:11px; padding:4px 8px;">📄 Recibo</button>
+      <td style="text-align:center; padding:8px; border-bottom:1px solid var(--border); white-space:nowrap;">
+        <span data-folha-status="${p.funcionario_id}" style="font-size:11px; color:var(--text-muted); margin-right:6px;">⏳</span>
+        <button class="btn-gold" data-recibo="${p.funcionario_id}" data-nome="${escape(p.nome)}" style="font-size:11px; padding:4px 8px;">📄 Recibo</button>
       </td>
     </tr>
   `).join('');
@@ -1667,7 +1823,44 @@ function renderFolha() {
   };
   document.getElementById('folhaPdf').onclick = () => exportarFolhaPdf(monthLabel);
   document.getElementById('folhaCsv').onclick = () => exportarFolhaCsv(monthLabel);
-  v.querySelectorAll('[data-recibo]').forEach(b => b.onclick = () => gerarRecibo(b.dataset.recibo, monthLabel));
+  v.querySelectorAll('[data-recibo]').forEach(b => b.onclick = () => {
+    // v1.65.40: clicar em Recibo abre o modal de Recibo Quinzenal direto
+    // (mesmo que em Marcar Dias). Se quiser PDF tradicional, gerarRecibo()
+    // ainda funciona via fallback se o modal nao existir.
+    if (typeof abrirModalReciboQuinzena === 'function') {
+      abrirModalReciboQuinzena(b.dataset.recibo, b.dataset.nome || '', periodoFolhaAtual);
+    } else {
+      gerarRecibo(b.dataset.recibo, monthLabel);
+    }
+  });
+
+  // v1.65.40: carrega status da quinzena pra cada membro (paralelo)
+  (async () => {
+    const statusMap = {
+      pago:                            { icon: '✅', label: 'PAGO',        color: 'var(--success)' },
+      pix_recebido:                    { icon: '🔵', label: 'PIX',         color: '#4aa3ff' },
+      confirmado_aguardando_pix:       { icon: '🟢', label: 'Confirmou',   color: 'var(--neon)' },
+      enviado_aguardando_confirmacao:  { icon: '🟡', label: 'Enviado',     color: 'var(--gold)' },
+      contestado:                      { icon: '🔴', label: 'Contestado',  color: 'var(--danger)' },
+      expirado:                        { icon: '⏰', label: 'Expirado',    color: 'var(--warning)' },
+    };
+    await Promise.allSettled(f.funcionarios.map(async p => {
+      const target = v.querySelector(`[data-folha-status="${p.funcionario_id}"]`);
+      if (!target) return;
+      try {
+        const r = await api(`/api/recibos/envio-status?membro_id=${p.funcionario_id}&periodo=${periodoFolhaAtual}`);
+        const env = r && r.envio;
+        if (!env) {
+          target.innerHTML = `<span style="color:var(--gold); font-size:11px;">⚪ Aberta</span>`;
+        } else {
+          const m = statusMap[env.status] || { icon: '📤', label: env.status, color: 'var(--text)' };
+          target.innerHTML = `<span style="color:${m.color}; font-size:11px; font-weight:500;">${m.icon} ${escape(m.label)}</span>`;
+        }
+      } catch {
+        target.innerHTML = `<span style="font-size:10px; color:var(--text-muted);">—</span>`;
+      }
+    }));
+  })();
 }
 
 // Header dos relatórios — apenas a logo Romatec (a imagem já tem todo o branding).

@@ -637,6 +637,14 @@ app.post  ('/api/obras',     apiHandle(args => obras.criarObra(args as Parameter
 app.put   ('/api/obras/:id', apiHandle(args => obras.atualizarObra(args as Parameters<typeof obras.atualizarObra>[0])));
 app.delete('/api/obras/:id', apiHandle(args => obras.apagarObra(args as { id: string; confirm?: boolean })));
 
+// v1.65.40: Parcelas de pagamento do cliente (receita por obra)
+app.get   ('/api/obras/:obra_id/parcelas',     apiHandle(args => obras.listarParcelasObra((args as { obra_id: string }).obra_id)));
+app.post  ('/api/parcelas',                    apiHandle(args => obras.criarParcela(args as Parameters<typeof obras.criarParcela>[0])));
+app.put   ('/api/parcelas/:id',                apiHandle(args => obras.atualizarParcela(args as Parameters<typeof obras.atualizarParcela>[0])));
+app.delete('/api/parcelas/:id',                apiHandle(args => obras.apagarParcela(args as { id: string })));
+app.post  ('/api/obras/:obra_id/parcelas/auto-gerar', apiHandle(args => obras.gerarParcelasAutomaticas(args as Parameters<typeof obras.gerarParcelasAutomaticas>[0])));
+app.get   ('/api/parcelas-vencendo',           apiHandle(args => obras.parcelasVencendo(Number((args as { dias?: number }).dias ?? 7))));
+
 // Etapas
 app.get   ('/api/etapas',     apiHandle(args => obras.listarEtapasObra((args as { obra_id: string }).obra_id)));
 app.post  ('/api/etapas',     apiHandle(args => obras.criarEtapa(args as Parameters<typeof obras.criarEtapa>[0])));
