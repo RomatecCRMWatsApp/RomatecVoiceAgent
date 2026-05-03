@@ -644,21 +644,23 @@ app.put   ('/api/etapas/:id', apiHandle(args => obras.atualizarEtapa(args as Par
 app.delete('/api/etapas/:id', apiHandle(args => obras.apagarEtapa(args as { id: string; confirm?: boolean })));
 
 // v1.62.0: middleware de admin pra endpoints de mutação sensíveis (financeiro).
-// Header X-CEO-Token validado contra env var CEO_API_TOKEN. Sem token configurado
-// no servidor, libera tudo (dev local). Em produção SETAR a env var.
-function requireCeoToken(req: Request, res: Response, next: () => void): void {
-  const expected = process.env.CEO_API_TOKEN;
-  if (!expected) {
-    // Sem env var em produção = warning visível
-    console.warn('[auth] CEO_API_TOKEN não setado — endpoint admin LIBERADO. Configure no Railway pra proteger.');
-    return next();
-  }
-  const got = (req.headers['x-ceo-token'] || req.headers['X-CEO-Token']) as string | undefined;
-  if (got !== expected) {
-    res.status(403).json({ error: 'Forbidden — header X-CEO-Token ausente ou inválido.' });
-    return;
-  }
-  next();
+// v1.65.38: DESABILITADO temporariamente — sistema em uso pessoal do CEO,
+// sem necessidade de auth. Quando virar SaaS multi-tenant, reabilitar
+// validacao do header X-CEO-Token contra CEO_API_TOKEN do .env.
+// Pra reativar: descomentar o bloco abaixo e remover o "return next()".
+function requireCeoToken(_req: Request, _res: Response, next: () => void): void {
+  return next();
+  // const expected = process.env.CEO_API_TOKEN;
+  // if (!expected) {
+  //   console.warn('[auth] CEO_API_TOKEN não setado — endpoint admin LIBERADO. Configure no Railway pra proteger.');
+  //   return next();
+  // }
+  // const got = (_req.headers['x-ceo-token'] || _req.headers['X-CEO-Token']) as string | undefined;
+  // if (got !== expected) {
+  //   _res.status(403).json({ error: 'Forbidden — header X-CEO-Token ausente ou inválido.' });
+  //   return;
+  // }
+  // next();
 }
 
 // v1.64.0: tenant settings (white-label estrutural). GET é público, PUT só CEO.

@@ -1449,7 +1449,8 @@ function renderMarcarDias() {
     abrirCalendario(b.dataset.calMarcar, b.dataset.nome, parseFloat(b.dataset.vd) || 0, state.currentObra);
   });
   v.querySelectorAll('[data-recibo-q]').forEach(b => b.onclick = () => {
-    abrirModalReciboQuinzena(b.dataset.reciboQ, b.dataset.nome);
+    // v1.65.38: passa o periodo do mes navegado pro modal abrir nele
+    abrirModalReciboQuinzena(b.dataset.reciboQ, b.dataset.nome, periodoLinhasAtual);
   });
 
   // v1.65.30: carrega status do envio da quinzena atual pra cada membro
@@ -1482,7 +1483,7 @@ function renderMarcarDias() {
         }
         // re-bind do click handler nos novos <a>
         target.querySelectorAll('[data-recibo-q]').forEach(a => {
-          a.onclick = ev => { ev.preventDefault(); abrirModalReciboQuinzena(a.dataset.reciboQ, a.dataset.nome); };
+          a.onclick = ev => { ev.preventDefault(); abrirModalReciboQuinzena(a.dataset.reciboQ, a.dataset.nome, periodoLinhasAtual); };
         });
       } catch {
         target.innerHTML = `<span style="color:var(--text-muted); font-size:11px;">— status indisponível —</span>`;
@@ -2703,8 +2704,10 @@ function periodoLabel(codigo) {
   return `${m[3]}ª quinzena de ${meses[Number(m[2])]}/${m[1]}`;
 }
 
-async function abrirModalReciboQuinzena(membroId, nome) {
-  const periodoIni = periodoQuinzenaAtual();
+async function abrirModalReciboQuinzena(membroId, nome, periodoInicial) {
+  // v1.65.38: aceita periodo inicial (ex: do chip externo). Fallback pra
+  // quinzena atual se nao passar.
+  const periodoIni = periodoInicial || periodoQuinzenaAtual();
   // Gera 6 períodos pra trás + o atual
   const opts = [];
   const d = new Date();
@@ -2843,6 +2846,7 @@ async function abrirModalReciboQuinzena(membroId, nome) {
             });
             alert('✅ ' + (out.message || 'Disparado.'));
             await recarregarStatus();
+            if (typeof render === 'function') render();
           } catch (e) { mostrarErroApi(e); btn.disabled = false; btn.textContent = '📤 Enviar agora via WhatsApp'; }
         };
         // v1.65.32: registra pagamento offline (sem WhatsApp)
@@ -2862,6 +2866,7 @@ async function abrirModalReciboQuinzena(membroId, nome) {
             });
             alert('✅ ' + (out.message || 'Registrado como PAGO.'));
             await recarregarStatus();
+            if (typeof render === 'function') render();
           } catch (e) { mostrarErroApi(e); btn.disabled = false; btn.textContent = '✅ Marcar PAGO sem enviar'; }
         };
         return;
@@ -2947,6 +2952,7 @@ async function abrirModalReciboQuinzena(membroId, nome) {
             body: JSON.stringify({ envio_id: String(env.id), status: statusNovo, motivo, marcador: 'CEO via UI Marcar Dias' }),
           });
           await recarregarStatus();
+          if (typeof render === 'function') render();
         } catch (e) { mostrarErroApi(e); }
       };
       const reenvBtn = document.getElementById('rqReenviar');
@@ -2968,6 +2974,7 @@ async function abrirModalReciboQuinzena(membroId, nome) {
             }),
           });
           await recarregarStatus();
+          if (typeof render === 'function') render();
         } catch (e) { mostrarErroApi(e); }
       };
       const map = {
@@ -2981,6 +2988,7 @@ async function abrirModalReciboQuinzena(membroId, nome) {
         if (el) el.onclick = () => rebind(st);
       }
       // v1.65.35: apagar envio (volta quinzena pra ABERTA)
+      // v1.65.38: apos sucesso, re-renderiza a lista externa (chip) tambem
       const apagarBtn = document.getElementById('rqApagarEnvio');
       if (apagarBtn) apagarBtn.onclick = async () => {
         const ok = await confirmarAcao({
@@ -2996,6 +3004,7 @@ async function abrirModalReciboQuinzena(membroId, nome) {
           });
           alert('🗑️ ' + (out.message || 'Apagado.'));
           await recarregarStatus();
+          if (typeof render === 'function') render();
         } catch (e) { mostrarErroApi(e); }
       };
 
