@@ -4622,6 +4622,8 @@ function renderFossaCorte() {
       <button onclick="baixarSvgCalc('svgFsCorte','corte_vertical')">⬇ SVG</button>
       <button onclick="baixarPngCalc('svgFsCorte','corte_vertical')">⬇ PNG</button>
       <button onclick="baixarJpegCalc('svgFsCorte','corte_vertical')">⬇ JPEG</button>
+      <button onclick="baixarPdfCalc('svgFsCorte','corte_vertical')">⬇ PDF</button>
+      <button onclick="baixarDxfFossaCorte()" style="background:var(--gold); color:#000;">⬇ DXF (CAD)</button>
     </div>
   `;
 }
@@ -4692,6 +4694,8 @@ function renderFossaPlanta() {
       <button onclick="baixarSvgCalc('svgFsPlanta','planta_baixa')">⬇ SVG</button>
       <button onclick="baixarPngCalc('svgFsPlanta','planta_baixa')">⬇ PNG</button>
       <button onclick="baixarJpegCalc('svgFsPlanta','planta_baixa')">⬇ JPEG</button>
+      <button onclick="baixarPdfCalc('svgFsPlanta','planta_baixa')">⬇ PDF</button>
+      <button onclick="baixarDxfFossaPlanta()" style="background:var(--gold); color:#000;">⬇ DXF (CAD)</button>
     </div>
   `;
 }
@@ -4807,6 +4811,262 @@ function baixarJpegCalc(svgId, nome) {
     const u = URL.createObjectURL(b); const a = document.createElement('a');
     a.href = u; a.download = nome+'.jpg'; a.click(); URL.revokeObjectURL(u);
   },'image/jpeg', 0.95));
+}
+
+// PDF: abre janela com SVG + autotrigger de impressao (Save as PDF)
+function baixarPdfCalc(svgId, nome) {
+  const svg = document.getElementById(svgId);
+  let s = new XMLSerializer().serializeToString(svg);
+  if (!s.includes('xmlns')) s = s.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
+  const w = window.open('', '_blank');
+  if (!w) return alert('Pop-up bloqueado. Permita pop-ups e tente novamente.');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>${nome}</title>
+    <style>
+      body { margin:0; padding:20px; background:white; font-family:Arial,sans-serif; }
+      svg { max-width:100%; height:auto; display:block; margin:0 auto; }
+      .actions { text-align:center; margin-bottom:20px; }
+      button { padding:10px 20px; cursor:pointer; font-size:14px; margin:0 5px; }
+      @media print { .actions { display:none; } body { padding:0; } @page { size:A4; margin:1cm; } }
+    </style></head><body>
+    <div class="actions">
+      <button onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
+      <button onclick="window.close()">Fechar</button>
+    </div>
+    ${s}
+    </body></html>`);
+  w.document.close();
+}
+
+// DXF: gera arquivo CAD compatível com AutoCAD/LibreCAD/etc
+// Recebe tipo + função que retorna entidades DXF baseadas em FOSSA_DADOS/COB_DADOS
+function _dxfHelpers() {
+  return {
+    line: (x1,y1,x2,y2,layer='0') => `0\nLINE\n8\n${layer}\n10\n${x1}\n20\n${y1}\n11\n${x2}\n21\n${y2}\n`,
+    circle: (cx,cy,r,layer='0') => `0\nCIRCLE\n8\n${layer}\n10\n${cx}\n20\n${cy}\n40\n${r}\n`,
+    text: (x,y,h,str,layer='TEXTOS') => `0\nTEXT\n8\n${layer}\n10\n${x}\n20\n${y}\n40\n${h}\n1\n${str}\n`,
+    rect: (x,y,w,h,layer='0') => {
+      const L = (x1,y1,x2,y2) => `0\nLINE\n8\n${layer}\n10\n${x1}\n20\n${y1}\n11\n${x2}\n21\n${y2}\n`;
+      return L(x,y,x+w,y) + L(x+w,y,x+w,y+h) + L(x+w,y+h,x,y+h) + L(x,y+h,x,y);
+    },
+  };
+}
+function _baixarDxf(entities, nome) {
+  const dxf = `0
+SECTION
+2
+HEADER
+9
+$ACADVER
+1
+AC1009
+0
+ENDSEC
+0
+SECTION
+2
+TABLES
+0
+TABLE
+2
+LAYER
+70
+8
+0
+LAYER
+2
+0
+70
+0
+62
+7
+6
+CONTINUOUS
+0
+LAYER
+2
+PRINCIPAL
+70
+0
+62
+1
+6
+CONTINUOUS
+0
+LAYER
+2
+PAREDE
+70
+0
+62
+8
+6
+CONTINUOUS
+0
+LAYER
+2
+TUBO
+70
+0
+62
+4
+6
+CONTINUOUS
+0
+LAYER
+2
+TERRENO
+70
+0
+62
+2
+6
+CONTINUOUS
+0
+LAYER
+2
+TEXTOS
+70
+0
+62
+7
+6
+CONTINUOUS
+0
+LAYER
+2
+COTAS
+70
+0
+62
+1
+6
+CONTINUOUS
+0
+ENDTAB
+0
+ENDSEC
+0
+SECTION
+2
+ENTITIES
+${entities}0
+ENDSEC
+0
+EOF`;
+  const blob = new Blob([dxf], {type:'application/dxf'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = nome+'.dxf'; a.click();
+  URL.revokeObjectURL(url);
+  setTimeout(() => alert('DXF gerado!\n\nAbra no AutoCAD, ZWCAD, BricsCAD ou LibreCAD (gratuito).\nPara converter em DWG: Arquivo → Salvar Como → DWG.'), 200);
+}
+
+// DXF da Fossa Septica (corte)
+function baixarDxfFossaCorte() {
+  const d = FOSSA_DADOS; if (!d) return;
+  const h = _dxfHelpers();
+  const x_fs = 0;
+  const x_filtro = x_fs + (d.formato==='retangular'?d.L_fs:d.D_fs) + 1.0;
+  const x_sum = x_filtro + d.D_filtro + 1.0;
+  const w_fs = d.formato==='retangular' ? d.L_fs : d.D_fs;
+  let e = '';
+  e += h.rect(x_fs, -d.prof_fs, w_fs, d.prof_fs, 'PRINCIPAL');
+  e += h.rect(x_fs-0.10, -d.prof_fs-0.10, w_fs+0.20, d.prof_fs+0.20, 'PAREDE');
+  e += h.text(x_fs+w_fs/2-0.5, 0.30, 0.15, 'FOSSA SEPTICA');
+  e += h.text(x_fs, -d.prof_fs-0.4, 0.10, 'L='+fmt(w_fs)+'m H='+fmt(d.prof_fs)+'m', 'COTAS');
+  e += h.rect(x_filtro, -d.h_filtro_total, d.D_filtro, d.h_filtro_total, 'PRINCIPAL');
+  e += h.rect(x_filtro-0.10, -d.h_filtro_total-0.10, d.D_filtro+0.20, d.h_filtro_total+0.20, 'PAREDE');
+  e += h.rect(x_filtro, -1.50, d.D_filtro, 1.20, 'PRINCIPAL');
+  e += h.text(x_filtro+d.D_filtro/2-0.5, 0.30, 0.15, 'FILTRO ANAEROBIO');
+  e += h.text(x_filtro+0.1, -0.9, 0.08, 'BRITA No 4 h=1.20m');
+  e += h.text(x_filtro, -d.h_filtro_total-0.4, 0.10, 'D='+fmt(d.D_filtro)+'m', 'COTAS');
+  e += h.rect(x_sum, -d.profSum, d.D_sum, d.profSum, 'PRINCIPAL');
+  e += h.text(x_sum+d.D_sum/2-0.5, 0.30, 0.15, 'SUMIDOURO');
+  e += h.text(x_sum, -d.profSum-0.4, 0.10, 'D='+fmt(d.D_sum)+'m', 'COTAS');
+  e += h.line(x_fs-1, 0, x_sum+d.D_sum+1, 0, 'TERRENO');
+  e += h.text(x_fs-0.8, 0.10, 0.08, 'N.T.');
+  e += h.line(x_fs+w_fs, -0.5, x_filtro, -0.5, 'TUBO');
+  e += h.line(x_filtro+d.D_filtro, -0.3, x_sum, -0.3, 'TUBO');
+  e += h.text(x_fs, 1.2, 0.25, 'CORTE VERTICAL - SISTEMA TRATAMENTO ESGOTO');
+  e += h.text(x_fs, 0.85, 0.10, escape(d.obra));
+  _baixarDxf(e, 'fossa_corte');
+}
+
+// DXF Fossa planta
+function baixarDxfFossaPlanta() {
+  const d = FOSSA_DADOS; if (!d) return;
+  const h = _dxfHelpers();
+  const x_fs=0, x_filtro = x_fs+(d.formato==='retangular'?d.L_fs:d.D_fs)+1.0;
+  const x_sum = x_filtro+d.D_filtro+1.0;
+  const w_fs = d.formato==='retangular'?d.L_fs:d.D_fs;
+  const b_fs = d.formato==='retangular'?d.B_fs:d.D_fs;
+  let e='';
+  if (d.formato==='retangular') {
+    e += h.rect(x_fs,0,w_fs,b_fs,'PRINCIPAL');
+    e += h.rect(x_fs-0.10,-0.10,w_fs+0.20,b_fs+0.20,'PAREDE');
+    e += h.line(x_fs+w_fs*0.6,0,x_fs+w_fs*0.6,b_fs,'PRINCIPAL');
+  } else {
+    e += h.circle(x_fs+w_fs/2,b_fs/2,w_fs/2,'PRINCIPAL');
+    e += h.circle(x_fs+w_fs/2,b_fs/2,w_fs/2+0.10,'PAREDE');
+  }
+  e += h.text(x_fs+w_fs/2-0.5,b_fs+0.3,0.15,'FOSSA SEPTICA');
+  e += h.circle(x_filtro+d.D_filtro/2,b_fs/2,d.D_filtro/2,'PRINCIPAL');
+  e += h.circle(x_filtro+d.D_filtro/2,b_fs/2,d.D_filtro/2+0.10,'PAREDE');
+  e += h.text(x_filtro+d.D_filtro/2-0.5,b_fs/2+d.D_filtro/2+0.3,0.15,'FILTRO ANAEROBIO');
+  e += h.circle(x_sum+d.D_sum/2,b_fs/2,d.D_sum/2,'PRINCIPAL');
+  e += h.text(x_sum+d.D_sum/2-0.5,b_fs/2+d.D_sum/2+0.3,0.15,'SUMIDOURO');
+  e += h.line(x_fs+w_fs,b_fs/2,x_filtro,b_fs/2,'TUBO');
+  e += h.line(x_filtro+d.D_filtro,b_fs/2,x_sum,b_fs/2,'TUBO');
+  e += h.text(x_fs, b_fs+1.5, 0.25, 'PLANTA BAIXA - SISTEMA TRATAMENTO');
+  _baixarDxf(e, 'fossa_planta');
+}
+
+// DXF Cobertura corte
+function baixarDxfCobCorte() {
+  const d = COB_DADOS; if (!d) return;
+  const h = _dxfHelpers();
+  const h_telhado = (d.B/2) * Math.tan(Math.atan(d.inc/100));
+  let e = '';
+  // Paredes
+  e += h.rect(0, 0, 0.20, 3, 'PAREDE');
+  e += h.rect(d.B-0.20, 0, 0.20, 3, 'PAREDE');
+  // Telhado (linhas inclinadas)
+  e += h.line(-d.beiral, 3, d.B/2, 3+h_telhado, 'PRINCIPAL');
+  e += h.line(d.B/2, 3+h_telhado, d.B+d.beiral, 3, 'PRINCIPAL');
+  // Cumeeira
+  e += h.circle(d.B/2, 3+h_telhado, 0.05, 'PRINCIPAL');
+  e += h.text(d.B/2-0.5, 3+h_telhado+0.2, 0.10, 'CUMEEIRA');
+  // Solo
+  e += h.line(-d.beiral-0.5, 0, d.B+d.beiral+0.5, 0, 'TERRENO');
+  e += h.text(-d.beiral, 0.10, 0.08, 'N.T.');
+  // Cotas
+  e += h.text(d.B/2-0.5, -0.5, 0.10, 'L='+fmt(d.B+2*d.beiral)+'m', 'COTAS');
+  e += h.text(d.B+d.beiral+0.3, 1.5, 0.10, 'parede 3m', 'COTAS');
+  e += h.text(d.B+d.beiral+0.3, 3+h_telhado/2, 0.10, 'h='+fmt(h_telhado,2)+'m', 'COTAS');
+  // Titulo
+  e += h.text(0, 3+h_telhado+1, 0.25, 'CORTE TRANSVERSAL TELHADO');
+  e += h.text(0, 3+h_telhado+0.7, 0.10, d.t.label+' - inc.'+d.inc+'%');
+  _baixarDxf(e, 'telhado_corte');
+}
+
+function baixarDxfCobPlanta() {
+  const d = COB_DADOS; if (!d) return;
+  const h = _dxfHelpers();
+  let e = '';
+  e += h.rect(0, 0, d.L_total, d.B_total, 'PRINCIPAL');
+  e += h.rect(d.beiral, d.beiral, d.L, d.B, 'PAREDE');
+  if (d.aguas === 2) {
+    e += h.line(0, d.B_total/2, d.L_total, d.B_total/2, 'PRINCIPAL');
+    e += h.text(d.L_total/2-0.5, d.B_total/2+0.15, 0.15, 'CUMEEIRA');
+  } else if (d.aguas === 4) {
+    e += h.line(0, 0, d.L_total/2, d.B_total/2, 'PRINCIPAL');
+    e += h.line(d.L_total, 0, d.L_total/2, d.B_total/2, 'PRINCIPAL');
+    e += h.line(0, d.B_total, d.L_total/2, d.B_total/2, 'PRINCIPAL');
+    e += h.line(d.L_total, d.B_total, d.L_total/2, d.B_total/2, 'PRINCIPAL');
+  }
+  e += h.text(0, d.B_total+0.5, 0.25, 'PLANTA COBERTURA - '+d.aguas+' AGUAS');
+  e += h.text(d.L_total/2-0.5, -0.5, 0.10, 'L='+fmt(d.L_total)+'m', 'COTAS');
+  _baixarDxf(e, 'telhado_planta');
 }
 
 // ─── 2. CONCRETO ───────────────────────────────────────────────────────
@@ -5285,34 +5545,383 @@ const TELHAS_TIPOS = {
   policarbonato:     { peso_m2: 8,  qtd_m2: 0.5, inc_min: 5, label: 'Policarbonato', madeiramento: 'minimo' },
 };
 
+let COB_DADOS = null;
+
 function renderCalcCobertura() {
   document.getElementById('calcContent').innerHTML = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
-      <div class="card">
-        <p class="section-title">Cobertura e Telhado</p>
-        <div class="form-grid">
-          <select id="cbTipo" style="grid-column: span 2;">
-            ${Object.entries(TELHAS_TIPOS).map(([k,t]) => `<option value="${k}">${t.label} (${t.qtd_m2 < 1 ? `${t.qtd_m2.toFixed(2)} un/m²` : `${t.qtd_m2} un/m²`})</option>`).join('')}
-          </select>
-          <input id="cbL" type="number" step="0.01" placeholder="Comprimento da casa (m)" value="10">
-          <input id="cbB" type="number" step="0.01" placeholder="Largura da casa (m)" value="8">
-          <input id="cbBeiral" type="number" step="0.01" placeholder="Beiral/avanço (m)" value="0.6">
-          <input id="cbInc" type="number" step="0.01" placeholder="Inclinação (%)" value="35">
-          <select id="cbAguas" style="grid-column: span 2;">
-            <option value="2" selected>2 águas (mais comum)</option>
-            <option value="4">4 águas (telhado piramidal)</option>
-            <option value="1">1 água (cobertura única inclinada)</option>
-          </select>
-          <input id="cbPerda" type="number" step="0.01" placeholder="% perda" value="10">
-        </div>
-        <button class="btn-primary" id="cbCalc" style="margin-top:10px; width:100%;">▶ Calcular</button>
+    <div class="card" style="margin-bottom:14px;">
+      <p class="section-title">Cobertura e Telhado</p>
+      <div class="form-grid">
+        <input id="cbObra" type="text" placeholder="Identificação da obra" style="grid-column: span 2;">
+        <select id="cbTipo" style="grid-column: span 2;">
+          ${Object.entries(TELHAS_TIPOS).map(([k,t]) => `<option value="${k}">${t.label}</option>`).join('')}
+        </select>
+        <input id="cbL" type="number" step="0.01" placeholder="Comprimento da casa (m)" value="10">
+        <input id="cbB" type="number" step="0.01" placeholder="Largura da casa (m)" value="8">
+        <input id="cbBeiral" type="number" step="0.01" placeholder="Beiral/avanço (m)" value="0.6">
+        <input id="cbInc" type="number" step="0.01" placeholder="Inclinação (%)" value="35">
+        <select id="cbAguas" style="grid-column: span 2;">
+          <option value="2" selected>2 águas (mais comum)</option>
+          <option value="4">4 águas (piramidal)</option>
+          <option value="1">1 água (única inclinada)</option>
+        </select>
+        <input id="cbPerda" type="number" step="0.01" placeholder="% perda" value="10">
       </div>
-      <div class="card" id="cbResultado">
-        <p class="section-title">Resultados</p>
-        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha e clique em Calcular</p>
+      <button class="btn-primary" id="cbCalc" style="margin-top:10px; width:100%;">▶ Calcular & Desenhar</button>
+    </div>
+
+    <div id="cbOutput" style="display:none;">
+      <div class="tabs" style="margin-bottom:0;">
+        <button class="tab active" data-cbtab="num">📊 Cálculos</button>
+        <button class="tab" data-cbtab="corte">📐 Corte do Telhado</button>
+        <button class="tab" data-cbtab="planta">🗺 Planta</button>
+        <button class="tab" data-cbtab="det">📋 Detalhes</button>
+      </div>
+      <div class="card" style="border-top:none; border-radius:0 0 var(--radius) var(--radius);">
+        <div id="cb-num" class="cbtab"></div>
+        <div id="cb-corte" class="cbtab" style="display:none;"></div>
+        <div id="cb-planta" class="cbtab" style="display:none;"></div>
+        <div id="cb-det" class="cbtab" style="display:none;"></div>
       </div>
     </div>
   `;
+  document.getElementById('cbCalc').onclick = calcularCobertura;
+  document.querySelectorAll('[data-cbtab]').forEach(b => b.onclick = () => {
+    document.querySelectorAll('[data-cbtab]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    document.querySelectorAll('.cbtab').forEach(x => x.style.display = 'none');
+    document.getElementById('cb-' + b.dataset.cbtab).style.display = 'block';
+  });
+}
+
+function calcularCobertura() {
+  const obra = document.getElementById('cbObra').value || 'Projeto sem identificação';
+  const tKey = document.getElementById('cbTipo').value;
+  const t = TELHAS_TIPOS[tKey];
+  const L = parseFloat(document.getElementById('cbL').value);
+  const B = parseFloat(document.getElementById('cbB').value);
+  const beiral = parseFloat(document.getElementById('cbBeiral').value) || 0;
+  const inc = parseFloat(document.getElementById('cbInc').value) || 30;
+  const aguas = parseInt(document.getElementById('cbAguas').value);
+  const perda = parseFloat(document.getElementById('cbPerda').value) / 100;
+  if (!L || !B) return alert('Preencha as dimensões da casa.');
+
+  const L_total = L + 2*beiral;
+  const B_total = B + 2*beiral;
+  const area_proj = L_total * B_total;
+  const angulo = Math.atan(inc/100);
+  const fator = 1/Math.cos(angulo);
+  const area_inclinada = area_proj * fator;
+  const qtd_telhas = Math.ceil(area_inclinada * t.qtd_m2 * (1+perda));
+  const peso_total = area_inclinada * t.peso_m2;
+
+  let madTipo, caibros_m=0, ripas_m=0, tercas_m=0, tesouras=0, parafusos=0;
+  if (t.madeiramento === 'completo') {
+    caibros_m = area_inclinada*2;
+    ripas_m = area_inclinada*3.1;
+    tercas_m = area_inclinada*0.7;
+    tesouras = aguas===4 ? Math.ceil(L/3)+Math.ceil(B/3) : Math.ceil(L/3);
+    madTipo = 'completo';
+  } else if (t.madeiramento === 'reduzido') {
+    tercas_m = area_inclinada*1.5;
+    tesouras = aguas===4 ? Math.ceil(L/3.5)+Math.ceil(B/3.5) : Math.ceil(L/3.5);
+    madTipo = 'reduzido';
+  } else {
+    tercas_m = area_inclinada*1.0;
+    parafusos = Math.ceil(area_inclinada*6);
+    madTipo = 'minimo';
+  }
+  const incOk = inc >= t.inc_min;
+
+  COB_DADOS = {
+    obra, t, tKey, L, B, beiral, inc, aguas, perda, L_total, B_total,
+    area_proj, area_inclinada, fator, qtd_telhas, peso_total,
+    caibros_m, ripas_m, tercas_m, tesouras, parafusos, madTipo, incOk,
+  };
+  document.getElementById('cbOutput').style.display = 'block';
+  renderCobNum(); renderCobCorte(); renderCobPlanta(); renderCobDet();
+}
+
+function renderCobNum() {
+  const d = COB_DADOS;
+  const aviso = !d.incOk ? `<p style="color:var(--danger); font-weight:600; margin-top:10px;">⚠ Inclinação ${d.inc}% abaixo do mínimo (${d.t.inc_min}%) para ${d.t.label}. Risco de infiltração.</p>` : '';
+  document.getElementById('cb-num').innerHTML = `
+    <div style="font-style:italic; padding:10px 14px; background:var(--surface-2); border-left:3px solid var(--gold); margin-bottom:14px;">
+      <b>${escape(d.obra)}</b><br>
+      <span style="font-size:12px; color:var(--text-muted);">${d.t.label} · ${d.aguas} água(s) · ${d.L}×${d.B}m + ${d.beiral}m beiral · inc. ${d.inc}%</span>
+    </div>
+    <div style="display:grid; gap:14px;">
+      <div style="padding:14px; background:var(--surface-1); border-left:4px solid var(--gold);">
+        <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">ÁREA INCLINADA DO TELHADO</p>
+        <p style="font-size:24px; font-weight:600; color:var(--gold); margin:4px 0;">${fmt(d.area_inclinada,2)} m²</p>
+        <p style="font-size:13px;">Projetada: ${fmt(d.area_proj,2)} m² · fator: ${fmt(d.fator,3)}</p>
+      </div>
+      <div style="padding:14px; background:var(--surface-1); border-left:4px solid var(--neon);">
+        <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">TELHAS</p>
+        <p style="font-size:20px; font-weight:600; color:var(--neon);">${d.qtd_telhas.toLocaleString('pt-BR')} unidades</p>
+        <p style="font-size:13px;">Peso total: <b>${fmt(d.peso_total,0)} kg</b> (${d.t.peso_m2} kg/m²) · com ${(d.perda*100).toFixed(0)}% perda</p>
+      </div>
+      <div style="padding:14px; background:var(--surface-1); border-left:4px solid #4aa3ff;">
+        <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">MADEIRAMENTO (${d.madTipo})</p>
+        ${d.caibros_m>0?`<p>Caibros 6×8cm: <b>${fmt(d.caibros_m,1)} m</b></p>`:''}
+        ${d.ripas_m>0?`<p>Ripas 2×5cm: <b>${fmt(d.ripas_m,1)} m</b></p>`:''}
+        ${d.tercas_m>0?`<p>Terças 6×12cm: <b>${fmt(d.tercas_m,1)} m</b></p>`:''}
+        ${d.tesouras>0?`<p>Tesouras: <b>${d.tesouras} unidades</b></p>`:''}
+        ${d.parafusos>0?`<p>Parafusos auto-brocantes: <b>${d.parafusos} un</b></p>`:''}
+      </div>
+      ${aviso}
+    </div>
+  `;
+}
+
+function renderCobCorte() {
+  const d = COB_DADOS;
+  const SC = 30; // 1m = 30px
+  const PAD = 80;
+  const w_casa = d.B * SC;
+  const h_parede = 3 * SC;
+  // altura do telhado = (B/2) * tg(angulo)
+  const h_telhado = (d.B/2) * Math.tan(Math.atan(d.inc/100)) * SC;
+  const beiral_px = d.beiral * SC;
+  const total_w = w_casa + 2*beiral_px + 2*PAD;
+  const total_h = h_parede + h_telhado + 200;
+  const x0 = PAD;
+  const x_casa = x0 + beiral_px;
+  const y_solo = total_h - 100;
+  const y_topo_parede = y_solo - h_parede;
+  const y_cumeeira = y_topo_parede - h_telhado;
+
+  // pontos do telhado (inclinado)
+  const x_esq = x0;  // beiral esquerdo
+  const x_dir = x0 + 2*beiral_px + w_casa;
+  const x_centro = x_casa + w_casa/2;
+
+  const svg = `<svg id="svgCbCorte" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total_w} ${total_h}" style="font-family:Consolas,monospace; font-size:11px;">
+    <defs>
+      <pattern id="cbTelha" patternUnits="userSpaceOnUse" width="20" height="8">
+        <path d="M0,0 Q5,4 10,0 Q15,4 20,0" stroke="#8a3920" fill="#b04a2f" stroke-width="0.6"/>
+      </pattern>
+      <pattern id="cbMadeira" patternUnits="userSpaceOnUse" width="6" height="20">
+        <rect width="6" height="20" fill="#8a6a3a"/>
+        <line x1="0" y1="5" x2="6" y2="5" stroke="#5c4a2d" stroke-width="0.5"/>
+        <line x1="0" y1="13" x2="6" y2="13" stroke="#5c4a2d" stroke-width="0.5"/>
+      </pattern>
+      <pattern id="cbConcr" patternUnits="userSpaceOnUse" width="6" height="6">
+        <circle cx="3" cy="3" r="0.8" fill="#888"/>
+      </pattern>
+      <pattern id="cbSolo" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="8" stroke="#a08568" stroke-width="1.2"/>
+      </pattern>
+    </defs>
+    <rect width="${total_w}" height="${total_h}" fill="white"/>
+    <text x="${total_w/2}" y="25" text-anchor="middle" font-size="16" font-weight="bold">CORTE TRANSVERSAL — TELHADO ${d.t.label.toUpperCase()}</text>
+    <text x="${total_w/2}" y="42" text-anchor="middle" font-size="10">Esc. aprox. 1:30 · Inclinação ${d.inc}% · ${escape(d.obra)}</text>
+
+    <!-- Solo -->
+    <rect x="0" y="${y_solo}" width="${total_w}" height="${total_h-y_solo}" fill="url(#cbSolo)" opacity="0.4"/>
+    <line x1="0" y1="${y_solo}" x2="${total_w}" y2="${y_solo}" stroke="#1a1916" stroke-width="2"/>
+
+    <!-- Paredes laterais -->
+    <rect x="${x_casa}" y="${y_topo_parede}" width="20" height="${h_parede}" fill="url(#cbConcr)" stroke="#1a1916"/>
+    <rect x="${x_casa+w_casa-20}" y="${y_topo_parede}" width="20" height="${h_parede}" fill="url(#cbConcr)" stroke="#1a1916"/>
+
+    <!-- Frechais (peças que sustentam telhado) -->
+    <rect x="${x_casa-5}" y="${y_topo_parede-12}" width="30" height="12" fill="url(#cbMadeira)" stroke="#1a1916"/>
+    <rect x="${x_casa+w_casa-25}" y="${y_topo_parede-12}" width="30" height="12" fill="url(#cbMadeira)" stroke="#1a1916"/>
+    <text x="${x_casa-30}" y="${y_topo_parede-15}" font-size="9">frechal</text>
+
+    <!-- Telhado: 2 águas -->
+    <!-- água esquerda -->
+    <polygon points="${x_esq},${y_topo_parede-5} ${x_centro},${y_cumeeira-5} ${x_centro},${y_cumeeira+15} ${x_esq},${y_topo_parede+15}" fill="url(#cbTelha)" stroke="#8a3920" stroke-width="1.5"/>
+    <!-- água direita -->
+    <polygon points="${x_centro},${y_cumeeira-5} ${x_dir},${y_topo_parede-5} ${x_dir},${y_topo_parede+15} ${x_centro},${y_cumeeira+15}" fill="url(#cbTelha)" stroke="#8a3920" stroke-width="1.5"/>
+
+    ${d.madTipo === 'completo' ? `
+      <!-- Caibros (linha tracejada perpendicular ao telhado) -->
+      ${[0.15, 0.35, 0.55, 0.75, 0.95].map(p => {
+        const x_int_e = x_esq + (x_centro-x_esq)*p;
+        const y_int_e = (y_topo_parede-5) + (y_cumeeira-y_topo_parede)*p;
+        const x_int_d = x_centro + (x_dir-x_centro)*p;
+        const y_int_d = (y_cumeeira-5) + (y_topo_parede-y_cumeeira)*p;
+        return `<line x1="${x_int_e}" y1="${y_int_e+15}" x2="${x_int_e+8}" y2="${y_int_e+15}" stroke="#5c4a2d" stroke-width="2"/>
+                <line x1="${x_int_d-8}" y1="${y_int_d+15}" x2="${x_int_d}" y2="${y_int_d+15}" stroke="#5c4a2d" stroke-width="2"/>`;
+      }).join('')}
+      <!-- Ripas (paralelas ao terreno) -->
+      ${[0.10, 0.30, 0.50, 0.70, 0.90].map(p => {
+        const y_e = y_topo_parede + (y_cumeeira-y_topo_parede)*p;
+        const x_l = x_esq + (x_centro-x_esq)*p;
+        return `<line x1="${x_l}" y1="${y_e+5}" x2="${2*x_centro-x_l}" y2="${y_e+5}" stroke="#5c4a2d" stroke-width="1" stroke-dasharray="3 3"/>`;
+      }).join('')}
+      <!-- Tesoura (estrutura interna) -->
+      <line x1="${x_casa+10}" y1="${y_topo_parede}" x2="${x_centro}" y2="${y_cumeeira+15}" stroke="#5c4a2d" stroke-width="3"/>
+      <line x1="${x_casa+w_casa-10}" y1="${y_topo_parede}" x2="${x_centro}" y2="${y_cumeeira+15}" stroke="#5c4a2d" stroke-width="3"/>
+      <line x1="${x_casa+10}" y1="${y_topo_parede}" x2="${x_casa+w_casa-10}" y2="${y_topo_parede}" stroke="#5c4a2d" stroke-width="3"/>
+      <line x1="${x_centro}" y1="${y_topo_parede}" x2="${x_centro}" y2="${y_cumeeira+15}" stroke="#5c4a2d" stroke-width="2"/>
+      <text x="${x_centro+8}" y="${(y_topo_parede+y_cumeeira)/2}" font-size="9" fill="#5c4a2d">pendural</text>
+    ` : `
+      <!-- Estrutura simplificada (só terças) -->
+      ${[0.20, 0.50, 0.80].map(p => {
+        const y = y_topo_parede + (y_cumeeira-y_topo_parede)*p;
+        const x_l = x_esq + (x_centro-x_esq)*p;
+        return `<rect x="${x_l-3}" y="${y+3}" width="6" height="6" fill="url(#cbMadeira)" stroke="#5c4a2d"/>
+                <rect x="${2*x_centro-x_l-3}" y="${y+3}" width="6" height="6" fill="url(#cbMadeira)" stroke="#5c4a2d"/>`;
+      }).join('')}
+      <line x1="${x_casa+10}" y1="${y_topo_parede}" x2="${x_centro}" y2="${y_cumeeira+15}" stroke="#5c4a2d" stroke-width="2"/>
+      <line x1="${x_casa+w_casa-10}" y1="${y_topo_parede}" x2="${x_centro}" y2="${y_cumeeira+15}" stroke="#5c4a2d" stroke-width="2"/>
+    `}
+
+    <!-- Cumeeira -->
+    <circle cx="${x_centro}" cy="${y_cumeeira}" r="6" fill="#8a3920" stroke="#1a1916"/>
+    <text x="${x_centro+15}" y="${y_cumeeira+3}" font-size="9">cumeeira</text>
+
+    <!-- Cotas -->
+    <line x1="${x_esq}" y1="${y_solo+30}" x2="${x_dir}" y2="${y_solo+30}" stroke="#b04a2f"/>
+    <text x="${x_centro}" y="${y_solo+45}" text-anchor="middle" font-size="11" fill="#b04a2f" font-weight="bold">${fmt(d.B+2*d.beiral)} m (com beiral)</text>
+
+    <line x1="${x_casa-30}" y1="${y_topo_parede}" x2="${x_casa-30}" y2="${y_solo}" stroke="#b04a2f"/>
+    <text x="${x_casa-35}" y="${(y_topo_parede+y_solo)/2}" text-anchor="end" font-size="11" fill="#b04a2f" font-weight="bold" transform="rotate(-90 ${x_casa-35} ${(y_topo_parede+y_solo)/2})">parede 3,00 m</text>
+
+    <line x1="${x_dir+30}" y1="${y_cumeeira}" x2="${x_dir+30}" y2="${y_topo_parede}" stroke="#b04a2f"/>
+    <text x="${x_dir+42}" y="${(y_cumeeira+y_topo_parede)/2+4}" font-size="11" fill="#b04a2f" font-weight="bold">${fmt(h_telhado/SC,2)} m</text>
+
+    <!-- Indicação inclinação -->
+    <text x="${x_centro-50}" y="${y_topo_parede-30}" font-size="11" fill="#b04a2f" font-weight="bold">↗ ${d.inc}%</text>
+
+    <!-- Legenda -->
+    <g transform="translate(20, ${total_h-90})">
+      <rect width="220" height="80" fill="#f7f4ec" stroke="#1a1916"/>
+      <text x="8" y="15" font-size="10" font-weight="bold">LEGENDA</text>
+      <rect x="8" y="22" width="14" height="8" fill="url(#cbTelha)"/><text x="28" y="29" font-size="9">telhas ${d.t.label.split(' ')[0]}</text>
+      <rect x="8" y="34" width="14" height="8" fill="url(#cbMadeira)"/><text x="28" y="41" font-size="9">madeira (caibros/ripas/terças)</text>
+      <rect x="8" y="46" width="14" height="8" fill="url(#cbConcr)"/><text x="28" y="53" font-size="9">parede de alvenaria</text>
+      <rect x="8" y="58" width="14" height="8" fill="url(#cbSolo)"/><text x="28" y="65" font-size="9">solo natural</text>
+    </g>
+  </svg>`;
+
+  document.getElementById('cb-corte').innerHTML = `
+    <div style="background:white; padding:12px; border:1px solid var(--border); overflow-x:auto; margin-bottom:12px;">${svg}</div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <button onclick="baixarSvgCalc('svgCbCorte','telhado_corte')">⬇ SVG</button>
+      <button onclick="baixarPngCalc('svgCbCorte','telhado_corte')">⬇ PNG</button>
+      <button onclick="baixarJpegCalc('svgCbCorte','telhado_corte')">⬇ JPEG</button>
+      <button onclick="baixarPdfCalc('svgCbCorte','telhado_corte')">⬇ PDF</button>
+      <button onclick="baixarDxfCobCorte()" style="background:var(--gold); color:#000;">⬇ DXF (CAD)</button>
+    </div>
+  `;
+}
+
+function renderCobPlanta() {
+  const d = COB_DADOS;
+  const SC = 30, PAD = 60;
+  const w = d.L_total*SC, h = d.B_total*SC;
+  const total_w = w + 2*PAD;
+  const total_h = h + 200;
+  const x0 = PAD, y0 = 80;
+
+  const svg = `<svg id="svgCbPlanta" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total_w} ${total_h}" style="font-family:Consolas,monospace; font-size:11px;">
+    <rect width="${total_w}" height="${total_h}" fill="white"/>
+    <text x="${total_w/2}" y="25" text-anchor="middle" font-size="16" font-weight="bold">PLANTA — COBERTURA ${d.aguas} ÁGUA(S)</text>
+    <text x="${total_w/2}" y="42" text-anchor="middle" font-size="10">${escape(d.obra)} · vista superior</text>
+
+    <!-- Limites externos (com beiral) -->
+    <rect x="${x0}" y="${y0}" width="${w}" height="${h}" fill="#f7e8c8" stroke="#8a3920" stroke-width="2"/>
+    <!-- Limites da casa -->
+    <rect x="${x0+d.beiral*SC}" y="${y0+d.beiral*SC}" width="${d.L*SC}" height="${d.B*SC}" fill="none" stroke="#444" stroke-width="1.5" stroke-dasharray="6 3"/>
+
+    ${d.aguas === 2 ? `
+      <!-- 2 águas: cumeeira no meio horizontal -->
+      <line x1="${x0}" y1="${y0+h/2}" x2="${x0+w}" y2="${y0+h/2}" stroke="#8a3920" stroke-width="3"/>
+      <text x="${x0+w/2}" y="${y0+h/2-5}" text-anchor="middle" font-size="10" fill="#8a3920" font-weight="bold">CUMEEIRA</text>
+      <!-- setas escoamento -->
+      <path d="M ${x0+w*0.3} ${y0+h*0.30} L ${x0+w*0.3} ${y0+h*0.10}" stroke="#2d4a5c" stroke-width="2" marker-end="url(#cbArrow)"/>
+      <path d="M ${x0+w*0.7} ${y0+h*0.30} L ${x0+w*0.7} ${y0+h*0.10}" stroke="#2d4a5c" stroke-width="2" marker-end="url(#cbArrow)"/>
+      <path d="M ${x0+w*0.3} ${y0+h*0.70} L ${x0+w*0.3} ${y0+h*0.90}" stroke="#2d4a5c" stroke-width="2" marker-end="url(#cbArrow)"/>
+      <path d="M ${x0+w*0.7} ${y0+h*0.70} L ${x0+w*0.7} ${y0+h*0.90}" stroke="#2d4a5c" stroke-width="2" marker-end="url(#cbArrow)"/>
+    ` : d.aguas === 4 ? `
+      <!-- 4 águas: linhas em X partindo dos cantos -->
+      <line x1="${x0}" y1="${y0}" x2="${x0+w/2}" y2="${y0+h/2}" stroke="#8a3920" stroke-width="2"/>
+      <line x1="${x0+w}" y1="${y0}" x2="${x0+w/2}" y2="${y0+h/2}" stroke="#8a3920" stroke-width="2"/>
+      <line x1="${x0}" y1="${y0+h}" x2="${x0+w/2}" y2="${y0+h/2}" stroke="#8a3920" stroke-width="2"/>
+      <line x1="${x0+w}" y1="${y0+h}" x2="${x0+w/2}" y2="${y0+h/2}" stroke="#8a3920" stroke-width="2"/>
+      <circle cx="${x0+w/2}" cy="${y0+h/2}" r="6" fill="#8a3920"/>
+      <text x="${x0+w/2}" y="${y0+h/2+25}" text-anchor="middle" font-size="10" fill="#8a3920" font-weight="bold">CUMEEIRA CENTRAL</text>
+    ` : `
+      <!-- 1 água: linha de baixo -->
+      <line x1="${x0}" y1="${y0}" x2="${x0+w}" y2="${y0}" stroke="#8a3920" stroke-width="3"/>
+      <text x="${x0+w/2}" y="${y0-5}" text-anchor="middle" font-size="10" fill="#8a3920" font-weight="bold">CUMEEIRA</text>
+      <path d="M ${x0+w*0.3} ${y0+h*0.20} L ${x0+w*0.3} ${y0+h*0.85}" stroke="#2d4a5c" stroke-width="2" marker-end="url(#cbArrow)"/>
+      <path d="M ${x0+w*0.7} ${y0+h*0.20} L ${x0+w*0.7} ${y0+h*0.85}" stroke="#2d4a5c" stroke-width="2" marker-end="url(#cbArrow)"/>
+    `}
+    <defs><marker id="cbArrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2d4a5c"/></marker></defs>
+
+    <!-- Cotas -->
+    <line x1="${x0}" y1="${y0+h+30}" x2="${x0+w}" y2="${y0+h+30}" stroke="#b04a2f"/>
+    <text x="${x0+w/2}" y="${y0+h+45}" text-anchor="middle" font-size="11" fill="#b04a2f" font-weight="bold">${fmt(d.L_total)} m (com ${d.beiral}m beiral)</text>
+    <line x1="${x0-30}" y1="${y0}" x2="${x0-30}" y2="${y0+h}" stroke="#b04a2f"/>
+    <text x="${x0-40}" y="${y0+h/2}" text-anchor="end" font-size="11" fill="#b04a2f" font-weight="bold" transform="rotate(-90 ${x0-40} ${y0+h/2})">${fmt(d.B_total)} m</text>
+
+    <text x="${x0+w/2}" y="${y0+h/2-50}" text-anchor="middle" font-size="11" fill="#444" font-style="italic">━ contorno casa</text>
+
+    <!-- Norte -->
+    <g transform="translate(${total_w-80}, ${total_h-80})">
+      <circle cx="20" cy="20" r="22" fill="white" stroke="#1a1916"/>
+      <path d="M 20 5 L 26 28 L 20 22 L 14 28 Z" fill="#1a1916"/>
+      <text x="20" y="50" text-anchor="middle" font-size="12" font-weight="bold">N</text>
+    </g>
+  </svg>`;
+
+  document.getElementById('cb-planta').innerHTML = `
+    <div style="background:white; padding:12px; border:1px solid var(--border); overflow-x:auto; margin-bottom:12px;">${svg}</div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <button onclick="baixarSvgCalc('svgCbPlanta','telhado_planta')">⬇ SVG</button>
+      <button onclick="baixarPngCalc('svgCbPlanta','telhado_planta')">⬇ PNG</button>
+      <button onclick="baixarJpegCalc('svgCbPlanta','telhado_planta')">⬇ JPEG</button>
+      <button onclick="baixarPdfCalc('svgCbPlanta','telhado_planta')">⬇ PDF</button>
+      <button onclick="baixarDxfCobPlanta()" style="background:var(--gold); color:#000;">⬇ DXF (CAD)</button>
+    </div>
+  `;
+}
+
+function renderCobDet() {
+  const d = COB_DADOS;
+  document.getElementById('cb-det').innerHTML = `
+    <div style="display:grid; gap:14px;">
+      <div style="padding:14px; background:var(--surface-1); border-left:3px solid var(--gold);">
+        <h4 style="margin-bottom:8px; font-size:14px;">TELHA — ${d.t.label}</h4>
+        <ul style="font-size:12px; line-height:1.8; list-style:none;">
+          <li>▸ Quantidade: <b>${d.qtd_telhas.toLocaleString('pt-BR')} unidades</b> (com ${(d.perda*100).toFixed(0)}% perda)</li>
+          <li>▸ Peso por m²: ${d.t.peso_m2} kg · Total: <b>${fmt(d.peso_total,0)} kg</b></li>
+          <li>▸ Inclinação mínima recomendada: <b>${d.t.inc_min}%</b> (atual: ${d.inc}% ${d.incOk?'✓':'⚠'})</li>
+          <li>▸ Recobrimento: variável conforme tipo (5-15cm)</li>
+          <li>▸ Fixação: arame galvanizado nº18 ou parafusos</li>
+        </ul>
+      </div>
+      <div style="padding:14px; background:var(--surface-1); border-left:3px solid var(--neon);">
+        <h4 style="margin-bottom:8px; font-size:14px;">MADEIRAMENTO (${d.madTipo})</h4>
+        <ul style="font-size:12px; line-height:1.8; list-style:none;">
+          ${d.caibros_m>0?`<li>▸ <b>Caibros 6×8cm:</b> ${fmt(d.caibros_m,1)} m linear (peças de 4-5m)</li>`:''}
+          ${d.ripas_m>0?`<li>▸ <b>Ripas 2×5cm:</b> ${fmt(d.ripas_m,1)} m</li>`:''}
+          ${d.tercas_m>0?`<li>▸ <b>Terças 6×12cm:</b> ${fmt(d.tercas_m,1)} m</li>`:''}
+          ${d.tesouras>0?`<li>▸ <b>Tesouras (mão francesa):</b> ${d.tesouras} unidades</li>`:''}
+          ${d.parafusos>0?`<li>▸ <b>Parafusos auto-brocantes:</b> ${d.parafusos} un</li>`:''}
+          <li>▸ Madeira recomendada: Maçaranduba, Cumaru, Eucalipto autoclavado</li>
+          <li>▸ Tratamento contra cupim e umidade obrigatório</li>
+        </ul>
+      </div>
+      <div style="padding:14px; background:var(--surface-2); border:2px solid var(--gold);">
+        <h4 style="margin-bottom:8px; font-size:14px;">📏 ESPECIFICAÇÕES TÉCNICAS</h4>
+        <ul style="font-size:12px; line-height:1.8; list-style:none;">
+          <li>▸ Beiral mínimo: 60 cm (proteção fachada)</li>
+          <li>▸ Calhas: PVC ou metálicas Ø100mm</li>
+          <li>▸ Rufos e contra-rufos em encontros com paredes</li>
+          <li>▸ Manta sub-cobertura recomendada (impermeabilização)</li>
+          <li>▸ Cumeeira: telha cumeeira específica + argamassa de fixação</li>
+          <li>▸ Subir cumeeira na obra antes de fixar telhas</li>
+        </ul>
+      </div>
+    </div>
+  `;
+}
 
   document.getElementById('cbCalc').onclick = () => {
     const tKey = document.getElementById('cbTipo').value;
