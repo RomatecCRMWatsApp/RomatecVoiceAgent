@@ -360,6 +360,49 @@
     .zayra-fab { width: 52px; height: 52px; bottom: 16px; right: 16px; font-size: 16px; }
     .zayra-modal { bottom: 80px; right: 16px; left: 16px; max-height: 60vh; }
   }
+  /* v1.65.48: ajustes finos pra mobile — header, cards de obra, modais */
+  @media (max-width: 768px) {
+    /* Header: brand + badges/botoes empilham se nao couber */
+    .header { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .header > div:last-child { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+    .header h1 { font-size: 18px; line-height: 1.2; }
+
+    /* Cards de obra/equipe/material: botoes empilham embaixo */
+    .card > div[style*="display:flex"][style*="justify-content:space-between"] {
+      flex-direction: column !important;
+    }
+    .card > div[style*="display:flex"] > div[style*="display:flex"][style*="gap:6px"],
+    .card > div[style*="display:flex"] > div[style*="display:flex; gap:6px"],
+    .card > div[style*="display:flex"] > div[style*="flex-direction:column"][style*="gap:6px"] {
+      width: 100%;
+      justify-content: stretch !important;
+      flex-wrap: wrap !important;
+    }
+    .card button { flex: 1 1 auto; min-width: 80px; }
+
+    /* Modal Editar/Cal: largura total em mobile */
+    .cal-modal { max-width: 100% !important; }
+
+    /* Tabelas dentro de modal/card: scroll horizontal sempre */
+    .card table, .cal-modal table { font-size: 11px; }
+    .card table input, .cal-modal table input {
+      min-height: 36px; font-size: 13px; padding: 4px 6px;
+    }
+
+    /* obraSelector na aba marcar/folha — input full-width */
+    [id^="folhaObra"], [id^="selObra"] { max-width: 100% !important; }
+
+    /* WhatsApp button em obra: cor verde com texto branco */
+    button[data-wpp-obra] { font-size: 12px; padding: 8px 10px; }
+
+    /* Tabs tab muito longa: trunca / quebra menor */
+    .tab { padding: 10px 12px !important; font-size: 12px !important; }
+
+    /* Toggle nova obra/equipe/material: full-width em mobile */
+    #toggleNovaObra, #toggleNovoMembro, #toggleNovoMat { width: 100%; }
+    #toggleNovaObra + div, #toggleNovoMembro + div, #toggleNovoMat + div { /* scrollIntoView ja funciona */ }
+  }
+
   @media (max-width: 420px) {
     .cal-summary { grid-template-columns: 1fr; }  /* 1 col em iPhone SE/13 mini */
   }
