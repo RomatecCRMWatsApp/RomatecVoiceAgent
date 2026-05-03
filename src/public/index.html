@@ -47,7 +47,7 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
 .state[data-state="listening"] .dot{background:var(--neon);box-shadow:0 0 14px var(--neon);animation:pulse 1s infinite}
 .state[data-state="thinking"]{border-color:#ffd166;color:#ffd166}
 .state[data-state="speaking"]{border-color:#7fffd4;color:#7fffd4}
-.transcript{margin-top:14px;width:100%;min-height:60px;max-height:38vh;padding:14px;border:1px solid rgba(61,255,176,.15);border-radius:12px;background:rgba(4,20,13,.55);backdrop-filter:blur(8px);font-size:13px;color:var(--text);line-height:1.5;text-align:center;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:rgba(61,255,176,.55) rgba(4,20,13,.3)}
+.transcript{margin-top:14px;margin-bottom:16px;width:100%;min-height:60px;max-height:min(34vh,30dvh);padding:14px;border:1px solid rgba(61,255,176,.15);border-radius:12px;background:rgba(4,20,13,.55);backdrop-filter:blur(8px);font-size:13px;color:var(--text);line-height:1.5;text-align:left;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:rgba(61,255,176,.55) rgba(4,20,13,.3)}
 .transcript::-webkit-scrollbar{width:6px}
 .transcript::-webkit-scrollbar-track{background:rgba(4,20,13,.3);border-radius:8px}
 .transcript::-webkit-scrollbar-thumb{background:linear-gradient(180deg,rgba(61,255,176,.6),rgba(61,255,176,.25));border-radius:8px;border:1px solid rgba(61,255,176,.2)}
@@ -80,8 +80,9 @@ body{background:radial-gradient(1200px 800px at 50% -10%, rgba(61,255,176,.18), 
 .chat-header .close{background:transparent;border:none;color:var(--text-dim);font-size:22px;cursor:pointer;padding:4px 10px;transition:transform .25s}
 .chat-overlay.open .chat-header .close{transform:rotate(45deg)}
 .chat-header .close:hover{color:var(--neon)}
-/* Espaço pra que a barra fixa não tampe o conteúdo principal */
-body.has-chat-bar .stage{padding-bottom:90px}
+/* Espaço pra que a barra fixa não tampe o conteúdo principal.
+   v1.65.27: aumentado pra cobrir safe-area do iPhone + dock 60px + folga. */
+body.has-chat-bar .stage{padding-bottom:calc(110px + env(safe-area-inset-bottom))}
 
 .chat-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;-webkit-overflow-scrolling:touch}
 .msg-bubble{max-width:85%;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap}
