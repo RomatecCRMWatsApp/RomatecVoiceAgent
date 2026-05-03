@@ -89,6 +89,28 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ agent: AGENT_IDENTITY.name, version: AGENT_IDENTITY.version, status: 'online', timestamp: new Date().toISOString() });
 });
 
+// v1.65.23: diagnostico do MySQL — lista todas as tabelas + valida criticas.
+// Resolve Issue #5 (tabelas ausentes em prod sem diagnostico claro).
+app.get('/health/db', async (_req: Request, res: Response) => {
+  try {
+    const { listExistingTables, checkCriticalTables } = await import('./database/migrations');
+    const [allTables, critical] = await Promise.all([
+      listExistingTables(),
+      checkCriticalTables(),
+    ]);
+    res.json({
+      version: AGENT_IDENTITY.version,
+      timestamp: new Date().toISOString(),
+      totalTables: allTables.length,
+      criticalPresent: critical.present,
+      criticalMissing: critical.missing,
+      allTables,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'health_db_failed', message: (err as Error).message });
+  }
+});
+
 // ── Diagnóstico de providers ──────────────────────────────────────────────────
 app.get('/health/providers', async (_req: Request, res: Response) => {
   const results: Record<string, unknown> = {

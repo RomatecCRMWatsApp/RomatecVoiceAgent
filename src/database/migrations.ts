@@ -363,45 +363,58 @@ export async function runMigrations(): Promise<void> {
   `);
 
   // v1.45.0: equipe Romatec (multi-tenant pra Eldemberto, Rosielma, etc)
-  await pool.execute(`
-    CREATE TABLE IF NOT EXISTS romatec_team_members (
-      id                 INT AUTO_INCREMENT PRIMARY KEY,
-      nome               VARCHAR(150) NOT NULL,
-      telegram_chat_id   VARCHAR(50) UNIQUE,
-      whatsapp_phone     VARCHAR(20),
-      email              VARCHAR(200),
-      role               ENUM('admin','engenheiro','corretor','comercial','leitura') NOT NULL DEFAULT 'leitura',
-      cargo              VARCHAR(100),
-      ativo              TINYINT(1) DEFAULT 1,
-      observacoes        TEXT,
-      criado_em          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      atualizado_em      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX idx_telegram (telegram_chat_id),
-      INDEX idx_ativo_role (ativo, role)
-    )
-  `);
+  // v1.65.23: log explicito + try/catch isolado pra evitar que falha aqui
+  // pare o resto do migration. Issue #5 reportou que essa tabela estava
+  // ausente do Railway apesar de definida aqui.
+  try {
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS romatec_team_members (
+        id                 INT AUTO_INCREMENT PRIMARY KEY,
+        nome               VARCHAR(150) NOT NULL,
+        telegram_chat_id   VARCHAR(50) UNIQUE,
+        whatsapp_phone     VARCHAR(20),
+        email              VARCHAR(200),
+        role               ENUM('admin','engenheiro','corretor','comercial','leitura') NOT NULL DEFAULT 'leitura',
+        cargo              VARCHAR(100),
+        ativo              TINYINT(1) DEFAULT 1,
+        observacoes        TEXT,
+        criado_em          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        atualizado_em      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_telegram (telegram_chat_id),
+        INDEX idx_ativo_role (ativo, role)
+      )
+    `);
+    console.log('[DB] romatec_team_members OK');
+  } catch (err) {
+    console.error('[DB] FALHA em romatec_team_members:', (err as Error).message);
+  }
 
   // v1.39.0: alertas proativos (push notifications inteligentes)
   // Cada detector escreve aqui com alert_key único pra dedup (não spamma o CEO).
-  await pool.execute(`
-    CREATE TABLE IF NOT EXISTS romatec_proactive_alerts (
-      id               INT AUTO_INCREMENT PRIMARY KEY,
-      alert_key        VARCHAR(255) NOT NULL UNIQUE,
-      detector         VARCHAR(50) NOT NULL,
-      type             VARCHAR(20) NOT NULL DEFAULT 'alert',
-      urgency          ENUM('low','medium','high','urgent') DEFAULT 'medium',
-      title            VARCHAR(200) NOT NULL,
-      message          TEXT NOT NULL,
-      payload          JSON,
-      first_detected   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      last_sent        TIMESTAMP NULL,
-      send_count       INT DEFAULT 0,
-      acknowledged_at  TIMESTAMP NULL,
-      silenced_until   TIMESTAMP NULL,
-      INDEX idx_silenced (silenced_until),
-      INDEX idx_detector (detector, first_detected DESC)
-    )
-  `);
+  try {
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS romatec_proactive_alerts (
+        id               INT AUTO_INCREMENT PRIMARY KEY,
+        alert_key        VARCHAR(255) NOT NULL UNIQUE,
+        detector         VARCHAR(50) NOT NULL,
+        type             VARCHAR(20) NOT NULL DEFAULT 'alert',
+        urgency          ENUM('low','medium','high','urgent') DEFAULT 'medium',
+        title            VARCHAR(200) NOT NULL,
+        message          TEXT NOT NULL,
+        payload          JSON,
+        first_detected   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_sent        TIMESTAMP NULL,
+        send_count       INT DEFAULT 0,
+        acknowledged_at  TIMESTAMP NULL,
+        silenced_until   TIMESTAMP NULL,
+        INDEX idx_silenced (silenced_until),
+        INDEX idx_detector (detector, first_detected DESC)
+      )
+    `);
+    console.log('[DB] romatec_proactive_alerts OK');
+  } catch (err) {
+    console.error('[DB] FALHA em romatec_proactive_alerts:', (err as Error).message);
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // v1.59.0: Schema do CRM WhatsApp (replicado do projeto Romatec_CRM_WhatsApp).
@@ -996,7 +1009,107 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.65.23: verificacao final das tabelas criticas. Se alguma das duas
+  // tabelas centrais (romatec_team_members, romatec_proactive_alerts) nao
+  // existir apos o run inteiro, loga warning e tenta recriar isolado.
+  // Resolve Issue #5 onde essas tabelas estavam ausentes em prod apesar
+  // de definidas aqui.
+  await verifyCriticalTables();
+
   console.log('[DB] Migrations complete');
+}
+
+// v1.65.23: validador de tabelas criticas. Retorna lista de tabelas
+// presentes/ausentes pra debug via /health/db.
+const CRITICAL_TABLES = [
+  'romatec_team_members',
+  'romatec_proactive_alerts',
+  'zayra_memory',
+  'zayra_conversations',
+  'romatec_obras',
+  'romatec_obra_equipe',
+] as const;
+
+export async function listExistingTables(): Promise<string[]> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME`,
+  );
+  return rows.map((r) => String((r as { name: string }).name));
+}
+
+export async function checkCriticalTables(): Promise<{ present: string[]; missing: string[] }> {
+  const all = await listExistingTables();
+  const allLower = new Set(all.map((t) => t.toLowerCase()));
+  const present: string[] = [];
+  const missing: string[] = [];
+  for (const t of CRITICAL_TABLES) {
+    if (allLower.has(t.toLowerCase())) present.push(t);
+    else missing.push(t);
+  }
+  return { present, missing };
+}
+
+async function verifyCriticalTables(): Promise<void> {
+  const status = await checkCriticalTables();
+  if (status.missing.length === 0) {
+    console.log(`[DB] Tabelas criticas OK: ${status.present.length}/${CRITICAL_TABLES.length}`);
+    return;
+  }
+  console.warn(`[DB] ⚠️ Tabelas criticas AUSENTES: ${status.missing.join(', ')}`);
+
+  // Retry isolado das que falharam — usa as mesmas definicoes acima.
+  if (status.missing.includes('romatec_team_members')) {
+    try {
+      await pool.execute(`
+        CREATE TABLE IF NOT EXISTS romatec_team_members (
+          id                 INT AUTO_INCREMENT PRIMARY KEY,
+          nome               VARCHAR(150) NOT NULL,
+          telegram_chat_id   VARCHAR(50) UNIQUE,
+          whatsapp_phone     VARCHAR(20),
+          email              VARCHAR(200),
+          role               ENUM('admin','engenheiro','corretor','comercial','leitura') NOT NULL DEFAULT 'leitura',
+          cargo              VARCHAR(100),
+          ativo              TINYINT(1) DEFAULT 1,
+          observacoes        TEXT,
+          criado_em          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          atualizado_em      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_telegram (telegram_chat_id),
+          INDEX idx_ativo_role (ativo, role)
+        )
+      `);
+      console.log('[DB] retry romatec_team_members OK');
+    } catch (err) {
+      console.error('[DB] retry romatec_team_members falhou:', (err as Error).message);
+    }
+  }
+
+  if (status.missing.includes('romatec_proactive_alerts')) {
+    try {
+      await pool.execute(`
+        CREATE TABLE IF NOT EXISTS romatec_proactive_alerts (
+          id               INT AUTO_INCREMENT PRIMARY KEY,
+          alert_key        VARCHAR(255) NOT NULL UNIQUE,
+          detector         VARCHAR(50) NOT NULL,
+          type             VARCHAR(20) NOT NULL DEFAULT 'alert',
+          urgency          ENUM('low','medium','high','urgent') DEFAULT 'medium',
+          title            VARCHAR(200) NOT NULL,
+          message          TEXT NOT NULL,
+          payload          JSON,
+          first_detected   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          last_sent        TIMESTAMP NULL,
+          send_count       INT DEFAULT 0,
+          acknowledged_at  TIMESTAMP NULL,
+          silenced_until   TIMESTAMP NULL,
+          INDEX idx_silenced (silenced_until),
+          INDEX idx_detector (detector, first_detected DESC)
+        )
+      `);
+      console.log('[DB] retry romatec_proactive_alerts OK');
+    } catch (err) {
+      console.error('[DB] retry romatec_proactive_alerts falhou:', (err as Error).message);
+    }
+  }
 }
 
 // v1.65.0: catálogo SINAPI inicial (~100 itens em 12 categorias).
