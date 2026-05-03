@@ -1455,7 +1455,9 @@ function renderMarcarDias() {
         const r = await api(`/api/recibos/envio-status?membro_id=${p.id}&periodo=${periodoLinhasAtual}`);
         const env = r && r.envio;
         if (!env) {
-          target.innerHTML = `<a data-recibo-q="${p.id}" data-nome="${escape(p.nome)}" style="color:var(--text-muted); cursor:pointer; text-decoration:underline; text-decoration-style:dotted;">⚪ ${escape(periodoTxt)} — sem envio</a>`;
+          // v1.65.34: quinzena atual sem envio = ABERTA (em curso). Quando
+          // fechar (apos dia 15 ou fim do mes), o CEO dispara recibos.
+          target.innerHTML = `<a data-recibo-q="${p.id}" data-nome="${escape(p.nome)}" style="color:var(--gold); cursor:pointer; text-decoration:underline; text-decoration-style:dotted; font-weight:500;" title="Quinzena em curso — quando fechar, envie o recibo">⚪ ABERTA — ${escape(periodoTxt)}</a>`;
         } else {
           const m = statusMap[env.status] || { icon: '📤', label: env.status, color: 'var(--text)' };
           target.innerHTML = `<a data-recibo-q="${p.id}" data-nome="${escape(p.nome)}" style="cursor:pointer; color:${m.color}; text-decoration:none; font-weight:500;">${m.icon} ${escape(m.label)} — ${escape(periodoTxt)}</a>`;
@@ -2778,7 +2780,10 @@ async function abrirModalReciboQuinzena(membroId, nome) {
   };
 
   // v1.65.20: status box com LEDs + ações manuais
+  // v1.65.34: incluido ABERTA como 1o estado (quinzena em curso, sem envio).
+  // Quando fechar a quinzena, CEO dispara o recibo e estado avanca pra Enviado.
   const ESTADOS = [
+    { st: 'aberta',                         label: 'ABERTA',      dot: '⚪' },
     { st: 'enviado_aguardando_confirmacao', label: 'Enviado',     dot: '🟡' },
     { st: 'confirmado_aguardando_pix',      label: 'Confirmou',   dot: '🟢' },
     { st: 'pix_recebido',                   label: 'PIX recebido', dot: '🔵' },
@@ -2794,8 +2799,12 @@ async function abrirModalReciboQuinzena(membroId, nome) {
       const env = r.envio;
 
       if (!env) {
-        ledsEl.innerHTML = `<span style="color:var(--text-muted);">⚪ ainda não enviado neste período</span>`;
-        infoEl.textContent = '';
+        // v1.65.34: barra de LEDs com ABERTA ativa (quinzena em curso).
+        ledsEl.innerHTML = ESTADOS.map((e, i) => {
+          const ativo = i === 0;
+          return `<span style="opacity:${ativo ? 1 : 0.25}; ${ativo ? 'font-weight:600; color:var(--gold);' : ''}">${e.dot} ${e.label}</span>`;
+        }).join(' <span style="color:var(--text-muted);">→</span> ');
+        infoEl.innerHTML = `<span style="color:var(--text-muted);">Quinzena em curso. Quando fechar, dispare o recibo via WhatsApp ou marque PAGO direto se ja pagou em maos.</span>`;
         acoesEl.innerHTML = `
           <button id="rqDispararIndiv" class="btn-primary" style="background:var(--success); color:#fff; border-color:var(--success);">📤 Enviar agora via WhatsApp</button>
           <button id="rqMarcarPagoOffline" title="Pagamento foi em mãos/banco — só registra como PAGO sem mandar WhatsApp" style="background:rgba(34,197,94,.15); border:1px solid var(--success); color:var(--success);">✅ Marcar PAGO sem enviar</button>
@@ -2889,11 +2898,10 @@ async function abrirModalReciboQuinzena(membroId, nome) {
         btns.push(`<button id="rqMarcarPago" style="background:var(--success); color:#fff; border-color:var(--success);">💰 Marcar como PAGO</button>`);
       }
       // v1.65.32: corrigir status — voltar 1 passo na maquina de estados.
-      // CEO marcou errado? Desfaz pro estado anterior. So aparece em estados
-      // "avancados" (confirmado pra cima). Marca DESPAGAR explicito quando
-      // ja esta em PAGO. ID rqDesfazer e diferenciado por estado destino.
+      // v1.65.34: idxAtualSeq > 1 (ABERTA agora e o indice 0, mas voltar
+      // pra ABERTA exigiria apagar o envio — feature separada se precisar).
       const idxAtualSeq = ESTADOS.findIndex(e => e.st === env.status);
-      if (idxAtualSeq > 0) {
+      if (idxAtualSeq > 1) {
         const anterior = ESTADOS[idxAtualSeq - 1];
         const labelDesfazer = env.status === 'pago'
           ? `↩️ Desmarcar PAGO (volta pra ${anterior.label})`
