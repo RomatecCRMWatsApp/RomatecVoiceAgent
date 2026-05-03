@@ -1018,7 +1018,8 @@ export async function resumoObras() {
 
 export async function listarParcelasObra(obraId: string) {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, obra_id, numero, valor, vencimento, prazo_dias, pago, pago_em,
+    `SELECT id, obra_id, numero, valor, vencimento, prazo_dias,
+            quinzena_inicio, quinzena_fim, pago, pago_em,
             observacoes, calendar_event_id, nf_numero, nf_emitida_em,
             created_at, updated_at
        FROM romatec_obra_parcelas
@@ -1034,6 +1035,8 @@ export async function listarParcelasObra(obraId: string) {
     vencimento: r.vencimento ? formatBRDate(r.vencimento as Date) : null,
     vencimento_iso: r.vencimento ? new Date(r.vencimento as Date).toISOString().slice(0,10) : null,
     prazo_dias: r.prazo_dias != null ? Number(r.prazo_dias) : null,
+    quinzena_inicio: r.quinzena_inicio ? new Date(r.quinzena_inicio as Date).toISOString().slice(0,10) : null,
+    quinzena_fim:    r.quinzena_fim    ? new Date(r.quinzena_fim    as Date).toISOString().slice(0,10) : null,
     pago: !!r.pago,
     pago_em: r.pago_em as Date | null,
     observacoes: r.observacoes as string | null,
@@ -1081,6 +1084,7 @@ export async function atualizarParcela(input: {
   id: string;
   numero?: number; valor?: number; vencimento?: string;
   prazo_dias?: number; pago?: boolean; observacoes?: string;
+  quinzena_inicio?: string; quinzena_fim?: string;
   calendar_event_id?: string; nf_numero?: string;
   confirm?: boolean;
 }): Promise<MutationResult> {
@@ -1090,6 +1094,7 @@ export async function atualizarParcela(input: {
   const map: Record<string, string> = {
     numero: 'numero', valor: 'valor', vencimento: 'vencimento',
     prazo_dias: 'prazo_dias', observacoes: 'observacoes',
+    quinzena_inicio: 'quinzena_inicio', quinzena_fim: 'quinzena_fim',
     calendar_event_id: 'calendar_event_id', nf_numero: 'nf_numero',
   };
   for (const [k, col] of Object.entries(map)) {
@@ -1146,17 +1151,24 @@ export async function gerarParcelasAutomaticas(input: {
     [input.obra_id]
   );
 
+  // v1.65.41: calcula intervalo da quinzena pra cada parcela (editavel)
   const inicio = new Date(input.data_inicio + 'T00:00:00');
   for (let i = 0; i < input.qtd_parcelas; i++) {
+    const qIni = new Date(inicio);
+    qIni.setDate(qIni.getDate() + (i * intervalo));
+    const qFim = new Date(qIni);
+    qFim.setDate(qFim.getDate() + intervalo - 1);
+
     const venc = new Date(inicio);
     venc.setDate(venc.getDate() + primeiroVenc + (i * intervalo));
     const vencIso = venc.toISOString().slice(0, 10);
     const prazoDias = primeiroVenc + (i * intervalo);
     await pool.execute(
       `INSERT INTO romatec_obra_parcelas
-         (obra_id, numero, valor, vencimento, prazo_dias)
-       VALUES (?,?,?,?,?)`,
-      [input.obra_id, i + 1, valorParcela.toFixed(2), vencIso, prazoDias]
+         (obra_id, numero, valor, vencimento, prazo_dias, quinzena_inicio, quinzena_fim)
+       VALUES (?,?,?,?,?,?,?)`,
+      [input.obra_id, i + 1, valorParcela.toFixed(2), vencIso, prazoDias,
+       qIni.toISOString().slice(0,10), qFim.toISOString().slice(0,10)]
     );
   }
 

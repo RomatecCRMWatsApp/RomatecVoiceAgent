@@ -134,6 +134,8 @@ export async function runMigrations(): Promise<void> {
   // Diferente dos recibos quinzenais (pagamento dos trabalhadores).
   // Cada obra tem N parcelas com vencimento+valor. Ao gerar, ZAYRA pode
   // criar evento no Google Calendar pra lembrete + emissao de NF.
+  // v1.65.41: +quinzena_inicio/quinzena_fim — define o intervalo da
+  // quinzena que essa parcela representa (editavel pelo CEO).
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS romatec_obra_parcelas (
       id                INT AUTO_INCREMENT PRIMARY KEY,
@@ -142,6 +144,8 @@ export async function runMigrations(): Promise<void> {
       valor             DECIMAL(14,2) NOT NULL,
       vencimento        DATE NOT NULL,
       prazo_dias        INT,
+      quinzena_inicio   DATE,
+      quinzena_fim      DATE,
       pago              TINYINT(1) DEFAULT 0,
       pago_em           TIMESTAMP NULL,
       observacoes       VARCHAR(300),
@@ -154,6 +158,23 @@ export async function runMigrations(): Promise<void> {
       INDEX idx_venc (vencimento, pago)
     )
   `);
+
+  // v1.65.41: ALTER idempotente pra DBs ja existentes
+  for (const col of [`ADD COLUMN IF NOT EXISTS quinzena_inicio DATE NULL AFTER prazo_dias`,
+                     `ADD COLUMN IF NOT EXISTS quinzena_fim DATE NULL AFTER quinzena_inicio`]) {
+    await pool.execute(`ALTER TABLE romatec_obra_parcelas ${col}`).catch(async () => {
+      const colName = (/ADD COLUMN IF NOT EXISTS (\w+)/.exec(col) || [])[1];
+      if (!colName) return;
+      const [c] = await pool.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'romatec_obra_parcelas' AND COLUMN_NAME = ?`,
+        [colName]
+      );
+      if (Number((c[0] as { n: number }).n) === 0) {
+        await pool.execute(`ALTER TABLE romatec_obra_parcelas ${col.replace('IF NOT EXISTS ', '')}`);
+      }
+    });
+  }
 
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS romatec_obra_etapas (

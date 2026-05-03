@@ -963,14 +963,15 @@ function abrirEditarObra(obraId) {
           <input id="eoPrev" type="date" value="${(o.data_previsao||'').slice(0,10)}">
         </label>
         <label style="display:flex; flex-direction:column; gap:4px;">
-          <span style="font-size:11px; color:var(--text-muted);">Prazo total (dias corridos)</span>
+          <span style="font-size:11px; color:var(--text-muted);">Prazo total (dias corridos) <em style="color:var(--gold);">— auto</em></span>
           <input id="eoPzd" type="number" placeholder="Ex: 60" value="${o.prazo_dias||''}">
         </label>
         <label style="display:flex; flex-direction:column; gap:4px;">
-          <span style="font-size:11px; color:var(--text-muted);">Prazo (dias úteis seg-sex)</span>
+          <span style="font-size:11px; color:var(--text-muted);">Prazo (dias úteis seg-sex) <em style="color:var(--gold);">— auto descontando feriados</em></span>
           <input id="eoPzu" type="number" placeholder="Ex: 45" value="${o.prazo_dias_uteis||''}">
         </label>
       </div>
+      <p id="eoFeriadosInfo" style="margin:6px 0 0; font-size:11px; color:var(--text-muted);"></p>
 
       <p style="margin:14px 0 8px; font-size:13px; color:var(--gold); font-weight:600;">💳 Parcelas de pagamento do cliente</p>
       <div id="eoParcelasBox" style="border:1px solid var(--border); border-radius:8px; padding:10px; background:var(--surface-1); margin-bottom:10px;">
@@ -992,6 +993,96 @@ function abrirEditarObra(obraId) {
   document.getElementById('editObraX').onclick = fechar;
   document.getElementById('editObraCancel').onclick = fechar;
 
+  // v1.65.41: auto-calculo de prazos (corridos + uteis descontando feriados)
+  // Algoritmo de Pascoa (Meeus/Anonymous Gregorian) pra feriados moveis.
+  const calcularPrazosAuto = () => {
+    const iniStr = document.getElementById('eoIni').value;
+    const fimStr = document.getElementById('eoPrev').value;
+    const info = document.getElementById('eoFeriadosInfo');
+    if (!iniStr || !fimStr) { info.textContent = ''; return; }
+    const ini = new Date(iniStr + 'T00:00:00');
+    const fim = new Date(fimStr + 'T00:00:00');
+    if (fim < ini) { info.textContent = '⚠️ Data fim antes do início.'; return; }
+
+    // Dias corridos (incluindo inicio e fim)
+    const diasCorridos = Math.round((fim - ini) / (1000*60*60*24)) + 1;
+
+    // Pascoa (Meeus)
+    const pascoa = (year) => {
+      const a = year % 19, b = Math.floor(year/100), c = year % 100;
+      const d = Math.floor(b/4), e = b % 4, f = Math.floor((b+8)/25);
+      const g = Math.floor((b-f+1)/3);
+      const h = (19*a + b - d - g + 15) % 30;
+      const i = Math.floor(c/4), k = c % 4;
+      const l = (32 + 2*e + 2*i - h - k) % 7;
+      const m = Math.floor((a + 11*h + 22*l) / 451);
+      const month = Math.floor((h + l - 7*m + 114) / 31);
+      const day = ((h + l - 7*m + 114) % 31) + 1;
+      return new Date(year, month - 1, day);
+    };
+    const addDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+    // Feriados nacionais BR (fixos + moveis) pra cada ano no intervalo
+    const feriados = [];
+    const feriadosNoPeriodo = [];
+    const yMin = ini.getFullYear(), yMax = fim.getFullYear();
+    for (let y = yMin; y <= yMax; y++) {
+      const p = pascoa(y);
+      const fixos = [
+        [`01/01`, 'Confraternização'], [`21/04`, 'Tiradentes'],
+        [`01/05`, 'Dia do Trabalho'], [`07/09`, 'Independência'],
+        [`12/10`, 'N.Sra Aparecida'], [`02/11`, 'Finados'],
+        [`15/11`, 'Proclamação da Rep.'], [`25/12`, 'Natal'],
+      ];
+      for (const [dm, nome] of fixos) {
+        const [dd, mm] = dm.split('/').map(Number);
+        feriados.push({ data: new Date(y, mm-1, dd), nome });
+      }
+      feriados.push({ data: addDias(p, -48), nome: 'Carnaval (seg)' });
+      feriados.push({ data: addDias(p, -47), nome: 'Carnaval (ter)' });
+      feriados.push({ data: addDias(p, -2),  nome: 'Sexta-feira Santa' });
+      feriados.push({ data: p,                 nome: 'Páscoa' });
+      feriados.push({ data: addDias(p, 60),  nome: 'Corpus Christi' });
+    }
+    const isFeriadoBR = (d) => feriados.some(f =>
+      f.data.getFullYear() === d.getFullYear()
+      && f.data.getMonth() === d.getMonth()
+      && f.data.getDate() === d.getDate()
+    );
+
+    // Dias uteis (seg-sex, descontando feriados)
+    let diasUteis = 0;
+    const cur = new Date(ini);
+    while (cur <= fim) {
+      const dow = cur.getDay();
+      const ehUtil = dow >= 1 && dow <= 5;
+      if (ehUtil && !isFeriadoBR(cur)) diasUteis++;
+      // registra feriado no periodo
+      if (isFeriadoBR(cur)) {
+        const f = feriados.find(x => x.data.getTime() === cur.getTime());
+        if (f) {
+          const diaStr = `${String(cur.getDate()).padStart(2,'0')}/${String(cur.getMonth()+1).padStart(2,'0')}`;
+          feriadosNoPeriodo.push(`${diaStr} (${f.nome})`);
+        }
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    document.getElementById('eoPzd').value = diasCorridos;
+    document.getElementById('eoPzu').value = diasUteis;
+    if (feriadosNoPeriodo.length > 0) {
+      info.innerHTML = `📌 ${diasCorridos} dias corridos · ${diasUteis} dias úteis (seg-sex menos feriados). Feriados: ${feriadosNoPeriodo.join(', ')}`;
+    } else {
+      info.innerHTML = `📌 ${diasCorridos} dias corridos · ${diasUteis} dias úteis (seg-sex). Sem feriados nacionais no período.`;
+    }
+  };
+  document.getElementById('eoIni').onchange = calcularPrazosAuto;
+  document.getElementById('eoPrev').onchange = calcularPrazosAuto;
+  // Roda 1x ao abrir se ja tem ambas datas preenchidas
+  if (document.getElementById('eoIni').value && document.getElementById('eoPrev').value) {
+    calcularPrazosAuto();
+  }
+
   // Carrega + renderiza parcelas
   const recarregarParcelas = async () => {
     const box = document.getElementById('eoParcelasBox');
@@ -1002,10 +1093,12 @@ function abrirEditarObra(obraId) {
       box.innerHTML = `
         ${parcelas.length === 0
           ? '<p style="margin:0 0 10px; font-size:12px; color:var(--text-muted);">Nenhuma parcela cadastrada. Use o botão Auto-gerar abaixo ou adicione manualmente.</p>'
-          : `<table style="width:100%; font-size:12px; border-collapse:collapse;">
+          : `<div style="overflow-x:auto;"><table style="width:100%; font-size:12px; border-collapse:collapse; min-width:660px;">
               <thead>
                 <tr style="border-bottom:1px solid var(--border);">
                   <th style="text-align:left; padding:6px 4px;">Nº</th>
+                  <th style="text-align:left; padding:6px 4px;">Quinzena início</th>
+                  <th style="text-align:left; padding:6px 4px;">Quinzena fim</th>
                   <th style="text-align:left; padding:6px 4px;">Valor</th>
                   <th style="text-align:left; padding:6px 4px;">Vencimento</th>
                   <th style="text-align:left; padding:6px 4px;">Status</th>
@@ -1014,24 +1107,27 @@ function abrirEditarObra(obraId) {
               </thead>
               <tbody>
                 ${parcelas.map(p => `
-                  <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
-                    <td style="padding:6px 4px;">${p.numero}</td>
-                    <td style="padding:6px 4px;">${fmt(p.valor)}</td>
-                    <td style="padding:6px 4px;">${escape(p.vencimento || '-')}</td>
+                  <tr style="border-bottom:1px solid rgba(255,255,255,0.05);" data-parc-id="${p.id}">
+                    <td style="padding:6px 4px;"><strong>${p.numero}ª</strong></td>
+                    <td style="padding:6px 4px;"><input type="date" data-pq-ini="${p.id}" value="${p.quinzena_inicio||''}" style="font-size:11px; padding:3px 6px;"></td>
+                    <td style="padding:6px 4px;"><input type="date" data-pq-fim="${p.id}" value="${p.quinzena_fim||''}" style="font-size:11px; padding:3px 6px;"></td>
+                    <td style="padding:6px 4px;"><input type="number" step="0.01" data-pq-val="${p.id}" value="${p.valor||0}" style="font-size:11px; padding:3px 6px; width:90px;"></td>
+                    <td style="padding:6px 4px;"><input type="date" data-pq-venc="${p.id}" value="${p.vencimento_iso||''}" style="font-size:11px; padding:3px 6px;"></td>
                     <td style="padding:6px 4px;">${p.pago ? '<span style="color:var(--success);">✅ Pago</span>' : '<span style="color:var(--gold);">⏳ Pendente</span>'}</td>
-                    <td style="padding:6px 4px; text-align:right;">
-                      <button data-toggle-pago="${p.id}" data-pago="${p.pago ? 1 : 0}" style="padding:3px 8px; font-size:11px;">${p.pago ? 'Desmarcar' : 'Marcar pago'}</button>
+                    <td style="padding:6px 4px; text-align:right; white-space:nowrap;">
+                      <button data-save-parc="${p.id}" class="btn-gold" style="padding:3px 8px; font-size:11px;">💾</button>
+                      <button data-toggle-pago="${p.id}" data-pago="${p.pago ? 1 : 0}" style="padding:3px 8px; font-size:11px;">${p.pago ? 'Desmarcar' : 'Pago'}</button>
                       <button data-del-parc="${p.id}" class="btn-danger" style="padding:3px 8px; font-size:11px;">🗑️</button>
                     </td>
                   </tr>`).join('')}
               </tbody>
               <tfoot>
                 <tr style="border-top:2px solid var(--border);">
-                  <td colspan="2" style="padding:6px 4px; font-weight:600;">Total: ${fmt(total)}</td>
-                  <td colspan="3" style="padding:6px 4px; text-align:right; color:var(--success);">Pago: ${fmt(totalPago)} · Pendente: ${fmt(total - totalPago)}</td>
+                  <td colspan="3" style="padding:6px 4px; font-weight:600;">Total: ${fmt(total)}</td>
+                  <td colspan="4" style="padding:6px 4px; text-align:right; color:var(--success);">Pago: ${fmt(totalPago)} · Pendente: ${fmt(total - totalPago)}</td>
                 </tr>
               </tfoot>
-            </table>`}
+            </table></div>`}
         <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">
           <button id="eoAutoGerar" class="btn-gold">⚙️ Auto-gerar parcelas</button>
           <button id="eoAddParc">➕ Adicionar parcela manual</button>
@@ -1050,6 +1146,26 @@ function abrirEditarObra(obraId) {
         if (!confirm('Apagar essa parcela?')) return;
         try {
           await api('/api/parcelas/' + b.dataset.delParc, { method: 'DELETE' });
+          await recarregarParcelas();
+        } catch (e) { alert('Erro: ' + (e?.message || e)); }
+      });
+      // v1.65.41: salvar edicao inline (quinzena_inicio/fim, valor, vencimento)
+      box.querySelectorAll('[data-save-parc]').forEach(b => b.onclick = async () => {
+        const id = b.dataset.saveParc;
+        const qIni = box.querySelector(`[data-pq-ini="${id}"]`).value || null;
+        const qFim = box.querySelector(`[data-pq-fim="${id}"]`).value || null;
+        const valor = parseFloat(box.querySelector(`[data-pq-val="${id}"]`).value) || 0;
+        const venc = box.querySelector(`[data-pq-venc="${id}"]`).value || null;
+        if (!venc) return alert('Vencimento obrigatório.');
+        if (valor <= 0) return alert('Valor inválido.');
+        try {
+          await api('/api/parcelas/' + id, {
+            method: 'PUT',
+            body: JSON.stringify({
+              id, quinzena_inicio: qIni, quinzena_fim: qFim,
+              valor, vencimento: venc,
+            }),
+          });
           await recarregarParcelas();
         } catch (e) { alert('Erro: ' + (e?.message || e)); }
       });
