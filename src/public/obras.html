@@ -814,20 +814,30 @@ function renderDashboard() {
 // ── OBRAS ──
 function renderObras() {
   const v = document.getElementById('view-obras');
+  // v1.65.39: mostra data_inicio + data_previsao + botao Editar
+  const fmtData = (s) => {
+    if (!s) return '-';
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s));
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : String(s);
+  };
   const lista = state.obras.map(o => {
     const sb = {em_andamento:'badge-success',concluida:'badge-info',paralisada:'badge-warning',planejamento:'badge-info'}[o.status];
     return `<div class="card">
-      <div style="display:flex; justify-content:space-between; gap:8px;">
-        <div style="flex:1; min-width:0;">
+      <div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
           <p style="margin:0; font-weight:500; font-size:15px; color: var(--text);">${escape(o.nome)}</p>
           <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">${escape(o.tipo)} · ${escape(o.endereco||'-')}, ${escape(o.cidade||'-')}</p>
           <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">Cliente: ${escape(o.cliente||'-')}</p>
+          <p style="margin:4px 0; font-size:12px; color:var(--gold);">📅 Início: ${fmtData(o.data_inicio)} · Previsão fim: ${fmtData(o.data_previsao)}</p>
           <div style="display:flex; gap:6px; align-items:center; margin-top:8px; flex-wrap:wrap;">
             <span class="badge ${sb}">${escape(o.status)}</span>
             <span style="font-size:12px; color: var(--gold);">${fmt(o.orcamento)}</span>
           </div>
         </div>
-        <button class="btn-danger" data-del-obra="${o.id}">Excluir</button>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:flex-start;">
+          <button class="btn-gold" data-edit-obra="${o.id}">✏️ Editar</button>
+          <button class="btn-danger" data-del-obra="${o.id}">Excluir</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -889,6 +899,89 @@ function renderObras() {
     try { await api('/api/obras/' + b.dataset.delObra, { method: 'DELETE' }); render(); }
     catch (e) { alert('Erro: ' + e.message); }
   });
+  // v1.65.39: editar obra completa (todos os campos do form em modal)
+  v.querySelectorAll('[data-edit-obra]').forEach(b => b.onclick = () => abrirEditarObra(b.dataset.editObra));
+}
+
+function abrirEditarObra(obraId) {
+  const o = state.obras.find(x => String(x.id) === String(obraId));
+  if (!o) return alert('Obra nao encontrada.');
+
+  const overlay = document.getElementById('editOverlay');
+  const modal = document.getElementById('editModal');
+  modal.innerHTML = `
+    <div class="cal-head">
+      <h2>✏️ Editar obra — ${escape(o.nome)}</h2>
+      <button id="editObraX" style="border:none;background:transparent;color:var(--text-muted);font-size:22px;cursor:pointer;">×</button>
+    </div>
+    <div style="padding:14px 18px;">
+      <div class="form-grid">
+        <input id="eoNome" placeholder="Nome da obra *" value="${escape(o.nome||'')}">
+        <select id="eoTipo">
+          <option value="residencial" ${o.tipo==='residencial'?'selected':''}>Residencial</option>
+          <option value="comercial" ${o.tipo==='comercial'?'selected':''}>Comercial</option>
+          <option value="industrial" ${o.tipo==='industrial'?'selected':''}>Industrial</option>
+          <option value="reforma" ${o.tipo==='reforma'?'selected':''}>Reforma</option>
+          <option value="publica" ${o.tipo==='publica'?'selected':''}>Pública</option>
+        </select>
+        <input id="eoCliente" placeholder="Cliente" value="${escape(o.cliente||'')}">
+        <input id="eoTel" placeholder="Telefone" value="${escape(o.cliente_telefone||'')}">
+        <input id="eoEnd" placeholder="Endereço" value="${escape(o.endereco||'')}">
+        <input id="eoCidade" placeholder="Cidade" value="${escape(o.cidade||'')}">
+        <input id="eoArea" type="number" placeholder="Área (m²)" value="${o.area_m2||''}">
+        <input id="eoOrc" type="number" step="0.01" placeholder="Orçamento (R$)" value="${o.orcamento||''}">
+        <select id="eoStatus">
+          <option value="planejamento" ${o.status==='planejamento'?'selected':''}>Planejamento</option>
+          <option value="em_andamento" ${o.status==='em_andamento'?'selected':''}>Em andamento</option>
+          <option value="paralisada" ${o.status==='paralisada'?'selected':''}>Paralisada</option>
+          <option value="concluida" ${o.status==='concluida'?'selected':''}>Concluída</option>
+        </select>
+        <input id="eoResp" placeholder="Responsável técnico" value="${escape(o.responsavel_tecnico||'')}">
+        <label style="display:block; font-size:11px; color:var(--text-muted); grid-column:1/-1; margin-top:6px;">📅 Data de início (define o ciclo das quinzenas dessa obra)</label>
+        <input id="eoIni" type="date" value="${(o.data_inicio||'').slice(0,10)}">
+        <input id="eoPrev" type="date" value="${(o.data_previsao||'').slice(0,10)}">
+      </div>
+      <textarea id="eoObs" placeholder="Observações" rows="2" style="width:100%; margin:10px 0;">${escape(o.observacoes||'')}</textarea>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button id="editObraCancel">Cancelar</button>
+        <button class="btn-primary" id="editObraSave">💾 Salvar alteracoes</button>
+      </div>
+    </div>
+  `;
+  overlay.classList.add('open');
+
+  const fechar = () => overlay.classList.remove('open');
+  document.getElementById('editObraX').onclick = fechar;
+  document.getElementById('editObraCancel').onclick = fechar;
+
+  document.getElementById('editObraSave').onclick = async () => {
+    const nome = document.getElementById('eoNome').value.trim();
+    if (!nome) return alert('Informe o nome.');
+    try {
+      await api('/api/obras/' + obraId, {
+        method: 'PUT',
+        body: JSON.stringify({
+          id: String(obraId),
+          nome,
+          tipo: document.getElementById('eoTipo').value,
+          cliente: document.getElementById('eoCliente').value.trim() || null,
+          cliente_telefone: document.getElementById('eoTel').value.trim() || null,
+          endereco: document.getElementById('eoEnd').value.trim() || null,
+          cidade: document.getElementById('eoCidade').value.trim() || null,
+          area_m2: parseFloat(document.getElementById('eoArea').value) || null,
+          orcamento: parseFloat(document.getElementById('eoOrc').value) || null,
+          status: document.getElementById('eoStatus').value,
+          responsavel_tecnico: document.getElementById('eoResp').value.trim() || null,
+          data_inicio: document.getElementById('eoIni').value || null,
+          data_previsao: document.getElementById('eoPrev').value || null,
+          observacoes: document.getElementById('eoObs').value.trim() || null,
+          confirm: true,
+        }),
+      });
+      fechar();
+      render();
+    } catch (e) { alert('Erro: ' + (e?.message || e)); }
+  };
 }
 
 // ── CRONOGRAMA ──
