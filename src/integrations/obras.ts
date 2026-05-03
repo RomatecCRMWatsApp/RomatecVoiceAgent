@@ -89,19 +89,40 @@ export async function listarObras(input: { status?: string; limite?: number } = 
   if (input.status) { sql += ' WHERE status = ?'; params.push(input.status); }
   sql += ` ORDER BY updated_at DESC LIMIT ${limit}`;
   const [rows] = await pool.execute<ObraRow[]>(sql, params);
-  return rows.map(r => ({
+  return rows.map((r: ObraRow & {
+    valor_contrato?: string | number | null;
+    prazo_dias?: number | null;
+    prazo_dias_uteis?: number | null;
+  }) => ({
     id: String(r.id),
     nome: r.nome, tipo: r.tipo, status: r.status,
-    cliente: r.cliente, telefone: r.cliente_telefone,
+    cliente: r.cliente,
+    cliente_telefone: r.cliente_telefone,  // v1.65.45: nome correto do campo
+    telefone: r.cliente_telefone,           // alias backward compat
     endereco: r.endereco, cidade: r.cidade,
     area_m2: num(r.area_m2),
     orcamento: num(r.orcamento),
+    valor_contrato: r.valor_contrato != null ? Number(r.valor_contrato) : 0,  // v1.65.45
     responsavel: r.responsavel_tecnico,
-    data_inicio:  r.data_inicio ? formatBRDate(r.data_inicio) : null,
-    data_previsao: r.data_previsao ? formatBRDate(r.data_previsao) : null,
+    responsavel_tecnico: r.responsavel_tecnico,
+    data_inicio:  r.data_inicio ? toIsoDate(r.data_inicio) : null,
+    data_previsao: r.data_previsao ? toIsoDate(r.data_previsao) : null,
+    prazo_dias: r.prazo_dias != null ? Number(r.prazo_dias) : null,        // v1.65.45
+    prazo_dias_uteis: r.prazo_dias_uteis != null ? Number(r.prazo_dias_uteis) : null, // v1.65.45
+    observacoes: (r as { observacoes?: string | null }).observacoes ?? null,
     created_at: formatBR(r.created_at),
     updated_at: formatBR(r.updated_at),
   }));
+}
+
+// v1.65.45: helper pra converter Date/string em YYYY-MM-DD (formato do <input type="date">)
+function toIsoDate(d: Date | string): string {
+  if (typeof d === 'string') {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  }
+  const dd = new Date(d);
+  return `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
 }
 
 export async function buscarObra(id: string) {
