@@ -3106,19 +3106,38 @@ document.getElementById('editClose').onclick = fecharEditar;
 document.getElementById('editCancel').onclick = fecharEditar;
 document.getElementById('editOverlay').onclick = e => { if (e.target.id === 'editOverlay') fecharEditar(); };
 // v1.65.6: helper que detecta 403 (CEO_TOKEN ausente) e orienta o operador.
-// v1.65.29: em vez de só alertar, oferece prompt direto pra colar o token —
-// CEO no celular nao precisa mais sair desse modal e ir no botao Admin.
+// v1.65.29: em vez de só alertar, oferece prompt direto pra colar o token.
+// v1.65.33: tambem oferece TROCAR token mesmo se ja existir — caso o
+// usuario tenha token errado/vencido salvo no localStorage. Mostra os
+// ultimos 4 chars pra ele saber qual token esta ativo agora.
 function mostrarErroApi(e) {
   const msg = String(e?.message || e);
   if (/Forbidden|X-CEO-Token|403/i.test(msg)) {
-    if (typeof setCeoToken === 'function' && !getCeoToken()) {
-      const t = prompt('Acesso restrito ao CEO. Cole o CEO_API_TOKEN do Railway pra liberar editar/marcar PAGO/reenviar:');
-      if (t && t.trim()) {
+    if (typeof setCeoToken === 'function') {
+      const atual = getCeoToken();
+      const semToken = !atual;
+      const sufixo = atual ? atual.slice(-4) : '';
+      const aviso = semToken
+        ? 'Acesso restrito ao CEO. Cole o CEO_API_TOKEN do Railway pra liberar editar/marcar PAGO/reenviar:'
+        : `Token atual termina em "...${sufixo}" mas o servidor recusou (403).\n\nCole um NOVO CEO_API_TOKEN ou clique Cancelar pra manter o atual:`;
+      const t = prompt(aviso, '');
+      if (t === null) {
+        // usuario cancelou
+        if (atual) alert('Mantido o token atual. Verifique se o CEO_API_TOKEN do Railway bate com o salvo.');
+        return;
+      }
+      if (t.trim()) {
         setCeoToken(t.trim());
         if (typeof atualizarBotaoCeo === 'function') atualizarBotaoCeo();
         alert('Token salvo. Tente a acao novamente.');
         return;
       }
+      // string vazia colada
+      if (confirm('Voce colou vazio. Remover o token atual?')) {
+        setCeoToken('');
+        if (typeof atualizarBotaoCeo === 'function') atualizarBotaoCeo();
+      }
+      return;
     }
     alert('Acesso negado: configure o token CEO no botao "Admin" (canto superior) antes de editar/excluir.');
   } else {
