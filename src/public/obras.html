@@ -4360,125 +4360,453 @@ const FOSSA_TIPOS = {
 };
 const FOSSA_K = { 1: 94, 2: 134, 3: 174, 4: 214, 5: 254 };
 
+let FOSSA_DADOS = null;
+
 function renderCalcFossa() {
   document.getElementById('calcContent').innerHTML = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
-      <div class="card">
-        <p class="section-title">Parâmetros</p>
-        <div class="form-grid">
-          <select id="fsTipo" style="grid-column: span 2;">
-            ${Object.entries(FOSSA_TIPOS).map(([k,t]) => `<option value="${k}">${t.label} (C=${t.C} L/p·dia)</option>`).join('')}
-          </select>
-          <input id="fsN" type="number" placeholder="Nº pessoas" value="5" min="1">
-          <select id="fsAnos">
-            <option value="1">Limpeza 1 ano</option>
-            <option value="2">Limpeza 2 anos</option>
-            <option value="3" selected>Limpeza 3 anos</option>
-            <option value="4">Limpeza 4 anos</option>
-            <option value="5">Limpeza 5 anos</option>
-          </select>
-          <select id="fsTemp">
-            <option value="alta">Clima quente (>25°C)</option>
-            <option value="media" selected>Clima ameno (15-25°C)</option>
-            <option value="baixa">Clima frio (<15°C)</option>
-          </select>
-          <select id="fsFormato">
-            <option value="retangular" selected>Retangular</option>
-            <option value="cilindrica">Cilíndrica</option>
-          </select>
-          <select id="fsSolo" style="grid-column: span 2;">
-            <option value="200">Areia grossa/pedregulho — 200 L/m²·dia</option>
-            <option value="160" selected>Areia média a fina — 160</option>
-            <option value="120">Solo arenoso c/ argila — 120</option>
-            <option value="90">Argila arenosa — 90</option>
-            <option value="60">Argila c/ areia/silte — 60</option>
-            <option value="40">Argila compacta — 40</option>
-            <option value="20">Argila muito compacta — 20 ⚠</option>
-          </select>
-          <input id="fsProfSum" type="number" step="0.1" placeholder="Prof. sumidouro (m)" value="3.0" min="1.5" max="5">
-        </div>
-        <button class="btn-primary" id="fsCalc" style="margin-top:10px; width:100%;">▶ Calcular</button>
+    <div class="card" style="margin-bottom:14px;">
+      <p class="section-title">Parâmetros</p>
+      <div class="form-grid">
+        <input id="fsObra" type="text" placeholder="Identificação da obra" style="grid-column: span 2;">
+        <select id="fsTipo" style="grid-column: span 2;">
+          ${Object.entries(FOSSA_TIPOS).map(([k,t]) => `<option value="${k}">${t.label} (C=${t.C} L/p·dia)</option>`).join('')}
+        </select>
+        <input id="fsN" type="number" placeholder="Nº pessoas" value="5" min="1">
+        <select id="fsAnos">
+          <option value="1">Limpeza 1 ano</option>
+          <option value="2">Limpeza 2 anos</option>
+          <option value="3" selected>Limpeza 3 anos</option>
+          <option value="4">Limpeza 4 anos</option>
+          <option value="5">Limpeza 5 anos</option>
+        </select>
+        <select id="fsTemp">
+          <option value="alta">Clima quente (>25°C)</option>
+          <option value="media" selected>Clima ameno (15-25°C)</option>
+          <option value="baixa">Clima frio (<15°C)</option>
+        </select>
+        <select id="fsFormato">
+          <option value="retangular" selected>Retangular</option>
+          <option value="cilindrica">Cilíndrica</option>
+        </select>
+        <select id="fsSolo" style="grid-column: span 2;">
+          <option value="200">Areia grossa/pedregulho — 200 L/m²·dia</option>
+          <option value="160" selected>Areia média a fina — 160</option>
+          <option value="120">Solo arenoso c/ argila — 120</option>
+          <option value="90">Argila arenosa — 90</option>
+          <option value="60">Argila c/ areia/silte — 60</option>
+          <option value="40">Argila compacta — 40</option>
+          <option value="20">Argila muito compacta — 20 ⚠</option>
+        </select>
+        <input id="fsProfSum" type="number" step="0.1" placeholder="Prof. sumidouro (m)" value="3.0" min="1.5" max="5">
       </div>
-      <div class="card" id="fsResultado">
-        <p class="section-title">Resultados</p>
-        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha e clique em Calcular</p>
+      <button class="btn-primary" id="fsCalc" style="margin-top:10px; width:100%;">▶ Calcular & Desenhar</button>
+    </div>
+
+    <div id="fsOutput" style="display:none;">
+      <div class="tabs" style="margin-bottom:0;">
+        <button class="tab active" data-fstab="num">📊 Cálculos</button>
+        <button class="tab" data-fstab="corte">📐 Corte Vertical</button>
+        <button class="tab" data-fstab="planta">🗺 Planta Baixa</button>
+        <button class="tab" data-fstab="det">📋 Detalhes</button>
+      </div>
+      <div class="card" style="border-top:none; border-radius:0 0 var(--radius) var(--radius);">
+        <div id="fs-num" class="fstab"></div>
+        <div id="fs-corte" class="fstab" style="display:none;"></div>
+        <div id="fs-planta" class="fstab" style="display:none;"></div>
+        <div id="fs-det" class="fstab" style="display:none;"></div>
       </div>
     </div>
   `;
 
-  document.getElementById('fsCalc').onclick = () => {
-    const tipo = FOSSA_TIPOS[document.getElementById('fsTipo').value];
-    const N = parseInt(document.getElementById('fsN').value);
-    const anos = parseInt(document.getElementById('fsAnos').value);
-    const K = FOSSA_K[anos];
-    const tempClima = document.getElementById('fsTemp').value;
-    const formato = document.getElementById('fsFormato').value;
-    const Ci = parseFloat(document.getElementById('fsSolo').value);
-    const profSum = parseFloat(document.getElementById('fsProfSum').value);
-    if (!N || N < 1) return alert('Informe o número de pessoas.');
+  document.getElementById('fsCalc').onclick = calcularFossa;
+  document.querySelectorAll('[data-fstab]').forEach(b => b.onclick = () => {
+    document.querySelectorAll('[data-fstab]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    document.querySelectorAll('.fstab').forEach(x => x.style.display = 'none');
+    document.getElementById('fs-' + b.dataset.fstab).style.display = 'block';
+  });
+}
 
-    const C = tipo.C, Lf = tipo.Lf;
-    const volumeDia = N * C;
-    let T;
-    if (volumeDia <= 1500) T = 1.00;
-    else if (volumeDia <= 3000) T = 0.92;
-    else if (volumeDia <= 4500) T = 0.83;
-    else if (volumeDia <= 6000) T = 0.75;
-    else if (volumeDia <= 7500) T = 0.67;
-    else if (volumeDia <= 9000) T = 0.58;
-    else T = 0.50;
-    if (tempClima === 'baixa') T *= 1.20;
-    if (tempClima === 'alta') T *= 0.85;
+function calcularFossa() {
+  const obra = document.getElementById('fsObra').value || 'Projeto sem identificação';
+  const tipoKey = document.getElementById('fsTipo').value;
+  const tipo = FOSSA_TIPOS[tipoKey];
+  const N = parseInt(document.getElementById('fsN').value);
+  const anos = parseInt(document.getElementById('fsAnos').value);
+  const K = FOSSA_K[anos];
+  const tempClima = document.getElementById('fsTemp').value;
+  const formato = document.getElementById('fsFormato').value;
+  const Ci = parseFloat(document.getElementById('fsSolo').value);
+  const profSum = parseFloat(document.getElementById('fsProfSum').value);
+  if (!N || N < 1) return alert('Informe o número de pessoas.');
 
-    const V_litros = 1000 + N * (C * T + K * Lf);
-    const V_final = Math.max(V_litros / 1000, 1.25);
-    let prof_fs;
-    if (V_final <= 6) prof_fs = 1.50;
-    else if (V_final <= 10) prof_fs = 1.80;
-    else if (V_final <= 25) prof_fs = 2.20;
-    else prof_fs = 2.50;
-    const area_fs = V_final / prof_fs;
-    const B_fs = Math.max(Math.sqrt(area_fs / 2), 0.80);
-    const L_fs = area_fs / B_fs;
-    const D_fs = Math.max(2 * Math.sqrt(area_fs / Math.PI), 1.10);
+  const C = tipo.C, Lf = tipo.Lf;
+  const volumeDia = N * C;
+  let T;
+  if (volumeDia <= 1500) T = 1.00;
+  else if (volumeDia <= 3000) T = 0.92;
+  else if (volumeDia <= 4500) T = 0.83;
+  else if (volumeDia <= 6000) T = 0.75;
+  else if (volumeDia <= 7500) T = 0.67;
+  else if (volumeDia <= 9000) T = 0.58;
+  else T = 0.50;
+  if (tempClima === 'baixa') T *= 1.20;
+  if (tempClima === 'alta') T *= 0.85;
 
-    const Vu_filtro_L = 1.6 * N * C * Math.max(T, 1.0);
-    const V_filtro_final = Math.max(Vu_filtro_L / 1000, 1.25);
-    const D_filtro = Math.max(2 * Math.sqrt(V_filtro_final/1.20 / Math.PI), 0.95);
+  const V_litros = 1000 + N * (C * T + K * Lf);
+  const V_final = Math.max(V_litros / 1000, 1.25);
+  let prof_fs;
+  if (V_final <= 6) prof_fs = 1.50;
+  else if (V_final <= 10) prof_fs = 1.80;
+  else if (V_final <= 25) prof_fs = 2.20;
+  else prof_fs = 2.50;
+  const area_fs = V_final / prof_fs;
+  const B_fs = Math.max(Math.sqrt(area_fs / 2), 0.80);
+  const L_fs = area_fs / B_fs;
+  const D_fs = Math.max(2 * Math.sqrt(area_fs / Math.PI), 1.10);
 
-    const A_inf = volumeDia / Ci;
-    const D_sum = Math.max(A_inf / (Math.PI * profSum), 1.20);
-    const V_sum = Math.PI * Math.pow(D_sum/2, 2) * profSum;
-    const aviso = Ci <= 20 ? '<p style="color:var(--danger); font-weight:600; margin-top:8px;">⚠ Solo de absorção muito baixa! Considere vala de filtração ou ETE compacta.</p>' : '';
+  const T_filtro = Math.max(T, 1.0);
+  const Vu_filtro_L = 1.6 * N * C * T_filtro;
+  const V_filtro_final = Math.max(Vu_filtro_L / 1000, 1.25);
+  const h_leito = 1.20;
+  const h_filtro_total = 2.10;
+  const area_filtro = V_filtro_final / h_leito;
+  const D_filtro = Math.max(2 * Math.sqrt(area_filtro / Math.PI), 0.95);
 
-    document.getElementById('fsResultado').innerHTML = `
-      <p class="section-title">Resultados — ${tipo.label}</p>
-      <div style="display:grid; gap:8px; font-size:13px;">
-        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--gold);">
-          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Fossa Séptica</p>
-          <p style="font-size:18px; font-weight:600; color:var(--gold);">${fmt(V_final)} m³</p>
-          <p style="font-size:12px;">${formato === 'retangular' ? `${fmt(L_fs)} × ${fmt(B_fs)} × ${fmt(prof_fs)} m` : `Ø ${fmt(D_fs)} × ${fmt(prof_fs)} m`}</p>
-        </div>
-        <div style="padding:10px; background:var(--surface-1); border-left:3px solid var(--neon);">
-          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Filtro Anaeróbio</p>
-          <p style="font-size:18px; font-weight:600; color:var(--neon);">${fmt(V_filtro_final)} m³</p>
-          <p style="font-size:12px;">Ø ${fmt(D_filtro)} × 2,10 m · brita nº 4 (h leito = 1,20m)</p>
-        </div>
-        <div style="padding:10px; background:var(--surface-1); border-left:3px solid #4aa3ff;">
-          <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Sumidouro</p>
-          <p style="font-size:18px; font-weight:600; color:#4aa3ff;">Ø ${fmt(D_sum)} × ${fmt(profSum)} m</p>
-          <p style="font-size:12px;">${fmt(V_sum)} m³ · área de infiltração: ${fmt(A_inf)} m²</p>
-        </div>
-        <div style="padding:8px 10px; background:var(--surface-2); font-size:11px; color:var(--text-muted); margin-top:6px;">
-          <p><b>Fórmula NBR 7229:</b> V = 1000 + N×(C×T + K×Lf)</p>
-          <p>= 1000 + ${N}×(${C}×${fmt(T,2)} + ${K}×${fmt(Lf,1)}) = <b>${fmt(V_litros,0)} L</b></p>
-          <p>T = ${fmt(T,2)} dias · K = ${K} dias · Q efluente = ${fmt(volumeDia,0)} L/dia</p>
-        </div>
-        ${aviso}
-        <p style="font-size:10px; color:var(--text-muted); font-style:italic; margin-top:6px;">⚠ Pré-dimensionamento. Afastamentos mínimos NBR 7229: 1,5m construções · 3m árvores · 15m poços.</p>
-      </div>
-    `;
+  const A_inf = volumeDia / Ci;
+  const D_sum = Math.max(A_inf / (Math.PI * profSum), 1.20);
+  const V_sum = Math.PI * Math.pow(D_sum/2, 2) * profSum;
+  const L_vala = A_inf / (2 * profSum);
+
+  FOSSA_DADOS = {
+    obra, tipo, tipoKey, N, anos, K, tempClima, C, Lf, T, formato,
+    V_litros, V_final, prof_fs, B_fs, L_fs, D_fs, area_fs,
+    Vu_filtro_L, V_filtro_final, h_leito, h_filtro_total,
+    D_filtro, area_filtro,
+    Ci, profSum, Q_efluente: volumeDia, A_inf, D_sum, V_sum, L_vala,
   };
+
+  document.getElementById('fsOutput').style.display = 'block';
+  renderFossaNum();
+  renderFossaCorte();
+  renderFossaPlanta();
+  renderFossaDetalhes();
+}
+
+function renderFossaNum() {
+  const d = FOSSA_DADOS;
+  const aviso = d.Ci <= 20 ? '<p style="color:var(--danger); font-weight:600; margin-top:10px;">⚠ Solo de absorção muito baixa! Considere vala de filtração ou ETE compacta.</p>' : '';
+  document.getElementById('fs-num').innerHTML = `
+    <div style="font-style:italic; padding:10px 14px; background:var(--surface-2); border-left:3px solid var(--gold); margin-bottom:14px;">
+      <b>${escape(d.obra)}</b><br>
+      <span style="font-size:12px; color:var(--text-muted);">${d.tipo.label} · ${d.N} pessoa(s) · Limpeza a cada ${d.anos} ano(s)</span>
+    </div>
+
+    <div style="display:grid; gap:14px;">
+      <div style="padding:14px; background:var(--surface-1); border-left:4px solid var(--gold);">
+        <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">01 · FOSSA SÉPTICA (NBR 7229)</p>
+        <p style="font-size:24px; font-weight:600; color:var(--gold); margin:4px 0;">${fmt(d.V_final)} m³ <span style="font-size:13px; color:var(--text-muted);">(${fmt(d.V_final*1000,0)} L)</span></p>
+        <p style="font-size:13px;">${d.formato === 'retangular' ? `<b>${fmt(d.L_fs)}</b> × <b>${fmt(d.B_fs)}</b> × prof <b>${fmt(d.prof_fs)}</b> m` : `Ø <b>${fmt(d.D_fs)}</b> × prof <b>${fmt(d.prof_fs)}</b> m`} · área <b>${fmt(d.area_fs)} m²</b></p>
+      </div>
+
+      <div style="padding:14px; background:var(--surface-1); border-left:4px solid var(--neon);">
+        <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">02 · FILTRO ANAERÓBIO (NBR 13969)</p>
+        <p style="font-size:24px; font-weight:600; color:var(--neon); margin:4px 0;">${fmt(d.V_filtro_final)} m³</p>
+        <p style="font-size:13px;">Ø <b>${fmt(d.D_filtro)}</b> m · altura total <b>${fmt(d.h_filtro_total)}</b> m · leito brita nº 4 <b>${fmt(d.h_leito)}</b> m</p>
+      </div>
+
+      <div style="padding:14px; background:var(--surface-1); border-left:4px solid #4aa3ff;">
+        <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">03 · SUMIDOURO (NBR 13969)</p>
+        <p style="font-size:24px; font-weight:600; color:#4aa3ff; margin:4px 0;">Ø ${fmt(d.D_sum)} × ${fmt(d.profSum)} m</p>
+        <p style="font-size:13px;">Volume <b>${fmt(d.V_sum)} m³</b> · área de infiltração <b>${fmt(d.A_inf)} m²</b> · vala alt. 0,50m: <b>${fmt(d.L_vala)} m</b> de extensão</p>
+      </div>
+
+      <div style="padding:10px 14px; background:var(--surface-2); font-size:12px; color:var(--text-muted); font-family:monospace;">
+        <p><b>V = 1000 + N×(C×T + K×Lf)</b></p>
+        <p>= 1000 + ${d.N}×(${d.C}×${fmt(d.T,2)} + ${d.K}×${fmt(d.Lf,1)}) = <b style="color:var(--gold);">${fmt(d.V_litros,0)} L</b></p>
+        <p>T = ${fmt(d.T,2)} dias · K = ${d.K} dias · Q efluente = ${fmt(d.Q_efluente,0)} L/dia · Ci = ${d.Ci} L/m²·dia</p>
+      </div>
+      ${aviso}
+    </div>
+  `;
+}
+
+function renderFossaCorte() {
+  const d = FOSSA_DADOS;
+  const SC = 80;
+  const PAD = 60;
+  const w_fs = (d.formato === 'retangular' ? d.L_fs : d.D_fs) * SC;
+  const w_filtro = d.D_filtro * SC;
+  const w_sum = d.D_sum * SC;
+  const h_fs = d.prof_fs * SC;
+  const h_filtro = d.h_filtro_total * SC;
+  const h_sum = d.profSum * SC;
+  const max_h = Math.max(h_fs, h_filtro, h_sum);
+  const GAP = 80;
+  const total_w = w_fs + GAP + w_filtro + GAP + w_sum + 2*PAD;
+  const total_h = max_h + 200;
+  const x_fs = PAD;
+  const x_filtro = x_fs + w_fs + GAP;
+  const x_sum = x_filtro + w_filtro + GAP;
+  const y_terreno = 80;
+
+  const svg = `<svg id="svgFsCorte" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total_w} ${total_h}" style="font-family:Consolas,monospace;font-size:11px;">
+    <defs>
+      <pattern id="fsConcr" patternUnits="userSpaceOnUse" width="6" height="6"><circle cx="3" cy="3" r="0.8" fill="#888"/></pattern>
+      <pattern id="fsBrita" patternUnits="userSpaceOnUse" width="10" height="10"><circle cx="2" cy="2" r="1.5" fill="#888" stroke="#444" stroke-width="0.4"/><circle cx="7" cy="6" r="1.8" fill="#999" stroke="#444" stroke-width="0.4"/></pattern>
+      <pattern id="fsAgua" patternUnits="userSpaceOnUse" width="14" height="6"><path d="M0,3 Q3.5,0 7,3 T14,3" stroke="#2d4a5c" fill="none" stroke-width="0.8"/></pattern>
+      <pattern id="fsLodo" patternUnits="userSpaceOnUse" width="8" height="8"><rect width="8" height="8" fill="#5c4a2d"/><circle cx="2" cy="2" r="0.8" fill="#3a2f1c"/></pattern>
+      <pattern id="fsSolo" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#a08568" stroke-width="1.2"/></pattern>
+      <marker id="fsArrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2d4a5c"/></marker>
+    </defs>
+    <rect width="${total_w}" height="${total_h}" fill="white"/>
+    <text x="${total_w/2}" y="25" text-anchor="middle" font-size="16" font-weight="bold" fill="#1a1916">CORTE VERTICAL — SISTEMA DE TRATAMENTO DE ESGOTO</text>
+    <text x="${total_w/2}" y="42" text-anchor="middle" font-size="10" fill="#4a4640">Esc. aprox. 1:50 · Cotas em metros · ${escape(d.obra)}</text>
+    <rect x="0" y="${y_terreno}" width="${total_w}" height="${total_h-y_terreno}" fill="url(#fsSolo)" opacity="0.4"/>
+    <line x1="0" y1="${y_terreno}" x2="${total_w}" y2="${y_terreno}" stroke="#1a1916" stroke-width="2"/>
+    <text x="10" y="${y_terreno-5}" font-size="10">N.T. — Nível do Terreno</text>
+
+    <!-- FOSSA -->
+    <rect x="${x_fs-8}" y="${y_terreno-8}" width="${w_fs+16}" height="${h_fs+16}" fill="url(#fsConcr)" stroke="#1a1916" stroke-width="2"/>
+    <rect x="${x_fs}" y="${y_terreno}" width="${w_fs}" height="${h_fs}" fill="#d9e3e8"/>
+    <rect x="${x_fs}" y="${y_terreno+h_fs*0.85}" width="${w_fs}" height="${h_fs*0.15}" fill="url(#fsLodo)"/>
+    <rect x="${x_fs}" y="${y_terreno+h_fs*0.20}" width="${w_fs}" height="${h_fs*0.65}" fill="url(#fsAgua)" opacity="0.5"/>
+    <rect x="${x_fs}" y="${y_terreno}" width="${w_fs}" height="${h_fs*0.10}" fill="#c7a87c" opacity="0.7"/>
+    <rect x="${x_fs-8}" y="${y_terreno-18}" width="${w_fs+16}" height="10" fill="#888" stroke="#1a1916"/>
+    <text x="${x_fs+w_fs/2}" y="${y_terreno-22}" text-anchor="middle" font-size="9" fill="#4a4640">tampa de inspeção</text>
+    <rect x="${x_fs-30}" y="${y_terreno+25}" width="30" height="10" fill="#444" stroke="#1a1916"/>
+    <text x="${x_fs-32}" y="${y_terreno+22}" text-anchor="end" font-size="9">entrada Ø100mm</text>
+    <path d="M ${x_fs} ${y_terreno+30} L ${x_fs+12} ${y_terreno+30} L ${x_fs+12} ${y_terreno+h_fs*0.35}" stroke="#1a1916" stroke-width="2" fill="none"/>
+    <rect x="${x_fs+w_fs}" y="${y_terreno+35}" width="30" height="10" fill="#444" stroke="#1a1916"/>
+    <path d="M ${x_fs+w_fs} ${y_terreno+40} L ${x_fs+w_fs-12} ${y_terreno+40} L ${x_fs+w_fs-12} ${y_terreno+h_fs*0.50}" stroke="#1a1916" stroke-width="2" fill="none"/>
+    <line x1="${x_fs}" y1="${y_terreno+h_fs+35}" x2="${x_fs+w_fs}" y2="${y_terreno+h_fs+35}" stroke="#b04a2f"/>
+    <text x="${x_fs+w_fs/2}" y="${y_terreno+h_fs+50}" text-anchor="middle" font-size="11" fill="#b04a2f" font-weight="bold">${fmt(d.formato==='retangular'?d.L_fs:d.D_fs)} m</text>
+    <line x1="${x_fs-30}" y1="${y_terreno}" x2="${x_fs-30}" y2="${y_terreno+h_fs}" stroke="#b04a2f"/>
+    <text x="${x_fs-40}" y="${y_terreno+h_fs/2}" text-anchor="end" font-size="11" fill="#b04a2f" font-weight="bold" transform="rotate(-90 ${x_fs-40} ${y_terreno+h_fs/2})">${fmt(d.prof_fs)} m</text>
+    <text x="${x_fs+w_fs/2}" y="${y_terreno-30}" text-anchor="middle" font-size="13" font-weight="bold" fill="#1a1916">FOSSA SÉPTICA</text>
+    <text x="${x_fs+w_fs/2}" y="${y_terreno+h_fs+70}" text-anchor="middle" font-size="9">${fmt(d.V_final)} m³ · ${d.formato}</text>
+
+    <!-- FILTRO -->
+    <rect x="${x_filtro-8}" y="${y_terreno-8}" width="${w_filtro+16}" height="${h_filtro+16}" fill="url(#fsConcr)" stroke="#1a1916" stroke-width="2"/>
+    <rect x="${x_filtro}" y="${y_terreno}" width="${w_filtro}" height="${h_filtro}" fill="#f0e8d8"/>
+    <rect x="${x_filtro}" y="${y_terreno+0.30*SC}" width="${w_filtro}" height="${1.20*SC}" fill="url(#fsBrita)"/>
+    <line x1="${x_filtro}" y1="${y_terreno+1.50*SC}" x2="${x_filtro+w_filtro}" y2="${y_terreno+1.50*SC}" stroke="#1a1916" stroke-width="1.5" stroke-dasharray="4 2"/>
+    <rect x="${x_filtro}" y="${y_terreno+1.50*SC}" width="${w_filtro}" height="${0.60*SC}" fill="url(#fsAgua)" opacity="0.4"/>
+    <rect x="${x_filtro-8}" y="${y_terreno-18}" width="${w_filtro+16}" height="10" fill="#888" stroke="#1a1916"/>
+    <text x="${x_filtro+w_filtro/2}" y="${y_terreno+0.95*SC}" text-anchor="middle" font-size="9" font-weight="bold">LEITO BRITA Nº 4</text>
+    <text x="${x_filtro+w_filtro/2}" y="${y_terreno+1.10*SC}" text-anchor="middle" font-size="9">h = 1,20m</text>
+    <text x="${x_filtro+w_filtro/2}" y="${y_terreno+1.85*SC}" text-anchor="middle" font-size="9">fundo falso 0,60m</text>
+    <line x1="${x_filtro}" y1="${y_terreno+h_filtro+35}" x2="${x_filtro+w_filtro}" y2="${y_terreno+h_filtro+35}" stroke="#b04a2f"/>
+    <text x="${x_filtro+w_filtro/2}" y="${y_terreno+h_filtro+50}" text-anchor="middle" font-size="11" fill="#b04a2f" font-weight="bold">Ø ${fmt(d.D_filtro)} m</text>
+    <line x1="${x_filtro+w_filtro+30}" y1="${y_terreno}" x2="${x_filtro+w_filtro+30}" y2="${y_terreno+h_filtro}" stroke="#b04a2f"/>
+    <text x="${x_filtro+w_filtro+42}" y="${y_terreno+h_filtro/2+4}" font-size="11" fill="#b04a2f" font-weight="bold">${fmt(d.h_filtro_total)} m</text>
+    <text x="${x_filtro+w_filtro/2}" y="${y_terreno-30}" text-anchor="middle" font-size="13" font-weight="bold">FILTRO ANAERÓBIO</text>
+    <text x="${x_filtro+w_filtro/2}" y="${y_terreno+h_filtro+70}" text-anchor="middle" font-size="9">${fmt(d.V_filtro_final)} m³ · cilíndrico</text>
+
+    <!-- SUMIDOURO -->
+    <rect x="${x_sum}" y="${y_terreno}" width="${w_sum}" height="${h_sum}" fill="none" stroke="#1a1916" stroke-width="2" stroke-dasharray="6 3"/>
+    ${[0.25,0.5,0.75].map(p=>`<path d="M ${x_sum} ${y_terreno+h_sum*p} L ${x_sum-15} ${y_terreno+h_sum*p}" stroke="#2d4a5c" marker-end="url(#fsArrow)"/><path d="M ${x_sum+w_sum} ${y_terreno+h_sum*p} L ${x_sum+w_sum+15} ${y_terreno+h_sum*p}" stroke="#2d4a5c" marker-end="url(#fsArrow)"/>`).join('')}
+    <rect x="${x_sum+4}" y="${y_terreno+4}" width="${w_sum-8}" height="${h_sum-4}" fill="url(#fsBrita)" opacity="0.5"/>
+    <rect x="${x_sum-4}" y="${y_terreno-18}" width="${w_sum+8}" height="10" fill="#888" stroke="#1a1916"/>
+    <line x1="${x_sum}" y1="${y_terreno+h_sum+35}" x2="${x_sum+w_sum}" y2="${y_terreno+h_sum+35}" stroke="#b04a2f"/>
+    <text x="${x_sum+w_sum/2}" y="${y_terreno+h_sum+50}" text-anchor="middle" font-size="11" fill="#b04a2f" font-weight="bold">Ø ${fmt(d.D_sum)} m</text>
+    <line x1="${x_sum+w_sum+30}" y1="${y_terreno}" x2="${x_sum+w_sum+30}" y2="${y_terreno+h_sum}" stroke="#b04a2f"/>
+    <text x="${x_sum+w_sum+42}" y="${y_terreno+h_sum/2+4}" font-size="11" fill="#b04a2f" font-weight="bold">${fmt(d.profSum)} m</text>
+    <text x="${x_sum+w_sum/2}" y="${y_terreno-30}" text-anchor="middle" font-size="13" font-weight="bold">SUMIDOURO</text>
+    <text x="${x_sum+w_sum/2}" y="${y_terreno+h_sum+70}" text-anchor="middle" font-size="9">paredes vazadas · ${fmt(d.V_sum)} m³</text>
+  </svg>`;
+
+  document.getElementById('fs-corte').innerHTML = `
+    <div style="background:white; padding:12px; border:1px solid var(--border); overflow-x:auto; margin-bottom:12px;">${svg}</div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <button onclick="baixarSvgCalc('svgFsCorte','corte_vertical')">⬇ SVG</button>
+      <button onclick="baixarPngCalc('svgFsCorte','corte_vertical')">⬇ PNG</button>
+      <button onclick="baixarJpegCalc('svgFsCorte','corte_vertical')">⬇ JPEG</button>
+    </div>
+  `;
+}
+
+function renderFossaPlanta() {
+  const d = FOSSA_DADOS;
+  const SC = 80, PAD = 60;
+  const w_fs = (d.formato==='retangular'?d.L_fs:d.D_fs)*SC;
+  const b_fs = (d.formato==='retangular'?d.B_fs:d.D_fs)*SC;
+  const w_filtro = d.D_filtro*SC;
+  const w_sum = d.D_sum*SC;
+  const max_b = Math.max(b_fs, w_filtro, w_sum);
+  const GAP = 80;
+  const total_w = w_fs+GAP+w_filtro+GAP+w_sum+2*PAD;
+  const total_h = max_b+200;
+  const x_fs = PAD, x_filtro = x_fs+w_fs+GAP, x_sum = x_filtro+w_filtro+GAP;
+  const y_c = 100+max_b/2;
+
+  const svg = `<svg id="svgFsPlanta" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total_w} ${total_h}" style="font-family:Consolas,monospace; font-size:11px;">
+    <defs><pattern id="fsCp" patternUnits="userSpaceOnUse" width="6" height="6"><circle cx="3" cy="3" r="0.8" fill="#888"/></pattern>
+      <pattern id="fsBp" patternUnits="userSpaceOnUse" width="10" height="10"><circle cx="2" cy="2" r="1.5" fill="#888"/></pattern>
+      <marker id="fsArrowP" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2d4a5c"/></marker>
+    </defs>
+    <rect width="${total_w}" height="${total_h}" fill="white"/>
+    <text x="${total_w/2}" y="25" text-anchor="middle" font-size="16" font-weight="bold">PLANTA BAIXA — SISTEMA DE TRATAMENTO</text>
+    <text x="${total_w/2}" y="42" text-anchor="middle" font-size="10" fill="#4a4640">Esc. aprox. 1:50 · Vista superior · ${escape(d.obra)}</text>
+    <line x1="0" y1="${y_c}" x2="${x_fs}" y2="${y_c}" stroke="#444" stroke-width="3"/>
+    <text x="10" y="${y_c-8}" font-size="9">esgoto</text>
+    ${d.formato==='retangular'?`
+      <rect x="${x_fs-8}" y="${y_c-b_fs/2-8}" width="${w_fs+16}" height="${b_fs+16}" fill="url(#fsCp)" stroke="#1a1916" stroke-width="2"/>
+      <rect x="${x_fs}" y="${y_c-b_fs/2}" width="${w_fs}" height="${b_fs}" fill="#d9e3e8"/>
+      <line x1="${x_fs+w_fs*0.6}" y1="${y_c-b_fs/2}" x2="${x_fs+w_fs*0.6}" y2="${y_c+b_fs/2}" stroke="#1a1916" stroke-dasharray="5 3"/>
+      <text x="${x_fs+w_fs*0.3}" y="${y_c}" text-anchor="middle" font-size="9">câmara 1 (60%)</text>
+      <text x="${x_fs+w_fs*0.8}" y="${y_c}" text-anchor="middle" font-size="9">câm. 2 (40%)</text>
+    `:`
+      <circle cx="${x_fs+w_fs/2}" cy="${y_c}" r="${w_fs/2+8}" fill="url(#fsCp)" stroke="#1a1916" stroke-width="2"/>
+      <circle cx="${x_fs+w_fs/2}" cy="${y_c}" r="${w_fs/2}" fill="#d9e3e8"/>
+    `}
+    <rect x="${x_fs-30}" y="${y_c-5}" width="30" height="10" fill="#444" stroke="#1a1916"/>
+    <rect x="${x_fs+w_fs}" y="${y_c-5}" width="30" height="10" fill="#444" stroke="#1a1916"/>
+    <line x1="${x_fs}" y1="${y_c+b_fs/2+30}" x2="${x_fs+w_fs}" y2="${y_c+b_fs/2+30}" stroke="#b04a2f"/>
+    <text x="${x_fs+w_fs/2}" y="${y_c+b_fs/2+45}" text-anchor="middle" font-size="11" fill="#b04a2f" font-weight="bold">${fmt(d.formato==='retangular'?d.L_fs:d.D_fs)} m</text>
+    <text x="${x_fs+w_fs/2}" y="${y_c-b_fs/2-30}" text-anchor="middle" font-size="13" font-weight="bold">FOSSA SÉPTICA</text>
+
+    <line x1="${x_fs+w_fs+4}" y1="${y_c}" x2="${x_filtro-4}" y2="${y_c}" stroke="#444" stroke-width="3"/>
+    <circle cx="${x_filtro+w_filtro/2}" cy="${y_c}" r="${w_filtro/2+8}" fill="url(#fsCp)" stroke="#1a1916" stroke-width="2"/>
+    <circle cx="${x_filtro+w_filtro/2}" cy="${y_c}" r="${w_filtro/2}" fill="#f0e8d8"/>
+    <text x="${x_filtro+w_filtro/2}" y="${y_c+4}" text-anchor="middle" font-size="10" font-weight="bold">BRITA Nº 4</text>
+    <text x="${x_filtro+w_filtro/2}" y="${y_c+w_filtro/2+45}" text-anchor="middle" font-size="11" fill="#b04a2f" font-weight="bold">Ø ${fmt(d.D_filtro)} m</text>
+    <text x="${x_filtro+w_filtro/2}" y="${y_c-w_filtro/2-30}" text-anchor="middle" font-size="13" font-weight="bold">FILTRO ANAERÓBIO</text>
+
+    <line x1="${x_filtro+w_filtro+4}" y1="${y_c}" x2="${x_sum-4}" y2="${y_c}" stroke="#444" stroke-width="3"/>
+    <circle cx="${x_sum+w_sum/2}" cy="${y_c}" r="${w_sum/2}" fill="none" stroke="#1a1916" stroke-width="2" stroke-dasharray="6 3"/>
+    <circle cx="${x_sum+w_sum/2}" cy="${y_c}" r="${w_sum/2-8}" fill="url(#fsBp)" opacity="0.5"/>
+    ${[0,60,120,180,240,300].map(ang=>{
+      const r1=w_sum/2,r2=w_sum/2+18,rad=ang*Math.PI/180;
+      const cx=x_sum+w_sum/2,cy=y_c;
+      return `<line x1="${cx+r1*Math.cos(rad)}" y1="${cy+r1*Math.sin(rad)}" x2="${cx+r2*Math.cos(rad)}" y2="${cy+r2*Math.sin(rad)}" stroke="#2d4a5c" marker-end="url(#fsArrowP)"/>`;
+    }).join('')}
+    <text x="${x_sum+w_sum/2}" y="${y_c+w_sum/2+45}" text-anchor="middle" font-size="11" fill="#b04a2f" font-weight="bold">Ø ${fmt(d.D_sum)} m</text>
+    <text x="${x_sum+w_sum/2}" y="${y_c-w_sum/2-30}" text-anchor="middle" font-size="13" font-weight="bold">SUMIDOURO</text>
+    <g transform="translate(${total_w-80},${total_h-80})"><circle cx="20" cy="20" r="22" fill="white" stroke="#1a1916"/><path d="M 20 5 L 26 28 L 20 22 L 14 28 Z" fill="#1a1916"/><text x="20" y="50" text-anchor="middle" font-size="12" font-weight="bold">N</text></g>
+  </svg>`;
+
+  document.getElementById('fs-planta').innerHTML = `
+    <div style="background:white; padding:12px; border:1px solid var(--border); overflow-x:auto; margin-bottom:12px;">${svg}</div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <button onclick="baixarSvgCalc('svgFsPlanta','planta_baixa')">⬇ SVG</button>
+      <button onclick="baixarPngCalc('svgFsPlanta','planta_baixa')">⬇ PNG</button>
+      <button onclick="baixarJpegCalc('svgFsPlanta','planta_baixa')">⬇ JPEG</button>
+    </div>
+  `;
+}
+
+function renderFossaDetalhes() {
+  const d = FOSSA_DADOS;
+  document.getElementById('fs-det').innerHTML = `
+    <div style="display:grid; gap:14px;">
+      <div style="padding:14px; background:var(--surface-1); border-left:3px solid var(--gold);">
+        <h4 style="margin-bottom:8px; font-size:14px;">FOSSA SÉPTICA — ${fmt(d.V_final)} m³</h4>
+        <ul style="font-size:12px; line-height:1.8; list-style:none;">
+          <li>▸ <b>Paredes:</b> alvenaria tijolo maciço (e=0,20m) ou concreto armado (e=0,10m)</li>
+          <li>▸ <b>Fundo:</b> laje de concreto fck≥25 MPa, e=0,10m, declividade 2%</li>
+          <li>▸ <b>Tampa:</b> laje pré-moldada com inspeção Ø60cm</li>
+          <li>▸ <b>Revestimento:</b> chapisco + reboco + impermeabilização (cimento+areia+impermeab. 1:3)</li>
+          <li>▸ <b>Tubulação:</b> PVC Ø100mm com tês de retenção</li>
+          <li>▸ <b>Tê entrada/saída:</b> mergulho 0,30m abaixo do nível d'água</li>
+          <li>▸ <b>Compartimentação:</b> ${d.formato==='retangular'?'2 câmaras (60% + 40%)':'câmara única'}</li>
+          <li>▸ <b>Ventilação:</b> tubo Ø75mm acima da cobertura</li>
+        </ul>
+      </div>
+
+      <div style="padding:14px; background:var(--surface-1); border-left:3px solid var(--neon);">
+        <h4 style="margin-bottom:8px; font-size:14px;">FILTRO ANAERÓBIO — ${fmt(d.V_filtro_final)} m³</h4>
+        <ul style="font-size:12px; line-height:1.8; list-style:none;">
+          <li>▸ <b>Paredes:</b> alvenaria ou concreto armado</li>
+          <li>▸ <b>Fundo falso:</b> laje pré-moldada perfurada ou tijolos vazados, h=0,60m</li>
+          <li>▸ <b>Material filtrante:</b> brita nº 4 (40-65mm), camada 1,20m</li>
+          <li>▸ <b>Câmara superior:</b> 0,30m livre acima do leito</li>
+          <li>▸ <b>Tubulação distribuidora:</b> PVC Ø100mm descendo até câmara inferior</li>
+          <li>▸ <b>Tubulação coletora:</b> PVC Ø100mm</li>
+          <li>▸ <b>Tampa:</b> laje com inspeção Ø60cm</li>
+          <li>▸ <b>Volume de brita necessário:</b> ${fmt(d.area_filtro * 1.20)} m³</li>
+        </ul>
+      </div>
+
+      <div style="padding:14px; background:var(--surface-1); border-left:3px solid #4aa3ff;">
+        <h4 style="margin-bottom:8px; font-size:14px;">SUMIDOURO — Ø ${fmt(d.D_sum)} × ${fmt(d.profSum)} m</h4>
+        <ul style="font-size:12px; line-height:1.8; list-style:none;">
+          <li>▸ <b>Paredes:</b> tijolos crivados ou anéis de concreto vazados</li>
+          <li>▸ <b>Fundo:</b> sem laje — solo natural (permite infiltração)</li>
+          <li>▸ <b>Preenchimento (opcional):</b> brita ou pedra-de-mão</li>
+          <li>▸ <b>Tampa:</b> laje pré-moldada com inspeção Ø60cm</li>
+          <li>▸ <b>Tubulação entrada:</b> PVC Ø100mm com pingadeira</li>
+          <li>▸ <b>Distância mínima do lençol freático:</b> 1,50m</li>
+        </ul>
+      </div>
+
+      <div style="padding:14px; background:var(--surface-2); border:2px solid var(--gold);">
+        <h4 style="margin-bottom:8px; font-size:14px;">📍 AFASTAMENTOS MÍNIMOS (NBR 7229)</h4>
+        <ul style="font-size:12px; line-height:1.8; list-style:none;">
+          <li>▸ De construções/divisas: <b>1,50 m</b></li>
+          <li>▸ De árvores: <b>3,00 m</b></li>
+          <li>▸ De poços/cursos d'água: <b>15,00 m</b></li>
+          <li>▸ Entre fossa, filtro e sumidouro: <b>0,50 m</b></li>
+          <li>▸ Sumidouro acima do lençol: <b>1,50 m</b></li>
+        </ul>
+      </div>
+
+      <div style="padding:14px; background:var(--surface-2); border:2px solid var(--neon);">
+        <h4 style="margin-bottom:8px; font-size:14px;">🧮 LISTA DE QUANTITATIVOS (estimativa)</h4>
+        <ul style="font-size:12px; line-height:1.8; list-style:none;">
+          <li>▸ Concreto fck 25 MPa: ~${fmt((d.area_fs + d.area_filtro)*0.20 + Math.PI*Math.pow(d.D_sum/2,2)*0.10)} m³</li>
+          <li>▸ Tijolo maciço: ~${fmt(((d.formato==='retangular'?2*(d.L_fs+d.B_fs):Math.PI*d.D_fs))*d.prof_fs*80)} unidades</li>
+          <li>▸ Brita nº 4 (filtro): ~${fmt(d.area_filtro*1.20)} m³</li>
+          <li>▸ Tubo PVC Ø100mm: ~${fmt(8+2*d.L_fs)} m</li>
+          <li>▸ Tê PVC 100×100mm: 4 unidades</li>
+          <li>▸ Anéis concreto Ø${fmt(d.D_sum)}m sumidouro: ~${Math.ceil(d.profSum/0.50)} unid. de 0,50m</li>
+          <li>▸ Tampa inspeção Ø60cm: 3 unidades</li>
+        </ul>
+        <p style="font-size:10px; color:var(--text-muted); font-style:italic; margin-top:6px;">⚠ Quantitativos estimados — confirmar com projeto executivo.</p>
+      </div>
+    </div>
+  `;
+}
+
+// Helpers de export pra calculadoras
+function baixarSvgCalc(svgId, nome) {
+  const svg = document.getElementById(svgId);
+  let s = new XMLSerializer().serializeToString(svg);
+  if (!s.includes('xmlns')) s = s.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
+  const blob = new Blob([s], {type:'image/svg+xml'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = nome + '.svg'; a.click();
+  URL.revokeObjectURL(url);
+}
+function _calcSvgToCanvas(svgId, cb) {
+  const svg = document.getElementById(svgId);
+  let s = new XMLSerializer().serializeToString(svg);
+  if (!s.includes('xmlns')) s = s.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
+  const vb = svg.viewBox.baseVal;
+  const img = new Image();
+  const blob = new Blob([s], {type:'image/svg+xml;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = vb.width*2; canvas.height = vb.height*2;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    URL.revokeObjectURL(url); cb(canvas);
+  };
+  img.src = url;
+}
+function baixarPngCalc(svgId, nome) {
+  _calcSvgToCanvas(svgId, c => c.toBlob(b => {
+    const u = URL.createObjectURL(b); const a = document.createElement('a');
+    a.href = u; a.download = nome+'.png'; a.click(); URL.revokeObjectURL(u);
+  },'image/png'));
+}
+function baixarJpegCalc(svgId, nome) {
+  _calcSvgToCanvas(svgId, c => c.toBlob(b => {
+    const u = URL.createObjectURL(b); const a = document.createElement('a');
+    a.href = u; a.download = nome+'.jpg'; a.click(); URL.revokeObjectURL(u);
+  },'image/jpeg', 0.95));
 }
 
 // ─── 2. CONCRETO ───────────────────────────────────────────────────────
