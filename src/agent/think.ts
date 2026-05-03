@@ -233,16 +233,16 @@ export async function think(
   // v1.45.0: scopa o caller pra que executeTool aplique permissão por role.
   // v1.61.0: scopa o sessionId pra que tools de drafts WhatsApp consigam
   //          associar/listar drafts da sessão certa.
-  const { setCurrentCaller, setCurrentSessionId } = await import('./tools');
-  setCurrentCaller(options.caller ? { role: options.caller.role, nome: options.caller.nome } : null);
-  setCurrentSessionId(sessionId);
-  let cascade;
-  try {
-    cascade = await pensarEmCascata(systemPrompt, history, userMessage, options.attachments);
-  } finally {
-    setCurrentCaller(null);
-    setCurrentSessionId(null);
-  }
+  // v1.65.23: AsyncLocalStorage isola contexto por chain async — não há mais
+  //          race condition entre chamadas concorrentes (Issue #2).
+  const { runWithRequestContext } = await import('./tools');
+  const cascade = await runWithRequestContext(
+    {
+      caller: options.caller ? { role: options.caller.role, nome: options.caller.nome } : null,
+      sessionId,
+    },
+    () => pensarEmCascata(systemPrompt, history, userMessage, options.attachments),
+  );
   const text      = cascade.text;
   const toolsUsed = cascade.toolsUsed;
 
