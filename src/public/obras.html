@@ -1381,7 +1381,25 @@ function renderMarcarDias() {
   // v1.65.30: chip de status da quinzena atual ao lado do nome — clicavel,
   // abre o modal de Recibo direto no periodo atual. Carrega assincrono apos
   // o primeiro render (1 fetch por membro) pra nao atrasar a tela.
-  const periodoLinhasAtual = periodoQuinzenaAtual();
+  // v1.65.37: o periodo agora SEGUE o MES navegado (state.folhaMes/folhaAno).
+  // Antes ficava preso na quinzena de HOJE — entao navegar pra Abril mostrava
+  // "1ª quinzena de Maio" (Bug 2 reportado pelo CEO).
+  const periodoLinhasAtual = (() => {
+    const ano = state.folhaAno;
+    const mes = state.folhaMes;
+    const hoje = new Date();
+    const anoHoje = hoje.getFullYear();
+    const mesHoje = hoje.getMonth() + 1;
+    let q;
+    if (ano === anoHoje && mes === mesHoje) {
+      // Mes atual: quinzena baseada no dia de hoje (1-15 = 1ª, 16+ = 2ª)
+      q = hoje.getDate() <= 15 ? 1 : 2;
+    } else {
+      // Mes passado/futuro: ultima quinzena (2ª, fechamento do mes)
+      q = 2;
+    }
+    return `${ano}-${String(mes).padStart(2,'0')}-${q}`;
+  })();
   const linhas = equipeObra.map(p => {
     const s = stats[p.id] || { integral:0, manha:0, tarde:0, total_dias_equivalente:0, total_pagar:0 };
     return `<div class="card" style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap;">
