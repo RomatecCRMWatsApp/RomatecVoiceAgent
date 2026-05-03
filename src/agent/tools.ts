@@ -89,51 +89,17 @@ import {
   type TeamRole,
 } from '../services/teamMembers';
 
-// v1.65.23: contexto da requisição via AsyncLocalStorage (resolve Issue #2).
-// Antes: variáveis module-level _currentCaller/_currentSessionId vazavam
-// entre chamadas concorrentes (Telegram + WhatsApp + Web simultâneos
-// sobrescreviam um o outro). Agora cada chamada de think() roda dentro
-// de um store isolado por chain de async/await — não há mais corrida.
-// Setters mantidos por compatibilidade: mutam o store ativo se houver.
-import { AsyncLocalStorage } from 'node:async_hooks';
-
-interface RequestContext {
-  caller: { role: TeamRole; nome: string } | null;
-  sessionId: string | null;
-}
-
-const requestStorage = new AsyncLocalStorage<RequestContext>();
-
-export function runWithRequestContext<T>(
-  ctx: { caller: { role: TeamRole; nome: string } | null; sessionId: string | null },
-  fn: () => T | Promise<T>,
-): T | Promise<T> {
-  // copia o ctx pro store ser mutável sem afetar quem passou
-  const store: RequestContext = { caller: ctx.caller, sessionId: ctx.sessionId };
-  return requestStorage.run(store, fn);
-}
-
-export function setCurrentCaller(c: { role: TeamRole; nome: string } | null): void {
-  const store = requestStorage.getStore();
-  if (store) {
-    store.caller = c;
-  }
-  // Sem store ativo: no-op silencioso (callers legados que não migraram pro
-  // runWithRequestContext seguem funcionando, só não propagam o caller).
-}
-export function getCurrentCaller(): { role: TeamRole; nome: string } | null {
-  return requestStorage.getStore()?.caller ?? null;
-}
-
-export function setCurrentSessionId(s: string | null): void {
-  const store = requestStorage.getStore();
-  if (store) {
-    store.sessionId = s;
-  }
-}
-export function getCurrentSessionId(): string | null {
-  return requestStorage.getStore()?.sessionId ?? null;
-}
+// v1.65.26: AsyncLocalStorage extraido pra src/agent/requestContext.ts
+// (testavel sem puxar todo o agente). Re-exportado aqui pra manter API
+// publica intacta (think.ts e outros callers). Issue #2 resolvida.
+export {
+  runWithRequestContext,
+  setCurrentCaller,
+  getCurrentCaller,
+  setCurrentSessionId,
+  getCurrentSessionId,
+} from './requestContext';
+import { getCurrentCaller, getCurrentSessionId } from './requestContext';
 
 // Tools que admin-only (sempre — independente do role configurado)
 const ADMIN_ONLY_TOOLS = new Set<string>([
@@ -2376,8 +2342,9 @@ export async function executeTool(name: string, input: Record<string, unknown>):
   console.log(`[Tool] → ${name}`, JSON.stringify(input).slice(0, 200));
 
   // v1.45.0: gate por role (multi-tenant). Admin/CEO passam direto.
-  // v1.65.23: lê do AsyncLocalStorage via getter (antes era módulo-level).
+  // v1.65.26: lido via requestContext.ts (AsyncLocalStorage isolado).
   const caller = getCurrentCaller();
+  void getCurrentSessionId; // silencia warning de unused import (re-exportado)
   if (caller && caller.role !== 'admin') {
     if (ADMIN_ONLY_TOOLS.has(name)) {
       return { toolName: name, success: false, error: `Acesso negado: a tool "${name}" é restrita ao CEO/admin. Seu papel: ${caller.role}.` };
