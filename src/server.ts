@@ -824,6 +824,12 @@ app.post('/api/recibos/marcar-pago-offline', requireCeoToken, apiHandle(async (a
   return m.marcarPagoOffline(args as Parameters<typeof m.marcarPagoOffline>[0]);
 }));
 
+// v1.65.35: apagar envio (limpa lote tambem se ficar vazio).
+app.post('/api/recibos/envio/:envio_id/apagar', requireCeoToken, apiHandle(async (args) => {
+  const m = await import('./services/recibosQuinzena');
+  return m.apagarEnvio(args as Parameters<typeof m.apagarEnvio>[0]);
+}));
+
 // v1.65.19 — Confirmação web por token (link clicável → vira botão no WhatsApp)
 app.get('/recibos/confirmar/:token', async (req: Request, res: Response) => {
   try {

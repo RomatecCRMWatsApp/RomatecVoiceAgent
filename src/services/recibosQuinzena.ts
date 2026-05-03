@@ -2637,3 +2637,53 @@ export async function alterarStatusManual(input: {
     message: `Envio ${id} (${envio.nome}): status atualizado para ${input.status}.`,
   };
 }
+
+// v1.65.35: apagar envio (e suas mensagens) — caso de uso: lote disparado
+// errado / em testes que precisa ser limpo pra quinzena voltar a ABERTA.
+// Se o lote ficar sem envios, tambem apaga o lote vazio (cleanup).
+// NAO mexe em recibos_quinzena_emitidos (snapshot historico imutavel).
+export async function apagarEnvio(input: {
+  envio_id: string;
+  marcador?: string;
+}): Promise<{ ok: true; deleted_envio_id: string; deleted_lote_id: string | null; message: string }> {
+  const id = Number(input.envio_id);
+  if (!id) throw new Error('envio_id invalido');
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT v.lote_id, v.status, v.membro_id, l.numero AS lote_numero, e.nome
+       FROM recibos_envios v
+       LEFT JOIN recibos_envios_lotes l ON l.id = v.lote_id
+       LEFT JOIN romatec_obra_equipe e ON e.id = v.membro_id
+      WHERE v.id = ?`, [id]
+  );
+  if (rows.length === 0) throw new Error(`envio ${id} nao encontrado`);
+  const row = rows[0] as { lote_id: number; status: string; membro_id: number; lote_numero: string; nome: string };
+  const loteId = row.lote_id;
+
+  // Apaga as mensagens primeiro (FK)
+  await pool.execute(`DELETE FROM recibos_envios_mensagens WHERE envio_id = ?`, [id]);
+  // Apaga o envio
+  await pool.execute(`DELETE FROM recibos_envios WHERE id = ?`, [id]);
+
+  // Se lote ficou vazio, apaga ele tambem
+  let loteApagado: number | null = null;
+  if (loteId) {
+    const [restantes] = await pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM recibos_envios WHERE lote_id = ?`, [loteId]
+    );
+    const n = Number((restantes[0] as { n: number }).n);
+    if (n === 0) {
+      await pool.execute(`DELETE FROM recibos_envios_lotes WHERE id = ?`, [loteId]);
+      loteApagado = loteId;
+    }
+  }
+
+  console.log(`[recibos] envio ${id} (${row.nome}, lote ${row.lote_numero}, status era "${row.status}") apagado por ${input.marcador ?? '?'}${loteApagado ? ` — lote vazio ${loteApagado} tambem apagado` : ''}`);
+
+  return {
+    ok: true,
+    deleted_envio_id: String(id),
+    deleted_lote_id: loteApagado ? String(loteApagado) : null,
+    message: `Envio ${id} apagado${loteApagado ? ` (lote ${loteApagado} ficou vazio e tambem foi apagado)` : ''}. Quinzena volta pra ABERTA.`,
+  };
+}

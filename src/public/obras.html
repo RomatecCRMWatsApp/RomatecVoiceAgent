@@ -2911,6 +2911,8 @@ async function abrirModalReciboQuinzena(membroId, nome) {
       if (env.token_confirmacao) {
         btns.push(`<a href="${API}/recibos/confirmar/${escape(env.token_confirmacao)}" target="_blank" style="text-decoration:none;"><button>🔗 Abrir link de confirmação</button></a>`);
       }
+      // v1.65.35: apagar envio (volta quinzena pra ABERTA)
+      btns.push(`<button id="rqApagarEnvio" class="btn-danger" title="Apaga este envio. Quinzena volta para ABERTA.">🗑️ Apagar envio</button>`);
       acoesEl.innerHTML = btns.join('');
 
       // Wire buttons
@@ -2960,6 +2962,25 @@ async function abrirModalReciboQuinzena(membroId, nome) {
         const el = document.getElementById(id);
         if (el) el.onclick = () => rebind(st);
       }
+      // v1.65.35: apagar envio (volta quinzena pra ABERTA)
+      const apagarBtn = document.getElementById('rqApagarEnvio');
+      if (apagarBtn) apagarBtn.onclick = async () => {
+        const ok = await confirmarAcao({
+          titulo: 'Apagar envio',
+          mensagem: `Confirma apagar o envio do recibo de <strong>${escape(nome)}</strong> (${escape(periodoLabel(periodo))})?<br><br><small>O registro do envio (status, datas, link de confirmação) será removido. A quinzena volta pra <strong>⚪ ABERTA</strong>.<br><br>Útil quando disparou errado / em testes. Não afeta o snapshot histórico (recibos_quinzena_emitidos).</small>`,
+          textoConfirmar: 'Apagar', perigoso: true,
+        });
+        if (!ok) return;
+        try {
+          const out = await api(`/api/recibos/envio/${env.id}/apagar`, {
+            method: 'POST',
+            body: JSON.stringify({ envio_id: String(env.id), marcador: 'CEO via UI Marcar Dias' }),
+          });
+          alert('🗑️ ' + (out.message || 'Apagado.'));
+          await recarregarStatus();
+        } catch (e) { mostrarErroApi(e); }
+      };
+
       // v1.65.32: botao desfazer (volta 1 estado, util pra corrigir clique errado)
       const desfBtn = document.getElementById('rqDesfazer');
       if (desfBtn) desfBtn.onclick = async () => {
