@@ -1378,6 +1378,10 @@ function renderMarcarDias() {
   const stats = {};
   f.funcionarios.forEach(p => stats[p.funcionario_id] = p);
 
+  // v1.65.30: chip de status da quinzena atual ao lado do nome — clicavel,
+  // abre o modal de Recibo direto no periodo atual. Carrega assincrono apos
+  // o primeiro render (1 fetch por membro) pra nao atrasar a tela.
+  const periodoLinhasAtual = periodoQuinzenaAtual();
   const linhas = equipeObra.map(p => {
     const s = stats[p.id] || { integral:0, manha:0, tarde:0, total_dias_equivalente:0, total_pagar:0 };
     return `<div class="card" style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap;">
@@ -1385,6 +1389,9 @@ function renderMarcarDias() {
         <p style="margin:0; font-weight:500;">${escape(p.nome)}</p>
         <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">
           ${escape(p.funcao||'sem função')} · <span style="color:var(--gold);">${fmt(p.valor_dia)}/dia</span>
+        </p>
+        <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);" data-status-quinzena="${p.id}">
+          ⏳ carregando quinzena…
         </p>
       </div>
       <div style="display:flex; gap:14px; font-size:12px; color:var(--text-muted); flex-wrap:wrap;">
@@ -1426,6 +1433,42 @@ function renderMarcarDias() {
   v.querySelectorAll('[data-recibo-q]').forEach(b => b.onclick = () => {
     abrirModalReciboQuinzena(b.dataset.reciboQ, b.dataset.nome);
   });
+
+  // v1.65.30: carrega status do envio da quinzena atual pra cada membro
+  // e injeta nos placeholders. Roda assincrono e em paralelo (fire-and-forget).
+  (async () => {
+    const statusMap = {
+      pago:                            { icon: '✅', label: 'PAGO',         color: 'var(--success)' },
+      pix_recebido:                    { icon: '🔵', label: 'PIX recebido', color: '#4aa3ff' },
+      confirmado_aguardando_pix:       { icon: '🟢', label: 'Confirmou',    color: 'var(--neon)' },
+      enviado_aguardando_confirmacao:  { icon: '🟡', label: 'Enviado',      color: 'var(--gold)' },
+      contestado:                      { icon: '🔴', label: 'Contestado',   color: 'var(--danger)' },
+      expirado:                        { icon: '⏰', label: 'Expirado',     color: 'var(--warning)' },
+      falha_envio:                     { icon: '❌', label: 'Falha envio',  color: 'var(--danger)' },
+      pulado_sem_telefone:             { icon: '⚠️', label: 'Sem telefone', color: 'var(--warning)' },
+    };
+    const periodoTxt = periodoLabel(periodoLinhasAtual);
+    await Promise.allSettled(equipeObra.map(async p => {
+      const target = v.querySelector(`[data-status-quinzena="${p.id}"]`);
+      if (!target) return;
+      try {
+        const r = await api(`/api/recibos/envio-status?membro_id=${p.id}&periodo=${periodoLinhasAtual}`);
+        const env = r && r.envio;
+        if (!env) {
+          target.innerHTML = `<a data-recibo-q="${p.id}" data-nome="${escape(p.nome)}" style="color:var(--text-muted); cursor:pointer; text-decoration:underline; text-decoration-style:dotted;">⚪ ${escape(periodoTxt)} — sem envio</a>`;
+        } else {
+          const m = statusMap[env.status] || { icon: '📤', label: env.status, color: 'var(--text)' };
+          target.innerHTML = `<a data-recibo-q="${p.id}" data-nome="${escape(p.nome)}" style="cursor:pointer; color:${m.color}; text-decoration:none; font-weight:500;">${m.icon} ${escape(m.label)} — ${escape(periodoTxt)}</a>`;
+        }
+        // re-bind do click handler nos novos <a>
+        target.querySelectorAll('[data-recibo-q]').forEach(a => {
+          a.onclick = ev => { ev.preventDefault(); abrirModalReciboQuinzena(a.dataset.reciboQ, a.dataset.nome); };
+        });
+      } catch {
+        target.innerHTML = `<span style="color:var(--text-muted); font-size:11px;">— status indisponível —</span>`;
+      }
+    }));
+  })();
 
   document.getElementById('mdPrev').onclick = () => {
     if (state.folhaMes === 1) { state.folhaMes = 12; state.folhaAno--; } else state.folhaMes--;
