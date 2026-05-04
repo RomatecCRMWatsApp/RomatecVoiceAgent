@@ -935,15 +935,18 @@ function renderDashboard() {
     { label: 'Paralisadas',  value: r.paralisadas||0,  color: 'var(--warning)' },
   ], { centerLabel: 'OBRAS' });
 
-  // Donut: financeiro (entradas vs saidas) — mostra saldo no centro,
-  // valores formatados na legenda.
-  const ent = Math.round(r.entradas||0);
-  const sai = Math.round(r.saidas||0);
-  const saldo = ent - sai;
+  // v1.65.57: donut financeiro agora usa state.transacoes (filtrado pela
+  // obra ativa via loadTransacoes) em vez de r.entradas/saidas (totais
+  // de TODAS as obras). Mostra so o fluxo da obra selecionada — bug
+  // reportado pelo CEO: "deve ser separado por obra".
+  const txObra = state.transacoes || [];
+  const entObra = Math.round(txObra.filter(t => t.tipo === 'entrada').reduce((s,t) => s + Number(t.valor||0), 0));
+  const saiObra = Math.round(txObra.filter(t => t.tipo === 'saida').reduce((s,t) => s + Number(t.valor||0), 0));
+  const saldoObra = entObra - saiObra;
   const donutFin = donutChart([
-    { label: 'Entradas', value: ent, display: fmt(ent), color: 'var(--neon)' },
-    { label: 'Saídas',   value: sai, display: fmt(sai), color: 'var(--danger)' },
-  ], { centerLabel: 'SALDO', centerValue: fmt(saldo) });
+    { label: 'Entradas', value: entObra, display: fmt(entObra), color: 'var(--neon)' },
+    { label: 'Saídas',   value: saiObra, display: fmt(saiObra), color: 'var(--danger)' },
+  ], { centerLabel: 'SALDO', centerValue: fmt(saldoObra) });
 
   // Top obras por orcamento
   const topObras = [...state.obras]
@@ -1007,7 +1010,7 @@ function renderDashboard() {
         ${donutObras}
       </div>
       <div class="card">
-        <p class="section-title">💸 Fluxo Financeiro</p>
+        <p class="section-title">💸 Fluxo Financeiro ${obra ? `<span style="color:var(--text-muted); font-weight:400; font-size:13px;">— ${escape(obra.nome)}</span>` : ''}</p>
         ${donutFin}
       </div>
       <div class="card">
