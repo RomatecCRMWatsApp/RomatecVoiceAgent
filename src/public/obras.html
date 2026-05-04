@@ -788,26 +788,48 @@ function attachSel() {
 }
 
 // ── DASHBOARD ──
-// v1.65.55: donut com conic-gradient (CSS nativo). Substitui versao SVG
-// dasharray que dava bug de proporcao quando havia 2+ segmentos.
-// Cores via vars do tema dark (--neon, --gold, --danger, --warning).
+// v1.65.56: donut com SVG path arcs. Substitui conic-gradient que dava
+// proporcao errada quando havia 2 segmentos iguais (50/50 saia ~75/25).
+// SVG arcs sao mais previsiveis e suportam vars CSS direto no stroke.
+function _polarToCart(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+function _arcPath(cx, cy, r, startDeg, endDeg) {
+  // SVG nao desenha arco completo (360 = ponto inicial = ponto final).
+  // Pra "circulo cheio", quebra em 2 arcos de 180 graus.
+  if (endDeg - startDeg >= 360) {
+    const m = startDeg + 180;
+    return _arcPath(cx, cy, r, startDeg, m) + ' ' + _arcPath(cx, cy, r, m, startDeg + 360).replace(/^M[^A]+/, 'L ');
+  }
+  const start = _polarToCart(cx, cy, r, endDeg);
+  const end = _polarToCart(cx, cy, r, startDeg);
+  const largeArc = endDeg - startDeg <= 180 ? 0 : 1;
+  return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 0 ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
+}
 function donutChart(parts, opts = {}) {
   const size = opts.size || 140;
   const stroke = opts.stroke || 22;
-  const inner = size - stroke * 2;
+  const r = (size - stroke) / 2;
+  const cx = size / 2, cy = size / 2;
   const total = parts.reduce((s, p) => s + (p.value || 0), 0) || 0;
   const safe = total || 1;
 
-  // Gera as paradas do conic-gradient. Se total=0, fica todo cinza (border).
+  // Gera paths SVG, um por segmento. Se total=0, fundo cinza.
   let acc = 0;
-  const stops = total === 0
-    ? 'var(--border) 0deg 360deg'
+  const arcs = total === 0
+    ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${stroke}"/>`
     : parts.filter(p => p.value > 0).map(p => {
         const startDeg = (acc / safe) * 360;
         acc += p.value;
         const endDeg = (acc / safe) * 360;
-        return `${p.color} ${startDeg}deg ${endDeg}deg`;
-      }).join(', ');
+        // Caso especial: 1 unico segmento ocupa 100% — usa <circle> pra evitar bug do arc
+        if (parts.filter(x => x.value > 0).length === 1) {
+          return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${p.color}" stroke-width="${stroke}"/>`;
+        }
+        const d = _arcPath(cx, cy, r, startDeg, endDeg);
+        return `<path d="${d}" fill="none" stroke="${p.color}" stroke-width="${stroke}" stroke-linecap="butt"/>`;
+      }).join('');
 
   const legend = parts.map(p => `
     <div style="display:flex; align-items:center; gap:8px; font-size:12px; margin:4px 0;">
@@ -816,15 +838,16 @@ function donutChart(parts, opts = {}) {
       <strong>${typeof p.display === 'string' ? p.display : p.value}</strong>
     </div>`).join('');
 
-  // Usa background do --surface no miolo pra integrar com o card escuro.
+  const centerVal = typeof opts.centerValue === 'string' ? opts.centerValue : total;
+  const centerLbl = opts.centerLabel || 'TOTAL';
+
   return `<div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
-    <div style="position:relative; width:${size}px; height:${size}px; flex-shrink:0;">
-      <div style="width:100%; height:100%; border-radius:50%; background:conic-gradient(from -90deg, ${stops});"></div>
-      <div style="position:absolute; inset:${stroke}px; border-radius:50%; background:var(--surface); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
-        <strong style="font-size:22px; line-height:1; color:var(--text);">${typeof opts.centerValue === 'string' ? opts.centerValue : total}</strong>
-        <span style="font-size:10px; color:var(--text-muted); margin-top:4px; letter-spacing:0.5px;">${escape(opts.centerLabel || 'TOTAL')}</span>
-      </div>
-    </div>
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex-shrink:0;">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${stroke}" opacity="0.3"/>
+      ${arcs}
+      <text x="50%" y="50%" text-anchor="middle" dy="-2" font-size="20" font-weight="700" fill="currentColor">${escape(String(centerVal))}</text>
+      <text x="50%" y="50%" text-anchor="middle" dy="14" font-size="9" fill="var(--text-muted)" letter-spacing="0.5">${escape(centerLbl)}</text>
+    </svg>
     <div style="flex:1; min-width:140px;">${legend}</div>
   </div>`;
 }
