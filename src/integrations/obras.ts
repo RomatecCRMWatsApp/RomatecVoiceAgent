@@ -511,6 +511,8 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
     valor_dia: num(r.valor_dia), especialidade: r.especialidade,
     obra_id: r.obra_id ? String(r.obra_id) : null,
     obras_ids: (r.obras_ids ?? '').split(',').filter(Boolean),
+    // v1.65.55: status do colaborador (ativo/ausente/doente/ferias/afastado/transferido/desligado)
+    status: ((r as unknown as { status?: string }).status as string) || 'ativo',
   }));
 }
 
@@ -525,6 +527,7 @@ export async function atualizarMembroEquipe(input: {
   endereco_cidade?: string; endereco_estado?: string; endereco_cep?: string;
   foto_url?: string;
   obra_id?: string | null; ativo?: boolean;
+  status?: 'ativo'|'ausente'|'doente'|'ferias'|'afastado'|'transferido'|'desligado';
   confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.id) throw new Error('id obrigatório');
@@ -540,6 +543,7 @@ export async function atualizarMembroEquipe(input: {
     endereco_bairro: 'endereco_bairro', endereco_cidade: 'endereco_cidade',
     endereco_estado: 'endereco_estado', endereco_cep: 'endereco_cep',
     foto_url: 'foto_url',
+    status: 'status',
   };
   for (const [k, col] of Object.entries(map)) {
     const v = (input as Record<string, unknown>)[k];
@@ -653,20 +657,21 @@ export async function criarMembroEquipe(input: {
   endereco_rua?: string; endereco_numero?: string; endereco_bairro?: string;
   endereco_cidade?: string; endereco_estado?: string; endereco_cep?: string;
   foto_url?: string;
+  status?: 'ativo'|'ausente'|'doente'|'ferias'|'afastado'|'transferido'|'desligado';
   obras_ids?: string[]; obra_id?: string; confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.nome) throw new Error('nome obrigatório');
   if (!input.confirm) {
     return { preview: true, message: `[PREVIEW] Criar ${input.nome} na equipe${input.obra_id ? ` (obra ${input.obra_id})` : ' (geral)'}. Reenvie com confirm:true.` };
   }
-  // v1.63.0: insert com 18 colunas (9 novas)
+  // v1.65.55: insert com 19 colunas (+ status). Default 'ativo'.
   const [r] = await pool.execute<ResultSetHeader>(
     `INSERT INTO romatec_obra_equipe
       (nome, funcao, tipo_contrato, cpf, rg, telefone, email, valor_dia,
        especialidade, observacoes, data_admissao,
        endereco_rua, endereco_numero, endereco_bairro, endereco_cidade,
-       endereco_estado, endereco_cep, foto_url, obras_ids, obra_id)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       endereco_estado, endereco_cep, foto_url, obras_ids, obra_id, status)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       input.nome, input.funcao ?? null, input.tipo_contrato ?? 'diarista',
       input.cpf ?? null, input.rg ?? null,
@@ -679,6 +684,7 @@ export async function criarMembroEquipe(input: {
       input.foto_url ?? null,
       (input.obras_ids ?? []).join(','),
       input.obra_id ? Number(input.obra_id) : null,
+      input.status ?? 'ativo',
     ],
   );
   // v1.65.10: sync Equipe → contacts → zayra_memory (fire-and-forget,

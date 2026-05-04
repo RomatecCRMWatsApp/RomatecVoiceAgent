@@ -811,6 +811,10 @@ export async function runMigrations(): Promise<void> {
     // v1.65.19 — PR confirmação web: token único por envio (link clicável que vira botão no WhatsApp)
     `ALTER TABLE recibos_envios ADD COLUMN token_confirmacao VARCHAR(36) NULL`,
     `ALTER TABLE recibos_envios ADD UNIQUE INDEX uniq_token_confirmacao (token_confirmacao)`,
+    // v1.65.55 — status do colaborador (tag visual em cada card de equipe).
+    // 'ativo' = trabalhando normalmente; outros = não computa em folha/marcações.
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN status ENUM('ativo','ausente','doente','ferias','afastado','transferido','desligado') NOT NULL DEFAULT 'ativo' AFTER ativo`,
+    `ALTER TABLE romatec_obra_equipe ADD INDEX idx_status (status)`,
   ]) {
     try {
       await pool.execute(stmt);

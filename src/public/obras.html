@@ -731,7 +731,7 @@ async function render() {
 
   try {
     const fns = {
-      dashboard: async () => { await Promise.all([loadDashboard(), loadObras()]); renderDashboard(); },
+      dashboard: async () => { await Promise.all([loadDashboard(), loadObras(), loadEquipe(), loadTransacoes()]); renderDashboard(); },
       obras: async () => { await loadObras(); renderObras(); },
       cronograma: async () => { await Promise.all([loadObras(), loadEtapas()]); renderCronograma(); },
       financeiro: async () => { await Promise.all([loadObras(), loadTransacoes()]); renderFinanceiro(); },
@@ -788,41 +788,43 @@ function attachSel() {
 }
 
 // ── DASHBOARD ──
-// v1.65.54: helpers de grafico SVG inline (sem dependencia externa).
-// Donut: aceita lista [{label, value, color}] e devolve SVG com legenda.
+// v1.65.55: donut com conic-gradient (CSS nativo). Substitui versao SVG
+// dasharray que dava bug de proporcao quando havia 2+ segmentos.
+// Cores via vars do tema dark (--neon, --gold, --danger, --warning).
 function donutChart(parts, opts = {}) {
   const size = opts.size || 140;
   const stroke = opts.stroke || 22;
-  const r = (size - stroke) / 2;
-  const cx = size / 2, cy = size / 2;
-  const C = 2 * Math.PI * r;
-  const total = parts.reduce((s, p) => s + (p.value || 0), 0) || 1;
+  const inner = size - stroke * 2;
+  const total = parts.reduce((s, p) => s + (p.value || 0), 0) || 0;
+  const safe = total || 1;
 
+  // Gera as paradas do conic-gradient. Se total=0, fica todo cinza (border).
   let acc = 0;
-  const segs = parts.map(p => {
-    const len = (p.value / total) * C;
-    const dasharray = `${len} ${C - len}`;
-    const offset = -acc;
-    acc += len;
-    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${p.color}"
-              stroke-width="${stroke}" stroke-dasharray="${dasharray}"
-              stroke-dashoffset="${offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
-  }).join('');
+  const stops = total === 0
+    ? 'var(--border) 0deg 360deg'
+    : parts.filter(p => p.value > 0).map(p => {
+        const startDeg = (acc / safe) * 360;
+        acc += p.value;
+        const endDeg = (acc / safe) * 360;
+        return `${p.color} ${startDeg}deg ${endDeg}deg`;
+      }).join(', ');
 
   const legend = parts.map(p => `
     <div style="display:flex; align-items:center; gap:8px; font-size:12px; margin:4px 0;">
       <span style="width:10px; height:10px; border-radius:2px; background:${p.color}; flex-shrink:0;"></span>
       <span style="color:var(--text-muted); flex:1;">${escape(p.label)}</span>
-      <strong>${p.value}</strong>
+      <strong>${typeof p.display === 'string' ? p.display : p.value}</strong>
     </div>`).join('');
 
+  // Usa background do --surface no miolo pra integrar com o card escuro.
   return `<div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
-    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex-shrink:0;">
-      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${stroke}"/>
-      ${segs}
-      <text x="50%" y="48%" text-anchor="middle" font-size="22" font-weight="600" fill="var(--text-strong, #fff)">${total}</text>
-      <text x="50%" y="62%" text-anchor="middle" font-size="10" fill="var(--text-muted)">${escape(opts.centerLabel || 'TOTAL')}</text>
-    </svg>
+    <div style="position:relative; width:${size}px; height:${size}px; flex-shrink:0;">
+      <div style="width:100%; height:100%; border-radius:50%; background:conic-gradient(from -90deg, ${stops});"></div>
+      <div style="position:absolute; inset:${stroke}px; border-radius:50%; background:var(--surface); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+        <strong style="font-size:22px; line-height:1; color:var(--text);">${typeof opts.centerValue === 'string' ? opts.centerValue : total}</strong>
+        <span style="font-size:10px; color:var(--text-muted); margin-top:4px; letter-spacing:0.5px;">${escape(opts.centerLabel || 'TOTAL')}</span>
+      </div>
+    </div>
     <div style="flex:1; min-width:140px;">${legend}</div>
   </div>`;
 }
@@ -902,18 +904,23 @@ function renderDashboard() {
     <div class="metric-card"><p class="metric-label">📦 Mat. em Falta</p><p class="metric-value" style="color:${(r.materiais_baixos||0)>0?'var(--warning)':'inherit'};">${r.materiais_baixos||0}</p></div>
   </div>`;
 
+  // v1.65.55: cores via vars do tema dark.
   // Donut: status das obras
   const donutObras = donutChart([
-    { label: 'Em andamento', value: r.em_andamento||0, color: '#00ff99' },
-    { label: 'Concluídas',   value: r.concluidas||0,   color: '#3b82f6' },
-    { label: 'Paralisadas',  value: r.paralisadas||0,  color: '#f59e0b' },
+    { label: 'Em andamento', value: r.em_andamento||0, color: 'var(--neon)' },
+    { label: 'Concluídas',   value: r.concluidas||0,   color: 'var(--gold)' },
+    { label: 'Paralisadas',  value: r.paralisadas||0,  color: 'var(--warning)' },
   ], { centerLabel: 'OBRAS' });
 
-  // Donut: financeiro (entradas vs saidas)
+  // Donut: financeiro (entradas vs saidas) — mostra saldo no centro,
+  // valores formatados na legenda.
+  const ent = Math.round(r.entradas||0);
+  const sai = Math.round(r.saidas||0);
+  const saldo = ent - sai;
   const donutFin = donutChart([
-    { label: 'Entradas', value: Math.round(r.entradas||0), color: '#00ff99' },
-    { label: 'Saídas',   value: Math.round(r.saidas||0),   color: '#ef4444' },
-  ], { centerLabel: 'R$' });
+    { label: 'Entradas', value: ent, display: fmt(ent), color: 'var(--neon)' },
+    { label: 'Saídas',   value: sai, display: fmt(sai), color: 'var(--danger)' },
+  ], { centerLabel: 'SALDO', centerValue: fmt(saldo) });
 
   // Top obras por orcamento
   const topObras = [...state.obras]
@@ -937,6 +944,36 @@ function renderDashboard() {
       <p style="font-size:13px; color:var(--text-muted); margin:0;">Sem etapas atrasadas, materiais em falta ou saldo negativo.</p>
     </div>`;
 
+  // v1.65.55: card com lista de colaboradores da obra ativa.
+  // state.equipe ja vem filtrado pela currentObra (via loadEquipe).
+  let cardEquipe = '';
+  if (obra && state.equipe && state.equipe.length > 0) {
+    const linhas = state.equipe.map(p => `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border); flex-wrap:wrap;">
+        <div style="flex:1; min-width:160px;">
+          <p style="margin:0; font-weight:500; font-size:13px;">${escape(p.nome)}</p>
+          <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">${escape(p.funcao||'sem função')} · ${escape(p.tipo_contrato||'')} · <span style="color:var(--gold);">${fmt(p.valor_dia)}/dia</span></p>
+        </div>
+        ${statusTag(p.status)}
+      </div>
+    `).join('');
+    const ativos = state.equipe.filter(p => (p.status||'ativo') === 'ativo').length;
+    cardEquipe = `
+      <div class="card" style="margin-top:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+          <p class="section-title" style="margin:0;">👥 Colaboradores da Obra <span style="color:var(--text-muted); font-weight:400; font-size:13px;">(${ativos} ativo${ativos===1?'':'s'} de ${state.equipe.length})</span></p>
+          <button id="goEquipe" style="font-size:11px; padding:6px 12px;">Gerenciar equipe →</button>
+        </div>
+        ${linhas}
+      </div>`;
+  } else if (obra) {
+    cardEquipe = `
+      <div class="card" style="margin-top:14px;">
+        <p class="section-title">👥 Colaboradores da Obra</p>
+        <p style="font-size:13px; color:var(--text-muted); margin:0;">Nenhum colaborador alocado nesta obra. Vá em <strong>Equipe</strong> para cadastrar.</p>
+      </div>`;
+  }
+
   v.innerHTML = `${obraSelector()}
     ${quickCreate}
     ${hero}
@@ -955,9 +992,12 @@ function renderDashboard() {
         ${barTopObras}
       </div>
     </div>
+    ${cardEquipe}
     <div style="margin-top:14px;">${cardAlertas}</div>
   `;
   attachSel();
+  const goEq = document.getElementById('goEquipe');
+  if (goEq) goEq.onclick = () => { state.currentTab = 'equipe'; render(); };
 
   const qBtn = document.getElementById('qSave');
   if (qBtn) qBtn.onclick = async () => {
@@ -1878,6 +1918,27 @@ function renderFinanceiro() {
 }
 
 // ── EQUIPE ──
+// v1.65.55: status do colaborador (tag visual + select editavel inline).
+// 7 valores possiveis com cores semanticas.
+const STATUS_COLAB = {
+  ativo:        { label: 'ATIVO',       bg: 'rgba(0,255,136,0.18)',  fg: 'var(--neon)' },
+  ausente:      { label: 'AUSENTE',     bg: 'rgba(255,170,51,0.18)', fg: 'var(--warning)' },
+  doente:       { label: 'DOENTE',      bg: 'rgba(255,85,85,0.16)',  fg: 'var(--danger)' },
+  ferias:       { label: 'FÉRIAS',      bg: 'rgba(201,168,76,0.18)', fg: 'var(--gold)' },
+  afastado:     { label: 'AFASTADO',    bg: 'rgba(255,170,51,0.18)', fg: 'var(--warning)' },
+  transferido:  { label: 'TRANSFERIDO', bg: 'rgba(122,153,136,0.20)', fg: 'var(--text-muted)' },
+  desligado:    { label: 'DESLIGADO',   bg: 'rgba(255,85,85,0.20)',  fg: 'var(--danger)' },
+};
+function statusTag(status) {
+  const s = STATUS_COLAB[status] || STATUS_COLAB.ativo;
+  return `<span class="status-tag" data-status="${status||'ativo'}" style="display:inline-block; padding:2px 8px; border-radius:3px; font-size:10px; font-weight:700; letter-spacing:0.5px; background:${s.bg}; color:${s.fg}; border:1px solid ${s.fg}33;">${s.label}</span>`;
+}
+function statusSelectOpts(current) {
+  return Object.entries(STATUS_COLAB).map(([k, v]) =>
+    `<option value="${k}" ${k===(current||'ativo')?'selected':''}>${v.label}</option>`
+  ).join('');
+}
+
 function renderEquipe() {
   const v = document.getElementById('view-equipe');
   const obraNome = id => {
@@ -1886,15 +1947,20 @@ function renderEquipe() {
   };
   const lista = state.equipe.map(p => {
     const link = p.obra_id ? `<span class="badge badge-info">${escape(obraNome(p.obra_id) || 'Obra '+p.obra_id)}</span>` : '<span class="badge badge-warning">Geral</span>';
+    const tag = statusTag(p.status);
     return `<div class="card">
       <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
         <div style="flex:1; min-width:0;">
-          <p style="margin:0; font-weight:500; font-size:15px;">${escape(p.nome)}</p>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:2px;">
+            <p style="margin:0; font-weight:500; font-size:15px;">${escape(p.nome)}</p>
+            ${tag}
+          </div>
           <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.funcao||'sem função')} · ${escape(p.tipo_contrato)} · <span style="color: var(--gold);">${fmt(p.valor_dia)}/dia</span></p>
           <p style="margin:6px 0 2px;">${link}</p>
           <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.telefone||'-')}${p.especialidade?' · '+escape(p.especialidade):''}</p>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+          <select data-status-eq="${p.id}" style="font-size:11px; padding:3px 6px; max-width:140px;">${statusSelectOpts(p.status)}</select>
           <button class="btn-gold" data-cal="${p.id}" data-nome="${escape(p.nome)}" data-vd="${p.valor_dia}">📅 Marcar dias</button>
           <button data-edit-eq="${p.id}">✏️ Editar</button>
           <button class="btn-danger" data-del-eq="${p.id}" data-del-nome="${escape(p.nome)}">Excluir</button>
@@ -1941,6 +2007,7 @@ function renderEquipe() {
         <input id="pNome" placeholder="Nome completo *">
         <input id="pFunc" placeholder="Função (auto)">
         <select id="pTipo"><option value="diarista">Diarista</option><option value="clt">CLT</option><option value="empreitada">Empreitada</option><option value="terceirizado">Terceirizado</option><option value="pj">PJ</option></select>
+        <select id="pStatus" title="Situação do colaborador">${statusSelectOpts('ativo')}</select>
         <input id="pCPF" placeholder="CPF">
         <input id="pRG" placeholder="RG">
         <input id="pTel" placeholder="Telefone">
@@ -2038,11 +2105,31 @@ function renderEquipe() {
           foto_url:        document.getElementById('pFoto').value.trim() || null,
           observacoes:     document.getElementById('pObs').value.trim() || null,
           obra_id:         document.getElementById('pObraId').value || null,
+          status:          document.getElementById('pStatus').value || 'ativo',
+          confirm:         true,
         }),
       });
       render();
     } catch (e) { alert('Erro: ' + e.message); }
   };
+
+  // v1.65.55: bind do select de status inline (muda direto sem abrir modal).
+  v.querySelectorAll('[data-status-eq]').forEach(sel => {
+    sel.onchange = async () => {
+      const id = sel.getAttribute('data-status-eq');
+      const status = sel.value;
+      try {
+        await api('/api/equipe/' + id, {
+          method: 'PUT',
+          body: JSON.stringify({ id, status, confirm: true }),
+        });
+        // atualiza state local sem re-render completo (UX mais rapida)
+        const m = state.equipe.find(p => p.id === id);
+        if (m) m.status = status;
+        render();
+      } catch (e) { alert('Erro ao atualizar status: ' + e.message); }
+    };
+  });
 }
 
 // ── MATERIAIS ──
@@ -3565,9 +3652,15 @@ function abrirEditarMembro(m) {
       <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Observações</label>
       <textarea id="eObs" rows="3" style="width:100%; margin-top:4px; resize:vertical;">${escape(m.observacoes||'')}</textarea>
     </div>
-    <div style="margin-top:12px; display:flex; gap:6px; align-items:center;">
-      <input type="checkbox" id="eAtivo" ${m.ativo===false || m.ativo===0?'':'checked'}>
-      <label for="eAtivo" style="font-size:13px; color:var(--text-muted);">Membro ativo</label>
+    <div style="margin-top:12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+      <div style="display:flex; gap:6px; align-items:center;">
+        <input type="checkbox" id="eAtivo" ${m.ativo===false || m.ativo===0?'':'checked'}>
+        <label for="eAtivo" style="font-size:13px; color:var(--text-muted);">Membro ativo</label>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <label for="eStatus" style="font-size:13px; color:var(--text-muted);">Situação:</label>
+        <select id="eStatus" style="padding:4px 8px;">${statusSelectOpts(m.status)}</select>
+      </div>
     </div>
   `;
   abrirEditar(`Editar membro — ${m.nome}`, body, async () => {
@@ -3599,6 +3692,7 @@ function abrirEditarMembro(m) {
         foto_url:        document.getElementById('eFoto').value.trim() || null,
         observacoes:     document.getElementById('eObs').value.trim() || null,
         ativo:           document.getElementById('eAtivo').checked,
+        status:          document.getElementById('eStatus').value || 'ativo',
         obra_id:         document.getElementById('eObraId').value || null,
       }),
     });
