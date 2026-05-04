@@ -390,7 +390,7 @@
     }
 
     /* obraSelector na aba marcar/folha — input full-width */
-    [id^="folhaObra"], [id^="selObra"] { max-width: 100% !important; }
+    [id^="folhaObra"], .js-sel-obra { max-width: 100% !important; }
 
     /* WhatsApp button em obra: cor verde com texto branco */
     button[data-wpp-obra] { font-size: 12px; padding: 8px 10px; }
@@ -775,39 +775,82 @@ function obraSelector() {
     `<option value="${o.id}" ${o.id===state.currentObra?'selected':''}>${escape(o.nome)}</option>`).join('');
   return `<div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
     <label style="font-size:12px; color:var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Obra ativa:</label>
-    <select id="selObra" style="flex:1; max-width:300px;">${opts}</select>
+    <select class="js-sel-obra" style="flex:1; max-width:300px;">${opts}</select>
   </div>`;
 }
 function attachSel() {
-  const s = document.getElementById('selObra');
-  if (s) s.onchange = e => { state.currentObra = e.target.value; render(); };
+  // v1.65.54: usa classe em vez de id pra cobrir TODAS as abas. Antes,
+  // getElementById('selObra') so achava o select da aba renderizada
+  // primeiro (Painel) — as outras ficavam sem handler.
+  document.querySelectorAll('.js-sel-obra').forEach(s => {
+    s.onchange = e => { state.currentObra = e.target.value; render(); };
+  });
 }
 
 // ── DASHBOARD ──
+// v1.65.54: helpers de grafico SVG inline (sem dependencia externa).
+// Donut: aceita lista [{label, value, color}] e devolve SVG com legenda.
+function donutChart(parts, opts = {}) {
+  const size = opts.size || 140;
+  const stroke = opts.stroke || 22;
+  const r = (size - stroke) / 2;
+  const cx = size / 2, cy = size / 2;
+  const C = 2 * Math.PI * r;
+  const total = parts.reduce((s, p) => s + (p.value || 0), 0) || 1;
+
+  let acc = 0;
+  const segs = parts.map(p => {
+    const len = (p.value / total) * C;
+    const dasharray = `${len} ${C - len}`;
+    const offset = -acc;
+    acc += len;
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${p.color}"
+              stroke-width="${stroke}" stroke-dasharray="${dasharray}"
+              stroke-dashoffset="${offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
+  }).join('');
+
+  const legend = parts.map(p => `
+    <div style="display:flex; align-items:center; gap:8px; font-size:12px; margin:4px 0;">
+      <span style="width:10px; height:10px; border-radius:2px; background:${p.color}; flex-shrink:0;"></span>
+      <span style="color:var(--text-muted); flex:1;">${escape(p.label)}</span>
+      <strong>${p.value}</strong>
+    </div>`).join('');
+
+  return `<div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex-shrink:0;">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${stroke}"/>
+      ${segs}
+      <text x="50%" y="48%" text-anchor="middle" font-size="22" font-weight="600" fill="var(--text-strong, #fff)">${total}</text>
+      <text x="50%" y="62%" text-anchor="middle" font-size="10" fill="var(--text-muted)">${escape(opts.centerLabel || 'TOTAL')}</text>
+    </svg>
+    <div style="flex:1; min-width:140px;">${legend}</div>
+  </div>`;
+}
+
+// Mini bar chart horizontal — top obras por orcamento.
+function barChartHoriz(items, opts = {}) {
+  const max = Math.max(1, ...items.map(i => i.value));
+  const fmtVal = opts.fmt || (v => v);
+  return items.map(i => {
+    const w = (i.value / max) * 100;
+    return `<div style="margin:6px 0;">
+      <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:3px;">
+        <span style="color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:60%;">${escape(i.label)}</span>
+        <strong style="color:var(--gold);">${fmtVal(i.value)}</strong>
+      </div>
+      <div style="height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
+        <div style="width:${w}%; height:100%; background:linear-gradient(90deg, var(--neon), var(--gold)); border-radius:4px;"></div>
+      </div>
+    </div>`;
+  }).join('') || '<p style="color:var(--text-muted); font-size:12px; margin:8px 0;">Sem dados.</p>';
+}
+
 function renderDashboard() {
   const v = document.getElementById('view-dashboard');
   const r = state.resumo || {};
   const obra = state.obras.find(o => o.id === state.currentObra);
 
-  let info = '';
-  if (obra) {
-    info = `<div class="card">
-      <p class="section-title">${escape(obra.nome)}</p>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-        <div>
-          <p class="metric-label">Cliente</p>
-          <p style="margin:4px 0;">${escape(obra.cliente||'-')}</p>
-          <p style="margin:8px 0 4px; font-size:12px; color:var(--text-muted);">${escape(obra.endereco||'-')}, ${escape(obra.cidade||'-')}</p>
-        </div>
-        <div>
-          <p class="metric-label">Orçamento</p>
-          <p style="margin:4px 0; font-size:18px; color: var(--gold);">${fmt(obra.orcamento)}</p>
-          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">Status: <span class="badge badge-info">${escape(obra.status)}</span></p>
-        </div>
-      </div>
-    </div>`;
-  }
-
+  // Quick-create se nao tem obras ainda
   const quickCreate = state.obras.length === 0 ? `
     <div class="card" style="border-color: var(--gold-dim);">
       <p class="section-title">⚡ Cadastrar primeira obra</p>
@@ -821,19 +864,99 @@ function renderDashboard() {
       <button class="btn-primary" id="qSave">Criar obra e ir pra aba Obras</button>
     </div>` : '';
 
+  // Hero card da obra ativa — visual destacado
+  let hero = '';
+  if (obra) {
+    const orc = Number(obra.orcamento || 0);
+    const sai = (state.transacoes || []).filter(t => t.obra_id === obra.id && t.tipo === 'saida').reduce((s, t) => s + Number(t.valor || 0), 0);
+    const consumo = orc > 0 ? Math.min(100, Math.round(sai / orc * 100)) : 0;
+    const statusCor = obra.status === 'concluida' ? 'var(--neon)' : obra.status === 'paralisada' ? 'var(--warning)' : 'var(--gold)';
+    hero = `<div class="card" style="background:linear-gradient(135deg, rgba(0,255,153,0.06), rgba(255,184,0,0.04)); border:1px solid var(--gold-dim); margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:240px;">
+          <p style="margin:0 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-muted);">Obra Ativa</p>
+          <h2 style="margin:0; font-size:20px; color:var(--gold);">${escape(obra.nome)}</h2>
+          <p style="margin:4px 0; font-size:13px;">${escape(obra.cliente||'-')}</p>
+          <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(obra.endereco||'-')}${obra.cidade?', '+escape(obra.cidade):''}</p>
+          <p style="margin:8px 0 0;"><span class="badge" style="background:${statusCor}; color:#000; font-weight:600;">${escape(obra.status)}</span></p>
+        </div>
+        <div style="min-width:200px; text-align:right;">
+          <p style="margin:0; font-size:11px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-muted);">Orçamento</p>
+          <p style="margin:4px 0; font-size:24px; color:var(--gold); font-weight:600;">${fmt(orc)}</p>
+          <p style="margin:8px 0 4px; font-size:11px; color:var(--text-muted);">Consumo: ${consumo}% (${fmt(sai)})</p>
+          <div style="height:6px; background:var(--border); border-radius:3px; overflow:hidden; margin-top:4px;">
+            <div style="width:${consumo}%; height:100%; background:${consumo>90?'var(--danger)':consumo>70?'var(--warning)':'var(--neon)'};"></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // KPI cards principais — 4 grandes
+  const kpis = `<div class="metrics-grid">
+    <div class="metric-card"><p class="metric-label">🏗️ Obras Totais</p><p class="metric-value">${r.total_obras||0}</p></div>
+    <div class="metric-card"><p class="metric-label">▶️ Em Andamento</p><p class="metric-value" style="color: var(--neon);">${r.em_andamento||0}</p></div>
+    <div class="metric-card"><p class="metric-label">💰 Orçamento Total</p><p class="metric-value" style="font-size:15px; color: var(--gold);">${fmt(r.orcamento_total)}</p></div>
+    <div class="metric-card"><p class="metric-label">💵 Saldo</p><p class="metric-value" style="font-size:15px; color:${(r.saldo||0)<0?'var(--danger)':'var(--neon)'};">${fmt(r.saldo)}</p></div>
+    <div class="metric-card"><p class="metric-label">⚠️ Etapas Atrasadas</p><p class="metric-value" style="color:${(r.etapas_atrasadas||0)>0?'var(--danger)':'inherit'};">${r.etapas_atrasadas||0}</p></div>
+    <div class="metric-card"><p class="metric-label">📦 Mat. em Falta</p><p class="metric-value" style="color:${(r.materiais_baixos||0)>0?'var(--warning)':'inherit'};">${r.materiais_baixos||0}</p></div>
+  </div>`;
+
+  // Donut: status das obras
+  const donutObras = donutChart([
+    { label: 'Em andamento', value: r.em_andamento||0, color: '#00ff99' },
+    { label: 'Concluídas',   value: r.concluidas||0,   color: '#3b82f6' },
+    { label: 'Paralisadas',  value: r.paralisadas||0,  color: '#f59e0b' },
+  ], { centerLabel: 'OBRAS' });
+
+  // Donut: financeiro (entradas vs saidas)
+  const donutFin = donutChart([
+    { label: 'Entradas', value: Math.round(r.entradas||0), color: '#00ff99' },
+    { label: 'Saídas',   value: Math.round(r.saidas||0),   color: '#ef4444' },
+  ], { centerLabel: 'R$' });
+
+  // Top obras por orcamento
+  const topObras = [...state.obras]
+    .map(o => ({ label: o.nome, value: Number(o.orcamento || 0) }))
+    .sort((a,b) => b.value - a.value)
+    .slice(0, 5);
+  const barTopObras = barChartHoriz(topObras, { fmt });
+
+  // Card de alertas
+  const alertas = [];
+  if ((r.etapas_atrasadas||0) > 0) alertas.push(`<div style="padding:8px 10px; border-left:3px solid var(--danger); background:rgba(239,68,68,0.06); margin:6px 0; font-size:13px;">⚠️ <strong>${r.etapas_atrasadas} etapa(s) atrasada(s)</strong> — verifique a aba Obras → Cronograma.</div>`);
+  if ((r.materiais_baixos||0) > 0) alertas.push(`<div style="padding:8px 10px; border-left:3px solid var(--warning); background:rgba(245,158,11,0.06); margin:6px 0; font-size:13px;">📦 <strong>${r.materiais_baixos} material(is) abaixo do estoque mínimo</strong> — verifique a aba Materiais.</div>`);
+  if ((r.saldo||0) < 0) alertas.push(`<div style="padding:8px 10px; border-left:3px solid var(--danger); background:rgba(239,68,68,0.06); margin:6px 0; font-size:13px;">💵 <strong>Saldo negativo: ${fmt(r.saldo)}</strong> — saídas estão acima das entradas.</div>`);
+  const cardAlertas = alertas.length ? `
+    <div class="card">
+      <p class="section-title">🔔 Alertas</p>
+      ${alertas.join('')}
+    </div>` : `
+    <div class="card" style="border-color: var(--neon-dim);">
+      <p class="section-title">✅ Tudo em ordem</p>
+      <p style="font-size:13px; color:var(--text-muted); margin:0;">Sem etapas atrasadas, materiais em falta ou saldo negativo.</p>
+    </div>`;
+
   v.innerHTML = `${obraSelector()}
     ${quickCreate}
-    <div class="metrics-grid">
-      <div class="metric-card"><p class="metric-label">Obras totais</p><p class="metric-value">${r.total_obras||0}</p></div>
-      <div class="metric-card"><p class="metric-label">Em andamento</p><p class="metric-value" style="color: var(--neon);">${r.em_andamento||0}</p></div>
-      <div class="metric-card"><p class="metric-label">Concluídas</p><p class="metric-value">${r.concluidas||0}</p></div>
-      <div class="metric-card"><p class="metric-label">Paralisadas</p><p class="metric-value" style="color: var(--warning);">${r.paralisadas||0}</p></div>
-      <div class="metric-card"><p class="metric-label">Orçamento total</p><p class="metric-value" style="font-size:15px; color: var(--gold);">${fmt(r.orcamento_total)}</p></div>
-      <div class="metric-card"><p class="metric-label">Saldo</p><p class="metric-value" style="font-size:15px; color:${(r.saldo||0)<0?'var(--danger)':'var(--neon)'};">${fmt(r.saldo)}</p></div>
-      <div class="metric-card"><p class="metric-label">Etapas atrasadas</p><p class="metric-value" style="color:${(r.etapas_atrasadas||0)>0?'var(--danger)':'inherit'};">${r.etapas_atrasadas||0}</p></div>
-      <div class="metric-card"><p class="metric-label">Mat. em falta</p><p class="metric-value" style="color:${(r.materiais_baixos||0)>0?'var(--warning)':'inherit'};">${r.materiais_baixos||0}</p></div>
+    ${hero}
+    ${kpis}
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; margin-top:14px;">
+      <div class="card">
+        <p class="section-title">📊 Status das Obras</p>
+        ${donutObras}
+      </div>
+      <div class="card">
+        <p class="section-title">💸 Fluxo Financeiro</p>
+        ${donutFin}
+      </div>
+      <div class="card">
+        <p class="section-title">🏆 Top 5 Obras por Orçamento</p>
+        ${barTopObras}
+      </div>
     </div>
-    ${info}`;
+    <div style="margin-top:14px;">${cardAlertas}</div>
+  `;
   attachSel();
 
   const qBtn = document.getElementById('qSave');
