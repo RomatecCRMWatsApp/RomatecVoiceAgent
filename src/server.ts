@@ -31,6 +31,7 @@ import { startDailyScheduler } from './agent/scheduler';
 import * as calendar from './integrations/calendar';
 import * as obras from './integrations/obras';
 import * as propostas from './integrations/propostas';
+import * as propostasConsultoria from './integrations/propostasConsultoria';
 import * as alarmes from './integrations/alarmes';
 import * as cofre from './integrations/cofre';
 import * as vistorias from './integrations/vistorias';
@@ -951,6 +952,34 @@ app.get('/api/propostas/:id/pdf', async (req: Request, res: Response) => {
   }
 });
 app.post('/api/propostas/:id/enviar-whatsapp', apiHandle(args => propostas.enviarPropostaWhatsApp(args as Parameters<typeof propostas.enviarPropostaWhatsApp>[0])));
+
+// v1.66.0: Proposta de Consultoria (averbacao + outros 5 subtipos na Fase 3).
+// Numeracao PROP-AAAA-XXXX compartilhada com Mao de Obra.
+app.get   ('/api/propostas-consultoria',
+  apiHandle(args => propostasConsultoria.listarPropostasPorTipo({
+    ...(args as object), tipo: 'consultoria',
+  } as Parameters<typeof propostasConsultoria.listarPropostasPorTipo>[0])));
+app.get   ('/api/propostas-consultoria/:id',
+  apiHandle(args => propostasConsultoria.buscarPropostaConsultoria((args as { id: string }).id)));
+app.post  ('/api/propostas-consultoria',
+  apiHandle(args => propostasConsultoria.criarPropostaConsultoria(args as Parameters<typeof propostasConsultoria.criarPropostaConsultoria>[0])));
+app.post  ('/api/propostas-consultoria/preview',
+  apiHandle(args => propostasConsultoria.previewCustoConsultoria(args as Parameters<typeof propostasConsultoria.previewCustoConsultoria>[0])));
+app.get   ('/api/propostas-consultoria/:id/pdf', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const buf = await propostasConsultoria.gerarPdfPropostaConsultoria(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Proposta_Consultoria_${id}.pdf"`);
+    res.send(buf);
+  } catch (err) {
+    res.status(404).json({ error: (err as Error).message });
+  }
+});
+app.post  ('/api/propostas-consultoria/:id/enviar-whatsapp',
+  apiHandle(args => propostasConsultoria.enviarPropostaConsultoriaWhatsApp(args as Parameters<typeof propostasConsultoria.enviarPropostaConsultoriaWhatsApp>[0])));
+app.post  ('/api/propostas-consultoria/:id/enviar-telegram',
+  apiHandle(args => propostasConsultoria.enviarPropostaConsultoriaTelegram(args as Parameters<typeof propostasConsultoria.enviarPropostaConsultoriaTelegram>[0])));
 
 // Cowork (tarefas em background)
 app.get   ('/api/cowork',       apiHandle(args => cowork.listarTarefasCowork(args as Parameters<typeof cowork.listarTarefasCowork>[0])));
