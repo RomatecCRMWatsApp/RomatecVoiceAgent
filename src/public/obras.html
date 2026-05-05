@@ -465,6 +465,16 @@
 </div>
 
 <button class="zayra-fab" id="zayraFab">Z</button>
+<!-- v1.66.0: modal generico pra Proposta de Consultoria -->
+<div class="cal-overlay" id="consOverlay">
+  <div class="cal-modal" id="consModal" style="max-width:680px; max-height:85vh; overflow:auto;">
+    <div class="cal-head">
+      <div></div>
+      <button id="consClose" style="border:none;background:transparent;color:var(--text-muted);font-size:22px;cursor:pointer;">×</button>
+    </div>
+    <div id="consBody" style="padding: 16px 20px;"></div>
+  </div>
+</div>
 <div class="cal-overlay" id="editOverlay">
   <div class="cal-modal" id="editModal" style="max-width: 480px;">
     <div class="cal-head">
@@ -2950,10 +2960,27 @@ function renderVto() {
   });
 }
 
-// ── PROPOSTA (v1.65.2) ──
-// Lista de propostas + editor com cabeçalho + acordeão SINAPI + edição inline.
+// ── PROPOSTA (v1.65.2 — Mao de Obra | v1.66.0 — Consultoria) ──
+// Toggle: state.tipoPropostaAtivo = 'mao_de_obra' (default) | 'consultoria'
 function renderPropostasLista() {
   const v = document.getElementById('view-proposta');
+  if (!state.tipoPropostaAtivo) state.tipoPropostaAtivo = 'mao_de_obra';
+
+  // Toggle no topo (sempre presente)
+  const toggleHTML = `
+    <div class="card" style="display:flex; gap:8px; padding:8px; align-items:center;">
+      <span style="font-size:12px; color:var(--text-muted);">Tipo:</span>
+      <button class="${state.tipoPropostaAtivo === 'mao_de_obra' ? '' : 'btn-secondary'}"
+              data-toggle-tipo="mao_de_obra" style="flex:1;">🔨 Mão de Obra</button>
+      <button class="${state.tipoPropostaAtivo === 'consultoria' ? '' : 'btn-secondary'}"
+              data-toggle-tipo="consultoria" style="flex:1;">📋 Consultoria</button>
+    </div>`;
+
+  if (state.tipoPropostaAtivo === 'consultoria') {
+    return renderPropostasConsultoriaLista(v, toggleHTML);
+  }
+  // — abaixo segue codigo da Mao de Obra (intacto). —
+  const _toggleHTML_para_injetar = toggleHTML;
   const linhas = state.propostas.map(p => {
     const sb = {
       rascunho: 'badge-info', enviada: 'badge-warning',
@@ -2987,6 +3014,7 @@ function renderPropostasLista() {
   }).join('') || '<div class="card empty">Nenhuma proposta ainda.</div>';
 
   v.innerHTML = `
+  ${_toggleHTML_para_injetar}
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
       <p class="section-title" style="margin:0;">Propostas de Mão de Obra</p>
@@ -2995,6 +3023,10 @@ function renderPropostasLista() {
   </div>
   ${linhas}`;
 
+  document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    render();
+  });
   document.querySelector('[data-nova-prop]').onclick = abrirNovaProposta;
   document.querySelectorAll('[data-edit-prop]').forEach(b => b.onclick = async () => {
     try {
@@ -3043,6 +3075,310 @@ function renderPropostasLista() {
     } catch (e) { alert('Erro: ' + e.message); }
     finally { b.disabled = false; b.textContent = '📱 Enviar'; }
   });
+}
+
+// ── Modal helper (v1.66.0) ──────────────────────────────────────────────
+function abrirModal(htmlContent, opts = {}) {
+  const overlay = document.getElementById('consOverlay');
+  const modal = document.getElementById('consModal');
+  const body = document.getElementById('consBody');
+  if (opts.width) modal.style.maxWidth = opts.width;
+  body.innerHTML = htmlContent;
+  overlay.classList.add('open');
+  document.getElementById('consClose').onclick = fecharModal;
+  overlay.onclick = (e) => { if (e.target === overlay) fecharModal(); };
+  return body;
+}
+function fecharModal() {
+  document.getElementById('consOverlay').classList.remove('open');
+}
+
+// ── PROPOSTA DE CONSULTORIA (v1.66.0) ───────────────────────────────────
+// Subtipos disponiveis Fase 1: averbacao_residencial, averbacao_comercial.
+// Demais subtipos aparecem como cards desabilitados ate Fase 3.
+const SUBTIPOS_CONSULTORIA = [
+  { slug: 'averbacao_residencial',     icone: '🏠', nome: 'Averbação Residencial',    disponivel: true },
+  { slug: 'averbacao_comercial',       icone: '🏢', nome: 'Averbação Comercial',      disponivel: true },
+  { slug: 'georreferenciamento_rural', icone: '🌾', nome: 'Georreferenciamento Rural', disponivel: false },
+  { slug: 'desmembramento',            icone: '✂️', nome: 'Desmembramento',           disponivel: false },
+  { slug: 'remembramento',             icone: '🔗', nome: 'Remembramento',            disponivel: false },
+  { slug: 'retificacao_area',          icone: '📐', nome: 'Retificação de Área',      disponivel: false },
+  { slug: 'avaliacao_ptam',            icone: '💰', nome: 'Avaliação PTAM',           disponivel: false },
+];
+
+const SUBTIPO_LABEL_FRONT = Object.fromEntries(SUBTIPOS_CONSULTORIA.map(s => [s.slug, s.nome]));
+
+async function loadPropostasConsultoria() {
+  try {
+    const r = await api('/api/propostas-consultoria?limite=200');
+    state.propostasConsultoria = r.items || [];
+  } catch (e) { state.propostasConsultoria = []; }
+}
+
+async function renderPropostasConsultoriaLista(v, toggleHTML) {
+  if (!state.propostasConsultoria) await loadPropostasConsultoria();
+  const linhas = (state.propostasConsultoria || []).map(p => {
+    const sb = {
+      rascunho: 'badge-info', enviada: 'badge-warning',
+      aceita: 'badge-success', recusada: 'badge-danger', expirada: 'badge-danger'
+    }[p.status] || 'badge-info';
+    const valorBR = (Number(p.valor_total) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const subLabel = SUBTIPO_LABEL_FRONT[p.subtipo] || p.subtipo;
+    return `<div class="card">
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+          <p style="margin:0; font-weight:600;">${escape(p.numero)} · ${escape(p.cliente_nome || '(cliente removido)')}</p>
+          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">
+            ${escape(p.data_proposta)} · validade ${p.validade_dias}d · <strong>${escape(valorBR)}</strong>
+          </p>
+          <span class="badge badge-warning" style="font-size:10px;">📋 ${escape(subLabel)}</span>
+          <span class="badge ${sb}">${escape(p.status)}</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px; min-width:230px;">
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-pdf-cons="${p.id}"   title="Baixar PDF"        style="flex:1; min-width:70px;">📄 PDF</button>
+            <button data-wapp-cons="${p.id}"  title="Enviar WhatsApp"   style="flex:1; min-width:80px; background:var(--success); color:#fff; border-color:var(--success);">📱 WhatsApp</button>
+            <button data-tele-cons="${p.id}"  title="Enviar Telegram"   style="flex:1; min-width:80px;">✈️ Telegram</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="card empty">Nenhuma proposta de consultoria ainda.</div>';
+
+  v.innerHTML = `
+  ${toggleHTML}
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+      <p class="section-title" style="margin:0;">Propostas de Consultoria</p>
+      <button data-nova-cons>+ Nova proposta</button>
+    </div>
+  </div>
+  ${linhas}`;
+
+  document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    render();
+  });
+  document.querySelector('[data-nova-cons]').onclick = abrirNovaConsultoriaPasso1;
+
+  document.querySelectorAll('[data-pdf-cons]').forEach(b => b.onclick = () => {
+    window.open('/api/propostas-consultoria/' + b.dataset.pdfCons + '/pdf', '_blank');
+  });
+  document.querySelectorAll('[data-wapp-cons]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.wappCons;
+    const tel = prompt('Telefone (ex: 5598999168...) ou deixe vazio pra usar o do cadastro:');
+    if (tel === null) return;
+    b.disabled = true; b.textContent = 'Enviando...';
+    try {
+      const r = await api('/api/propostas-consultoria/' + id + '/enviar-whatsapp', {
+        method: 'POST', body: JSON.stringify(tel ? { id, telefone: tel } : { id })
+      });
+      alert('✅ ' + r.message);
+      await loadPropostasConsultoria(); render();
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { b.disabled = false; b.textContent = '📱 WhatsApp'; }
+  });
+  document.querySelectorAll('[data-tele-cons]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.teleCons;
+    b.disabled = true; b.textContent = 'Enviando...';
+    try {
+      const r = await api('/api/propostas-consultoria/' + id + '/enviar-telegram', {
+        method: 'POST', body: JSON.stringify({ id })
+      });
+      alert('✅ ' + r.message);
+      await loadPropostasConsultoria(); render();
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { b.disabled = false; b.textContent = '✈️ Telegram'; }
+  });
+}
+
+async function abrirNovaConsultoriaPasso1() {
+  const cards = SUBTIPOS_CONSULTORIA.map(s => `
+    <button data-pick-subtipo="${s.slug}" ${s.disponivel ? '' : 'disabled'}
+            style="padding:14px; text-align:left; border:1px solid var(--border); border-radius:8px;
+                   background:${s.disponivel ? 'var(--card-bg)' : 'var(--bg-disabled, #1a1a1a)'};
+                   opacity:${s.disponivel ? '1' : '0.5'}; cursor:${s.disponivel ? 'pointer' : 'not-allowed'};">
+      <div style="font-size:18px;">${s.icone} ${escape(s.nome)}</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+        ${s.disponivel ? 'Disponível' : 'Em breve (Fase 3)'}
+      </div>
+    </button>`).join('');
+
+  const html = `
+    <h3 style="margin:0 0 12px;">Nova Proposta de Consultoria</h3>
+    <p style="font-size:13px; color:var(--text-muted); margin:0 0 12px;">Selecione o tipo:</p>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">${cards}</div>
+  `;
+  const modal = abrirModal(html);
+  modal.querySelectorAll('[data-pick-subtipo]:not([disabled])').forEach(b => b.onclick = () => {
+    const subtipo = b.dataset.pickSubtipo;
+    fecharModal();
+    abrirNovaConsultoriaPasso2(subtipo);
+  });
+}
+
+async function abrirNovaConsultoriaPasso2(subtipo) {
+  await loadPropostasClientes();
+  const cliOpts = state.propostasClientes.map(c =>
+    `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
+  ).join('');
+  const isResid = subtipo === 'averbacao_residencial';
+  const isComerc = subtipo === 'averbacao_comercial';
+  const subLabel = SUBTIPO_LABEL_FRONT[subtipo] || subtipo;
+
+  const html = `
+    <h3 style="margin:0 0 8px;">Nova Proposta — ${escape(subLabel)}</h3>
+    <div style="display:grid; gap:8px; font-size:13px;">
+      <label>Cliente
+        <select id="cnsCliente" style="width:100%;"><option value="">— escolher —</option>${cliOpts}</select>
+      </label>
+      <label>Endereço do imóvel
+        <input id="cnsEndereco" placeholder="Rua, número, bairro, cidade-UF" style="width:100%;">
+      </label>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <label>Área construída (m²)
+          <input id="cnsArea" type="number" min="1" step="0.01" style="width:100%;">
+        </label>
+        <label>Valor venal (R$)
+          <input id="cnsValorVenal" type="number" min="0" step="0.01" style="width:100%;">
+        </label>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <label>Padrão construtivo
+          <select id="cnsPadrao" style="width:100%;">
+            <option value="popular">Popular (R-1)</option>
+            <option value="normal" selected>Normal (R-8N)</option>
+            <option value="alto">Alto (R-16)</option>
+          </select>
+        </label>
+        <label>Responsável
+          <select id="cnsResponsavel" style="width:100%;">
+            <option value="PF" selected>Pessoa Física</option>
+            <option value="PJ_sem_contabilidade">PJ sem contabilidade</option>
+            <option value="PJ_com_contabilidade">PJ com contabilidade (sem SERO)</option>
+          </select>
+        </label>
+      </div>
+      ${isResid ? `
+      <label style="display:flex; gap:6px; align-items:center;">
+        <input id="cnsComplementares" type="checkbox">
+        <span>Apresentar projetos complementares (libera pacote completo de 7 projetos)</span>
+      </label>` : ''}
+      ${isComerc ? `<div style="font-size:12px; color:var(--text-muted); padding:8px; background:rgba(255,200,0,0.08); border-radius:4px;">
+        ⚠️ Comercial: pacote completo obrigatório (7 projetos: Mapa, Arquitetônico, Elétrico, Hidrossanitário, Estrutural, PPCI, Memorial).
+      </div>` : ''}
+      <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Status atual dos documentos do cliente:</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:12px;">
+        <label><input id="cnsAlvara" type="checkbox"> Já tem Alvará</label>
+        <label><input id="cnsHabite" type="checkbox"> Já tem Habite-se</label>
+        <label><input id="cnsIptu" type="checkbox" checked> IPTU em dia</label>
+        <label><input id="cnsCnd" type="checkbox"> Já tem CND Receita</label>
+        <label style="grid-column:1/-1;"><input id="cnsCertidao" type="checkbox"> Certidão Inteiro Teor atualizada</label>
+      </div>
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <button id="cnsPreview" style="flex:1;">🧮 Calcular preview</button>
+        <button class="btn-secondary" id="cnsCancelar">Cancelar</button>
+      </div>
+      <div id="cnsResultado"></div>
+    </div>
+  `;
+  const modal = abrirModal(html, { width: '720px' });
+
+  document.getElementById('cnsCancelar').onclick = fecharModal;
+  document.getElementById('cnsPreview').onclick = async () => {
+    const cliId = document.getElementById('cnsCliente').value;
+    const area = Number(document.getElementById('cnsArea').value);
+    const valorVenal = Number(document.getElementById('cnsValorVenal').value);
+    if (!cliId) return alert('Selecione o cliente.');
+    if (!area || area <= 0) return alert('Informe área construída.');
+    if (!valorVenal || valorVenal <= 0) return alert('Informe valor venal.');
+
+    const dados_imovel = {
+      area_construida: area,
+      valor_venal_imovel: valorVenal,
+      padrao_construtivo: document.getElementById('cnsPadrao').value,
+      responsavel: document.getElementById('cnsResponsavel').value,
+      municipio: 'Açailândia-MA',
+      apresentar_projetos_complementares: isResid ? document.getElementById('cnsComplementares').checked : false,
+      tem_alvara_construcao: document.getElementById('cnsAlvara').checked,
+      tem_habite_se: document.getElementById('cnsHabite').checked,
+      iptu_em_dia: document.getElementById('cnsIptu').checked,
+      cnd_receita_emitida: document.getElementById('cnsCnd').checked,
+      certidao_inteiro_teor_atualizada: document.getElementById('cnsCertidao').checked,
+    };
+
+    const btn = document.getElementById('cnsPreview');
+    btn.disabled = true; btn.textContent = 'Calculando...';
+    try {
+      const r = await api('/api/propostas-consultoria/preview', {
+        method: 'POST',
+        body: JSON.stringify({ subtipo, dados_imovel }),
+      });
+      renderPreviewConsultoria(r, { cliId, dados_imovel, subtipo });
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { btn.disabled = false; btn.textContent = '🧮 Recalcular preview'; }
+  };
+}
+
+function renderPreviewConsultoria(r, ctx) {
+  const fmt = v => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const projetosHTML = r.custos.secao_1_projetos.map((p, i) => `<li>${i + 1}. ${escape(p)}</li>`).join('');
+  const taxasHTML = r.custos.secao_2_taxas.map(t => `
+    <tr>
+      <td style="padding:4px 6px; border-bottom:1px solid #333;">${t.ordem}. ${escape(t.descricao)}${t.observacao ? '<br><small style="color:var(--text-muted);">' + escape(t.observacao) + '</small>' : ''}</td>
+      <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #333; color:${t.pendente ? '#fbbf24' : 'var(--text)'};">${t.pendente ? 'A confirmar' : escape(fmt(t.valor))}</td>
+    </tr>`).join('');
+  const honorariosHTML = r.custos.secao_3_honorarios.map(h => `
+    <tr>
+      <td style="padding:4px 6px; border-bottom:1px solid #333;">${h.ordem}. ${escape(h.descricao)}${h.observacao ? '<br><small style="color:var(--text-muted);">' + escape(h.observacao) + '</small>' : ''}</td>
+      <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #333;"><strong>${escape(fmt(h.valor))}</strong></td>
+    </tr>`).join('');
+  const checklistHTML = r.custos.secao_4_checklist.map(d => `<li>${escape(d.texto)}${d.obrigatorio ? '' : ' <em>(opcional)</em>'}</li>`).join('');
+  const avisosHTML = (r.custos.avisos || []).map(a => `<li style="color:var(--text-muted);">${escape(a)}</li>`).join('');
+
+  const div = document.getElementById('cnsResultado');
+  div.innerHTML = `
+    <div style="margin-top:10px; padding:10px; background:rgba(0,255,150,0.04); border-radius:6px;">
+      <h4 style="margin:0 0 6px; color:var(--neon);">📋 Seção 1 — Projetos a Confeccionar</h4>
+      <ul style="margin:0; padding-left:20px;">${projetosHTML}</ul>
+
+      <h4 style="margin:10px 0 6px; color:var(--neon);">💰 Seção 2 — Taxas de Terceiros</h4>
+      <table style="width:100%; font-size:12px;">${taxasHTML}</table>
+
+      <h4 style="margin:10px 0 6px; color:var(--neon);">⭐ Seção 3 — Honorários Romatec</h4>
+      <table style="width:100%; font-size:12px;">${honorariosHTML}</table>
+
+      <h4 style="margin:10px 0 6px; color:var(--neon);">📑 Seção 4 — Documentos do Cliente</h4>
+      <ul style="margin:0; padding-left:20px; font-size:12px;">${checklistHTML}</ul>
+
+      <h3 style="margin:14px 0 0; text-align:right; color:var(--gold);">VALOR TOTAL: ${escape(fmt(r.valor_total))}</h3>
+      ${avisosHTML ? `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:12px;">Avisos legais</summary><ul style="font-size:11px;">${avisosHTML}</ul></details>` : ''}
+
+      <div style="display:flex; gap:6px; margin-top:12px;">
+        <button id="cnsSalvar" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">💾 Salvar proposta</button>
+      </div>
+    </div>`;
+
+  document.getElementById('cnsSalvar').onclick = async () => {
+    const btn = document.getElementById('cnsSalvar');
+    btn.disabled = true; btn.textContent = 'Salvando...';
+    try {
+      const endereco = document.getElementById('cnsEndereco').value.trim();
+      const r2 = await api('/api/propostas-consultoria', {
+        method: 'POST',
+        body: JSON.stringify({
+          subtipo: ctx.subtipo,
+          cliente_id: ctx.cliId,
+          endereco_imovel: endereco || null,
+          dados_imovel: ctx.dados_imovel,
+        }),
+      });
+      alert('✅ ' + r2.message);
+      fecharModal();
+      await loadPropostasConsultoria();
+      render();
+    } catch (e) { alert('Erro: ' + e.message); btn.disabled = false; btn.textContent = '💾 Salvar proposta'; }
+  };
 }
 
 async function abrirNovaProposta() {
