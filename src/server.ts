@@ -963,6 +963,8 @@ app.get   ('/api/propostas-consultoria/:id',
   apiHandle(args => propostasConsultoria.buscarPropostaConsultoria((args as { id: string }).id)));
 app.post  ('/api/propostas-consultoria',
   apiHandle(args => propostasConsultoria.criarPropostaConsultoria(args as Parameters<typeof propostasConsultoria.criarPropostaConsultoria>[0])));
+app.put   ('/api/propostas-consultoria/:id',
+  apiHandle(args => propostasConsultoria.atualizarPropostaConsultoria(args as Parameters<typeof propostasConsultoria.atualizarPropostaConsultoria>[0])));
 app.post  ('/api/propostas-consultoria/preview',
   apiHandle(args => propostasConsultoria.previewCustoConsultoria(args as Parameters<typeof propostasConsultoria.previewCustoConsultoria>[0])));
 app.get   ('/api/propostas-consultoria/:id/pdf', async (req: Request, res: Response) => {

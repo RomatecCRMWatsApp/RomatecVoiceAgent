@@ -3225,6 +3225,7 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
           </div>
           <div style="display:flex; gap:4px;">
             <button data-tele-cons="${p.id}" style="flex:1;">✈️ Telegram</button>
+            <button data-edit-cons="${p.id}" style="flex:1;">✏️ Editar</button>
             <button class="btn-danger" data-del-cons="${p.id}" style="flex:1;">Excluir</button>
           </div>
         </div>
@@ -3267,6 +3268,29 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
       await loadPropostasConsultoria(); render();
     } catch (e) { alert('Erro: ' + e.message); }
     finally { b.disabled = false; b.textContent = '📱 Enviar'; }
+  });
+  document.querySelectorAll('[data-edit-cons]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.editCons;
+    b.disabled = true; b.textContent = 'Carregando...';
+    try {
+      const p = await api('/api/propostas-consultoria/' + id);
+      const subtipo = p.subtipo;
+      if (!subtipo || (subtipo !== 'averbacao_residencial' && subtipo !== 'averbacao_comercial')) {
+        return alert('Edição disponível apenas para Averbação Residencial e Comercial nesta fase.');
+      }
+      // Popula cache do form com dados da proposta
+      state.consultoriaFormCache = {
+        subtipo,
+        cliId: String(p.cliente.id),
+        endereco: p.endereco_imovel || '',
+        dados_imovel: p.dados_imovel || {},
+      };
+      state.consultoriaEditandoId = id;
+      state.consultoriaPropostaOriginal = p; // pra preservar custos overrides ja editados
+      state.consultoriaAnexosTemp = [];
+      setConsultoriaView('form_' + subtipo);
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { b.disabled = false; b.textContent = '✏️ Editar'; }
   });
   document.querySelectorAll('[data-tele-cons]').forEach(b => b.onclick = async () => {
     const id = b.dataset.teleCons;
@@ -3345,13 +3369,19 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
   const isComerc = subtipo === 'averbacao_comercial';
   const subLabel = SUBTIPO_LABEL_FRONT[subtipo] || subtipo;
 
+  // v1.66.13: titulo dinamico (edicao vs nova)
+  const editando = !!state.consultoriaEditandoId;
+  const tituloHeader = editando
+    ? `Editando ${state.consultoriaPropostaOriginal?.numero || ''}`
+    : 'Nova Proposta de Consultoria';
+
   v.innerHTML = `
     ${toggleHTML}
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
         <div>
-          <p class="section-title" style="margin:0;">Nova Proposta de Consultoria</p>
-          <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">${escape(subLabel)}</p>
+          <p class="section-title" style="margin:0;">${escape(tituloHeader)}</p>
+          <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">${escape(subLabel)}${editando ? ' · Modo Edição' : ''}</p>
         </div>
         <button data-cons-voltar style="background:transparent;">← Voltar</button>
       </div>
@@ -3463,11 +3493,18 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
     state.consultoriaView = 'lista';
     render();
   });
-  // v1.66.12: voltar pra escolha de subtipo descarta cache (novo fluxo)
+  // v1.66.13: voltar pra escolha de subtipo descarta cache.
+  // Se estava editando, volta direto pra lista (nao faz sentido escolher subtipo).
   const voltarParaEscolha = () => {
     state.consultoriaFormCache = null;
     state.consultoriaAnexosTemp = [];
-    setConsultoriaView('escolha');
+    if (state.consultoriaEditandoId) {
+      state.consultoriaEditandoId = null;
+      state.consultoriaPropostaOriginal = null;
+      setConsultoriaView('lista');
+    } else {
+      setConsultoriaView('escolha');
+    }
   };
   document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
   document.getElementById('cnsCancelar').onclick = voltarParaEscolha;
@@ -3684,7 +3721,7 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
         <div style="padding:8px 0; ${i > 0 ? 'border-top:1px solid #333;' : ''}">
           <div style="font-size:13px; font-weight:600;">${i + 1}. ${escape(cp.rotulo)}</div>
           <div style="font-size:11px; color:var(--text-muted); margin:4px 0;">${escape(cp.descricao)}</div>
-          <div style="font-size:14px; color:var(--neon); font-weight:700;">Valor: ${escape(fmt(cp.valor))}</div>
+          <div style="font-size:14px; color:var(--neon); font-weight:700;">Valor: <span data-cns-cond-valor="${i}">${escape(fmt(cp.valor))}</span></div>
         </div>
       `).join('')}
     </div>` : ''}
@@ -3719,7 +3756,7 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
     ${avisosHTML ? `<div class="card"><h3 style="margin:0 0 8px; font-size:13px; color:var(--text-muted);">Avisos legais</h3><ul style="margin:0; padding-left:20px;">${avisosHTML}</ul></div>` : ''}
     <div class="card" style="display:flex; gap:8px;">
       <button class="btn-secondary" data-cons-voltar style="flex:1;">← Voltar e ajustar</button>
-      <button id="cnsSalvarInline" style="flex:2; background:var(--success); color:#fff; border-color:var(--success);">💾 Salvar proposta</button>
+      <button id="cnsSalvarInline" style="flex:2; background:var(--success); color:#fff; border-color:var(--success);">${state.consultoriaEditandoId ? '💾 Salvar alterações' : '💾 Salvar proposta'}</button>
     </div>`;
 
   document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
@@ -3729,17 +3766,33 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
   });
   document.querySelectorAll('[data-cons-voltar]').forEach(b => b.onclick = () => setConsultoriaView('form_' + ctx.subtipo));
 
-  // v1.66.8: recalculo ao editar valores
+  // v1.66.13: recalculo ao editar valores (Secao 2, 3 e Condicoes Pagamento)
   function recalcular() {
     let subTaxas = 0, subHon = 0;
+    let honProjeto = 0, honAssessoria = 0;
     document.querySelectorAll('[data-cns-valor]').forEach(inp => {
       const v = Number(inp.value) || 0;
       if (inp.dataset.secao === '2') subTaxas += v;
-      else if (inp.dataset.secao === '3') subHon += v;
+      else if (inp.dataset.secao === '3') {
+        subHon += v;
+        // Identifica linhas: ordem 6 = Honorario Projeto, ordem 7 = Assessoria
+        if (inp.dataset.ordem === '6') honProjeto = v;
+        else if (inp.dataset.ordem === '7') honAssessoria = v;
+      }
     });
     document.getElementById('cnsSubTaxas').textContent = fmt(subTaxas);
     document.getElementById('cnsSubHon').textContent = fmt(subHon);
     document.getElementById('cnsTotalCalc').textContent = fmt(subTaxas + subHon);
+
+    // Recalcula Condicoes de Pagamento dos Honorarios:
+    // 1a parcela (assinatura) = 100% Projeto + 50% Assessoria
+    // 2a parcela (protocolo)  = 50% Assessoria
+    const cond1 = honProjeto + (honAssessoria * 0.5);
+    const cond2 = honAssessoria * 0.5;
+    const cv0 = document.querySelector('[data-cns-cond-valor="0"]');
+    const cv1 = document.querySelector('[data-cns-cond-valor="1"]');
+    if (cv0) cv0.textContent = fmt(cond1);
+    if (cv1) cv1.textContent = fmt(cond2);
   }
   document.querySelectorAll('[data-cns-valor]').forEach(inp => {
     inp.oninput = recalcular;
@@ -3760,10 +3813,19 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
       return { ...h, valor: inp ? Number(inp.value) || 0 : Number(h.valor) || 0 };
     });
     const totalOverride = taxasOverride.reduce((s,i)=>s+i.valor,0) + honorariosOverride.reduce((s,i)=>s+i.valor,0);
+    // v1.66.13: recalcula Condicoes de Pagamento com honorarios editados
+    const honProjeto = Number(honorariosOverride.find(h => h.ordem === 6)?.valor) || 0;
+    const honAssessoria = Number(honorariosOverride.find(h => h.ordem === 7)?.valor) || 0;
+    const condicoesOverride = (r.custos.condicoes_pagamento || []).map((cp, i) => {
+      if (i === 0) return { ...cp, valor: honProjeto + (honAssessoria * 0.5) };
+      if (i === 1) return { ...cp, valor: honAssessoria * 0.5 };
+      return cp;
+    });
     const custos_override = {
       ...r.custos,
       secao_2_taxas: taxasOverride,
       secao_3_honorarios: honorariosOverride,
+      condicoes_pagamento: condicoesOverride,
       secao_5_total: totalOverride,
     };
 
@@ -3772,22 +3834,48 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
       const anexosPayload = (state.consultoriaAnexosTemp || []).map(a => ({
         filename: a.filename, mimetype: a.mimetype, conteudo_b64: a.conteudo_b64,
       }));
-      const r2 = await api('/api/propostas-consultoria', {
-        method: 'POST',
-        body: JSON.stringify({
-          subtipo: ctx.subtipo,
-          cliente_id: ctx.cliId,
-          endereco_imovel: ctx.endereco || null,
-          dados_imovel: ctx.dados_imovel,
-          custos_override,
-          anexos: anexosPayload,
-        }),
-      });
+      // v1.66.13: detecta modo EDICAO vs CRIACAO
+      const editandoId = state.consultoriaEditandoId;
+      let r2;
+      if (editandoId) {
+        r2 = await api('/api/propostas-consultoria/' + editandoId, {
+          method: 'PUT',
+          body: JSON.stringify({
+            id: editandoId,
+            endereco_imovel: ctx.endereco || null,
+            dados_imovel: ctx.dados_imovel,
+            custos_override,
+          }),
+        });
+        // Se houver anexos novos, sobe um por um
+        for (const a of anexosPayload) {
+          try {
+            await api('/api/propostas-consultoria/' + editandoId + '/anexos', {
+              method: 'POST',
+              body: JSON.stringify({ id: editandoId, ...a }),
+            });
+          } catch (err) { console.warn('Falha anexo:', err); }
+        }
+      } else {
+        r2 = await api('/api/propostas-consultoria', {
+          method: 'POST',
+          body: JSON.stringify({
+            subtipo: ctx.subtipo,
+            cliente_id: ctx.cliId,
+            endereco_imovel: ctx.endereco || null,
+            dados_imovel: ctx.dados_imovel,
+            custos_override,
+            anexos: anexosPayload,
+          }),
+        });
+      }
       alert('✅ ' + r2.message);
       state.consultoriaPreviewData = null;
       state.consultoriaAnexosTemp = [];
       state.consultoriaUltimoSubtipo = null;
-      state.consultoriaFormCache = null; // v1.66.12: limpa cache do form
+      state.consultoriaFormCache = null;
+      state.consultoriaEditandoId = null;
+      state.consultoriaPropostaOriginal = null;
       await loadPropostasConsultoria();
       setConsultoriaView('lista');
     } catch (e) { alert('Erro: ' + e.message); btn.disabled = false; btn.textContent = '💾 Salvar proposta'; }

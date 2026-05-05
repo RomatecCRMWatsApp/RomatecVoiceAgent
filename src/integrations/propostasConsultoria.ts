@@ -553,6 +553,78 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
   };
 }
 
+// v1.66.13: atualiza Proposta de Consultoria existente (mesmos dados que
+// criar — recalcula custos via engine OU usa custos_override se vier).
+// NAO mexe em numero, cliente_id, criado_em.
+export async function atualizarPropostaConsultoria(input: {
+  id: string;
+  endereco_imovel?: string;
+  observacoes?: string;
+  gestor_cargo?: string;
+  gestor_nome?: string;
+  gestor_telefone?: string;
+  dados_imovel?: Record<string, unknown>;
+  custos_override?: CustosCalculados;
+}) {
+  const id = Number(input.id);
+  if (!id) throw new Error('id obrigatorio');
+
+  // Busca proposta atual (precisa do subtipo + dados_imovel pra recalcular se nao vier override)
+  const atual = await buscarPropostaConsultoria(input.id);
+  if (atual.tipo !== 'consultoria') throw new Error('Proposta nao e de consultoria');
+
+  // Determina dados_imovel a usar (novo ou existente)
+  const dadosFinal = (input.dados_imovel as InputAverbacao | undefined) ?? (atual.dados_imovel as InputAverbacao);
+
+  // Recalcula via engine se nao vier override
+  let custosFinal: CustosCalculados;
+  if (input.custos_override) {
+    const ov = input.custos_override;
+    const tot = (ov.secao_2_taxas || []).reduce((s, i) => s + Number(i.valor || 0), 0)
+              + (ov.secao_3_honorarios || []).reduce((s, i) => s + Number(i.valor || 0), 0);
+    custosFinal = { ...ov, secao_5_total: tot };
+  } else {
+    const subtipo = atual.subtipo as SubtipoConsultoria;
+    if (subtipo !== 'averbacao_residencial' && subtipo !== 'averbacao_comercial') {
+      throw new Error(`Subtipo ${subtipo} nao suportado para edicao nesta fase.`);
+    }
+    const r = await calcularConsultoria({ subtipo, dados: dadosFinal });
+    custosFinal = r.custos;
+  }
+
+  await pool.execute(
+    `UPDATE propostas SET
+       endereco_obra = COALESCE(?, endereco_obra),
+       observacoes = COALESCE(?, observacoes),
+       gestor_cargo = COALESCE(?, gestor_cargo),
+       gestor_nome = COALESCE(?, gestor_nome),
+       gestor_telefone = COALESCE(?, gestor_telefone),
+       dados_imovel = ?,
+       custos_calculados = ?,
+       valor_total = ?,
+       atualizado_em = CURRENT_TIMESTAMP
+     WHERE id = ? AND deleted_at IS NULL`,
+    [
+      input.endereco_imovel ?? null,
+      input.observacoes ?? null,
+      input.gestor_cargo ?? null,
+      input.gestor_nome ?? null,
+      input.gestor_telefone ?? null,
+      JSON.stringify(dadosFinal),
+      JSON.stringify(custosFinal),
+      custosFinal.secao_5_total,
+      id,
+    ]
+  );
+
+  return {
+    ok: true as const,
+    id: input.id,
+    valor_total: custosFinal.secao_5_total,
+    message: `Proposta ${atual.numero} atualizada. Novo total: R$ ${custosFinal.secao_5_total.toFixed(2)}.`,
+  };
+}
+
 // ── Anexos da Proposta (v1.66.9) ───────────────────────────────────────────
 
 const ANEXO_MIMES_VALIDOS = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
