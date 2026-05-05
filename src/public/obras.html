@@ -889,12 +889,21 @@ function donutChart(parts, opts = {}) {
   const centerVal = typeof opts.centerValue === 'string' ? opts.centerValue : total;
   const centerLbl = opts.centerLabel || 'TOTAL';
 
+  // v1.66.16: tamanho de fonte proporcional ao circulo interno e comprimento do texto.
+  // Diametro util do "miolo" = size - 2*stroke - margem. Heuristica: cada char ocupa
+  // ~0.55em, entao fontSize <= innerW / (len * 0.55), com piso 9 e teto 20.
+  const innerW = size - (2 * stroke) - 12;
+  const valStr = String(centerVal);
+  const dynFontSize = Math.min(20, Math.max(9, Math.floor(innerW / Math.max(valStr.length * 0.55, 1))));
+  const dyVal = dynFontSize <= 12 ? -1 : -2;
+  const dyLbl = dynFontSize <= 12 ? 11 : 14;
+
   return `<div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
     <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex-shrink:0;">
       <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${stroke}" opacity="0.3"/>
       ${arcs}
-      <text x="50%" y="50%" text-anchor="middle" dy="-2" font-size="20" font-weight="700" fill="currentColor">${escape(String(centerVal))}</text>
-      <text x="50%" y="50%" text-anchor="middle" dy="14" font-size="9" fill="var(--text-muted)" letter-spacing="0.5">${escape(centerLbl)}</text>
+      <text x="50%" y="50%" text-anchor="middle" dy="${dyVal}" font-size="${dynFontSize}" font-weight="700" fill="currentColor">${escape(valStr)}</text>
+      <text x="50%" y="50%" text-anchor="middle" dy="${dyLbl}" font-size="9" fill="var(--text-muted)" letter-spacing="0.5">${escape(centerLbl)}</text>
     </svg>
     <div style="flex:1; min-width:140px;">${legend}</div>
   </div>`;
