@@ -7,7 +7,15 @@ if (!DB_URL) {
   );
 }
 
-// Pass URI as string — mysql2 createPool({ uri }) ignores the field in some versions
-const pool = mysql.createPool(DB_URL);
+// v1.66.24: pool maior pra reduzir wait quando varias requests batem juntas
+// (chat ZAYRA + tools + dashboard + briefings). Default mysql2 = 10.
+const pool = mysql.createPool({
+  uri: DB_URL,
+  connectionLimit: Number(process.env.DB_POOL_SIZE) || 25,
+  waitForConnections: true,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10_000,
+});
 
 export default pool;

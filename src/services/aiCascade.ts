@@ -132,6 +132,10 @@ let _cerebras: Cerebras | null = null;
 function cerebrasClient(): Cerebras {
   if (!_cerebras) _cerebras = new Cerebras({
     apiKey: process.env.CEREBRAS_API_KEY || process.env.CHAVE_API_CEREBRAS!,
+    // v1.66.24: timeout agressivo no Cerebras (1.8s) pra cair rapido pra
+    // Gemini se Cerebras estiver lento. Antes era padrao do SDK (~10s).
+    timeout: 1800,
+    maxRetries: 0,
   });
   return _cerebras;
 }

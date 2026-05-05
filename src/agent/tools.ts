@@ -2369,6 +2369,42 @@ export const toolDefinitions: Anthropic.Tool[] = _allToolDefinitions.filter(
 );
 console.log(`[tools] ${toolDefinitions.length} tools ativas (${_allToolDefinitions.length} totais, ${DISABLED_TOOLS.size} desabilitadas)`);
 
+// v1.66.24: cache em memoria pra tools de leitura repetitivas (sem efeitos
+// colaterais). TTL curto (30s) — preserva dados quase-em-tempo-real mas evita
+// chamadas duplicadas em sequencia (ex: usuario pergunta "Selic" 2x seguidas).
+// Cache key inclui o input pra nao misturar consultas diferentes.
+const TOOLS_CACHEAVEIS = new Set([
+  'consultar_taxas',          // Selic/CDI/IPCA — atualiza dia
+  'status_railway',           // muda raramente
+  'status_whatsapp',          // muda raramente
+  'info_whatsapp',            // muda raramente
+  'status_telegram',
+  'listar_municipios_itbi',   // tabela estatica
+  'listar_municipios_iptu',
+  'listar_municipios_cartorio',
+  'listar_tribunais_datajud',
+  'listar_tipos_documento',
+  'listar_tabela_comissao',
+  'listar_categorias_limpeza',
+  'consultar_cep',            // CEP nao muda (raramente)
+  'consultar_cnpj',           // muda raramente
+  'consultar_banco',
+  'consultar_ddd',
+  'pix_participantes',
+  'feriados_nacionais',
+  'fipe_marcas',
+  'consultar_isbn',
+  'norma_buscar',
+  'cep_buscar',
+  'ibge_municipio',
+]);
+const _toolCache = new Map<string, { result: ToolResult; expires: number }>();
+const TOOL_CACHE_TTL_MS = 30_000;
+
+function cacheKey(name: string, input: Record<string, unknown>): string {
+  return name + ':' + JSON.stringify(input);
+}
+
 export async function executeTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
   console.log(`[Tool] → ${name}`, JSON.stringify(input).slice(0, 200));
 
@@ -2382,6 +2418,16 @@ export async function executeTool(name: string, input: Record<string, unknown>):
     }
     if (!temPermissao(caller.role, name)) {
       return { toolName: name, success: false, error: `Acesso negado: ${caller.nome} (${caller.role}) não tem permissão para "${name}". Peça ao CEO José Romário.` };
+    }
+  }
+
+  // v1.66.24: cache hit pra tools cacheaveis
+  if (TOOLS_CACHEAVEIS.has(name)) {
+    const k = cacheKey(name, input);
+    const cached = _toolCache.get(k);
+    if (cached && cached.expires > Date.now()) {
+      console.log(`[Tool] ✓ cache HIT ${name} (idade ${((TOOL_CACHE_TTL_MS - (cached.expires - Date.now())) / 1000).toFixed(1)}s)`);
+      return cached.result;
     }
   }
 
@@ -3288,7 +3334,19 @@ export async function executeTool(name: string, input: Record<string, unknown>):
         return { toolName: name, success: false, error: `Tool desconhecida: ${name}` };
     }
 
-    return { toolName: name, success: true, data };
+    const result: ToolResult = { toolName: name, success: true, data };
+    // v1.66.24: cache resultado se for tool cacheavel
+    if (TOOLS_CACHEAVEIS.has(name)) {
+      _toolCache.set(cacheKey(name, input), { result, expires: Date.now() + TOOL_CACHE_TTL_MS });
+      // limita tamanho do cache (LRU simples — quando passar de 200, limpa expirados)
+      if (_toolCache.size > 200) {
+        const agora = Date.now();
+        for (const [k, v] of _toolCache) {
+          if (v.expires <= agora) _toolCache.delete(k);
+        }
+      }
+    }
+    return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { toolName: name, success: false, error: message };
