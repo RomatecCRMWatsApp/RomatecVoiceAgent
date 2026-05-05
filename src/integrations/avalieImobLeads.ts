@@ -9,12 +9,16 @@
 import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import pool from '../database/connection';
 import { sendReply } from './whatsapp';
+import { sendMessage as sendTelegramMessage } from './telegram';
 
 // Canais de notificacao do CEO. WhatsApp e Telegram disparam em paralelo.
 // Email Resend fica opcional (only-if-key) caso queira ativar no futuro.
+//
+// Telegram: reusa integracao existente do projeto (src/integrations/telegram.ts)
+// que ja le TELEGRAM_BOT_TOKEN + TELEGRAM_AUTHORIZED_USER_IDS (CSV) das env vars.
+// Por padrao notifica TODOS os chat_ids autorizados (CEO + equipe). Pra notificar
+// apenas o CEO, defina TELEGRAM_LEAD_CHAT_ID com um unico chat_id.
 const CEO_PHONE         = process.env.CEO_PHONE         || '5599991811246';
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const TELEGRAM_CHAT_ID   = process.env.TELEGRAM_CHAT_ID   || '';
 const RESEND_API_KEY    = process.env.RESEND_API_KEY    || '';
 const RESEND_FROM       = process.env.RESEND_FROM       || 'ZAYRA <onboarding@resend.dev>';
 const CEO_EMAIL         = process.env.CEO_EMAIL         || 'romateccrm@gmail.com';
@@ -167,41 +171,33 @@ async function notificarCEOWhatsApp(p: AvalieImobLeadPayload): Promise<boolean> 
 }
 
 async function notificarCEOTelegram(p: AvalieImobLeadPayload): Promise<boolean> {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return false;
-  try {
-    // Telegram suporta Markdown legacy. Asteriscos em volta = bold; emoji nativos OK.
-    // Escapamos caracteres reservados ('_', '*', '[', ']', '`') no nome/email do lead
-    // pra evitar erro de parsing. Usamos 'Markdown' (legacy) que e mais permissivo.
-    const text = mensagemCEO(p);
-    const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
-        text,
-        parse_mode: 'Markdown',
-        disable_web_page_preview: true,
-      }),
-    });
-    if (!r.ok) {
-      // Se Markdown falhar (algum caractere especial), tenta em texto puro
-      const errBody = await r.text();
-      console.warn('[avalieImobLeads] Telegram (markdown) falhou, tentando plain:', r.status, errBody.slice(0, 120));
-      const r2 = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }),
-      });
-      if (!r2.ok) {
-        console.warn('[avalieImobLeads] Telegram (plain) tambem falhou:', r2.status);
-        return false;
-      }
+  // Reusa integracao Telegram ja configurada no ZAYRA (src/integrations/telegram.ts).
+  // Modos:
+  //   - TELEGRAM_LEAD_CHAT_ID setada: notifica APENAS esse chat (so CEO).
+  //   - Senao: notifica TODOS em TELEGRAM_AUTHORIZED_USER_IDS (CEO + equipe).
+  if (!process.env.TELEGRAM_BOT_TOKEN) return false;
+  const text = mensagemCEO(p);
+
+  const dedicado = (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim();
+  const targets: string[] = dedicado
+    ? [dedicado]
+    : (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+  if (targets.length === 0) return false;
+
+  let pelobMenosUm = false;
+  await Promise.all(targets.map(async (chatId) => {
+    try {
+      await sendTelegramMessage(chatId, text);
+      pelobMenosUm = true;
+    } catch (err) {
+      console.warn(`[avalieImobLeads] Telegram chat ${chatId} falhou:`, (err as Error).message);
     }
-    return true;
-  } catch (err) {
-    console.warn('[avalieImobLeads] notificarCEOTelegram falhou:', (err as Error).message);
-    return false;
-  }
+  }));
+  return pelobMenosUm;
 }
 
 async function responderLeadAuto(p: AvalieImobLeadPayload): Promise<boolean> {
