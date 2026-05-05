@@ -7,8 +7,10 @@ import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import pool from '../database/connection';
 import { formatBRDate, formatBRL } from '../util/format';
 import { sendDocument } from './whatsapp';
+import { sendDocument as sendTelegramDocument } from './telegram';
 import { getTenantSettings } from '../services/tenantSettings';
 import PDFDocument from 'pdfkit';
+import { PDFDocument as PDFLibDocument } from 'pdf-lib';
 import path from 'path';
 import fs from 'fs';
 
@@ -213,7 +215,9 @@ export async function listarPropostas(input: {
   const params: (string | number)[] = [];
   // v1.66.5: filtra por tipo='mao_de_obra' (ou NULL = legado pre v1.66.0).
   // Propostas tipo='consultoria' aparecem na rota /api/propostas-consultoria.
-  let sql = `SELECT p.*, c.nome AS cliente_nome
+  // v1.66.19: tambem retorna qtd_anexos pra exibir chips na lista
+  let sql = `SELECT p.*, c.nome AS cliente_nome,
+                    (SELECT COUNT(*) FROM proposta_anexos a WHERE a.proposta_id = p.id) AS qtd_anexos
                FROM propostas p
                LEFT JOIN propostas_clientes c ON c.id = p.cliente_id
               WHERE p.deleted_at IS NULL
@@ -226,7 +230,30 @@ export async function listarPropostas(input: {
     params.push(q, q);
   }
   sql += ` ORDER BY p.criado_em DESC LIMIT ${limit}`;
-  const [rows] = await pool.execute<PropostaRow[]>(sql, params);
+  const [rows] = await pool.execute<(PropostaRow & { qtd_anexos?: number })[]>(sql, params);
+
+  // v1.66.19: anexos por proposta (uma query so pra todos os ids)
+  const ids = rows.map(r => Number(r.id)).filter(Boolean);
+  const anexosPorPropId: Record<number, Array<{ id: number; filename: string; mimetype: string; tamanho_bytes: number }>> = {};
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => '?').join(',');
+    const [arows] = await pool.execute<RowDataPacket[]>(
+      `SELECT id, proposta_id, filename, mimetype, tamanho_bytes
+         FROM proposta_anexos WHERE proposta_id IN (${placeholders}) ORDER BY ordem`,
+      ids
+    );
+    for (const ar of arows) {
+      const pid = Number(ar.proposta_id);
+      if (!anexosPorPropId[pid]) anexosPorPropId[pid] = [];
+      anexosPorPropId[pid].push({
+        id: Number(ar.id),
+        filename: String(ar.filename),
+        mimetype: String(ar.mimetype),
+        tamanho_bytes: Number(ar.tamanho_bytes),
+      });
+    }
+  }
+
   return rows.map(r => ({
     id: String(r.id),
     numero: r.numero,
@@ -245,6 +272,8 @@ export async function listarPropostas(input: {
     gestor_cargo: r.gestor_cargo,
     gestor_nome: r.gestor_nome,
     gestor_telefone: r.gestor_telefone,
+    qtd_anexos: Number(r.qtd_anexos || 0),
+    anexos: anexosPorPropId[Number(r.id)] || [],
   }));
 }
 
@@ -816,6 +845,56 @@ export async function gerarPdfProposta(id: string): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+// v1.66.19: PDF com anexos mergeados (mesma logica de propostasConsultoria)
+async function carregarAnexosProposta(propId: number): Promise<Array<{ filename: string; mimetype: string; buffer: Buffer }>> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT filename, mimetype, conteudo_b64 FROM proposta_anexos
+      WHERE proposta_id = ? ORDER BY ordem`, [propId]
+  );
+  return rows.map(r => ({
+    filename: String(r.filename),
+    mimetype: String(r.mimetype),
+    buffer: Buffer.from(String(r.conteudo_b64), 'base64'),
+  }));
+}
+
+export async function gerarPdfPropostaCompleto(id: string): Promise<Buffer> {
+  const principal = await gerarPdfProposta(id);
+  const anexos = await carregarAnexosProposta(Number(id));
+  if (anexos.length === 0) return principal;
+
+  const merged = await PDFLibDocument.create();
+  const principalDoc = await PDFLibDocument.load(principal);
+  const principalPages = await merged.copyPages(principalDoc, principalDoc.getPageIndices());
+  principalPages.forEach(p => merged.addPage(p));
+
+  for (const anexo of anexos) {
+    try {
+      if (anexo.mimetype === 'application/pdf') {
+        const anexoDoc = await PDFLibDocument.load(anexo.buffer);
+        const anexoPages = await merged.copyPages(anexoDoc, anexoDoc.getPageIndices());
+        anexoPages.forEach(p => merged.addPage(p));
+      } else if (anexo.mimetype.startsWith('image/')) {
+        const img = anexo.mimetype === 'image/png'
+          ? await merged.embedPng(anexo.buffer)
+          : await merged.embedJpg(anexo.buffer);
+        const A4_W = 595.28, A4_H = 841.89;
+        const margem = 30;
+        const maxW = A4_W - 2 * margem, maxH = A4_H - 2 * margem - 30;
+        const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+        const w = img.width * scale, h = img.height * scale;
+        const page = merged.addPage([A4_W, A4_H]);
+        page.drawImage(img, { x: (A4_W - w) / 2, y: (A4_H - h) / 2 - 15, width: w, height: h });
+        page.drawText(`Anexo: ${anexo.filename}`, { x: margem, y: 20, size: 9 });
+      }
+    } catch (err) {
+      console.warn(`[propostas-anexos] Falha ao mergear ${anexo.filename}: ${(err as Error).message}`);
+    }
+  }
+  const out = await merged.save();
+  return Buffer.from(out);
+}
+
 // ── Envio Z-API ─────────────────────────────────────────────────────────────
 export async function enviarPropostaWhatsApp(input: { id: string; telefone?: string }): Promise<MutationResult & { messageId?: string; phone?: string }> {
   const id = Number(input.id);
@@ -824,11 +903,11 @@ export async function enviarPropostaWhatsApp(input: { id: string; telefone?: str
   const tel = (input.telefone?.trim()) || p.cliente?.telefone || '';
   if (!tel) throw new Error('Telefone obrigatório (informe ou cadastre no cliente).');
 
-  const pdfBuf = await gerarPdfProposta(input.id);
+  // v1.66.19: usa PDF completo (com anexos)
+  const pdfBuf = await gerarPdfPropostaCompleto(input.id);
   const fileName = `Proposta_${p.numero}_${(p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
   const r = await sendDocument(tel, pdfBuf.toString('base64'), fileName);
 
-  // Marca como enviada (status rascunho → enviada; mantém outros status)
   await pool.execute(
     `UPDATE propostas
         SET enviada_whatsapp = 1,
@@ -843,5 +922,40 @@ export async function enviarPropostaWhatsApp(input: { id: string; telefone?: str
     message: `Proposta ${p.numero} enviada para ${r.phone} (msgId ${r.messageId || '?'}).`,
     messageId: r.messageId,
     phone: r.phone,
+  };
+}
+
+// v1.66.19: envio Telegram para Mao de Obra (mesmo padrao da Consultoria)
+export async function enviarPropostaTelegram(input: { id: string; chatId?: string }) {
+  const id = Number(input.id);
+  if (!id) throw new Error('id obrigatorio');
+  const p = await buscarProposta(input.id);
+  const chatId = input.chatId
+    || (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
+    || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+  if (!chatId) throw new Error('chatId Telegram obrigatorio (TELEGRAM_LEAD_CHAT_ID ou TELEGRAM_AUTHORIZED_USER_IDS).');
+
+  console.log(`[telegram-mao-obra] iniciando envio proposta=${p.numero} chat=${chatId}`);
+  const pdfBuf = await gerarPdfPropostaCompleto(input.id);
+  console.log(`[telegram-mao-obra] PDF gerado: ${(pdfBuf.length / 1024 / 1024).toFixed(2)} MB`);
+  if (pdfBuf.length > 50 * 1024 * 1024) {
+    throw new Error(`PDF tem ${(pdfBuf.length / 1024 / 1024).toFixed(1)} MB e o Telegram aceita ate 50 MB.`);
+  }
+  const fileName = `Proposta_${p.numero}_${(p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+  try {
+    await sendTelegramDocument(chatId, pdfBuf, fileName, `Proposta ${p.numero} — Mao de Obra`);
+    console.log(`[telegram-mao-obra] envio OK proposta=${p.numero}`);
+  } catch (err) {
+    const e = err as Error & { response?: { data?: { description?: string; error_code?: number } } };
+    const desc = e.response?.data?.description || e.message;
+    const code = e.response?.data?.error_code;
+    throw new Error(`Telegram rejeitou: ${desc}${code ? ` (code ${code})` : ''}`);
+  }
+  await pool.execute(
+    `UPDATE propostas SET status = IF(status = 'rascunho', 'enviada', status) WHERE id = ?`, [id]
+  );
+  return {
+    ok: true as const,
+    message: `Proposta ${p.numero} enviada via Telegram (chat ${chatId}, ${(pdfBuf.length / 1024).toFixed(0)} KB).`,
   };
 }

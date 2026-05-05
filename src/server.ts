@@ -952,6 +952,20 @@ app.get('/api/propostas/:id/pdf', async (req: Request, res: Response) => {
   }
 });
 app.post('/api/propostas/:id/enviar-whatsapp', apiHandle(args => propostas.enviarPropostaWhatsApp(args as Parameters<typeof propostas.enviarPropostaWhatsApp>[0])));
+// v1.66.19: envio Telegram + anexos pra Mao de Obra (paridade com Consultoria)
+app.post('/api/propostas/:id/enviar-telegram',
+  apiHandle(args => propostas.enviarPropostaTelegram(args as Parameters<typeof propostas.enviarPropostaTelegram>[0])));
+app.get   ('/api/propostas/:id/anexos',
+  apiHandle(args => propostasConsultoria.listarAnexosProposta({ proposta_id: (args as { id: string }).id })));
+app.post  ('/api/propostas/:id/anexos',
+  apiHandle(args => propostasConsultoria.criarAnexoProposta({
+    proposta_id: (args as { id: string }).id,
+    filename: (args as { filename: string }).filename,
+    mimetype: (args as { mimetype: string }).mimetype,
+    conteudo_b64: (args as { conteudo_b64: string }).conteudo_b64,
+  })));
+app.delete('/api/propostas/anexos/:id',
+  apiHandle(args => propostasConsultoria.removerAnexoProposta(args as { id: string })));
 
 // v1.66.0: Proposta de Consultoria (averbacao + outros 5 subtipos na Fase 3).
 // Numeracao PROP-AAAA-XXXX compartilhada com Mao de Obra.
