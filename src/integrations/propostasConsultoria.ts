@@ -536,9 +536,33 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
     || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
   if (!chatId) throw new Error('chatId Telegram obrigatorio (defina TELEGRAM_LEAD_CHAT_ID ou TELEGRAM_AUTHORIZED_USER_IDS, ou passe explicit).');
 
-  const pdfBuf = await gerarPdfPropostaConsultoriaCompleto(input.id);
+  // v1.66.14: log + try/catch detalhado pra diagnosticar falhas no 2o envio
+  console.log(`[telegram-consultoria] iniciando envio proposta=${p.numero} chat=${chatId}`);
+  let pdfBuf: Buffer;
+  try {
+    pdfBuf = await gerarPdfPropostaConsultoriaCompleto(input.id);
+    console.log(`[telegram-consultoria] PDF gerado: ${(pdfBuf.length / 1024 / 1024).toFixed(2)} MB`);
+  } catch (err) {
+    console.error('[telegram-consultoria] erro ao gerar PDF:', (err as Error).message);
+    throw new Error(`Falha ao gerar PDF: ${(err as Error).message}`);
+  }
+
+  // Telegram limita arquivos a 50MB. Se passar, aborta com mensagem clara.
+  if (pdfBuf.length > 50 * 1024 * 1024) {
+    throw new Error(`PDF tem ${(pdfBuf.length / 1024 / 1024).toFixed(1)} MB e o Telegram aceita ate 50 MB. Reduza o tamanho dos anexos da proposta.`);
+  }
+
   const fileName = `Proposta_${p.numero}_${(p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
-  await sendTelegramDocument(chatId, pdfBuf, fileName, `Proposta ${p.numero} — ${SUBTIPO_LABEL[p.subtipo || ''] || p.subtipo}`);
+  try {
+    await sendTelegramDocument(chatId, pdfBuf, fileName, `Proposta ${p.numero} — ${SUBTIPO_LABEL[p.subtipo || ''] || p.subtipo}`);
+    console.log(`[telegram-consultoria] envio OK proposta=${p.numero}`);
+  } catch (err) {
+    const e = err as Error & { response?: { data?: { description?: string; error_code?: number } } };
+    const desc = e.response?.data?.description || e.message || 'erro desconhecido';
+    const code = e.response?.data?.error_code;
+    console.error(`[telegram-consultoria] envio FALHOU proposta=${p.numero} code=${code} desc=${desc}`);
+    throw new Error(`Telegram rejeitou: ${desc}${code ? ` (code ${code})` : ''}`);
+  }
 
   await pool.execute(
     `UPDATE propostas
@@ -549,7 +573,7 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
 
   return {
     ok: true as const,
-    message: `Proposta ${p.numero} enviada via Telegram (chat ${chatId}).`,
+    message: `Proposta ${p.numero} enviada via Telegram (chat ${chatId}, ${(pdfBuf.length / 1024).toFixed(0)} KB).`,
   };
 }
 
