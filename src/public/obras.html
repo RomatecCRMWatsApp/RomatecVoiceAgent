@@ -3124,21 +3124,28 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
     }[p.status] || 'badge-info';
     const valorBR = (Number(p.valor_total) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const subLabel = SUBTIPO_LABEL_FRONT[p.subtipo] || p.subtipo;
+    const dataBR = p.data_proposta ? parseDataBR(p.data_proposta) : '';
+    const telDefault = state.propostasClientesTel?.[p.cliente_id] || '';
     return `<div class="card">
       <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
         <div style="flex:1; min-width:200px;">
           <p style="margin:0; font-weight:600;">${escape(p.numero)} · ${escape(p.cliente_nome || '(cliente removido)')}</p>
           <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">
-            ${escape(p.data_proposta)} · validade ${p.validade_dias}d · <strong>${escape(valorBR)}</strong>
+            ${escape(dataBR)} · validade ${p.validade_dias}d · <strong>${escape(valorBR)}</strong>
           </p>
           <span class="badge badge-warning" style="font-size:10px;">📋 ${escape(subLabel)}</span>
           <span class="badge ${sb}">${escape(p.status)}</span>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; min-width:230px;">
+          <input data-tel-cons="${p.id}" placeholder="WhatsApp p/ envio (ex: 5598...)" value="${escape(telDefault)}" style="font-size:12px; padding:6px 8px;">
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
-            <button data-pdf-cons="${p.id}"   title="Baixar PDF"        style="flex:1; min-width:70px;">📄 PDF</button>
-            <button data-wapp-cons="${p.id}"  title="Enviar WhatsApp"   style="flex:1; min-width:80px; background:var(--success); color:#fff; border-color:var(--success);">📱 WhatsApp</button>
-            <button data-tele-cons="${p.id}"  title="Enviar Telegram"   style="flex:1; min-width:80px;">✈️ Telegram</button>
+            <button data-view-cons="${p.id}" title="Visualizar PDF"   style="flex:1; min-width:70px;">👁 Ver</button>
+            <button data-pdf-cons="${p.id}"  title="Baixar PDF"       style="flex:1; min-width:70px;">📄 PDF</button>
+            <button data-wapp-cons="${p.id}" title="Enviar WhatsApp"  style="flex:1; min-width:80px; background:var(--success); color:#fff; border-color:var(--success);">📱 Enviar</button>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button data-tele-cons="${p.id}" style="flex:1;">✈️ Telegram</button>
+            <button class="btn-danger" data-del-cons="${p.id}" style="flex:1;">Excluir</button>
           </div>
         </div>
       </div>
@@ -3161,13 +3168,16 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
   });
   document.querySelector('[data-nova-cons]').onclick = abrirNovaConsultoriaPasso1;
 
+  document.querySelectorAll('[data-view-cons]').forEach(b => b.onclick = () => {
+    window.open('/api/propostas-consultoria/' + b.dataset.viewCons + '/pdf', '_blank');
+  });
   document.querySelectorAll('[data-pdf-cons]').forEach(b => b.onclick = () => {
     window.open('/api/propostas-consultoria/' + b.dataset.pdfCons + '/pdf', '_blank');
   });
   document.querySelectorAll('[data-wapp-cons]').forEach(b => b.onclick = async () => {
     const id = b.dataset.wappCons;
-    const tel = prompt('Telefone (ex: 5598999168...) ou deixe vazio pra usar o do cadastro:');
-    if (tel === null) return;
+    const telInput = document.querySelector(`[data-tel-cons="${id}"]`);
+    const tel = (telInput?.value || '').trim();
     b.disabled = true; b.textContent = 'Enviando...';
     try {
       const r = await api('/api/propostas-consultoria/' + id + '/enviar-whatsapp', {
@@ -3176,7 +3186,7 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
       alert('✅ ' + r.message);
       await loadPropostasConsultoria(); render();
     } catch (e) { alert('Erro: ' + e.message); }
-    finally { b.disabled = false; b.textContent = '📱 WhatsApp'; }
+    finally { b.disabled = false; b.textContent = '📱 Enviar'; }
   });
   document.querySelectorAll('[data-tele-cons]').forEach(b => b.onclick = async () => {
     const id = b.dataset.teleCons;
@@ -3189,6 +3199,20 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
       await loadPropostasConsultoria(); render();
     } catch (e) { alert('Erro: ' + e.message); }
     finally { b.disabled = false; b.textContent = '✈️ Telegram'; }
+  });
+  document.querySelectorAll('[data-del-cons]').forEach(b => b.onclick = async () => {
+    const ok = await confirmarAcao({
+      titulo: 'Excluir proposta de consultoria',
+      mensagem: 'A proposta será removida (soft delete). O registro permanece no histórico do banco.',
+      textoConfirmar: 'Excluir', perigoso: true,
+    });
+    if (!ok) return;
+    try {
+      await api('/api/propostas/' + b.dataset.delCons, { method: 'DELETE' });
+      await loadPropostasConsultoria(); render();
+    } catch (e) {
+      alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : ''));
+    }
   });
 }
 
