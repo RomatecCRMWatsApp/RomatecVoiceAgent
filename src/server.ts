@@ -1026,18 +1026,7 @@ app.post('/api/avalieimob/lead-webhook', async (req: Request, res: Response) => 
     const secret = req.headers['x-webhook-secret'] || req.headers['X-Webhook-Secret'];
     const expected = process.env.AVALIEIMOB_WEBHOOK_SECRET;
     if (!expected) {
-      // v1.65.62: debug auxiliar quando env var nao chega — lista quais env
-      // vars com prefixo AVALIEIMOB / WEBHOOK existem no processo, sem
-      // expor valores. Ajuda a diagnosticar nome com typo / caractere
-      // invisivel / variavel cadastrada em service errado.
-      const candidatas = Object.keys(process.env)
-        .filter((k) => /AVALIEIMOB|WEBHOOK/i.test(k))
-        .map((k) => `${k} (len=${(process.env[k] || '').length})`);
-      console.error('[avalieimob-webhook] AVALIEIMOB_WEBHOOK_SECRET ausente. Candidatas:', candidatas);
-      return res.status(500).json({
-        error: 'AVALIEIMOB_WEBHOOK_SECRET nao configurada na ZAYRA',
-        debug_env_keys_matching: candidatas,
-      });
+      return res.status(500).json({ error: 'AVALIEIMOB_WEBHOOK_SECRET nao configurada na ZAYRA' });
     }
     if (secret !== expected) {
       return res.status(401).json({ error: 'invalid secret' });
@@ -1048,26 +1037,6 @@ app.post('/api/avalieimob/lead-webhook', async (req: Request, res: Response) => 
     console.error('[avalieimob-webhook] erro:', (err as Error).message);
     res.status(400).json({ error: (err as Error).message });
   }
-});
-
-// v1.65.62: endpoint de DEBUG (temporario) — confirma se a ZAYRA esta lendo
-// a env var. NAO expoe o valor; so retorna se existe, comprimento e prefixo.
-// Header de protecao basica — qualquer valor nao-vazio em X-Debug-Token serve.
-app.get('/api/avalieimob/debug-secret', async (req: Request, res: Response) => {
-  if (!req.headers['x-debug-token']) {
-    return res.status(404).json({ error: 'not found' });
-  }
-  const v = process.env.AVALIEIMOB_WEBHOOK_SECRET;
-  res.json({
-    has_var: !!v,
-    length: v ? v.length : 0,
-    starts_with: v ? v.slice(0, 4) : null,
-    ends_with:   v ? v.slice(-4)  : null,
-    has_whitespace: v ? /^\s|\s$/.test(v) : false,
-    matching_keys: Object.keys(process.env)
-      .filter((k) => /AVALIEIMOB|WEBHOOK/i.test(k))
-      .map((k) => ({ key: k, length: (process.env[k] || '').length })),
-  });
 });
 
 app.get('/api/avalieimob/leads', async (req: Request, res: Response) => {
