@@ -21,7 +21,7 @@ import { buscarMemoria, formatarContexto } from '../services/ragSearch';
 import { listarDocumentos, apagarDocumento } from '../services/ragIngest';
 import { listarContratosIndexados } from '../services/contratosIngest';
 import { gerarContrato, listarContratosGerados } from '../services/contratosGerar';
-import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS, statusInstancia, infoInstancia } from '../integrations/whatsapp';
+import { sendReply, sendImage, sendDocument, sendLocation, enviarAudioTTS, statusInstancia, infoInstancia, listarAudiosWhatsApp } from '../integrations/whatsapp';
 import {
   criarDraft as criarDraftWa,
   buscarDraft as buscarDraftWa,
@@ -364,6 +364,23 @@ const _allToolDefinitions: Anthropic.Tool[] = [
         mensagem: { type: 'string', description: 'Texto da mensagem (sem markdown). OBRIGATÓRIO na 1ª chamada.' },
         confirm:  { type: 'boolean', description: 'true APÓS autorização verbal do CEO.' },
         draft_id: { type: 'string', description: 'UUID do draft criado na 1ª chamada. OBRIGATÓRIO quando confirm:true.' },
+      },
+    },
+  },
+  {
+    name: 'listar_audios_whatsapp',
+    description: 'Lista os áudios enviados/recebidos via WhatsApp (apenas metadados — data, telefone, ID). Use quando o usuário pedir "me envia os últimos áudios", "histórico de áudios", "áudios mandados pelo WhatsApp". Retorna até 30 últimos áudios dos últimos 7 dias por padrão. NÃO retorna o conteúdo do áudio em si — apenas metadados.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        direcao: {
+          type: 'string',
+          enum: ['outbound', 'inbound', 'todas'],
+          description: '"outbound" = enviados pela ZAYRA. "inbound" = recebidos. "todas" = ambos. Default: todas.'
+        },
+        telefone: { type: 'string', description: 'Filtra por telefone específico (com ou sem DDI)' },
+        dias: { type: 'number', description: 'Últimos N dias (default 7, max 90)' },
+        limite: { type: 'number', description: 'Máximo de resultados (default 30, max 200)' },
       },
     },
   },
@@ -2523,6 +2540,10 @@ export async function executeTool(name: string, input: Record<string, unknown>):
           await marcarDraftEnviado(inp.draft_id, r.messageId ?? '');
           data = { success: true, draft_id: inp.draft_id, para: r.phone, mensagem: d.conteudo, messageId: r.messageId, enviado_em: new Date().toISOString() };
         }
+        break;
+      }
+      case 'listar_audios_whatsapp': {
+        data = await listarAudiosWhatsApp(input as Parameters<typeof listarAudiosWhatsApp>[0]);
         break;
       }
       case 'enviar_audio_whatsapp': {

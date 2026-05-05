@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { RowDataPacket } from 'mysql2';
 import pool from '../database/connection';
 import { transcribeAudio } from '../agent/transcribe';
 import { think } from '../agent/think';
@@ -517,4 +518,47 @@ export async function logInbound(phone: string, message: string, zApiId?: string
     'INSERT INTO zayra_whatsapp_log (direction, phone, message, z_api_id) VALUES (?,?,?,?)',
     ['inbound', phone, message, zApiId ?? null],
   );
+}
+
+// v1.66.20: lista audios enviados/recebidos via WhatsApp (metadados — o
+// conteudo do audio em si nao e armazenado). Filtra por message LIKE '[ÁUDIO]%'
+// ou '[áudio:%' (formatos usados nos logs).
+export async function listarAudiosWhatsApp(input: {
+  direcao?: 'outbound' | 'inbound' | 'todas';
+  telefone?: string;
+  dias?: number;   // ultimos N dias (default 7)
+  limite?: number; // default 30, max 200
+} = {}) {
+  if (!_logTableReady) { await ensureLogTable(); _logTableReady = true; }
+  const dias = Math.max(1, Math.min(Number(input.dias) || 7, 90));
+  const limite = Math.max(1, Math.min(Number(input.limite) || 30, 200));
+  const params: (string | number)[] = [];
+  let sql = `SELECT id, direction, phone, message, z_api_id, sent_at
+               FROM zayra_whatsapp_log
+              WHERE (message LIKE '[ÁUDIO]%' OR message LIKE '[%udio%' OR message LIKE '%audio%')
+                AND sent_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`;
+  params.push(dias);
+  if (input.direcao && input.direcao !== 'todas') {
+    sql += ' AND direction = ?';
+    params.push(input.direcao);
+  }
+  if (input.telefone) {
+    sql += ' AND phone LIKE ?';
+    params.push(`%${input.telefone.replace(/\D/g, '')}%`);
+  }
+  sql += ` ORDER BY sent_at DESC LIMIT ${limite}`;
+  const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
+  return {
+    total: rows.length,
+    periodo_dias: dias,
+    items: rows.map(r => ({
+      id: Number(r.id),
+      direcao: String(r.direction),
+      telefone: String(r.phone),
+      descricao: String(r.message),
+      z_api_id: r.z_api_id ? String(r.z_api_id) : null,
+      enviado_em: r.sent_at,
+    })),
+    aviso: 'Esta listagem mostra apenas metadados (data, telefone, ID). O conteudo do audio em si nao e armazenado pelo sistema — apenas Z-API/WhatsApp guarda a midia.',
+  };
 }
