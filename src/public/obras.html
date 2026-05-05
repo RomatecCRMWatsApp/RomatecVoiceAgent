@@ -465,11 +465,14 @@
 </div>
 
 <button class="zayra-fab" id="zayraFab">Z</button>
-<!-- v1.66.0: modal generico pra Proposta de Consultoria -->
+<!-- v1.66.0: modal generico pra Proposta de Consultoria (padrao do sistema) -->
 <div class="cal-overlay" id="consOverlay">
-  <div class="cal-modal" id="consModal" style="max-width:680px; max-height:85vh; overflow:auto;">
+  <div class="cal-modal" id="consModal" style="max-width:680px;">
     <div class="cal-head">
-      <div></div>
+      <div>
+        <h2 id="consTitle">Proposta de Consultoria</h2>
+        <p id="consSubtitle">—</p>
+      </div>
       <button id="consClose" style="border:none;background:transparent;color:var(--text-muted);font-size:22px;cursor:pointer;">×</button>
     </div>
     <div id="consBody" style="padding: 16px 20px;"></div>
@@ -3077,12 +3080,17 @@ function renderPropostasLista() {
   });
 }
 
-// ── Modal helper (v1.66.0) ──────────────────────────────────────────────
+// ── Modal helper (v1.66.0 — padrao cal-modal do sistema) ────────────────
 function abrirModal(htmlContent, opts = {}) {
   const overlay = document.getElementById('consOverlay');
   const modal = document.getElementById('consModal');
   const body = document.getElementById('consBody');
+  const titleEl = document.getElementById('consTitle');
+  const subEl = document.getElementById('consSubtitle');
   if (opts.width) modal.style.maxWidth = opts.width;
+  if (opts.title)    titleEl.textContent = opts.title;
+  if (opts.subtitle) { subEl.textContent = opts.subtitle; subEl.style.display = ''; }
+  else               { subEl.style.display = 'none'; }
   body.innerHTML = htmlContent;
   overlay.classList.add('open');
   document.getElementById('consClose').onclick = fecharModal;
@@ -3229,11 +3237,9 @@ async function abrirNovaConsultoriaPasso1() {
     </button>`).join('');
 
   const html = `
-    <h3 style="margin:0 0 12px;">Nova Proposta de Consultoria</h3>
-    <p style="font-size:13px; color:var(--text-muted); margin:0 0 12px;">Selecione o tipo:</p>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">${cards}</div>
   `;
-  const modal = abrirModal(html);
+  const modal = abrirModal(html, { title: 'Nova Proposta de Consultoria', subtitle: 'Selecione o tipo' });
   modal.querySelectorAll('[data-pick-subtipo]:not([disabled])').forEach(b => b.onclick = () => {
     const subtipo = b.dataset.pickSubtipo;
     fecharModal();
@@ -3246,7 +3252,6 @@ async function abrirNovaConsultoriaPasso1() {
 // o novo cliente ja selecionado.
 async function abrirCadastroClienteModal(subtipoParaVoltar) {
   const html = `
-    <h3 style="margin:0 0 12px;">+ Novo Cliente</h3>
     <div style="display:grid; gap:8px; font-size:13px;">
       <label>Nome completo / Razão Social *
         <input id="novCliNome" placeholder="Maria Ester R. Sampaio" style="width:100%;" autofocus>
@@ -3284,7 +3289,7 @@ async function abrirCadastroClienteModal(subtipoParaVoltar) {
         <button class="btn-secondary" id="novCliCancelar">Cancelar</button>
       </div>
     </div>`;
-  const body = abrirModal(html, { width: '640px' });
+  const body = abrirModal(html, { width: '640px', title: '+ Novo Cliente', subtitle: 'Cadastro completo' });
 
   document.getElementById('novCliCancelar').onclick = () => {
     fecharModal();
@@ -3335,7 +3340,6 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
   const subLabel = SUBTIPO_LABEL_FRONT[subtipo] || subtipo;
 
   const html = `
-    <h3 style="margin:0 0 8px;">Nova Proposta — ${escape(subLabel)}</h3>
     <div style="display:grid; gap:8px; font-size:13px;">
       <label>Cliente
         <div style="display:flex; gap:6px;">
@@ -3393,7 +3397,7 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
       <div id="cnsResultado"></div>
     </div>
   `;
-  const modal = abrirModal(html, { width: '720px' });
+  const modal = abrirModal(html, { width: '720px', title: 'Nova Proposta de Consultoria', subtitle: subLabel });
 
   document.getElementById('cnsCancelar').onclick = fecharModal;
   document.getElementById('cnsNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
