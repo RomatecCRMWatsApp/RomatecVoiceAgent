@@ -3463,7 +3463,12 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
     state.consultoriaView = 'lista';
     render();
   });
-  const voltarParaEscolha = () => setConsultoriaView('escolha');
+  // v1.66.12: voltar pra escolha de subtipo descarta cache (novo fluxo)
+  const voltarParaEscolha = () => {
+    state.consultoriaFormCache = null;
+    state.consultoriaAnexosTemp = [];
+    setConsultoriaView('escolha');
+  };
   document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
   document.getElementById('cnsCancelar').onclick = voltarParaEscolha;
   document.getElementById('cnsNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
@@ -3549,6 +3554,32 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
     dropZone.ondrop = (e) => { e.preventDefault(); dropZone.style.background = 'rgba(0,255,136,0.03)'; processarArquivos(e.dataTransfer.files); };
   }
 
+  // v1.66.12: restaura form a partir do cache (volta do preview preserva dados)
+  const cache = state.consultoriaFormCache;
+  if (cache && cache.subtipo === subtipo) {
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+    const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    setVal('cnsCliente',  cache.cliId);
+    setVal('cnsEndereco', cache.endereco);
+    const d = cache.dados_imovel || {};
+    setVal('cnsArea',          d.area_construida);
+    setVal('cnsValorVenal',    d.valor_venal_imovel);
+    setVal('cnsPadrao',        d.padrao_construtivo);
+    setVal('cnsResponsavel',   d.responsavel);
+    setVal('cnsAnotacao',      d.anotacao_tecnica);
+    setChk('cnsComplementares', d.apresentar_projetos_complementares);
+    setChk('cnsAlvara',         d.tem_alvara_construcao);
+    setChk('cnsHabite',         d.tem_habite_se);
+    setChk('cnsIptu',           d.iptu_em_dia);
+    setChk('cnsCnd',            d.cnd_receita_emitida);
+    setChk('cnsCertidao',       d.certidao_inteiro_teor_atualizada);
+    setChk('cnsParcelarInss',   d.parcelar_inss);
+    setVal('cnsNumeroParcelasInss', d.numero_parcelas_inss);
+    if (d.parcelar_inss && inpParcelas) inpParcelas.disabled = false;
+    // se valor venal foi setado pelo cache, usuario ja mexeu — desliga auto-recalc
+    if (d.valor_venal_imovel) valorVenalEditadoManualmente = true;
+  }
+
   document.getElementById('cnsPreview').onclick = async () => {
     const cliId = document.getElementById('cnsCliente').value;
     const area = Number(document.getElementById('cnsArea').value);
@@ -3582,6 +3613,8 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
         method: 'POST',
         body: JSON.stringify({ subtipo, dados_imovel }),
       });
+      // v1.66.12: salva cache pra restaurar form ao voltar do preview
+      state.consultoriaFormCache = { subtipo, cliId, endereco: enderecoTxt, dados_imovel };
       state.consultoriaPreviewData = { ctx: { cliId, dados_imovel, subtipo, endereco: enderecoTxt }, resultado: r };
       setConsultoriaView('preview');
     } catch (e) { alert('Erro: ' + e.message); btn.disabled = false; btn.textContent = '🧮 Calcular preview'; }
@@ -3754,6 +3787,7 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
       state.consultoriaPreviewData = null;
       state.consultoriaAnexosTemp = [];
       state.consultoriaUltimoSubtipo = null;
+      state.consultoriaFormCache = null; // v1.66.12: limpa cache do form
       await loadPropostasConsultoria();
       setConsultoriaView('lista');
     } catch (e) { alert('Erro: ' + e.message); btn.disabled = false; btn.textContent = '💾 Salvar proposta'; }
