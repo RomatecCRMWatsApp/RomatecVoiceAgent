@@ -11,6 +11,7 @@
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import pool from '../database/connection';
 import PDFDocument from 'pdfkit';
+import { PDFDocument as PDFLibDocument } from 'pdf-lib';
 import path from 'path';
 import fs from 'fs';
 import { sendDocument as sendWhatsAppDocument } from './whatsapp';
@@ -55,6 +56,8 @@ export interface CriarPropostaConsultoriaInput {
   dados_imovel: Record<string, unknown>;
   // v1.66.8: override opcional dos custos (UI permite editar valores no preview)
   custos_override?: CustosCalculados;
+  // v1.66.9: anexos enviados junto na criacao (Planta/Mapa em PDF/PNG/JPEG)
+  anexos?: Array<{ filename: string; mimetype: string; conteudo_b64: string }>;
 }
 
 export interface PropostaConsultoriaRow extends RowDataPacket {
@@ -137,6 +140,24 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     ]
   );
 
+  // v1.66.9: persiste anexos enviados junto (se houver)
+  let anexosCriados = 0;
+  if (input.anexos && input.anexos.length > 0) {
+    for (const anexo of input.anexos) {
+      try {
+        await criarAnexoProposta({
+          proposta_id: String(r.insertId),
+          filename: anexo.filename,
+          mimetype: anexo.mimetype,
+          conteudo_b64: anexo.conteudo_b64,
+        });
+        anexosCriados++;
+      } catch (err) {
+        console.warn(`[anexos] Falha ao salvar ${anexo.filename}: ${(err as Error).message}`);
+      }
+    }
+  }
+
   return {
     ok: true as const,
     insertId: r.insertId,
@@ -145,7 +166,8 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     valor_total: resultado.custos.secao_5_total,
     custos_calculados: resultado.custos,
     fontes_consulta: resultado.fontes,
-    message: `Proposta de Consultoria ${numero} (${subtipo}) criada. Valor R$ ${resultado.custos.secao_5_total.toFixed(2)}.`,
+    anexos_criados: anexosCriados,
+    message: `Proposta de Consultoria ${numero} (${subtipo}) criada. Valor R$ ${resultado.custos.secao_5_total.toFixed(2)}.${anexosCriados > 0 ? ` ${anexosCriados} anexo(s) salvos.` : ''}`,
   };
 }
 
@@ -446,7 +468,7 @@ export async function enviarPropostaConsultoriaWhatsApp(input: { id: string; tel
   const tel = (input.telefone?.trim()) || p.cliente?.telefone || '';
   if (!tel) throw new Error('Telefone obrigatorio (informe ou cadastre no cliente).');
 
-  const pdfBuf = await gerarPdfPropostaConsultoria(input.id);
+  const pdfBuf = await gerarPdfPropostaConsultoriaCompleto(input.id);
   const fileName = `Proposta_${p.numero}_${(p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
   const r = await sendWhatsAppDocument(tel, pdfBuf.toString('base64'), fileName);
 
@@ -477,7 +499,7 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
     || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
   if (!chatId) throw new Error('chatId Telegram obrigatorio (defina TELEGRAM_LEAD_CHAT_ID ou TELEGRAM_AUTHORIZED_USER_IDS, ou passe explicit).');
 
-  const pdfBuf = await gerarPdfPropostaConsultoria(input.id);
+  const pdfBuf = await gerarPdfPropostaConsultoriaCompleto(input.id);
   const fileName = `Proposta_${p.numero}_${(p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
   await sendTelegramDocument(chatId, pdfBuf, fileName, `Proposta ${p.numero} — ${SUBTIPO_LABEL[p.subtipo || ''] || p.subtipo}`);
 
@@ -492,6 +514,141 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
     ok: true as const,
     message: `Proposta ${p.numero} enviada via Telegram (chat ${chatId}).`,
   };
+}
+
+// ── Anexos da Proposta (v1.66.9) ───────────────────────────────────────────
+
+const ANEXO_MIMES_VALIDOS = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
+const ANEXO_TAMANHO_MAX_BYTES = 15 * 1024 * 1024; // 15MB por arquivo
+
+export async function criarAnexoProposta(input: {
+  proposta_id: string;
+  filename: string;
+  mimetype: string;
+  conteudo_b64: string;
+}) {
+  const propId = Number(input.proposta_id);
+  if (!propId) throw new Error('proposta_id obrigatorio');
+  if (!input.filename) throw new Error('filename obrigatorio');
+  if (!ANEXO_MIMES_VALIDOS.includes(input.mimetype)) {
+    throw new Error(`Mimetype nao suportado: ${input.mimetype}. Aceito: PDF, PNG, JPEG.`);
+  }
+  const tamanho = Math.floor((input.conteudo_b64.length * 3) / 4);
+  if (tamanho > ANEXO_TAMANHO_MAX_BYTES) {
+    throw new Error(`Arquivo excede limite de 15MB (atual: ${(tamanho / 1024 / 1024).toFixed(1)}MB).`);
+  }
+
+  const [maxRow] = await pool.execute<RowDataPacket[]>(
+    `SELECT COALESCE(MAX(ordem), 0) AS ord FROM proposta_anexos WHERE proposta_id = ?`,
+    [propId]
+  );
+  const proxOrdem = Number(maxRow[0]?.ord || 0) + 1;
+
+  const [r] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO proposta_anexos (proposta_id, filename, mimetype, tamanho_bytes, conteudo_b64, ordem)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [propId, input.filename, input.mimetype, tamanho, input.conteudo_b64, proxOrdem]
+  );
+  return {
+    ok: true as const,
+    insertId: r.insertId,
+    filename: input.filename,
+    tamanho_bytes: tamanho,
+    ordem: proxOrdem,
+    message: `Anexo "${input.filename}" enviado (${(tamanho / 1024).toFixed(1)} KB).`,
+  };
+}
+
+export async function listarAnexosProposta(input: { proposta_id: string }) {
+  const propId = Number(input.proposta_id);
+  if (!propId) throw new Error('proposta_id obrigatorio');
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, filename, mimetype, tamanho_bytes, ordem, criado_em
+       FROM proposta_anexos WHERE proposta_id = ? ORDER BY ordem`,
+    [propId]
+  );
+  return {
+    total: rows.length,
+    items: rows.map(r => ({
+      id: String(r.id),
+      filename: r.filename,
+      mimetype: r.mimetype,
+      tamanho_bytes: Number(r.tamanho_bytes),
+      ordem: Number(r.ordem),
+      criado_em: r.criado_em,
+    })),
+  };
+}
+
+export async function removerAnexoProposta(input: { id: string }) {
+  const id = Number(input.id);
+  if (!id) throw new Error('id invalido');
+  const [r] = await pool.execute<ResultSetHeader>(
+    `DELETE FROM proposta_anexos WHERE id = ?`, [id]
+  );
+  return { ok: true as const, affected: r.affectedRows, message: 'Anexo removido.' };
+}
+
+async function carregarAnexosProposta(propId: number): Promise<Array<{ filename: string; mimetype: string; buffer: Buffer }>> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT filename, mimetype, conteudo_b64 FROM proposta_anexos
+      WHERE proposta_id = ? ORDER BY ordem`,
+    [propId]
+  );
+  return rows.map(r => ({
+    filename: String(r.filename),
+    mimetype: String(r.mimetype),
+    buffer: Buffer.from(String(r.conteudo_b64), 'base64'),
+  }));
+}
+
+// v1.66.9: gera PDF da proposta com anexos mergeados ao final.
+// Imagens (PNG/JPG) viram pagina propria do PDF. PDFs anexos sao mergeados
+// pagina por pagina. Usa pdf-lib pra concatenacao real.
+export async function gerarPdfPropostaConsultoriaCompleto(id: string): Promise<Buffer> {
+  const propostaPdf = await gerarPdfPropostaConsultoria(id);
+  const anexos = await carregarAnexosProposta(Number(id));
+  if (anexos.length === 0) return propostaPdf;
+
+  const merged = await PDFLibDocument.create();
+  // Importa proposta principal
+  const principalDoc = await PDFLibDocument.load(propostaPdf);
+  const principalPages = await merged.copyPages(principalDoc, principalDoc.getPageIndices());
+  principalPages.forEach(p => merged.addPage(p));
+
+  for (const anexo of anexos) {
+    try {
+      if (anexo.mimetype === 'application/pdf') {
+        const anexoDoc = await PDFLibDocument.load(anexo.buffer);
+        const anexoPages = await merged.copyPages(anexoDoc, anexoDoc.getPageIndices());
+        anexoPages.forEach(p => merged.addPage(p));
+      } else if (anexo.mimetype === 'image/png' || anexo.mimetype === 'image/jpeg' || anexo.mimetype === 'image/jpg') {
+        const img = anexo.mimetype === 'image/png'
+          ? await merged.embedPng(anexo.buffer)
+          : await merged.embedJpg(anexo.buffer);
+        // Pagina A4 com imagem ajustada mantendo aspecto
+        const A4_W = 595.28, A4_H = 841.89;
+        const margem = 30;
+        const maxW = A4_W - 2 * margem, maxH = A4_H - 2 * margem - 30;
+        const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+        const w = img.width * scale, h = img.height * scale;
+        const page = merged.addPage([A4_W, A4_H]);
+        page.drawImage(img, {
+          x: (A4_W - w) / 2,
+          y: (A4_H - h) / 2 - 15,
+          width: w,
+          height: h,
+        });
+        page.drawText(`Anexo: ${anexo.filename}`, {
+          x: margem, y: 20, size: 9,
+        });
+      }
+    } catch (err) {
+      console.warn(`[anexos] Falha ao mergear ${anexo.filename}: ${(err as Error).message}`);
+    }
+  }
+  const out = await merged.save();
+  return Buffer.from(out);
 }
 
 // Lista filtrada por tipo (mao_de_obra ou consultoria)

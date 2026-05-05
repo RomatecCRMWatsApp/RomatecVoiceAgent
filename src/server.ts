@@ -968,7 +968,12 @@ app.post  ('/api/propostas-consultoria/preview',
 app.get   ('/api/propostas-consultoria/:id/pdf', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    const buf = await propostasConsultoria.gerarPdfPropostaConsultoria(id);
+    // v1.66.9: por padrao serve PDF completo (com anexos mergeados).
+    // Use ?somente_principal=1 pra pegar so a proposta sem anexos.
+    const somentePrincipal = req.query.somente_principal === '1';
+    const buf = somentePrincipal
+      ? await propostasConsultoria.gerarPdfPropostaConsultoria(id)
+      : await propostasConsultoria.gerarPdfPropostaConsultoriaCompleto(id);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="Proposta_Consultoria_${id}.pdf"`);
     res.send(buf);
@@ -976,6 +981,19 @@ app.get   ('/api/propostas-consultoria/:id/pdf', async (req: Request, res: Respo
     res.status(404).json({ error: (err as Error).message });
   }
 });
+
+// v1.66.9: anexos da proposta (Planta Arquitetonica/Mapa — PDF/PNG/JPEG)
+app.get   ('/api/propostas-consultoria/:id/anexos',
+  apiHandle(args => propostasConsultoria.listarAnexosProposta({ proposta_id: (args as { id: string }).id })));
+app.post  ('/api/propostas-consultoria/:id/anexos',
+  apiHandle(args => propostasConsultoria.criarAnexoProposta({
+    proposta_id: (args as { id: string }).id,
+    filename: (args as { filename: string }).filename,
+    mimetype: (args as { mimetype: string }).mimetype,
+    conteudo_b64: (args as { conteudo_b64: string }).conteudo_b64,
+  })));
+app.delete('/api/propostas-consultoria/anexos/:id',
+  apiHandle(args => propostasConsultoria.removerAnexoProposta(args as { id: string })));
 app.post  ('/api/propostas-consultoria/:id/enviar-whatsapp',
   apiHandle(args => propostasConsultoria.enviarPropostaConsultoriaWhatsApp(args as Parameters<typeof propostasConsultoria.enviarPropostaConsultoriaWhatsApp>[0])));
 app.post  ('/api/propostas-consultoria/:id/enviar-telegram',

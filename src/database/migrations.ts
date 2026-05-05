@@ -970,6 +970,23 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.66.9: anexos da Proposta de Consultoria (Planta Arquitetonica/Mapa).
+  // Aceita PDF, PNG, JPEG. Sem limite de quantidade. Conteudo em base64
+  // (LONGTEXT — ate 4GB; impomos limite ~10MB por anexo no client).
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS proposta_anexos (
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      proposta_id   INT NOT NULL,
+      filename      VARCHAR(255) NOT NULL,
+      mimetype      VARCHAR(100) NOT NULL,
+      tamanho_bytes INT NOT NULL,
+      conteudo_b64  LONGTEXT NOT NULL,
+      ordem         INT DEFAULT 0,
+      criado_em     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_proposta (proposta_id, ordem)
+    )
+  `);
+
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS proposta_itens (
       id                INT AUTO_INCREMENT PRIMARY KEY,

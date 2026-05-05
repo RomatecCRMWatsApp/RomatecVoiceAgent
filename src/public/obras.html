@@ -3353,7 +3353,9 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
       </div>
     </div>
     <div class="card">
-      <div style="display:grid; gap:10px; font-size:13px; max-width:760px;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:16px;">
+       <!-- Coluna esquerda: form -->
+       <div style="display:grid; gap:10px; font-size:13px;">
         <label>Cliente
           <div style="display:flex; gap:6px;">
             <select id="cnsCliente" style="flex:1;"><option value="">— escolher —</option>${cliOpts}</select>
@@ -3429,6 +3431,24 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
           <button id="cnsPreview" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
           <button class="btn-secondary" id="cnsCancelar">Cancelar</button>
         </div>
+       </div>
+
+       <!-- Coluna direita: anexos (Planta/Mapa) -->
+       <div style="display:flex; flex-direction:column; gap:10px;">
+         <div>
+           <p style="margin:0; font-weight:600; font-size:13px;">📎 Anexos da Proposta</p>
+           <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">
+             Planta Arquitetônica, Mapa de Situação, croquis, fotos. Formatos: PDF, PNG, JPEG. Sem limite de quantidade. Os anexos vão no final do PDF da proposta.
+           </p>
+         </div>
+         <label id="cnsDropZone" style="border:2px dashed var(--border-strong); border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:rgba(0,255,136,0.03); transition:all 0.2s;">
+           <input type="file" id="cnsAnexoInput" multiple accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" style="display:none;">
+           <div style="font-size:28px; margin-bottom:6px;">📤</div>
+           <div style="font-size:13px; color:var(--neon); font-weight:600;">Clique ou arraste arquivos</div>
+           <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">PDF · PNG · JPEG (máx. 15 MB cada)</div>
+         </label>
+         <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+       </div>
       </div>
     </div>`;
 
@@ -3450,6 +3470,57 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
   const inpParcelas = document.getElementById('cnsNumeroParcelasInss');
   if (chkParcelar && inpParcelas) {
     chkParcelar.onchange = () => { inpParcelas.disabled = !chkParcelar.checked; };
+  }
+
+  // v1.66.9: gestao de anexos (Planta/Mapa) durante o form
+  if (!state.consultoriaAnexosTemp) state.consultoriaAnexosTemp = [];
+  if (state.consultoriaUltimoSubtipo !== subtipo) {
+    state.consultoriaAnexosTemp = [];
+    state.consultoriaUltimoSubtipo = subtipo;
+  }
+  const renderAnexos = () => {
+    const lista = document.getElementById('cnsAnexosLista');
+    if (!lista) return;
+    lista.innerHTML = state.consultoriaAnexosTemp.map((a, i) => `
+      <div style="display:flex; gap:8px; align-items:center; padding:6px 8px; background:var(--bg-elev); border:1px solid var(--border); border-radius:6px;">
+        <span style="font-size:18px;">${a.mimetype.includes('pdf') ? '📄' : '🖼️'}</span>
+        <div style="flex:1; min-width:0; overflow:hidden;">
+          <div style="font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escape(a.filename)}</div>
+          <div style="font-size:10px; color:var(--text-muted);">${(a.tamanho / 1024).toFixed(1)} KB · ${a.mimetype}</div>
+        </div>
+        <button type="button" data-rm-anexo="${i}" class="btn-danger" style="padding:4px 8px; font-size:11px;">×</button>
+      </div>`).join('');
+    lista.querySelectorAll('[data-rm-anexo]').forEach(b => b.onclick = () => {
+      state.consultoriaAnexosTemp.splice(Number(b.dataset.rmAnexo), 1);
+      renderAnexos();
+    });
+  };
+  renderAnexos();
+
+  const dropZone = document.getElementById('cnsDropZone');
+  const fileInput = document.getElementById('cnsAnexoInput');
+  const MIMES_OK = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
+  const MAX_BYTES = 15 * 1024 * 1024;
+  const processarArquivos = async (files) => {
+    for (const file of Array.from(files)) {
+      if (!MIMES_OK.includes(file.type)) { alert(`"${file.name}" não suportado. Use PDF, PNG ou JPEG.`); continue; }
+      if (file.size > MAX_BYTES) { alert(`"${file.name}" excede 15 MB.`); continue; }
+      const conteudo_b64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1]);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      state.consultoriaAnexosTemp.push({ filename: file.name, mimetype: file.type, tamanho: file.size, conteudo_b64 });
+    }
+    renderAnexos();
+  };
+  if (dropZone && fileInput) {
+    dropZone.onclick = () => fileInput.click();
+    fileInput.onchange = (e) => processarArquivos(e.target.files);
+    dropZone.ondragover = (e) => { e.preventDefault(); dropZone.style.background = 'rgba(0,255,136,0.08)'; };
+    dropZone.ondragleave = () => { dropZone.style.background = 'rgba(0,255,136,0.03)'; };
+    dropZone.ondrop = (e) => { e.preventDefault(); dropZone.style.background = 'rgba(0,255,136,0.03)'; processarArquivos(e.dataTransfer.files); };
   }
 
   document.getElementById('cnsPreview').onclick = async () => {
@@ -3613,6 +3684,9 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
 
     btn.disabled = true; btn.textContent = 'Salvando...';
     try {
+      const anexosPayload = (state.consultoriaAnexosTemp || []).map(a => ({
+        filename: a.filename, mimetype: a.mimetype, conteudo_b64: a.conteudo_b64,
+      }));
       const r2 = await api('/api/propostas-consultoria', {
         method: 'POST',
         body: JSON.stringify({
@@ -3621,10 +3695,13 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
           endereco_imovel: ctx.endereco || null,
           dados_imovel: ctx.dados_imovel,
           custos_override,
+          anexos: anexosPayload,
         }),
       });
       alert('✅ ' + r2.message);
       state.consultoriaPreviewData = null;
+      state.consultoriaAnexosTemp = [];
+      state.consultoriaUltimoSubtipo = null;
       await loadPropostasConsultoria();
       setConsultoriaView('lista');
     } catch (e) { alert('Erro: ' + e.message); btn.disabled = false; btn.textContent = '💾 Salvar proposta'; }
