@@ -20,6 +20,9 @@ export interface ItemCusto {
   valor: number;
   observacao?: string;
   pendente?: boolean; // true quando valor nao confirmado (ex: Habite-se Prefeitura)
+  // v1.66.17: quando o usuario edita o valor no preview, guardamos o valor
+  // calculado pelo motor pra mostrar "Desconto" / "Acrescimo" no PDF.
+  valor_original?: number;
 }
 
 export interface DocumentoChecklist {

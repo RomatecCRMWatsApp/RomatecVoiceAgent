@@ -20,7 +20,7 @@ import { getTenantSettings } from '../services/tenantSettings';
 import { formatBRL } from '../util/format';
 import { calcularConsultoria } from '../services/pricing';
 import type {
-  SubtipoConsultoria, CustosCalculados, FontesConsulta, InputAverbacao,
+  SubtipoConsultoria, CustosCalculados, FontesConsulta, InputAverbacao, ItemCusto,
 } from '../services/pricing/types';
 
 const LOGO_RELATORIO = '/romatec-logo-removebg-preview.png';
@@ -99,14 +99,28 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
   }
 
   // v1.66.8: aplica override se a UI editou valores no preview.
-  // Recalcula secao_5_total a partir das secoes 2+3 do override (defesa contra
-  // payload inconsistente do client).
+  // v1.66.17: guarda valor_original pra mostrar Desconto/Acrescimo no PDF.
   if (input.custos_override) {
     const ov = input.custos_override;
-    const tot = (ov.secao_2_taxas || []).reduce((s, i) => s + Number(i.valor || 0), 0)
-              + (ov.secao_3_honorarios || []).reduce((s, i) => s + Number(i.valor || 0), 0);
+    const origTaxas = resultado.custos.secao_2_taxas;
+    const origHon   = resultado.custos.secao_3_honorarios;
+    const taxasComOriginal = (ov.secao_2_taxas || []).map(i => {
+      const orig = origTaxas.find(o => o.ordem === i.ordem);
+      return { ...i, valor_original: orig?.valor };
+    });
+    const honComOriginal = (ov.secao_3_honorarios || []).map(i => {
+      const orig = origHon.find(o => o.ordem === i.ordem);
+      return { ...i, valor_original: orig?.valor };
+    });
+    const tot = taxasComOriginal.reduce((s, i) => s + Number(i.valor || 0), 0)
+              + honComOriginal.reduce((s, i) => s + Number(i.valor || 0), 0);
     resultado = {
-      custos: { ...ov, secao_5_total: tot },
+      custos: {
+        ...ov,
+        secao_2_taxas: taxasComOriginal,
+        secao_3_honorarios: honComOriginal,
+        secao_5_total: tot,
+      },
       fontes: { ...resultado.fontes, override_aplicado: true } as typeof resultado.fontes,
     };
   }
@@ -467,15 +481,42 @@ function desenharTabelaCustos(doc: PDFKit.PDFDocument, items: CustosCalculados['
 
   doc.fontSize(8.5).fillColor('#111');
   for (const it of items) {
-    const descTxt = it.descricao + (it.observacao ? `\n   ${it.observacao}` : '');
+    // v1.66.17: aviso de Desconto/Acrescimo se valor_original presente e diferente
+    let avisoDesconto = '';
+    let corAviso = '#dc2626';
+    if (typeof it.valor_original === 'number' && it.valor_original > 0 && it.valor !== it.valor_original) {
+      const diff = it.valor - it.valor_original;
+      const pct = (Math.abs(diff) / it.valor_original) * 100;
+      if (diff < 0) {
+        avisoDesconto = `\n   ⚠ Desconto concedido: ${formatBRL(Math.abs(diff))} (-${pct.toFixed(1)}%)`;
+        corAviso = '#dc2626';
+      } else {
+        avisoDesconto = `\n   ⬆ Acrescimo: ${formatBRL(diff)} (+${pct.toFixed(1)}%)`;
+        corAviso = '#fb923c';
+      }
+    } else if ((!it.valor_original || it.valor_original === 0) && it.valor > 0 && it.pendente === false && (it as { _eraOriginalmenteZero?: boolean })._eraOriginalmenteZero) {
+      // (caso especifico — nao usa, mas reservado)
+    }
+
+    const descTxtBase = it.descricao + (it.observacao ? `\n   ${it.observacao}` : '');
+    const descTxt = descTxtBase + avisoDesconto;
     const hDesc = doc.heightOfString(descTxt, { width: colW.desc });
     const lineHeight = Math.max(hDesc, 12);
     if (cursorY + lineHeight > 760) {
       doc.addPage();
       cursorY = 60;
     }
-    doc.text(String(it.ordem), colX.idx, cursorY, { width: colW.idx });
-    doc.text(descTxt, colX.desc, cursorY, { width: colW.desc });
+    doc.fillColor('#111').text(String(it.ordem), colX.idx, cursorY, { width: colW.idx });
+    // Imprime descricao + observacao em preto, depois aviso em vermelho/laranja
+    if (avisoDesconto) {
+      const altBase = doc.heightOfString(descTxtBase, { width: colW.desc });
+      doc.fillColor('#111').text(descTxtBase, colX.desc, cursorY, { width: colW.desc });
+      doc.fillColor(corAviso).font('Helvetica-Bold')
+         .text(avisoDesconto.trim(), colX.desc, cursorY + altBase, { width: colW.desc });
+      doc.font('Helvetica');
+    } else {
+      doc.text(descTxt, colX.desc, cursorY, { width: colW.desc });
+    }
     const valorStr = it.pendente ? 'A confirmar' : formatBRL(it.valor);
     doc.fillColor(it.pendente ? '#b45309' : '#111')
        .text(valorStr, colX.sub, cursorY, { width: colW.sub, align: 'right' });
@@ -603,10 +644,35 @@ export async function atualizarPropostaConsultoria(input: {
   // Recalcula via engine se nao vier override
   let custosFinal: CustosCalculados;
   if (input.custos_override) {
+    // v1.66.17: pra mostrar Desconto/Acrescimo no PDF, recalcula via engine
+    // pra ter os valores originais e anota em valor_original de cada item.
+    const subtipo = atual.subtipo as SubtipoConsultoria;
+    let origTaxas: ItemCusto[] = [];
+    let origHon: ItemCusto[] = [];
+    if (subtipo === 'averbacao_residencial' || subtipo === 'averbacao_comercial') {
+      try {
+        const r = await calcularConsultoria({ subtipo, dados: dadosFinal });
+        origTaxas = r.custos.secao_2_taxas;
+        origHon   = r.custos.secao_3_honorarios;
+      } catch { /* se falhar, segue sem valores originais */ }
+    }
     const ov = input.custos_override;
-    const tot = (ov.secao_2_taxas || []).reduce((s, i) => s + Number(i.valor || 0), 0)
-              + (ov.secao_3_honorarios || []).reduce((s, i) => s + Number(i.valor || 0), 0);
-    custosFinal = { ...ov, secao_5_total: tot };
+    const taxasComOriginal = (ov.secao_2_taxas || []).map(i => {
+      const orig = origTaxas.find((o: ItemCusto) => o.ordem === i.ordem);
+      return { ...i, valor_original: orig?.valor };
+    });
+    const honComOriginal = (ov.secao_3_honorarios || []).map(i => {
+      const orig = origHon.find((o: ItemCusto) => o.ordem === i.ordem);
+      return { ...i, valor_original: orig?.valor };
+    });
+    const tot = taxasComOriginal.reduce((s, i) => s + Number(i.valor || 0), 0)
+              + honComOriginal.reduce((s, i) => s + Number(i.valor || 0), 0);
+    custosFinal = {
+      ...ov,
+      secao_2_taxas: taxasComOriginal,
+      secao_3_honorarios: honComOriginal,
+      secao_5_total: tot,
+    };
   } else {
     const subtipo = atual.subtipo as SubtipoConsultoria;
     if (subtipo !== 'averbacao_residencial' && subtipo !== 'averbacao_comercial') {
