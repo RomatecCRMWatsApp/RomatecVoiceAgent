@@ -1,0 +1,64 @@
+{
+  "_meta": {
+    "ultima_atualizacao": "2026-05-05",
+    "atualizado_por": "Jose Romario",
+    "versao": "1.0",
+    "fonte_tjma": "Resolucao GP 143/2025 TJMA - vigente desde 01/01/2026"
+  },
+  "salario_minimo_2026": 1621.00,
+  "cub_ma": {
+    "base_r8n": 1814.39,
+    "ultima_atualizacao": "2025-12",
+    "fonte": "Sinduscon-MA",
+    "multiplicadores_padrao": {
+      "popular": 0.75,
+      "normal": 1.00,
+      "alto": 1.45
+    }
+  },
+  "art_crea_ma_2026": {
+    "faixa_1": 93.40,
+    "faixa_2": 124.13,
+    "faixa_3": 168.53,
+    "fonte": "Decisao Plenaria 0450/2025 Confea"
+  },
+  "honorarios_projeto": {
+    "averbacao_residencial_por_m2": 15.00,
+    "averbacao_comercial_por_m2": 25.00,
+    "desmembramento_meio_sm": 0.5,
+    "desmembramento_sm_completo": 1.0,
+    "remembramento_meio_sm": 0.5,
+    "remembramento_sm_completo": 1.0,
+    "retificacao_area_sm_default": 1.0,
+    "ptam_lote_urbano_sm": 1.0,
+    "ptam_sitio_proximo_sm": 2.0,
+    "ptam_rural_medio_sm": 3.0,
+    "ptam_fazenda_grande_sm": 4.0
+  },
+  "honorarios_assessoria": {
+    "padrao_sm": 1.0,
+    "descricao": "Universal: 1 SM independente do subtipo. Cobre alvara, Habite-se, CND, diligencias cartorio, acompanhamento integral."
+  },
+  "sero_inss": {
+    "aliquota_inss": 0.20,
+    "aliquota_sistema_s": 0.08,
+    "fonte": "IN RFB 2021/2021",
+    "percentual_mao_obra": {
+      "residencial_alvenaria_sem_premoldado": 0.14,
+      "residencial_alvenaria_com_premoldado": 0.04,
+      "residencial_madeira": 0.14,
+      "comercial_medio": 0.10
+    },
+    "aviso_pdf": "Valor estimado conforme afericao indireta IN RFB 2021/2021. Calculo definitivo apenas mediante apuracao no portal SERO/e-CAC pelo contribuinte ou contador habilitado."
+  },
+  "prefeitura_acailandia": {
+    "habite_se": null,
+    "alvara_construcao": null,
+    "aprovacao_desmembramento": null,
+    "AVISO": "Valores pendentes de confirmacao na Secretaria de Obras de Acailandia. Quando null, sistema imprime 'A confirmar com a Prefeitura' no PDF."
+  },
+  "tjma_emolumentos_2026": {
+    "fonte": "Resolucao GP 143/2025 TJMA - valores TOTAL (incluem FERC+FADEP+FEMP+FERRFIS)",
+    "limite_maximo_total": 23946.65
+  }
+}

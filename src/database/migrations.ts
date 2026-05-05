@@ -994,10 +994,16 @@ export async function runMigrations(): Promise<void> {
   await popularCatalogoSinapi();
 
   // v1.65.5: campos do gestor/indicador da proposta (sai no relatório)
+  // v1.66.0: campos pra Proposta de Consultoria (averbacao, georref, desm, retif, ptam)
   for (const col of [
     "ADD COLUMN gestor_cargo    VARCHAR(40)  DEFAULT NULL AFTER criada_por",
     "ADD COLUMN gestor_nome     VARCHAR(150) DEFAULT NULL AFTER gestor_cargo",
     "ADD COLUMN gestor_telefone VARCHAR(20)  DEFAULT NULL AFTER gestor_nome",
+    "ADD COLUMN tipo            ENUM('mao_de_obra','consultoria') NOT NULL DEFAULT 'mao_de_obra' AFTER numero",
+    "ADD COLUMN subtipo_consultoria VARCHAR(40) DEFAULT NULL AFTER tipo",
+    "ADD COLUMN dados_imovel    JSON DEFAULT NULL",
+    "ADD COLUMN custos_calculados JSON DEFAULT NULL",
+    "ADD COLUMN fontes_consulta JSON DEFAULT NULL",
   ]) {
     try { await pool.execute(`ALTER TABLE propostas ${col}`); }
     catch (err) {
