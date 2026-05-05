@@ -1,0 +1,39 @@
+{
+  "name": "Gestão de Obras — Romatec",
+  "short_name": "Romatec Obras",
+  "description": "Sistema de Gestão de Obras, Vistorias, Propostas e Cálculos da Romatec Consultoria Imobiliária — Açailândia/MA",
+  "start_url": "/obras.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0e0a",
+  "theme_color": "#00ff88",
+  "lang": "pt-BR",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    { "src": "/romatec-logo-removebg-preview.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/romatec-logo-removebg-preview.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/romatec-logo-removebg-preview.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/romatec-logo-removebg-preview.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nova Proposta de Consultoria",
+      "short_name": "Nova Proposta",
+      "description": "Criar nova proposta de consultoria imobiliária",
+      "url": "/obras.html?aba=proposta&tipo=consultoria"
+    },
+    {
+      "name": "Vistoria (VTO)",
+      "short_name": "Vistoria",
+      "description": "Iniciar nova vistoria de obra",
+      "url": "/obras.html?aba=vistoria"
+    },
+    {
+      "name": "Cálculos",
+      "short_name": "Cálculos",
+      "description": "ITBI, IPTU, comissão, financiamento",
+      "url": "/obras.html?aba=calculos"
+    }
+  ]
+}

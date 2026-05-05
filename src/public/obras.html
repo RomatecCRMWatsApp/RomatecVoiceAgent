@@ -2,8 +2,30 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Gestão de Obras · ZAYRA Romatec</title>
+
+<!-- v1.66.6: PWA — instalavel no desktop e mobile com icone Romatec -->
+<link rel="manifest" href="/manifest-obras.webmanifest">
+<meta name="theme-color" content="#00ff88">
+<meta name="application-name" content="Romatec Obras">
+<meta name="description" content="Sistema de Gestao de Obras, Vistorias, Propostas e Calculos — Romatec Consultoria Imobiliaria">
+
+<!-- Icones (favicon + Apple Touch + Android) -->
+<link rel="icon" type="image/png" sizes="192x192" href="/romatec-logo-removebg-preview.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/romatec-logo-removebg-preview.png">
+<link rel="shortcut icon" href="/romatec-logo-removebg-preview.png">
+<link rel="apple-touch-icon" href="/romatec-logo-removebg-preview.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/romatec-logo-removebg-preview.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Romatec Obras">
+<meta name="mobile-web-app-capable" content="yes">
+
+<!-- Microsoft tile (Windows) -->
+<meta name="msapplication-TileColor" content="#00ff88">
+<meta name="msapplication-TileImage" content="/romatec-logo-removebg-preview.png">
+<meta name="msapplication-config" content="none">
 <style>
   :root {
     --bg: #0a0e0a;
@@ -3471,6 +3493,18 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
           <option value="trt_cft">TRT — CFT (Técnico Industrial)</option>
         </select>
       </label>
+      <div style="border:1px solid var(--border); border-radius:6px; padding:10px; background:rgba(0,200,255,0.04);">
+        <label style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+          <input id="cnsParcelarInss" type="checkbox">
+          <strong>Cliente vai parcelar o INSS/SERO com a Receita Federal?</strong>
+        </label>
+        <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">
+          A Romatec presta assessoria do parcelamento direto com a Receita Federal (portal e-CAC). A CND da obra é liberada para averbação após o pagamento da 1ª parcela.
+        </p>
+        <label style="display:block; font-size:12px;">Quantidade de parcelas (2 a 60):
+          <input id="cnsNumeroParcelasInss" type="number" min="2" max="60" value="12" style="width:100px; margin-left:6px;" disabled>
+        </label>
+      </div>
       ${isResid ? `
       <label style="display:flex; gap:6px; align-items:center;">
         <input id="cnsComplementares" type="checkbox">
@@ -3502,6 +3536,12 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
     e.preventDefault();
     abrirHelpPadraoConstrutivo();
   };
+  // v1.66.6: enable/disable input numero parcelas conforme checkbox
+  const chkParcelar = document.getElementById('cnsParcelarInss');
+  const inpParcelas = document.getElementById('cnsNumeroParcelasInss');
+  if (chkParcelar && inpParcelas) {
+    chkParcelar.onchange = () => { inpParcelas.disabled = !chkParcelar.checked; };
+  }
   document.getElementById('cnsPreview').onclick = async () => {
     const cliId = document.getElementById('cnsCliente').value;
     const area = Number(document.getElementById('cnsArea').value);
@@ -3523,6 +3563,8 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
       cnd_receita_emitida: document.getElementById('cnsCnd').checked,
       certidao_inteiro_teor_atualizada: document.getElementById('cnsCertidao').checked,
       anotacao_tecnica: document.getElementById('cnsAnotacao')?.value || 'art_crea',
+      parcelar_inss: document.getElementById('cnsParcelarInss')?.checked || false,
+      numero_parcelas_inss: Number(document.getElementById('cnsNumeroParcelasInss')?.value) || 12,
     };
 
     const btn = document.getElementById('cnsPreview');
@@ -6742,6 +6784,15 @@ document.getElementById('zayraSend').onclick = () => {
 document.getElementById('zayraInput').onkeydown = e => { if (e.key === 'Enter') document.getElementById('zayraSend').click(); };
 
 render();
+
+// v1.66.6: registra service worker pra PWA instalavel (desktop + mobile)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => {
+      console.warn('[PWA] SW register falhou:', err.message);
+    });
+  });
+}
 </script>
 </body>
 </html>

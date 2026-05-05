@@ -60,6 +60,9 @@ export interface InputAverbacao {
   cnd_receita_emitida: boolean;
   certidao_inteiro_teor_atualizada: boolean;
   anotacao_tecnica?: AnotacaoTecnica; // default 'art_crea' (CREA-MA)
+  // v1.66.6: opcao de parcelamento INSS/SERO (cliente pode dividir em ate 60x)
+  parcelar_inss?: boolean;
+  numero_parcelas_inss?: number; // 2..60
 }
 
 export interface InputGeorreferenciamento {

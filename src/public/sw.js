@@ -5,7 +5,7 @@ const CACHE = 'zayra-v1.38.0';
 
 // App shell — recursos pequenos que podem ser cacheados.
 // HTML NÃO está aqui de propósito — é network-first.
-const PRECACHE = ['/avatar.png', '/manifest.json', '/manifest.webmanifest'];
+const PRECACHE = ['/avatar.png', '/manifest.json', '/manifest.webmanifest', '/manifest-obras.webmanifest', '/romatec-logo-removebg-preview.png'];
 
 // ── Install: pré-cacheia só recursos estáticos pequenos ─────────────────────
 self.addEventListener('install', e => {

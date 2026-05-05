@@ -67,12 +67,22 @@ export async function calcularAverbacao(input: InputAverbacao): Promise<Resultad
     responsavel: input.responsavel,
     com_premoldados: false,
   });
+  // v1.66.6: opcao de parcelamento direto com a RECEITA FEDERAL (nao com a
+  // Romatec). Cliente pode parcelar em ate 60x diretamente no portal e-CAC,
+  // e a Romatec presta a ASSESSORIA DO PARCELAMENTO (orientacao, calculo,
+  // protocolo). A CND fica liberada para averbacao apos pagamento da 1a parcela.
+  let observacaoSero = sero.observacao_pj
+    ?? `RMT R$ ${sero.rmt.toFixed(2)} (CUB R$ ${sero.cub_usado.toFixed(2)}/m2 x ${input.area_construida}m2 x ${(sero.percentual_mao_obra * 100).toFixed(0)}%) -> INSS 20% + Sistema S 8% = 28%`;
+  if (input.parcelar_inss && sero.total > 0 && (input.numero_parcelas_inss || 0) >= 2) {
+    const n = Math.min(60, Math.max(2, input.numero_parcelas_inss || 0));
+    const parcela = sero.total / n;
+    observacaoSero += ` | Opcao de parcelamento direto com a Receita Federal: ${n}x de aprox. R$ ${parcela.toFixed(2)} (a Romatec presta assessoria; CND liberada para averbacao apos 1a parcela).`;
+  }
   secao_2_taxas.push({
     ordem: ordem++,
     descricao: 'INSS da obra (CND/SERO — Receita Federal, afericao indireta)',
     valor: sero.total,
-    observacao: sero.observacao_pj
-      ?? `RMT R$ ${sero.rmt.toFixed(2)} (CUB R$ ${sero.cub_usado.toFixed(2)}/m2 x ${input.area_construida}m2 x ${(sero.percentual_mao_obra * 100).toFixed(0)}%) -> INSS 20% + Sistema S 8% = 28%`,
+    observacao: observacaoSero,
   });
   fontes.sero = { fonte: sero.fonte, aviso: sero.aviso };
   fontes.cub = {
@@ -162,6 +172,13 @@ export async function calcularAverbacao(input: InputAverbacao): Promise<Resultad
   // v1.66.5: aviso universal de aproximacao Receita/Cartorio
   avisos.push('IMPORTANTE: Os valores das taxas de Cartorio e da Receita Federal informados nesta proposta sao APROXIMADOS, calculados com base nas tabelas oficiais vigentes (TJMA Resolucao GP 143/2025 e IN RFB 2021/2021). Os valores definitivos podem variar conforme apuracao real do cartorio competente e do portal SERO/e-CAC no momento do pagamento.');
   if (sero.total > 0) avisos.push(sero.aviso);
+  // v1.66.6: aviso explicito sobre parcelamento INSS com a Receita Federal
+  if (input.parcelar_inss && sero.total > 0 && (input.numero_parcelas_inss || 0) >= 2) {
+    const n = Math.min(60, Math.max(2, input.numero_parcelas_inss || 0));
+    avisos.push(`PARCELAMENTO INSS/SERO: o cliente pode parcelar o debito diretamente com a Receita Federal (portal e-CAC) em ate ${n} parcelas. A Romatec presta assessoria completa nesse processo (orientacao, calculo de juros/multa, protocolo). A CND da obra fica liberada para averbacao apos o pagamento da 1a parcela e regularidade fiscal mantida.`);
+  } else if (sero.total > 0) {
+    avisos.push('PARCELAMENTO OPCIONAL: caso o cliente prefira nao pagar o INSS/SERO a vista, e possivel parcelar o debito diretamente com a Receita Federal (portal e-CAC) em ate 60x. A Romatec presta assessoria nesse parcelamento. A CND da obra fica liberada para averbacao apos pagamento da 1a parcela.');
+  }
   const itensPendentes = secao_2_taxas.filter(i => i.pendente).map(i => i.descricao);
   if (itensPendentes.length > 0) {
     avisos.push(`Itens pendentes de confirmacao com a Prefeitura: ${itensPendentes.join(', ')}.`);
