@@ -3017,6 +3017,10 @@ function renderPropostasLista() {
   if (state.tipoPropostaAtivo === 'consultoria') {
     return renderPropostasConsultoriaLista(v, toggleHTML);
   }
+  // v1.66.10: Mao de Obra com fluxo inline ('novo' = form de nova proposta)
+  if (state.maoObraView === 'novo') {
+    return renderNovaPropostaInline(v, toggleHTML);
+  }
   // — abaixo segue codigo da Mao de Obra (intacto). —
   const _toggleHTML_para_injetar = toggleHTML;
   const linhas = state.propostas.map(p => {
@@ -4074,92 +4078,145 @@ function renderPreviewConsultoria(r, ctx) {
   };
 }
 
+// v1.66.10: Nova Proposta de Mao de Obra agora e inline (sem modal flutuante).
+// Mesma logica do consultoriaView. state.maoObraView controla:
+//   'lista'  → lista de propostas (default)
+//   'novo'   → form de Nova proposta inline
+function setMaoObraView(view) {
+  state.maoObraView = view;
+  render();
+}
+
 async function abrirNovaProposta() {
+  // Compat retro (caso alguem ainda chame): roteia pro inline
+  setMaoObraView('novo');
+}
+
+async function renderNovaPropostaInline(v, toggleHTML) {
   await loadPropostasClientes();
   const cliOpts = state.propostasClientes.map(c =>
     `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
   ).join('');
 
-  const body = `
-    <div class="form-grid">
-      <label style="grid-column:1/-1;">
-        <span style="font-size:12px; color:var(--text-muted);">Cliente existente</span>
-        <select id="npCliente">
-          <option value="">— Selecionar cliente cadastrado —</option>
-          ${cliOpts}
-        </select>
-      </label>
-      <p style="grid-column:1/-1; margin:4px 0; font-size:12px; color:var(--text-muted);">
-        Ou cadastre um novo cliente:
-      </p>
-      <input id="npNovoNome" placeholder="Nome do novo cliente">
-      <input id="npNovoTel" placeholder="Telefone (com DDD)">
-      <input id="npNovoCpf" placeholder="CPF/CNPJ">
-      <input id="npNovoEmail" type="email" placeholder="E-mail">
-      <hr style="grid-column:1/-1; border:none; border-top:1px solid var(--border-strong); margin:8px 0;">
-      <input id="npEnderecoObra" placeholder="Endereço da obra (opcional)" style="grid-column:1/-1;">
-      <label><span style="font-size:12px; color:var(--text-muted);">Data</span>
-        <input id="npData" type="date" value="${today()}">
-      </label>
-      <label><span style="font-size:12px; color:var(--text-muted);">Validade (dias)</span>
-        <input id="npValidade" type="number" min="1" value="15">
-      </label>
-      <textarea id="npObs" rows="2" placeholder="Observações (opcional)" style="grid-column:1/-1;"></textarea>
-      <hr style="grid-column:1/-1; border:none; border-top:1px solid var(--border-strong); margin:8px 0;">
-      <p style="grid-column:1/-1; margin:0; font-size:12px; color:var(--text-muted);">
-        Responsável Técnico / Indicador (sai no relatório):
-      </p>
-      <label><span style="font-size:12px; color:var(--text-muted);">Cargo</span>
-        <select id="npGestorCargo">
-          <option value="">— Selecionar —</option>
-          <option>Engenheiro</option>
-          <option>Arquiteto</option>
-          <option>Técnico em Edificações</option>
-          <option>Mestre de Obra</option>
-          <option>Pedreiro</option>
-          <option>Encarregado</option>
-          <option>Indicador</option>
-          <option>Outro</option>
-        </select>
-      </label>
-      <input id="npGestorNome" placeholder="Nome do responsável">
-      <input id="npGestorTel" placeholder="Telefone (com DDD)" style="grid-column:1/-1;">
+  v.innerHTML = `
+    ${toggleHTML}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div>
+          <p class="section-title" style="margin:0;">Nova Proposta de Mão de Obra</p>
+          <p style="margin:4px 0 0; font-size:13px; color:var(--text-muted);">Selecione cliente cadastrado ou cadastre um novo</p>
+        </div>
+        <button data-mao-voltar style="background:transparent;">← Voltar</button>
+      </div>
     </div>
-  `;
-  abrirEditar('Nova proposta', body, async () => {
+    <div class="card">
+      <div style="display:grid; gap:10px; font-size:13px; max-width:880px;">
+        <label>
+          <span style="font-size:12px; color:var(--text-muted);">Cliente existente</span>
+          <select id="npCliente" style="width:100%;">
+            <option value="">— Selecionar cliente cadastrado —</option>
+            ${cliOpts}
+          </select>
+        </label>
+        <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">Ou cadastre um novo cliente:</p>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px;">
+          <input id="npNovoNome" placeholder="Nome do novo cliente">
+          <input id="npNovoTel" placeholder="Telefone (com DDD)">
+          <input id="npNovoCpf" placeholder="CPF/CNPJ">
+          <input id="npNovoEmail" type="email" placeholder="E-mail">
+        </div>
+        <hr style="border:none; border-top:1px solid var(--border-strong); margin:8px 0;">
+        <input id="npEnderecoObra" placeholder="Endereço da obra (opcional)" style="width:100%;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:8px;">
+          <label><span style="font-size:12px; color:var(--text-muted);">Data</span>
+            <input id="npData" type="date" value="${today()}" style="width:100%;">
+          </label>
+          <label><span style="font-size:12px; color:var(--text-muted);">Validade (dias)</span>
+            <input id="npValidade" type="number" min="1" value="15" style="width:100%;">
+          </label>
+        </div>
+        <textarea id="npObs" rows="2" placeholder="Observações (opcional)" style="width:100%;"></textarea>
+        <hr style="border:none; border-top:1px solid var(--border-strong); margin:8px 0;">
+        <p style="margin:0; font-size:12px; color:var(--text-muted);">Responsável Técnico / Indicador (sai no relatório):</p>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px;">
+          <label><span style="font-size:12px; color:var(--text-muted);">Cargo</span>
+            <select id="npGestorCargo" style="width:100%;">
+              <option value="">— Selecionar —</option>
+              <option>Engenheiro</option>
+              <option>Arquiteto</option>
+              <option>Técnico em Edificações</option>
+              <option>Mestre de Obra</option>
+              <option>Pedreiro</option>
+              <option>Encarregado</option>
+              <option>Indicador</option>
+              <option>Outro</option>
+            </select>
+          </label>
+          <input id="npGestorNome" placeholder="Nome do responsável">
+        </div>
+        <input id="npGestorTel" placeholder="Telefone responsável (com DDD)" style="width:100%;">
+        <div style="display:flex; gap:6px; margin-top:8px;">
+          <button id="npSalvarInline" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">💾 Criar e abrir editor</button>
+          <button class="btn-secondary" id="npCancelarInline">Cancelar</button>
+        </div>
+      </div>
+    </div>`;
+
+  // Handlers do toggle (mesma logica que ja tinha)
+  document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    state.maoObraView = 'lista';
+    state.consultoriaView = 'lista';
+    render();
+  });
+  const voltar = () => setMaoObraView('lista');
+  document.querySelector('[data-mao-voltar]').onclick = voltar;
+  document.getElementById('npCancelarInline').onclick = voltar;
+
+  document.getElementById('npSalvarInline').onclick = async () => {
+    const btn = document.getElementById('npSalvarInline');
     let cliente_id = document.getElementById('npCliente').value;
     const novoNome = document.getElementById('npNovoNome').value.trim();
-    if (!cliente_id && !novoNome) throw new Error('Selecione ou cadastre um cliente.');
-    if (!cliente_id && novoNome) {
-      const r = await api('/api/propostas-clientes', {
+    if (!cliente_id && !novoNome) {
+      return alert('Selecione um cliente cadastrado ou preencha o Nome do novo cliente.');
+    }
+    btn.disabled = true; btn.textContent = 'Salvando...';
+    try {
+      if (!cliente_id && novoNome) {
+        const rcli = await api('/api/propostas-clientes', {
+          method: 'POST',
+          body: JSON.stringify({
+            nome: novoNome,
+            telefone: document.getElementById('npNovoTel').value.trim() || undefined,
+            cpf_cnpj: document.getElementById('npNovoCpf').value.trim() || undefined,
+            email:    document.getElementById('npNovoEmail').value.trim() || undefined,
+          })
+        });
+        cliente_id = String(rcli.insertId);
+      }
+      const criada = await api('/api/propostas', {
         method: 'POST',
         body: JSON.stringify({
-          nome: novoNome,
-          telefone: document.getElementById('npNovoTel').value.trim() || undefined,
-          cpf_cnpj: document.getElementById('npNovoCpf').value.trim() || undefined,
-          email:    document.getElementById('npNovoEmail').value.trim() || undefined,
+          cliente_id,
+          endereco_obra: document.getElementById('npEnderecoObra').value.trim() || undefined,
+          data_proposta: document.getElementById('npData').value,
+          validade_dias: Number(document.getElementById('npValidade').value) || 15,
+          observacoes: document.getElementById('npObs').value.trim() || undefined,
+          gestor_cargo:    document.getElementById('npGestorCargo').value || undefined,
+          gestor_nome:     document.getElementById('npGestorNome').value.trim() || undefined,
+          gestor_telefone: document.getElementById('npGestorTel').value.trim() || undefined,
         })
       });
-      cliente_id = String(r.insertId);
+      // Volta pra lista e abre o editor de itens (fluxo original)
+      state.maoObraView = 'lista';
+      await loadProposta(String(criada.insertId));
+      await loadSinapiAgrupado();
+      renderPropostaEditor();
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false; btn.textContent = '💾 Criar e abrir editor';
     }
-    const criada = await api('/api/propostas', {
-      method: 'POST',
-      body: JSON.stringify({
-        cliente_id,
-        endereco_obra: document.getElementById('npEnderecoObra').value.trim() || undefined,
-        data_proposta: document.getElementById('npData').value,
-        validade_dias: Number(document.getElementById('npValidade').value) || 15,
-        observacoes: document.getElementById('npObs').value.trim() || undefined,
-        gestor_cargo:    document.getElementById('npGestorCargo').value || undefined,
-        gestor_nome:     document.getElementById('npGestorNome').value.trim() || undefined,
-        gestor_telefone: document.getElementById('npGestorTel').value.trim() || undefined,
-      })
-    });
-    fecharEditar();
-    await loadProposta(String(criada.insertId));
-    await loadSinapiAgrupado();
-    renderPropostaEditor();
-  });
+  };
 }
 
 // v1.65.7: editar dados do cliente da proposta (15 campos completos)
