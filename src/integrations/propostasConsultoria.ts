@@ -53,6 +53,8 @@ export interface CriarPropostaConsultoriaInput {
   gestor_nome?: string;
   gestor_telefone?: string;
   dados_imovel: Record<string, unknown>;
+  // v1.66.8: override opcional dos custos (UI permite editar valores no preview)
+  custos_override?: CustosCalculados;
 }
 
 export interface PropostaConsultoriaRow extends RowDataPacket {
@@ -91,6 +93,19 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     });
   } else {
     throw new Error(`Subtipo ${subtipo} nao implementado nesta fase. Apenas averbacao_residencial e averbacao_comercial estao disponiveis.`);
+  }
+
+  // v1.66.8: aplica override se a UI editou valores no preview.
+  // Recalcula secao_5_total a partir das secoes 2+3 do override (defesa contra
+  // payload inconsistente do client).
+  if (input.custos_override) {
+    const ov = input.custos_override;
+    const tot = (ov.secao_2_taxas || []).reduce((s, i) => s + Number(i.valor || 0), 0)
+              + (ov.secao_3_honorarios || []).reduce((s, i) => s + Number(i.valor || 0), 0);
+    resultado = {
+      custos: { ...ov, secao_5_total: tot },
+      fontes: { ...resultado.fontes, override_aplicado: true } as typeof resultado.fontes,
+    };
   }
 
   const numero = await gerarNumeroProposta();

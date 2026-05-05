@@ -3496,15 +3496,30 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
   const fmt = val => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const subLabel = SUBTIPO_LABEL_FRONT[ctx.subtipo] || ctx.subtipo;
   const projetosHTML = r.custos.secao_1_projetos.map((p, i) => `<li>${i + 1}. ${escape(p)}</li>`).join('');
+
+  // v1.66.8: linhas editaveis com input numerico. Recalcula total ao mudar.
+  // data-secao=2 (taxas) | data-secao=3 (honorarios). data-ordem identifica linha.
+  const inputCell = (val, secao, ordem, pendente) => `
+    <td style="padding:6px; text-align:right; border-bottom:1px solid #333; white-space:nowrap;">
+      <span style="font-size:11px; color:var(--text-muted); margin-right:4px;">R$</span>
+      <input type="number" min="0" step="0.01"
+             data-cns-valor data-secao="${secao}" data-ordem="${ordem}"
+             value="${(Number(val) || 0).toFixed(2)}"
+             style="width:100px; text-align:right; padding:4px 6px; font-size:13px;
+                    background:${pendente ? 'rgba(255,170,51,0.08)' : 'var(--bg-elev)'};
+                    border:1px solid ${pendente ? 'var(--warning)' : 'var(--border)'};
+                    color:var(--text); border-radius:4px;">
+    </td>`;
+
   const taxasHTML = r.custos.secao_2_taxas.map(t => `
     <tr>
-      <td style="padding:6px; border-bottom:1px solid #333;">${t.ordem}. ${escape(t.descricao)}${t.observacao ? '<br><small style="color:var(--text-muted);">' + escape(t.observacao) + '</small>' : ''}</td>
-      <td style="padding:6px; text-align:right; border-bottom:1px solid #333; color:${t.pendente ? '#fbbf24' : 'var(--text)'};">${t.pendente ? 'A confirmar' : escape(fmt(t.valor))}</td>
+      <td style="padding:6px; border-bottom:1px solid #333;">${t.ordem}. ${escape(t.descricao)}${t.observacao ? '<br><small style="color:var(--text-muted);">' + escape(t.observacao) + '</small>' : ''}${t.pendente ? '<br><small style="color:var(--warning);">⚠ Pendente — preencha o valor confirmado</small>' : ''}</td>
+      ${inputCell(t.valor, 2, t.ordem, t.pendente)}
     </tr>`).join('');
   const honorariosHTML = r.custos.secao_3_honorarios.map(h => `
     <tr>
       <td style="padding:6px; border-bottom:1px solid #333;">${h.ordem}. ${escape(h.descricao)}${h.observacao ? '<br><small style="color:var(--text-muted);">' + escape(h.observacao) + '</small>' : ''}</td>
-      <td style="padding:6px; text-align:right; border-bottom:1px solid #333;"><strong>${escape(fmt(h.valor))}</strong></td>
+      ${inputCell(h.valor, 3, h.ordem, false)}
     </tr>`).join('');
   const checklistHTML = r.custos.secao_4_checklist.map(d => `<li>${escape(d.texto)}${d.obrigatorio ? '' : ' <em>(opcional)</em>'}</li>`).join('');
   const avisosHTML = (r.custos.avisos || []).map(a => `<li style="color:var(--text-muted); font-size:12px;">${escape(a)}</li>`).join('');
@@ -3537,7 +3552,13 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
       <ul style="margin:0; padding-left:20px; font-size:12px;">${checklistHTML}</ul>
     </div>
     <div class="card" style="background:rgba(201,168,76,0.08); border-color:var(--gold);">
-      <h2 style="margin:0; text-align:right; color:var(--gold);">VALOR TOTAL: ${escape(fmt(r.valor_total))}</h2>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div style="font-size:11px; color:var(--text-muted);">
+          <div>Subtotal Taxas: <strong id="cnsSubTaxas" style="color:var(--text);">${escape(fmt(r.custos.secao_2_taxas.reduce((s,i)=>s+Number(i.valor||0),0)))}</strong></div>
+          <div>Subtotal Honorários: <strong id="cnsSubHon" style="color:var(--text);">${escape(fmt(r.custos.secao_3_honorarios.reduce((s,i)=>s+Number(i.valor||0),0)))}</strong></div>
+        </div>
+        <h2 style="margin:0; text-align:right; color:var(--gold);">VALOR TOTAL: <span id="cnsTotalCalc">${escape(fmt(r.valor_total))}</span></h2>
+      </div>
     </div>
     ${avisosHTML ? `<div class="card"><h3 style="margin:0 0 8px; font-size:13px; color:var(--text-muted);">Avisos legais</h3><ul style="margin:0; padding-left:20px;">${avisosHTML}</ul></div>` : ''}
     <div class="card" style="display:flex; gap:8px;">
@@ -3552,8 +3573,44 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
   });
   document.querySelectorAll('[data-cons-voltar]').forEach(b => b.onclick = () => setConsultoriaView('form_' + ctx.subtipo));
 
+  // v1.66.8: recalculo ao editar valores
+  function recalcular() {
+    let subTaxas = 0, subHon = 0;
+    document.querySelectorAll('[data-cns-valor]').forEach(inp => {
+      const v = Number(inp.value) || 0;
+      if (inp.dataset.secao === '2') subTaxas += v;
+      else if (inp.dataset.secao === '3') subHon += v;
+    });
+    document.getElementById('cnsSubTaxas').textContent = fmt(subTaxas);
+    document.getElementById('cnsSubHon').textContent = fmt(subHon);
+    document.getElementById('cnsTotalCalc').textContent = fmt(subTaxas + subHon);
+  }
+  document.querySelectorAll('[data-cns-valor]').forEach(inp => {
+    inp.oninput = recalcular;
+  });
+
   document.getElementById('cnsSalvarInline').onclick = async () => {
     const btn = document.getElementById('cnsSalvarInline');
+
+    // v1.66.8: monta override com valores editados (se diferentes do calculado).
+    // Backend persiste o override em custos_calculados + ajusta valor_total.
+    const taxasOverride = r.custos.secao_2_taxas.map(t => {
+      const inp = document.querySelector(`[data-cns-valor][data-secao="2"][data-ordem="${t.ordem}"]`);
+      const novoValor = inp ? Number(inp.value) || 0 : Number(t.valor) || 0;
+      return { ...t, valor: novoValor, pendente: novoValor === 0 ? t.pendente : false };
+    });
+    const honorariosOverride = r.custos.secao_3_honorarios.map(h => {
+      const inp = document.querySelector(`[data-cns-valor][data-secao="3"][data-ordem="${h.ordem}"]`);
+      return { ...h, valor: inp ? Number(inp.value) || 0 : Number(h.valor) || 0 };
+    });
+    const totalOverride = taxasOverride.reduce((s,i)=>s+i.valor,0) + honorariosOverride.reduce((s,i)=>s+i.valor,0);
+    const custos_override = {
+      ...r.custos,
+      secao_2_taxas: taxasOverride,
+      secao_3_honorarios: honorariosOverride,
+      secao_5_total: totalOverride,
+    };
+
     btn.disabled = true; btn.textContent = 'Salvando...';
     try {
       const r2 = await api('/api/propostas-consultoria', {
@@ -3563,6 +3620,7 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
           cliente_id: ctx.cliId,
           endereco_imovel: ctx.endereco || null,
           dados_imovel: ctx.dados_imovel,
+          custos_override,
         }),
       });
       alert('✅ ' + r2.message);
