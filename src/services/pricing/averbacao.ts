@@ -14,7 +14,7 @@
 //   Alvara Construcao (cobra so se !tem_alvara_construcao)
 //   ART CREA-MA = R$ 93,40
 
-import type { InputAverbacao, ResultadoCalculo, CustosCalculados, FontesConsulta, ItemCusto, DocumentoChecklist } from './types';
+import type { InputAverbacao, ResultadoCalculo, CustosCalculados, FontesConsulta, ItemCusto, DocumentoChecklist, CondicaoPagamento, BaseCalculo } from './types';
 import { calcularEmolumentos } from '../tjma';
 import { calcularSERO } from '../receita-federal/sero-calculator';
 import { taxaHabiteSe, taxaAlvaraConstrucao } from '../prefeitura-acailandia';
@@ -185,10 +185,63 @@ export async function calcularAverbacao(input: InputAverbacao): Promise<Resultad
     fontes.prefeitura = { itens_pendentes: itensPendentes };
   }
 
+  // v1.66.11: Condicoes de Pagamento (regra confirmada CEO):
+  //   1a parcela (assinatura):  100% Honorario Projeto + 50% Honorario Assessoria
+  //   2a parcela (protocolo):   50% restante do Honorario Assessoria
+  // Taxas de Terceiros (Secao 2) sao pagas conforme cada orgao demanda
+  // (cliente paga DARF, boleto cartorio, etc). Nao entram nas condicoes.
+  const primeira_parcela = honorario_projeto + (honorario_assessoria * 0.5);
+  const segunda_parcela  = honorario_assessoria * 0.5;
+  const condicoes_pagamento: CondicaoPagamento[] = [
+    {
+      rotulo: '1a parcela — na assinatura da proposta',
+      descricao: '100% dos Honorarios de Projeto e Diligencia Tecnica + 50% dos Honorarios de Assessoria',
+      valor: primeira_parcela,
+    },
+    {
+      rotulo: '2a parcela — no protocolo em cartorio',
+      descricao: '50% restante dos Honorarios de Assessoria e Acompanhamento',
+      valor: segunda_parcela,
+    },
+  ];
+
+  // Base de Calculo explicita (Receita Federal — INSS/SERO):
+  const base_calculo: BaseCalculo[] = [];
+  if (sero.total > 0) {
+    const fatorPadrao = params.cub_ma.multiplicadores_padrao[input.padrao_construtivo];
+    base_calculo.push({
+      rotulo: 'Custo da Obra (CUB regional)',
+      formula: `${input.area_construida} m² × R$ ${sero.cub_usado.toFixed(2)}/m² (CUB-MA R8N R$ ${params.cub_ma.base_r8n.toFixed(2)} × ${fatorPadrao.toFixed(2)} padrão ${input.padrao_construtivo})`,
+      valor_resultado: sero.custo_global,
+    });
+    base_calculo.push({
+      rotulo: 'RMT (Remuneracao Mao de Obra)',
+      formula: `R$ ${sero.custo_global.toFixed(2)} × ${(sero.percentual_mao_obra * 100).toFixed(0)}% (IN RFB 2021/2021)`,
+      valor_resultado: sero.rmt,
+    });
+    base_calculo.push({
+      rotulo: 'INSS (20% sobre RMT)',
+      formula: `R$ ${sero.rmt.toFixed(2)} × 20%`,
+      valor_resultado: sero.inss,
+    });
+    base_calculo.push({
+      rotulo: 'Sistema S (8% sobre RMT)',
+      formula: `R$ ${sero.rmt.toFixed(2)} × 8%`,
+      valor_resultado: sero.sistema_s,
+    });
+    base_calculo.push({
+      rotulo: 'TOTAL CND/SERO (INSS + Sistema S)',
+      formula: 'INSS + Sistema S',
+      valor_resultado: sero.total,
+    });
+  }
+
   const custos: CustosCalculados = {
     secao_1_projetos,
     secao_2_taxas,
     secao_3_honorarios,
+    condicoes_pagamento,
+    base_calculo,
     secao_4_checklist,
     secao_5_total,
     avisos,

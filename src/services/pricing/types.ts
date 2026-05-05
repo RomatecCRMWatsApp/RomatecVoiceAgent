@@ -28,10 +28,26 @@ export interface DocumentoChecklist {
   imprescindivel?: boolean; // destaque vermelho (IPTU em desm/rem)
 }
 
+export interface CondicaoPagamento {
+  rotulo: string;
+  descricao: string;
+  valor: number;
+}
+
+export interface BaseCalculo {
+  rotulo: string;
+  formula: string;
+  valor_resultado: number;
+}
+
 export interface CustosCalculados {
   secao_1_projetos: string[];               // lista descritiva dos projetos a confeccionar
   secao_2_taxas: ItemCusto[];                // emolumentos, INSS, ART, taxas Prefeitura
   secao_3_honorarios: ItemCusto[];           // sempre 2 linhas: projeto + assessoria
+  // v1.66.11: Condicoes de Pagamento (abaixo da Secao 3 Honorarios) +
+  // Base de Calculo explicita da Receita Federal.
+  condicoes_pagamento?: CondicaoPagamento[];
+  base_calculo?: BaseCalculo[];
   secao_4_checklist: DocumentoChecklist[];   // documentos do cliente
   secao_5_total: number;                     // soma das secoes 2 + 3
   avisos: string[];                          // ex: aviso SERO, aviso Prefeitura

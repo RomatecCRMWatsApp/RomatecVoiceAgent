@@ -345,7 +345,44 @@ export async function gerarPdfPropostaConsultoria(id: string): Promise<Buffer> {
   doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.2);
   desenharTabelaCustos(doc, custos.secao_3_honorarios, corHex);
-  doc.moveDown(0.5);
+  doc.moveDown(0.4);
+
+  // v1.66.11: Condicoes de Pagamento (logo abaixo dos Honorarios)
+  if (custos.condicoes_pagamento && custos.condicoes_pagamento.length > 0) {
+    if (doc.y > 700) doc.addPage();
+    doc.fontSize(10.5).fillColor(corHex).text('Condicoes de Pagamento dos Honorarios');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    custos.condicoes_pagamento.forEach((cp, i) => {
+      doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold').text(`${i + 1}. ${cp.rotulo}`, { indent: 8 });
+      doc.font('Helvetica').fontSize(8.5).fillColor('#444').text(cp.descricao, { indent: 16, width: 480 });
+      doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold').text(`Valor: ${formatBRL(cp.valor)}`, { indent: 16 });
+      doc.font('Helvetica');
+      doc.moveDown(0.15);
+    });
+    doc.moveDown(0.4);
+  }
+
+  // v1.66.11: Base de Calculo da Receita Federal (transparencia ao cliente)
+  if (custos.base_calculo && custos.base_calculo.length > 0) {
+    if (doc.y > 680) doc.addPage();
+    doc.fontSize(10.5).fillColor(corHex).text('Base de Calculo — Receita Federal (INSS/SERO)');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    custos.base_calculo.forEach((bc) => {
+      const isTotal = bc.rotulo.startsWith('TOTAL');
+      doc.fontSize(9).fillColor(isTotal ? corHex : '#111')
+         .font(isTotal ? 'Helvetica-Bold' : 'Helvetica-Bold')
+         .text(`${bc.rotulo}:  ${formatBRL(bc.valor_resultado)}`, { indent: 8 });
+      doc.font('Helvetica').fontSize(8).fillColor('#666')
+         .text(bc.formula, { indent: 16, width: 480 });
+      doc.moveDown(0.1);
+    });
+    doc.fontSize(8).fillColor('#666').font('Helvetica-Oblique')
+       .text('Fonte: IN RFB 2021/2021 — afericao indireta. Valor definitivo apenas via portal e-CAC.', { indent: 8 });
+    doc.font('Helvetica');
+    doc.moveDown(0.4);
+  }
 
   // ── Secao 4: Checklist de Documentos do Cliente ────────────────────────
   if (doc.y > 680) doc.addPage();

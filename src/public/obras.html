@@ -3374,7 +3374,8 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
             <input id="cnsArea" type="number" min="1" step="0.01" style="width:100%;">
           </label>
           <label>Valor venal (R$)
-            <input id="cnsValorVenal" type="number" min="0" step="0.01" style="width:100%;">
+            <input id="cnsValorVenal" type="number" min="0" step="0.01" style="width:100%;" placeholder="Auto-calculado">
+            <span style="font-size:10px; color:var(--text-muted);">Auto: área × CUB × padrão. Editável.</span>
           </label>
         </div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px;">
@@ -3475,6 +3476,27 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
   if (chkParcelar && inpParcelas) {
     chkParcelar.onchange = () => { inpParcelas.disabled = !chkParcelar.checked; };
   }
+
+  // v1.66.11: auto-calcula valor venal estimado a partir da area + padrao
+  // construtivo. Formula: area × CUB-MA R8N × multiplicador_padrao.
+  // Usuario ainda pode sobrescrever manualmente.
+  const CUB_MA_R8N = 1814.39;
+  const MULT_PADRAO = { popular: 0.75, normal: 1.00, alto: 1.45 };
+  const inpArea = document.getElementById('cnsArea');
+  const inpValorVenal = document.getElementById('cnsValorVenal');
+  const selPadrao = document.getElementById('cnsPadrao');
+  let valorVenalEditadoManualmente = false;
+  inpValorVenal.oninput = () => { valorVenalEditadoManualmente = true; };
+  const recalcularValorVenal = () => {
+    if (valorVenalEditadoManualmente) return;
+    const area = Number(inpArea.value) || 0;
+    const padrao = selPadrao.value;
+    const mult = MULT_PADRAO[padrao] || 1.0;
+    const venal = area * CUB_MA_R8N * mult;
+    if (area > 0) inpValorVenal.value = venal.toFixed(2);
+  };
+  inpArea.oninput = recalcularValorVenal;
+  selPadrao.onchange = recalcularValorVenal;
 
   // v1.66.9: gestao de anexos (Planta/Mapa) durante o form
   if (!state.consultoriaAnexosTemp) state.consultoriaAnexosTemp = [];
@@ -3622,6 +3644,32 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
       <h3 style="margin:0 0 8px; color:var(--neon); font-size:14px;">⭐ Seção 3 — Honorários Romatec</h3>
       <table style="width:100%; font-size:12px; border-collapse:collapse;">${honorariosHTML}</table>
     </div>
+    ${(r.custos.condicoes_pagamento || []).length > 0 ? `
+    <div class="card">
+      <h3 style="margin:0 0 8px; color:var(--neon); font-size:14px;">💳 Condições de Pagamento dos Honorários</h3>
+      ${r.custos.condicoes_pagamento.map((cp, i) => `
+        <div style="padding:8px 0; ${i > 0 ? 'border-top:1px solid #333;' : ''}">
+          <div style="font-size:13px; font-weight:600;">${i + 1}. ${escape(cp.rotulo)}</div>
+          <div style="font-size:11px; color:var(--text-muted); margin:4px 0;">${escape(cp.descricao)}</div>
+          <div style="font-size:14px; color:var(--neon); font-weight:700;">Valor: ${escape(fmt(cp.valor))}</div>
+        </div>
+      `).join('')}
+    </div>` : ''}
+    ${(r.custos.base_calculo || []).length > 0 ? `
+    <div class="card" style="background:rgba(0,200,255,0.04);">
+      <h3 style="margin:0 0 8px; color:var(--neon); font-size:14px;">🧮 Base de Cálculo — Receita Federal (INSS/SERO)</h3>
+      ${r.custos.base_calculo.map(bc => {
+        const isTotal = bc.rotulo.startsWith('TOTAL');
+        return `
+          <div style="padding:4px 0; ${isTotal ? 'border-top:1px solid var(--neon); margin-top:6px; padding-top:8px;' : ''}">
+            <div style="font-size:12px; font-weight:${isTotal ? '700' : '600'}; color:${isTotal ? 'var(--neon)' : 'var(--text)'};">
+              ${escape(bc.rotulo)}: <span style="float:right;">${escape(fmt(bc.valor_resultado))}</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${escape(bc.formula)}</div>
+          </div>`;
+      }).join('')}
+      <p style="margin:10px 0 0; font-size:10px; color:var(--text-muted); font-style:italic;">Fonte: IN RFB 2021/2021 — aferição indireta. Valor definitivo apenas via portal e-CAC.</p>
+    </div>` : ''}
     <div class="card">
       <h3 style="margin:0 0 8px; color:var(--neon); font-size:14px;">📑 Seção 4 — Documentos do Cliente</h3>
       <ul style="margin:0; padding-left:20px; font-size:12px;">${checklistHTML}</ul>
