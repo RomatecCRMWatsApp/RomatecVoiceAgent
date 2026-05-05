@@ -160,6 +160,8 @@ export async function calcularAverbacao(input: InputAverbacao): Promise<Resultad
     { texto: 'Alvara de Construcao (se ja possuir)', obrigatorio: false },
     { texto: 'Habite-se (se ja possuir)', obrigatorio: false },
     { texto: 'CND da Receita Federal — Imovel (se ja possuir)', obrigatorio: false },
+    // v1.66.18: senha gov.br e essencial pra acessar e-CAC, gerar CNO e calcular SERO
+    { texto: 'Senha gov.br (nivel prata ou ouro) do proprietario — necessaria para acesso ao portal e-CAC, geracao do CNO da obra e calculo definitivo do SERO/INSS', obrigatorio: true },
   );
 
   // ── Secao 5: total ──────────────────────────────────────────────────────
@@ -172,6 +174,20 @@ export async function calcularAverbacao(input: InputAverbacao): Promise<Resultad
   // v1.66.5: aviso universal de aproximacao Receita/Cartorio
   avisos.push('IMPORTANTE: Os valores das taxas de Cartorio e da Receita Federal informados nesta proposta sao APROXIMADOS, calculados com base nas tabelas oficiais vigentes (TJMA Resolucao GP 143/2025 e IN RFB 2021/2021). Os valores definitivos podem variar conforme apuracao real do cartorio competente e do portal SERO/e-CAC no momento do pagamento.');
   if (sero.total > 0) avisos.push(sero.aviso);
+  // v1.66.18: explica detalhadamente pra que a senha gov.br e necessaria,
+  // listando portais e servicos especificos que serao acessados.
+  avisos.push(
+    'SENHA GOV.BR — DETALHAMENTO DE USO. ' +
+    'Para concluir o processo de averbacao da construcao, a Romatec precisa acessar, EM NOME DO PROPRIETARIO, ' +
+    'os seguintes portais e servicos do governo federal (todos exigem login com senha gov.br nivel prata ou ouro): ' +
+    '(1) PORTAL E-CAC (cav.receita.fazenda.gov.br): autenticacao do contribuinte na Receita Federal para acessar todos os servicos online. ' +
+    '(2) MODULO CNO — CADASTRO NACIONAL DE OBRAS (sistema CNO dentro do e-CAC): inscricao da obra perante a Receita Federal, obtencao do numero CNO, vinculacao do CPF do proprietario e do CPF/CREA do responsavel tecnico, atualizacao de matricula e situacao da obra. ' +
+    '(3) PORTAL SERO — SISTEMA DE ESCRITURACAO DIGITAL DAS OBRIGACOES PREVIDENCIARIAS (sero.receita.fazenda.gov.br): afericao oficial da obra (calculo definitivo de INSS + Sistema S), emissao do DARF para pagamento, controle de parcelamento se houver. ' +
+    '(4) MEU IMPOSTO DE RENDA / SITUACAO FISCAL: verificacao de regularidade do CPF para emissao da CND. ' +
+    '(5) EMISSAO DA CND DA OBRA: certidao negativa de debitos previdenciarios, documento OBRIGATORIO para o cartorio averbar a construcao na matricula. ' +
+    'A senha NAO e compartilhada com terceiros — o proprietario acompanha o login presencialmente ou via tela compartilhada com a Romatec. ' +
+    'Caso o proprietario nao tenha conta gov.br ou nao saiba a senha, a Romatec orienta o cadastro/recuperacao em gov.br/conta.'
+  );
   // v1.66.6: aviso explicito sobre parcelamento INSS com a Receita Federal
   if (input.parcelar_inss && sero.total > 0 && (input.numero_parcelas_inss || 0) >= 2) {
     const n = Math.min(60, Math.max(2, input.numero_parcelas_inss || 0));
