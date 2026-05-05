@@ -3174,7 +3174,24 @@ async function loadPropostasConsultoria() {
   } catch (e) { state.propostasConsultoria = []; }
 }
 
+// v1.66.7: estados inline (sem modal flutuante — integrado no fluxo do sistema)
+//   'lista'                       — lista de propostas (default)
+//   'escolha'                     — cards 7 subtipos
+//   'form_averbacao_residencial'  — form do subtipo
+//   'form_averbacao_comercial'
+//   'preview'                     — revisao com 5 secoes
+function setConsultoriaView(view) {
+  state.consultoriaView = view;
+  render();
+}
+
 async function renderPropostasConsultoriaLista(v, toggleHTML) {
+  // Roteia conforme estado inline atual
+  const view = state.consultoriaView || 'lista';
+  if (view === 'escolha') return renderConsultoriaEscolhaInline(v, toggleHTML);
+  if (view.startsWith('form_')) return renderConsultoriaFormInline(v, toggleHTML, view.slice(5));
+  if (view === 'preview' && state.consultoriaPreviewData) return renderConsultoriaPreviewInline(v, toggleHTML);
+
   if (!state.propostasConsultoria) await loadPropostasConsultoria();
   const linhas = (state.propostasConsultoria || []).map(p => {
     const sb = {
@@ -3225,7 +3242,7 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
     state.tipoPropostaAtivo = b.dataset.toggleTipo;
     render();
   });
-  document.querySelector('[data-nova-cons]').onclick = abrirNovaConsultoriaPasso1;
+  document.querySelector('[data-nova-cons]').onclick = () => setConsultoriaView('escolha');
 
   document.querySelectorAll('[data-view-cons]').forEach(b => b.onclick = () => {
     window.open('/api/propostas-consultoria/' + b.dataset.viewCons + '/pdf', '_blank');
@@ -3273,6 +3290,287 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
       alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : ''));
     }
   });
+}
+
+// ── INLINE (v1.66.7): cards de subtipo dentro da propria aba ──────────────
+function renderConsultoriaEscolhaInline(v, toggleHTML) {
+  const cards = SUBTIPOS_CONSULTORIA.map(s => `
+    <button data-pick-subtipo-inline="${s.slug}" ${s.disponivel ? '' : 'disabled'}
+            style="padding:14px; text-align:left; border:1px solid var(--border); border-radius:8px;
+                   background:${s.disponivel ? 'var(--bg-elev)' : '#1a1a1a'};
+                   opacity:${s.disponivel ? '1' : '0.5'}; cursor:${s.disponivel ? 'pointer' : 'not-allowed'};
+                   color:var(--text);">
+      <div style="font-size:16px; font-weight:600;">${s.icone} ${escape(s.nome)}</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+        ${s.disponivel ? 'Disponível' : 'Em breve (Fase 3)'}
+      </div>
+    </button>`).join('');
+
+  v.innerHTML = `
+    ${toggleHTML}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div>
+          <p class="section-title" style="margin:0;">Nova Proposta de Consultoria</p>
+          <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Selecione o tipo de consultoria</p>
+        </div>
+        <button data-cons-voltar style="background:transparent;">← Voltar</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px;">${cards}</div>
+    </div>`;
+
+  document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    state.consultoriaView = 'lista';
+    render();
+  });
+  document.querySelector('[data-cons-voltar]').onclick = () => setConsultoriaView('lista');
+  document.querySelectorAll('[data-pick-subtipo-inline]:not([disabled])').forEach(b => b.onclick = () => {
+    setConsultoriaView('form_' + b.dataset.pickSubtipoInline);
+  });
+}
+
+async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
+  await loadPropostasClientes();
+  const cliOpts = state.propostasClientes.map(c =>
+    `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
+  ).join('');
+  const isResid  = subtipo === 'averbacao_residencial';
+  const isComerc = subtipo === 'averbacao_comercial';
+  const subLabel = SUBTIPO_LABEL_FRONT[subtipo] || subtipo;
+
+  v.innerHTML = `
+    ${toggleHTML}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div>
+          <p class="section-title" style="margin:0;">Nova Proposta de Consultoria</p>
+          <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">${escape(subLabel)}</p>
+        </div>
+        <button data-cons-voltar style="background:transparent;">← Voltar</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:grid; gap:10px; font-size:13px; max-width:760px;">
+        <label>Cliente
+          <div style="display:flex; gap:6px;">
+            <select id="cnsCliente" style="flex:1;"><option value="">— escolher —</option>${cliOpts}</select>
+            <button type="button" id="cnsNovoCliente" style="white-space:nowrap; background:var(--success); color:#fff; border-color:var(--success);">+ Novo cliente</button>
+          </div>
+        </label>
+        <label>Endereço do imóvel
+          <input id="cnsEndereco" placeholder="Rua, número, bairro, cidade-UF" style="width:100%;">
+        </label>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:8px;">
+          <label>Área construída (m²)
+            <input id="cnsArea" type="number" min="1" step="0.01" style="width:100%;">
+          </label>
+          <label>Valor venal (R$)
+            <input id="cnsValorVenal" type="number" min="0" step="0.01" style="width:100%;">
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px;">
+          <label>
+            <span style="display:flex; align-items:center; gap:4px;">Padrão construtivo
+              <button type="button" id="cnsPadraoHelp" title="Como escolher" style="background:transparent; border:1px solid var(--border); color:var(--neon); border-radius:50%; width:18px; height:18px; padding:0; line-height:1; cursor:pointer; font-size:12px;">?</button>
+            </span>
+            <select id="cnsPadrao" style="width:100%;">
+              <option value="popular">Popular (R-1)</option>
+              <option value="normal" selected>Normal (R-8N)</option>
+              <option value="alto">Alto (R-16)</option>
+            </select>
+          </label>
+          <label>Responsável
+            <select id="cnsResponsavel" style="width:100%;">
+              <option value="PF" selected>Pessoa Física</option>
+              <option value="PJ_sem_contabilidade">PJ sem contabilidade</option>
+              <option value="PJ_com_contabilidade">PJ com contabilidade (sem SERO)</option>
+            </select>
+          </label>
+        </div>
+        <label>Anotação Técnica do Responsável
+          <select id="cnsAnotacao" style="width:100%;">
+            <option value="art_crea" selected>ART — CREA-MA (Engenheiro Civil)</option>
+            <option value="rrt_cau">RRT — CAU/MA (Arquiteto e Urbanista)</option>
+            <option value="trt_cft">TRT — CFT (Técnico Industrial)</option>
+          </select>
+        </label>
+        <div style="border:1px solid var(--border); border-radius:6px; padding:10px; background:rgba(0,200,255,0.04);">
+          <label style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+            <input id="cnsParcelarInss" type="checkbox">
+            <strong>Cliente vai parcelar o INSS/SERO com a Receita Federal?</strong>
+          </label>
+          <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">
+            A Romatec presta assessoria do parcelamento direto com a Receita Federal (portal e-CAC). A CND da obra é liberada para averbação após o pagamento da 1ª parcela.
+          </p>
+          <label style="display:block; font-size:12px;">Quantidade de parcelas (2 a 60):
+            <input id="cnsNumeroParcelasInss" type="number" min="2" max="60" value="12" style="width:100px; margin-left:6px;" disabled>
+          </label>
+        </div>
+        ${isResid ? `
+        <label style="display:flex; gap:6px; align-items:center;">
+          <input id="cnsComplementares" type="checkbox">
+          <span>Apresentar projetos complementares (libera pacote completo de 7 projetos)</span>
+        </label>` : ''}
+        ${isComerc ? `<div style="font-size:12px; color:var(--text-muted); padding:8px; background:rgba(255,200,0,0.08); border-radius:4px;">
+          ⚠️ Comercial: pacote completo obrigatório (7 projetos: Mapa, Arquitetônico, Elétrico, Hidrossanitário, Estrutural, PPCI, Memorial).
+        </div>` : ''}
+        <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Status atual dos documentos do cliente:</div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:4px; font-size:12px;">
+          <label><input id="cnsAlvara" type="checkbox"> Já tem Alvará</label>
+          <label><input id="cnsHabite" type="checkbox"> Já tem Habite-se</label>
+          <label><input id="cnsIptu" type="checkbox" checked> IPTU em dia</label>
+          <label><input id="cnsCnd" type="checkbox"> Já tem CND Receita</label>
+          <label style="grid-column:1/-1;"><input id="cnsCertidao" type="checkbox"> Certidão Inteiro Teor atualizada</label>
+        </div>
+        <div style="display:flex; gap:6px; margin-top:8px;">
+          <button id="cnsPreview" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
+          <button class="btn-secondary" id="cnsCancelar">Cancelar</button>
+        </div>
+      </div>
+    </div>`;
+
+  // Handlers
+  document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    state.consultoriaView = 'lista';
+    render();
+  });
+  const voltarParaEscolha = () => setConsultoriaView('escolha');
+  document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
+  document.getElementById('cnsCancelar').onclick = voltarParaEscolha;
+  document.getElementById('cnsNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
+  document.getElementById('cnsPadraoHelp').onclick = (e) => {
+    e.preventDefault();
+    abrirHelpPadraoConstrutivo();
+  };
+  const chkParcelar = document.getElementById('cnsParcelarInss');
+  const inpParcelas = document.getElementById('cnsNumeroParcelasInss');
+  if (chkParcelar && inpParcelas) {
+    chkParcelar.onchange = () => { inpParcelas.disabled = !chkParcelar.checked; };
+  }
+
+  document.getElementById('cnsPreview').onclick = async () => {
+    const cliId = document.getElementById('cnsCliente').value;
+    const area = Number(document.getElementById('cnsArea').value);
+    const valorVenal = Number(document.getElementById('cnsValorVenal').value);
+    if (!cliId) return alert('Selecione o cliente.');
+    if (!area || area <= 0) return alert('Informe área construída.');
+    if (!valorVenal || valorVenal <= 0) return alert('Informe valor venal.');
+
+    const dados_imovel = {
+      area_construida: area,
+      valor_venal_imovel: valorVenal,
+      padrao_construtivo: document.getElementById('cnsPadrao').value,
+      responsavel: document.getElementById('cnsResponsavel').value,
+      municipio: 'Açailândia-MA',
+      apresentar_projetos_complementares: isResid ? document.getElementById('cnsComplementares').checked : false,
+      tem_alvara_construcao: document.getElementById('cnsAlvara').checked,
+      tem_habite_se: document.getElementById('cnsHabite').checked,
+      iptu_em_dia: document.getElementById('cnsIptu').checked,
+      cnd_receita_emitida: document.getElementById('cnsCnd').checked,
+      certidao_inteiro_teor_atualizada: document.getElementById('cnsCertidao').checked,
+      anotacao_tecnica: document.getElementById('cnsAnotacao')?.value || 'art_crea',
+      parcelar_inss: document.getElementById('cnsParcelarInss')?.checked || false,
+      numero_parcelas_inss: Number(document.getElementById('cnsNumeroParcelasInss')?.value) || 12,
+    };
+    const enderecoTxt = document.getElementById('cnsEndereco').value.trim();
+
+    const btn = document.getElementById('cnsPreview');
+    btn.disabled = true; btn.textContent = 'Calculando...';
+    try {
+      const r = await api('/api/propostas-consultoria/preview', {
+        method: 'POST',
+        body: JSON.stringify({ subtipo, dados_imovel }),
+      });
+      state.consultoriaPreviewData = { ctx: { cliId, dados_imovel, subtipo, endereco: enderecoTxt }, resultado: r };
+      setConsultoriaView('preview');
+    } catch (e) { alert('Erro: ' + e.message); btn.disabled = false; btn.textContent = '🧮 Calcular preview'; }
+  };
+}
+
+function renderConsultoriaPreviewInline(v, toggleHTML) {
+  const { ctx, resultado: r } = state.consultoriaPreviewData;
+  const fmt = val => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const subLabel = SUBTIPO_LABEL_FRONT[ctx.subtipo] || ctx.subtipo;
+  const projetosHTML = r.custos.secao_1_projetos.map((p, i) => `<li>${i + 1}. ${escape(p)}</li>`).join('');
+  const taxasHTML = r.custos.secao_2_taxas.map(t => `
+    <tr>
+      <td style="padding:6px; border-bottom:1px solid #333;">${t.ordem}. ${escape(t.descricao)}${t.observacao ? '<br><small style="color:var(--text-muted);">' + escape(t.observacao) + '</small>' : ''}</td>
+      <td style="padding:6px; text-align:right; border-bottom:1px solid #333; color:${t.pendente ? '#fbbf24' : 'var(--text)'};">${t.pendente ? 'A confirmar' : escape(fmt(t.valor))}</td>
+    </tr>`).join('');
+  const honorariosHTML = r.custos.secao_3_honorarios.map(h => `
+    <tr>
+      <td style="padding:6px; border-bottom:1px solid #333;">${h.ordem}. ${escape(h.descricao)}${h.observacao ? '<br><small style="color:var(--text-muted);">' + escape(h.observacao) + '</small>' : ''}</td>
+      <td style="padding:6px; text-align:right; border-bottom:1px solid #333;"><strong>${escape(fmt(h.valor))}</strong></td>
+    </tr>`).join('');
+  const checklistHTML = r.custos.secao_4_checklist.map(d => `<li>${escape(d.texto)}${d.obrigatorio ? '' : ' <em>(opcional)</em>'}</li>`).join('');
+  const avisosHTML = (r.custos.avisos || []).map(a => `<li style="color:var(--text-muted); font-size:12px;">${escape(a)}</li>`).join('');
+
+  v.innerHTML = `
+    ${toggleHTML}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div>
+          <p class="section-title" style="margin:0;">Revisão da Proposta</p>
+          <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">${escape(subLabel)}</p>
+        </div>
+        <button data-cons-voltar style="background:transparent;">← Voltar ao formulário</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 8px; color:var(--neon); font-size:14px;">📋 Seção 1 — Projetos a Confeccionar</h3>
+      <ul style="margin:0; padding-left:20px;">${projetosHTML}</ul>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 8px; color:var(--neon); font-size:14px;">💰 Seção 2 — Taxas de Terceiros</h3>
+      <table style="width:100%; font-size:12px; border-collapse:collapse;">${taxasHTML}</table>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 8px; color:var(--neon); font-size:14px;">⭐ Seção 3 — Honorários Romatec</h3>
+      <table style="width:100%; font-size:12px; border-collapse:collapse;">${honorariosHTML}</table>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 8px; color:var(--neon); font-size:14px;">📑 Seção 4 — Documentos do Cliente</h3>
+      <ul style="margin:0; padding-left:20px; font-size:12px;">${checklistHTML}</ul>
+    </div>
+    <div class="card" style="background:rgba(201,168,76,0.08); border-color:var(--gold);">
+      <h2 style="margin:0; text-align:right; color:var(--gold);">VALOR TOTAL: ${escape(fmt(r.valor_total))}</h2>
+    </div>
+    ${avisosHTML ? `<div class="card"><h3 style="margin:0 0 8px; font-size:13px; color:var(--text-muted);">Avisos legais</h3><ul style="margin:0; padding-left:20px;">${avisosHTML}</ul></div>` : ''}
+    <div class="card" style="display:flex; gap:8px;">
+      <button class="btn-secondary" data-cons-voltar style="flex:1;">← Voltar e ajustar</button>
+      <button id="cnsSalvarInline" style="flex:2; background:var(--success); color:#fff; border-color:var(--success);">💾 Salvar proposta</button>
+    </div>`;
+
+  document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    state.consultoriaView = 'lista';
+    render();
+  });
+  document.querySelectorAll('[data-cons-voltar]').forEach(b => b.onclick = () => setConsultoriaView('form_' + ctx.subtipo));
+
+  document.getElementById('cnsSalvarInline').onclick = async () => {
+    const btn = document.getElementById('cnsSalvarInline');
+    btn.disabled = true; btn.textContent = 'Salvando...';
+    try {
+      const r2 = await api('/api/propostas-consultoria', {
+        method: 'POST',
+        body: JSON.stringify({
+          subtipo: ctx.subtipo,
+          cliente_id: ctx.cliId,
+          endereco_imovel: ctx.endereco || null,
+          dados_imovel: ctx.dados_imovel,
+        }),
+      });
+      alert('✅ ' + r2.message);
+      state.consultoriaPreviewData = null;
+      await loadPropostasConsultoria();
+      setConsultoriaView('lista');
+    } catch (e) { alert('Erro: ' + e.message); btn.disabled = false; btn.textContent = '💾 Salvar proposta'; }
+  };
 }
 
 async function abrirNovaConsultoriaPasso1() {
