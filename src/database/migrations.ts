@@ -815,6 +815,8 @@ export async function runMigrations(): Promise<void> {
     // 'ativo' = trabalhando normalmente; outros = não computa em folha/marcações.
     `ALTER TABLE romatec_obra_equipe ADD COLUMN status ENUM('ativo','ausente','doente','ferias','afastado','transferido','desligado') NOT NULL DEFAULT 'ativo' AFTER ativo`,
     `ALTER TABLE romatec_obra_equipe ADD INDEX idx_status (status)`,
+    // v1.65.60 — leads AvalieImob: campo Telegram pra DBs ja existentes
+    `ALTER TABLE romatec_avalieimob_leads ADD COLUMN ja_notificou_telegram BOOLEAN DEFAULT FALSE AFTER ja_notificou_ceo`,
   ]) {
     try {
       await pool.execute(stmt);
@@ -825,6 +827,42 @@ export async function runMigrations(): Promise<void> {
       }
     }
   }
+
+  // v1.65.60: leads do AvalieImob — captura cadastros + assinaturas vindos do
+  // SEO/Google/Facebook ads pra ZAYRA monitorar. Webhook recebido em
+  // POST /api/avalieimob/lead-webhook dispara INSERT/UPDATE nesta tabela
+  // + notifica CEO via WhatsApp/email + auto-resposta opcional pro lead.
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS romatec_avalieimob_leads (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      external_id     VARCHAR(120) NULL,
+      event_type      ENUM('cadastro','assinatura','login','outro') NOT NULL DEFAULT 'cadastro',
+      name            VARCHAR(200) NOT NULL,
+      email           VARCHAR(200) NOT NULL,
+      phone           VARCHAR(40)  NULL,
+      role            VARCHAR(120) NULL,
+      crea            VARCHAR(40)  NULL,
+      utm_source      VARCHAR(100) NULL,
+      utm_medium      VARCHAR(100) NULL,
+      utm_campaign    VARCHAR(150) NULL,
+      utm_content     VARCHAR(150) NULL,
+      utm_term        VARCHAR(150) NULL,
+      page_origin     VARCHAR(500) NULL,
+      referrer        VARCHAR(500) NULL,
+      assinatura_plano VARCHAR(60) NULL,
+      assinatura_valor DECIMAL(10,2) NULL,
+      ja_notificou_ceo BOOLEAN DEFAULT FALSE,
+      ja_notificou_telegram BOOLEAN DEFAULT FALSE,
+      ja_respondeu_lead BOOLEAN DEFAULT FALSE,
+      payload_raw     JSON NULL,
+      created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_email (email),
+      INDEX idx_event_created (event_type, created_at DESC),
+      INDEX idx_utm_source (utm_source),
+      INDEX idx_external (external_id)
+    )
+  `);
 
   // v1.64.0: tenant_settings — preparação white-label estrutural.
   // Mono-tenant agora (Romatec). Estrutura pronta pra trocar logo/marca via UPDATE

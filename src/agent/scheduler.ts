@@ -59,9 +59,12 @@ async function sendDailyBriefing(): Promise<void> {
   try {
     console.log('[Scheduler] Gerando briefing diário das 8h...');
     const resp = await think(
-      'Gere o resumo executivo diário completo para o CEO José Romário: ' +
-      'leads do CRM (total, novos, em atendimento), contratos pendentes no AvalieImob, ' +
-      'campanhas ativas, e agenda de hoje no Google Calendar. ' +
+      'Gere o resumo executivo diário completo para o CEO José Romário com estas seções: ' +
+      '1) leads do CRM Romatec (total, novos, em atendimento); ' +
+      '2) leads do AvalieImob das últimas 24h via consultar_leads_avalieimob (total, top fontes utm_source, top páginas de origem, novas assinaturas). Se não houver leads, mencione "sem leads novos no AvalieImob"; ' +
+      '3) contratos pendentes no AvalieImob; ' +
+      '4) campanhas ativas; ' +
+      '5) agenda de hoje no Google Calendar. ' +
       'Seja conciso, executivo e use emojis para facilitar a leitura no WhatsApp.',
     );
     await sendReply(CEO_PHONE, resp.text);

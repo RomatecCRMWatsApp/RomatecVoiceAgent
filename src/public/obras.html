@@ -935,17 +935,25 @@ function renderDashboard() {
     { label: 'Paralisadas',  value: r.paralisadas||0,  color: 'var(--warning)' },
   ], { centerLabel: 'OBRAS' });
 
-  // v1.65.57: donut financeiro agora usa state.transacoes (filtrado pela
-  // obra ativa via loadTransacoes) em vez de r.entradas/saidas (totais
-  // de TODAS as obras). Mostra so o fluxo da obra selecionada — bug
-  // reportado pelo CEO: "deve ser separado por obra".
+  // v1.65.57: donut financeiro usa state.transacoes (filtrado pela obra ativa
+  // via loadTransacoes), nao r.entradas/saidas (totais de TODAS as obras).
+  //
+  // v1.65.60: SALDO agora e (Orcamento da obra - Saidas), nao (Entradas - Saidas).
+  // Regra de negocio CEO: saldo representa "quanto ainda sobra do contrato pra
+  // gastar na obra". Se a obra tem orcamento R$ 70k e ja gastou R$ 6k, o saldo
+  // e R$ 64k (independente do quanto o cliente ja pagou em entradas).
+  // Donut: 2 fatias = Saidas (gasto) + Disponivel (orcamento - gasto).
   const txObra = state.transacoes || [];
   const entObra = Math.round(txObra.filter(t => t.tipo === 'entrada').reduce((s,t) => s + Number(t.valor||0), 0));
   const saiObra = Math.round(txObra.filter(t => t.tipo === 'saida').reduce((s,t) => s + Number(t.valor||0), 0));
-  const saldoObra = entObra - saiObra;
+  const orcamentoObra = Math.round(Number(obra?.orcamento || 0));
+  const disponivelObra = Math.max(0, orcamentoObra - saiObra);
+  const saldoObra = orcamentoObra - saiObra; // pode ficar negativo se estourou orcamento
+  // Entradas continua na legenda como informacao extra (nao compoe o donut).
   const donutFin = donutChart([
-    { label: 'Entradas', value: entObra, display: fmt(entObra), color: 'var(--neon)' },
-    { label: 'Saídas',   value: saiObra, display: fmt(saiObra), color: 'var(--danger)' },
+    { label: 'Saídas',     value: saiObra,        display: fmt(saiObra),        color: 'var(--danger)' },
+    { label: 'Disponível', value: disponivelObra, display: fmt(disponivelObra), color: 'var(--neon)'   },
+    { label: 'Entradas',   value: 0,              display: fmt(entObra),        color: 'var(--gold)'   }, // visual-only (value 0 = nao pinta no donut)
   ], { centerLabel: 'SALDO', centerValue: fmt(saldoObra) });
 
   // Top obras por orcamento

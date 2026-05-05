@@ -39,6 +39,13 @@ interface DadosBriefingSemanal {
     novas_semana:    number;
     pendentes_total: number;
   };
+  // v1.65.60: leads do AvalieImob (cadastros/assinaturas vindos do SEO/ads)
+  avalieimob?: {
+    cadastros_semana:   number;
+    assinaturas_semana: number;
+    top_paginas:        Array<{ page: string; count: number }>;
+    top_sources:        Array<{ source: string; count: number }>;
+  };
 }
 
 async function coletarDadosSemana(): Promise<DadosBriefingSemanal> {
@@ -57,6 +64,7 @@ async function coletarDadosSemana(): Promise<DadosBriefingSemanal> {
     financeiro: { entradas_semana: 0, saidas_semana: 0, saldo_semana: 0, saidas_por_categoria: [] },
     crm:        { leads_novos_semana: 0, leads_quentes_total: 0, leads_mornos_total: 0 },
     vistorias:  { novas_semana: 0, pendentes_total: 0 },
+    avalieimob: { cadastros_semana: 0, assinaturas_semana: 0, top_paginas: [], top_sources: [] },
   };
 
   // ── Obras ───────────────────────────────────────────────────────────────
@@ -182,6 +190,20 @@ async function coletarDadosSemana(): Promise<DadosBriefingSemanal> {
     console.warn('[briefingSemanal] CRM:', (err as Error).message);
   }
 
+  // ── AvalieImob (leads do SEO/ads via webhook) ──────────────────────────
+  try {
+    const { consultarLeads } = await import('../integrations/avalieImobLeads');
+    const r = await consultarLeads({ dias: 7, limit: 1 });
+    dados.avalieimob = {
+      cadastros_semana:   r.por_evento.cadastro   || 0,
+      assinaturas_semana: r.por_evento.assinatura || 0,
+      top_paginas:        r.top_paginas,
+      top_sources:        r.top_sources,
+    };
+  } catch (err) {
+    console.warn('[briefingSemanal] AvalieImob leads:', (err as Error).message);
+  }
+
   // ── Vistorias ───────────────────────────────────────────────────────────
   try {
     type VtoRow = RowDataPacket & { n: number };
@@ -250,6 +272,25 @@ function formatBriefing(d: DadosBriefingSemanal): string {
   linhas.push(`   🔥 ${d.crm.leads_quentes_total} leads quentes (total)`);
   linhas.push(`   🌡 ${d.crm.leads_mornos_total} leads mornos (total)`);
   linhas.push(`   🆕 ${d.crm.leads_novos_semana} lead(s) novo(s) na semana\n`);
+
+  // AvalieImob (v1.65.60: leads vindos do SEO/ads)
+  if (d.avalieimob && (d.avalieimob.cadastros_semana > 0 || d.avalieimob.assinaturas_semana > 0)) {
+    linhas.push(`🎯 *AvalieImob (orgânico/ads)*`);
+    linhas.push(`   📥 ${d.avalieimob.cadastros_semana} cadastro(s) novo(s) na semana`);
+    if (d.avalieimob.assinaturas_semana > 0) {
+      linhas.push(`   💰 ${d.avalieimob.assinaturas_semana} nova(s) assinatura(s) 🚀`);
+    }
+    if (d.avalieimob.top_paginas.length > 0) {
+      linhas.push(`   _Top páginas de origem:_`);
+      for (const p of d.avalieimob.top_paginas.slice(0, 3)) {
+        linhas.push(`     • ${p.page}: ${p.count}`);
+      }
+    }
+    if (d.avalieimob.top_sources.length > 0) {
+      linhas.push(`   _Top fontes:_ ${d.avalieimob.top_sources.slice(0, 3).map(s => `${s.source} (${s.count})`).join(', ')}`);
+    }
+    linhas.push('');
+  }
 
   // VISTORIAS
   if (d.vistorias.novas_semana > 0 || d.vistorias.pendentes_total > 0) {

@@ -1016,6 +1016,41 @@ app.get   ('/api/funcionarios/:funcionario_id/relatorio',
 app.get   ('/api/relatorio-equipe',
   apiHandle(args => obras.relatorioMensalEquipe(args as Parameters<typeof obras.relatorioMensalEquipe>[0])));
 
+// v1.65.60: Webhook do AvalieImob — recebe leads (cadastros + assinaturas)
+// pra ZAYRA monitorar. Disparo em paralelo: WhatsApp CEO + Telegram CEO +
+// auto-resposta WhatsApp pro lead. Header X-Webhook-Secret obrigatorio.
+import { processarLeadWebhook, consultarLeads } from './integrations/avalieImobLeads';
+
+app.post('/api/avalieimob/lead-webhook', async (req: Request, res: Response) => {
+  try {
+    const secret = req.headers['x-webhook-secret'] || req.headers['X-Webhook-Secret'];
+    const expected = process.env.AVALIEIMOB_WEBHOOK_SECRET;
+    if (!expected) {
+      return res.status(500).json({ error: 'AVALIEIMOB_WEBHOOK_SECRET nao configurada na ZAYRA' });
+    }
+    if (secret !== expected) {
+      return res.status(401).json({ error: 'invalid secret' });
+    }
+    const result = await processarLeadWebhook(req.body);
+    res.json(result);
+  } catch (err) {
+    console.error('[avalieimob-webhook] erro:', (err as Error).message);
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/avalieimob/leads', async (req: Request, res: Response) => {
+  try {
+    const dias  = req.query.dias  ? parseInt(String(req.query.dias),  10) : 7;
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 20;
+    const event_type = req.query.event_type as 'cadastro' | 'assinatura' | 'login' | 'outro' | undefined;
+    const data = await consultarLeads({ dias, limit, event_type });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // Pergunta pra ZAYRA via contexto de obras
 app.post('/api/obras/zayra', async (req: Request, res: Response) => {
   try {

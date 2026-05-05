@@ -2327,6 +2327,20 @@ const _allToolDefinitions: Anthropic.Tool[] = [
       required: ['membro_nome', 'tarefa'],
     },
   },
+
+  // v1.65.60: Leads do AvalieImob — cadastros/assinaturas vindos do SEO/ads.
+  {
+    name: 'consultar_leads_avalieimob',
+    description: 'Consulta os leads do AvalieImob (cadastros novos, assinaturas, etc) recebidos via webhook. Use quando o CEO perguntar coisas como "quantos leads chegaram hoje/esta semana?", "de onde vieram os leads?", "qual a página que mais converte?", "houve nova assinatura?".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        dias:       { type: 'integer', description: 'Janela em dias (default 7, max 365)' },
+        event_type: { type: 'string', enum: ['cadastro','assinatura','login','outro'], description: 'Filtrar por tipo de evento (opcional)' },
+        limit:      { type: 'integer', description: 'Quantos leads detalhar no resultado (default 20, max 100)' },
+      },
+    },
+  },
 ];
 
 // v1.60.0: lista filtrada — sem as desabilitadas em DISABLED_TOOLS.
@@ -3242,6 +3256,12 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       case 'delegar_para_membro':
         data = await tmDelegar(input as Parameters<typeof tmDelegar>[0]);
         break;
+
+      case 'consultar_leads_avalieimob': {
+        const { consultarLeads } = await import('../integrations/avalieImobLeads');
+        data = await consultarLeads(input as Parameters<typeof consultarLeads>[0]);
+        break;
+      }
 
       default:
         return { toolName: name, success: false, error: `Tool desconhecida: ${name}` };
