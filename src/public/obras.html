@@ -3217,6 +3217,90 @@ async function abrirNovaConsultoriaPasso1() {
   });
 }
 
+// v1.66.0: cadastro inline de cliente (chamado pelo botao "+ Novo cliente"
+// dentro do form de Nova Consultoria). Apos salvar, retorna pro form com
+// o novo cliente ja selecionado.
+async function abrirCadastroClienteModal(subtipoParaVoltar) {
+  const html = `
+    <h3 style="margin:0 0 12px;">+ Novo Cliente</h3>
+    <div style="display:grid; gap:8px; font-size:13px;">
+      <label>Nome completo / Razão Social *
+        <input id="novCliNome" placeholder="Maria Ester R. Sampaio" style="width:100%;" autofocus>
+      </label>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <label>CPF / CNPJ
+          <input id="novCliCpf" placeholder="000.000.000-00" style="width:100%;">
+        </label>
+        <label>Telefone (WhatsApp)
+          <input id="novCliTel" placeholder="55 98 99168-2644" style="width:100%;">
+        </label>
+      </div>
+      <label>E-mail
+        <input id="novCliEmail" type="email" placeholder="cliente@email.com" style="width:100%;">
+      </label>
+      <label>Endereço completo
+        <input id="novCliEnd" placeholder="Rua Bom Jesus, 236, Centro" style="width:100%;">
+      </label>
+      <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px;">
+        <label>Cidade
+          <input id="novCliCidade" placeholder="Açailândia" style="width:100%;" value="Açailândia">
+        </label>
+        <label>UF
+          <input id="novCliEstado" placeholder="MA" maxlength="2" style="width:100%; text-transform:uppercase;" value="MA">
+        </label>
+        <label>CEP
+          <input id="novCliCep" placeholder="65930-000" style="width:100%;">
+        </label>
+      </div>
+      <label>Observações
+        <textarea id="novCliObs" rows="2" placeholder="Notas internas (opcional)" style="width:100%; resize:vertical;"></textarea>
+      </label>
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <button id="novCliSalvar" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">💾 Salvar e voltar</button>
+        <button class="btn-secondary" id="novCliCancelar">Cancelar</button>
+      </div>
+    </div>`;
+  const body = abrirModal(html, { width: '640px' });
+
+  document.getElementById('novCliCancelar').onclick = () => {
+    fecharModal();
+    abrirNovaConsultoriaPasso2(subtipoParaVoltar);
+  };
+
+  document.getElementById('novCliSalvar').onclick = async () => {
+    const nome = document.getElementById('novCliNome').value.trim();
+    if (!nome) return alert('Nome é obrigatório.');
+    const btn = document.getElementById('novCliSalvar');
+    btn.disabled = true; btn.textContent = 'Salvando...';
+    try {
+      const r = await api('/api/propostas-clientes', {
+        method: 'POST',
+        body: JSON.stringify({
+          nome,
+          cpf_cnpj: document.getElementById('novCliCpf').value.trim() || null,
+          telefone: document.getElementById('novCliTel').value.trim() || null,
+          email: document.getElementById('novCliEmail').value.trim() || null,
+          endereco: document.getElementById('novCliEnd').value.trim() || null,
+          cidade: document.getElementById('novCliCidade').value.trim() || null,
+          estado: (document.getElementById('novCliEstado').value.trim() || null)?.toUpperCase(),
+          cep: document.getElementById('novCliCep').value.trim() || null,
+          observacoes: document.getElementById('novCliObs').value.trim() || null,
+        }),
+      });
+      // Recarrega lista e volta pro form, ja selecionando o novo cliente
+      await loadPropostasClientes();
+      fecharModal();
+      await abrirNovaConsultoriaPasso2(subtipoParaVoltar);
+      const sel = document.getElementById('cnsCliente');
+      if (sel && r.insertId) sel.value = String(r.insertId);
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false;
+      btn.textContent = '💾 Salvar e voltar';
+    }
+  };
+}
+
 async function abrirNovaConsultoriaPasso2(subtipo) {
   await loadPropostasClientes();
   const cliOpts = state.propostasClientes.map(c =>
@@ -3230,7 +3314,10 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
     <h3 style="margin:0 0 8px;">Nova Proposta — ${escape(subLabel)}</h3>
     <div style="display:grid; gap:8px; font-size:13px;">
       <label>Cliente
-        <select id="cnsCliente" style="width:100%;"><option value="">— escolher —</option>${cliOpts}</select>
+        <div style="display:flex; gap:6px;">
+          <select id="cnsCliente" style="flex:1;"><option value="">— escolher —</option>${cliOpts}</select>
+          <button type="button" id="cnsNovoCliente" style="white-space:nowrap; background:var(--success); color:#fff; border-color:var(--success);">+ Novo cliente</button>
+        </div>
       </label>
       <label>Endereço do imóvel
         <input id="cnsEndereco" placeholder="Rua, número, bairro, cidade-UF" style="width:100%;">
@@ -3285,6 +3372,7 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
   const modal = abrirModal(html, { width: '720px' });
 
   document.getElementById('cnsCancelar').onclick = fecharModal;
+  document.getElementById('cnsNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
   document.getElementById('cnsPreview').onclick = async () => {
     const cliId = document.getElementById('cnsCliente').value;
     const area = Number(document.getElementById('cnsArea').value);
