@@ -198,10 +198,21 @@ export async function buscarPropostaConsultoria(id: string) {
     gestor_cargo: row.gestor_cargo,
     gestor_nome: row.gestor_nome,
     gestor_telefone: row.gestor_telefone,
-    dados_imovel: row.dados_imovel ? JSON.parse(row.dados_imovel) : null,
-    custos_calculados: (row.custos_calculados ? JSON.parse(row.custos_calculados) : null) as CustosCalculados | null,
-    fontes_consulta: (row.fontes_consulta ? JSON.parse(row.fontes_consulta) : null) as FontesConsulta | null,
+    dados_imovel: parseJsonCol(row.dados_imovel),
+    custos_calculados: parseJsonCol<CustosCalculados>(row.custos_calculados),
+    fontes_consulta: parseJsonCol<FontesConsulta>(row.fontes_consulta),
   };
+}
+
+// MySQL2 retorna colunas tipo JSON ja parseadas em alguns ambientes,
+// e como string em outros. Esta funcao trata os dois casos.
+function parseJsonCol<T = unknown>(v: unknown): T | null {
+  if (v == null) return null;
+  if (typeof v === 'object') return v as T;
+  if (typeof v === 'string') {
+    try { return JSON.parse(v) as T; } catch { return null; }
+  }
+  return null;
 }
 
 // ── PDF de 5 secoes ────────────────────────────────────────────────────────
