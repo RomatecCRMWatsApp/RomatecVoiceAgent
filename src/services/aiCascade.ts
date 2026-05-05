@@ -43,13 +43,20 @@ const OPENAI_MODEL      = process.env.OPENAI_MODEL         || 'gpt-4o-mini';
 const MISTRAL_MODEL     = process.env.MISTRAL_MODEL        || 'mistral-large-latest';
 const TOGETHER_MODEL    = process.env.TOGETHER_MODEL       || 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
 const FIREWORKS_MODEL   = process.env.FIREWORKS_MODEL      || 'accounts/fireworks/models/llama-v3p3-70b-instruct';
-// v1.65.58: NVIDIA NIM (build.nvidia.com) — free tier 1000 req/dia, OpenAI-compatible.
-// Adicionamos DUAS variantes do mesmo provider:
-//   8a) phi-4-mini-instruct (Microsoft, ~3.8B): primario, suporta tools, mais robusto
-//   8b) llama-3.2-1b-instruct (Meta, ~1B): backup leve do mesmo provider, ultra-rapido
-// Outras opcoes possiveis via env: nvidia/nemotron-ultra-253b, meta/llama-3.3-70b-instruct, microsoft/phi-4.
-const NVIDIA_PHI_MODEL    = process.env.NVIDIA_PHI_MODEL    || 'microsoft/phi-4-mini-instruct';
-const NVIDIA_LLAMA_MODEL  = process.env.NVIDIA_LLAMA_MODEL  || 'meta/llama-3.2-1b-instruct';
+// v1.65.58/v1.65.59: NVIDIA NIM (build.nvidia.com) — free tier 1000 req/dia, OpenAI-compatible.
+// Variantes:
+//   8a) phi-4-mini-instruct (Microsoft, ~3.8B): rapido, suporta tools, primario
+//   8b) llama-3.2-1b-instruct (Meta, ~1B): ultra-rapido, fallback leve
+//   8c) mixtral-8x22b-instruct-v0.1 (Mistral AI, MoE 141B): raciocinio avancado.
+//       PODE ter API_KEY E BASE_URL proprios (caso esteja em outro provider —
+//       Mistral AI direta, DeepInfra, Replicate, etc). Se MIXTRAL_LARGE_API_KEY
+//       nao setada, faz fallback pra NVIDIA_API_KEY (mesmo cliente NVIDIA).
+const NVIDIA_PHI_MODEL     = process.env.NVIDIA_PHI_MODEL     || 'microsoft/phi-4-mini-instruct';
+const NVIDIA_LLAMA_MODEL   = process.env.NVIDIA_LLAMA_MODEL   || 'meta/llama-3.2-1b-instruct';
+const NVIDIA_MIXTRAL_MODEL = process.env.NVIDIA_MIXTRAL_MODEL || 'mistralai/mixtral-8x22b-instruct-v0.1';
+// Endpoint customizavel pro Mixtral 8x22b (default = NVIDIA NIM, mas pode ser
+// outro provider compativel com OpenAI API se voce tiver key separada)
+const MIXTRAL_LARGE_BASE_URL = process.env.MIXTRAL_LARGE_BASE_URL || 'https://integrate.api.nvidia.com/v1';
 
 console.log(
   `[aiCascade] modelos ativos: Cerebras=${CEREBRAS_MODEL} | ` +
@@ -60,7 +67,9 @@ console.log(
   `Mistral=${MISTRAL_MODEL}${process.env.MISTRAL_API_KEY ? '' : ' (sem chave)'} | ` +
   `Together=${TOGETHER_MODEL}${process.env.TOGETHER_API_KEY ? '' : ' (sem chave)'} | ` +
   `Fireworks=${FIREWORKS_MODEL}${process.env.FIREWORKS_API_KEY ? '' : ' (sem chave)'} | ` +
-  `NVIDIA=${NVIDIA_PHI_MODEL}+${NVIDIA_LLAMA_MODEL}${process.env.NVIDIA_API_KEY ? '' : ' (sem chave)'}`
+  `NVIDIA=${NVIDIA_PHI_MODEL}+${NVIDIA_LLAMA_MODEL}${process.env.NVIDIA_API_KEY ? '' : ' (sem chave)'} | ` +
+  `Mixtral8x22b=${NVIDIA_MIXTRAL_MODEL} via ${MIXTRAL_LARGE_BASE_URL}` +
+  `${process.env.MIXTRAL_LARGE_API_KEY ? ' (chave própria)' : (process.env.NVIDIA_API_KEY ? ' (fallback NVIDIA)' : ' (sem chave)')}`
 );
 
 const MAX_HISTORY = parseInt(process.env.AI_MAX_HISTORY_MESSAGES || '12', 10);
@@ -227,7 +236,7 @@ function fireworksClient(): OpenAI {
 
 // v1.65.58: NVIDIA NIM — endpoint OpenAI-compatible, free tier 1000 req/dia,
 // suporta phi-4-mini, llama-3.2-1b, nemotron-ultra-253b e dezenas de outros.
-// Cliente unico compartilhado entre os 2 elos (phi e llama).
+// Cliente unico compartilhado entre 8a (phi) e 8b (llama).
 let _nvidia: OpenAI | null = null;
 function nvidiaClient(): OpenAI {
   if (!_nvidia) _nvidia = new OpenAI({
@@ -235,6 +244,25 @@ function nvidiaClient(): OpenAI {
     baseURL: 'https://integrate.api.nvidia.com/v1',
   });
   return _nvidia;
+}
+
+// v1.65.59: Cliente especifico pro Mixtral 8x22b (elo 8c). Pode ter API_KEY E
+// BASE_URL proprios via env vars MIXTRAL_LARGE_API_KEY + MIXTRAL_LARGE_BASE_URL.
+// Se MIXTRAL_LARGE_API_KEY nao for setada, faz fallback pra NVIDIA_API_KEY.
+// Permite hospedar o Mixtral em outro provider sem mudar codigo.
+let _mixtralLarge: OpenAI | null = null;
+function mixtralLargeClient(): OpenAI {
+  if (!_mixtralLarge) {
+    const apiKey = process.env.MIXTRAL_LARGE_API_KEY || process.env.NVIDIA_API_KEY;
+    _mixtralLarge = new OpenAI({
+      apiKey,
+      baseURL: MIXTRAL_LARGE_BASE_URL,
+    });
+  }
+  return _mixtralLarge;
+}
+function mixtralLargeHasKey(): boolean {
+  return !!(process.env.MIXTRAL_LARGE_API_KEY || process.env.NVIDIA_API_KEY);
 }
 
 // ── Conversores de schema ───────────────────────────────────────────────────
@@ -496,6 +524,23 @@ async function chamarNvidiaLlama(
   );
 }
 
+// ── Mixtral 8x22b (v1.65.59, elo 8c) — Mistral, raciocinio avancado
+// Usa cliente proprio (mixtralLargeClient) que aceita API_KEY/BASE_URL custom
+// via env vars MIXTRAL_LARGE_API_KEY/MIXTRAL_LARGE_BASE_URL, com fallback pra
+// NVIDIA NIM (NVIDIA_API_KEY + endpoint padrao). Mantem o nome "NVIDIA-Mixtral"
+// no log porque NVIDIA e o default — se hospedar em outro provider, logs
+// continuam claros mas baseURL muda.
+async function chamarNvidiaMixtral(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    mixtralLargeClient(), NVIDIA_MIXTRAL_MODEL, 'NVIDIA-Mixtral',
+    systemPrompt, history, userMessage,
+  );
+}
+
 // ── GEMINI (fallback intermediário) ─────────────────────────────────────────
 async function chamarGemini(
   systemPrompt: string,
@@ -676,7 +721,7 @@ export async function pensarEmCascata(
   const hasAttachments = !!attachments && attachments.length > 0;
   const tentativas: { provider: string; razao: string }[] = [];
 
-  // v1.65.58 — Cascata de 13 elos:
+  // v1.65.59 — Cascata de 14 elos:
   // 1) Gemini       (1M ctx, free 20/dia, paid muito barato)
   // 2) Cerebras     (qwen-3-235b 32k ctx, free, rápido)
   // 3) Claude       (200k ctx, principal pago)
@@ -684,8 +729,9 @@ export async function pensarEmCascata(
   // 5) Mistral      (v1.58 — free tier alto, tools nativos)
   // 6) Together     (v1.58 — Llama 3.3 70B Turbo, US$5 grátis signup)
   // 7) Fireworks    (v1.58 — Llama 3.3 70B, latência baixa)
-  // 8a) NVIDIA-Phi   (v1.65.58 — phi-4-mini-instruct, robusto, suporta tools, free 1k/dia)
-  // 8b) NVIDIA-Llama (v1.65.58 — llama-3.2-1b-instruct, ultra-rápido, fallback do mesmo provider)
+  // 8a) NVIDIA-Phi     (v1.65.58 — phi-4-mini-instruct, rápido, tools, free 1k/dia)
+  // 8b) NVIDIA-Llama   (v1.65.58 — llama-3.2-1b-instruct, ultra-rápido, fallback leve)
+  // 8c) NVIDIA-Mixtral (v1.65.59 — mixtral-8x22b-instruct-v0.1, MoE 141B, raciocinio avancado)
   // 9) Groq         (llama-3.3-70b, TPM ~6k)
   // 10) OpenRouter  (free)
   // 11) GitHub Models (gpt-4o-mini free, max 8k)
@@ -831,6 +877,23 @@ export async function pensarEmCascata(
       console.warn(`[AI] ⚠️ NVIDIA-Llama falhou: ${m}`);
       tentativas.push({ provider: 'NVIDIA-Llama', razao: m.slice(0, 200) });
     }
+  }
+
+  // ── 8c) Mixtral 8x22b (v1.65.59) — Mistral AI, raciocinio avancado, MoE 141B
+  // Aceita API key/base URL custom via MIXTRAL_LARGE_API_KEY/MIXTRAL_LARGE_BASE_URL
+  // (default: NVIDIA NIM). Util se voce hospedar o Mixtral em provider diferente.
+  if (!hasAttachments && mixtralLargeHasKey()) {
+    try {
+      const r = await chamarNvidiaMixtral(systemPrompt, truncado, userMessage);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ NVIDIA-Mixtral falhou: ${m}`);
+      tentativas.push({ provider: 'NVIDIA-Mixtral', razao: m.slice(0, 200) });
+    }
+  } else if (!mixtralLargeHasKey()) {
+    tentativas.push({ provider: 'NVIDIA-Mixtral', razao: 'MIXTRAL_LARGE_API_KEY/NVIDIA_API_KEY não setadas (opcional)' });
   }
 
   // ── 9) GROQ ──────────────────────────────────────────────────────────────
