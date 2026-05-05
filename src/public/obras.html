@@ -7562,16 +7562,30 @@ async function abrirZayraVisual() {
   const html = `
     <div style="display:grid; gap:12px;">
       <p style="margin:0; font-size:13px; color:var(--text-muted);">
-        Capture uma imagem pra ZAYRA analisar (custo aprox. R$ 0,02 por foto via Claude Vision).
+        Capture uma imagem ou ative o modo LIVE (frames a cada 5s).
       </p>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
         <button id="zvCam" style="padding:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text); cursor:pointer;">
           <div style="font-size:32px;">📱</div>
-          <div style="font-size:12px; margin-top:4px;">Câmera</div>
+          <div style="font-size:12px; margin-top:4px;">Câmera (foto única)</div>
+          <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">~R$ 0,02 · Claude</div>
         </button>
         <button id="zvScreen" style="padding:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text); cursor:pointer;">
           <div style="font-size:32px;">🖥️</div>
-          <div style="font-size:12px; margin-top:4px;">Tela</div>
+          <div style="font-size:12px; margin-top:4px;">Tela (foto única)</div>
+          <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">~R$ 0,02 · Claude</div>
+        </button>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <button id="zvLiveCam" style="padding:14px; background:rgba(0,255,136,0.06); border:2px solid var(--neon); border-radius:8px; color:var(--text); cursor:pointer;">
+          <div style="font-size:32px;">🎥</div>
+          <div style="font-size:12px; margin-top:4px; color:var(--neon); font-weight:600;">LIVE Câmera</div>
+          <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">Frames 5s · Gemini FREE</div>
+        </button>
+        <button id="zvLiveScreen" style="padding:14px; background:rgba(0,255,136,0.06); border:2px solid var(--neon); border-radius:8px; color:var(--text); cursor:pointer;">
+          <div style="font-size:32px;">📺</div>
+          <div style="font-size:12px; margin-top:4px; color:var(--neon); font-weight:600;">LIVE Tela</div>
+          <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">Frames 5s · Gemini FREE</div>
         </button>
       </div>
       <div id="zvPreview" style="display:none;"></div>
@@ -7656,6 +7670,109 @@ async function abrirZayraVisual() {
 
   document.getElementById('zvCam').onclick = captureCamera;
   document.getElementById('zvScreen').onclick = captureScreen;
+
+  // v1.66.23: modo LIVE — captura frame a cada 5s e analisa via Gemini
+  const iniciarLive = async (modo) => {
+    let stream;
+    try {
+      if (modo === 'camera') {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      } else {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      }
+    } catch (e) {
+      alert('Erro: ' + e.message); return;
+    }
+
+    const div = document.getElementById('zvPreview');
+    div.style.display = 'block';
+    div.innerHTML = `
+      <div style="display:grid; gap:8px;">
+        <video id="zvLiveVideo" autoplay playsinline muted style="width:100%; max-height:240px; background:#000; border-radius:8px;"></video>
+        <textarea id="zvLivePergunta" rows="2" placeholder="Pergunta opcional pra ZAYRA (foco da análise — ex: 'foco em rachaduras', 'avalie acabamento')" style="width:100%; padding:8px; font-size:13px; background:var(--bg-elev); border:1px solid var(--border); border-radius:6px; color:var(--text); resize:vertical;"></textarea>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button id="zvLiveStart" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">▶️ Iniciar análise (5s)</button>
+          <button id="zvLiveStop" class="btn-danger" disabled>⏹️ Parar</button>
+          <button id="zvLiveCancel" class="btn-secondary">Fechar</button>
+        </div>
+        <div id="zvLiveStatus" style="font-size:11px; color:var(--text-muted); display:flex; justify-content:space-between;">
+          <span id="zvLiveCount">Frames: 0</span>
+          <span id="zvLiveQuota">Free tier: — / 1500</span>
+        </div>
+        <div id="zvLiveTimeline" style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+      </div>`;
+
+    const video = document.getElementById('zvLiveVideo');
+    video.srcObject = stream;
+    let intervalId = null;
+    let frameCount = 0;
+    let canvasEl = document.createElement('canvas');
+
+    const pararStream = () => {
+      stream.getTracks().forEach(t => t.stop());
+      if (intervalId) clearInterval(intervalId);
+      intervalId = null;
+    };
+
+    const captureFrame = async () => {
+      try {
+        canvasEl.width = video.videoWidth || 1280;
+        canvasEl.height = video.videoHeight || 720;
+        canvasEl.getContext('2d').drawImage(video, 0, 0, canvasEl.width, canvasEl.height);
+        const dataUrl = canvasEl.toDataURL('image/jpeg', 0.7); // qualidade menor pra economizar bandwidth
+        const b64 = dataUrl.split(',')[1];
+        const pergunta = document.getElementById('zvLivePergunta').value.trim();
+        const r = await api('/api/zayra/visual-live', {
+          method: 'POST',
+          body: JSON.stringify({ imagem_b64: b64, mimetype: 'image/jpeg', pergunta }),
+        });
+        frameCount++;
+        document.getElementById('zvLiveCount').textContent = `Frames: ${frameCount}`;
+        document.getElementById('zvLiveQuota').textContent = `Free tier: ${r.rpd_usado} / ${r.rpd_limite}`;
+        const tl = document.getElementById('zvLiveTimeline');
+        const time = new Date().toLocaleTimeString('pt-BR');
+        const item = document.createElement('div');
+        item.style.cssText = 'padding:8px 10px; background:var(--bg-elev); border-left:3px solid var(--neon); border-radius:4px; font-size:12px;';
+        item.innerHTML = `<span style="color:var(--text-muted); font-size:10px;">${time}</span><br><strong style="color:var(--neon);">ZAYRA:</strong> ${escape(r.resposta)}`;
+        tl.insertBefore(item, tl.firstChild);
+        if (r.aviso) {
+          document.getElementById('zvLiveStatus').style.color = '#fb923c';
+        }
+      } catch (e) {
+        const tl = document.getElementById('zvLiveTimeline');
+        const item = document.createElement('div');
+        item.style.cssText = 'padding:8px 10px; background:rgba(220,38,38,0.1); border-left:3px solid var(--danger); border-radius:4px; font-size:11px; color:var(--danger);';
+        item.textContent = 'Erro: ' + e.message;
+        tl.insertBefore(item, tl.firstChild);
+        // Para automaticamente se hit limite ou erro recorrente
+        if (e.message.includes('Limite') || e.message.includes('quota')) {
+          document.getElementById('zvLiveStop').click();
+        }
+      }
+    };
+
+    document.getElementById('zvLiveStart').onclick = () => {
+      document.getElementById('zvLiveStart').disabled = true;
+      document.getElementById('zvLiveStop').disabled = false;
+      captureFrame(); // primeiro frame imediato
+      intervalId = setInterval(captureFrame, 5000);
+    };
+    document.getElementById('zvLiveStop').onclick = () => {
+      if (intervalId) { clearInterval(intervalId); intervalId = null; }
+      document.getElementById('zvLiveStart').disabled = false;
+      document.getElementById('zvLiveStop').disabled = true;
+    };
+    document.getElementById('zvLiveCancel').onclick = () => {
+      pararStream();
+      fecharHelpModal();
+    };
+  };
+
+  document.getElementById('zvLiveCam').onclick = () => iniciarLive('camera');
+  document.getElementById('zvLiveScreen').onclick = () => iniciarLive('tela');
 }
 
 render();

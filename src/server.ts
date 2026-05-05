@@ -1128,6 +1128,25 @@ app.post('/api/obras/zayra', async (req: Request, res: Response) => {
   }
 });
 
+// v1.66.23: ZAYRA Visual Live — frame contínuo a cada 5s via Gemini Free Tier.
+import { analisarFrameLive, statusFreeTier } from './services/zayraVisualLive';
+app.post('/api/zayra/visual-live', async (req: Request, res: Response) => {
+  try {
+    const imgB64   = String(req.body?.imagem_b64 ?? '').trim();
+    const mimetype = String(req.body?.mimetype ?? 'image/jpeg').toLowerCase();
+    const pergunta = String(req.body?.pergunta ?? '').trim() || undefined;
+    if (!imgB64) return res.status(400).json({ error: 'imagem_b64 obrigatorio' });
+    const r = await analisarFrameLive({ imagem_b64: imgB64, mimetype, pergunta });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+app.get('/api/zayra/visual-live/status', async (_req: Request, res: Response) => {
+  try { res.json(statusFreeTier()); }
+  catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // v1.66.22: ZAYRA Visual — analisa imagem capturada via camera ou tela.
 // Recebe { imagem_b64, mimetype, pergunta? } e devolve a analise da ZAYRA.
 app.post('/api/zayra/visual', async (req: Request, res: Response) => {
