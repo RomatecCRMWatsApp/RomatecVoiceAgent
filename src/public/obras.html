@@ -478,6 +478,19 @@
     <div id="consBody" style="padding: 16px 20px;"></div>
   </div>
 </div>
+<!-- v1.66.5: overlay secundario pra popups de ajuda (nao destroi modal principal) -->
+<div class="cal-overlay" id="helpOverlay" style="z-index:300;">
+  <div class="cal-modal" id="helpModal" style="max-width:640px;">
+    <div class="cal-head">
+      <div>
+        <h2 id="helpTitle">Ajuda</h2>
+        <p id="helpSubtitle">—</p>
+      </div>
+      <button id="helpClose" style="border:none;background:transparent;color:var(--text-muted);font-size:22px;cursor:pointer;">×</button>
+    </div>
+    <div id="helpBody" style="padding: 16px 20px;"></div>
+  </div>
+</div>
 <div class="cal-overlay" id="editOverlay">
   <div class="cal-modal" id="editModal" style="max-width: 480px;">
     <div class="cal-head">
@@ -3101,6 +3114,22 @@ function fecharModal() {
   document.getElementById('consOverlay').classList.remove('open');
 }
 
+// Modal secundario de ajuda (nao destroi modal principal)
+function abrirHelpModal(htmlContent, title = 'Ajuda', subtitle = '') {
+  const overlay = document.getElementById('helpOverlay');
+  document.getElementById('helpTitle').textContent = title;
+  const subEl = document.getElementById('helpSubtitle');
+  if (subtitle) { subEl.textContent = subtitle; subEl.style.display = ''; }
+  else { subEl.style.display = 'none'; }
+  document.getElementById('helpBody').innerHTML = htmlContent;
+  overlay.classList.add('open');
+  document.getElementById('helpClose').onclick = fecharHelpModal;
+  overlay.onclick = (e) => { if (e.target === overlay) fecharHelpModal(); };
+}
+function fecharHelpModal() {
+  document.getElementById('helpOverlay').classList.remove('open');
+}
+
 // ── PROPOSTA DE CONSULTORIA (v1.66.0) ───────────────────────────────────
 // Subtipos disponiveis Fase 1: averbacao_residencial, averbacao_comercial.
 // Demais subtipos aparecem como cards desabilitados ate Fase 3.
@@ -3247,6 +3276,64 @@ async function abrirNovaConsultoriaPasso1() {
   });
 }
 
+// v1.66.5: popup explicativo dos padroes construtivos R-1, R-8N, R-16
+// (CUB Sinduscon-MA). Ajuda o usuario a enquadrar corretamente o imovel
+// pra calculo da Receita Federal (SERO/INSS).
+function abrirHelpPadraoConstrutivo() {
+  const html = `
+    <div style="font-size:13px; line-height:1.55;">
+      <p style="margin:0 0 10px;">O <strong>CUB</strong> (Custo Unitário Básico) do <strong>Sinduscon-MA</strong> é a referência oficial usada pelo cálculo de SERO/INSS da obra. Cada padrão se aplica a um tipo de imóvel:</p>
+
+      <div style="border:1px solid var(--border); border-radius:6px; padding:10px; margin:8px 0; background:rgba(0,255,150,0.04);">
+        <p style="margin:0 0 4px; color:var(--neon); font-weight:600;">🏠 Popular (R-1) — multiplicador 0,75</p>
+        <p style="margin:0; font-size:12px;">
+          Casa térrea ou sobrado <strong>simples</strong>, padrão econômico.<br>
+          • Acabamento básico (piso cerâmico simples, esquadria de alumínio comum)<br>
+          • Sem garagem ou com garagem aberta<br>
+          • Imóveis populares, programas habitacionais (MCMV faixa 1-2)<br>
+          • Áreas até ~70 m² normalmente
+        </p>
+      </div>
+
+      <div style="border:1px solid var(--border); border-radius:6px; padding:10px; margin:8px 0; background:rgba(0,200,255,0.04);">
+        <p style="margin:0 0 4px; color:var(--neon); font-weight:600;">🏡 Normal (R-8N) — multiplicador 1,00 (PADRÃO)</p>
+        <p style="margin:0; font-size:12px;">
+          Residência <strong>de classe média</strong>, padrão normal de mercado.<br>
+          • Acabamento intermediário (porcelanato, esquadria PVC/alumínio bom)<br>
+          • Garagem coberta, área de serviço, varanda<br>
+          • Imóveis financiados pela Caixa/bancos privados<br>
+          • Áreas entre 70 m² e 200 m² geralmente<br>
+          • <em>Use este padrão na maioria dos casos.</em>
+        </p>
+      </div>
+
+      <div style="border:1px solid var(--border); border-radius:6px; padding:10px; margin:8px 0; background:rgba(255,200,0,0.06);">
+        <p style="margin:0 0 4px; color:var(--gold); font-weight:600;">🏛️ Alto (R-16) — multiplicador 1,45</p>
+        <p style="margin:0; font-size:12px;">
+          Residência de <strong>alto padrão</strong>, classe alta.<br>
+          • Acabamento sofisticado (mármore/granito, esquadria de madeira nobre)<br>
+          • Múltiplas suítes, área de lazer completa, piscina<br>
+          • Imóveis de luxo, mansões, coberturas em condomínios fechados<br>
+          • Áreas acima de 200 m² ou com itens de luxo evidentes
+        </p>
+      </div>
+
+      <div style="margin-top:12px; padding:8px; background:rgba(255,150,0,0.08); border-radius:4px; font-size:12px;">
+        ⚠️ <strong>Por que isso importa?</strong> O padrão escolhido afeta o valor da CND-SERO (INSS da obra) que o cliente paga à Receita Federal. Se errar pra mais, infla artificialmente o orçamento. Se errar pra menos, o cliente pode ter problema na hora da quitação no e-CAC.
+      </div>
+
+      <div style="margin-top:8px; font-size:11px; color:var(--text-muted);">
+        Fonte: Sinduscon-MA — CUB R-8N base de R$ 1.814,39/m² (dez/2025). Cálculo SERO via aferição indireta IN RFB 2021/2021.
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+        <button id="cnsHelpVoltar" class="btn-secondary">Voltar</button>
+      </div>
+    </div>`;
+  abrirHelpModal(html, 'Padrão construtivo — como escolher', 'CUB Sinduscon-MA / Receita Federal');
+  document.getElementById('cnsHelpVoltar').onclick = () => fecharHelpModal();
+}
+
 // v1.66.0: cadastro inline de cliente (chamado pelo botao "+ Novo cliente"
 // dentro do form de Nova Consultoria). Apos salvar, retorna pro form com
 // o novo cliente ja selecionado.
@@ -3359,7 +3446,10 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
         </label>
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-        <label>Padrão construtivo
+        <label>
+          <span style="display:flex; align-items:center; gap:4px;">Padrão construtivo
+            <button type="button" id="cnsPadraoHelp" title="Como escolher" style="background:transparent; border:1px solid var(--border); color:var(--neon); border-radius:50%; width:18px; height:18px; padding:0; line-height:1; cursor:pointer; font-size:12px;">?</button>
+          </span>
           <select id="cnsPadrao" style="width:100%;">
             <option value="popular">Popular (R-1)</option>
             <option value="normal" selected>Normal (R-8N)</option>
@@ -3374,6 +3464,13 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
           </select>
         </label>
       </div>
+      <label>Anotação Técnica do Responsável
+        <select id="cnsAnotacao" style="width:100%;">
+          <option value="art_crea" selected>ART — CREA-MA (Engenheiro Civil)</option>
+          <option value="rrt_cau">RRT — CAU/MA (Arquiteto e Urbanista)</option>
+          <option value="trt_cft">TRT — CFT (Técnico Industrial)</option>
+        </select>
+      </label>
       ${isResid ? `
       <label style="display:flex; gap:6px; align-items:center;">
         <input id="cnsComplementares" type="checkbox">
@@ -3401,6 +3498,10 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
 
   document.getElementById('cnsCancelar').onclick = fecharModal;
   document.getElementById('cnsNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
+  document.getElementById('cnsPadraoHelp').onclick = (e) => {
+    e.preventDefault();
+    abrirHelpPadraoConstrutivo();
+  };
   document.getElementById('cnsPreview').onclick = async () => {
     const cliId = document.getElementById('cnsCliente').value;
     const area = Number(document.getElementById('cnsArea').value);
@@ -3421,6 +3522,7 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
       iptu_em_dia: document.getElementById('cnsIptu').checked,
       cnd_receita_emitida: document.getElementById('cnsCnd').checked,
       certidao_inteiro_teor_atualizada: document.getElementById('cnsCertidao').checked,
+      anotacao_tecnica: document.getElementById('cnsAnotacao')?.value || 'art_crea',
     };
 
     const btn = document.getElementById('cnsPreview');

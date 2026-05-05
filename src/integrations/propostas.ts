@@ -211,10 +211,13 @@ export async function listarPropostas(input: {
 } = {}) {
   const limit = Math.min(Math.max(Number(input.limite) || 50, 1), 500);
   const params: (string | number)[] = [];
+  // v1.66.5: filtra por tipo='mao_de_obra' (ou NULL = legado pre v1.66.0).
+  // Propostas tipo='consultoria' aparecem na rota /api/propostas-consultoria.
   let sql = `SELECT p.*, c.nome AS cliente_nome
                FROM propostas p
                LEFT JOIN propostas_clientes c ON c.id = p.cliente_id
-              WHERE p.deleted_at IS NULL`;
+              WHERE p.deleted_at IS NULL
+                AND (p.tipo = 'mao_de_obra' OR p.tipo IS NULL)`;
   if (input.status)     { sql += ' AND p.status = ?';     params.push(input.status); }
   if (input.cliente_id) { sql += ' AND p.cliente_id = ?'; params.push(Number(input.cliente_id)); }
   if (input.busca) {

@@ -22,6 +22,28 @@
     "faixa_3": 168.53,
     "fonte": "Decisao Plenaria 0450/2025 Confea"
   },
+
+  "anotacao_tecnica_2026": {
+    "_AVISO": "3 conselhos profissionais. Cliente escolhe qual aplica conforme habilitacao do responsavel tecnico.",
+    "art_crea": {
+      "rotulo": "ART CREA-MA (Anotacao de Responsabilidade Tecnica)",
+      "conselho": "CREA-MA",
+      "valor": 93.40,
+      "fonte": "Decisao Plenaria 0450/2025 Confea (Engenheiros)"
+    },
+    "rrt_cau": {
+      "rotulo": "RRT CAU/MA (Registro de Responsabilidade Tecnica)",
+      "conselho": "CAU/MA",
+      "valor": 95.45,
+      "fonte": "Resolucao CAU/BR 91/2014 atualizada (Arquitetos e Urbanistas)"
+    },
+    "trt_cft": {
+      "rotulo": "TRT CFT (Termo de Responsabilidade Tecnica)",
+      "conselho": "CFT",
+      "valor": 75.00,
+      "fonte": "Tabela CFT 2026 (Tecnicos Industriais)"
+    }
+  },
   "honorarios_projeto": {
     "averbacao_residencial_por_m2": 15.00,
     "averbacao_comercial_por_m2": 25.00,

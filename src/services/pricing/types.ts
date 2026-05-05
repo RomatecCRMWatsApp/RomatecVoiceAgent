@@ -12,6 +12,7 @@ export type SubtipoConsultoria =
 
 export type PadraoConstrutivo = 'popular' | 'normal' | 'alto';
 export type ResponsavelObra = 'PF' | 'PJ_com_contabilidade' | 'PJ_sem_contabilidade';
+export type AnotacaoTecnica = 'art_crea' | 'rrt_cau' | 'trt_cft';
 
 export interface ItemCusto {
   ordem: number;
@@ -58,6 +59,7 @@ export interface InputAverbacao {
   iptu_em_dia: boolean;
   cnd_receita_emitida: boolean;
   certidao_inteiro_teor_atualizada: boolean;
+  anotacao_tecnica?: AnotacaoTecnica; // default 'art_crea' (CREA-MA)
 }
 
 export interface InputGeorreferenciamento {

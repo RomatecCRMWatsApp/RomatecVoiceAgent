@@ -12,6 +12,11 @@ interface PricingParams {
     fonte: string;
   };
   art_crea_ma_2026: { faixa_1: number; faixa_2: number; faixa_3: number; fonte: string };
+  anotacao_tecnica_2026?: {
+    art_crea: { rotulo: string; conselho: string; valor: number; fonte: string };
+    rrt_cau:  { rotulo: string; conselho: string; valor: number; fonte: string };
+    trt_cft:  { rotulo: string; conselho: string; valor: number; fonte: string };
+  };
   honorarios_projeto: {
     averbacao_residencial_por_m2: number;
     averbacao_comercial_por_m2: number;
@@ -83,4 +88,19 @@ export function cubPorPadrao(padrao: 'popular' | 'normal' | 'alto'): number {
 
 export function artCreaFaixa1(): number {
   return getParams().art_crea_ma_2026.faixa_1;
+}
+
+export type AnotacaoTecnicaTipo = 'art_crea' | 'rrt_cau' | 'trt_cft';
+
+export function anotacaoTecnica(tipo: AnotacaoTecnicaTipo): { rotulo: string; conselho: string; valor: number; fonte: string } {
+  const params = getParams();
+  const at = params.anotacao_tecnica_2026;
+  if (at && at[tipo]) return at[tipo];
+  // Fallback retrocompat: usa ART CREA
+  return {
+    rotulo: 'ART CREA-MA (Anotacao de Responsabilidade Tecnica)',
+    conselho: 'CREA-MA',
+    valor: params.art_crea_ma_2026.faixa_1,
+    fonte: params.art_crea_ma_2026.fonte,
+  };
 }

@@ -291,7 +291,15 @@ export async function gerarPdfPropostaConsultoria(id: string): Promise<Buffer> {
   // ── Secao 2: Taxas e Emolumentos de Terceiros ──────────────────────────
   doc.fontSize(11).fillColor(corHex).text('2. Taxas e Emolumentos de Terceiros');
   doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
-  doc.moveDown(0.2);
+  doc.moveDown(0.15);
+  // v1.66.5: aviso destacado de aproximacao Receita/Cartorio
+  const avisoY = doc.y;
+  doc.rect(48, avisoY, 499, 26).fillAndStroke('#fff7ed', '#fb923c');
+  doc.fontSize(8).fillColor('#9a3412').font('Helvetica-Bold')
+     .text('ATENCAO: Os valores de Cartorio e Receita Federal sao APROXIMADOS (tabelas oficiais TJMA Res. 143/2025 e IN RFB 2021/2021). Valores definitivos podem variar conforme apuracao real no cartorio e portal SERO/e-CAC no momento do pagamento.',
+       52, avisoY + 4, { width: 491 });
+  doc.font('Helvetica').fillColor('#111');
+  doc.y = avisoY + 30;
   desenharTabelaCustos(doc, custos.secao_2_taxas, corHex);
   doc.moveDown(0.5);
 

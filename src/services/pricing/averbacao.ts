@@ -18,7 +18,7 @@ import type { InputAverbacao, ResultadoCalculo, CustosCalculados, FontesConsulta
 import { calcularEmolumentos } from '../tjma';
 import { calcularSERO } from '../receita-federal/sero-calculator';
 import { taxaHabiteSe, taxaAlvaraConstrucao } from '../prefeitura-acailandia';
-import { getParams, salarioMinimo, artCreaFaixa1, cubPorPadrao } from './params';
+import { getParams, salarioMinimo, anotacaoTecnica, cubPorPadrao } from './params';
 
 const PROJETOS_RESIDENCIAL_BASICO = [
   'Mapa de Situacao',
@@ -103,13 +103,14 @@ export async function calcularAverbacao(input: InputAverbacao): Promise<Resultad
     });
   }
 
-  // 5. ART CREA-MA
-  const art = artCreaFaixa1();
+  // 5. Anotacao Tecnica (ART CREA / RRT CAU / TRT CFT — selecionavel)
+  const tipoAnotacao = input.anotacao_tecnica || 'art_crea';
+  const at = anotacaoTecnica(tipoAnotacao);
   secao_2_taxas.push({
     ordem: ordem++,
-    descricao: 'ART CREA-MA (Anotacao de Responsabilidade Tecnica)',
-    valor: art,
-    observacao: params.art_crea_ma_2026.fonte,
+    descricao: at.rotulo,
+    valor: at.valor,
+    observacao: at.fonte,
   });
 
   // ── Secao 3: honorarios Romatec (sempre 2 linhas) ────────────────────────
@@ -158,6 +159,8 @@ export async function calcularAverbacao(input: InputAverbacao): Promise<Resultad
 
   // ── Avisos legais ───────────────────────────────────────────────────────
   const avisos: string[] = [];
+  // v1.66.5: aviso universal de aproximacao Receita/Cartorio
+  avisos.push('IMPORTANTE: Os valores das taxas de Cartorio e da Receita Federal informados nesta proposta sao APROXIMADOS, calculados com base nas tabelas oficiais vigentes (TJMA Resolucao GP 143/2025 e IN RFB 2021/2021). Os valores definitivos podem variar conforme apuracao real do cartorio competente e do portal SERO/e-CAC no momento do pagamento.');
   if (sero.total > 0) avisos.push(sero.aviso);
   const itensPendentes = secao_2_taxas.filter(i => i.pendente).map(i => i.descricao);
   if (itensPendentes.length > 0) {
