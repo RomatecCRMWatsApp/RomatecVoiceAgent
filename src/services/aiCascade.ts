@@ -43,6 +43,13 @@ const OPENAI_MODEL      = process.env.OPENAI_MODEL         || 'gpt-4o-mini';
 const MISTRAL_MODEL     = process.env.MISTRAL_MODEL        || 'mistral-large-latest';
 const TOGETHER_MODEL    = process.env.TOGETHER_MODEL       || 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
 const FIREWORKS_MODEL   = process.env.FIREWORKS_MODEL      || 'accounts/fireworks/models/llama-v3p3-70b-instruct';
+// v1.65.58: NVIDIA NIM (build.nvidia.com) — free tier 1000 req/dia, OpenAI-compatible.
+// Adicionamos DUAS variantes do mesmo provider:
+//   8a) phi-4-mini-instruct (Microsoft, ~3.8B): primario, suporta tools, mais robusto
+//   8b) llama-3.2-1b-instruct (Meta, ~1B): backup leve do mesmo provider, ultra-rapido
+// Outras opcoes possiveis via env: nvidia/nemotron-ultra-253b, meta/llama-3.3-70b-instruct, microsoft/phi-4.
+const NVIDIA_PHI_MODEL    = process.env.NVIDIA_PHI_MODEL    || 'microsoft/phi-4-mini-instruct';
+const NVIDIA_LLAMA_MODEL  = process.env.NVIDIA_LLAMA_MODEL  || 'meta/llama-3.2-1b-instruct';
 
 console.log(
   `[aiCascade] modelos ativos: Cerebras=${CEREBRAS_MODEL} | ` +
@@ -52,7 +59,8 @@ console.log(
   `OpenAI=${OPENAI_MODEL}${process.env.OPENAI_API_KEY ? '' : ' (sem chave)'} | ` +
   `Mistral=${MISTRAL_MODEL}${process.env.MISTRAL_API_KEY ? '' : ' (sem chave)'} | ` +
   `Together=${TOGETHER_MODEL}${process.env.TOGETHER_API_KEY ? '' : ' (sem chave)'} | ` +
-  `Fireworks=${FIREWORKS_MODEL}${process.env.FIREWORKS_API_KEY ? '' : ' (sem chave)'}`
+  `Fireworks=${FIREWORKS_MODEL}${process.env.FIREWORKS_API_KEY ? '' : ' (sem chave)'} | ` +
+  `NVIDIA=${NVIDIA_PHI_MODEL}+${NVIDIA_LLAMA_MODEL}${process.env.NVIDIA_API_KEY ? '' : ' (sem chave)'}`
 );
 
 const MAX_HISTORY = parseInt(process.env.AI_MAX_HISTORY_MESSAGES || '12', 10);
@@ -215,6 +223,18 @@ function fireworksClient(): OpenAI {
     baseURL: 'https://api.fireworks.ai/inference/v1',
   });
   return _fireworks;
+}
+
+// v1.65.58: NVIDIA NIM — endpoint OpenAI-compatible, free tier 1000 req/dia,
+// suporta phi-4-mini, llama-3.2-1b, nemotron-ultra-253b e dezenas de outros.
+// Cliente unico compartilhado entre os 2 elos (phi e llama).
+let _nvidia: OpenAI | null = null;
+function nvidiaClient(): OpenAI {
+  if (!_nvidia) _nvidia = new OpenAI({
+    apiKey:  process.env.NVIDIA_API_KEY,
+    baseURL: 'https://integrate.api.nvidia.com/v1',
+  });
+  return _nvidia;
 }
 
 // ── Conversores de schema ───────────────────────────────────────────────────
@@ -452,6 +472,30 @@ async function chamarFireworks(
   );
 }
 
+// ── NVIDIA NIM phi-4-mini (v1.65.58, elo 8a) — Microsoft, robusto + tools ──
+async function chamarNvidiaPhi(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    nvidiaClient(), NVIDIA_PHI_MODEL, 'NVIDIA-Phi',
+    systemPrompt, history, userMessage,
+  );
+}
+
+// ── NVIDIA NIM llama-3.2-1b (v1.65.58, elo 8b) — Meta, ultra-rapido ────────
+async function chamarNvidiaLlama(
+  systemPrompt: string,
+  history:      CascadeMessage[],
+  userMessage:  string,
+): Promise<CascadeResult> {
+  return chamarOpenAICompatible(
+    nvidiaClient(), NVIDIA_LLAMA_MODEL, 'NVIDIA-Llama',
+    systemPrompt, history, userMessage,
+  );
+}
+
 // ── GEMINI (fallback intermediário) ─────────────────────────────────────────
 async function chamarGemini(
   systemPrompt: string,
@@ -632,18 +676,20 @@ export async function pensarEmCascata(
   const hasAttachments = !!attachments && attachments.length > 0;
   const tentativas: { provider: string; razao: string }[] = [];
 
-  // v1.58.0 — Cascata de 11 elos:
-  // 1) Gemini    (1M ctx, free 20/dia, paid muito barato)
-  // 2) Cerebras  (qwen-3-235b 32k ctx, free, rápido)
-  // 3) Claude    (200k ctx, principal pago)
-  // 4) OpenAI    (gpt-4o-mini, $0.15/1M — backbone se Claude offline)
-  // 5) Mistral   (v1.58 — free tier alto, tools nativos)
-  // 6) Together  (v1.58 — Llama 3.3 70B Turbo, US$5 grátis signup)
-  // 7) Fireworks (v1.58 — Llama 3.3 70B, latência baixa)
-  // 8) Groq      (llama-3.3-70b, TPM ~6k)
-  // 9) OpenRouter (free)
-  // 10) GitHub Models (gpt-4o-mini free, max 8k)
-  // 11) Cloudflare (edge BR)
+  // v1.65.58 — Cascata de 13 elos:
+  // 1) Gemini       (1M ctx, free 20/dia, paid muito barato)
+  // 2) Cerebras     (qwen-3-235b 32k ctx, free, rápido)
+  // 3) Claude       (200k ctx, principal pago)
+  // 4) OpenAI       (gpt-4o-mini, $0.15/1M — backbone se Claude offline)
+  // 5) Mistral      (v1.58 — free tier alto, tools nativos)
+  // 6) Together     (v1.58 — Llama 3.3 70B Turbo, US$5 grátis signup)
+  // 7) Fireworks    (v1.58 — Llama 3.3 70B, latência baixa)
+  // 8a) NVIDIA-Phi   (v1.65.58 — phi-4-mini-instruct, robusto, suporta tools, free 1k/dia)
+  // 8b) NVIDIA-Llama (v1.65.58 — llama-3.2-1b-instruct, ultra-rápido, fallback do mesmo provider)
+  // 9) Groq         (llama-3.3-70b, TPM ~6k)
+  // 10) OpenRouter  (free)
+  // 11) GitHub Models (gpt-4o-mini free, max 8k)
+  // 12) Cloudflare  (edge BR)
 
   // ── 1) GEMINI ────────────────────────────────────────────────────────────
   if (process.env.GEMINI_API_KEY) {
@@ -757,7 +803,37 @@ export async function pensarEmCascata(
     tentativas.push({ provider: 'Fireworks', razao: 'FIREWORKS_API_KEY não setada (opcional)' });
   }
 
-  // ── 8) GROQ ──────────────────────────────────────────────────────────────
+  // ── 8a) NVIDIA NIM phi-4-mini (v1.65.58) — Microsoft, suporta tools ────
+  if (!hasAttachments && process.env.NVIDIA_API_KEY) {
+    try {
+      const r = await chamarNvidiaPhi(systemPrompt, truncado, userMessage);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ NVIDIA-Phi falhou: ${m}`);
+      tentativas.push({ provider: 'NVIDIA-Phi', razao: m.slice(0, 200) });
+    }
+  } else if (!process.env.NVIDIA_API_KEY) {
+    tentativas.push({ provider: 'NVIDIA-Phi', razao: 'NVIDIA_API_KEY não setada (opcional)' });
+  }
+
+  // ── 8b) NVIDIA NIM llama-3.2-1b (v1.65.58) — Meta, ultra-rapido ────────
+  // Backup do mesmo provider NVIDIA: se phi-4-mini falhar (quota, rate limit
+  // ou erro especifico do modelo), tenta llama-3.2-1b antes de cair pro Groq.
+  if (!hasAttachments && process.env.NVIDIA_API_KEY) {
+    try {
+      const r = await chamarNvidiaLlama(systemPrompt, truncado, userMessage);
+      console.log(`[AI] ✅ ${r.provider}`);
+      return r;
+    } catch (err) {
+      const m = (err as Error).message ?? String(err);
+      console.warn(`[AI] ⚠️ NVIDIA-Llama falhou: ${m}`);
+      tentativas.push({ provider: 'NVIDIA-Llama', razao: m.slice(0, 200) });
+    }
+  }
+
+  // ── 9) GROQ ──────────────────────────────────────────────────────────────
   if (!hasAttachments && process.env.GROQ_API_KEY) {
     const estimated = estimatePromptTokens(systemPrompt, truncado, userMessage);
     if (estimated > GROQ_MAX_INPUT_TOKENS) {
