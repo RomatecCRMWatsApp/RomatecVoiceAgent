@@ -159,6 +159,19 @@
     letter-spacing: 1px;
   }
   .zayra-fab:hover { filter: brightness(1.15); transform: scale(1.05); }
+  /* v1.66.22: botao "Mostrar pra ZAYRA" — captura camera/tela e analisa */
+  .zayra-cam-fab {
+    position: fixed; bottom: 24px; right: 96px;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: var(--bg-elev); border: 2px solid var(--neon);
+    color: var(--neon); font-size: 22px; cursor: pointer; z-index: 100;
+    box-shadow: 0 0 16px rgba(0,255,136,0.3), 0 4px 12px rgba(0,0,0,0.4);
+    transition: all 0.2s;
+  }
+  .zayra-cam-fab:hover { transform: scale(1.08); background: var(--neon); color: #06120a; }
+  @media (max-width: 600px) {
+    .zayra-cam-fab { width: 46px; height: 46px; bottom: 16px; right: 80px; font-size: 18px; }
+  }
   .zayra-modal {
     position: fixed; bottom: 96px; right: 24px;
     width: min(420px, calc(100% - 48px));
@@ -486,6 +499,7 @@
   <div id="view-calculos" class="view"></div>
 </div>
 
+<button class="zayra-cam-fab" id="zayraCamFab" title="Mostrar imagem pra ZAYRA (câmera ou tela)">📷</button>
 <button class="zayra-fab" id="zayraFab">Z</button>
 <!-- v1.66.0: modal generico pra Proposta de Consultoria (padrao do sistema) -->
 <div class="cal-overlay" id="consOverlay">
@@ -7540,6 +7554,109 @@ document.getElementById('zayraSend').onclick = () => {
   if (q) askZayra(q);
 };
 document.getElementById('zayraInput').onkeydown = e => { if (e.key === 'Enter') document.getElementById('zayraSend').click(); };
+
+// v1.66.22: ZAYRA Visual — captura camera/tela e analisa
+document.getElementById('zayraCamFab').onclick = () => abrirZayraVisual();
+
+async function abrirZayraVisual() {
+  const html = `
+    <div style="display:grid; gap:12px;">
+      <p style="margin:0; font-size:13px; color:var(--text-muted);">
+        Capture uma imagem pra ZAYRA analisar (custo aprox. R$ 0,02 por foto via Claude Vision).
+      </p>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <button id="zvCam" style="padding:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text); cursor:pointer;">
+          <div style="font-size:32px;">📱</div>
+          <div style="font-size:12px; margin-top:4px;">Câmera</div>
+        </button>
+        <button id="zvScreen" style="padding:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text); cursor:pointer;">
+          <div style="font-size:32px;">🖥️</div>
+          <div style="font-size:12px; margin-top:4px;">Tela</div>
+        </button>
+      </div>
+      <div id="zvPreview" style="display:none;"></div>
+    </div>`;
+  abrirHelpModal(html, '📷 Mostrar pra ZAYRA', 'Visão em tempo real');
+
+  const captureCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      mostrarStreamECapturar(stream, 'camera');
+    } catch (e) {
+      alert('Erro ao acessar câmera: ' + e.message);
+    }
+  };
+  const captureScreen = async () => {
+    try {
+      // @ts-ignore - getDisplayMedia padrao
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      mostrarStreamECapturar(stream, 'tela');
+    } catch (e) {
+      alert('Erro ao capturar tela: ' + e.message);
+    }
+  };
+
+  function mostrarStreamECapturar(stream, modo) {
+    const div = document.getElementById('zvPreview');
+    div.style.display = 'block';
+    div.innerHTML = `
+      <div style="display:grid; gap:8px;">
+        <video id="zvVideo" autoplay playsinline muted style="width:100%; max-height:300px; background:#000; border-radius:8px;"></video>
+        <textarea id="zvPergunta" rows="2" placeholder="Pergunta pra ZAYRA (ex: 'avalie esse imóvel', 'que padrão é esse?')" style="width:100%; padding:8px; font-size:13px; background:var(--bg-elev); border:1px solid var(--border); border-radius:6px; color:var(--text); resize:vertical;"></textarea>
+        <div style="display:flex; gap:6px;">
+          <button id="zvCapturar" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">📸 Capturar e analisar</button>
+          <button id="zvCancelar" class="btn-secondary">Cancelar</button>
+        </div>
+        <div id="zvResultado" style="font-size:13px;"></div>
+      </div>`;
+    const video = document.getElementById('zvVideo');
+    video.srcObject = stream;
+
+    const pararStream = () => {
+      stream.getTracks().forEach(t => t.stop());
+    };
+
+    document.getElementById('zvCancelar').onclick = () => {
+      pararStream();
+      fecharHelpModal();
+    };
+
+    document.getElementById('zvCapturar').onclick = async () => {
+      const btn = document.getElementById('zvCapturar');
+      btn.disabled = true; btn.textContent = '⏳ Analisando...';
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const b64 = dataUrl.split(',')[1];
+        const pergunta = document.getElementById('zvPergunta').value.trim();
+        const r = await api('/api/zayra/visual', {
+          method: 'POST',
+          body: JSON.stringify({ imagem_b64: b64, mimetype: 'image/jpeg', pergunta }),
+        });
+        // Mostra preview da foto + resposta
+        document.getElementById('zvResultado').innerHTML = `
+          <div style="margin-top:10px; padding:12px; background:rgba(0,255,136,0.04); border:1px solid var(--border); border-radius:8px;">
+            <img src="${dataUrl}" style="width:100%; max-height:200px; object-fit:contain; border-radius:6px; margin-bottom:8px;">
+            <div style="font-size:13px; line-height:1.5; white-space:pre-wrap;"><strong style="color:var(--neon);">ZAYRA:</strong> ${escape(r.resposta)}</div>
+          </div>`;
+        pararStream();
+      } catch (e) {
+        document.getElementById('zvResultado').innerHTML = `<div style="color:var(--danger); margin-top:8px;">Erro: ${escape(e.message)}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = '📸 Capturar e analisar';
+      }
+    };
+  }
+
+  document.getElementById('zvCam').onclick = captureCamera;
+  document.getElementById('zvScreen').onclick = captureScreen;
+}
 
 render();
 

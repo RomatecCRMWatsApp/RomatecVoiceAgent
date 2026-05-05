@@ -1128,6 +1128,33 @@ app.post('/api/obras/zayra', async (req: Request, res: Response) => {
   }
 });
 
+// v1.66.22: ZAYRA Visual — analisa imagem capturada via camera ou tela.
+// Recebe { imagem_b64, mimetype, pergunta? } e devolve a analise da ZAYRA.
+app.post('/api/zayra/visual', async (req: Request, res: Response) => {
+  try {
+    const imgB64    = String(req.body?.imagem_b64 ?? '').trim();
+    const mimetype  = String(req.body?.mimetype ?? 'image/jpeg').toLowerCase();
+    const perguntaUsuario = String(req.body?.pergunta ?? '').trim();
+    if (!imgB64) return res.status(400).json({ error: 'imagem_b64 obrigatorio' });
+    if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'].includes(mimetype)) {
+      return res.status(400).json({ error: `mimetype ${mimetype} nao suportado. Aceito: jpeg/png/webp/gif.` });
+    }
+    const tamanhoMB = (imgB64.length * 3 / 4) / 1024 / 1024;
+    if (tamanhoMB > 10) {
+      return res.status(413).json({ error: `Imagem tem ${tamanhoMB.toFixed(1)}MB, maximo 10MB.` });
+    }
+    const pergunta = perguntaUsuario || 'Analise a imagem e descreva o que voce ve em detalhes (avaliacao tecnica se for imovel — fachada, padrao construtivo, conservacao, area aproximada).';
+    const r = await think(pergunta, {
+      channel: 'text',
+      attachments: [{ kind: 'image', mime: mimetype, base64: imgB64 }],
+    });
+    res.json({ resposta: r.text, sessionId: r.sessionId });
+  } catch (err) {
+    console.error('[zayra-visual] erro:', (err as Error).message);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // Last-resort guardrails: prevent transient provider/DB errors from killing the process
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason);
