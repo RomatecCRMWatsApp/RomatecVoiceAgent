@@ -3206,6 +3206,13 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
     const subLabel = SUBTIPO_LABEL_FRONT[p.subtipo] || p.subtipo;
     const dataBR = p.data_proposta ? parseDataBR(p.data_proposta) : '';
     const telDefault = state.propostasClientesTel?.[p.cliente_id] || '';
+    // v1.66.15: chips dos anexos
+    const anexosChips = (p.anexos || []).map(a => {
+      const icone = a.mimetype.includes('pdf') ? '📄' : '🖼️';
+      const kb = (a.tamanho_bytes / 1024).toFixed(0);
+      return `<span title="${escape(a.filename)} · ${kb} KB" style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-elev); border:1px solid var(--border); border-radius:4px; font-size:10px; color:var(--text-muted);">${icone} ${escape(a.filename.length > 20 ? a.filename.slice(0,18) + '…' : a.filename)}</span>`;
+    }).join(' ');
+
     return `<div class="card">
       <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
         <div style="flex:1; min-width:200px;">
@@ -3215,6 +3222,11 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
           </p>
           <span class="badge badge-warning" style="font-size:10px;">📋 ${escape(subLabel)}</span>
           <span class="badge ${sb}">${escape(p.status)}</span>
+          ${p.qtd_anexos > 0 ? `
+            <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:4px; align-items:center;">
+              <span style="font-size:11px; color:var(--text-muted);">📎 ${p.qtd_anexos} anexo${p.qtd_anexos > 1 ? 's' : ''}:</span>
+              ${anexosChips}
+            </div>` : ''}
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; min-width:230px;">
           <input data-tel-cons="${p.id}" placeholder="WhatsApp p/ envio (ex: 5598...)" value="${escape(telDefault)}" style="font-size:12px; padding:6px 8px;">
@@ -3278,6 +3290,8 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
       if (!subtipo || (subtipo !== 'averbacao_residencial' && subtipo !== 'averbacao_comercial')) {
         return alert('Edição disponível apenas para Averbação Residencial e Comercial nesta fase.');
       }
+      // v1.66.15: tambem carrega anexos existentes da proposta
+      const anexosExistentes = await api('/api/propostas-consultoria/' + id + '/anexos').catch(() => ({ items: [] }));
       // Popula cache do form com dados da proposta
       state.consultoriaFormCache = {
         subtipo,
@@ -3286,8 +3300,9 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
         dados_imovel: p.dados_imovel || {},
       };
       state.consultoriaEditandoId = id;
-      state.consultoriaPropostaOriginal = p; // pra preservar custos overrides ja editados
+      state.consultoriaPropostaOriginal = p;
       state.consultoriaAnexosTemp = [];
+      state.consultoriaAnexosExistentes = anexosExistentes.items || [];
       setConsultoriaView('form_' + subtipo);
     } catch (e) { alert('Erro: ' + e.message); }
     finally { b.disabled = false; b.textContent = '✏️ Editar'; }
@@ -3498,6 +3513,7 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
   const voltarParaEscolha = () => {
     state.consultoriaFormCache = null;
     state.consultoriaAnexosTemp = [];
+    state.consultoriaAnexosExistentes = [];
     if (state.consultoriaEditandoId) {
       state.consultoriaEditandoId = null;
       state.consultoriaPropostaOriginal = null;
@@ -3549,18 +3565,40 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
   const renderAnexos = () => {
     const lista = document.getElementById('cnsAnexosLista');
     if (!lista) return;
-    lista.innerHTML = state.consultoriaAnexosTemp.map((a, i) => `
+    // v1.66.15: anexos existentes (modo edicao) com badge "salvo" + delete via API
+    const existentes = (state.consultoriaAnexosExistentes || []).map(a => `
+      <div style="display:flex; gap:8px; align-items:center; padding:6px 8px; background:rgba(0,255,136,0.04); border:1px solid var(--border); border-radius:6px;">
+        <span style="font-size:18px;">${a.mimetype.includes('pdf') ? '📄' : '🖼️'}</span>
+        <div style="flex:1; min-width:0; overflow:hidden;">
+          <div style="font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escape(a.filename)}</div>
+          <div style="font-size:10px; color:var(--text-muted);">${(a.tamanho_bytes / 1024).toFixed(1)} KB · ${a.mimetype} · <span style="color:var(--neon);">salvo</span></div>
+        </div>
+        <button type="button" data-rm-anexo-existente="${a.id}" class="btn-danger" style="padding:4px 8px; font-size:11px;" title="Remover do banco">×</button>
+      </div>`).join('');
+    const novos = state.consultoriaAnexosTemp.map((a, i) => `
       <div style="display:flex; gap:8px; align-items:center; padding:6px 8px; background:var(--bg-elev); border:1px solid var(--border); border-radius:6px;">
         <span style="font-size:18px;">${a.mimetype.includes('pdf') ? '📄' : '🖼️'}</span>
         <div style="flex:1; min-width:0; overflow:hidden;">
           <div style="font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escape(a.filename)}</div>
-          <div style="font-size:10px; color:var(--text-muted);">${(a.tamanho / 1024).toFixed(1)} KB · ${a.mimetype}</div>
+          <div style="font-size:10px; color:var(--text-muted);">${(a.tamanho / 1024).toFixed(1)} KB · ${a.mimetype} · <span style="color:var(--gold);">novo</span></div>
         </div>
         <button type="button" data-rm-anexo="${i}" class="btn-danger" style="padding:4px 8px; font-size:11px;">×</button>
       </div>`).join('');
+    lista.innerHTML = existentes + novos;
     lista.querySelectorAll('[data-rm-anexo]').forEach(b => b.onclick = () => {
       state.consultoriaAnexosTemp.splice(Number(b.dataset.rmAnexo), 1);
       renderAnexos();
+    });
+    // v1.66.15: remove anexo existente (DELETE imediato no banco)
+    lista.querySelectorAll('[data-rm-anexo-existente]').forEach(b => b.onclick = async () => {
+      const aId = b.dataset.rmAnexoExistente;
+      if (!confirm('Remover anexo permanentemente do banco?')) return;
+      b.disabled = true;
+      try {
+        await api('/api/propostas-consultoria/anexos/' + aId, { method: 'DELETE' });
+        state.consultoriaAnexosExistentes = state.consultoriaAnexosExistentes.filter(x => String(x.id) !== String(aId));
+        renderAnexos();
+      } catch (e) { alert('Erro: ' + e.message); b.disabled = false; }
     });
   };
   renderAnexos();
@@ -3665,18 +3703,24 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
   const projetosHTML = r.custos.secao_1_projetos.map((p, i) => `<li>${i + 1}. ${escape(p)}</li>`).join('');
 
   // v1.66.8: linhas editaveis com input numerico. Recalcula total ao mudar.
-  // data-secao=2 (taxas) | data-secao=3 (honorarios). data-ordem identifica linha.
-  const inputCell = (val, secao, ordem, pendente) => `
+  // v1.66.15: data-valor-original guarda o valor calculado pelo motor. A funcao
+  // recalcular() compara e exibe "Desconto concedido" em vermelho ou "Acrescimo" em laranja.
+  const inputCell = (val, secao, ordem, pendente) => {
+    const v = (Number(val) || 0);
+    return `
     <td style="padding:6px; text-align:right; border-bottom:1px solid #333; white-space:nowrap;">
       <span style="font-size:11px; color:var(--text-muted); margin-right:4px;">R$</span>
       <input type="number" min="0" step="0.01"
              data-cns-valor data-secao="${secao}" data-ordem="${ordem}"
-             value="${(Number(val) || 0).toFixed(2)}"
+             data-valor-original="${v.toFixed(2)}"
+             value="${v.toFixed(2)}"
              style="width:100px; text-align:right; padding:4px 6px; font-size:13px;
                     background:${pendente ? 'rgba(255,170,51,0.08)' : 'var(--bg-elev)'};
                     border:1px solid ${pendente ? 'var(--warning)' : 'var(--border)'};
                     color:var(--text); border-radius:4px;">
+      <div data-cns-aviso-secao="${secao}" data-cns-aviso-ordem="${ordem}" style="font-size:10px; margin-top:3px; min-height:13px; text-align:right;"></div>
     </td>`;
+  };
 
   const taxasHTML = r.custos.secao_2_taxas.map(t => `
     <tr>
@@ -3767,15 +3811,34 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
   document.querySelectorAll('[data-cons-voltar]').forEach(b => b.onclick = () => setConsultoriaView('form_' + ctx.subtipo));
 
   // v1.66.13: recalculo ao editar valores (Secao 2, 3 e Condicoes Pagamento)
+  // v1.66.15: alem do recalculo, sinaliza "Desconto concedido" / "Acrescimo"
   function recalcular() {
     let subTaxas = 0, subHon = 0;
     let honProjeto = 0, honAssessoria = 0;
+    const fmtBR = val => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     document.querySelectorAll('[data-cns-valor]').forEach(inp => {
       const v = Number(inp.value) || 0;
+      const orig = Number(inp.dataset.valorOriginal) || 0;
+      // Mostra aviso de desconto/acrescimo se diferente do calculado original
+      const aviso = document.querySelector(`[data-cns-aviso-secao="${inp.dataset.secao}"][data-cns-aviso-ordem="${inp.dataset.ordem}"]`);
+      if (aviso) {
+        if (orig > 0 && v < orig) {
+          const diff = orig - v;
+          const pct = (diff / orig) * 100;
+          aviso.innerHTML = `<span style="color:#dc2626; font-weight:600;">⚠ Desconto: -${fmtBR(diff)} (-${pct.toFixed(1)}%)</span>`;
+        } else if (orig > 0 && v > orig) {
+          const diff = v - orig;
+          const pct = (diff / orig) * 100;
+          aviso.innerHTML = `<span style="color:#fb923c;">⬆ Acréscimo: +${fmtBR(diff)} (+${pct.toFixed(1)}%)</span>`;
+        } else if (orig === 0 && v > 0) {
+          aviso.innerHTML = `<span style="color:#fb923c;">Valor preenchido manualmente</span>`;
+        } else {
+          aviso.innerHTML = '';
+        }
+      }
       if (inp.dataset.secao === '2') subTaxas += v;
       else if (inp.dataset.secao === '3') {
         subHon += v;
-        // Identifica linhas: ordem 6 = Honorario Projeto, ordem 7 = Assessoria
         if (inp.dataset.ordem === '6') honProjeto = v;
         else if (inp.dataset.ordem === '7') honAssessoria = v;
       }
@@ -3872,6 +3935,7 @@ function renderConsultoriaPreviewInline(v, toggleHTML) {
       alert('✅ ' + r2.message);
       state.consultoriaPreviewData = null;
       state.consultoriaAnexosTemp = [];
+      state.consultoriaAnexosExistentes = [];
       state.consultoriaUltimoSubtipo = null;
       state.consultoriaFormCache = null;
       state.consultoriaEditandoId = null;

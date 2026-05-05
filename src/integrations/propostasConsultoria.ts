@@ -788,10 +788,12 @@ export async function gerarPdfPropostaConsultoriaCompleto(id: string): Promise<B
 export async function listarPropostasPorTipo(input: { tipo?: 'mao_de_obra' | 'consultoria'; limite?: number } = {}) {
   const limit = Math.min(Math.max(Number(input.limite) || 100, 1), 500);
   const params: (string | number)[] = [];
+  // v1.66.15: tambem retorna contagem + lista resumida de anexos por proposta
   let sql = `SELECT p.id, p.numero, p.tipo, p.subtipo_consultoria, p.cliente_id,
                     c.nome AS cliente_nome, p.endereco_obra, p.data_proposta,
                     p.validade_dias, p.valor_total, p.status, p.enviada_whatsapp,
-                    p.criado_em
+                    p.criado_em,
+                    (SELECT COUNT(*) FROM proposta_anexos a WHERE a.proposta_id = p.id) AS qtd_anexos
                FROM propostas p
                LEFT JOIN propostas_clientes c ON c.id = p.cliente_id
               WHERE p.deleted_at IS NULL`;
@@ -801,6 +803,28 @@ export async function listarPropostasPorTipo(input: { tipo?: 'mao_de_obra' | 'co
   }
   sql += ` ORDER BY p.id DESC LIMIT ${limit}`;
   const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
+  // Anexos por proposta (uma query so pra todos os ids — mais eficiente que N queries)
+  const ids = rows.map(r => Number(r.id)).filter(Boolean);
+  let anexosPorPropId: Record<number, Array<{ id: number; filename: string; mimetype: string; tamanho_bytes: number }>> = {};
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => '?').join(',');
+    const [arows] = await pool.execute<RowDataPacket[]>(
+      `SELECT id, proposta_id, filename, mimetype, tamanho_bytes
+         FROM proposta_anexos WHERE proposta_id IN (${placeholders}) ORDER BY ordem`,
+      ids
+    );
+    for (const ar of arows) {
+      const pid = Number(ar.proposta_id);
+      if (!anexosPorPropId[pid]) anexosPorPropId[pid] = [];
+      anexosPorPropId[pid].push({
+        id: Number(ar.id),
+        filename: String(ar.filename),
+        mimetype: String(ar.mimetype),
+        tamanho_bytes: Number(ar.tamanho_bytes),
+      });
+    }
+  }
+
   return {
     total: rows.length,
     items: rows.map(r => ({
@@ -817,6 +841,8 @@ export async function listarPropostasPorTipo(input: { tipo?: 'mao_de_obra' | 'co
       status: r.status,
       enviada_whatsapp: !!r.enviada_whatsapp,
       criado_em: r.criado_em,
+      qtd_anexos: Number(r.qtd_anexos || 0),
+      anexos: anexosPorPropId[Number(r.id)] || [],
     })),
   };
 }
