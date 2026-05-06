@@ -2328,7 +2328,7 @@ function renderDespesasExtras() {
           <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:6px;">
             <span class="badge" style="font-size:10px; background:${cat.cor}22; color:${cat.cor}; border:1px solid ${cat.cor}55;">${cat.label}</span>
             <span class="badge badge-info" style="font-size:10px;">${escape(desFormaLabel(d.forma_pagamento))}</span>
-            ${d.tem_foto ? '<span class="badge badge-success" style="font-size:10px;">📷 Foto anexada</span>' : ''}
+            ${d.tem_foto ? `<span class="badge badge-success" style="font-size:10px;">${d.foto_mimetype === 'application/pdf' ? '📄 PDF anexado' : '📷 Foto anexada'}</span>` : ''}
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:4px; min-width:120px;">
@@ -2481,8 +2481,9 @@ async function renderDespesaFormInline(v) {
         </div>
 
         <div style="border:1px solid var(--border); border-radius:8px; padding:10px;">
-          <p style="margin:0 0 6px; font-weight:600; font-size:13px;">📷 Foto do cupom (opcional)</p>
-          <input type="file" id="despFotoInput" accept="image/jpeg,image/png,image/webp" style="font-size:12px;">
+          <p style="margin:0 0 6px; font-weight:600; font-size:13px;">📷 Foto / PDF do cupom (opcional)</p>
+          <p style="margin:0 0 6px; font-size:11px; color:var(--text-muted);">Aceita JPG, PNG, WEBP ou PDF (máx. 8MB).</p>
+          <input type="file" id="despFotoInput" accept="image/jpeg,image/png,image/webp,application/pdf" style="font-size:12px;">
           <div id="despFotoPreview" style="margin-top:8px;"></div>
         </div>
 
@@ -2554,14 +2555,31 @@ async function renderDespesaFormInline(v) {
     renderItens();
   };
 
-  // Foto preview
+  // Foto/PDF preview (v1.67.3: aceita PDF tambem)
   const renderFoto = () => {
     const div = document.getElementById('despFotoPreview');
     if (!state.despesaFotoTemp) { div.innerHTML = ''; return; }
-    const dataUrl = `data:${state.despesaFotoTemp.mimetype};base64,${state.despesaFotoTemp.b64}`;
-    div.innerHTML = `
-      <img src="${dataUrl}" style="max-width:200px; max-height:200px; border-radius:6px; border:1px solid var(--border);">
-      <button type="button" id="despRmFoto" class="btn-danger" style="display:block; margin-top:6px; font-size:11px;">× Remover foto</button>`;
+    const t = state.despesaFotoTemp;
+    const isPdf = t.mimetype === 'application/pdf';
+    const dataUrl = `data:${t.mimetype};base64,${t.b64}`;
+    const tamanhoKB = (t.b64.length * 3 / 4 / 1024).toFixed(0);
+    if (isPdf) {
+      div.innerHTML = `
+        <div style="display:flex; gap:10px; align-items:center; padding:10px; background:var(--bg-elev); border:1px solid var(--border); border-radius:6px;">
+          <span style="font-size:36px;">📄</span>
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:13px; font-weight:600;">${escape(t.filename || 'cupom.pdf')}</div>
+            <div style="font-size:11px; color:var(--text-muted);">PDF · ${tamanhoKB} KB</div>
+          </div>
+          <a href="${dataUrl}" target="_blank" style="font-size:11px; color:var(--neon); text-decoration:underline;">Abrir</a>
+          <button type="button" id="despRmFoto" class="btn-danger" style="font-size:11px; padding:4px 8px;">×</button>
+        </div>`;
+    } else {
+      div.innerHTML = `
+        <img src="${dataUrl}" style="max-width:200px; max-height:200px; border-radius:6px; border:1px solid var(--border);">
+        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${tamanhoKB} KB</div>
+        <button type="button" id="despRmFoto" class="btn-danger" style="display:block; margin-top:6px; font-size:11px;">× Remover</button>`;
+    }
     document.getElementById('despRmFoto').onclick = () => {
       state.despesaFotoTemp = null;
       renderFoto();
@@ -2571,16 +2589,16 @@ async function renderDespesaFormInline(v) {
   document.getElementById('despFotoInput').onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const MIMES_OK = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (!MIMES_OK.includes(file.type)) { alert('Use JPG, PNG ou WEBP.'); return; }
-    if (file.size > 5 * 1024 * 1024) { alert('Máximo 5MB.'); return; }
+    const MIMES_OK = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!MIMES_OK.includes(file.type)) { alert('Use JPG, PNG, WEBP ou PDF.'); return; }
+    if (file.size > 8 * 1024 * 1024) { alert('Máximo 8MB.'); return; }
     const b64 = await new Promise((resolve, reject) => {
       const r = new FileReader();
       r.onload = () => resolve(String(r.result).split(',')[1]);
       r.onerror = reject;
       r.readAsDataURL(file);
     });
-    state.despesaFotoTemp = { existente: false, mimetype: file.type, b64 };
+    state.despesaFotoTemp = { existente: false, mimetype: file.type, b64, filename: file.name };
     renderFoto();
   };
 

@@ -9,8 +9,9 @@ export type Categoria = 'ferramenta' | 'aluguel' | 'material' | 'outros';
 export type FormaPagamento = 'pix' | 'dinheiro' | 'cartao_credito' | 'cartao_debito' | 'boleto';
 const CATEGORIAS: Categoria[] = ['ferramenta', 'aluguel', 'material', 'outros'];
 const FORMAS: FormaPagamento[] = ['pix', 'dinheiro', 'cartao_credito', 'cartao_debito', 'boleto'];
-const MIMES_FOTO = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-const FOTO_MAX_BYTES = 5 * 1024 * 1024; // 5MB
+// v1.67.3: aceita PDF tambem (cupom em PDF e comum em ferragens/lojas online)
+const MIMES_FOTO = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf'];
+const FOTO_MAX_BYTES = 8 * 1024 * 1024; // 8MB (PDF tende a ser maior que JPG)
 
 export interface ItemInput { descricao: string; valor: number; quantidade?: number; ordem?: number }
 
@@ -125,11 +126,11 @@ function validarItens(itens: ItemInput[]): number {
 function validarFoto(foto_b64?: string | null, mimetype?: string | null): { b64: string | null; mime: string | null } {
   if (!foto_b64) return { b64: null, mime: null };
   if (!mimetype || !MIMES_FOTO.includes(mimetype)) {
-    throw new Error(`Mimetype invalido: ${mimetype}. Aceito: jpg, png, webp.`);
+    throw new Error(`Mimetype invalido: ${mimetype}. Aceito: jpg, png, webp, pdf.`);
   }
   const tamanho = Math.floor((foto_b64.length * 3) / 4);
   if (tamanho > FOTO_MAX_BYTES) {
-    throw new Error(`Foto excede limite de 5MB (atual: ${(tamanho / 1024 / 1024).toFixed(1)}MB).`);
+    throw new Error(`Arquivo excede limite de 8MB (atual: ${(tamanho / 1024 / 1024).toFixed(1)}MB).`);
   }
   return { b64: foto_b64, mime: mimetype };
 }
