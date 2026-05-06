@@ -1,11 +1,11 @@
 // Service Worker da ZAYRA — versão atrelada à versão do app pra forçar
 // rotação de cache em todo deploy. Se você bumpar a versão do app, bumpe esta
 // constante também (ou no futuro, gere via build).
-const CACHE = 'zayra-v1.38.0';
+const CACHE = 'zayra-v1.67.5';
 
 // App shell — recursos pequenos que podem ser cacheados.
 // HTML NÃO está aqui de propósito — é network-first.
-const PRECACHE = ['/avatar.png', '/manifest.json', '/manifest.webmanifest', '/manifest-obras.webmanifest', '/romatec-logo-removebg-preview.png'];
+const PRECACHE = ['/avatar.png', '/manifest.json', '/manifest.webmanifest', '/manifest-obras.webmanifest', '/logo_R-removebg-preview.png', '/romatec-logo-removebg-preview.png'];
 
 // ── Install: pré-cacheia só recursos estáticos pequenos ─────────────────────
 self.addEventListener('install', e => {

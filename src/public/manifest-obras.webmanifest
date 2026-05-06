@@ -11,10 +11,10 @@
   "lang": "pt-BR",
   "categories": ["business", "productivity", "utilities"],
   "icons": [
-    { "src": "/romatec-logo-removebg-preview.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/romatec-logo-removebg-preview.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/romatec-logo-removebg-preview.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "/romatec-logo-removebg-preview.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/logo_R-removebg-preview.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/logo_R-removebg-preview.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/logo_R-removebg-preview.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/logo_R-removebg-preview.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
     {
