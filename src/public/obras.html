@@ -3891,6 +3891,25 @@ function renderVto() {
     finally { b.disabled = false; b.textContent = '✈️ Telegram'; }
   });
 
+  // v1.67.12: handler do botao Editar (faltava — botao existia sem onclick)
+  document.querySelectorAll('[data-edit-vto]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.editVto;
+    b.disabled = true; b.textContent = 'Carregando...';
+    try {
+      const r = await api('/api/vistorias/' + id);
+      state.vistoriaEditandoId = id;
+      state.vistoriaEditandoData = r;
+      state.vtoFotos = []; // novas fotos substituirao se enviadas
+      renderVto();
+      // scroll pro topo do formulario
+      document.querySelector('.section-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      alert('Erro ao carregar vistoria: ' + e.message);
+    } finally {
+      b.disabled = false; b.textContent = '✏️ Editar';
+    }
+  });
+
   document.querySelectorAll('[data-del-vto]').forEach(b => b.onclick = async () => {
     const ok = await confirmarAcao({
       titulo: 'Apagar vistoria',
