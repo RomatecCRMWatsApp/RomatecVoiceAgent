@@ -1275,6 +1275,7 @@ function renderObras() {
         </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:flex-start;">
           <button data-wpp-obra="${o.id}" title="Enviar info da obra ao cliente via WhatsApp" style="background:#25d366; color:#fff; border-color:#25d366;">💬 WhatsApp</button>
+          <button data-tg-obra="${o.id}" title="Compartilhar resumo da obra no Telegram (escolha o destinatário)" style="background:#0088cc; color:#fff; border-color:#0088cc;">✈️ Telegram</button>
           <button data-view-obra="${o.id}" title="Visualizar / Imprimir / PDF">👁️ Ver</button>
           <button class="btn-gold" data-edit-obra="${o.id}">✏️ Editar</button>
           <button class="btn-danger" data-del-obra="${o.id}">Excluir</button>
@@ -1368,25 +1369,15 @@ function renderObras() {
   // v1.65.42: visualizar / imprimir / PDF
   v.querySelectorAll('[data-view-obra]').forEach(b => b.onclick = () => abrirVisualizarObra(b.dataset.viewObra));
 
-  // v1.65.46: envia resumo da obra ao cliente via WhatsApp
-  v.querySelectorAll('[data-wpp-obra]').forEach(b => b.onclick = async () => {
-    const o = state.obras.find(x => String(x.id) === String(b.dataset.wppObra));
-    if (!o) return;
-    const tel = (o.cliente_telefone || o.telefone || '').replace(/\D/g, '');
-    if (!tel || tel.length < 10) {
-      alert('Telefone do cliente vazio ou inválido. Edite a obra e preencha o campo Telefone primeiro.');
-      return;
-    }
-    // Busca parcelas pra incluir no resumo
+  // v1.65.46/v1.67.15: constroi resumo da obra (compartilhado WhatsApp + Telegram)
+  const construirResumoObra = async (o) => {
     let parcelas = [];
     try { parcelas = await api(`/api/obras/${o.id}/parcelas`); } catch {}
-
     const fmtData = (s) => {
       if (!s) return '-';
       const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s));
       return m ? `${m[3]}/${m[2]}/${m[1]}` : String(s);
     };
-
     const linhas = [
       `🏗️ *Obra: ${o.nome}*`,
       ``,
@@ -1398,7 +1389,6 @@ function renderObras() {
       o.prazo_dias ? `⏱️ *Prazo:* ${o.prazo_dias} dias corridos${o.prazo_dias_uteis ? ` (${o.prazo_dias_uteis} úteis)` : ''}` : null,
       o.valor_contrato ? `💰 *Valor do contrato:* ${fmt(o.valor_contrato)}` : null,
     ].filter(Boolean);
-
     if (parcelas.length > 0) {
       linhas.push('', '*💳 Parcelas:*');
       parcelas.forEach(p => {
@@ -1406,11 +1396,32 @@ function renderObras() {
         linhas.push(`• ${p.numero}ª — ${fmt(p.valor)} — venc. ${escape(p.vencimento || '-')} — ${status}`);
       });
     }
-
     linhas.push('', '_Romatec Consultoria Total_', 'Engenharia e Agrimensura');
+    return linhas.join('\n');
+  };
 
-    const msg = encodeURIComponent(linhas.join('\n'));
-    const url = `https://wa.me/55${tel.replace(/^55/, '')}?text=${msg}`;
+  v.querySelectorAll('[data-wpp-obra]').forEach(b => b.onclick = async () => {
+    const o = state.obras.find(x => String(x.id) === String(b.dataset.wppObra));
+    if (!o) return;
+    const tel = (o.cliente_telefone || o.telefone || '').replace(/\D/g, '');
+    if (!tel || tel.length < 10) {
+      alert('Telefone do cliente vazio ou inválido. Edite a obra e preencha o campo Telefone primeiro.');
+      return;
+    }
+    const texto = await construirResumoObra(o);
+    const url = `https://wa.me/55${tel.replace(/^55/, '')}?text=${encodeURIComponent(texto)}`;
+    window.open(url, '_blank');
+  });
+
+  // v1.67.15: compartilhar resumo via Telegram. Usa share dialog do Telegram
+  // (https://t.me/share/url?text=...) — abre o app/web, usuario escolhe destinatario
+  // (chat com o cliente, grupo da obra, salvar em "Saved Messages", etc).
+  v.querySelectorAll('[data-tg-obra]').forEach(b => b.onclick = async () => {
+    const o = state.obras.find(x => String(x.id) === String(b.dataset.tgObra));
+    if (!o) return;
+    const texto = await construirResumoObra(o);
+    // t.me/share/url aceita 'text' (com markdown _italico_/*negrito* funcional no Telegram).
+    const url = `https://t.me/share/url?url=${encodeURIComponent('')}&text=${encodeURIComponent(texto)}`;
     window.open(url, '_blank');
   });
 }
