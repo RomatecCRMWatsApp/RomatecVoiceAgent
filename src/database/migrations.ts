@@ -1019,6 +1019,163 @@ export async function runMigrations(): Promise<void> {
     }
   }
 
+  // ── v1.68.0: SaaS foundation — Recibos universais + Notas Fiscais ──
+  // Schema puro (DDL). Sem comportamento novo. Permite construir incrementalmente
+  // os 7 tipos de recibo (funcionario/parcela/despesa/proposta/vistoria/etapa/chaves)
+  // com confirmacao via WhatsApp, QR code de validacao no PDF e integracao NFe.io.
+  // tenant_id ja desde o nascimento (DEFAULT 1 = Romatec) pra multi-tenant futuro.
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS recibos (
+      id                    INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id             INT NOT NULL DEFAULT 1,
+      numero                VARCHAR(40) NOT NULL,
+      tipo                  ENUM('funcionario','parcela','despesa','proposta',
+                                 'vistoria','etapa','chaves','custom') NOT NULL,
+      resource_type         VARCHAR(40) NOT NULL,
+      resource_id           VARCHAR(40) NOT NULL,
+      destinatario_nome     VARCHAR(120) NOT NULL,
+      destinatario_doc      VARCHAR(20) NULL,
+      destinatario_phone    VARCHAR(20) NOT NULL,
+      destinatario_email    VARCHAR(150) NULL,
+      destinatario_endereco JSON NULL,
+      valor                 DECIMAL(12,2) NULL,
+      forma_pagamento       ENUM('pix','dinheiro','transferencia','cartao','boleto','cheque') NULL,
+      descricao_servico     TEXT NULL,
+      codigo_servico_key    VARCHAR(40) NULL,
+      token                 VARCHAR(64) NOT NULL UNIQUE,
+      hash_validacao        VARCHAR(64) NOT NULL UNIQUE,
+      status                ENUM('rascunho','aguardando_envio','enviado','entregue',
+                                 'lido','respondido','confirmado','contestado',
+                                 'expirado','cancelado') NOT NULL DEFAULT 'rascunho',
+      resposta_acao         ENUM('confirma','contesta','recebido','pix') NULL,
+      resposta_obs          TEXT NULL,
+      resposta_foto_url     VARCHAR(500) NULL,
+      resposta_lat          DECIMAL(10,7) NULL,
+      resposta_lng          DECIMAL(10,7) NULL,
+      pdf_url               VARCHAR(500) NULL,
+      zapi_message_id       VARCHAR(80) NULL,
+      expires_at            DATETIME NULL,
+      enviado_em            DATETIME NULL,
+      entregue_em           DATETIME NULL,
+      lido_em               DATETIME NULL,
+      respondido_em         DATETIME NULL,
+      ip_resposta           VARCHAR(45) NULL,
+      user_agent_resposta   VARCHAR(255) NULL,
+      last_reminder_at      DATETIME NULL,
+      nota_fiscal_id        INT NULL,
+      created_by            INT NULL,
+      created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_tenant_numero (tenant_id, numero),
+      INDEX idx_tenant_status (tenant_id, status, expires_at),
+      INDEX idx_resource (resource_type, resource_id),
+      INDEX idx_phone (destinatario_phone),
+      INDEX idx_tipo_periodo (tenant_id, tipo, created_at)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS recibos_eventos (
+      id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+      recibo_id   INT NOT NULL,
+      event_type  VARCHAR(40) NOT NULL,
+      payload     JSON NULL,
+      created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_recibo_time (recibo_id, created_at)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS tenant_fiscal_config (
+      tenant_id               INT PRIMARY KEY,
+      cnpj                    VARCHAR(18) NOT NULL,
+      inscricao_municipal     VARCHAR(20) NULL,
+      inscricao_estadual      VARCHAR(20) NULL,
+      regime_tributario       ENUM('mei','simples','presumido','real')
+                              NOT NULL DEFAULT 'simples',
+      simples_aliquota        DECIMAL(5,2) NULL,
+      iss_aliquota            DECIMAL(5,2) NOT NULL DEFAULT 5.00,
+      provider                ENUM('nfeio','plugnotas','enotas','manual')
+                              NOT NULL DEFAULT 'nfeio',
+      provider_company_id     VARCHAR(80) NULL,
+      provider_api_key_enc    VARBINARY(512) NULL,
+      certificado_storage_url VARCHAR(500) NULL,
+      certificado_validade    DATE NULL,
+      ambiente                ENUM('producao','homologacao')
+                              NOT NULL DEFAULT 'homologacao',
+      rps_serie               VARCHAR(10) NOT NULL DEFAULT '1',
+      servicos_codigos        JSON NULL,
+      auto_emitir_em          JSON NULL,
+      created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS notas_fiscais (
+      id                  INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id           INT NOT NULL DEFAULT 1,
+      numero              VARCHAR(20) NULL,
+      serie               VARCHAR(10) NULL,
+      rps_numero          VARCHAR(20) NOT NULL,
+      rps_serie           VARCHAR(10) NOT NULL DEFAULT '1',
+      tipo                ENUM('nfse','nfe','nfce') NOT NULL DEFAULT 'nfse',
+      resource_type       VARCHAR(40) NULL,
+      resource_id         VARCHAR(40) NULL,
+      recibo_id           INT NULL,
+      tomador_doc         VARCHAR(20) NOT NULL,
+      tomador_nome        VARCHAR(120) NOT NULL,
+      tomador_email       VARCHAR(150) NULL,
+      tomador_endereco    JSON NOT NULL,
+      valor_servico       DECIMAL(12,2) NOT NULL,
+      valor_iss           DECIMAL(12,2) NOT NULL DEFAULT 0,
+      valor_inss          DECIMAL(12,2) NOT NULL DEFAULT 0,
+      valor_irrf          DECIMAL(12,2) NOT NULL DEFAULT 0,
+      valor_csll          DECIMAL(12,2) NOT NULL DEFAULT 0,
+      valor_cofins        DECIMAL(12,2) NOT NULL DEFAULT 0,
+      valor_pis           DECIMAL(12,2) NOT NULL DEFAULT 0,
+      valor_deducoes      DECIMAL(12,2) NOT NULL DEFAULT 0,
+      valor_liquido       DECIMAL(12,2) NOT NULL,
+      iss_aliquota        DECIMAL(5,2) NOT NULL DEFAULT 0,
+      iss_retido          BOOLEAN NOT NULL DEFAULT FALSE,
+      codigo_servico      VARCHAR(20) NOT NULL,
+      descricao           TEXT NOT NULL,
+      provider            ENUM('nfeio','plugnotas','enotas','manual')
+                          NOT NULL DEFAULT 'nfeio',
+      provider_id         VARCHAR(80) NULL,
+      status              ENUM('rascunho','processando','autorizada','rejeitada',
+                               'cancelada','substituida','manual')
+                          NOT NULL DEFAULT 'rascunho',
+      motivo_rejeicao     TEXT NULL,
+      pdf_url             VARCHAR(500) NULL,
+      xml_url             VARCHAR(500) NULL,
+      codigo_verificacao  VARCHAR(40) NULL,
+      link_verificacao    VARCHAR(500) NULL,
+      emitida_em          DATETIME NULL,
+      cancelada_em        DATETIME NULL,
+      motivo_cancelamento TEXT NULL,
+      emitida_por         INT NULL,
+      created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_tenant_rps (tenant_id, rps_serie, rps_numero),
+      INDEX idx_tenant_status (tenant_id, status, created_at),
+      INDEX idx_resource (resource_type, resource_id),
+      INDEX idx_provider (provider, provider_id)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS notas_fiscais_eventos (
+      id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+      nf_id       INT NOT NULL,
+      event_type  VARCHAR(40) NOT NULL,
+      payload     JSON NULL,
+      created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_nf_time (nf_id, created_at)
+    )
+  `);
+
   // v1.66.9: anexos da Proposta de Consultoria (Planta Arquitetonica/Mapa).
   // Aceita PDF, PNG, JPEG. Sem limite de quantidade. Conteudo em base64
   // (LONGTEXT — ate 4GB; impomos limite ~10MB por anexo no client).
