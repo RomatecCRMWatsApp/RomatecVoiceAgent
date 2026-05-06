@@ -55,6 +55,7 @@ export async function listarDespesasExtras(input: { obra_id?: string; from?: str
       obra_nome: r.obra_nome ?? null,
       data: r.data,
       loja: r.loja,
+      destinatario: r.destinatario ?? null,
       categoria: r.categoria,
       forma_pagamento: r.forma_pagamento,
       tem_foto: !!r.foto_b64,
@@ -89,6 +90,7 @@ export async function buscarDespesaExtra(id: string) {
     obra_nome: r.obra_nome ?? null,
     data: r.data,
     loja: r.loja,
+    destinatario: r.destinatario ?? null,
     categoria: r.categoria,
     forma_pagamento: r.forma_pagamento,
     foto_b64: r.foto_b64 ?? null,
@@ -134,6 +136,12 @@ async function ensureSchemaUpToDate(): Promise<void> {
         `ALTER TABLE despesas_extras_itens ADD COLUMN quantidade DECIMAL(10,3) NOT NULL DEFAULT 1 AFTER valor`
       ).catch(e => console.warn('[despesas-self-heal] alter quantidade:', (e as Error).message));
     }
+    if (!set.has('destinatario')) {
+      console.log('[despesas-self-heal] adicionando coluna destinatario...');
+      await pool.execute(
+        `ALTER TABLE despesas_extras ADD COLUMN destinatario VARCHAR(120) NULL AFTER loja`
+      ).catch(e => console.warn('[despesas-self-heal] alter destinatario:', (e as Error).message));
+    }
     _schemaChecked = true;
     console.log('[despesas-self-heal] schema OK');
   } catch (err) {
@@ -172,6 +180,7 @@ export async function criarDespesaExtra(input: {
   obra_id: string;
   data: string; // YYYY-MM-DD
   loja: string;
+  destinatario?: string | null;
   categoria: Categoria;
   forma_pagamento: FormaPagamento;
   itens: ItemInput[];
@@ -202,11 +211,12 @@ export async function criarDespesaExtra(input: {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    const destinatario = input.destinatario?.trim()?.slice(0, 120) || null;
     const [r] = await conn.execute<ResultSetHeader>(
       `INSERT INTO despesas_extras
-         (obra_id, data, loja, categoria, forma_pagamento, foto_b64, foto_mimetype, observacoes, valor_total, desconto, created_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      [obraId, input.data, input.loja.trim(), input.categoria, input.forma_pagamento,
+         (obra_id, data, loja, destinatario, categoria, forma_pagamento, foto_b64, foto_mimetype, observacoes, valor_total, desconto, created_by)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [obraId, input.data, input.loja.trim(), destinatario, input.categoria, input.forma_pagamento,
        foto.b64, foto.mime, input.observacoes ?? null, valor_total, desconto, input.created_by ?? null]
     );
     const despesaId = r.insertId;
@@ -246,6 +256,7 @@ export async function atualizarDespesaExtra(input: {
   obra_id?: string;
   data?: string;
   loja?: string;
+  destinatario?: string | null;
   categoria?: Categoria;
   forma_pagamento?: FormaPagamento;
   itens?: ItemInput[];
@@ -261,6 +272,9 @@ export async function atualizarDespesaExtra(input: {
   const obra_id = input.obra_id ? Number(input.obra_id) : Number(atual.obra_id);
   const data    = input.data ?? atual.data;
   const loja    = input.loja ?? atual.loja;
+  const destinatario = input.destinatario !== undefined
+    ? (input.destinatario?.toString().trim().slice(0, 120) || null)
+    : (atual.destinatario ?? null);
   const categoria = input.categoria ?? atual.categoria;
   const forma_pagamento = input.forma_pagamento ?? atual.forma_pagamento;
   const observacoes = input.observacoes !== undefined ? input.observacoes : atual.observacoes;
@@ -292,10 +306,10 @@ export async function atualizarDespesaExtra(input: {
     await conn.beginTransaction();
     await conn.execute(
       `UPDATE despesas_extras SET
-         obra_id = ?, data = ?, loja = ?, categoria = ?, forma_pagamento = ?,
+         obra_id = ?, data = ?, loja = ?, destinatario = ?, categoria = ?, forma_pagamento = ?,
          foto_b64 = ?, foto_mimetype = ?, observacoes = ?, valor_total = ?, desconto = ?
        WHERE id = ? AND deleted_at IS NULL`,
-      [obra_id, data, loja, categoria, forma_pagamento, foto_b64, foto_mime,
+      [obra_id, data, loja, destinatario, categoria, forma_pagamento, foto_b64, foto_mime,
        observacoes, valor_total, desconto, id]
     );
     if (input.itens) {
@@ -399,6 +413,7 @@ function renderDespesaNaPagina(doc: PDFKit.PDFDocument, d: Awaited<ReturnType<ty
      .text(`Despesa #${String(d.id).padStart(3, '0')} — ${d.loja}`);
   doc.font('Helvetica').fontSize(10).fillColor('#444');
   doc.text(`Obra: ${d.obra_nome || '-'}`);
+  if (d.destinatario) doc.text(`Destinatário: ${d.destinatario}`);
   doc.text(`Data: ${fmtData(d.data)} · ${CAT_LABEL[String(d.categoria)] || d.categoria} · ${FORMA_LABEL[String(d.forma_pagamento)] || d.forma_pagamento}`);
   doc.moveDown(0.4);
 
@@ -509,7 +524,7 @@ export async function gerarPdfRelatorioDespesas(ids: string[], opts?: { obra_nom
   const corHex = t?.primary_color || '#10b981';
   const logoFile = path.join(__dirname, '..', 'public', 'romatec-logo-removebg-preview.png');
 
-  const doc = new PDFDocument({ size: 'A4', margin: 48, info: {
+  const doc = new PDFDocument({ size: 'A4', margin: 48, bufferPages: true, info: {
     Title: `Relatorio Despesas Extras (${ids.length} notas)`, Author: brand,
   }});
   const chunks: Buffer[] = [];
@@ -539,11 +554,13 @@ export async function gerarPdfRelatorioDespesas(ids: string[], opts?: { obra_nom
 
   doc.fontSize(9).fillColor('#444').font('Helvetica-Bold');
   let cy = doc.y;
-  doc.text('#', 48, cy, { width: 30 });
-  doc.text('Loja', 78, cy, { width: 220 });
-  doc.text('Data', 298, cy, { width: 60 });
-  doc.text('Categoria', 358, cy, { width: 70 });
-  doc.text('Total', 428, cy, { width: 119, align: 'right' });
+  // Colunas: # (28) | Loja (165) | Destinatário (95) | Data (55) | Categoria (65) | Total (89)
+  doc.text('#', 48, cy, { width: 28 });
+  doc.text('Loja', 76, cy, { width: 165 });
+  doc.text('Destinatário', 241, cy, { width: 95 });
+  doc.text('Data', 336, cy, { width: 55 });
+  doc.text('Categoria', 391, cy, { width: 65 });
+  doc.text('Total', 456, cy, { width: 91, align: 'right' });
   doc.font('Helvetica');
   cy = doc.y + 4;
   doc.moveTo(48, cy).lineTo(547, cy).strokeColor('#888').lineWidth(0.5).stroke();
@@ -551,11 +568,12 @@ export async function gerarPdfRelatorioDespesas(ids: string[], opts?: { obra_nom
   doc.fontSize(9).fillColor('#111');
   for (const d of despesas) {
     if (cy > 730) { doc.addPage(); cy = 60; }
-    doc.text(`#${String(d.id).padStart(3,'0')}`, 48, cy, { width: 30 });
-    doc.text(d.loja.slice(0, 40), 78, cy, { width: 220 });
-    doc.text(fmtData(d.data), 298, cy, { width: 60 });
-    doc.text(CAT_LABEL[String(d.categoria)] || String(d.categoria), 358, cy, { width: 70 });
-    doc.text(fmtBRL(d.valor_total), 428, cy, { width: 119, align: 'right' });
+    doc.text(`#${String(d.id).padStart(3,'0')}`, 48, cy, { width: 28 });
+    doc.text(d.loja.slice(0, 30), 76, cy, { width: 165 });
+    doc.text((d.destinatario || '-').slice(0, 18), 241, cy, { width: 95 });
+    doc.text(fmtData(d.data), 336, cy, { width: 55 });
+    doc.text(CAT_LABEL[String(d.categoria)] || String(d.categoria), 391, cy, { width: 65 });
+    doc.text(fmtBRL(d.valor_total), 456, cy, { width: 91, align: 'right' });
     cy += 14;
   }
   doc.moveTo(48, cy).lineTo(547, cy).strokeColor(corHex).lineWidth(1).stroke();
@@ -577,9 +595,17 @@ export async function gerarPdfRelatorioDespesas(ids: string[], opts?: { obra_nom
     renderDespesaNaPagina(doc, d, corHex);
   }
 
-  doc.fontSize(8).fillColor('#888').text(
-    `${brand} — Relatório consolidado.`, 48, 800, { width: 499, align: 'center' }
-  );
+  // Footer: escreve em CADA pagina ja existente (sem criar pagina nova vazia).
+  // bufferPages: true permite iterar e voltar com switchToPage.
+  const range = doc.bufferedPageRange();
+  for (let i = 0; i < range.count; i++) {
+    doc.switchToPage(range.start + i);
+    doc.fontSize(8).fillColor('#888').text(
+      `${brand} — Relatório consolidado · Pág. ${i + 1}/${range.count}`,
+      48, 815, { width: 499, align: 'center', lineBreak: false }
+    );
+  }
+  doc.flushPages();
   doc.end();
   await new Promise<void>(r => doc.on('end', () => r()));
   let principal: Buffer = Buffer.concat(chunks);

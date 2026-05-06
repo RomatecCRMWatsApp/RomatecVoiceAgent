@@ -2433,6 +2433,7 @@ function renderDespesasExtras() {
           <input type="checkbox" data-sel-desp="${d.id}" ${checked} style="width:20px; height:20px; margin-top:4px; cursor:pointer; accent-color:var(--neon);">
           <div style="flex:1; min-width:0;">
             <p style="margin:0; font-weight:600;">#${String(d.id).padStart(3,'0')} · ${escape(d.loja)}</p>
+            ${d.destinatario ? `<p style="margin:2px 0; font-size:12px; color:var(--neon);">→ ${escape(d.destinatario)}</p>` : ''}
             <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">
               ${escape(dataBR)} · <strong style="color:var(--gold);">${escape(fmt(d.valor_total))}</strong>
               ${desc > 0 ? `<span style="color:var(--danger); margin-left:6px;">(− ${escape(fmt(desc))} desc.)</span>` : ''}
@@ -2718,6 +2719,11 @@ async function renderDespesaFormInline(v) {
           <input id="despLoja" placeholder="Ex: Casa do Construtor, MercadoLivre, Loja do Bairro" value="${escape(despesaAtual?.loja || '')}" style="width:100%;">
         </label>
 
+        <label>Destinatário (quem recebeu / onde foi usado)
+          <input id="despDestinatario" maxlength="120" placeholder="Ex: Leonardo, Equipe Posto Chapadão, Cliente Marília" value="${escape(despesaAtual?.destinatario || '')}" style="width:100%;">
+          <span style="font-size:11px; color:var(--text-muted);">A obra continua vinculada — esse campo identifica QUEM usou o material dentro da obra.</span>
+        </label>
+
         <div style="border:1px solid var(--border); border-radius:8px; padding:10px;">
           <p style="margin:0 0 6px; font-weight:600; font-size:13px;">📋 Itens da nota</p>
           <div style="display:grid; grid-template-columns:1fr 70px 100px 30px; gap:6px; font-size:10px; color:var(--text-muted); margin-bottom:4px; padding:0 2px;">
@@ -2963,6 +2969,7 @@ async function renderDespesaFormInline(v) {
       obra_id: obraId,
       data,
       loja,
+      destinatario: document.getElementById('despDestinatario')?.value.trim() || null,
       categoria: document.getElementById('despCategoria').value,
       forma_pagamento: document.getElementById('despForma').value,
       itens: itensValidos,
