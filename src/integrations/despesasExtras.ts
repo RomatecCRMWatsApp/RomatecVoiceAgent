@@ -12,7 +12,7 @@ const FORMAS: FormaPagamento[] = ['pix', 'dinheiro', 'cartao_credito', 'cartao_d
 const MIMES_FOTO = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const FOTO_MAX_BYTES = 5 * 1024 * 1024; // 5MB
 
-export interface ItemInput { descricao: string; valor: number; ordem?: number }
+export interface ItemInput { descricao: string; valor: number; quantidade?: number; ordem?: number }
 
 export async function listarDespesasExtras(input: { obra_id?: string; from?: string; to?: string; limite?: number } = {}) {
   const limite = Math.min(Math.max(Number(input.limite) || 100, 1), 500);
@@ -28,11 +28,11 @@ export async function listarDespesasExtras(input: { obra_id?: string; from?: str
   const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
   // Carrega itens em uma query
   const ids = rows.map(r => Number(r.id));
-  const itensPorDespesa: Record<number, Array<{ id: number; descricao: string; valor: number; ordem: number }>> = {};
+  const itensPorDespesa: Record<number, Array<{ id: number; descricao: string; valor: number; quantidade: number; ordem: number }>> = {};
   if (ids.length > 0) {
     const ph = ids.map(() => '?').join(',');
     const [itens] = await pool.execute<RowDataPacket[]>(
-      `SELECT id, despesa_id, descricao, valor, ordem FROM despesas_extras_itens
+      `SELECT id, despesa_id, descricao, valor, quantidade, ordem FROM despesas_extras_itens
         WHERE despesa_id IN (${ph}) ORDER BY despesa_id, ordem`, ids
     );
     for (const it of itens) {
@@ -40,7 +40,9 @@ export async function listarDespesasExtras(input: { obra_id?: string; from?: str
       if (!itensPorDespesa[pid]) itensPorDespesa[pid] = [];
       itensPorDespesa[pid].push({
         id: Number(it.id), descricao: String(it.descricao),
-        valor: Number(it.valor), ordem: Number(it.ordem),
+        valor: Number(it.valor),
+        quantidade: Number(it.quantidade ?? 1),
+        ordem: Number(it.ordem),
       });
     }
   }
@@ -57,6 +59,7 @@ export async function listarDespesasExtras(input: { obra_id?: string; from?: str
       tem_foto: !!r.foto_b64,
       foto_mimetype: r.foto_mimetype ?? null,
       observacoes: r.observacoes,
+      desconto: Number(r.desconto || 0),
       valor_total: Number(r.valor_total),
       created_by: r.created_by,
       created_at: r.created_at,
@@ -76,7 +79,7 @@ export async function buscarDespesaExtra(id: string) {
   if (rows.length === 0) throw new Error('Despesa nao encontrada');
   const r = rows[0];
   const [itens] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, descricao, valor, ordem FROM despesas_extras_itens
+    `SELECT id, descricao, valor, quantidade, ordem FROM despesas_extras_itens
       WHERE despesa_id = ? ORDER BY ordem`, [idN]
   );
   return {
@@ -91,16 +94,20 @@ export async function buscarDespesaExtra(id: string) {
     foto_mimetype: r.foto_mimetype ?? null,
     tem_foto: !!r.foto_b64,
     observacoes: r.observacoes,
+    desconto: Number(r.desconto || 0),
     valor_total: Number(r.valor_total),
     created_by: r.created_by,
     created_at: r.created_at,
     itens: (itens as RowDataPacket[]).map(it => ({
       id: Number(it.id), descricao: String(it.descricao),
-      valor: Number(it.valor), ordem: Number(it.ordem),
+      valor: Number(it.valor),
+      quantidade: Number(it.quantidade ?? 1),
+      ordem: Number(it.ordem),
     })),
   };
 }
 
+// v1.67.2: itens agora tem quantidade. Subtotal do item = qtd × valor unitario.
 function validarItens(itens: ItemInput[]): number {
   if (!Array.isArray(itens) || itens.length === 0) throw new Error('Pelo menos 1 item obrigatorio');
   let total = 0;
@@ -108,7 +115,9 @@ function validarItens(itens: ItemInput[]): number {
     if (!it.descricao || !String(it.descricao).trim()) throw new Error('Item sem descricao');
     const v = Number(it.valor);
     if (!Number.isFinite(v) || v <= 0) throw new Error(`Valor invalido para "${it.descricao}"`);
-    total += v;
+    const q = Number(it.quantidade);
+    const qtd = (Number.isFinite(q) && q > 0) ? q : 1;
+    total += v * qtd;
   }
   return Math.round(total * 100) / 100;
 }
@@ -135,6 +144,7 @@ export async function criarDespesaExtra(input: {
   foto_b64?: string;
   foto_mimetype?: string;
   observacoes?: string;
+  desconto?: number;
   created_by?: string;
 }) {
   const obraId = Number(input.obra_id);
@@ -144,7 +154,10 @@ export async function criarDespesaExtra(input: {
   if (!input.loja?.trim()) throw new Error('Loja obrigatoria');
   if (!CATEGORIAS.includes(input.categoria)) throw new Error('Categoria invalida');
   if (!FORMAS.includes(input.forma_pagamento)) throw new Error('Forma de pagamento invalida');
-  const valor_total = validarItens(input.itens);
+  const subtotal = validarItens(input.itens);
+  const desconto = Math.max(0, Math.round(Number(input.desconto || 0) * 100) / 100);
+  if (desconto > subtotal) throw new Error(`Desconto (R$ ${desconto.toFixed(2)}) nao pode ser maior que o subtotal (R$ ${subtotal.toFixed(2)})`);
+  const valor_total = Math.round((subtotal - desconto) * 100) / 100;
   const foto = validarFoto(input.foto_b64, input.foto_mimetype);
 
   const conn = await pool.getConnection();
@@ -152,23 +165,25 @@ export async function criarDespesaExtra(input: {
     await conn.beginTransaction();
     const [r] = await conn.execute<ResultSetHeader>(
       `INSERT INTO despesas_extras
-         (obra_id, data, loja, categoria, forma_pagamento, foto_b64, foto_mimetype, observacoes, valor_total, created_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+         (obra_id, data, loja, categoria, forma_pagamento, foto_b64, foto_mimetype, observacoes, valor_total, desconto, created_by)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [obraId, input.data, input.loja.trim(), input.categoria, input.forma_pagamento,
-       foto.b64, foto.mime, input.observacoes ?? null, valor_total, input.created_by ?? null]
+       foto.b64, foto.mime, input.observacoes ?? null, valor_total, desconto, input.created_by ?? null]
     );
     const despesaId = r.insertId;
     for (let i = 0; i < input.itens.length; i++) {
       const it = input.itens[i];
+      const qtd = Number(it.quantidade);
+      const qtdFinal = (Number.isFinite(qtd) && qtd > 0) ? qtd : 1;
       await conn.execute(
-        `INSERT INTO despesas_extras_itens (despesa_id, descricao, valor, ordem) VALUES (?,?,?,?)`,
-        [despesaId, String(it.descricao).trim().slice(0, 200), Number(it.valor), it.ordem ?? i]
+        `INSERT INTO despesas_extras_itens (despesa_id, descricao, valor, quantidade, ordem) VALUES (?,?,?,?,?)`,
+        [despesaId, String(it.descricao).trim().slice(0, 200), Number(it.valor), qtdFinal, it.ordem ?? i]
       );
     }
     await conn.commit();
     return {
-      ok: true as const, insertId: despesaId, valor_total,
-      message: `Despesa #${despesaId} criada (R$ ${valor_total.toFixed(2)}).`,
+      ok: true as const, insertId: despesaId, valor_total, desconto,
+      message: `Despesa #${despesaId} criada (R$ ${valor_total.toFixed(2)}${desconto > 0 ? ` com desconto de R$ ${desconto.toFixed(2)}` : ''}).`,
     };
   } catch (err) {
     await conn.rollback();
@@ -189,6 +204,7 @@ export async function atualizarDespesaExtra(input: {
   foto_b64?: string | null;
   foto_mimetype?: string | null;
   observacoes?: string | null;
+  desconto?: number;
 }) {
   const id = Number(input.id);
   if (!id) throw new Error('id obrigatorio');
@@ -213,8 +229,15 @@ export async function atualizarDespesaExtra(input: {
     foto_b64 = f.b64; foto_mime = f.mime;
   }
 
-  const itens = input.itens ?? atual.itens.map(i => ({ descricao: i.descricao, valor: i.valor, ordem: i.ordem }));
-  const valor_total = validarItens(itens);
+  const itens = input.itens ?? atual.itens.map(i => ({
+    descricao: i.descricao, valor: i.valor, quantidade: i.quantidade, ordem: i.ordem
+  }));
+  const subtotal = validarItens(itens);
+  const desconto = input.desconto !== undefined
+    ? Math.max(0, Math.round(Number(input.desconto) * 100) / 100)
+    : Number(atual.desconto || 0);
+  if (desconto > subtotal) throw new Error(`Desconto (R$ ${desconto.toFixed(2)}) nao pode ser maior que o subtotal (R$ ${subtotal.toFixed(2)})`);
+  const valor_total = Math.round((subtotal - desconto) * 100) / 100;
 
   const conn = await pool.getConnection();
   try {
@@ -222,24 +245,26 @@ export async function atualizarDespesaExtra(input: {
     await conn.execute(
       `UPDATE despesas_extras SET
          obra_id = ?, data = ?, loja = ?, categoria = ?, forma_pagamento = ?,
-         foto_b64 = ?, foto_mimetype = ?, observacoes = ?, valor_total = ?
+         foto_b64 = ?, foto_mimetype = ?, observacoes = ?, valor_total = ?, desconto = ?
        WHERE id = ? AND deleted_at IS NULL`,
       [obra_id, data, loja, categoria, forma_pagamento, foto_b64, foto_mime,
-       observacoes, valor_total, id]
+       observacoes, valor_total, desconto, id]
     );
     if (input.itens) {
       // Substitui itens
       await conn.execute(`DELETE FROM despesas_extras_itens WHERE despesa_id = ?`, [id]);
       for (let i = 0; i < input.itens.length; i++) {
         const it = input.itens[i];
+        const qtd = Number(it.quantidade);
+        const qtdFinal = (Number.isFinite(qtd) && qtd > 0) ? qtd : 1;
         await conn.execute(
-          `INSERT INTO despesas_extras_itens (despesa_id, descricao, valor, ordem) VALUES (?,?,?,?)`,
-          [id, String(it.descricao).trim().slice(0, 200), Number(it.valor), it.ordem ?? i]
+          `INSERT INTO despesas_extras_itens (despesa_id, descricao, valor, quantidade, ordem) VALUES (?,?,?,?,?)`,
+          [id, String(it.descricao).trim().slice(0, 200), Number(it.valor), qtdFinal, it.ordem ?? i]
         );
       }
     }
     await conn.commit();
-    return { ok: true as const, valor_total, message: `Despesa #${id} atualizada.` };
+    return { ok: true as const, valor_total, desconto, message: `Despesa #${id} atualizada.` };
   } catch (err) {
     await conn.rollback();
     throw err;

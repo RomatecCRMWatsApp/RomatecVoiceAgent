@@ -2306,9 +2306,13 @@ function renderDespesasExtras() {
 
   const cards = lista.map(d => {
     const cat = desCategoria(d.categoria);
-    const itensTexto = (d.itens || []).slice(0, 3).map(i => i.descricao).join(' · ');
+    const itensTexto = (d.itens || []).slice(0, 3).map(i => {
+      const qtd = Number(i.quantidade ?? 1);
+      return qtd > 1 ? `${qtd}x ${i.descricao}` : i.descricao;
+    }).join(' · ');
     const maisItens = (d.itens || []).length > 3 ? ` (+${d.itens.length - 3})` : '';
     const dataBR = d.data ? parseDataBR(d.data) : '-';
+    const desc = Number(d.desconto || 0);
     return `
     <div class="card" style="border-left:4px solid ${cat.cor}; cursor:pointer;" data-edit-desp="${d.id}">
       <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
@@ -2316,6 +2320,7 @@ function renderDespesasExtras() {
           <p style="margin:0; font-weight:600;">#${String(d.id).padStart(3,'0')} · ${escape(d.loja)}</p>
           <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">
             ${escape(dataBR)} · <strong style="color:var(--gold);">${escape(fmt(d.valor_total))}</strong>
+            ${desc > 0 ? `<span style="color:var(--danger); margin-left:6px;">(− ${escape(fmt(desc))} desc.)</span>` : ''}
           </p>
           <p style="margin:4px 0; font-size:11px; color:var(--text-muted);">
             ${(d.itens||[]).length} ${(d.itens||[]).length === 1 ? 'item' : 'itens'}: ${escape(itensTexto)}${maisItens}
@@ -2404,11 +2409,15 @@ async function renderDespesaFormInline(v) {
   const hoje = new Date().toISOString().slice(0, 10);
   const dataValor = despesaAtual?.data ? String(despesaAtual.data).slice(0, 10) : hoje;
 
-  // Itens iniciais
+  // Itens iniciais (v1.67.2: cada item agora tem quantidade)
   if (!state.despesaItensTemp) {
     state.despesaItensTemp = despesaAtual
-      ? despesaAtual.itens.map(i => ({ descricao: i.descricao, valor: Number(i.valor) }))
-      : [{ descricao: '', valor: 0 }];
+      ? despesaAtual.itens.map(i => ({ descricao: i.descricao, valor: Number(i.valor), quantidade: Number(i.quantidade ?? 1) }))
+      : [{ descricao: '', valor: 0, quantidade: 1 }];
+  }
+  // Desconto inicial
+  if (state.despesaDescontoTemp === undefined) {
+    state.despesaDescontoTemp = despesaAtual ? Number(despesaAtual.desconto || 0) : 0;
   }
   // Foto inicial
   if (state.despesaFotoTemp === undefined) {
@@ -2450,11 +2459,24 @@ async function renderDespesaFormInline(v) {
 
         <div style="border:1px solid var(--border); border-radius:8px; padding:10px;">
           <p style="margin:0 0 6px; font-weight:600; font-size:13px;">📋 Itens da nota</p>
+          <div style="display:grid; grid-template-columns:1fr 70px 100px 30px; gap:6px; font-size:10px; color:var(--text-muted); margin-bottom:4px; padding:0 2px;">
+            <span>DESCRIÇÃO</span><span style="text-align:center;">QTD</span><span style="text-align:right;">V. UNIT.</span><span></span>
+          </div>
           <div id="despItensLista" style="display:flex; flex-direction:column; gap:6px;"></div>
           <button type="button" id="despAddItem" style="margin-top:8px; width:100%; background:var(--bg-elev); border:1px dashed var(--border-strong); color:var(--text);">+ ADICIONAR ITEM</button>
+          <div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:12px; color:var(--text-muted);">Subtotal dos itens:</span>
+            <strong id="despSubtotalCalc" style="font-size:14px;">R$ 0,00</strong>
+          </div>
+          <div style="margin-top:6px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <label style="font-size:12px; color:var(--text-muted); margin:0;">Desconto (R$):</label>
+            <input id="despDesconto" type="number" min="0" step="0.01" placeholder="0,00"
+              value="${Number(state.despesaDescontoTemp || 0).toFixed(2)}"
+              style="width:120px; text-align:right; padding:6px; font-size:13px;">
+          </div>
           <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-size:12px; color:var(--text-muted);">Total da nota:</span>
-            <strong id="despTotalCalc" style="color:var(--gold); font-size:18px;">R$ 0,00</strong>
+            <span style="font-size:12px; color:var(--text-muted); font-weight:600;">Total da nota:</span>
+            <strong id="despTotalCalc" style="color:var(--gold); font-size:20px;">R$ 0,00</strong>
           </div>
         </div>
 
@@ -2475,11 +2497,13 @@ async function renderDespesaFormInline(v) {
       </div>
     </div>`;
 
+  const fmtBR = n => Number(n||0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const renderItens = () => {
     const html = state.despesaItensTemp.map((it, i) => `
-      <div style="display:flex; gap:6px; align-items:center;">
-        <input data-it-desc="${i}" placeholder="Descrição (ex: extensão 10m)" value="${escape(it.descricao || '')}" style="flex:2; font-size:12px; padding:6px;">
-        <input data-it-val="${i}" type="number" min="0" step="0.01" placeholder="0,00" value="${Number(it.valor) || ''}" style="flex:1; font-size:12px; padding:6px; text-align:right;">
+      <div style="display:grid; grid-template-columns:1fr 70px 100px 30px; gap:6px; align-items:center;">
+        <input data-it-desc="${i}" placeholder="Descrição (ex: extensão 10m)" value="${escape(it.descricao || '')}" style="font-size:12px; padding:6px;">
+        <input data-it-qtd="${i}"  type="number" min="0.001" step="0.001" placeholder="1" value="${Number(it.quantidade) || 1}" style="font-size:12px; padding:6px; text-align:center;">
+        <input data-it-val="${i}"  type="number" min="0" step="0.01" placeholder="0,00" value="${Number(it.valor) || ''}" style="font-size:12px; padding:6px; text-align:right;">
         <button type="button" data-rm-it="${i}" class="btn-danger" style="padding:4px 8px; font-size:14px;" ${state.despesaItensTemp.length === 1 ? 'disabled' : ''}>×</button>
       </div>`).join('');
     document.getElementById('despItensLista').innerHTML = html;
@@ -2487,13 +2511,25 @@ async function renderDespesaFormInline(v) {
     recalcularTotal();
   };
   const recalcularTotal = () => {
-    const total = state.despesaItensTemp.reduce((s, i) => s + (Number(i.valor) || 0), 0);
-    document.getElementById('despTotalCalc').textContent =
-      Number(total).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const subtotal = state.despesaItensTemp.reduce((s, i) =>
+      s + ((Number(i.valor) || 0) * (Number(i.quantidade) || 1)), 0);
+    const desconto = Math.max(0, Number(state.despesaDescontoTemp) || 0);
+    const total = Math.max(0, subtotal - desconto);
+    document.getElementById('despSubtotalCalc').textContent = fmtBR(subtotal);
+    document.getElementById('despTotalCalc').textContent = fmtBR(total);
+    // alerta visual se desconto > subtotal
+    const inpDesc = document.getElementById('despDesconto');
+    if (inpDesc) {
+      inpDesc.style.borderColor = (desconto > subtotal && subtotal > 0) ? 'var(--danger)' : '';
+    }
   };
   const bindItensHandlers = () => {
     document.querySelectorAll('[data-it-desc]').forEach(el => el.oninput = () => {
       state.despesaItensTemp[Number(el.dataset.itDesc)].descricao = el.value;
+    });
+    document.querySelectorAll('[data-it-qtd]').forEach(el => el.oninput = () => {
+      state.despesaItensTemp[Number(el.dataset.itQtd)].quantidade = Number(el.value) || 1;
+      recalcularTotal();
     });
     document.querySelectorAll('[data-it-val]').forEach(el => el.oninput = () => {
       state.despesaItensTemp[Number(el.dataset.itVal)].valor = Number(el.value) || 0;
@@ -2506,9 +2542,15 @@ async function renderDespesaFormInline(v) {
     });
   };
   renderItens();
+  // Listener do campo desconto (recalcula total ao alterar)
+  const inpDesc = document.getElementById('despDesconto');
+  if (inpDesc) inpDesc.oninput = () => {
+    state.despesaDescontoTemp = Number(inpDesc.value) || 0;
+    recalcularTotal();
+  };
 
   document.getElementById('despAddItem').onclick = () => {
-    state.despesaItensTemp.push({ descricao: '', valor: 0 });
+    state.despesaItensTemp.push({ descricao: '', valor: 0, quantidade: 1 });
     renderItens();
   };
 
@@ -2547,6 +2589,7 @@ async function renderDespesaFormInline(v) {
     state.despesaEditandoId = null;
     state.despesaItensTemp = null;
     state.despesaFotoTemp = undefined;
+    state.despesaDescontoTemp = undefined;
     render();
   };
   document.querySelector('[data-desp-voltar]').onclick = voltar;
@@ -2559,8 +2602,17 @@ async function renderDespesaFormInline(v) {
     if (!obraId)   return alert('Selecione a obra.');
     if (!data)     return alert('Informe a data.');
     if (!loja)     return alert('Informe loja/fornecedor.');
-    const itensValidos = state.despesaItensTemp.filter(i => i.descricao?.trim() && Number(i.valor) > 0);
+    const itensValidos = state.despesaItensTemp
+      .filter(i => i.descricao?.trim() && Number(i.valor) > 0)
+      .map(i => ({
+        descricao: i.descricao.trim(),
+        valor: Number(i.valor),
+        quantidade: Number(i.quantidade) > 0 ? Number(i.quantidade) : 1,
+      }));
     if (itensValidos.length === 0) return alert('Pelo menos 1 item com descrição e valor > 0.');
+    const subtotal = itensValidos.reduce((s, i) => s + i.valor * i.quantidade, 0);
+    const desconto = Math.max(0, Number(state.despesaDescontoTemp) || 0);
+    if (desconto > subtotal) return alert(`Desconto (R$ ${desconto.toFixed(2)}) não pode ser maior que o subtotal (R$ ${subtotal.toFixed(2)}).`);
 
     const btn = document.getElementById('despSalvar');
     btn.disabled = true; btn.textContent = 'Salvando...';
@@ -2572,6 +2624,7 @@ async function renderDespesaFormInline(v) {
       categoria: document.getElementById('despCategoria').value,
       forma_pagamento: document.getElementById('despForma').value,
       itens: itensValidos,
+      desconto,
       observacoes: document.getElementById('despObs').value.trim() || null,
     };
     // Foto: envia se nova ou se mudou. Se editando e mantém a existente, não envia (backend mantém).

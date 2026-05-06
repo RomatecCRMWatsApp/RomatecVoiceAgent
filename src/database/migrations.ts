@@ -1000,10 +1000,24 @@ export async function runMigrations(): Promise<void> {
       despesa_id  INT NOT NULL,
       descricao   VARCHAR(200) NOT NULL,
       valor       DECIMAL(10,2) NOT NULL,
+      quantidade  DECIMAL(10,3) NOT NULL DEFAULT 1,
       ordem       INT NOT NULL DEFAULT 0,
       INDEX idx_despesa (despesa_id, ordem)
     )
   `);
+  // v1.67.2: campos novos (quantidade nos itens + desconto na nota).
+  // Idempotente — ignora "Duplicate column".
+  for (const col of [
+    "ALTER TABLE despesas_extras_itens ADD COLUMN quantidade DECIMAL(10,3) NOT NULL DEFAULT 1 AFTER valor",
+    "ALTER TABLE despesas_extras ADD COLUMN desconto DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER valor_total",
+  ]) {
+    try { await pool.execute(col); }
+    catch (err) {
+      if (!/Duplicate column|already exists/i.test((err as Error).message)) {
+        console.warn('[migrations] alter despesas falhou:', (err as Error).message.slice(0, 100));
+      }
+    }
+  }
 
   // v1.66.9: anexos da Proposta de Consultoria (Planta Arquitetonica/Mapa).
   // Aceita PDF, PNG, JPEG. Sem limite de quantidade. Conteudo em base64
