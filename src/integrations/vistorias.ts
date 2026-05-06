@@ -265,3 +265,132 @@ export async function gerarHtmlRelatorio(vistoriaId: string): Promise<string> {
   <script>window.onload = () => window.print();</script>
 </body></html>`;
 }
+
+// v1.67.1: PDF binario via PDFKit + envio WhatsApp/Telegram (paridade Proposta).
+import PDFDocument from 'pdfkit';
+import path from 'path';
+import fs from 'fs';
+import { sendDocument as sendWhatsAppDocument } from './whatsapp';
+import { sendDocument as sendTelegramDocument } from './telegram';
+import { getTenantSettings } from '../services/tenantSettings';
+
+export async function gerarPdfVistoria(vistoriaId: string): Promise<Buffer> {
+  const v = await buscarVistoria(vistoriaId);
+  const [obras] = await pool.execute<RowDataPacket[]>(
+    'SELECT nome, cliente, endereco, cidade FROM romatec_obras WHERE id = ?', [v.obra_id]
+  );
+  const obra = obras[0] ?? { nome: '—', cliente: null, endereco: null, cidade: null };
+  const [fotos] = await pool.execute<FotoRow[]>(
+    'SELECT id, legenda, mime, data_base64, ordem FROM romatec_obra_vistoria_fotos WHERE vistoria_id = ? ORDER BY ordem ASC, id ASC',
+    [vistoriaId]
+  );
+  const t = await getTenantSettings(1).catch(() => null);
+  const brand = t?.brand_name || 'Romatec Consultoria Imobiliaria';
+  const corHex = t?.primary_color || '#10b981';
+  const logoFile = path.join(__dirname, '..', 'public', 'romatec-logo-removebg-preview.png');
+
+  const doc = new PDFDocument({ size: 'A4', margin: 48, info: {
+    Title: `Vistoria ${v.titulo || '#' + v.id}`,
+    Author: brand,
+  }});
+  const chunks: Buffer[] = [];
+  doc.on('data', (c: Buffer) => chunks.push(c));
+
+  if (fs.existsSync(logoFile)) {
+    try { doc.image(logoFile, { fit: [120, 60], align: 'center' }); } catch { /* opt */ }
+  } else {
+    doc.fontSize(16).fillColor(corHex).text(brand, { align: 'center' });
+  }
+  doc.moveDown(0.5);
+  doc.strokeColor(corHex).lineWidth(2).moveTo(48, doc.y).lineTo(547, doc.y).stroke();
+  doc.moveDown(0.8);
+  doc.fontSize(15).fillColor('#111').text('RELATÓRIO DE VISTORIA TÉCNICA', { align: 'center' });
+  doc.fontSize(11).fillColor('#444').text(`${v.titulo || 'Vistoria #' + v.id}  ·  ${formatBRDate(v.data)}`, { align: 'center' });
+  doc.moveDown(0.8);
+
+  doc.fontSize(11).fillColor(corHex).text('Obra');
+  doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+  doc.fontSize(10).fillColor('#111');
+  doc.text(`${obra.nome}${obra.cliente ? ' — ' + obra.cliente : ''}`);
+  if (obra.endereco) doc.text(`${obra.endereco}${obra.cidade ? ', ' + obra.cidade : ''}`);
+  if (v.vistoriador) doc.text(`Vistoriador: ${v.vistoriador}`);
+  doc.text(`Status: ${v.status_obra.toUpperCase()}`);
+  doc.moveDown(0.6);
+
+  doc.fontSize(11).fillColor(corHex).text('Descrição');
+  doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+  doc.fontSize(10).fillColor('#111').text(v.descricao || '-', { width: 499 });
+  doc.moveDown(0.6);
+
+  if (v.observacoes) {
+    doc.fontSize(11).fillColor(corHex).text('Observações');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    doc.fontSize(10).fillColor('#111').text(v.observacoes, { width: 499 });
+    doc.moveDown(0.6);
+  }
+  if (v.pendencias) {
+    doc.fontSize(11).fillColor('#dc2626').text('Pendências / Não-conformidades');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    doc.fontSize(10).fillColor('#111').text(v.pendencias, { width: 499 });
+    doc.moveDown(0.6);
+  }
+
+  // Fotos: cada uma em pagina propria com legenda
+  for (const f of fotos) {
+    doc.addPage();
+    doc.fontSize(11).fillColor(corHex).text(`Foto ${f.ordem + 1}${f.legenda ? ' — ' + f.legenda : ''}`);
+    doc.moveDown(0.4);
+    try {
+      const buf = Buffer.from(f.data_base64, 'base64');
+      doc.image(buf, { fit: [499, 650], align: 'center' });
+    } catch (err) {
+      doc.fontSize(9).fillColor('#999').text(`(falha ao renderizar foto: ${(err as Error).message})`);
+    }
+  }
+
+  const footerY = 800;
+  doc.fontSize(8).fillColor('#888')
+     .text(`${brand} — Relatório gerado eletronicamente.`, 48, footerY, { width: 499, align: 'center' });
+  doc.end();
+  await new Promise<void>(resolve => doc.on('end', () => resolve()));
+  return Buffer.concat(chunks);
+}
+
+export async function enviarVistoriaWhatsApp(input: { id: string; telefone?: string }) {
+  if (!input.telefone?.trim()) throw new Error('Telefone obrigatorio.');
+  const v = await buscarVistoria(input.id);
+  const pdfBuf = await gerarPdfVistoria(input.id);
+  const fileName = `Vistoria_${v.id}_${(v.titulo || 'obra').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+  const r = await sendWhatsAppDocument(input.telefone.trim(), pdfBuf.toString('base64'), fileName);
+  return {
+    ok: true as const,
+    message: `Vistoria #${v.id} enviada para ${r.phone} (msgId ${r.messageId || '?'}).`,
+    messageId: r.messageId, phone: r.phone,
+  };
+}
+
+export async function enviarVistoriaTelegram(input: { id: string; chatId?: string }) {
+  const v = await buscarVistoria(input.id);
+  const chatId = input.chatId
+    || (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
+    || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+  if (!chatId) throw new Error('chatId Telegram obrigatorio (TELEGRAM_LEAD_CHAT_ID ou TELEGRAM_AUTHORIZED_USER_IDS).');
+  const pdfBuf = await gerarPdfVistoria(input.id);
+  if (pdfBuf.length > 50 * 1024 * 1024) {
+    throw new Error(`PDF tem ${(pdfBuf.length / 1024 / 1024).toFixed(1)}MB e Telegram aceita ate 50MB.`);
+  }
+  const fileName = `Vistoria_${v.id}_${(v.titulo || 'obra').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+  try {
+    await sendTelegramDocument(chatId, pdfBuf, fileName, `Vistoria #${v.id} — ${v.titulo || formatBRDate(v.data)}`);
+  } catch (err) {
+    const e = err as Error & { response?: { data?: { description?: string; error_code?: number } } };
+    const desc = e.response?.data?.description || e.message;
+    const code = e.response?.data?.error_code;
+    throw new Error(`Telegram rejeitou: ${desc}${code ? ` (code ${code})` : ''}`);
+  }
+  return { ok: true as const, message: `Vistoria #${v.id} enviada via Telegram (chat ${chatId}, ${(pdfBuf.length / 1024).toFixed(0)} KB).` };
+}

@@ -1062,6 +1062,21 @@ app.get('/api/vistorias/:id/relatorio', async (req, res) => {
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v1.67.1: PDF + envio WhatsApp/Telegram da vistoria (paridade Proposta)
+app.get('/api/vistorias/:id/pdf', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const buf = await vistorias.gerarPdfVistoria(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Vistoria_${id}.pdf"`);
+    res.send(buf);
+  } catch (err) { res.status(404).json({ error: (err as Error).message }); }
+});
+app.post('/api/vistorias/:id/enviar-whatsapp',
+  apiHandle(args => vistorias.enviarVistoriaWhatsApp(args as Parameters<typeof vistorias.enviarVistoriaWhatsApp>[0])));
+app.post('/api/vistorias/:id/enviar-telegram',
+  apiHandle(args => vistorias.enviarVistoriaTelegram(args as Parameters<typeof vistorias.enviarVistoriaTelegram>[0])));
+
 // Cofre Obsidian
 app.post('/api/cofre/sincronizar', apiHandle(() => cofre.sincronizarCofreMemoria()));
 app.get ('/api/cofre/exportar',    apiHandle(() => cofre.exportarVaultZip()));

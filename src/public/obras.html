@@ -3276,20 +3276,33 @@ function renderVto() {
     return;
   }
 
+  // v1.67.1: paridade visual com Proposta — botoes Ver/PDF/Enviar/Telegram/Excluir
+  const obraTel = state.obras.find(o => String(o.id) === String(state.currentObra))?.telefone_cliente || '';
   const lista = state.vistorias.map(vis => {
     const sb = { regular:'badge-success', atencao:'badge-warning', critica:'badge-danger' }[vis.status_obra] || 'badge-info';
     return `<div class="card">
-      <div style="display:flex; justify-content:space-between; gap:8px;">
-        <div style="flex:1; min-width:0;">
-          <p style="margin:0; font-weight:500;">${escape(vis.titulo || 'Vistoria ' + vis.id)}</p>
-          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">${escape(vis.data)} · ${escape(vis.vistoriador||'-')} · ${vis.qtd_fotos} foto(s)</p>
-          <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
-            <span class="badge ${sb}">${escape(vis.status_obra)}</span>
-            <a class="badge badge-info" style="text-decoration:none;" href="/api/vistorias/${vis.id}/relatorio" target="_blank">📄 Imprimir/PDF</a>
-          </div>
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+          <p style="margin:0; font-weight:600;">${escape(vis.titulo || 'Vistoria #' + vis.id)}</p>
+          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">
+            ${escape(vis.data)} · ${escape(vis.vistoriador||'-')}
+            ${vis.qtd_fotos > 0 ? ` · 📷 ${vis.qtd_fotos} foto${vis.qtd_fotos>1?'s':''}` : ''}
+          </p>
+          <span class="badge ${sb}">${escape(vis.status_obra)}</span>
           <p style="margin:6px 0 0; font-size:12px; color:var(--text-muted);">${escape((vis.descricao||'').slice(0,150))}${(vis.descricao||'').length>150?'…':''}</p>
         </div>
-        <button class="btn-danger" data-del-vto="${vis.id}">Excluir</button>
+        <div style="display:flex; flex-direction:column; gap:6px; min-width:230px;">
+          <input data-tel-vto="${vis.id}" placeholder="WhatsApp (ex: 5598...)" value="${escape(obraTel)}" style="font-size:12px; padding:6px 8px;">
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-view-vto="${vis.id}" title="Visualizar HTML" style="flex:1; min-width:70px;">👁 Ver</button>
+            <button data-pdf-vto="${vis.id}" title="Baixar PDF" style="flex:1; min-width:70px;">📄 PDF</button>
+            <button data-send-vto="${vis.id}" title="Enviar WhatsApp" style="flex:1; min-width:80px; background:var(--success); color:#fff; border-color:var(--success);">📱 Enviar</button>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button data-tele-vto="${vis.id}" style="flex:1;">✈️ Telegram</button>
+            <button class="btn-danger" data-del-vto="${vis.id}" style="flex:1;">Excluir</button>
+          </div>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -3358,8 +3371,14 @@ function renderVto() {
   document.getElementById('addVto').onclick = async () => {
     const desc = document.getElementById('vDesc').value.trim();
     if (!desc) return alert('Descreva a vistoria');
+    const btn = document.getElementById('addVto');
+    btn.disabled = true;
+    const fotosCount = state.vtoFotos.length;
+    btn.textContent = fotosCount > 0 ? `Salvando (${fotosCount} foto${fotosCount>1?'s':''})...` : 'Salvando...';
     try {
-      await api('/api/vistorias', {
+      // v1.67.1: bug fix — backend exige confirm:true. Sem isso retornava
+      // { preview: true } e o frontend limpava as fotos sem salvar nada.
+      const r = await api('/api/vistorias', {
         method: 'POST',
         body: JSON.stringify({
           obra_id: state.currentObra,
@@ -3371,15 +3390,60 @@ function renderVto() {
           pendencias: document.getElementById('vPend').value.trim() || null,
           status_obra: document.getElementById('vStatus').value,
           fotos: state.vtoFotos,
+          confirm: true,
         }),
       });
+      // Defesa: se backend devolver preview, NAO limpa fotos
+      if (r && r.preview) {
+        alert('Atenção: backend retornou preview, sem salvar. ' + (r.message || ''));
+        return;
+      }
+      alert('✅ Vistoria salva' + (fotosCount > 0 ? ` com ${fotosCount} foto(s).` : '.'));
       state.vtoFotos = [];
       render();
     } catch (e) { alert('Erro: ' + e.message); }
+    finally { btn.disabled = false; btn.textContent = 'Salvar vistoria'; }
   };
 
+  // v1.67.1: handlers de Ver/PDF/Enviar WhatsApp/Telegram (paridade Proposta)
+  document.querySelectorAll('[data-view-vto]').forEach(b => b.onclick = () => {
+    window.open('/api/vistorias/' + b.dataset.viewVto + '/relatorio', '_blank');
+  });
+  document.querySelectorAll('[data-pdf-vto]').forEach(b => b.onclick = () => {
+    window.open('/api/vistorias/' + b.dataset.pdfVto + '/pdf', '_blank');
+  });
+  document.querySelectorAll('[data-send-vto]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.sendVto;
+    const tel = (document.querySelector(`[data-tel-vto="${id}"]`)?.value || '').trim();
+    if (!tel) return alert('Informe o WhatsApp de destino.');
+    b.disabled = true; b.textContent = 'Enviando...';
+    try {
+      const r = await api('/api/vistorias/' + id + '/enviar-whatsapp', {
+        method: 'POST', body: JSON.stringify({ id, telefone: tel })
+      });
+      alert('✅ ' + r.message);
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { b.disabled = false; b.textContent = '📱 Enviar'; }
+  });
+  document.querySelectorAll('[data-tele-vto]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.teleVto;
+    b.disabled = true; b.textContent = 'Enviando...';
+    try {
+      const r = await api('/api/vistorias/' + id + '/enviar-telegram', {
+        method: 'POST', body: JSON.stringify({ id })
+      });
+      alert('✅ ' + r.message);
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { b.disabled = false; b.textContent = '✈️ Telegram'; }
+  });
+
   document.querySelectorAll('[data-del-vto]').forEach(b => b.onclick = async () => {
-    if (!confirm('Apagar vistoria + fotos?')) return;
+    const ok = await confirmarAcao({
+      titulo: 'Apagar vistoria',
+      mensagem: 'A vistoria e suas fotos serão removidas. Confirma?',
+      textoConfirmar: 'Excluir', perigoso: true,
+    });
+    if (!ok) return;
     try { await api('/api/vistorias/' + b.dataset.delVto, { method: 'DELETE' }); render(); }
     catch (e) { alert('Erro: ' + e.message); }
   });
