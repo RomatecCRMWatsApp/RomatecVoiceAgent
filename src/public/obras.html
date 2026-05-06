@@ -6981,7 +6981,9 @@ function renderRecibos() {
         <input id="recFiltroQ" placeholder="número, nome, telefone..." value="${escape(f.q || '')}" style="width:100%;">
       </label>
       <button class="btn-primary" id="recNovoBtn">➕ Novo recibo</button>
+      <button id="recTriggersBtn" title="Configurar geração automática de recibos">⚙️ Triggers</button>
     </div>
+    <div id="recTriggersBox" style="display:none;"></div>
     ${cards}
   `;
 
@@ -6998,6 +7000,70 @@ function renderRecibos() {
     state.recibosFiltro.q = e.target.value;
     renderRecibos();
   };
+  document.getElementById('recTriggersBtn').onclick = async () => {
+    const box = document.getElementById('recTriggersBox');
+    if (box.style.display === 'block') { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    box.innerHTML = '<div class="card"><p>Carregando...</p></div>';
+    try {
+      const cfg = await api('/api/recibos/triggers');
+      const TRIG_LABEL = {
+        parcela_paga:      { label:'💵 Quando parcela do cliente é paga', desc:'Cria recibo tipo "parcela" automaticamente, vinculado ao cliente da obra.' },
+        proposta_aceita:   { label:'📋 Quando proposta é aceita',           desc:'Em breve.' },
+        etapa_concluida:   { label:'🏗️ Quando etapa de obra é concluída',   desc:'Em breve.' },
+        despesa_criada:    { label:'🧾 Quando despesa é registrada',        desc:'Em breve.' },
+        vistoria_entregue: { label:'📷 Quando vistoria é entregue',         desc:'Em breve.' },
+      };
+      const html = Object.entries(TRIG_LABEL).map(([k, m]) => {
+        const c = cfg[k] || {};
+        const disabled = k !== 'parcela_paga'; // só parcela_paga implementada nesta release
+        return `
+        <div style="border:1px solid var(--border); border-radius:10px; padding:12px; ${disabled ? 'opacity:0.5;' : ''}">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:240px;">
+              <p style="margin:0; font-weight:600; font-size:13px;">${escape(m.label)}</p>
+              <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">${escape(m.desc)}</p>
+            </div>
+            <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:${disabled ? 'not-allowed' : 'pointer'};">
+              <input type="checkbox" data-trig-evento="${k}" data-trig-prop="enabled" ${c.enabled ? 'checked' : ''} ${disabled ? 'disabled' : ''} style="width:18px; height:18px; accent-color:var(--neon);">
+              <span style="font-weight:600;">Ligado</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:${disabled ? 'not-allowed' : 'pointer'};">
+              <input type="checkbox" data-trig-evento="${k}" data-trig-prop="auto_enviar" ${c.auto_enviar ? 'checked' : ''} ${disabled ? 'disabled' : ''} style="width:18px; height:18px; accent-color:var(--gold);">
+              <span>📱 Auto-enviar WhatsApp</span>
+            </label>
+          </div>
+        </div>`;
+      }).join('');
+      box.innerHTML = `<div class="card">
+        <p class="section-title" style="margin-top:0;">⚙️ Triggers automáticos</p>
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">
+          Quando ligado, o sistema cria recibos sozinho. Combine com "Auto-enviar" pra disparar WhatsApp imediato.
+        </p>
+        <div style="display:flex; flex-direction:column; gap:8px;">${html}</div>
+      </div>`;
+      document.querySelectorAll('[data-trig-evento]').forEach(cb => {
+        cb.onchange = async () => {
+          const evento = cb.dataset.trigEvento;
+          const prop = cb.dataset.trigProp;
+          try {
+            const allCheckboxes = document.querySelectorAll(`[data-trig-evento="${evento}"]`);
+            const payload = {};
+            allCheckboxes.forEach(c => { payload[c.dataset.trigProp] = c.checked; });
+            await api('/api/recibos/triggers/' + evento, {
+              method: 'PUT', body: JSON.stringify(payload),
+            });
+          } catch (e) {
+            alert('Erro: ' + e.message);
+            cb.checked = !cb.checked;
+          }
+        };
+      });
+    } catch (e) {
+      box.innerHTML = `<div class="card empty">Erro: ${escape(e.message)}</div>`;
+    }
+  };
+
   document.getElementById('recNovoBtn').onclick = () => {
     state.recibosView = 'form';
     state.reciboForm = {

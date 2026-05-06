@@ -906,6 +906,19 @@ export async function runMigrations(): Promise<void> {
        )
   `);
 
+  // v1.73.0: triggers automaticos de recibo. JSON com config por evento:
+  // {"parcela_paga":{"enabled":true,"auto_enviar":true},
+  //  "proposta_aceita":{"enabled":false},...}
+  try {
+    await pool.execute(
+      `ALTER TABLE tenant_settings ADD COLUMN auto_recibo_em JSON NULL AFTER site`
+    );
+  } catch (err) {
+    if (!/Duplicate column|already exists/i.test((err as Error).message)) {
+      console.warn('[migrations] alter tenant_settings auto_recibo:', (err as Error).message.slice(0, 100));
+    }
+  }
+
   // v1.65.0: Implementação 1 — Proposta de Mão de Obra (schema + catálogo SINAPI)
   // 4 tabelas: catálogo de serviços, clientes da proposta (separado do CRM),
   // propostas e itens de cada proposta.

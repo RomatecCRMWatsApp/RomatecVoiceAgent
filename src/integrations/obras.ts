@@ -1142,6 +1142,15 @@ export async function atualizarParcela(input: {
   const [r] = await pool.execute<ResultSetHeader>(
     `UPDATE romatec_obra_parcelas SET ${fields.join(', ')} WHERE id = ?`, params,
   );
+
+  // v1.73.0: dispara trigger de recibo automatico se transicionou pra pago.
+  // Async, fire-and-forget — falha nao bloqueia o UPDATE.
+  if (input.pago === true) {
+    void import('../services/recibosTriggers')
+      .then(m => m.gerarReciboParcelaPaga(Number(input.id)))
+      .catch(err => console.warn('[trigger parcela_paga]', (err as Error).message));
+  }
+
   return { ok: true, affected: r.affectedRows, message: `Parcela ${input.id} atualizada.` };
 }
 

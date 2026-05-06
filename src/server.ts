@@ -1101,6 +1101,24 @@ app.post('/api/despesas-extras/:id/enviar-telegram',
 
 // ── v1.70.0: Recibos Universais ─────────────────────────────────────────
 // API autenticada (CRUD + envio) + paginas publicas /r/:token e /v/:hash
+// v1.73.0: configuracao de triggers automaticos
+app.get   ('/api/recibos/triggers', async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./services/recibosTriggers');
+    res.json(await m.getTodosTriggers(1));
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.put   ('/api/recibos/triggers/:evento', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/recibosTriggers');
+    await m.setTriggerConfig(1,
+      String(req.params.evento) as Parameters<typeof m.setTriggerConfig>[1],
+      req.body || {}
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 app.get   ('/api/recibos',
   apiHandle(args => recibos.listarRecibos(args as Parameters<typeof recibos.listarRecibos>[0])));
 app.get   ('/api/recibos/:id',
