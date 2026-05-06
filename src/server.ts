@@ -639,6 +639,10 @@ app.post  ('/api/obras',     apiHandle(args => obras.criarObra(args as Parameter
 app.put   ('/api/obras/:id', apiHandle(args => obras.atualizarObra(args as Parameters<typeof obras.atualizarObra>[0])));
 app.delete('/api/obras/:id', apiHandle(args => obras.apagarObra(args as { id: string; confirm?: boolean })));
 
+// v1.67.17: envia resumo da obra pro Telegram do CEO (default) ou chat custom
+app.post  ('/api/obras/:id/enviar-telegram',
+  apiHandle(args => obras.enviarObraTelegram(args as Parameters<typeof obras.enviarObraTelegram>[0])));
+
 // v1.65.40: Parcelas de pagamento do cliente (receita por obra)
 app.get   ('/api/obras/:obra_id/parcelas',     apiHandle(args => obras.listarParcelasObra((args as { obra_id: string }).obra_id)));
 app.post  ('/api/parcelas',                    apiHandle(args => obras.criarParcela(args as Parameters<typeof obras.criarParcela>[0])));

@@ -1228,3 +1228,60 @@ export async function parcelasVencendo(diasAFrente = 7) {
     vencimento_iso: new Date(r.vencimento as Date).toISOString().slice(0,10),
   }));
 }
+
+// v1.67.17: envio de resumo da obra via Telegram Bot API (mesmo padrao
+// de despesa/vistoria/proposta). Default: envia pro chat do CEO. Aceita
+// chatId opcional pra enviar pra outras pessoas/grupos.
+import { sendMessage as sendTelegramMessage } from './telegram';
+
+export async function enviarObraTelegram(input: { id: string; chatId?: string }) {
+  const det = await buscarObra(input.id);
+  if (!det || !det.obra) throw new Error('Obra nao encontrada');
+  const o = det.obra as Record<string, unknown>;
+
+  // Busca parcelas pra incluir
+  const [parcelasRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT numero, valor, vencimento, pago FROM romatec_obra_parcelas
+      WHERE obra_id = ? ORDER BY numero ASC`, [Number(input.id)]
+  );
+
+  const fmtData = (s: unknown): string => {
+    if (!s) return '-';
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s));
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+    if (s instanceof Date && !isNaN(s.getTime())) {
+      return `${String(s.getDate()).padStart(2,'0')}/${String(s.getMonth()+1).padStart(2,'0')}/${s.getFullYear()}`;
+    }
+    return String(s);
+  };
+  const fmtBRL = (n: unknown) => 'R$ ' + Number(n||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const linhas: string[] = [
+    `🏗️ *Obra: ${o.nome}*`,
+    ``,
+    `Olá, ${o.cliente || ''}! Segue o resumo da obra:`,
+    ``,
+    `📍 *Endereço:* ${o.endereco || '-'}, ${o.cidade || '-'}`,
+    `📅 *Início:* ${fmtData(o.data_inicio)}`,
+    `📅 *Conclusão prevista:* ${fmtData(o.data_previsao)}`,
+  ];
+  if (o.prazo_dias) linhas.push(`⏱️ *Prazo:* ${o.prazo_dias} dias corridos${o.prazo_dias_uteis ? ` (${o.prazo_dias_uteis} úteis)` : ''}`);
+  if (o.valor_contrato) linhas.push(`💰 *Valor do contrato:* ${fmtBRL(o.valor_contrato)}`);
+
+  if (parcelasRows.length > 0) {
+    linhas.push('', '*💳 Parcelas:*');
+    for (const p of parcelasRows) {
+      const status = p.pago ? '✅ PAGO' : '⏳ Pendente';
+      linhas.push(`• ${p.numero}ª — ${fmtBRL(p.valor)} — venc. ${fmtData(p.vencimento)} — ${status}`);
+    }
+  }
+  linhas.push('', '_Romatec Consultoria Total_', 'Engenharia e Agrimensura');
+
+  const chatId = input.chatId?.trim()
+    || (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
+    || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+  if (!chatId) throw new Error('chatId Telegram obrigatorio (configure TELEGRAM_LEAD_CHAT_ID).');
+
+  await sendTelegramMessage(chatId, linhas.join('\n'));
+  return { ok: true as const, message: `Resumo da obra "${o.nome}" enviado via Telegram${input.chatId ? ` para chat ${chatId}` : ' (CEO)'}.` };
+}

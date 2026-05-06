@@ -1413,17 +1413,35 @@ function renderObras() {
     window.open(url, '_blank');
   });
 
-  // v1.67.15: compartilhar resumo via Telegram. Usa share dialog do Telegram
-  // (https://t.me/share/url?text=...) — abre o app/web, usuario escolhe destinatario
-  // (chat com o cliente, grupo da obra, salvar em "Saved Messages", etc).
+  // v1.67.17: envia resumo da obra pro Telegram via Bot API (mesmo padrao
+  // de despesas/vistorias/propostas). Default: envia pro CEO. Prompt aceita
+  // chat_id opcional pra mandar pra outras pessoas/grupos.
   v.querySelectorAll('[data-tg-obra]').forEach(b => b.onclick = async () => {
-    const o = state.obras.find(x => String(x.id) === String(b.dataset.tgObra));
+    const id = b.dataset.tgObra;
+    const o = state.obras.find(x => String(x.id) === String(id));
     if (!o) return;
-    const texto = await construirResumoObra(o);
-    // t.me/share/url aceita 'text' (com markdown _italico_/*negrito* funcional no Telegram).
-    const url = `https://t.me/share/url?url=${encodeURIComponent('')}&text=${encodeURIComponent(texto)}`;
-    window.open(url, '_blank');
+    const chatId = pedirChatTelegram(`Enviar resumo de "${o.nome}" via Telegram`);
+    if (chatId === null) return; // cancelou
+    b.disabled = true; b.textContent = 'Enviando...';
+    try {
+      const r = await api('/api/obras/' + id + '/enviar-telegram', {
+        method: 'POST', body: JSON.stringify({ id, chatId: chatId || undefined }),
+      });
+      alert('✅ ' + r.message);
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { b.disabled = false; b.textContent = '✈️ Telegram'; }
   });
+}
+
+// v1.67.17: helper para perguntar chat_id Telegram (cancelado retorna null,
+// vazio retorna '' = usar CEO default, preenchido retorna o chat_id).
+function pedirChatTelegram(titulo) {
+  const r = prompt(
+    `${titulo}\n\nDeixe vazio pra enviar pra você (José Romário).\nOu informe o chat_id Telegram do destinatário (numérico ou @username):`,
+    ''
+  );
+  if (r === null) return null;
+  return r.trim();
 }
 
 // v1.65.42: abre janela print-friendly com todos os dados da obra +
@@ -2570,10 +2588,12 @@ function renderDespesasExtras() {
   });
   document.querySelectorAll('[data-tele-desp]').forEach(b => b.onclick = async () => {
     const id = b.dataset.teleDesp;
+    const chatId = pedirChatTelegram(`Enviar Despesa #${id} via Telegram`);
+    if (chatId === null) return;
     b.disabled = true; b.textContent = 'Enviando...';
     try {
       const r = await api('/api/despesas-extras/' + id + '/enviar-telegram', {
-        method: 'POST', body: JSON.stringify({ id })
+        method: 'POST', body: JSON.stringify({ id, chatId: chatId || undefined })
       });
       alert('✅ ' + r.message);
     } catch (e) { alert('Erro: ' + e.message); }
@@ -2639,10 +2659,12 @@ function renderDespesasExtras() {
   if (teleRelatBtn) teleRelatBtn.onclick = async () => {
     const ids = idsSel();
     if (!ids.length) return;
+    const chatId = pedirChatTelegram(`Enviar relatório consolidado (${ids.length} despesas) via Telegram`);
+    if (chatId === null) return;
     teleRelatBtn.disabled = true; teleRelatBtn.textContent = 'Enviando...';
     try {
       const r = await api('/api/despesas-extras/relatorio/enviar-telegram', {
-        method: 'POST', body: JSON.stringify({ ids, obra_nome: obraNomeAtual })
+        method: 'POST', body: JSON.stringify({ ids, obra_nome: obraNomeAtual, chatId: chatId || undefined })
       });
       alert('✅ ' + r.message);
     } catch (e) { alert('Erro: ' + e.message); }
@@ -3892,10 +3914,12 @@ function renderVto() {
   });
   document.querySelectorAll('[data-tele-vto]').forEach(b => b.onclick = async () => {
     const id = b.dataset.teleVto;
+    const chatId = pedirChatTelegram(`Enviar Vistoria #${id} via Telegram`);
+    if (chatId === null) return;
     b.disabled = true; b.textContent = 'Enviando...';
     try {
       const r = await api('/api/vistorias/' + id + '/enviar-telegram', {
-        method: 'POST', body: JSON.stringify({ id })
+        method: 'POST', body: JSON.stringify({ id, chatId: chatId || undefined })
       });
       alert('✅ ' + r.message);
     } catch (e) { alert('Erro: ' + e.message); }
@@ -4067,10 +4091,12 @@ function renderPropostasLista() {
   // v1.66.19: envio Telegram para Mao de Obra (paridade com Consultoria)
   document.querySelectorAll('[data-tele-prop]').forEach(b => b.onclick = async () => {
     const id = b.dataset.teleProp;
+    const chatId = pedirChatTelegram(`Enviar Proposta Mão de Obra #${id} via Telegram`);
+    if (chatId === null) return;
     b.disabled = true; b.textContent = 'Enviando...';
     try {
       const r = await api('/api/propostas/' + id + '/enviar-telegram', {
-        method: 'POST', body: JSON.stringify({ id })
+        method: 'POST', body: JSON.stringify({ id, chatId: chatId || undefined })
       });
       alert('✅ ' + r.message);
       render();
@@ -4269,10 +4295,12 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
   });
   document.querySelectorAll('[data-tele-cons]').forEach(b => b.onclick = async () => {
     const id = b.dataset.teleCons;
+    const chatId = pedirChatTelegram(`Enviar Proposta de Consultoria #${id} via Telegram`);
+    if (chatId === null) return;
     b.disabled = true; b.textContent = 'Enviando...';
     try {
       const r = await api('/api/propostas-consultoria/' + id + '/enviar-telegram', {
-        method: 'POST', body: JSON.stringify({ id })
+        method: 'POST', body: JSON.stringify({ id, chatId: chatId || undefined })
       });
       alert('✅ ' + r.message);
       await loadPropostasConsultoria(); render();
