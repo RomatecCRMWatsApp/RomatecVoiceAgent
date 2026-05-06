@@ -970,6 +970,41 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.67.0: Despesas Extras — gastos avulsos vinculados a obras (ferramentas,
+  // alugueis, materiais avulsos) FORA do orcamento de empreita/diaria. Somam
+  // no Consumo da obra junto com obras_transacoes.
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS despesas_extras (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      obra_id         INT NOT NULL,
+      data            DATE NOT NULL,
+      loja            VARCHAR(120) NOT NULL,
+      categoria       ENUM('ferramenta','aluguel','material','outros') NOT NULL DEFAULT 'outros',
+      forma_pagamento ENUM('pix','dinheiro','cartao_credito','cartao_debito','boleto') NOT NULL DEFAULT 'pix',
+      foto_b64        LONGTEXT,
+      foto_mimetype   VARCHAR(40),
+      observacoes     TEXT,
+      valor_total     DECIMAL(10,2) NOT NULL DEFAULT 0,
+      created_by      VARCHAR(80),
+      created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      deleted_at      TIMESTAMP NULL,
+      INDEX idx_obra      (obra_id, deleted_at),
+      INDEX idx_data      (data),
+      INDEX idx_categoria (categoria)
+    )
+  `);
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS despesas_extras_itens (
+      id          INT AUTO_INCREMENT PRIMARY KEY,
+      despesa_id  INT NOT NULL,
+      descricao   VARCHAR(200) NOT NULL,
+      valor       DECIMAL(10,2) NOT NULL,
+      ordem       INT NOT NULL DEFAULT 0,
+      INDEX idx_despesa (despesa_id, ordem)
+    )
+  `);
+
   // v1.66.9: anexos da Proposta de Consultoria (Planta Arquitetonica/Mapa).
   // Aceita PDF, PNG, JPEG. Sem limite de quantidade. Conteudo em base64
   // (LONGTEXT — ate 4GB; impomos limite ~10MB por anexo no client).

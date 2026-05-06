@@ -475,6 +475,9 @@
   <div class="tabs">
     <button class="tab active" data-tab="dashboard">Painel</button>
     <button class="tab" data-tab="obras">Obras</button>
+    <button class="tab" data-tab="despesas" style="position:relative;">🧾 Despesas Extras
+      <span style="position:absolute; top:-6px; right:-12px; background:var(--gold); color:#06120a; font-size:8px; font-weight:800; padding:1px 4px; border-radius:3px; letter-spacing:0.5px;">NOVO</span>
+    </button>
     <button class="tab" data-tab="financeiro">Financeiro</button>
     <button class="tab" data-tab="equipe">Equipe</button>
     <button class="tab" data-tab="marcar">Marcar Dias</button>
@@ -488,6 +491,7 @@
   <div id="view-dashboard" class="view active"></div>
   <div id="view-obras" class="view"></div>
   <div id="view-cronograma" class="view"></div>
+  <div id="view-despesas" class="view"></div>
   <div id="view-financeiro" class="view"></div>
   <div id="view-equipe" class="view"></div>
   <div id="view-materiais" class="view"></div>
@@ -766,6 +770,14 @@ async function loadDiario() {
   if (!state.currentObra) return state.diario = [];
   state.diario = await api('/api/diario?obra_id=' + state.currentObra);
 }
+// v1.67.0: Despesas Extras
+async function loadDespesasExtras() {
+  const q = state.currentObra ? '?obra_id=' + state.currentObra : '';
+  try {
+    const r = await api('/api/despesas-extras' + q);
+    state.despesasExtras = r.items || [];
+  } catch (e) { state.despesasExtras = []; }
+}
 
 // v1.65.2: Propostas
 async function loadPropostas() {
@@ -796,7 +808,8 @@ async function render() {
       dashboard: async () => { await Promise.all([loadDashboard(), loadObras(), loadEquipe(), loadTransacoes()]); renderDashboard(); },
       obras: async () => { await loadObras(); renderObras(); },
       cronograma: async () => { await Promise.all([loadObras(), loadEtapas()]); renderCronograma(); },
-      financeiro: async () => { await Promise.all([loadObras(), loadTransacoes()]); renderFinanceiro(); },
+      financeiro: async () => { await Promise.all([loadObras(), loadTransacoes(), loadDespesasExtras()]); renderFinanceiro(); },
+      despesas: async () => { await Promise.all([loadObras(), loadDespesasExtras()]); renderDespesasExtras(); },
       equipe: async () => { await Promise.all([loadObras(), loadEquipe(), loadCatalogo()]); renderEquipe(); },
       materiais: async () => { await Promise.all([loadObras(), loadMateriais()]); renderMateriais(); },
       marcar: async () => {
@@ -964,7 +977,10 @@ function renderDashboard() {
   let hero = '';
   if (obra) {
     const orc = Number(obra.orcamento || 0);
-    const sai = (state.transacoes || []).filter(t => t.obra_id === obra.id && t.tipo === 'saida').reduce((s, t) => s + Number(t.valor || 0), 0);
+    const saiTrans = (state.transacoes || []).filter(t => t.obra_id === obra.id && t.tipo === 'saida').reduce((s, t) => s + Number(t.valor || 0), 0);
+    // v1.67.0: soma despesas extras no Consumo da obra (mesmo bucket de saidas)
+    const saiDespesas = (state.despesasExtras || []).filter(d => String(d.obra_id) === String(obra.id)).reduce((s, d) => s + Number(d.valor_total || 0), 0);
+    const sai = saiTrans + saiDespesas;
     const consumo = orc > 0 ? Math.min(100, Math.round(sai / orc * 100)) : 0;
     const statusCor = obra.status === 'concluida' ? 'var(--neon)' : obra.status === 'paralisada' ? 'var(--warning)' : 'var(--gold)';
     hero = `<div class="card" style="background:linear-gradient(135deg, rgba(0,255,153,0.06), rgba(255,184,0,0.04)); border:1px solid var(--gold-dim); margin-bottom:14px;">
@@ -1938,7 +1954,10 @@ function renderFinanceiro() {
   if (!state.currentObra) { v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro.</div>'; return; }
   const obra = state.obras.find(o => o.id === state.currentObra);
   const ent = state.transacoes.filter(t => t.tipo === 'entrada').reduce((s,t) => s+Number(t.valor||0), 0);
-  const sai = state.transacoes.filter(t => t.tipo === 'saida').reduce((s,t) => s+Number(t.valor||0), 0);
+  const saiTrans = state.transacoes.filter(t => t.tipo === 'saida').reduce((s,t) => s+Number(t.valor||0), 0);
+  // v1.67.0: soma despesas extras nas Saidas/Consumo
+  const saiDespesas = (state.despesasExtras || []).filter(d => String(d.obra_id) === String(state.currentObra)).reduce((s, d) => s + Number(d.valor_total || 0), 0);
+  const sai = saiTrans + saiDespesas;
   const cons = obra && obra.orcamento ? Math.round(sai/obra.orcamento*100) : 0;
 
   // v1.65.6: botões editar/excluir SEMPRE visíveis (CEO pediu).
@@ -1976,10 +1995,24 @@ function renderFinanceiro() {
     </div>
     <button class="btn-primary" id="addT">Adicionar</button>
   </div>
+  ${saiDespesas > 0 ? `
+  <div class="card" style="margin-top:12px; background:rgba(212,168,74,0.06); border:1px solid var(--gold-dim); cursor:pointer;" id="despExtrasLink">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+      <div>
+        <p style="margin:0; font-size:13px; font-weight:600; color:var(--gold);">🧾 Despesas Extras</p>
+        <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">${(state.despesasExtras || []).filter(d => String(d.obra_id) === String(state.currentObra)).length} nota(s) · clique para ver detalhes</p>
+      </div>
+      <strong style="color:var(--gold); font-size:18px;">${fmt(saiDespesas)}</strong>
+    </div>
+  </div>` : ''}
   <div class="card" style="margin-top:12px;">
     <p class="section-title">Movimentações (${state.transacoes.length})</p>
     ${lista || '<div class="empty">Sem transações.</div>'}
   </div>`;
+  if (saiDespesas > 0) {
+    const link = document.getElementById('despExtrasLink');
+    if (link) link.onclick = () => { state.currentTab = 'despesas'; state.despesasView = 'lista'; render(); };
+  }
   attachSel();
   document.getElementById('tData').value = today();
 
@@ -2235,6 +2268,337 @@ function renderEquipe() {
       } catch (e) { alert('Erro ao atualizar status: ' + e.message); }
     };
   });
+}
+
+// ── DESPESAS EXTRAS (v1.67.0) ──
+const DESP_CATEGORIAS = [
+  { val: 'ferramenta', label: '🔧 Ferramenta', cor: '#d4a84a' },
+  { val: 'aluguel',    label: '📅 Aluguel',    cor: '#3b82f6' },
+  { val: 'material',   label: '🧱 Material',   cor: '#10b981' },
+  { val: 'outros',     label: '📦 Outros',     cor: '#94a3b8' },
+];
+const DESP_FORMAS = [
+  { val: 'pix',              label: 'PIX' },
+  { val: 'dinheiro',         label: 'Dinheiro' },
+  { val: 'cartao_credito',   label: 'Cartão de Crédito' },
+  { val: 'cartao_debito',    label: 'Cartão de Débito' },
+  { val: 'boleto',           label: 'Boleto' },
+];
+const desCategoria = c => DESP_CATEGORIAS.find(x => x.val === c) || DESP_CATEGORIAS[3];
+const desFormaLabel = f => (DESP_FORMAS.find(x => x.val === f)?.label || f);
+
+function renderDespesasExtras() {
+  const v = document.getElementById('view-despesas');
+  if (!state.despesasView) state.despesasView = 'lista';
+
+  const obrasOpts = state.obras.map(o =>
+    `<option value="${o.id}" ${String(o.id)===String(state.currentObra)?'selected':''}>${escape(o.nome)}</option>`
+  ).join('');
+
+  const lista = state.despesasExtras || [];
+  const totalNotas = lista.length;
+  const totalValor = lista.reduce((s, d) => s + Number(d.valor_total || 0), 0);
+  const fmt = n => Number(n||0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  if (state.despesasView === 'form') {
+    return renderDespesaFormInline(v);
+  }
+
+  const cards = lista.map(d => {
+    const cat = desCategoria(d.categoria);
+    const itensTexto = (d.itens || []).slice(0, 3).map(i => i.descricao).join(' · ');
+    const maisItens = (d.itens || []).length > 3 ? ` (+${d.itens.length - 3})` : '';
+    const dataBR = d.data ? parseDataBR(d.data) : '-';
+    return `
+    <div class="card" style="border-left:4px solid ${cat.cor}; cursor:pointer;" data-edit-desp="${d.id}">
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+          <p style="margin:0; font-weight:600;">#${String(d.id).padStart(3,'0')} · ${escape(d.loja)}</p>
+          <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">
+            ${escape(dataBR)} · <strong style="color:var(--gold);">${escape(fmt(d.valor_total))}</strong>
+          </p>
+          <p style="margin:4px 0; font-size:11px; color:var(--text-muted);">
+            ${(d.itens||[]).length} ${(d.itens||[]).length === 1 ? 'item' : 'itens'}: ${escape(itensTexto)}${maisItens}
+          </p>
+          <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:6px;">
+            <span class="badge" style="font-size:10px; background:${cat.cor}22; color:${cat.cor}; border:1px solid ${cat.cor}55;">${cat.label}</span>
+            <span class="badge badge-info" style="font-size:10px;">${escape(desFormaLabel(d.forma_pagamento))}</span>
+            ${d.tem_foto ? '<span class="badge badge-success" style="font-size:10px;">📷 Foto anexada</span>' : ''}
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px; min-width:120px;">
+          <button data-edit-desp-btn="${d.id}" style="font-size:12px;">✏️ Editar</button>
+          <button class="btn-danger" data-del-desp="${d.id}" style="font-size:12px;">Excluir</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="card empty">Nenhuma despesa extra registrada para esta obra. Toque em + para adicionar a primeira.</div>';
+
+  v.innerHTML = `
+    <div class="card" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <span style="font-size:12px; color:var(--text-muted);">OBRA:</span>
+      <select id="despObraSel" style="flex:1; min-width:200px;">
+        <option value="">— todas —</option>
+        ${obrasOpts}
+      </select>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px; margin-bottom:12px;">
+      <div class="card"><p style="margin:0; font-size:11px; color:var(--text-muted);">📋 NOTAS LANÇADAS</p><p style="margin:4px 0 0; font-size:24px; font-weight:700;">${totalNotas}</p></div>
+      <div class="card"><p style="margin:0; font-size:11px; color:var(--text-muted);">💰 TOTAL EXTRA</p><p style="margin:4px 0 0; font-size:22px; font-weight:700; color:var(--gold);">${escape(fmt(totalValor))}</p></div>
+    </div>
+    <div class="card">
+      <button data-nova-desp style="width:100%; background:var(--success); color:#fff; border-color:var(--success); font-weight:600; padding:12px;">+ NOVA NOTA DE DESPESA</button>
+    </div>
+    ${cards}`;
+
+  document.getElementById('despObraSel').onchange = async (e) => {
+    state.currentObra = e.target.value || null;
+    await loadDespesasExtras();
+    render();
+  };
+  document.querySelector('[data-nova-desp]').onclick = () => {
+    state.despesaEditandoId = null;
+    state.despesasView = 'form';
+    render();
+  };
+  document.querySelectorAll('[data-edit-desp], [data-edit-desp-btn]').forEach(b => b.onclick = (ev) => {
+    ev.stopPropagation();
+    state.despesaEditandoId = b.dataset.editDesp || b.dataset.editDespBtn;
+    state.despesasView = 'form';
+    render();
+  });
+  document.querySelectorAll('[data-del-desp]').forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    const ok = await confirmarAcao({
+      titulo: 'Excluir nota de despesa',
+      mensagem: 'A nota será removida (soft delete). Permanece no histórico do banco.',
+      textoConfirmar: 'Excluir', perigoso: true,
+    });
+    if (!ok) return;
+    try {
+      await api('/api/despesas-extras/' + b.dataset.delDesp, { method: 'DELETE' });
+      await loadDespesasExtras();
+      render();
+    } catch (e) {
+      alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : ''));
+    }
+  });
+}
+
+async function renderDespesaFormInline(v) {
+  let despesaAtual = null;
+  if (state.despesaEditandoId) {
+    try { despesaAtual = await api('/api/despesas-extras/' + state.despesaEditandoId); }
+    catch (e) { alert('Erro ao carregar: ' + e.message); state.despesasView = 'lista'; return render(); }
+  }
+
+  const obrasOpts = state.obras.map(o =>
+    `<option value="${o.id}" ${String(o.id) === String(despesaAtual?.obra_id || state.currentObra) ? 'selected' : ''}>${escape(o.nome)}</option>`
+  ).join('');
+  const catOpts = DESP_CATEGORIAS.map(c =>
+    `<option value="${c.val}" ${despesaAtual?.categoria === c.val ? 'selected' : ''}>${c.label}</option>`
+  ).join('');
+  const formaOpts = DESP_FORMAS.map(f =>
+    `<option value="${f.val}" ${despesaAtual?.forma_pagamento === f.val ? 'selected' : ''}>${f.label}</option>`
+  ).join('');
+  const hoje = new Date().toISOString().slice(0, 10);
+  const dataValor = despesaAtual?.data ? String(despesaAtual.data).slice(0, 10) : hoje;
+
+  // Itens iniciais
+  if (!state.despesaItensTemp) {
+    state.despesaItensTemp = despesaAtual
+      ? despesaAtual.itens.map(i => ({ descricao: i.descricao, valor: Number(i.valor) }))
+      : [{ descricao: '', valor: 0 }];
+  }
+  // Foto inicial
+  if (state.despesaFotoTemp === undefined) {
+    state.despesaFotoTemp = despesaAtual?.tem_foto
+      ? { existente: true, mimetype: despesaAtual.foto_mimetype, b64: despesaAtual.foto_b64 }
+      : null;
+  }
+
+  const titulo = despesaAtual ? `Editando Despesa #${String(despesaAtual.id).padStart(3,'0')}` : 'Nova Nota de Despesa';
+
+  v.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">${escape(titulo)}</p>
+        <button data-desp-voltar style="background:transparent;">← Voltar</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:grid; gap:10px; font-size:13px; max-width:880px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px;">
+          <label>Obra vinculada *
+            <select id="despObra" style="width:100%;"><option value="">— escolher —</option>${obrasOpts}</select>
+          </label>
+          <label>Data *
+            <input id="despData" type="date" max="${hoje}" value="${dataValor}" style="width:100%;">
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:8px;">
+          <label>Categoria *
+            <select id="despCategoria" style="width:100%;">${catOpts}</select>
+          </label>
+          <label>Forma de pagamento *
+            <select id="despForma" style="width:100%;">${formaOpts}</select>
+          </label>
+        </div>
+        <label>Loja / Fornecedor *
+          <input id="despLoja" placeholder="Ex: Casa do Construtor, MercadoLivre, Loja do Bairro" value="${escape(despesaAtual?.loja || '')}" style="width:100%;">
+        </label>
+
+        <div style="border:1px solid var(--border); border-radius:8px; padding:10px;">
+          <p style="margin:0 0 6px; font-weight:600; font-size:13px;">📋 Itens da nota</p>
+          <div id="despItensLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+          <button type="button" id="despAddItem" style="margin-top:8px; width:100%; background:var(--bg-elev); border:1px dashed var(--border-strong); color:var(--text);">+ ADICIONAR ITEM</button>
+          <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:12px; color:var(--text-muted);">Total da nota:</span>
+            <strong id="despTotalCalc" style="color:var(--gold); font-size:18px;">R$ 0,00</strong>
+          </div>
+        </div>
+
+        <div style="border:1px solid var(--border); border-radius:8px; padding:10px;">
+          <p style="margin:0 0 6px; font-weight:600; font-size:13px;">📷 Foto do cupom (opcional)</p>
+          <input type="file" id="despFotoInput" accept="image/jpeg,image/png,image/webp" style="font-size:12px;">
+          <div id="despFotoPreview" style="margin-top:8px;"></div>
+        </div>
+
+        <label>Observações
+          <textarea id="despObs" rows="2" placeholder="Notas internas (opcional)" style="width:100%; resize:vertical;">${escape(despesaAtual?.observacoes || '')}</textarea>
+        </label>
+
+        <div style="display:flex; gap:6px; margin-top:8px;">
+          <button id="despSalvar" style="flex:2; background:var(--success); color:#fff; border-color:var(--success); padding:10px;">💾 Salvar Nota</button>
+          <button class="btn-secondary" id="despCancelar">Cancelar</button>
+        </div>
+      </div>
+    </div>`;
+
+  const renderItens = () => {
+    const html = state.despesaItensTemp.map((it, i) => `
+      <div style="display:flex; gap:6px; align-items:center;">
+        <input data-it-desc="${i}" placeholder="Descrição (ex: extensão 10m)" value="${escape(it.descricao || '')}" style="flex:2; font-size:12px; padding:6px;">
+        <input data-it-val="${i}" type="number" min="0" step="0.01" placeholder="0,00" value="${Number(it.valor) || ''}" style="flex:1; font-size:12px; padding:6px; text-align:right;">
+        <button type="button" data-rm-it="${i}" class="btn-danger" style="padding:4px 8px; font-size:14px;" ${state.despesaItensTemp.length === 1 ? 'disabled' : ''}>×</button>
+      </div>`).join('');
+    document.getElementById('despItensLista').innerHTML = html;
+    bindItensHandlers();
+    recalcularTotal();
+  };
+  const recalcularTotal = () => {
+    const total = state.despesaItensTemp.reduce((s, i) => s + (Number(i.valor) || 0), 0);
+    document.getElementById('despTotalCalc').textContent =
+      Number(total).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+  const bindItensHandlers = () => {
+    document.querySelectorAll('[data-it-desc]').forEach(el => el.oninput = () => {
+      state.despesaItensTemp[Number(el.dataset.itDesc)].descricao = el.value;
+    });
+    document.querySelectorAll('[data-it-val]').forEach(el => el.oninput = () => {
+      state.despesaItensTemp[Number(el.dataset.itVal)].valor = Number(el.value) || 0;
+      recalcularTotal();
+    });
+    document.querySelectorAll('[data-rm-it]').forEach(el => el.onclick = () => {
+      if (state.despesaItensTemp.length <= 1) return;
+      state.despesaItensTemp.splice(Number(el.dataset.rmIt), 1);
+      renderItens();
+    });
+  };
+  renderItens();
+
+  document.getElementById('despAddItem').onclick = () => {
+    state.despesaItensTemp.push({ descricao: '', valor: 0 });
+    renderItens();
+  };
+
+  // Foto preview
+  const renderFoto = () => {
+    const div = document.getElementById('despFotoPreview');
+    if (!state.despesaFotoTemp) { div.innerHTML = ''; return; }
+    const dataUrl = `data:${state.despesaFotoTemp.mimetype};base64,${state.despesaFotoTemp.b64}`;
+    div.innerHTML = `
+      <img src="${dataUrl}" style="max-width:200px; max-height:200px; border-radius:6px; border:1px solid var(--border);">
+      <button type="button" id="despRmFoto" class="btn-danger" style="display:block; margin-top:6px; font-size:11px;">× Remover foto</button>`;
+    document.getElementById('despRmFoto').onclick = () => {
+      state.despesaFotoTemp = null;
+      renderFoto();
+    };
+  };
+  renderFoto();
+  document.getElementById('despFotoInput').onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const MIMES_OK = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!MIMES_OK.includes(file.type)) { alert('Use JPG, PNG ou WEBP.'); return; }
+    if (file.size > 5 * 1024 * 1024) { alert('Máximo 5MB.'); return; }
+    const b64 = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',')[1]);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+    state.despesaFotoTemp = { existente: false, mimetype: file.type, b64 };
+    renderFoto();
+  };
+
+  const voltar = () => {
+    state.despesasView = 'lista';
+    state.despesaEditandoId = null;
+    state.despesaItensTemp = null;
+    state.despesaFotoTemp = undefined;
+    render();
+  };
+  document.querySelector('[data-desp-voltar]').onclick = voltar;
+  document.getElementById('despCancelar').onclick = voltar;
+
+  document.getElementById('despSalvar').onclick = async () => {
+    const obraId = document.getElementById('despObra').value;
+    const data = document.getElementById('despData').value;
+    const loja = document.getElementById('despLoja').value.trim();
+    if (!obraId)   return alert('Selecione a obra.');
+    if (!data)     return alert('Informe a data.');
+    if (!loja)     return alert('Informe loja/fornecedor.');
+    const itensValidos = state.despesaItensTemp.filter(i => i.descricao?.trim() && Number(i.valor) > 0);
+    if (itensValidos.length === 0) return alert('Pelo menos 1 item com descrição e valor > 0.');
+
+    const btn = document.getElementById('despSalvar');
+    btn.disabled = true; btn.textContent = 'Salvando...';
+
+    const payload = {
+      obra_id: obraId,
+      data,
+      loja,
+      categoria: document.getElementById('despCategoria').value,
+      forma_pagamento: document.getElementById('despForma').value,
+      itens: itensValidos,
+      observacoes: document.getElementById('despObs').value.trim() || null,
+    };
+    // Foto: envia se nova ou se mudou. Se editando e mantém a existente, não envia (backend mantém).
+    if (state.despesaFotoTemp && !state.despesaFotoTemp.existente) {
+      payload.foto_b64 = state.despesaFotoTemp.b64;
+      payload.foto_mimetype = state.despesaFotoTemp.mimetype;
+    } else if (state.despesaFotoTemp === null && state.despesaEditandoId) {
+      payload.foto_b64 = null; // remover
+    }
+
+    try {
+      if (state.despesaEditandoId) {
+        await api('/api/despesas-extras/' + state.despesaEditandoId, {
+          method: 'PUT', body: JSON.stringify({ id: state.despesaEditandoId, ...payload })
+        });
+      } else {
+        await api('/api/despesas-extras', {
+          method: 'POST', body: JSON.stringify(payload)
+        });
+      }
+      await loadDespesasExtras();
+      voltar();
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false; btn.textContent = '💾 Salvar Nota';
+    }
+  };
 }
 
 // ── MATERIAIS ──

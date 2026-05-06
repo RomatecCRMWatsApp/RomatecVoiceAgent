@@ -32,6 +32,7 @@ import * as calendar from './integrations/calendar';
 import * as obras from './integrations/obras';
 import * as propostas from './integrations/propostas';
 import * as propostasConsultoria from './integrations/propostasConsultoria';
+import * as despesasExtras from './integrations/despesasExtras';
 import * as alarmes from './integrations/alarmes';
 import * as cofre from './integrations/cofre';
 import * as vistorias from './integrations/vistorias';
@@ -966,6 +967,21 @@ app.post  ('/api/propostas/:id/anexos',
   })));
 app.delete('/api/propostas/anexos/:id',
   apiHandle(args => propostasConsultoria.removerAnexoProposta(args as { id: string })));
+
+// v1.67.0: Despesas Extras — gastos avulsos por obra (ferramenta, aluguel,
+// material avulso). Soma no Consumo da obra junto com obras_transacoes.
+app.get   ('/api/despesas-extras',
+  apiHandle(args => despesasExtras.listarDespesasExtras(args as Parameters<typeof despesasExtras.listarDespesasExtras>[0])));
+app.get   ('/api/despesas-extras/resumo',
+  apiHandle(args => despesasExtras.resumoDespesasExtras(args as Parameters<typeof despesasExtras.resumoDespesasExtras>[0])));
+app.get   ('/api/despesas-extras/:id',
+  apiHandle(args => despesasExtras.buscarDespesaExtra((args as { id: string }).id)));
+app.post  ('/api/despesas-extras',
+  apiHandle(args => despesasExtras.criarDespesaExtra(args as Parameters<typeof despesasExtras.criarDespesaExtra>[0])));
+app.put   ('/api/despesas-extras/:id',
+  apiHandle(args => despesasExtras.atualizarDespesaExtra(args as Parameters<typeof despesasExtras.atualizarDespesaExtra>[0])));
+app.delete('/api/despesas-extras/:id', requireCeoToken,
+  apiHandle(args => despesasExtras.apagarDespesaExtra(args as { id: string })));
 
 // v1.66.0: Proposta de Consultoria (averbacao + outros 5 subtipos na Fase 3).
 // Numeracao PROP-AAAA-XXXX compartilhada com Mao de Obra.
