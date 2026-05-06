@@ -108,6 +108,39 @@ export async function buscarDespesaExtra(id: string) {
   };
 }
 
+// v1.67.4: self-heal — em prod a migration ALTER TABLE pode nao ter rodado
+// (boot anterior falhou silencioso, lock, etc). Se INSERT/UPDATE der "Unknown
+// column 'desconto'" ou 'quantidade', roda ALTER inline e retenta.
+let _schemaChecked = false;
+async function ensureSchemaUpToDate(): Promise<void> {
+  if (_schemaChecked) return;
+  try {
+    // Checa colunas existentes
+    const [cols] = await pool.execute<RowDataPacket[]>(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME IN ('despesas_extras', 'despesas_extras_itens')`
+    );
+    const set = new Set(cols.map(c => String(c.COLUMN_NAME).toLowerCase()));
+    if (!set.has('desconto')) {
+      console.log('[despesas-self-heal] adicionando coluna desconto...');
+      await pool.execute(
+        `ALTER TABLE despesas_extras ADD COLUMN desconto DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER valor_total`
+      ).catch(e => console.warn('[despesas-self-heal] alter desconto:', (e as Error).message));
+    }
+    if (!set.has('quantidade')) {
+      console.log('[despesas-self-heal] adicionando coluna quantidade...');
+      await pool.execute(
+        `ALTER TABLE despesas_extras_itens ADD COLUMN quantidade DECIMAL(10,3) NOT NULL DEFAULT 1 AFTER valor`
+      ).catch(e => console.warn('[despesas-self-heal] alter quantidade:', (e as Error).message));
+    }
+    _schemaChecked = true;
+    console.log('[despesas-self-heal] schema OK');
+  } catch (err) {
+    console.warn('[despesas-self-heal] checagem falhou:', (err as Error).message);
+  }
+}
+
 // v1.67.2: itens agora tem quantidade. Subtotal do item = qtd × valor unitario.
 function validarItens(itens: ItemInput[]): number {
   if (!Array.isArray(itens) || itens.length === 0) throw new Error('Pelo menos 1 item obrigatorio');
@@ -147,7 +180,10 @@ export async function criarDespesaExtra(input: {
   observacoes?: string;
   desconto?: number;
   created_by?: string;
+  _retried?: boolean; // v1.67.4: previne loop infinito no self-heal
 }) {
+  // v1.67.4: garante schema atualizado (self-heal)
+  await ensureSchemaUpToDate();
   const obraId = Number(input.obra_id);
   if (!obraId) throw new Error('obra_id obrigatorio');
   if (!input.data || !/^\d{4}-\d{2}-\d{2}$/.test(input.data)) throw new Error('Data invalida (use YYYY-MM-DD)');
@@ -160,6 +196,8 @@ export async function criarDespesaExtra(input: {
   if (desconto > subtotal) throw new Error(`Desconto (R$ ${desconto.toFixed(2)}) nao pode ser maior que o subtotal (R$ ${subtotal.toFixed(2)})`);
   const valor_total = Math.round((subtotal - desconto) * 100) / 100;
   const foto = validarFoto(input.foto_b64, input.foto_mimetype);
+
+  console.log(`[despesas] criar obra=${obraId} loja="${input.loja}" subtotal=${subtotal} desconto=${desconto} total=${valor_total} itens=${input.itens.length}`);
 
   const conn = await pool.getConnection();
   try {
@@ -182,15 +220,24 @@ export async function criarDespesaExtra(input: {
       );
     }
     await conn.commit();
+    console.log(`[despesas] OK criada #${despesaId}`);
     return {
       ok: true as const, insertId: despesaId, valor_total, desconto,
       message: `Despesa #${despesaId} criada (R$ ${valor_total.toFixed(2)}${desconto > 0 ? ` com desconto de R$ ${desconto.toFixed(2)}` : ''}).`,
     };
   } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
+    await conn.rollback().catch(() => {});
     conn.release();
+    const msg = (err as Error).message;
+    console.error('[despesas] FALHA criar:', msg);
+    // Self-heal pra Unknown column: roda alter e retenta uma vez
+    if (/Unknown column/i.test(msg) && !input._retried) {
+      console.log('[despesas] tentando self-heal e retry...');
+      _schemaChecked = false;
+      await ensureSchemaUpToDate();
+      return criarDespesaExtra({ ...input, _retried: true });
+    }
+    throw err;
   }
 }
 
