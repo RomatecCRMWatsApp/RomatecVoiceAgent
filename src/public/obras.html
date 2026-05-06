@@ -7193,11 +7193,11 @@ function renderRecibos() {
         etapa_concluida:   { label:'🏗️ Quando etapa de obra é concluída',     desc:'Cria recibo de aceite — cliente confirma para liberar próxima etapa.' },
         proposta_aceita:   { label:'📋 Quando proposta é aceita pelo cliente', desc:'Atualiza status da proposta para "aceita" e notifica CEO via Telegram.' },
         despesa_criada:    { label:'🧾 Quando despesa é registrada',          desc:'Em breve.' },
-        vistoria_entregue: { label:'📷 Quando vistoria é entregue',           desc:'Em breve.' },
+        vistoria_entregue: { label:'📷 Quando vistoria é entregue ao cliente', desc:'Cria recibo de ciência ao mandar a vistoria via WhatsApp — cliente confirma pendências.' },
       };
       const html = Object.entries(TRIG_LABEL).map(([k, m]) => {
         const c = cfg[k] || {};
-        const IMPLEMENTADOS = ['parcela_paga', 'etapa_concluida', 'proposta_aceita'];
+        const IMPLEMENTADOS = ['parcela_paga', 'etapa_concluida', 'proposta_aceita', 'vistoria_entregue'];
         const disabled = !IMPLEMENTADOS.includes(k);
         return `
         <div style="border:1px solid var(--border); border-radius:10px; padding:12px; ${disabled ? 'opacity:0.5;' : ''}">

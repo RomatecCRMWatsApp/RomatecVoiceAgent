@@ -417,6 +417,12 @@ export async function enviarVistoriaWhatsApp(input: { id: string; telefone?: str
   const pdfBuf = await gerarPdfVistoria(input.id);
   const fileName = `Vistoria_${v.id}_${(v.titulo || 'obra').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
   const r = await sendWhatsAppDocument(input.telefone.trim(), pdfBuf.toString('base64'), fileName);
+
+  // v1.79.0: trigger automatico de recibo de ciencia da vistoria
+  void import('../services/recibosTriggers')
+    .then(m => m.gerarReciboVistoriaEntregue(Number(input.id), input.telefone!))
+    .catch(err => console.warn('[trigger vistoria_entregue]', (err as Error).message));
+
   return {
     ok: true as const,
     message: `Vistoria #${v.id} enviada para ${r.phone} (msgId ${r.messageId || '?'}).`,

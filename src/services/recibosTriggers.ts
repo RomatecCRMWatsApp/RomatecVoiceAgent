@@ -340,3 +340,90 @@ export async function processarPropostaAceita(recibo: Recibo): Promise<void> {
     console.error(`[trigger:proposta_aceita] FALHA:`, (err as Error).message);
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Trigger: vistoria entregue
+// ────────────────────────────────────────────────────────────────────────
+
+interface VistoriaTriggerRow extends RowDataPacket {
+  id: number; titulo: string | null; data: Date | string;
+  vistoriador: string | null; status_obra: string;
+  obra_id: number; obra_nome: string;
+  cliente: string | null;
+}
+
+/**
+ * Disparar quando vistoria e enviada via WhatsApp pra cliente.
+ * Cria recibo tipo='vistoria' pedindo ciencia. Idempotente — 1 recibo
+ * por vistoria. Recebe telefone direto (do envio) pra nao depender da
+ * obra ter cliente_telefone cadastrado.
+ */
+export async function gerarReciboVistoriaEntregue(
+  vistoria_id: number, telefone: string, tenant_id = 1
+): Promise<void> {
+  try {
+    const cfg = await getTriggerConfig(tenant_id, 'vistoria_entregue');
+    if (!cfg.enabled) return;
+
+    const existentes = await listarRecibos({
+      tenant_id, tipo: 'vistoria',
+      resource_type: 'romatec_obra_vistorias',
+      resource_id: String(vistoria_id),
+    });
+    if (existentes.length > 0) {
+      console.log(`[trigger:vistoria_entregue] vistoria #${vistoria_id} ja tem recibo — ignorando`);
+      return;
+    }
+
+    const [rows] = await pool.execute<VistoriaTriggerRow[]>(
+      `SELECT v.id, v.titulo, v.data, v.vistoriador, v.status_obra,
+              v.obra_id, o.nome AS obra_nome, o.cliente
+         FROM romatec_obra_vistorias v
+         JOIN romatec_obras o ON o.id = v.obra_id
+        WHERE v.id = ?`,
+      [vistoria_id]
+    );
+    if (!rows.length) {
+      console.warn(`[trigger:vistoria_entregue] vistoria #${vistoria_id} nao encontrada`);
+      return;
+    }
+    const v = rows[0];
+    const phone = telefone.replace(/\D/g, '');
+    if (phone.length < 10) {
+      console.warn(`[trigger:vistoria_entregue] telefone invalido: ${telefone}`);
+      return;
+    }
+
+    const labelStatus = ({
+      regular: 'regular', atencao: 'atenção', critica: 'crítica',
+    } as Record<string, string>)[v.status_obra] || v.status_obra;
+    const desc = [
+      `Vistoria${v.titulo ? ` "${v.titulo}"` : ''} da obra ${v.obra_nome}`,
+      v.vistoriador ? `por ${v.vistoriador}` : '',
+      `(status ${labelStatus})`,
+    ].filter(Boolean).join(' ');
+
+    const novo = await criarRecibo({
+      tenant_id,
+      tipo: 'vistoria',
+      resource_type: 'romatec_obra_vistorias',
+      resource_id: String(vistoria_id),
+      destinatario_nome: v.cliente || 'Cliente',
+      destinatario_phone: phone,
+      descricao_servico: desc,
+      expira_em_dias: cfg.validade_dias ?? 7,
+    });
+    console.log(`[trigger:vistoria_entregue] recibo ${novo.numero} criado pra vistoria #${vistoria_id}`);
+
+    if (cfg.auto_enviar) {
+      try {
+        await enviarReciboWhatsApp({ id: novo.id });
+        console.log(`[trigger:vistoria_entregue] WhatsApp enviado pra ${phone}`);
+      } catch (err) {
+        console.warn(`[trigger:vistoria_entregue] falha auto-enviar:`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error(`[trigger:vistoria_entregue] FALHA pra vistoria #${vistoria_id}:`, (err as Error).message);
+  }
+}
