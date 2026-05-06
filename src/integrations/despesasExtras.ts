@@ -551,12 +551,14 @@ export async function gerarPdfRelatorioDespesas(ids: string[], opts?: { obra_nom
   doc.fontSize(9).fillColor('#444').font('Helvetica-Bold');
   let cy = doc.y;
   // Colunas: # (28) | Loja (165) | Destinatário (95) | Data (55) | Categoria (65) | Total (89)
-  doc.text('#', 48, cy, { width: 28 });
-  doc.text('Loja', 76, cy, { width: 165 });
-  doc.text('Destinatário', 241, cy, { width: 95 });
-  doc.text('Data', 336, cy, { width: 55 });
-  doc.text('Categoria', 391, cy, { width: 65 });
-  doc.text('Total', 456, cy, { width: 91, align: 'right' });
+  // lineBreak:false + ellipsis evitam que texto longo quebre linha e sobreponha o proximo row
+  const cellOpts = { lineBreak: false as const, ellipsis: true as const };
+  doc.text('#', 48, cy, { width: 28, ...cellOpts });
+  doc.text('Loja', 76, cy, { width: 165, ...cellOpts });
+  doc.text('Destinatário', 241, cy, { width: 95, ...cellOpts });
+  doc.text('Data', 336, cy, { width: 55, ...cellOpts });
+  doc.text('Categoria', 391, cy, { width: 65, ...cellOpts });
+  doc.text('Total', 456, cy, { width: 91, align: 'right', ...cellOpts });
   doc.font('Helvetica');
   cy = doc.y + 4;
   doc.moveTo(48, cy).lineTo(547, cy).strokeColor('#888').lineWidth(0.5).stroke();
@@ -564,12 +566,12 @@ export async function gerarPdfRelatorioDespesas(ids: string[], opts?: { obra_nom
   doc.fontSize(9).fillColor('#111');
   for (const d of despesas) {
     if (cy > 730) { doc.addPage(); cy = 60; }
-    doc.text(`#${String(d.id).padStart(3,'0')}`, 48, cy, { width: 28 });
-    doc.text(d.loja.slice(0, 30), 76, cy, { width: 165 });
-    doc.text((d.destinatario || '-').slice(0, 18), 241, cy, { width: 95 });
-    doc.text(fmtData(d.data), 336, cy, { width: 55 });
-    doc.text(CAT_LABEL[String(d.categoria)] || String(d.categoria), 391, cy, { width: 65 });
-    doc.text(fmtBRL(d.valor_total), 456, cy, { width: 91, align: 'right' });
+    doc.text(`#${String(d.id).padStart(3,'0')}`, 48, cy, { width: 28, ...cellOpts });
+    doc.text(d.loja, 76, cy, { width: 165, ...cellOpts });
+    doc.text(d.destinatario || '-', 241, cy, { width: 95, ...cellOpts });
+    doc.text(fmtData(d.data), 336, cy, { width: 55, ...cellOpts });
+    doc.text(CAT_LABEL[String(d.categoria)] || String(d.categoria), 391, cy, { width: 65, ...cellOpts });
+    doc.text(fmtBRL(d.valor_total), 456, cy, { width: 91, align: 'right', ...cellOpts });
     cy += 14;
   }
   doc.moveTo(48, cy).lineTo(547, cy).strokeColor(corHex).lineWidth(1).stroke();
