@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#10b981">
+<title>Confirmar Recibo</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:linear-gradient(180deg,#f9fafb 0%,#e5e7eb 100%);
+    color:#111;line-height:1.5;
+    display:flex;flex-direction:column;align-items:center;
+    padding:20px 16px;min-height:100vh;
+  }
+  .card{
+    background:#fff;border-radius:16px;padding:24px;
+    width:100%;max-width:420px;
+    box-shadow:0 10px 40px rgba(0,0,0,.08);
+    margin-bottom:16px;
+  }
+  .header{text-align:center;padding:20px 0 4px;}
+  .logo{max-width:130px;max-height:60px;margin:0 auto 10px;display:block}
+  .brand{font-size:14px;color:#666;font-weight:500}
+  .hero{
+    background:linear-gradient(135deg,var(--cor) 0%, var(--cor-dark) 100%);
+    color:#fff;border-radius:16px;padding:24px 20px;margin-bottom:16px;
+    width:100%;max-width:420px;
+    box-shadow:0 10px 30px rgba(16,185,129,.25);
+  }
+  .hero h1{font-size:20px;font-weight:600;margin-bottom:4px}
+  .hero .numero{font-size:13px;opacity:.85;font-family:ui-monospace,Courier,monospace}
+  .hero .valor{font-size:36px;font-weight:700;margin-top:14px;letter-spacing:-1px}
+  .hero .forma{font-size:13px;opacity:.85;margin-top:4px}
+  dl{display:grid;grid-template-columns:90px 1fr;gap:8px 12px;font-size:14px}
+  dt{color:#666;font-weight:500}
+  dd{color:#111;font-weight:500;word-wrap:break-word;overflow-wrap:break-word}
+  h2{font-size:13px;color:#666;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;font-weight:600}
+  textarea{
+    width:100%;border:1px solid #d1d5db;border-radius:10px;
+    padding:12px;font-size:14px;font-family:inherit;resize:vertical;
+    min-height:80px;background:#f9fafb;
+    margin-top:6px;
+  }
+  textarea:focus{outline:2px solid var(--cor);background:#fff}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}
+  .btn{
+    border:0;border-radius:12px;padding:16px;font-size:16px;font-weight:600;
+    cursor:pointer;transition:transform .1s,box-shadow .1s;
+    display:flex;align-items:center;justify-content:center;gap:6px;
+  }
+  .btn:active{transform:scale(.97)}
+  .btn-ok{background:var(--cor);color:#fff;box-shadow:0 4px 14px rgba(16,185,129,.35)}
+  .btn-no{background:#fff;color:#dc2626;border:2px solid #fee2e2}
+  .btn:disabled{opacity:.5;cursor:wait}
+  .badge{
+    display:inline-block;padding:6px 12px;border-radius:999px;
+    font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    margin-bottom:14px;
+  }
+  .badge-pending{background:#fef3c7;color:#92400e}
+  .badge-ok{background:#d1fae5;color:#065f46}
+  .badge-no{background:#fee2e2;color:#991b1b}
+  .footer{font-size:11px;color:#9ca3af;text-align:center;padding:8px 16px;max-width:420px}
+  .footer a{color:var(--cor);text-decoration:none}
+  .alert{
+    padding:12px 14px;border-radius:10px;font-size:14px;margin-bottom:14px;
+  }
+  .alert-error{background:#fee2e2;color:#991b1b;border-left:4px solid #dc2626}
+  .alert-success{background:#d1fae5;color:#065f46;border-left:4px solid #10b981}
+  .pdf-link{
+    display:flex;align-items:center;gap:8px;
+    padding:10px 14px;border-radius:10px;background:#f3f4f6;
+    color:#111;text-decoration:none;font-size:14px;font-weight:500;
+    margin-top:14px;
+  }
+  .pdf-link:hover{background:#e5e7eb}
+</style>
+</head>
+<body>
+  <div id="root"></div>
+  <p class="footer">
+    Documento autenticado por <span id="brand">Romatec</span>.<br>
+    Este link tem validade limitada.<br>
+    Hash: <code id="hash"></code>
+  </p>
+<script>
+(async function(){
+  const root = document.getElementById('root');
+  const path = location.pathname.replace(/^\/r\//, '');
+  const token = path.split('/')[0];
+
+  function el(html){
+    const div = document.createElement('div');
+    div.innerHTML = html.trim();
+    return div.firstElementChild;
+  }
+  function escapeHtml(s){
+    return String(s||'').replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+  function fmtBRL(n){
+    if (n == null) return '';
+    return 'R$ ' + Number(n).toLocaleString('pt-BR', {minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  function fmtData(s){
+    if (!s) return '-';
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  }
+
+  const TIPO_TITULO = {
+    funcionario:'Recibo de Pagamento',
+    parcela:'Comprovante de Parcela',
+    despesa:'Reembolso de Despesa',
+    proposta:'Aceite de Proposta',
+    vistoria:'Ciência de Vistoria',
+    etapa:'Aceite de Etapa',
+    chaves:'Termo de Entrega de Chaves',
+    custom:'Recibo'
+  };
+
+  function renderError(msg){
+    root.innerHTML = `<div class="card">
+      <div class="alert alert-error"><strong>Não foi possível carregar.</strong><br>${escapeHtml(msg)}</div>
+    </div>`;
+  }
+
+  // Busca recibo
+  let r;
+  try {
+    const res = await fetch('/r/' + encodeURIComponent(token) + '/json');
+    if (!res.ok) {
+      const j = await res.json().catch(()=>({error:'erro desconhecido'}));
+      return renderError(j.error || 'Recibo não encontrado');
+    }
+    const j = await res.json();
+    r = j.recibo;
+    document.getElementById('brand').textContent = j.tenant?.brand_name || 'Romatec';
+    document.getElementById('hash').textContent = r.hash_validacao.slice(0, 16) + '...';
+    document.documentElement.style.setProperty('--cor', j.tenant?.primary_color || '#10b981');
+    document.documentElement.style.setProperty('--cor-dark', j.tenant?.primary_color_dark || '#059669');
+  } catch (err) {
+    return renderError(err.message);
+  }
+
+  const ja = ['confirmado','contestado','expirado','cancelado'].includes(r.status);
+  const expirado = r.expires_at && new Date(r.expires_at).getTime() < Date.now();
+
+  // Hero (cabeçalho colorido)
+  let heroHtml = `<div class="hero">
+    <h1>${escapeHtml(TIPO_TITULO[r.tipo] || 'Recibo')}</h1>
+    <div class="numero">${escapeHtml(r.numero)}</div>`;
+  if (r.valor != null) {
+    heroHtml += `<div class="valor">${escapeHtml(fmtBRL(r.valor))}</div>`;
+    if (r.forma_pagamento) {
+      heroHtml += `<div class="forma">via ${escapeHtml(r.forma_pagamento.toUpperCase())}</div>`;
+    }
+  }
+  heroHtml += `</div>`;
+  root.appendChild(el(heroHtml));
+
+  // Card de detalhes + ações
+  const card = document.createElement('div');
+  card.className = 'card';
+  let cardInner = '';
+
+  // Status badge se ja respondido
+  if (r.status === 'confirmado') {
+    cardInner += `<span class="badge badge-ok">✓ Confirmado em ${escapeHtml(fmtData(r.respondido_em))}</span>`;
+  } else if (r.status === 'contestado') {
+    cardInner += `<span class="badge badge-no">✗ Contestado em ${escapeHtml(fmtData(r.respondido_em))}</span>`;
+  } else if (r.status === 'expirado' || expirado) {
+    cardInner += `<span class="badge badge-no">⏱ Link expirado</span>`;
+  } else if (r.status === 'cancelado') {
+    cardInner += `<span class="badge badge-no">⊘ Cancelado</span>`;
+  } else {
+    cardInner += `<span class="badge badge-pending">Aguardando confirmação</span>`;
+  }
+
+  cardInner += `<h2>Destinatário</h2>
+    <dl>
+      <dt>Nome</dt><dd>${escapeHtml(r.destinatario_nome)}</dd>
+      ${r.destinatario_doc ? `<dt>Documento</dt><dd>${escapeHtml(r.destinatario_doc)}</dd>` : ''}
+      ${r.descricao_servico ? `<dt>Descrição</dt><dd>${escapeHtml(r.descricao_servico)}</dd>` : ''}
+      <dt>Emissão</dt><dd>${escapeHtml(fmtData(r.created_at))}</dd>
+      ${r.expires_at && !ja ? `<dt>Validade</dt><dd>${escapeHtml(fmtData(r.expires_at))}</dd>` : ''}
+    </dl>
+    <a href="/r/${encodeURIComponent(token)}/pdf" target="_blank" class="pdf-link">📄 Baixar PDF do recibo</a>
+  `;
+
+  // Mostra observação enviada (se ja respondido)
+  if (ja && r.resposta_obs) {
+    cardInner += `<h2 style="margin-top:18px">Observação registrada</h2>
+      <p style="font-size:14px;color:#444;background:#f9fafb;padding:10px 12px;border-radius:8px;border-left:3px solid var(--cor)">${escapeHtml(r.resposta_obs)}</p>`;
+  }
+
+  card.innerHTML = cardInner;
+  root.appendChild(card);
+
+  // Card de ação (so se ainda pode responder)
+  if (!ja && !expirado) {
+    const acaoCard = document.createElement('div');
+    acaoCard.className = 'card';
+    acaoCard.innerHTML = `
+      <h2>Sua resposta</h2>
+      <p style="font-size:14px;color:#444;margin-bottom:6px">Adicione uma observação (opcional):</p>
+      <textarea id="obs" maxlength="2000" placeholder="Ex: confirmo o recebimento do PIX em 06/05/2026"></textarea>
+      <div class="btns">
+        <button class="btn btn-no" id="btnNo">✗ Contestar</button>
+        <button class="btn btn-ok" id="btnOk">✓ Confirmar</button>
+      </div>
+      <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:10px">
+        Sua confirmação ficará registrada no documento original.
+      </p>
+    `;
+    root.appendChild(acaoCard);
+
+    async function responder(acao){
+      const obs = document.getElementById('obs').value.trim();
+      const btnOk = document.getElementById('btnOk');
+      const btnNo = document.getElementById('btnNo');
+      btnOk.disabled = btnNo.disabled = true;
+      btnOk.textContent = btnNo.textContent = 'Enviando...';
+      try {
+        const res = await fetch('/r/' + encodeURIComponent(token) + '/responder', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ acao, obs }),
+        });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || 'Erro ao enviar');
+        location.reload();
+      } catch (err) {
+        alert('Erro: ' + err.message);
+        btnOk.disabled = btnNo.disabled = false;
+        btnOk.textContent = '✓ Confirmar';
+        btnNo.textContent = '✗ Contestar';
+      }
+    }
+    document.getElementById('btnOk').onclick = () => {
+      if (confirm('Confirmar este recibo? A ação ficará registrada permanentemente.')) responder('confirma');
+    };
+    document.getElementById('btnNo').onclick = () => {
+      const obs = document.getElementById('obs').value.trim();
+      if (!obs) {
+        alert('Informe o motivo no campo de observação antes de contestar.');
+        document.getElementById('obs').focus();
+        return;
+      }
+      if (confirm('Contestar este recibo? Você pode adicionar mais detalhes na observação.')) responder('contesta');
+    };
+  }
+})();
+</script>
+</body>
+</html>

@@ -416,3 +416,96 @@ export async function listarEventos(recibo_id: number | string): Promise<Array<{
 }
 
 export const META = { TIPO_LABEL, TITULO_PDF, PREFIXOS };
+
+// ────────────────────────────────────────────────────────────────────────
+// Envio WhatsApp (Z-API)
+// ────────────────────────────────────────────────────────────────────────
+
+import { sendReply, sendDocument } from './whatsapp';
+import { gerarPdfRecibo } from '../services/reciboPdf';
+import { montarMensagem } from '../services/reciboWhatsappTemplates';
+import { getTenantSettings } from '../services/tenantSettings';
+
+function getBaseUrl(): string {
+  return (process.env.BASE_URL || 'https://romatecvoiceagent-production.up.railway.app').replace(/\/$/, '');
+}
+
+/**
+ * Envia o recibo pelo WhatsApp:
+ *  1) mensagem texto com link unico /r/:token
+ *  2) (opcional) PDF anexado como documento
+ *
+ * Atualiza status pra 'enviado' + grava enviado_em + zapi_message_id.
+ * Idempotente — se ja foi enviado, nao reenvia (use reenviar() pra forcar).
+ */
+export async function enviarReciboWhatsApp(input: {
+  id: number | string;
+  enviar_pdf?: boolean;        // default: true
+  forcar?: boolean;            // ignora status atual e reenvia
+}): Promise<{ ok: true; messageId?: string; phone: string; numero: string }> {
+  const r = await buscarReciboPorId(input.id);
+  if (!input.forcar && r.status !== 'rascunho' && r.status !== 'aguardando_envio') {
+    if (r.status === 'cancelado' || r.status === 'expirado') {
+      throw new Error(`Recibo ${r.status}, nao pode ser enviado`);
+    }
+    if (r.status === 'confirmado' || r.status === 'contestado') {
+      throw new Error(`Recibo ja foi ${r.status} pelo destinatario`);
+    }
+  }
+
+  const tenant = await getTenantSettings(r.tenant_id).catch(() => null);
+  const link = `${getBaseUrl()}/r/${r.token}`;
+  const texto = montarMensagem(r, tenant ?? {}, link);
+
+  // 1) texto com link
+  const sentText = await sendReply(r.destinatario_phone, texto);
+
+  // 2) PDF (opcional, default true)
+  if (input.enviar_pdf !== false) {
+    try {
+      const pdfBuf = await gerarPdfRecibo(r);
+      const fileName = `${r.numero}.pdf`;
+      await sendDocument(r.destinatario_phone, pdfBuf.toString('base64'), fileName);
+    } catch (err) {
+      console.warn(`[recibos] falha enviar PDF do recibo #${r.id}:`, (err as Error).message);
+      // segue mesmo se PDF falhar — texto com link foi entregue
+    }
+  }
+
+  // Atualiza status
+  await pool.execute(
+    `UPDATE recibos SET status = 'enviado', enviado_em = NOW(),
+                       zapi_message_id = ?
+       WHERE id = ?`,
+    [sentText.messageId || null, r.id]
+  );
+  await registrarEvento(r.id, 'sent', {
+    phone: sentText.phone,
+    messageId: sentText.messageId,
+    pdf_anexado: input.enviar_pdf !== false,
+    forcado: !!input.forcar,
+  });
+
+  return {
+    ok: true,
+    messageId: sentText.messageId,
+    phone: sentText.phone,
+    numero: r.numero,
+  };
+}
+
+/** Reenvia recibo (gera lembrete). Atualiza last_reminder_at. */
+export async function reenviarRecibo(id: number | string): Promise<void> {
+  const r = await buscarReciboPorId(id);
+  if (r.status === 'confirmado' || r.status === 'contestado') {
+    throw new Error('Recibo ja foi respondido');
+  }
+  if (r.status === 'cancelado' || r.status === 'expirado') {
+    throw new Error(`Recibo ${r.status}`);
+  }
+  await enviarReciboWhatsApp({ id, forcar: true, enviar_pdf: false });
+  await pool.execute(
+    `UPDATE recibos SET last_reminder_at = NOW() WHERE id = ?`, [Number(id)]
+  );
+  await registrarEvento(Number(id), 'reminded', {});
+}

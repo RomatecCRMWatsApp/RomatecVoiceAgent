@@ -37,6 +37,9 @@ import * as alarmes from './integrations/alarmes';
 import * as cofre from './integrations/cofre';
 import * as vistorias from './integrations/vistorias';
 import * as cowork from './integrations/cowork';
+import * as recibos from './integrations/recibos';
+import { gerarPdfRecibo } from './services/reciboPdf';
+import { getTenantSettings } from './services/tenantSettings';
 import ragRoutes from './routes/rag';
 import contractsRoutes from './routes/contracts';
 import painelRoutes from './routes/painel';
@@ -1047,6 +1050,143 @@ app.post('/api/despesas-extras/:id/enviar-whatsapp',
   apiHandle(args => despesasExtras.enviarDespesaWhatsApp(args as Parameters<typeof despesasExtras.enviarDespesaWhatsApp>[0])));
 app.post('/api/despesas-extras/:id/enviar-telegram',
   apiHandle(args => despesasExtras.enviarDespesaTelegram(args as Parameters<typeof despesasExtras.enviarDespesaTelegram>[0])));
+
+// ── v1.70.0: Recibos Universais ─────────────────────────────────────────
+// API autenticada (CRUD + envio) + paginas publicas /r/:token e /v/:hash
+app.get   ('/api/recibos',
+  apiHandle(args => recibos.listarRecibos(args as Parameters<typeof recibos.listarRecibos>[0])));
+app.get   ('/api/recibos/:id',
+  apiHandle(args => recibos.buscarReciboPorId((args as { id: string }).id)));
+app.get   ('/api/recibos/:id/eventos',
+  apiHandle(args => recibos.listarEventos((args as { id: string }).id)));
+app.post  ('/api/recibos',
+  apiHandle(args => recibos.criarRecibo(args as Parameters<typeof recibos.criarRecibo>[0])));
+app.post  ('/api/recibos/:id/enviar',
+  apiHandle(args => recibos.enviarReciboWhatsApp(args as Parameters<typeof recibos.enviarReciboWhatsApp>[0])));
+app.post  ('/api/recibos/:id/reenviar',
+  apiHandle(async args => {
+    await recibos.reenviarRecibo((args as { id: string }).id);
+    return { ok: true };
+  }));
+app.post  ('/api/recibos/:id/cancelar',
+  apiHandle(async args => {
+    const a = args as { id: string; motivo?: string };
+    await recibos.cancelarRecibo(a.id, a.motivo);
+    return { ok: true };
+  }));
+app.get   ('/api/recibos/:id/pdf', async (req: Request, res: Response) => {
+  try {
+    const r = await recibos.buscarReciboPorId(String(req.params.id));
+    const buf = await gerarPdfRecibo(r);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
+    res.send(buf);
+  } catch (err) {
+    res.status(404).json({ error: (err as Error).message });
+  }
+});
+
+// ── Paginas publicas de resposta (sem auth, token-based) ────────────────
+// /r/:token → form mobile pra destinatario confirmar/contestar
+app.get('/r/:token', (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'recibo-responder.html'));
+});
+
+app.get('/r/:token/json', async (req: Request, res: Response) => {
+  try {
+    const r = await recibos.buscarReciboPorToken(String(req.params.token));
+    if (!r) return res.status(404).json({ error: 'Recibo nao encontrado' });
+    const tenant = await getTenantSettings(r.tenant_id).catch(() => null);
+    res.json({
+      recibo: r,
+      tenant: tenant ? {
+        brand_name: tenant.brand_name,
+        primary_color: tenant.primary_color,
+        cnpj: tenant.cnpj,
+        logo_url: tenant.logo_path
+          ? `/public/${tenant.logo_path.replace(/^\/?(public\/)?/, '')}`
+          : null,
+      } : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/r/:token/pdf', async (req: Request, res: Response) => {
+  try {
+    const r = await recibos.buscarReciboPorToken(String(req.params.token));
+    if (!r) return res.status(404).json({ error: 'Recibo nao encontrado' });
+    const buf = await gerarPdfRecibo(r);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
+    res.send(buf);
+  } catch (err) {
+    res.status(404).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/r/:token/responder', async (req: Request, res: Response) => {
+  try {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
+            || req.socket.remoteAddress || '';
+    const ua = String(req.headers['user-agent'] || '');
+    const r = await recibos.responderRecibo({
+      token: String(req.params.token),
+      acao: (req.body?.acao || '') as 'confirma' | 'contesta' | 'recebido' | 'pix',
+      obs: req.body?.obs,
+      foto_url: req.body?.foto_url,
+      lat: req.body?.lat,
+      lng: req.body?.lng,
+      ip,
+      user_agent: ua,
+    });
+    res.json({ ok: true, recibo: r });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+// /v/:hash → pagina de validacao publica permanente (escaneou QR)
+app.get('/v/:hash', (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'recibo-validar.html'));
+});
+
+app.get('/v/:hash/json', async (req: Request, res: Response) => {
+  try {
+    const r = await recibos.buscarReciboPorHash(String(req.params.hash));
+    if (!r) return res.status(404).json({ error: 'Hash invalido' });
+    const tenant = await getTenantSettings(r.tenant_id).catch(() => null);
+    res.json({
+      recibo: r,
+      tenant: tenant ? {
+        brand_name: tenant.brand_name,
+        primary_color: tenant.primary_color,
+        cnpj: tenant.cnpj,
+        logo_url: tenant.logo_path
+          ? `/public/${tenant.logo_path.replace(/^\/?(public\/)?/, '')}`
+          : null,
+      } : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/v/:hash/pdf', async (req: Request, res: Response) => {
+  try {
+    const r = await recibos.buscarReciboPorHash(String(req.params.hash));
+    if (!r) return res.status(404).json({ error: 'Hash invalido' });
+    const buf = await gerarPdfRecibo(r);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
+    res.send(buf);
+  } catch (err) {
+    res.status(404).json({ error: (err as Error).message });
+  }
+});
 
 // v1.66.0: Proposta de Consultoria (averbacao + outros 5 subtipos na Fase 3).
 // Numeracao PROP-AAAA-XXXX compartilhada com Mao de Obra.

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#10b981">
+<title>Validar Recibo</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:#f9fafb;color:#111;line-height:1.5;
+    padding:20px 16px;min-height:100vh;
+    display:flex;flex-direction:column;align-items:center;
+  }
+  .header{text-align:center;padding:20px 0;max-width:480px}
+  .logo{max-width:120px;max-height:55px;margin-bottom:8px}
+  .stamp{
+    background:linear-gradient(135deg,var(--cor) 0%, var(--cor-dark) 100%);
+    color:#fff;padding:18px;border-radius:14px;text-align:center;
+    width:100%;max-width:480px;margin-bottom:16px;
+    box-shadow:0 8px 24px rgba(16,185,129,.2);
+  }
+  .stamp .check{font-size:48px;margin-bottom:4px;line-height:1}
+  .stamp h1{font-size:20px;font-weight:600;margin-bottom:4px}
+  .stamp p{font-size:13px;opacity:.92}
+  .stamp.invalid{background:linear-gradient(135deg,#dc2626,#991b1b);box-shadow:0 8px 24px rgba(220,38,38,.2)}
+  .card{
+    background:#fff;border-radius:14px;padding:22px;
+    width:100%;max-width:480px;
+    box-shadow:0 4px 16px rgba(0,0,0,.06);
+    margin-bottom:14px;
+  }
+  h2{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:8px}
+  dl{display:grid;grid-template-columns:120px 1fr;gap:10px 14px;font-size:14px}
+  dt{color:#666;font-weight:500}
+  dd{color:#111;font-weight:500;word-wrap:break-word;overflow-wrap:break-word}
+  .status{
+    display:inline-block;padding:4px 10px;border-radius:999px;
+    font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em
+  }
+  .status-ok{background:#d1fae5;color:#065f46}
+  .status-no{background:#fee2e2;color:#991b1b}
+  .status-pending{background:#fef3c7;color:#92400e}
+  .pdf-link{
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    padding:14px;border-radius:10px;background:var(--cor);color:#fff;
+    text-decoration:none;font-weight:600;font-size:15px;margin-top:12px;
+  }
+  .footer{font-size:11px;color:#9ca3af;text-align:center;padding:8px 16px;max-width:480px}
+  .hash-box{
+    background:#f3f4f6;padding:10px 12px;border-radius:8px;
+    font-family:ui-monospace,Courier,monospace;font-size:11px;
+    color:#444;word-break:break-all;line-height:1.4;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<p class="footer">
+  Sistema de validação criptográfica de recibos. Documentos emitidos pelo sistema têm um hash SHA-256 único que vincula o conteúdo ao QR Code. Qualquer alteração no PDF invalida automaticamente.
+</p>
+<script>
+(async function(){
+  const root = document.getElementById('root');
+  const hash = location.pathname.replace(/^\/v\//,'').split('/')[0];
+
+  function escapeHtml(s){
+    return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function fmtBRL(n){
+    if (n == null) return '';
+    return 'R$ ' + Number(n).toLocaleString('pt-BR', {minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  function fmtData(s){
+    if (!s) return '-';
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  }
+
+  const TIPO_TITULO = {
+    funcionario:'Recibo de Pagamento',
+    parcela:'Comprovante de Parcela',
+    despesa:'Reembolso de Despesa',
+    proposta:'Aceite de Proposta',
+    vistoria:'Ciência de Vistoria',
+    etapa:'Aceite de Etapa',
+    chaves:'Termo de Entrega de Chaves',
+    custom:'Recibo'
+  };
+  const STATUS_LABEL = {
+    rascunho:'Rascunho',
+    aguardando_envio:'Aguardando envio',
+    enviado:'Enviado',
+    entregue:'Entregue',
+    lido:'Lido',
+    respondido:'Respondido',
+    confirmado:'✓ Confirmado',
+    contestado:'✗ Contestado',
+    expirado:'⏱ Expirado',
+    cancelado:'⊘ Cancelado'
+  };
+
+  try {
+    const res = await fetch('/v/' + encodeURIComponent(hash) + '/json');
+    if (!res.ok) {
+      const j = await res.json().catch(()=>({error:'Recibo não encontrado'}));
+      root.innerHTML = `
+        <div class="stamp invalid">
+          <div class="check">✗</div>
+          <h1>Documento inválido</h1>
+          <p>${escapeHtml(j.error || 'Hash não corresponde a nenhum recibo.')}</p>
+        </div>
+        <div class="card">
+          <p style="font-size:13px;color:#444">Verifique:</p>
+          <ul style="font-size:13px;color:#666;margin:8px 0 0 18px;line-height:1.7">
+            <li>Se o QR foi escaneado corretamente</li>
+            <li>Se o PDF não foi alterado após emissão</li>
+            <li>Se o link foi digitado sem erros</li>
+          </ul>
+        </div>`;
+      return;
+    }
+    const { recibo: r, tenant } = await res.json();
+    document.documentElement.style.setProperty('--cor', tenant?.primary_color || '#10b981');
+    document.documentElement.style.setProperty('--cor-dark', tenant?.primary_color_dark || '#059669');
+
+    const statusClass =
+      r.status === 'confirmado' ? 'status-ok' :
+      r.status === 'contestado' || r.status === 'expirado' || r.status === 'cancelado' ? 'status-no' :
+      'status-pending';
+
+    let html = `
+      <div class="header">
+        ${tenant?.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" class="logo" alt="">` : ''}
+        <strong>${escapeHtml(tenant?.brand_name || 'Romatec')}</strong>
+        ${tenant?.cnpj ? `<div style="font-size:12px;color:#666">CNPJ ${escapeHtml(tenant.cnpj)}</div>` : ''}
+      </div>
+      <div class="stamp">
+        <div class="check">✓</div>
+        <h1>Documento autenticado</h1>
+        <p>Recibo emitido oficialmente pelo sistema</p>
+      </div>
+      <div class="card">
+        <h2>Detalhes do recibo</h2>
+        <dl>
+          <dt>Tipo</dt><dd>${escapeHtml(TIPO_TITULO[r.tipo] || r.tipo)}</dd>
+          <dt>Número</dt><dd>${escapeHtml(r.numero)}</dd>
+          <dt>Status</dt><dd><span class="status ${statusClass}">${escapeHtml(STATUS_LABEL[r.status] || r.status)}</span></dd>
+          <dt>Destinatário</dt><dd>${escapeHtml(r.destinatario_nome)}</dd>
+          ${r.destinatario_doc ? `<dt>Documento</dt><dd>${escapeHtml(r.destinatario_doc)}</dd>` : ''}
+          ${r.valor != null ? `<dt>Valor</dt><dd><strong>${escapeHtml(fmtBRL(r.valor))}</strong></dd>` : ''}
+          ${r.forma_pagamento ? `<dt>Forma</dt><dd>${escapeHtml(r.forma_pagamento.toUpperCase())}</dd>` : ''}
+          ${r.descricao_servico ? `<dt>Descrição</dt><dd>${escapeHtml(r.descricao_servico)}</dd>` : ''}
+          <dt>Emitido em</dt><dd>${escapeHtml(fmtData(r.created_at))}</dd>
+          ${r.respondido_em ? `<dt>Respondido em</dt><dd>${escapeHtml(fmtData(r.respondido_em))}</dd>` : ''}
+        </dl>
+        <a href="/v/${encodeURIComponent(hash)}/pdf" class="pdf-link">📄 Abrir PDF original</a>
+      </div>
+      <div class="card">
+        <h2>Hash de autenticidade</h2>
+        <div class="hash-box">${escapeHtml(r.hash_validacao)}</div>
+        <p style="font-size:11px;color:#9ca3af;margin-top:8px">
+          Este hash é único e imutável. Vinculado ao conteúdo do PDF no momento da emissão.
+        </p>
+      </div>`;
+    root.innerHTML = html;
+  } catch (err) {
+    root.innerHTML = `<div class="stamp invalid"><div class="check">✗</div><h1>Erro</h1><p>${escapeHtml(err.message)}</p></div>`;
+  }
+})();
+</script>
+</body>
+</html>
