@@ -7191,13 +7191,13 @@ function renderRecibos() {
       const TRIG_LABEL = {
         parcela_paga:      { label:'💵 Quando parcela do cliente é paga',     desc:'Cria recibo tipo "parcela" automaticamente, vinculado ao cliente da obra.' },
         etapa_concluida:   { label:'🏗️ Quando etapa de obra é concluída',     desc:'Cria recibo de aceite — cliente confirma para liberar próxima etapa.' },
-        proposta_aceita:   { label:'📋 Quando proposta é aceita',             desc:'Em breve.' },
+        proposta_aceita:   { label:'📋 Quando proposta é aceita pelo cliente', desc:'Atualiza status da proposta para "aceita" e notifica CEO via Telegram.' },
         despesa_criada:    { label:'🧾 Quando despesa é registrada',          desc:'Em breve.' },
         vistoria_entregue: { label:'📷 Quando vistoria é entregue',           desc:'Em breve.' },
       };
       const html = Object.entries(TRIG_LABEL).map(([k, m]) => {
         const c = cfg[k] || {};
-        const IMPLEMENTADOS = ['parcela_paga', 'etapa_concluida'];
+        const IMPLEMENTADOS = ['parcela_paga', 'etapa_concluida', 'proposta_aceita'];
         const disabled = !IMPLEMENTADOS.includes(k);
         return `
         <div style="border:1px solid var(--border); border-radius:10px; padding:12px; ${disabled ? 'opacity:0.5;' : ''}">

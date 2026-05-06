@@ -251,3 +251,92 @@ export async function gerarReciboEtapaConcluida(etapa_id: number, tenant_id = 1)
     console.error(`[trigger:etapa_concluida] FALHA pra etapa #${etapa_id}:`, (err as Error).message);
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Trigger: proposta aceita
+// ────────────────────────────────────────────────────────────────────────
+
+import type { Recibo } from '../integrations/recibos';
+
+interface PropostaRow extends RowDataPacket {
+  id: number; numero: string; status: string;
+  valor_total: string;
+  cliente_id: number; cliente_nome: string;
+}
+
+/**
+ * Disparar quando recibo tipo='proposta' for confirmado.
+ * - Atualiza propostas.status = 'aceita'
+ * - Notifica CEO via Telegram com resumo
+ *
+ * recibo.resource_type pode ser 'propostas' ou 'propostas_consultoria'
+ */
+export async function processarPropostaAceita(recibo: Recibo): Promise<void> {
+  try {
+    const cfg = await getTriggerConfig(recibo.tenant_id, 'proposta_aceita');
+    if (!cfg.enabled) return;
+
+    const proposta_id = Number(recibo.resource_id);
+    if (!proposta_id) return;
+    const isConsultoria = recibo.resource_type === 'propostas_consultoria';
+    const tabela = isConsultoria ? 'propostas_consultoria' : 'propostas';
+
+    // 1) Atualiza status
+    try {
+      await pool.execute(
+        `UPDATE ${tabela} SET status = 'aceita' WHERE id = ? AND status IN ('enviada','rascunho')`,
+        [proposta_id]
+      );
+      console.log(`[trigger:proposta_aceita] ${tabela} #${proposta_id} -> status='aceita'`);
+    } catch (err) {
+      console.warn(`[trigger:proposta_aceita] falha update status:`, (err as Error).message);
+    }
+
+    // 2) Busca dados pra notificacao
+    let nomeProposta = '';
+    let valor = 0;
+    try {
+      const [rows] = await pool.execute<PropostaRow[]>(
+        `SELECT p.numero, p.valor_total, p.cliente_id,
+                c.nome AS cliente_nome
+           FROM ${tabela} p
+           LEFT JOIN propostas_clientes c ON c.id = p.cliente_id
+          WHERE p.id = ?`,
+        [proposta_id]
+      );
+      if (rows.length) {
+        nomeProposta = rows[0].numero;
+        valor = Number(rows[0].valor_total) || 0;
+      }
+    } catch { /* ignora */ }
+
+    // 3) Notifica CEO via Telegram
+    try {
+      const { sendMessage } = await import('../integrations/telegram');
+      const chatId = (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
+        || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+      if (chatId) {
+        const valorFmt = 'R$ ' + valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+        const texto = [
+          `🎉 *PROPOSTA ACEITA!*`,
+          ``,
+          `Cliente: *${recibo.destinatario_nome}*`,
+          `Proposta: ${nomeProposta || '#' + proposta_id}`,
+          valor > 0 ? `Valor: ${valorFmt}` : '',
+          `Tipo: ${isConsultoria ? 'Consultoria' : 'Mão de Obra'}`,
+          ``,
+          `Confirmado em: ${recibo.respondido_em?.toLocaleString('pt-BR') || 'agora'}`,
+          recibo.resposta_obs ? `Obs: _${recibo.resposta_obs}_` : '',
+          ``,
+          `_Hash: ${recibo.hash_validacao.slice(0, 16)}..._`,
+        ].filter(Boolean).join('\n');
+        await sendMessage(chatId, texto);
+        console.log(`[trigger:proposta_aceita] notificacao Telegram enviada`);
+      }
+    } catch (err) {
+      console.warn(`[trigger:proposta_aceita] falha Telegram:`, (err as Error).message);
+    }
+  } catch (err) {
+    console.error(`[trigger:proposta_aceita] FALHA:`, (err as Error).message);
+  }
+}

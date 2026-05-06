@@ -370,6 +370,17 @@ export async function responderRecibo(input: ResponderInput): Promise<Recibo> {
     obs: input.obs ? input.obs.slice(0, 200) : undefined,
     ip: input.ip,
   });
+
+  // v1.78.0: dispara triggers downstream baseados em tipo + acao
+  // (fire-and-forget — falha aqui nao impede a resposta voltar pro cliente)
+  if (novoStatus === 'confirmado') {
+    if (r.tipo === 'proposta') {
+      void import('../services/recibosTriggers')
+        .then(m => m.processarPropostaAceita(r))
+        .catch(err => console.warn('[trigger proposta_aceita]', (err as Error).message));
+    }
+  }
+
   return await buscarReciboPorId(r.id);
 }
 
