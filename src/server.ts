@@ -38,8 +38,13 @@ import * as cofre from './integrations/cofre';
 import * as vistorias from './integrations/vistorias';
 import * as cowork from './integrations/cowork';
 import * as recibos from './integrations/recibos';
+import * as notasFiscais from './integrations/notasFiscais';
 import { gerarPdfRecibo } from './services/reciboPdf';
 import { getTenantSettings } from './services/tenantSettings';
+import {
+  getFiscalConfig as getTenantFiscalConfig,
+  upsertFiscalConfig as upsertTenantFiscalConfig,
+} from './services/tenantFiscalConfig';
 import ragRoutes from './routes/rag';
 import contractsRoutes from './routes/contracts';
 import painelRoutes from './routes/painel';
@@ -1098,6 +1103,65 @@ app.post('/api/despesas-extras/:id/enviar-whatsapp',
   apiHandle(args => despesasExtras.enviarDespesaWhatsApp(args as Parameters<typeof despesasExtras.enviarDespesaWhatsApp>[0])));
 app.post('/api/despesas-extras/:id/enviar-telegram',
   apiHandle(args => despesasExtras.enviarDespesaTelegram(args as Parameters<typeof despesasExtras.enviarDespesaTelegram>[0])));
+
+// ── v1.74.0: Configuração Fiscal + Notas Fiscais (NFe.io) ───────────────
+app.get('/api/fiscal-config', async (_req: Request, res: Response) => {
+  try {
+    const cfg = await getTenantFiscalConfig(1);
+    res.json(cfg); // has_api_key boolean — nunca retorna a chave em si
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.put('/api/fiscal-config', async (req: Request, res: Response) => {
+  try {
+    const cfg = await upsertTenantFiscalConfig({
+      ...(req.body || {}),
+      tenant_id: 1,
+    });
+    res.json(cfg);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/notas-fiscais',
+  apiHandle(args => notasFiscais.listarNotasFiscais(args as Parameters<typeof notasFiscais.listarNotasFiscais>[0])));
+app.get('/api/notas-fiscais/:id',
+  apiHandle(args => notasFiscais.buscarNotaFiscal((args as { id: string }).id)));
+app.post('/api/notas-fiscais',
+  apiHandle(args => notasFiscais.criarRascunhoNF(args as Parameters<typeof notasFiscais.criarRascunhoNF>[0])));
+app.post('/api/notas-fiscais/:id/emitir',
+  apiHandle(async args => notasFiscais.enviarNFParaProvider((args as { id: string }).id)));
+app.post('/api/notas-fiscais/:id/cancelar',
+  apiHandle(async args => {
+    const a = args as { id: string; motivo?: string };
+    if (!a.motivo?.trim()) throw new Error('motivo obrigatorio pra cancelar');
+    return notasFiscais.cancelarNotaFiscal(a.id, a.motivo);
+  }));
+
+// Webhook NFe.io — recebe atualizacao quando prefeitura processa
+app.post('/webhook/nfeio', async (req: Request, res: Response) => {
+  res.json({ ok: true }); // ack imediato
+  try {
+    const body = req.body as Record<string, unknown>;
+    const provider_id = String(body.id || (body.serviceInvoice as Record<string, unknown>)?.id || '');
+    if (!provider_id) {
+      console.warn('[webhook nfeio] sem provider_id no payload');
+      return;
+    }
+    const data = (body.serviceInvoice as Record<string, unknown>) || body;
+    await notasFiscais.aplicarAtualizacaoProvider(provider_id, {
+      status: data.status as string,
+      number: data.number as string,
+      pdfUrl: data.pdfUrl as string,
+      xmlUrl: data.xmlUrl as string,
+      checkCode: data.checkCode as string,
+      flowMessage: data.flowMessage as string,
+      issuedOn: data.issuedOn as string,
+      cancelledOn: data.cancelledOn as string,
+    });
+    console.log(`[webhook nfeio] NF ${provider_id} -> ${data.status}`);
+  } catch (err) {
+    console.error('[webhook nfeio] erro:', (err as Error).message);
+  }
+});
 
 // ── v1.70.0: Recibos Universais ─────────────────────────────────────────
 // API autenticada (CRUD + envio) + paginas publicas /r/:token e /v/:hash
