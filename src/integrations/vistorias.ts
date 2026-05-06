@@ -151,6 +151,57 @@ export async function adicionarFotoVistoria(input: {
   return { ok: true, insertId: r.insertId, message: `Foto adicionada (ID ${r.insertId}, ordem ${ordem}).` };
 }
 
+// v1.67.9: edicao de vistoria (paridade Proposta — modo Editar)
+// Atualiza campos basicos. Fotos: se input.fotos vier, SUBSTITUI as existentes
+// (caso contrario mantem). NAO mexe em obra_id (vistoria nao migra de obra).
+export async function atualizarVistoria(input: {
+  id: string;
+  titulo?: string | null;
+  vistoriador?: string | null;
+  data?: string;
+  descricao?: string;
+  observacoes?: string | null;
+  pendencias?: string | null;
+  status_obra?: 'regular' | 'atencao' | 'critica';
+  fotos?: { legenda?: string; mime: string; data_base64: string }[];
+}): Promise<MutationResult> {
+  const id = Number(input.id);
+  if (!id) throw new Error('id obrigatorio');
+  const atual = await buscarVistoria(input.id);
+
+  const titulo      = input.titulo      !== undefined ? input.titulo      : atual.titulo;
+  const vistoriador = input.vistoriador !== undefined ? input.vistoriador : atual.vistoriador;
+  const data        = input.data        ?? (typeof atual.data === 'object' && atual.data && 'toISOString' in atual.data ? (atual.data as Date).toISOString().slice(0, 10) : String(atual.data).slice(0, 10));
+  const descricao   = input.descricao   ?? atual.descricao;
+  const observacoes = input.observacoes !== undefined ? input.observacoes : atual.observacoes;
+  const pendencias  = input.pendencias  !== undefined ? input.pendencias  : atual.pendencias;
+  const status_obra = input.status_obra ?? atual.status_obra;
+
+  await pool.execute(
+    `UPDATE romatec_obra_vistorias SET
+       titulo = ?, vistoriador = ?, data = ?, descricao = ?,
+       observacoes = ?, pendencias = ?, status_obra = ?
+     WHERE id = ?`,
+    [titulo, vistoriador, data, descricao, observacoes, pendencias, status_obra, id]
+  );
+
+  // Se vier array de fotos, substitui as antigas
+  if (Array.isArray(input.fotos)) {
+    await pool.execute('DELETE FROM romatec_obra_vistoria_fotos WHERE vistoria_id = ?', [id]);
+    for (let i = 0; i < input.fotos.length; i++) {
+      const f = input.fotos[i];
+      // Se a foto vier sem data_base64 (mantida), pula — front so manda novas/mantidas-com-base64
+      if (!f.data_base64) continue;
+      await pool.execute(
+        `INSERT INTO romatec_obra_vistoria_fotos (vistoria_id, legenda, mime, data_base64, ordem) VALUES (?,?,?,?,?)`,
+        [id, f.legenda ?? null, f.mime, f.data_base64, i]
+      );
+    }
+  }
+
+  return { ok: true, message: `Vistoria #${id} atualizada.` };
+}
+
 export async function apagarVistoria(input: { id: string; confirm?: boolean }): Promise<MutationResult> {
   if (!input.confirm) {
     return { preview: true, message: `[PREVIEW] APAGAR vistoria ${input.id} + todas as fotos. IRREVERSÍVEL. Reenvie com confirm:true.` };

@@ -367,3 +367,308 @@ export async function somaDespesasExtrasObra(obra_id: number): Promise<number> {
   );
   return Number(rows[0]?.total || 0);
 }
+
+// ── v1.67.10: PDF individual + consolidado + envio WhatsApp/Telegram ──
+import PDFDocument from 'pdfkit';
+import { PDFDocument as PDFLibDocument } from 'pdf-lib';
+import path from 'path';
+import fs from 'fs';
+import { sendDocument as sendWhatsAppDocument } from './whatsapp';
+import { sendDocument as sendTelegramDocument } from './telegram';
+import { getTenantSettings } from '../services/tenantSettings';
+
+const FORMA_LABEL: Record<string, string> = {
+  pix: 'PIX', dinheiro: 'Dinheiro',
+  cartao_credito: 'Cartão de Crédito', cartao_debito: 'Cartão de Débito', boleto: 'Boleto',
+};
+const CAT_LABEL: Record<string, string> = {
+  ferramenta: 'Ferramenta', aluguel: 'Aluguel', material: 'Material', outros: 'Outros',
+};
+const fmtBRL = (n: number) => 'R$ ' + Number(n||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtData = (d: Date | string): string => {
+  if (!d) return '-';
+  const dt = d instanceof Date ? d : new Date(d);
+  if (isNaN(dt.getTime())) return String(d);
+  return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
+};
+
+// Renderiza UMA despesa em um PDFKit document. Retorna apos terminar
+// (sem fechar o doc — pra suportar relatorio consolidado).
+function renderDespesaNaPagina(doc: PDFKit.PDFDocument, d: Awaited<ReturnType<typeof buscarDespesaExtra>>, corHex: string) {
+  doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold')
+     .text(`Despesa #${String(d.id).padStart(3, '0')} — ${d.loja}`);
+  doc.font('Helvetica').fontSize(10).fillColor('#444');
+  doc.text(`Obra: ${d.obra_nome || '-'}`);
+  doc.text(`Data: ${fmtData(d.data)} · ${CAT_LABEL[String(d.categoria)] || d.categoria} · ${FORMA_LABEL[String(d.forma_pagamento)] || d.forma_pagamento}`);
+  doc.moveDown(0.4);
+
+  // Tabela de itens
+  doc.fontSize(10).fillColor('#111').font('Helvetica-Bold');
+  const colX = { idx: 48, desc: 75, qtd: 380, vu: 430, sub: 495 };
+  const colW = { idx: 22, desc: 300, qtd: 45, vu: 60, sub: 55 };
+  const yH = doc.y;
+  doc.text('#', colX.idx, yH, { width: colW.idx });
+  doc.text('Descrição', colX.desc, yH, { width: colW.desc });
+  doc.text('Qtd', colX.qtd, yH, { width: colW.qtd, align: 'right' });
+  doc.text('V.Unit', colX.vu, yH, { width: colW.vu, align: 'right' });
+  doc.text('Subtotal', colX.sub, yH, { width: colW.sub, align: 'right' });
+  doc.font('Helvetica');
+  let cursorY = doc.y + 4;
+  doc.moveTo(48, cursorY).lineTo(547, cursorY).strokeColor('#888').lineWidth(0.5).stroke();
+  cursorY += 4;
+
+  doc.fontSize(9).fillColor('#111');
+  for (let i = 0; i < d.itens.length; i++) {
+    const it = d.itens[i];
+    const qtd = Number(it.quantidade || 1);
+    const subtotal = Number(it.valor) * qtd;
+    const hDesc = doc.heightOfString(it.descricao, { width: colW.desc });
+    const lineH = Math.max(hDesc, 12);
+    if (cursorY + lineH > 760) { doc.addPage(); cursorY = 60; }
+    doc.text(String(i + 1), colX.idx, cursorY, { width: colW.idx });
+    doc.text(it.descricao, colX.desc, cursorY, { width: colW.desc });
+    doc.text(qtd.toLocaleString('pt-BR'), colX.qtd, cursorY, { width: colW.qtd, align: 'right' });
+    doc.text(fmtBRL(it.valor).replace('R$ ', ''), colX.vu, cursorY, { width: colW.vu, align: 'right' });
+    doc.text(fmtBRL(subtotal).replace('R$ ', ''), colX.sub, cursorY, { width: colW.sub, align: 'right' });
+    cursorY += lineH + 4;
+  }
+
+  doc.moveTo(48, cursorY).lineTo(547, cursorY).strokeColor('#ccc').lineWidth(0.5).stroke();
+  cursorY += 6;
+
+  // Subtotal/Desconto/Total
+  const subtotal = d.itens.reduce((s, i) => s + (Number(i.valor) * Number(i.quantidade || 1)), 0);
+  const desconto = Number(d.desconto || 0);
+  doc.fontSize(9).fillColor('#444')
+     .text(`Subtotal: ${fmtBRL(subtotal)}`, 48, cursorY, { width: 499, align: 'right' });
+  cursorY += 12;
+  if (desconto > 0) {
+    doc.fillColor('#dc2626').text(`Desconto: − ${fmtBRL(desconto)}`, 48, cursorY, { width: 499, align: 'right' });
+    cursorY += 12;
+  }
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold')
+     .text(`TOTAL: ${fmtBRL(d.valor_total)}`, 48, cursorY, { width: 499, align: 'right' });
+  doc.font('Helvetica');
+  cursorY += 18;
+
+  if (d.observacoes) {
+    doc.fontSize(9).fillColor('#666').text(`Obs: ${d.observacoes}`, 48, cursorY, { width: 499 });
+    cursorY += 14;
+  }
+  doc.x = 48; doc.y = cursorY;
+}
+
+// PDF individual de UMA despesa + anexo do cupom mergeado
+export async function gerarPdfDespesaExtra(id: string): Promise<Buffer> {
+  const d = await buscarDespesaExtra(id);
+  const t = await getTenantSettings(1).catch(() => null);
+  const brand = t?.brand_name || 'Romatec Consultoria Imobiliaria';
+  const corHex = t?.primary_color || '#10b981';
+  const logoFile = path.join(__dirname, '..', 'public', 'romatec-logo-removebg-preview.png');
+
+  const doc = new PDFDocument({ size: 'A4', margin: 48, info: {
+    Title: `Despesa #${d.id} - ${d.loja}`, Author: brand,
+  }});
+  const chunks: Buffer[] = [];
+  doc.on('data', (c: Buffer) => chunks.push(c));
+
+  // Header
+  if (fs.existsSync(logoFile)) {
+    try { doc.image(logoFile, { fit: [120, 60], align: 'center' }); } catch { /* opcional */ }
+  } else {
+    doc.fontSize(16).fillColor(corHex).text(brand, { align: 'center' });
+  }
+  doc.moveDown(0.3);
+  doc.strokeColor(corHex).lineWidth(2).moveTo(48, doc.y).lineTo(547, doc.y).stroke();
+  doc.moveDown(0.5);
+  doc.fontSize(15).fillColor('#111').text('NOTA DE DESPESA EXTRA', { align: 'center' });
+  doc.moveDown(0.6);
+
+  renderDespesaNaPagina(doc, d, corHex);
+
+  doc.fontSize(8).fillColor('#888').text(
+    `${brand} — Documento gerado em ${new Date().toLocaleString('pt-BR')}.`,
+    48, 800, { width: 499, align: 'center' }
+  );
+  doc.end();
+  await new Promise<void>(r => doc.on('end', () => r()));
+
+  const principal = Buffer.concat(chunks);
+
+  // Mergeia anexo do cupom (se houver)
+  if (!d.foto_b64 || !d.foto_mimetype) return principal;
+  return mergePrincipalComAnexo(principal, d.foto_b64, d.foto_mimetype, `Cupom #${d.id} — ${d.loja}`);
+}
+
+// PDF consolidado de varias despesas + anexos
+export async function gerarPdfRelatorioDespesas(ids: string[], opts?: { obra_nome?: string }): Promise<Buffer> {
+  if (!Array.isArray(ids) || ids.length === 0) throw new Error('Pelo menos 1 id obrigatorio');
+  const despesas = await Promise.all(ids.map(id => buscarDespesaExtra(id)));
+  const t = await getTenantSettings(1).catch(() => null);
+  const brand = t?.brand_name || 'Romatec Consultoria Imobiliaria';
+  const corHex = t?.primary_color || '#10b981';
+  const logoFile = path.join(__dirname, '..', 'public', 'romatec-logo-removebg-preview.png');
+
+  const doc = new PDFDocument({ size: 'A4', margin: 48, info: {
+    Title: `Relatorio Despesas Extras (${ids.length} notas)`, Author: brand,
+  }});
+  const chunks: Buffer[] = [];
+  doc.on('data', (c: Buffer) => chunks.push(c));
+
+  // Capa
+  if (fs.existsSync(logoFile)) {
+    try { doc.image(logoFile, { fit: [120, 60], align: 'center' }); } catch { /* opt */ }
+  }
+  doc.moveDown(0.3);
+  doc.strokeColor(corHex).lineWidth(2).moveTo(48, doc.y).lineTo(547, doc.y).stroke();
+  doc.moveDown(0.5);
+  doc.fontSize(18).fillColor('#111').font('Helvetica-Bold')
+     .text('RELATÓRIO DE DESPESAS EXTRAS', { align: 'center' });
+  doc.font('Helvetica').fontSize(11).fillColor('#444')
+     .text(`${despesas.length} nota(s) consolidada(s) — gerado em ${new Date().toLocaleString('pt-BR')}`, { align: 'center' });
+  if (opts?.obra_nome) doc.text(`Obra: ${opts.obra_nome}`, { align: 'center' });
+  doc.moveDown(0.8);
+
+  // Resumo: tabela com #, loja, data, total, desconto
+  const totalGeral = despesas.reduce((s, d) => s + Number(d.valor_total || 0), 0);
+  const descontoGeral = despesas.reduce((s, d) => s + Number(d.desconto || 0), 0);
+
+  doc.fontSize(11).fillColor(corHex).text('Resumo das Notas');
+  doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.3);
+
+  doc.fontSize(9).fillColor('#444').font('Helvetica-Bold');
+  let cy = doc.y;
+  doc.text('#', 48, cy, { width: 30 });
+  doc.text('Loja', 78, cy, { width: 220 });
+  doc.text('Data', 298, cy, { width: 60 });
+  doc.text('Categoria', 358, cy, { width: 70 });
+  doc.text('Total', 428, cy, { width: 119, align: 'right' });
+  doc.font('Helvetica');
+  cy = doc.y + 4;
+  doc.moveTo(48, cy).lineTo(547, cy).strokeColor('#888').lineWidth(0.5).stroke();
+  cy += 4;
+  doc.fontSize(9).fillColor('#111');
+  for (const d of despesas) {
+    if (cy > 730) { doc.addPage(); cy = 60; }
+    doc.text(`#${String(d.id).padStart(3,'0')}`, 48, cy, { width: 30 });
+    doc.text(d.loja.slice(0, 40), 78, cy, { width: 220 });
+    doc.text(fmtData(d.data), 298, cy, { width: 60 });
+    doc.text(CAT_LABEL[String(d.categoria)] || String(d.categoria), 358, cy, { width: 70 });
+    doc.text(fmtBRL(d.valor_total), 428, cy, { width: 119, align: 'right' });
+    cy += 14;
+  }
+  doc.moveTo(48, cy).lineTo(547, cy).strokeColor(corHex).lineWidth(1).stroke();
+  cy += 6;
+  if (descontoGeral > 0) {
+    doc.fontSize(9).fillColor('#dc2626')
+       .text(`Total descontos: − ${fmtBRL(descontoGeral)}`, 48, cy, { width: 499, align: 'right' });
+    cy += 12;
+  }
+  doc.fontSize(13).fillColor(corHex).font('Helvetica-Bold')
+     .text(`TOTAL CONSOLIDADO: ${fmtBRL(totalGeral)}`, 48, cy, { width: 499, align: 'right' });
+  doc.font('Helvetica');
+
+  // Detalhes de cada despesa em pagina propria
+  for (const d of despesas) {
+    doc.addPage();
+    doc.fontSize(8).fillColor('#888').text(`Nota ${despesas.indexOf(d) + 1}/${despesas.length}`, 48, 30);
+    doc.moveDown(0.5);
+    renderDespesaNaPagina(doc, d, corHex);
+  }
+
+  doc.fontSize(8).fillColor('#888').text(
+    `${brand} — Relatório consolidado.`, 48, 800, { width: 499, align: 'center' }
+  );
+  doc.end();
+  await new Promise<void>(r => doc.on('end', () => r()));
+  let principal: Buffer = Buffer.concat(chunks);
+
+  // Mergeia todos os anexos (cupons) sequencialmente
+  for (const d of despesas) {
+    if (d.foto_b64 && d.foto_mimetype) {
+      const merged = await mergePrincipalComAnexo(
+        principal, d.foto_b64, d.foto_mimetype, `Cupom #${d.id} — ${d.loja}`
+      );
+      principal = merged as Buffer;
+    }
+  }
+  return principal;
+}
+
+// Mergeia 1 anexo (PDF ou imagem) ao final de um PDF principal
+async function mergePrincipalComAnexo(principalBuf: Buffer, anexoB64: string, mimetype: string, legenda: string): Promise<Buffer> {
+  try {
+    const merged = await PDFLibDocument.create();
+    const principalDoc = await PDFLibDocument.load(principalBuf);
+    const principalPages = await merged.copyPages(principalDoc, principalDoc.getPageIndices());
+    principalPages.forEach(p => merged.addPage(p));
+
+    const anexoBuf = Buffer.from(anexoB64, 'base64');
+    if (mimetype === 'application/pdf') {
+      const anexoDoc = await PDFLibDocument.load(anexoBuf);
+      const anexoPages = await merged.copyPages(anexoDoc, anexoDoc.getPageIndices());
+      anexoPages.forEach(p => merged.addPage(p));
+    } else if (mimetype.startsWith('image/')) {
+      const img = mimetype === 'image/png'
+        ? await merged.embedPng(anexoBuf)
+        : await merged.embedJpg(anexoBuf);
+      const A4_W = 595.28, A4_H = 841.89, M = 30;
+      const maxW = A4_W - 2 * M, maxH = A4_H - 2 * M - 30;
+      const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+      const w = img.width * scale, h = img.height * scale;
+      const page = merged.addPage([A4_W, A4_H]);
+      page.drawImage(img, { x: (A4_W - w) / 2, y: (A4_H - h) / 2 - 15, width: w, height: h });
+      page.drawText(legenda, { x: M, y: 20, size: 9 });
+    }
+    const out = await merged.save();
+    return Buffer.from(out);
+  } catch (err) {
+    console.warn(`[despesas-merge] falha ao mergear anexo: ${(err as Error).message}`);
+    return principalBuf;
+  }
+}
+
+export async function enviarDespesaWhatsApp(input: { id: string; telefone?: string }) {
+  if (!input.telefone?.trim()) throw new Error('Telefone obrigatorio.');
+  const d = await buscarDespesaExtra(input.id);
+  const pdfBuf = await gerarPdfDespesaExtra(input.id);
+  const fileName = `Despesa_${String(d.id).padStart(3,'0')}_${d.loja.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+  const r = await sendWhatsAppDocument(input.telefone.trim(), pdfBuf.toString('base64'), fileName);
+  return { ok: true as const, message: `Despesa #${d.id} enviada para ${r.phone}.`, messageId: r.messageId, phone: r.phone };
+}
+
+export async function enviarDespesaTelegram(input: { id: string; chatId?: string }) {
+  const d = await buscarDespesaExtra(input.id);
+  const chatId = input.chatId
+    || (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
+    || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+  if (!chatId) throw new Error('chatId Telegram obrigatorio.');
+  const pdfBuf = await gerarPdfDespesaExtra(input.id);
+  if (pdfBuf.length > 50 * 1024 * 1024) throw new Error(`PDF tem ${(pdfBuf.length/1024/1024).toFixed(1)}MB e Telegram aceita ate 50MB.`);
+  const fileName = `Despesa_${String(d.id).padStart(3,'0')}_${d.loja.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+  await sendTelegramDocument(chatId, pdfBuf, fileName, `Despesa #${d.id} — ${d.loja}`);
+  return { ok: true as const, message: `Despesa #${d.id} enviada via Telegram (${(pdfBuf.length/1024).toFixed(0)} KB).` };
+}
+
+export async function enviarRelatorioDespesasWhatsApp(input: { ids: string[]; telefone?: string; obra_nome?: string }) {
+  if (!input.telefone?.trim()) throw new Error('Telefone obrigatorio.');
+  if (!input.ids?.length) throw new Error('Pelo menos 1 despesa obrigatoria.');
+  const pdfBuf = await gerarPdfRelatorioDespesas(input.ids, { obra_nome: input.obra_nome });
+  const fileName = `Relatorio_Despesas_${input.ids.length}_notas.pdf`;
+  const r = await sendWhatsAppDocument(input.telefone.trim(), pdfBuf.toString('base64'), fileName);
+  return { ok: true as const, message: `Relatório com ${input.ids.length} despesas enviado para ${r.phone}.`, messageId: r.messageId };
+}
+
+export async function enviarRelatorioDespesasTelegram(input: { ids: string[]; chatId?: string; obra_nome?: string }) {
+  const chatId = input.chatId
+    || (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
+    || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+  if (!chatId) throw new Error('chatId Telegram obrigatorio.');
+  if (!input.ids?.length) throw new Error('Pelo menos 1 despesa obrigatoria.');
+  const pdfBuf = await gerarPdfRelatorioDespesas(input.ids, { obra_nome: input.obra_nome });
+  if (pdfBuf.length > 50 * 1024 * 1024) throw new Error(`PDF tem ${(pdfBuf.length/1024/1024).toFixed(1)}MB e Telegram aceita ate 50MB.`);
+  const fileName = `Relatorio_Despesas_${input.ids.length}_notas.pdf`;
+  await sendTelegramDocument(chatId, pdfBuf, fileName, `Relatório de Despesas Extras — ${input.ids.length} nota(s)`);
+  return { ok: true as const, message: `Relatório enviado via Telegram (${(pdfBuf.length/1024).toFixed(0)} KB).` };
+}

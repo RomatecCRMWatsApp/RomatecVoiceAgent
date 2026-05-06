@@ -1012,6 +1012,35 @@ app.put   ('/api/despesas-extras/:id',
   apiHandle(args => despesasExtras.atualizarDespesaExtra(args as Parameters<typeof despesasExtras.atualizarDespesaExtra>[0])));
 app.delete('/api/despesas-extras/:id', requireCeoToken,
   apiHandle(args => despesasExtras.apagarDespesaExtra(args as { id: string })));
+// v1.67.10: PDF individual + relatorio consolidado + envios WhatsApp/Telegram
+app.get('/api/despesas-extras/:id/pdf', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const buf = await despesasExtras.gerarPdfDespesaExtra(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Despesa_${id}.pdf"`);
+    res.send(buf);
+  } catch (err) { res.status(404).json({ error: (err as Error).message }); }
+});
+app.post('/api/despesas-extras/relatorio-pdf', async (req: Request, res: Response) => {
+  try {
+    const ids = (req.body?.ids || []) as string[];
+    const obra_nome = String(req.body?.obra_nome || '').trim() || undefined;
+    if (!ids.length) return res.status(400).json({ error: 'ids obrigatorio (array)' });
+    const buf = await despesasExtras.gerarPdfRelatorioDespesas(ids, { obra_nome });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Relatorio_Despesas_${ids.length}_notas.pdf"`);
+    res.send(buf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.post('/api/despesas-extras/:id/enviar-whatsapp',
+  apiHandle(args => despesasExtras.enviarDespesaWhatsApp(args as Parameters<typeof despesasExtras.enviarDespesaWhatsApp>[0])));
+app.post('/api/despesas-extras/:id/enviar-telegram',
+  apiHandle(args => despesasExtras.enviarDespesaTelegram(args as Parameters<typeof despesasExtras.enviarDespesaTelegram>[0])));
+app.post('/api/despesas-extras/relatorio/enviar-whatsapp',
+  apiHandle(args => despesasExtras.enviarRelatorioDespesasWhatsApp(args as Parameters<typeof despesasExtras.enviarRelatorioDespesasWhatsApp>[0])));
+app.post('/api/despesas-extras/relatorio/enviar-telegram',
+  apiHandle(args => despesasExtras.enviarRelatorioDespesasTelegram(args as Parameters<typeof despesasExtras.enviarRelatorioDespesasTelegram>[0])));
 
 // v1.66.0: Proposta de Consultoria (averbacao + outros 5 subtipos na Fase 3).
 // Numeracao PROP-AAAA-XXXX compartilhada com Mao de Obra.
@@ -1071,6 +1100,7 @@ app.delete('/api/cowork/:id',   apiHandle(args => cowork.cancelarTarefaCowork(ar
 app.get   ('/api/vistorias',     apiHandle(args => vistorias.listarVistorias(args as Parameters<typeof vistorias.listarVistorias>[0])));
 app.get   ('/api/vistorias/:id', apiHandle(args => vistorias.buscarVistoria((args as { id: string }).id)));
 app.post  ('/api/vistorias',     apiHandle(args => vistorias.criarVistoria(args as Parameters<typeof vistorias.criarVistoria>[0])));
+app.put   ('/api/vistorias/:id', apiHandle(args => vistorias.atualizarVistoria(args as Parameters<typeof vistorias.atualizarVistoria>[0])));
 app.delete('/api/vistorias/:id', apiHandle(args => vistorias.apagarVistoria(args as { id: string; confirm?: boolean })));
 app.post  ('/api/vistorias/:vistoria_id/fotos', apiHandle(args => vistorias.adicionarFotoVistoria(args as Parameters<typeof vistorias.adicionarFotoVistoria>[0])));
 app.delete('/api/vistorias/fotos/:foto_id',     apiHandle(args => vistorias.apagarFotoVistoria(args as { foto_id: string; confirm?: boolean })));
