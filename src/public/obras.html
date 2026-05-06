@@ -733,6 +733,11 @@ async function api(path, opts={}) {
 
 async function loadDashboard() {
   state.resumo = await api('/api/resumo-obras');
+  // v1.67.8: documentos vencendo nos proximos 30 dias
+  try {
+    const r = await api('/api/documentos-vencimento?vencendo_em=30&ativo=true');
+    state.documentosVencendo = (r || []).filter(d => d.dias_para_vencer !== undefined && d.dias_para_vencer <= 30);
+  } catch (e) { state.documentosVencendo = []; }
 }
 async function loadObras() {
   state.obras = await api('/api/obras');
@@ -1095,10 +1100,45 @@ function renderDashboard() {
       </div>`;
   }
 
+  // v1.67.8: widget de vencimentos
+  const docsVenc = state.documentosVencendo || [];
+  const docsCriticos = docsVenc.filter(d => d.dias_para_vencer <= 7);
+  const docsMedio = docsVenc.filter(d => d.dias_para_vencer > 7 && d.dias_para_vencer <= 30);
+  const widgetVenc = docsVenc.length > 0 ? `
+    <div class="card" style="margin-top:14px; border:1px solid ${docsCriticos.length > 0 ? 'var(--danger)' : 'var(--gold-dim)'};">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">📅 Documentos vencendo</p>
+        <button data-cad-doc-venc style="background:var(--success); color:#fff; border-color:var(--success); font-size:12px;">+ Cadastrar</button>
+      </div>
+      ${docsCriticos.length > 0 ? `
+        <p style="margin:8px 0 4px; font-size:11px; color:var(--danger); font-weight:600;">⚠ CRÍTICOS (≤ 7 dias):</p>
+        ${docsCriticos.map(d => `
+          <div style="display:flex; justify-content:space-between; gap:8px; padding:6px 8px; background:rgba(220,38,38,0.08); border-left:3px solid var(--danger); border-radius:4px; margin-bottom:4px;">
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:12px; font-weight:600;">${escape(d.tipo_label || d.tipo)}: ${escape(d.descricao)}</div>
+              <div style="font-size:10px; color:var(--text-muted);">Vence ${d.data_vencimento_br} · ${d.dias_para_vencer === 0 ? 'HOJE' : d.dias_para_vencer + ' dia(s)'}</div>
+            </div>
+            <button data-doc-renov="${d.id}" style="font-size:10px; padding:4px 8px;">✓ Renovado</button>
+          </div>`).join('')}
+      ` : ''}
+      ${docsMedio.length > 0 ? `
+        <p style="margin:8px 0 4px; font-size:11px; color:var(--gold); font-weight:600;">⏰ Próximos (8-30 dias):</p>
+        ${docsMedio.map(d => `
+          <div style="display:flex; justify-content:space-between; gap:8px; padding:6px 8px; background:rgba(212,168,74,0.06); border-left:3px solid var(--gold); border-radius:4px; margin-bottom:4px;">
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:12px;">${escape(d.tipo_label || d.tipo)}: ${escape(d.descricao)}</div>
+              <div style="font-size:10px; color:var(--text-muted);">Vence ${d.data_vencimento_br} · ${d.dias_para_vencer} dia(s)</div>
+            </div>
+            <button data-doc-renov="${d.id}" style="font-size:10px; padding:4px 8px;">✓ Renovado</button>
+          </div>`).join('')}
+      ` : ''}
+    </div>` : '';
+
   v.innerHTML = `${obraSelector()}
     ${quickCreate}
     ${hero}
     ${kpis}
+    ${widgetVenc}
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; margin-top:14px;">
       <div class="card">
         <p class="section-title">📊 Status das Obras</p>
@@ -1138,6 +1178,75 @@ function renderDashboard() {
       state.currentTab = 'obras';
       render();
     } catch (e) { alert('Erro: ' + e.message); }
+  };
+
+  // v1.67.8: handlers do widget de Vencimentos
+  document.querySelectorAll('[data-doc-renov]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.docRenov;
+    const novaData = prompt('Nova data de vencimento (YYYY-MM-DD). Deixe vazio se já renovou e quer apenas marcar:', '');
+    if (novaData === null) return;
+    b.disabled = true;
+    try {
+      await api('/api/documentos-vencimento/' + id + '/renovado', {
+        method: 'POST',
+        body: JSON.stringify({ id: Number(id), nova_data_vencimento: novaData || undefined }),
+      });
+      await loadDashboard();
+      render();
+    } catch (e) { alert('Erro: ' + e.message); b.disabled = false; }
+  });
+  const cadBtn = document.querySelector('[data-cad-doc-venc]');
+  if (cadBtn) cadBtn.onclick = () => abrirCadastroDocVenc();
+}
+
+async function abrirCadastroDocVenc() {
+  const tipos = await api('/api/documentos-vencimento/tipos').catch(() => []);
+  const tiposOpts = (tipos || []).map(t => `<option value="${t.tipo}">${escape(t.label)}</option>`).join('');
+  const obrasOpts = state.obras.map(o => `<option value="${o.id}">${escape(o.nome)}</option>`).join('');
+  const html = `
+    <div style="display:grid; gap:8px; font-size:13px;">
+      <label>Tipo *
+        <select id="dvTipo" style="width:100%;">${tiposOpts}</select>
+      </label>
+      <label>Descrição *
+        <input id="dvDesc" placeholder="Ex: ART obra Maria Ester" style="width:100%;">
+      </label>
+      <label>Data de vencimento *
+        <input id="dvData" type="date" style="width:100%;">
+      </label>
+      <label>Obra vinculada (opcional)
+        <select id="dvObra" style="width:100%;"><option value="">— nenhuma —</option>${obrasOpts}</select>
+      </label>
+      <label>Observações
+        <textarea id="dvObs" rows="2" style="width:100%;"></textarea>
+      </label>
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <button id="dvSalvar" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">💾 Cadastrar</button>
+        <button class="btn-secondary" id="dvCancelar">Cancelar</button>
+      </div>
+    </div>`;
+  abrirHelpModal(html, '+ Cadastrar Documento com Vencimento', 'Alerta proativo D-30 / D-7 / D-1');
+  document.getElementById('dvCancelar').onclick = fecharHelpModal;
+  document.getElementById('dvSalvar').onclick = async () => {
+    const tipo = document.getElementById('dvTipo').value;
+    const descricao = document.getElementById('dvDesc').value.trim();
+    const data = document.getElementById('dvData').value;
+    const obra = document.getElementById('dvObra').value || null;
+    const obs = document.getElementById('dvObs').value.trim() || null;
+    if (!tipo) return alert('Tipo obrigatório.');
+    if (!descricao) return alert('Descrição obrigatória.');
+    if (!data) return alert('Data obrigatória.');
+    const btn = document.getElementById('dvSalvar');
+    btn.disabled = true; btn.textContent = 'Salvando...';
+    try {
+      await api('/api/documentos-vencimento', {
+        method: 'POST',
+        body: JSON.stringify({ tipo, descricao, data_vencimento: data, obra_id: obra, observacoes: obs }),
+      });
+      fecharHelpModal();
+      await loadDashboard();
+      render();
+    } catch (e) { alert('Erro: ' + e.message); btn.disabled = false; btn.textContent = '💾 Cadastrar'; }
   };
 }
 

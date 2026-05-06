@@ -968,6 +968,19 @@ app.post  ('/api/propostas/:id/anexos',
 app.delete('/api/propostas/anexos/:id',
   apiHandle(args => propostasConsultoria.removerAnexoProposta(args as { id: string })));
 
+// v1.67.8: Vencimentos triagem — rotas REST pra UI (ja tinha tools ZAYRA + detector proativo)
+import * as docsVenc from './services/documentosVencimento';
+app.get   ('/api/documentos-vencimento',
+  apiHandle(args => docsVenc.listarDocumentos(args as Parameters<typeof docsVenc.listarDocumentos>[0])));
+app.post  ('/api/documentos-vencimento',
+  apiHandle(args => docsVenc.cadastrarDocumento(args as Parameters<typeof docsVenc.cadastrarDocumento>[0])));
+app.post  ('/api/documentos-vencimento/:id/renovado',
+  apiHandle(args => docsVenc.marcarRenovado(args as Parameters<typeof docsVenc.marcarRenovado>[0])));
+app.delete('/api/documentos-vencimento/:id',
+  apiHandle(args => docsVenc.apagarDocumento(Number((args as { id: string }).id))));
+app.get   ('/api/documentos-vencimento/tipos',
+  apiHandle(async () => docsVenc.listarTiposDocumento()));
+
 // v1.67.7: OCR de cupom fiscal — foto/PDF do cupom -> extrai loja/itens/total
 import { extrairDadosCupom } from './services/cupomOcr';
 app.post('/api/despesas-extras/ocr-cupom', async (req: Request, res: Response) => {
