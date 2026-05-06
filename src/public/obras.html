@@ -6932,7 +6932,11 @@ function renderRecibos() {
           <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
             <span class="badge" style="font-size:10px; background:${corStatus}22; color:${corStatus}; border:1px solid ${corStatus}55;">${escape(labelStatus)}</span>
             <span class="badge badge-info" style="font-size:10px;">${escape(dataBR)}</span>
-            ${r.respondido_em ? `<span class="badge badge-success" style="font-size:10px;">resp em ${escape(parseDataBR(r.respondido_em))}</span>` : ''}
+            ${r.lido_em ? `<span class="badge" style="font-size:10px; background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955;" title="Lido em ${escape(parseDataBR(r.lido_em))}">✓✓ Lido</span>` :
+              r.entregue_em ? `<span class="badge" style="font-size:10px; background:#06b6d422; color:#06b6d4; border:1px solid #06b6d455;" title="Entregue em ${escape(parseDataBR(r.entregue_em))}">✓✓ Entregue</span>` :
+              r.enviado_em ? `<span class="badge" style="font-size:10px; background:#3b82f622; color:#3b82f6; border:1px solid #3b82f655;" title="Enviado em ${escape(parseDataBR(r.enviado_em))}">✓ Enviado</span>` : ''}
+            ${r.respondido_em ? `<span class="badge badge-success" style="font-size:10px;">📥 resp em ${escape(parseDataBR(r.respondido_em))}</span>` : ''}
+            ${r.last_reminder_at ? `<span class="badge" style="font-size:10px; background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b55;">🔔 lembrete em ${escape(parseDataBR(r.last_reminder_at))}</span>` : ''}
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; min-width:200px;">

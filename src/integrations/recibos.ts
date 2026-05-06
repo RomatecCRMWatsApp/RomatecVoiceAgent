@@ -278,6 +278,14 @@ export async function buscarReciboPorHash(hash: string): Promise<Recibo | null> 
   return rows.length ? mapRow(rows[0]) : null;
 }
 
+export async function buscarReciboPorZapiMessageId(messageId: string): Promise<Recibo | null> {
+  if (!messageId) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT * FROM recibos WHERE zapi_message_id = ? LIMIT 1`, [messageId]
+  );
+  return rows.length ? mapRow(rows[0]) : null;
+}
+
 export interface ListarFiltro {
   tenant_id?: number;
   tipo?: TipoRecibo;

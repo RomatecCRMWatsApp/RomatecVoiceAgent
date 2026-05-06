@@ -379,9 +379,57 @@ app.get('/notifications/stream', (req: Request, res: Response) => {
 app.post('/webhook/zapi', (req: Request, res: Response) => handleWhatsAppWebhook(req, res));
 app.post('/webhook/whatsapp', (req: Request, res: Response) => handleWhatsAppWebhook(req, res));
 
+// v1.72.0: status callbacks Z-API atualizam tracking de recibos universais.
+// Z-API envia eventos 'sent' / 'delivered' / 'read' em payloads separados,
+// vem diferente formato dependendo da versao da API. Usamos o messageId pra
+// fazer match com recibos.zapi_message_id.
+async function handleZapiStatusCallback(body: unknown): Promise<void> {
+  if (!body || typeof body !== 'object') return;
+  const b = body as Record<string, unknown>;
+  // Detecta payload de status (varios formatos Z-API conhecidos)
+  const eventStr = String(
+    (b.event as string) ?? (b.type as string) ?? (b.status as string) ??
+    ((b.data as Record<string, unknown>)?.event as string) ?? ''
+  ).toLowerCase();
+  const STATUS_MAP: Record<string, 'enviado' | 'entregue' | 'lido'> = {
+    sent: 'enviado', delivered: 'entregue', read: 'lido',
+    'message-status-sent': 'enviado',
+    'message-status-delivered': 'entregue',
+    'message-status-read': 'lido',
+    'message_status_sent': 'enviado',
+    'message_status_delivered': 'entregue',
+    'message_status_read': 'lido',
+  };
+  const eventoRecibo = STATUS_MAP[eventStr];
+  if (!eventoRecibo) return; // nao e status, ignora
+
+  // Pega o messageId em vários formatos possiveis
+  const messageId = String(
+    (b.messageId as string) ?? (b.id as string) ?? (b.zaapId as string) ??
+    ((b.data as Record<string, unknown>)?.messageId as string) ?? ''
+  );
+  if (!messageId) return;
+
+  // Procura o recibo com esse messageId
+  try {
+    const r = await recibos.buscarReciboPorZapiMessageId(messageId);
+    if (!r) return; // mensagem nao e de recibo, ignora
+    await recibos.marcarEvento(r.id, eventoRecibo, messageId);
+    console.log(`[recibos:status] recibo #${r.id} -> ${eventoRecibo} (msg ${messageId.slice(0, 12)}...)`);
+  } catch (err) {
+    console.warn('[recibos:status-callback] erro:', (err as Error).message);
+  }
+}
+
 function handleWhatsAppWebhook(req: Request, res: Response) {
   res.json({ status: 'ok' }); // ack imediato — processa async pra não travar ZAPI
   const body = req.body ?? {};
+
+  // v1.72.0: intercepta callbacks de status (sent/delivered/read) ANTES do parser.
+  // Atualiza tracking de recibos universais sem bloquear o fluxo normal.
+  void handleZapiStatusCallback(body).catch(err =>
+    console.warn('[recibos:status-callback] falha:', (err as Error).message)
+  );
 
   // Tenta formato ZAPI (1 mensagem por payload)
   const msgsZapi = parseZapiWebhook(body);
@@ -1436,6 +1484,8 @@ app.listen(PORT, () => {
     .then(m => m.startDraftCleanup())
     .then(() => import('./services/recibosQuinzena'))
     .then(m => m.startExpiracaoRecibosTicker()) // v1.65.16: expira recibos sem resposta há mais de 48h (ticker a cada 6h)
+    .then(() => import('./services/reciboLembretes'))
+    .then(m => m.iniciarLembretesCron()) // v1.72.0: lembretes universais + auto-expirar
     .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));
 
   // v1.39.1: sync contatos CRM → memória ZAYRA (1x ao boot + 1x/dia 04:00 BRT)
