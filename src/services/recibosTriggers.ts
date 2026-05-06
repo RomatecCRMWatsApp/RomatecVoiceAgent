@@ -427,3 +427,72 @@ export async function gerarReciboVistoriaEntregue(
     console.error(`[trigger:vistoria_entregue] FALHA pra vistoria #${vistoria_id}:`, (err as Error).message);
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Trigger: despesa criada (NOTIFICACAO ao inves de recibo)
+// ────────────────────────────────────────────────────────────────────────
+//
+// Despesa interna nao tem destinatario externo claro (gasto da empresa).
+// Por isso esse trigger NAO cria recibo — manda notificacao Telegram pro
+// CEO em tempo real cada vez que uma despesa e lancada (transparencia
+// + controle de gasto).
+
+interface DespesaTriggerRow extends RowDataPacket {
+  id: number; loja: string; categoria: string;
+  forma_pagamento: string; valor_total: string;
+  destinatario: string | null; data: Date | string;
+  obra_id: number; obra_nome: string;
+  observacoes: string | null;
+}
+
+export async function notificarDespesaCriada(despesa_id: number, tenant_id = 1): Promise<void> {
+  try {
+    const cfg = await getTriggerConfig(tenant_id, 'despesa_criada');
+    if (!cfg.enabled) return;
+
+    const [rows] = await pool.execute<DespesaTriggerRow[]>(
+      `SELECT d.id, d.loja, d.categoria, d.forma_pagamento, d.valor_total,
+              d.destinatario, d.data, d.observacoes,
+              d.obra_id, o.nome AS obra_nome
+         FROM despesas_extras d
+         LEFT JOIN romatec_obras o ON o.id = d.obra_id
+        WHERE d.id = ? AND d.deleted_at IS NULL`,
+      [despesa_id]
+    );
+    if (!rows.length) return;
+    const d = rows[0];
+
+    const { sendMessage } = await import('../integrations/telegram');
+    const chatId = (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
+      || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+    if (!chatId) return;
+
+    const valorFmt = 'R$ ' + Number(d.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    const labelCat = ({
+      ferramenta: '🔨 Ferramenta', aluguel: '🏠 Aluguel',
+      material: '🧱 Material', outros: '📦 Outros',
+    } as Record<string, string>)[d.categoria] || d.categoria;
+    const labelForma = ({
+      pix: 'PIX', dinheiro: 'Dinheiro',
+      cartao_credito: 'Cartão crédito', cartao_debito: 'Cartão débito', boleto: 'Boleto',
+    } as Record<string, string>)[d.forma_pagamento] || d.forma_pagamento;
+
+    const linhas: string[] = [
+      `💸 *Nova despesa lançada*`,
+      ``,
+      `Loja: *${d.loja}*`,
+      `Valor: *${valorFmt}*`,
+      `Categoria: ${labelCat}`,
+      `Forma: ${labelForma}`,
+    ];
+    if (d.destinatario) linhas.push(`Destinatário: ${d.destinatario}`);
+    if (d.obra_nome) linhas.push(`Obra: ${d.obra_nome}`);
+    if (d.observacoes) linhas.push('', `Obs: _${String(d.observacoes).slice(0, 200)}_`);
+    linhas.push('', `_Despesa #${d.id} · via Romatec Gestão de Obras_`);
+
+    await sendMessage(chatId, linhas.join('\n'));
+    console.log(`[trigger:despesa_criada] notificacao Telegram enviada — despesa #${despesa_id}`);
+  } catch (err) {
+    console.error(`[trigger:despesa_criada] FALHA pra despesa #${despesa_id}:`, (err as Error).message);
+  }
+}

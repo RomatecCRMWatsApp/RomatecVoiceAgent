@@ -227,6 +227,12 @@ export async function criarDespesaExtra(input: {
     }
     await conn.commit();
     console.log(`[despesas] OK criada #${despesaId}`);
+
+    // v1.80.0: trigger automatico — notifica CEO via Telegram se config ligada
+    void import('../services/recibosTriggers')
+      .then(m => m.notificarDespesaCriada(despesaId))
+      .catch(err => console.warn('[trigger despesa_criada]', (err as Error).message));
+
     return {
       ok: true as const, insertId: despesaId, valor_total, desconto,
       message: `Despesa #${despesaId} criada (R$ ${valor_total.toFixed(2)}${desconto > 0 ? ` com desconto de R$ ${desconto.toFixed(2)}` : ''}).`,
