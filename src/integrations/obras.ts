@@ -348,6 +348,14 @@ export async function atualizarEtapa(input: {
   const [r] = await pool.execute<ResultSetHeader>(
     `UPDATE romatec_obra_etapas SET ${fields.join(', ')} WHERE id = ?`, params,
   );
+
+  // v1.77.0: trigger recibo automatico se etapa virou 'concluido'
+  if (input.status === 'concluido') {
+    void import('../services/recibosTriggers')
+      .then(m => m.gerarReciboEtapaConcluida(Number(input.id)))
+      .catch(err => console.warn('[trigger etapa_concluida]', (err as Error).message));
+  }
+
   return { ok: true, affected: r.affectedRows, message: `Etapa ${input.id} atualizada.` };
 }
 

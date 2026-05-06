@@ -176,3 +176,78 @@ export async function gerarReciboParcelaPaga(parcela_id: number, tenant_id = 1):
     console.error(`[trigger:parcela_paga] FALHA pra parcela #${parcela_id}:`, (err as Error).message);
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Trigger: etapa concluida
+// ────────────────────────────────────────────────────────────────────────
+
+interface EtapaTriggerRow extends RowDataPacket {
+  id: number; nome: string; ordem: number;
+  obra_id: number; obra_nome: string;
+  cliente: string | null; cliente_telefone: string | null;
+}
+
+/**
+ * Disparar quando etapa.status = 'concluido'.
+ * Cliente recebe recibo de aceite — confirmacao libera proxima etapa.
+ *
+ * Idempotente: 1 recibo por etapa. Nao lanca.
+ */
+export async function gerarReciboEtapaConcluida(etapa_id: number, tenant_id = 1): Promise<void> {
+  try {
+    const cfg = await getTriggerConfig(tenant_id, 'etapa_concluida');
+    if (!cfg.enabled) return;
+
+    const existentes = await listarRecibos({
+      tenant_id, tipo: 'etapa',
+      resource_type: 'romatec_obra_etapas',
+      resource_id: String(etapa_id),
+    });
+    if (existentes.length > 0) {
+      console.log(`[trigger:etapa_concluida] etapa #${etapa_id} ja tem recibo — ignorando`);
+      return;
+    }
+
+    const [rows] = await pool.execute<EtapaTriggerRow[]>(
+      `SELECT e.id, e.nome, e.ordem,
+              e.obra_id, o.nome AS obra_nome,
+              o.cliente, o.cliente_telefone
+         FROM romatec_obra_etapas e
+         JOIN romatec_obras o ON o.id = e.obra_id
+        WHERE e.id = ?`,
+      [etapa_id]
+    );
+    if (!rows.length) {
+      console.warn(`[trigger:etapa_concluida] etapa #${etapa_id} nao encontrada`);
+      return;
+    }
+    const e = rows[0];
+    if (!e.cliente_telefone || e.cliente_telefone.replace(/\D/g, '').length < 10) {
+      console.warn(`[trigger:etapa_concluida] obra ${e.obra_nome} sem telefone — ignorando`);
+      return;
+    }
+
+    const novo = await criarRecibo({
+      tenant_id,
+      tipo: 'etapa',
+      resource_type: 'romatec_obra_etapas',
+      resource_id: String(etapa_id),
+      destinatario_nome: e.cliente || 'Cliente',
+      destinatario_phone: e.cliente_telefone,
+      descricao_servico: `Etapa "${e.nome}" da obra ${e.obra_nome}`,
+      expira_em_dias: cfg.validade_dias ?? 7,
+    });
+    console.log(`[trigger:etapa_concluida] recibo ${novo.numero} criado pra etapa #${etapa_id}`);
+
+    if (cfg.auto_enviar) {
+      try {
+        await enviarReciboWhatsApp({ id: novo.id });
+        console.log(`[trigger:etapa_concluida] WhatsApp enviado pra ${e.cliente_telefone}`);
+      } catch (err) {
+        console.warn(`[trigger:etapa_concluida] falha auto-enviar:`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error(`[trigger:etapa_concluida] FALHA pra etapa #${etapa_id}:`, (err as Error).message);
+  }
+}
