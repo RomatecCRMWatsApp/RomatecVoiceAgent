@@ -20,7 +20,7 @@ export async function listarDespesasExtras(input: { obra_id?: string; from?: str
   const params: (string | number)[] = [];
   let sql = `SELECT d.*, o.nome AS obra_nome
                FROM despesas_extras d
-               LEFT JOIN obras o ON o.id = d.obra_id
+               LEFT JOIN romatec_obras o ON o.id = d.obra_id
               WHERE d.deleted_at IS NULL`;
   if (input.obra_id) { sql += ' AND d.obra_id = ?'; params.push(Number(input.obra_id)); }
   if (input.from)    { sql += ' AND d.data >= ?'; params.push(input.from); }
@@ -74,7 +74,7 @@ export async function buscarDespesaExtra(id: string) {
   if (!idN) throw new Error('id invalido');
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT d.*, o.nome AS obra_nome
-       FROM despesas_extras d LEFT JOIN obras o ON o.id = d.obra_id
+       FROM despesas_extras d LEFT JOIN romatec_obras o ON o.id = d.obra_id
       WHERE d.id = ? AND d.deleted_at IS NULL`, [idN]
   );
   if (rows.length === 0) throw new Error('Despesa nao encontrada');
