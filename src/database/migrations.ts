@@ -1005,11 +1005,11 @@ export async function runMigrations(): Promise<void> {
       INDEX idx_despesa (despesa_id, ordem)
     )
   `);
-  // v1.67.2: campos novos (quantidade nos itens + desconto na nota).
-  // Idempotente — ignora "Duplicate column".
+  // v1.67.2/.11: campos novos. Idempotente — ignora "Duplicate column".
   for (const col of [
     "ALTER TABLE despesas_extras_itens ADD COLUMN quantidade DECIMAL(10,3) NOT NULL DEFAULT 1 AFTER valor",
     "ALTER TABLE despesas_extras ADD COLUMN desconto DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER valor_total",
+    "ALTER TABLE despesas_extras ADD COLUMN destinatario VARCHAR(120) NULL AFTER loja",
   ]) {
     try { await pool.execute(col); }
     catch (err) {

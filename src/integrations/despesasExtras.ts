@@ -124,26 +124,22 @@ async function ensureSchemaUpToDate(): Promise<void> {
           AND TABLE_NAME IN ('despesas_extras', 'despesas_extras_itens')`
     );
     const set = new Set(cols.map(c => String(c.COLUMN_NAME).toLowerCase()));
-    if (!set.has('desconto')) {
-      console.log('[despesas-self-heal] adicionando coluna desconto...');
-      await pool.execute(
-        `ALTER TABLE despesas_extras ADD COLUMN desconto DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER valor_total`
-      ).catch(e => console.warn('[despesas-self-heal] alter desconto:', (e as Error).message));
-    }
-    if (!set.has('quantidade')) {
-      console.log('[despesas-self-heal] adicionando coluna quantidade...');
-      await pool.execute(
-        `ALTER TABLE despesas_extras_itens ADD COLUMN quantidade DECIMAL(10,3) NOT NULL DEFAULT 1 AFTER valor`
-      ).catch(e => console.warn('[despesas-self-heal] alter quantidade:', (e as Error).message));
-    }
-    if (!set.has('destinatario')) {
-      console.log('[despesas-self-heal] adicionando coluna destinatario...');
-      await pool.execute(
-        `ALTER TABLE despesas_extras ADD COLUMN destinatario VARCHAR(120) NULL AFTER loja`
-      ).catch(e => console.warn('[despesas-self-heal] alter destinatario:', (e as Error).message));
-    }
-    _schemaChecked = true;
-    console.log('[despesas-self-heal] schema OK');
+    let allOk = true;
+    const tryAlter = async (label: string, sql: string) => {
+      console.log(`[despesas-self-heal] adicionando coluna ${label}...`);
+      try { await pool.execute(sql); console.log(`[despesas-self-heal] OK: ${label}`); }
+      catch (e) {
+        const msg = (e as Error).message || '';
+        if (/Duplicate column|already exists/i.test(msg)) return; // ja existe, ok
+        console.error(`[despesas-self-heal] FALHA alter ${label}:`, msg);
+        allOk = false;
+      }
+    };
+    if (!set.has('desconto'))      await tryAlter('desconto',     `ALTER TABLE despesas_extras ADD COLUMN desconto DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER valor_total`);
+    if (!set.has('quantidade'))    await tryAlter('quantidade',   `ALTER TABLE despesas_extras_itens ADD COLUMN quantidade DECIMAL(10,3) NOT NULL DEFAULT 1 AFTER valor`);
+    if (!set.has('destinatario')) await tryAlter('destinatario', `ALTER TABLE despesas_extras ADD COLUMN destinatario VARCHAR(120) NULL AFTER loja`);
+    if (allOk) { _schemaChecked = true; console.log('[despesas-self-heal] schema OK'); }
+    else { console.warn('[despesas-self-heal] alguns ALTERs falharam — vai retentar na proxima chamada'); }
   } catch (err) {
     console.warn('[despesas-self-heal] checagem falhou:', (err as Error).message);
   }
