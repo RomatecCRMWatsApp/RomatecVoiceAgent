@@ -2435,6 +2435,19 @@ async function renderDespesaFormInline(v) {
         <button data-desp-voltar style="background:transparent;">← Voltar</button>
       </div>
     </div>
+    ${!state.despesaEditandoId ? `
+    <div class="card" style="background:rgba(0,200,255,0.06); border:2px dashed var(--neon);">
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div style="font-size:36px;">📸</div>
+        <div style="flex:1; min-width:200px;">
+          <p style="margin:0; font-weight:600; font-size:14px;">Escanear cupom fiscal</p>
+          <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">Tire uma foto do cupom e a ZAYRA preenche tudo automaticamente (loja, itens, valores, categoria).</p>
+        </div>
+        <input type="file" id="despOcrInput" accept="image/jpeg,image/png,image/webp" style="display:none;">
+        <button id="despOcrBtn" style="background:var(--neon); color:#06120a; font-weight:700; padding:10px 16px;">📷 Escanear</button>
+      </div>
+      <div id="despOcrStatus" style="margin-top:10px; font-size:12px;"></div>
+    </div>` : ''}
     <div class="card">
       <div style="display:grid; gap:10px; font-size:13px; max-width:880px;">
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px;">
@@ -2601,6 +2614,69 @@ async function renderDespesaFormInline(v) {
     state.despesaFotoTemp = { existente: false, mimetype: file.type, b64, filename: file.name };
     renderFoto();
   };
+
+  // v1.67.7: OCR de cupom — foto -> ZAYRA preenche o form
+  const ocrBtn = document.getElementById('despOcrBtn');
+  const ocrInput = document.getElementById('despOcrInput');
+  if (ocrBtn && ocrInput) {
+    ocrBtn.onclick = () => ocrInput.click();
+    ocrInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const MIMES_OK = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      if (!MIMES_OK.includes(file.type)) { alert('Use JPG, PNG ou WEBP.'); return; }
+      if (file.size > 10 * 1024 * 1024) { alert('Máximo 10MB.'); return; }
+      const status = document.getElementById('despOcrStatus');
+      status.innerHTML = '<span style="color:var(--neon);">⏳ ZAYRA está lendo o cupom (3-8s)...</span>';
+      ocrBtn.disabled = true; ocrBtn.textContent = '⏳ Lendo...';
+      try {
+        const b64 = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result).split(',')[1]);
+          r.onerror = reject;
+          r.readAsDataURL(file);
+        });
+        const r = await api('/api/despesas-extras/ocr-cupom', {
+          method: 'POST',
+          body: JSON.stringify({ imagem_b64: b64, mimetype: file.type }),
+        });
+        if (r.loja) document.getElementById('despLoja').value = r.loja;
+        if (r.data) document.getElementById('despData').value = r.data;
+        if (r.categoria_sugerida) document.getElementById('despCategoria').value = r.categoria_sugerida;
+        if (r.forma_pagamento) document.getElementById('despForma').value = r.forma_pagamento;
+        if (r.observacoes) document.getElementById('despObs').value = r.observacoes;
+        if (r.itens && r.itens.length > 0) {
+          state.despesaItensTemp = r.itens.map(i => ({
+            descricao: i.descricao,
+            valor: Number(i.valor) || 0,
+            quantidade: Number(i.quantidade) || 1,
+          }));
+          renderItens();
+        }
+        const inpDesc = document.getElementById('despDesconto');
+        if (inpDesc && r.desconto && r.desconto > 0) {
+          inpDesc.value = r.desconto;
+          recalcularTotal();
+        }
+        // Anexa a foto do cupom automaticamente
+        state.despesaFotoTemp = { existente: false, mimetype: file.type, b64, filename: file.name };
+        renderFoto();
+        const conf = r.confianca || 'media';
+        const corConf = { alta: 'var(--neon)', media: 'var(--gold)', baixa: 'var(--danger)' }[conf];
+        status.innerHTML = `
+          <span style="color:${corConf}; font-weight:600;">
+            ✓ Extração concluída (confiança ${conf}). ${(r.itens||[]).length} item(s) preenchido(s).
+            ${r.cnpj ? '<br>CNPJ: ' + escape(r.cnpj) : ''}
+          </span>
+          <p style="margin-top:6px; font-size:11px; color:var(--text-muted);">⚠ Confira os valores antes de salvar.</p>`;
+      } catch (err) {
+        status.innerHTML = `<span style="color:var(--danger);">❌ Erro: ${escape(err.message)}</span>`;
+      } finally {
+        ocrBtn.disabled = false; ocrBtn.textContent = '📷 Escanear';
+        e.target.value = '';
+      }
+    };
+  }
 
   const voltar = () => {
     state.despesasView = 'lista';

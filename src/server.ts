@@ -968,6 +968,23 @@ app.post  ('/api/propostas/:id/anexos',
 app.delete('/api/propostas/anexos/:id',
   apiHandle(args => propostasConsultoria.removerAnexoProposta(args as { id: string })));
 
+// v1.67.7: OCR de cupom fiscal — foto/PDF do cupom -> extrai loja/itens/total
+import { extrairDadosCupom } from './services/cupomOcr';
+app.post('/api/despesas-extras/ocr-cupom', async (req: Request, res: Response) => {
+  try {
+    const imgB64 = String(req.body?.imagem_b64 ?? '').trim();
+    const mimetype = String(req.body?.mimetype ?? 'image/jpeg').toLowerCase();
+    if (!imgB64) return res.status(400).json({ error: 'imagem_b64 obrigatorio' });
+    const tamanhoMB = (imgB64.length * 3 / 4) / 1024 / 1024;
+    if (tamanhoMB > 10) return res.status(413).json({ error: `Imagem ${tamanhoMB.toFixed(1)}MB, max 10MB.` });
+    const r = await extrairDadosCupom({ imagem_b64: imgB64, mimetype });
+    res.json(r);
+  } catch (err) {
+    console.error('[ocr-cupom] erro:', (err as Error).message);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // v1.67.0: Despesas Extras — gastos avulsos por obra (ferramenta, aluguel,
 // material avulso). Soma no Consumo da obra junto com obras_transacoes.
 app.get   ('/api/despesas-extras',
