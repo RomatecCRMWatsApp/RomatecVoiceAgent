@@ -1848,9 +1848,11 @@ function abrirEditarObra(obraId) {
                     <td style="padding:6px 4px;"><input type="date" data-pq-venc="${p.id}" value="${p.vencimento_iso||''}" style="font-size:11px; padding:3px 6px;"></td>
                     <td style="padding:6px 4px;">${p.pago ? '<span style="color:var(--success);">✅ Pago</span>' : '<span style="color:var(--gold);">⏳ Pendente</span>'}</td>
                     <td style="padding:6px 4px; text-align:right; white-space:nowrap;">
-                      <button data-save-parc="${p.id}" class="btn-gold" style="padding:3px 8px; font-size:11px;">💾</button>
-                      <button data-toggle-pago="${p.id}" data-pago="${p.pago ? 1 : 0}" style="padding:3px 8px; font-size:11px;">${p.pago ? 'Desmarcar' : 'Pago'}</button>
-                      <button data-del-parc="${p.id}" class="btn-danger" style="padding:3px 8px; font-size:11px;">🗑️</button>
+                      <button data-save-parc="${p.id}" class="btn-gold" style="padding:3px 8px; font-size:11px;" title="Salvar alteracoes">💾</button>
+                      <button data-toggle-pago="${p.id}" data-pago="${p.pago ? 1 : 0}" style="padding:3px 8px; font-size:11px; ${p.pago ? '' : 'background:var(--gold); color:#06120a; border-color:var(--gold); font-weight:600;'}" title="${p.pago ? 'Desmarcar como pago' : 'Marcar pago + emitir Recibo + NFe + enviar WhatsApp'}">${p.pago ? 'Desmarcar' : '✓ Pago'}</button>
+                      <button data-wpp-parc="${p.id}" title="Enviar resumo desta parcela ao cliente via WhatsApp" style="padding:3px 8px; font-size:11px; background:#25d36622; color:#25d366; border-color:#25d36655;">💬</button>
+                      <button data-tg-parc="${p.id}" title="Enviar pro Telegram do CEO" style="padding:3px 8px; font-size:11px; background:#0088cc22; color:#0088cc; border-color:#0088cc55;">✈️</button>
+                      <button data-del-parc="${p.id}" class="btn-danger" style="padding:3px 8px; font-size:11px;" title="Excluir parcela">🗑️</button>
                     </td>
                   </tr>`).join('')}
               </tbody>
@@ -1867,13 +1869,126 @@ function abrirEditarObra(obraId) {
         </div>
       `;
       // Wire actions
+      // v1.76.0: clique em "Pago" dispara fluxo automatico:
+      //   1) marca parcela como paga
+      //   2) cria recibo tipo='parcela' + envia WhatsApp pro cliente
+      //   3) cria + emite NFe (se config fiscal estiver completa)
+      // Desmarcar pago: so faz UPDATE da parcela, sem mexer em recibo/NF.
       box.querySelectorAll('[data-toggle-pago]').forEach(b => b.onclick = async () => {
         const id = b.dataset.togglePago;
-        const novo = b.dataset.pago === '1' ? false : true;
+        const desmarcando = b.dataset.pago === '1';
+        if (desmarcando) {
+          if (!confirm('Desmarcar como pago? Isso NAO cancela recibos/NFs ja emitidos.')) return;
+          try {
+            await api('/api/parcelas/' + id, { method: 'PUT', body: JSON.stringify({ id, pago: false }) });
+            await recarregarParcelas();
+          } catch (e) { alert('Erro: ' + (e?.message || e)); }
+          return;
+        }
+        // Marcando como PAGO — fluxo automatico
+        const parcela = parcelas.find(p => String(p.id) === String(id));
+        const obra = state.obras?.find(o => String(o.id) === String(obraId));
+        if (!parcela || !obra) return alert('Parcela ou obra nao encontrada');
+        const tel = (obra.cliente_telefone || obra.telefone || '').replace(/\D/g, '');
+        const temTel = tel && tel.length >= 10;
+
+        let cfg = null;
+        try { cfg = await api('/api/fiscal-config'); } catch {}
+        const fiscalOk = cfg && cfg.cnpj && cfg.has_api_key && cfg.provider_company_id;
+
+        // Modal de confirmacao com checkboxes
+        const opts = [];
+        opts.push('Marcar como pago (sempre)');
+        if (temTel) opts.push('+ Criar recibo + enviar WhatsApp pro cliente');
+        if (fiscalOk) opts.push('+ Emitir Nota Fiscal automaticamente');
+        const continuar = confirm(
+          `Marcar ${parcela.numero}ª parcela como paga (${fmt(parcela.valor)})?\n\n` +
+          `Vou executar:\n  • ${opts.join('\n  • ')}\n\n` +
+          (!temTel ? '⚠ Cliente sem telefone — recibo nao sera enviado.\n' : '') +
+          (!fiscalOk ? '⚠ Config fiscal incompleta — NFe nao sera emitida.\n' : '') +
+          '\nConfirmar?'
+        );
+        if (!continuar) return;
+
+        b.disabled = true; b.textContent = 'Processando...';
+        let reciboInfo = '';
+        let nfInfo = '';
+
         try {
-          await api('/api/parcelas/' + id, { method: 'PUT', body: JSON.stringify({ id, pago: novo }) });
+          // 1) Marcar como pago
+          await api('/api/parcelas/' + id, { method: 'PUT', body: JSON.stringify({ id, pago: true }) });
+
+          // 2) Recibo + WhatsApp (se tem telefone)
+          if (temTel) {
+            try {
+              const r = await api('/api/recibos', {
+                method:'POST',
+                body: JSON.stringify({
+                  tipo: 'parcela',
+                  resource_type: 'romatec_obra_parcelas',
+                  resource_id: String(id),
+                  destinatario_nome: obra.cliente || 'Cliente',
+                  destinatario_phone: tel,
+                  destinatario_doc: obra.cliente_doc || null,
+                  valor: Number(parcela.valor),
+                  forma_pagamento: 'pix',
+                  descricao_servico: `${parcela.numero}ª parcela da obra ${obra.nome}`,
+                  expira_em_dias: 30,
+                }),
+              });
+              await api('/api/recibos/' + r.id + '/enviar', { method:'POST', body: JSON.stringify({}) });
+              reciboInfo = `Recibo ${r.numero} enviado pelo WhatsApp.`;
+            } catch (e) {
+              reciboInfo = 'Falha no recibo: ' + (e?.message || e);
+            }
+          }
+
+          // 3) NFe (se config fiscal completa e cliente tem doc)
+          if (fiscalOk) {
+            const docCliente = obra.cliente_doc || prompt('CPF/CNPJ do cliente (obrigatório pra NFe):', '');
+            if (docCliente?.trim()) {
+              const cep = obra.cep || prompt('CEP da obra (somente números):', '');
+              if (cep) {
+                try {
+                  const nf = await api('/api/notas-fiscais', {
+                    method:'POST',
+                    body: JSON.stringify({
+                      resource_type: 'romatec_obra_parcelas',
+                      resource_id: String(id),
+                      tomador_doc: docCliente,
+                      tomador_nome: obra.cliente || 'Cliente',
+                      tomador_email: obra.cliente_email || null,
+                      tomador_endereco: {
+                        cep,
+                        logradouro: obra.endereco || '',
+                        numero: 'S/N', bairro: '',
+                        municipio: obra.cidade || 'Açailândia', uf: 'MA',
+                      },
+                      valor_servico: Number(parcela.valor),
+                      codigo_servico: '7.02',
+                      descricao: `${parcela.numero}ª parcela da obra ${obra.nome}`,
+                      iss_aliquota: Number(cfg.iss_aliquota) || 5,
+                    }),
+                  });
+                  await api('/api/notas-fiscais/' + nf.id + '/emitir', { method:'POST', body: JSON.stringify({}) });
+                  nfInfo = `NFe RPS ${nf.rps_numero} enviada pra ${cfg.ambiente === 'producao' ? 'PRODUÇÃO' : 'sandbox'}.`;
+                } catch (e) {
+                  nfInfo = 'Falha na NF: ' + (e?.message || e);
+                }
+              }
+            }
+          }
+
+          alert(
+            '✅ Parcela marcada como paga!' +
+            (reciboInfo ? '\n\n📜 ' + reciboInfo : '') +
+            (nfInfo ? '\n\n🧾 ' + nfInfo : '')
+          );
           await recarregarParcelas();
-        } catch (e) { alert('Erro: ' + (e?.message || e)); }
+        } catch (e) {
+          alert('Erro: ' + (e?.message || e));
+          b.disabled = false; b.textContent = '✓ Pago';
+        }
       });
       box.querySelectorAll('[data-del-parc]').forEach(b => b.onclick = async () => {
         if (!confirm('Apagar essa parcela?')) return;
@@ -1881,6 +1996,66 @@ function abrirEditarObra(obraId) {
           await api('/api/parcelas/' + b.dataset.delParc, { method: 'DELETE' });
           await recarregarParcelas();
         } catch (e) { alert('Erro: ' + (e?.message || e)); }
+      });
+
+      // v1.76.0: 💬 WhatsApp — envia resumo da parcela ao cliente (link wa.me)
+      box.querySelectorAll('[data-wpp-parc]').forEach(b => b.onclick = async () => {
+        const parcelaId = b.dataset.wppParc;
+        const parcela = parcelas.find(p => String(p.id) === String(parcelaId));
+        const obra = state.obras?.find(o => String(o.id) === String(obraId));
+        if (!parcela || !obra) return;
+        const tel = (obra.cliente_telefone || obra.telefone || '').replace(/\D/g, '');
+        if (!tel || tel.length < 10) return alert('Cliente sem telefone cadastrado.');
+        const status = parcela.pago ? '✅ *PAGO*' : '⏳ Pendente';
+        const linhas = [
+          `🏗️ *Obra: ${obra.nome}*`,
+          ``,
+          `Olá ${obra.cliente || ''}, sobre a *${parcela.numero}ª parcela*:`,
+          ``,
+          `💰 Valor: *${fmt(parcela.valor)}*`,
+          `📅 Vencimento: ${parcela.vencimento || '-'}`,
+          `📊 Status: ${status}`,
+          ``,
+          `_Romatec Consultoria Total_`,
+        ];
+        const url = `https://wa.me/55${tel.replace(/^55/, '')}?text=${encodeURIComponent(linhas.join('\n'))}`;
+        window.open(url, '_blank');
+      });
+
+      // v1.76.0: ✈️ Telegram — envia resumo da parcela pro CEO (Bot API)
+      box.querySelectorAll('[data-tg-parc]').forEach(b => b.onclick = async () => {
+        const parcelaId = b.dataset.tgParc;
+        const parcela = parcelas.find(p => String(p.id) === String(parcelaId));
+        const obra = state.obras?.find(o => String(o.id) === String(obraId));
+        if (!parcela || !obra) return;
+        const status = parcela.pago ? '✅ *PAGO*' : '⏳ *Pendente*';
+        const texto = [
+          `📊 *Parcela ${parcela.numero}ª — ${obra.nome}*`,
+          ``,
+          `Cliente: ${obra.cliente || '-'}`,
+          `Valor: ${fmt(parcela.valor)}`,
+          `Vencimento: ${parcela.vencimento || '-'}`,
+          `Status: ${status}`,
+          ``,
+          `_via Romatec Gestao de Obras_`,
+        ].join('\n');
+        b.disabled = true; const orig = b.textContent; b.textContent = '⏳';
+        try {
+          await api('/api/zayra/telegram', {
+            method: 'POST', body: JSON.stringify({ texto, parse_mode: 'Markdown' }),
+          });
+          alert('✓ Enviado pro Telegram');
+        } catch (e) {
+          // Fallback: usa rota de obra (envia resumo da obra)
+          try {
+            await api('/api/obras/' + obra.id + '/enviar-telegram', { method: 'POST', body: JSON.stringify({ id: obra.id }) });
+            alert('✓ Enviado resumo da obra pro Telegram');
+          } catch (e2) {
+            alert('Erro: ' + (e2?.message || e?.message || e));
+          }
+        } finally {
+          b.disabled = false; b.textContent = orig;
+        }
       });
       // v1.65.41/v1.65.43: salvar edicao inline + auto-save on change.
       // Cliente pode flexibilizar valores das parcelas — qualquer campo da
@@ -7400,8 +7575,10 @@ function renderNotas() {
           ${Object.entries(NF_STATUS_LABEL).map(([k,v])=>`<option value="${k}" ${f.status===k?'selected':''}>${escape(v)}</option>`).join('')}
         </select>
       </label>
-      <button id="nfRefresh" style="grid-column: span 1;">🔁 Atualizar</button>
+      <button id="nfRefresh">🔁 Atualizar</button>
+      <button class="btn-primary" id="nfNovaAvulsa" style="background:var(--gold); color:#06120a; border-color:var(--gold);">➕ Nova NF avulsa</button>
     </div>
+    <div id="nfNovaBox" style="display:none;"></div>
     ${cards}
   `;
 
@@ -7413,6 +7590,7 @@ function renderNotas() {
     await loadNotas(); renderNotas();
   };
   document.getElementById('nfCfgBtn').onclick = () => renderFiscalConfigBox();
+  document.getElementById('nfNovaAvulsa').onclick = () => renderNFAvulsaBox();
 
   document.querySelectorAll('[data-nf-emitir]').forEach(b => b.onclick = async () => {
     const id = b.dataset.nfEmitir;
@@ -7514,6 +7692,149 @@ function renderFiscalConfigBox() {
       renderNotas();
     } catch (e) { alert('Erro: ' + e.message); }
   };
+}
+
+// v1.76.0: form inline pra emitir NF avulsa (servico fora de obra/parcela)
+function renderNFAvulsaBox() {
+  const box = document.getElementById('nfNovaBox');
+  if (box.style.display === 'block') { box.style.display = 'none'; return; }
+  const cfg = state.fiscalConfig;
+  if (!cfg || !cfg.cnpj || !cfg.has_api_key || !cfg.provider_company_id) {
+    if (confirm('Configuração fiscal incompleta. Configurar agora?')) {
+      renderFiscalConfigBox();
+    }
+    return;
+  }
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">➕ Nova Nota Fiscal avulsa</p>
+        <button data-nf-cancelar-form style="background:transparent;">Fechar</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin:8px 0;">
+        Use pra serviços que NÃO são parcelas de obra (ex: vistorias, consultorias avulsas, projetos pontuais, perícias).
+      </p>
+      <div style="display:grid; gap:10px; max-width:760px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px;">
+          <label>Tomador — Nome/Razão *
+            <input id="nfaNome" placeholder="Nome ou Razão Social" style="width:100%;">
+          </label>
+          <label>CPF/CNPJ *
+            <input id="nfaDoc" placeholder="000.000.000-00 ou 00.000.000/0000-00" style="width:100%;">
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:8px;">
+          <label>Email (opcional)
+            <input id="nfaEmail" type="email" placeholder="cliente@email.com" style="width:100%;">
+          </label>
+          <label>CEP *
+            <input id="nfaCep" placeholder="65930-000" style="width:100%;">
+          </label>
+          <label>Cidade
+            <input id="nfaCidade" value="Açailândia" style="width:100%;">
+          </label>
+          <label>UF
+            <input id="nfaUf" maxlength="2" value="MA" style="width:100%; text-transform:uppercase;">
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1.5fr 1fr 1fr; gap:8px;">
+          <label>Logradouro
+            <input id="nfaLogr" placeholder="Av. Brasil" style="width:100%;">
+          </label>
+          <label>Número
+            <input id="nfaNum" value="S/N" style="width:100%;">
+          </label>
+          <label>Bairro
+            <input id="nfaBairro" style="width:100%;">
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+          <label>Valor do serviço (R$) *
+            <input id="nfaValor" type="number" step="0.01" min="0.01" placeholder="0,00" style="width:100%;">
+          </label>
+          <label>Código LC 116 *
+            <select id="nfaCodigo" style="width:100%;">
+              <option value="7.01">7.01 — Engenharia/Agronomia</option>
+              <option value="7.02" selected>7.02 — Construção civil/obras</option>
+              <option value="7.03">7.03 — Elaboração de plantas</option>
+              <option value="17.01">17.01 — Vistoria/perícia/avaliação</option>
+              <option value="17.13">17.13 — Assessoria/consultoria</option>
+              <option value="17.19">17.19 — Outras consultorias</option>
+              <option value="32.01">32.01 — Serviços de desenho técnico</option>
+            </select>
+          </label>
+          <label>Alíquota ISS (%)
+            <input id="nfaIss" type="number" step="0.01" value="${cfg.iss_aliquota || 5}" style="width:100%;">
+          </label>
+        </div>
+        <label>Descrição do serviço *
+          <textarea id="nfaDesc" rows="3" placeholder="Ex: Vistoria técnica em imóvel residencial — Av. X, Açailândia/MA — laudo entregue 10/05/2026" style="width:100%; resize:vertical;"></textarea>
+        </label>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-primary" id="nfaCriar" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">💾 Criar rascunho</button>
+          <button class="btn-primary" id="nfaCriarEmitir" style="flex:2; background:var(--gold); color:#06120a; border-color:var(--gold);">🚀 Criar e emitir agora</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.querySelector('[data-nf-cancelar-form]').onclick = () => { box.style.display='none'; };
+
+  async function salvar(emitirAgora) {
+    const nome = document.getElementById('nfaNome').value.trim();
+    const doc = document.getElementById('nfaDoc').value.replace(/\D/g, '');
+    const cep = document.getElementById('nfaCep').value.replace(/\D/g, '');
+    const valor = Number(document.getElementById('nfaValor').value);
+    const desc = document.getElementById('nfaDesc').value.trim();
+    if (!nome) return alert('Nome do tomador obrigatório');
+    if (doc.length !== 11 && doc.length !== 14) return alert('CPF/CNPJ inválido');
+    if (cep.length < 8) return alert('CEP inválido');
+    if (!isFinite(valor) || valor <= 0) return alert('Valor inválido');
+    if (!desc) return alert('Descrição obrigatória');
+
+    const payload = {
+      resource_type: 'avulsa',
+      resource_id: 'avulsa-' + Date.now(),
+      tomador_doc: doc,
+      tomador_nome: nome,
+      tomador_email: document.getElementById('nfaEmail').value.trim() || null,
+      tomador_endereco: {
+        cep,
+        logradouro: document.getElementById('nfaLogr').value.trim(),
+        numero: document.getElementById('nfaNum').value.trim() || 'S/N',
+        bairro: document.getElementById('nfaBairro').value.trim(),
+        municipio: document.getElementById('nfaCidade').value.trim() || 'Açailândia',
+        uf: document.getElementById('nfaUf').value.trim().toUpperCase() || 'MA',
+      },
+      valor_servico: valor,
+      codigo_servico: document.getElementById('nfaCodigo').value,
+      descricao: desc,
+      iss_aliquota: Number(document.getElementById('nfaIss').value) || 5,
+    };
+
+    const btn = document.getElementById(emitirAgora ? 'nfaCriarEmitir' : 'nfaCriar');
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = 'Salvando...';
+    try {
+      const nf = await api('/api/notas-fiscais', { method:'POST', body: JSON.stringify(payload) });
+      if (emitirAgora) {
+        btn.textContent = 'Emitindo...';
+        await api('/api/notas-fiscais/' + nf.id + '/emitir', { method:'POST', body: JSON.stringify({}) });
+        alert('🚀 NF RPS ' + nf.rps_numero + ' enviada pro NFe.io!');
+      } else {
+        alert('💾 NF rascunho criada (RPS ' + nf.rps_numero + '). Emita depois pelo botão na lista.');
+      }
+      box.style.display = 'none';
+      await loadNotas();
+      renderNotas();
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false; btn.textContent = orig;
+    }
+  }
+  document.getElementById('nfaCriar').onclick = () => salvar(false);
+  document.getElementById('nfaCriarEmitir').onclick = () => salvar(true);
 }
 
 let CALC_ATIVA = null;
