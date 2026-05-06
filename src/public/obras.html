@@ -484,6 +484,9 @@
     <button class="tab" data-tab="folha">Folha Mensal</button>
     <button class="tab" data-tab="vto">Vistoria (VTO)</button>
     <button class="tab" data-tab="proposta">Proposta</button>
+    <button class="tab" data-tab="recibos" style="position:relative;">📜 Recibos
+      <span style="position:absolute; top:-6px; right:-12px; background:var(--gold); color:#06120a; font-size:8px; font-weight:800; padding:1px 4px; border-radius:3px; letter-spacing:0.5px;">NOVO</span>
+    </button>
     <button class="tab" data-tab="materiais">Materiais</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
   </div>
@@ -500,6 +503,7 @@
   <div id="view-folha" class="view"></div>
   <div id="view-vto" class="view"></div>
   <div id="view-proposta" class="view"></div>
+  <div id="view-recibos" class="view"></div>
   <div id="view-calculos" class="view"></div>
 </div>
 
@@ -841,6 +845,7 @@ async function render() {
         }
       },
       calculos: async () => { renderCalculos(); },
+      recibos: async () => { await Promise.all([loadObras(), loadRecibos()]); renderRecibos(); },
     };
     await fns[state.currentTab]();
   } catch (e) {
@@ -6829,6 +6834,352 @@ const CALCULADORAS = {
     render: renderCalcCobertura,
   },
 };
+
+// ─── RECIBOS UNIVERSAIS (v1.71.0) ──────────────────────────────────────
+// 7 tipos: funcionario, parcela, despesa, proposta, vistoria, etapa, chaves.
+// Estado:
+//   state.recibos[]              — lista carregada
+//   state.recibosFiltro          — { tipo, status, q }
+//   state.recibosView            — 'lista' | 'form'
+//   state.reciboForm             — dados do form em edicao
+const RECIBO_TIPOS = [
+  { val: 'funcionario', label: '👷 Funcionário',     cor: '#10b981' },
+  { val: 'parcela',     label: '💵 Parcela cliente', cor: '#3b82f6' },
+  { val: 'despesa',     label: '🧾 Despesa',         cor: '#f59e0b' },
+  { val: 'proposta',    label: '📋 Proposta',        cor: '#8b5cf6' },
+  { val: 'vistoria',    label: '📷 Vistoria',        cor: '#ec4899' },
+  { val: 'etapa',       label: '🏗️ Etapa de obra',   cor: '#14b8a6' },
+  { val: 'chaves',      label: '🔑 Entrega chaves',  cor: '#a855f7' },
+  { val: 'custom',      label: '📜 Personalizado',   cor: '#6b7280' },
+];
+const RECIBO_STATUS_LABEL = {
+  rascunho:'Rascunho', aguardando_envio:'Aguardando envio',
+  enviado:'Enviado', entregue:'Entregue', lido:'Lido',
+  respondido:'Respondido', confirmado:'✓ Confirmado',
+  contestado:'✗ Contestado', expirado:'⏱ Expirado', cancelado:'⊘ Cancelado',
+};
+const RECIBO_STATUS_COR = {
+  rascunho:'#6b7280', aguardando_envio:'#f59e0b',
+  enviado:'#3b82f6', entregue:'#06b6d4', lido:'#0ea5e9',
+  respondido:'#8b5cf6', confirmado:'#10b981',
+  contestado:'#dc2626', expirado:'#9ca3af', cancelado:'#71717a',
+};
+
+async function loadRecibos() {
+  const f = state.recibosFiltro || {};
+  const qs = new URLSearchParams();
+  if (f.tipo)   qs.set('tipo', f.tipo);
+  if (f.status) qs.set('status', f.status);
+  qs.set('limite', '200');
+  state.recibos = await api('/api/recibos?' + qs.toString());
+}
+
+function recibosTipoMeta(tipo) {
+  return RECIBO_TIPOS.find(t => t.val === tipo) || RECIBO_TIPOS[7];
+}
+
+function renderRecibos() {
+  const v = document.getElementById('view-recibos');
+  if (!state.recibosView) state.recibosView = 'lista';
+  if (state.recibosView === 'form') return renderReciboForm(v);
+
+  if (!state.recibosFiltro) state.recibosFiltro = { tipo:'', status:'', q:'' };
+  const f = state.recibosFiltro;
+
+  // filtro client-side por busca livre
+  let lista = state.recibos || [];
+  if (f.q) {
+    const q = f.q.toLowerCase();
+    lista = lista.filter(r =>
+      (r.numero || '').toLowerCase().includes(q) ||
+      (r.destinatario_nome || '').toLowerCase().includes(q) ||
+      (r.destinatario_phone || '').includes(q) ||
+      (r.descricao_servico || '').toLowerCase().includes(q)
+    );
+  }
+
+  // chips de status (resumo)
+  const stCount = {};
+  for (const r of state.recibos || []) {
+    stCount[r.status] = (stCount[r.status] || 0) + 1;
+  }
+  const totalConfirmados = stCount.confirmado || 0;
+  const totalPendentes = (stCount.enviado||0)+(stCount.entregue||0)+(stCount.lido||0)+(stCount.respondido||0);
+  const totalContestados = stCount.contestado || 0;
+
+  const cards = lista.map(r => {
+    const meta = recibosTipoMeta(r.tipo);
+    const corStatus = RECIBO_STATUS_COR[r.status] || '#666';
+    const labelStatus = RECIBO_STATUS_LABEL[r.status] || r.status;
+    const dataBR = r.created_at ? parseDataBR(r.created_at) : '-';
+    const valor = r.valor != null ? fmt(r.valor) : '';
+    const podeReenviar = ['enviado','entregue','lido','respondido'].includes(r.status);
+    const podeEnviar = ['rascunho','aguardando_envio'].includes(r.status);
+    const podeCancel = !['confirmado','cancelado','expirado'].includes(r.status);
+    return `
+    <div class="card" style="border-left:4px solid ${meta.cor};">
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1; min-width:220px;">
+          <p style="margin:0; font-weight:600; font-size:14px;">
+            ${escape(r.numero)} · ${escape(meta.label)}
+          </p>
+          <p style="margin:4px 0; font-size:12px;">
+            <strong>${escape(r.destinatario_nome)}</strong>
+            <span style="color:var(--text-muted);">· ${escape(r.destinatario_phone)}</span>
+          </p>
+          ${valor ? `<p style="margin:2px 0; font-size:13px; color:var(--gold);">${escape(valor)}${r.forma_pagamento ? ' · ' + escape(r.forma_pagamento.toUpperCase()) : ''}</p>` : ''}
+          ${r.descricao_servico ? `<p style="margin:4px 0; font-size:11px; color:var(--text-muted);">${escape(r.descricao_servico)}</p>` : ''}
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+            <span class="badge" style="font-size:10px; background:${corStatus}22; color:${corStatus}; border:1px solid ${corStatus}55;">${escape(labelStatus)}</span>
+            <span class="badge badge-info" style="font-size:10px;">${escape(dataBR)}</span>
+            ${r.respondido_em ? `<span class="badge badge-success" style="font-size:10px;">resp em ${escape(parseDataBR(r.respondido_em))}</span>` : ''}
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px; min-width:200px;">
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-rec-pdf="${r.id}" title="Baixar PDF" style="flex:1;">📄 PDF</button>
+            <button data-rec-link="${r.token}" title="Copiar link" style="flex:1;">🔗 Link</button>
+          </div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            ${podeEnviar    ? `<button data-rec-enviar="${r.id}" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">📱 Enviar</button>` : ''}
+            ${podeReenviar  ? `<button data-rec-reenviar="${r.id}" style="flex:1;">🔁 Lembrete</button>` : ''}
+            ${podeCancel    ? `<button data-rec-cancelar="${r.id}" class="btn-danger" style="flex:1;">Cancelar</button>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="card empty">Nenhum recibo no filtro atual. Use "+ Novo recibo" pra criar.</div>';
+
+  v.innerHTML = `
+    <p class="section-title">📜 Recibos Universais (${(state.recibos||[]).length})</p>
+    <div class="card" style="display:flex; gap:16px; flex-wrap:wrap;">
+      <div><strong style="color:var(--success); font-size:18px;">${totalConfirmados}</strong>
+        <span style="font-size:11px; color:var(--text-muted);"> confirmados</span></div>
+      <div><strong style="color:var(--gold); font-size:18px;">${totalPendentes}</strong>
+        <span style="font-size:11px; color:var(--text-muted);"> pendentes</span></div>
+      <div><strong style="color:var(--danger); font-size:18px;">${totalContestados}</strong>
+        <span style="font-size:11px; color:var(--text-muted);"> contestados</span></div>
+    </div>
+    <div class="card" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; align-items:end;">
+      <label>Tipo
+        <select id="recFiltroTipo" style="width:100%;">
+          <option value="">Todos</option>
+          ${RECIBO_TIPOS.map(t => `<option value="${t.val}" ${f.tipo===t.val?'selected':''}>${escape(t.label)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Status
+        <select id="recFiltroStatus" style="width:100%;">
+          <option value="">Todos</option>
+          ${Object.entries(RECIBO_STATUS_LABEL).map(([k,v])=>`<option value="${k}" ${f.status===k?'selected':''}>${escape(v)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Buscar
+        <input id="recFiltroQ" placeholder="número, nome, telefone..." value="${escape(f.q || '')}" style="width:100%;">
+      </label>
+      <button class="btn-primary" id="recNovoBtn">➕ Novo recibo</button>
+    </div>
+    ${cards}
+  `;
+
+  // Bind filtros
+  document.getElementById('recFiltroTipo').onchange = async (e) => {
+    state.recibosFiltro.tipo = e.target.value;
+    await loadRecibos(); renderRecibos();
+  };
+  document.getElementById('recFiltroStatus').onchange = async (e) => {
+    state.recibosFiltro.status = e.target.value;
+    await loadRecibos(); renderRecibos();
+  };
+  document.getElementById('recFiltroQ').oninput = (e) => {
+    state.recibosFiltro.q = e.target.value;
+    renderRecibos();
+  };
+  document.getElementById('recNovoBtn').onclick = () => {
+    state.recibosView = 'form';
+    state.reciboForm = {
+      tipo: 'custom',
+      destinatario_nome: '',
+      destinatario_phone: '',
+      destinatario_doc: '',
+      destinatario_email: '',
+      valor: '',
+      forma_pagamento: 'pix',
+      descricao_servico: '',
+      resource_type: 'manual',
+      resource_id: 'manual-' + Date.now(),
+      expira_em_dias: 7,
+    };
+    renderRecibos();
+  };
+
+  // Botões de ação
+  document.querySelectorAll('[data-rec-pdf]').forEach(b => b.onclick = () => {
+    window.open('/api/recibos/' + b.dataset.recPdf + '/pdf', '_blank');
+  });
+  document.querySelectorAll('[data-rec-link]').forEach(b => b.onclick = async () => {
+    const token = b.dataset.recLink;
+    const url = location.origin + '/r/' + token;
+    try {
+      await navigator.clipboard.writeText(url);
+      const orig = b.textContent;
+      b.textContent = '✓ Copiado';
+      setTimeout(() => b.textContent = orig, 2000);
+    } catch {
+      prompt('Link do recibo:', url);
+    }
+  });
+  document.querySelectorAll('[data-rec-enviar]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.recEnviar;
+    if (!confirm('Enviar pelo WhatsApp agora?')) return;
+    b.disabled = true; b.textContent = 'Enviando...';
+    try {
+      const r = await api('/api/recibos/' + id + '/enviar', { method:'POST', body: JSON.stringify({}) });
+      alert('✅ Enviado pra ' + r.phone);
+      await loadRecibos(); renderRecibos();
+    } catch (e) { alert('Erro: ' + e.message); b.disabled = false; }
+  });
+  document.querySelectorAll('[data-rec-reenviar]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.recReenviar;
+    if (!confirm('Enviar lembrete pelo WhatsApp?')) return;
+    b.disabled = true; b.textContent = 'Enviando...';
+    try {
+      await api('/api/recibos/' + id + '/reenviar', { method:'POST', body: JSON.stringify({}) });
+      alert('✅ Lembrete enviado');
+      await loadRecibos(); renderRecibos();
+    } catch (e) { alert('Erro: ' + e.message); b.disabled = false; }
+  });
+  document.querySelectorAll('[data-rec-cancelar]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.recCancelar;
+    const motivo = prompt('Motivo do cancelamento (opcional):', '');
+    if (motivo === null) return;
+    try {
+      await api('/api/recibos/' + id + '/cancelar', {
+        method:'POST', body: JSON.stringify({ motivo: motivo || null })
+      });
+      await loadRecibos(); renderRecibos();
+    } catch (e) { alert('Erro: ' + e.message); }
+  });
+}
+
+function renderReciboForm(v) {
+  const f = state.reciboForm;
+  v.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">➕ Novo recibo</p>
+        <button data-rec-voltar style="background:transparent;">← Voltar</button>
+      </div>
+      <div style="display:grid; gap:10px; max-width:680px; margin-top:10px;">
+        <label>Tipo *
+          <select id="recTipo" style="width:100%;">
+            ${RECIBO_TIPOS.map(t => `<option value="${t.val}" ${f.tipo===t.val?'selected':''}>${escape(t.label)}</option>`).join('')}
+          </select>
+        </label>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px;">
+          <label>Destinatário *
+            <input id="recNome" placeholder="Nome completo" value="${escape(f.destinatario_nome)}" style="width:100%;">
+          </label>
+          <label>WhatsApp *
+            <input id="recPhone" placeholder="5598999999999" value="${escape(f.destinatario_phone)}" style="width:100%;">
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:8px;">
+          <label>CPF/CNPJ (opcional)
+            <input id="recDoc" placeholder="000.000.000-00" value="${escape(f.destinatario_doc)}" style="width:100%;">
+          </label>
+          <label>Email (opcional)
+            <input id="recEmail" type="email" placeholder="email@dominio.com" value="${escape(f.destinatario_email)}" style="width:100%;">
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 120px; gap:8px;">
+          <label>Valor (R$)
+            <input id="recValor" type="number" step="0.01" min="0" placeholder="0,00" value="${escape(f.valor)}" style="width:100%;">
+          </label>
+          <label>Forma de pagamento
+            <select id="recForma" style="width:100%;">
+              <option value="">—</option>
+              ${['pix','dinheiro','transferencia','cartao','boleto','cheque'].map(x => `<option value="${x}" ${f.forma_pagamento===x?'selected':''}>${x.toUpperCase()}</option>`).join('')}
+            </select>
+          </label>
+          <label>Validade (dias)
+            <input id="recDias" type="number" min="1" max="365" value="${f.expira_em_dias}" style="width:100%;">
+          </label>
+        </div>
+        <label>Descrição do serviço/motivo (opcional)
+          <textarea id="recDesc" rows="2" placeholder="Ex: Mão de obra quinzena 06-20/maio, pagamento PIX" style="width:100%; resize:vertical;">${escape(f.descricao_servico)}</textarea>
+        </label>
+        <p style="font-size:11px; color:var(--text-muted); margin:0;">
+          O recibo recebe número automático no formato <code>REC-{TIPO}-{ANO}-{seq}</code>.
+          Após salvar, você poderá enviar pelo WhatsApp com 1 clique.
+        </p>
+        <div style="display:flex; gap:8px; margin-top:6px;">
+          <button class="btn-primary" id="recSalvar" style="flex:2; background:var(--success); color:#fff; border-color:var(--success);">💾 Criar e enviar</button>
+          <button id="recSalvarRascunho" style="flex:1;">Salvar rascunho</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.querySelector('[data-rec-voltar]').onclick = () => {
+    state.recibosView = 'lista'; renderRecibos();
+  };
+
+  // Sync state em alterações
+  ['Tipo','Nome','Phone','Doc','Email','Valor','Forma','Dias','Desc'].forEach(k => {
+    const el = document.getElementById('rec' + k);
+    if (!el) return;
+    el.oninput = el.onchange = () => {
+      const map = {
+        Tipo:'tipo', Nome:'destinatario_nome', Phone:'destinatario_phone',
+        Doc:'destinatario_doc', Email:'destinatario_email',
+        Valor:'valor', Forma:'forma_pagamento', Dias:'expira_em_dias',
+        Desc:'descricao_servico'
+      };
+      f[map[k]] = el.value;
+    };
+  });
+
+  async function salvar(enviar) {
+    if (!f.destinatario_nome.trim()) return alert('Informe o destinatário');
+    if (!f.destinatario_phone.trim()) return alert('Informe o WhatsApp');
+    const btnId = enviar ? 'recSalvar' : 'recSalvarRascunho';
+    const btn = document.getElementById(btnId);
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = 'Salvando...';
+    try {
+      const payload = {
+        tipo: f.tipo,
+        resource_type: f.resource_type,
+        resource_id: f.resource_id,
+        destinatario_nome: f.destinatario_nome.trim(),
+        destinatario_phone: f.destinatario_phone.trim(),
+        destinatario_doc: f.destinatario_doc.trim() || null,
+        destinatario_email: f.destinatario_email.trim() || null,
+        valor: f.valor ? Number(f.valor) : null,
+        forma_pagamento: f.forma_pagamento || null,
+        descricao_servico: f.descricao_servico.trim() || null,
+        expira_em_dias: Number(f.expira_em_dias) || 7,
+      };
+      const r = await api('/api/recibos', { method: 'POST', body: JSON.stringify(payload) });
+      if (enviar) {
+        btn.textContent = 'Enviando WhatsApp...';
+        await api('/api/recibos/' + r.id + '/enviar', { method: 'POST', body: JSON.stringify({}) });
+        alert('✅ Recibo ' + r.numero + ' criado e enviado pelo WhatsApp!');
+      } else {
+        alert('💾 Recibo ' + r.numero + ' salvo como rascunho');
+      }
+      state.recibosView = 'lista';
+      state.reciboForm = null;
+      await loadRecibos();
+      renderRecibos();
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false; btn.textContent = orig;
+    }
+  }
+  document.getElementById('recSalvar').onclick = () => salvar(true);
+  document.getElementById('recSalvarRascunho').onclick = () => salvar(false);
+}
 
 let CALC_ATIVA = null;
 
