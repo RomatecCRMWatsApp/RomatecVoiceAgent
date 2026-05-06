@@ -1033,14 +1033,16 @@ app.post('/api/despesas-extras/relatorio-pdf', async (req: Request, res: Respons
     res.send(buf);
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
-app.post('/api/despesas-extras/:id/enviar-whatsapp',
-  apiHandle(args => despesasExtras.enviarDespesaWhatsApp(args as Parameters<typeof despesasExtras.enviarDespesaWhatsApp>[0])));
-app.post('/api/despesas-extras/:id/enviar-telegram',
-  apiHandle(args => despesasExtras.enviarDespesaTelegram(args as Parameters<typeof despesasExtras.enviarDespesaTelegram>[0])));
+// v1.67.13: rotas literais /relatorio/... ANTES das paramétricas /:id/...
+// (caso contrario o Express casa "relatorio" como :id e quebra com "id invalido")
 app.post('/api/despesas-extras/relatorio/enviar-whatsapp',
   apiHandle(args => despesasExtras.enviarRelatorioDespesasWhatsApp(args as Parameters<typeof despesasExtras.enviarRelatorioDespesasWhatsApp>[0])));
 app.post('/api/despesas-extras/relatorio/enviar-telegram',
   apiHandle(args => despesasExtras.enviarRelatorioDespesasTelegram(args as Parameters<typeof despesasExtras.enviarRelatorioDespesasTelegram>[0])));
+app.post('/api/despesas-extras/:id/enviar-whatsapp',
+  apiHandle(args => despesasExtras.enviarDespesaWhatsApp(args as Parameters<typeof despesasExtras.enviarDespesaWhatsApp>[0])));
+app.post('/api/despesas-extras/:id/enviar-telegram',
+  apiHandle(args => despesasExtras.enviarDespesaTelegram(args as Parameters<typeof despesasExtras.enviarDespesaTelegram>[0])));
 
 // v1.66.0: Proposta de Consultoria (averbacao + outros 5 subtipos na Fase 3).
 // Numeracao PROP-AAAA-XXXX compartilhada com Mao de Obra.
