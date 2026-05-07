@@ -1104,6 +1104,20 @@ app.post('/api/despesas-extras/:id/enviar-whatsapp',
 app.post('/api/despesas-extras/:id/enviar-telegram',
   apiHandle(args => despesasExtras.enviarDespesaTelegram(args as Parameters<typeof despesasExtras.enviarDespesaTelegram>[0])));
 
+// ── v1.81.0: lookups Brasil API (CEP, CNPJ) pra autocompletar formularios
+app.get('/api/lookup/cep/:cep', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/brasilApi');
+    res.json(await m.consultarCep({ cep: String(req.params.cep) }));
+  } catch (err) { res.status(404).json({ error: (err as Error).message }); }
+});
+app.get('/api/lookup/cnpj/:cnpj', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/brasilApi');
+    res.json(await m.consultarCnpj({ cnpj: String(req.params.cnpj) }));
+  } catch (err) { res.status(404).json({ error: (err as Error).message }); }
+});
+
 // ── v1.74.0: Configuração Fiscal + Notas Fiscais (NFe.io) ───────────────
 app.get('/api/fiscal-config', async (_req: Request, res: Response) => {
   try {

@@ -1943,39 +1943,49 @@ function abrirEditarObra(obraId) {
             }
           }
 
-          // 3) NFe (se config fiscal completa e cliente tem doc)
+          // 3) NFe (se config fiscal completa) — modal customizado, sem prompt feio
           if (fiscalOk) {
-            const docCliente = obra.cliente_doc || prompt('CPF/CNPJ do cliente (obrigatório pra NFe):', '');
-            if (docCliente?.trim()) {
-              const cep = obra.cep || prompt('CEP da obra (somente números):', '');
-              if (cep) {
-                try {
-                  const nf = await api('/api/notas-fiscais', {
-                    method:'POST',
-                    body: JSON.stringify({
-                      resource_type: 'romatec_obra_parcelas',
-                      resource_id: String(id),
-                      tomador_doc: docCliente,
-                      tomador_nome: obra.cliente || 'Cliente',
-                      tomador_email: obra.cliente_email || null,
-                      tomador_endereco: {
-                        cep,
-                        logradouro: obra.endereco || '',
-                        numero: 'S/N', bairro: '',
-                        municipio: obra.cidade || 'Açailândia', uf: 'MA',
-                      },
-                      valor_servico: Number(parcela.valor),
-                      codigo_servico: '7.02',
-                      descricao: `${parcela.numero}ª parcela da obra ${obra.nome}`,
-                      iss_aliquota: Number(cfg.iss_aliquota) || 5,
-                    }),
-                  });
-                  await api('/api/notas-fiscais/' + nf.id + '/emitir', { method:'POST', body: JSON.stringify({}) });
-                  nfInfo = `NFe RPS ${nf.rps_numero} enviada pra ${cfg.ambiente === 'producao' ? 'PRODUÇÃO' : 'sandbox'}.`;
-                } catch (e) {
-                  nfInfo = 'Falha na NF: ' + (e?.message || e);
-                }
+            const dados = await abrirModalNF({
+              titulo: `Emitir NFe da ${parcela.numero}ª parcela`,
+              ehObrigatorioDoc: true,
+              prefilled: {
+                tomador_doc: obra.cliente_doc || '',
+                tomador_nome: obra.cliente || '',
+                tomador_email: obra.cliente_email || '',
+                logradouro: obra.endereco || '',
+                municipio: obra.cidade || 'Açailândia',
+                uf: 'MA',
+                codigo: '7.02',
+              },
+            });
+            if (dados) {
+              try {
+                const nf = await api('/api/notas-fiscais', {
+                  method:'POST',
+                  body: JSON.stringify({
+                    resource_type: 'romatec_obra_parcelas',
+                    resource_id: String(id),
+                    tomador_doc: dados.tomador_doc,
+                    tomador_nome: dados.tomador_nome,
+                    tomador_email: dados.tomador_email,
+                    tomador_endereco: {
+                      cep: dados.cep, logradouro: dados.logradouro,
+                      numero: dados.numero, bairro: dados.bairro,
+                      municipio: dados.municipio, uf: dados.uf,
+                    },
+                    valor_servico: Number(parcela.valor),
+                    codigo_servico: dados.codigo,
+                    descricao: `${parcela.numero}ª parcela da obra ${obra.nome}`,
+                    iss_aliquota: Number(cfg.iss_aliquota) || 5,
+                  }),
+                });
+                await api('/api/notas-fiscais/' + nf.id + '/emitir', { method:'POST', body: JSON.stringify({}) });
+                nfInfo = `NFe RPS ${nf.rps_numero} enviada pra ${cfg.ambiente === 'producao' ? 'PRODUÇÃO' : 'sandbox'}.`;
+              } catch (e) {
+                nfInfo = 'Falha na NF: ' + (e?.message || e);
               }
+            } else {
+              nfInfo = 'NF cancelada pelo usuário.';
             }
           }
 
@@ -7327,30 +7337,36 @@ function renderRecibos() {
       return;
     }
 
-    // Endereço do tomador via prompt simples
-    const cep = prompt('CEP do tomador (somente números):', '');
-    if (!cep) return;
-    const logradouro = prompt('Logradouro:', '') || '';
-    const numero = prompt('Número:', 'S/N') || 'S/N';
-    const bairro = prompt('Bairro:', '') || '';
-    const municipio = prompt('Cidade:', 'Açailândia') || 'Açailândia';
-    const uf = prompt('UF (2 letras):', 'MA') || 'MA';
-    const codigoServico = prompt('Código de serviço (LC 116). Ex: 7.01 (engenharia), 17.01 (vistoria), 17.13 (consultoria):', '7.01') || '7.01';
+    // Modal customizado com autocompletar CEP/CNPJ
+    const dados = await abrirModalNF({
+      titulo: `Emitir NFe do recibo ${r.numero}`,
+      ehObrigatorioDoc: true,
+      prefilled: {
+        tomador_doc: r.destinatario_doc || '',
+        tomador_nome: r.destinatario_nome || '',
+        tomador_email: r.destinatario_email || '',
+        codigo: '7.01',
+      },
+    });
+    if (!dados) return;
 
     try {
       const payload = {
         recibo_id: r.id,
         resource_type: 'recibos', resource_id: String(r.id),
-        tomador_doc: r.destinatario_doc || prompt('CPF/CNPJ do tomador (obrigatório):', '') || '',
-        tomador_nome: r.destinatario_nome,
-        tomador_email: r.destinatario_email || null,
-        tomador_endereco: { cep, logradouro, numero, bairro, municipio, uf },
+        tomador_doc: dados.tomador_doc,
+        tomador_nome: dados.tomador_nome,
+        tomador_email: dados.tomador_email,
+        tomador_endereco: {
+          cep: dados.cep, logradouro: dados.logradouro,
+          numero: dados.numero, bairro: dados.bairro,
+          municipio: dados.municipio, uf: dados.uf,
+        },
         valor_servico: r.valor,
-        codigo_servico: codigoServico,
+        codigo_servico: dados.codigo,
         descricao: r.descricao_servico || `Recibo ${r.numero}`,
         iss_aliquota: Number(cfg.iss_aliquota) || 5,
       };
-      if (!payload.tomador_doc) return alert('CPF/CNPJ obrigatório.');
       const nf = await api('/api/notas-fiscais', { method:'POST', body: JSON.stringify(payload) });
       if (confirm(`NF rascunho criada (RPS ${nf.rps_numero}). Emitir agora pelo NFe.io?`)) {
         await api('/api/notas-fiscais/' + nf.id + '/emitir', { method:'POST', body: JSON.stringify({}) });
@@ -7481,6 +7497,176 @@ function renderReciboForm(v) {
   }
   document.getElementById('recSalvar').onclick = () => salvar(true);
   document.getElementById('recSalvarRascunho').onclick = () => salvar(false);
+}
+
+// ─── MODAL UNIVERSAL DE EMISSÃO NF (v1.81.0) ──────────────────────────
+// Substitui prompt() do botão "Emitir NF" do recibo e do clique "✓ Pago".
+// Autocompleta CEP via Brasil API. Lookup automático CNPJ se for PJ.
+// Retorna Promise<dados | null> — null = cancelou.
+function abrirModalNF(opts) {
+  // opts: { titulo, prefilled: {tomador_doc,tomador_nome,...}, ehObrigatorioDoc:true }
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'cal-overlay';
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px;';
+
+    const modal = document.createElement('div');
+    modal.className = 'card';
+    modal.style.cssText = 'max-width:680px; width:100%; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.5);';
+
+    const p = opts.prefilled || {};
+    modal.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">${escape(opts.titulo || 'Emitir Nota Fiscal')}</p>
+        <button data-mnf-cancelar style="background:transparent;">✕</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin:8px 0;">
+        Preencha CPF/CNPJ — se for empresa, dados auto-completam da Receita Federal.
+        Digite o CEP — endereço auto-completa via Brasil API.
+      </p>
+      <div style="display:grid; gap:10px;">
+        <div style="display:grid; grid-template-columns:1fr 2fr; gap:8px;">
+          <label>CPF/CNPJ ${opts.ehObrigatorioDoc ? '*' : ''}
+            <input id="mnfDoc" placeholder="000.000.000-00" value="${escape(p.tomador_doc || '')}" style="width:100%;">
+            <span id="mnfDocStatus" style="font-size:10px; color:var(--text-muted);"></span>
+          </label>
+          <label>Nome / Razão Social *
+            <input id="mnfNome" value="${escape(p.tomador_nome || '')}" style="width:100%;">
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px;">
+          <label>Email
+            <input id="mnfEmail" type="email" value="${escape(p.tomador_email || '')}" style="width:100%;">
+          </label>
+          <label>CEP *
+            <input id="mnfCep" placeholder="00000-000" maxlength="9" value="${escape(p.cep || '')}" style="width:100%;">
+            <span id="mnfCepStatus" style="font-size:10px; color:var(--text-muted);"></span>
+          </label>
+          <label>Logradouro
+            <input id="mnfLogr" value="${escape(p.logradouro || '')}" style="width:100%;">
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 2fr 2fr 80px; gap:8px;">
+          <label>Número
+            <input id="mnfNum" value="${escape(p.numero || 'S/N')}" style="width:100%;">
+          </label>
+          <label>Bairro
+            <input id="mnfBairro" value="${escape(p.bairro || '')}" style="width:100%;">
+          </label>
+          <label>Cidade
+            <input id="mnfCidade" value="${escape(p.municipio || '')}" style="width:100%;">
+          </label>
+          <label>UF
+            <input id="mnfUf" maxlength="2" value="${escape(p.uf || '')}" style="width:100%; text-transform:uppercase;">
+          </label>
+        </div>
+        <label>Código de serviço LC 116 *
+          <select id="mnfCodigo" style="width:100%;">
+            <option value="7.01" ${p.codigo === '7.01' ? 'selected':''}>7.01 — Engenharia/Agronomia/Geologia</option>
+            <option value="7.02" ${!p.codigo || p.codigo === '7.02' ? 'selected':''}>7.02 — Construção civil/obras de engenharia</option>
+            <option value="7.03" ${p.codigo === '7.03' ? 'selected':''}>7.03 — Elaboração de plantas e projetos</option>
+            <option value="17.01" ${p.codigo === '17.01' ? 'selected':''}>17.01 — Vistoria, perícia, avaliação imobiliária</option>
+            <option value="17.13" ${p.codigo === '17.13' ? 'selected':''}>17.13 — Assessoria/consultoria</option>
+            <option value="17.19" ${p.codigo === '17.19' ? 'selected':''}>17.19 — Outras consultorias</option>
+            <option value="32.01" ${p.codigo === '32.01' ? 'selected':''}>32.01 — Serviços de desenho técnico</option>
+          </select>
+        </label>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button class="btn-primary" data-mnf-ok style="flex:2; background:var(--gold); color:#06120a; border-color:var(--gold); font-weight:600;">🚀 Continuar</button>
+          <button data-mnf-cancelar2 style="flex:1; background:transparent;">Cancelar</button>
+        </div>
+      </div>`;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    overlay.style.display = 'flex';
+
+    const cleanup = (result) => {
+      try { document.body.removeChild(overlay); } catch {}
+      resolve(result);
+    };
+
+    modal.querySelector('[data-mnf-cancelar]').onclick = () => cleanup(null);
+    modal.querySelector('[data-mnf-cancelar2]').onclick = () => cleanup(null);
+    overlay.onclick = (e) => { if (e.target === overlay) cleanup(null); };
+
+    // Autocompletar CEP
+    const inpCep = document.getElementById('mnfCep');
+    inpCep.oninput = async (e) => {
+      const cep = e.target.value.replace(/\D/g, '');
+      if (cep.length !== 8) { document.getElementById('mnfCepStatus').textContent = ''; return; }
+      document.getElementById('mnfCepStatus').textContent = '⏳ buscando...';
+      try {
+        const r = await api('/api/lookup/cep/' + cep);
+        document.getElementById('mnfLogr').value = r.street || r.logradouro || '';
+        document.getElementById('mnfBairro').value = r.neighborhood || r.bairro || '';
+        document.getElementById('mnfCidade').value = r.city || r.localidade || '';
+        document.getElementById('mnfUf').value = (r.state || r.uf || '').toUpperCase();
+        document.getElementById('mnfCepStatus').textContent = '✓ encontrado';
+      } catch {
+        document.getElementById('mnfCepStatus').textContent = '✗ CEP não encontrado';
+      }
+    };
+
+    // Autocompletar CNPJ
+    const inpDoc = document.getElementById('mnfDoc');
+    inpDoc.oninput = async (e) => {
+      const doc = e.target.value.replace(/\D/g, '');
+      if (doc.length !== 14) {
+        document.getElementById('mnfDocStatus').textContent = doc.length === 11 ? 'CPF (sem auto-fill)' : '';
+        return;
+      }
+      document.getElementById('mnfDocStatus').textContent = '⏳ buscando CNPJ...';
+      try {
+        const r = await api('/api/lookup/cnpj/' + doc);
+        if (!document.getElementById('mnfNome').value) {
+          document.getElementById('mnfNome').value = r.razao_social || r.nome_fantasia || '';
+        }
+        if (!document.getElementById('mnfCep').value && r.cep) {
+          document.getElementById('mnfCep').value = r.cep;
+          inpCep.dispatchEvent(new Event('input'));
+        }
+        if (!document.getElementById('mnfLogr').value) {
+          document.getElementById('mnfLogr').value = r.logradouro || '';
+          document.getElementById('mnfNum').value = r.numero || 'S/N';
+          document.getElementById('mnfBairro').value = r.bairro || '';
+          document.getElementById('mnfCidade').value = r.municipio || '';
+          document.getElementById('mnfUf').value = (r.uf || '').toUpperCase();
+        }
+        document.getElementById('mnfDocStatus').textContent = '✓ ' + (r.razao_social || 'encontrado');
+      } catch {
+        document.getElementById('mnfDocStatus').textContent = '✗ CNPJ não encontrado';
+      }
+    };
+
+    // OK
+    modal.querySelector('[data-mnf-ok]').onclick = () => {
+      const doc = document.getElementById('mnfDoc').value.replace(/\D/g, '');
+      const nome = document.getElementById('mnfNome').value.trim();
+      const cep = document.getElementById('mnfCep').value.replace(/\D/g, '');
+      if (opts.ehObrigatorioDoc && doc.length !== 11 && doc.length !== 14) {
+        alert('CPF (11 dig) ou CNPJ (14 dig) obrigatório');
+        return;
+      }
+      if (!nome) { alert('Nome obrigatório'); return; }
+      if (cep.length < 8) { alert('CEP obrigatório'); return; }
+      cleanup({
+        tomador_doc: doc,
+        tomador_nome: nome,
+        tomador_email: document.getElementById('mnfEmail').value.trim() || null,
+        cep,
+        logradouro: document.getElementById('mnfLogr').value.trim(),
+        numero: document.getElementById('mnfNum').value.trim() || 'S/N',
+        bairro: document.getElementById('mnfBairro').value.trim(),
+        municipio: document.getElementById('mnfCidade').value.trim(),
+        uf: document.getElementById('mnfUf').value.trim().toUpperCase(),
+        codigo: document.getElementById('mnfCodigo').value,
+      });
+    };
+
+    // Foco inicial
+    setTimeout(() => inpDoc.focus(), 50);
+  });
 }
 
 // ─── NOTAS FISCAIS (v1.75.0) ───────────────────────────────────────────
@@ -7723,6 +7909,7 @@ function renderNFAvulsaBox() {
           </label>
           <label>CPF/CNPJ *
             <input id="nfaDoc" placeholder="000.000.000-00 ou 00.000.000/0000-00" style="width:100%;">
+            <span id="nfaDocStatus" style="font-size:10px; color:var(--text-muted);"></span>
           </label>
         </div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:8px;">
@@ -7730,7 +7917,8 @@ function renderNFAvulsaBox() {
             <input id="nfaEmail" type="email" placeholder="cliente@email.com" style="width:100%;">
           </label>
           <label>CEP *
-            <input id="nfaCep" placeholder="65930-000" style="width:100%;">
+            <input id="nfaCep" placeholder="65930-000" maxlength="9" style="width:100%;">
+            <span id="nfaCepStatus" style="font-size:10px; color:var(--text-muted);"></span>
           </label>
           <label>Cidade
             <input id="nfaCidade" value="Açailândia" style="width:100%;">
@@ -7780,6 +7968,45 @@ function renderNFAvulsaBox() {
     </div>`;
 
   document.querySelector('[data-nf-cancelar-form]').onclick = () => { box.style.display='none'; };
+
+  // v1.81.0: autocompletar CEP via Brasil API
+  document.getElementById('nfaCep').oninput = async (e) => {
+    const cep = e.target.value.replace(/\D/g, '');
+    if (cep.length !== 8) { document.getElementById('nfaCepStatus').textContent = ''; return; }
+    document.getElementById('nfaCepStatus').textContent = '⏳ buscando...';
+    try {
+      const r = await api('/api/lookup/cep/' + cep);
+      document.getElementById('nfaLogr').value = r.street || r.logradouro || '';
+      document.getElementById('nfaBairro').value = r.neighborhood || r.bairro || '';
+      document.getElementById('nfaCidade').value = r.city || r.localidade || '';
+      document.getElementById('nfaUf').value = (r.state || r.uf || '').toUpperCase();
+      document.getElementById('nfaCepStatus').textContent = '✓ ' + (r.city || '');
+    } catch {
+      document.getElementById('nfaCepStatus').textContent = '✗ CEP não encontrado';
+    }
+  };
+  // v1.81.0: autocompletar CNPJ via Brasil API
+  document.getElementById('nfaDoc').oninput = async (e) => {
+    const doc = e.target.value.replace(/\D/g, '');
+    if (doc.length !== 14) {
+      document.getElementById('nfaDocStatus').textContent = doc.length === 11 ? 'CPF (sem auto-fill)' : '';
+      return;
+    }
+    document.getElementById('nfaDocStatus').textContent = '⏳ buscando CNPJ...';
+    try {
+      const r = await api('/api/lookup/cnpj/' + doc);
+      if (!document.getElementById('nfaNome').value) {
+        document.getElementById('nfaNome').value = r.razao_social || r.nome_fantasia || '';
+      }
+      if (!document.getElementById('nfaCep').value && r.cep) {
+        document.getElementById('nfaCep').value = r.cep;
+        document.getElementById('nfaCep').dispatchEvent(new Event('input'));
+      }
+      document.getElementById('nfaDocStatus').textContent = '✓ ' + (r.razao_social || 'encontrado');
+    } catch {
+      document.getElementById('nfaDocStatus').textContent = '✗ CNPJ não encontrado';
+    }
+  };
 
   async function salvar(emitirAgora) {
     const nome = document.getElementById('nfaNome').value.trim();
