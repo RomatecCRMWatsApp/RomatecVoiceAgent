@@ -1,7 +1,7 @@
 // Service Worker da ZAYRA — versão atrelada à versão do app pra forçar
 // rotação de cache em todo deploy. Se você bumpar a versão do app, bumpe esta
 // constante também (ou no futuro, gere via build).
-const CACHE = 'zayra-v1.97.0';
+const CACHE = 'zayra-v1.98.0';
 
 // App shell — recursos pequenos que podem ser cacheados.
 // HTML NÃO está aqui de propósito — é network-first.
@@ -67,7 +67,7 @@ self.addEventListener('fetch', e => {
   // Se rede falhar, cai pro cache (modo offline).
   // Inclui rotas SPA-like servidas pelo Express que renderizam HTML mas
   // não terminam em .html (ex: /obras, /vto se houver no futuro).
-  const HTML_ROUTES = ['/', '/obras', '/sw.js'];
+  const HTML_ROUTES = ['/', '/obras', '/cartao', '/cartao/', '/sw.js'];
   const isHtml = HTML_ROUTES.includes(url.pathname) || url.pathname.endsWith('.html');
   const isSw   = url.pathname === '/sw.js';
   if (isHtml || isSw) {

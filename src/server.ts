@@ -682,6 +682,13 @@ app.get('/obras', (_req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, 'public', 'obras.html'));
 });
 
+// v1.98.0: cartao publico de visitas (sem auth) — paleta verde Romatec + dourado
+// Atende /cartao e /cartao/ (com slash final). Busca em /public/cartao/index.html
+app.get(['/cartao', '/cartao/'], (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.sendFile(path.join(__dirname, 'public', 'cartao', 'index.html'));
+});
+
 const apiHandle = (fn: (...args: never[]) => Promise<unknown> | unknown) =>
   async (req: Request, res: Response) => {
     try {
