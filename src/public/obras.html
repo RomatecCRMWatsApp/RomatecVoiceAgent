@@ -7450,7 +7450,10 @@ function renderReciboForm(v) {
             <input id="recNome" placeholder="Nome completo" value="${escape(f.destinatario_nome)}" style="width:100%;">
           </label>
           <label>WhatsApp *
-            <input id="recPhone" placeholder="5598999999999" value="${escape(f.destinatario_phone)}" style="width:100%;">
+            <div style="display:flex; gap:6px;">
+              <input id="recPhone" placeholder="5598999999999" value="${escape(f.destinatario_phone)}" style="flex:1;">
+              <button type="button" id="recCadastrarNovo" title="Cadastrar novo cliente completo" style="background:var(--gold); color:#06120a; border-color:var(--gold); padding:6px 10px; font-size:12px; white-space:nowrap;">+ Cadastrar Novo</button>
+            </div>
           </label>
         </div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:8px;">
@@ -7581,6 +7584,23 @@ function renderReciboForm(v) {
     if (recDesc) { recDesc.value = ''; f.descricao_servico = ''; recDesc.focus(); }
   };
 
+  // v1.86.0: botão + Cadastrar Novo cliente
+  const btnCad = document.getElementById('recCadastrarNovo');
+  if (btnCad) btnCad.onclick = async () => {
+    const cli = await abrirModalNovoCliente();
+    if (!cli) return; // cancelou
+    // Auto-preenche os campos do recibo com os dados do cliente recém-criado
+    f.destinatario_nome = cli.nome;
+    f.destinatario_phone = cli.telefone || '';
+    f.destinatario_doc = cli.cpf_cnpj || '';
+    f.destinatario_email = cli.email || '';
+    document.getElementById('recNome').value = cli.nome;
+    document.getElementById('recPhone').value = cli.telefone || '';
+    document.getElementById('recDoc').value = cli.cpf_cnpj || '';
+    document.getElementById('recEmail').value = cli.email || '';
+    showToast('✓ Cliente cadastrado e selecionado!', 'success');
+  };
+
   async function salvar(enviar) {
     if (!f.destinatario_nome.trim()) return alert('Informe o destinatário');
     if (!f.destinatario_phone.trim()) return alert('Informe o WhatsApp');
@@ -7645,6 +7665,302 @@ function renderReciboForm(v) {
   }
   document.getElementById('recSalvar').onclick = () => salvar(true);
   document.getElementById('recSalvarRascunho').onclick = () => salvar(false);
+}
+
+// ─── HELPERS DE VALIDAÇÃO + TOAST + MÁSCARAS (v1.86.0) ────────────────
+// Validação de CPF (algoritmo dígitos verificadores)
+function validarCPF(cpf) {
+  cpf = String(cpf || '').replace(/\D/g, '');
+  if (cpf.length !== 11) return false;
+  if (/^(\d)\1+$/.test(cpf)) return false; // todos iguais
+  let s = 0;
+  for (let i = 0; i < 9; i++) s += parseInt(cpf[i]) * (10 - i);
+  let dv1 = (s * 10) % 11; if (dv1 === 10) dv1 = 0;
+  if (dv1 !== parseInt(cpf[9])) return false;
+  s = 0;
+  for (let i = 0; i < 10; i++) s += parseInt(cpf[i]) * (11 - i);
+  let dv2 = (s * 10) % 11; if (dv2 === 10) dv2 = 0;
+  return dv2 === parseInt(cpf[10]);
+}
+// Validação de CNPJ (algoritmo dígitos verificadores)
+function validarCNPJ(cnpj) {
+  cnpj = String(cnpj || '').replace(/\D/g, '');
+  if (cnpj.length !== 14) return false;
+  if (/^(\d)\1+$/.test(cnpj)) return false;
+  const calc = (n) => {
+    const w = n === 12 ? [5,4,3,2,9,8,7,6,5,4,3,2] : [6,5,4,3,2,9,8,7,6,5,4,3,2];
+    let s = 0;
+    for (let i = 0; i < n; i++) s += parseInt(cnpj[i]) * w[i];
+    const r = s % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  return calc(12) === parseInt(cnpj[12]) && calc(13) === parseInt(cnpj[13]);
+}
+function validarDoc(doc) {
+  const d = String(doc || '').replace(/\D/g, '');
+  if (d.length === 11) return validarCPF(d);
+  if (d.length === 14) return validarCNPJ(d);
+  return false;
+}
+function mascararDoc(v) {
+  const d = String(v || '').replace(/\D/g, '').slice(0, 14);
+  if (d.length <= 11) {
+    return d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+  }
+  return d.replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2}\.\d{3})(\d)/, '$1.$2').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+}
+function mascararTelefone(v) {
+  const d = String(v || '').replace(/\D/g, '').slice(0, 11);
+  if (d.length <= 10) return d.replace(/^(\d{2})(\d)/, '($1) $2').replace(/(\d{4})(\d{1,4})$/, '$1-$2');
+  return d.replace(/^(\d{2})(\d)/, '($1) $2').replace(/(\d{5})(\d{1,4})$/, '$1-$2');
+}
+function mascararCEP(v) {
+  return String(v || '').replace(/\D/g, '').slice(0, 8).replace(/^(\d{5})(\d)/, '$1-$2');
+}
+// Toast minimalista (sumir após 3s)
+function showToast(msg, tipo = 'info') {
+  const cores = {
+    success: { bg: '#10b981', fg: '#fff' },
+    error:   { bg: '#dc2626', fg: '#fff' },
+    info:    { bg: '#3b82f6', fg: '#fff' },
+    warn:    { bg: '#f59e0b', fg: '#06120a' },
+  };
+  const c = cores[tipo] || cores.info;
+  let host = document.getElementById('toastHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'toastHost';
+    host.style.cssText = 'position:fixed; top:20px; right:20px; z-index:99999; display:flex; flex-direction:column; gap:8px;';
+    document.body.appendChild(host);
+  }
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = `background:${c.bg}; color:${c.fg}; padding:12px 18px; border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,0.3); font-weight:500; font-size:14px; min-width:240px; max-width:380px; opacity:0; transform:translateY(-10px); transition:all .25s ease;`;
+  host.appendChild(t);
+  requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform = 'translateY(0)'; });
+  setTimeout(() => {
+    t.style.opacity = '0'; t.style.transform = 'translateY(-10px)';
+    setTimeout(() => t.remove(), 300);
+  }, 3000);
+}
+
+// ─── MODAL CADASTRO DE CLIENTE (v1.86.0) ──────────────────────────────
+// Promise<cliente | null>. Cliente = objeto retornado do POST /api/propostas-clientes.
+function abrirModalNovoCliente() {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px; overflow-y:auto;';
+    const modal = document.createElement('div');
+    modal.className = 'card';
+    modal.style.cssText = 'max-width:780px; width:100%; max-height:92vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.5);';
+    modal.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">➕ Cadastrar novo cliente</p>
+        <button data-cli-fechar style="background:transparent;">✕</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin:8px 0 14px;">
+        Dados completos pra integrar com Recibo, NF e CRM. Campos com * são obrigatórios.
+      </p>
+
+      <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
+        <legend style="padding:0 8px; font-size:12px; color:var(--gold); font-weight:600;">DADOS PRINCIPAIS</legend>
+        <div style="display:grid; gap:10px;">
+          <div style="display:grid; grid-template-columns:2fr 1fr; gap:8px;">
+            <label>Nome completo / Razão Social *
+              <input id="cli_nome" placeholder="Nome ou Razão Social" maxlength="150" style="width:100%;">
+            </label>
+            <label>CPF/CNPJ *
+              <input id="cli_doc" placeholder="000.000.000-00" maxlength="18" style="width:100%; font-family:monospace;">
+              <span id="cli_doc_status" style="font-size:10px; color:var(--text-muted);"></span>
+            </label>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+            <label>Celular / WhatsApp *
+              <input id="cli_tel" placeholder="(99) 99999-9999" maxlength="15" style="width:100%; font-family:monospace;">
+            </label>
+            <label>Email
+              <input id="cli_email" type="email" placeholder="email@dominio.com" style="width:100%;">
+            </label>
+            <label>RG / Inscrição Estadual
+              <input id="cli_rgie" maxlength="30" style="width:100%;">
+            </label>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
+        <legend style="padding:0 8px; font-size:12px; color:var(--gold); font-weight:600;">DADOS PESSOAIS / EMPRESARIAIS</legend>
+        <div style="display:grid; gap:10px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px;">
+            <label>Data nascimento / fundação
+              <input id="cli_dtnasc" type="date" style="width:100%;">
+            </label>
+            <label>Estado civil (PF)
+              <select id="cli_estciv" style="width:100%;">
+                <option value="">—</option>
+                <option value="solteiro">Solteiro(a)</option>
+                <option value="casado">Casado(a)</option>
+                <option value="divorciado">Divorciado(a)</option>
+                <option value="viuvo">Viúvo(a)</option>
+                <option value="uniao_estavel">União Estável</option>
+              </select>
+            </label>
+            <label>Profissão (PF)
+              <input id="cli_profissao" maxlength="120" style="width:100%;">
+            </label>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <label>Razão Social (PJ — se diferente do nome)
+              <input id="cli_razao" maxlength="150" style="width:100%;">
+            </label>
+            <label>Nome Fantasia (PJ)
+              <input id="cli_fantasia" maxlength="150" style="width:100%;">
+            </label>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
+        <legend style="padding:0 8px; font-size:12px; color:var(--gold); font-weight:600;">ENDEREÇO</legend>
+        <div style="display:grid; gap:10px;">
+          <div style="display:grid; grid-template-columns:140px 2fr 80px 1fr; gap:8px;">
+            <label>CEP
+              <input id="cli_cep" placeholder="00000-000" maxlength="9" style="width:100%; font-family:monospace;">
+              <span id="cli_cep_status" style="font-size:10px; color:var(--text-muted);"></span>
+            </label>
+            <label>Logradouro
+              <input id="cli_logr" maxlength="200" style="width:100%;">
+            </label>
+            <label>Número
+              <input id="cli_num" maxlength="20" style="width:100%;">
+            </label>
+            <label>Complemento
+              <input id="cli_compl" maxlength="120" style="width:100%;">
+            </label>
+          </div>
+          <div style="display:grid; grid-template-columns:2fr 2fr 60px; gap:8px;">
+            <label>Bairro
+              <input id="cli_bairro" maxlength="80" style="width:100%;">
+            </label>
+            <label>Cidade
+              <input id="cli_cidade" maxlength="80" style="width:100%;">
+            </label>
+            <label>UF
+              <input id="cli_uf" maxlength="2" style="width:100%; text-transform:uppercase;">
+            </label>
+          </div>
+        </div>
+      </fieldset>
+
+      <label>Observações
+        <textarea id="cli_obs" rows="2" style="width:100%; resize:vertical;"></textarea>
+      </label>
+
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button data-cli-salvar class="btn-primary" style="flex:2; background:var(--success); color:#fff; border-color:var(--success); font-weight:600;">💾 Cadastrar e usar no recibo</button>
+        <button data-cli-cancelar style="flex:1; background:transparent;">Cancelar</button>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const cleanup = (val) => { try { document.body.removeChild(overlay); } catch {} resolve(val); };
+
+    modal.querySelector('[data-cli-fechar]').onclick = () => cleanup(null);
+    modal.querySelector('[data-cli-cancelar]').onclick = () => cleanup(null);
+    overlay.onclick = (e) => { if (e.target === overlay) cleanup(null); };
+
+    // Máscaras
+    const inpDoc = document.getElementById('cli_doc');
+    const inpTel = document.getElementById('cli_tel');
+    const inpCep = document.getElementById('cli_cep');
+    inpDoc.oninput = () => {
+      inpDoc.value = mascararDoc(inpDoc.value);
+      const d = inpDoc.value.replace(/\D/g, '');
+      const status = document.getElementById('cli_doc_status');
+      if (d.length === 11) status.textContent = validarCPF(d) ? '✓ CPF válido' : '✗ CPF inválido';
+      else if (d.length === 14) {
+        status.textContent = validarCNPJ(d) ? '⏳ buscando dados CNPJ...' : '✗ CNPJ inválido';
+        if (validarCNPJ(d)) {
+          // Auto-preencher via lookup CNPJ
+          api('/api/lookup/cnpj/' + d).then(r => {
+            if (!document.getElementById('cli_razao').value) document.getElementById('cli_razao').value = r.razao_social || '';
+            if (!document.getElementById('cli_fantasia').value) document.getElementById('cli_fantasia').value = r.nome_fantasia || '';
+            if (!document.getElementById('cli_nome').value) document.getElementById('cli_nome').value = r.razao_social || r.nome_fantasia || '';
+            if (!document.getElementById('cli_email').value && r.email) document.getElementById('cli_email').value = r.email;
+            if (!inpCep.value && r.cep) { inpCep.value = mascararCEP(r.cep); inpCep.dispatchEvent(new Event('input')); }
+            status.textContent = '✓ ' + (r.razao_social || 'CNPJ encontrado');
+          }).catch(() => { status.textContent = '✓ CNPJ válido (sem dados Receita)'; });
+        }
+      }
+      else status.textContent = '';
+    };
+    inpTel.oninput = () => { inpTel.value = mascararTelefone(inpTel.value); };
+    inpCep.oninput = () => {
+      inpCep.value = mascararCEP(inpCep.value);
+      const cep = inpCep.value.replace(/\D/g, '');
+      const status = document.getElementById('cli_cep_status');
+      if (cep.length !== 8) { status.textContent = ''; return; }
+      status.textContent = '⏳ buscando...';
+      api('/api/lookup/cep/' + cep).then(r => {
+        document.getElementById('cli_logr').value = r.street || r.logradouro || '';
+        document.getElementById('cli_bairro').value = r.neighborhood || r.bairro || '';
+        document.getElementById('cli_cidade').value = r.city || r.localidade || '';
+        document.getElementById('cli_uf').value = (r.state || r.uf || '').toUpperCase();
+        status.textContent = '✓ ' + (r.city || 'encontrado');
+      }).catch(() => { status.textContent = '✗ CEP não encontrado'; });
+    };
+
+    // Foco inicial
+    setTimeout(() => document.getElementById('cli_nome').focus(), 50);
+
+    // Salvar
+    modal.querySelector('[data-cli-salvar]').onclick = async () => {
+      const nome = document.getElementById('cli_nome').value.trim();
+      const doc = inpDoc.value.replace(/\D/g, '');
+      const tel = inpTel.value.replace(/\D/g, '');
+      const email = document.getElementById('cli_email').value.trim();
+
+      if (nome.length < 3) { showToast('Nome deve ter pelo menos 3 caracteres', 'error'); return; }
+      if (!doc) { showToast('CPF/CNPJ obrigatório', 'error'); return; }
+      if (!validarDoc(doc)) { showToast('CPF/CNPJ inválido', 'error'); return; }
+      if (tel.length < 10) { showToast('Celular incompleto (mínimo DDD + 8 dígitos)', 'error'); return; }
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Email inválido', 'error'); return; }
+
+      const btn = modal.querySelector('[data-cli-salvar]');
+      btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Salvando...';
+      try {
+        const payload = {
+          nome,
+          cpf_cnpj: doc,
+          telefone: tel,
+          email: email || null,
+          rg_ie: document.getElementById('cli_rgie').value.trim() || null,
+          data_nascimento: document.getElementById('cli_dtnasc').value || null,
+          estado_civil: document.getElementById('cli_estciv').value || null,
+          profissao: document.getElementById('cli_profissao').value.trim() || null,
+          razao_social: document.getElementById('cli_razao').value.trim() || null,
+          nome_fantasia: document.getElementById('cli_fantasia').value.trim() || null,
+          cep: inpCep.value.replace(/\D/g, '') || null,
+          endereco: document.getElementById('cli_logr').value.trim() || null,
+          numero: document.getElementById('cli_num').value.trim() || null,
+          complemento: document.getElementById('cli_compl').value.trim() || null,
+          bairro: document.getElementById('cli_bairro').value.trim() || null,
+          cidade: document.getElementById('cli_cidade').value.trim() || null,
+          estado: document.getElementById('cli_uf').value.trim().toUpperCase() || null,
+          observacoes: document.getElementById('cli_obs').value.trim() || null,
+        };
+        const r = await api('/api/propostas-clientes', { method: 'POST', body: JSON.stringify(payload) });
+        cleanup({
+          id: r.insertId,
+          nome, cpf_cnpj: doc, telefone: tel, email,
+        });
+      } catch (e) {
+        showToast('Erro: ' + (e?.message || e), 'error');
+        btn.disabled = false; btn.textContent = orig;
+      }
+    };
+  });
 }
 
 // ─── MODAL UNIVERSAL DE EMISSÃO NF (v1.81.0) ──────────────────────────

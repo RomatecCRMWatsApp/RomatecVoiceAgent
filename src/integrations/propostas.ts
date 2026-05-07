@@ -142,20 +142,56 @@ export async function listarClientesProposta(input: { busca?: string; limite?: n
 export async function criarClienteProposta(input: {
   nome: string; cpf_cnpj?: string; telefone?: string; email?: string;
   endereco?: string; cidade?: string; estado?: string; cep?: string; observacoes?: string;
+  // v1.86.0: novos campos pro cadastro completo
+  rg_ie?: string; data_nascimento?: string; estado_civil?: string; profissao?: string;
+  razao_social?: string; nome_fantasia?: string;
+  numero?: string; complemento?: string; bairro?: string;
 }): Promise<MutationResult> {
   if (!input.nome?.trim()) throw new Error('nome obrigatório');
-  const [r] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO propostas_clientes
-       (nome, cpf_cnpj, telefone, email, endereco, cidade, estado, cep, observacoes)
-     VALUES (?,?,?,?,?,?,?,?,?)`,
-    [
-      input.nome.trim(),
-      input.cpf_cnpj ?? null, input.telefone ?? null, input.email ?? null,
-      input.endereco ?? null, input.cidade ?? null, input.estado ?? null, input.cep ?? null,
-      input.observacoes ?? null,
-    ]
-  );
-  return { ok: true, insertId: r.insertId, message: `Cliente "${input.nome}" criado.` };
+  // INSERT com colunas explicitas — fallback gracioso se ALTERs ainda nao rodaram
+  // (campos novos serao silenciosamente ignorados se nao existirem na tabela).
+  try {
+    const [r] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO propostas_clientes
+         (nome, cpf_cnpj, telefone, email, endereco, cidade, estado, cep, observacoes,
+          rg_ie, data_nascimento, estado_civil, profissao, razao_social, nome_fantasia,
+          numero, complemento, bairro)
+       VALUES (?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?, ?,?,?)`,
+      [
+        input.nome.trim(),
+        input.cpf_cnpj ?? null, input.telefone ?? null, input.email ?? null,
+        input.endereco ?? null, input.cidade ?? null, input.estado ?? null, input.cep ?? null,
+        input.observacoes ?? null,
+        input.rg_ie ?? null,
+        input.data_nascimento ?? null,
+        input.estado_civil ?? null,
+        input.profissao ?? null,
+        input.razao_social ?? null,
+        input.nome_fantasia ?? null,
+        input.numero ?? null,
+        input.complemento ?? null,
+        input.bairro ?? null,
+      ]
+    );
+    return { ok: true, insertId: r.insertId, message: `Cliente "${input.nome}" criado.` };
+  } catch (err) {
+    // Se ALTERs ainda nao rodaram (campos novos inexistentes), faz fallback ao INSERT antigo
+    if (/Unknown column/i.test((err as Error).message)) {
+      const [r] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO propostas_clientes
+           (nome, cpf_cnpj, telefone, email, endereco, cidade, estado, cep, observacoes)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+        [
+          input.nome.trim(),
+          input.cpf_cnpj ?? null, input.telefone ?? null, input.email ?? null,
+          input.endereco ?? null, input.cidade ?? null, input.estado ?? null, input.cep ?? null,
+          input.observacoes ?? null,
+        ]
+      );
+      return { ok: true, insertId: r.insertId, message: `Cliente "${input.nome}" criado (modo legado).` };
+    }
+    throw err;
+  }
 }
 
 export async function atualizarClienteProposta(input: {
