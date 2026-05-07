@@ -143,6 +143,8 @@ export interface CriarReciboInput {
   categoria_servico?: string | null;
   /** v1.85.0: sigla da categoria pai (ex: 'CAMP'). Influencia o prefixo do numero. */
   categoria_grupo?: string | null;
+  /** v1.96.0: id do perfil emitente — 'romatec_pj' (default) ou 'jose_romario_pf'. */
+  emitente_perfil?: string | null;
   /** Em quantos dias expira o link (default: 7). */
   expira_em_dias?: number;
   created_by?: number | null;
@@ -166,6 +168,7 @@ export interface Recibo {
   codigo_servico_key: string | null;
   categoria_servico: string | null;
   categoria_grupo: string | null;
+  emitente_perfil: string;
   token: string;
   hash_validacao: string;
   status: StatusRecibo;
@@ -213,6 +216,7 @@ function mapRow(r: RowDataPacket): Recibo {
     codigo_servico_key: r.codigo_servico_key ?? null,
     categoria_servico: r.categoria_servico ?? null,
     categoria_grupo: r.categoria_grupo ?? null,
+    emitente_perfil: String(r.emitente_perfil || 'romatec_pj'),
     token: String(r.token),
     hash_validacao: String(r.hash_validacao),
     status: r.status as StatusRecibo,
@@ -258,31 +262,70 @@ export async function criarRecibo(input: CriarReciboInput & { _rascunho?: boolea
   const dias = Math.max(1, Math.min(365, input.expira_em_dias ?? 7));
   const expires_at = new Date(Date.now() + dias * 86400_000);
 
-  const [res] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO recibos (
-       tenant_id, numero, tipo, resource_type, resource_id,
-       destinatario_nome, destinatario_doc, destinatario_phone,
-       destinatario_email, destinatario_endereco,
-       valor, forma_pagamento, descricao_servico, codigo_servico_key,
-       categoria_servico, categoria_grupo,
-       token, hash_validacao, status, expires_at, created_by
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'rascunho', ?, ?)`,
-    [
-      tenant_id, numero, input.tipo, input.resource_type, input.resource_id,
-      (input.destinatario_nome || '— preencher —').trim().slice(0, 120),
-      input.destinatario_doc?.replace(/\D/g, '').slice(0, 20) || null,
-      phone,
-      input.destinatario_email?.trim().slice(0, 150) || null,
-      input.destinatario_endereco ? JSON.stringify(input.destinatario_endereco) : null,
-      input.valor != null ? Math.round(Number(input.valor) * 100) / 100 : null,
-      input.forma_pagamento || null,
-      input.descricao_servico?.trim() || null,
-      input.codigo_servico_key || null,
-      input.categoria_servico || null,
-      input.categoria_grupo ? input.categoria_grupo.toUpperCase().slice(0, 20) : null,
-      token, hash, expires_at, input.created_by ?? null,
-    ]
-  );
+  const emitente = input.emitente_perfil === 'jose_romario_pf' ? 'jose_romario_pf' : 'romatec_pj';
+
+  // v1.96.0: self-heal — se INSERT der "Unknown column", roda ALTERs faltantes
+  // e retenta. Cobre casos onde migration nao rodou completa em producao.
+  async function selfHealRecibos(): Promise<void> {
+    const altersFaltantes = [
+      "ALTER TABLE recibos ADD COLUMN categoria_servico VARCHAR(80) NULL",
+      "ALTER TABLE recibos ADD COLUMN categoria_grupo VARCHAR(20) NULL",
+      "ALTER TABLE recibos ADD COLUMN emitente_perfil VARCHAR(32) NOT NULL DEFAULT 'romatec_pj'",
+    ];
+    for (const sql of altersFaltantes) {
+      try { await pool.execute(sql); console.log('[recibos:self-heal] OK:', sql.slice(0, 80)); }
+      catch (e) {
+        const m = (e as Error).message || '';
+        if (!/Duplicate column|already exists/i.test(m)) {
+          console.warn('[recibos:self-heal] falha:', m.slice(0, 100));
+        }
+      }
+    }
+  }
+
+  async function executarInsert(): Promise<ResultSetHeader> {
+    const [res] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO recibos (
+         tenant_id, numero, tipo, resource_type, resource_id,
+         destinatario_nome, destinatario_doc, destinatario_phone,
+         destinatario_email, destinatario_endereco,
+         valor, forma_pagamento, descricao_servico, codigo_servico_key,
+         categoria_servico, categoria_grupo, emitente_perfil,
+         token, hash_validacao, status, expires_at, created_by
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'rascunho', ?, ?)`,
+      [
+        tenant_id, numero, input.tipo, input.resource_type, input.resource_id,
+        (input.destinatario_nome || '— preencher —').trim().slice(0, 120),
+        input.destinatario_doc?.replace(/\D/g, '').slice(0, 20) || null,
+        phone,
+        input.destinatario_email?.trim().slice(0, 150) || null,
+        input.destinatario_endereco ? JSON.stringify(input.destinatario_endereco) : null,
+        input.valor != null ? Math.round(Number(input.valor) * 100) / 100 : null,
+        input.forma_pagamento || null,
+        input.descricao_servico?.trim() || null,
+        input.codigo_servico_key || null,
+        input.categoria_servico || null,
+        input.categoria_grupo ? input.categoria_grupo.toUpperCase().slice(0, 20) : null,
+        emitente,
+        token, hash, expires_at, input.created_by ?? null,
+      ]
+    );
+    return res;
+  }
+
+  let res: ResultSetHeader;
+  try {
+    res = await executarInsert();
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    if (/Unknown column/i.test(msg)) {
+      console.warn('[recibos] Unknown column detectado — rodando self-heal e retentando...');
+      await selfHealRecibos();
+      res = await executarInsert(); // retenta — se ainda falhar, propaga
+    } else {
+      throw err;
+    }
+  }
   await registrarEvento(res.insertId, 'created', { numero, tipo: input.tipo });
   return await buscarReciboPorId(res.insertId);
 }

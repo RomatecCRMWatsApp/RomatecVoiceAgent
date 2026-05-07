@@ -1717,6 +1717,17 @@ export async function runMigrations(): Promise<void> {
 
   console.log('[DB] SaaS foundation tables ready (v1.83.0 — schema-only)');
 
+  // ─── v1.96.0: emitente_perfil (PJ Romatec / PF Jose Romario) ──────────
+  try {
+    await pool.execute(
+      `ALTER TABLE recibos ADD COLUMN emitente_perfil VARCHAR(32) NOT NULL DEFAULT 'romatec_pj'`
+    );
+  } catch (err) {
+    if (!/Duplicate column|already exists/i.test((err as Error).message)) {
+      console.warn('[migrations] emitente_perfil:', (err as Error).message.slice(0, 100));
+    }
+  }
+
   // ─── v1.88.0: status_simplificado derivado (UX limpa, audit preservado) ─
   // Mapeia os 10 estados granulares (rascunho..cancelado) em 6 estados de
   // negocio (rascunho, emitido, enviado, visualizado, pago, cancelado).
@@ -1757,24 +1768,28 @@ export async function runMigrations(): Promise<void> {
   // ─── v1.85.0: Catálogo de serviços + cadastro completo de cliente ─────
   // ALTER idempotente em propostas_clientes (campos extras pro cadastro)
   // e em recibos (categoria_servico + categoria_grupo).
+  // v1.96.0: removido AFTER de cada ALTER pra eliminar dependencia de
+  // ordem (se 'codigo_servico_key' ainda nao existe em prod, ALTER com
+  // AFTER falha silencioso e categoria_servico nunca e criada).
   const altersClientes = [
-    "ALTER TABLE propostas_clientes ADD COLUMN rg_ie VARCHAR(30) NULL AFTER cpf_cnpj",
-    "ALTER TABLE propostas_clientes ADD COLUMN data_nascimento DATE NULL AFTER rg_ie",
-    "ALTER TABLE propostas_clientes ADD COLUMN estado_civil VARCHAR(40) NULL AFTER data_nascimento",
-    "ALTER TABLE propostas_clientes ADD COLUMN profissao VARCHAR(120) NULL AFTER estado_civil",
-    "ALTER TABLE propostas_clientes ADD COLUMN razao_social VARCHAR(150) NULL AFTER profissao",
-    "ALTER TABLE propostas_clientes ADD COLUMN nome_fantasia VARCHAR(150) NULL AFTER razao_social",
-    "ALTER TABLE propostas_clientes ADD COLUMN numero VARCHAR(20) NULL AFTER endereco",
-    "ALTER TABLE propostas_clientes ADD COLUMN complemento VARCHAR(120) NULL AFTER numero",
-    "ALTER TABLE propostas_clientes ADD COLUMN bairro VARCHAR(80) NULL AFTER complemento",
-    "ALTER TABLE recibos ADD COLUMN categoria_servico VARCHAR(80) NULL AFTER codigo_servico_key",
-    "ALTER TABLE recibos ADD COLUMN categoria_grupo VARCHAR(20) NULL AFTER categoria_servico",
+    "ALTER TABLE propostas_clientes ADD COLUMN rg_ie VARCHAR(30) NULL",
+    "ALTER TABLE propostas_clientes ADD COLUMN data_nascimento DATE NULL",
+    "ALTER TABLE propostas_clientes ADD COLUMN estado_civil VARCHAR(40) NULL",
+    "ALTER TABLE propostas_clientes ADD COLUMN profissao VARCHAR(120) NULL",
+    "ALTER TABLE propostas_clientes ADD COLUMN razao_social VARCHAR(150) NULL",
+    "ALTER TABLE propostas_clientes ADD COLUMN nome_fantasia VARCHAR(150) NULL",
+    "ALTER TABLE propostas_clientes ADD COLUMN numero VARCHAR(20) NULL",
+    "ALTER TABLE propostas_clientes ADD COLUMN complemento VARCHAR(120) NULL",
+    "ALTER TABLE propostas_clientes ADD COLUMN bairro VARCHAR(80) NULL",
+    "ALTER TABLE recibos ADD COLUMN categoria_servico VARCHAR(80) NULL",
+    "ALTER TABLE recibos ADD COLUMN categoria_grupo VARCHAR(20) NULL",
   ];
   for (const sql of altersClientes) {
-    try { await pool.execute(sql); }
+    try { await pool.execute(sql); console.log('[migrations] OK:', sql.slice(0, 80)); }
     catch (err) {
-      if (!/Duplicate column|already exists/i.test((err as Error).message)) {
-        console.warn('[migrations] alter v1.85:', (err as Error).message.slice(0, 100));
+      const msg = (err as Error).message || '';
+      if (!/Duplicate column|already exists/i.test(msg)) {
+        console.error('[migrations] FALHA alter v1.85/96:', msg.slice(0, 200), '\n  SQL:', sql);
       }
     }
   }

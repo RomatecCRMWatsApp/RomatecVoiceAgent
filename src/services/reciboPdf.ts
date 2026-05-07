@@ -111,21 +111,40 @@ export function valorPorExtenso(valor: number): string {
 
 export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
   const t = await getTenantSettings(recibo.tenant_id).catch(() => null);
-  // v1.95.0: tenta tambem o tenant_fiscal_config (CNPJ, IM, endereco fiscal)
+  // v1.95.0: tenta tambem o tenant_fiscal_config
   let fiscal: { cnpj?: string; inscricao_municipal?: string | null } | null = null;
   try {
     const m = await import('./tenantFiscalConfig');
     fiscal = await m.getFiscalConfig(recibo.tenant_id);
   } catch { /* ignora */ }
-  const brand = t?.brand_name || 'ROMATEC CONSULTORIA TOTAL';
+
+  // v1.96.0: perfil emitente — PJ Romatec (default) ou PF José Romário
+  const ehPF = recibo.emitente_perfil === 'jose_romario_pf';
   const corHex = t?.primary_color || '#1F5C3A';
   const corDourada = '#B8893A';
-  const cnpj = fiscal?.cnpj || t?.cnpj || '17.261.987/0001-09';
-  const im = fiscal?.inscricao_municipal || 'ISENTO';
-  const enderecoEmitente = (t?.endereco) || 'Rua São Raimundo, 10 — Centro — Açailândia/MA — CEP 65930-000';
-  const telEmitente = t?.telefone || '(99) 99181-1246';
-  const emailEmitente = t?.email || 'contato@consultoriaromatec.com.br';
-  // Dados bancários (Romatec PJ — Santander)
+
+  const emitente = ehPF
+    ? {
+        nome: 'JOSÉ ROMÁRIO PINTO BEZERRA',
+        identificadorLabel: 'CPF',
+        identificador: '012.091.853-69',
+        complemento: 'Brasileiro · Avaliador Imobiliário CNAI 031.161 · CRECI 4.705 · CFT-BR 0120918536-9 · INCRA-FQNS',
+        endereco: 'Rua São Raimundo, 10 — Centro — Açailândia/MA — CEP 65930-000',
+        contato: '(99) 99181-1246 · contato@consultoriaromatec.com.br',
+        exibirBancarios: false, // PF não exibe dados bancários (PIX a combinar)
+        observacaoBancaria: 'Pagamento via PIX a combinar com o profissional.',
+      }
+    : {
+        nome: t?.brand_name || 'ROMATEC CONSULTORIA TOTAL',
+        identificadorLabel: 'CNPJ',
+        identificador: fiscal?.cnpj || t?.cnpj || '17.261.987/0001-09',
+        complemento: `IM: ${fiscal?.inscricao_municipal || 'ISENTO'}  ·  J R P BEZERRA LTDA`,
+        endereco: t?.endereco || 'Rua São Raimundo, 10 — Centro — Açailândia/MA — CEP 65930-000',
+        contato: `${t?.telefone || '(99) 99181-1246'} · ${t?.email || 'contato@consultoriaromatec.com.br'}`,
+        exibirBancarios: true,
+        observacaoBancaria: '',
+      };
+
   const dadosBancarios = {
     banco: 'Santander (033)',
     agencia: '1225',
