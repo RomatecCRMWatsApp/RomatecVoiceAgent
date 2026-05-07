@@ -7292,24 +7292,13 @@ function renderRecibos() {
       setTimeout(() => b.textContent = orig, 2000);
     } catch { prompt('Link do recibo:', url); }
   });
-  // 📱 WhatsApp — primeira vez "Enviar", depois "Reenviar Lembrete"
+  // 📱 WhatsApp — abre modal de envio/reenvio com histórico (v1.92.0)
   document.querySelectorAll('[data-rec-wapp]').forEach(b => b.onclick = async () => {
     const id = b.dataset.recWapp;
     const r = (state.recibos || []).find(x => String(x.id) === String(id));
-    const ehReenvio = r && !['rascunho', 'aguardando_envio'].includes(r.status);
-    const txt = ehReenvio ? 'Reenviar lembrete WhatsApp?' : 'Enviar pelo WhatsApp agora?';
-    if (!confirm(txt)) return;
-    b.disabled = true; b.textContent = 'Enviando...';
-    try {
-      if (ehReenvio) {
-        await api('/api/recibos/' + id + '/reenviar', { method:'POST', body: JSON.stringify({}) });
-        alert('✅ Lembrete enviado');
-      } else {
-        const out = await api('/api/recibos/' + id + '/enviar', { method:'POST', body: JSON.stringify({}) });
-        alert('✅ Enviado pra ' + out.phone);
-      }
-      await loadRecibos(); renderRecibos();
-    } catch (e) { alert('Erro: ' + e.message); b.disabled = false; b.textContent = '📱 WhatsApp'; }
+    if (!r) return;
+    const enviado = await abrirModalReenvio(r);
+    if (enviado) { await loadRecibos(); renderRecibos(); }
   });
   // ✈️ Telegram — envia pro CEO
   document.querySelectorAll('[data-rec-tg]').forEach(b => b.onclick = async () => {
@@ -8150,6 +8139,126 @@ function abrirModalNovoCliente() {
       } catch (e) {
         showToast('Erro: ' + (e?.message || e), 'error');
         btn.disabled = false; btn.textContent = orig;
+      }
+    };
+  });
+}
+
+// ─── MODAL DE REENVIO DE RECIBO (v1.92.0) ─────────────────────────────
+// Mostra histórico de envios (lê /api/recibos/:id/eventos), permite
+// editar telefone de destino, dispara envio. Retorna true se enviou.
+async function abrirModalReenvio(recibo) {
+  return new Promise(async (resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px; overflow-y:auto;';
+    const modal = document.createElement('div');
+    modal.className = 'card';
+    modal.style.cssText = 'max-width:560px; width:100%; max-height:92vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.5);';
+
+    const ehReenvio = !['rascunho', 'aguardando_envio'].includes(recibo.status);
+    const titulo = ehReenvio ? '🔁 Reenviar recibo via WhatsApp' : '🚀 Enviar recibo via WhatsApp';
+    const valorFmt = recibo.valor != null ? fmt(recibo.valor) : '';
+
+    modal.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">${escape(titulo)}</p>
+        <button data-rmv-fechar style="background:transparent;">✕</button>
+      </div>
+      <div style="background:var(--bg-elev); padding:10px 12px; border-radius:8px; margin:10px 0; font-size:13px;">
+        <p style="margin:0; font-weight:600; color:var(--text);">${escape(recibo.numero)}</p>
+        <p style="margin:4px 0 0; color:var(--text-muted); font-size:12px;">
+          ${escape(recibo.destinatario_nome)}${valorFmt ? ' · ' + escape(valorFmt) : ''}
+        </p>
+      </div>
+      <label>WhatsApp de destino *
+        <input id="rmv_tel" maxlength="15" value="${escape(recibo.destinatario_phone || '')}" style="width:100%; font-family:monospace;">
+        <span style="font-size:11px; color:var(--text-muted);">Edite se quiser enviar pra outro número (ex: o cliente trocou de chip).</span>
+      </label>
+      <p class="section-title" style="margin:14px 0 6px; font-size:11px;">📜 HISTÓRICO DE ENVIOS</p>
+      <div id="rmv_historico" style="max-height:200px; overflow-y:auto; font-size:12px;">
+        <p style="color:var(--text-muted);">⏳ carregando...</p>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button data-rmv-cancelar style="flex:1; background:transparent; border:1px solid #444; color:#888;">Cancelar</button>
+        <button data-rmv-enviar class="btn-primary" style="flex:2; background:#25D366; color:#fff; border-color:#25D366; font-weight:600;">📱 ${ehReenvio ? 'Reenviar agora' : 'Enviar agora'}</button>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const cleanup = (val) => { try { document.body.removeChild(overlay); } catch {} resolve(val); };
+    modal.querySelector('[data-rmv-fechar]').onclick = () => cleanup(false);
+    modal.querySelector('[data-rmv-cancelar]').onclick = () => cleanup(false);
+    overlay.onclick = (e) => { if (e.target === overlay) cleanup(false); };
+
+    // Máscara no telefone
+    const inpTel = document.getElementById('rmv_tel');
+    inpTel.oninput = () => { inpTel.value = mascararTelefone(inpTel.value); };
+
+    // Carrega histórico
+    const histBox = document.getElementById('rmv_historico');
+    try {
+      const eventos = await api('/api/recibos/' + recibo.id + '/eventos');
+      // Filtra eventos relevantes pro histórico de envios
+      const ENVIO_EVENTS = new Set(['sent', 'reminded', 'delivery:enviado', 'delivery:entregue', 'delivery:lido', 'answered:confirma', 'answered:contesta']);
+      const LABELS = {
+        sent: '📤 Enviado',
+        reminded: '🔁 Lembrete reenviado',
+        'delivery:enviado': '✓ Entregue ao Z-API',
+        'delivery:entregue': '✓✓ Entregue ao destinatário',
+        'delivery:lido': '✓✓ Lido pelo destinatário',
+        'answered:confirma': '✅ Confirmado pelo destinatário',
+        'answered:contesta': '✗ Contestado pelo destinatário',
+      };
+      const filtrados = (eventos || []).filter(e => ENVIO_EVENTS.has(e.event_type));
+      if (filtrados.length === 0) {
+        histBox.innerHTML = '<p style="color:var(--text-muted);">Nenhum envio anterior — primeiro disparo.</p>';
+      } else {
+        histBox.innerHTML = filtrados.reverse().map(e => {
+          const data = new Date(e.created_at);
+          const dataBR = data.toLocaleDateString('pt-BR') + ' ' + data.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+          const phone = e.payload?.phone ? ' · ' + e.payload.phone : '';
+          return `<div style="padding:6px 0; border-bottom:1px solid var(--border);">
+            <strong>${escape(LABELS[e.event_type] || e.event_type)}</strong>
+            <span style="color:var(--text-muted); font-size:11px;"> — ${escape(dataBR)}${escape(phone)}</span>
+          </div>`;
+        }).join('');
+      }
+    } catch (err) {
+      histBox.innerHTML = '<p style="color:var(--danger);">Erro ao carregar histórico</p>';
+    }
+
+    // Enviar
+    modal.querySelector('[data-rmv-enviar]').onclick = async () => {
+      const tel = inpTel.value.replace(/\D/g, '');
+      if (tel.length < 10) { showToast('WhatsApp incompleto', 'error'); return; }
+
+      const btn = modal.querySelector('[data-rmv-enviar]');
+      btn.disabled = true;
+      btn.textContent = '📤 Enviando...';
+
+      try {
+        // Se telefone mudou, atualiza no recibo antes de enviar
+        const telOriginal = (recibo.destinatario_phone || '').replace(/\D/g, '');
+        if (tel !== telOriginal && ['rascunho', 'aguardando_envio'].includes(recibo.status)) {
+          await api('/api/recibos/' + recibo.id, {
+            method: 'PUT',
+            body: JSON.stringify({ destinatario_phone: tel }),
+          });
+        }
+        // Dispara envio
+        if (ehReenvio) {
+          await api('/api/recibos/' + recibo.id + '/reenviar', { method:'POST', body: JSON.stringify({}) });
+          showToast('Lembrete reenviado', 'success');
+        } else {
+          await api('/api/recibos/' + recibo.id + '/enviar', { method:'POST', body: JSON.stringify({}) });
+          showToast('Recibo enviado', 'success');
+        }
+        cleanup(true);
+      } catch (e) {
+        showToast('Erro: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = ehReenvio ? '📱 Reenviar agora' : '📱 Enviar agora';
       }
     };
   });
