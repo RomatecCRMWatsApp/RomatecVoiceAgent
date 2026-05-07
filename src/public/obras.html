@@ -7867,8 +7867,13 @@ function abrirModalNovoCliente() {
         <p class="section-title" style="margin:0;">➕ Cadastrar novo cliente</p>
         <button data-cli-fechar style="background:transparent;">✕</button>
       </div>
-      <p style="font-size:12px; color:var(--text-muted); margin:8px 0 14px;">
-        Dados completos pra integrar com Recibo, NF e CRM. Campos com * são obrigatórios.
+      <!-- v1.90.0: toggle PF/PJ explícito no topo -->
+      <div style="display:flex; gap:6px; margin:8px 0 14px; padding:4px; background:var(--bg-elev); border-radius:8px;">
+        <button type="button" data-cli-pessoa="PF" style="flex:1; padding:8px; background:#1F5C3A; color:#fff; border:0; border-radius:6px; font-weight:600; cursor:pointer;">👤 Pessoa Física</button>
+        <button type="button" data-cli-pessoa="PJ" style="flex:1; padding:8px; background:transparent; color:var(--text-muted); border:0; border-radius:6px; cursor:pointer;">🏢 Pessoa Jurídica</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin:0 0 14px;">
+        Campos com * são obrigatórios. Dedup automática por CPF/CNPJ.
       </p>
 
       <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
@@ -7890,7 +7895,8 @@ function abrirModalNovoCliente() {
             <label>Email
               <input id="cli_email" type="email" placeholder="email@dominio.com" style="width:100%;">
             </label>
-            <label>RG / Inscrição Estadual
+            <label data-cli-pf-label data-cli-pj-label>
+              <span data-cli-pf-only>RG</span><span data-cli-pj-only style="display:none;">Inscrição Estadual</span>
               <input id="cli_rgie" maxlength="30" style="width:100%;">
             </label>
           </div>

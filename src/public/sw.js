@@ -1,7 +1,7 @@
 // Service Worker da ZAYRA — versão atrelada à versão do app pra forçar
 // rotação de cache em todo deploy. Se você bumpar a versão do app, bumpe esta
 // constante também (ou no futuro, gere via build).
-const CACHE = 'zayra-v1.67.5';
+const CACHE = 'zayra-v1.90.0';
 
 // App shell — recursos pequenos que podem ser cacheados.
 // HTML NÃO está aqui de propósito — é network-first.
@@ -43,7 +43,17 @@ self.addEventListener('fetch', e => {
 
   // Rotas de API: sempre rede, nunca cacheia
   const apiRoutes = ['/api/', '/text', '/voice', '/briefing', '/memory', '/notifications', '/webhook', '/zayra', '/auth', '/chat', '/health'];
+  // v1.90.0: rotas que retornam binario (PDF, XML, imagens) NAO podem receber
+  // fallback JSON — quebra o iframe/download. Pass-through sem .catch.
+  const BINARY_PATTERNS = ['/pdf', '/preview-pdf', '/relatorio-pdf', '/danfse', '/xml', '/raw', '/foto'];
+  const isBinaryEndpoint = BINARY_PATTERNS.some(p =>
+    url.pathname.endsWith(p) || url.pathname.includes(p + '/') || url.pathname.includes(p + '?')
+  );
   if (apiRoutes.some(r => url.pathname.startsWith(r)) || e.request.method !== 'GET') {
+    if (isBinaryEndpoint) {
+      e.respondWith(fetch(e.request)); // pass-through, sem fallback JSON
+      return;
+    }
     e.respondWith(
       fetch(e.request).catch(() => new Response('{"error":"offline"}', {
         headers: { 'Content-Type': 'application/json' },
