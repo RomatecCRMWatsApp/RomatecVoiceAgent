@@ -110,9 +110,12 @@ async function proximoNumero(
   }
 }
 
-function normalizarTelefone(tel: string): string {
+function normalizarTelefone(tel: string, opcional = false): string {
   const digits = String(tel || '').replace(/\D/g, '');
-  if (!digits) throw new Error('Telefone obrigatorio');
+  if (!digits) {
+    if (opcional) return ''; // rascunho permite vazio
+    throw new Error('Telefone obrigatorio');
+  }
   if (digits.length < 10) throw new Error(`Telefone invalido: ${tel}`);
   // Garante DDI 55 (Brasil)
   return digits.startsWith('55') ? digits : `55${digits}`;
@@ -235,14 +238,20 @@ function mapRow(r: RowDataPacket): Recibo {
   };
 }
 
-export async function criarRecibo(input: CriarReciboInput): Promise<Recibo> {
+export async function criarRecibo(input: CriarReciboInput & { _rascunho?: boolean }): Promise<Recibo> {
   const tenant_id = input.tenant_id ?? 1;
   if (!input.tipo || !PREFIXOS[input.tipo]) throw new Error('tipo invalido');
-  if (!input.destinatario_nome?.trim()) throw new Error('destinatario_nome obrigatorio');
+  // v1.94: rascunho permite nome vazio (placeholder) — usuario complementa depois
+  const ehRascunho = !!input._rascunho;
+  if (!ehRascunho && !input.destinatario_nome?.trim()) {
+    throw new Error('destinatario_nome obrigatorio');
+  }
   if (!input.resource_type?.trim() || !input.resource_id?.trim()) {
     throw new Error('resource_type e resource_id obrigatorios');
   }
-  const phone = normalizarTelefone(input.destinatario_phone);
+  // v1.94: telefone opcional em rascunho — assim o user pode salvar e
+  // completar dados depois, sem ser bloqueado.
+  const phone = normalizarTelefone(input.destinatario_phone, ehRascunho);
   const numero = await proximoNumero(tenant_id, input.tipo, input.categoria_grupo);
   const token = genHex(32);
   const hash = genHex(32);
@@ -260,7 +269,7 @@ export async function criarRecibo(input: CriarReciboInput): Promise<Recibo> {
      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'rascunho', ?, ?)`,
     [
       tenant_id, numero, input.tipo, input.resource_type, input.resource_id,
-      input.destinatario_nome.trim().slice(0, 120),
+      (input.destinatario_nome || '— preencher —').trim().slice(0, 120),
       input.destinatario_doc?.replace(/\D/g, '').slice(0, 20) || null,
       phone,
       input.destinatario_email?.trim().slice(0, 150) || null,

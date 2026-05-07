@@ -7478,13 +7478,15 @@ function renderRecibos() {
 
 function renderReciboForm(v) {
   const f = state.reciboForm;
+  // v1.94.0: split-screen — form 60% / preview 40% (desktop). Mobile empilha.
   v.innerHTML = `
-    <div class="card">
+    <div style="display:grid; grid-template-columns:minmax(0, 3fr) minmax(0, 2fr); gap:14px; align-items:start;" id="recSplitGrid">
+    <div class="card" style="min-width:0;">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
         <p class="section-title" style="margin:0;">${state.recibosEditandoId ? '✏️ Editar recibo #' + state.recibosEditandoId : '➕ Novo recibo'}</p>
         <button data-rec-voltar style="background:transparent;">← Voltar</button>
       </div>
-      <div style="display:grid; gap:10px; max-width:680px; margin-top:10px;">
+      <div style="display:grid; gap:10px; margin-top:10px;">
         <label>Tipo *
           <select id="recTipo" style="width:100%;">
             ${RECIBO_TIPOS.map(t => `<option value="${t.val}" ${f.tipo===t.val?'selected':''}>${escape(t.label)}</option>`).join('')}
@@ -7557,7 +7559,22 @@ function renderReciboForm(v) {
           <button id="recSalvarEnviar" title="Salva e dispara WhatsApp imediatamente" style="background:#25D366; color:#fff; border-color:#25D366; font-weight:600;">🚀 Salvar e enviar via WhatsApp</button>
         </div>
       </div>
-    </div>`;
+    </div>
+    <!-- v1.94.0: painel de preview FIXO (não modal). Atualiza a cada keystroke. -->
+    <div class="card" style="min-width:0; position:sticky; top:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">📄 Preview do recibo</p>
+        <button type="button" id="recRefreshPreview" style="background:transparent; font-size:11px;" title="Atualizar manualmente">🔄</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin:6px 0 8px;">
+        Atualiza automaticamente enquanto você preenche. É exatamente o PDF que será gerado.
+      </p>
+      <div id="recPreviewBox" style="background:#FAF7EE; border-radius:8px; min-height:520px; height:65vh; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+        <span style="color:#888; font-size:13px;">⏳ Preencha os campos pra ver o preview</span>
+      </div>
+    </div>
+    </div>
+    <style>@media (max-width: 900px) { #recSplitGrid { grid-template-columns: 1fr !important; } }</style>`;
 
   document.querySelector('[data-rec-voltar]').onclick = () => {
     state.recibosView = 'lista';
@@ -7690,9 +7707,13 @@ function renderReciboForm(v) {
       }
     }
 
-    // Modal de confirmação com preview do PDF (option C2 — preview = PDF real)
-    const confirmou = await abrirModalConfirmacaoRecibo(acao, f);
-    if (!confirmou) return;
+    // v1.94.0: confirmação inline rápida (preview já tá visível no painel à direita)
+    const msgs = {
+      rascunho: 'Salvar como rascunho? Sem número definitivo, pode editar depois.',
+      emitir:   'Emitir o recibo agora? Recebe número oficial. Você pode enviar depois.',
+      enviar:   `Emitir e ENVIAR pelo WhatsApp pra ${f.destinatario_phone || '—'}?`,
+    };
+    if (!confirm(msgs[acao] || 'Confirmar?')) return;
 
     const btnId = { rascunho:'recSalvarRascunho', emitir:'recSalvarSemEnviar', enviar:'recSalvarEnviar' }[acao];
     const btn = document.getElementById(btnId);
@@ -7730,6 +7751,8 @@ function renderReciboForm(v) {
           categoria_servico: f.categoria_servico || null,
           categoria_grupo: f.categoria_sigla || null,
           expira_em_dias: Number(f.expira_em_dias) || 7,
+          // v1.94: backend permite nome/telefone vazios pra rascunho
+          _rascunho: acao === 'rascunho',
         };
         r = await api('/api/recibos', { method: 'POST', body: JSON.stringify(createPayload) });
         if (acao === 'enviar') {
@@ -7763,6 +7786,59 @@ function renderReciboForm(v) {
   document.getElementById('recSalvarRascunho').onclick = () => salvar('rascunho');
   document.getElementById('recSalvarSemEnviar').onclick = () => salvar('emitir');
   document.getElementById('recSalvarEnviar').onclick = () => salvar('enviar');
+
+  // v1.94.0: preview live do PDF no painel fixo (debounce 600ms)
+  let previewTimer = null;
+  let previewBlobUrl = null;
+  function agendarPreview() {
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(atualizarPreview, 600);
+  }
+  async function atualizarPreview() {
+    const box = document.getElementById('recPreviewBox');
+    if (!box) return;
+    box.innerHTML = '<span style="color:#888; font-size:13px;">⏳ Atualizando preview...</span>';
+    try {
+      const resp = await fetch('/api/recibos/preview-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tipo: f.tipo,
+          destinatario_nome: f.destinatario_nome || '— Destinatário —',
+          destinatario_doc: f.destinatario_doc || null,
+          destinatario_phone: f.destinatario_phone || '0000000000',
+          destinatario_email: f.destinatario_email || null,
+          valor: f.valor ? Number(f.valor) : null,
+          forma_pagamento: f.forma_pagamento || null,
+          descricao_servico: f.descricao_servico || null,
+          expira_em_dias: Number(f.expira_em_dias) || 7,
+        }),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const blob = await resp.blob();
+      if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+      previewBlobUrl = URL.createObjectURL(blob);
+      box.innerHTML = `<iframe src="${previewBlobUrl}#toolbar=0&navpanes=0" style="width:100%; height:100%; border:0;"></iframe>`;
+    } catch (err) {
+      box.innerHTML = `<span style="color:#dc2626; font-size:12px; padding:12px; text-align:center;">Erro: ${escape(err.message)}<br><small>Tente o botão 🔄 manual</small></span>`;
+    }
+  }
+  // Bind: qualquer mudança em campo do form atualiza preview
+  ['Tipo','Nome','Phone','Doc','Email','Valor','Forma','Dias','Desc'].forEach(k => {
+    const el = document.getElementById('rec' + k);
+    if (el) el.addEventListener('input', agendarPreview);
+    if (el) el.addEventListener('change', agendarPreview);
+  });
+  // Cascata categoria também atualiza preview
+  ['recCategoria','recSubtipo'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', agendarPreview);
+  });
+  // Botão refresh manual
+  const btnRefresh = document.getElementById('recRefreshPreview');
+  if (btnRefresh) btnRefresh.onclick = atualizarPreview;
+  // Preview inicial (quando edita recibo existente, já tem dados)
+  if (f.destinatario_nome || f.descricao_servico) atualizarPreview();
 }
 
 // v1.89.0: Modal de confirmação universal pras 3 ações do form de Recibo.
