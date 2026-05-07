@@ -1717,6 +1717,43 @@ export async function runMigrations(): Promise<void> {
 
   console.log('[DB] SaaS foundation tables ready (v1.83.0 — schema-only)');
 
+  // ─── v1.88.0: status_simplificado derivado (UX limpa, audit preservado) ─
+  // Mapeia os 10 estados granulares (rascunho..cancelado) em 6 estados de
+  // negocio (rascunho, emitido, enviado, visualizado, pago, cancelado).
+  // GENERATED COLUMN STORED — atualiza automatico quando 'status' muda.
+  // Listagem da UI usa esse campo; tela de detalhes mostra os 10.
+  try {
+    await pool.execute(`
+      ALTER TABLE recibos
+        ADD COLUMN status_simplificado VARCHAR(16)
+        GENERATED ALWAYS AS (
+          CASE
+            WHEN status = 'rascunho' THEN 'rascunho'
+            WHEN status = 'aguardando_envio' THEN 'emitido'
+            WHEN status IN ('enviado','entregue') THEN 'enviado'
+            WHEN status IN ('lido','respondido') THEN 'visualizado'
+            WHEN status = 'confirmado' THEN 'pago'
+            WHEN status IN ('contestado','expirado','cancelado') THEN 'cancelado'
+            ELSE 'rascunho'
+          END
+        ) STORED
+    `);
+    console.log('[migrations] status_simplificado: coluna gerada criada');
+  } catch (err) {
+    if (!/Duplicate column|already exists/i.test((err as Error).message)) {
+      console.warn('[migrations] status_simplificado:', (err as Error).message.slice(0, 100));
+    }
+  }
+  try {
+    await pool.execute(
+      `CREATE INDEX idx_recibos_status_simpl ON recibos (tenant_id, status_simplificado, created_at)`
+    );
+  } catch (err) {
+    if (!/Duplicate key name|already exists/i.test((err as Error).message)) {
+      console.warn('[migrations] idx_recibos_status_simpl:', (err as Error).message.slice(0, 100));
+    }
+  }
+
   // ─── v1.85.0: Catálogo de serviços + cadastro completo de cliente ─────
   // ALTER idempotente em propostas_clientes (campos extras pro cadastro)
   // e em recibos (categoria_servico + categoria_grupo).
