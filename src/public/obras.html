@@ -7202,6 +7202,8 @@ function renderRecibos() {
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; min-width:240px;">
+          <!-- v1.97.0: input editável de WhatsApp pra envio rápido pra outro número -->
+          <input data-tel-rec="${r.id}" placeholder="WhatsApp p/ envio" value="${escape(r.destinatario_phone || '')}" style="font-size:12px; padding:6px 8px; font-family:monospace;" title="Edite pra mandar pra outro número (sobrescreve o original)">
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
             <button data-rec-ver="${r.token}" title="Visualizar página pública" style="flex:1;">👁 Ver</button>
             <button data-rec-pdf="${r.id}" title="Baixar PDF" style="flex:1;">📄 PDF</button>
@@ -7369,13 +7371,67 @@ function renderRecibos() {
       setTimeout(() => b.textContent = orig, 2000);
     } catch { prompt('Link do recibo:', url); }
   });
-  // 📱 WhatsApp — abre modal de envio/reenvio com histórico (v1.92.0)
-  document.querySelectorAll('[data-rec-wapp]').forEach(b => b.onclick = async () => {
+  // 📱 WhatsApp — v1.97.0: lê input data-tel-rec inline (envio rápido pra outro num).
+  // Se telefone do input != original, atualiza no banco antes (se for editável)
+  // ou só usa o novo telefone no envio. Modal completo abre só com Shift+Click.
+  document.querySelectorAll('[data-rec-wapp]').forEach(b => b.onclick = async (ev) => {
     const id = b.dataset.recWapp;
     const r = (state.recibos || []).find(x => String(x.id) === String(id));
     if (!r) return;
-    const enviado = await abrirModalReenvio(r);
-    if (enviado) { await loadRecibos(); renderRecibos(); }
+
+    // Shift+Click → modal completo com histórico
+    if (ev.shiftKey) {
+      const enviado = await abrirModalReenvio(r);
+      if (enviado) { await loadRecibos(); renderRecibos(); }
+      return;
+    }
+
+    // Click normal → usa o input inline
+    const inpTel = document.querySelector(`[data-tel-rec="${id}"]`);
+    const novoTel = (inpTel?.value || '').replace(/\D/g, '');
+    if (novoTel.length < 10) {
+      showToast('WhatsApp incompleto (DDD + 8 dígitos)', 'error');
+      inpTel?.focus();
+      return;
+    }
+    const telOriginal = (r.destinatario_phone || '').replace(/\D/g, '');
+    const mudou = novoTel !== telOriginal;
+    const ehReenvio = !['rascunho', 'aguardando_envio'].includes(r.status);
+    const txt = mudou
+      ? `Enviar pra OUTRO número ${inpTel.value}? (original era ${r.destinatario_phone})`
+      : ehReenvio ? 'Reenviar lembrete WhatsApp?' : 'Enviar pelo WhatsApp agora?';
+    if (!confirm(txt)) return;
+
+    b.disabled = true; b.textContent = 'Enviando...';
+    try {
+      // Editavel (rascunho/aguardando_envio): atualiza no banco
+      if (mudou && ['rascunho', 'aguardando_envio'].includes(r.status)) {
+        await api('/api/recibos/' + id, {
+          method: 'PUT', body: JSON.stringify({ destinatario_phone: novoTel })
+        });
+        await api('/api/recibos/' + id + '/enviar', { method:'POST', body: JSON.stringify({}) });
+      }
+      // Status terminal + telefone diferente: usa phone_override (não altera original)
+      else if (mudou) {
+        await api('/api/recibos/' + id + '/enviar', {
+          method:'POST',
+          body: JSON.stringify({ phone_override: novoTel, forcar: true })
+        });
+      }
+      // Mesmo telefone, status terminal: reenvio normal (lembrete)
+      else if (ehReenvio) {
+        await api('/api/recibos/' + id + '/reenviar', { method:'POST', body: JSON.stringify({}) });
+      }
+      // Mesmo telefone, primeiro envio
+      else {
+        await api('/api/recibos/' + id + '/enviar', { method:'POST', body: JSON.stringify({}) });
+      }
+      showToast(ehReenvio ? 'Lembrete enviado pra ' + inpTel.value : 'Recibo enviado pra ' + inpTel.value, 'success');
+      await loadRecibos(); renderRecibos();
+    } catch (e) {
+      showToast('Erro: ' + e.message, 'error');
+      b.disabled = false; b.textContent = '📱 WhatsApp';
+    }
   });
   // ✈️ Telegram — envia pro CEO
   document.querySelectorAll('[data-rec-tg]').forEach(b => b.onclick = async () => {

@@ -535,6 +535,9 @@ export async function enviarReciboWhatsApp(input: {
   id: number | string;
   enviar_pdf?: boolean;        // default: true
   forcar?: boolean;            // ignora status atual e reenvia
+  /** v1.97.0: telefone alternativo — sobrescreve o destinatario do recibo SO neste envio.
+   *  Usado pra mandar recibo ja emitido pra outro numero sem alterar o original. */
+  phone_override?: string;
 }): Promise<{ ok: true; messageId?: string; phone: string; numero: string }> {
   const r = await buscarReciboPorId(input.id);
   if (!input.forcar && r.status !== 'rascunho' && r.status !== 'aguardando_envio') {
@@ -550,33 +553,41 @@ export async function enviarReciboWhatsApp(input: {
   const link = `${getBaseUrl()}/r/${r.token}`;
   const texto = montarMensagem(r, tenant ?? {}, link);
 
+  // v1.97.0: phone override pra envio ad-hoc pra outro numero
+  const telDestino = input.phone_override
+    ? normalizarTelefone(input.phone_override)
+    : r.destinatario_phone;
+
   // 1) texto com link
-  const sentText = await sendReply(r.destinatario_phone, texto);
+  const sentText = await sendReply(telDestino, texto);
 
   // 2) PDF (opcional, default true)
   if (input.enviar_pdf !== false) {
     try {
       const pdfBuf = await gerarPdfRecibo(r);
       const fileName = `${r.numero}.pdf`;
-      await sendDocument(r.destinatario_phone, pdfBuf.toString('base64'), fileName);
+      await sendDocument(telDestino, pdfBuf.toString('base64'), fileName);
     } catch (err) {
       console.warn(`[recibos] falha enviar PDF do recibo #${r.id}:`, (err as Error).message);
-      // segue mesmo se PDF falhar — texto com link foi entregue
     }
   }
 
-  // Atualiza status
-  await pool.execute(
-    `UPDATE recibos SET status = 'enviado', enviado_em = NOW(),
-                       zapi_message_id = ?
-       WHERE id = ?`,
-    [sentText.messageId || null, r.id]
-  );
-  await registrarEvento(r.id, 'sent', {
+  // Atualiza status (so se nao for override pra outro num — preserva
+  // status original quando reenvio e ad-hoc pra outro destinatario)
+  if (!input.phone_override || telDestino === r.destinatario_phone) {
+    await pool.execute(
+      `UPDATE recibos SET status = 'enviado', enviado_em = NOW(),
+                         zapi_message_id = ?
+         WHERE id = ?`,
+      [sentText.messageId || null, r.id]
+    );
+  }
+  await registrarEvento(r.id, input.phone_override ? 'sent_override' : 'sent', {
     phone: sentText.phone,
     messageId: sentText.messageId,
     pdf_anexado: input.enviar_pdf !== false,
     forcado: !!input.forcar,
+    override: !!input.phone_override,
   });
 
   return {
