@@ -138,7 +138,8 @@ export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
         nome: t?.brand_name || 'ROMATEC CONSULTORIA TOTAL',
         identificadorLabel: 'CNPJ',
         identificador: fiscal?.cnpj || t?.cnpj || '17.261.987/0001-09',
-        complemento: `IM: ${fiscal?.inscricao_municipal || 'ISENTO'}  ·  J R P BEZERRA LTDA`,
+        // v1.97.1: removido 'IM: ISENTO' a pedido do CEO — emitente exibe so CNPJ + razao social
+        complemento: 'J R P BEZERRA LTDA',
         endereco: t?.endereco || 'Rua São Raimundo, 10 — Centro — Açailândia/MA — CEP 65930-000',
         contato: `${t?.telefone || '(99) 99181-1246'} · ${t?.email || 'contato@consultoriaromatec.com.br'}`,
         exibirBancarios: true,
