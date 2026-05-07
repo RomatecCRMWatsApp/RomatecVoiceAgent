@@ -475,22 +475,16 @@
   <div class="tabs">
     <button class="tab active" data-tab="dashboard">Painel</button>
     <button class="tab" data-tab="obras">Obras</button>
-    <button class="tab" data-tab="despesas" style="position:relative;">🧾 Despesas Extras
-      <span style="position:absolute; top:-6px; right:-12px; background:var(--gold); color:#06120a; font-size:8px; font-weight:800; padding:1px 4px; border-radius:3px; letter-spacing:0.5px;">NOVO</span>
-    </button>
+    <button class="tab" data-tab="despesas" style="position:relative;">🧾 Despesas Extras</button>
+    <button class="tab" data-tab="materiais">Materiais</button>
     <button class="tab" data-tab="financeiro">Financeiro</button>
+    <button class="tab" data-tab="recibos" style="position:relative;">📜 Recibos</button>
+    <button class="tab" data-tab="notas" style="position:relative;">🧾 Notas Fiscais</button>
     <button class="tab" data-tab="equipe">Equipe</button>
     <button class="tab" data-tab="marcar">Marcar Dias</button>
     <button class="tab" data-tab="folha">Folha Mensal</button>
     <button class="tab" data-tab="vto">Vistoria (VTO)</button>
     <button class="tab" data-tab="proposta">Proposta</button>
-    <button class="tab" data-tab="recibos" style="position:relative;">📜 Recibos
-      <span style="position:absolute; top:-6px; right:-12px; background:var(--gold); color:#06120a; font-size:8px; font-weight:800; padding:1px 4px; border-radius:3px; letter-spacing:0.5px;">NOVO</span>
-    </button>
-    <button class="tab" data-tab="notas" style="position:relative;">🧾 Notas Fiscais
-      <span style="position:absolute; top:-6px; right:-12px; background:var(--gold); color:#06120a; font-size:8px; font-weight:800; padding:1px 4px; border-radius:3px; letter-spacing:0.5px;">NOVO</span>
-    </button>
-    <button class="tab" data-tab="materiais">Materiais</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
   </div>
 
@@ -7129,17 +7123,20 @@ function renderRecibos() {
             ${r.last_reminder_at ? `<span class="badge" style="font-size:10px; background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b55;">🔔 lembrete em ${escape(parseDataBR(r.last_reminder_at))}</span>` : ''}
           </div>
         </div>
-        <div style="display:flex; flex-direction:column; gap:6px; min-width:200px;">
+        <div style="display:flex; flex-direction:column; gap:6px; min-width:240px;">
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-rec-ver="${r.token}" title="Visualizar página pública" style="flex:1;">👁 Ver</button>
             <button data-rec-pdf="${r.id}" title="Baixar PDF" style="flex:1;">📄 PDF</button>
-            <button data-rec-link="${r.token}" title="Copiar link" style="flex:1;">🔗 Link</button>
           </div>
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
-            ${podeEnviar    ? `<button data-rec-enviar="${r.id}" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">📱 Enviar</button>` : ''}
-            ${podeReenviar  ? `<button data-rec-reenviar="${r.id}" style="flex:1;">🔁 Lembrete</button>` : ''}
-            ${podeCancel    ? `<button data-rec-cancelar="${r.id}" class="btn-danger" style="flex:1;">Cancelar</button>` : ''}
+            <button data-rec-wapp="${r.id}" title="Enviar/Reenviar WhatsApp" style="flex:1; background:#25d36622; color:#25d366; border-color:#25d36655;">📱 WhatsApp</button>
+            <button data-rec-tg="${r.id}" title="Enviar pro Telegram do CEO" style="flex:1; background:#0088cc22; color:#0088cc; border-color:#0088cc55;">✈️ Telegram</button>
           </div>
-          ${r.valor && r.valor > 0 && r.status==='confirmado' ? `<button data-rec-nf="${r.id}" title="Emitir Nota Fiscal a partir deste recibo" style="background:var(--gold); color:#06120a; border-color:var(--gold); font-size:12px; padding:6px;">🧾 Emitir NF</button>` : ''}
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            ${['rascunho','aguardando_envio'].includes(r.status) ? `<button data-rec-edit="${r.id}" style="flex:1; background:var(--gold); color:#06120a; border-color:var(--gold);">✏️ Editar</button>` : `<button data-rec-link="${r.token}" title="Copiar link" style="flex:1;">🔗 Link</button>`}
+            <button data-rec-del="${r.id}" class="btn-danger" style="flex:1;" title="${r.status==='confirmado' ? 'Recibo confirmado não pode ser excluído (LGPD)' : 'Excluir definitivamente'}">🗑️ Excluir</button>
+          </div>
+          ${r.valor && r.valor > 0 && r.status==='confirmado' ? `<button data-rec-nf="${r.id}" title="Emitir Nota Fiscal" style="background:var(--gold); color:#06120a; border-color:var(--gold); font-size:12px; padding:6px;">🧾 Emitir NF</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -7274,50 +7271,80 @@ function renderRecibos() {
     renderRecibos();
   };
 
-  // Botões de ação
+  // v1.82.0: botões completos no card de recibo
+  document.querySelectorAll('[data-rec-ver]').forEach(b => b.onclick = () => {
+    window.open('/r/' + b.dataset.recVer, '_blank');
+  });
   document.querySelectorAll('[data-rec-pdf]').forEach(b => b.onclick = () => {
     window.open('/api/recibos/' + b.dataset.recPdf + '/pdf', '_blank');
   });
   document.querySelectorAll('[data-rec-link]').forEach(b => b.onclick = async () => {
-    const token = b.dataset.recLink;
-    const url = location.origin + '/r/' + token;
+    const url = location.origin + '/r/' + b.dataset.recLink;
     try {
       await navigator.clipboard.writeText(url);
       const orig = b.textContent;
       b.textContent = '✓ Copiado';
       setTimeout(() => b.textContent = orig, 2000);
-    } catch {
-      prompt('Link do recibo:', url);
-    }
+    } catch { prompt('Link do recibo:', url); }
   });
-  document.querySelectorAll('[data-rec-enviar]').forEach(b => b.onclick = async () => {
-    const id = b.dataset.recEnviar;
-    if (!confirm('Enviar pelo WhatsApp agora?')) return;
+  // 📱 WhatsApp — primeira vez "Enviar", depois "Reenviar Lembrete"
+  document.querySelectorAll('[data-rec-wapp]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.recWapp;
+    const r = (state.recibos || []).find(x => String(x.id) === String(id));
+    const ehReenvio = r && !['rascunho', 'aguardando_envio'].includes(r.status);
+    const txt = ehReenvio ? 'Reenviar lembrete WhatsApp?' : 'Enviar pelo WhatsApp agora?';
+    if (!confirm(txt)) return;
     b.disabled = true; b.textContent = 'Enviando...';
     try {
-      const r = await api('/api/recibos/' + id + '/enviar', { method:'POST', body: JSON.stringify({}) });
-      alert('✅ Enviado pra ' + r.phone);
+      if (ehReenvio) {
+        await api('/api/recibos/' + id + '/reenviar', { method:'POST', body: JSON.stringify({}) });
+        alert('✅ Lembrete enviado');
+      } else {
+        const out = await api('/api/recibos/' + id + '/enviar', { method:'POST', body: JSON.stringify({}) });
+        alert('✅ Enviado pra ' + out.phone);
+      }
       await loadRecibos(); renderRecibos();
-    } catch (e) { alert('Erro: ' + e.message); b.disabled = false; }
+    } catch (e) { alert('Erro: ' + e.message); b.disabled = false; b.textContent = '📱 WhatsApp'; }
   });
-  document.querySelectorAll('[data-rec-reenviar]').forEach(b => b.onclick = async () => {
-    const id = b.dataset.recReenviar;
-    if (!confirm('Enviar lembrete pelo WhatsApp?')) return;
+  // ✈️ Telegram — envia pro CEO
+  document.querySelectorAll('[data-rec-tg]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.recTg;
+    if (!confirm('Enviar PDF do recibo pro seu Telegram?')) return;
     b.disabled = true; b.textContent = 'Enviando...';
     try {
-      await api('/api/recibos/' + id + '/reenviar', { method:'POST', body: JSON.stringify({}) });
-      alert('✅ Lembrete enviado');
-      await loadRecibos(); renderRecibos();
-    } catch (e) { alert('Erro: ' + e.message); b.disabled = false; }
+      await api('/api/recibos/' + id + '/enviar-telegram', { method:'POST', body: JSON.stringify({}) });
+      alert('✅ Enviado via Telegram');
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { b.disabled = false; b.textContent = '✈️ Telegram'; }
   });
-  document.querySelectorAll('[data-rec-cancelar]').forEach(b => b.onclick = async () => {
-    const id = b.dataset.recCancelar;
-    const motivo = prompt('Motivo do cancelamento (opcional):', '');
-    if (motivo === null) return;
+  // ✏️ Editar — abre form universal pré-preenchido
+  document.querySelectorAll('[data-rec-edit]').forEach(b => b.onclick = () => {
+    const id = b.dataset.recEdit;
+    const r = (state.recibos || []).find(x => String(x.id) === String(id));
+    if (!r) return;
+    state.recibosView = 'form';
+    state.recibosEditandoId = r.id;
+    state.reciboForm = {
+      tipo: r.tipo,
+      destinatario_nome: r.destinatario_nome,
+      destinatario_phone: r.destinatario_phone,
+      destinatario_doc: r.destinatario_doc || '',
+      destinatario_email: r.destinatario_email || '',
+      valor: r.valor || '',
+      forma_pagamento: r.forma_pagamento || 'pix',
+      descricao_servico: r.descricao_servico || '',
+      resource_type: r.resource_type,
+      resource_id: r.resource_id,
+      expira_em_dias: 7,
+    };
+    renderRecibos();
+  });
+  // 🗑️ Excluir — hard delete (exceto confirmado)
+  document.querySelectorAll('[data-rec-del]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.recDel;
+    if (!confirm('Excluir DEFINITIVAMENTE este recibo? Não pode desfazer.')) return;
     try {
-      await api('/api/recibos/' + id + '/cancelar', {
-        method:'POST', body: JSON.stringify({ motivo: motivo || null })
-      });
+      await api('/api/recibos/' + id, { method: 'DELETE' });
       await loadRecibos(); renderRecibos();
     } catch (e) { alert('Erro: ' + e.message); }
   });
@@ -7384,7 +7411,7 @@ function renderReciboForm(v) {
   v.innerHTML = `
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-        <p class="section-title" style="margin:0;">➕ Novo recibo</p>
+        <p class="section-title" style="margin:0;">${state.recibosEditandoId ? '✏️ Editar recibo #' + state.recibosEditandoId : '➕ Novo recibo'}</p>
         <button data-rec-voltar style="background:transparent;">← Voltar</button>
       </div>
       <div style="display:grid; gap:10px; max-width:680px; margin-top:10px;">
@@ -7438,7 +7465,10 @@ function renderReciboForm(v) {
     </div>`;
 
   document.querySelector('[data-rec-voltar]').onclick = () => {
-    state.recibosView = 'lista'; renderRecibos();
+    state.recibosView = 'lista';
+    state.recibosEditandoId = null;
+    state.reciboForm = null;
+    renderRecibos();
   };
 
   // Sync state em alterações
@@ -7465,10 +7495,8 @@ function renderReciboForm(v) {
     const orig = btn.textContent;
     btn.textContent = 'Salvando...';
     try {
+      const editandoId = state.recibosEditandoId;
       const payload = {
-        tipo: f.tipo,
-        resource_type: f.resource_type,
-        resource_id: f.resource_id,
         destinatario_nome: f.destinatario_nome.trim(),
         destinatario_phone: f.destinatario_phone.trim(),
         destinatario_doc: f.destinatario_doc.trim() || null,
@@ -7476,18 +7504,41 @@ function renderReciboForm(v) {
         valor: f.valor ? Number(f.valor) : null,
         forma_pagamento: f.forma_pagamento || null,
         descricao_servico: f.descricao_servico.trim() || null,
-        expira_em_dias: Number(f.expira_em_dias) || 7,
       };
-      const r = await api('/api/recibos', { method: 'POST', body: JSON.stringify(payload) });
-      if (enviar) {
-        btn.textContent = 'Enviando WhatsApp...';
-        await api('/api/recibos/' + r.id + '/enviar', { method: 'POST', body: JSON.stringify({}) });
-        alert('✅ Recibo ' + r.numero + ' criado e enviado pelo WhatsApp!');
+
+      let r;
+      if (editandoId) {
+        // EDIÇÃO — PUT
+        await api('/api/recibos/' + editandoId, { method: 'PUT', body: JSON.stringify(payload) });
+        r = (state.recibos || []).find(x => String(x.id) === String(editandoId)) || { id: editandoId, numero: '#' + editandoId };
+        if (enviar) {
+          btn.textContent = 'Enviando WhatsApp...';
+          await api('/api/recibos/' + editandoId + '/enviar', { method: 'POST', body: JSON.stringify({}) });
+          alert('✅ Recibo ' + r.numero + ' atualizado e enviado.');
+        } else {
+          alert('💾 Recibo ' + r.numero + ' atualizado.');
+        }
       } else {
-        alert('💾 Recibo ' + r.numero + ' salvo como rascunho');
+        // CRIAÇÃO — POST
+        const createPayload = {
+          tipo: f.tipo,
+          resource_type: f.resource_type,
+          resource_id: f.resource_id,
+          ...payload,
+          expira_em_dias: Number(f.expira_em_dias) || 7,
+        };
+        r = await api('/api/recibos', { method: 'POST', body: JSON.stringify(createPayload) });
+        if (enviar) {
+          btn.textContent = 'Enviando WhatsApp...';
+          await api('/api/recibos/' + r.id + '/enviar', { method: 'POST', body: JSON.stringify({}) });
+          alert('✅ Recibo ' + r.numero + ' criado e enviado pelo WhatsApp!');
+        } else {
+          alert('💾 Recibo ' + r.numero + ' salvo como rascunho');
+        }
       }
       state.recibosView = 'lista';
       state.reciboForm = null;
+      state.recibosEditandoId = null;
       await loadRecibos();
       renderRecibos();
     } catch (e) {
@@ -7726,11 +7777,21 @@ function renderNotas() {
             ${n.motivo_rejeicao ? `<span class="badge" style="font-size:10px; background:#fee2e2; color:#991b1b;" title="${escape(n.motivo_rejeicao)}">Erro: ${escape(n.motivo_rejeicao.slice(0,40))}...</span>` : ''}
           </div>
         </div>
-        <div style="display:flex; flex-direction:column; gap:6px; min-width:180px;">
-          ${n.pdf_url ? `<a href="${escape(n.pdf_url)}" target="_blank" style="display:inline-block; padding:6px 12px; background:var(--success); color:#fff; border-radius:6px; text-decoration:none; text-align:center; font-size:13px;">📄 PDF DANFSE</a>` : ''}
-          ${n.xml_url ? `<a href="${escape(n.xml_url)}" target="_blank" style="display:inline-block; padding:6px 12px; background:var(--bg-elev); color:var(--text); border-radius:6px; text-decoration:none; text-align:center; font-size:13px;">📋 XML</a>` : ''}
-          ${n.status==='rascunho' || n.status==='rejeitada' ? `<button data-nf-emitir="${n.id}" style="background:var(--gold); color:#06120a; border-color:var(--gold);">🚀 ${n.status==='rejeitada'?'Reenviar':'Emitir'}</button>` : ''}
-          ${n.status==='autorizada' ? `<button data-nf-cancelar="${n.id}" class="btn-danger">Cancelar</button>` : ''}
+        <div style="display:flex; flex-direction:column; gap:6px; min-width:240px;">
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-nf-ver="${n.id}" title="Ver detalhes" style="flex:1;">👁 Ver</button>
+            ${n.pdf_url ? `<a href="${escape(n.pdf_url)}" target="_blank" style="flex:1; display:inline-block; padding:6px 12px; background:var(--success); color:#fff; border-radius:6px; text-decoration:none; text-align:center; font-size:13px;">📄 PDF</a>` : `<button data-nf-pdf-pendente disabled style="flex:1; opacity:0.5;" title="PDF disponível após autorização">📄 PDF</button>`}
+          </div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-nf-wapp="${n.id}" ${!n.pdf_url ? 'disabled style="flex:1; opacity:0.5;"' : 'style="flex:1; background:#25d36622; color:#25d366; border-color:#25d36655;"'} title="Enviar PDF via WhatsApp">📱 WhatsApp</button>
+            <button data-nf-tg="${n.id}" ${!n.pdf_url ? 'disabled style="flex:1; opacity:0.5;"' : 'style="flex:1; background:#0088cc22; color:#0088cc; border-color:#0088cc55;"'} title="Enviar PDF via Telegram">✈️ Telegram</button>
+          </div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            ${['rascunho','rejeitada'].includes(n.status) ? `<button data-nf-emitir="${n.id}" style="flex:1; background:var(--gold); color:#06120a; border-color:var(--gold);">🚀 ${n.status==='rejeitada'?'Reenviar':'Emitir'}</button>` : ''}
+            ${n.status==='autorizada' ? `<button data-nf-cancelar="${n.id}" class="btn-danger" style="flex:1;">⊘ Cancelar</button>` : ''}
+            ${['rascunho','rejeitada'].includes(n.status) ? `<button data-nf-del="${n.id}" class="btn-danger" style="flex:1;">🗑️ Excluir</button>` : ''}
+          </div>
+          ${n.xml_url ? `<a href="${escape(n.xml_url)}" target="_blank" style="display:inline-block; padding:4px 8px; background:var(--bg-elev); color:var(--text-muted); border-radius:6px; text-decoration:none; text-align:center; font-size:11px;">📋 Baixar XML</a>` : ''}
         </div>
       </div>
     </div>`;
@@ -7798,6 +7859,65 @@ function renderNotas() {
         method:'POST', body: JSON.stringify({ motivo })
       });
       alert('✓ Solicitação de cancelamento enviada.');
+      await loadNotas(); renderNotas();
+    } catch (e) { alert('Erro: ' + e.message); }
+  });
+
+  // v1.82.0: novos botões da NF
+  document.querySelectorAll('[data-nf-ver]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.nfVer;
+    const n = (state.notas || []).find(x => String(x.id) === String(id));
+    if (!n) return;
+    if (n.link_verificacao) {
+      window.open(n.link_verificacao, '_blank');
+      return;
+    }
+    // Modal simples mostrando detalhes
+    const det = [
+      `NF: ${n.numero ? 'Nº ' + n.numero : 'RPS ' + n.rps_numero + '/' + n.rps_serie}`,
+      `Status: ${NF_STATUS_LABEL[n.status] || n.status}`,
+      `Tomador: ${n.tomador_nome} (${n.tomador_doc})`,
+      `Valor: ${fmt(n.valor_servico)}`,
+      `ISS (${n.iss_aliquota}%): ${fmt(n.valor_iss)}${n.iss_retido ? ' [retido]' : ''}`,
+      `Líquido: ${fmt(n.valor_liquido)}`,
+      `Código LC 116: ${n.codigo_servico}`,
+      `Descrição: ${n.descricao}`,
+      n.codigo_verificacao ? `Código verificação: ${n.codigo_verificacao}` : '',
+      n.motivo_rejeicao ? `Erro: ${n.motivo_rejeicao}` : '',
+      n.emitida_em ? `Autorizada em: ${parseDataBR(n.emitida_em)}` : '',
+    ].filter(Boolean).join('\n');
+    alert(det);
+  });
+  document.querySelectorAll('[data-nf-wapp]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.nfWapp;
+    const n = (state.notas || []).find(x => String(x.id) === String(id));
+    if (!n) return;
+    const tel = prompt('WhatsApp do destinatário (com DDD):', '');
+    if (!tel) return;
+    b.disabled = true; b.textContent = 'Enviando...';
+    try {
+      const r = await api('/api/notas-fiscais/' + id + '/enviar-whatsapp', {
+        method:'POST', body: JSON.stringify({ telefone: tel }),
+      });
+      alert('✅ ' + r.message);
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { b.disabled = false; b.textContent = '📱 WhatsApp'; }
+  });
+  document.querySelectorAll('[data-nf-tg]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.nfTg;
+    if (!confirm('Enviar PDF da NF pro seu Telegram?')) return;
+    b.disabled = true; b.textContent = 'Enviando...';
+    try {
+      await api('/api/notas-fiscais/' + id + '/enviar-telegram', { method:'POST', body: JSON.stringify({}) });
+      alert('✅ NF enviada via Telegram');
+    } catch (e) { alert('Erro: ' + e.message); }
+    finally { b.disabled = false; b.textContent = '✈️ Telegram'; }
+  });
+  document.querySelectorAll('[data-nf-del]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.nfDel;
+    if (!confirm('Excluir DEFINITIVAMENTE esta NF? (só rascunho/rejeitada)')) return;
+    try {
+      await api('/api/notas-fiscais/' + id, { method: 'DELETE' });
       await loadNotas(); renderNotas();
     } catch (e) { alert('Erro: ' + e.message); }
   });

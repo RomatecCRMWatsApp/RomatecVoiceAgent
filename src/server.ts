@@ -1150,6 +1150,55 @@ app.post('/api/notas-fiscais/:id/cancelar',
     return notasFiscais.cancelarNotaFiscal(a.id, a.motivo);
   }));
 
+// v1.82.0: enviar PDF da NF via WhatsApp/Telegram
+app.post('/api/notas-fiscais/:id/enviar-whatsapp', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const tel = String(req.body?.telefone || '').replace(/\D/g, '');
+    if (tel.length < 10) return res.status(400).json({ error: 'telefone obrigatorio' });
+    const nf = await notasFiscais.buscarNotaFiscal(id);
+    if (!nf.pdf_url) return res.status(400).json({ error: 'NF ainda nao tem PDF (status: ' + nf.status + ')' });
+    const axios = (await import('axios')).default;
+    const r = await axios.get(nf.pdf_url, { responseType: 'arraybuffer', timeout: 30000 });
+    const pdfBuf = Buffer.from(r.data);
+    const wpp = await import('./integrations/whatsapp');
+    const phone = tel.startsWith('55') ? tel : `55${tel}`;
+    const fileName = `NF_${nf.numero || nf.rps_numero}.pdf`;
+    const sent = await wpp.sendDocument(phone, pdfBuf.toString('base64'), fileName);
+    res.json({ ok: true, message: `NF enviada para ${sent.phone}.`, messageId: sent.messageId });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.post('/api/notas-fiscais/:id/enviar-telegram', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const nf = await notasFiscais.buscarNotaFiscal(id);
+    if (!nf.pdf_url) return res.status(400).json({ error: 'NF ainda nao tem PDF (status: ' + nf.status + ')' });
+    const axios = (await import('axios')).default;
+    const r = await axios.get(nf.pdf_url, { responseType: 'arraybuffer', timeout: 30000 });
+    const pdfBuf = Buffer.from(r.data);
+    const tg = await import('./integrations/telegram');
+    const chatId = String(req.body?.chatId || '').trim()
+      || (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
+      || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+    if (!chatId) return res.status(400).json({ error: 'chatId Telegram obrigatorio' });
+    const fileName = `NF_${nf.numero || nf.rps_numero}.pdf`;
+    await tg.sendDocument(chatId, pdfBuf, fileName, `NF ${nf.numero || 'RPS ' + nf.rps_numero} — ${nf.tomador_nome}`);
+    res.json({ ok: true, message: 'NF enviada via Telegram.' });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.delete('/api/notas-fiscais/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const nf = await notasFiscais.buscarNotaFiscal(id);
+    if (!['rascunho', 'rejeitada'].includes(nf.status)) {
+      return res.status(400).json({ error: `Nao pode excluir NF status='${nf.status}'. Use cancelar.` });
+    }
+    const m = await import('./database/connection');
+    await m.default.execute('DELETE FROM notas_fiscais WHERE id = ?', [id]);
+    res.json({ ok: true, message: `NF #${id} excluida.` });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // Webhook NFe.io — recebe atualizacao quando prefeitura processa
 app.post('/webhook/nfeio', async (req: Request, res: Response) => {
   res.json({ ok: true }); // ack imediato
@@ -1218,6 +1267,75 @@ app.post  ('/api/recibos/:id/cancelar',
     await recibos.cancelarRecibo(a.id, a.motivo);
     return { ok: true };
   }));
+
+// v1.82.0: enviar PDF do recibo via Telegram (WhatsApp ja existe via /enviar)
+app.post('/api/recibos/:id/enviar-telegram', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const r = await recibos.buscarReciboPorId(id);
+    const { gerarPdfRecibo } = await import('./services/reciboPdf');
+    const pdfBuf = await gerarPdfRecibo(r);
+    const tg = await import('./integrations/telegram');
+    const chatId = String(req.body?.chatId || '').trim()
+      || (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
+      || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+    if (!chatId) return res.status(400).json({ error: 'chatId Telegram obrigatorio' });
+    const fileName = `${r.numero}.pdf`;
+    await tg.sendDocument(chatId, pdfBuf, fileName, `Recibo ${r.numero} — ${r.destinatario_nome}`);
+    res.json({ ok: true, message: 'Recibo enviado via Telegram.' });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.delete('/api/recibos/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const r = await recibos.buscarReciboPorId(id);
+    if (r.status === 'confirmado') {
+      return res.status(400).json({ error: 'Recibo confirmado nao pode ser excluido (LGPD).' });
+    }
+    const m = await import('./database/connection');
+    await m.default.execute('DELETE FROM recibos WHERE id = ?', [id]);
+    res.json({ ok: true, message: `Recibo ${r.numero} excluido.` });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// PUT pra editar recibo em rascunho/aguardando_envio
+app.put('/api/recibos/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const r = await recibos.buscarReciboPorId(id);
+    if (!['rascunho', 'aguardando_envio'].includes(r.status)) {
+      return res.status(400).json({ error: `Nao pode editar — status='${r.status}'.` });
+    }
+    const b = req.body || {};
+    const fields: string[] = [];
+    const params: (string | number | null)[] = [];
+    const allow = ['destinatario_nome', 'destinatario_doc', 'destinatario_phone',
+                   'destinatario_email', 'valor', 'forma_pagamento',
+                   'descricao_servico'];
+    for (const k of allow) {
+      if (b[k] !== undefined) {
+        fields.push(`${k} = ?`);
+        const v = b[k];
+        if (k === 'destinatario_phone') {
+          const tel = String(v).replace(/\D/g, '');
+          params.push(tel.startsWith('55') ? tel : `55${tel}`);
+        } else if (k === 'destinatario_doc') {
+          params.push(v ? String(v).replace(/\D/g, '') : null);
+        } else {
+          params.push(v == null ? null : v);
+        }
+      }
+    }
+    if (fields.length === 0) return res.status(400).json({ error: 'nada pra atualizar' });
+    params.push(id);
+    const m = await import('./database/connection');
+    await m.default.execute(
+      `UPDATE recibos SET ${fields.join(', ')} WHERE id = ?`, params
+    );
+    res.json({ ok: true, message: `Recibo ${r.numero} atualizado.` });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
 app.get   ('/api/recibos/:id/pdf', async (req: Request, res: Response) => {
   try {
     const r = await recibos.buscarReciboPorId(String(req.params.id));
