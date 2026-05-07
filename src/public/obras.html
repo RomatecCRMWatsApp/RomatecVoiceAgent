@@ -7903,14 +7903,15 @@ function abrirModalNovoCliente() {
         </div>
       </fieldset>
 
-      <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
+      <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;" id="cli_fs_pessoais">
         <legend style="padding:0 8px; font-size:12px; color:var(--gold); font-weight:600;">DADOS PESSOAIS / EMPRESARIAIS</legend>
         <div style="display:grid; gap:10px;">
           <div style="display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px;">
-            <label>Data nascimento / fundação
+            <label>
+              <span data-cli-pf-only>Data de nascimento</span><span data-cli-pj-only style="display:none;">Data de fundação</span>
               <input id="cli_dtnasc" type="date" style="width:100%;">
             </label>
-            <label>Estado civil (PF)
+            <label data-cli-pf-only>Estado civil
               <select id="cli_estciv" style="width:100%;">
                 <option value="">—</option>
                 <option value="solteiro">Solteiro(a)</option>
@@ -7918,17 +7919,18 @@ function abrirModalNovoCliente() {
                 <option value="divorciado">Divorciado(a)</option>
                 <option value="viuvo">Viúvo(a)</option>
                 <option value="uniao_estavel">União Estável</option>
+                <option value="separado">Separado(a)</option>
               </select>
             </label>
-            <label>Profissão (PF)
+            <label data-cli-pf-only>Profissão
               <input id="cli_profissao" maxlength="120" style="width:100%;">
             </label>
           </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-            <label>Razão Social (PJ — se diferente do nome)
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;" data-cli-pj-only>
+            <label>Razão Social (se diferente do nome)
               <input id="cli_razao" maxlength="150" style="width:100%;">
             </label>
-            <label>Nome Fantasia (PJ)
+            <label>Nome Fantasia
               <input id="cli_fantasia" maxlength="150" style="width:100%;">
             </label>
           </div>
@@ -7985,14 +7987,89 @@ function abrirModalNovoCliente() {
     modal.querySelector('[data-cli-cancelar]').onclick = () => cleanup(null);
     overlay.onclick = (e) => { if (e.target === overlay) cleanup(null); };
 
+    // v1.91.0: Toggle PF/PJ — controla quais campos aparecem
+    let tipoPessoaAtual = 'PF'; // default
+    function aplicarTipoPessoa(tipo) {
+      tipoPessoaAtual = tipo;
+      // Atualiza estilo dos botões toggle
+      modal.querySelectorAll('[data-cli-pessoa]').forEach(b => {
+        const ativo = b.dataset.cliPessoa === tipo;
+        b.style.background = ativo ? '#1F5C3A' : 'transparent';
+        b.style.color = ativo ? '#fff' : 'var(--text-muted)';
+        b.style.fontWeight = ativo ? '600' : 'normal';
+      });
+      // Show/hide campos
+      modal.querySelectorAll('[data-cli-pf-only]').forEach(el => {
+        el.style.display = (tipo === 'PF') ? '' : 'none';
+      });
+      modal.querySelectorAll('[data-cli-pj-only]').forEach(el => {
+        el.style.display = (tipo === 'PJ') ? '' : 'none';
+      });
+      // Atualiza placeholders
+      const cliDoc = document.getElementById('cli_doc');
+      const cliNome = document.getElementById('cli_nome');
+      if (cliDoc) cliDoc.placeholder = (tipo === 'PF') ? '000.000.000-00' : '00.000.000/0000-00';
+      if (cliNome) cliNome.placeholder = (tipo === 'PF') ? 'Nome completo' : 'Razão Social';
+    }
+    aplicarTipoPessoa('PF'); // estado inicial
+    modal.querySelectorAll('[data-cli-pessoa]').forEach(b => {
+      b.onclick = () => aplicarTipoPessoa(b.dataset.cliPessoa);
+    });
+
     // Máscaras
     const inpDoc = document.getElementById('cli_doc');
     const inpTel = document.getElementById('cli_tel');
     const inpCep = document.getElementById('cli_cep');
+
+    // v1.91.0: dedup — busca cliente existente pelo CPF/CNPJ
+    let dedupTimer = null;
+    async function checarDuplicado(doc) {
+      try {
+        const lista = await api('/api/propostas-clientes?busca=' + encodeURIComponent(doc));
+        const match = (lista || []).find(c => (c.cpf_cnpj || '').replace(/\D/g, '') === doc);
+        if (!match) return null;
+        return match;
+      } catch { return null; }
+    }
+
     inpDoc.oninput = () => {
       inpDoc.value = mascararDoc(inpDoc.value);
       const d = inpDoc.value.replace(/\D/g, '');
       const status = document.getElementById('cli_doc_status');
+      // Auto-detect tipo pessoa pelo número de dígitos
+      if (d.length >= 12 && tipoPessoaAtual === 'PF') aplicarTipoPessoa('PJ');
+      else if (d.length === 11 && tipoPessoaAtual === 'PJ') aplicarTipoPessoa('PF');
+
+      // Dedup com debounce 600ms
+      if (dedupTimer) clearTimeout(dedupTimer);
+      if (d.length === 11 || d.length === 14) {
+        const valido = (d.length === 11 ? validarCPF(d) : validarCNPJ(d));
+        if (valido) {
+          dedupTimer = setTimeout(async () => {
+            const existente = await checarDuplicado(d);
+            if (existente) {
+              const usar = confirm(
+                `⚠️ Cliente já cadastrado com este CPF/CNPJ:\n\n` +
+                `Nome: ${existente.nome}\n` +
+                `Telefone: ${existente.telefone || '—'}\n\n` +
+                `Usar cliente existente?\n\n` +
+                `OK = usar este cliente (modal fecha)\n` +
+                `Cancelar = cadastrar novo mesmo assim (vai duplicar)`
+              );
+              if (usar) {
+                cleanup({
+                  id: existente.id,
+                  nome: existente.nome,
+                  cpf_cnpj: existente.cpf_cnpj,
+                  telefone: existente.telefone,
+                  email: existente.email || null,
+                });
+              }
+            }
+          }, 600);
+        }
+      }
+
       if (d.length === 11) status.textContent = validarCPF(d) ? '✓ CPF válido' : '✗ CPF inválido';
       else if (d.length === 14) {
         status.textContent = validarCNPJ(d) ? '⏳ buscando dados CNPJ...' : '✗ CNPJ inválido';
