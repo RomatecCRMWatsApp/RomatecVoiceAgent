@@ -7335,6 +7335,7 @@ function renderRecibos() {
     state.recibosView = 'form';
     state.reciboForm = {
       tipo: 'custom',
+      emitente_perfil: 'romatec_pj',  // v1.96.0: PJ Romatec por default
       destinatario_nome: '',
       destinatario_phone: '',
       destinatario_doc: '',
@@ -7342,9 +7343,9 @@ function renderRecibos() {
       valor: '',
       forma_pagamento: 'pix',
       descricao_servico: '',
-      categoria_id: null,        // v1.85.0: id da categoria do catálogo
-      categoria_sigla: null,     // sigla pra prefixo do número
-      categoria_servico: null,   // id do serviço específico
+      categoria_id: null,
+      categoria_sigla: null,
+      categoria_servico: null,
       resource_type: 'manual',
       resource_id: 'manual-' + Date.now(),
       expira_em_dias: 7,
@@ -7487,6 +7488,14 @@ function renderReciboForm(v) {
         <button data-rec-voltar style="background:transparent;">← Voltar</button>
       </div>
       <div style="display:grid; gap:10px; margin-top:10px;">
+        <!-- v1.96.0: seletor de Emitente PJ/PF -->
+        <label>Emitir como *
+          <select id="recEmitente" style="width:100%;">
+            <option value="romatec_pj" ${(f.emitente_perfil||'romatec_pj')==='romatec_pj'?'selected':''}>🏢 ROMATEC CONSULTORIA TOTAL (PJ — CNPJ 17.261.987/0001-09)</option>
+            <option value="jose_romario_pf" ${f.emitente_perfil==='jose_romario_pf'?'selected':''}>👤 José Romário Pinto Bezerra (PF — CPF 012.091.853-69)</option>
+          </select>
+          <span style="font-size:11px; color:var(--text-muted);">Define cabeçalho, dados bancários e assinatura do PDF.</span>
+        </label>
         <label>Tipo *
           <select id="recTipo" style="width:100%;">
             ${RECIBO_TIPOS.map(t => `<option value="${t.val}" ${f.tipo===t.val?'selected':''}>${escape(t.label)}</option>`).join('')}
@@ -7581,6 +7590,13 @@ function renderReciboForm(v) {
     state.recibosEditandoId = null;
     state.reciboForm = null;
     renderRecibos();
+  };
+
+  // v1.96.0: bind do select de Emitente
+  const recEmit = document.getElementById('recEmitente');
+  if (recEmit) recEmit.onchange = () => {
+    f.emitente_perfil = recEmit.value;
+    if (typeof agendarPreview === 'function') agendarPreview();
   };
 
   // Sync state em alterações + máscaras (v1.87.0)
@@ -7750,8 +7766,8 @@ function renderReciboForm(v) {
           ...payload,
           categoria_servico: f.categoria_servico || null,
           categoria_grupo: f.categoria_sigla || null,
+          emitente_perfil: f.emitente_perfil || 'romatec_pj',  // v1.96
           expira_em_dias: Number(f.expira_em_dias) || 7,
-          // v1.94: backend permite nome/telefone vazios pra rascunho
           _rascunho: acao === 'rascunho',
         };
         r = await api('/api/recibos', { method: 'POST', body: JSON.stringify(createPayload) });
@@ -7804,6 +7820,7 @@ function renderReciboForm(v) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tipo: f.tipo,
+          emitente_perfil: f.emitente_perfil || 'romatec_pj',
           destinatario_nome: f.destinatario_nome || '— Destinatário —',
           destinatario_doc: f.destinatario_doc || null,
           destinatario_phone: f.destinatario_phone || '0000000000',

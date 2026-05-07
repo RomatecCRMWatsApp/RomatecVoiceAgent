@@ -159,7 +159,7 @@ export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
     margin: 40,
     info: {
       Title: `${META.TITULO_PDF[recibo.tipo]} ${recibo.numero}`,
-      Author: brand,
+      Author: emitente.nome,
     },
   });
   const chunks: Buffer[] = [];
@@ -169,11 +169,11 @@ export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
   if (fs.existsSync(logoFile)) {
     try { doc.image(logoFile, 40, 30, { fit: [90, 50] }); } catch { /* opcional */ }
   }
-  doc.fontSize(15).fillColor(corHex).font('Helvetica-Bold').text(brand, 145, 38);
+  doc.fontSize(15).fillColor(corHex).font('Helvetica-Bold').text(emitente.nome, 145, 38);
   doc.fontSize(8).fillColor('#444').font('Helvetica')
-     .text(`CNPJ ${cnpj} · IM ${im}`, 145, 56)
-     .text(enderecoEmitente, 145, 67, { width: 410 })
-     .text(`${telEmitente} · ${emailEmitente}`, 145, 78);
+     .text(`${emitente.identificadorLabel} ${emitente.identificador} · ${emitente.complemento}`, 145, 56, { width: 410 })
+     .text(emitente.endereco, 145, 70, { width: 410 })
+     .text(emitente.contato, 145, 82, { width: 410 });
 
   // Faixa dourada
   doc.rect(40, 95, 515, 3).fill(corDourada);
@@ -194,12 +194,12 @@ export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
   doc.fontSize(9).fillColor(corDourada).font('Helvetica-Bold')
      .text('EMITENTE — RECEBI(EMOS) DE', 40, cy);
   cy += 11;
-  doc.fontSize(10).fillColor('#111').font('Helvetica-Bold').text(brand, 40, cy);
+  doc.fontSize(10).fillColor('#111').font('Helvetica-Bold').text(emitente.nome, 40, cy);
   cy += 12;
   doc.fontSize(9).fillColor('#444').font('Helvetica')
-     .text(`CNPJ: ${cnpj} · IM: ${im}`, 40, cy);
-  cy += 11;
-  doc.text(enderecoEmitente, 40, cy, { width: 515 });
+     .text(`${emitente.identificadorLabel}: ${emitente.identificador} · ${emitente.complemento}`, 40, cy, { width: 515 });
+  cy = doc.y + 4;
+  doc.text(emitente.endereco, 40, cy, { width: 515 });
   cy = doc.y + 8;
 
   // ── Bloco PAGADOR ───────────────────────────────────────────────────
@@ -289,10 +289,10 @@ export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
   doc.moveTo(180, cy).lineTo(415, cy).strokeColor('#444').lineWidth(0.5).stroke();
   cy += 6;
   doc.fontSize(9).fillColor('#222').font('Helvetica-Bold')
-     .text(brand, 40, cy, { width: 515, align: 'center' });
+     .text(emitente.nome, 40, cy, { width: 515, align: 'center' });
   cy += 11;
   doc.fontSize(8).fillColor('#666').font('Helvetica')
-     .text(`CNPJ ${cnpj}`, 40, cy, { width: 515, align: 'center' });
+     .text(`${emitente.identificadorLabel} ${emitente.identificador}`, 40, cy, { width: 515, align: 'center' });
 
   // Bloco confirmacao (se ja respondido)
   if (recibo.respondido_em) {
@@ -332,32 +332,33 @@ export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
 
   // ── Rodape: QR code + hash + assinatura ──────────────────────────────
   const qrUrl = `${getBaseUrl()}/v/${recibo.hash_validacao}`;
+  // v1.96.0: footer compacto (y=680..795) pra caber em 1 pagina A4 (842 max)
   try {
     const qrPng = await QRCode.toBuffer(qrUrl, {
-      width: 110,
+      width: 95,
       margin: 1,
       errorCorrectionLevel: 'M',
       color: { dark: corHex, light: '#FFFFFF' },
     });
-    doc.image(qrPng, 445, 700, { width: 110 });
-    doc.fontSize(8).fillColor('#666').font('Helvetica')
-       .text('Escaneie para validar', 440, 815, { width: 120, align: 'center' });
+    doc.image(qrPng, 460, 680, { width: 95 });
+    doc.fontSize(7.5).fillColor('#666').font('Helvetica')
+       .text('Escaneie para validar', 455, 778, { width: 105, align: 'center', lineBreak: false });
   } catch (err) {
     console.warn('[reciboPdf] falha gerar QR:', (err as Error).message);
   }
 
-  // Hash truncado + url
-  doc.fontSize(8).fillColor('#888').font('Helvetica')
-     .text('Hash de autenticidade:', 40, 700)
+  // Hash truncado + url (caixa esquerda do rodape)
+  doc.fontSize(7.5).fillColor('#888').font('Helvetica')
+     .text('Hash de autenticidade:', 40, 680, { lineBreak: false })
      .fillColor('#444').font('Courier')
-     .text(recibo.hash_validacao.slice(0, 32) + '...', 40, 712, { width: 380 });
-  doc.fontSize(8).fillColor('#888').font('Helvetica')
-     .text(`Validar em: ${qrUrl}`, 40, 730, { width: 380 });
+     .text(recibo.hash_validacao.slice(0, 40), 40, 692, { width: 410, lineBreak: false });
+  doc.fontSize(7.5).fillColor('#888').font('Helvetica')
+     .text(qrUrl, 40, 706, { width: 410, lineBreak: false });
 
-  // Assinatura
-  doc.fontSize(8).fillColor('#666').font('Helvetica')
-     .text(`Documento eletrônico autenticado por ${brand}.`, 40, 800, { width: 400 })
-     .text(`Qualquer alteração no PDF invalida o hash criptográfico.`, 40, 812, { width: 400 });
+  // v1.96.0: footer mais compacto pra evitar pagina em branco extra.
+  // Texto da assinatura foi REMOVIDO daqui (estava em y=800 absoluto e
+  // criava pagina nova quando cy ja passou). Hash + URL em y=700-730
+  // ja servem pra rastreabilidade.
 
   doc.end();
   await new Promise<void>(resolve => doc.on('end', () => resolve()));
@@ -371,6 +372,7 @@ export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
 export interface ReciboPreviewInput {
   tipo: string;
   numero?: string;
+  emitente_perfil?: string;  // v1.96.0: 'romatec_pj' (default) | 'jose_romario_pf'
   destinatario_nome: string;
   destinatario_doc?: string | null;
   destinatario_phone: string;
@@ -401,6 +403,7 @@ export async function gerarPdfReciboPreview(input: ReciboPreviewInput): Promise<
     tenant_id: input.tenant_id ?? 1,
     numero,
     tipo: input.tipo,
+    emitente_perfil: input.emitente_perfil || 'romatec_pj',
     resource_type: 'preview',
     resource_id: 'preview',
     destinatario_nome: input.destinatario_nome || '— preencher —',
