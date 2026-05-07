@@ -13,6 +13,7 @@
 <meta property="og:image" content="/romatec-logo-removebg-preview.png">
 <meta property="og:locale" content="pt_BR">
 <link rel="icon" href="/avatar.png">
+<link rel="canonical" href="https://app.romatecavalieimob.com.br/cartao">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; }
@@ -466,8 +467,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (function () {
-  // URL pública do cartão — lê de PUBLIC_BASE_URL via /api/version no backend, fallback pra hardcoded
-  const FALLBACK_URL = 'https://romatecavalieimob.com.br/cartao';
+  // URL pública do cartão — fallback aponta pro subdomínio app (Opção A escolhida pelo CEO).
+  // O JS detecta dinamicamente: se ja estiver em dominio proprio (app.romatecavalieimob.com.br
+  // ou similar), usa location.origin; senao usa o FALLBACK_URL.
+  const FALLBACK_URL = 'https://app.romatecavalieimob.com.br/cartao';
   fetch('/api/version', { cache: 'no-store' })
     .then(r => r.ok ? r.json() : null)
     .then(j => {
