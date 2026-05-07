@@ -1367,6 +1367,356 @@ export async function runMigrations(): Promise<void> {
   // tabelas centrais (romatec_team_members, romatec_proactive_alerts) nao
   // existir apos o run inteiro, loga warning e tenta recriar isolado.
   // Resolve Issue #5 onde essas tabelas estavam ausentes em prod apesar
+  // ─── v1.83.0: SaaS Foundation — Tabelas de plataforma ───────────────────
+  // Multi-tenant + auth + billing + audit. Idempotente (CREATE IF NOT EXISTS
+  // + INSERT IGNORE). Zero impacto no comportamento atual — Romatec vira
+  // tenant_id=1 + user_id=1 com plano "Business" manual permanente.
+  // Tabelas existentes ainda nao tem tenant_id (vem em release seguinte).
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS tenants (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      slug            VARCHAR(60)  NOT NULL UNIQUE,
+      name            VARCHAR(120) NOT NULL,
+      cnpj            VARCHAR(18)  NULL,
+      email           VARCHAR(150) NULL,
+      phone           VARCHAR(30)  NULL,
+      status          ENUM('trialing','active','past_due','suspended','cancelled')
+                      NOT NULL DEFAULT 'trialing',
+      logo_url        VARCHAR(500) NULL,
+      primary_color   VARCHAR(20)  NOT NULL DEFAULT '#10b981',
+      brand_name      VARCHAR(120) NULL,
+      timezone        VARCHAR(50)  NOT NULL DEFAULT 'America/Sao_Paulo',
+      locale          VARCHAR(10)  NOT NULL DEFAULT 'pt-BR',
+      currency        VARCHAR(3)   NOT NULL DEFAULT 'BRL',
+      trial_ends_at   DATETIME     NULL,
+      suspended_at    DATETIME     NULL,
+      cancelled_at    DATETIME     NULL,
+      created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+      updated_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_status (status),
+      INDEX idx_slug (slug)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS users (
+      id                    INT AUTO_INCREMENT PRIMARY KEY,
+      email                 VARCHAR(150) NOT NULL UNIQUE,
+      email_verified_at     DATETIME     NULL,
+      password_hash         VARCHAR(255) NOT NULL,
+      name                  VARCHAR(120) NOT NULL,
+      phone                 VARCHAR(30)  NULL,
+      avatar_url            VARCHAR(500) NULL,
+      locale                VARCHAR(10)  NOT NULL DEFAULT 'pt-BR',
+      timezone              VARCHAR(50)  NOT NULL DEFAULT 'America/Sao_Paulo',
+      mfa_secret            VARCHAR(64)  NULL,
+      mfa_enabled           BOOLEAN      NOT NULL DEFAULT FALSE,
+      failed_login_attempts INT          NOT NULL DEFAULT 0,
+      locked_until          DATETIME     NULL,
+      last_login_at         DATETIME     NULL,
+      last_login_ip         VARCHAR(45)  NULL,
+      created_at            TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+      updated_at            TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      deleted_at            DATETIME     NULL,
+      INDEX idx_email_verified (email_verified_at),
+      INDEX idx_deleted (deleted_at)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS plans (
+      id                       INT AUTO_INCREMENT PRIMARY KEY,
+      slug                     VARCHAR(40)   NOT NULL UNIQUE,
+      name                     VARCHAR(60)   NOT NULL,
+      description              TEXT          NULL,
+      price_brl_monthly        DECIMAL(10,2) NOT NULL,
+      price_brl_yearly         DECIMAL(10,2) NULL,
+      limit_obras_ativas       INT NULL,
+      limit_users              INT NULL,
+      limit_storage_gb         INT NULL,
+      limit_ocr_per_month      INT NULL,
+      limit_whatsapp_per_month INT NULL,
+      limit_telegram_per_month INT NULL,
+      limit_pdfs_per_month     INT NULL,
+      limit_nf_per_month       INT NULL,
+      features                 JSON NOT NULL,
+      active                   BOOLEAN NOT NULL DEFAULT TRUE,
+      sort_order               INT NOT NULL DEFAULT 0,
+      created_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS tenant_users (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id    INT NOT NULL,
+      user_id      INT NOT NULL,
+      role         ENUM('owner','admin','engenheiro','financeiro','colaborador','viewer')
+                   NOT NULL DEFAULT 'colaborador',
+      permissions  JSON NULL,
+      invited_by   INT NULL,
+      invited_at   DATETIME NULL,
+      accepted_at  DATETIME NULL,
+      removed_at   DATETIME NULL,
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_tenant_user (tenant_id, user_id),
+      INDEX idx_user (user_id, removed_at),
+      INDEX idx_tenant (tenant_id, role)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS tenant_invites (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id    INT NOT NULL,
+      email        VARCHAR(150) NOT NULL,
+      role         ENUM('admin','engenheiro','financeiro','colaborador','viewer')
+                   NOT NULL DEFAULT 'colaborador',
+      token        VARCHAR(64) NOT NULL UNIQUE,
+      invited_by   INT NOT NULL,
+      expires_at   DATETIME NOT NULL,
+      accepted_at  DATETIME NULL,
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_email_pending (email, accepted_at),
+      INDEX idx_tenant (tenant_id)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id                       INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id                INT NOT NULL UNIQUE,
+      plan_id                  INT NOT NULL,
+      status                   ENUM('trialing','active','past_due','canceled','paused','incomplete')
+                               NOT NULL DEFAULT 'trialing',
+      billing_cycle            ENUM('monthly','yearly') NOT NULL DEFAULT 'monthly',
+      provider                 ENUM('stripe','asaas','manual') NOT NULL DEFAULT 'manual',
+      provider_customer_id     VARCHAR(120) NULL,
+      provider_subscription_id VARCHAR(120) NULL,
+      current_period_start     DATETIME NULL,
+      current_period_end       DATETIME NULL,
+      trial_end                DATETIME NULL,
+      cancel_at_period_end     BOOLEAN  NOT NULL DEFAULT FALSE,
+      canceled_at              DATETIME NULL,
+      created_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_status (status, current_period_end),
+      INDEX idx_provider (provider, provider_subscription_id)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS invoices (
+      id                    INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id             INT NOT NULL,
+      subscription_id       INT NULL,
+      number                VARCHAR(40) NOT NULL UNIQUE,
+      status                ENUM('draft','open','paid','void','uncollectible')
+                            NOT NULL DEFAULT 'open',
+      amount_brl            DECIMAL(10,2) NOT NULL,
+      tax_brl               DECIMAL(10,2) NOT NULL DEFAULT 0,
+      total_brl             DECIMAL(10,2) NOT NULL,
+      provider              ENUM('stripe','asaas','manual') NOT NULL,
+      provider_invoice_id   VARCHAR(120) NULL,
+      payment_method        ENUM('card','pix','boleto','manual') NULL,
+      issue_date            DATE NOT NULL,
+      due_date              DATE NOT NULL,
+      paid_at               DATETIME NULL,
+      pdf_url               VARCHAR(500) NULL,
+      line_items            JSON NOT NULL,
+      created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_tenant_date (tenant_id, issue_date),
+      INDEX idx_status (status, due_date)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS payment_methods (
+      id                INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id         INT NOT NULL,
+      provider          ENUM('stripe','asaas') NOT NULL,
+      provider_pm_id    VARCHAR(120) NOT NULL,
+      type              ENUM('card','pix','boleto') NOT NULL DEFAULT 'card',
+      brand             VARCHAR(20)  NULL,
+      last4             VARCHAR(4)   NULL,
+      exp_month         TINYINT      NULL,
+      exp_year          SMALLINT     NULL,
+      is_default        BOOLEAN      NOT NULL DEFAULT FALSE,
+      created_at        TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+      removed_at        DATETIME     NULL,
+      INDEX idx_tenant_default (tenant_id, is_default)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS usage_metrics (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id    INT NOT NULL,
+      metric_key   VARCHAR(60) NOT NULL,
+      period       VARCHAR(7)  NOT NULL,
+      value        BIGINT      NOT NULL DEFAULT 0,
+      updated_at   TIMESTAMP   DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_metric_period (tenant_id, metric_key, period),
+      INDEX idx_period (period, metric_key)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id     INT NOT NULL,
+      user_id       INT NULL,
+      action        VARCHAR(60) NOT NULL,
+      resource_type VARCHAR(40) NULL,
+      resource_id   VARCHAR(40) NULL,
+      ip            VARCHAR(45) NULL,
+      user_agent    VARCHAR(255) NULL,
+      payload       JSON NULL,
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_tenant_created (tenant_id, created_at),
+      INDEX idx_user (user_id, created_at),
+      INDEX idx_resource (resource_type, resource_id)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id     INT NOT NULL,
+      label         VARCHAR(80) NOT NULL,
+      key_prefix    VARCHAR(12) NOT NULL,
+      key_hash      VARCHAR(255) NOT NULL,
+      scopes        JSON NULL,
+      last_used_at  DATETIME NULL,
+      expires_at    DATETIME NULL,
+      revoked_at    DATETIME NULL,
+      created_by    INT NOT NULL,
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_tenant (tenant_id, revoked_at),
+      INDEX idx_prefix (key_prefix)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS webhooks (
+      id                   INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id            INT NOT NULL,
+      url                  VARCHAR(500) NOT NULL,
+      secret               VARCHAR(64) NOT NULL,
+      events               JSON NOT NULL,
+      active               BOOLEAN NOT NULL DEFAULT TRUE,
+      last_delivery_at     DATETIME NULL,
+      consecutive_failures INT NOT NULL DEFAULT 0,
+      created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_tenant_active (tenant_id, active)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id                  CHAR(36) PRIMARY KEY,
+      user_id             INT NOT NULL,
+      refresh_token_hash  VARCHAR(255) NOT NULL,
+      ip                  VARCHAR(45) NULL,
+      user_agent          VARCHAR(255) NULL,
+      created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_used_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      expires_at          DATETIME NOT NULL,
+      revoked_at          DATETIME NULL,
+      INDEX idx_user_active (user_id, revoked_at, expires_at)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      user_id      INT NOT NULL,
+      token_hash   VARCHAR(255) NOT NULL,
+      expires_at   DATETIME NOT NULL,
+      used_at      DATETIME NULL,
+      ip           VARCHAR(45) NULL,
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user_unused (user_id, used_at)
+    )
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS email_verifications (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      user_id      INT NOT NULL,
+      email        VARCHAR(150) NOT NULL,
+      token_hash   VARCHAR(255) NOT NULL,
+      expires_at   DATETIME NOT NULL,
+      verified_at  DATETIME NULL,
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user (user_id, verified_at)
+    )
+  `);
+
+  // ─── Seed: planos default ────────────────────────────────────────────
+  await pool.execute(`
+    INSERT IGNORE INTO plans (slug, name, description, price_brl_monthly, price_brl_yearly,
+       limit_obras_ativas, limit_users, limit_storage_gb,
+       limit_ocr_per_month, limit_whatsapp_per_month, limit_nf_per_month,
+       features, sort_order)
+    VALUES
+      ('starter',  'Starter',  'Pra autônomos e pequenas equipes',
+         97.00,  931.20,  3,    2,   5,   50,  100,   50,
+         '{"api_access":false,"white_label":false,"audit_log_retention_days":30}', 1),
+      ('pro',      'Pro',      'Pra equipes em crescimento',
+        297.00, 2851.20, 15,   10,  50,  500, 1000,  200,
+         '{"api_access":true,"white_label":false,"audit_log_retention_days":90}', 2),
+      ('business', 'Business', 'Operação completa com NF-e',
+        697.00, 6691.20, 50, NULL, 200, 2000, 5000, 1000,
+         '{"api_access":true,"white_label":true,"sso":false,"audit_log_retention_days":365}', 3)
+  `);
+
+  // ─── Bootstrap: Romatec vira tenant 1 + CEO vira user 1 ─────────────
+  // Pega dados da tenant_settings existente (cnpj, brand_name) pra preencher.
+  await pool.execute(`
+    INSERT IGNORE INTO tenants (id, slug, name, cnpj, email, status,
+       primary_color, brand_name, timezone)
+    SELECT 1, 'romatec',
+           COALESCE(brand_name, 'Romatec Consultoria'),
+           cnpj, email, 'active',
+           COALESCE(primary_color, '#10b981'),
+           brand_name, 'America/Sao_Paulo'
+      FROM tenant_settings WHERE tenant_id = 1
+     LIMIT 1
+  `);
+  // Fallback se tenant_settings ainda nao tem row (instalacao limpa):
+  await pool.execute(`
+    INSERT IGNORE INTO tenants (id, slug, name, status, primary_color, brand_name)
+    VALUES (1, 'romatec', 'Romatec Consultoria', 'active', '#10b981', 'Romatec')
+  `);
+
+  // CEO José Romário — placeholder hash bcrypt forçará reset no 1º login
+  // Hash "$2b$12$placeholderForceReset0000000000000000000000000000000" — invalido propositalmente
+  const CEO_EMAIL = (process.env.CEO_EMAIL || 'romateccrm@gmail.com').toLowerCase();
+  const CEO_NAME  = process.env.CEO_NAME || 'José Romário Pinto Bezerra';
+  await pool.execute(
+    `INSERT IGNORE INTO users (id, email, password_hash, name, email_verified_at)
+     VALUES (1, ?, '$2b$12$placeholderForceResetXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX', ?, NOW())`,
+    [CEO_EMAIL, CEO_NAME]
+  );
+  await pool.execute(`
+    INSERT IGNORE INTO tenant_users (tenant_id, user_id, role, accepted_at)
+    VALUES (1, 1, 'owner', NOW())
+  `);
+
+  // Subscription Business permanente (manual, sem cobranca real) pro Romatec
+  await pool.execute(`
+    INSERT IGNORE INTO subscriptions
+      (tenant_id, plan_id, status, billing_cycle, provider,
+       current_period_start, current_period_end)
+    SELECT 1, p.id, 'active', 'yearly', 'manual',
+           NOW(), DATE_ADD(NOW(), INTERVAL 100 YEAR)
+      FROM plans p WHERE p.slug = 'business' LIMIT 1
+  `);
+
+  console.log('[DB] SaaS foundation tables ready (v1.83.0 — schema-only)');
+
   // de definidas aqui.
   await verifyCriticalTables();
 
