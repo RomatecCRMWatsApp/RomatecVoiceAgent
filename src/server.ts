@@ -1310,6 +1310,12 @@ app.put('/api/recibos/:id', async (req: Request, res: Response) => {
     const b = req.body || {};
     const fields: string[] = [];
     const params: (string | number | null)[] = [];
+    // v1.89.0: status_force permite transicionar 'rascunho' -> 'aguardando_envio'
+    // (botao "Salvar sem enviar"). So aceita transicao especifica, sem pular etapas.
+    if (b.status_force === 'aguardando_envio' && r.status === 'rascunho') {
+      fields.push('status = ?');
+      params.push('aguardando_envio');
+    }
     const allow = ['destinatario_nome', 'destinatario_doc', 'destinatario_phone',
                    'destinatario_email', 'valor', 'forma_pagamento',
                    'descricao_servico'];
@@ -1336,6 +1342,19 @@ app.put('/api/recibos/:id', async (req: Request, res: Response) => {
     res.json({ ok: true, message: `Recibo ${r.numero} atualizado.` });
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
+// v1.89.0: PDF preview SEM persistir — pra modal de confirmacao
+app.post('/api/recibos/preview-pdf', async (req: Request, res: Response) => {
+  try {
+    const { gerarPdfReciboPreview } = await import('./services/reciboPdf');
+    const buf = await gerarPdfReciboPreview(req.body || {});
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 app.get   ('/api/recibos/:id/pdf', async (req: Request, res: Response) => {
   try {
     const r = await recibos.buscarReciboPorId(String(req.params.id));

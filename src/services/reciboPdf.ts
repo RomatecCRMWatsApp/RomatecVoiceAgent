@@ -31,9 +31,13 @@ const fmtDataHora = (d: Date | string | null): string => {
   return `${fmtData(dt)} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
 };
 
-/** Base URL pra QR code. Usa env BASE_URL se setado, senao Railway URL. */
+/** Base URL pra QR code. Usa env PUBLIC_BASE_URL (preferido) ou BASE_URL (legado),
+ * senao Railway URL. Pra apontar dominio proprio, basta trocar PUBLIC_BASE_URL. */
 function getBaseUrl(): string {
-  return (process.env.BASE_URL || 'https://romatecvoiceagent-production.up.railway.app').replace(/\/$/, '');
+  const url = process.env.PUBLIC_BASE_URL
+    || process.env.BASE_URL
+    || 'https://romatecvoiceagent-production.up.railway.app';
+  return url.replace(/\/$/, '');
 }
 
 const FORMA_LABEL: Record<string, string> = {
@@ -214,4 +218,81 @@ export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
   doc.end();
   await new Promise<void>(resolve => doc.on('end', () => resolve()));
   return Buffer.concat(chunks);
+}
+
+// v1.89.0: PDF de PREVIEW (modal de confirmação). NAO persiste — recebe
+// dados crus do form, faz placeholder pro hash/numero/QR e gera PDF.
+// Usa o mesmo gerarPdfRecibo internamente pra garantir 100% de consistencia
+// visual entre o que o user ve no modal e o que vai pro cliente.
+export interface ReciboPreviewInput {
+  tipo: string;
+  numero?: string;
+  destinatario_nome: string;
+  destinatario_doc?: string | null;
+  destinatario_phone: string;
+  destinatario_email?: string | null;
+  valor?: number | null;
+  forma_pagamento?: string | null;
+  descricao_servico?: string | null;
+  expira_em_dias?: number;
+  tenant_id?: number;
+}
+
+const PREVIEW_PREFIXOS: Record<string, string> = {
+  funcionario: 'REC-FUN', parcela: 'REC-PAR', despesa: 'REC-DSP',
+  proposta: 'REC-PRO', vistoria: 'REC-VTO', etapa: 'REC-ETP',
+  chaves: 'REC-CHV', custom: 'REC-CUS',
+};
+
+export async function gerarPdfReciboPreview(input: ReciboPreviewInput): Promise<Buffer> {
+  // Constroi um Recibo "fake" com placeholders. NAO insere no banco.
+  const ano = new Date().getFullYear();
+  const numero = input.numero || `${PREVIEW_PREFIXOS[input.tipo] || 'REC-CUS'}-${ano}-PREVIEW`;
+  const expiresAt = input.expira_em_dias
+    ? new Date(Date.now() + Math.max(1, Math.min(365, input.expira_em_dias)) * 86400_000)
+    : null;
+
+  const fakeRecibo = {
+    id: 0,
+    tenant_id: input.tenant_id ?? 1,
+    numero,
+    tipo: input.tipo,
+    resource_type: 'preview',
+    resource_id: 'preview',
+    destinatario_nome: input.destinatario_nome || '— preencher —',
+    destinatario_doc: input.destinatario_doc?.replace(/\D/g, '') || null,
+    destinatario_phone: input.destinatario_phone || '',
+    destinatario_email: input.destinatario_email || null,
+    destinatario_endereco: null,
+    valor: input.valor != null ? Number(input.valor) : null,
+    forma_pagamento: input.forma_pagamento || null,
+    descricao_servico: input.descricao_servico || null,
+    codigo_servico_key: null,
+    categoria_servico: null,
+    categoria_grupo: null,
+    token: 'preview',
+    hash_validacao: 'preview-'.padEnd(64, '0'),
+    status: 'rascunho',
+    resposta_acao: null,
+    resposta_obs: null,
+    resposta_foto_url: null,
+    resposta_lat: null,
+    resposta_lng: null,
+    pdf_url: null,
+    zapi_message_id: null,
+    expires_at: expiresAt,
+    enviado_em: null,
+    entregue_em: null,
+    lido_em: null,
+    respondido_em: null,
+    ip_resposta: null,
+    user_agent_resposta: null,
+    last_reminder_at: null,
+    nota_fiscal_id: null,
+    created_by: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+  } as unknown as import('../integrations/recibos').Recibo;
+
+  return await gerarPdfRecibo(fakeRecibo);
 }

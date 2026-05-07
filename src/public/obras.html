@@ -7485,9 +7485,11 @@ function renderReciboForm(v) {
           O recibo recebe número automático no formato <code>REC-{TIPO}-{ANO}-{seq}</code>.
           Após salvar, você poderá enviar pelo WhatsApp com 1 clique.
         </p>
-        <div style="display:flex; gap:8px; margin-top:6px;">
-          <button class="btn-primary" id="recSalvar" style="flex:2; background:var(--success); color:#fff; border-color:var(--success);">💾 Criar e enviar</button>
-          <button id="recSalvarRascunho" style="flex:1;">Salvar rascunho</button>
+        <!-- v1.89.0: 3 botões com fluxo separado de salvar/enviar -->
+        <div style="display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px; margin-top:6px;">
+          <button id="recSalvarRascunho" title="Salvar como rascunho — pode editar depois, número provisório" style="background:transparent; border:1px solid #444; color:#888;">💾 Salvar rascunho</button>
+          <button id="recSalvarSemEnviar" title="Emite o recibo (gera número definitivo) sem enviar agora" style="background:#1F5C3A; color:#fff; border-color:#1F5C3A;">✅ Salvar sem enviar</button>
+          <button id="recSalvarEnviar" title="Salva e dispara WhatsApp imediatamente" style="background:#25D366; color:#fff; border-color:#25D366; font-weight:600;">🚀 Salvar e enviar via WhatsApp</button>
         </div>
       </div>
     </div>`;
@@ -7604,21 +7606,33 @@ function renderReciboForm(v) {
     showToast('✓ Cliente cadastrado e selecionado!', 'success');
   };
 
-  async function salvar(enviar) {
-    if (!f.destinatario_nome.trim()) { showToast('Informe o destinatário', 'error'); return; }
-    const telDigits = f.destinatario_phone.replace(/\D/g, '');
-    if (telDigits.length < 10) { showToast('WhatsApp incompleto (DDD + 8 dígitos)', 'error'); return; }
+  // v1.89.0: 3 ações com validação condicional + modal de confirmação universal
+  // acao: 'rascunho' | 'emitir' | 'enviar'
+  async function salvar(acao) {
+    // Validação CONDICIONAL por ação
+    if (acao !== 'rascunho') {
+      if (!f.destinatario_nome.trim()) { showToast('Informe o destinatário', 'error'); return; }
+      if (f.valor === '' || f.valor === null) { showToast('Informe o valor', 'error'); return; }
+    }
+    if (acao === 'enviar') {
+      const telDigits = f.destinatario_phone.replace(/\D/g, '');
+      if (telDigits.length < 10) { showToast('WhatsApp obrigatório pra enviar (DDD + 8 dígitos)', 'error'); return; }
+    }
     if (f.destinatario_doc) {
       const docDigits = f.destinatario_doc.replace(/\D/g, '');
       if (docDigits && !validarDoc(docDigits)) {
         showToast('CPF/CNPJ inválido', 'error'); return;
       }
     }
-    const btnId = enviar ? 'recSalvar' : 'recSalvarRascunho';
+
+    // Modal de confirmação com preview do PDF (option C2 — preview = PDF real)
+    const confirmou = await abrirModalConfirmacaoRecibo(acao, f);
+    if (!confirmou) return;
+
+    const btnId = { rascunho:'recSalvarRascunho', emitir:'recSalvarSemEnviar', enviar:'recSalvarEnviar' }[acao];
     const btn = document.getElementById(btnId);
-    btn.disabled = true;
-    const orig = btn.textContent;
-    btn.textContent = 'Salvando...';
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+
     try {
       const editandoId = state.recibosEditandoId;
       const payload = {
@@ -7633,18 +7647,16 @@ function renderReciboForm(v) {
 
       let r;
       if (editandoId) {
-        // EDIÇÃO — PUT
         await api('/api/recibos/' + editandoId, { method: 'PUT', body: JSON.stringify(payload) });
         r = (state.recibos || []).find(x => String(x.id) === String(editandoId)) || { id: editandoId, numero: '#' + editandoId };
-        if (enviar) {
-          btn.textContent = 'Enviando WhatsApp...';
+        if (acao === 'enviar') {
+          if (btn) btn.textContent = 'Enviando WhatsApp...';
           await api('/api/recibos/' + editandoId + '/enviar', { method: 'POST', body: JSON.stringify({}) });
           showToast('Recibo ' + r.numero + ' atualizado e enviado', 'success');
         } else {
           showToast('Recibo ' + r.numero + ' atualizado', 'info');
         }
       } else {
-        // CRIAÇÃO — POST
         const createPayload = {
           tipo: f.tipo,
           resource_type: f.resource_type,
@@ -7655,10 +7667,17 @@ function renderReciboForm(v) {
           expira_em_dias: Number(f.expira_em_dias) || 7,
         };
         r = await api('/api/recibos', { method: 'POST', body: JSON.stringify(createPayload) });
-        if (enviar) {
-          btn.textContent = 'Enviando WhatsApp...';
+        if (acao === 'enviar') {
+          if (btn) btn.textContent = 'Enviando WhatsApp...';
           await api('/api/recibos/' + r.id + '/enviar', { method: 'POST', body: JSON.stringify({}) });
           showToast('Recibo ' + r.numero + ' criado e enviado pelo WhatsApp', 'success');
+        } else if (acao === 'emitir') {
+          // 'emitir' = salvou sem enviar — atualiza status pra 'aguardando_envio'
+          // (que mapeia pra 'emitido' no status_simplificado)
+          await api('/api/recibos/' + r.id, {
+            method: 'PUT', body: JSON.stringify({ status_force: 'aguardando_envio' })
+          }).catch(() => {}); // se PUT falhar, segue como rascunho mesmo
+          showToast('Recibo ' + r.numero + ' emitido (sem envio)', 'success');
         } else {
           showToast('Recibo ' + r.numero + ' salvo como rascunho', 'info');
         }
@@ -7670,11 +7689,91 @@ function renderReciboForm(v) {
       renderRecibos();
     } catch (e) {
       showToast('Erro: ' + e.message, 'error');
-      btn.disabled = false; btn.textContent = orig;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = { rascunho:'💾 Salvar rascunho', emitir:'✅ Salvar sem enviar', enviar:'🚀 Salvar e enviar via WhatsApp' }[acao];
+      }
     }
   }
-  document.getElementById('recSalvar').onclick = () => salvar(true);
-  document.getElementById('recSalvarRascunho').onclick = () => salvar(false);
+  document.getElementById('recSalvarRascunho').onclick = () => salvar('rascunho');
+  document.getElementById('recSalvarSemEnviar').onclick = () => salvar('emitir');
+  document.getElementById('recSalvarEnviar').onclick = () => salvar('enviar');
+}
+
+// v1.89.0: Modal de confirmação universal pras 3 ações do form de Recibo.
+// Mostra preview do PDF real (option C2 — sem layout duplicado).
+// Retorna Promise<true> se confirmou, false se cancelou.
+async function abrirModalConfirmacaoRecibo(acao, f) {
+  const titulos = {
+    rascunho: 'Confirmar salvamento como rascunho',
+    emitir:   'Confirmar emissão do recibo',
+    enviar:   'Confirmar emissão e envio pelo WhatsApp',
+  };
+  const avisos = {
+    rascunho: '🟡 O recibo NÃO receberá número definitivo. Pode ser editado depois.',
+    emitir:   '🟢 O recibo receberá número oficial e ficará no status "Emitido". Você pode enviar depois.',
+    enviar:   `🚀 O recibo será emitido e enviado IMEDIATAMENTE para o WhatsApp ${f.destinatario_phone || '—'}.`,
+  };
+  const cores = { rascunho:'#888', emitir:'#1F5C3A', enviar:'#25D366' };
+
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px;';
+    const modal = document.createElement('div');
+    modal.className = 'card';
+    modal.style.cssText = 'max-width:900px; width:100%; max-height:95vh; display:flex; flex-direction:column; gap:12px; box-shadow:0 20px 60px rgba(0,0,0,0.5);';
+    modal.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">${escape(titulos[acao] || 'Confirmar')}</p>
+        <button data-conf-fechar style="background:transparent;">✕</button>
+      </div>
+      <div style="background:${cores[acao]}22; border-left:4px solid ${cores[acao]}; padding:10px 12px; border-radius:6px; font-size:13px; color:var(--text);">
+        ${escape(avisos[acao] || '')}
+      </div>
+      <p style="margin:0; font-size:12px; color:var(--text-muted);">Preview do PDF que será gerado:</p>
+      <div id="confPreviewBox" style="flex:1; min-height:400px; max-height:65vh; background:#FAF7EE; border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+        <span style="color:#888;">⏳ Gerando preview...</span>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button data-conf-cancelar style="flex:1; background:transparent; border:1px solid #444; color:#888;">← Voltar e revisar</button>
+        <button data-conf-ok style="flex:2; background:${cores[acao]}; color:#fff; border-color:${cores[acao]}; font-weight:600;">${acao==='enviar'?'🚀 Confirmar e enviar':'✅ Confirmar'}</button>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const cleanup = (val) => { try { document.body.removeChild(overlay); } catch {} resolve(val); };
+    modal.querySelector('[data-conf-fechar]').onclick = () => cleanup(false);
+    modal.querySelector('[data-conf-cancelar]').onclick = () => cleanup(false);
+    modal.querySelector('[data-conf-ok]').onclick = () => cleanup(true);
+    overlay.onclick = (e) => { if (e.target === overlay) cleanup(false); };
+
+    // Carrega preview do PDF
+    const previewBox = modal.querySelector('#confPreviewBox');
+    fetch('/api/recibos/preview-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tipo: f.tipo,
+        destinatario_nome: f.destinatario_nome || '',
+        destinatario_doc: f.destinatario_doc || null,
+        destinatario_phone: f.destinatario_phone || '',
+        destinatario_email: f.destinatario_email || null,
+        valor: f.valor ? Number(f.valor) : null,
+        forma_pagamento: f.forma_pagamento || null,
+        descricao_servico: f.descricao_servico || null,
+        expira_em_dias: Number(f.expira_em_dias) || 7,
+      }),
+    })
+    .then(r => r.ok ? r.blob() : Promise.reject(new Error('HTTP ' + r.status)))
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      previewBox.innerHTML = `<iframe src="${url}#toolbar=0&navpanes=0" style="width:100%; height:100%; border:0;"></iframe>`;
+    })
+    .catch(err => {
+      previewBox.innerHTML = `<span style="color:#dc2626;">Erro gerando preview: ${escape(err.message)}</span>`;
+    });
+  });
 }
 
 // ─── HELPERS DE VALIDAÇÃO + TOAST + MÁSCARAS (v1.86.0) ────────────────
