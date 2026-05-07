@@ -7447,18 +7447,18 @@ function renderReciboForm(v) {
         </div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px;">
           <label>Destinatário *
-            <input id="recNome" placeholder="Nome completo" value="${escape(f.destinatario_nome)}" style="width:100%;">
+            <input id="recNome" placeholder="Nome completo" maxlength="120" value="${escape(f.destinatario_nome)}" style="width:100%;">
           </label>
           <label>WhatsApp *
             <div style="display:flex; gap:6px;">
-              <input id="recPhone" placeholder="5598999999999" value="${escape(f.destinatario_phone)}" style="flex:1;">
+              <input id="recPhone" placeholder="(99) 99999-9999" maxlength="15" value="${escape(f.destinatario_phone)}" style="flex:1; font-family:monospace;">
               <button type="button" id="recCadastrarNovo" title="Cadastrar novo cliente completo" style="background:var(--gold); color:#06120a; border-color:var(--gold); padding:6px 10px; font-size:12px; white-space:nowrap;">+ Cadastrar Novo</button>
             </div>
           </label>
         </div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:8px;">
           <label>CPF/CNPJ (opcional)
-            <input id="recDoc" placeholder="000.000.000-00" value="${escape(f.destinatario_doc)}" style="width:100%;">
+            <input id="recDoc" placeholder="000.000.000-00" maxlength="18" value="${escape(f.destinatario_doc)}" style="width:100%; font-family:monospace;">
           </label>
           <label>Email (opcional)
             <input id="recEmail" type="email" placeholder="email@dominio.com" value="${escape(f.destinatario_email)}" style="width:100%;">
@@ -7499,11 +7499,14 @@ function renderReciboForm(v) {
     renderRecibos();
   };
 
-  // Sync state em alterações
+  // Sync state em alterações + máscaras (v1.87.0)
   ['Tipo','Nome','Phone','Doc','Email','Valor','Forma','Dias','Desc'].forEach(k => {
     const el = document.getElementById('rec' + k);
     if (!el) return;
     el.oninput = el.onchange = () => {
+      // Aplica máscara antes de sincronizar com state
+      if (k === 'Phone') el.value = mascararTelefone(el.value);
+      else if (k === 'Doc') el.value = mascararDoc(el.value);
       const map = {
         Tipo:'tipo', Nome:'destinatario_nome', Phone:'destinatario_phone',
         Doc:'destinatario_doc', Email:'destinatario_email',
@@ -7602,8 +7605,15 @@ function renderReciboForm(v) {
   };
 
   async function salvar(enviar) {
-    if (!f.destinatario_nome.trim()) return alert('Informe o destinatário');
-    if (!f.destinatario_phone.trim()) return alert('Informe o WhatsApp');
+    if (!f.destinatario_nome.trim()) { showToast('Informe o destinatário', 'error'); return; }
+    const telDigits = f.destinatario_phone.replace(/\D/g, '');
+    if (telDigits.length < 10) { showToast('WhatsApp incompleto (DDD + 8 dígitos)', 'error'); return; }
+    if (f.destinatario_doc) {
+      const docDigits = f.destinatario_doc.replace(/\D/g, '');
+      if (docDigits && !validarDoc(docDigits)) {
+        showToast('CPF/CNPJ inválido', 'error'); return;
+      }
+    }
     const btnId = enviar ? 'recSalvar' : 'recSalvarRascunho';
     const btn = document.getElementById(btnId);
     btn.disabled = true;
@@ -7629,9 +7639,9 @@ function renderReciboForm(v) {
         if (enviar) {
           btn.textContent = 'Enviando WhatsApp...';
           await api('/api/recibos/' + editandoId + '/enviar', { method: 'POST', body: JSON.stringify({}) });
-          alert('✅ Recibo ' + r.numero + ' atualizado e enviado.');
+          showToast('Recibo ' + r.numero + ' atualizado e enviado', 'success');
         } else {
-          alert('💾 Recibo ' + r.numero + ' atualizado.');
+          showToast('Recibo ' + r.numero + ' atualizado', 'info');
         }
       } else {
         // CRIAÇÃO — POST
@@ -7648,9 +7658,9 @@ function renderReciboForm(v) {
         if (enviar) {
           btn.textContent = 'Enviando WhatsApp...';
           await api('/api/recibos/' + r.id + '/enviar', { method: 'POST', body: JSON.stringify({}) });
-          alert('✅ Recibo ' + r.numero + ' criado e enviado pelo WhatsApp!');
+          showToast('Recibo ' + r.numero + ' criado e enviado pelo WhatsApp', 'success');
         } else {
-          alert('💾 Recibo ' + r.numero + ' salvo como rascunho');
+          showToast('Recibo ' + r.numero + ' salvo como rascunho', 'info');
         }
       }
       state.recibosView = 'lista';
@@ -7659,7 +7669,7 @@ function renderReciboForm(v) {
       await loadRecibos();
       renderRecibos();
     } catch (e) {
-      alert('Erro: ' + e.message);
+      showToast('Erro: ' + e.message, 'error');
       btn.disabled = false; btn.textContent = orig;
     }
   }
