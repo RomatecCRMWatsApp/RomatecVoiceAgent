@@ -49,11 +49,90 @@ const FORMA_LABEL: Record<string, string> = {
   cheque: 'Cheque',
 };
 
+// v1.95.0: Valor por extenso em pt-BR (até R$ 999.999.999,99).
+function numeroExtenso(n: number): string {
+  if (n === 0) return 'zero';
+  if (n < 0) return 'menos ' + numeroExtenso(-n);
+  const u = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove'];
+  const d10 = ['dez', 'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
+  const d = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'];
+  const c = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos'];
+
+  function ate999(x: number): string {
+    if (x === 100) return 'cem';
+    const partes: string[] = [];
+    const cc = Math.floor(x / 100);
+    if (cc > 0) partes.push(c[cc]);
+    const r = x % 100;
+    if (r > 0) {
+      if (r < 10) partes.push(u[r]);
+      else if (r < 20) partes.push(d10[r - 10]);
+      else {
+        const dd = Math.floor(r / 10);
+        const uu = r % 10;
+        if (uu > 0) partes.push(d[dd] + ' e ' + u[uu]);
+        else partes.push(d[dd]);
+      }
+    }
+    return partes.join(' e ');
+  }
+
+  const partes: string[] = [];
+  const bilhoes = Math.floor(n / 1_000_000_000);
+  if (bilhoes > 0) {
+    partes.push(ate999(bilhoes) + (bilhoes === 1 ? ' bilhão' : ' bilhões'));
+    n = n % 1_000_000_000;
+  }
+  const milhoes = Math.floor(n / 1_000_000);
+  if (milhoes > 0) {
+    partes.push(ate999(milhoes) + (milhoes === 1 ? ' milhão' : ' milhões'));
+    n = n % 1_000_000;
+  }
+  const milhares = Math.floor(n / 1000);
+  if (milhares > 0) {
+    if (milhares === 1) partes.push('mil');
+    else partes.push(ate999(milhares) + ' mil');
+    n = n % 1000;
+  }
+  if (n > 0) partes.push(ate999(n));
+  return partes.join(' e ');
+}
+
+export function valorPorExtenso(valor: number): string {
+  const v = Math.max(0, Math.round(Number(valor) * 100) / 100);
+  const reais = Math.floor(v);
+  const centavos = Math.round((v - reais) * 100);
+  const partes: string[] = [];
+  if (reais > 0) partes.push(numeroExtenso(reais) + (reais === 1 ? ' real' : ' reais'));
+  if (centavos > 0) partes.push(numeroExtenso(centavos) + (centavos === 1 ? ' centavo' : ' centavos'));
+  if (partes.length === 0) return 'zero reais';
+  return partes.join(' e ');
+}
+
 export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
   const t = await getTenantSettings(recibo.tenant_id).catch(() => null);
-  const brand = t?.brand_name || 'Romatec Consultoria Imobiliária';
-  const corHex = t?.primary_color || '#10b981';
-  const cnpj = t?.cnpj || '';
+  // v1.95.0: tenta tambem o tenant_fiscal_config (CNPJ, IM, endereco fiscal)
+  let fiscal: { cnpj?: string; inscricao_municipal?: string | null } | null = null;
+  try {
+    const m = await import('./tenantFiscalConfig');
+    fiscal = await m.getFiscalConfig(recibo.tenant_id);
+  } catch { /* ignora */ }
+  const brand = t?.brand_name || 'ROMATEC CONSULTORIA TOTAL';
+  const corHex = t?.primary_color || '#1F5C3A';
+  const corDourada = '#B8893A';
+  const cnpj = fiscal?.cnpj || t?.cnpj || '17.261.987/0001-09';
+  const im = fiscal?.inscricao_municipal || 'ISENTO';
+  const enderecoEmitente = (t?.endereco) || 'Rua São Raimundo, 10 — Centro — Açailândia/MA — CEP 65930-000';
+  const telEmitente = t?.telefone || '(99) 99181-1246';
+  const emailEmitente = t?.email || 'contato@consultoriaromatec.com.br';
+  // Dados bancários (Romatec PJ — Santander)
+  const dadosBancarios = {
+    banco: 'Santander (033)',
+    agencia: '1225',
+    conta: '13000714-4',
+    titular: 'J R P BEZERRA LTDA',
+    pix: 'romatec.cad@hotmail.com',
+  };
   const logoFile = path.join(__dirname, '..', 'public', 'romatec-logo-removebg-preview.png');
 
   const doc = new PDFDocument({
@@ -68,109 +147,155 @@ export async function gerarPdfRecibo(recibo: Recibo): Promise<Buffer> {
   doc.on('data', (c: Buffer) => chunks.push(c));
 
   // ── Cabecalho ────────────────────────────────────────────────────────
-  let yLogo = 40;
   if (fs.existsSync(logoFile)) {
-    try {
-      doc.image(logoFile, 40, yLogo, { fit: [110, 55] });
-    } catch { /* opcional */ }
+    try { doc.image(logoFile, 40, 30, { fit: [90, 50] }); } catch { /* opcional */ }
   }
+  doc.fontSize(15).fillColor(corHex).font('Helvetica-Bold').text(brand, 145, 38);
+  doc.fontSize(8).fillColor('#444').font('Helvetica')
+     .text(`CNPJ ${cnpj} · IM ${im}`, 145, 56)
+     .text(enderecoEmitente, 145, 67, { width: 410 })
+     .text(`${telEmitente} · ${emailEmitente}`, 145, 78);
 
-  doc.fontSize(16).fillColor(corHex).font('Helvetica-Bold').text(brand, 170, 50);
-  if (cnpj) {
-    doc.fontSize(9).fillColor('#666').font('Helvetica').text(`CNPJ ${cnpj}`, 170, 75);
-  }
+  // Faixa dourada
+  doc.rect(40, 95, 515, 3).fill(corDourada);
+  doc.moveTo(40, 99).lineTo(555, 99).strokeColor(corHex).lineWidth(1.5).stroke();
 
-  // Linha divisoria
-  doc.moveTo(40, 110).lineTo(555, 110).strokeColor(corHex).lineWidth(2).stroke();
-
-  // Titulo
-  doc.fontSize(18).fillColor('#111').font('Helvetica-Bold')
-     .text(META.TITULO_PDF[recibo.tipo], 40, 130, { align: 'center', width: 515 });
-  doc.fontSize(11).fillColor('#666').font('Helvetica')
-     .text(`Nº ${recibo.numero}`, 40, 158, { align: 'center', width: 515 });
-
-  // ── Corpo ───────────────────────────────────────────────────────────
-  let cy = 200;
-
-  // Bloco destinatario
-  doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold').text('DESTINATÁRIO', 40, cy);
-  cy += 14;
-  doc.fontSize(11).fillColor('#111').font('Helvetica')
-     .text(recibo.destinatario_nome, 40, cy);
-  cy += 14;
-  if (recibo.destinatario_doc) {
-    doc.fontSize(9).fillColor('#444').text(`CPF/CNPJ: ${recibo.destinatario_doc}`, 40, cy);
-    cy += 12;
-  }
-  doc.fontSize(9).fillColor('#444').text(`Tel: ${recibo.destinatario_phone}`, 40, cy);
-  cy += 12;
-  if (recibo.destinatario_email) {
-    doc.fontSize(9).fillColor('#444').text(`Email: ${recibo.destinatario_email}`, 40, cy);
-    cy += 12;
-  }
-  cy += 12;
-
-  // Bloco valor (so se tem valor)
+  // Titulo + numero + valor destacado em row
+  doc.fontSize(16).fillColor('#111').font('Helvetica-Bold')
+     .text(META.TITULO_PDF[recibo.tipo], 40, 110, { width: 280 });
+  doc.fontSize(9).fillColor('#666').font('Helvetica')
+     .text(`Nº ${recibo.numero}`, 40, 132);
   if (recibo.valor != null) {
-    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold').text('VALOR', 40, cy);
-    cy += 14;
-    doc.fontSize(20).fillColor('#111').font('Helvetica-Bold').text(fmtBRL(recibo.valor), 40, cy);
-    cy += 28;
-    if (recibo.forma_pagamento) {
-      doc.fontSize(10).fillColor('#444').font('Helvetica')
-         .text(`Forma de pagamento: ${FORMA_LABEL[recibo.forma_pagamento] || recibo.forma_pagamento}`, 40, cy);
-      cy += 14;
-    }
-    cy += 8;
+    doc.fontSize(20).fillColor(corHex).font('Helvetica-Bold')
+       .text(fmtBRL(recibo.valor), 320, 113, { width: 235, align: 'right' });
   }
 
-  // Bloco descricao
-  if (recibo.descricao_servico) {
-    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold').text('DESCRIÇÃO', 40, cy);
-    cy += 14;
-    doc.fontSize(10).fillColor('#111').font('Helvetica')
-       .text(recibo.descricao_servico, 40, cy, { width: 515 });
-    cy = doc.y + 12;
-  }
-
-  // Bloco datas
-  doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold').text('EMISSÃO', 40, cy);
-  cy += 14;
-  doc.fontSize(10).fillColor('#444').font('Helvetica')
-     .text(`Emitido em: ${fmtDataHora(recibo.created_at)}`, 40, cy);
+  // ── Bloco EMITENTE ──────────────────────────────────────────────────
+  let cy = 165;
+  doc.fontSize(9).fillColor(corDourada).font('Helvetica-Bold')
+     .text('EMITENTE — RECEBI(EMOS) DE', 40, cy);
+  cy += 11;
+  doc.fontSize(10).fillColor('#111').font('Helvetica-Bold').text(brand, 40, cy);
   cy += 12;
+  doc.fontSize(9).fillColor('#444').font('Helvetica')
+     .text(`CNPJ: ${cnpj} · IM: ${im}`, 40, cy);
+  cy += 11;
+  doc.text(enderecoEmitente, 40, cy, { width: 515 });
+  cy = doc.y + 8;
+
+  // ── Bloco PAGADOR ───────────────────────────────────────────────────
+  doc.fontSize(9).fillColor(corDourada).font('Helvetica-Bold')
+     .text('PAGADOR — A IMPORTÂNCIA DE', 40, cy);
+  cy += 11;
+  doc.fontSize(11).fillColor('#111').font('Helvetica-Bold')
+     .text(recibo.destinatario_nome || '— preencher —', 40, cy);
+  cy += 13;
+  doc.fontSize(9).fillColor('#444').font('Helvetica');
+  if (recibo.destinatario_doc) {
+    doc.text(`CPF/CNPJ: ${recibo.destinatario_doc}`, 40, cy);
+    cy += 11;
+  }
+  if (recibo.destinatario_phone) {
+    doc.text(`WhatsApp: ${recibo.destinatario_phone}`, 40, cy);
+    cy += 11;
+  }
+  if (recibo.destinatario_email) {
+    doc.text(`Email: ${recibo.destinatario_email}`, 40, cy);
+    cy += 11;
+  }
+  cy += 6;
+
+  // ── Frase de quitação com valor por extenso ─────────────────────────
+  if (recibo.valor != null && recibo.valor > 0) {
+    const extenso = valorPorExtenso(Number(recibo.valor));
+    const frase = `A importância de ${fmtBRL(recibo.valor)} (${extenso}), referente ao serviço abaixo descrito, dando plena, geral e irrevogável quitação.`;
+    doc.fontSize(9.5).fillColor('#111').font('Helvetica-Oblique')
+       .text(frase, 40, cy, { width: 515, align: 'justify' });
+    cy = doc.y + 10;
+  }
+
+  // ── Bloco REFERENTE A ───────────────────────────────────────────────
+  if (recibo.descricao_servico) {
+    doc.fontSize(9).fillColor(corDourada).font('Helvetica-Bold')
+       .text('REFERENTE A', 40, cy);
+    cy += 11;
+    doc.fontSize(9.5).fillColor('#111').font('Helvetica')
+       .text(recibo.descricao_servico, 40, cy, { width: 515 });
+    cy = doc.y + 8;
+  }
+
+  // ── Forma de pagamento + DADOS BANCÁRIOS ────────────────────────────
+  doc.fontSize(9).fillColor(corDourada).font('Helvetica-Bold')
+     .text('PAGAMENTO', 40, cy);
+  cy += 11;
+  doc.fontSize(9).fillColor('#444').font('Helvetica');
+  if (recibo.forma_pagamento) {
+    doc.text(`Forma: ${FORMA_LABEL[recibo.forma_pagamento] || recibo.forma_pagamento}`, 40, cy);
+    cy += 11;
+  }
+  doc.text(`Data de emissão: ${fmtData(recibo.created_at)}`, 40, cy);
+  cy += 11;
   if (recibo.expires_at) {
     doc.text(`Válido até: ${fmtData(recibo.expires_at)}`, 40, cy);
+    cy += 11;
+  }
+  // Dados bancários (so pra PJ — Romatec)
+  if (recibo.tenant_id === 1) {
+    cy += 4;
+    doc.fontSize(8.5).fillColor('#666').font('Helvetica-Bold')
+       .text('Dados bancários para depósito/PIX:', 40, cy);
+    cy += 10;
+    doc.fontSize(8.5).fillColor('#444').font('Helvetica')
+       .text(`Banco ${dadosBancarios.banco} · Ag. ${dadosBancarios.agencia} · CC ${dadosBancarios.conta}`, 40, cy);
+    cy += 10;
+    doc.text(`Titular: ${dadosBancarios.titular}`, 40, cy);
+    cy += 10;
+    doc.font('Helvetica-Bold').fillColor(corHex)
+       .text(`PIX (e-mail): ${dadosBancarios.pix}`, 40, cy);
     cy += 12;
   }
-  cy += 8;
+
+  // ── Local + Data + Linha de assinatura ──────────────────────────────
+  cy += 14;
+  const cidade = 'Açailândia/MA';
+  const dataExtenso = (() => {
+    const d = recibo.created_at instanceof Date ? recibo.created_at : new Date(recibo.created_at);
+    const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+    return `${cidade}, ${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}.`;
+  })();
+  doc.fontSize(10).fillColor('#111').font('Helvetica')
+     .text(dataExtenso, 40, cy, { width: 515, align: 'center' });
+  cy += 32;
+  // Linha de assinatura
+  doc.moveTo(180, cy).lineTo(415, cy).strokeColor('#444').lineWidth(0.5).stroke();
+  cy += 6;
+  doc.fontSize(9).fillColor('#222').font('Helvetica-Bold')
+     .text(brand, 40, cy, { width: 515, align: 'center' });
+  cy += 11;
+  doc.fontSize(8).fillColor('#666').font('Helvetica')
+     .text(`CNPJ ${cnpj}`, 40, cy, { width: 515, align: 'center' });
 
   // Bloco confirmacao (se ja respondido)
   if (recibo.respondido_em) {
+    cy += 18;
     const corStatus =
       recibo.status === 'confirmado' ? '#10b981' :
       recibo.status === 'contestado' ? '#dc2626' :
       '#3b82f6';
-    doc.fontSize(10).fillColor(corStatus).font('Helvetica-Bold')
-       .text('STATUS DE CONFIRMAÇÃO', 40, cy);
-    cy += 14;
+    doc.fontSize(8).fillColor(corStatus).font('Helvetica-Bold')
+       .text('STATUS', 40, cy);
+    cy += 10;
     const labelStatus =
       recibo.status === 'confirmado' ? '✓ CONFIRMADO PELO DESTINATÁRIO' :
       recibo.status === 'contestado' ? '✗ CONTESTADO PELO DESTINATÁRIO' :
       `Respondido (${recibo.resposta_acao})`;
-    doc.fontSize(11).fillColor(corStatus).text(labelStatus, 40, cy);
-    cy += 14;
-    doc.fontSize(9).fillColor('#444').font('Helvetica')
-       .text(`Em ${fmtDataHora(recibo.respondido_em)} via WhatsApp`, 40, cy);
-    cy += 12;
-    if (recibo.ip_resposta) {
-      doc.text(`IP: ${recibo.ip_resposta}`, 40, cy);
-      cy += 12;
-    }
+    doc.fontSize(9).fillColor(corStatus).text(labelStatus, 40, cy);
+    cy += 10;
+    doc.fontSize(8).fillColor('#444').font('Helvetica')
+       .text(`Em ${fmtDataHora(recibo.respondido_em)} via WhatsApp${recibo.ip_resposta ? ' · IP ' + recibo.ip_resposta : ''}`, 40, cy);
+    cy += 10;
     if (recibo.resposta_obs) {
-      cy += 4;
-      doc.fontSize(9).fillColor('#444').text(`Observação: ${recibo.resposta_obs}`, 40, cy, { width: 515 });
-      cy = doc.y + 8;
+      doc.text(`Obs: ${recibo.resposta_obs}`, 40, cy, { width: 515 });
     }
   }
 
