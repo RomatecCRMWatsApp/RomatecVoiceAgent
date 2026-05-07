@@ -68,13 +68,24 @@ function genHex(bytes = 32): string {
   return crypto.randomBytes(bytes).toString('hex');
 }
 
-/** Numero sequencial: REC-{TIPO}-{ANO}-{0001}. Lock pra evitar duplicacao. */
-async function proximoNumero(tenantId: number, tipo: TipoRecibo): Promise<string> {
+/**
+ * Numero sequencial: REC-{PREFIXO}-{ANO}-{0001}. Lock pra evitar duplicacao.
+ * Quando tipo='custom' e categoriaSigla informada, usa a sigla da categoria
+ * (ex: REC-CAMP-2026-0001) com sequencia propria por (tenant, sigla, ano).
+ * Caso contrario usa o prefixo do tipo padrao (REC-FUN, REC-PAR, etc).
+ */
+async function proximoNumero(
+  tenantId: number, tipo: TipoRecibo, categoriaSigla?: string | null
+): Promise<string> {
   const ano = new Date().getFullYear();
-  const prefixo = PREFIXOS[tipo];
+  const prefixo = (tipo === 'custom' && categoriaSigla)
+    ? `REC-${categoriaSigla.toUpperCase()}`
+    : PREFIXOS[tipo];
   const padrao = `${prefixo}-${ano}-%`;
 
-  // FOR UPDATE evita race condition se 2 requests chegam simultaneos
+  // FOR UPDATE evita race condition se 2 requests chegam simultaneos.
+  // Sequencia e por (tenant, prefixo, ano) — categorias diferentes nao
+  // misturam numeracao (REC-CAMP-2026-0001 e REC-AMB-2026-0001 paralelos).
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -84,9 +95,9 @@ async function proximoNumero(tenantId: number, tipo: TipoRecibo): Promise<string
                 0
               ) AS atual
          FROM recibos
-        WHERE tenant_id = ? AND tipo = ? AND numero LIKE ?
+        WHERE tenant_id = ? AND numero LIKE ?
         FOR UPDATE`,
-      [tenantId, tipo, padrao]
+      [tenantId, padrao]
     );
     const proximo = Number(rows[0]?.atual || 0) + 1;
     await conn.commit();
@@ -125,6 +136,10 @@ export interface CriarReciboInput {
   forma_pagamento?: FormaPagamento | null;
   descricao_servico?: string | null;
   codigo_servico_key?: string | null;
+  /** v1.85.0: id do servico no catalogo (ex: 'geo-rural-sigef'). Apenas pra tipo='custom'. */
+  categoria_servico?: string | null;
+  /** v1.85.0: sigla da categoria pai (ex: 'CAMP'). Influencia o prefixo do numero. */
+  categoria_grupo?: string | null;
   /** Em quantos dias expira o link (default: 7). */
   expira_em_dias?: number;
   created_by?: number | null;
@@ -146,6 +161,8 @@ export interface Recibo {
   forma_pagamento: FormaPagamento | null;
   descricao_servico: string | null;
   codigo_servico_key: string | null;
+  categoria_servico: string | null;
+  categoria_grupo: string | null;
   token: string;
   hash_validacao: string;
   status: StatusRecibo;
@@ -191,6 +208,8 @@ function mapRow(r: RowDataPacket): Recibo {
     forma_pagamento: r.forma_pagamento as FormaPagamento | null,
     descricao_servico: r.descricao_servico ?? null,
     codigo_servico_key: r.codigo_servico_key ?? null,
+    categoria_servico: r.categoria_servico ?? null,
+    categoria_grupo: r.categoria_grupo ?? null,
     token: String(r.token),
     hash_validacao: String(r.hash_validacao),
     status: r.status as StatusRecibo,
@@ -224,7 +243,7 @@ export async function criarRecibo(input: CriarReciboInput): Promise<Recibo> {
     throw new Error('resource_type e resource_id obrigatorios');
   }
   const phone = normalizarTelefone(input.destinatario_phone);
-  const numero = await proximoNumero(tenant_id, input.tipo);
+  const numero = await proximoNumero(tenant_id, input.tipo, input.categoria_grupo);
   const token = genHex(32);
   const hash = genHex(32);
   const dias = Math.max(1, Math.min(365, input.expira_em_dias ?? 7));
@@ -236,8 +255,9 @@ export async function criarRecibo(input: CriarReciboInput): Promise<Recibo> {
        destinatario_nome, destinatario_doc, destinatario_phone,
        destinatario_email, destinatario_endereco,
        valor, forma_pagamento, descricao_servico, codigo_servico_key,
+       categoria_servico, categoria_grupo,
        token, hash_validacao, status, expires_at, created_by
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'rascunho', ?, ?)`,
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'rascunho', ?, ?)`,
     [
       tenant_id, numero, input.tipo, input.resource_type, input.resource_id,
       input.destinatario_nome.trim().slice(0, 120),
@@ -249,6 +269,8 @@ export async function criarRecibo(input: CriarReciboInput): Promise<Recibo> {
       input.forma_pagamento || null,
       input.descricao_servico?.trim() || null,
       input.codigo_servico_key || null,
+      input.categoria_servico || null,
+      input.categoria_grupo ? input.categoria_grupo.toUpperCase().slice(0, 20) : null,
       token, hash, expires_at, input.created_by ?? null,
     ]
   );

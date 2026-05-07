@@ -454,6 +454,8 @@
     padding: 0 20px 12px; font-size: 11px; color: var(--text-muted); line-height: 1.4;
   }
 </style>
+<!-- v1.84.0: catálogo de serviços técnico-legais (auto-preenchimento descrição recibo) -->
+<script src="/js/catalogo-servicos.js"></script>
 </head>
 <body>
 <div class="container">
@@ -7264,6 +7266,9 @@ function renderRecibos() {
       valor: '',
       forma_pagamento: 'pix',
       descricao_servico: '',
+      categoria_id: null,        // v1.85.0: id da categoria do catálogo
+      categoria_sigla: null,     // sigla pra prefixo do número
+      categoria_servico: null,   // id do serviço específico
       resource_type: 'manual',
       resource_id: 'manual-' + Date.now(),
       expira_em_dias: 7,
@@ -7420,6 +7425,26 @@ function renderReciboForm(v) {
             ${RECIBO_TIPOS.map(t => `<option value="${t.val}" ${f.tipo===t.val?'selected':''}>${escape(t.label)}</option>`).join('')}
           </select>
         </label>
+        <!-- v1.85.0: catálogo de serviços (somente quando tipo='custom') -->
+        <div id="recCatalogoBox" style="display:${f.tipo==='custom'?'block':'none'};">
+          <div style="display:grid; grid-template-columns:1fr 2fr; gap:8px;">
+            <label>Categoria de serviço
+              <select id="recCategoria" style="width:100%;">
+                <option value="">— Personalizado / Em branco —</option>
+                ${(window.CATALOGO_SERVICOS||[]).map(c => `<option value="${c.id}" data-sigla="${c.sigla}" ${f.categoria_id===c.id?'selected':''}>${escape(c.nome)}</option>`).join('')}
+              </select>
+            </label>
+            <label>Serviço específico
+              <select id="recSubtipo" style="width:100%;" ${!f.categoria_id?'disabled':''}>
+                <option value="">— escolher categoria primeiro —</option>
+              </select>
+            </label>
+          </div>
+          <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
+            <span id="recCatalogoSigla" style="font-size:11px; color:var(--text-muted);">${f.categoria_id ? '🏷️ Prefixo do número: REC-' + (f.categoria_sigla || '?') + '-2026-...' : ''}</span>
+            <button type="button" id="recLimparDesc" style="margin-left:auto; font-size:11px; padding:4px 10px; background:transparent;">🧹 Limpar descrição</button>
+          </div>
+        </div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px;">
           <label>Destinatário *
             <input id="recNome" placeholder="Nome completo" value="${escape(f.destinatario_nome)}" style="width:100%;">
@@ -7483,8 +7508,78 @@ function renderReciboForm(v) {
         Desc:'descricao_servico'
       };
       f[map[k]] = el.value;
+      // Quando tipo muda, mostra/esconde o catalogo
+      if (k === 'Tipo') {
+        const box = document.getElementById('recCatalogoBox');
+        if (box) box.style.display = (el.value === 'custom') ? 'block' : 'none';
+        if (el.value !== 'custom') {
+          f.categoria_id = null; f.categoria_sigla = null; f.categoria_servico = null;
+        }
+      }
     };
   });
+
+  // v1.85.0: cascata Categoria → Subtipo + auto-preenchimento descrição
+  const recCat = document.getElementById('recCategoria');
+  const recSub = document.getElementById('recSubtipo');
+  const recDesc = document.getElementById('recDesc');
+  const recSigla = document.getElementById('recCatalogoSigla');
+
+  function preencherSubtipos(catId) {
+    if (!recSub) return;
+    if (!catId) {
+      recSub.innerHTML = '<option value="">— escolher categoria primeiro —</option>';
+      recSub.disabled = true;
+      return;
+    }
+    const cat = (window.CATALOGO_SERVICOS||[]).find(c => c.id === catId);
+    if (!cat) return;
+    const opts = ['<option value="">— escolher serviço —</option>'];
+    for (const sg of cat.subgrupos) {
+      opts.push(`<optgroup label="${sg.nome}">`);
+      for (const sv of sg.servicos) {
+        const sel = (f.categoria_servico === sv.id) ? 'selected' : '';
+        opts.push(`<option value="${sv.id}" ${sel}>${sv.nome}</option>`);
+      }
+      opts.push('</optgroup>');
+    }
+    recSub.innerHTML = opts.join('');
+    recSub.disabled = false;
+  }
+  // Pre-popula se ja tinha categoria
+  if (f.categoria_id) preencherSubtipos(f.categoria_id);
+
+  if (recCat) recCat.onchange = () => {
+    const catId = recCat.value;
+    const opt = recCat.selectedOptions[0];
+    const sigla = opt?.dataset.sigla || null;
+    f.categoria_id = catId || null;
+    f.categoria_sigla = sigla;
+    f.categoria_servico = null; // reset subtipo
+    f.descricao_servico = '';   // reset descrição
+    preencherSubtipos(catId);
+    if (recDesc) recDesc.value = '';
+    if (recSigla) recSigla.textContent = sigla
+      ? `🏷️ Prefixo do número: REC-${sigla}-${new Date().getFullYear()}-...`
+      : '';
+  };
+
+  if (recSub) recSub.onchange = () => {
+    const id = recSub.value;
+    f.categoria_servico = id || null;
+    if (id && window.CATALOGO_SERVICOS_POR_ID[id]) {
+      const sv = window.CATALOGO_SERVICOS_POR_ID[id];
+      if (recDesc) {
+        recDesc.value = sv.descricao;
+        f.descricao_servico = sv.descricao;
+      }
+    }
+  };
+
+  const btnLimpar = document.getElementById('recLimparDesc');
+  if (btnLimpar) btnLimpar.onclick = () => {
+    if (recDesc) { recDesc.value = ''; f.descricao_servico = ''; recDesc.focus(); }
+  };
 
   async function salvar(enviar) {
     if (!f.destinatario_nome.trim()) return alert('Informe o destinatário');
@@ -7525,6 +7620,8 @@ function renderReciboForm(v) {
           resource_type: f.resource_type,
           resource_id: f.resource_id,
           ...payload,
+          categoria_servico: f.categoria_servico || null,
+          categoria_grupo: f.categoria_sigla || null,
           expira_em_dias: Number(f.expira_em_dias) || 7,
         };
         r = await api('/api/recibos', { method: 'POST', body: JSON.stringify(createPayload) });

@@ -1717,6 +1717,31 @@ export async function runMigrations(): Promise<void> {
 
   console.log('[DB] SaaS foundation tables ready (v1.83.0 — schema-only)');
 
+  // ─── v1.85.0: Catálogo de serviços + cadastro completo de cliente ─────
+  // ALTER idempotente em propostas_clientes (campos extras pro cadastro)
+  // e em recibos (categoria_servico + categoria_grupo).
+  const altersClientes = [
+    "ALTER TABLE propostas_clientes ADD COLUMN rg_ie VARCHAR(30) NULL AFTER cpf_cnpj",
+    "ALTER TABLE propostas_clientes ADD COLUMN data_nascimento DATE NULL AFTER rg_ie",
+    "ALTER TABLE propostas_clientes ADD COLUMN estado_civil VARCHAR(40) NULL AFTER data_nascimento",
+    "ALTER TABLE propostas_clientes ADD COLUMN profissao VARCHAR(120) NULL AFTER estado_civil",
+    "ALTER TABLE propostas_clientes ADD COLUMN razao_social VARCHAR(150) NULL AFTER profissao",
+    "ALTER TABLE propostas_clientes ADD COLUMN nome_fantasia VARCHAR(150) NULL AFTER razao_social",
+    "ALTER TABLE propostas_clientes ADD COLUMN numero VARCHAR(20) NULL AFTER endereco",
+    "ALTER TABLE propostas_clientes ADD COLUMN complemento VARCHAR(120) NULL AFTER numero",
+    "ALTER TABLE propostas_clientes ADD COLUMN bairro VARCHAR(80) NULL AFTER complemento",
+    "ALTER TABLE recibos ADD COLUMN categoria_servico VARCHAR(80) NULL AFTER codigo_servico_key",
+    "ALTER TABLE recibos ADD COLUMN categoria_grupo VARCHAR(20) NULL AFTER categoria_servico",
+  ];
+  for (const sql of altersClientes) {
+    try { await pool.execute(sql); }
+    catch (err) {
+      if (!/Duplicate column|already exists/i.test((err as Error).message)) {
+        console.warn('[migrations] alter v1.85:', (err as Error).message.slice(0, 100));
+      }
+    }
+  }
+
   // de definidas aqui.
   await verifyCriticalTables();
 
