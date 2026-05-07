@@ -99,6 +99,13 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ agent: AGENT_IDENTITY.name, version: AGENT_IDENTITY.version, status: 'online', timestamp: new Date().toISOString() });
 });
 
+// v1.93.0: rota leve so com versao — usada pelo client pra detectar
+// quando ha versao nova do app E o SW antigo ainda esta cached.
+app.get('/api/version', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ version: AGENT_IDENTITY.version, name: AGENT_IDENTITY.name });
+});
+
 // v1.65.23: diagnostico do MySQL — lista todas as tabelas + valida criticas.
 // Resolve Issue #5 (tabelas ausentes em prod sem diagnostico claro).
 app.get('/health/db', async (_req: Request, res: Response) => {

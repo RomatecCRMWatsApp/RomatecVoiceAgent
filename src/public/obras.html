@@ -456,6 +456,82 @@
 </style>
 <!-- v1.84.0: catálogo de serviços técnico-legais (auto-preenchimento descrição recibo) -->
 <script src="/js/catalogo-servicos.js"></script>
+<!-- v1.93.0: auto-detecção de versão + banner "Atualizar agora".
+     Previne bug do SW antigo cached (Failed to fetch em endpoints novos). -->
+<script>
+(async function detectarVersaoNova() {
+  try {
+    // 1) Versão do app no servidor (rota leve, sem cache)
+    const verResp = await fetch('/api/version', { cache: 'no-store' });
+    if (!verResp.ok) return;
+    const { version: serverVersion } = await verResp.json();
+    if (!serverVersion) return;
+
+    // 2) Versão do SW que está rodando no navegador (lê do sw.js cached)
+    const swResp = await fetch('/sw.js?_=' + Date.now(), { cache: 'no-store' }).catch(() => null);
+    let swVersion = null;
+    if (swResp && swResp.ok) {
+      const txt = await swResp.text();
+      const m = txt.match(/CACHE\s*=\s*'zayra-(v?[\d.]+)'/);
+      if (m) swVersion = m[1].replace(/^v/, '');
+    }
+
+    // 3) Compara — se SW está desatualizado, mostra banner
+    if (swVersion && swVersion !== serverVersion) {
+      mostrarBannerUpdate(serverVersion, swVersion);
+    }
+  } catch (e) { /* falhou silenciosamente — não trava o app */ }
+})();
+
+function mostrarBannerUpdate(serverV, cachedV) {
+  // Não duplica banner
+  if (document.getElementById('updateBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'updateBanner';
+  banner.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:99999; background:linear-gradient(90deg, #f59e0b, #d97706); color:#06120a; padding:10px 16px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:12px; flex-wrap:wrap; box-shadow:0 4px 12px rgba(0,0,0,0.4); animation:slideDown .3s ease;';
+  banner.innerHTML = `
+    <style>@keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }</style>
+    <span style="flex:1; min-width:200px;">⚠️ Nova versão disponível — <strong>v${escapeHtml(serverV)}</strong> (você está com cache de v${escapeHtml(cachedV)})</span>
+    <button id="updateBtn" style="background:#06120a; color:#f59e0b; border:0; padding:8px 16px; border-radius:6px; font-weight:700; cursor:pointer; font-size:13px;">🔄 Atualizar agora</button>
+    <button id="updateLater" style="background:transparent; color:#06120a; border:1px solid #06120a; padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12px;">depois</button>
+  `;
+  document.body.appendChild(banner);
+
+  document.getElementById('updateBtn').onclick = forcarUpdate;
+  document.getElementById('updateLater').onclick = () => { try { document.body.removeChild(banner); } catch {} };
+}
+
+function escapeHtml(s) {
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function forcarUpdate() {
+  const btn = document.getElementById('updateBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Atualizando...'; }
+  try {
+    // 1) Unregister TODOS os service workers
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+    }
+    // 2) Apaga TODOS os caches CacheStorage (sw caches, runtime caches)
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
+    }
+    // 3) Hard reload (com bypass cache)
+    location.reload();
+  } catch (e) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '❌ Erro — recarregue manualmente (Ctrl+Shift+R)';
+    }
+  }
+}
+
+// Expõe pra debug manual no console
+window.forcarUpdateApp = forcarUpdate;
+</script>
 </head>
 <body>
 <div class="container">
