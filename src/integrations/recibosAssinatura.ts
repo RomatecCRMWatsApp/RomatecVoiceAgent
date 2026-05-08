@@ -12,7 +12,7 @@
 import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import pool from '../database/connection';
 import { buscarReciboPorId } from './recibos';
-import { gerarPdfRecibo } from '../services/reciboPdf';
+import { gerarPdfRecibo, type SignatureVisualMeta } from '../services/reciboPdf';
 import {
   getCertForSigning,
   type Perfil,
@@ -66,8 +66,19 @@ export async function assinarRecibo(reciboId: number | string): Promise<AssinarR
     console.warn(`[assinatura] cert ${certData.meta.id} VENCIDO em ${certData.meta.validade_ate}`);
   }
 
-  // Gera PDF original
-  const pdfBuffer = await gerarPdfRecibo(recibo);
+  // v1.99.9: monta metadata de assinatura pra PDF visual ANTES de gerar
+  const agora = new Date();
+  const signatureVisualMeta: SignatureVisualMeta = {
+    signer_cn: certData.meta.subject_cn ?? `Recibo ${recibo.numero}`,
+    signer_doc: certData.meta.subject_doc,
+    issuer_cn: certData.meta.issuer_cn,
+    validade_ate: certData.meta.validade_ate,
+    data_assinatura: agora,
+    thumbprint: certData.meta.thumbprint,
+  };
+
+  // Gera PDF JA COM bloco visual de assinatura
+  const pdfBuffer = await gerarPdfRecibo(recibo, signatureVisualMeta);
 
   // Metadados de assinatura
   const signMeta = {
@@ -85,7 +96,6 @@ export async function assinarRecibo(reciboId: number | string): Promise<AssinarR
     signMeta,
   );
 
-  const agora = new Date();
   const meta = {
     perfil,
     cert_id: certData.meta.id,
