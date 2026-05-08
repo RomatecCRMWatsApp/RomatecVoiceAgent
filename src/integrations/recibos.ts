@@ -15,7 +15,7 @@ import pool from '../database/connection';
 
 export type TipoRecibo =
   | 'funcionario' | 'parcela' | 'despesa' | 'proposta'
-  | 'vistoria' | 'etapa' | 'chaves' | 'custom';
+  | 'vistoria' | 'etapa' | 'chaves' | 'custom' | 'vale';
 
 export type StatusRecibo =
   | 'rascunho' | 'aguardando_envio' | 'enviado' | 'entregue'
@@ -36,6 +36,7 @@ const PREFIXOS: Record<TipoRecibo, string> = {
   etapa:       'REC-ETP',
   chaves:      'REC-CHV',
   custom:      'REC-CUS',
+  vale:        'REC-VAL', // v1.99.16: vale = recibo universal (fluxo confirmacao WhatsApp)
 };
 
 const TIPO_LABEL: Record<TipoRecibo, string> = {
@@ -47,6 +48,7 @@ const TIPO_LABEL: Record<TipoRecibo, string> = {
   etapa:       'Aceite de etapa concluída',
   chaves:      'Termo de entrega de chaves',
   custom:      'Recibo personalizado',
+  vale:        'Vale (adiantamento)',
 };
 
 const TITULO_PDF: Record<TipoRecibo, string> = {
@@ -58,6 +60,7 @@ const TITULO_PDF: Record<TipoRecibo, string> = {
   etapa:       'ACEITE DE ETAPA CONCLUÍDA',
   chaves:      'TERMO DE ENTREGA DE CHAVES',
   custom:      'RECIBO',
+  vale:        'RECIBO DE VALE',
 };
 
 // ────────────────────────────────────────────────────────────────────────

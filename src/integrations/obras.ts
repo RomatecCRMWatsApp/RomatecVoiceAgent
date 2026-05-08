@@ -1018,6 +1018,174 @@ export async function relatorioMensalEquipe(input: {
   };
 }
 
+// v1.99.16: Saldo Consolidado em Aberto (cross-month)
+// Cobre o caso "obra que comeca no meio de uma quinzena e termina no meio
+// da proxima" — a UI mensal da Folha nao representa isso bem.
+//
+// Logica de "em aberto":
+//   - Calcula data_limite = fim do periodo do ULTIMO recibo quinzenal
+//     EMITIDO pra cada membro (em recibos_quinzena_emitidos)
+//   - Se nunca foi emitido recibo quinzenal pro membro, data_limite = '1900-01-01'
+//   - dias_em_aberto = todos os dias trabalhados com data > data_limite
+//   - vales_em_aberto = ajustes tipo 'adiantamento' criados apos data_limite
+//                       (heuristica simples: usa criado_em do ajuste)
+//
+// Periodo corrente (pra eventual passagem de vale a partir desta vista):
+//   - Se hoje <= dia 15 -> periodo = 'YYYY-MM-1'
+//   - Senao             -> periodo = 'YYYY-MM-2'
+export async function relatorioSaldoEmAbertoEquipe(input: { obra_id?: string } = {}) {
+  const hoje = new Date();
+  const ano = hoje.getFullYear();
+  const mes = String(hoje.getMonth() + 1).padStart(2, '0');
+  const q = hoje.getDate() <= 15 ? 1 : 2;
+  const periodoCorrente = `${ano}-${mes}-${q}`;
+
+  // 1) Lista membros ativos (mesmo filtro de listarEquipe)
+  const params: (string | number)[] = [];
+  let sqlMembros = `
+    SELECT id, nome, funcao, valor_dia, telefone
+      FROM romatec_obra_equipe
+     WHERE ativo = 1`;
+  if (input.obra_id) {
+    sqlMembros += ' AND (obra_id = ? OR obra_id IS NULL OR FIND_IN_SET(?, obras_ids) > 0)';
+    params.push(input.obra_id, input.obra_id);
+  }
+  sqlMembros += ' ORDER BY nome ASC';
+  const [membros] = await pool.execute<RowDataPacket[]>(sqlMembros, params);
+
+  if (membros.length === 0) {
+    return {
+      periodo_corrente: periodoCorrente,
+      obra_id: input.obra_id ?? null,
+      total_funcionarios: 0,
+      total_dias: 0,
+      total_bruto: 0,
+      total_vales: 0,
+      total_liquido: 0,
+      funcionarios: [] as Array<Record<string, unknown>>,
+    };
+  }
+
+  // 2) Pra cada membro, calcula data_limite + dias_em_aberto + vales_em_aberto
+  // Faz query agregada pra todos de uma vez (evita N+1)
+  const ids = membros.map(m => Number(m.id));
+  const placeholders = ids.map(() => '?').join(',');
+
+  // Data limite por membro (fim do periodo do ultimo recibo quinzenal emitido)
+  const [limites] = await pool.execute<RowDataPacket[]>(
+    `SELECT membro_id,
+            MAX(
+              CASE
+                WHEN periodo LIKE '%-1' THEN STR_TO_DATE(CONCAT(SUBSTRING(periodo,1,7),'-15'), '%Y-%m-%d')
+                ELSE LAST_DAY(STR_TO_DATE(CONCAT(SUBSTRING(periodo,1,7),'-01'), '%Y-%m-%d'))
+              END
+            ) AS data_limite
+       FROM recibos_quinzena_emitidos
+      WHERE membro_id IN (${placeholders})
+      GROUP BY membro_id`,
+    ids
+  );
+  const limitePorMembro = new Map<number, Date>();
+  for (const r of limites) {
+    if (r.data_limite) {
+      limitePorMembro.set(Number(r.membro_id), new Date(r.data_limite as string));
+    }
+  }
+
+  // Dias em aberto: SUM por membro APOS data_limite (ou todos se nao tem limite)
+  // Como cada membro pode ter limite diferente, faz query por membro com inline.
+  // Pra equipes pequenas (5-15) e aceitavel; otimiza depois se virar bottleneck.
+  type SaldoFuncionario = {
+    funcionario_id: string;
+    nome: string;
+    funcao: string | null;
+    telefone: string | null;
+    valor_dia: number;
+    data_limite: string | null;       // ISO date OR null
+    dias_em_aberto: number;
+    bruto: number;
+    vales: Array<{ id: number; valor: number; descricao: string | null; criado_em: string }>;
+    total_vales: number;
+    saldo_liquido: number;
+  };
+  const lista: SaldoFuncionario[] = [];
+
+  for (const m of membros) {
+    const membroId = Number(m.id);
+    const valorDia = num((m.valor_dia as string) ?? '0');
+    const limite = limitePorMembro.get(membroId) ?? new Date('1900-01-01');
+    const limiteIso = limite.toISOString().slice(0, 10);
+
+    // Dias em aberto (apos data_limite)
+    const [diasRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT
+         COALESCE(SUM(CASE WHEN periodo='integral' THEN 1 ELSE 0.5 END), 0) AS dias,
+         COALESCE(SUM(valor), 0) AS bruto
+         FROM romatec_obra_funcionario_dias
+        WHERE funcionario_id = ?
+          AND data > ?`,
+      [membroId, limiteIso]
+    );
+    const diasEmAberto = Number(diasRows[0]?.dias ?? 0);
+    const bruto = num(String(diasRows[0]?.bruto ?? '0'));
+
+    // Vales em aberto (criados apos data_limite — heuristica simples)
+    const [valesRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT id, valor, descricao, criado_em
+         FROM recibos_ajustes
+        WHERE membro_id = ?
+          AND tipo = 'adiantamento'
+          AND criado_em > ?
+        ORDER BY criado_em DESC`,
+      [membroId, limiteIso]
+    );
+    const vales = valesRows.map(v => ({
+      id: Number(v.id),
+      valor: num(String(v.valor)),
+      descricao: (v.descricao as string | null) ?? null,
+      criado_em: v.criado_em instanceof Date
+        ? v.criado_em.toISOString()
+        : String(v.criado_em),
+    }));
+    const totalVales = vales.reduce((s, v) => s + v.valor, 0);
+
+    const saldoLiquido = bruto - totalVales;
+
+    // Filtra: so aparece se tem dias em aberto OU vales (membros zerados nao aparecem)
+    if (diasEmAberto === 0 && vales.length === 0) continue;
+
+    lista.push({
+      funcionario_id: String(membroId),
+      nome: m.nome as string,
+      funcao: (m.funcao as string | null) ?? null,
+      telefone: (m.telefone as string | null) ?? null,
+      valor_dia: valorDia,
+      data_limite: limitePorMembro.has(membroId) ? limiteIso : null,
+      dias_em_aberto: diasEmAberto,
+      bruto,
+      vales,
+      total_vales: totalVales,
+      saldo_liquido: saldoLiquido,
+    });
+  }
+
+  const totalDias = lista.reduce((s, l) => s + l.dias_em_aberto, 0);
+  const totalBruto = lista.reduce((s, l) => s + l.bruto, 0);
+  const totalVales = lista.reduce((s, l) => s + l.total_vales, 0);
+  const totalLiquido = totalBruto - totalVales;
+
+  return {
+    periodo_corrente: periodoCorrente,
+    obra_id: input.obra_id ?? null,
+    total_funcionarios: lista.length,
+    total_dias: totalDias,
+    total_bruto: totalBruto,
+    total_vales: totalVales,
+    total_liquido: totalLiquido,
+    funcionarios: lista,
+  };
+}
+
 // ── Resumo Geral ─────────────────────────────────────────────────────────────
 export async function resumoObras() {
   const [obras] = await pool.execute<ObraRow[]>('SELECT * FROM romatec_obras');

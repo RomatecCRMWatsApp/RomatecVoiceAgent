@@ -12,6 +12,11 @@ const ALTERS_RECIBOS = [
   "ALTER TABLE recibos ADD COLUMN assinado_por_cert_id INT NULL",
   "ALTER TABLE recibos ADD COLUMN pdf_assinado LONGBLOB NULL",
   "ALTER TABLE recibos ADD COLUMN assinatura_meta JSON NULL",
+  // v1.99.16: adiciona 'vale' ao ENUM tipo (vale vira recibo universal).
+  // 'vale' adicionado na ULTIMA posicao — preserva indices internos dos
+  // valores existentes (MySQL armazena ENUM por indice numerico).
+  // MODIFY e idempotente: re-aplicar nao da erro nem warning relevante.
+  "ALTER TABLE recibos MODIFY COLUMN tipo ENUM('funcionario','parcela','despesa','proposta','vistoria','etapa','chaves','custom','vale') NOT NULL",
 ];
 
 // v1.99.11: assinatura digital tambem em propostas (consultoria + mao de obra)

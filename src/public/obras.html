@@ -3843,6 +3843,86 @@ function renderMarcarDias() {
   };
 }
 
+// v1.99.16: Saldo Consolidado em Aberto (cross-month)
+// Visao alternativa da Folha Mensal pra obras que cruzam meses (ex: comecou
+// 20/abril, paga dia 11/maio). Permite passar vales contra saldo real.
+async function loadFolhaSaldo() {
+  const obra = state.folhaObraId || '';
+  try {
+    state.folhaSaldo = await api(`/api/folha/saldo-aberto${obra ? '?obra_id=' + obra : ''}`);
+  } catch (err) {
+    console.warn('[folhaSaldo] falha:', err.message);
+    state.folhaSaldo = { error: err.message };
+  }
+}
+
+function renderFolhaSaldoHTML() {
+  const s = state.folhaSaldo;
+  if (!s) {
+    return '<div class="empty" style="padding:30px;">Clique novamente em "📊 Saldo em Aberto" pra carregar.</div>';
+  }
+  if (s.error) {
+    return `<div class="empty" style="padding:20px; color:var(--danger);">❌ Erro ao carregar saldo: ${escape(s.error)}</div>`;
+  }
+  if (!s.funcionarios || s.funcionarios.length === 0) {
+    return `<div class="empty" style="padding:30px;">Nenhum funcionário com saldo em aberto.<br><small>Período corrente pra novos vales: <strong>${escape(periodoLabel(s.periodo_corrente))}</strong></small></div>`;
+  }
+
+  const linhas = s.funcionarios.map(f => {
+    const valesBadge = f.total_vales > 0
+      ? `<span style="color:var(--danger); font-size:11px;" title="${f.vales.length} vale(s) registrado(s)">−${fmt(f.total_vales)}</span>`
+      : `<span style="color:var(--text-muted); font-size:11px;">—</span>`;
+    const dataLimiteTxt = f.data_limite
+      ? `desde ${escape(parseDataBR(f.data_limite))}`
+      : `<span style="color:var(--gold);">sem recibo emitido</span>`;
+    return `
+    <tr>
+      <td style="padding:10px; border-bottom:1px solid var(--border);">
+        <strong>${escape(f.nome)}</strong>
+        <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">${escape(f.funcao||'-')} · ${fmt(f.valor_dia)}/dia · ${dataLimiteTxt}</p>
+      </td>
+      <td style="text-align:center; color:var(--neon); font-weight:500;">${f.dias_em_aberto}</td>
+      <td style="text-align:right; color:var(--gold); font-weight:500;">${fmt(f.bruto)}</td>
+      <td style="text-align:right;">${valesBadge}</td>
+      <td style="text-align:right; color:${f.saldo_liquido < 0 ? 'var(--danger)' : 'var(--neon)'}; font-weight:600;">${fmt(f.saldo_liquido)}</td>
+      <td style="text-align:center; padding:8px; white-space:nowrap;">
+        <button class="btn-gold" data-recibo="${f.funcionario_id}" data-nome="${escape(f.nome)}" style="font-size:11px; padding:4px 8px;">📄 Recibo</button>
+        <button data-saldo-vale-btn data-membro="${f.funcionario_id}" data-nome="${escape(f.nome)}" data-tel="${escape(f.telefone || '')}" data-saldo="${f.saldo_liquido}" data-periodo="${escape(s.periodo_corrente)}" title="Passar vale contra saldo consolidado" style="font-size:11px; padding:4px 8px; background:transparent; border:1px solid #f59e0b; color:#f59e0b; border-radius:4px; cursor:pointer; margin-left:4px;">💸 Vale</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:10px; margin-bottom:12px;">
+      <p style="margin:0; font-size:12px; color:#f59e0b;">
+        💡 <strong>Saldo consolidado cross-month</strong> — soma todos os dias trabalhados desde o último recibo quinzenal emitido por funcionário, descontando vales já passados. Útil pra obras que cruzam quinzenas. Período corrente pra novos vales: <strong>${escape(periodoLabel(s.periodo_corrente))}</strong>.
+      </p>
+    </div>
+    <div class="metrics-grid">
+      <div class="metric-card"><p class="metric-label">Funcionários com saldo</p><p class="metric-value">${s.total_funcionarios}</p></div>
+      <div class="metric-card"><p class="metric-label">Dias acumulados</p><p class="metric-value">${s.total_dias}</p></div>
+      <div class="metric-card"><p class="metric-label">Bruto total</p><p class="metric-value" style="color:var(--gold);">${fmt(s.total_bruto)}</p></div>
+      <div class="metric-card"><p class="metric-label">Vales já passados</p><p class="metric-value" style="color:var(--danger);">−${fmt(s.total_vales)}</p></div>
+      <div class="metric-card"><p class="metric-label">Saldo líquido</p><p class="metric-value" style="color:var(--neon);">${fmt(s.total_liquido)}</p></div>
+    </div>
+    <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; margin-top:8px; min-width:700px;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border-strong);">
+          <th style="text-align:left; padding:8px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Funcionário</th>
+          <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Dias em aberto</th>
+          <th style="text-align:right; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Bruto</th>
+          <th style="text-align:right; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Vales</th>
+          <th style="text-align:right; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Saldo Líquido</th>
+          <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Ações</th>
+        </tr>
+      </thead>
+      <tbody>${linhas}</tbody>
+    </table>
+    </div>
+  `;
+}
+
 // ── FOLHA MENSAL ──
 function renderFolha() {
   const v = document.getElementById('view-folha');
@@ -3884,6 +3964,32 @@ function renderFolha() {
     </tr>
   `).join('');
 
+  // v1.99.16: sub-aba ativa (mensal vs saldo em aberto)
+  const subview = state.folhaSubview || 'mensal';
+  const corpoMensal = `
+    <div class="metrics-grid">
+      <div class="metric-card"><p class="metric-label">Funcionários ativos no mês</p><p class="metric-value">${f.total_funcionarios}</p></div>
+      <div class="metric-card"><p class="metric-label">Total a pagar</p><p class="metric-value" style="color:var(--gold);">${fmt(f.total_geral)}</p></div>
+    </div>
+    ${f.funcionarios.length === 0 ? '<div class="empty">Nenhum dia trabalhado registrado neste mês.</div>' : `
+    <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; margin-top:8px; min-width:680px;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border-strong);">
+          <th style="text-align:left; padding:8px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Funcionário</th>
+          <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Integral</th>
+          <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Manhã</th>
+          <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Tarde</th>
+          <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Equiv.</th>
+          <th style="text-align:right; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Total</th>
+          <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Recibo</th>
+        </tr>
+      </thead>
+      <tbody>${linhas}</tbody>
+    </table>
+    </div>`}
+  `;
+
   v.innerHTML = `
     <div class="card">
       <p class="section-title">Folha Mensal — ${monthLabel}</p>
@@ -3894,27 +4000,14 @@ function renderFolha() {
         <button id="folhaPdf" class="btn-gold">📄 Exportar PDF</button>
         <button id="folhaCsv" class="btn-gold">📊 CSV</button>
       </div>
-      <div class="metrics-grid">
-        <div class="metric-card"><p class="metric-label">Funcionários ativos no mês</p><p class="metric-value">${f.total_funcionarios}</p></div>
-        <div class="metric-card"><p class="metric-label">Total a pagar</p><p class="metric-value" style="color:var(--gold);">${fmt(f.total_geral)}</p></div>
+      <!-- v1.99.16: sub-abas Mensal vs Saldo em Aberto -->
+      <div style="display:flex; gap:6px; margin-bottom:12px; border-bottom:1px solid var(--border-strong); padding-bottom:8px;">
+        <button data-folha-sub="mensal" style="padding:6px 14px; border-radius:6px; cursor:pointer; ${subview==='mensal' ? 'background:var(--gold); color:#06120a; border:1px solid var(--gold); font-weight:600;' : 'background:transparent; color:var(--text-muted); border:1px solid var(--border);'}">📅 Mensal</button>
+        <button data-folha-sub="saldo"  style="padding:6px 14px; border-radius:6px; cursor:pointer; ${subview==='saldo'  ? 'background:var(--gold); color:#06120a; border:1px solid var(--gold); font-weight:600;' : 'background:transparent; color:var(--text-muted); border:1px solid var(--border);'}">📊 Saldo em Aberto</button>
       </div>
-      ${f.funcionarios.length === 0 ? '<div class="empty">Nenhum dia trabalhado registrado neste mês.</div>' : `
-      <div style="overflow-x:auto;">
-      <table style="width:100%; border-collapse:collapse; margin-top:8px; min-width:680px;">
-        <thead>
-          <tr style="border-bottom:1px solid var(--border-strong);">
-            <th style="text-align:left; padding:8px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Funcionário</th>
-            <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Integral</th>
-            <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Manhã</th>
-            <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Tarde</th>
-            <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Equiv.</th>
-            <th style="text-align:right; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Total</th>
-            <th style="text-align:center; padding:8px; font-size:11px; text-transform:uppercase; color:var(--text-muted);">Recibo</th>
-          </tr>
-        </thead>
-        <tbody>${linhas}</tbody>
-      </table>
-      </div>`}
+      <div id="folhaSubviewBox">
+        ${subview === 'saldo' ? renderFolhaSaldoHTML() : corpoMensal}
+      </div>
     </div>
     <!-- v1.99.15: painel inline pro Vale (abre abaixo da tabela em vez de modal flutuante) -->
     <div id="valeInlineBox" style="display:none; margin-top:12px;"></div>
@@ -3952,6 +4045,31 @@ function renderFolha() {
       telefone: b.dataset.telVale || '',
       totalPagar: Number(b.dataset.saldoVale) || 0,
       periodo: periodoFolhaAtual,
+    });
+  });
+
+  // v1.99.16: handlers das sub-abas (Mensal vs Saldo em Aberto)
+  v.querySelectorAll('[data-folha-sub]').forEach(b => b.onclick = async () => {
+    const sub = b.dataset.folhaSub;
+    if (state.folhaSubview === sub) return;
+    state.folhaSubview = sub;
+    if (sub === 'saldo') {
+      const box = document.getElementById('folhaSubviewBox');
+      if (box) box.innerHTML = '<div class="empty" style="padding:30px;">⏳ Carregando saldo consolidado...</div>';
+      await loadFolhaSaldo();
+    }
+    render();
+  });
+
+  // v1.99.16: botão "💸 Vale" na sub-aba Saldo em Aberto — passa saldo
+  // consolidado (cross-month) como totalPagar pro modal, em vez do mensal.
+  v.querySelectorAll('[data-saldo-vale-btn]').forEach(b => b.onclick = () => {
+    abrirModalPassarVale({
+      membroId: b.dataset.membro,
+      nome: b.dataset.nome || '',
+      telefone: b.dataset.tel || '',
+      totalPagar: Number(b.dataset.saldo) || 0,
+      periodo: b.dataset.periodo,
     });
   });
 

@@ -7,10 +7,15 @@
 import PDFDocument from 'pdfkit';
 import path from 'path';
 import fs from 'fs';
-import QRCode from 'qrcode';
 import { getTenantSettings } from './tenantSettings';
 import type { Recibo } from '../integrations/recibos';
 import { META } from '../integrations/recibos';
+// v1.99.16: helpers compartilhados (QR, hash, selo CONFIRMADO)
+import {
+  renderQRValidacao,
+  renderHashFooter,
+  renderSeloConfirmado,
+} from './reciboPdfShared';
 
 const fmtBRL = (n: number) =>
   'R$ ' + Number(n || 0).toLocaleString('pt-BR', {
@@ -33,7 +38,7 @@ const fmtDataHora = (d: Date | string | null): string => {
 
 /** Base URL pra QR code. Usa env PUBLIC_BASE_URL (preferido) ou BASE_URL (legado),
  * senao Railway URL. Pra apontar dominio proprio, basta trocar PUBLIC_BASE_URL. */
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
   const url = process.env.PUBLIC_BASE_URL
     || process.env.BASE_URL
     || 'https://romatecvoiceagent-production.up.railway.app';
@@ -389,41 +394,19 @@ export async function gerarPdfRecibo(
   }
 
   // ── Selo diagonal "CONFIRMADO" (so se confirmado) ───────────────────
+  // v1.99.16: refatorado pra renderSeloConfirmado (mesmo selo usado em valePdf)
   if (recibo.status === 'confirmado') {
-    doc.save()
-       .translate(310, 480)
-       .rotate(-20)
-       .fontSize(50)
-       .fillColor('#10b98133')
-       .font('Helvetica-Bold')
-       .text('✓ CONFIRMADO', -150, -25, { width: 300, align: 'center' })
-       .restore();
+    renderSeloConfirmado(doc);
   }
 
   // ── Rodape: QR code + hash + assinatura ──────────────────────────────
-  const qrUrl = `${getBaseUrl()}/v/${recibo.hash_validacao}`;
-  // v1.96.0: footer compacto (y=680..795) pra caber em 1 pagina A4 (842 max)
-  try {
-    const qrPng = await QRCode.toBuffer(qrUrl, {
-      width: 95,
-      margin: 1,
-      errorCorrectionLevel: 'M',
-      color: { dark: corHex, light: '#FFFFFF' },
-    });
-    doc.image(qrPng, 460, 680, { width: 95 });
-    doc.fontSize(7.5).fillColor('#666').font('Helvetica')
-       .text('Escaneie para validar', 455, 778, { width: 105, align: 'center', lineBreak: false });
-  } catch (err) {
-    console.warn('[reciboPdf] falha gerar QR:', (err as Error).message);
-  }
-
-  // Hash truncado + url (caixa esquerda do rodape)
-  doc.fontSize(7.5).fillColor('#888').font('Helvetica')
-     .text('Hash de autenticidade:', 40, 680, { lineBreak: false })
-     .fillColor('#444').font('Courier')
-     .text(recibo.hash_validacao.slice(0, 40), 40, 692, { width: 410, lineBreak: false });
-  doc.fontSize(7.5).fillColor('#888').font('Helvetica')
-     .text(qrUrl, 40, 706, { width: 410, lineBreak: false });
+  // v1.99.16: refatorado pra renderQRValidacao + renderHashFooter
+  const qrUrl = await renderQRValidacao(
+    doc, recibo.hash_validacao, getBaseUrl(),
+    460, 680,
+    { size: 95, corHex, comLabel: true }
+  );
+  renderHashFooter(doc, recibo.hash_validacao, qrUrl, 40, 680, 410);
 
   // v1.99.10: bloco visual de assinatura digital foi MOVIDO pro miolo do
   // documento (entre data e linha de assinatura manuscrita). Aqui no rodape

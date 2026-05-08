@@ -5,11 +5,21 @@
 //   1) CEO clica "Passar Vale" na Folha Mensal
 //   2) Preview do PDF aparece em tempo real (split-screen)
 //   3) Confirma -> persiste ajuste + envia WhatsApp com PDF anexo
+// v1.99.16: aceita parametro `recibo` (recibo universal tipo='vale').
+// Quando presente, PDF inclui QR de validacao /v/:hash + hash truncado +
+// (se status=confirmado) selo "✓ CONFIRMADO" diagonal sobreposto.
 
 import PDFDocument from 'pdfkit';
 import path from 'path';
 import fs from 'fs';
 import { getTenantSettings } from './tenantSettings';
+import type { Recibo } from '../integrations/recibos';
+import { getBaseUrl } from './reciboPdf';
+import {
+  renderQRValidacao,
+  renderHashFooter,
+  renderSeloConfirmado,
+} from './reciboPdfShared';
 
 const fmtBRL = (n: number) =>
   'R$ ' + Number(n || 0).toLocaleString('pt-BR', {
@@ -84,6 +94,15 @@ export interface ValePdfInput {
   numero?: string;
   /** Modo preview = sem QR/hash (rapido), sem persistencia */
   preview?: boolean;
+  /**
+   * v1.99.16: Recibo universal associado ao vale.
+   * Quando presente, o PDF inclui:
+   *   - QR Code apontando pra /v/:hash (validacao publica)
+   *   - Hash de autenticidade no rodape
+   *   - Selo "✓ CONFIRMADO" diagonal sobreposto (se status='confirmado')
+   * Em modo preview/sem persistencia, deve ser undefined/null.
+   */
+  recibo?: Recibo | null;
 }
 
 export async function gerarPdfVale(input: ValePdfInput): Promise<Buffer> {
@@ -234,6 +253,27 @@ export async function gerarPdfVale(input: ValePdfInput): Promise<Buffer> {
      .text('Colaborador (assinatura)', 60, cy, { width: 220, align: 'center' });
   doc.fontSize(7).fillColor('#666').font('Helvetica')
      .text('Emitente (CNPJ 17.261.987/0001-09)', 315, cy, { width: 220, align: 'center' });
+
+  // ── v1.99.16: BLOCO DE VALIDACAO DIGITAL (QR + hash) ──────────────────
+  // So renderiza quando o vale e um recibo universal persistido.
+  // Em modo preview ou sem recibo associado, pula este bloco.
+  if (input.recibo) {
+    const baseUrl = getBaseUrl();
+    const qrUrl = await renderQRValidacao(
+      doc, input.recibo.hash_validacao, baseUrl,
+      460, 720,
+      { size: 75, corHex, comLabel: true }
+    );
+    renderHashFooter(doc, input.recibo.hash_validacao, qrUrl, 40, 720, 410);
+
+    // Selo "✓ CONFIRMADO" diagonal — so quando confirmado
+    if (input.recibo.status === 'confirmado') {
+      // Posicao ajustada pra centro-superior do PDF do vale (480 cobre o
+      // bloco "VALOR DO VALE" — chama atencao mas nao impede leitura por
+      // causa da opacidade 33%)
+      renderSeloConfirmado(doc, 310, 460);
+    }
+  }
 
   // ── Footer ─────────────────────────────────────────────────────────────
   doc.fontSize(7).fillColor('#999').font('Helvetica-Oblique')

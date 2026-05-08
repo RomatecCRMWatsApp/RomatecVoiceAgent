@@ -39,7 +39,7 @@ import * as vistorias from './integrations/vistorias';
 import * as cowork from './integrations/cowork';
 import * as recibos from './integrations/recibos';
 import * as notasFiscais from './integrations/notasFiscais';
-import { gerarPdfRecibo } from './services/reciboPdf';
+import { gerarPdfRecibo, getBaseUrl } from './services/reciboPdf';
 import { getTenantSettings } from './services/tenantSettings';
 import {
   getFiscalConfig as getTenantFiscalConfig,
@@ -1185,102 +1185,207 @@ app.post('/api/recibos/vale/preview-pdf', async (req: Request, res: Response) =>
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
-// v1.99.13: cria vale (ajuste) + envia WhatsApp/Telegram com PDF anexo
+// v1.99.16: cria vale como RECIBO UNIVERSAL tipo='vale' (fluxo confirmacao
+// WhatsApp completo) + ajuste em recibos_ajustes (subtrai do quinzenal).
+// Atomicidade via transacao MySQL. Idempotencia via chave natural
+// (membro+periodo+valor) com janela 60s.
 app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Request, res: Response) => {
+  const b = (req.body || {}) as Record<string, unknown>;
+  const membroId = Number(b.membro_id);
+  const valor = Number(b.valor);
+  const periodo = String(b.periodo || '');
+  if (!membroId || !valor || valor <= 0 || !periodo) {
+    res.status(400).json({ error: 'membro_id, valor e periodo obrigatorios' });
+    return;
+  }
+  const descricao = typeof b.descricao === 'string' ? b.descricao : '';
+  const enviarWa = b.enviar_whatsapp !== false; // default true
+  const enviarTg = !!b.enviar_telegram;
+  const saldoAnterior = Number(b.saldo_anterior) || 0;
+  const obraNome = typeof b.obra_nome === 'string' ? b.obra_nome : null;
+
+  const pool = (await import('./database/connection')).default;
+  const recibosMod = await import('./integrations/recibos');
+
+  const [memberRows] = await pool.execute<import('mysql2').RowDataPacket[]>(
+    'SELECT nome, funcao, cpf, telefone FROM romatec_obra_equipe WHERE id = ? LIMIT 1',
+    [membroId]
+  );
+  if (!memberRows.length) { res.status(404).json({ error: 'Membro nao encontrado' }); return; }
+  const m = memberRows[0] as { nome: string; funcao: string | null; cpf: string | null; telefone: string | null };
+  if (!m.telefone) {
+    res.status(400).json({ error: 'Membro sem telefone cadastrado — recibo de vale exige numero pra envio/confirmacao' });
+    return;
+  }
+
+  // ── IDEMPOTENCIA — chave natural (membro+periodo+valor) janela 60s ─────
+  // Se duplo-clique cria o mesmo vale 2x, retorna SAME RESPONSE da 1a chamada
+  // sem reenviar nem duplicar registros. JOIN com recibos pra confirmar
+  // que ambos os lados (ajuste + recibo universal) ja existem.
+  const [duplicatas] = await pool.execute<import('mysql2').RowDataPacket[]>(
+    `SELECT a.id AS ajuste_id,
+            r.id AS vale_id, r.numero, r.token, r.hash_validacao
+       FROM recibos_ajustes a
+       LEFT JOIN recibos r
+              ON r.resource_type = 'ajuste_quinzenal'
+             AND r.resource_id = CAST(a.id AS CHAR)
+      WHERE a.membro_id = ?
+        AND a.periodo = ?
+        AND a.tipo = 'adiantamento'
+        AND a.valor = ?
+        AND a.criado_em >= NOW() - INTERVAL 60 SECOND
+      ORDER BY a.id DESC LIMIT 1`,
+    [membroId, periodo, valor]
+  );
+  if (duplicatas.length > 0 && duplicatas[0].vale_id) {
+    const dup = duplicatas[0];
+    console.log(`[vale:idempotente] retornando vale_id=${dup.vale_id} (criado <60s, mesma chave membro=${membroId}/periodo=${periodo}/valor=${valor})`);
+    res.json({
+      ok: true,
+      idempotent: true,
+      numero: dup.numero,
+      vale_id: Number(dup.vale_id),
+      ajuste_id: Number(dup.ajuste_id),
+      token: dup.token,
+      hash: dup.hash_validacao,
+      link_v: `${getBaseUrl()}/v/${dup.hash_validacao}`,
+      valor,
+      saldo_apos: saldoAnterior - valor,
+      envios: { ok: [], falha: [], note: 'idempotente — nao reenvia' },
+    });
+    return;
+  }
+
+  // ── PERSISTENCIA TRANSACIONAL (ajuste + recibo universal) ──────────────
+  const conn = await pool.getConnection();
+  let ajusteId = 0;
+  let reciboCriado: import('./integrations/recibos').Recibo;
   try {
-    const b = (req.body || {}) as Record<string, unknown>;
-    const membroId = Number(b.membro_id);
-    const valor = Number(b.valor);
-    const periodo = String(b.periodo || '');
-    if (!membroId || !valor || valor <= 0 || !periodo) {
-      res.status(400).json({ error: 'membro_id, valor e periodo obrigatorios' });
-      return;
-    }
-    const descricao = typeof b.descricao === 'string' ? b.descricao : '';
-    const enviarWa = b.enviar_whatsapp !== false; // default true
-    const enviarTg = !!b.enviar_telegram;
-    const saldoAnterior = Number(b.saldo_anterior) || 0;
-
-    const pool = (await import('./database/connection')).default;
-    const [rows] = await pool.execute<import('mysql2').RowDataPacket[]>(
-      'SELECT nome, funcao, cpf, telefone FROM romatec_obra_equipe WHERE id = ? LIMIT 1',
-      [membroId]
-    );
-    if (!rows.length) { res.status(404).json({ error: 'Membro nao encontrado' }); return; }
-    const m = rows[0] as { nome: string; funcao: string | null; cpf: string | null; telefone: string | null };
-
-    // 1) Persiste como ajuste tipo 'adiantamento'
-    await pool.execute(
+    await conn.beginTransaction();
+    // 1) INSERT ajuste (subtrai do quinzenal automaticamente)
+    const [ajusteRes] = await conn.execute<import('mysql2').ResultSetHeader>(
       `INSERT INTO recibos_ajustes (membro_id, periodo, tipo, valor, descricao, criado_por)
        VALUES (?, ?, 'adiantamento', ?, ?, ?)`,
       [membroId, periodo, valor, descricao || `Vale passado em ${new Date().toLocaleDateString('pt-BR')}`, 'admin']
     );
+    ajusteId = Number(ajusteRes.insertId);
 
-    // 2) Gera PDF final (sem flag preview)
-    const { gerarPdfVale } = await import('./services/valePdf');
-    const numero = `VALE-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-    const pdf = await gerarPdfVale({
-      membro_nome: m.nome,
-      membro_funcao: m.funcao,
-      membro_cpf: m.cpf,
-      membro_telefone: m.telefone,
+    await conn.commit();
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    console.error('[vale:persistencia] rollback:', (err as Error).message);
+    res.status(500).json({ error: 'Falha ao persistir vale: ' + (err as Error).message });
+    return;
+  } finally {
+    conn.release();
+  }
+
+  // 2) Cria recibo universal (chama criarRecibo que faz proprio numero/token/hash)
+  // Fora da transacao acima porque criarRecibo gerencia conexao propria
+  // (com lock pessimista pra numeracao). Se falhar, removemos o ajuste.
+  try {
+    reciboCriado = await recibosMod.criarRecibo({
+      tenant_id: 1,
+      tipo: 'vale',
+      resource_type: 'ajuste_quinzenal',
+      resource_id: String(ajusteId),
+      destinatario_nome: m.nome,
+      destinatario_doc: m.cpf,
+      destinatario_phone: m.telefone,
       valor,
-      descricao: descricao || null,
-      periodo,
-      saldo_anterior: saldoAnterior,
-      obra_nome: typeof b.obra_nome === 'string' ? b.obra_nome : null,
-      numero,
+      forma_pagamento: 'dinheiro',
+      descricao_servico: descricao || `Vale (adiantamento) — ${m.nome}`,
+      categoria_servico: 'vale_quinzenal',
+      categoria_grupo: null,
+      emitente_perfil: 'romatec_pj',
+      expira_em_dias: 30,
     });
+    console.log(`[vale:criado] vale=${reciboCriado.numero} ajuste=${ajusteId} membro=${membroId} valor=${valor}`);
+  } catch (err) {
+    // Compensacao: remove o ajuste pra nao ficar fantasma
+    await pool.execute('DELETE FROM recibos_ajustes WHERE id = ?', [ajusteId]).catch(() => {});
+    console.error('[vale:recibo-criar] falhou, ajuste removido:', (err as Error).message);
+    res.status(500).json({ error: 'Falha ao criar recibo universal: ' + (err as Error).message });
+    return;
+  }
 
-    const enviosOk: string[] = [];
-    const enviosFalha: string[] = [];
+  // 3) Gera PDF do vale com QR + hash (Etapa 4 vai usar input.recibo)
+  const { gerarPdfVale } = await import('./services/valePdf');
+  const pdf = await gerarPdfVale({
+    membro_nome: m.nome,
+    membro_funcao: m.funcao,
+    membro_cpf: m.cpf,
+    membro_telefone: m.telefone,
+    valor,
+    descricao: descricao || null,
+    periodo,
+    saldo_anterior: saldoAnterior,
+    obra_nome: obraNome,
+    numero: reciboCriado.numero,
+    recibo: reciboCriado, // v1.99.16: PDF agora inclui QR /v/:hash + hash truncado
+  });
 
-    // 3) WhatsApp pro funcionario (texto + PDF anexo separados)
-    if (enviarWa && m.telefone) {
-      try {
-        const wa = await import('./integrations/whatsapp');
-        const phoneClean = m.telefone.replace(/\D/g, '');
-        const caption = `💸 *Recibo de Vale* — ${numero}\n\n${m.nome}, foi registrado um vale de *R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}*${descricao ? ` (${descricao})` : ''}.\n\nSerá descontado da próxima quinzena.\n\n— Romatec`;
-        await wa.sendReply(phoneClean, caption);
-        await wa.sendDocument(phoneClean, pdf.toString('base64'), `Vale-${numero}.pdf`);
-        enviosOk.push('whatsapp');
-      } catch (err) {
-        console.error('[vale] WhatsApp falhou:', (err as Error).message);
-        enviosFalha.push('whatsapp');
-      }
-    }
+  const enviosOk: string[] = [];
+  const enviosFalha: string[] = [];
+  let zapiMessageId: string | undefined;
 
-    // 4) Telegram pro CEO (com PDF anexo)
-    // Resolve chat_id na ordem usada pelo resto do sistema:
-    //   1. TELEGRAM_CEO_CHAT_ID (especifico)
-    //   2. TELEGRAM_CHAT_ID (legado)
-    //   3. Primeiro id de TELEGRAM_AUTHORIZED_USER_IDS (lista CSV)
-    if (enviarTg) {
-      try {
-        const { sendDocument: sendTelegramDocument } = await import('./integrations/telegram');
-        const chatId = process.env.TELEGRAM_CEO_CHAT_ID
-          || process.env.TELEGRAM_CHAT_ID
-          || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
-        if (!chatId) throw new Error('Telegram CEO chat_id nao configurado (defina TELEGRAM_CEO_CHAT_ID ou TELEGRAM_AUTHORIZED_USER_IDS)');
-        await sendTelegramDocument(
-          chatId, pdf, `Vale-${numero}.pdf`,
-          `💸 Vale ${numero} — ${m.nome} — R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}${descricao ? `\n${descricao}` : ''}`
+  // 4) WhatsApp pro funcionario com instrucao de confirmacao
+  if (enviarWa) {
+    try {
+      const wa = await import('./integrations/whatsapp');
+      const phoneClean = m.telefone.replace(/\D/g, '');
+      const caption = `💸 *Recibo de Vale* — ${reciboCriado.numero}\n\n` +
+        `${m.nome}, foi registrado um vale de *R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}*` +
+        `${descricao ? ` (${descricao})` : ''}.\n\nSerá descontado da próxima quinzena.\n\n` +
+        `Para confirmar o recebimento, responda *CONFIRMO*.\n\n— Romatec`;
+      const repRes = await wa.sendReply(phoneClean, caption);
+      zapiMessageId = repRes.messageId;
+      await wa.sendDocument(phoneClean, pdf.toString('base64'), `Vale-${reciboCriado.numero}.pdf`);
+      enviosOk.push('whatsapp');
+      console.log(`[vale:whatsapp] vale=${reciboCriado.numero} zapi_message_id=${zapiMessageId ?? '?'}`);
+      if (zapiMessageId) {
+        await recibosMod.marcarEvento(reciboCriado.id, 'enviado', zapiMessageId).catch(err =>
+          console.warn('[vale:marcarEvento]', (err as Error).message)
         );
-        enviosOk.push('telegram');
-      } catch (err) {
-        console.error('[vale] Telegram falhou:', (err as Error).message);
-        enviosFalha.push('telegram');
       }
+    } catch (err) {
+      console.error('[vale:whatsapp] falhou:', (err as Error).message);
+      enviosFalha.push('whatsapp');
     }
+  }
 
-    res.json({
-      ok: true,
-      numero,
-      valor,
-      saldo_apos: saldoAnterior - valor,
-      envios: { ok: enviosOk, falha: enviosFalha },
-    });
-  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+  // 5) Telegram pro CEO (copia)
+  if (enviarTg) {
+    try {
+      const { sendDocument: sendTelegramDocument } = await import('./integrations/telegram');
+      const chatId = process.env.TELEGRAM_CEO_CHAT_ID
+        || process.env.TELEGRAM_CHAT_ID
+        || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+      if (!chatId) throw new Error('Telegram CEO chat_id nao configurado');
+      await sendTelegramDocument(
+        chatId, pdf, `Vale-${reciboCriado.numero}.pdf`,
+        `💸 Vale ${reciboCriado.numero} — ${m.nome} — R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}` +
+        `${descricao ? `\n${descricao}` : ''}\n\n🔗 ${getBaseUrl()}/v/${reciboCriado.hash_validacao}`
+      );
+      enviosOk.push('telegram');
+    } catch (err) {
+      console.error('[vale:telegram] falhou:', (err as Error).message);
+      enviosFalha.push('telegram');
+    }
+  }
+
+  res.json({
+    ok: true,
+    numero: reciboCriado.numero,
+    vale_id: reciboCriado.id,
+    ajuste_id: ajusteId,
+    token: reciboCriado.token,
+    hash: reciboCriado.hash_validacao,
+    link_v: `${getBaseUrl()}/v/${reciboCriado.hash_validacao}`,
+    valor,
+    saldo_apos: saldoAnterior - valor,
+    envios: { ok: enviosOk, falha: enviosFalha },
+  });
 });
 
 // ── v1.81.0: lookups Brasil API (CEP, CNPJ) pra autocompletar formularios
@@ -1876,6 +1981,9 @@ app.get   ('/api/funcionarios/:funcionario_id/relatorio',
   apiHandle(args => obras.relatorioMensalFuncionario(args as Parameters<typeof obras.relatorioMensalFuncionario>[0])));
 app.get   ('/api/relatorio-equipe',
   apiHandle(args => obras.relatorioMensalEquipe(args as Parameters<typeof obras.relatorioMensalEquipe>[0])));
+// v1.99.16: saldo consolidado em aberto (cross-month) — sub-aba Folha Mensal
+app.get   ('/api/folha/saldo-aberto',
+  apiHandle(args => obras.relatorioSaldoEmAbertoEquipe(args as Parameters<typeof obras.relatorioSaldoEmAbertoEquipe>[0])));
 
 // v1.65.60: Webhook do AvalieImob — recebe leads (cadastros + assinaturas)
 // pra ZAYRA monitorar. Disparo em paralelo: WhatsApp CEO + Telegram CEO +
