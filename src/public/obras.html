@@ -3916,6 +3916,8 @@ function renderFolha() {
       </table>
       </div>`}
     </div>
+    <!-- v1.99.15: painel inline pro Vale (abre abaixo da tabela em vez de modal flutuante) -->
+    <div id="valeInlineBox" style="display:none; margin-top:12px;"></div>
   `;
 
   document.getElementById('folhaPrev').onclick = () => {
@@ -7358,86 +7360,87 @@ function periodoLabel(codigo) {
   return `${m[3]}ª quinzena de ${meses[Number(m[2])]}/${m[1]}`;
 }
 
-// ── v1.99.13: Modal "Passar Vale" SPLIT-SCREEN com preview do PDF ──────────
+// ── v1.99.15: Painel "Passar Vale" INLINE (abaixo da tabela, não modal flutuante) ──
 async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, periodo }) {
   const periodoLbl = periodoLabel(periodo);
   const saldoFmt = (Number(totalPagar) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // Cria overlay full-screen com split (form esquerda, PDF direita)
-  let overlay = document.getElementById('valeModalOverlay');
-  if (overlay) overlay.remove();
-  overlay = document.createElement('div');
-  overlay.id = 'valeModalOverlay';
-  overlay.style.cssText = 'position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.85); display:flex; align-items:stretch; justify-content:center; padding:20px;';
-  overlay.innerHTML = `
-    <div style="background:var(--card); border:1px solid var(--border); border-radius:12px; width:100%; max-width:1200px; display:grid; grid-template-columns:minmax(340px, 420px) 1fr; gap:0; overflow:hidden; box-shadow:0 12px 40px rgba(0,0,0,0.6);">
-      <!-- COLUNA ESQUERDA: form -->
-      <div style="padding:18px; overflow-y:auto; border-right:1px solid var(--border);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0; color:#f59e0b;">💸 Passar Vale</h3>
-          <button id="valeClose" style="background:transparent; border:1px solid var(--border); color:var(--text); padding:4px 10px; border-radius:6px; cursor:pointer;">✕</button>
-        </div>
-        <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:10px; margin-bottom:12px;">
-          <p style="margin:0; font-size:13px; color:#f59e0b;"><strong>${escape(nome)}</strong></p>
-          <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">
-            Período: <strong>${escape(periodoLbl)}</strong>
-          </p>
-          <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">
-            Total a receber atual: <strong>${escape(saldoFmt)}</strong>
-          </p>
-        </div>
-        <div style="display:grid; gap:10px;">
-          <label>
-            <span style="font-size:12px; color:var(--text-muted);">Valor do vale (R$)</span>
-            <input id="valeValor" type="number" step="0.01" min="0.01" placeholder="0,00" style="width:100%; font-size:18px; padding:8px 10px;" autofocus>
-          </label>
-          <label>
-            <span style="font-size:12px; color:var(--text-muted);">Descrição (opcional)</span>
-            <input id="valeDesc" placeholder="ex: Vale combustível 08/05" style="width:100%;">
-          </label>
-
-          <p id="valeSaldoFinal" style="font-size:12px; color:var(--text-muted); margin:6px 0; padding:8px; background:var(--surface-1); border-radius:6px;">
-            Saldo após este vale: <strong style="color:var(--gold);">${escape(saldoFmt)}</strong>
-          </p>
-
-          <div style="border:1px solid var(--border); border-radius:8px; padding:10px;">
-            <p style="margin:0 0 8px; font-size:12px; font-weight:600; color:var(--text-muted);">📤 ENVIO DO RECIBO</p>
-            <label style="display:flex; gap:6px; align-items:center; padding:6px; cursor:pointer;">
-              <input id="valeWa" type="checkbox" checked ${!telefone ? 'disabled' : ''}>
-              <span style="font-size:12px;">📱 WhatsApp ao colaborador${!telefone ? ' (sem telefone cadastrado)' : ' (' + escape(telefone) + ')'}</span>
+  // Renderiza dentro do div #valeInlineBox (criado no renderFolha, abaixo da tabela)
+  const box = document.getElementById('valeInlineBox');
+  if (!box) return;
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div class="card" style="border:2px solid #f59e0b55; padding:0; overflow:hidden;">
+      <div style="display:grid; grid-template-columns:minmax(320px, 420px) 1fr; gap:0; min-height:520px;">
+        <!-- COLUNA ESQUERDA: form -->
+        <div style="padding:16px; border-right:1px solid var(--border); background:var(--surface-1);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0; color:#f59e0b; font-size:16px;">💸 Passar Vale</h3>
+            <button id="valeClose" title="Fechar painel" style="background:transparent; border:1px solid var(--border); color:var(--text); padding:4px 10px; border-radius:6px; cursor:pointer;">✕</button>
+          </div>
+          <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:10px; margin-bottom:12px;">
+            <p style="margin:0; font-size:13px; color:#f59e0b;"><strong>${escape(nome)}</strong></p>
+            <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">
+              Período: <strong>${escape(periodoLbl)}</strong>
+            </p>
+            <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">
+              Total a receber atual: <strong>${escape(saldoFmt)}</strong>
+            </p>
+          </div>
+          <div style="display:grid; gap:10px;">
+            <label>
+              <span style="font-size:12px; color:var(--text-muted);">Valor do vale (R$)</span>
+              <input id="valeValor" type="number" step="0.01" min="0.01" placeholder="0,00" style="width:100%; font-size:18px; padding:8px 10px;" autofocus>
             </label>
-            <label style="display:flex; gap:6px; align-items:center; padding:6px; cursor:pointer;">
-              <input id="valeTg" type="checkbox" checked>
-              <span style="font-size:12px;">✈️ Telegram (cópia pro CEO)</span>
+            <label>
+              <span style="font-size:12px; color:var(--text-muted);">Descrição (opcional)</span>
+              <input id="valeDesc" placeholder="ex: Vale combustível 08/05" style="width:100%;">
             </label>
-          </div>
 
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <button id="valeRefresh" style="flex:1; background:transparent; border:1px solid var(--neon); color:var(--neon); padding:10px; border-radius:6px; cursor:pointer;">🔄 Atualizar preview</button>
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button id="valeCancel" style="flex:1; background:transparent; border:1px solid var(--border); color:var(--text); padding:10px; border-radius:6px; cursor:pointer;">Cancelar</button>
-            <button id="valeConfirm" class="btn-primary" style="flex:2; padding:10px;">✅ Confirmar e enviar</button>
+            <p id="valeSaldoFinal" style="font-size:12px; color:var(--text-muted); margin:6px 0; padding:8px; background:var(--surface-2); border-radius:6px;">
+              Saldo após este vale: <strong style="color:var(--gold);">${escape(saldoFmt)}</strong>
+            </p>
+
+            <div style="border:1px solid var(--border); border-radius:8px; padding:10px;">
+              <p style="margin:0 0 8px; font-size:12px; font-weight:600; color:var(--text-muted);">📤 ENVIO DO RECIBO</p>
+              <label style="display:flex; gap:6px; align-items:center; padding:6px; cursor:pointer;">
+                <input id="valeWa" type="checkbox" checked ${!telefone ? 'disabled' : ''}>
+                <span style="font-size:12px;">📱 WhatsApp ao colaborador${!telefone ? ' (sem telefone cadastrado)' : ' (' + escape(telefone) + ')'}</span>
+              </label>
+              <label style="display:flex; gap:6px; align-items:center; padding:6px; cursor:pointer;">
+                <input id="valeTg" type="checkbox" checked>
+                <span style="font-size:12px;">✈️ Telegram (cópia pro CEO)</span>
+              </label>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <button id="valeRefresh" style="flex:1; background:transparent; border:1px solid var(--neon); color:var(--neon); padding:10px; border-radius:6px; cursor:pointer;">🔄 Atualizar preview</button>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button id="valeCancel" style="flex:1; background:transparent; border:1px solid var(--border); color:var(--text); padding:10px; border-radius:6px; cursor:pointer;">Cancelar</button>
+              <button id="valeConfirm" class="btn-primary" style="flex:2; padding:10px;">✅ Confirmar e enviar</button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- COLUNA DIREITA: preview PDF -->
-      <div style="background:#1a1a1a; display:flex; flex-direction:column;">
-        <div style="padding:8px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-size:12px; color:var(--text-muted);">📄 Preview do recibo de vale</span>
-          <span id="valePreviewStatus" style="font-size:11px; color:var(--text-muted);">aguardando valor...</span>
+        <!-- COLUNA DIREITA: preview PDF -->
+        <div style="background:#1a1a1a; display:flex; flex-direction:column;">
+          <div style="padding:8px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:12px; color:var(--text-muted);">📄 Preview do recibo de vale</span>
+            <span id="valePreviewStatus" style="font-size:11px; color:var(--text-muted);">aguardando valor...</span>
+          </div>
+          <iframe id="valePreviewIframe" style="flex:1; width:100%; border:0; background:#fff; min-height:480px;" title="Preview do recibo"></iframe>
         </div>
-        <iframe id="valePreviewIframe" style="flex:1; width:100%; border:0; background:#fff;" title="Preview do recibo"></iframe>
       </div>
     </div>
   `;
-  document.body.appendChild(overlay);
 
-  const close = () => overlay.remove();
+  // Scroll suave até o painel quando abre
+  setTimeout(() => box.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+
+  const close = () => { box.style.display = 'none'; box.innerHTML = ''; };
   document.getElementById('valeClose').onclick = close;
   document.getElementById('valeCancel').onclick = close;
-  overlay.onclick = (e) => { if (e.target === overlay) close(); };
 
   const inpValor = document.getElementById('valeValor');
   const inpDesc  = document.getElementById('valeDesc');
