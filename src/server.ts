@@ -1608,6 +1608,25 @@ app.get   ('/api/propostas-consultoria/:id/pdf', async (req: Request, res: Respo
   }
 });
 
+// v1.99.11: Assinatura digital ICP-Brasil de propostas
+app.post('/api/propostas-consultoria/:id/assinar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const result = await propostasConsultoria.assinarProposta(String(req.params.id));
+    res.json(result);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/propostas-consultoria/:id/pdf-assinado', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const data = await propostasConsultoria.getPropostaPdfAssinado(id);
+    if (!data) { res.status(404).json({ error: 'Proposta ainda nao foi assinada' }); return; }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Proposta_${id}_assinada.pdf"`);
+    res.send(data.pdf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // v1.66.9: anexos da proposta (Planta Arquitetonica/Mapa — PDF/PNG/JPEG)
 app.get   ('/api/propostas-consultoria/:id/anexos',
   apiHandle(args => propostasConsultoria.listarAnexosProposta({ proposta_id: (args as { id: string }).id })));

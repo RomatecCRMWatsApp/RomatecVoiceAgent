@@ -4712,6 +4712,10 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
             <button data-edit-cons="${p.id}" style="flex:1;">✏️ Editar</button>
             <button class="btn-danger" data-del-cons="${p.id}" style="flex:1;">Excluir</button>
           </div>
+          <!-- v1.99.11: assinatura digital ICP-Brasil de propostas (cert PJ Romatec) -->
+          ${p.assinado_em
+            ? `<button data-cons-sig-pdf="${p.id}" title="Baixar PDF assinado digitalmente em ${escape(parseDataBR(p.assinado_em))}" style="background:#1F5C3A22; color:#1F5C3A; border:1px solid #1F5C3A55; font-size:12px; padding:6px;">🔏 PDF assinado</button>`
+            : `<button data-cons-sig="${p.id}" title="Assinar digitalmente esta proposta com e-CNPJ Romatec (PAdES ICP-Brasil)" style="background:transparent; color:var(--text-muted); border:1px dashed var(--border); font-size:12px; padding:6px;">🔏 Assinar digitalmente</button>`}
         </div>
       </div>
     </div>`;
@@ -4738,6 +4742,26 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
   });
   document.querySelectorAll('[data-pdf-cons]').forEach(b => b.onclick = () => {
     window.open('/api/propostas-consultoria/' + b.dataset.pdfCons + '/pdf', '_blank');
+  });
+  // v1.99.11: assinatura digital de propostas (PJ Romatec)
+  document.querySelectorAll('[data-cons-sig]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.consSig;
+    if (!confirm('Assinar esta proposta digitalmente com e-CNPJ Romatec?\n\nO PDF assinado fica salvo no banco. Validável no Adobe Reader e gov.br/validar.')) return;
+    const orig = b.textContent;
+    b.disabled = true; b.textContent = '⏳ Assinando...';
+    try {
+      const r = await api('/api/propostas-consultoria/' + id + '/assinar', { method:'POST', body:'{}' });
+      alert('✅ Proposta assinada!\n\nTitular: ' + (r.cert.subject_cn || '?') +
+            '\nCertificado: ' + r.cert.label +
+            '\nTamanho do PDF: ' + Math.round(r.pdf_size_bytes/1024) + ' KB');
+      await loadPropostasConsultoria(); render();
+    } catch (e) {
+      alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : ''));
+      b.disabled = false; b.textContent = orig;
+    }
+  });
+  document.querySelectorAll('[data-cons-sig-pdf]').forEach(b => b.onclick = () => {
+    window.open('/api/propostas-consultoria/' + b.dataset.consSigPdf + '/pdf-assinado', '_blank');
   });
   document.querySelectorAll('[data-wapp-cons]').forEach(b => b.onclick = async () => {
     const id = b.dataset.wappCons;

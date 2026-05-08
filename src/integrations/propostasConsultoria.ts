@@ -19,6 +19,8 @@ import { sendDocument as sendTelegramDocument } from './telegram';
 import { getTenantSettings } from '../services/tenantSettings';
 import { formatBRL } from '../util/format';
 import { calcularConsultoria } from '../services/pricing';
+// v1.99.11: assinatura digital reutiliza tipos do reciboPdf
+import type { SignatureVisualMeta } from '../services/reciboPdf';
 import type {
   SubtipoConsultoria, CustosCalculados, FontesConsulta, InputAverbacao, ItemCusto,
   InputGeorreferenciamento, InputDesmembramento, InputRetificacao, InputAvaliacaoPTAM,
@@ -359,7 +361,10 @@ const SUBTIPO_LABEL: Record<string, string> = {
   avaliacao_ptam: 'AVALIACAO DE IMOVEIS (PTAM)',
 };
 
-export async function gerarPdfPropostaConsultoria(id: string): Promise<Buffer> {
+export async function gerarPdfPropostaConsultoria(
+  id: string,
+  signatureMeta?: SignatureVisualMeta,
+): Promise<Buffer> {
   const p = await buscarPropostaConsultoria(id);
   if (p.tipo !== 'consultoria') throw new Error('Proposta nao e de consultoria');
   const custos = p.custos_calculados;
@@ -533,6 +538,52 @@ export async function gerarPdfPropostaConsultoria(id: string): Promise<Buffer> {
     doc.text(partes.join(' — ') || '-');
     if (p.gestor_telefone) doc.text(`Tel: ${p.gestor_telefone}`);
     doc.moveDown(0.4);
+  }
+
+  // v1.99.11: BLOCO VISUAL DE ASSINATURA DIGITAL (antes do footer)
+  if (signatureMeta) {
+    doc.moveDown(0.8);
+    let cy = doc.y;
+    if (cy > 720) cy = 720; // garante caber acima do footer (800)
+
+    const fmtDataAssin = (d: Date) =>
+      `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const fmtData = (iso: string) => {
+      const d = new Date(iso);
+      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+    };
+    const validadeFmt = signatureMeta.validade_ate ? fmtData(signatureMeta.validade_ate) : '—';
+    const docFmt = (() => {
+      const d = signatureMeta.signer_doc || '';
+      if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+      if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+      return d || '—';
+    })();
+    const cnLimpo = signatureMeta.signer_cn.replace(/:\d+$/, '');
+    const dataAssinFmt = fmtDataAssin(signatureMeta.data_assinatura);
+
+    const boxX = 130;
+    const boxW = 335;
+    doc.save()
+       .lineWidth(0.8)
+       .strokeColor(corHex)
+       .roundedRect(boxX, cy, boxW, 56, 4)
+       .stroke()
+       .restore();
+
+    doc.fontSize(8).fillColor(corHex).font('Helvetica-Bold')
+       .text('ASSINADO DIGITALMENTE — ICP-Brasil (PAdES)', boxX, cy + 5, {
+         width: boxW, align: 'center', lineBreak: false,
+       });
+    doc.fontSize(8).fillColor('#222').font('Helvetica-Bold')
+       .text(cnLimpo, boxX + 6, cy + 19, { width: boxW - 12, align: 'center', lineBreak: false });
+    doc.fontSize(7).fillColor('#444').font('Helvetica')
+       .text(`${docFmt} · Assinado em ${dataAssinFmt}`, boxX + 6, cy + 31, {
+         width: boxW - 12, align: 'center', lineBreak: false,
+       });
+    doc.fontSize(6.5).fillColor('#666').font('Helvetica')
+       .text(`Cert: ${signatureMeta.issuer_cn || '—'} · Válido até ${validadeFmt} · Validar em validar.iti.gov.br`,
+             boxX + 6, cy + 42, { width: boxW - 12, align: 'center', lineBreak: false });
   }
 
   // Footer
@@ -939,7 +990,7 @@ export async function listarPropostasPorTipo(input: { tipo?: 'mao_de_obra' | 'co
   let sql = `SELECT p.id, p.numero, p.tipo, p.subtipo_consultoria, p.cliente_id,
                     c.nome AS cliente_nome, p.endereco_obra, p.data_proposta,
                     p.validade_dias, p.valor_total, p.status, p.enviada_whatsapp,
-                    p.criado_em,
+                    p.criado_em, p.assinado_em,
                     (SELECT COUNT(*) FROM proposta_anexos a WHERE a.proposta_id = p.id) AS qtd_anexos
                FROM propostas p
                LEFT JOIN propostas_clientes c ON c.id = p.cliente_id
@@ -990,6 +1041,135 @@ export async function listarPropostasPorTipo(input: { tipo?: 'mao_de_obra' | 'co
       criado_em: r.criado_em,
       qtd_anexos: Number(r.qtd_anexos || 0),
       anexos: anexosPorPropId[Number(r.id)] || [],
+      assinado_em: r.assinado_em
+        ? (r.assinado_em instanceof Date ? r.assinado_em.toISOString() : String(r.assinado_em))
+        : null,
     })),
   };
+}
+
+// ─── v1.99.11: Assinatura digital ICP-Brasil de Propostas ──────────────────
+
+import { getCertForSigning } from '../services/signingCertificates';
+import { signPdfBuffer } from '../services/pdfSigner';
+
+export interface AssinarPropostaResult {
+  proposta_id: number;
+  numero: string;
+  assinado_em: string;
+  cert: {
+    id: number;
+    label: string;
+    subject_cn: string | null;
+    subject_doc: string | null;
+    issuer_cn: string | null;
+    validade_ate: string | null;
+  };
+  pdf_size_bytes: number;
+}
+
+/**
+ * Assina proposta com certificado PJ (Romatec). PF nao faz sentido pra propostas
+ * empresariais. Quando e-CNPJ A1 estiver cadastrado, esta funcao funciona.
+ */
+export async function assinarProposta(propostaId: number | string): Promise<AssinarPropostaResult> {
+  const certData = await getCertForSigning('pj');
+  if (!certData) {
+    throw new Error(
+      'Nenhum certificado digital PJ cadastrado. Cadastre o e-CNPJ A1 da Romatec em /obras admin antes de assinar propostas.'
+    );
+  }
+  if (certData.meta.expirado) {
+    console.warn(`[proposta-assinatura] cert ${certData.meta.id} VENCIDO em ${certData.meta.validade_ate}`);
+  }
+
+  const agora = new Date();
+  const signatureMeta: SignatureVisualMeta = {
+    signer_cn: certData.meta.subject_cn ?? `Proposta ${propostaId}`,
+    signer_doc: certData.meta.subject_doc,
+    issuer_cn: certData.meta.issuer_cn,
+    validade_ate: certData.meta.validade_ate,
+    data_assinatura: agora,
+    thumbprint: certData.meta.thumbprint,
+  };
+
+  const proposta = await buscarPropostaConsultoria(String(propostaId));
+  if (proposta.tipo !== 'consultoria') {
+    throw new Error('Apenas propostas de consultoria sao suportadas neste momento');
+  }
+
+  // Gera PDF JA com bloco visual + assina
+  const pdfBuffer = await gerarPdfPropostaConsultoria(String(propostaId), signatureMeta);
+
+  const signMeta = {
+    name: certData.meta.subject_cn ?? `Proposta ${proposta.numero}`,
+    reason: `Proposta de Consultoria ${proposta.numero}`,
+    location: 'Acailandia/MA',
+    contactInfo: certData.meta.subject_doc ?? '',
+  };
+
+  const pdfAssinado = await signPdfBuffer(pdfBuffer, certData.pfx, certData.senha, signMeta);
+
+  const meta = {
+    perfil: 'pj' as const,
+    cert_id: certData.meta.id,
+    cert_label: certData.meta.label,
+    subject_cn: certData.meta.subject_cn,
+    subject_doc: certData.meta.subject_doc,
+    issuer_cn: certData.meta.issuer_cn,
+    thumbprint: certData.meta.thumbprint,
+    validade_ate: certData.meta.validade_ate,
+    assinado_em: agora.toISOString(),
+    sign_reason: signMeta.reason,
+  };
+
+  await pool.execute<ResultSetHeader>(
+    `UPDATE propostas
+     SET pdf_assinado = ?, assinado_em = ?, assinado_por_cert_id = ?, assinatura_meta = ?
+     WHERE id = ?`,
+    [pdfAssinado, agora, certData.meta.id, JSON.stringify(meta), Number(propostaId)]
+  );
+
+  return {
+    proposta_id: Number(propostaId),
+    numero: proposta.numero,
+    assinado_em: agora.toISOString(),
+    cert: {
+      id: certData.meta.id,
+      label: certData.meta.label,
+      subject_cn: certData.meta.subject_cn,
+      subject_doc: certData.meta.subject_doc,
+      issuer_cn: certData.meta.issuer_cn,
+      validade_ate: certData.meta.validade_ate,
+    },
+    pdf_size_bytes: pdfAssinado.length,
+  };
+}
+
+interface PropostaAssinadaRow extends RowDataPacket {
+  id: number;
+  pdf_assinado: Buffer | null;
+  assinado_em: Date | string | null;
+  assinatura_meta: string | Record<string, unknown> | null;
+}
+
+export async function getPropostaPdfAssinado(propostaId: number | string): Promise<{
+  pdf: Buffer;
+  assinado_em: string;
+  meta: Record<string, unknown>;
+} | null> {
+  const [rows] = await pool.execute<PropostaAssinadaRow[]>(
+    `SELECT id, pdf_assinado, assinado_em, assinatura_meta
+     FROM propostas WHERE id = ? LIMIT 1`,
+    [Number(propostaId)]
+  );
+  if (!rows.length || !rows[0].pdf_assinado) return null;
+  const r = rows[0];
+  const meta = typeof r.assinatura_meta === 'string'
+    ? JSON.parse(r.assinatura_meta)
+    : (r.assinatura_meta ?? {});
+  const assinadoEm = r.assinado_em
+    ? (r.assinado_em instanceof Date ? r.assinado_em.toISOString() : String(r.assinado_em))
+    : '';
+  return { pdf: r.pdf_assinado as Buffer, assinado_em: assinadoEm, meta };
 }

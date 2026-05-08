@@ -14,6 +14,14 @@ const ALTERS_RECIBOS = [
   "ALTER TABLE recibos ADD COLUMN assinatura_meta JSON NULL",
 ];
 
+// v1.99.11: assinatura digital tambem em propostas (consultoria + mao de obra)
+const ALTERS_PROPOSTAS = [
+  "ALTER TABLE propostas ADD COLUMN assinado_em DATETIME NULL",
+  "ALTER TABLE propostas ADD COLUMN assinado_por_cert_id INT NULL",
+  "ALTER TABLE propostas ADD COLUMN pdf_assinado LONGBLOB NULL",
+  "ALTER TABLE propostas ADD COLUMN assinatura_meta JSON NULL",
+];
+
 const CREATE_SIGNING_CERT_TABLE = `
   CREATE TABLE IF NOT EXISTS tenant_signing_certificates (
     id            INT AUTO_INCREMENT PRIMARY KEY,
@@ -44,8 +52,8 @@ export async function runSigningMigrations(): Promise<void> {
     console.error('[signing-migrations] FALHA tenant_signing_certificates:', (err as Error).message);
   }
 
-  // 2) ALTERs em recibos — try/catch individual por ALTER
-  for (const sql of ALTERS_RECIBOS) {
+  // 2) ALTERs em recibos + propostas — try/catch individual por ALTER
+  for (const sql of [...ALTERS_RECIBOS, ...ALTERS_PROPOSTAS]) {
     try {
       await pool.execute(sql);
       console.log('[signing-migrations] OK:', sql.slice(0, 80));
