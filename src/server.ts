@@ -1820,6 +1820,11 @@ app.listen(PORT, () => {
   // Antes (v1.61.0), startDraftCleanup era chamado direto e a 1ª execução
   // falhava com ER_NO_SUCH_TABLE pq runMigrations ainda nem tinha rodado.
   void initDb()
+    // v1.99.7: signing migrations rodam INDEPENDENTE (runMigrations principal
+    // tem bug em prod que aborta antes dos ALTERs novos). Esta versao tem
+    // try/catch por ALTER e nao aborta cascata.
+    .then(() => import('./database/migrations-signing'))
+    .then(m => m.runSigningMigrations())
     .then(() => loadSessionFromDb())
     .then(() => import('./services/whatsappDrafts'))
     .then(m => m.startDraftCleanup())
