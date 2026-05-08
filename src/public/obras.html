@@ -7464,7 +7464,11 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
     try {
       const r = await fetch('/api/recibos/vale/preview-pdf', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/pdf, application/json', ...(getCeoToken() ? { 'X-CEO-Token': getCeoToken() } : {}) },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/pdf',
+          ...(getCeoToken() ? { 'X-CEO-Token': getCeoToken() } : {}),
+        },
         body: JSON.stringify({
           membro_id: Number(membroId),
           valor: v,
