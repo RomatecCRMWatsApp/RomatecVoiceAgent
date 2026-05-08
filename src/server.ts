@@ -1819,12 +1819,20 @@ app.listen(PORT, () => {
   // v1.61.1: cleanup de drafts roda APÓS migrations criarem a tabela.
   // Antes (v1.61.0), startDraftCleanup era chamado direto e a 1ª execução
   // falhava com ER_NO_SUCH_TABLE pq runMigrations ainda nem tinha rodado.
+  // v1.99.7+: signing migrations rodam IMEDIATAMENTE em promise SEPARADA.
+  // Antes (v1.99.7) estavam encadeadas em initDb().then(...) — quando initDb
+  // rejeitava (bug do users.password_hash), o .catch da chain pulava as
+  // signing migrations. Agora correm independente do sucesso/falha de initDb.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-signing');
+      await m.runSigningMigrations();
+    } catch (err) {
+      console.error('[signing-migrations] FALHA fatal:', err);
+    }
+  })();
+
   void initDb()
-    // v1.99.7: signing migrations rodam INDEPENDENTE (runMigrations principal
-    // tem bug em prod que aborta antes dos ALTERs novos). Esta versao tem
-    // try/catch por ALTER e nao aborta cascata.
-    .then(() => import('./database/migrations-signing'))
-    .then(m => m.runSigningMigrations())
     .then(() => loadSessionFromDb())
     .then(() => import('./services/whatsappDrafts'))
     .then(m => m.startDraftCleanup())
