@@ -7358,95 +7358,179 @@ function periodoLabel(codigo) {
   return `${m[3]}ª quinzena de ${meses[Number(m[2])]}/${m[1]}`;
 }
 
-// ── v1.99.12: Modal "Passar Vale" — atalho rápido na linha do funcionário ──
+// ── v1.99.13: Modal "Passar Vale" SPLIT-SCREEN com preview do PDF ──────────
 async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, periodo }) {
   const periodoLbl = periodoLabel(periodo);
   const saldoFmt = (Number(totalPagar) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  const body = `
-    <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:10px; margin-bottom:12px;">
-      <p style="margin:0; font-size:13px; color:#f59e0b;"><strong>${escape(nome)}</strong></p>
-      <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">
-        Período: <strong>${escape(periodoLbl)}</strong>
-        · Total a receber atual: <strong>${escape(saldoFmt)}</strong>
-      </p>
-    </div>
-    <div style="display:grid; gap:10px;">
-      <label>
-        <span style="font-size:12px; color:var(--text-muted);">Valor do vale (R$)</span>
-        <input id="valeValor" type="number" step="0.01" min="0.01" placeholder="0,00" style="width:100%; font-size:18px; padding:8px 10px;" autofocus>
-      </label>
-      <label>
-        <span style="font-size:12px; color:var(--text-muted);">Descrição (opcional)</span>
-        <input id="valeDesc" placeholder="ex: Vale combustível 08/05" style="width:100%;">
-      </label>
-      <label style="display:flex; gap:6px; align-items:center; padding:8px; background:rgba(0,255,136,0.05); border-radius:6px;">
-        <input id="valeNotificar" type="checkbox" checked>
-        <span style="font-size:12px;">📱 Notificar funcionário no WhatsApp depois de salvar</span>
-      </label>
-      <p id="valeSaldoFinal" style="font-size:12px; color:var(--text-muted); margin:0; padding:8px; background:var(--surface-1); border-radius:6px;">
-        Saldo após este vale: <strong style="color:var(--gold);">${escape(saldoFmt)}</strong>
-      </p>
+  // Cria overlay full-screen com split (form esquerda, PDF direita)
+  let overlay = document.getElementById('valeModalOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'valeModalOverlay';
+  overlay.style.cssText = 'position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.85); display:flex; align-items:stretch; justify-content:center; padding:20px;';
+  overlay.innerHTML = `
+    <div style="background:var(--card); border:1px solid var(--border); border-radius:12px; width:100%; max-width:1200px; display:grid; grid-template-columns:minmax(340px, 420px) 1fr; gap:0; overflow:hidden; box-shadow:0 12px 40px rgba(0,0,0,0.6);">
+      <!-- COLUNA ESQUERDA: form -->
+      <div style="padding:18px; overflow-y:auto; border-right:1px solid var(--border);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0; color:#f59e0b;">💸 Passar Vale</h3>
+          <button id="valeClose" style="background:transparent; border:1px solid var(--border); color:var(--text); padding:4px 10px; border-radius:6px; cursor:pointer;">✕</button>
+        </div>
+        <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:10px; margin-bottom:12px;">
+          <p style="margin:0; font-size:13px; color:#f59e0b;"><strong>${escape(nome)}</strong></p>
+          <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">
+            Período: <strong>${escape(periodoLbl)}</strong>
+          </p>
+          <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">
+            Total a receber atual: <strong>${escape(saldoFmt)}</strong>
+          </p>
+        </div>
+        <div style="display:grid; gap:10px;">
+          <label>
+            <span style="font-size:12px; color:var(--text-muted);">Valor do vale (R$)</span>
+            <input id="valeValor" type="number" step="0.01" min="0.01" placeholder="0,00" style="width:100%; font-size:18px; padding:8px 10px;" autofocus>
+          </label>
+          <label>
+            <span style="font-size:12px; color:var(--text-muted);">Descrição (opcional)</span>
+            <input id="valeDesc" placeholder="ex: Vale combustível 08/05" style="width:100%;">
+          </label>
+
+          <p id="valeSaldoFinal" style="font-size:12px; color:var(--text-muted); margin:6px 0; padding:8px; background:var(--surface-1); border-radius:6px;">
+            Saldo após este vale: <strong style="color:var(--gold);">${escape(saldoFmt)}</strong>
+          </p>
+
+          <div style="border:1px solid var(--border); border-radius:8px; padding:10px;">
+            <p style="margin:0 0 8px; font-size:12px; font-weight:600; color:var(--text-muted);">📤 ENVIO DO RECIBO</p>
+            <label style="display:flex; gap:6px; align-items:center; padding:6px; cursor:pointer;">
+              <input id="valeWa" type="checkbox" checked ${!telefone ? 'disabled' : ''}>
+              <span style="font-size:12px;">📱 WhatsApp ao colaborador${!telefone ? ' (sem telefone cadastrado)' : ' (' + escape(telefone) + ')'}</span>
+            </label>
+            <label style="display:flex; gap:6px; align-items:center; padding:6px; cursor:pointer;">
+              <input id="valeTg" type="checkbox" checked>
+              <span style="font-size:12px;">✈️ Telegram (cópia pro CEO)</span>
+            </label>
+          </div>
+
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button id="valeRefresh" style="flex:1; background:transparent; border:1px solid var(--neon); color:var(--neon); padding:10px; border-radius:6px; cursor:pointer;">🔄 Atualizar preview</button>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button id="valeCancel" style="flex:1; background:transparent; border:1px solid var(--border); color:var(--text); padding:10px; border-radius:6px; cursor:pointer;">Cancelar</button>
+            <button id="valeConfirm" class="btn-primary" style="flex:2; padding:10px;">✅ Confirmar e enviar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- COLUNA DIREITA: preview PDF -->
+      <div style="background:#1a1a1a; display:flex; flex-direction:column;">
+        <div style="padding:8px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:12px; color:var(--text-muted);">📄 Preview do recibo de vale</span>
+          <span id="valePreviewStatus" style="font-size:11px; color:var(--text-muted);">aguardando valor...</span>
+        </div>
+        <iframe id="valePreviewIframe" style="flex:1; width:100%; border:0; background:#fff;" title="Preview do recibo"></iframe>
+      </div>
     </div>
   `;
+  document.body.appendChild(overlay);
 
-  abrirEditar(`💸 Passar vale — ${nome}`, body, async () => {
-    const valor = Number(document.getElementById('valeValor').value);
+  const close = () => overlay.remove();
+  document.getElementById('valeClose').onclick = close;
+  document.getElementById('valeCancel').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+  const inpValor = document.getElementById('valeValor');
+  const inpDesc  = document.getElementById('valeDesc');
+  const outSaldo = document.getElementById('valeSaldoFinal');
+  const iframe   = document.getElementById('valePreviewIframe');
+  const previewStatus = document.getElementById('valePreviewStatus');
+
+  // Atualiza preview de saldo + chama backend pra gerar PDF preview
+  let lastBlobUrl = null;
+  let debounceTimer = null;
+  async function atualizarPreview() {
+    const v = Number(inpValor.value) || 0;
+    const restante = totalPagar - v;
+    const restanteFmt = restante.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+    const cor = restante < 0 ? 'var(--danger)' : restante === 0 ? 'var(--text-muted)' : 'var(--gold)';
+    outSaldo.innerHTML = `Saldo após este vale: <strong style="color:${cor};">${restanteFmt}</strong>${restante < 0 ? ' ⚠️ Vale maior que saldo' : ''}`;
+
+    if (v <= 0) {
+      previewStatus.textContent = 'aguardando valor...';
+      iframe.src = 'about:blank';
+      return;
+    }
+    previewStatus.textContent = '⏳ gerando...';
+    try {
+      const r = await fetch('/api/recibos/vale/preview-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/pdf, application/json', ...(getCeoToken() ? { 'X-CEO-Token': getCeoToken() } : {}) },
+        body: JSON.stringify({
+          membro_id: Number(membroId),
+          valor: v,
+          descricao: inpDesc.value.trim() || null,
+          periodo,
+          saldo_anterior: totalPagar,
+        }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: 'erro' }));
+        previewStatus.textContent = '❌ ' + (err.error || 'erro');
+        return;
+      }
+      const blob = await r.blob();
+      if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
+      lastBlobUrl = URL.createObjectURL(blob);
+      iframe.src = lastBlobUrl;
+      previewStatus.textContent = '✓ atualizado';
+    } catch (err) {
+      previewStatus.textContent = '❌ ' + err.message;
+    }
+  }
+  function debounce() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(atualizarPreview, 600);
+  }
+  inpValor.oninput = debounce;
+  inpDesc.oninput  = debounce;
+  document.getElementById('valeRefresh').onclick = atualizarPreview;
+  setTimeout(() => inpValor.focus(), 80);
+
+  document.getElementById('valeConfirm').onclick = async () => {
+    const valor = Number(inpValor.value);
     if (!valor || valor <= 0) { alert('Informe o valor do vale.'); return; }
     if (valor > totalPagar) {
       if (!confirm(`Vale (${valor.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}) é maior que o saldo atual (${saldoFmt}). Continuar mesmo assim?`)) return;
     }
-    const descricao = document.getElementById('valeDesc').value.trim();
-    const notificar = document.getElementById('valeNotificar').checked;
-
+    const enviarWa = document.getElementById('valeWa').checked && !!telefone;
+    const enviarTg = document.getElementById('valeTg').checked;
+    const btn = document.getElementById('valeConfirm');
+    btn.disabled = true; btn.textContent = '⏳ Enviando...';
     try {
-      await api('/api/recibos/ajustes', {
+      const r = await api('/api/recibos/vale/criar-e-enviar', {
         method: 'POST',
         body: JSON.stringify({
           membro_id: Number(membroId),
-          periodo,
-          tipo: 'adiantamento',
           valor,
-          descricao: descricao || `Vale passado em ${new Date().toLocaleDateString('pt-BR')}`,
+          descricao: inpDesc.value.trim() || null,
+          periodo,
+          saldo_anterior: totalPagar,
+          enviar_whatsapp: enviarWa,
+          enviar_telegram: enviarTg,
         }),
       });
-
-      if (notificar && telefone) {
-        try {
-          const msg = `💸 *Vale registrado*\n\n${nome}, foi registrado um vale de *${valor.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}*${descricao ? ` (${descricao})` : ''}.\n\nEsse valor será descontado da sua próxima quinzena (${periodoLbl}).\n\nSaldo após desconto: *${(totalPagar - valor).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}*\n\n— Romatec`;
-          await api('/api/whatsapp/send-text', {
-            method: 'POST',
-            body: JSON.stringify({ phone: telefone, message: msg }),
-          });
-        } catch (err) {
-          console.warn('[vale] notificacao WhatsApp falhou:', err.message);
-        }
-      }
-
-      alert(`✅ Vale de ${valor.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} registrado.\n\nSerá descontado automaticamente do recibo quinzenal.${notificar && telefone ? '\n\n📱 Funcionário notificado no WhatsApp.' : ''}`);
-      fecharEditar();
+      const enviosTxt = r.envios.ok.length
+        ? `\n\nEnviado via: ${r.envios.ok.join(', ')}` + (r.envios.falha.length ? `\nFalhou: ${r.envios.falha.join(', ')}` : '')
+        : '';
+      alert(`✅ Vale ${r.numero} de R$ ${r.valor.toLocaleString('pt-BR',{minimumFractionDigits:2})} registrado.${enviosTxt}\n\nSaldo após desconto: R$ ${r.saldo_apos.toLocaleString('pt-BR',{minimumFractionDigits:2})}`);
+      close();
       await loadFolha();
       render();
     } catch (e) {
       alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : ''));
+      btn.disabled = false; btn.textContent = '✅ Confirmar e enviar';
     }
-  });
-
-  // Atualiza preview do saldo ao digitar valor
-  setTimeout(() => {
-    const inp = document.getElementById('valeValor');
-    const out = document.getElementById('valeSaldoFinal');
-    if (inp && out) {
-      inp.oninput = () => {
-        const v = Number(inp.value) || 0;
-        const restante = totalPagar - v;
-        const restanteFmt = restante.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-        const cor = restante < 0 ? 'var(--danger)' : restante === 0 ? 'var(--text-muted)' : 'var(--gold)';
-        out.innerHTML = `Saldo após este vale: <strong style="color:${cor};">${restanteFmt}</strong>${restante < 0 ? ' ⚠️ Vale maior que saldo' : ''}`;
-      };
-      inp.focus();
-    }
-  }, 100);
+  };
 }
 
 async function abrirModalReciboQuinzena(membroId, nome, periodoInicial) {

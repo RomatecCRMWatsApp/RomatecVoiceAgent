@@ -1148,6 +1148,135 @@ app.post('/api/whatsapp/send-text', requireCeoToken, async (req: Request, res: R
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v1.99.13: PREVIEW PDF de Vale (sem persistir)
+app.post('/api/recibos/vale/preview-pdf', async (req: Request, res: Response) => {
+  try {
+    const b = (req.body || {}) as Record<string, unknown>;
+    const { gerarPdfVale } = await import('./services/valePdf');
+    const pool = (await import('./database/connection')).default;
+    const membroId = Number(b.membro_id);
+    if (!membroId) { res.status(400).json({ error: 'membro_id obrigatorio' }); return; }
+    const valor = Number(b.valor);
+    if (!valor || valor <= 0) { res.status(400).json({ error: 'valor invalido' }); return; }
+
+    // Busca dados do membro
+    const [rows] = await pool.execute<import('mysql2').RowDataPacket[]>(
+      'SELECT nome, funcao, cpf, telefone FROM romatec_obra_equipe WHERE id = ? LIMIT 1',
+      [membroId]
+    );
+    if (!rows.length) { res.status(404).json({ error: 'Membro nao encontrado' }); return; }
+    const m = rows[0] as { nome: string; funcao: string | null; cpf: string | null; telefone: string | null };
+
+    const pdf = await gerarPdfVale({
+      membro_nome: m.nome,
+      membro_funcao: m.funcao,
+      membro_cpf: m.cpf,
+      membro_telefone: m.telefone,
+      valor,
+      descricao: typeof b.descricao === 'string' ? b.descricao : null,
+      periodo: String(b.periodo || ''),
+      saldo_anterior: Number(b.saldo_anterior) || 0,
+      obra_nome: typeof b.obra_nome === 'string' ? b.obra_nome : null,
+      preview: true,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="vale-preview.pdf"');
+    res.send(pdf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// v1.99.13: cria vale (ajuste) + envia WhatsApp/Telegram com PDF anexo
+app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const b = (req.body || {}) as Record<string, unknown>;
+    const membroId = Number(b.membro_id);
+    const valor = Number(b.valor);
+    const periodo = String(b.periodo || '');
+    if (!membroId || !valor || valor <= 0 || !periodo) {
+      res.status(400).json({ error: 'membro_id, valor e periodo obrigatorios' });
+      return;
+    }
+    const descricao = typeof b.descricao === 'string' ? b.descricao : '';
+    const enviarWa = b.enviar_whatsapp !== false; // default true
+    const enviarTg = !!b.enviar_telegram;
+    const saldoAnterior = Number(b.saldo_anterior) || 0;
+
+    const pool = (await import('./database/connection')).default;
+    const [rows] = await pool.execute<import('mysql2').RowDataPacket[]>(
+      'SELECT nome, funcao, cpf, telefone FROM romatec_obra_equipe WHERE id = ? LIMIT 1',
+      [membroId]
+    );
+    if (!rows.length) { res.status(404).json({ error: 'Membro nao encontrado' }); return; }
+    const m = rows[0] as { nome: string; funcao: string | null; cpf: string | null; telefone: string | null };
+
+    // 1) Persiste como ajuste tipo 'adiantamento'
+    await pool.execute(
+      `INSERT INTO recibos_ajustes (membro_id, periodo, tipo, valor, descricao, criado_por)
+       VALUES (?, ?, 'adiantamento', ?, ?, ?)`,
+      [membroId, periodo, valor, descricao || `Vale passado em ${new Date().toLocaleDateString('pt-BR')}`, 'admin']
+    );
+
+    // 2) Gera PDF final (sem flag preview)
+    const { gerarPdfVale } = await import('./services/valePdf');
+    const numero = `VALE-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+    const pdf = await gerarPdfVale({
+      membro_nome: m.nome,
+      membro_funcao: m.funcao,
+      membro_cpf: m.cpf,
+      membro_telefone: m.telefone,
+      valor,
+      descricao: descricao || null,
+      periodo,
+      saldo_anterior: saldoAnterior,
+      obra_nome: typeof b.obra_nome === 'string' ? b.obra_nome : null,
+      numero,
+    });
+
+    const enviosOk: string[] = [];
+    const enviosFalha: string[] = [];
+
+    // 3) WhatsApp pro funcionario (texto + PDF anexo separados)
+    if (enviarWa && m.telefone) {
+      try {
+        const wa = await import('./integrations/whatsapp');
+        const phoneClean = m.telefone.replace(/\D/g, '');
+        const caption = `💸 *Recibo de Vale* — ${numero}\n\n${m.nome}, foi registrado um vale de *R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}*${descricao ? ` (${descricao})` : ''}.\n\nSerá descontado da próxima quinzena.\n\n— Romatec`;
+        await wa.sendReply(phoneClean, caption);
+        await wa.sendDocument(phoneClean, pdf.toString('base64'), `Vale-${numero}.pdf`);
+        enviosOk.push('whatsapp');
+      } catch (err) {
+        console.error('[vale] WhatsApp falhou:', (err as Error).message);
+        enviosFalha.push('whatsapp');
+      }
+    }
+
+    // 4) Telegram pro CEO (com PDF anexo)
+    if (enviarTg) {
+      try {
+        const { sendDocument: sendTelegramDocument } = await import('./integrations/telegram');
+        const chatId = process.env.TELEGRAM_CEO_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+        if (!chatId) throw new Error('TELEGRAM_CEO_CHAT_ID nao configurado');
+        await sendTelegramDocument(
+          chatId, pdf, `Vale-${numero}.pdf`,
+          `💸 Vale ${numero} — ${m.nome} — R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}${descricao ? `\n${descricao}` : ''}`
+        );
+        enviosOk.push('telegram');
+      } catch (err) {
+        console.error('[vale] Telegram falhou:', (err as Error).message);
+        enviosFalha.push('telegram');
+      }
+    }
+
+    res.json({
+      ok: true,
+      numero,
+      valor,
+      saldo_apos: saldoAnterior - valor,
+      envios: { ok: enviosOk, falha: enviosFalha },
+    });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // ── v1.81.0: lookups Brasil API (CEP, CNPJ) pra autocompletar formularios
 app.get('/api/lookup/cep/:cep', async (req: Request, res: Response) => {
   try {
