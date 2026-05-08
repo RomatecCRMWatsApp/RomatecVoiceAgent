@@ -1239,13 +1239,17 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
   // Se duplo-clique cria o mesmo vale 2x, retorna SAME RESPONSE da 1a chamada
   // sem reenviar nem duplicar registros. JOIN com recibos pra confirmar
   // que ambos os lados (ajuste + recibo universal) ja existem.
+  // v1.99.20: COLLATE explicito pra evitar 'Illegal mix of collations'.
+  // recibos.resource_id e VARCHAR utf8mb4_unicode_ci; CAST(a.id AS CHAR)
+  // sai com utf8mb4_0900_ai_ci (default MySQL 8). Usar CAST(... AS UNSIGNED)
+  // do lado de recibos.resource_id resolve sem dependencia de collation.
   const [duplicatas] = await pool.execute<import('mysql2').RowDataPacket[]>(
     `SELECT a.id AS ajuste_id,
             r.id AS vale_id, r.numero, r.token, r.hash_validacao
        FROM recibos_ajustes a
        LEFT JOIN recibos r
               ON r.resource_type = 'ajuste_quinzenal'
-             AND r.resource_id = CAST(a.id AS CHAR)
+             AND CAST(r.resource_id AS UNSIGNED) = a.id
       WHERE a.membro_id = ?
         AND a.periodo = ?
         AND a.tipo = 'adiantamento'
