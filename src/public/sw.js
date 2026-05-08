@@ -1,7 +1,7 @@
 // Service Worker da ZAYRA — versão atrelada à versão do app pra forçar
 // rotação de cache em todo deploy. Se você bumpar a versão do app, bumpe esta
 // constante também (ou no futuro, gere via build).
-const CACHE = 'zayra-v1.99.0';
+const CACHE = 'zayra-v1.99.6';
 
 // App shell — recursos pequenos que podem ser cacheados.
 // HTML NÃO está aqui de propósito — é network-first.
@@ -45,7 +45,7 @@ self.addEventListener('fetch', e => {
   const apiRoutes = ['/api/', '/text', '/voice', '/briefing', '/memory', '/notifications', '/webhook', '/zayra', '/auth', '/chat', '/health'];
   // v1.90.0: rotas que retornam binario (PDF, XML, imagens) NAO podem receber
   // fallback JSON — quebra o iframe/download. Pass-through sem .catch.
-  const BINARY_PATTERNS = ['/pdf', '/preview-pdf', '/relatorio-pdf', '/danfse', '/xml', '/raw', '/foto'];
+  const BINARY_PATTERNS = ['/pdf', '/pdf-assinado', '/preview-pdf', '/relatorio-pdf', '/danfse', '/xml', '/raw', '/foto'];
   const isBinaryEndpoint = BINARY_PATTERNS.some(p =>
     url.pathname.endsWith(p) || url.pathname.includes(p + '/') || url.pathname.includes(p + '?')
   );
@@ -98,6 +98,14 @@ self.addEventListener('fetch', e => {
       }).catch(() => caches.match('/'));
     }),
   );
+});
+
+// ── SKIP_WAITING postMessage (v1.99.2: auto-update silencioso) ────────────
+// Permite que o front mande SKIP_WAITING pra ativar o SW novo imediatamente
+// sem precisar fechar/abrir aba. Combinado com 'controllerchange' listener no
+// front, fecha o ciclo de auto-update sem botão.
+self.addEventListener('message', e => {
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // ── Push notifications (quando configurado com VAPID) ──────────────────────

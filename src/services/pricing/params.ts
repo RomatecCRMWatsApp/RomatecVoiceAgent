@@ -29,6 +29,14 @@ interface PricingParams {
     ptam_sitio_proximo_sm: number;
     ptam_rural_medio_sm: number;
     ptam_fazenda_grande_sm: number;
+    geo_rural_por_hectare: number;
+    geo_rural_por_vertice: number;
+    geo_rural_diaria_campo: number;
+    geo_rural_por_km_deslocamento: number;
+    geo_rural_minimo_sm: number;
+    geo_rural_complexidade_simples: number;
+    geo_rural_complexidade_media: number;
+    geo_rural_complexidade_alta: number;
   };
   honorarios_assessoria: { padrao_sm: number; descricao: string };
   sero_inss: {

@@ -189,6 +189,9 @@ export interface Recibo {
   last_reminder_at: Date | null;
   nota_fiscal_id: number | null;
   created_by: number | null;
+  // v1.99.3: assinatura digital ICP-Brasil (PAdES)
+  assinado_em: Date | string | null;
+  assinado_por_cert_id: number | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -237,6 +240,8 @@ function mapRow(r: RowDataPacket): Recibo {
     last_reminder_at: r.last_reminder_at ? new Date(r.last_reminder_at as Date) : null,
     nota_fiscal_id: r.nota_fiscal_id != null ? Number(r.nota_fiscal_id) : null,
     created_by: r.created_by != null ? Number(r.created_by) : null,
+    assinado_em: r.assinado_em ? new Date(r.assinado_em as Date).toISOString() : null,
+    assinado_por_cert_id: r.assinado_por_cert_id != null ? Number(r.assinado_por_cert_id) : null,
     created_at: new Date(r.created_at as Date),
     updated_at: new Date(r.updated_at as Date),
   };

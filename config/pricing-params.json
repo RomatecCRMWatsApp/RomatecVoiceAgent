@@ -55,7 +55,16 @@
     "ptam_lote_urbano_sm": 1.0,
     "ptam_sitio_proximo_sm": 2.0,
     "ptam_rural_medio_sm": 3.0,
-    "ptam_fazenda_grande_sm": 4.0
+    "ptam_fazenda_grande_sm": 4.0,
+    "geo_rural_por_hectare": 80.00,
+    "geo_rural_por_vertice": 200.00,
+    "geo_rural_diaria_campo": 600.00,
+    "geo_rural_por_km_deslocamento": 3.50,
+    "geo_rural_minimo_sm": 2.0,
+    "geo_rural_complexidade_simples": 1.00,
+    "geo_rural_complexidade_media": 1.30,
+    "geo_rural_complexidade_alta": 1.60,
+    "_AVISO_GEO": "Valores referenciais CONFEA/CREA-MA 2026. Mínimo de 2 SM por matrícula garantido. Multiplicador de complexidade aplicado sobre o subtotal de campo (área + vértices + diárias + km)."
   },
   "honorarios_assessoria": {
     "padrao_sm": 1.0,

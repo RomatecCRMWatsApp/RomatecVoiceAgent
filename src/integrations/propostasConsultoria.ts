@@ -21,6 +21,7 @@ import { formatBRL } from '../util/format';
 import { calcularConsultoria } from '../services/pricing';
 import type {
   SubtipoConsultoria, CustosCalculados, FontesConsulta, InputAverbacao, ItemCusto,
+  InputGeorreferenciamento, InputDesmembramento, InputRetificacao, InputAvaliacaoPTAM,
 } from '../services/pricing/types';
 
 const LOGO_RELATORIO = '/romatec-logo-removebg-preview.png';
@@ -94,8 +95,32 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
       subtipo,
       dados: input.dados_imovel as unknown as InputAverbacao,
     });
+  } else if (subtipo === 'georreferenciamento_rural') {
+    // v1.99.4: Geo Rural ativo
+    resultado = await calcularConsultoria({
+      subtipo,
+      dados: input.dados_imovel as unknown as InputGeorreferenciamento,
+    });
+  } else if (subtipo === 'desmembramento' || subtipo === 'remembramento') {
+    // v1.99.5: Desmembramento + Remembramento ativos
+    resultado = await calcularConsultoria({
+      subtipo,
+      dados: input.dados_imovel as unknown as InputDesmembramento,
+    });
+  } else if (subtipo === 'retificacao_area') {
+    // v1.99.6: Retificacao ativa
+    resultado = await calcularConsultoria({
+      subtipo,
+      dados: input.dados_imovel as unknown as InputRetificacao,
+    });
+  } else if (subtipo === 'avaliacao_ptam') {
+    // v1.99.6: PTAM ativo
+    resultado = await calcularConsultoria({
+      subtipo,
+      dados: input.dados_imovel as unknown as InputAvaliacaoPTAM,
+    });
   } else {
-    throw new Error(`Subtipo ${subtipo} nao implementado nesta fase. Apenas averbacao_residencial e averbacao_comercial estao disponiveis.`);
+    throw new Error(`Subtipo ${subtipo} desconhecido.`);
   }
 
   // v1.66.8: aplica override se a UI editou valores no preview.
@@ -203,7 +228,63 @@ export async function previewCustoConsultoria(input: {
       fontes: resultado.fontes,
     };
   }
-  throw new Error(`Subtipo ${subtipo} nao disponivel na Fase 1.`);
+  // v1.99.4: Geo Rural ativo
+  if (subtipo === 'georreferenciamento_rural') {
+    const resultado = await calcularConsultoria({
+      subtipo,
+      dados: dados_imovel as unknown as InputGeorreferenciamento,
+    });
+    return {
+      ok: true as const,
+      subtipo,
+      valor_total: resultado.custos.secao_5_total,
+      custos: resultado.custos,
+      fontes: resultado.fontes,
+    };
+  }
+  // v1.99.5: Desm + Rem ativos
+  if (subtipo === 'desmembramento' || subtipo === 'remembramento') {
+    const resultado = await calcularConsultoria({
+      subtipo,
+      dados: dados_imovel as unknown as InputDesmembramento,
+    });
+    return {
+      ok: true as const,
+      subtipo,
+      valor_total: resultado.custos.secao_5_total,
+      custos: resultado.custos,
+      fontes: resultado.fontes,
+    };
+  }
+  // v1.99.6: Retificacao ativa
+  if (subtipo === 'retificacao_area') {
+    const resultado = await calcularConsultoria({
+      subtipo,
+      dados: dados_imovel as unknown as InputRetificacao,
+    });
+    return {
+      ok: true as const,
+      subtipo,
+      valor_total: resultado.custos.secao_5_total,
+      custos: resultado.custos,
+      fontes: resultado.fontes,
+    };
+  }
+  // v1.99.6: PTAM ativo
+  if (subtipo === 'avaliacao_ptam') {
+    const resultado = await calcularConsultoria({
+      subtipo,
+      dados: dados_imovel as unknown as InputAvaliacaoPTAM,
+    });
+    return {
+      ok: true as const,
+      subtipo,
+      valor_total: resultado.custos.secao_5_total,
+      custos: resultado.custos,
+      fontes: resultado.fontes,
+    };
+  }
+  throw new Error(`Subtipo ${subtipo} desconhecido.`);
 }
 
 export async function buscarPropostaConsultoria(id: string) {

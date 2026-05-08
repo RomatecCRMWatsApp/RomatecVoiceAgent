@@ -1189,6 +1189,30 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v1.99.3: certificados digitais ICP-Brasil (.pfx) pra assinatura PAdES de
+  // recibos. Um cert por perfil (PJ Romatec / PF Jose Romario). Conteudo do
+  // .pfx + senha criptografados via cryptoSecrets.ts (AES-256-GCM).
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS tenant_signing_certificates (
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id     INT NOT NULL DEFAULT 1,
+      perfil        ENUM('pj','pf') NOT NULL,
+      label         VARCHAR(120) NOT NULL,
+      pfx_enc       LONGBLOB NOT NULL,
+      senha_enc     VARBINARY(512) NOT NULL,
+      subject_cn    VARCHAR(255) NULL,
+      subject_doc   VARCHAR(20) NULL,
+      issuer_cn     VARCHAR(255) NULL,
+      thumbprint    VARCHAR(64) NULL,
+      validade_de   DATETIME NULL,
+      validade_ate  DATETIME NULL,
+      ativo         BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_tenant_perfil (tenant_id, perfil, ativo)
+    )
+  `);
+
   // v1.66.9: anexos da Proposta de Consultoria (Planta Arquitetonica/Mapa).
   // Aceita PDF, PNG, JPEG. Sem limite de quantidade. Conteudo em base64
   // (LONGTEXT — ate 4GB; impomos limite ~10MB por anexo no client).
@@ -1783,6 +1807,11 @@ export async function runMigrations(): Promise<void> {
     "ALTER TABLE propostas_clientes ADD COLUMN bairro VARCHAR(80) NULL",
     "ALTER TABLE recibos ADD COLUMN categoria_servico VARCHAR(80) NULL",
     "ALTER TABLE recibos ADD COLUMN categoria_grupo VARCHAR(20) NULL",
+    // v1.99.3: assinatura digital ICP-Brasil (PAdES)
+    "ALTER TABLE recibos ADD COLUMN assinado_em DATETIME NULL",
+    "ALTER TABLE recibos ADD COLUMN assinado_por_cert_id INT NULL",
+    "ALTER TABLE recibos ADD COLUMN pdf_assinado LONGBLOB NULL",
+    "ALTER TABLE recibos ADD COLUMN assinatura_meta JSON NULL",
   ];
   for (const sql of altersClientes) {
     try { await pool.execute(sql); console.log('[migrations] OK:', sql.slice(0, 80)); }

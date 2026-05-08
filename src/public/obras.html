@@ -456,18 +456,62 @@
 </style>
 <!-- v1.84.0: catálogo de serviços técnico-legais (auto-preenchimento descrição recibo) -->
 <script src="/js/catalogo-servicos.js"></script>
-<!-- v1.93.0: auto-detecção de versão + banner "Atualizar agora".
-     Previne bug do SW antigo cached (Failed to fetch em endpoints novos). -->
+<!-- v1.99.2: auto-update SILENCIOSO via SKIP_WAITING + controllerchange.
+     Antes (v1.93): banner "Atualizar agora" pedia clique. Resultado: usuário
+     via banner com "v1.99.1" e badge "v1.99.1" e ficava confuso (mesma versão).
+     Agora: detecta SW novo, manda SKIP_WAITING via postMessage, e quando o
+     novo SW assume controle (controllerchange) faz UM soft-reload. Banner
+     fica como fallback visível só se auto-update demorar > 4s. -->
 <script>
-(async function detectarVersaoNova() {
+let __reloadGuard = false;
+
+// Listener global: quando novo SW assume controle, recarrega 1× pra rodar JS novo.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (__reloadGuard) return;
+    __reloadGuard = true;
+    location.reload();
+  });
+}
+
+(async function autoUpdateApp() {
+  if (!('serviceWorker' in navigator)) return;
   try {
-    // 1) Versão do app no servidor (rota leve, sem cache)
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return; // SW ainda não registrado — primeira visita
+
+    // Hook pra qualquer SW novo que apareça (instalando agora ou já waiting)
+    function ativarSeWaiting(worker) {
+      if (!worker) return;
+      if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+        worker.postMessage({ type: 'SKIP_WAITING' });
+      } else {
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            worker.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      }
+    }
+    if (reg.waiting) ativarSeWaiting(reg.waiting);
+    reg.addEventListener('updatefound', () => ativarSeWaiting(reg.installing));
+
+    // Força check de update agora (e a cada 5min se aba ficar aberta)
+    reg.update().catch(() => {});
+    setInterval(() => reg.update().catch(() => {}), 5 * 60 * 1000);
+
+    // Fallback: se em 4s o SW ainda estiver desatualizado, mostra banner.
+    setTimeout(verificarVersaoEMostrarBanner, 4000);
+  } catch (e) { /* silent */ }
+})();
+
+async function verificarVersaoEMostrarBanner() {
+  try {
     const verResp = await fetch('/api/version', { cache: 'no-store' });
     if (!verResp.ok) return;
     const { version: serverVersion } = await verResp.json();
     if (!serverVersion) return;
 
-    // 2) Versão do SW que está rodando no navegador (lê do sw.js cached)
     const swResp = await fetch('/sw.js?_=' + Date.now(), { cache: 'no-store' }).catch(() => null);
     let swVersion = null;
     if (swResp && swResp.ok) {
@@ -476,22 +520,20 @@
       if (m) swVersion = m[1].replace(/^v/, '');
     }
 
-    // 3) Compara — se SW está desatualizado, mostra banner
     if (swVersion && swVersion !== serverVersion) {
       mostrarBannerUpdate(serverVersion, swVersion);
     }
-  } catch (e) { /* falhou silenciosamente — não trava o app */ }
-})();
+  } catch (e) { /* silent */ }
+}
 
 function mostrarBannerUpdate(serverV, cachedV) {
-  // Não duplica banner
   if (document.getElementById('updateBanner')) return;
   const banner = document.createElement('div');
   banner.id = 'updateBanner';
   banner.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:99999; background:linear-gradient(90deg, #f59e0b, #d97706); color:#06120a; padding:10px 16px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:12px; flex-wrap:wrap; box-shadow:0 4px 12px rgba(0,0,0,0.4); animation:slideDown .3s ease;';
   banner.innerHTML = `
     <style>@keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }</style>
-    <span style="flex:1; min-width:200px;">⚠️ Nova versão disponível — <strong>v${escapeHtml(serverV)}</strong> (você está com cache de v${escapeHtml(cachedV)})</span>
+    <span style="flex:1; min-width:200px;">⚠️ Cache offline desatualizado — app rodando: <strong>v${escapeHtml(serverV)}</strong>; cache do Service Worker: v${escapeHtml(cachedV)}. Recarregue pra sincronizar.</span>
     <button id="updateBtn" style="background:#06120a; color:#f59e0b; border:0; padding:8px 16px; border-radius:6px; font-weight:700; cursor:pointer; font-size:13px;">🔄 Atualizar agora</button>
     <button id="updateLater" style="background:transparent; color:#06120a; border:1px solid #06120a; padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12px;">depois</button>
   `;
@@ -505,28 +547,51 @@ function escapeHtml(s) {
   return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Update graceful: tenta SKIP_WAITING + controllerchange primeiro (sem perda
+// de estado). Só faz nuke (unregister + clear caches) se SKIP_WAITING não
+// rolar em 2s (ex: SW velho não tem o handler de message).
 async function forcarUpdate() {
   const btn = document.getElementById('updateBtn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Atualizando...'; }
   try {
-    // 1) Unregister TODOS os service workers
     if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        // Force fetch sw.js novo + dispara waiting
+        await reg.update().catch(() => {});
+        if (reg.waiting) {
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          // controllerchange listener vai disparar reload sozinho
+          // Timeout de 2s caso skipWaiting não pegue (SW velho sem handler)
+          setTimeout(nukeReload, 2000);
+          return;
+        }
+      }
     }
-    // 2) Apaga TODOS os caches CacheStorage (sw caches, runtime caches)
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
-    }
-    // 3) Hard reload (com bypass cache)
-    location.reload();
+    // Sem SW ou sem waiting — vai direto pro nuke
+    await nukeReload();
   } catch (e) {
     if (btn) {
       btn.disabled = false;
       btn.textContent = '❌ Erro — recarregue manualmente (Ctrl+Shift+R)';
     }
   }
+}
+
+async function nukeReload() {
+  if (__reloadGuard) return;
+  __reloadGuard = true;
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+    }
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
+    }
+  } catch {}
+  location.reload();
 }
 
 // Expõe pra debug manual no console
@@ -546,6 +611,7 @@ window.forcarUpdateApp = forcarUpdate;
     <div style="display:flex; gap:8px; align-items:center;">
       <span class="badge-zayra" id="versionBadge">v...</span>
       <button id="btnCeoToken" title="Login admin/CEO" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); cursor:pointer; padding:6px 10px; border-radius:var(--radius); font-size:12px;">🔒 Admin</button>
+      <button id="btnCertsDigitais" title="Certificados digitais ICP-Brasil pra assinatura de recibos" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); cursor:pointer; padding:6px 10px; border-radius:var(--radius); font-size:12px;">🔏 Certs</button>
       <a href="/" style="color: var(--text-muted); text-decoration: none; font-size: 13px; padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius);">← ZAYRA Chat</a>
     </div>
   </div>
@@ -752,7 +818,161 @@ document.addEventListener('DOMContentLoaded', () => {
       alert('Token salvo. Botões editar/excluir devem aparecer.');
     }
   };
+
+  // v1.99.3: certificados digitais ICP-Brasil
+  const btnCerts = document.getElementById('btnCertsDigitais');
+  if (btnCerts) btnCerts.onclick = abrirModalCerts;
 });
+
+// ─── v1.99.3: Modal de Certificados Digitais ─────────────────────────────
+async function abrirModalCerts() {
+  let overlay = document.getElementById('certsModalOverlay');
+  if (overlay) { overlay.style.display = 'flex'; await carregarListaCerts(); return; }
+
+  overlay = document.createElement('div');
+  overlay.id = 'certsModalOverlay';
+  overlay.style.cssText = 'position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.75); display:flex; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto;';
+  overlay.innerHTML = `
+    <div style="background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; max-width:760px; width:100%; box-shadow:0 12px 32px rgba(0,0,0,0.6);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;">
+        <h2 style="margin:0; color:var(--neon);">🔏 Certificados Digitais ICP-Brasil</h2>
+        <button id="certsModalClose" style="background:transparent; border:1px solid var(--border); color:var(--text); cursor:pointer; padding:6px 12px; border-radius:6px;">✕ Fechar</button>
+      </div>
+      <p style="margin:0 0 16px; color:var(--text-muted); font-size:12px;">
+        Cadastre o e-CNPJ A1 (PJ Romatec) e/ou e-CPF A1 (PF José Romário) pra assinar recibos
+        digitalmente com validade jurídica (PAdES — Adobe Reader e gov.br/validar reconhecem).
+        O .pfx fica criptografado AES-256-GCM no banco. Senha nunca é exposta.
+      </p>
+
+      <div style="border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:16px;">
+        <p style="margin:0 0 10px; font-weight:600; font-size:13px;">📤 Adicionar novo certificado</p>
+        <form id="certUploadForm" style="display:grid; gap:10px;">
+          <label style="font-size:12px;">
+            <span style="display:block; margin-bottom:4px;">Arquivo .pfx</span>
+            <input type="file" name="pfx" accept=".pfx,.p12,application/x-pkcs12" required style="width:100%;">
+          </label>
+          <label style="font-size:12px;">
+            <span style="display:block; margin-bottom:4px;">Senha do certificado</span>
+            <input type="password" name="senha" placeholder="Senha que você criou ao emitir" required style="width:100%;">
+          </label>
+          <div style="display:grid; grid-template-columns:1fr 2fr; gap:10px;">
+            <label style="font-size:12px;">
+              <span style="display:block; margin-bottom:4px;">Perfil</span>
+              <select name="perfil" required style="width:100%;">
+                <option value="pj">PJ — Romatec (e-CNPJ)</option>
+                <option value="pf">PF — José Romário (e-CPF)</option>
+              </select>
+            </label>
+            <label style="font-size:12px;">
+              <span style="display:block; margin-bottom:4px;">Rótulo (apelido pra identificar)</span>
+              <input type="text" name="label" placeholder="ex: Romatec 2026" required style="width:100%;">
+            </label>
+          </div>
+          <button type="submit" class="btn-primary" style="margin-top:6px;">🔐 Cadastrar certificado</button>
+        </form>
+      </div>
+
+      <p style="margin:6px 0; font-weight:600; font-size:13px;">📜 Certificados cadastrados</p>
+      <div id="certsLista"><p style="color:var(--text-muted); font-size:12px;">Carregando...</p></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  document.getElementById('certsModalClose').onclick = () => overlay.style.display = 'none';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.style.display = 'none'; };
+
+  document.getElementById('certUploadForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const fd = new FormData();
+    const file = f.querySelector('input[name=pfx]').files[0];
+    if (!file) { alert('Selecione o arquivo .pfx'); return; }
+    fd.append('pfx', file);
+    fd.append('senha', f.querySelector('input[name=senha]').value);
+    fd.append('perfil', f.querySelector('select[name=perfil]').value);
+    fd.append('label', f.querySelector('input[name=label]').value);
+
+    const btn = f.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = '⏳ Validando e cadastrando...';
+    try {
+      const tok = (localStorage.getItem('ceo_token') || '').replace(/[^\x21-\x7E]/g, '');
+      if (!tok) throw new Error('Configure o token CEO no botão Admin antes.');
+      const r = await fetch('/api/signing-cert', {
+        method: 'POST', body: fd, headers: { 'X-CEO-Token': tok },
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao cadastrar');
+      alert('✅ Certificado cadastrado!\n\nTitular: ' + (d.subject_cn || '?') +
+            '\nVálido até: ' + (d.validade_ate ? new Date(d.validade_ate).toLocaleDateString('pt-BR') : '?'));
+      f.reset();
+      await carregarListaCerts();
+    } catch (err) {
+      alert('Erro: ' + err.message);
+    } finally {
+      btn.disabled = false; btn.textContent = '🔐 Cadastrar certificado';
+    }
+  };
+
+  await carregarListaCerts();
+}
+
+async function carregarListaCerts() {
+  const box = document.getElementById('certsLista');
+  if (!box) return;
+  try {
+    const certs = await api('/api/signing-cert');
+    if (!certs.length) {
+      box.innerHTML = '<p style="color:var(--text-muted); font-size:12px;">Nenhum certificado cadastrado.</p>';
+      return;
+    }
+    box.innerHTML = certs.map(c => {
+      const dias = c.dias_para_vencer;
+      const venceCor = c.expirado ? '#ef4444' : (dias != null && dias < 30 ? '#f59e0b' : 'var(--text-muted)');
+      const venceTxt = c.expirado ? 'VENCIDO' : (dias != null ? `vence em ${dias} dia(s)` : '?');
+      const validadeAte = c.validade_ate ? new Date(c.validade_ate).toLocaleDateString('pt-BR') : '?';
+      return `
+        <div style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:8px; ${c.ativo ? '' : 'opacity:0.6;'}">
+          <div style="display:flex; justify-content:space-between; align-items:start; gap:10px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:240px;">
+              <p style="margin:0; font-weight:600; font-size:13px;">
+                ${c.ativo ? '🟢' : '⚫'} ${escape(c.label)} <span style="background:${c.perfil==='pj'?'#1F5C3A':'#B8893A'}; color:#fff; padding:1px 6px; border-radius:4px; font-size:10px; margin-left:6px;">${c.perfil.toUpperCase()}</span>
+              </p>
+              <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">Titular: ${escape(c.subject_cn || '—')}</p>
+              ${c.subject_doc ? `<p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">Documento: ${escape(c.subject_doc)}</p>` : ''}
+              <p style="margin:2px 0 0; font-size:11px; color:${venceCor};">Válido até ${validadeAte} — ${venceTxt}</p>
+              ${c.issuer_cn ? `<p style="margin:2px 0 0; font-size:10px; color:var(--text-muted);">Emissor: ${escape(c.issuer_cn)}</p>` : ''}
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              ${c.ativo
+                ? `<button data-cert-desativar="${c.id}" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); padding:5px 10px; border-radius:6px; cursor:pointer; font-size:11px;">desativar</button>`
+                : `<button data-cert-ativar="${c.id}" style="background:var(--neon); color:#06120a; border:0; padding:5px 10px; border-radius:6px; cursor:pointer; font-size:11px; font-weight:600;">ativar</button>`}
+              <button data-cert-del="${c.id}" style="background:transparent; border:1px solid #ef4444; color:#ef4444; padding:5px 10px; border-radius:6px; cursor:pointer; font-size:11px;">🗑 excluir</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    box.querySelectorAll('[data-cert-ativar]').forEach(b => b.onclick = async () => {
+      try { await api('/api/signing-cert/' + b.dataset.certAtivar + '/ativar', { method:'POST', body:'{}' }); }
+      catch (err) { alert('Erro: ' + err.message); }
+      await carregarListaCerts();
+    });
+    box.querySelectorAll('[data-cert-desativar]').forEach(b => b.onclick = async () => {
+      try { await api('/api/signing-cert/' + b.dataset.certDesativar + '/desativar', { method:'POST', body:'{}' }); }
+      catch (err) { alert('Erro: ' + err.message); }
+      await carregarListaCerts();
+    });
+    box.querySelectorAll('[data-cert-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('Excluir este certificado? Recibos já assinados continuam válidos, mas novas assinaturas exigirão recadastro.')) return;
+      try { await api('/api/signing-cert/' + b.dataset.certDel, { method:'DELETE' }); }
+      catch (err) { alert('Erro: ' + err.message); }
+      await carregarListaCerts();
+    });
+  } catch (err) {
+    box.innerHTML = '<p style="color:#ef4444; font-size:12px;">Erro ao carregar: ' + escapeHtml(err.message) + '</p>';
+  }
+}
 const state = {
   currentObra: null, currentTab: 'dashboard',
   obras: [], etapas: [], transacoes: [],
@@ -780,12 +1000,24 @@ const escape = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&l
 // v1.62.0: token CEO opcional em localStorage. Quando setado, injeta header
 // X-CEO-Token em TODAS as chamadas. Permissão admin (PUT/DELETE financeiro)
 // só funciona com token válido (validado no servidor).
-function getCeoToken() { return localStorage.getItem('ceo_token') || ''; }
+function getCeoToken() {
+  const raw = localStorage.getItem('ceo_token') || '';
+  // v1.99.2: Safari iOS rejeita fetch se header tem char inválido (newline,
+  // espaço, non-ASCII) com "The string did not match the expected pattern".
+  // Sanitiza removendo whitespace e mantendo só visible-ASCII (0x21-0x7E).
+  return raw.replace(/[^\x21-\x7E]/g, '');
+}
 function setCeoToken(t) {
   if (t && t.trim()) localStorage.setItem('ceo_token', t.trim());
   else localStorage.removeItem('ceo_token');
 }
 function temCeoToken() { return !!getCeoToken(); }
+
+// v1.99.2: sanitiza valor de header pra Safari iOS (visible-ASCII only).
+// Header com \n ou char unicode quebra fetch inteiro com pattern error.
+function sanitizeHeaderValue(v) {
+  return String(v ?? '').replace(/[^\x20-\x7E]/g, '').trim();
+}
 
 async function api(path, opts={}) {
   // Cache-busting via query param só em GET (Safari iOS engasga com cache:'no-store' + Content-Type)
@@ -796,7 +1028,12 @@ async function api(path, opts={}) {
   }
   // Content-Type só quando tem body (evita "The string did not match the expected pattern" no iOS)
   const fetchOpts = { ...opts };
-  const baseHeaders = { ...(opts.headers || {}) };
+  const baseHeaders = {};
+  // v1.99.2: sanitiza todo header de entrada
+  for (const [k, v] of Object.entries(opts.headers || {})) {
+    const clean = sanitizeHeaderValue(v);
+    if (clean) baseHeaders[k] = clean;
+  }
   // Injeta X-CEO-Token quando existir (servidor exige só pra mutações sensíveis)
   const ceoTok = getCeoToken();
   if (ceoTok) baseHeaders['X-CEO-Token'] = ceoTok;
@@ -4135,7 +4372,13 @@ function renderVto() {
       alert('✅ Vistoria salva' + (fotosCount > 0 ? ` com ${fotosCount} foto(s).` : '.'));
       state.vtoFotos = [];
       render();
-    } catch (e) { alert('Erro: ' + e.message); }
+    } catch (e) {
+      // v1.99.2: diagnóstico expandido — mostra name + message + 1ª linha do
+      // stack pra rastrear erros estranhos no Safari iOS (ex: "expected pattern")
+      const detalhe = [e.name, e.message, (e.stack||'').split('\n')[0]].filter(Boolean).join(' | ');
+      alert('Erro ao salvar vistoria:\n' + detalhe);
+      console.error('[addVto] falha:', e);
+    }
     finally { btn.disabled = false; btn.textContent = 'Salvar vistoria'; }
   };
 
@@ -4391,11 +4634,11 @@ function fecharHelpModal() {
 const SUBTIPOS_CONSULTORIA = [
   { slug: 'averbacao_residencial',     icone: '🏠', nome: 'Averbação Residencial',    disponivel: true },
   { slug: 'averbacao_comercial',       icone: '🏢', nome: 'Averbação Comercial',      disponivel: true },
-  { slug: 'georreferenciamento_rural', icone: '🌾', nome: 'Georreferenciamento Rural', disponivel: false },
-  { slug: 'desmembramento',            icone: '✂️', nome: 'Desmembramento',           disponivel: false },
-  { slug: 'remembramento',             icone: '🔗', nome: 'Remembramento',            disponivel: false },
-  { slug: 'retificacao_area',          icone: '📐', nome: 'Retificação de Área',      disponivel: false },
-  { slug: 'avaliacao_ptam',            icone: '💰', nome: 'Avaliação PTAM',           disponivel: false },
+  { slug: 'georreferenciamento_rural', icone: '🌾', nome: 'Georreferenciamento Rural', disponivel: true },
+  { slug: 'desmembramento',            icone: '✂️', nome: 'Desmembramento',           disponivel: true },
+  { slug: 'remembramento',             icone: '🔗', nome: 'Remembramento',            disponivel: true },
+  { slug: 'retificacao_area',          icone: '📐', nome: 'Retificação de Área',      disponivel: true },
+  { slug: 'avaliacao_ptam',            icone: '💰', nome: 'Avaliação PTAM',           disponivel: true },
 ];
 
 const SUBTIPO_LABEL_FRONT = Object.fromEntries(SUBTIPOS_CONSULTORIA.map(s => [s.slug, s.nome]));
@@ -4605,6 +4848,19 @@ function renderConsultoriaEscolhaInline(v, toggleHTML) {
 }
 
 async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
+  // v1.99.4+: cada subtipo nao-Averbacao tem form proprio. Aqui despacha.
+  if (subtipo === 'georreferenciamento_rural') {
+    return renderConsultoriaFormGeoRural(v, toggleHTML);
+  }
+  if (subtipo === 'desmembramento' || subtipo === 'remembramento') {
+    return renderConsultoriaFormDesmRem(v, toggleHTML, subtipo);
+  }
+  if (subtipo === 'retificacao_area') {
+    return renderConsultoriaFormRetificacao(v, toggleHTML);
+  }
+  if (subtipo === 'avaliacao_ptam') {
+    return renderConsultoriaFormPTAM(v, toggleHTML);
+  }
   await loadPropostasClientes();
   const cliOpts = state.propostasClientes.map(c =>
     `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
@@ -4922,6 +5178,773 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
       state.consultoriaPreviewData = { ctx: { cliId, dados_imovel, subtipo, endereco: enderecoTxt }, resultado: r };
       setConsultoriaView('preview');
     } catch (e) { alert('Erro: ' + e.message); btn.disabled = false; btn.textContent = '🧮 Calcular preview'; }
+  };
+}
+
+// ── v1.99.4: Form Geo Rural ────────────────────────────────────────────
+async function renderConsultoriaFormGeoRural(v, toggleHTML) {
+  await loadPropostasClientes();
+  const cliOpts = state.propostasClientes.map(c =>
+    `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
+  ).join('');
+  const subtipo = 'georreferenciamento_rural';
+  const subLabel = SUBTIPO_LABEL_FRONT[subtipo];
+  const editando = !!state.consultoriaEditandoId;
+  const tituloHeader = editando
+    ? `Editando ${state.consultoriaPropostaOriginal?.numero || ''}`
+    : 'Nova Proposta — Georreferenciamento Rural';
+
+  v.innerHTML = `
+    ${toggleHTML}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div>
+          <p class="section-title" style="margin:0;">${escape(tituloHeader)}</p>
+          <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">🌾 ${escape(subLabel)} · NTGIR/INCRA · CONFEA</p>
+        </div>
+        <button data-cons-voltar style="background:transparent;">← Voltar</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:16px;">
+       <div style="display:grid; gap:10px; font-size:13px;">
+        <label>Cliente
+          <div style="display:flex; gap:6px;">
+            <select id="geoCliente" style="flex:1;"><option value="">— escolher —</option>${cliOpts}</select>
+            <button type="button" id="geoNovoCliente" style="white-space:nowrap; background:var(--success); color:#fff; border-color:var(--success);">+ Novo cliente</button>
+          </div>
+        </label>
+        <label>Endereço / localização do imóvel rural
+          <input id="geoEndereco" placeholder="Sítio/Fazenda Tal, zona rural, município-UF" style="width:100%;">
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>Município
+            <input id="geoMunicipio" value="Açailândia" style="width:100%;">
+          </label>
+          <label>UF
+            <input id="geoEstado" value="MA" maxlength="2" style="width:100%;">
+          </label>
+        </div>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📐 Levantamento</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>Área (hectares)
+            <input id="geoArea" type="number" min="0.1" step="0.01" placeholder="ex: 25.5" style="width:100%;">
+          </label>
+          <label>Nº de vértices
+            <input id="geoVertices" type="number" min="3" step="1" placeholder="ex: 8" style="width:100%;">
+            <span style="font-size:10px; color:var(--text-muted);">Mínimo 3 (poligonal)</span>
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>Distância de deslocamento (km)
+            <input id="geoDistKm" type="number" min="0" step="1" value="0" style="width:100%;">
+            <span style="font-size:10px; color:var(--text-muted);">Ida+volta a partir de Açailândia</span>
+          </label>
+          <label>Diárias de campo
+            <input id="geoDiarias" type="number" min="0" step="1" value="1" style="width:100%;">
+            <span style="font-size:10px; color:var(--text-muted);">Quantidade de dias em campo</span>
+          </label>
+        </div>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💰 Valores unitários (deixe 0 pra usar tabela CONFEA)</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>R$/hectare
+            <input id="geoValHa" type="number" min="0" step="0.01" placeholder="80.00 (default)" style="width:100%;">
+          </label>
+          <label>R$/vértice
+            <input id="geoValVert" type="number" min="0" step="0.01" placeholder="200.00 (default)" style="width:100%;">
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>R$/diária
+            <input id="geoValDia" type="number" min="0" step="0.01" placeholder="600.00 (default)" style="width:100%;">
+          </label>
+          <label>R$/km
+            <input id="geoValKm" type="number" min="0" step="0.01" placeholder="3.50 (default)" style="width:100%;">
+          </label>
+        </div>
+        <label>Outros serviços (R$)
+          <input id="geoOutros" type="number" min="0" step="0.01" value="0" style="width:100%;">
+          <span style="font-size:10px; color:var(--text-muted);">Taxas extras, certidões, deslocamentos especiais — se houver</span>
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">⚙️ Características do projeto</p>
+        <label>Complexidade
+          <select id="geoComplexidade" style="width:100%;">
+            <option value="simples" selected>Simples (1.0x) — terreno aberto, vegetação rasa, divisas claras</option>
+            <option value="media">Média (1.3x) — vegetação média, alguns confrontantes, acesso médio</option>
+            <option value="alta">Alta (1.6x) — vegetação densa, muitos confrontantes, divisas litigiosas</option>
+          </select>
+        </label>
+        <label style="display:flex; gap:6px; align-items:center;">
+          <input id="geoTemMatricula" type="checkbox" checked>
+          <span>Imóvel TEM matrícula registrada em cartório</span>
+        </label>
+
+        <div style="display:flex; gap:6px; margin-top:12px;">
+          <button id="geoPreview" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
+          <button class="btn-secondary" id="geoCancelar">Cancelar</button>
+        </div>
+       </div>
+
+       <div style="display:flex; flex-direction:column; gap:10px;">
+         <div>
+           <p style="margin:0; font-weight:600; font-size:13px;">📎 Anexos da Proposta</p>
+           <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">
+             Plantas anteriores, levantamentos prévios, croquis. Formatos: PDF, PNG, JPEG.
+           </p>
+         </div>
+         <label id="cnsDropZone" style="border:2px dashed var(--border-strong); border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:rgba(0,255,136,0.03);">
+           <input type="file" id="cnsAnexoInput" multiple accept=".pdf,.png,.jpg,.jpeg" style="display:none;">
+           <div style="font-size:28px; margin-bottom:6px;">📤</div>
+           <div style="font-size:13px; color:var(--neon); font-weight:600;">Clique ou arraste arquivos</div>
+         </label>
+         <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+       </div>
+      </div>
+    </div>`;
+
+  // ── Handlers ──────────────────────────────────────────────────────────
+  document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    state.consultoriaView = 'lista';
+    render();
+  });
+  const voltarParaEscolha = () => {
+    state.consultoriaFormCache = null;
+    state.consultoriaAnexosTemp = [];
+    state.consultoriaAnexosExistentes = [];
+    if (state.consultoriaEditandoId) {
+      state.consultoriaEditandoId = null;
+      state.consultoriaPropostaOriginal = null;
+      setConsultoriaView('lista');
+    } else {
+      setConsultoriaView('escolha');
+    }
+  };
+  document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
+  document.getElementById('geoCancelar').onclick = voltarParaEscolha;
+  document.getElementById('geoNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
+
+  // restaura cache se voltou do preview
+  const cache = state.consultoriaFormCache;
+  if (cache && cache.subtipo === subtipo) {
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+    const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    setVal('geoCliente',  cache.cliId);
+    setVal('geoEndereco', cache.endereco);
+    const d = cache.dados_imovel || {};
+    setVal('geoMunicipio',     d.municipio);
+    setVal('geoEstado',        d.estado);
+    setVal('geoArea',          d.area_hectares);
+    setVal('geoVertices',      d.numero_vertices);
+    setVal('geoDistKm',        d.distancia_km);
+    setVal('geoDiarias',       d.numero_diarias);
+    setVal('geoValHa',         d.valor_por_hectare || '');
+    setVal('geoValVert',       d.valor_por_vertice || '');
+    setVal('geoValDia',        d.valor_diaria_campo || '');
+    setVal('geoValKm',         d.valor_km_deslocamento || '');
+    setVal('geoOutros',        d.valor_outros_servicos);
+    setVal('geoComplexidade',  d.complexidade);
+    setChk('geoTemMatricula',  d.tem_matricula);
+  }
+
+  document.getElementById('geoPreview').onclick = async () => {
+    const cliId = document.getElementById('geoCliente').value;
+    const area = Number(document.getElementById('geoArea').value);
+    const vertices = Number(document.getElementById('geoVertices').value);
+    if (!cliId) return alert('Selecione o cliente.');
+    if (!area || area <= 0) return alert('Informe a área em hectares (>0).');
+    if (!vertices || vertices < 3) return alert('Informe nº de vértices (mínimo 3 — poligonal).');
+
+    const dados_imovel = {
+      area_hectares: area,
+      numero_vertices: vertices,
+      distancia_km: Number(document.getElementById('geoDistKm').value) || 0,
+      numero_diarias: Number(document.getElementById('geoDiarias').value) || 0,
+      valor_por_hectare: Number(document.getElementById('geoValHa').value) || 0,
+      valor_por_vertice: Number(document.getElementById('geoValVert').value) || 0,
+      valor_diaria_campo: Number(document.getElementById('geoValDia').value) || 0,
+      valor_km_deslocamento: Number(document.getElementById('geoValKm').value) || 0,
+      valor_outros_servicos: Number(document.getElementById('geoOutros').value) || 0,
+      municipio: document.getElementById('geoMunicipio').value.trim() || 'Açailândia',
+      estado: document.getElementById('geoEstado').value.trim().toUpperCase() || 'MA',
+      tem_matricula: document.getElementById('geoTemMatricula').checked,
+      complexidade: document.getElementById('geoComplexidade').value,
+    };
+    const enderecoTxt = document.getElementById('geoEndereco').value.trim();
+
+    const btn = document.getElementById('geoPreview');
+    btn.disabled = true; btn.textContent = 'Calculando...';
+    try {
+      const r = await api('/api/propostas-consultoria/preview', {
+        method: 'POST',
+        body: JSON.stringify({ subtipo, dados_imovel }),
+      });
+      state.consultoriaFormCache = { subtipo, cliId, endereco: enderecoTxt, dados_imovel };
+      state.consultoriaPreviewData = { ctx: { cliId, dados_imovel, subtipo, endereco: enderecoTxt }, resultado: r };
+      setConsultoriaView('preview');
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false; btn.textContent = '🧮 Calcular preview';
+    }
+  };
+}
+
+// ── v1.99.5: Form Desmembramento + Remembramento (compartilhado) ────────
+async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
+  await loadPropostasClientes();
+  const cliOpts = state.propostasClientes.map(c =>
+    `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
+  ).join('');
+  const isDesm = subtipo === 'desmembramento';
+  const subLabel = SUBTIPO_LABEL_FRONT[subtipo];
+  const editando = !!state.consultoriaEditandoId;
+  const tituloHeader = editando
+    ? `Editando ${state.consultoriaPropostaOriginal?.numero || ''}`
+    : `Nova Proposta — ${subLabel.charAt(0) + subLabel.slice(1).toLowerCase()}`;
+  const icone = isDesm ? '✂️' : '🔗';
+  const baseLegal = isDesm
+    ? 'Lei 6.766/79 · Aprovação Prefeitura · Vários lotes resultantes'
+    : 'Lei 6.015/73 art. 234 · Unificação de matrículas contíguas do mesmo proprietário';
+
+  v.innerHTML = `
+    ${toggleHTML}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div>
+          <p class="section-title" style="margin:0;">${escape(tituloHeader)}</p>
+          <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">${icone} ${escape(subLabel)} · ${escape(baseLegal)}</p>
+        </div>
+        <button data-cons-voltar style="background:transparent;">← Voltar</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:16px;">
+       <div style="display:grid; gap:10px; font-size:13px;">
+        <label>Cliente
+          <div style="display:flex; gap:6px;">
+            <select id="dxCliente" style="flex:1;"><option value="">— escolher —</option>${cliOpts}</select>
+            <button type="button" id="dxNovoCliente" style="white-space:nowrap; background:var(--success); color:#fff; border-color:var(--success);">+ Novo cliente</button>
+          </div>
+        </label>
+        <label>Endereço do imóvel
+          <input id="dxEndereco" placeholder="Rua, nº, bairro, cidade-UF" style="width:100%;">
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📐 Dados do imóvel</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>Área total (m²)
+            <input id="dxArea" type="number" min="1" step="0.01" style="width:100%;">
+            <span style="font-size:10px; color:var(--text-muted);">${isDesm ? 'Área da matriz' : 'Soma das áreas a unificar'}</span>
+          </label>
+          <label>Valor venal total (R$)
+            <input id="dxValorVenal" type="number" min="0" step="0.01" style="width:100%;">
+            <span style="font-size:10px; color:var(--text-muted);">Soma dos valores venais</span>
+          </label>
+        </div>
+        <label>Tipo de zona
+          <select id="dxZona" style="width:100%;">
+            <option value="urbana" selected>Urbana</option>
+            <option value="rural">Rural</option>
+          </select>
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">${isDesm ? '🏘️ Lotes resultantes' : '🔗 Matrículas a unificar'}</p>
+        <label>${isDesm ? 'Quantidade de lotes resultantes do desmembramento' : 'Quantidade de matrículas que serão unificadas'}
+          <input id="dxNumLotes" type="number" min="2" step="1" style="width:100%;" placeholder="${isDesm ? 'ex: 4 (1 matriz vira 4 lotes)' : 'ex: 3 (3 matrículas viram 1)'}">
+          <span style="font-size:10px; color:var(--text-muted);">Mínimo 2</span>
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💰 Pacote de honorários</p>
+        <label>Tipo de pacote (escolha do cliente)
+          <select id="dxPacote" style="width:100%;">
+            <option value="0.5">Básico (0,5 SM por ${isDesm ? 'lote resultante' : 'matrícula origem'}) — projeto técnico essencial</option>
+            <option value="1.0" selected>Completo (1,0 SM por ${isDesm ? 'lote resultante' : 'matrícula origem'}) — pacote técnico completo + apoio jurídico</option>
+          </select>
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📋 Status</p>
+        <label style="display:flex; gap:6px; align-items:center;">
+          <input id="dxIptu" type="checkbox" checked>
+          <span><strong>IPTU em dia</strong> (todos exercícios). Sem isso, Prefeitura/cartório recusam.</span>
+        </label>
+
+        <div style="display:flex; gap:6px; margin-top:12px;">
+          <button id="dxPreview" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
+          <button class="btn-secondary" id="dxCancelar">Cancelar</button>
+        </div>
+       </div>
+
+       <div style="display:flex; flex-direction:column; gap:10px;">
+         <div>
+           <p style="margin:0; font-weight:600; font-size:13px;">📎 Anexos</p>
+           <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">
+             ${isDesm ? 'Planta atual do imóvel, croqui da divisão pretendida.' : 'Plantas das matrículas atuais, croqui da unificação.'}
+           </p>
+         </div>
+         <label id="cnsDropZone" style="border:2px dashed var(--border-strong); border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:rgba(0,255,136,0.03);">
+           <input type="file" id="cnsAnexoInput" multiple accept=".pdf,.png,.jpg,.jpeg" style="display:none;">
+           <div style="font-size:28px; margin-bottom:6px;">📤</div>
+           <div style="font-size:13px; color:var(--neon); font-weight:600;">Clique ou arraste arquivos</div>
+         </label>
+         <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+       </div>
+      </div>
+    </div>`;
+
+  // ── Handlers ──────────────────────────────────────────────────────────
+  document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    state.consultoriaView = 'lista';
+    render();
+  });
+  const voltarParaEscolha = () => {
+    state.consultoriaFormCache = null;
+    state.consultoriaAnexosTemp = [];
+    state.consultoriaAnexosExistentes = [];
+    if (state.consultoriaEditandoId) {
+      state.consultoriaEditandoId = null;
+      state.consultoriaPropostaOriginal = null;
+      setConsultoriaView('lista');
+    } else {
+      setConsultoriaView('escolha');
+    }
+  };
+  document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
+  document.getElementById('dxCancelar').onclick = voltarParaEscolha;
+  document.getElementById('dxNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
+
+  // restaura cache
+  const cache = state.consultoriaFormCache;
+  if (cache && cache.subtipo === subtipo) {
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+    const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    setVal('dxCliente',  cache.cliId);
+    setVal('dxEndereco', cache.endereco);
+    const d = cache.dados_imovel || {};
+    setVal('dxArea',        d.area_total_m2);
+    setVal('dxValorVenal',  d.valor_venal_total);
+    setVal('dxZona',        d.tipo_zona);
+    setVal('dxNumLotes',    isDesm ? d.numero_lotes_resultantes : d.numero_lotes_origem);
+    setVal('dxPacote',      d.honorario_projeto_sm);
+    setChk('dxIptu',        d.iptu_em_dia);
+  }
+
+  document.getElementById('dxPreview').onclick = async () => {
+    const cliId = document.getElementById('dxCliente').value;
+    const area = Number(document.getElementById('dxArea').value);
+    const valorVenal = Number(document.getElementById('dxValorVenal').value);
+    const numLotes = Number(document.getElementById('dxNumLotes').value);
+    if (!cliId) return alert('Selecione o cliente.');
+    if (!area || area <= 0) return alert('Informe a área total (m²).');
+    if (valorVenal < 0) return alert('Valor venal inválido.');
+    if (!numLotes || numLotes < 2) return alert(`${isDesm ? 'Quantidade de lotes' : 'Matrículas a unificar'} deve ser >= 2.`);
+
+    const pacoteSM = Number(document.getElementById('dxPacote').value) === 0.5 ? 0.5 : 1.0;
+
+    const dados_imovel = {
+      area_total_m2: area,
+      valor_venal_total: valorVenal,
+      tipo_zona: document.getElementById('dxZona').value,
+      iptu_em_dia: document.getElementById('dxIptu').checked,
+      honorario_projeto_sm: pacoteSM,
+    };
+    if (isDesm) {
+      dados_imovel.numero_lotes_resultantes = numLotes;
+    } else {
+      dados_imovel.numero_lotes_origem = numLotes;
+    }
+
+    const enderecoTxt = document.getElementById('dxEndereco').value.trim();
+
+    const btn = document.getElementById('dxPreview');
+    btn.disabled = true; btn.textContent = 'Calculando...';
+    try {
+      const r = await api('/api/propostas-consultoria/preview', {
+        method: 'POST',
+        body: JSON.stringify({ subtipo, dados_imovel }),
+      });
+      state.consultoriaFormCache = { subtipo, cliId, endereco: enderecoTxt, dados_imovel };
+      state.consultoriaPreviewData = { ctx: { cliId, dados_imovel, subtipo, endereco: enderecoTxt }, resultado: r };
+      setConsultoriaView('preview');
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false; btn.textContent = '🧮 Calcular preview';
+    }
+  };
+}
+
+// ── v1.99.6: Form Retificação de Área ────────────────────────────────────
+async function renderConsultoriaFormRetificacao(v, toggleHTML) {
+  await loadPropostasClientes();
+  const cliOpts = state.propostasClientes.map(c =>
+    `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
+  ).join('');
+  const subtipo = 'retificacao_area';
+  const editando = !!state.consultoriaEditandoId;
+  const tituloHeader = editando
+    ? `Editando ${state.consultoriaPropostaOriginal?.numero || ''}`
+    : 'Nova Proposta — Retificação de Área';
+
+  v.innerHTML = `
+    ${toggleHTML}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div>
+          <p class="section-title" style="margin:0;">${escape(tituloHeader)}</p>
+          <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">📐 Retificação · Lei 10.931/2004 (admin) ou Lei 6.015/1973 (judicial)</p>
+        </div>
+        <button data-cons-voltar style="background:transparent;">← Voltar</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:16px;">
+       <div style="display:grid; gap:10px; font-size:13px;">
+        <label>Cliente
+          <div style="display:flex; gap:6px;">
+            <select id="rxCliente" style="flex:1;"><option value="">— escolher —</option>${cliOpts}</select>
+            <button type="button" id="rxNovoCliente" style="white-space:nowrap; background:var(--success); color:#fff; border-color:var(--success);">+ Novo cliente</button>
+          </div>
+        </label>
+        <label>Endereço do imóvel
+          <input id="rxEndereco" placeholder="Rua, nº, bairro, cidade-UF (ou descrição rural)" style="width:100%;">
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📊 Áreas (em m² ou hectares)</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>Área atual (matrícula)
+            <input id="rxAreaAtual" type="number" min="0.01" step="0.01" style="width:100%;">
+            <span style="font-size:10px; color:var(--text-muted);">Como está na matrícula hoje</span>
+          </label>
+          <label>Área real (levantada)
+            <input id="rxAreaReal" type="number" min="0.01" step="0.01" style="width:100%;">
+            <span style="font-size:10px; color:var(--text-muted);">Medida em campo (GPS/Estação)</span>
+          </label>
+        </div>
+        <label>Valor venal do imóvel (R$)
+          <input id="rxValorVenal" type="number" min="0" step="0.01" style="width:100%;">
+          <span style="font-size:10px; color:var(--text-muted);">Influencia emolumentos cartório e custas judiciais (se aplicável)</span>
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">⚖️ Tipo de retificação</p>
+        <label>
+          <select id="rxTipo" style="width:100%;">
+            <option value="administrativa" selected>Administrativa (Lei 10.931/2004) — exige anuência de TODOS confrontantes</option>
+            <option value="judicial">Judicial (Lei 6.015/1973 art. 213) — quando confrontantes recusam ou há litígio</option>
+          </select>
+        </label>
+        <label style="display:flex; gap:6px; align-items:center;">
+          <input id="rxAnuencia" type="checkbox" checked>
+          <span><strong>Cliente já tem anuência dos confrontantes</strong> (essencial pra via administrativa)</span>
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💰 Honorários</p>
+        <label>Honorário Técnico (em SM — padrão 1)
+          <input id="rxHonorarioSM" type="number" min="0.5" step="0.5" value="1.0" style="width:100%;">
+          <span style="font-size:10px; color:var(--text-muted);">Default 1 SM. Ajuste pra trabalhos complexos.</span>
+        </label>
+
+        <div style="display:flex; gap:6px; margin-top:12px;">
+          <button id="rxPreview" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
+          <button class="btn-secondary" id="rxCancelar">Cancelar</button>
+        </div>
+       </div>
+
+       <div style="display:flex; flex-direction:column; gap:10px;">
+         <div>
+           <p style="margin:0; font-weight:600; font-size:13px;">📎 Anexos</p>
+           <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">
+             Plantas anteriores, escrituras, documentos da matrícula. PDF/PNG/JPEG.
+           </p>
+         </div>
+         <label id="cnsDropZone" style="border:2px dashed var(--border-strong); border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:rgba(0,255,136,0.03);">
+           <input type="file" id="cnsAnexoInput" multiple accept=".pdf,.png,.jpg,.jpeg" style="display:none;">
+           <div style="font-size:28px; margin-bottom:6px;">📤</div>
+           <div style="font-size:13px; color:var(--neon); font-weight:600;">Clique ou arraste arquivos</div>
+         </label>
+         <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+       </div>
+      </div>
+    </div>`;
+
+  document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    state.consultoriaView = 'lista';
+    render();
+  });
+  const voltarParaEscolha = () => {
+    state.consultoriaFormCache = null;
+    state.consultoriaAnexosTemp = [];
+    state.consultoriaAnexosExistentes = [];
+    if (state.consultoriaEditandoId) {
+      state.consultoriaEditandoId = null;
+      state.consultoriaPropostaOriginal = null;
+      setConsultoriaView('lista');
+    } else {
+      setConsultoriaView('escolha');
+    }
+  };
+  document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
+  document.getElementById('rxCancelar').onclick = voltarParaEscolha;
+  document.getElementById('rxNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
+
+  const cache = state.consultoriaFormCache;
+  if (cache && cache.subtipo === subtipo) {
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+    const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    setVal('rxCliente',  cache.cliId);
+    setVal('rxEndereco', cache.endereco);
+    const d = cache.dados_imovel || {};
+    setVal('rxAreaAtual',     d.area_atual_matricula);
+    setVal('rxAreaReal',      d.area_real_levantada);
+    setVal('rxValorVenal',    d.valor_venal);
+    setVal('rxTipo',          d.tipo_retificacao);
+    setChk('rxAnuencia',      d.tem_anuencia_confrontantes);
+    setVal('rxHonorarioSM',   d.honorario_projeto_sm);
+  }
+
+  document.getElementById('rxPreview').onclick = async () => {
+    const cliId = document.getElementById('rxCliente').value;
+    const areaAtual = Number(document.getElementById('rxAreaAtual').value);
+    const areaReal = Number(document.getElementById('rxAreaReal').value);
+    const valorVenal = Number(document.getElementById('rxValorVenal').value);
+    if (!cliId) return alert('Selecione o cliente.');
+    if (!areaAtual || areaAtual <= 0) return alert('Informe a área atual da matrícula.');
+    if (!areaReal || areaReal <= 0) return alert('Informe a área real levantada.');
+    if (!valorVenal || valorVenal < 0) return alert('Informe o valor venal.');
+
+    const dados_imovel = {
+      area_atual_matricula: areaAtual,
+      area_real_levantada: areaReal,
+      valor_venal: valorVenal,
+      tipo_retificacao: document.getElementById('rxTipo').value,
+      tem_anuencia_confrontantes: document.getElementById('rxAnuencia').checked,
+      honorario_projeto_sm: Number(document.getElementById('rxHonorarioSM').value) || 1.0,
+    };
+    const enderecoTxt = document.getElementById('rxEndereco').value.trim();
+
+    const btn = document.getElementById('rxPreview');
+    btn.disabled = true; btn.textContent = 'Calculando...';
+    try {
+      const r = await api('/api/propostas-consultoria/preview', {
+        method: 'POST',
+        body: JSON.stringify({ subtipo, dados_imovel }),
+      });
+      state.consultoriaFormCache = { subtipo, cliId, endereco: enderecoTxt, dados_imovel };
+      state.consultoriaPreviewData = { ctx: { cliId, dados_imovel, subtipo, endereco: enderecoTxt }, resultado: r };
+      setConsultoriaView('preview');
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false; btn.textContent = '🧮 Calcular preview';
+    }
+  };
+}
+
+// ── v1.99.6: Form Avaliação PTAM ────────────────────────────────────────
+async function renderConsultoriaFormPTAM(v, toggleHTML) {
+  await loadPropostasClientes();
+  const cliOpts = state.propostasClientes.map(c =>
+    `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
+  ).join('');
+  const subtipo = 'avaliacao_ptam';
+  const editando = !!state.consultoriaEditandoId;
+  const tituloHeader = editando
+    ? `Editando ${state.consultoriaPropostaOriginal?.numero || ''}`
+    : 'Nova Proposta — Avaliação PTAM';
+
+  v.innerHTML = `
+    ${toggleHTML}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div>
+          <p class="section-title" style="margin:0;">${escape(tituloHeader)}</p>
+          <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">💰 PTAM · NBR 14653 · CONFEA/CRECI</p>
+        </div>
+        <button data-cons-voltar style="background:transparent;">← Voltar</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:16px;">
+       <div style="display:grid; gap:10px; font-size:13px;">
+        <label>Cliente / Solicitante
+          <div style="display:flex; gap:6px;">
+            <select id="ptCliente" style="flex:1;"><option value="">— escolher —</option>${cliOpts}</select>
+            <button type="button" id="ptNovoCliente" style="white-space:nowrap; background:var(--success); color:#fff; border-color:var(--success);">+ Novo</button>
+          </div>
+        </label>
+        <label>Endereço do imóvel a avaliar
+          <input id="ptEndereco" placeholder="Rua, nº, bairro, cidade-UF (ou descrição rural)" style="width:100%;">
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>Município
+            <input id="ptMunicipio" value="Açailândia" style="width:100%;">
+          </label>
+          <label>Bairro / Localidade
+            <input id="ptBairro" placeholder="Centro / Zona Rural / etc" style="width:100%;">
+          </label>
+        </div>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">🏠 Tipo de imóvel</p>
+        <label>
+          <select id="ptTipoImovel" style="width:100%;">
+            <option value="urbano_residencial" selected>Urbano Residencial (casa, apartamento, lote)</option>
+            <option value="urbano_comercial">Urbano Comercial (loja, sala comercial, galpão)</option>
+            <option value="rural">Rural (sítio, chácara, fazenda)</option>
+            <option value="glebas">Glebas (área não loteada)</option>
+            <option value="industrial">Industrial (instalações + maquinário)</option>
+          </select>
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>Área do terreno (m² ou ha)
+            <input id="ptAreaTerreno" type="number" min="0" step="0.01" value="0" style="width:100%;">
+          </label>
+          <label>Área construída (m²)
+            <input id="ptAreaConstruida" type="number" min="0" step="0.01" value="0" style="width:100%;">
+          </label>
+        </div>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">🎯 Finalidade do laudo</p>
+        <label>
+          <select id="ptFinalidade" style="width:100%;">
+            <option value="particular" selected>Particular (compra/venda) — fundamentação normal</option>
+            <option value="bancaria">Bancária (garantia/crédito imobiliário) — template do banco</option>
+            <option value="judicial">Judicial (perícia, inventário, ação) — fundamentação rigorosa +30%</option>
+            <option value="inventario">Inventário / Partilha — finalidade sucessória</option>
+          </select>
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📊 Nível de precisão (NBR 14653)</p>
+        <label>
+          <select id="ptPrecisao" style="width:100%;">
+            <option value="expedita">Expedita (0,7x) — poucas amostras, valor estimativo</option>
+            <option value="normal" selected>Normal (1,0x) — fundamentação padrão, 5-15 amostras</option>
+            <option value="rigorosa">Rigorosa (1,5x) — tratamento estatístico completo, ART faixa 2</option>
+          </select>
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💵 Faixa de honorário</p>
+        <label>
+          <select id="ptFaixa" style="width:100%;">
+            <option value="1_lote_urbano" selected>Lote urbano (1 SM) — até 1.000m²</option>
+            <option value="2_sitio_proximo">Sítio próximo (2 SM) — até 50ha</option>
+            <option value="3_rural_medio">Rural médio (3 SM) — até 500ha</option>
+            <option value="4_fazenda_grande">Fazenda grande (4 SM) — > 500ha</option>
+            <option value="outro">Outro / customizado</option>
+          </select>
+        </label>
+        <label id="ptValorOutroBox" style="display:none;">Valor customizado (R$)
+          <input id="ptValorOutro" type="number" min="0" step="0.01" style="width:100%;">
+        </label>
+
+        <div style="display:flex; gap:6px; margin-top:12px;">
+          <button id="ptPreview" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
+          <button class="btn-secondary" id="ptCancelar">Cancelar</button>
+        </div>
+       </div>
+
+       <div style="display:flex; flex-direction:column; gap:10px;">
+         <div>
+           <p style="margin:0; font-weight:600; font-size:13px;">📎 Anexos</p>
+           <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">
+             Matrícula, IPTU, fotos do imóvel, plantas existentes. PDF/PNG/JPEG.
+           </p>
+         </div>
+         <label id="cnsDropZone" style="border:2px dashed var(--border-strong); border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:rgba(0,255,136,0.03);">
+           <input type="file" id="cnsAnexoInput" multiple accept=".pdf,.png,.jpg,.jpeg" style="display:none;">
+           <div style="font-size:28px; margin-bottom:6px;">📤</div>
+           <div style="font-size:13px; color:var(--neon); font-weight:600;">Clique ou arraste arquivos</div>
+         </label>
+         <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+       </div>
+      </div>
+    </div>`;
+
+  document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    state.consultoriaView = 'lista';
+    render();
+  });
+  const voltarParaEscolha = () => {
+    state.consultoriaFormCache = null;
+    state.consultoriaAnexosTemp = [];
+    state.consultoriaAnexosExistentes = [];
+    if (state.consultoriaEditandoId) {
+      state.consultoriaEditandoId = null;
+      state.consultoriaPropostaOriginal = null;
+      setConsultoriaView('lista');
+    } else {
+      setConsultoriaView('escolha');
+    }
+  };
+  document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
+  document.getElementById('ptCancelar').onclick = voltarParaEscolha;
+  document.getElementById('ptNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
+
+  // Mostra/esconde campo de valor customizado
+  const selFaixa = document.getElementById('ptFaixa');
+  const boxOutro = document.getElementById('ptValorOutroBox');
+  selFaixa.onchange = () => { boxOutro.style.display = selFaixa.value === 'outro' ? 'block' : 'none'; };
+
+  const cache = state.consultoriaFormCache;
+  if (cache && cache.subtipo === subtipo) {
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+    setVal('ptCliente',  cache.cliId);
+    setVal('ptEndereco', cache.endereco);
+    const d = cache.dados_imovel || {};
+    setVal('ptMunicipio',     d.localizacao?.municipio);
+    setVal('ptBairro',        d.localizacao?.bairro);
+    setVal('ptTipoImovel',    d.tipo_imovel);
+    setVal('ptAreaTerreno',   d.area_terreno);
+    setVal('ptAreaConstruida', d.area_construida);
+    setVal('ptFinalidade',    d.finalidade);
+    setVal('ptPrecisao',      d.nivel_precisao);
+    setVal('ptFaixa',          d.faixa_honorario);
+    setVal('ptValorOutro',    d.valor_outro);
+    if (d.faixa_honorario === 'outro') boxOutro.style.display = 'block';
+  }
+
+  document.getElementById('ptPreview').onclick = async () => {
+    const cliId = document.getElementById('ptCliente').value;
+    const faixa = document.getElementById('ptFaixa').value;
+    if (!cliId) return alert('Selecione o cliente.');
+
+    const valorOutro = Number(document.getElementById('ptValorOutro').value);
+    if (faixa === 'outro' && (!valorOutro || valorOutro <= 0)) {
+      return alert('Faixa "Outro" exige valor customizado > 0.');
+    }
+
+    const dados_imovel = {
+      tipo_imovel: document.getElementById('ptTipoImovel').value,
+      area_terreno: Number(document.getElementById('ptAreaTerreno').value) || 0,
+      area_construida: Number(document.getElementById('ptAreaConstruida').value) || 0,
+      localizacao: {
+        municipio: document.getElementById('ptMunicipio').value.trim() || 'Açailândia',
+        bairro: document.getElementById('ptBairro').value.trim() || undefined,
+      },
+      finalidade: document.getElementById('ptFinalidade').value,
+      nivel_precisao: document.getElementById('ptPrecisao').value,
+      faixa_honorario: faixa,
+    };
+    if (faixa === 'outro') dados_imovel.valor_outro = valorOutro;
+
+    const enderecoTxt = document.getElementById('ptEndereco').value.trim();
+
+    const btn = document.getElementById('ptPreview');
+    btn.disabled = true; btn.textContent = 'Calculando...';
+    try {
+      const r = await api('/api/propostas-consultoria/preview', {
+        method: 'POST',
+        body: JSON.stringify({ subtipo, dados_imovel }),
+      });
+      state.consultoriaFormCache = { subtipo, cliId, endereco: enderecoTxt, dados_imovel };
+      state.consultoriaPreviewData = { ctx: { cliId, dados_imovel, subtipo, endereco: enderecoTxt }, resultado: r };
+      setConsultoriaView('preview');
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false; btn.textContent = '🧮 Calcular preview';
+    }
   };
 }
 
@@ -7216,6 +8239,10 @@ function renderRecibos() {
             ${['rascunho','aguardando_envio'].includes(r.status) ? `<button data-rec-edit="${r.id}" style="flex:1; background:var(--gold); color:#06120a; border-color:var(--gold);">✏️ Editar</button>` : `<button data-rec-link="${r.token}" title="Copiar link" style="flex:1;">🔗 Link</button>`}
             <button data-rec-del="${r.id}" class="btn-danger" style="flex:1;" title="${r.status==='confirmado' ? 'Recibo confirmado não pode ser excluído (LGPD)' : 'Excluir definitivamente'}">🗑️ Excluir</button>
           </div>
+          <!-- v1.99.3: assinatura digital ICP-Brasil -->
+          ${r.assinado_em
+            ? `<button data-rec-sig-pdf="${r.id}" title="Baixar PDF assinado digitalmente em ${escape(parseDataBR(r.assinado_em))}" style="background:#1F5C3A22; color:#1F5C3A; border:1px solid #1F5C3A55; font-size:12px; padding:6px;">🔏 PDF assinado</button>`
+            : `<button data-rec-sig="${r.id}" title="Assinar digitalmente este recibo (PAdES ICP-Brasil)" style="background:transparent; color:var(--text-muted); border:1px dashed var(--border); font-size:12px; padding:6px;">🔏 Assinar digitalmente</button>`}
           ${r.valor && r.valor > 0 && r.status==='confirmado' ? `<button data-rec-nf="${r.id}" title="Emitir Nota Fiscal" style="background:var(--gold); color:#06120a; border-color:var(--gold); font-size:12px; padding:6px;">🧾 Emitir NF</button>` : ''}
         </div>
       </div>
@@ -7361,6 +8388,26 @@ function renderRecibos() {
   });
   document.querySelectorAll('[data-rec-pdf]').forEach(b => b.onclick = () => {
     window.open('/api/recibos/' + b.dataset.recPdf + '/pdf', '_blank');
+  });
+  // v1.99.3: assinar digitalmente (PAdES ICP-Brasil)
+  document.querySelectorAll('[data-rec-sig]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.recSig;
+    if (!confirm('Assinar este recibo com seu certificado digital?\n\nO PDF assinado fica salvo no banco e pode ser baixado depois. Validável no Adobe Reader e gov.br/validar.')) return;
+    const orig = b.textContent;
+    b.disabled = true; b.textContent = '⏳ Assinando...';
+    try {
+      const r = await api('/api/recibos/' + id + '/assinar', { method:'POST', body:'{}' });
+      alert('✅ Recibo assinado!\n\nTitular: ' + (r.cert.subject_cn || '?') +
+            '\nCertificado: ' + r.cert.label +
+            '\nTamanho do PDF: ' + Math.round(r.pdf_size_bytes/1024) + ' KB');
+      await loadRecibos(); renderRecibos();
+    } catch (e) {
+      alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : ''));
+      b.disabled = false; b.textContent = orig;
+    }
+  });
+  document.querySelectorAll('[data-rec-sig-pdf]').forEach(b => b.onclick = () => {
+    window.open('/api/recibos/' + b.dataset.recSigPdf + '/pdf-assinado', '_blank');
   });
   document.querySelectorAll('[data-rec-link]').forEach(b => b.onclick = async () => {
     const url = location.origin + '/r/' + b.dataset.recLink;

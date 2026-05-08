@@ -1,17 +1,29 @@
-// v1.66.0: orquestrador do motor de calculo. Em Fase 1 so Averbacao.
-// Demais subtipos (georref, desm, retif, ptam) entram na Fase 3.
+// v1.66.0: orquestrador do motor de calculo.
+// v1.99.4: Geo Rural implementado (Fase 2 iniciada).
+// Pendentes: desmembramento, remembramento, retificacao, ptam.
 
-import type { SubtipoConsultoria, ResultadoCalculo, InputAverbacao } from './types';
+import type {
+  SubtipoConsultoria,
+  ResultadoCalculo,
+  InputAverbacao,
+  InputGeorreferenciamento,
+  InputDesmembramento,
+  InputRetificacao,
+  InputAvaliacaoPTAM,
+} from './types';
 import { calcularAverbacao } from './averbacao';
+import { calcularGeorreferenciamento } from './georreferenciamento';
+import { calcularDesmembramento } from './desmembramento';
+import { calcularRetificacao } from './retificacao';
+import { calcularAvaliacaoPTAM } from './ptam';
 
 export type InputConsultoria =
   | { subtipo: 'averbacao_residencial' | 'averbacao_comercial'; dados: InputAverbacao }
-  // Stubs Fase 3 — bloqueiam ate implementacao completa:
-  | { subtipo: 'georreferenciamento_rural';   dados: unknown }
-  | { subtipo: 'desmembramento';              dados: unknown }
-  | { subtipo: 'remembramento';               dados: unknown }
-  | { subtipo: 'retificacao_area';            dados: unknown }
-  | { subtipo: 'avaliacao_ptam';              dados: unknown };
+  | { subtipo: 'georreferenciamento_rural';   dados: InputGeorreferenciamento }
+  | { subtipo: 'desmembramento';              dados: InputDesmembramento }
+  | { subtipo: 'remembramento';               dados: InputDesmembramento }
+  | { subtipo: 'retificacao_area';            dados: InputRetificacao }
+  | { subtipo: 'avaliacao_ptam';              dados: InputAvaliacaoPTAM };
 
 export async function calcularConsultoria(input: InputConsultoria): Promise<ResultadoCalculo> {
   switch (input.subtipo) {
@@ -20,19 +32,28 @@ export async function calcularConsultoria(input: InputConsultoria): Promise<Resu
     case 'averbacao_comercial':
       return calcularAverbacao({ ...input.dados, modalidade: 'comercial', apresentar_projetos_complementares: true });
     case 'georreferenciamento_rural':
+      return calcularGeorreferenciamento(input.dados);
     case 'desmembramento':
+      return calcularDesmembramento({ ...input.dados, tipo: 'desmembramento' });
     case 'remembramento':
+      return calcularDesmembramento({ ...input.dados, tipo: 'remembramento' });
     case 'retificacao_area':
+      return calcularRetificacao(input.dados);
     case 'avaliacao_ptam':
-      throw new Error(`Subtipo ${input.subtipo} nao implementado nesta fase. Apenas averbacao_residencial e averbacao_comercial estao disponiveis na Fase 1.`);
+      return calcularAvaliacaoPTAM(input.dados);
   }
 }
 
-export type SubtipoFase1 = 'averbacao_residencial' | 'averbacao_comercial';
+export type SubtipoFase1 = SubtipoConsultoria;
 
-export const SUBTIPOS_DISPONIVEIS_FASE1: SubtipoFase1[] = [
+export const SUBTIPOS_DISPONIVEIS_FASE1: SubtipoConsultoria[] = [
   'averbacao_residencial',
   'averbacao_comercial',
+  'georreferenciamento_rural',
+  'desmembramento',
+  'remembramento',
+  'retificacao_area',
+  'avaliacao_ptam',
 ];
 
 export const TODOS_SUBTIPOS: SubtipoConsultoria[] = [

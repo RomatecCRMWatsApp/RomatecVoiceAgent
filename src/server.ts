@@ -45,6 +45,18 @@ import {
   getFiscalConfig as getTenantFiscalConfig,
   upsertFiscalConfig as upsertTenantFiscalConfig,
 } from './services/tenantFiscalConfig';
+// v1.99.3: assinatura digital ICP-Brasil
+import {
+  uploadCert as uploadSigningCert,
+  listCerts as listSigningCerts,
+  deleteCert as deleteSigningCert,
+  setCertAtivo as setSigningCertAtivo,
+} from './services/signingCertificates';
+import {
+  assinarRecibo as assinarReciboPades,
+  getReciboPdfAssinado,
+  getStatusAssinatura,
+} from './integrations/recibosAssinatura';
 import ragRoutes from './routes/rag';
 import contractsRoutes from './routes/contracts';
 import painelRoutes from './routes/painel';
@@ -1147,6 +1159,88 @@ app.put('/api/fiscal-config', async (req: Request, res: Response) => {
     });
     res.json(cfg);
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// ─── v1.99.3: Certificados Digitais ICP-Brasil ─────────────────────────────
+// GET — lista certs cadastrados (sem expor pfx/senha)
+app.get('/api/signing-cert', async (_req: Request, res: Response) => {
+  try {
+    const certs = await listSigningCerts(1);
+    res.json(certs);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// POST — upload de novo cert (.pfx + senha + perfil + label)
+// multipart/form-data: file=pfx, fields=senha,perfil,label
+app.post('/api/signing-cert', requireCeoToken, upload.single('pfx'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: 'Arquivo .pfx obrigatorio (campo file=pfx)' });
+      return;
+    }
+    const { senha, perfil, label } = req.body || {};
+    const cert = await uploadSigningCert({
+      tenant_id: 1,
+      pfx: req.file.buffer,
+      senha: String(senha || ''),
+      perfil: (String(perfil || 'pj').toLowerCase() === 'pf' ? 'pf' : 'pj'),
+      label: String(label || req.file.originalname || 'Certificado'),
+    });
+    res.json(cert);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.delete('/api/signing-cert/:id', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    await deleteSigningCert(Number(String(req.params.id)), 1);
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.post('/api/signing-cert/:id/ativar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const cert = await setSigningCertAtivo(Number(String(req.params.id)), true, 1);
+    res.json(cert);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.post('/api/signing-cert/:id/desativar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const cert = await setSigningCertAtivo(Number(String(req.params.id)), false, 1);
+    res.json(cert);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// ─── Assinatura digital de Recibos ─────────────────────────────────────────
+// POST — assina recibo (gera PDF + aplica PAdES + salva no banco)
+app.post('/api/recibos/:id/assinar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const result = await assinarReciboPades(String(req.params.id));
+    res.json(result);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// GET — status (assinado? quando? por qual cert?) sem retornar o blob
+app.get('/api/recibos/:id/assinatura-status', async (req: Request, res: Response) => {
+  try {
+    const st = await getStatusAssinatura(String(req.params.id));
+    res.json(st);
+  } catch (err) { res.status(404).json({ error: (err as Error).message }); }
+});
+
+// GET — baixa o PDF assinado (Buffer). Inline pra abrir no browser.
+app.get('/api/recibos/:id/pdf-assinado', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const data = await getReciboPdfAssinado(id);
+    if (!data) {
+      res.status(404).json({ error: 'Recibo ainda nao foi assinado' });
+      return;
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="recibo-${id}-assinado.pdf"`);
+    res.send(data.pdf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
 app.get('/api/notas-fiscais',
