@@ -1130,6 +1130,24 @@ app.post('/api/despesas-extras/:id/enviar-whatsapp',
 app.post('/api/despesas-extras/:id/enviar-telegram',
   apiHandle(args => despesasExtras.enviarDespesaTelegram(args as Parameters<typeof despesasExtras.enviarDespesaTelegram>[0])));
 
+// v1.99.12: envio simples de texto WhatsApp (usado pelo modal "Passar Vale")
+app.post('/api/whatsapp/send-text', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const { phone, message } = (req.body || {}) as { phone?: string; message?: string };
+    if (!phone || !message) {
+      res.status(400).json({ error: 'phone e message obrigatorios' });
+      return;
+    }
+    const phoneClean = String(phone).replace(/\D/g, '');
+    if (phoneClean.length < 10) {
+      res.status(400).json({ error: 'telefone invalido' });
+      return;
+    }
+    const r = await sendReply(phoneClean, String(message));
+    res.json({ ok: true, result: r });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // ── v1.81.0: lookups Brasil API (CEP, CNPJ) pra autocompletar formularios
 app.get('/api/lookup/cep/:cep', async (req: Request, res: Response) => {
   try {

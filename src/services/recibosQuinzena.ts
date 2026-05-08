@@ -493,7 +493,7 @@ export async function gerarReciboQuinzenalPdf(input: {
 
 function tipoAjusteLabel(t: TipoAjuste): string {
   return t === 'desconto'      ? 'Desconto'
-       : t === 'adiantamento'  ? 'Adiantamento'
+       : t === 'adiantamento'  ? 'Vale (adiantamento)'
        : t === 'bonus'         ? 'Bônus'
        :                         'Horas extras';
 }

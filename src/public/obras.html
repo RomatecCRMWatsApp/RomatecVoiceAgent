@@ -3879,6 +3879,7 @@ function renderFolha() {
       <td style="text-align:center; padding:8px; border-bottom:1px solid var(--border); white-space:nowrap;">
         <span data-folha-status="${p.funcionario_id}" style="font-size:11px; color:var(--text-muted); margin-right:6px;">⏳</span>
         <button class="btn-gold" data-recibo="${p.funcionario_id}" data-nome="${escape(p.nome)}" style="font-size:11px; padding:4px 8px;">📄 Recibo</button>
+        <button data-passar-vale="${p.funcionario_id}" data-nome-vale="${escape(p.nome)}" data-tel-vale="${escape(p.telefone || '')}" data-saldo-vale="${p.total_pagar}" title="Passar vale (adiantamento) — desconta do recibo quinzenal" style="font-size:11px; padding:4px 8px; background:transparent; border:1px solid #f59e0b; color:#f59e0b; border-radius:4px; cursor:pointer; margin-left:4px;">💸 Vale</button>
       </td>
     </tr>
   `).join('');
@@ -3939,6 +3940,17 @@ function renderFolha() {
     } else {
       gerarRecibo(b.dataset.recibo, monthLabel);
     }
+  });
+  // v1.99.12: botão direto "💸 Vale" — abre modal pequeno e adiciona como
+  // adiantamento no período quinzenal atual (subtrai do recibo automaticamente)
+  v.querySelectorAll('[data-passar-vale]').forEach(b => b.onclick = () => {
+    abrirModalPassarVale({
+      membroId: b.dataset.passarVale,
+      nome: b.dataset.nomeVale || '',
+      telefone: b.dataset.telVale || '',
+      totalPagar: Number(b.dataset.saldoVale) || 0,
+      periodo: periodoFolhaAtual,
+    });
   });
 
   // v1.65.40: carrega status da quinzena pra cada membro (paralelo)
@@ -7346,6 +7358,97 @@ function periodoLabel(codigo) {
   return `${m[3]}ª quinzena de ${meses[Number(m[2])]}/${m[1]}`;
 }
 
+// ── v1.99.12: Modal "Passar Vale" — atalho rápido na linha do funcionário ──
+async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, periodo }) {
+  const periodoLbl = periodoLabel(periodo);
+  const saldoFmt = (Number(totalPagar) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const body = `
+    <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:10px; margin-bottom:12px;">
+      <p style="margin:0; font-size:13px; color:#f59e0b;"><strong>${escape(nome)}</strong></p>
+      <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">
+        Período: <strong>${escape(periodoLbl)}</strong>
+        · Total a receber atual: <strong>${escape(saldoFmt)}</strong>
+      </p>
+    </div>
+    <div style="display:grid; gap:10px;">
+      <label>
+        <span style="font-size:12px; color:var(--text-muted);">Valor do vale (R$)</span>
+        <input id="valeValor" type="number" step="0.01" min="0.01" placeholder="0,00" style="width:100%; font-size:18px; padding:8px 10px;" autofocus>
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--text-muted);">Descrição (opcional)</span>
+        <input id="valeDesc" placeholder="ex: Vale combustível 08/05" style="width:100%;">
+      </label>
+      <label style="display:flex; gap:6px; align-items:center; padding:8px; background:rgba(0,255,136,0.05); border-radius:6px;">
+        <input id="valeNotificar" type="checkbox" checked>
+        <span style="font-size:12px;">📱 Notificar funcionário no WhatsApp depois de salvar</span>
+      </label>
+      <p id="valeSaldoFinal" style="font-size:12px; color:var(--text-muted); margin:0; padding:8px; background:var(--surface-1); border-radius:6px;">
+        Saldo após este vale: <strong style="color:var(--gold);">${escape(saldoFmt)}</strong>
+      </p>
+    </div>
+  `;
+
+  abrirEditar(`💸 Passar vale — ${nome}`, body, async () => {
+    const valor = Number(document.getElementById('valeValor').value);
+    if (!valor || valor <= 0) { alert('Informe o valor do vale.'); return; }
+    if (valor > totalPagar) {
+      if (!confirm(`Vale (${valor.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}) é maior que o saldo atual (${saldoFmt}). Continuar mesmo assim?`)) return;
+    }
+    const descricao = document.getElementById('valeDesc').value.trim();
+    const notificar = document.getElementById('valeNotificar').checked;
+
+    try {
+      await api('/api/recibos/ajustes', {
+        method: 'POST',
+        body: JSON.stringify({
+          membro_id: Number(membroId),
+          periodo,
+          tipo: 'adiantamento',
+          valor,
+          descricao: descricao || `Vale passado em ${new Date().toLocaleDateString('pt-BR')}`,
+        }),
+      });
+
+      if (notificar && telefone) {
+        try {
+          const msg = `💸 *Vale registrado*\n\n${nome}, foi registrado um vale de *${valor.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}*${descricao ? ` (${descricao})` : ''}.\n\nEsse valor será descontado da sua próxima quinzena (${periodoLbl}).\n\nSaldo após desconto: *${(totalPagar - valor).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}*\n\n— Romatec`;
+          await api('/api/whatsapp/send-text', {
+            method: 'POST',
+            body: JSON.stringify({ phone: telefone, message: msg }),
+          });
+        } catch (err) {
+          console.warn('[vale] notificacao WhatsApp falhou:', err.message);
+        }
+      }
+
+      alert(`✅ Vale de ${valor.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} registrado.\n\nSerá descontado automaticamente do recibo quinzenal.${notificar && telefone ? '\n\n📱 Funcionário notificado no WhatsApp.' : ''}`);
+      fecharEditar();
+      await loadFolha();
+      render();
+    } catch (e) {
+      alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : ''));
+    }
+  });
+
+  // Atualiza preview do saldo ao digitar valor
+  setTimeout(() => {
+    const inp = document.getElementById('valeValor');
+    const out = document.getElementById('valeSaldoFinal');
+    if (inp && out) {
+      inp.oninput = () => {
+        const v = Number(inp.value) || 0;
+        const restante = totalPagar - v;
+        const restanteFmt = restante.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+        const cor = restante < 0 ? 'var(--danger)' : restante === 0 ? 'var(--text-muted)' : 'var(--gold)';
+        out.innerHTML = `Saldo após este vale: <strong style="color:${cor};">${restanteFmt}</strong>${restante < 0 ? ' ⚠️ Vale maior que saldo' : ''}`;
+      };
+      inp.focus();
+    }
+  }, 100);
+}
+
 async function abrirModalReciboQuinzena(membroId, nome, periodoInicial) {
   // v1.65.38: aceita periodo inicial (ex: do chip externo). Fallback pra
   // quinzena atual se nao passar.
@@ -7392,7 +7495,7 @@ async function abrirModalReciboQuinzena(membroId, nome, periodoInicial) {
     <div class="form-grid">
       <select id="rqTipo">
         <option value="desconto">Desconto</option>
-        <option value="adiantamento">Adiantamento</option>
+        <option value="adiantamento">💸 Vale (adiantamento)</option>
         <option value="bonus">Bônus</option>
         <option value="horas_extras">Horas extras</option>
       </select>
@@ -7420,7 +7523,7 @@ async function abrirModalReciboQuinzena(membroId, nome, periodoInicial) {
         lista.innerHTML = '<p style="color:var(--text-muted); text-align:center; padding:8px;">Sem ajustes neste período.</p>';
         return;
       }
-      const tipoLabel = { desconto: 'Desconto', adiantamento: 'Adiantamento', bonus: 'Bônus', horas_extras: 'Horas extras' };
+      const tipoLabel = { desconto: 'Desconto', adiantamento: '💸 Vale', bonus: 'Bônus', horas_extras: 'Horas extras' };
       const sinal = (t) => (t === 'desconto' || t === 'adiantamento') ? '−' : '+';
       const cor   = (t) => (t === 'desconto' || t === 'adiantamento') ? 'var(--danger)' : 'var(--neon)';
       lista.innerHTML = r.map(a => `

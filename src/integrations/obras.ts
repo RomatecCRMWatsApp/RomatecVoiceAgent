@@ -984,7 +984,7 @@ export async function relatorioMensalEquipe(input: {
 }) {
   const params: (string | number)[] = [input.ano, input.mes];
   let sql = `
-    SELECT d.funcionario_id, e.nome, e.funcao, e.valor_dia,
+    SELECT d.funcionario_id, e.nome, e.funcao, e.valor_dia, e.telefone,
            COUNT(CASE WHEN d.periodo = 'integral' THEN 1 END) AS integral,
            COUNT(CASE WHEN d.periodo = 'manha'    THEN 1 END) AS manha,
            COUNT(CASE WHEN d.periodo = 'tarde'    THEN 1 END) AS tarde,
@@ -993,13 +993,14 @@ export async function relatorioMensalEquipe(input: {
     JOIN romatec_obra_equipe e ON e.id = d.funcionario_id
     WHERE YEAR(d.data) = ? AND MONTH(d.data) = ?`;
   if (input.obra_id) { sql += ' AND d.obra_id = ?'; params.push(input.obra_id); }
-  sql += ' GROUP BY d.funcionario_id, e.nome, e.funcao, e.valor_dia ORDER BY e.nome ASC';
+  sql += ' GROUP BY d.funcionario_id, e.nome, e.funcao, e.valor_dia, e.telefone ORDER BY e.nome ASC';
 
   const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
   const lista = rows.map(r => ({
     funcionario_id: String(r.funcionario_id),
     nome: r.nome as string,
     funcao: r.funcao as string | null,
+    telefone: (r.telefone as string | null) ?? null,
     valor_dia: num((r.valor_dia as string) ?? '0'),
     integral: Number(r.integral),
     manha:    Number(r.manha),
