@@ -68,9 +68,26 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 // Multer separado pra anexos multimodais (imagens/PDFs) — Claude aceita até 32MB/PDF e ~5MB/imagem
 const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 32 * 1024 * 1024, files: 5 } });
 
-app.use(express.json({ limit: '32mb' })); // VTO usa fotos base64 no body
+// v1.99.18: limit 64mb (antes 32mb). VTO no iPhone com 10 fotos HEIC chegava
+// a ~67mb em base64 e quebrava com 413 → JSON.parse de HTML no Safari iOS
+// virava SyntaxError "string did not match the expected pattern".
+app.use(express.json({ limit: '64mb' }));
 // v1.65.19: forms HTML do /recibos/confirmar/:token (POST application/x-www-form-urlencoded)
 app.use(express.urlencoded({ extended: false, limit: '128kb' }));
+
+// v1.99.18: error handler explicito pra payload demasiado grande.
+// Sem isso, Express retorna HTML padrao 413 e o JSON.parse no client falha
+// com SyntaxError enganador. Aqui forcamos resposta JSON sempre.
+app.use((err: { type?: string; status?: number; message?: string; statusCode?: number }, _req: Request, res: Response, next: (e?: unknown) => void) => {
+  if (err && (err.type === 'entity.too.large' || err.statusCode === 413)) {
+    res.status(413).json({
+      error: 'Tamanho do envio excede o limite (64MB). Reduza fotos, comprima ou divida em vistorias menores.',
+      code: 'PAYLOAD_TOO_LARGE',
+    });
+    return;
+  }
+  next(err);
+});
 app.use('/rag', ragRoutes);                 // v1.26.0 — endpoints de memoria vetorial
 app.use('/contracts', contractsRoutes);     // v1.27.1 — indexacao de contratos modelo (Fase 1)
 app.use(painelRoutes);                      // v1.47.0 — dashboard /painel + /api/painel/stats

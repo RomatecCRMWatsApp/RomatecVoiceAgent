@@ -4418,12 +4418,57 @@ function renderVto() {
 
   document.getElementById('vFotos').onchange = async (e) => {
     const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    // v1.99.18: compressao automatica (Canvas, max 1600px, JPEG 85%) + aviso
+    // Mostra progresso enquanto processa
+    const inp = e.target;
+    const labelOriginal = document.querySelector('label[for=vFotos]')?.textContent;
+    let totalOriginalMB = 0;
+    let totalCompressedMB = 0;
+    let processadas = 0;
+    let ignoradas = 0;
+
     for (const f of files) {
-      if (f.size > 5 * 1024 * 1024) { alert(`Foto "${f.name}" maior que 5MB, ignorada.`); continue; }
-      const b64 = await fileToBase64(f);
-      state.vtoFotos.push({ mime: f.type || 'image/jpeg', data_base64: b64, legenda: '' });
+      // Limit ATUAL aceita ate 20MB por foto (HEIC iPhone podem ser ~10MB).
+      // Compressao posterior reduz pra ~500KB-1MB.
+      if (f.size > 20 * 1024 * 1024) {
+        alert(`Foto "${f.name}" maior que 20MB, ignorada.`);
+        ignoradas++;
+        continue;
+      }
+      try {
+        const result = await compressImageFile(f, { maxDim: 1600, quality: 0.85 });
+        state.vtoFotos.push({
+          mime: result.mime,
+          data_base64: result.data_base64,
+          legenda: '',
+        });
+        totalOriginalMB += result.original_kb / 1024;
+        totalCompressedMB += result.compressed_kb / 1024;
+        processadas++;
+      } catch (err) {
+        console.error('[vto:foto]', err.message);
+        ignoradas++;
+      }
     }
+
     e.target.value = '';
+
+    // Aviso preventivo: se total comprimido > 50MB, alerta antes de salvar
+    if (totalCompressedMB > 50) {
+      alert(`⚠️ Atenção: ${state.vtoFotos.length} fotos somam ~${totalCompressedMB.toFixed(1)}MB mesmo após compressão.\n\nConsidere dividir em vistorias menores ou remover algumas fotos pra evitar erro de upload.`);
+    }
+
+    // Toast informativo (sem alert chato) sobre economia da compressao
+    if (processadas > 0 && totalOriginalMB > 0) {
+      const economia = Math.round((1 - totalCompressedMB / totalOriginalMB) * 100);
+      if (economia >= 20) {
+        console.log(`[vto:compressao] ${processadas} foto(s): ${totalOriginalMB.toFixed(1)}MB → ${totalCompressedMB.toFixed(1)}MB (economia ${economia}%)`);
+      }
+    }
+    if (ignoradas > 0) console.warn(`[vto:foto] ${ignoradas} foto(s) ignoradas`);
+
     renderVto();
   };
 
@@ -7290,6 +7335,79 @@ function fileToBase64(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+// v1.99.18: comprime imagem antes do upload (Canvas → JPEG quality 85%, max 1600px).
+// Reduz foto de iPhone HEIC (3-5MB) pra ~500KB-1MB JPEG. Mantem qualidade
+// suficiente pra vistoria de obra (visao geral de ambientes).
+//
+// Retorna { mime, data_base64, original_kb, compressed_kb } pra UI mostrar economia.
+// Se compressao falha (formato nao-imagem, erro de canvas), faz fallback pro arquivo original.
+async function compressImageFile(file, opts) {
+  const maxDim = (opts && opts.maxDim) || 1600;
+  const quality = (opts && opts.quality) || 0.85;
+
+  // Se nao for imagem, retorna original sem comprimir
+  if (!file.type || !file.type.startsWith('image/')) {
+    const base64 = await fileToBase64(file);
+    return {
+      mime: file.type || 'application/octet-stream',
+      data_base64: base64,
+      original_kb: Math.round(file.size / 1024),
+      compressed_kb: Math.round(file.size / 1024),
+    };
+  }
+
+  try {
+    // Carrega arquivo como Image (via blob URL pra evitar memory blow-up no iOS)
+    const blobUrl = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('Falha ao decodificar imagem'));
+        i.src = blobUrl;
+      });
+
+      // Calcula dimensoes finais mantendo aspect ratio
+      let w = img.naturalWidth;
+      let h = img.naturalHeight;
+      if (Math.max(w, h) > maxDim) {
+        const ratio = maxDim / Math.max(w, h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+
+      // Renderiza em canvas + exporta JPEG
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      const base64 = dataUrl.split(',')[1] || '';
+      // Estimativa de bytes: cada char base64 = 6 bits = 0.75 byte
+      const compressedBytes = Math.round(base64.length * 0.75);
+
+      return {
+        mime: 'image/jpeg',
+        data_base64: base64,
+        original_kb: Math.round(file.size / 1024),
+        compressed_kb: Math.round(compressedBytes / 1024),
+      };
+    } finally {
+      URL.revokeObjectURL(blobUrl);
+    }
+  } catch (err) {
+    console.warn('[compressImage] falhou, usando original:', err.message);
+    const base64 = await fileToBase64(file);
+    return {
+      mime: file.type,
+      data_base64: base64,
+      original_kb: Math.round(file.size / 1024),
+      compressed_kb: Math.round(file.size / 1024),
+    };
+  }
 }
 
 // ── CONFIRMAÇÃO GENÉRICA (v1.62.0, reutilizável pra qualquer ação destrutiva) ──
