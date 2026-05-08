@@ -298,8 +298,64 @@ export async function gerarPdfRecibo(
   })();
   doc.fontSize(10).fillColor('#111').font('Helvetica')
      .text(dataExtenso, 40, cy, { width: 515, align: 'center' });
-  cy += 32;
-  // Linha de assinatura
+  cy += 18;
+
+  // v1.99.10: BLOCO VISUAL DE ASSINATURA DIGITAL ENTRE DATA E LINHA DE ASSINATURA
+  // Quando o PDF e gerado dentro do fluxo assinarRecibo, o signatureMeta tem
+  // dados do certificado e o bloco e renderizado AQUI (no miolo, nao no rodape).
+  if (signatureMeta) {
+    const fmtDataAssin = (d: Date) => {
+      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    };
+    const validadeFmt = signatureMeta.validade_ate
+      ? fmtData(signatureMeta.validade_ate)
+      : '—';
+    const docFmt = (() => {
+      const d = signatureMeta.signer_doc || '';
+      if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+      if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+      return d || '—';
+    })();
+    const dataAssinFmt = fmtDataAssin(signatureMeta.data_assinatura);
+    const cnLimpo = signatureMeta.signer_cn.replace(/:\d+$/, '');
+
+    // Caixa verde no miolo, x=130-485 (centrada, 355px de largura)
+    const boxX = 130;
+    const boxW = 355;
+    doc.save()
+       .lineWidth(0.8)
+       .strokeColor('#10b981')
+       .roundedRect(boxX, cy, boxW, 56, 4)
+       .stroke()
+       .restore();
+
+    // Cabecalho
+    doc.fontSize(8).fillColor('#10b981').font('Helvetica-Bold')
+       .text('ASSINADO DIGITALMENTE — ICP-Brasil (PAdES)', boxX, cy + 5, {
+         width: boxW, align: 'center', lineBreak: false,
+       });
+
+    // Linha 1: signatario
+    doc.fontSize(8).fillColor('#222').font('Helvetica-Bold')
+       .text(cnLimpo, boxX + 6, cy + 19, { width: boxW - 12, align: 'center', lineBreak: false });
+
+    // Linha 2: doc + data
+    doc.fontSize(7).fillColor('#444').font('Helvetica')
+       .text(`${docFmt} · Assinado em ${dataAssinFmt}`, boxX + 6, cy + 31, {
+         width: boxW - 12, align: 'center', lineBreak: false,
+       });
+
+    // Linha 3: cert + validade
+    doc.fontSize(6.5).fillColor('#666').font('Helvetica')
+       .text(`Cert: ${signatureMeta.issuer_cn || '—'} · Válido até ${validadeFmt} · Validar em validar.iti.gov.br`,
+             boxX + 6, cy + 42, { width: boxW - 12, align: 'center', lineBreak: false });
+
+    cy += 65; // altura do bloco + margem
+  } else {
+    cy += 14; // espaço normal se nao tem assinatura digital
+  }
+
+  // Linha de assinatura (manuscrita)
   doc.moveTo(180, cy).lineTo(415, cy).strokeColor('#444').lineWidth(0.5).stroke();
   cy += 6;
   doc.fontSize(9).fillColor('#222').font('Helvetica-Bold')
@@ -369,54 +425,9 @@ export async function gerarPdfRecibo(
   doc.fontSize(7.5).fillColor('#888').font('Helvetica')
      .text(qrUrl, 40, 706, { width: 410, lineBreak: false });
 
-  // v1.99.9: BLOCO VISUAL DE ASSINATURA DIGITAL ICP-Brasil
-  // So renderiza quando o PDF e gerado dentro do fluxo de assinatura
-  // (via assinarRecibo), passando signatureMeta. Ocupa y=720-775,
-  // logo abaixo do hash e antes do "Escaneie para validar" (y=778).
-  if (signatureMeta) {
-    const fmtDataAssin = (d: Date) => {
-      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    };
-    const validadeFmt = signatureMeta.validade_ate
-      ? fmtData(signatureMeta.validade_ate)
-      : '—';
-    const docFmt = (() => {
-      const d = signatureMeta.signer_doc || '';
-      if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-      if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
-      return d || '—';
-    })();
-    const dataAssinFmt = fmtDataAssin(signatureMeta.data_assinatura);
-    const cnLimpo = signatureMeta.signer_cn.replace(/:\d+$/, ''); // tira ":CPF/CNPJ" se vier no CN
-
-    // Caixa com borda verde (col esquerda do rodape, abaixo do hash)
-    doc.save()
-       .lineWidth(0.8)
-       .strokeColor('#10b981')
-       .roundedRect(40, 720, 410, 53, 4)
-       .stroke()
-       .restore();
-
-    // Cabecalho da caixa
-    doc.fontSize(8).fillColor('#10b981').font('Helvetica-Bold')
-       .text('🔏 ASSINADO DIGITALMENTE — ICP-Brasil (PAdES)', 48, 724, { lineBreak: false });
-
-    // Linha 1: signatario + documento
-    doc.fontSize(7.5).fillColor('#333').font('Helvetica-Bold')
-       .text(`Signatario: `, 48, 738, { continued: true, lineBreak: false })
-       .font('Helvetica')
-       .text(`${cnLimpo} (${docFmt})`, { lineBreak: false });
-
-    // Linha 2: data + certificado
-    doc.fontSize(7).fillColor('#444').font('Helvetica')
-       .text(`Data assinatura: ${dataAssinFmt}  |  Cert: ${signatureMeta.issuer_cn || '—'}  |  Validade cert: ${validadeFmt}`,
-             48, 752, { width: 395, lineBreak: false });
-
-    // Linha 3: como validar
-    doc.fontSize(6.5).fillColor('#888').font('Helvetica-Oblique')
-       .text('Validar em: validar.iti.gov.br ou abrir no Adobe Reader (barra azul "Assinado e todas as assinaturas validas")',
-             48, 765, { width: 395, lineBreak: false });
-  }
+  // v1.99.10: bloco visual de assinatura digital foi MOVIDO pro miolo do
+  // documento (entre data e linha de assinatura manuscrita). Aqui no rodape
+  // sobra apenas hash + QR code.
 
   // v1.96.0: footer mais compacto pra evitar pagina em branco extra.
   // Texto da assinatura foi REMOVIDO daqui (estava em y=800 absoluto e
