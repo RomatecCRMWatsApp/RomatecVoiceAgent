@@ -368,6 +368,52 @@ export async function buscarReciboPorZapiMessageId(messageId: string): Promise<R
   return rows.length ? mapRow(rows[0]) : null;
 }
 
+/**
+ * v1.99.17: Busca o vale (recibo tipo='vale') mais recente PENDENTE pra um
+ * telefone. Pendente = aguardando_envio | enviado | entregue | lido | respondido.
+ * NAO inclui confirmado/contestado/cancelado/expirado.
+ *
+ * Usado pelo webhook do WhatsApp pra detectar resposta de confirmacao de vale
+ * ANTES de cair no fluxo de recibo quinzenal.
+ */
+export async function buscarValePendentePorPhone(phone: string): Promise<Recibo | null> {
+  const phoneNorm = normalizarTelefone(phone, true); // opcional=true: nao lanca se invalido
+  if (!phoneNorm) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT * FROM recibos
+      WHERE tenant_id = 1
+        AND tipo = 'vale'
+        AND destinatario_phone = ?
+        AND status IN ('aguardando_envio','enviado','entregue','lido','respondido')
+        AND (expires_at IS NULL OR expires_at > NOW())
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [phoneNorm]
+  );
+  return rows.length ? mapRow(rows[0]) : null;
+}
+
+/**
+ * v1.99.17: Busca vale CONFIRMADO mais recente pra um telefone.
+ * Usado pra responder idempotente quando funcionario manda CONFIRMO 2x.
+ */
+export async function buscarValeConfirmadoRecentePorPhone(phone: string): Promise<Recibo | null> {
+  const phoneNorm = normalizarTelefone(phone, true);
+  if (!phoneNorm) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT * FROM recibos
+      WHERE tenant_id = 1
+        AND tipo = 'vale'
+        AND destinatario_phone = ?
+        AND status = 'confirmado'
+        AND respondido_em > NOW() - INTERVAL 24 HOUR
+      ORDER BY respondido_em DESC
+      LIMIT 1`,
+    [phoneNorm]
+  );
+  return rows.length ? mapRow(rows[0]) : null;
+}
+
 export interface ListarFiltro {
   tenant_id?: number;
   tipo?: TipoRecibo;

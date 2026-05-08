@@ -103,6 +103,12 @@ export interface ValePdfInput {
    * Em modo preview/sem persistencia, deve ser undefined/null.
    */
   recibo?: Recibo | null;
+  /**
+   * v1.99.17: Quando true, omite o bloco "IMPACTO NO RECIBO QUINZENAL".
+   * Usado na regeneracao pos-confirmacao quando o saldo_anterior nao
+   * foi persistido (decisao b da Etapa 5). Nao afeta selo/QR/hash.
+   */
+  omitirBlocoSaldo?: boolean;
 }
 
 export async function gerarPdfVale(input: ValePdfInput): Promise<Buffer> {
@@ -202,24 +208,26 @@ export async function gerarPdfVale(input: ValePdfInput): Promise<Buffer> {
   doc.moveTo(40, cy).lineTo(555, cy).strokeColor('#ddd').lineWidth(0.5).stroke();
   cy += 16;
 
-  // ── Saldo ────────────────────────────────────────────────────────────────
-  doc.fontSize(10).fillColor('#888').font('Helvetica')
-     .text('IMPACTO NO RECIBO QUINZENAL', 40, cy);
-  cy += 14;
-
-  const drawLinhaSaldo = (label: string, valor: string, cor: string, bold = false) => {
-    doc.fontSize(10).fillColor('#444').font('Helvetica').text(label, 40, cy);
-    doc.fontSize(11).fillColor(cor).font(bold ? 'Helvetica-Bold' : 'Helvetica')
-       .text(valor, 40, cy, { width: 515, align: 'right' });
+  // ── Saldo (omitido na regeneracao pos-confirmacao — v1.99.17) ─────────
+  if (!input.omitirBlocoSaldo) {
+    doc.fontSize(10).fillColor('#888').font('Helvetica')
+       .text('IMPACTO NO RECIBO QUINZENAL', 40, cy);
     cy += 14;
-  };
-  drawLinhaSaldo('Saldo de diárias antes do vale:', fmtBRL(input.saldo_anterior), '#444');
-  drawLinhaSaldo('(–) Vale neste documento:',       fmtBRL(input.valor),          '#dc2626');
-  doc.moveTo(40, cy + 2).lineTo(555, cy + 2).strokeColor('#999').lineWidth(0.5).stroke();
-  cy += 6;
-  drawLinhaSaldo('Saldo restante a receber:',       fmtBRL(saldoApos),            saldoApos < 0 ? '#dc2626' : corHex, true);
 
-  cy += 16;
+    const drawLinhaSaldo = (label: string, valor: string, cor: string, bold = false) => {
+      doc.fontSize(10).fillColor('#444').font('Helvetica').text(label, 40, cy);
+      doc.fontSize(11).fillColor(cor).font(bold ? 'Helvetica-Bold' : 'Helvetica')
+         .text(valor, 40, cy, { width: 515, align: 'right' });
+      cy += 14;
+    };
+    drawLinhaSaldo('Saldo de diárias antes do vale:', fmtBRL(input.saldo_anterior), '#444');
+    drawLinhaSaldo('(–) Vale neste documento:',       fmtBRL(input.valor),          '#dc2626');
+    doc.moveTo(40, cy + 2).lineTo(555, cy + 2).strokeColor('#999').lineWidth(0.5).stroke();
+    cy += 6;
+    drawLinhaSaldo('Saldo restante a receber:',       fmtBRL(saldoApos),            saldoApos < 0 ? '#dc2626' : corHex, true);
+
+    cy += 16;
+  }
 
   // ── Texto explicativo ──────────────────────────────────────────────────
   doc.fontSize(9).fillColor('#444').font('Helvetica')

@@ -1599,9 +1599,189 @@ async function notificarCeo(texto: string): Promise<void> {
 
 export interface RespostaProcessada {
   handled: boolean;
-  acao?: 'confirmou' | 'contestou' | 'pix_registrado' | 'ambiguo';
+  acao?:
+    | 'confirmou' | 'contestou' | 'pix_registrado' | 'ambiguo'
+    // v1.99.17: acoes especificas de vale
+    | 'confirmou_vale' | 'contestou_vale' | 'ja_confirmado_vale' | 'ambigua_vale';
   envio_id?: string;
+  vale_id?: string;
   detalhe?: string;
+}
+
+// v1.99.17: REGEX especifico de vale — mais permissivo que recibo quinzenal
+// (cobre "ok recebi", "recebi sim", "sim recebi", "tudo certo recebi", etc).
+// Diferente do REGEX_CONFIRMA do quinzenal que e estrito ^...$.
+const REGEX_CONFIRMA_VALE = /(^|\s)(confirm\w*|sim|ok|recebi(do|do\s|\s|$)?|ta\s*ok|tudo\s*certo|de\s*acordo|certo|👍|✅)(\s|$|[.\!])/i;
+const REGEX_CONTESTA_VALE = /(n[ãa]o\s*recebi|nao\s*chegou|n[ãa]o\s*confir|errad\w*|incorret\w*|valor\s*errad\w*|❌|n[ãa]o\s*concordo|contest)/i;
+
+import type { Recibo } from '../integrations/recibos';
+
+/**
+ * v1.99.17: Processa resposta de funcionario a um vale pendente.
+ * Fluxo:
+ *   - REGEX_CONFIRMA_VALE → status='confirmado' + regenera PDF com selo + reenvia
+ *   - REGEX_CONTESTA_VALE → status='contestado' + notifica CEO
+ *   - Texto ambiguo → notifica CEO sem responder colaborador
+ */
+async function processarRespostaVale(input: {
+  vale: Recibo;
+  text: string;
+  phone: string;
+  messageId?: string;
+}): Promise<RespostaProcessada> {
+  const { vale, text, phone, messageId } = input;
+
+  // Normalizacao igual ao quinzenal (remove emojis variation, etc)
+  const textNorm = text.replace(/[️⃣]/g, '').replace(/^\s*[\p{Emoji}\s]+/u, '').trim();
+
+  const recibosMod = await import('../integrations/recibos');
+  const wa = await import('../integrations/whatsapp');
+  const reciboPdfMod = await import('./reciboPdf');
+  const baseUrl = reciboPdfMod.getBaseUrl();
+  const linkValidacao = `${baseUrl}/v/${vale.hash_validacao}`;
+
+  // ── CONFIRMA ──────────────────────────────────────────────────────────
+  if (REGEX_CONFIRMA_VALE.test(textNorm)) {
+    console.log(`[vale:confirmacao] vale=${vale.numero} phone=${phone} text="${text.slice(0, 60)}"`);
+
+    try {
+      // 1. Atualiza status via funcao existente
+      await recibosMod.responderRecibo({
+        token: vale.token,
+        acao: 'confirma',
+        ip: phone,
+        user_agent: 'whatsapp-confirmo',
+        obs: text.slice(0, 500),
+      });
+
+      // 2. Re-busca recibo atualizado (status='confirmado')
+      const valeAtualizado = await recibosMod.buscarReciboPorId(vale.id);
+      if (!valeAtualizado) throw new Error('Recibo recem confirmado nao encontrado');
+
+      // 3. Regenera PDF (com selo CONFIRMADO, sem bloco de saldo)
+      const valePdfMod = await import('./valePdf');
+      const pdfAssinado = await valePdfMod.gerarPdfVale({
+        membro_nome: valeAtualizado.destinatario_nome,
+        membro_cpf: valeAtualizado.destinatario_doc,
+        valor: valeAtualizado.valor ?? 0,
+        descricao: valeAtualizado.descricao_servico,
+        // periodo nao temos persistido — usa quinzena atual como aproximacao
+        periodo: (() => {
+          const d = new Date();
+          const a = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const q = d.getDate() <= 15 ? 1 : 2;
+          return `${a}-${m}-${q}`;
+        })(),
+        saldo_anterior: 0,             // omitido pelo flag abaixo
+        omitirBlocoSaldo: true,        // v1.99.17: PDF reassinado nao mostra saldo
+        numero: valeAtualizado.numero,
+        recibo: valeAtualizado,        // status='confirmado' -> selo aplicado
+      });
+
+      // 4. Reenvia via WhatsApp
+      const msg =
+        `✅ Recibo de vale ${valeAtualizado.numero} confirmado e assinado digitalmente.\n` +
+        `Guarde como comprovante oficial.\n\n` +
+        `🔗 Verificar autenticidade: ${linkValidacao}\n\n— Romatec`;
+      await wa.sendReply(phone, msg);
+      await wa.sendDocument(phone, pdfAssinado.toString('base64'), `Vale-${valeAtualizado.numero}-assinado.pdf`);
+
+      console.log(`[vale:contra-recibo] vale=${valeAtualizado.numero} reenviado pra ${phone}`);
+
+      // 5. Notifica CEO (Telegram)
+      try {
+        const tgMod = await import('../integrations/telegram');
+        const chatId = process.env.TELEGRAM_CEO_CHAT_ID
+          || process.env.TELEGRAM_CHAT_ID
+          || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+        if (chatId) {
+          await tgMod.sendMessage(chatId,
+            `✅ Vale ${valeAtualizado.numero} CONFIRMADO\n\n` +
+            `Por: ${valeAtualizado.destinatario_nome} (${phone})\n` +
+            `Valor: R$ ${(valeAtualizado.valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n\n` +
+            `🔗 ${linkValidacao}`
+          ).catch(err => console.warn('[vale:notif-ceo]', (err as Error).message));
+        }
+      } catch (err) {
+        console.warn('[vale:telegram-ceo]', (err as Error).message);
+      }
+
+      return {
+        handled: true,
+        acao: 'confirmou_vale',
+        vale_id: String(valeAtualizado.id),
+      };
+    } catch (err) {
+      console.error('[vale:processar-confirmar] falha:', (err as Error).message);
+      // Status pode ja ter mudado pra confirmado mas envio do contra-recibo falhou.
+      // Notifica CEO pra reenviar manualmente. Nao volta status atras.
+      try {
+        const tgMod = await import('../integrations/telegram');
+        const chatId = process.env.TELEGRAM_CEO_CHAT_ID
+          || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+        if (chatId) {
+          await tgMod.sendMessage(chatId,
+            `⚠️ Vale ${vale.numero} CONFIRMADO mas falha no contra-recibo: ${(err as Error).message.slice(0, 200)}`
+          ).catch(() => {});
+        }
+      } catch {}
+      return { handled: true, acao: 'confirmou_vale', detalhe: (err as Error).message };
+    }
+  }
+
+  // ── CONTESTA ──────────────────────────────────────────────────────────
+  if (REGEX_CONTESTA_VALE.test(textNorm)) {
+    console.log(`[vale:contestacao] vale=${vale.numero} phone=${phone} text="${text.slice(0, 60)}"`);
+    try {
+      await recibosMod.responderRecibo({
+        token: vale.token,
+        acao: 'contesta',
+        obs: text.slice(0, 1000),
+        ip: phone,
+        user_agent: 'whatsapp-contesta',
+      });
+      await wa.sendReply(phone,
+        `⚠️ Vale ${vale.numero} marcado como contestado.\nO CEO foi notificado e entrará em contato.\n\n— Romatec`
+      );
+      try {
+        const tgMod = await import('../integrations/telegram');
+        const chatId = process.env.TELEGRAM_CEO_CHAT_ID
+          || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+        if (chatId) {
+          await tgMod.sendMessage(chatId,
+            `⚠️ Vale ${vale.numero} CONTESTADO\n\n` +
+            `Por: ${vale.destinatario_nome} (${phone})\n` +
+            `Mensagem: "${text.slice(0, 400)}"\n\n` +
+            `Aguardando sua decisão.`
+          ).catch(() => {});
+        }
+      } catch {}
+      return { handled: true, acao: 'contestou_vale', vale_id: String(vale.id) };
+    } catch (err) {
+      console.error('[vale:processar-contestar] falha:', (err as Error).message);
+      return { handled: true, acao: 'contestou_vale', detalhe: (err as Error).message };
+    }
+  }
+
+  // ── AMBIGUO ───────────────────────────────────────────────────────────
+  // Texto que nao bate em CONFIRMA nem CONTESTA. Notifica CEO sem responder
+  // colaborador (ZAYRA fica calada — handled=true).
+  console.log(`[vale:ambiguo] vale=${vale.numero} phone=${phone} text="${text.slice(0, 60)}"`);
+  try {
+    const tgMod = await import('../integrations/telegram');
+    const chatId = process.env.TELEGRAM_CEO_CHAT_ID
+      || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+    if (chatId) {
+      await tgMod.sendMessage(chatId,
+        `🔔 Resposta inesperada sobre vale ${vale.numero}\n\n` +
+        `De: ${vale.destinatario_nome} (${phone})\n` +
+        `Mensagem: "${text.slice(0, 400)}"\n\n` +
+        `(Não bateu CONFIRMO nem contestação — verifique manualmente.)`
+      ).catch(() => {});
+    }
+  } catch {}
+  return { handled: true, acao: 'ambigua_vale', vale_id: String(vale.id) };
 }
 
 export async function processarRespostaRecibo(input: {
@@ -1610,6 +1790,43 @@ export async function processarRespostaRecibo(input: {
   const phone = input.phone || '';
   const text = (input.text || '').trim();
   if (!text) return { handled: false };
+
+  // v1.99.17: VALE TEM PRIORIDADE sobre quinzenal.
+  // Vales sao criados sob demanda (qualquer momento); quinzenal e ciclico.
+  // Se ha vale pendente pra esse phone, processa ele e RETORNA.
+  // Idempotencia: se vale ja confirmado nas ultimas 24h, responde "ja confirmado".
+  try {
+    const m = await import('../integrations/recibos');
+    const valePendente = await m.buscarValePendentePorPhone(phone);
+    if (valePendente) {
+      const r = await processarRespostaVale({
+        vale: valePendente,
+        text,
+        phone,
+        messageId: input.messageId,
+      });
+      return r;
+    }
+    // Sem vale pendente: verifica se ha vale recente CONFIRMADO (idempotencia 24h)
+    const valeRecente = await m.buscarValeConfirmadoRecentePorPhone(phone);
+    if (valeRecente) {
+      const textNormQuick = text.toLowerCase().replace(/[^\w\s]/g, '').trim();
+      // So responde "ja confirmado" se o texto parecer ser tentativa de confirmar de novo
+      if (/confirm|recebi|sim|ok/.test(textNormQuick)) {
+        const baseUrl = (await import('./reciboPdf')).getBaseUrl();
+        const link = `${baseUrl}/v/${valeRecente.hash_validacao}`;
+        const wa = await import('../integrations/whatsapp');
+        await wa.sendReply(phone,
+          `✅ ${valeRecente.numero} já foi confirmado anteriormente.\n` +
+          `O recibo assinado está com você.\n\n` +
+          `🔗 Verificar: ${link}`
+        ).catch(err => console.warn('[vale:idempotente]', err.message));
+        return { handled: true, acao: 'ja_confirmado_vale' as RespostaProcessada['acao'] };
+      }
+    }
+  } catch (err) {
+    console.warn('[vale:roteamento] falha — caindo no fluxo quinzenal:', (err as Error).message);
+  }
 
   const envio = await buscarEnvioPendentePorPhone(phone);
   if (!envio) return { handled: false };
