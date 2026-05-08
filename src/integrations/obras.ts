@@ -1071,18 +1071,21 @@ export async function relatorioSaldoEmAbertoEquipe(input: { obra_id?: string } =
   const ids = membros.map(m => Number(m.id));
   const placeholders = ids.map(() => '?').join(',');
 
-  // Data limite por membro (fim do periodo do ultimo recibo quinzenal emitido)
+  // v1.99.19: data_limite agora vem de recibos_envios.status='pago' (efetivo),
+  // NAO mais de recibos_quinzena_emitidos (snapshot de geracao de PDF, que pode
+  // existir sem pagamento real).
+  // Bug anterior: snapshot de '2026-04-2' fazia obra que comecou 27/04 perder
+  // os 4 dias de abril (sistema achava que ja tinham sido pagos no recibo
+  // quinzenal — mas nunca foi pago).
+  // Agora: se nao tem recibos_envios.status='pago' pro membro, data_limite
+  // fica null e TODOS os dias trabalhados entram como em aberto.
   const [limites] = await pool.execute<RowDataPacket[]>(
-    `SELECT membro_id,
-            MAX(
-              CASE
-                WHEN periodo LIKE '%-1' THEN STR_TO_DATE(CONCAT(SUBSTRING(periodo,1,7),'-15'), '%Y-%m-%d')
-                ELSE LAST_DAY(STR_TO_DATE(CONCAT(SUBSTRING(periodo,1,7),'-01'), '%Y-%m-%d'))
-              END
-            ) AS data_limite
-       FROM recibos_quinzena_emitidos
-      WHERE membro_id IN (${placeholders})
-      GROUP BY membro_id`,
+    `SELECT e.membro_id, MAX(l.periodo_fim) AS data_limite
+       FROM recibos_envios e
+       JOIN recibos_envios_lotes l ON l.id = e.lote_id
+      WHERE e.membro_id IN (${placeholders})
+        AND e.status = 'pago'
+      GROUP BY e.membro_id`,
     ids
   );
   const limitePorMembro = new Map<number, Date>();
