@@ -1251,11 +1251,17 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
     }
 
     // 4) Telegram pro CEO (com PDF anexo)
+    // Resolve chat_id na ordem usada pelo resto do sistema:
+    //   1. TELEGRAM_CEO_CHAT_ID (especifico)
+    //   2. TELEGRAM_CHAT_ID (legado)
+    //   3. Primeiro id de TELEGRAM_AUTHORIZED_USER_IDS (lista CSV)
     if (enviarTg) {
       try {
         const { sendDocument: sendTelegramDocument } = await import('./integrations/telegram');
-        const chatId = process.env.TELEGRAM_CEO_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
-        if (!chatId) throw new Error('TELEGRAM_CEO_CHAT_ID nao configurado');
+        const chatId = process.env.TELEGRAM_CEO_CHAT_ID
+          || process.env.TELEGRAM_CHAT_ID
+          || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+        if (!chatId) throw new Error('Telegram CEO chat_id nao configurado (defina TELEGRAM_CEO_CHAT_ID ou TELEGRAM_AUTHORIZED_USER_IDS)');
         await sendTelegramDocument(
           chatId, pdf, `Vale-${numero}.pdf`,
           `💸 Vale ${numero} — ${m.nome} — R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}${descricao ? `\n${descricao}` : ''}`
