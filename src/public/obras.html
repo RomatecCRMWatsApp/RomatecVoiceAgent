@@ -12690,7 +12690,7 @@ function renderLaudosLista(v) {
     const data = l.created_at ? parseDataBR(l.created_at) : '-';
     const valor = l.valor_servico != null ? fmt(l.valor_servico) : '';
     const area = l.area_total_m2 != null ? Number(l.area_total_m2).toLocaleString('pt-BR',{maximumFractionDigits:2}) + ' m²' : '';
-    const localizacao = [l.numero_lote && 'Lote '+l.numero_lote, l.quadra && 'Q.'+l.quadra, l.loteamento, l.municipio].filter(Boolean).join(' · ');
+    const localizacao = [l.loteamento, l.numero_contrato && 'Contr. '+l.numero_contrato, l.quadra && 'Q.'+l.quadra, l.numero_lote && 'Lote '+l.numero_lote, l.municipio].filter(Boolean).join(' · ');
     return `
     <div class="card" style="border-left:4px solid ${cor};">
       <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
@@ -13061,6 +13061,10 @@ function renderLaudoTabDados(c) {
   c.innerHTML = `
     <div class="card">
       <h3 style="margin-top:0;">Identificação do imóvel</h3>
+      <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">
+        ℹ️ Preencha apenas os campos disponíveis. Particular (PF) costuma ter só rua/quadra/lote.
+        Demarcação para incorporadora/loteadora preenche também Loteamento + Contrato.
+      </p>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
         ${isUrbano ? `
           <select id="ld-tipo-lote">
@@ -13068,15 +13072,16 @@ function renderLaudoTabDados(c) {
             <option value="MEIO_QUADRA" ${l.tipo_lote_urbano==='MEIO_QUADRA'?'selected':''}>Meio de quadra</option>
             <option value="ESQUINA" ${l.tipo_lote_urbano==='ESQUINA'?'selected':''}>Esquina</option>
           </select>
+          <input id="ld-loteamento" placeholder="Loteamento (ex: Colina Park)" value="${escape(l.loteamento||'')}">
+          <input id="ld-contrato" placeholder="Contrato (ex: 26/15-0024)" value="${escape(l.numero_contrato||'')}">
           <input id="ld-quadra" placeholder="Quadra" value="${escape(l.quadra||'')}">
           <input id="ld-lote" placeholder="Número do lote" value="${escape(l.numero_lote||'')}">
-          <input id="ld-loteamento" placeholder="Loteamento" value="${escape(l.loteamento||'')}">
         ` : `
           <input id="ld-denom" placeholder="Denominação do imóvel" value="${escape(l.denominacao_imovel||'')}" style="grid-column:1/3;">
           <input id="ld-nirf" placeholder="NIRF" value="${escape(l.nirf||'')}">
           <input id="ld-ccir" placeholder="CCIR" value="${escape(l.ccir||'')}">
         `}
-        <input id="ld-end" placeholder="Endereço do imóvel" value="${escape(l.endereco_imovel||'')}" style="grid-column:1/3;">
+        <input id="ld-end" placeholder="${isUrbano ? 'Rua / Endereço completo' : 'Endereço do imóvel'}" value="${escape(l.endereco_imovel||'')}" style="grid-column:1/3;">
         <input id="ld-mun" placeholder="Município" value="${escape(l.municipio||'')}">
         <input id="ld-uf" placeholder="UF" maxlength="2" value="${escape(l.uf_imovel||'')}">
         <input id="ld-comarca" placeholder="Comarca" value="${escape(l.comarca||'')}" style="grid-column:1/3;">
@@ -13106,6 +13111,7 @@ function renderLaudoTabDados(c) {
       quadra: isUrbano ? (document.getElementById('ld-quadra').value.trim() || null) : null,
       numero_lote: isUrbano ? (document.getElementById('ld-lote').value.trim() || null) : null,
       loteamento: isUrbano ? (document.getElementById('ld-loteamento').value.trim() || null) : null,
+      numero_contrato: isUrbano ? (document.getElementById('ld-contrato').value.trim() || null) : null,
       denominacao_imovel: !isUrbano ? (document.getElementById('ld-denom').value.trim() || null) : null,
       nirf: !isUrbano ? (document.getElementById('ld-nirf').value.trim() || null) : null,
       ccir: !isUrbano ? (document.getElementById('ld-ccir').value.trim() || null) : null,

@@ -215,9 +215,10 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   if (laudo.tipo_imovel === 'URBANO') {
     const partesO: string[] = [];
     if (laudo.tipo_lote_urbano) partesO.push(`Tipo: ${laudo.tipo_lote_urbano === 'MEIO_QUADRA' ? 'Meio de quadra (4 vértices)' : 'Esquina (5 vértices)'}`);
+    if (laudo.loteamento) partesO.push(`Loteamento: ${laudo.loteamento}`);
+    if (laudo.numero_contrato) partesO.push(`Contrato: ${laudo.numero_contrato}`);
     if (laudo.quadra) partesO.push(`Quadra ${laudo.quadra}`);
     if (laudo.numero_lote) partesO.push(`Lote ${laudo.numero_lote}`);
-    if (laudo.loteamento) partesO.push(laudo.loteamento);
     doc.text(partesO.join(' · '), 40, cy, { width: 515 });
     cy += 12;
   } else {

@@ -231,6 +231,9 @@ export async function runLaudosMigrations(): Promise<void> {
     { label: 'ALTER lado medida_manual_m', sql: 'ALTER TABLE laudos_demarcacao_lados ADD COLUMN medida_manual_m DECIMAL(10,3) NULL' },
     { label: 'ALTER lado confrontante_nome', sql: 'ALTER TABLE laudos_demarcacao_lados ADD COLUMN confrontante_nome VARCHAR(255) NULL' },
     { label: 'ALTER lado nome_lado', sql: "ALTER TABLE laudos_demarcacao_lados ADD COLUMN nome_lado VARCHAR(50) NULL" },
+    // v2.1.1 — Numero de contrato com loteadora (ex: "26/15-0024" do Colina Park)
+    // Opcional — PF nao preenche, PJ/loteadora preenche
+    { label: 'ALTER numero_contrato', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN numero_contrato VARCHAR(50) NULL' },
   ];
   for (const { label, sql } of ops) {
     try {

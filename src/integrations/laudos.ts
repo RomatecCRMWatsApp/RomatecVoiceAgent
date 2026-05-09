@@ -27,6 +27,7 @@ export interface Laudo {
   quadra: string | null;
   numero_lote: string | null;
   loteamento: string | null;
+  numero_contrato: string | null;
   denominacao_imovel: string | null;
   nirf: string | null;
   ccir: string | null;
@@ -77,6 +78,7 @@ interface LaudoRow extends RowDataPacket {
   quadra: string | null;
   numero_lote: string | null;
   loteamento: string | null;
+  numero_contrato: string | null;
   denominacao_imovel: string | null;
   nirf: string | null;
   ccir: string | null;
@@ -140,6 +142,7 @@ function mapRow(r: LaudoRow): Laudo {
     quadra: r.quadra ?? null,
     numero_lote: r.numero_lote ?? null,
     loteamento: r.loteamento ?? null,
+    numero_contrato: r.numero_contrato ?? null,
     denominacao_imovel: r.denominacao_imovel ?? null,
     nirf: r.nirf ?? null,
     ccir: r.ccir ?? null,
@@ -319,6 +322,7 @@ export interface AtualizarLaudoInput {
   quadra?: string | null;
   numero_lote?: string | null;
   loteamento?: string | null;
+  numero_contrato?: string | null;
   denominacao_imovel?: string | null;
   nirf?: string | null;
   ccir?: string | null;
@@ -361,6 +365,7 @@ export async function atualizarLaudo(id: number | string, input: AtualizarLaudoI
   set('quadra', input.quadra);
   set('numero_lote', input.numero_lote);
   set('loteamento', input.loteamento);
+  set('numero_contrato', input.numero_contrato);
   set('denominacao_imovel', input.denominacao_imovel);
   set('nirf', input.nirf);
   set('ccir', input.ccir);
