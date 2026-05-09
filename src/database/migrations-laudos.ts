@@ -240,6 +240,13 @@ export async function runLaudosMigrations(): Promise<void> {
     // v2.2.1 — Tempo de rastreio GNSS por ponto (segundos) — opcional
     // Usado em laudo rural pra georreferenciamento NTGIR/INCRA certificavel
     { label: 'ALTER ponto tempo_rastreio_seg', sql: 'ALTER TABLE laudos_demarcacao_pontos ADD COLUMN tempo_rastreio_seg INT NULL' },
+    // v2.2.2 — Base GNSS (estacao de referencia) — obrigatorio em rural
+    // Exigencia NTGIR/INCRA/SIGEF: registrar inicio e fim do rastreio
+    // da base pra calcular horas totais de observacao estatica
+    { label: 'ALTER laudo base_nome', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN base_nome VARCHAR(120) NULL' },
+    { label: 'ALTER laudo base_inicio_rastreio', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN base_inicio_rastreio DATETIME NULL' },
+    { label: 'ALTER laudo base_fim_rastreio', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN base_fim_rastreio DATETIME NULL' },
+    { label: 'ALTER laudo base_observacoes', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN base_observacoes TEXT NULL' },
   ];
   for (const { label, sql } of ops) {
     try {

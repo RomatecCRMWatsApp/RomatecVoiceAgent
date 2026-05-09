@@ -64,6 +64,11 @@ export interface Laudo {
   // v2.1.0
   tipo_levantamento: TipoLevantamento | null;
   sistema_coord: SistemaCoord;
+  // v2.2.2: Base GNSS (estacao de referencia) — obrigatorio em rural (NTGIR/INCRA)
+  base_nome: string | null;
+  base_inicio_rastreio: string | null;
+  base_fim_rastreio: string | null;
+  base_observacoes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -115,6 +120,10 @@ interface LaudoRow extends RowDataPacket {
   ativo: 0 | 1;
   tipo_levantamento: TipoLevantamento | null;
   sistema_coord: SistemaCoord | null;
+  base_nome: string | null;
+  base_inicio_rastreio: Date | string | null;
+  base_fim_rastreio: Date | string | null;
+  base_observacoes: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -182,6 +191,10 @@ function mapRow(r: LaudoRow): Laudo {
     ativo: r.ativo === 1,
     tipo_levantamento: r.tipo_levantamento ?? null,
     sistema_coord: (r.sistema_coord ?? 'AMBOS') as SistemaCoord,
+    base_nome: r.base_nome ?? null,
+    base_inicio_rastreio: asISO(r.base_inicio_rastreio),
+    base_fim_rastreio: asISO(r.base_fim_rastreio),
+    base_observacoes: r.base_observacoes ?? null,
     created_at: asISO(r.created_at) ?? '',
     updated_at: asISO(r.updated_at) ?? '',
   };
@@ -350,6 +363,11 @@ export interface AtualizarLaudoInput {
   tipo_levantamento?: TipoLevantamento | null;
   sistema_coord?: SistemaCoord;
   escala?: string | null;
+  // v2.2.2 — Base GNSS
+  base_nome?: string | null;
+  base_inicio_rastreio?: string | null;
+  base_fim_rastreio?: string | null;
+  base_observacoes?: string | null;
 }
 
 export async function atualizarLaudo(id: number | string, input: AtualizarLaudoInput): Promise<Laudo> {
@@ -394,6 +412,10 @@ export async function atualizarLaudo(id: number | string, input: AtualizarLaudoI
   set('tipo_levantamento', input.tipo_levantamento);
   set('sistema_coord', input.sistema_coord);
   set('escala', input.escala);
+  set('base_nome', input.base_nome);
+  set('base_inicio_rastreio', input.base_inicio_rastreio);
+  set('base_fim_rastreio', input.base_fim_rastreio);
+  set('base_observacoes', input.base_observacoes);
 
   if (fields.length === 0) return existente;
   params.push(Number(id));

@@ -13936,6 +13936,38 @@ function renderLaudoTabPontos(c) {
   const fotosAtual = state.laudoAtual.fotos || [];
   const fotoDoPonto = (pontoId) => fotosAtual.find(f => f.ponto_id === pontoId);
 
+  // v2.2.2: helpers de cronômetro persistente (localStorage)
+  function fmtCrono(sec) {
+    const n = Math.max(0, Math.floor(Number(sec) || 0));
+    const h = Math.floor(n / 3600);
+    const m = Math.floor((n % 3600) / 60);
+    const s = n % 60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+  function getCronoSec(key, cronos, fallback) {
+    const c = cronos[key];
+    if (!c) return fallback || 0;
+    if (c.running && c.startMs) return (c.accumulated || 0) + Math.floor((Date.now() - c.startMs) / 1000);
+    return c.accumulated || fallback || 0;
+  }
+  // Ticker global pra atualizar displays de cronômetro a cada segundo
+  if (window.lpCronoTicker) clearInterval(window.lpCronoTicker);
+  window.lpCronoTicker = setInterval(() => {
+    if (!state.laudoAtual || state.laudoEditorTab !== 'pontos') return;
+    const cronos = window.romatecCronos?.[state.laudoAtual.id] || {};
+    document.querySelectorAll('[data-crono-display]').forEach(el => {
+      const key = el.dataset.cronoDisplay;
+      const sec = getCronoSec(key, cronos, 0);
+      el.textContent = fmtCrono(sec);
+      // Auto-atualiza input manual quando rodando
+      if (cronos[key]?.running) {
+        const i = key.replace('p', '');
+        const inp = document.querySelector(`[data-fp-rastreio="${i}"]`);
+        if (inp && document.activeElement !== inp) inp.value = sec;
+      }
+    });
+  }, 1000);
+
   const renderFormPontos = () => {
     const host = document.getElementById('lp-form-host');
     if (!host) return;
@@ -13986,12 +14018,18 @@ function renderLaudoTabPontos(c) {
             ${showLatLng ? `<input data-fp-lat="${i}" type="number" step="0.000001" inputmode="decimal" placeholder="Latitude" value="${p.lat_decimal ?? ''}">` : ''}
             ${showLatLng ? `<input data-fp-lng="${i}" type="number" step="0.000001" inputmode="decimal" placeholder="Longitude" value="${p.long_decimal ?? ''}">` : ''}
           </div>
-          ${isRural ? `
-            <div style="margin-top:6px;">
-              <input data-fp-rastreio="${i}" type="number" min="0" step="1" inputmode="numeric"
-                placeholder="⏱️ Tempo de rastreio GNSS (segundos) — opcional, útil pra georreferenciamento INCRA"
-                value="${p.tempo_rastreio_seg ?? ''}"
-                style="width:100%; font-size:12px;">
+          ${cronoAtivo ? `
+            <div style="margin-top:6px; padding:6px; background:var(--bg-secondary); border-radius:4px;">
+              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                <span style="font-size:11px; color:var(--text-muted);">⏱️ Rastreio GNSS:</span>
+                <span data-crono-display="p${i}" style="font-family:monospace; font-size:16px; font-weight:600; min-width:80px; color:var(--gold);">${fmtCrono(getCronoSec('p'+i, cronos, p.tempo_rastreio_seg))}</span>
+                <button data-crono-toggle="p${i}" style="padding:4px 10px; background:#16a34a22; color:#16a34a; border:1px solid #16a34a55; font-size:14px;">${cronos['p'+i]?.running ? '⏸ Pausar' : '▶ Iniciar'}</button>
+                <button data-crono-reset="p${i}" title="Zerar cronômetro" style="padding:4px 8px; font-size:11px;">↺</button>
+                <input data-fp-rastreio="${i}" type="number" min="0" step="1" inputmode="numeric" placeholder="manual (seg)"
+                  value="${p.tempo_rastreio_seg ?? (cronos['p'+i]?.accumulated || '')}"
+                  style="flex:1; min-width:80px; font-size:11px;">
+              </div>
+              ${isRural ? '<p style="margin:4px 0 0; font-size:10px; color:#f59e0b;">⚠️ Obrigatório em rural (NTGIR/INCRA)</p>' : ''}
             </div>
           ` : ''}
           <!-- v2.2.1: foto-por-piquete inline -->
@@ -14029,7 +14067,73 @@ function renderLaudoTabPontos(c) {
     else if (isUrb5) header = '5 pontos (com chanfro)';
     else header = `${nPontos} pontos${isRural?' (rural)':' (poligonal urbano)'}`;
 
+    // v2.2.2: cronometros — em rural sempre ativos, em urbano com toggle
+    const CRONO_KEY = 'romatec_cronos_laudo_' + l.id;
+    if (!window.romatecCronos) window.romatecCronos = {};
+    if (!window.romatecCronos[l.id]) {
+      try { window.romatecCronos[l.id] = JSON.parse(localStorage.getItem(CRONO_KEY) || '{}'); }
+      catch (_) { window.romatecCronos[l.id] = {}; }
+    }
+    const cronos = window.romatecCronos[l.id];
+    const salvarCronos = () => { try { localStorage.setItem(CRONO_KEY, JSON.stringify(cronos)); } catch (_) {} };
+    // Toggle urbano: localStorage
+    const URB_CRONO_KEY = 'romatec_lp_crono_urb_' + l.id;
+    if (typeof window.lpCronoUrbAtivo === 'undefined') {
+      window.lpCronoUrbAtivo = (localStorage.getItem(URB_CRONO_KEY) === 'on');
+    }
+    const cronoAtivo = isRural || (window.lpCronoUrbAtivo === true);
+
+    // Card de toggle urbano (apenas urbanos)
+    const toggleUrbHtml = !isRural ? `
+      <div class="card" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <strong style="font-size:13px;">🕐 Rastreio cronometrado:</strong>
+        <label class="lp-card-opt" style="margin:0;">
+          <input type="radio" name="lp-crono-toggle" value="off" ${!window.lpCronoUrbAtivo?'checked':''}><span>❌ Desativado (urbano simples)</span>
+        </label>
+        <label class="lp-card-opt" style="margin:0;">
+          <input type="radio" name="lp-crono-toggle" value="on" ${window.lpCronoUrbAtivo?'checked':''}><span>⏱️ Ativado (com base GNSS + tempo por ponto)</span>
+        </label>
+      </div>
+    ` : '';
+
+    // Card Base GNSS (rural sempre, urbano se toggle ON)
+    const baseHtml = cronoAtivo ? `
+      <div class="card" style="border:1px solid #f59e0b;">
+        <h3 style="margin-top:0;">📡 Base GNSS — estação de referência ${isRural?'(NTGIR/INCRA)':''}</h3>
+        <p style="font-size:11px; color:var(--text-muted); margin:4px 0 8px;">
+          ${isRural ? '⚠️ <strong>Obrigatório para georreferenciamento rural certificável.</strong>' : '🕐 Registre o início e fim do rastreio da base.'}
+          Use os botões <strong>📌 Marcar agora</strong> em campo — sistema calcula a duração automaticamente.
+        </p>
+        <div style="display:grid; grid-template-columns:1fr; gap:6px;">
+          <input id="lp-base-nome" placeholder="Nome/ID da base (ex: ComNav T30 RTK Romatec, RBMC PARA, etc)"
+            value="${escape(l.base_nome || 'ComNav T30 RTK Romatec')}">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+            <div>
+              <label style="font-size:11px; color:var(--text-muted); display:block;">⏱️ Início do rastreio</label>
+              <div style="display:flex; gap:4px;">
+                <input id="lp-base-inicio" type="datetime-local" value="${l.base_inicio_rastreio ? new Date(l.base_inicio_rastreio).toISOString().slice(0,16) : ''}" style="flex:1;">
+                <button id="lp-base-marcar-inicio" title="Marcar início agora" style="padding:6px 10px; background:#16a34a22; color:#16a34a; border:1px solid #16a34a55;">📌 Agora</button>
+              </div>
+            </div>
+            <div>
+              <label style="font-size:11px; color:var(--text-muted); display:block;">⏱️ Fim do rastreio</label>
+              <div style="display:flex; gap:4px;">
+                <input id="lp-base-fim" type="datetime-local" value="${l.base_fim_rastreio ? new Date(l.base_fim_rastreio).toISOString().slice(0,16) : ''}" style="flex:1;">
+                <button id="lp-base-marcar-fim" title="Marcar fim agora" style="padding:6px 10px; background:#ef444422; color:#ef4444; border:1px solid #ef444455;">📌 Agora</button>
+              </div>
+            </div>
+          </div>
+          <div id="lp-base-duracao" style="padding:10px; background:var(--bg-secondary); border-radius:4px; font-size:14px; text-align:center; font-family:monospace;">
+            Duração: <strong>—</strong>
+          </div>
+          <textarea id="lp-base-obs" rows="2" placeholder="Observações da base (opcional — equipamento, condições, marco oficial, etc)" style="width:100%; font-size:11px;">${escape(l.base_observacoes || '')}</textarea>
+        </div>
+      </div>
+    ` : '';
+
     host.innerHTML = `
+      ${toggleUrbHtml}
+      ${baseHtml}
       <div class="card">
         <h3 style="margin-top:0;">📋 3. Vértices e medidas dos lados — ${header}</h3>
         <p style="font-size:11px; color:var(--text-muted); margin:4px 0 8px;">
@@ -14051,6 +14155,84 @@ function renderLaudoTabPontos(c) {
     `;
 
     // ── Handlers ───────────────────────────────────────────
+    // v2.2.2: Toggle cronômetro urbano
+    document.querySelectorAll('input[name="lp-crono-toggle"]').forEach(r => r.onchange = () => {
+      window.lpCronoUrbAtivo = (r.value === 'on');
+      try { localStorage.setItem(URB_CRONO_KEY, r.value); } catch(_) {}
+      renderFormPontos();
+    });
+
+    // v2.2.2: Cronômetros por ponto (▶/⏸/↺)
+    document.querySelectorAll('[data-crono-toggle]').forEach(b => b.onclick = () => {
+      const key = b.dataset.cronoToggle;
+      if (!cronos[key]) cronos[key] = { running:false, startMs:null, accumulated:0 };
+      if (cronos[key].running) {
+        // Pausar: acumula tempo decorrido
+        cronos[key].accumulated = (cronos[key].accumulated || 0) + Math.floor((Date.now() - cronos[key].startMs) / 1000);
+        cronos[key].running = false;
+        cronos[key].startMs = null;
+        b.textContent = '▶ Iniciar';
+        b.style.background = '#16a34a22'; b.style.color = '#16a34a'; b.style.borderColor = '#16a34a55';
+        // Atualiza input manual
+        const i = key.replace('p','');
+        const inp = document.querySelector(`[data-fp-rastreio="${i}"]`);
+        if (inp) inp.value = cronos[key].accumulated;
+      } else {
+        cronos[key].running = true;
+        cronos[key].startMs = Date.now();
+        b.textContent = '⏸ Pausar';
+        b.style.background = '#f59e0b22'; b.style.color = '#f59e0b'; b.style.borderColor = '#f59e0b55';
+      }
+      salvarCronos();
+    });
+    document.querySelectorAll('[data-crono-reset]').forEach(b => b.onclick = () => {
+      if (!confirm('Zerar cronômetro deste ponto?')) return;
+      const key = b.dataset.cronoReset;
+      cronos[key] = { running:false, startMs:null, accumulated:0 };
+      salvarCronos();
+      const disp = document.querySelector(`[data-crono-display="${key}"]`);
+      if (disp) disp.textContent = '00:00:00';
+      const i = key.replace('p','');
+      const inp = document.querySelector(`[data-fp-rastreio="${i}"]`);
+      if (inp) inp.value = '';
+      const btn = document.querySelector(`[data-crono-toggle="${key}"]`);
+      if (btn) {
+        btn.textContent = '▶ Iniciar';
+        btn.style.background = '#16a34a22'; btn.style.color = '#16a34a'; btn.style.borderColor = '#16a34a55';
+      }
+    });
+
+    // v2.2.2: Botões "Marcar agora" da Base + auto-calc duração
+    const calcDuracao = () => {
+      const ini = document.getElementById('lp-base-inicio')?.value;
+      const fim = document.getElementById('lp-base-fim')?.value;
+      const el = document.getElementById('lp-base-duracao');
+      if (!el) return;
+      if (ini && fim) {
+        const diff = (new Date(fim) - new Date(ini)) / 1000;
+        if (diff > 0) {
+          const h = Math.floor(diff / 3600);
+          const m = Math.floor((diff % 3600) / 60);
+          const s = Math.floor(diff % 60);
+          el.innerHTML = `Duração: <strong style="color:var(--gold);">${h}h ${m}min ${s}s</strong> (${Math.round(diff)} segundos / ${(diff/3600).toFixed(2)} horas)`;
+        } else el.innerHTML = '<strong style="color:#ef4444;">⚠️ Fim deve ser posterior ao início</strong>';
+      } else el.innerHTML = 'Duração: <strong>—</strong>';
+    };
+    const baseIniEl = document.getElementById('lp-base-inicio');
+    const baseFimEl = document.getElementById('lp-base-fim');
+    if (baseIniEl) baseIniEl.oninput = calcDuracao;
+    if (baseFimEl) baseFimEl.oninput = calcDuracao;
+    const marcarIni = document.getElementById('lp-base-marcar-inicio');
+    const marcarFim = document.getElementById('lp-base-marcar-fim');
+    const isoLocalAgora = () => {
+      const d = new Date();
+      const tz = d.getTimezoneOffset() * 60000;
+      return new Date(d - tz).toISOString().slice(0,16);
+    };
+    if (marcarIni) marcarIni.onclick = () => { baseIniEl.value = isoLocalAgora(); calcDuracao(); };
+    if (marcarFim) marcarFim.onclick = () => { baseFimEl.value = isoLocalAgora(); calcDuracao(); };
+    calcDuracao();
+
     // Adicionar ponto (Np/Rural)
     if (isDinamico) {
       document.getElementById('lp-add-ponto').onclick = () => {
@@ -14126,9 +14308,27 @@ function renderLaudoTabPontos(c) {
       window.open('/api/laudos-demarcacao/foto/'+img.dataset.fpFotoView, '_blank');
     });
 
-    // Salvar pontos + lados
+    // Salvar pontos + lados + Base GNSS (v2.2.2)
     document.getElementById('lp-form-salvar').onclick = async () => {
       const zona = 23, hem = 'S';
+      // Validação rural: base + tempo de rastreio obrigatórios
+      if (isRural) {
+        const baseNome = document.getElementById('lp-base-nome')?.value.trim();
+        const baseIni = document.getElementById('lp-base-inicio')?.value;
+        const baseFim = document.getElementById('lp-base-fim')?.value;
+        if (!baseNome || !baseIni || !baseFim) {
+          return alert('🚨 RURAL: Base GNSS obrigatória (NTGIR/INCRA).\nPreencha nome, início e fim do rastreio da base.');
+        }
+        if (new Date(baseFim) <= new Date(baseIni)) {
+          return alert('🚨 Fim do rastreio da base deve ser POSTERIOR ao início.');
+        }
+        for (let i = 1; i <= nPontos; i++) {
+          const r = document.querySelector(`[data-fp-rastreio="${i}"]`)?.value;
+          if (!r || Number(r) <= 0) {
+            return alert(`🚨 Tempo de rastreio do ponto P${i} é OBRIGATÓRIO em rural (use o cronômetro ou digite manualmente).`);
+          }
+        }
+      }
       const pontosBody = [];
       for (let i = 1; i <= nPontos; i++) {
         const utmE = document.querySelector(`[data-fp-utme="${i}"]`)?.value;
@@ -14144,10 +14344,23 @@ function renderLaudoTabPontos(c) {
           lat_decimal: lat ? Number(lat) : null, long_decimal: lng ? Number(lng) : null,
           lat_gms: null, long_gms: null, altitude: null, descricao_marco: null,
           azimute_manual: null,
-          tempo_rastreio_seg: (isRural && rastreio) ? Number(rastreio) : null,
+          tempo_rastreio_seg: (cronoAtivo && rastreio) ? Number(rastreio) : null,
         });
       }
       try {
+        // 1) Salva Base GNSS (se cronômetro ativo)
+        if (cronoAtivo) {
+          const baseBody = {
+            base_nome: document.getElementById('lp-base-nome')?.value.trim() || null,
+            base_inicio_rastreio: document.getElementById('lp-base-inicio')?.value || null,
+            base_fim_rastreio: document.getElementById('lp-base-fim')?.value || null,
+            base_observacoes: document.getElementById('lp-base-obs')?.value.trim() || null,
+          };
+          await api('/api/laudos-demarcacao/'+l.id, {
+            method: 'PUT', body: JSON.stringify(baseBody),
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         await api('/api/laudos-demarcacao/'+l.id+'/pontos', {
           method: 'POST',
           body: JSON.stringify({ pontos: pontosBody, default_zona: zona, default_hemisferio: hem }),
