@@ -12866,14 +12866,39 @@ function renderLaudoNovo(v) {
       </div>
     </div>
     <div class="card">
-      <h3 style="margin-top:0;">2. Tipo de imóvel</h3>
+      <h3 style="margin-top:0;">2. Profissional executor (RT)</h3>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <select id="ln-executante" style="flex:1; min-width:240px;">
+          ${state.laudoExecutantes.map(e => {
+            const reg = [e.registro_cft && 'CFT '+e.registro_cft, e.registro_crea && 'CREA '+e.registro_crea, e.cadastro_incra && 'INCRA '+e.cadastro_incra].filter(Boolean).join(' · ');
+            return `<option value="${e.id}" ${e.id===1?'selected':''}>${escape(e.nome)}${reg?' ('+escape(reg)+')':''}${e.id===1?' — padrão':''}</option>`;
+          }).join('')}
+        </select>
+        <button id="ln-novo-exec">➕ Cadastrar novo</button>
+      </div>
+      <div id="ln-exec-form" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <input id="ln-e-nome" placeholder="Nome completo" style="grid-column:1/3;">
+          <input id="ln-e-qual" placeholder="Qualificação (Téc. em Agrimensura, Eng. Civil, etc.)" style="grid-column:1/3;">
+          <input id="ln-e-cft" placeholder="CFT (Conselho Federal Técnicos)">
+          <input id="ln-e-crea" placeholder="CREA (Conselho Engenharia)">
+          <input id="ln-e-incra" placeholder="Código INCRA (georref)">
+          <input id="ln-e-cpf" placeholder="CPF" maxlength="14" data-mask="cpfcnpj">
+          <input id="ln-e-tel" placeholder="Telefone" data-mask="tel">
+          <input id="ln-e-email" placeholder="Email" type="email">
+        </div>
+        <button id="ln-e-salvar" style="margin-top:8px; background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Salvar profissional</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">3. Tipo de imóvel</h3>
       <div style="display:flex; gap:12px;">
         <label><input type="radio" name="ln-tipo" value="URBANO" checked> 🏘️ Urbano</label>
         <label><input type="radio" name="ln-tipo" value="RURAL"> 🌾 Rural</label>
       </div>
     </div>
     <div class="card">
-      <h3 style="margin-top:0;">3. Observações (opcional)</h3>
+      <h3 style="margin-top:0;">4. Observações (opcional)</h3>
       <textarea id="ln-obs" rows="3" style="width:100%;" placeholder="Notas internas, contexto, etc."></textarea>
     </div>
     <div class="card">
@@ -12933,15 +12958,51 @@ function renderLaudoNovo(v) {
       alert('✅ Contratante cadastrado');
     } catch (err) { alert('Erro: '+err.message); }
   };
+  // v2.0.2: cadastro inline de executante
+  document.getElementById('ln-novo-exec').onclick = () => {
+    document.getElementById('ln-exec-form').style.display = 'block';
+    aplicarMascarasLn();
+  };
+  document.getElementById('ln-e-salvar').onclick = async () => {
+    const body = {
+      nome: document.getElementById('ln-e-nome').value.trim(),
+      qualificacao: document.getElementById('ln-e-qual').value.trim() || null,
+      registro_cft: document.getElementById('ln-e-cft').value.trim() || null,
+      registro_crea: document.getElementById('ln-e-crea').value.trim() || null,
+      cadastro_incra: document.getElementById('ln-e-incra').value.trim() || null,
+      cpf: document.getElementById('ln-e-cpf').value.replace(/\D/g, '') || null,
+      telefone: document.getElementById('ln-e-tel').value.replace(/\D/g, '') || null,
+      email: document.getElementById('ln-e-email').value.trim() || null,
+    };
+    if (!body.nome) return alert('Nome obrigatório');
+    try {
+      const novo = await api('/api/executantes', {
+        method:'POST',
+        body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      state.laudoExecutantes.push(novo);
+      const sel = document.getElementById('ln-executante');
+      const opt = document.createElement('option');
+      const reg = [novo.registro_cft && 'CFT '+novo.registro_cft, novo.registro_crea && 'CREA '+novo.registro_crea, novo.cadastro_incra && 'INCRA '+novo.cadastro_incra].filter(Boolean).join(' · ');
+      opt.value = novo.id; opt.textContent = novo.nome + (reg?' ('+reg+')':''); opt.selected = true;
+      sel.appendChild(opt);
+      document.getElementById('ln-exec-form').style.display = 'none';
+      alert('✅ Profissional cadastrado');
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+
   document.getElementById('ln-criar').onclick = async () => {
     const cId = document.getElementById('ln-contratante').value;
     if (!cId) return alert('Escolha ou cadastre um contratante');
+    const eId = document.getElementById('ln-executante').value;
+    if (!eId) return alert('Escolha o profissional executor');
     const tipo = document.querySelector('[name="ln-tipo"]:checked').value;
     const obs = document.getElementById('ln-obs').value.trim() || null;
     try {
       const novo = await api('/api/laudos-demarcacao', {
         method:'POST',
-        body: JSON.stringify({ contratante_id: Number(cId), tipo_imovel: tipo, observacoes: obs }),
+        body: JSON.stringify({ contratante_id: Number(cId), executante_id: Number(eId), tipo_imovel: tipo, observacoes: obs }),
         headers: { 'Content-Type': 'application/json' },
       });
       await loadLaudos();

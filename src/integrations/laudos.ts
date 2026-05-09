@@ -208,7 +208,7 @@ async function gerarNumeroLaudo(): Promise<string> {
 
 export interface CriarLaudoRascunhoInput {
   contratante_id: number;
-  executante_id?: number; // default: 1 (Ronicley)
+  executante_id?: number; // default: 1 (Jose Romario)
   tipo_imovel: TipoImovel;
   observacoes?: string | null;
 }
@@ -218,7 +218,7 @@ export async function criarLaudoRascunho(input: CriarLaudoRascunhoInput): Promis
   if (!['URBANO', 'RURAL'].includes(input.tipo_imovel)) {
     throw new Error("tipo_imovel deve ser 'URBANO' ou 'RURAL'");
   }
-  const executanteId = input.executante_id ?? 1; // default Ronicley
+  const executanteId = input.executante_id ?? 1; // default Jose Romario
 
   // Valida FKs antes de inserir
   const [contratantes] = await pool.execute<RowDataPacket[]>(

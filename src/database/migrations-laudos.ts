@@ -5,7 +5,7 @@
 //
 // Cria 6 tabelas:
 //   contratantes (PF/PJ, reusavel em outros modulos do sistema)
-//   executantes (responsaveis tecnicos, seed Ronicley)
+//   executantes (responsaveis tecnicos, seed Jose Romario)
 //   laudos_demarcacao (cabecalho)
 //   laudos_demarcacao_pontos (vertices — uso na Fase 2)
 //   laudos_demarcacao_lados (calculados — Fase 2)
@@ -183,12 +183,23 @@ const CREATE_LAUDOS_FOTOS = `
   )
 `;
 
-const SEED_RONICLEY = `
+// v2.0.2: seed do executante padrao = CEO Jose Romario.
+// INSERT IGNORE pra ser idempotente. UPDATE depois corrige o nome se id=1
+// ja existia com valor antigo (ex: bancos que rodaram o seed inicial).
+const SEED_EXECUTANTE_PADRAO = `
   INSERT IGNORE INTO executantes
     (id, nome, qualificacao, registro_cft, cadastro_incra, cpf, ativo)
   VALUES
-    (1, 'Ronicley Pinto', 'Técnico em Agrimensura',
+    (1, 'José Romário Pinto Bezerra', 'Técnico em Agrimensura',
      '01209185369', 'FQNS', NULL, TRUE)
+`;
+const FIX_EXECUTANTE_NOME = `
+  UPDATE executantes
+     SET nome = 'José Romário Pinto Bezerra',
+         qualificacao = 'Técnico em Agrimensura',
+         registro_cft = '01209185369',
+         cadastro_incra = 'FQNS'
+   WHERE id = 1 AND nome <> 'José Romário Pinto Bezerra'
 `;
 
 export async function runLaudosMigrations(): Promise<void> {
@@ -199,7 +210,9 @@ export async function runLaudosMigrations(): Promise<void> {
     { label: 'laudos_demarcacao_pontos', sql: CREATE_LAUDOS_PONTOS },
     { label: 'laudos_demarcacao_lados', sql: CREATE_LAUDOS_LADOS },
     { label: 'laudos_demarcacao_fotos', sql: CREATE_LAUDOS_FOTOS },
-    { label: 'seed: Ronicley', sql: SEED_RONICLEY },
+    { label: 'seed: executante padrao', sql: SEED_EXECUTANTE_PADRAO },
+    // v2.0.2: corrige nome do executante id=1 se ja existia com valor antigo
+    { label: 'fix: nome executante #1', sql: FIX_EXECUTANTE_NOME },
     // v1.99.27 — Fase 3: croqui upload em LONGTEXT base64 + mime
     { label: 'ALTER croqui_b64', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN croqui_b64 LONGTEXT NULL' },
     { label: 'ALTER croqui_mime', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN croqui_mime VARCHAR(50) NULL' },
