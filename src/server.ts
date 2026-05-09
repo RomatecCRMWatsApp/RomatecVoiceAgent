@@ -1765,6 +1765,45 @@ app.put('/api/laudos-demarcacao/foto/:fotoId/legenda', requireCeoToken, async (r
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v1.99.28 — Fase 4: PDF do Laudo (memorial NTGIR, croqui, fotos)
+app.get('/api/laudos-demarcacao/:id/pdf', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const laudosMod = await import('./integrations/laudos');
+    const contratantesMod = await import('./integrations/contratantes');
+    const executantesMod = await import('./integrations/executantes');
+    const { gerarPdfLaudo } = await import('./services/laudoPdf');
+
+    const laudo = await laudosMod.buscarLaudo(id);
+    if (!laudo) { res.status(404).json({ error: 'Laudo nao encontrado' }); return; }
+    const contratante = await contratantesMod.buscarContratante(laudo.contratante_id);
+    if (!contratante) { res.status(500).json({ error: 'Contratante associado nao encontrado' }); return; }
+    const executante = await executantesMod.buscarExecutante(laudo.executante_id);
+    if (!executante) { res.status(500).json({ error: 'Executante associado nao encontrado' }); return; }
+
+    const [pontos, lados, fotos, croquiUpload] = await Promise.all([
+      laudosMod.listarPontosDoLaudo(id),
+      laudosMod.listarLadosDoLaudo(id),
+      laudosMod.listarFotosDoLaudo(id),
+      laudosMod.getCroquiUpload(id),
+    ]);
+
+    const pdf = await gerarPdfLaudo({
+      laudo, contratante, executante, pontos, lados,
+      fotos: fotos.map(f => ({ id: f.id, mime: f.mime, legenda: f.legenda })),
+      fotoBase64Loader: async (fotoId) => {
+        const f = await laudosMod.getFotoConteudo(fotoId);
+        if (!f) return null;
+        return { base64: f.base64, mime: f.mime };
+      },
+      croquiUpload: croquiUpload ?? null,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Laudo-${laudo.numero_laudo}.pdf"`);
+    res.send(pdf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // ─── v1.99.3: Certificados Digitais ICP-Brasil ─────────────────────────────
 // GET — lista certs cadastrados (sem expor pfx/senha)
 app.get('/api/signing-cert', async (_req: Request, res: Response) => {
