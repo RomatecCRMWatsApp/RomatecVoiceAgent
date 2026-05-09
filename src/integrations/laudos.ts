@@ -598,3 +598,164 @@ export async function listarLadosDoLaudo(laudoId: number | string): Promise<Lado
     distancia_m: asNum(r.distancia_m), azimute: asNum(r.azimute),
   }));
 }
+
+// ── v1.99.27: Fase 3 — Croqui SVG / Upload + Relatorio Fotografico ────────
+
+import { gerarCroquiSvg } from '../services/croquiSvg';
+
+/**
+ * Gera SVG do croqui a partir dos pontos UTM. Nao persiste (gera on-the-fly).
+ * Quando user prefere croqui manual, sobrepoe via salvarCroquiUpload().
+ */
+export async function gerarCroquiAutoSvg(laudoId: number | string): Promise<string> {
+  const pontos = await listarPontosDoLaudo(laudoId);
+  const lados = await listarLadosDoLaudo(laudoId);
+  const pontosSvg = pontos
+    .filter(p => p.utm_e != null && p.utm_n != null)
+    .map(p => ({ rotulo: p.rotulo, e: p.utm_e as number, n: p.utm_n as number }));
+  const ladosSvg = lados.map(l => ({
+    i_idx: pontos.findIndex(p => p.id === l.ponto_inicio_id),
+    f_idx: pontos.findIndex(p => p.id === l.ponto_fim_id),
+    distancia_m: l.distancia_m ?? 0,
+  }));
+  return gerarCroquiSvg(pontosSvg, ladosSvg);
+}
+
+/** Salva croqui manual (upload imagem PNG/JPG/PDF base64). */
+export async function salvarCroquiUpload(
+  laudoId: number | string,
+  base64: string,
+  mime: string
+): Promise<void> {
+  if (!base64) throw new Error('Conteudo base64 vazio');
+  if (!/^image\/(png|jpe?g)$|^application\/pdf$/i.test(mime)) {
+    throw new Error('Mime deve ser image/png, image/jpeg ou application/pdf');
+  }
+  await pool.execute(
+    `UPDATE laudos_demarcacao
+       SET croqui_tipo = 'UPLOAD', croqui_b64 = ?, croqui_mime = ?
+     WHERE id = ?`,
+    [base64, mime, Number(laudoId)]
+  );
+}
+
+export async function resetarCroquiAuto(laudoId: number | string): Promise<void> {
+  await pool.execute(
+    `UPDATE laudos_demarcacao
+       SET croqui_tipo = 'AUTO_SVG', croqui_b64 = NULL, croqui_mime = NULL
+     WHERE id = ?`,
+    [Number(laudoId)]
+  );
+}
+
+export async function getCroquiUpload(laudoId: number | string): Promise<{
+  mime: string; base64: string;
+} | null> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    'SELECT croqui_b64, croqui_mime FROM laudos_demarcacao WHERE id = ? AND croqui_tipo = "UPLOAD" LIMIT 1',
+    [Number(laudoId)]
+  );
+  if (!rows.length || !rows[0].croqui_b64) return null;
+  return {
+    mime: String(rows[0].croqui_mime || 'image/png'),
+    base64: String(rows[0].croqui_b64),
+  };
+}
+
+// FOTOS — relatorio fotografico
+export interface FotoLaudo {
+  id: number;
+  laudo_id: number;
+  ponto_id: number | null;
+  ordem: number | null;
+  mime: string;
+  legenda: string | null;
+  created_at: string;
+}
+
+interface FotoRow extends RowDataPacket {
+  id: number; laudo_id: number; ponto_id: number | null;
+  ordem: number | null; mime: string; conteudo_b64: string;
+  legenda: string | null; created_at: Date | string;
+}
+
+export async function listarFotosDoLaudo(laudoId: number | string): Promise<FotoLaudo[]> {
+  // Lista metadados sem o LONGTEXT (pra payload pequeno)
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, laudo_id, ponto_id, ordem, mime, legenda, created_at
+       FROM laudos_demarcacao_fotos
+      WHERE laudo_id = ?
+      ORDER BY ordem ASC, id ASC`,
+    [Number(laudoId)]
+  );
+  return rows.map(r => ({
+    id: Number(r.id),
+    laudo_id: Number(r.laudo_id),
+    ponto_id: r.ponto_id != null ? Number(r.ponto_id) : null,
+    ordem: r.ordem != null ? Number(r.ordem) : null,
+    mime: String(r.mime),
+    legenda: r.legenda ?? null,
+    created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+  }));
+}
+
+export async function getFotoConteudo(fotoId: number | string): Promise<{
+  mime: string; base64: string; legenda: string | null;
+} | null> {
+  const [rows] = await pool.execute<FotoRow[]>(
+    'SELECT mime, conteudo_b64, legenda FROM laudos_demarcacao_fotos WHERE id = ? LIMIT 1',
+    [Number(fotoId)]
+  );
+  if (!rows.length) return null;
+  return {
+    mime: String(rows[0].mime),
+    base64: String(rows[0].conteudo_b64),
+    legenda: rows[0].legenda ?? null,
+  };
+}
+
+export interface AdicionarFotoInput {
+  laudo_id: number;
+  ponto_id?: number | null;
+  ordem?: number | null;
+  mime: string;
+  conteudo_b64: string;
+  legenda?: string | null;
+}
+
+export async function adicionarFotoLaudo(input: AdicionarFotoInput): Promise<FotoLaudo> {
+  if (!input.conteudo_b64) throw new Error('conteudo_b64 obrigatorio');
+  if (!/^image\//.test(input.mime || '')) throw new Error('mime deve ser image/*');
+
+  // Auto-determina ordem (proxima)
+  let ordem = input.ordem;
+  if (ordem == null) {
+    const [maxRows] = await pool.execute<RowDataPacket[]>(
+      'SELECT COALESCE(MAX(ordem), 0) AS max_ordem FROM laudos_demarcacao_fotos WHERE laudo_id = ?',
+      [input.laudo_id]
+    );
+    ordem = Number(maxRows[0]?.max_ordem ?? 0) + 1;
+  }
+
+  const [r] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO laudos_demarcacao_fotos
+      (laudo_id, ponto_id, ordem, mime, conteudo_b64, legenda)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [input.laudo_id, input.ponto_id ?? null, ordem, input.mime, input.conteudo_b64, input.legenda ?? null]
+  );
+  const fotos = await listarFotosDoLaudo(input.laudo_id);
+  const criada = fotos.find(f => f.id === r.insertId);
+  if (!criada) throw new Error('Falha ao adicionar foto');
+  return criada;
+}
+
+export async function removerFotoLaudo(fotoId: number | string): Promise<void> {
+  await pool.execute('DELETE FROM laudos_demarcacao_fotos WHERE id = ?', [Number(fotoId)]);
+}
+
+export async function atualizarLegendaFoto(fotoId: number | string, legenda: string): Promise<void> {
+  await pool.execute(
+    'UPDATE laudos_demarcacao_fotos SET legenda = ? WHERE id = ?',
+    [legenda, Number(fotoId)]
+  );
+}

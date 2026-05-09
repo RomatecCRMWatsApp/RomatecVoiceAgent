@@ -1650,6 +1650,121 @@ app.post('/api/laudos-demarcacao/import-rtk', requireCeoToken, async (req: Reque
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v1.99.27 — Fase 3: Croqui SVG / Upload + Fotos
+
+// GET croqui — gera SVG auto OU retorna o upload manual
+app.get('/api/laudos-demarcacao/:id/croqui', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const id = String(req.params.id);
+    const laudo = await m.buscarLaudo(id);
+    if (!laudo) { res.status(404).json({ error: 'Laudo nao encontrado' }); return; }
+
+    if (laudo.croqui_tipo === 'UPLOAD') {
+      const up = await m.getCroquiUpload(id);
+      if (!up) { res.status(404).json({ error: 'Croqui upload nao encontrado' }); return; }
+      const buf = Buffer.from(up.base64, 'base64');
+      res.setHeader('Content-Type', up.mime);
+      res.setHeader('Content-Disposition', `inline; filename="croqui-${id}.${up.mime.split('/')[1] || 'png'}"`);
+      res.send(buf);
+      return;
+    }
+
+    // AUTO_SVG
+    const svg = await m.gerarCroquiAutoSvg(id);
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.send(svg);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// POST upload croqui manual
+app.post('/api/laudos-demarcacao/:id/croqui-upload', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const b = (req.body || {}) as { mime?: string; conteudo_b64?: string };
+    if (!b.conteudo_b64) { res.status(400).json({ error: 'conteudo_b64 obrigatorio' }); return; }
+    if (!b.mime) { res.status(400).json({ error: 'mime obrigatorio' }); return; }
+    await m.salvarCroquiUpload(String(req.params.id), b.conteudo_b64, b.mime);
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// POST volta pro auto-SVG (limpa upload manual)
+app.post('/api/laudos-demarcacao/:id/croqui-reset', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    await m.resetarCroquiAuto(String(req.params.id));
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// FOTOS — listar
+app.get('/api/laudos-demarcacao/:id/fotos', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const fotos = await m.listarFotosDoLaudo(String(req.params.id));
+    res.json(fotos);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// FOTOS — adicionar (uma ou varias em batch)
+app.post('/api/laudos-demarcacao/:id/fotos', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const id = Number(req.params.id);
+    const b = (req.body || {}) as { fotos?: unknown };
+    if (!Array.isArray(b.fotos) || b.fotos.length === 0) {
+      res.status(400).json({ error: 'campo `fotos` (array) obrigatorio' });
+      return;
+    }
+    const adicionadas = [];
+    for (const f of b.fotos) {
+      const ff = f as { mime?: string; conteudo_b64?: string; legenda?: string; ponto_id?: number };
+      if (!ff.mime || !ff.conteudo_b64) continue;
+      const nova = await m.adicionarFotoLaudo({
+        laudo_id: id,
+        mime: ff.mime,
+        conteudo_b64: ff.conteudo_b64,
+        legenda: ff.legenda ?? null,
+        ponto_id: ff.ponto_id ?? null,
+      });
+      adicionadas.push(nova);
+    }
+    res.json({ ok: true, adicionadas });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// FOTOS — get conteudo individual (binario)
+app.get('/api/laudos-demarcacao/foto/:fotoId', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const f = await m.getFotoConteudo(String(req.params.fotoId));
+    if (!f) { res.status(404).json({ error: 'Foto nao encontrada' }); return; }
+    const buf = Buffer.from(f.base64, 'base64');
+    res.setHeader('Content-Type', f.mime);
+    res.send(buf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// FOTOS — remover
+app.delete('/api/laudos-demarcacao/foto/:fotoId', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    await m.removerFotoLaudo(String(req.params.fotoId));
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// FOTOS — atualizar legenda
+app.put('/api/laudos-demarcacao/foto/:fotoId/legenda', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const legenda = typeof req.body?.legenda === 'string' ? req.body.legenda : '';
+    await m.atualizarLegendaFoto(String(req.params.fotoId), legenda);
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // ─── v1.99.3: Certificados Digitais ICP-Brasil ─────────────────────────────
 // GET — lista certs cadastrados (sem expor pfx/senha)
 app.get('/api/signing-cert', async (_req: Request, res: Response) => {

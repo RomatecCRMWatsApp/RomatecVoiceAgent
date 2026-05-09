@@ -200,6 +200,9 @@ export async function runLaudosMigrations(): Promise<void> {
     { label: 'laudos_demarcacao_lados', sql: CREATE_LAUDOS_LADOS },
     { label: 'laudos_demarcacao_fotos', sql: CREATE_LAUDOS_FOTOS },
     { label: 'seed: Ronicley', sql: SEED_RONICLEY },
+    // v1.99.27 — Fase 3: croqui upload em LONGTEXT base64 + mime
+    { label: 'ALTER croqui_b64', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN croqui_b64 LONGTEXT NULL' },
+    { label: 'ALTER croqui_mime', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN croqui_mime VARCHAR(50) NULL' },
   ];
   for (const { label, sql } of ops) {
     try {
