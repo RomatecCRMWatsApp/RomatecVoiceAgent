@@ -1184,6 +1184,10 @@ app.post('/api/recibos/vale/preview-pdf', async (req: Request, res: Response) =>
     if (!rows.length) { res.status(404).json({ error: 'Membro nao encontrado' }); return; }
     const m = rows[0] as { nome: string; funcao: string | null; cpf: string | null; telefone: string | null };
 
+    // v1.99.21: forma_pagamento no preview tambem
+    const formaPagPreviewRaw = typeof b.forma_pagamento === 'string' ? b.forma_pagamento.toLowerCase() : '';
+    const formaPagPreview = (['pix', 'dinheiro', 'ted', 'transferencia'].includes(formaPagPreviewRaw)
+      ? formaPagPreviewRaw : null) as 'pix' | 'dinheiro' | 'ted' | 'transferencia' | null;
     const pdf = await gerarPdfVale({
       membro_nome: m.nome,
       membro_funcao: m.funcao,
@@ -1194,6 +1198,7 @@ app.post('/api/recibos/vale/preview-pdf', async (req: Request, res: Response) =>
       periodo: String(b.periodo || ''),
       saldo_anterior: Number(b.saldo_anterior) || 0,
       obra_nome: typeof b.obra_nome === 'string' ? b.obra_nome : null,
+      forma_pagamento: formaPagPreview,
       preview: true,
     });
     res.setHeader('Content-Type', 'application/pdf');
@@ -1220,6 +1225,10 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
   const enviarTg = !!b.enviar_telegram;
   const saldoAnterior = Number(b.saldo_anterior) || 0;
   const obraNome = typeof b.obra_nome === 'string' ? b.obra_nome : null;
+  // v1.99.21: forma de pagamento (PIX | Dinheiro | TED | Transferência)
+  const formaPagRaw = typeof b.forma_pagamento === 'string' ? b.forma_pagamento.toLowerCase() : '';
+  const formaPag = (['pix', 'dinheiro', 'ted', 'transferencia'].includes(formaPagRaw)
+    ? formaPagRaw : 'pix') as 'pix' | 'dinheiro' | 'ted' | 'transferencia';
 
   const pool = (await import('./database/connection')).default;
   const recibosMod = await import('./integrations/recibos');
@@ -1305,6 +1314,13 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
   // Fora da transacao acima porque criarRecibo gerencia conexao propria
   // (com lock pessimista pra numeracao). Se falhar, removemos o ajuste.
   try {
+    // v1.99.21: forma_pagamento pra recibos universais usa enum proprio
+    // (pix|dinheiro|transferencia|cartao|boleto|cheque). Mapeio TED -> transferencia.
+    const formaPagRecibo: 'pix' | 'dinheiro' | 'transferencia' =
+      formaPag === 'ted' ? 'transferencia' :
+      formaPag === 'pix' ? 'pix' :
+      formaPag === 'dinheiro' ? 'dinheiro' :
+      'transferencia';
     reciboCriado = await recibosMod.criarRecibo({
       tenant_id: 1,
       tipo: 'vale',
@@ -1314,7 +1330,7 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
       destinatario_doc: m.cpf,
       destinatario_phone: m.telefone,
       valor,
-      forma_pagamento: 'dinheiro',
+      forma_pagamento: formaPagRecibo,
       descricao_servico: descricao || `Vale (adiantamento) — ${m.nome}`,
       categoria_servico: 'vale_quinzenal',
       categoria_grupo: null,
@@ -1342,6 +1358,7 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
     periodo,
     saldo_anterior: saldoAnterior,
     obra_nome: obraNome,
+    forma_pagamento: formaPag, // v1.99.21
     numero: reciboCriado.numero,
     recibo: reciboCriado, // v1.99.16: PDF agora inclui QR /v/:hash + hash truncado
   });

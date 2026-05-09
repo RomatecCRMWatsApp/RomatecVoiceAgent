@@ -7629,6 +7629,15 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
               <input id="valeValor" type="number" step="0.01" min="0.01" placeholder="0,00" style="width:100%; font-size:18px; padding:8px 10px;" autofocus>
             </label>
             <label>
+              <span style="font-size:12px; color:var(--text-muted);">Forma de pagamento</span>
+              <select id="valeFormaPag" style="width:100%;">
+                <option value="pix" selected>💳 PIX</option>
+                <option value="dinheiro">💵 Dinheiro</option>
+                <option value="ted">🏦 TED</option>
+                <option value="transferencia">🏦 Transferência bancária</option>
+              </select>
+            </label>
+            <label>
               <span style="font-size:12px; color:var(--text-muted);">Descrição (opcional)</span>
               <input id="valeDesc" placeholder="ex: Vale combustível 08/05" style="width:100%;">
             </label>
@@ -7714,6 +7723,7 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
           descricao: inpDesc.value.trim() || null,
           periodo,
           saldo_anterior: totalPagar,
+          forma_pagamento: document.getElementById('valeFormaPag')?.value || 'pix',
         }),
       });
       if (!r.ok) {
@@ -7736,6 +7746,7 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
   }
   inpValor.oninput = debounce;
   inpDesc.oninput  = debounce;
+  document.getElementById('valeFormaPag').onchange = debounce;
   document.getElementById('valeRefresh').onclick = atualizarPreview;
   setTimeout(() => inpValor.focus(), 80);
 
@@ -7760,6 +7771,7 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
           saldo_anterior: totalPagar,
           enviar_whatsapp: enviarWa,
           enviar_telegram: enviarTg,
+          forma_pagamento: document.getElementById('valeFormaPag')?.value || 'pix',
         }),
       });
       const enviosTxt = r.envios.ok.length

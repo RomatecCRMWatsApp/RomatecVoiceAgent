@@ -90,6 +90,8 @@ export interface ValePdfInput {
   saldo_anterior: number;   // total a receber antes do vale
   data_emissao?: Date;
   obra_nome?: string | null;
+  /** v1.99.21: Forma de pagamento do vale (mostrada no PDF) */
+  forma_pagamento?: 'pix' | 'dinheiro' | 'ted' | 'transferencia' | null;
   /** Numero sequencial do vale (opcional — se nao tiver, usa timestamp curto) */
   numero?: string;
   /** Modo preview = sem QR/hash (rapido), sem persistencia */
@@ -159,78 +161,88 @@ export async function gerarPdfVale(input: ValePdfInput): Promise<Buffer> {
   doc.fontSize(10).fillColor('#666').font('Helvetica-Oblique')
      .text(`Adiantamento sobre diárias da ${periodoLabel(input.periodo)}`, 40, 145, { width: 515, align: 'center' });
 
-  // ── Bloco do colaborador ────────────────────────────────────────────────
-  let cy = 180;
-  doc.fontSize(10).fillColor('#888').font('Helvetica')
+  // ── v1.99.21: layout COMPACTO pra caber em 1 pagina A4 (842pt altura)
+  // Conteudo principal precisa terminar antes de y=720 (onde QR e hash entram).
+
+  // ── Bloco do colaborador (compacto) ────────────────────────────────────
+  let cy = 165;
+  doc.fontSize(9).fillColor('#888').font('Helvetica')
      .text('COLABORADOR', 40, cy);
-  cy += 14;
-  doc.fontSize(13).fillColor('#111').font('Helvetica-Bold')
+  cy += 12;
+  doc.fontSize(12).fillColor('#111').font('Helvetica-Bold')
      .text(input.membro_nome, 40, cy);
-  cy += 16;
-  if (input.membro_funcao) {
-    doc.fontSize(10).fillColor('#444').font('Helvetica')
-       .text(`Função: ${input.membro_funcao}`, 40, cy);
-    cy += 12;
-  }
-  if (input.membro_cpf) {
-    doc.fontSize(10).fillColor('#444').font('Helvetica')
-       .text(`CPF: ${input.membro_cpf}`, 40, cy);
-    cy += 12;
-  }
-  if (input.obra_nome) {
-    doc.fontSize(10).fillColor('#444').font('Helvetica')
-       .text(`Obra: ${input.obra_nome}`, 40, cy);
+  cy += 14;
+  // Linha unica com funcao + cpf + obra (separados por ·)
+  const partesMembro: string[] = [];
+  if (input.membro_funcao) partesMembro.push(`Função: ${input.membro_funcao}`);
+  if (input.membro_cpf)    partesMembro.push(`CPF: ${input.membro_cpf}`);
+  if (input.obra_nome)     partesMembro.push(`Obra: ${input.obra_nome}`);
+  if (partesMembro.length > 0) {
+    doc.fontSize(9).fillColor('#444').font('Helvetica')
+       .text(partesMembro.join(' · '), 40, cy, { width: 515 });
     cy += 12;
   }
 
-  cy += 14;
+  cy += 8;
   doc.moveTo(40, cy).lineTo(555, cy).strokeColor('#ddd').lineWidth(0.5).stroke();
-  cy += 16;
+  cy += 12;
 
-  // ── Bloco do valor ──────────────────────────────────────────────────────
-  doc.fontSize(10).fillColor('#888').font('Helvetica')
+  // ── Bloco do valor + forma de pagamento (compacto) ────────────────────
+  doc.fontSize(9).fillColor('#888').font('Helvetica')
      .text('VALOR DO VALE', 40, cy);
-  cy += 14;
-  doc.fontSize(28).fillColor(corGold).font('Helvetica-Bold')
+  cy += 12;
+  doc.fontSize(22).fillColor(corGold).font('Helvetica-Bold')
      .text(fmtBRL(input.valor), 40, cy, { width: 515 });
-  cy += 32;
-  doc.fontSize(10).fillColor('#444').font('Helvetica-Oblique')
+  cy += 26;
+  doc.fontSize(9).fillColor('#444').font('Helvetica-Oblique')
      .text(`(${numeroExtenso(input.valor)})`, 40, cy, { width: 515 });
-  cy += 18;
+  cy += 14;
+
+  // v1.99.21: Forma de pagamento (se informada)
+  if (input.forma_pagamento) {
+    const formaLabel: Record<string, string> = {
+      pix: '💳 PIX', dinheiro: '💵 Dinheiro',
+      ted: '🏦 TED', transferencia: '🏦 Transferência bancária',
+    };
+    doc.fontSize(9).fillColor('#444').font('Helvetica-Bold')
+       .text(`Forma de pagamento: `, 40, cy, { continued: true })
+       .font('Helvetica').text(formaLabel[input.forma_pagamento] || input.forma_pagamento);
+    cy += 12;
+  }
 
   if (input.descricao) {
-    doc.fontSize(10).fillColor('#444').font('Helvetica')
+    doc.fontSize(9).fillColor('#444').font('Helvetica')
        .text(`Referente a: ${input.descricao}`, 40, cy, { width: 515 });
-    cy += 14;
+    cy += 12;
   }
 
-  cy += 14;
+  cy += 8;
   doc.moveTo(40, cy).lineTo(555, cy).strokeColor('#ddd').lineWidth(0.5).stroke();
-  cy += 16;
+  cy += 12;
 
-  // ── Saldo (omitido na regeneracao pos-confirmacao — v1.99.17) ─────────
+  // ── Saldo (compacto) ───────────────────────────────────────────────────
   if (!input.omitirBlocoSaldo) {
-    doc.fontSize(10).fillColor('#888').font('Helvetica')
+    doc.fontSize(9).fillColor('#888').font('Helvetica')
        .text('IMPACTO NO RECIBO QUINZENAL', 40, cy);
-    cy += 14;
+    cy += 12;
 
     const drawLinhaSaldo = (label: string, valor: string, cor: string, bold = false) => {
-      doc.fontSize(10).fillColor('#444').font('Helvetica').text(label, 40, cy);
-      doc.fontSize(11).fillColor(cor).font(bold ? 'Helvetica-Bold' : 'Helvetica')
+      doc.fontSize(9).fillColor('#444').font('Helvetica').text(label, 40, cy);
+      doc.fontSize(10).fillColor(cor).font(bold ? 'Helvetica-Bold' : 'Helvetica')
          .text(valor, 40, cy, { width: 515, align: 'right' });
-      cy += 14;
+      cy += 12;
     };
     drawLinhaSaldo('Saldo de diárias antes do vale:', fmtBRL(input.saldo_anterior), '#444');
     drawLinhaSaldo('(–) Vale neste documento:',       fmtBRL(input.valor),          '#dc2626');
-    doc.moveTo(40, cy + 2).lineTo(555, cy + 2).strokeColor('#999').lineWidth(0.5).stroke();
-    cy += 6;
+    doc.moveTo(40, cy + 1).lineTo(555, cy + 1).strokeColor('#999').lineWidth(0.5).stroke();
+    cy += 5;
     drawLinhaSaldo('Saldo restante a receber:',       fmtBRL(saldoApos),            saldoApos < 0 ? '#dc2626' : corHex, true);
 
-    cy += 16;
+    cy += 10;
   }
 
-  // ── Texto explicativo ──────────────────────────────────────────────────
-  doc.fontSize(9).fillColor('#444').font('Helvetica')
+  // ── Texto explicativo (compacto) ───────────────────────────────────────
+  doc.fontSize(8).fillColor('#444').font('Helvetica')
      .text(
        `Recebi do(a) emitente o valor de ${fmtBRL(input.valor)} (${numeroExtenso(input.valor)}) ` +
        `a título de VALE / ADIANTAMENTO sobre as diárias trabalhadas. ` +
@@ -238,15 +250,15 @@ export async function gerarPdfVale(input: ValePdfInput): Promise<Buffer> {
        `à ${periodoLabel(input.periodo)}.`,
        40, cy, { width: 515, align: 'justify' }
      );
-  cy = doc.y + 18;
+  cy = doc.y + 12;
 
-  // ── Local + Data + Linha de assinatura ─────────────────────────────────
+  // ── Local + Data + Linha de assinatura (compacto) ──────────────────────
   const cidade = 'Açailândia/MA';
   const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
   const dataExtenso = `${cidade}, ${dataEmissao.getDate()} de ${meses[dataEmissao.getMonth()]} de ${dataEmissao.getFullYear()}.`;
-  doc.fontSize(10).fillColor('#111').font('Helvetica')
+  doc.fontSize(9).fillColor('#111').font('Helvetica')
      .text(dataExtenso, 40, cy, { width: 515, align: 'center' });
-  cy += 50;
+  cy += 35;
 
   // Linha colaborador (esq) + linha emitente (dir)
   doc.moveTo(60, cy).lineTo(280, cy).strokeColor('#444').lineWidth(0.5).stroke();
