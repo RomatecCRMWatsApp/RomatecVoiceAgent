@@ -1601,6 +1601,55 @@ app.delete('/api/laudos-demarcacao/:id', requireCeoToken, async (req: Request, r
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// PUT — atualiza dados gerais do laudo (imovel, confrontantes, ART/TRT, financeiro)
+app.put('/api/laudos-demarcacao/:id', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const l = await m.atualizarLaudo(String(req.params.id), req.body || {});
+    res.json(l);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// v1.99.26 — Fase 2: Pontos (vertices) + calculos geodesicos
+app.get('/api/laudos-demarcacao/:id/pontos', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const [pontos, lados] = await Promise.all([
+      m.listarPontosDoLaudo(String(req.params.id)),
+      m.listarLadosDoLaudo(String(req.params.id)),
+    ]);
+    res.json({ pontos, lados });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.post('/api/laudos-demarcacao/:id/pontos', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const b = (req.body || {}) as { pontos?: unknown; default_zona?: number; default_hemisferio?: 'N' | 'S' };
+    if (!Array.isArray(b.pontos)) {
+      res.status(400).json({ error: 'campo `pontos` (array) obrigatorio' });
+      return;
+    }
+    const r = await m.salvarPontosDoLaudo(
+      String(req.params.id),
+      b.pontos as Parameters<typeof m.salvarPontosDoLaudo>[1],
+      b.default_zona ?? 23,
+      b.default_hemisferio ?? 'S'
+    );
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// Import RTK (CSV/TXT) — recebe { texto: string } e retorna pontos parseados
+app.post('/api/laudos-demarcacao/import-rtk', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const { importarRTK } = await import('./services/geometria');
+    const texto = typeof req.body?.texto === 'string' ? req.body.texto : '';
+    if (!texto.trim()) { res.status(400).json({ error: 'campo `texto` obrigatorio' }); return; }
+    const r = importarRTK(texto);
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // ─── v1.99.3: Certificados Digitais ICP-Brasil ─────────────────────────────
 // GET — lista certs cadastrados (sem expor pfx/senha)
 app.get('/api/signing-cert', async (_req: Request, res: Response) => {

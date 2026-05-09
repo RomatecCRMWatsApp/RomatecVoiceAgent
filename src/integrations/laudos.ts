@@ -303,3 +303,298 @@ export async function desativarLaudo(id: number | string): Promise<void> {
     [Number(id)]
   );
 }
+
+export interface AtualizarLaudoInput {
+  tipo_lote_urbano?: TipoLoteUrbano | null;
+  quadra?: string | null;
+  numero_lote?: string | null;
+  loteamento?: string | null;
+  denominacao_imovel?: string | null;
+  nirf?: string | null;
+  ccir?: string | null;
+  endereco_imovel?: string | null;
+  municipio?: string | null;
+  uf_imovel?: string | null;
+  comarca?: string | null;
+  confrontante_frente?: string | null;
+  confrontante_lat_dir?: string | null;
+  confrontante_lat_esq?: string | null;
+  confrontante_fundo?: string | null;
+  confrontante_extra?: string | null;
+  usa_art?: boolean;
+  numero_art?: string | null;
+  usa_trt?: boolean;
+  numero_trt?: string | null;
+  valor_servico?: number | null;
+  forma_pagamento?: FormaPagamentoLaudo | null;
+  data_pagamento?: string | null;
+  observacoes?: string | null;
+}
+
+export async function atualizarLaudo(id: number | string, input: AtualizarLaudoInput): Promise<Laudo> {
+  const existente = await buscarLaudo(id);
+  if (!existente) throw new Error('Laudo nao encontrado');
+
+  const fields: string[] = [];
+  const params: (string | number | boolean | null)[] = [];
+  const set = <T>(col: string, val: T | undefined) => {
+    if (val !== undefined) {
+      fields.push(`${col} = ?`);
+      params.push(val as string | number | boolean | null);
+    }
+  };
+  set('tipo_lote_urbano', input.tipo_lote_urbano);
+  set('quadra', input.quadra);
+  set('numero_lote', input.numero_lote);
+  set('loteamento', input.loteamento);
+  set('denominacao_imovel', input.denominacao_imovel);
+  set('nirf', input.nirf);
+  set('ccir', input.ccir);
+  set('endereco_imovel', input.endereco_imovel);
+  set('municipio', input.municipio);
+  set('uf_imovel', input.uf_imovel);
+  set('comarca', input.comarca);
+  set('confrontante_frente', input.confrontante_frente);
+  set('confrontante_lat_dir', input.confrontante_lat_dir);
+  set('confrontante_lat_esq', input.confrontante_lat_esq);
+  set('confrontante_fundo', input.confrontante_fundo);
+  set('confrontante_extra', input.confrontante_extra);
+  set('usa_art', input.usa_art);
+  set('numero_art', input.numero_art);
+  set('usa_trt', input.usa_trt);
+  set('numero_trt', input.numero_trt);
+  set('valor_servico', input.valor_servico);
+  set('forma_pagamento', input.forma_pagamento);
+  set('data_pagamento', input.data_pagamento);
+  set('observacoes', input.observacoes);
+
+  if (fields.length === 0) return existente;
+  params.push(Number(id));
+  await pool.execute(
+    `UPDATE laudos_demarcacao SET ${fields.join(', ')} WHERE id = ?`,
+    params
+  );
+  const updated = await buscarLaudo(id);
+  if (!updated) throw new Error('Laudo sumiu apos update');
+  return updated;
+}
+
+// ── v1.99.26: Fase 2 — Pontos (vertices) e calculos geodesicos ────────────
+
+import {
+  utmParaGeo, geoParaUtm, decimalParaGMS, areaGauss, perimetro,
+  calcularLados, detectarZonaUtm,
+} from '../services/geometria';
+
+export interface PontoLaudo {
+  id?: number;
+  laudo_id?: number;
+  ordem: number;
+  rotulo: string;
+  utm_zona: number | null;
+  utm_hemisferio: 'N' | 'S' | null;
+  utm_e: number | null;
+  utm_n: number | null;
+  lat_decimal: number | null;
+  long_decimal: number | null;
+  lat_gms: string | null;
+  long_gms: string | null;
+  altitude: number | null;
+  descricao_marco: string | null;
+}
+
+interface PontoRow extends RowDataPacket {
+  id: number; laudo_id: number; ordem: number; rotulo: string;
+  utm_zona: string | null; utm_hemisferio: 'N' | 'S' | null;
+  utm_e: string | number | null; utm_n: string | number | null;
+  lat_decimal: string | number | null; long_decimal: string | number | null;
+  lat_gms: string | null; long_gms: string | null;
+  altitude: string | number | null; descricao_marco: string | null;
+}
+
+function mapPontoRow(r: PontoRow): PontoLaudo {
+  return {
+    id: Number(r.id),
+    laudo_id: Number(r.laudo_id),
+    ordem: Number(r.ordem),
+    rotulo: String(r.rotulo),
+    utm_zona: r.utm_zona ? Number(r.utm_zona) : null,
+    utm_hemisferio: r.utm_hemisferio ?? null,
+    utm_e: asNum(r.utm_e),
+    utm_n: asNum(r.utm_n),
+    lat_decimal: asNum(r.lat_decimal),
+    long_decimal: asNum(r.long_decimal),
+    lat_gms: r.lat_gms ?? null,
+    long_gms: r.long_gms ?? null,
+    altitude: asNum(r.altitude),
+    descricao_marco: r.descricao_marco ?? null,
+  };
+}
+
+export async function listarPontosDoLaudo(laudoId: number | string): Promise<PontoLaudo[]> {
+  const [rows] = await pool.execute<PontoRow[]>(
+    'SELECT * FROM laudos_demarcacao_pontos WHERE laudo_id = ? ORDER BY ordem ASC',
+    [Number(laudoId)]
+  );
+  return rows.map(mapPontoRow);
+}
+
+/**
+ * Substitui TODOS os pontos do laudo (delete + insert em transacao).
+ * Cada ponto pode ter UTM, Geo, ou ambos. Sistema completa o que faltar.
+ * Default zona UTM: 23S (Acailandia/MA) se nao informado mas tem Geo.
+ */
+export async function salvarPontosDoLaudo(
+  laudoId: number | string,
+  pontos: Array<Omit<PontoLaudo, 'id' | 'laudo_id'>>,
+  defaultZona: number = 23,
+  defaultHemisferio: 'N' | 'S' = 'S'
+): Promise<{ pontos: PontoLaudo[]; area_m2: number; perimetro_m: number }> {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // Limpa lados/pontos antigos
+    await conn.execute('DELETE FROM laudos_demarcacao_lados WHERE laudo_id = ?', [Number(laudoId)]);
+    await conn.execute('DELETE FROM laudos_demarcacao_pontos WHERE laudo_id = ?', [Number(laudoId)]);
+
+    // Auto-completa UTM↔Geo + GMS
+    const pontosCompletos = pontos.map((p, idx) => {
+      const ordem = p.ordem ?? (idx + 1);
+      const rotulo = p.rotulo || `V${ordem}`;
+      let utmZona = p.utm_zona;
+      let utmHemisferio = p.utm_hemisferio;
+      let utmE = p.utm_e;
+      let utmN = p.utm_n;
+      let lat = p.lat_decimal;
+      let lng = p.long_decimal;
+      let latGms = p.lat_gms;
+      let longGms = p.long_gms;
+
+      // Se tem UTM mas falta Geo
+      if (utmE != null && utmN != null && utmZona && utmHemisferio && (lat == null || lng == null)) {
+        try {
+          const geo = utmParaGeo({ e: utmE, n: utmN, zona: utmZona, hemisferio: utmHemisferio });
+          lat = geo.lat;
+          lng = geo.lng;
+        } catch (err) {
+          console.warn('[laudos:utm→geo]', (err as Error).message);
+        }
+      }
+      // Se tem Geo mas falta UTM
+      if (lat != null && lng != null && (utmE == null || utmN == null)) {
+        const zona = utmZona ?? detectarZonaUtm(lng);
+        const hem = utmHemisferio ?? (lat >= 0 ? 'N' : 'S');
+        try {
+          const utm = geoParaUtm({ lat, lng, zona, hemisferio: hem });
+          utmE = utm.e;
+          utmN = utm.n;
+          utmZona = zona;
+          utmHemisferio = hem;
+        } catch (err) {
+          console.warn('[laudos:geo→utm]', (err as Error).message);
+        }
+      }
+      // Default zona/hemisferio se ainda nao tem
+      if (utmE != null && utmN != null && (!utmZona || !utmHemisferio)) {
+        utmZona = utmZona ?? defaultZona;
+        utmHemisferio = utmHemisferio ?? defaultHemisferio;
+      }
+      // GMS se tem decimal
+      if (lat != null && !latGms) latGms = decimalParaGMS(lat, true);
+      if (lng != null && !longGms) longGms = decimalParaGMS(lng, false);
+
+      return {
+        ordem, rotulo,
+        utm_zona: utmZona, utm_hemisferio: utmHemisferio,
+        utm_e: utmE, utm_n: utmN,
+        lat_decimal: lat, long_decimal: lng,
+        lat_gms: latGms, long_gms: longGms,
+        altitude: p.altitude ?? null,
+        descricao_marco: p.descricao_marco ?? null,
+      };
+    });
+
+    // Insere pontos
+    const idsInseridos: number[] = [];
+    for (const p of pontosCompletos) {
+      const [r] = await conn.execute<ResultSetHeader>(
+        `INSERT INTO laudos_demarcacao_pontos
+          (laudo_id, ordem, rotulo, utm_zona, utm_hemisferio, utm_e, utm_n,
+           lat_decimal, long_decimal, lat_gms, long_gms, altitude, descricao_marco)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [Number(laudoId), p.ordem, p.rotulo,
+         p.utm_zona, p.utm_hemisferio, p.utm_e, p.utm_n,
+         p.lat_decimal, p.long_decimal, p.lat_gms, p.long_gms,
+         p.altitude, p.descricao_marco]
+      );
+      idsInseridos.push(r.insertId);
+    }
+
+    // Calcula area/perimetro/lados se temos UTM em todos
+    const pontosUtm = pontosCompletos
+      .filter(p => p.utm_e != null && p.utm_n != null)
+      .map(p => ({ e: p.utm_e as number, n: p.utm_n as number }));
+
+    let areaTotal = 0;
+    let perimTotal = 0;
+    if (pontosUtm.length >= 3 && pontosUtm.length === pontosCompletos.length) {
+      areaTotal = areaGauss(pontosUtm);
+      perimTotal = perimetro(pontosUtm);
+      const lados = calcularLados(pontosUtm);
+      for (const l of lados) {
+        await conn.execute<ResultSetHeader>(
+          `INSERT INTO laudos_demarcacao_lados
+            (laudo_id, ordem, ponto_inicio_id, ponto_fim_id, rotulo, distancia_m, azimute)
+           VALUES (?,?,?,?,?,?,?)`,
+          [Number(laudoId), l.ordem,
+           idsInseridos[l.i_idx], idsInseridos[l.f_idx],
+           `${pontosCompletos[l.i_idx].rotulo}-${pontosCompletos[l.f_idx].rotulo}`,
+           l.distancia_m, l.azimute]
+        );
+      }
+    }
+
+    // Atualiza laudo com area + perimetro
+    await conn.execute(
+      'UPDATE laudos_demarcacao SET area_total_m2 = ?, perimetro_m = ?, status = IF(status=\'RASCUNHO\', \'PREENCHIDO\', status) WHERE id = ?',
+      [areaTotal || null, perimTotal || null, Number(laudoId)]
+    );
+
+    await conn.commit();
+
+    const pontosFinais = await listarPontosDoLaudo(laudoId);
+    return { pontos: pontosFinais, area_m2: areaTotal, perimetro_m: perimTotal };
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+// Lados (calculados a partir dos pontos)
+export interface LadoLaudo {
+  id: number; laudo_id: number; ordem: number;
+  ponto_inicio_id: number; ponto_fim_id: number;
+  rotulo: string | null; distancia_m: number | null; azimute: number | null;
+}
+
+interface LadoRow extends RowDataPacket {
+  id: number; laudo_id: number; ordem: number;
+  ponto_inicio_id: number; ponto_fim_id: number;
+  rotulo: string | null; distancia_m: string | number | null; azimute: string | number | null;
+}
+
+export async function listarLadosDoLaudo(laudoId: number | string): Promise<LadoLaudo[]> {
+  const [rows] = await pool.execute<LadoRow[]>(
+    'SELECT * FROM laudos_demarcacao_lados WHERE laudo_id = ? ORDER BY ordem ASC',
+    [Number(laudoId)]
+  );
+  return rows.map(r => ({
+    id: Number(r.id), laudo_id: Number(r.laudo_id), ordem: Number(r.ordem),
+    ponto_inicio_id: Number(r.ponto_inicio_id), ponto_fim_id: Number(r.ponto_fim_id),
+    rotulo: r.rotulo ?? null,
+    distancia_m: asNum(r.distancia_m), azimute: asNum(r.azimute),
+  }));
+}
