@@ -14045,6 +14045,22 @@ function renderLaudoTabPontos(c) {
     const showLatLng = sistemaAtual === 'LATLNG' || sistemaAtual === 'AMBOS';
     const ladosArr = lados;
 
+    // v2.2.3 FIX TDZ: declarar cronoAtivo + cronos ANTES do loop de rows
+    // (era usado dentro do loop mas declarado depois — causava ReferenceError)
+    const CRONO_KEY = 'romatec_cronos_laudo_' + l.id;
+    if (!window.romatecCronos) window.romatecCronos = {};
+    if (!window.romatecCronos[l.id]) {
+      try { window.romatecCronos[l.id] = JSON.parse(localStorage.getItem(CRONO_KEY) || '{}'); }
+      catch (_) { window.romatecCronos[l.id] = {}; }
+    }
+    const cronos = window.romatecCronos[l.id];
+    const salvarCronos = () => { try { localStorage.setItem(CRONO_KEY, JSON.stringify(cronos)); } catch (_) {} };
+    const URB_CRONO_KEY = 'romatec_lp_crono_urb_' + l.id;
+    if (typeof window.lpCronoUrbAtivo === 'undefined') {
+      window.lpCronoUrbAtivo = (localStorage.getItem(URB_CRONO_KEY) === 'on');
+    }
+    const cronoAtivo = isRural || (window.lpCronoUrbAtivo === true);
+
     let rows = '';
     for (let i = 1; i <= nPontos; i++) {
       const p = pontos.find(x => x.ordem === i) || {};
@@ -14111,22 +14127,6 @@ function renderLaudoTabPontos(c) {
     if (isUrb4) header = '4 pontos (retangular)';
     else if (isUrb5) header = '5 pontos (com chanfro)';
     else header = `${nPontos} pontos${isRural?' (rural)':' (poligonal urbano)'}`;
-
-    // v2.2.2: cronometros — em rural sempre ativos, em urbano com toggle
-    const CRONO_KEY = 'romatec_cronos_laudo_' + l.id;
-    if (!window.romatecCronos) window.romatecCronos = {};
-    if (!window.romatecCronos[l.id]) {
-      try { window.romatecCronos[l.id] = JSON.parse(localStorage.getItem(CRONO_KEY) || '{}'); }
-      catch (_) { window.romatecCronos[l.id] = {}; }
-    }
-    const cronos = window.romatecCronos[l.id];
-    const salvarCronos = () => { try { localStorage.setItem(CRONO_KEY, JSON.stringify(cronos)); } catch (_) {} };
-    // Toggle urbano: localStorage
-    const URB_CRONO_KEY = 'romatec_lp_crono_urb_' + l.id;
-    if (typeof window.lpCronoUrbAtivo === 'undefined') {
-      window.lpCronoUrbAtivo = (localStorage.getItem(URB_CRONO_KEY) === 'on');
-    }
-    const cronoAtivo = isRural || (window.lpCronoUrbAtivo === true);
 
     // Card de toggle urbano (apenas urbanos)
     const toggleUrbHtml = !isRural ? `
