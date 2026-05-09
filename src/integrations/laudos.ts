@@ -318,6 +318,9 @@ export async function desativarLaudo(id: number | string): Promise<void> {
 }
 
 export interface AtualizarLaudoInput {
+  // v2.1.4: trocar contratante/executante do laudo
+  contratante_id?: number;
+  executante_id?: number;
   tipo_lote_urbano?: TipoLoteUrbano | null;
   quadra?: string | null;
   numero_lote?: string | null;
@@ -361,6 +364,8 @@ export async function atualizarLaudo(id: number | string, input: AtualizarLaudoI
       params.push(val as string | number | boolean | null);
     }
   };
+  set('contratante_id', input.contratante_id);
+  set('executante_id', input.executante_id);
   set('tipo_lote_urbano', input.tipo_lote_urbano);
   set('quadra', input.quadra);
   set('numero_lote', input.numero_lote);

@@ -13144,6 +13144,7 @@ function renderLaudoEditor(v) {
     ['croqui', '🗺️ Croqui'],
     ['fotos', '📸 Fotos (' + (l.fotos?.length || 0) + ')'],
     ['art', '📜 ART/TRT + Financeiro'],
+    ['cadastros', '👥 Contratante / Profissional'],
   ];
 
   v.innerHTML = `
@@ -13170,6 +13171,274 @@ function renderLaudoEditor(v) {
   else if (state.laudoEditorTab === 'croqui') renderLaudoTabCroqui(c);
   else if (state.laudoEditorTab === 'fotos')  renderLaudoTabFotos(c);
   else if (state.laudoEditorTab === 'art')    renderLaudoTabArt(c);
+  else if (state.laudoEditorTab === 'cadastros') renderLaudoTabCadastros(c);
+}
+
+// v2.1.4: aba pra editar contratante/executante vinculados ao laudo
+function renderLaudoTabCadastros(c) {
+  const l = state.laudoAtual;
+  const cont = state.laudoContratantes.find(x => x.id === l.contratante_id);
+  const exec = state.laudoExecutantes.find(x => x.id === l.executante_id);
+  c.innerHTML = `
+    <div class="card">
+      <p style="margin:0; color:var(--text-muted); font-size:12px;">
+        ℹ️ Dados do contratante e do profissional executor vinculados a este laudo.
+        Edite aqui se precisar corrigir algo (vai refletir no PDF).
+      </p>
+    </div>
+
+    <!-- ── CONTRATANTE ── -->
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+        <div>
+          <h3 style="margin:0;">👤 Contratante (proprietário)</h3>
+          <p style="margin:4px 0 0; font-size:13px; color:var(--text-muted);">
+            <strong>${escape(cont?.nome || '—')}</strong>
+            ${cont?.cpf_cnpj ? ' · '+escape(cont.cpf_cnpj) : ''}
+            ${cont?.tipo_pessoa ? ' · '+escape(cont.tipo_pessoa) : ''}
+          </p>
+        </div>
+        <div>
+          <button id="lec-trocar-cont">🔄 Trocar</button>
+          <button id="lec-edit-cont" style="background:var(--gold); color:#06120a; border-color:var(--gold);">✏️ Editar</button>
+        </div>
+      </div>
+      <div id="lec-cont-trocar" style="display:none; margin-top:8px; padding:8px; background:var(--bg-secondary); border-radius:4px;">
+        <label style="font-size:12px; color:var(--text-muted);">Selecionar outro contratante:</label>
+        <div style="display:flex; gap:8px; margin-top:4px;">
+          <select id="lec-cont-novo" style="flex:1;">
+            ${state.laudoContratantes.map(x => `<option value="${x.id}" ${x.id===l.contratante_id?'selected':''}>${escape(x.nome)} ${x.cpf_cnpj?'('+escape(x.cpf_cnpj)+')':''}</option>`).join('')}
+          </select>
+          <button id="lec-cont-trocar-salvar" style="background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Aplicar</button>
+        </div>
+      </div>
+      <div id="lec-cont-form" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <select id="lec-c-tipo">
+            <option value="PF">Pessoa Física</option>
+            <option value="PJ">Pessoa Jurídica</option>
+          </select>
+          <input id="lec-c-cpf" placeholder="CPF/CNPJ" maxlength="18" data-mask="cpfcnpj">
+          <input id="lec-c-nome" placeholder="Nome / Razão Social" style="grid-column:1/3;">
+          <input id="lec-c-tel" placeholder="Telefone" data-mask="tel">
+          <input id="lec-c-email" placeholder="Email" type="email">
+          <input id="lec-c-end" placeholder="Endereço completo" style="grid-column:1/3;">
+          <input id="lec-c-rg" placeholder="RG / Insc. Estadual">
+          <input id="lec-c-nac" class="lec-pf-only" placeholder="Nacionalidade (PF)">
+          <input id="lec-c-est" class="lec-pf-only" placeholder="Estado civil (PF)">
+          <input id="lec-c-prof" class="lec-pf-only" placeholder="Profissão (PF)">
+        </div>
+        <div id="lec-pj-block" style="display:none; margin-top:8px; padding:8px; background:var(--bg-secondary); border-radius:4px; border-left:3px solid var(--gold);">
+          <p style="margin:0 0 8px; font-size:12px; color:var(--text-muted);">
+            👤 <strong>Representante legal</strong> (obrigatório para PJ)
+          </p>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <input id="lec-c-rep-nome" placeholder="Nome do representante" style="grid-column:1/3;">
+            <input id="lec-c-rep-cpf" placeholder="CPF do representante" maxlength="14" data-mask="cpfcnpj">
+            <input id="lec-c-rep-cargo" placeholder="Cargo (Sócio, Adm, etc.)">
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button id="lec-c-salvar" style="background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Atualizar contratante</button>
+          <button id="lec-c-cancelar">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── EXECUTANTE ── -->
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+        <div>
+          <h3 style="margin:0;">🛠️ Profissional executor (RT)</h3>
+          <p style="margin:4px 0 0; font-size:13px; color:var(--text-muted);">
+            <strong>${escape(exec?.nome || '—')}</strong>
+            ${exec?.qualificacao ? ' · '+escape(exec.qualificacao) : ''}
+            ${exec?.registro_cft ? ' · CFT '+escape(exec.registro_cft) : ''}
+            ${exec?.cadastro_incra ? ' · INCRA '+escape(exec.cadastro_incra) : ''}
+          </p>
+        </div>
+        <div>
+          <button id="lec-trocar-exec">🔄 Trocar</button>
+          <button id="lec-edit-exec" style="background:var(--gold); color:#06120a; border-color:var(--gold);">✏️ Editar</button>
+        </div>
+      </div>
+      <div id="lec-exec-trocar" style="display:none; margin-top:8px; padding:8px; background:var(--bg-secondary); border-radius:4px;">
+        <label style="font-size:12px; color:var(--text-muted);">Selecionar outro profissional:</label>
+        <div style="display:flex; gap:8px; margin-top:4px;">
+          <select id="lec-exec-novo" style="flex:1;">
+            ${state.laudoExecutantes.map(x => {
+              const reg = [x.registro_cft && 'CFT '+x.registro_cft, x.cadastro_incra && 'INCRA '+x.cadastro_incra].filter(Boolean).join(' · ');
+              return `<option value="${x.id}" ${x.id===l.executante_id?'selected':''}>${escape(x.nome)}${reg?' ('+escape(reg)+')':''}</option>`;
+            }).join('')}
+          </select>
+          <button id="lec-exec-trocar-salvar" style="background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Aplicar</button>
+        </div>
+      </div>
+      <div id="lec-exec-form" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <input id="lec-e-nome" placeholder="Nome completo" style="grid-column:1/3;">
+          <input id="lec-e-qual" placeholder="Qualificação (Téc. em Agrimensura, etc.)" style="grid-column:1/3;">
+          <input id="lec-e-cft" placeholder="CFT">
+          <input id="lec-e-crea" placeholder="CREA">
+          <input id="lec-e-incra" placeholder="Código INCRA">
+          <input id="lec-e-cpf" placeholder="CPF" maxlength="14" data-mask="cpfcnpj">
+          <input id="lec-e-tel" placeholder="Telefone" data-mask="tel">
+          <input id="lec-e-email" placeholder="Email" type="email">
+        </div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button id="lec-e-salvar" style="background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Atualizar profissional</button>
+          <button id="lec-e-cancelar">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Toggle PJ block (igual no Novo Laudo)
+  const togglePjLec = () => {
+    const tipo = document.getElementById('lec-c-tipo').value;
+    document.getElementById('lec-pj-block').style.display = tipo === 'PJ' ? 'block' : 'none';
+    document.querySelectorAll('.lec-pf-only').forEach(el => el.style.display = tipo === 'PF' ? '' : 'none');
+    const cpfEl = document.getElementById('lec-c-cpf');
+    cpfEl.maxLength = tipo === 'PF' ? 14 : 18;
+    cpfEl.placeholder = tipo === 'PF' ? 'CPF (000.000.000-00)' : 'CNPJ (00.000.000/0000-00)';
+    cpfEl.value = aplicarMascaraCpfCnpj(cpfEl.value);
+  };
+  document.getElementById('lec-c-tipo').onchange = togglePjLec;
+
+  // Toggle "Trocar contratante"
+  document.getElementById('lec-trocar-cont').onclick = () => {
+    const el = document.getElementById('lec-cont-trocar');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  };
+  document.getElementById('lec-cont-trocar-salvar').onclick = async () => {
+    const novoId = document.getElementById('lec-cont-novo').value;
+    if (!novoId || Number(novoId) === l.contratante_id) return;
+    if (!confirm('Trocar contratante deste laudo?')) return;
+    try {
+      await api('/api/laudos-demarcacao/'+l.id, {
+        method:'PUT',
+        body: JSON.stringify({ contratante_id: Number(novoId) }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await loadLaudoDetalhe(l.id);
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+
+  // Toggle "Trocar executante"
+  document.getElementById('lec-trocar-exec').onclick = () => {
+    const el = document.getElementById('lec-exec-trocar');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  };
+  document.getElementById('lec-exec-trocar-salvar').onclick = async () => {
+    const novoId = document.getElementById('lec-exec-novo').value;
+    if (!novoId || Number(novoId) === l.executante_id) return;
+    if (!confirm('Trocar profissional executor deste laudo?')) return;
+    try {
+      await api('/api/laudos-demarcacao/'+l.id, {
+        method:'PUT',
+        body: JSON.stringify({ executante_id: Number(novoId) }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await loadLaudoDetalhe(l.id);
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+
+  // Editar contratante
+  document.getElementById('lec-edit-cont').onclick = async () => {
+    if (!cont) return alert('Contratante não encontrado');
+    document.getElementById('lec-c-tipo').value = cont.tipo_pessoa || 'PF';
+    document.getElementById('lec-c-cpf').value = aplicarMascaraCpfCnpj(cont.cpf_cnpj || '');
+    document.getElementById('lec-c-nome').value = cont.nome || '';
+    document.getElementById('lec-c-tel').value = aplicarMascaraTel(cont.telefone || '');
+    document.getElementById('lec-c-email').value = cont.email || '';
+    document.getElementById('lec-c-end').value = cont.endereco || cont.logradouro || '';
+    document.getElementById('lec-c-rg').value = cont.rg_ie || '';
+    document.getElementById('lec-c-nac').value = cont.nacionalidade || 'brasileiro(a)';
+    document.getElementById('lec-c-est').value = cont.estado_civil || '';
+    document.getElementById('lec-c-prof').value = cont.profissao || '';
+    document.getElementById('lec-c-rep-nome').value = cont.representante_nome || '';
+    document.getElementById('lec-c-rep-cpf').value = aplicarMascaraCpfCnpj(cont.representante_cpf || '');
+    document.getElementById('lec-c-rep-cargo').value = cont.representante_cargo || '';
+    togglePjLec();
+    document.getElementById('lec-cont-form').style.display = 'block';
+    aplicarMascarasLn();
+  };
+  document.getElementById('lec-c-cancelar').onclick = () => {
+    document.getElementById('lec-cont-form').style.display = 'none';
+  };
+  document.getElementById('lec-c-salvar').onclick = async () => {
+    const tipo = document.getElementById('lec-c-tipo').value;
+    const body = {
+      tipo_pessoa: tipo,
+      cpf_cnpj: document.getElementById('lec-c-cpf').value.replace(/\D/g, ''),
+      nome: document.getElementById('lec-c-nome').value.trim(),
+      telefone: document.getElementById('lec-c-tel').value.replace(/\D/g, '') || null,
+      email: document.getElementById('lec-c-email').value.trim() || null,
+      endereco: document.getElementById('lec-c-end').value.trim() || null,
+      rg_ie: document.getElementById('lec-c-rg').value.trim() || null,
+      nacionalidade: tipo === 'PF' ? (document.getElementById('lec-c-nac').value.trim() || null) : null,
+      estado_civil: tipo === 'PF' ? (document.getElementById('lec-c-est').value.trim() || null) : null,
+      profissao: tipo === 'PF' ? (document.getElementById('lec-c-prof').value.trim() || null) : null,
+      representante_nome: tipo === 'PJ' ? (document.getElementById('lec-c-rep-nome').value.trim() || null) : null,
+      representante_cpf: tipo === 'PJ' ? (document.getElementById('lec-c-rep-cpf').value.replace(/\D/g, '') || null) : null,
+      representante_cargo: tipo === 'PJ' ? (document.getElementById('lec-c-rep-cargo').value.trim() || null) : null,
+    };
+    if (!body.cpf_cnpj || !body.nome) return alert('CPF/CNPJ e nome obrigatórios');
+    if (tipo === 'PJ' && (!body.representante_nome || !body.representante_cpf)) {
+      return alert('PJ: nome e CPF do representante obrigatórios');
+    }
+    try {
+      const novo = await api('/api/contratantes/'+l.contratante_id, {
+        method:'PUT', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' },
+      });
+      const idx = state.laudoContratantes.findIndex(x => x.id === l.contratante_id);
+      if (idx >= 0) state.laudoContratantes[idx] = novo;
+      alert('✅ Contratante atualizado');
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+
+  // Editar executante
+  document.getElementById('lec-edit-exec').onclick = () => {
+    if (!exec) return alert('Profissional não encontrado');
+    document.getElementById('lec-e-nome').value = exec.nome || '';
+    document.getElementById('lec-e-qual').value = exec.qualificacao || '';
+    document.getElementById('lec-e-cft').value = exec.registro_cft || '';
+    document.getElementById('lec-e-crea').value = exec.registro_crea || '';
+    document.getElementById('lec-e-incra').value = exec.cadastro_incra || '';
+    document.getElementById('lec-e-cpf').value = aplicarMascaraCpfCnpj(exec.cpf || '');
+    document.getElementById('lec-e-tel').value = aplicarMascaraTel(exec.telefone || '');
+    document.getElementById('lec-e-email').value = exec.email || '';
+    document.getElementById('lec-exec-form').style.display = 'block';
+    aplicarMascarasLn();
+  };
+  document.getElementById('lec-e-cancelar').onclick = () => {
+    document.getElementById('lec-exec-form').style.display = 'none';
+  };
+  document.getElementById('lec-e-salvar').onclick = async () => {
+    const body = {
+      nome: document.getElementById('lec-e-nome').value.trim(),
+      qualificacao: document.getElementById('lec-e-qual').value.trim() || null,
+      registro_cft: document.getElementById('lec-e-cft').value.trim() || null,
+      registro_crea: document.getElementById('lec-e-crea').value.trim() || null,
+      cadastro_incra: document.getElementById('lec-e-incra').value.trim() || null,
+      cpf: document.getElementById('lec-e-cpf').value.replace(/\D/g, '') || null,
+      telefone: document.getElementById('lec-e-tel').value.replace(/\D/g, '') || null,
+      email: document.getElementById('lec-e-email').value.trim() || null,
+    };
+    if (!body.nome) return alert('Nome obrigatório');
+    try {
+      const novo = await api('/api/executantes/'+l.executante_id, {
+        method:'PUT', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' },
+      });
+      const idx = state.laudoExecutantes.findIndex(x => x.id === l.executante_id);
+      if (idx >= 0) state.laudoExecutantes[idx] = novo;
+      alert('✅ Profissional atualizado');
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  };
 }
 
 function renderLaudoTabDados(c) {
