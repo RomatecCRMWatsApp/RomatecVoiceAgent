@@ -7399,6 +7399,145 @@ function fileToBase64(file) {
 //
 // Retorna { mime, data_base64, original_kb, compressed_kb } pra UI mostrar economia.
 // Se compressao falha (formato nao-imagem, erro de canvas), faz fallback pro arquivo original.
+// v2.3.0: helpers pra foto carimbada (estilo Tagofy) — GPS + timestamp + ponto
+// Converte Lat/Lng (graus decimais) → UTM (E, N, zona, hemisférios)
+// SIRGAS 2000 / GRS80 (datum oficial brasileiro — exigência IBGE/INCRA/SIGEF)
+// Algoritmo USGS. Diferenca pra WGS84 < 0.1mm — equivalentes na pratica.
+function latLngParaUTMClient(lat, lng, zonaForcada) {
+  if (lat == null || lng == null) return null;
+  const a = 6378137.0; // SIRGAS 2000 / GRS80 semi-major
+  const f = 1 / 298.257222101; // SIRGAS 2000 / GRS80 flattening
+  const k0 = 0.9996;
+  const e2 = 2*f - f*f;
+  const ep2 = e2 / (1 - e2);
+  const latR = lat * Math.PI / 180;
+  const lngR = lng * Math.PI / 180;
+  const zona = zonaForcada || (Math.floor((lng + 180) / 6) + 1);
+  const lngOrigDeg = (zona - 1) * 6 - 180 + 3;
+  const lngOrigR = lngOrigDeg * Math.PI / 180;
+  const N = a / Math.sqrt(1 - e2 * Math.sin(latR)**2);
+  const T = Math.tan(latR)**2;
+  const C = ep2 * Math.cos(latR)**2;
+  const A = Math.cos(latR) * (lngR - lngOrigR);
+  const M = a * (
+    (1 - e2/4 - 3*e2*e2/64 - 5*e2*e2*e2/256) * latR
+    - (3*e2/8 + 3*e2*e2/32 + 45*e2*e2*e2/1024) * Math.sin(2*latR)
+    + (15*e2*e2/256 + 45*e2*e2*e2/1024) * Math.sin(4*latR)
+    - (35*e2*e2*e2/3072) * Math.sin(6*latR)
+  );
+  const E = k0 * N * (A + (1 - T + C) * A**3 / 6 + (5 - 18*T + T*T + 72*C - 58*ep2) * A**5 / 120) + 500000;
+  const Nn = k0 * (M + N * Math.tan(latR) * (A**2 / 2 + (5 - T + 9*C + 4*C*C) * A**4 / 24 + (61 - 58*T + T*T + 600*C - 330*ep2) * A**6 / 720));
+  const Nfinal = lat < 0 ? Nn + 10000000 : Nn;
+  return { e: E, n: Nfinal, zona, hemisferio: lat >= 0 ? 'N' : 'S' };
+}
+
+async function getGPSAtual(timeoutMs) {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+        altitude: pos.coords.altitude,
+      }),
+      _err => resolve(null),
+      { enableHighAccuracy: true, timeout: timeoutMs || 8000, maximumAge: 30000 }
+    );
+  });
+}
+
+// Desenha banda inferior semi-transparente com info geo (estilo Tagofy)
+function desenharCarimboGeo(ctx, w, h, info) {
+  const lh = Math.max(20, Math.round(w * 0.025)); // line height proporcional
+  const padding = Math.max(10, Math.round(w * 0.012));
+  // Linhas: cabecalho + data/hora + lat/lng + UTM E/N + fonte
+  const temGeo = info.lat != null && info.lng != null;
+  let utmLine = '';
+  if (info.utmE != null && info.utmN != null) {
+    utmLine = `UTM E ${Number(info.utmE).toFixed(3)}  ·  UTM N ${Number(info.utmN).toFixed(3)}${info.utmZona?'  · zona '+info.utmZona+(info.utmHem||'S'):'  · zona 23S'}`;
+  } else if (temGeo) {
+    const utm = latLngParaUTMClient(info.lat, info.lng);
+    if (utm) utmLine = `UTM E ${utm.e.toFixed(3)}  ·  UTM N ${utm.n.toFixed(3)}  ·  zona ${utm.zona}${utm.hemisferio}`;
+  }
+  const lines = [
+    `${info.label || ''}${info.numeroLaudo ? ' · ' + info.numeroLaudo : ''}`,
+    `${info.dataStr}  ${info.horaStr}`,
+    temGeo ? `Lat ${Number(info.lat).toFixed(6)}°  ·  Lng ${Number(info.lng).toFixed(6)}°` : '⚠️ Sem GPS disponível',
+    utmLine,
+    temGeo ? 'Datum: SIRGAS 2000 (oficial Brasil — IBGE/INCRA)' : '',
+    info.source || '',
+  ].filter(Boolean);
+  const stampH = (lines.length * lh) + (padding * 2);
+  // Faixa preta semi-transparente
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillRect(0, h - stampH, w, stampH);
+  // Linha dourada superior
+  ctx.fillStyle = '#f59e0b';
+  ctx.fillRect(0, h - stampH - 3, w, 3);
+  // Texto principal
+  ctx.fillStyle = '#ffffff';
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  let y = h - stampH + padding;
+  for (let i = 0; i < lines.length; i++) {
+    ctx.font = i === 0
+      ? `bold ${lh - 4}px Arial, sans-serif`
+      : `${lh - 6}px Arial, sans-serif`;
+    ctx.fillStyle = i === 0 ? '#f59e0b' : (i === 2 ? '#10b981' : '#ffffff');
+    ctx.fillText(lines[i], padding, y);
+    y += lh;
+  }
+  // Marca ROMATEC no canto direito
+  ctx.font = `bold ${lh - 8}px Arial, sans-serif`;
+  ctx.fillStyle = '#f59e0b';
+  ctx.textAlign = 'right';
+  ctx.fillText('🛰️ ROMATEC', w - padding, h - stampH + padding);
+  ctx.textAlign = 'left';
+}
+
+// Comprime + carimba foto. Mesma lógica de compressImageFile mas chama
+// desenharCarimboGeo no canvas antes de exportar JPEG.
+async function compressImageFileComStamp(file, opts, stampInfo) {
+  const maxDim = (opts && opts.maxDim) || 1600;
+  const quality = (opts && opts.quality) || 0.85;
+  if (!file.type || !file.type.startsWith('image/')) {
+    return await compressImageFile(file, opts); // fallback sem stamp
+  }
+  try {
+    const blobUrl = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('Falha ao decodificar'));
+        i.src = blobUrl;
+      });
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (Math.max(w, h) > maxDim) {
+        const ratio = maxDim / Math.max(w, h);
+        w = Math.round(w * ratio); h = Math.round(h * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      // 🆕 Aplica carimbo
+      if (stampInfo) desenharCarimboGeo(ctx, w, h, stampInfo);
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      const base64 = dataUrl.split(',')[1] || '';
+      return {
+        mime: 'image/jpeg', data_base64: base64,
+        original_kb: Math.round(file.size / 1024),
+        compressed_kb: Math.round(base64.length * 0.75 / 1024),
+      };
+    } finally { URL.revokeObjectURL(blobUrl); }
+  } catch (err) {
+    console.warn('[compressImageFileComStamp] falhou, sem stamp:', err.message);
+    return await compressImageFile(file, opts);
+  }
+}
+
 async function compressImageFile(file, opts) {
   const maxDim = (opts && opts.maxDim) || 1600;
   const quality = (opts && opts.quality) || 0.85;
@@ -14315,7 +14454,7 @@ function renderLaudoTabPontos(c) {
       };
     });
 
-    // Foto upload
+    // Foto upload — v2.3.0: carimbo geo automático (GPS + timestamp + ponto)
     document.querySelectorAll('[data-fp-foto-input]').forEach(input => {
       input.onchange = async () => {
         const i = Number(input.getAttribute('data-fp-foto-input'));
@@ -14323,9 +14462,33 @@ function renderLaudoTabPontos(c) {
         if (!f) return;
         const p = pontos.find(x => x.ordem === i);
         if (!p?.id) return alert('Ponto não encontrado no banco. Salve os pontos primeiro.');
+
+        // Monta info do carimbo: prioriza coords do ponto (RTK), senão GPS celular
+        let stampLat = p.lat_decimal != null ? Number(p.lat_decimal) : null;
+        let stampLng = p.long_decimal != null ? Number(p.long_decimal) : null;
+        let source = '';
+        if (stampLat != null && stampLng != null) {
+          source = '📡 Coordenada RTK do ponto';
+        } else {
+          const gps = await getGPSAtual(6000);
+          if (gps) {
+            stampLat = gps.lat; stampLng = gps.lng;
+            source = `📱 GPS celular (±${Math.round(gps.accuracy)}m)`;
+          }
+        }
+        const now = new Date();
+        const dataStr = now.toLocaleDateString('pt-BR');
+        const horaStr = now.toLocaleTimeString('pt-BR').slice(0, 8);
+        const stampInfo = {
+          label: `📍 ${p.rotulo || 'P'+i}`,
+          numeroLaudo: l.numero_laudo,
+          dataStr, horaStr,
+          lat: stampLat, lng: stampLng,
+          source,
+        };
+
         try {
-          const r = await compressImageFile(f, { maxDim: 1600, quality: 0.85 });
-          // Se ja tinha foto, remover antes
+          const r = await compressImageFileComStamp(f, { maxDim: 1600, quality: 0.85 }, stampInfo);
           const existente = fotoDoPonto(p.id);
           if (existente) {
             await api('/api/laudos-demarcacao/foto/'+existente.id, { method: 'DELETE' });
@@ -14336,7 +14499,7 @@ function renderLaudoTabPontos(c) {
               fotos: [{
                 conteudo_b64: r.data_base64, mime: r.mime,
                 filename: `P${i}-${l.numero_laudo}.jpg`,
-                legenda: `Piquete P${i}`,
+                legenda: `Piquete ${p.rotulo || 'P'+i} · ${dataStr} ${horaStr}${stampLat?` · Lat ${stampLat.toFixed(6)} Lng ${stampLng.toFixed(6)}`:''}`,
                 ponto_id: p.id,
               }],
             }),
