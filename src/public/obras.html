@@ -4697,7 +4697,7 @@ function renderVto() {
     if (files.length === 0) return;
 
     // v1.99.18: compressao automatica (Canvas, max 1600px, JPEG 85%) + aviso
-    // Mostra progresso enquanto processa
+    // v2.4.1: tambem aplica carimbo geo (estilo Tagofy) — GPS + UTM + datum
     const inp = e.target;
     const labelOriginal = document.querySelector('label[for=vFotos]')?.textContent;
     let totalOriginalMB = 0;
@@ -4705,20 +4705,38 @@ function renderVto() {
     let processadas = 0;
     let ignoradas = 0;
 
+    // Captura GPS uma unica vez no inicio (todas as fotos do batch usam a mesma)
+    let gpsBatch = null;
+    if (typeof getGPSAtual === 'function') {
+      gpsBatch = await getGPSAtual(8000);
+    }
+    const vtoAtual = state.vistoriaAtual || {};
+    const obraAtual = state.obras.find(o => o.id === state.currentObra);
+
     for (const f of files) {
-      // Limit ATUAL aceita ate 20MB por foto (HEIC iPhone podem ser ~10MB).
-      // Compressao posterior reduz pra ~500KB-1MB.
       if (f.size > 20 * 1024 * 1024) {
         alert(`Foto "${f.name}" maior que 20MB, ignorada.`);
         ignoradas++;
         continue;
       }
       try {
-        const result = await compressImageFile(f, { maxDim: 1600, quality: 0.85 });
+        const now = new Date();
+        const stampInfo = {
+          label: `🏗️ VISTORIA${vtoAtual.numero?' '+vtoAtual.numero:''}`,
+          numeroLaudo: obraAtual?.nome ? obraAtual.nome.slice(0, 40) : '',
+          dataStr: now.toLocaleDateString('pt-BR'),
+          horaStr: now.toLocaleTimeString('pt-BR').slice(0, 8),
+          lat: gpsBatch?.lat ?? null,
+          lng: gpsBatch?.lng ?? null,
+          source: gpsBatch ? `📱 GPS celular (±${Math.round(gpsBatch.accuracy)}m)` : '',
+        };
+        const result = (typeof compressImageFileComStamp === 'function')
+          ? await compressImageFileComStamp(f, { maxDim: 1600, quality: 0.85 }, stampInfo)
+          : await compressImageFile(f, { maxDim: 1600, quality: 0.85 });
         state.vtoFotos.push({
           mime: result.mime,
           data_base64: result.data_base64,
-          legenda: '',
+          legenda: gpsBatch ? `${stampInfo.dataStr} ${stampInfo.horaStr} · Lat ${gpsBatch.lat.toFixed(6)} Lng ${gpsBatch.lng.toFixed(6)}` : '',
         });
         totalOriginalMB += result.original_kb / 1024;
         totalCompressedMB += result.compressed_kb / 1024;
