@@ -7648,11 +7648,16 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
 
             <div style="border:1px solid var(--border); border-radius:8px; padding:10px;">
               <p style="margin:0 0 8px; font-size:12px; font-weight:600; color:var(--text-muted);">📤 ENVIO DO RECIBO</p>
-              <label style="display:flex; gap:6px; align-items:center; padding:6px; cursor:pointer;">
-                <input id="valeWa" type="checkbox" checked ${!telefone ? 'disabled' : ''}>
-                <span style="font-size:12px;">📱 WhatsApp ao colaborador${!telefone ? ' (sem telefone cadastrado)' : ' (' + escape(telefone) + ')'}</span>
+              <label style="display:flex; gap:6px; align-items:center; padding:6px 0; cursor:pointer;">
+                <input id="valeWa" type="checkbox" checked>
+                <span style="font-size:12px; flex:1;">📱 WhatsApp principal</span>
               </label>
-              <label style="display:flex; gap:6px; align-items:center; padding:6px; cursor:pointer;">
+              <input id="valeWaPhone" type="tel" placeholder="55DDDNNNNNNNNN" value="${escape(telefone || '')}" style="width:100%; font-size:12px; padding:5px 8px; margin-bottom:6px;" title="Número do colaborador (editável). Formato: 55+DDD+número">
+              <label style="display:flex; gap:6px; align-items:flex-start; padding:6px 0; cursor:pointer;">
+                <span style="font-size:12px; flex:1;">📱 Outros números <span style="color:var(--text-muted);">(opcional, separe com vírgula)</span></span>
+              </label>
+              <input id="valeWaPhonesExtras" type="text" placeholder="ex: 5599991234567, 5599998765432" style="width:100%; font-size:12px; padding:5px 8px; margin-bottom:6px;" title="Manda cópia pra outros WhatsApps (família, sócio, contador). Cada número com 55+DDD+número, separados por vírgula.">
+              <label style="display:flex; gap:6px; align-items:center; padding:6px 0; cursor:pointer; border-top:1px solid var(--border); margin-top:4px;">
                 <input id="valeTg" type="checkbox" checked>
                 <span style="font-size:12px;">✈️ Telegram (cópia pro CEO)</span>
               </label>
@@ -7756,8 +7761,20 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
     if (valor > totalPagar) {
       if (!confirm(`Vale (${valor.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}) é maior que o saldo atual (${saldoFmt}). Continuar mesmo assim?`)) return;
     }
-    const enviarWa = document.getElementById('valeWa').checked && !!telefone;
+    const enviarWa = document.getElementById('valeWa').checked;
     const enviarTg = document.getElementById('valeTg').checked;
+    // v1.99.22: numero editavel + extras
+    const phonePrincipal = (document.getElementById('valeWaPhone')?.value || '').replace(/\D/g, '');
+    const phonesExtrasRaw = (document.getElementById('valeWaPhonesExtras')?.value || '').trim();
+    const phonesExtras = phonesExtrasRaw
+      ? phonesExtrasRaw.split(/[,;\s]+/).map(s => s.replace(/\D/g, '')).filter(p => p.length >= 10)
+      : [];
+
+    if (enviarWa && !phonePrincipal && phonesExtras.length === 0) {
+      alert('Pra enviar via WhatsApp, informe pelo menos um número.');
+      return;
+    }
+
     const btn = document.getElementById('valeConfirm');
     btn.disabled = true; btn.textContent = '⏳ Enviando...';
     try {
@@ -7772,6 +7789,8 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
           enviar_whatsapp: enviarWa,
           enviar_telegram: enviarTg,
           forma_pagamento: document.getElementById('valeFormaPag')?.value || 'pix',
+          phone_override: phonePrincipal || null,
+          phones_extras: phonesExtras,
         }),
       });
       const enviosTxt = r.envios.ok.length

@@ -1229,6 +1229,15 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
   const formaPagRaw = typeof b.forma_pagamento === 'string' ? b.forma_pagamento.toLowerCase() : '';
   const formaPag = (['pix', 'dinheiro', 'ted', 'transferencia'].includes(formaPagRaw)
     ? formaPagRaw : 'pix') as 'pix' | 'dinheiro' | 'ted' | 'transferencia';
+  // v1.99.22: phone override (substitui o do colaborador) + extras (copias pra outros)
+  const phoneOverride = typeof b.phone_override === 'string'
+    ? b.phone_override.replace(/\D/g, '')
+    : '';
+  const phonesExtras = Array.isArray(b.phones_extras)
+    ? (b.phones_extras as unknown[])
+        .map(p => String(p ?? '').replace(/\D/g, ''))
+        .filter(p => p.length >= 10)
+    : [];
 
   const pool = (await import('./database/connection')).default;
   const recibosMod = await import('./integrations/recibos');
@@ -1239,8 +1248,11 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
   );
   if (!memberRows.length) { res.status(404).json({ error: 'Membro nao encontrado' }); return; }
   const m = memberRows[0] as { nome: string; funcao: string | null; cpf: string | null; telefone: string | null };
-  if (!m.telefone) {
-    res.status(400).json({ error: 'Membro sem telefone cadastrado — recibo de vale exige numero pra envio/confirmacao' });
+  // v1.99.22: aceita override de telefone — pode salvar vale sem telefone cadastrado
+  // se o user passou phone_override no payload.
+  const phonePrincipalEnvio = phoneOverride || m.telefone || '';
+  if (!phonePrincipalEnvio && phonesExtras.length === 0 && enviarWa) {
+    res.status(400).json({ error: 'Membro sem telefone cadastrado e nenhum override informado — recibo de vale exige numero pra envio' });
     return;
   }
 
@@ -1328,7 +1340,7 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
       resource_id: String(ajusteId),
       destinatario_nome: m.nome,
       destinatario_doc: m.cpf,
-      destinatario_phone: m.telefone,
+      destinatario_phone: m.telefone || phonePrincipalEnvio, // v1.99.22: fallback override
       valor,
       forma_pagamento: formaPagRecibo,
       descricao_servico: descricao || `Vale (adiantamento) — ${m.nome}`,
@@ -1367,28 +1379,45 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
   const enviosFalha: string[] = [];
   let zapiMessageId: string | undefined;
 
-  // 4) WhatsApp pro funcionario com instrucao de confirmacao
+  // 4) WhatsApp — envia pra principal + extras (v1.99.22)
+  // Cada numero recebe texto + PDF anexo. So o PRIMEIRO envio bem-sucedido
+  // grava zapi_message_id (usado pra confirmacao via webhook CONFIRMO —
+  // a confirmacao deve vir do principal/colaborador, nao das copias).
   if (enviarWa) {
-    try {
-      const wa = await import('./integrations/whatsapp');
-      const phoneClean = m.telefone.replace(/\D/g, '');
-      const caption = `💸 *Recibo de Vale* — ${reciboCriado.numero}\n\n` +
-        `${m.nome}, foi registrado um vale de *R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}*` +
-        `${descricao ? ` (${descricao})` : ''}.\n\nSerá descontado da próxima quinzena.\n\n` +
-        `Para confirmar o recebimento, responda *CONFIRMO*.\n\n— Romatec`;
-      const repRes = await wa.sendReply(phoneClean, caption);
-      zapiMessageId = repRes.messageId;
-      await wa.sendDocument(phoneClean, pdf.toString('base64'), `Vale-${reciboCriado.numero}.pdf`);
-      enviosOk.push('whatsapp');
-      console.log(`[vale:whatsapp] vale=${reciboCriado.numero} zapi_message_id=${zapiMessageId ?? '?'}`);
-      if (zapiMessageId) {
-        await recibosMod.marcarEvento(reciboCriado.id, 'enviado', zapiMessageId).catch(err =>
-          console.warn('[vale:marcarEvento]', (err as Error).message)
-        );
+    const wa = await import('./integrations/whatsapp');
+    const todosOsPhones: Array<{ phone: string; rotulo: string }> = [];
+    if (phonePrincipalEnvio) {
+      todosOsPhones.push({ phone: phonePrincipalEnvio, rotulo: 'principal' });
+    }
+    for (const extra of phonesExtras) {
+      if (extra && extra !== phonePrincipalEnvio) {
+        todosOsPhones.push({ phone: extra, rotulo: 'extra' });
       }
-    } catch (err) {
-      console.error('[vale:whatsapp] falhou:', (err as Error).message);
-      enviosFalha.push('whatsapp');
+    }
+    const caption = `💸 *Recibo de Vale* — ${reciboCriado.numero}\n\n` +
+      `${m.nome}, foi registrado um vale de *R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}*` +
+      `${descricao ? ` (${descricao})` : ''}.\n\nSerá descontado da próxima quinzena.\n\n` +
+      `Para confirmar o recebimento, responda *CONFIRMO*.\n\n— Romatec`;
+    let primeiroEnvioOk = false;
+    for (const dest of todosOsPhones) {
+      try {
+        const repRes = await wa.sendReply(dest.phone, caption);
+        await wa.sendDocument(dest.phone, pdf.toString('base64'), `Vale-${reciboCriado.numero}.pdf`);
+        enviosOk.push(`whatsapp:${dest.rotulo}:${dest.phone.slice(-4)}`);
+        console.log(`[vale:whatsapp:${dest.rotulo}] vale=${reciboCriado.numero} phone=${dest.phone} msgId=${repRes.messageId ?? '?'}`);
+        if (!primeiroEnvioOk && repRes.messageId) {
+          zapiMessageId = repRes.messageId;
+          primeiroEnvioOk = true;
+        }
+      } catch (err) {
+        console.error(`[vale:whatsapp:${dest.rotulo}] falhou pra ${dest.phone}:`, (err as Error).message);
+        enviosFalha.push(`whatsapp:${dest.rotulo}:${dest.phone.slice(-4)}`);
+      }
+    }
+    if (zapiMessageId) {
+      await recibosMod.marcarEvento(reciboCriado.id, 'enviado', zapiMessageId).catch(err =>
+        console.warn('[vale:marcarEvento]', (err as Error).message)
+      );
     }
   }
 
