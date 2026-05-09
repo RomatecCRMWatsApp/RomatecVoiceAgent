@@ -12631,6 +12631,62 @@ const LAUDO_STATUS_LABEL = {
   CANCELADO: 'Cancelado',
 };
 
+// v2.1.7: defaults Acailandia/MA — extraidos do PMSB municipal 2019 + lista do CEO
+const ACAILANDIA_DEFAULTS = {
+  uf: 'MA',
+  municipio: 'Açailândia',
+  comarca: 'Açailândia',
+  cep: '65930-000',
+  // Bairros urbanos da sede (alfabetico)
+  bairros: [
+    '50 Bis', 'Antonio Ferreira', 'Aulídia', 'Barra Azul', 'Boa Vista', 'Bairro Cikel',
+    'Bairro Getat', 'Bairro Jacu', 'Brasil Novo', 'Centro', 'Chácaras',
+    'Cj João Paulo II', 'Cj Vale do Pindaré', 'Cj Vale do Rio Doce',
+    'COHAB-JK', 'Entroncamento', 'Gastão Vieira', 'Gramacosa', 'Iberê Quintal',
+    'Jardim Alah', 'Jardim América', 'Jardim Brasil', 'Jardim Glória 1',
+    'Jardim Glória 2', 'Jardim Glória 3', 'Jardim Glória City', 'Juscelino Oliveira',
+    'Massaranduba', 'Matadouro', 'Monte Sinai', 'Nego Sá', 'Nova Açailândia',
+    'Novo Horizonte', 'Parque das Nações', 'Parque Industrial', 'Parque Planalto',
+    'Parque Vitória', 'Pequiá', 'Pequiá de Baixo', 'Pequiá de Cima', 'Plano da Serra',
+    'Polo Moveleiro', 'Porto Seguro II', 'Residencial Ana Julia',
+    'Residencial Bela Vista', 'Residencial Colina Park', 'Residencial Ouro Verde',
+    'Residencial Parati', 'Residencial Parque da Lagoa', 'Residencial Tropical',
+    'Sarney Filho', 'Vila Bom Jardim', 'Vila Bom Jardim de Baixo',
+    'Vila Bom Jardim de Cima', 'Vila Capeloza', 'Vila Dr Gilson',
+    'Vila Flávio Dino', 'Vila Ildemar', 'Vila Ipiranga', 'Vila Laranjeiras',
+    'Vila Maranhão', 'Vila Progresso I', 'Vila Progresso II', 'Vila São Francisco',
+    'Vila Sucuri', 'Vila Tancredo Neves',
+  ],
+  // Loteamentos/incorporadoras conhecidos
+  loteamentos: [
+    'Colina Park', 'Cj João Paulo II', 'Cj Vale do Pindaré', 'Cj Vale do Rio Doce',
+    'Laguna Park', 'Loteamento Bela Vista', 'Porto Seguro II', 'Residencial Ana Julia',
+    'Residencial Bela Vista', 'Residencial Colina Park', 'Residencial Ouro Verde',
+    'Residencial Parati', 'Residencial Parque da Lagoa', 'Residencial Tropical',
+  ],
+  // Povoados / zona rural
+  povoados: [
+    '50 Bis', 'Alvorada', 'Andirobal', 'Arizona', 'Beira da Mata', 'Cajuapara',
+    'Califórnia', 'Centro dos Maranhenses', 'Córrego Novo', 'Independência', 'Km 30',
+    'Nebulosa', 'Novo Bacabal', 'Pequiá', 'Pequiá de Baixo', 'Plano da Serra',
+    'Redenção', 'Reta', 'Santa Isabel', 'Santo Antônio', 'São Francisco', 'São João',
+    'São João do Andirobal', 'Suril', 'Teimosa', 'Trecho Seco', 'Turmalina',
+  ],
+  // Municípios limítrofes (uteis pra confrontantes/comarca)
+  municipiosLimitrofes: [
+    'Açailândia/MA', 'Bom Jardim/MA', 'Bom Jesus das Selvas/MA', 'Buriticupu/MA',
+    'Cidelândia/MA', 'Dom Eliseu/PA', 'Imperatriz/MA', 'Itinga do Maranhão/MA',
+    'João Lisboa/MA', 'Rondon do Pará/PA', 'São Francisco do Brejão/MA',
+  ],
+  // Cursos d'agua (uteis pra confrontantes em laudo rural)
+  cursosAgua: [
+    'Córrego Água Branca', 'Córrego Brejão', 'Córrego do Sapo', 'Córrego Esperança',
+    'Córrego Jacaré', 'Córrego Pequiá', 'Igarapé Água Suja', 'Rio Açailândia',
+    'Rio Ararandeua', 'Rio Azul', 'Rio Gurupi', 'Rio Itinga', 'Rio Pindaré',
+    'Rio Verde',
+  ],
+};
+
 async function loadLaudos() {
   try {
     const [r, c, e] = await Promise.all([
@@ -13464,29 +13520,29 @@ function renderLaudoTabDados(c) {
             <option value="MEIO_QUADRA" ${l.tipo_lote_urbano==='MEIO_QUADRA'?'selected':''}>Meio de quadra</option>
             <option value="ESQUINA" ${l.tipo_lote_urbano==='ESQUINA'?'selected':''}>Esquina</option>
           </select>
-          <input id="ld-loteamento" placeholder="Loteamento (ex: Colina Park)" value="${escape(l.loteamento||'')}">
+          <input id="ld-loteamento" list="dl-loteamentos" placeholder="Loteamento (ex: Colina Park)" value="${escape(l.loteamento||'')}">
           <input id="ld-contrato" placeholder="Contrato (ex: 26/15-0024)" value="${escape(l.numero_contrato||'')}">
           <input id="ld-quadra" placeholder="Quadra" value="${escape(l.quadra||'')}">
           <input id="ld-lote" placeholder="Número do lote" value="${escape(l.numero_lote||'')}">
         ` : `
-          <input id="ld-denom" placeholder="Denominação do imóvel" value="${escape(l.denominacao_imovel||'')}" style="grid-column:1/3;">
+          <input id="ld-denom" placeholder="Denominação do imóvel (ex: Fazenda...)" list="dl-povoados" value="${escape(l.denominacao_imovel||'')}" style="grid-column:1/3;">
           <input id="ld-nirf" placeholder="NIRF" value="${escape(l.nirf||'')}">
           <input id="ld-ccir" placeholder="CCIR" value="${escape(l.ccir||'')}">
         `}
         <input id="ld-end" placeholder="${isUrbano ? 'Rua / Endereço completo' : 'Endereço do imóvel'}" value="${escape(l.endereco_imovel||'')}" style="grid-column:1/3;">
-        <input id="ld-mun" placeholder="Município" value="${escape(l.municipio||'')}">
-        <input id="ld-uf" placeholder="UF" maxlength="2" value="${escape(l.uf_imovel||'')}">
-        <input id="ld-comarca" placeholder="Comarca" value="${escape(l.comarca||'')}" style="grid-column:1/3;">
+        <input id="ld-mun" list="dl-municipios" placeholder="Município" value="${escape(l.municipio || ACAILANDIA_DEFAULTS.municipio)}">
+        <input id="ld-uf" placeholder="UF" maxlength="2" value="${escape(l.uf_imovel || ACAILANDIA_DEFAULTS.uf)}">
+        <input id="ld-comarca" list="dl-municipios" placeholder="Comarca" value="${escape(l.comarca || ACAILANDIA_DEFAULTS.comarca)}" style="grid-column:1/3;">
       </div>
     </div>
     <div class="card">
       <h3 style="margin-top:0;">Confrontantes</h3>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-        <input id="ld-cf-frente" placeholder="Frente" value="${escape(l.confrontante_frente||'')}">
-        <input id="ld-cf-fundo" placeholder="Fundo" value="${escape(l.confrontante_fundo||'')}">
-        <input id="ld-cf-dir" placeholder="Lateral direita" value="${escape(l.confrontante_lat_dir||'')}">
-        <input id="ld-cf-esq" placeholder="Lateral esquerda" value="${escape(l.confrontante_lat_esq||'')}">
-        <input id="ld-cf-extra" placeholder="Confrontante extra (opcional)" value="${escape(l.confrontante_extra||'')}" style="grid-column:1/3;">
+        <input id="ld-cf-frente" list="dl-confrontantes" placeholder="Frente (ex: Rua, Avenida, vizinho)" value="${escape(l.confrontante_frente||'')}">
+        <input id="ld-cf-fundo" list="dl-confrontantes" placeholder="Fundo" value="${escape(l.confrontante_fundo||'')}">
+        <input id="ld-cf-dir" list="dl-confrontantes" placeholder="Lateral direita" value="${escape(l.confrontante_lat_dir||'')}">
+        <input id="ld-cf-esq" list="dl-confrontantes" placeholder="Lateral esquerda" value="${escape(l.confrontante_lat_esq||'')}">
+        <input id="ld-cf-extra" list="dl-confrontantes" placeholder="Confrontante extra (chanfro/esquina, opcional)" value="${escape(l.confrontante_extra||'')}" style="grid-column:1/3;">
       </div>
     </div>
     <div class="card">
@@ -13981,6 +14037,32 @@ if ('serviceWorker' in navigator) {
     });
   });
 }
+
+// v2.1.7: injeta datalists Açailândia no DOM (autocomplete dos campos do laudo)
+(function injetarDatalistsAcailandia() {
+  if (typeof ACAILANDIA_DEFAULTS === 'undefined') return;
+  const mk = (id, items) => {
+    if (document.getElementById(id)) return;
+    const dl = document.createElement('datalist');
+    dl.id = id;
+    dl.innerHTML = items.map(v => `<option value="${escape(v)}">`).join('');
+    document.body.appendChild(dl);
+  };
+  mk('dl-bairros', ACAILANDIA_DEFAULTS.bairros);
+  mk('dl-loteamentos', ACAILANDIA_DEFAULTS.loteamentos);
+  mk('dl-povoados', ACAILANDIA_DEFAULTS.povoados);
+  mk('dl-municipios', ACAILANDIA_DEFAULTS.municipiosLimitrofes.map(s => s.split('/')[0]));
+  mk('dl-cursos-agua', ACAILANDIA_DEFAULTS.cursosAgua);
+  // Confrontantes: combina bairros + loteamentos + cursos d'agua + municipios
+  const confrontantes = [...new Set([
+    ...ACAILANDIA_DEFAULTS.bairros,
+    ...ACAILANDIA_DEFAULTS.loteamentos,
+    ...ACAILANDIA_DEFAULTS.cursosAgua,
+    ...ACAILANDIA_DEFAULTS.povoados,
+    'Via pública', 'Avenida', 'Rua sem nome', 'Estrada vicinal',
+  ])].sort();
+  mk('dl-confrontantes', confrontantes);
+})();
 </script>
 </body>
 </html>
