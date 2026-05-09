@@ -12833,6 +12833,7 @@ function renderLaudoNovo(v) {
           <option value="">— escolher contratante existente —</option>
           ${conts.map(c => `<option value="${c.id}">${escape(c.nome)} ${c.cpf_cnpj?'('+escape(c.cpf_cnpj)+')':''}</option>`).join('')}
         </select>
+        <button id="ln-edit-cont" disabled title="Selecione um contratante para editar">✏️ Editar</button>
         <button id="ln-novo-cont">➕ Cadastrar novo</button>
       </div>
       <div id="ln-cont-form" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
@@ -12874,6 +12875,7 @@ function renderLaudoNovo(v) {
             return `<option value="${e.id}" ${e.id===1?'selected':''}>${escape(e.nome)}${reg?' ('+escape(reg)+')':''}${e.id===1?' — padrão':''}</option>`;
           }).join('')}
         </select>
+        <button id="ln-edit-exec">✏️ Editar</button>
         <button id="ln-novo-exec">➕ Cadastrar novo</button>
       </div>
       <div id="ln-exec-form" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
@@ -12906,9 +12908,66 @@ function renderLaudoNovo(v) {
     </div>
   `;
   document.getElementById('laudo-novo-back').onclick = () => { state.laudosView='lista'; renderLaudos(); };
+
+  // v2.1.3: tracking de modo (create vs edit) pra reusar o mesmo form
+  let contEditId = null; // null = create, número = edit
+  let execEditId = null;
+
+  // Habilita botão Editar quando há contratante selecionado
+  const updateEditContBtn = () => {
+    const id = document.getElementById('ln-contratante').value;
+    const btn = document.getElementById('ln-edit-cont');
+    btn.disabled = !id;
+    btn.title = id ? 'Editar este contratante' : 'Selecione um contratante para editar';
+  };
+  document.getElementById('ln-contratante').addEventListener('change', updateEditContBtn);
+  updateEditContBtn();
+
+  const limparFormCont = () => {
+    ['ln-c-cpf','ln-c-nome','ln-c-tel','ln-c-email','ln-c-end','ln-c-rg','ln-c-est','ln-c-prof','ln-c-rep-nome','ln-c-rep-cpf','ln-c-rep-cargo'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    document.getElementById('ln-c-tipo').value = 'PF';
+    document.getElementById('ln-c-nac').value = 'brasileiro(a)';
+    togglePfPj();
+  };
+
+  const preencherFormCont = (c) => {
+    document.getElementById('ln-c-tipo').value = c.tipo_pessoa || 'PF';
+    document.getElementById('ln-c-cpf').value = aplicarMascaraCpfCnpj(c.cpf_cnpj || '');
+    document.getElementById('ln-c-nome').value = c.nome || '';
+    document.getElementById('ln-c-tel').value = aplicarMascaraTel(c.telefone || '');
+    document.getElementById('ln-c-email').value = c.email || '';
+    document.getElementById('ln-c-end').value = c.endereco || c.logradouro || '';
+    document.getElementById('ln-c-rg').value = c.rg_ie || '';
+    document.getElementById('ln-c-nac').value = c.nacionalidade || 'brasileiro(a)';
+    document.getElementById('ln-c-est').value = c.estado_civil || '';
+    document.getElementById('ln-c-prof').value = c.profissao || '';
+    document.getElementById('ln-c-rep-nome').value = c.representante_nome || '';
+    document.getElementById('ln-c-rep-cpf').value = aplicarMascaraCpfCnpj(c.representante_cpf || '');
+    document.getElementById('ln-c-rep-cargo').value = c.representante_cargo || '';
+    togglePfPj();
+  };
+
   document.getElementById('ln-novo-cont').onclick = () => {
+    contEditId = null;
+    limparFormCont();
     document.getElementById('ln-cont-form').style.display = 'block';
+    document.getElementById('ln-c-salvar').textContent = '💾 Salvar contratante';
     aplicarMascarasLn();
+  };
+
+  document.getElementById('ln-edit-cont').onclick = async () => {
+    const id = document.getElementById('ln-contratante').value;
+    if (!id) return;
+    try {
+      const c = await api('/api/contratantes/'+id);
+      contEditId = Number(id);
+      preencherFormCont(c);
+      document.getElementById('ln-cont-form').style.display = 'block';
+      document.getElementById('ln-c-salvar').textContent = '💾 Atualizar contratante';
+      aplicarMascarasLn();
+    } catch (err) { alert('Erro: '+err.message); }
   };
   // v2.0.1: toggle PJ block + esconde campos PF
   const togglePfPj = () => {
@@ -12944,25 +13003,71 @@ function renderLaudoNovo(v) {
       return alert('Para PJ, nome e CPF do representante legal são obrigatórios');
     }
     try {
-      const novo = await api('/api/contratantes', {
-        method:'POST',
+      const ehEdit = contEditId !== null;
+      const url = ehEdit ? '/api/contratantes/'+contEditId : '/api/contratantes';
+      const novo = await api(url, {
+        method: ehEdit ? 'PUT' : 'POST',
         body: JSON.stringify(body),
         headers: { 'Content-Type': 'application/json' },
       });
-      state.laudoContratantes.unshift(novo);
       const sel = document.getElementById('ln-contratante');
-      const opt = document.createElement('option');
-      opt.value = novo.id; opt.textContent = novo.nome + ' (' + novo.cpf_cnpj + ')'; opt.selected = true;
-      sel.appendChild(opt);
+      if (ehEdit) {
+        // Substitui no cache + atualiza option
+        const idx = state.laudoContratantes.findIndex(c => c.id === contEditId);
+        if (idx >= 0) state.laudoContratantes[idx] = novo;
+        const opt = sel.querySelector(`option[value="${contEditId}"]`);
+        if (opt) opt.textContent = novo.nome + ' (' + novo.cpf_cnpj + ')';
+        alert('✅ Contratante atualizado');
+      } else {
+        state.laudoContratantes.unshift(novo);
+        const opt = document.createElement('option');
+        opt.value = novo.id; opt.textContent = novo.nome + ' (' + novo.cpf_cnpj + ')'; opt.selected = true;
+        sel.appendChild(opt);
+        alert('✅ Contratante cadastrado');
+      }
+      contEditId = null;
       document.getElementById('ln-cont-form').style.display = 'none';
-      alert('✅ Contratante cadastrado');
+      updateEditContBtn();
     } catch (err) { alert('Erro: '+err.message); }
   };
-  // v2.0.2: cadastro inline de executante
+  // v2.0.2 + v2.1.3: cadastro/edição inline de executante
+  const limparFormExec = () => {
+    ['ln-e-nome','ln-e-qual','ln-e-cft','ln-e-crea','ln-e-incra','ln-e-cpf','ln-e-tel','ln-e-email'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+  };
+
+  const preencherFormExec = (e) => {
+    document.getElementById('ln-e-nome').value = e.nome || '';
+    document.getElementById('ln-e-qual').value = e.qualificacao || '';
+    document.getElementById('ln-e-cft').value = e.registro_cft || '';
+    document.getElementById('ln-e-crea').value = e.registro_crea || '';
+    document.getElementById('ln-e-incra').value = e.cadastro_incra || '';
+    document.getElementById('ln-e-cpf').value = aplicarMascaraCpfCnpj(e.cpf || '');
+    document.getElementById('ln-e-tel').value = aplicarMascaraTel(e.telefone || '');
+    document.getElementById('ln-e-email').value = e.email || '';
+  };
+
   document.getElementById('ln-novo-exec').onclick = () => {
+    execEditId = null;
+    limparFormExec();
     document.getElementById('ln-exec-form').style.display = 'block';
+    document.getElementById('ln-e-salvar').textContent = '💾 Salvar profissional';
     aplicarMascarasLn();
   };
+
+  document.getElementById('ln-edit-exec').onclick = () => {
+    const id = document.getElementById('ln-executante').value;
+    if (!id) return alert('Selecione um profissional');
+    const e = state.laudoExecutantes.find(x => x.id === Number(id));
+    if (!e) return alert('Profissional não encontrado no cache');
+    execEditId = Number(id);
+    preencherFormExec(e);
+    document.getElementById('ln-exec-form').style.display = 'block';
+    document.getElementById('ln-e-salvar').textContent = '💾 Atualizar profissional';
+    aplicarMascarasLn();
+  };
+
   document.getElementById('ln-e-salvar').onclick = async () => {
     const body = {
       nome: document.getElementById('ln-e-nome').value.trim(),
@@ -12976,19 +13081,31 @@ function renderLaudoNovo(v) {
     };
     if (!body.nome) return alert('Nome obrigatório');
     try {
-      const novo = await api('/api/executantes', {
-        method:'POST',
+      const ehEdit = execEditId !== null;
+      const url = ehEdit ? '/api/executantes/'+execEditId : '/api/executantes';
+      const novo = await api(url, {
+        method: ehEdit ? 'PUT' : 'POST',
         body: JSON.stringify(body),
         headers: { 'Content-Type': 'application/json' },
       });
-      state.laudoExecutantes.push(novo);
       const sel = document.getElementById('ln-executante');
-      const opt = document.createElement('option');
       const reg = [novo.registro_cft && 'CFT '+novo.registro_cft, novo.registro_crea && 'CREA '+novo.registro_crea, novo.cadastro_incra && 'INCRA '+novo.cadastro_incra].filter(Boolean).join(' · ');
-      opt.value = novo.id; opt.textContent = novo.nome + (reg?' ('+reg+')':''); opt.selected = true;
-      sel.appendChild(opt);
+      const labelExec = novo.nome + (reg?' ('+reg+')':'') + (novo.id===1?' — padrão':'');
+      if (ehEdit) {
+        const idx = state.laudoExecutantes.findIndex(x => x.id === execEditId);
+        if (idx >= 0) state.laudoExecutantes[idx] = novo;
+        const opt = sel.querySelector(`option[value="${execEditId}"]`);
+        if (opt) opt.textContent = labelExec;
+        alert('✅ Profissional atualizado');
+      } else {
+        state.laudoExecutantes.push(novo);
+        const opt = document.createElement('option');
+        opt.value = novo.id; opt.textContent = labelExec; opt.selected = true;
+        sel.appendChild(opt);
+        alert('✅ Profissional cadastrado');
+      }
+      execEditId = null;
       document.getElementById('ln-exec-form').style.display = 'none';
-      alert('✅ Profissional cadastrado');
     } catch (err) { alert('Erro: '+err.message); }
   };
 
