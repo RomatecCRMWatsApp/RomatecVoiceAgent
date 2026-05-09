@@ -1141,7 +1141,17 @@ async function sincronizarFilaOffline() {
           ? { 'Content-Type': 'application/json', ...(item.headers || {}) }
           : item.headers,
       });
-      if (r.ok) { await removerDaFila(item.id); ok++; }
+      if (r.ok) {
+        // v2.4.2: se foi POST /api/laudos-demarcacao (criação), remove do cache offline local
+        if (item.method === 'POST' && item.path === '/api/laudos-demarcacao' && item.body) {
+          try {
+            const body = JSON.parse(item.body);
+            if (body.uuid_local) removerLaudoOfflineLocal(body.uuid_local);
+          } catch (_) {}
+        }
+        await removerDaFila(item.id);
+        ok++;
+      }
       else {
         await incrementarTentativa(item.id, `HTTP ${r.status}`);
         fail++;
@@ -13156,22 +13166,33 @@ function reinjetarDatalists() {
 async function loadLaudos() {
   try {
     const [r, c, e] = await Promise.all([
-      api('/api/laudos-demarcacao?limit=200'),
+      api('/api/laudos-demarcacao?limit=200').catch(() => ({ items: [], total: 0 })),
       api('/api/contratantes').catch(() => ({ items: [] })),
       api('/api/executantes').catch(() => ({ items: [] })),
     ]);
-    state.laudos = r;
+    // v2.4.2: merge laudos offline (pendentes de sync) com a lista online
+    const offlines = getLaudosOfflineLocal();
+    const items = [...(r.items || []), ...offlines.filter(o => !(r.items||[]).some(x => x.uuid_local === o.uuid_local))];
+    state.laudos = { items, total: items.length };
     state.laudoContratantes = c.items || c || [];
     state.laudoExecutantes = e.items || e || [];
   } catch (err) {
     console.warn('[laudos] load falhou:', err.message);
-    state.laudos = { items: [], total: 0 };
+    state.laudos = { items: getLaudosOfflineLocal(), total: 0 };
     state.laudoContratantes = [];
     state.laudoExecutantes = [];
   }
 }
 
 async function loadLaudoDetalhe(id) {
+  // v2.4.2: se id é UUID e está no cache offline, retorna direto sem ir pro server
+  if (typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)) {
+    const offline = getLaudosOfflineLocal().find(l => l.uuid_local === id);
+    if (offline) {
+      state.laudoAtual = offline;
+      return;
+    }
+  }
   const [laudo, geom, fotos] = await Promise.all([
     api('/api/laudos-demarcacao/' + id),
     api('/api/laudos-demarcacao/' + id + '/pontos').catch(() => ({ pontos:[], lados:[] })),
@@ -13644,12 +13665,43 @@ function renderLaudoNovo(v) {
     if (!eId) return alert('Escolha o profissional executor');
     const tipo = document.querySelector('[name="ln-tipo"]:checked').value;
     const obs = document.getElementById('ln-obs').value.trim() || null;
+    // v2.4.2: gera UUID client-side ANTES da request — assim funciona offline
+    const uuidLocal = (crypto.randomUUID && crypto.randomUUID()) || gerarUuidFallback();
     try {
       const novo = await api('/api/laudos-demarcacao', {
         method:'POST',
-        body: JSON.stringify({ contratante_id: Number(cId), executante_id: Number(eId), tipo_imovel: tipo, observacoes: obs }),
+        body: JSON.stringify({
+          contratante_id: Number(cId), executante_id: Number(eId),
+          tipo_imovel: tipo, observacoes: obs,
+          uuid_local: uuidLocal,
+        }),
         headers: { 'Content-Type': 'application/json' },
       });
+      // Quando offline: api() retorna { ok:true, _offline:true, _queued:true }
+      // Sem id real, mas com uuid_local. Cria laudo "fantasma" no state pra editar.
+      if (novo._offline || novo._queued) {
+        const fantasma = {
+          id: uuidLocal, // usa UUID como id (URL endpoints aceitam ambos via resolver)
+          uuid_local: uuidLocal,
+          numero_laudo: 'OFFLINE-' + uuidLocal.slice(0, 8),
+          contratante_id: Number(cId), executante_id: Number(eId),
+          tipo_imovel: tipo, observacoes: obs,
+          status: 'RASCUNHO', ativo: true, _offline: true,
+          pontos: [], lados: [], fotos: [],
+          base_nome: null, base_inicio_rastreio: null, base_fim_rastreio: null,
+          base_observacoes: null, rover_nome: null, coletor_nome: null,
+          tipo_levantamento: null, sistema_coord: 'AMBOS',
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        };
+        await salvarLaudoOfflineLocal(fantasma);
+        state.laudoAtual = fantasma;
+        state.laudoContratantes = state.laudoContratantes; // sem reload
+        state.laudosView = 'editor';
+        state.laudoEditorTab = 'dados';
+        renderLaudos();
+        mostrarToastOffline('🔴 Laudo criado OFFLINE — sincroniza quando reconectar', 'warn');
+        return;
+      }
       await loadLaudos();
       await loadLaudoDetalhe(novo.id);
       state.laudosView = 'editor';
@@ -13657,6 +13709,36 @@ function renderLaudoNovo(v) {
       renderLaudos();
     } catch (err) { alert('Erro: '+err.message); }
   };
+}
+
+// v2.4.2: fallback de UUID v4 quando crypto.randomUUID() não suportado (browsers antigos)
+function gerarUuidFallback() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+// Cache local de laudos criados offline pra poder editá-los antes do sync
+const LAUDOS_OFFLINE_KEY = 'romatec_laudos_offline_v1';
+async function salvarLaudoOfflineLocal(laudo) {
+  try {
+    const lista = JSON.parse(localStorage.getItem(LAUDOS_OFFLINE_KEY) || '[]');
+    const idx = lista.findIndex(l => l.uuid_local === laudo.uuid_local);
+    if (idx >= 0) lista[idx] = laudo; else lista.push(laudo);
+    localStorage.setItem(LAUDOS_OFFLINE_KEY, JSON.stringify(lista));
+  } catch (_) {}
+}
+function getLaudosOfflineLocal() {
+  try { return JSON.parse(localStorage.getItem(LAUDOS_OFFLINE_KEY) || '[]'); }
+  catch (_) { return []; }
+}
+function removerLaudoOfflineLocal(uuid) {
+  try {
+    const lista = JSON.parse(localStorage.getItem(LAUDOS_OFFLINE_KEY) || '[]');
+    const filt = lista.filter(l => l.uuid_local !== uuid);
+    localStorage.setItem(LAUDOS_OFFLINE_KEY, JSON.stringify(filt));
+  } catch (_) {}
 }
 
 function renderLaudoEditor(v) {

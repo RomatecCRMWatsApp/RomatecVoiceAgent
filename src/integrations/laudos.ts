@@ -72,6 +72,8 @@ export interface Laudo {
   // v2.2.3: equipamento Rover (receptor movel) + Coletor de dados
   rover_nome: string | null;
   coletor_nome: string | null;
+  // v2.4.2: uuid gerado pelo cliente pra suportar criacao offline
+  uuid_local: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -129,6 +131,7 @@ interface LaudoRow extends RowDataPacket {
   base_observacoes: string | null;
   rover_nome: string | null;
   coletor_nome: string | null;
+  uuid_local: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -202,6 +205,7 @@ function mapRow(r: LaudoRow): Laudo {
     base_observacoes: r.base_observacoes ?? null,
     rover_nome: r.rover_nome ?? null,
     coletor_nome: r.coletor_nome ?? null,
+    uuid_local: r.uuid_local ?? null,
     created_at: asISO(r.created_at) ?? '',
     updated_at: asISO(r.updated_at) ?? '',
   };
@@ -244,6 +248,28 @@ export interface CriarLaudoRascunhoInput {
   executante_id?: number; // default: 1 (Jose Romario)
   tipo_imovel: TipoImovel;
   observacoes?: string | null;
+  // v2.4.2: uuid client-side pra suportar criacao offline
+  uuid_local?: string | null;
+}
+
+/**
+ * v2.4.2: Resolve um identificador (numero ou UUID) pro id INT do laudo.
+ * Aceita: 123 (number), "123" (string numerica), ou uuid v4 (string).
+ * Permite que endpoints existentes aceitem ambos formatos.
+ */
+export async function resolverLaudoId(idOrUuid: string | number): Promise<number> {
+  if (typeof idOrUuid === 'number') return idOrUuid;
+  const s = String(idOrUuid).trim();
+  if (/^\d+$/.test(s)) return Number(s);
+  // UUID v4 format check (loose)
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) {
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      'SELECT id FROM laudos_demarcacao WHERE uuid_local = ? LIMIT 1', [s]
+    );
+    if (rows.length) return Number(rows[0].id);
+    throw new Error('Laudo nao encontrado por uuid_local: ' + s);
+  }
+  throw new Error('Identificador de laudo invalido: ' + s);
 }
 
 export async function criarLaudoRascunho(input: CriarLaudoRascunhoInput): Promise<Laudo> {
@@ -266,14 +292,30 @@ export async function criarLaudoRascunho(input: CriarLaudoRascunhoInput): Promis
   const numero = await gerarNumeroLaudo();
   const tokenUuid = crypto.randomUUID();
   const hashValidacao = crypto.randomBytes(32).toString('hex');
+  // v2.4.2: aceita uuid_local do cliente (offline-first), senao gera novo
+  const uuidLocal = input.uuid_local && /^[0-9a-f-]{36}$/i.test(input.uuid_local)
+    ? input.uuid_local
+    : crypto.randomUUID();
+
+  // Idempotencia: se uuid_local ja existe, retorna o laudo existente em vez de criar duplicata
+  // (cenário: sync de fila offline pode tentar criar 2x se algo falhou)
+  if (input.uuid_local) {
+    const [exist] = await pool.execute<RowDataPacket[]>(
+      'SELECT id FROM laudos_demarcacao WHERE uuid_local = ? LIMIT 1', [uuidLocal]
+    );
+    if (exist.length) {
+      const existing = await buscarLaudo(Number(exist[0].id));
+      if (existing) return existing;
+    }
+  }
 
   const [r] = await pool.execute<ResultSetHeader>(
     `INSERT INTO laudos_demarcacao
       (numero_laudo, contratante_id, executante_id, tipo_imovel,
-       token_uuid, hash_validacao, status, observacoes)
-     VALUES (?, ?, ?, ?, ?, ?, 'RASCUNHO', ?)`,
+       token_uuid, hash_validacao, status, observacoes, uuid_local)
+     VALUES (?, ?, ?, ?, ?, ?, 'RASCUNHO', ?, ?)`,
     [numero, input.contratante_id, executanteId, input.tipo_imovel,
-     tokenUuid, hashValidacao, input.observacoes ?? null]
+     tokenUuid, hashValidacao, input.observacoes ?? null, uuidLocal]
   );
 
   const created = await buscarLaudo(r.insertId);

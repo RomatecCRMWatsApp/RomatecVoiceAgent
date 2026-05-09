@@ -252,6 +252,11 @@ export async function runLaudosMigrations(): Promise<void> {
     { label: 'ALTER laudo rover_nome', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN rover_nome VARCHAR(120) NULL' },
     // v2.2.3: coletor de dados (controlador). Default 'Coletor R60'
     { label: 'ALTER laudo coletor_nome', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN coletor_nome VARCHAR(120) NULL' },
+    // v2.4.2: uuid_local — identificador gerado pelo cliente pra suportar
+    // criacao OFFLINE de laudos. Quando online sincroniza, server resolve
+    // uuid_local → id numerico interno. Frontend pode usar uuid em URLs.
+    { label: 'ALTER laudo uuid_local', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN uuid_local CHAR(36) NULL' },
+    { label: 'INDEX uuid_local UNIQUE', sql: 'ALTER TABLE laudos_demarcacao ADD UNIQUE INDEX idx_uuid_local (uuid_local)' },
   ];
   for (const { label, sql } of ops) {
     try {

@@ -1581,10 +1581,12 @@ app.get('/api/laudos-demarcacao', async (req: Request, res: Response) => {
 app.get('/api/laudos-demarcacao/:id', async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
-    const l = await m.buscarLaudo(String(req.params.id));
+    // v2.4.2: aceita id numerico ou uuid_local
+    const id = await m.resolverLaudoId(String(req.params.id));
+    const l = await m.buscarLaudo(id);
     if (!l) { res.status(404).json({ error: 'Laudo nao encontrado' }); return; }
     res.json(l);
-  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+  } catch (err) { res.status(404).json({ error: (err as Error).message }); }
 });
 app.post('/api/laudos-demarcacao', requireCeoToken, async (req: Request, res: Response) => {
   try {
@@ -1596,7 +1598,8 @@ app.post('/api/laudos-demarcacao', requireCeoToken, async (req: Request, res: Re
 app.delete('/api/laudos-demarcacao/:id', requireCeoToken, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
-    await m.desativarLaudo(String(req.params.id));
+    const id = await m.resolverLaudoId(String(req.params.id));
+    await m.desativarLaudo(id);
     res.json({ ok: true });
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
@@ -1605,7 +1608,8 @@ app.delete('/api/laudos-demarcacao/:id', requireCeoToken, async (req: Request, r
 app.put('/api/laudos-demarcacao/:id', requireCeoToken, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
-    const l = await m.atualizarLaudo(String(req.params.id), req.body || {});
+    const id = await m.resolverLaudoId(String(req.params.id));
+    const l = await m.atualizarLaudo(id, req.body || {});
     res.json(l);
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
@@ -1614,9 +1618,10 @@ app.put('/api/laudos-demarcacao/:id', requireCeoToken, async (req: Request, res:
 app.get('/api/laudos-demarcacao/:id/pontos', async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
+    const id = await m.resolverLaudoId(String(req.params.id));
     const [pontos, lados] = await Promise.all([
-      m.listarPontosDoLaudo(String(req.params.id)),
-      m.listarLadosDoLaudo(String(req.params.id)),
+      m.listarPontosDoLaudo(id),
+      m.listarLadosDoLaudo(id),
     ]);
     res.json({ pontos, lados });
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
@@ -1624,13 +1629,14 @@ app.get('/api/laudos-demarcacao/:id/pontos', async (req: Request, res: Response)
 app.post('/api/laudos-demarcacao/:id/pontos', requireCeoToken, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
+    const id = await m.resolverLaudoId(String(req.params.id));
     const b = (req.body || {}) as { pontos?: unknown; default_zona?: number; default_hemisferio?: 'N' | 'S' };
     if (!Array.isArray(b.pontos)) {
       res.status(400).json({ error: 'campo `pontos` (array) obrigatorio' });
       return;
     }
     const r = await m.salvarPontosDoLaudo(
-      String(req.params.id),
+      id,
       b.pontos as Parameters<typeof m.salvarPontosDoLaudo>[1],
       b.default_zona ?? 23,
       b.default_hemisferio ?? 'S'
@@ -1656,7 +1662,7 @@ app.post('/api/laudos-demarcacao/import-rtk', requireCeoToken, async (req: Reque
 app.get('/api/laudos-demarcacao/:id/croqui', async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
-    const id = String(req.params.id);
+    const id = await m.resolverLaudoId(String(req.params.id));
     const laudo = await m.buscarLaudo(id);
     if (!laudo) { res.status(404).json({ error: 'Laudo nao encontrado' }); return; }
 
@@ -1681,10 +1687,11 @@ app.get('/api/laudos-demarcacao/:id/croqui', async (req: Request, res: Response)
 app.post('/api/laudos-demarcacao/:id/croqui-upload', requireCeoToken, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
+    const id = await m.resolverLaudoId(String(req.params.id));
     const b = (req.body || {}) as { mime?: string; conteudo_b64?: string };
     if (!b.conteudo_b64) { res.status(400).json({ error: 'conteudo_b64 obrigatorio' }); return; }
     if (!b.mime) { res.status(400).json({ error: 'mime obrigatorio' }); return; }
-    await m.salvarCroquiUpload(String(req.params.id), b.conteudo_b64, b.mime);
+    await m.salvarCroquiUpload(id, b.conteudo_b64, b.mime);
     res.json({ ok: true });
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
@@ -1693,7 +1700,8 @@ app.post('/api/laudos-demarcacao/:id/croqui-upload', requireCeoToken, async (req
 app.post('/api/laudos-demarcacao/:id/croqui-reset', requireCeoToken, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
-    await m.resetarCroquiAuto(String(req.params.id));
+    const id = await m.resolverLaudoId(String(req.params.id));
+    await m.resetarCroquiAuto(id);
     res.json({ ok: true });
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
@@ -1702,7 +1710,8 @@ app.post('/api/laudos-demarcacao/:id/croqui-reset', requireCeoToken, async (req:
 app.get('/api/laudos-demarcacao/:id/fotos', async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
-    const fotos = await m.listarFotosDoLaudo(String(req.params.id));
+    const id = await m.resolverLaudoId(String(req.params.id));
+    const fotos = await m.listarFotosDoLaudo(id);
     res.json(fotos);
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
@@ -1711,7 +1720,7 @@ app.get('/api/laudos-demarcacao/:id/fotos', async (req: Request, res: Response) 
 app.post('/api/laudos-demarcacao/:id/fotos', requireCeoToken, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
-    const id = Number(req.params.id);
+    const id = await m.resolverLaudoId(String(req.params.id));
     const b = (req.body || {}) as { fotos?: unknown };
     if (!Array.isArray(b.fotos) || b.fotos.length === 0) {
       res.status(400).json({ error: 'campo `fotos` (array) obrigatorio' });
