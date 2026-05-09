@@ -629,6 +629,7 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="folha">Folha Mensal</button>
     <button class="tab" data-tab="vto">Vistoria (VTO)</button>
     <button class="tab" data-tab="proposta">Proposta</button>
+    <button class="tab" data-tab="laudos">📐 Laudos</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
   </div>
 
@@ -646,6 +647,7 @@ window.forcarUpdateApp = forcarUpdate;
   <div id="view-proposta" class="view"></div>
   <div id="view-recibos" class="view"></div>
   <div id="view-notas" class="view"></div>
+  <div id="view-laudos" class="view"></div>
   <div id="view-calculos" class="view"></div>
 </div>
 
@@ -994,6 +996,11 @@ const state = {
   sinapiBusca: '',               // filtro autocomplete
   propostasClientes: [],         // cache de clientes
   propostaCategoriaAberta: '',   // qual acordeão de categoria está aberto
+  // v2.0.0: Laudos de Demarcacao
+  laudos: { items: [], total: 0 },
+  laudoAtual: null,              // laudo sendo editado (com pontos/lados/fotos)
+  laudoContratantes: [],         // cache lista de contratantes
+  laudoExecutantes: [],          // cache lista de executantes
 };
 
 const fmt = n => 'R$ ' + (Number(n)||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -1163,6 +1170,7 @@ async function render() {
       calculos: async () => { renderCalculos(); },
       recibos: async () => { await Promise.all([loadObras(), loadRecibos()]); renderRecibos(); },
       notas:   async () => { await Promise.all([loadNotas(), loadFiscalConfig()]); renderNotas(); },
+      laudos:  async () => { await loadLaudos(); renderLaudos(); },
     };
     await fns[state.currentTab]();
   } catch (e) {
@@ -12565,6 +12573,705 @@ async function abrirZayraVisual() {
 }
 
 render();
+
+// ── v2.0.0: LAUDOS DE DEMARCACAO (Fase 7) ─────────────────────────────────
+const LAUDO_STATUS_COR = {
+  RASCUNHO: '#94a3b8', PREENCHIDO: '#3b82f6', ASSINADO: '#1F5C3A',
+  RECIBO_GERADO: '#f59e0b', ENVIADO: '#0ea5e9', CONFIRMADO: '#16a34a',
+  CANCELADO: '#ef4444',
+};
+const LAUDO_STATUS_LABEL = {
+  RASCUNHO: 'Rascunho', PREENCHIDO: 'Preenchido', ASSINADO: 'Assinado',
+  RECIBO_GERADO: 'Recibo gerado', ENVIADO: 'Enviado', CONFIRMADO: 'Confirmado',
+  CANCELADO: 'Cancelado',
+};
+
+async function loadLaudos() {
+  try {
+    const [r, c, e] = await Promise.all([
+      api('/api/laudos-demarcacao?limit=200'),
+      api('/api/contratantes').catch(() => ({ items: [] })),
+      api('/api/executantes').catch(() => ({ items: [] })),
+    ]);
+    state.laudos = r;
+    state.laudoContratantes = c.items || c || [];
+    state.laudoExecutantes = e.items || e || [];
+  } catch (err) {
+    console.warn('[laudos] load falhou:', err.message);
+    state.laudos = { items: [], total: 0 };
+    state.laudoContratantes = [];
+    state.laudoExecutantes = [];
+  }
+}
+
+async function loadLaudoDetalhe(id) {
+  const [laudo, geom, fotos] = await Promise.all([
+    api('/api/laudos-demarcacao/' + id),
+    api('/api/laudos-demarcacao/' + id + '/pontos').catch(() => ({ pontos:[], lados:[] })),
+    api('/api/laudos-demarcacao/' + id + '/fotos').catch(() => ({ items:[] })),
+  ]);
+  state.laudoAtual = {
+    ...laudo,
+    pontos: geom.pontos || [],
+    lados: geom.lados || [],
+    fotos: fotos.items || fotos || [],
+  };
+}
+
+function renderLaudos() {
+  const v = document.getElementById('view-laudos');
+  if (!state.laudosView) state.laudosView = 'lista';
+  if (state.laudosView === 'novo')      return renderLaudoNovo(v);
+  if (state.laudosView === 'editor' && state.laudoAtual) return renderLaudoEditor(v);
+  return renderLaudosLista(v);
+}
+
+function renderLaudosLista(v) {
+  if (!state.laudosFiltro) state.laudosFiltro = { status:'', q:'' };
+  const f = state.laudosFiltro;
+  let lista = state.laudos.items || [];
+  if (f.status) lista = lista.filter(l => l.status === f.status);
+  if (f.q) {
+    const q = f.q.toLowerCase();
+    lista = lista.filter(l =>
+      (l.numero_laudo || '').toLowerCase().includes(q) ||
+      (l.denominacao_imovel || '').toLowerCase().includes(q) ||
+      (l.municipio || '').toLowerCase().includes(q) ||
+      (l.numero_lote || '').toLowerCase().includes(q)
+    );
+  }
+  const stCount = {};
+  for (const l of state.laudos.items || []) stCount[l.status] = (stCount[l.status]||0)+1;
+  const totalAtivos = (state.laudos.items || []).length;
+
+  const cards = lista.map(l => {
+    const cor = LAUDO_STATUS_COR[l.status] || '#666';
+    const label = LAUDO_STATUS_LABEL[l.status] || l.status;
+    const cont = state.laudoContratantes.find(c => c.id === l.contratante_id);
+    const data = l.created_at ? parseDataBR(l.created_at) : '-';
+    const valor = l.valor_servico != null ? fmt(l.valor_servico) : '';
+    const area = l.area_total_m2 != null ? Number(l.area_total_m2).toLocaleString('pt-BR',{maximumFractionDigits:2}) + ' m²' : '';
+    const localizacao = [l.numero_lote && 'Lote '+l.numero_lote, l.quadra && 'Q.'+l.quadra, l.loteamento, l.municipio].filter(Boolean).join(' · ');
+    return `
+    <div class="card" style="border-left:4px solid ${cor};">
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1; min-width:220px;">
+          <p style="margin:0; font-weight:600; font-size:14px;">
+            📐 ${escape(l.numero_laudo)} · ${escape(l.tipo_imovel)}
+          </p>
+          <p style="margin:4px 0; font-size:12px;">
+            <strong>${escape(cont?.nome || 'Contratante #'+l.contratante_id)}</strong>
+            ${cont?.cpf_cnpj ? `<span style="color:var(--text-muted);"> · ${escape(cont.cpf_cnpj)}</span>` : ''}
+          </p>
+          ${localizacao ? `<p style="margin:2px 0; font-size:11px; color:var(--text-muted);">📍 ${escape(localizacao)}</p>` : ''}
+          ${l.denominacao_imovel ? `<p style="margin:2px 0; font-size:11px; color:var(--text-muted);">${escape(l.denominacao_imovel)}</p>` : ''}
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+            <span class="badge" style="font-size:10px; background:${cor}22; color:${cor}; border:1px solid ${cor}55;">${escape(label)}</span>
+            <span class="badge badge-info" style="font-size:10px;">${escape(data)}</span>
+            ${area ? `<span class="badge" style="font-size:10px; background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955;">📏 ${escape(area)}</span>` : ''}
+            ${valor ? `<span class="badge" style="font-size:10px; background:#16a34a22; color:#16a34a; border:1px solid #16a34a55;">💰 ${escape(valor)}</span>` : ''}
+            ${l.assinado_em ? `<span class="badge" style="font-size:10px; background:#1F5C3A22; color:#1F5C3A; border:1px solid #1F5C3A55;" title="Assinado em ${escape(parseDataBR(l.assinado_em))}">🔏 Assinado</span>` : ''}
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px; min-width:240px;">
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-laudo-edit="${l.id}" style="flex:1; background:var(--gold); color:#06120a; border-color:var(--gold);">✏️ Abrir</button>
+            <button data-laudo-pdf="${l.id}" title="Baixar PDF" style="flex:1;">📄 PDF</button>
+          </div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            ${l.assinado_em
+              ? `<button data-laudo-pdf-sig="${l.id}" title="PDF assinado digitalmente" style="flex:1; background:#1F5C3A22; color:#1F5C3A; border:1px solid #1F5C3A55;">🔏 Assinado</button>`
+              : `<button data-laudo-sig="${l.id}" title="Assinar digitalmente (PAdES ICP-Brasil)" style="flex:1; background:transparent; color:var(--text-muted); border:1px dashed var(--border);">🔏 Assinar</button>`}
+            ${l.recibo_id
+              ? `<button data-laudo-recibo-ver="${l.recibo_id}" title="Ver recibo gerado" style="flex:1; background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b55;">🧾 Recibo</button>`
+              : (l.assinado_em ? `<button data-laudo-recibo="${l.id}" title="Gerar recibo" style="flex:1;">🧾 Gerar recibo</button>` : '')}
+          </div>
+          ${l.assinado_em ? `<div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-laudo-zapi="${l.id}" title="Enviar pelo WhatsApp (Z-API)" style="flex:1; background:#25d36622; color:#25d366; border-color:#25d36655;">📱 Enviar WhatsApp</button>
+          </div>` : ''}
+          <button data-laudo-del="${l.id}" class="btn-danger" style="font-size:11px; padding:4px;" title="Desativar laudo">🗑️ Excluir</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  v.innerHTML = `
+    <div class="card" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <strong style="font-size:14px;">📐 Laudos de Demarcação</strong>
+      <span style="color:var(--text-muted); font-size:12px;">${totalAtivos} ${totalAtivos===1?'laudo':'laudos'}</span>
+      <span style="flex:1;"></span>
+      <button id="btn-laudo-novo" style="background:var(--gold); color:#06120a; border-color:var(--gold);">➕ Novo Laudo</button>
+    </div>
+    <div class="card" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <input id="laudo-q" placeholder="Buscar por número, lote, imóvel..." value="${escape(f.q)}" style="flex:1; min-width:200px;">
+      <select id="laudo-status" style="min-width:140px;">
+        <option value="">Todos status</option>
+        ${Object.keys(LAUDO_STATUS_LABEL).map(s =>
+          `<option value="${s}" ${f.status===s?'selected':''}>${LAUDO_STATUS_LABEL[s]} (${stCount[s]||0})</option>`
+        ).join('')}
+      </select>
+    </div>
+    ${cards || '<div class="card empty">Nenhum laudo cadastrado. Clique em <strong>➕ Novo Laudo</strong> pra começar.</div>'}
+  `;
+
+  document.getElementById('btn-laudo-novo').onclick = () => { state.laudosView='novo'; renderLaudos(); };
+  document.getElementById('laudo-q').oninput = e => { state.laudosFiltro.q = e.target.value; renderLaudosLista(v); };
+  document.getElementById('laudo-status').onchange = e => { state.laudosFiltro.status = e.target.value; renderLaudosLista(v); };
+
+  v.querySelectorAll('[data-laudo-edit]').forEach(b => b.onclick = async () => {
+    try {
+      await loadLaudoDetalhe(b.dataset.laudoEdit);
+      state.laudosView = 'editor';
+      state.laudoEditorTab = 'dados';
+      renderLaudos();
+    } catch (err) { alert('Erro: '+err.message); }
+  });
+  v.querySelectorAll('[data-laudo-pdf]').forEach(b => b.onclick = () => {
+    window.open('/api/laudos-demarcacao/' + b.dataset.laudoPdf + '/pdf', '_blank');
+  });
+  v.querySelectorAll('[data-laudo-pdf-sig]').forEach(b => b.onclick = () => {
+    window.open('/api/laudos-demarcacao/' + b.dataset.laudoPdfSig + '/pdf-assinado', '_blank');
+  });
+  v.querySelectorAll('[data-laudo-sig]').forEach(b => b.onclick = async () => {
+    if (!confirm('Assinar digitalmente este laudo (PAdES ICP-Brasil)?')) return;
+    const senha = prompt('Senha do certificado A1:');
+    if (!senha) return;
+    try {
+      await api('/api/laudos-demarcacao/' + b.dataset.laudoSig + '/assinar', {
+        method: 'POST',
+        body: JSON.stringify({ senha }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await render();
+    } catch (err) { alert('Erro ao assinar: '+err.message); }
+  });
+  v.querySelectorAll('[data-laudo-recibo]').forEach(b => b.onclick = async () => {
+    if (!confirm('Gerar recibo a partir deste laudo?')) return;
+    try {
+      await api('/api/laudos-demarcacao/' + b.dataset.laudoRecibo + '/gerar-recibo', { method: 'POST' });
+      alert('Recibo gerado!');
+      await render();
+    } catch (err) { alert('Erro: '+err.message); }
+  });
+  v.querySelectorAll('[data-laudo-recibo-ver]').forEach(b => b.onclick = () => {
+    state.currentTab = 'recibos'; render();
+  });
+  v.querySelectorAll('[data-laudo-zapi]').forEach(b => b.onclick = async () => {
+    const tel = prompt('WhatsApp do destinatário (DDD+número):');
+    if (!tel) return;
+    try {
+      const r = await api('/api/laudos-demarcacao/' + b.dataset.laudoZapi + '/enviar-zapi', {
+        method: 'POST',
+        body: JSON.stringify({ telefone: tel }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      alert('✅ Enviado! ' + (r.message_id ? 'ID: '+r.message_id : ''));
+      await render();
+    } catch (err) { alert('Erro Z-API: '+err.message); }
+  });
+  v.querySelectorAll('[data-laudo-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Desativar este laudo? (soft delete — pode ser recuperado pelo banco)')) return;
+    try {
+      await api('/api/laudos-demarcacao/' + b.dataset.laudoDel, { method: 'DELETE' });
+      await render();
+    } catch (err) { alert('Erro: '+err.message); }
+  });
+}
+
+function renderLaudoNovo(v) {
+  const conts = state.laudoContratantes;
+  v.innerHTML = `
+    <div class="card">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button id="laudo-novo-back">← Voltar</button>
+        <strong>➕ Novo Laudo de Demarcação</strong>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">1. Contratante (proprietário)</h3>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <select id="ln-contratante" style="flex:1; min-width:240px;">
+          <option value="">— escolher contratante existente —</option>
+          ${conts.map(c => `<option value="${c.id}">${escape(c.nome)} ${c.cpf_cnpj?'('+escape(c.cpf_cnpj)+')':''}</option>`).join('')}
+        </select>
+        <button id="ln-novo-cont">➕ Cadastrar novo</button>
+      </div>
+      <div id="ln-cont-form" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+        <div class="grid-2" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <select id="ln-c-tipo">
+            <option value="PF">Pessoa Física</option>
+            <option value="PJ">Pessoa Jurídica</option>
+          </select>
+          <input id="ln-c-cpf" placeholder="CPF ou CNPJ">
+          <input id="ln-c-nome" placeholder="Nome / Razão Social" style="grid-column:1/3;">
+          <input id="ln-c-tel" placeholder="Telefone (com DDD)">
+          <input id="ln-c-email" placeholder="Email" type="email">
+          <input id="ln-c-end" placeholder="Endereço completo" style="grid-column:1/3;">
+          <input id="ln-c-rg" placeholder="RG / Insc. Estadual">
+          <input id="ln-c-nac" placeholder="Nacionalidade (PF)" value="brasileiro(a)">
+          <input id="ln-c-est" placeholder="Estado civil (PF)">
+          <input id="ln-c-prof" placeholder="Profissão (PF)">
+        </div>
+        <button id="ln-c-salvar" style="margin-top:8px; background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Salvar contratante</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">2. Tipo de imóvel</h3>
+      <div style="display:flex; gap:12px;">
+        <label><input type="radio" name="ln-tipo" value="URBANO" checked> 🏘️ Urbano</label>
+        <label><input type="radio" name="ln-tipo" value="RURAL"> 🌾 Rural</label>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">3. Observações (opcional)</h3>
+      <textarea id="ln-obs" rows="3" style="width:100%;" placeholder="Notas internas, contexto, etc."></textarea>
+    </div>
+    <div class="card">
+      <button id="ln-criar" style="background:var(--gold); color:#06120a; border-color:var(--gold); padding:12px 24px; font-weight:600;">✅ Criar laudo (rascunho)</button>
+    </div>
+  `;
+  document.getElementById('laudo-novo-back').onclick = () => { state.laudosView='lista'; renderLaudos(); };
+  document.getElementById('ln-novo-cont').onclick = () => {
+    document.getElementById('ln-cont-form').style.display = 'block';
+  };
+  document.getElementById('ln-c-salvar').onclick = async () => {
+    const body = {
+      tipo_pessoa: document.getElementById('ln-c-tipo').value,
+      cpf_cnpj: document.getElementById('ln-c-cpf').value.trim(),
+      nome: document.getElementById('ln-c-nome').value.trim(),
+      telefone: document.getElementById('ln-c-tel').value.trim() || null,
+      email: document.getElementById('ln-c-email').value.trim() || null,
+      endereco: document.getElementById('ln-c-end').value.trim() || null,
+      rg_ie: document.getElementById('ln-c-rg').value.trim() || null,
+      nacionalidade: document.getElementById('ln-c-nac').value.trim() || null,
+      estado_civil: document.getElementById('ln-c-est').value.trim() || null,
+      profissao: document.getElementById('ln-c-prof').value.trim() || null,
+    };
+    if (!body.cpf_cnpj || !body.nome) return alert('CPF/CNPJ e nome obrigatórios');
+    try {
+      const novo = await api('/api/contratantes', {
+        method:'POST',
+        body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      state.laudoContratantes.unshift(novo);
+      const sel = document.getElementById('ln-contratante');
+      const opt = document.createElement('option');
+      opt.value = novo.id; opt.textContent = novo.nome + ' (' + novo.cpf_cnpj + ')'; opt.selected = true;
+      sel.appendChild(opt);
+      document.getElementById('ln-cont-form').style.display = 'none';
+      alert('✅ Contratante cadastrado');
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+  document.getElementById('ln-criar').onclick = async () => {
+    const cId = document.getElementById('ln-contratante').value;
+    if (!cId) return alert('Escolha ou cadastre um contratante');
+    const tipo = document.querySelector('[name="ln-tipo"]:checked').value;
+    const obs = document.getElementById('ln-obs').value.trim() || null;
+    try {
+      const novo = await api('/api/laudos-demarcacao', {
+        method:'POST',
+        body: JSON.stringify({ contratante_id: Number(cId), tipo_imovel: tipo, observacoes: obs }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await loadLaudos();
+      await loadLaudoDetalhe(novo.id);
+      state.laudosView = 'editor';
+      state.laudoEditorTab = 'dados';
+      renderLaudos();
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+}
+
+function renderLaudoEditor(v) {
+  const l = state.laudoAtual;
+  if (!l) { state.laudosView='lista'; return renderLaudos(); }
+  if (!state.laudoEditorTab) state.laudoEditorTab = 'dados';
+  const cont = state.laudoContratantes.find(c => c.id === l.contratante_id);
+  const cor = LAUDO_STATUS_COR[l.status] || '#666';
+
+  const tabs = [
+    ['dados', '📋 Dados gerais'],
+    ['pontos', '📍 Pontos / Vértices'],
+    ['croqui', '🗺️ Croqui'],
+    ['fotos', '📸 Fotos (' + (l.fotos?.length || 0) + ')'],
+    ['art', '📜 ART/TRT + Financeiro'],
+  ];
+
+  v.innerHTML = `
+    <div class="card" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; border-left:4px solid ${cor};">
+      <button id="le-back">← Lista</button>
+      <strong style="font-size:14px;">📐 ${escape(l.numero_laudo)}</strong>
+      <span class="badge" style="font-size:10px; background:${cor}22; color:${cor}; border:1px solid ${cor}55;">${escape(LAUDO_STATUS_LABEL[l.status] || l.status)}</span>
+      <span style="color:var(--text-muted); font-size:12px;">${escape(cont?.nome || '')}</span>
+      <span style="flex:1;"></span>
+      <button data-le-pdf style="background:var(--gold); color:#06120a; border-color:var(--gold);">📄 Pré-visualizar PDF</button>
+    </div>
+    <div class="card" style="display:flex; gap:6px; flex-wrap:wrap; padding:8px;">
+      ${tabs.map(([k,lbl]) => `<button class="le-tab" data-le-tab="${k}" style="${state.laudoEditorTab===k?'background:var(--gold); color:#06120a; border-color:var(--gold);':''}">${lbl}</button>`).join('')}
+    </div>
+    <div id="le-content"></div>
+  `;
+  document.getElementById('le-back').onclick = () => { state.laudosView='lista'; state.laudoAtual=null; renderLaudos(); };
+  document.querySelector('[data-le-pdf]').onclick = () => window.open('/api/laudos-demarcacao/'+l.id+'/pdf', '_blank');
+  v.querySelectorAll('.le-tab').forEach(b => b.onclick = () => { state.laudoEditorTab = b.dataset.leTab; renderLaudoEditor(v); });
+
+  const c = document.getElementById('le-content');
+  if (state.laudoEditorTab === 'dados')   renderLaudoTabDados(c);
+  else if (state.laudoEditorTab === 'pontos') renderLaudoTabPontos(c);
+  else if (state.laudoEditorTab === 'croqui') renderLaudoTabCroqui(c);
+  else if (state.laudoEditorTab === 'fotos')  renderLaudoTabFotos(c);
+  else if (state.laudoEditorTab === 'art')    renderLaudoTabArt(c);
+}
+
+function renderLaudoTabDados(c) {
+  const l = state.laudoAtual;
+  const isUrbano = l.tipo_imovel === 'URBANO';
+  c.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0;">Identificação do imóvel</h3>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        ${isUrbano ? `
+          <select id="ld-tipo-lote">
+            <option value="">— tipo de lote —</option>
+            <option value="MEIO_QUADRA" ${l.tipo_lote_urbano==='MEIO_QUADRA'?'selected':''}>Meio de quadra</option>
+            <option value="ESQUINA" ${l.tipo_lote_urbano==='ESQUINA'?'selected':''}>Esquina</option>
+          </select>
+          <input id="ld-quadra" placeholder="Quadra" value="${escape(l.quadra||'')}">
+          <input id="ld-lote" placeholder="Número do lote" value="${escape(l.numero_lote||'')}">
+          <input id="ld-loteamento" placeholder="Loteamento" value="${escape(l.loteamento||'')}">
+        ` : `
+          <input id="ld-denom" placeholder="Denominação do imóvel" value="${escape(l.denominacao_imovel||'')}" style="grid-column:1/3;">
+          <input id="ld-nirf" placeholder="NIRF" value="${escape(l.nirf||'')}">
+          <input id="ld-ccir" placeholder="CCIR" value="${escape(l.ccir||'')}">
+        `}
+        <input id="ld-end" placeholder="Endereço do imóvel" value="${escape(l.endereco_imovel||'')}" style="grid-column:1/3;">
+        <input id="ld-mun" placeholder="Município" value="${escape(l.municipio||'')}">
+        <input id="ld-uf" placeholder="UF" maxlength="2" value="${escape(l.uf_imovel||'')}">
+        <input id="ld-comarca" placeholder="Comarca" value="${escape(l.comarca||'')}" style="grid-column:1/3;">
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Confrontantes</h3>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <input id="ld-cf-frente" placeholder="Frente" value="${escape(l.confrontante_frente||'')}">
+        <input id="ld-cf-fundo" placeholder="Fundo" value="${escape(l.confrontante_fundo||'')}">
+        <input id="ld-cf-dir" placeholder="Lateral direita" value="${escape(l.confrontante_lat_dir||'')}">
+        <input id="ld-cf-esq" placeholder="Lateral esquerda" value="${escape(l.confrontante_lat_esq||'')}">
+        <input id="ld-cf-extra" placeholder="Confrontante extra (opcional)" value="${escape(l.confrontante_extra||'')}" style="grid-column:1/3;">
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Observações</h3>
+      <textarea id="ld-obs" rows="3" style="width:100%;">${escape(l.observacoes||'')}</textarea>
+    </div>
+    <div class="card">
+      <button id="ld-salvar" style="background:var(--gold); color:#06120a; border-color:var(--gold); padding:10px 20px;">💾 Salvar dados</button>
+    </div>
+  `;
+  document.getElementById('ld-salvar').onclick = async () => {
+    const body = {
+      tipo_lote_urbano: isUrbano ? (document.getElementById('ld-tipo-lote').value || null) : null,
+      quadra: isUrbano ? (document.getElementById('ld-quadra').value.trim() || null) : null,
+      numero_lote: isUrbano ? (document.getElementById('ld-lote').value.trim() || null) : null,
+      loteamento: isUrbano ? (document.getElementById('ld-loteamento').value.trim() || null) : null,
+      denominacao_imovel: !isUrbano ? (document.getElementById('ld-denom').value.trim() || null) : null,
+      nirf: !isUrbano ? (document.getElementById('ld-nirf').value.trim() || null) : null,
+      ccir: !isUrbano ? (document.getElementById('ld-ccir').value.trim() || null) : null,
+      endereco_imovel: document.getElementById('ld-end').value.trim() || null,
+      municipio: document.getElementById('ld-mun').value.trim() || null,
+      uf_imovel: document.getElementById('ld-uf').value.trim().toUpperCase() || null,
+      comarca: document.getElementById('ld-comarca').value.trim() || null,
+      confrontante_frente: document.getElementById('ld-cf-frente').value.trim() || null,
+      confrontante_fundo: document.getElementById('ld-cf-fundo').value.trim() || null,
+      confrontante_lat_dir: document.getElementById('ld-cf-dir').value.trim() || null,
+      confrontante_lat_esq: document.getElementById('ld-cf-esq').value.trim() || null,
+      confrontante_extra: document.getElementById('ld-cf-extra').value.trim() || null,
+      observacoes: document.getElementById('ld-obs').value.trim() || null,
+    };
+    try {
+      await api('/api/laudos-demarcacao/'+l.id, {
+        method:'PUT', body:JSON.stringify(body), headers:{'Content-Type':'application/json'},
+      });
+      await loadLaudoDetalhe(l.id);
+      alert('✅ Salvo');
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+}
+
+function renderLaudoTabPontos(c) {
+  const l = state.laudoAtual;
+  const pontos = l.pontos || [];
+  const lados = l.lados || [];
+  c.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0;">📍 Importar pontos RTK (CSV/TXT)</h3>
+      <p style="color:var(--text-muted); font-size:12px; margin:4px 0 8px;">
+        Cole o conteúdo do arquivo (formato livre — ID, X, Y, Z; ou ID, Lat, Lng).
+        Detecção automática de zona UTM e conversão Lat/Lng↔UTM.
+      </p>
+      <textarea id="lp-rtk" rows="6" style="width:100%; font-family:monospace; font-size:12px;" placeholder="P1, 9234567.123, 567890.456&#10;P2, 9234578.234, 567901.567&#10;..."></textarea>
+      <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+        <label>Zona UTM padrão: <input id="lp-zona" type="number" value="23" min="1" max="60" style="width:60px;"></label>
+        <label>Hem.: <select id="lp-hem"><option value="S" selected>Sul</option><option value="N">Norte</option></select></label>
+        <span style="flex:1;"></span>
+        <button id="lp-import">📥 Importar e parsear</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">📐 Pontos atuais (${pontos.length})</h3>
+      ${pontos.length === 0 ? '<p style="color:var(--text-muted);">Nenhum ponto. Importe RTK ou adicione manualmente.</p>' : `
+        <div style="overflow-x:auto;">
+          <table style="width:100%; font-size:11px; font-family:monospace;">
+            <thead><tr style="border-bottom:1px solid var(--border);">
+              <th style="padding:4px; text-align:left;">#</th>
+              <th style="padding:4px; text-align:left;">Vert.</th>
+              <th style="padding:4px; text-align:right;">UTM E (X)</th>
+              <th style="padding:4px; text-align:right;">UTM N (Y)</th>
+              <th style="padding:4px; text-align:right;">Lat</th>
+              <th style="padding:4px; text-align:right;">Lng</th>
+            </tr></thead>
+            <tbody>
+              ${pontos.map(p => `<tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:4px;">${p.ordem}</td>
+                <td style="padding:4px;">${escape(p.identificador||'')}</td>
+                <td style="padding:4px; text-align:right;">${p.utm_x_e!=null?Number(p.utm_x_e).toFixed(3):'-'}</td>
+                <td style="padding:4px; text-align:right;">${p.utm_y_n!=null?Number(p.utm_y_n).toFixed(3):'-'}</td>
+                <td style="padding:4px; text-align:right;">${p.latitude!=null?Number(p.latitude).toFixed(6):'-'}</td>
+                <td style="padding:4px; text-align:right;">${p.longitude!=null?Number(p.longitude).toFixed(6):'-'}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${lados.length ? `
+        <h4 style="margin-top:12px;">📏 Lados calculados</h4>
+        <div style="overflow-x:auto;">
+          <table style="width:100%; font-size:11px; font-family:monospace;">
+            <thead><tr style="border-bottom:1px solid var(--border);">
+              <th style="padding:4px;">#</th>
+              <th style="padding:4px;">De</th>
+              <th style="padding:4px;">Para</th>
+              <th style="padding:4px; text-align:right;">Distância (m)</th>
+              <th style="padding:4px; text-align:right;">Azimute</th>
+            </tr></thead>
+            <tbody>
+              ${lados.map(s => `<tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:4px;">${s.ordem}</td>
+                <td style="padding:4px;">${escape(s.de_identificador||'')}</td>
+                <td style="padding:4px;">${escape(s.para_identificador||'')}</td>
+                <td style="padding:4px; text-align:right;">${Number(s.distancia_m||0).toFixed(2)}</td>
+                <td style="padding:4px; text-align:right;">${escape(s.azimute_dms||'')}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : ''}
+        <div style="margin-top:12px; padding:8px; background:var(--bg-secondary); border-radius:4px;">
+          <strong>📊 Resumo:</strong>
+          Área: <strong>${l.area_total_m2?Number(l.area_total_m2).toLocaleString('pt-BR',{maximumFractionDigits:2}):'-'} m²</strong> ·
+          Perímetro: <strong>${l.perimetro_m?Number(l.perimetro_m).toFixed(2):'-'} m</strong>
+        </div>
+      `}
+    </div>
+  `;
+  document.getElementById('lp-import').onclick = async () => {
+    const texto = document.getElementById('lp-rtk').value.trim();
+    if (!texto) return alert('Cole o conteúdo do RTK');
+    const zona = Number(document.getElementById('lp-zona').value) || 23;
+    const hem = document.getElementById('lp-hem').value;
+    try {
+      const r = await api('/api/laudos-demarcacao/import-rtk', {
+        method:'POST',
+        body: JSON.stringify({ texto, default_zona: zona, default_hemisferio: hem }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!r.pontos || !r.pontos.length) return alert('Não foi possível parsear pontos');
+      if (!confirm('Encontrados '+r.pontos.length+' pontos. Salvar no laudo? (substitui os atuais)')) return;
+      await api('/api/laudos-demarcacao/'+l.id+'/pontos', {
+        method:'POST',
+        body: JSON.stringify({ pontos: r.pontos, default_zona: zona, default_hemisferio: hem }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await loadLaudoDetalhe(l.id);
+      alert('✅ '+r.pontos.length+' pontos importados. Área e perímetro calculados.');
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+}
+
+function renderLaudoTabCroqui(c) {
+  const l = state.laudoAtual;
+  c.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0;">🗺️ Croqui</h3>
+      <p style="font-size:12px; color:var(--text-muted);">
+        Tipo atual: <strong>${l.croqui_tipo === 'UPLOAD' ? '📷 Imagem enviada' : '⚙️ SVG automático (gerado a partir dos pontos)'}</strong>
+      </p>
+      <div style="display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap;">
+        <button id="lc-preview">👁 Pré-visualizar (no PDF)</button>
+        <input id="lc-file" type="file" accept="image/*" style="flex:1;">
+        <button id="lc-upload">📤 Substituir por upload</button>
+        ${l.croqui_tipo === 'UPLOAD' ? '<button id="lc-reset">↺ Voltar pro automático</button>' : ''}
+      </div>
+      <div style="margin-top:12px; padding:8px; background:var(--bg-secondary); border-radius:4px;">
+        <p style="font-size:11px; color:var(--text-muted); margin:0;">
+          ℹ️ O croqui automático é gerado a partir dos pontos importados (norte, escala, distâncias).
+          Se preferir um croqui customizado (CAD/Google Earth), faça upload de uma imagem.
+        </p>
+      </div>
+    </div>
+  `;
+  document.getElementById('lc-preview').onclick = () => window.open('/api/laudos-demarcacao/'+l.id+'/pdf', '_blank');
+  document.getElementById('lc-upload').onclick = async () => {
+    const f = document.getElementById('lc-file').files[0];
+    if (!f) return alert('Escolha uma imagem');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const b64 = reader.result.split(',')[1];
+      try {
+        await api('/api/laudos-demarcacao/'+l.id+'/croqui-upload', {
+          method:'POST',
+          body: JSON.stringify({ imagem_base64: b64, mime: f.type, filename: f.name }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        await loadLaudoDetalhe(l.id);
+        alert('✅ Croqui enviado');
+        renderLaudoEditor(document.getElementById('view-laudos'));
+      } catch (err) { alert('Erro: '+err.message); }
+    };
+    reader.readAsDataURL(f);
+  };
+  const reset = document.getElementById('lc-reset');
+  if (reset) reset.onclick = async () => {
+    if (!confirm('Voltar pro croqui automático? (apaga upload)')) return;
+    try {
+      await api('/api/laudos-demarcacao/'+l.id+'/croqui-reset', { method:'POST' });
+      await loadLaudoDetalhe(l.id);
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+}
+
+function renderLaudoTabFotos(c) {
+  const l = state.laudoAtual;
+  const fotos = l.fotos || [];
+  c.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0;">📸 Relatório fotográfico</h3>
+      <input id="lf-files" type="file" accept="image/*" multiple style="width:100%; margin:8px 0;">
+      <button id="lf-upload" style="background:var(--gold); color:#06120a; border-color:var(--gold);">📤 Adicionar fotos</button>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Fotos enviadas (${fotos.length})</h3>
+      ${fotos.length === 0 ? '<p style="color:var(--text-muted);">Nenhuma foto.</p>' : `
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:12px;">
+          ${fotos.map(f => `
+            <div class="card" style="padding:6px;">
+              <img src="/api/laudos-demarcacao/foto/${f.id}" alt="" style="width:100%; height:140px; object-fit:cover; border-radius:4px;">
+              <input data-leg="${f.id}" placeholder="Legenda" value="${escape(f.legenda||'')}" style="width:100%; margin-top:4px; font-size:11px;">
+              <div style="display:flex; gap:4px; margin-top:4px;">
+                <button data-leg-save="${f.id}" style="flex:1; font-size:11px;">💾</button>
+                <button data-foto-del="${f.id}" class="btn-danger" style="flex:1; font-size:11px;">🗑️</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+  `;
+  document.getElementById('lf-upload').onclick = async () => {
+    const files = Array.from(document.getElementById('lf-files').files || []);
+    if (!files.length) return alert('Escolha fotos');
+    try {
+      const fotosBody = await Promise.all(files.map(f => new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve({ imagem_base64: r.result.split(',')[1], mime: f.type, filename: f.name, legenda: '' });
+        r.onerror = reject;
+        r.readAsDataURL(f);
+      })));
+      await api('/api/laudos-demarcacao/'+l.id+'/fotos', {
+        method:'POST',
+        body: JSON.stringify({ fotos: fotosBody }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await loadLaudoDetalhe(l.id);
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+  c.querySelectorAll('[data-leg-save]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.legSave;
+    const leg = c.querySelector('[data-leg="'+id+'"]').value.trim();
+    try {
+      await api('/api/laudos-demarcacao/foto/'+id+'/legenda', {
+        method:'PUT', body: JSON.stringify({ legenda: leg }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      b.textContent = '✅';
+      setTimeout(() => b.textContent = '💾', 1500);
+    } catch (err) { alert('Erro: '+err.message); }
+  });
+  c.querySelectorAll('[data-foto-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Excluir esta foto?')) return;
+    try {
+      await api('/api/laudos-demarcacao/foto/'+b.dataset.fotoDel, { method:'DELETE' });
+      await loadLaudoDetalhe(l.id);
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  });
+}
+
+function renderLaudoTabArt(c) {
+  const l = state.laudoAtual;
+  c.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0;">📜 ART / TRT</h3>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <label><input id="la-art" type="checkbox" ${l.usa_art?'checked':''}> Possui ART (CREA)</label>
+        <input id="la-art-num" placeholder="Número da ART" value="${escape(l.numero_art||'')}">
+        <label><input id="la-trt" type="checkbox" ${l.usa_trt?'checked':''}> Possui TRT (CFT)</label>
+        <input id="la-trt-num" placeholder="Número do TRT" value="${escape(l.numero_trt||'')}">
+        <input id="la-escala" placeholder="Escala (ex: 1:500)" value="${escape(l.escala||'')}">
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">💰 Financeiro</h3>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <input id="la-valor" type="number" step="0.01" placeholder="Valor do serviço (R$)" value="${l.valor_servico ?? ''}">
+        <select id="la-fp">
+          <option value="">— forma de pagamento —</option>
+          <option value="PIX" ${l.forma_pagamento==='PIX'?'selected':''}>PIX</option>
+          <option value="DINHEIRO" ${l.forma_pagamento==='DINHEIRO'?'selected':''}>Dinheiro</option>
+          <option value="TRANSFERENCIA" ${l.forma_pagamento==='TRANSFERENCIA'?'selected':''}>Transferência</option>
+          <option value="BOLETO" ${l.forma_pagamento==='BOLETO'?'selected':''}>Boleto</option>
+        </select>
+        <input id="la-data" type="date" value="${l.data_pagamento ? l.data_pagamento.split('T')[0] : ''}">
+      </div>
+    </div>
+    <div class="card">
+      <button id="la-salvar" style="background:var(--gold); color:#06120a; border-color:var(--gold); padding:10px 20px;">💾 Salvar</button>
+    </div>
+  `;
+  document.getElementById('la-salvar').onclick = async () => {
+    const body = {
+      usa_art: document.getElementById('la-art').checked,
+      numero_art: document.getElementById('la-art-num').value.trim() || null,
+      usa_trt: document.getElementById('la-trt').checked,
+      numero_trt: document.getElementById('la-trt-num').value.trim() || null,
+      escala: document.getElementById('la-escala').value.trim() || null,
+      valor_servico: document.getElementById('la-valor').value ? Number(document.getElementById('la-valor').value) : null,
+      forma_pagamento: document.getElementById('la-fp').value || null,
+      data_pagamento: document.getElementById('la-data').value || null,
+    };
+    try {
+      await api('/api/laudos-demarcacao/'+l.id, {
+        method:'PUT', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' },
+      });
+      await loadLaudoDetalhe(l.id);
+      alert('✅ Salvo');
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  };
+}
 
 // v1.66.6: registra service worker pra PWA instalavel (desktop + mobile)
 if ('serviceWorker' in navigator) {
