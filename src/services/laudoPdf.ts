@@ -48,6 +48,33 @@ function fmtData(d: Date): string {
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
+// v2.1.2 — Textos padrao de metodologia e equipamentos (Romatec / SinoGNSS RTK)
+const METODOLOGIA_PADRAO = `O presente levantamento topográfico foi executado mediante o seguinte procedimento técnico:
+
+1. PLANEJAMENTO E RECONHECIMENTO DE CAMPO — vistoria preliminar do imóvel para identificação dos limites, confrontantes e melhor estratégia de implantação dos marcos.
+
+2. MATERIALIZAÇÃO DOS VÉRTICES — implantação física dos marcos (piquetes) em todos os vértices da poligonal, com identificação sequencial (P1, P2, …) e registro fotográfico individual de cada vértice no local.
+
+3. RASTREAMENTO GNSS EM MODO RTK — coleta das coordenadas geodésicas de cada vértice por meio de receptor GNSS de dupla frequência operando em modo Real-Time Kinematic (RTK), com tempo mínimo de fixação até obtenção de solução fixa centimétrica.
+
+4. CAMINHAMENTO DA POLIGONAL — coleta sequencial dos vértices percorrendo o perímetro do imóvel no sentido horário, com fechamento angular e linear sobre o vértice inicial (P1) para verificação de consistência.
+
+5. PROCESSAMENTO E DESENHO TÉCNICO — pós-processamento dos dados brutos em escritório utilizando os softwares Topcon Tools e MetricaTOPO, geração da poligonal final, cálculo de área pelo método de Gauss (Shoelace), perímetro pelo somatório das distâncias planas e azimutes calculados segmento a segmento em DMS (graus, minutos e segundos).
+
+6. EMISSÃO DAS PEÇAS TÉCNICAS — produção do memorial descritivo conforme Norma Técnica de Georreferenciamento (NTGIR/INCRA), planilha de coordenadas, croqui georreferenciado e o presente laudo técnico.`;
+
+const EQUIPAMENTOS_PADRAO = `Equipamentos topográficos e instrumentação utilizados:
+
+• RECEPTOR BASE GNSS RTK — ComNav Technology, configurado como estação de referência fixa, montado sobre tripé com base niveladora ótica e antena de comunicação rádio.
+
+• RECEPTOR ROVER GNSS T30 LASER PLUS (SinoGNSS) — receptor móvel multibanda com 1.668 canais, rastreio simultâneo de todas as constelações ativas (GPS, BeiDou, GLONASS e Galileo), Auto-IMU 120° (compensação de inclinação), tecnologia de bloqueio de sinais multicaminhados e bloqueio de interferência eletromagnética, laser integrado com alcance de 50 m, duas câmeras integradas, certificação IP68 (proteção total contra água e poeira). Precisão estática: 2,5 mm + 0,5 ppm (horizontal) e 5 mm + 0,5 ppm (vertical). Precisão RTK: 8 mm + 1 ppm (horizontal) e 15 mm + 1 ppm (vertical).
+
+• COLETOR DE DADOS R80 (SinoGNSS) — controlador GNSS de alto desempenho com sistema operacional Android 12.0, processador octa-core MediaTek, executando software de coleta topográfica integrada ao receptor rover via Bluetooth.
+
+• ACESSÓRIOS DE CAMPO — tripé robusto para a base, bastão telescópico de 2 m para o rover, bipé estabilizador, base niveladora ótica, trena de aferição.
+
+Software de pós-processamento: Topcon Tools (suíte oficial Topcon para processamento GNSS) e MetricaTOPO (geração de peças técnicas e desenho da poligonal).`;
+
 // v2.0.1: formata CPF/CNPJ pra exibicao com mascara
 function formatarCpfCnpj(v: string | null, tipo: 'PF' | 'PJ'): string {
   if (!v) return '—';
@@ -258,9 +285,26 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
     cy = doc.y + 6;
   }
 
+  // ── v2.1.2 — Metodologia tecnica + equipamentos ────────────────────
+  if (cy > 600) { doc.addPage(); cy = 60; }
+  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold')
+     .text('4. METODOLOGIA TÉCNICA APLICADA', 40, cy);
+  cy += 14;
+  doc.fontSize(9).fillColor('#222').font('Helvetica')
+     .text(METODOLOGIA_PADRAO, 40, cy, { width: 515, align: 'justify' });
+  cy = doc.y + 12;
+
+  if (cy > 600) { doc.addPage(); cy = 60; }
+  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold')
+     .text('5. EQUIPAMENTOS UTILIZADOS', 40, cy);
+  cy += 14;
+  doc.fontSize(9).fillColor('#222').font('Helvetica')
+     .text(EQUIPAMENTOS_PADRAO, 40, cy, { width: 515, align: 'justify' });
+  cy = doc.y + 14;
+
   // ── 6. Tabela de coordenadas ───────────────────────────────────────
   if (cy > 700) { doc.addPage(); cy = 60; }
-  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('4. COORDENADAS DOS VÉRTICES', 40, cy);
+  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('6. COORDENADAS DOS VÉRTICES', 40, cy);
   cy += 16;
   // Header da tabela
   doc.fontSize(8).fillColor('#666').font('Helvetica-Bold');
@@ -288,7 +332,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
 
   // ── 7. Memorial NTGIR ──────────────────────────────────────────────
   if (cy > 660) { doc.addPage(); cy = 60; }
-  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('5. MEMORIAL DESCRITIVO', 40, cy);
+  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('7. MEMORIAL DESCRITIVO', 40, cy);
   cy += 14;
   const memorial = gerarMemorialNTGIR(pontos, lados);
   doc.fontSize(9).fillColor('#222').font('Helvetica')
@@ -298,7 +342,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   // ── 8. Tabela de lados ─────────────────────────────────────────────
   if (lados.length > 0) {
     if (cy > 720) { doc.addPage(); cy = 60; }
-    doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('6. LADOS DA POLIGONAL', 40, cy);
+    doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('8. LADOS DA POLIGONAL', 40, cy);
     cy += 14;
     doc.fontSize(8).fillColor('#666').font('Helvetica-Bold');
     doc.text('Lado', 40, cy, { width: 100 });
@@ -320,7 +364,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
 
   // ── 9. Area + perimetro ────────────────────────────────────────────
   if (cy > 720) { doc.addPage(); cy = 60; }
-  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('7. ÁREA E PERÍMETRO', 40, cy);
+  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('9. ÁREA E PERÍMETRO', 40, cy);
   cy += 14;
   doc.fontSize(11).fillColor(corGold).font('Helvetica-Bold');
   if (laudo.area_total_m2 != null) doc.text(`Área total: ${fmtArea(laudo.area_total_m2)}`, 40, cy);
@@ -330,7 +374,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
 
   // ── 10. Croqui ─────────────────────────────────────────────────────
   if (cy > 600) { doc.addPage(); cy = 60; }
-  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('8. CROQUI DO LEVANTAMENTO', 40, cy);
+  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('10. CROQUI DO LEVANTAMENTO', 40, cy);
   cy += 14;
   if (input.croquiUpload && input.croquiUpload.mime.startsWith('image/')) {
     try {
@@ -348,7 +392,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   // ── 11. Fotos ──────────────────────────────────────────────────────
   if (input.fotos.length > 0 && input.fotoBase64Loader) {
     if (cy > 600) { doc.addPage(); cy = 60; }
-    doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('9. RELATÓRIO FOTOGRÁFICO', 40, cy);
+    doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('11. RELATÓRIO FOTOGRÁFICO', 40, cy);
     cy += 14;
     const fotoW = 250;
     const fotoH = 180;
@@ -378,7 +422,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
 
   // ── 12. ART/TRT ────────────────────────────────────────────────────
   if (cy > 720) { doc.addPage(); cy = 60; }
-  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('10. RESPONSABILIDADE TÉCNICA', 40, cy);
+  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('12. RESPONSABILIDADE TÉCNICA', 40, cy);
   cy += 14;
   doc.fontSize(9).fillColor('#444').font('Helvetica');
   if (laudo.usa_art) doc.text(`☑ ART (CREA): ${laudo.numero_art || '—'}`, 40, cy, { width: 515 });
