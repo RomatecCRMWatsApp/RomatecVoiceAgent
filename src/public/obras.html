@@ -981,6 +981,9 @@ const state = {
   folhaAno: new Date().getFullYear(),
   folhaMes: new Date().getMonth() + 1,
   folhaObraId: '',
+  // v1.99.23: filtro de intervalo na sub-aba Saldo em Aberto
+  folhaSaldoDataInicio: '', // YYYY-MM-DD ou '' = automatico (data_limite)
+  folhaSaldoDataFim: '',    // YYYY-MM-DD ou '' = hoje
   vistorias: [], vistoriaAtual: null,
   vtoFotos: [], // {legenda, mime, data_base64} antes de salvar
   // v1.65.2: Propostas
@@ -3848,8 +3851,15 @@ function renderMarcarDias() {
 // 20/abril, paga dia 11/maio). Permite passar vales contra saldo real.
 async function loadFolhaSaldo() {
   const obra = state.folhaObraId || '';
+  const di = state.folhaSaldoDataInicio || '';
+  const df = state.folhaSaldoDataFim || '';
+  const params = new URLSearchParams();
+  if (obra) params.set('obra_id', obra);
+  if (di) params.set('data_inicio', di);
+  if (df) params.set('data_fim', df);
+  const qs = params.toString();
   try {
-    state.folhaSaldo = await api(`/api/folha/saldo-aberto${obra ? '?obra_id=' + obra : ''}`);
+    state.folhaSaldo = await api(`/api/folha/saldo-aberto${qs ? '?' + qs : ''}`);
   } catch (err) {
     console.warn('[folhaSaldo] falha:', err.message);
     state.folhaSaldo = { error: err.message };
@@ -4000,6 +4010,22 @@ function renderFolha() {
         <button id="folhaPdf" class="btn-gold">📄 Exportar PDF</button>
         <button id="folhaCsv" class="btn-gold">📊 CSV</button>
       </div>
+      ${subview === 'saldo' ? `
+      <!-- v1.99.23: filtro de intervalo (saldo em aberto cross-month) -->
+      <div style="display:flex; gap:8px; align-items:end; flex-wrap:wrap; margin-bottom:12px; padding:10px; background:rgba(245,158,11,0.05); border:1px solid rgba(245,158,11,0.2); border-radius:8px;">
+        <label style="font-size:11px; color:var(--text-muted);">
+          📅 Início da quinzena
+          <input id="folhaSaldoDi" type="date" value="${escape(state.folhaSaldoDataInicio || '')}" style="display:block; width:160px; margin-top:2px;">
+        </label>
+        <label style="font-size:11px; color:var(--text-muted);">
+          📅 Fim da quinzena
+          <input id="folhaSaldoDf" type="date" value="${escape(state.folhaSaldoDataFim || '')}" style="display:block; width:160px; margin-top:2px;">
+        </label>
+        <button id="folhaSaldoLimpar" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); padding:6px 10px; border-radius:6px; cursor:pointer; font-size:11px;">Limpar (auto)</button>
+        <span style="font-size:11px; color:var(--text-muted); margin-left:auto;">
+          ${state.folhaSaldoDataInicio || state.folhaSaldoDataFim ? '🔍 filtro manual ativo' : '🤖 automático (último recibo pago → hoje)'}
+        </span>
+      </div>` : ''}
       <!-- v1.99.16: sub-abas Mensal vs Saldo em Aberto -->
       <div style="display:flex; gap:6px; margin-bottom:12px; border-bottom:1px solid var(--border-strong); padding-bottom:8px;">
         <button data-folha-sub="mensal" style="padding:6px 14px; border-radius:6px; cursor:pointer; ${subview==='mensal' ? 'background:var(--gold); color:#06120a; border:1px solid var(--gold); font-weight:600;' : 'background:transparent; color:var(--text-muted); border:1px solid var(--border);'}">📅 Mensal</button>
@@ -4060,6 +4086,28 @@ function renderFolha() {
     }
     render();
   });
+
+  // v1.99.23: filtro de intervalo na sub-aba Saldo em Aberto
+  const inpDi = document.getElementById('folhaSaldoDi');
+  const inpDf = document.getElementById('folhaSaldoDf');
+  const btnLimpar = document.getElementById('folhaSaldoLimpar');
+  let saldoFiltroTimer = null;
+  function recarregarSaldoComFiltro() {
+    if (saldoFiltroTimer) clearTimeout(saldoFiltroTimer);
+    saldoFiltroTimer = setTimeout(async () => {
+      const box = document.getElementById('folhaSubviewBox');
+      if (box) box.innerHTML = '<div class="empty" style="padding:30px;">⏳ Recalculando saldo...</div>';
+      await loadFolhaSaldo();
+      render();
+    }, 400);
+  }
+  if (inpDi) inpDi.onchange = (e) => { state.folhaSaldoDataInicio = e.target.value || ''; recarregarSaldoComFiltro(); };
+  if (inpDf) inpDf.onchange = (e) => { state.folhaSaldoDataFim    = e.target.value || ''; recarregarSaldoComFiltro(); };
+  if (btnLimpar) btnLimpar.onclick = () => {
+    state.folhaSaldoDataInicio = '';
+    state.folhaSaldoDataFim = '';
+    recarregarSaldoComFiltro();
+  };
 
   // v1.99.16: botão "💸 Vale" na sub-aba Saldo em Aberto — passa saldo
   // consolidado (cross-month) como totalPagar pro modal, em vez do mensal.

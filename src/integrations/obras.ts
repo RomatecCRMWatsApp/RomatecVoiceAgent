@@ -1033,12 +1033,23 @@ export async function relatorioMensalEquipe(input: {
 // Periodo corrente (pra eventual passagem de vale a partir desta vista):
 //   - Se hoje <= dia 15 -> periodo = 'YYYY-MM-1'
 //   - Senao             -> periodo = 'YYYY-MM-2'
-export async function relatorioSaldoEmAbertoEquipe(input: { obra_id?: string } = {}) {
+export async function relatorioSaldoEmAbertoEquipe(input: {
+  obra_id?: string;
+  /** v1.99.23: data inicial override (YYYY-MM-DD). Se nao passar, usa data_limite (auto). */
+  data_inicio?: string;
+  /** v1.99.23: data final override (YYYY-MM-DD). Se nao passar, conta ate hoje. */
+  data_fim?: string;
+} = {}) {
   const hoje = new Date();
   const ano = hoje.getFullYear();
   const mes = String(hoje.getMonth() + 1).padStart(2, '0');
   const q = hoje.getDate() <= 15 ? 1 : 2;
   const periodoCorrente = `${ano}-${mes}-${q}`;
+  // v1.99.23: filtros opcionais de intervalo (sobrescreve data_limite e/ou hoje)
+  const dataInicioOverride = (input.data_inicio && /^\d{4}-\d{2}-\d{2}$/.test(input.data_inicio))
+    ? input.data_inicio : null;
+  const dataFimOverride = (input.data_fim && /^\d{4}-\d{2}-\d{2}$/.test(input.data_fim))
+    ? input.data_fim : null;
 
   // 1) Lista membros ativos (mesmo filtro de listarEquipe)
   const params: (string | number)[] = [];
@@ -1105,6 +1116,8 @@ export async function relatorioSaldoEmAbertoEquipe(input: { obra_id?: string } =
     telefone: string | null;
     valor_dia: number;
     data_limite: string | null;       // ISO date OR null
+    data_inicio_efetiva: string;      // v1.99.23: data efetivamente usada (apos override)
+    data_fim_efetiva: string;         // v1.99.23: idem
     dias_em_aberto: number;
     bruto: number;
     vales: Array<{ id: number; valor: number; descricao: string | null; criado_em: string }>;
@@ -1119,28 +1132,37 @@ export async function relatorioSaldoEmAbertoEquipe(input: { obra_id?: string } =
     const limite = limitePorMembro.get(membroId) ?? new Date('1900-01-01');
     const limiteIso = limite.toISOString().slice(0, 10);
 
-    // Dias em aberto (apos data_limite)
+    // v1.99.23: data_inicio efetiva — usa override SE depois de data_limite,
+    // senao mantem data_limite (nao deixa user "voltar" antes de recibo pago)
+    const dataInicioEfetiva = (dataInicioOverride && dataInicioOverride > limiteIso)
+      ? dataInicioOverride
+      : limiteIso;
+    const dataFimEfetiva = dataFimOverride || hoje.toISOString().slice(0, 10);
+
+    // Dias em aberto entre dataInicioEfetiva (exclusivo) e dataFimEfetiva (inclusivo)
     const [diasRows] = await pool.execute<RowDataPacket[]>(
       `SELECT
          COALESCE(SUM(CASE WHEN periodo='integral' THEN 1 ELSE 0.5 END), 0) AS dias,
          COALESCE(SUM(valor), 0) AS bruto
          FROM romatec_obra_funcionario_dias
         WHERE funcionario_id = ?
-          AND data > ?`,
-      [membroId, limiteIso]
+          AND data > ?
+          AND data <= ?`,
+      [membroId, dataInicioEfetiva, dataFimEfetiva]
     );
     const diasEmAberto = Number(diasRows[0]?.dias ?? 0);
     const bruto = num(String(diasRows[0]?.bruto ?? '0'));
 
-    // Vales em aberto (criados apos data_limite — heuristica simples)
+    // Vales em aberto (criados apos data_inicio_efetiva ate data_fim+1d)
     const [valesRows] = await pool.execute<RowDataPacket[]>(
       `SELECT id, valor, descricao, criado_em
          FROM recibos_ajustes
         WHERE membro_id = ?
           AND tipo = 'adiantamento'
           AND criado_em > ?
+          AND criado_em <= DATE_ADD(?, INTERVAL 1 DAY)
         ORDER BY criado_em DESC`,
-      [membroId, limiteIso]
+      [membroId, dataInicioEfetiva, dataFimEfetiva]
     );
     const vales = valesRows.map(v => ({
       id: Number(v.id),
@@ -1164,6 +1186,8 @@ export async function relatorioSaldoEmAbertoEquipe(input: { obra_id?: string } =
       telefone: (m.telefone as string | null) ?? null,
       valor_dia: valorDia,
       data_limite: limitePorMembro.has(membroId) ? limiteIso : null,
+      data_inicio_efetiva: dataInicioEfetiva,  // v1.99.23
+      data_fim_efetiva: dataFimEfetiva,        // v1.99.23
       dias_em_aberto: diasEmAberto,
       bruto,
       vales,
