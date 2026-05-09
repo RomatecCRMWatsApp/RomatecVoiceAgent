@@ -25,7 +25,7 @@ export interface Contratante {
   telefone: string | null;
   email: string | null;
   observacoes: string | null;
-  // v2.0.1 — representante legal (obrigatorio quando PJ)
+  // v2.0.1 — representante legal (opcional, mesmo em PJ)
   representante_nome: string | null;
   representante_cpf: string | null;
   representante_cargo: string | null;
@@ -210,18 +210,12 @@ export async function criarContratante(input: CriarContratanteInput): Promise<Co
     }
   }
 
-  // PJ: valida representante legal
-  const repCpfLimpo = (input.representante_cpf ?? '').replace(/\D/g, '') || null;
-  if (input.tipo_pessoa === 'PJ') {
-    if (!input.representante_nome?.trim()) {
-      throw new Error('PJ precisa informar nome do representante legal');
-    }
-    if (!repCpfLimpo) {
-      throw new Error('PJ precisa informar CPF do representante legal');
-    }
-    if (!validarCPF(repCpfLimpo)) {
-      throw new Error('CPF do representante invalido');
-    }
+  // v2.1.5: representante legal totalmente opcional. Trata placeholder
+  // (todos os digitos iguais — 00000000000, etc) como vazio.
+  let repCpfLimpo = (input.representante_cpf ?? '').replace(/\D/g, '') || null;
+  if (repCpfLimpo && /^(\d)\1+$/.test(repCpfLimpo)) repCpfLimpo = null;
+  if (repCpfLimpo && !validarCPF(repCpfLimpo)) {
+    throw new Error('CPF do representante invalido');
   }
 
   // Telefone (so digitos)
@@ -240,7 +234,7 @@ export async function criarContratante(input: CriarContratanteInput): Promise<Co
       input.cep ?? null, input.logradouro ?? null, input.numero ?? null, input.complemento ?? null,
       input.bairro ?? null, input.cidade ?? null, input.uf ?? null,
       telLimpo, input.email ?? null, input.observacoes ?? null,
-      input.representante_nome?.trim() || null, repCpfLimpo, input.representante_cargo?.trim() || null,
+      input.representante_nome?.trim() || null, repCpfLimpo as string | null, input.representante_cargo?.trim() || null,
     ]
   );
   const created = await buscarContratante(r.insertId);
@@ -302,7 +296,8 @@ export async function atualizarContratante(
   set('representante_nome', input.representante_nome?.trim() || null);
   set('representante_cargo', input.representante_cargo?.trim() || null);
   if (input.representante_cpf !== undefined) {
-    const repCpfLimpo = (input.representante_cpf ?? '').replace(/\D/g, '') || null;
+    let repCpfLimpo = (input.representante_cpf ?? '').replace(/\D/g, '') || null;
+    if (repCpfLimpo && /^(\d)\1+$/.test(repCpfLimpo)) repCpfLimpo = null;
     if (repCpfLimpo && !validarCPF(repCpfLimpo)) throw new Error('CPF do representante invalido');
     fields.push('representante_cpf = ?');
     params.push(repCpfLimpo);

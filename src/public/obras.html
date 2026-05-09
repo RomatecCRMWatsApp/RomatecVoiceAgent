@@ -12855,7 +12855,7 @@ function renderLaudoNovo(v) {
         <!-- v2.0.1: campos exclusivos PJ — representante legal -->
         <div id="ln-pj-block" style="display:none; margin-top:8px; padding:8px; background:var(--bg-secondary); border-radius:4px; border-left:3px solid var(--gold);">
           <p style="margin:0 0 8px; font-size:12px; color:var(--text-muted);">
-            👤 <strong>Representante legal</strong> (obrigatório para PJ — sócio/administrador que assina contratos)
+            👤 <strong>Representante legal</strong> (opcional — sócio/administrador que assina contratos, se aplicável)
           </p>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <input id="ln-c-rep-nome" placeholder="Nome completo do representante" style="grid-column:1/3;">
@@ -12999,9 +12999,6 @@ function renderLaudoNovo(v) {
       representante_cargo: tipo === 'PJ' ? (document.getElementById('ln-c-rep-cargo').value.trim() || null) : null,
     };
     if (!body.cpf_cnpj || !body.nome) return alert('CPF/CNPJ e nome obrigatórios');
-    if (tipo === 'PJ' && (!body.representante_nome || !body.representante_cpf)) {
-      return alert('Para PJ, nome e CPF do representante legal são obrigatórios');
-    }
     try {
       const ehEdit = contEditId !== null;
       const url = ehEdit ? '/api/contratantes/'+contEditId : '/api/contratantes';
@@ -13230,7 +13227,7 @@ function renderLaudoTabCadastros(c) {
         </div>
         <div id="lec-pj-block" style="display:none; margin-top:8px; padding:8px; background:var(--bg-secondary); border-radius:4px; border-left:3px solid var(--gold);">
           <p style="margin:0 0 8px; font-size:12px; color:var(--text-muted);">
-            👤 <strong>Representante legal</strong> (obrigatório para PJ)
+            👤 <strong>Representante legal</strong> (opcional)
           </p>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <input id="lec-c-rep-nome" placeholder="Nome do representante" style="grid-column:1/3;">
@@ -13386,9 +13383,6 @@ function renderLaudoTabCadastros(c) {
       representante_cargo: tipo === 'PJ' ? (document.getElementById('lec-c-rep-cargo').value.trim() || null) : null,
     };
     if (!body.cpf_cnpj || !body.nome) return alert('CPF/CNPJ e nome obrigatórios');
-    if (tipo === 'PJ' && (!body.representante_nome || !body.representante_cpf)) {
-      return alert('PJ: nome e CPF do representante obrigatórios');
-    }
     try {
       const novo = await api('/api/contratantes/'+l.contratante_id, {
         method:'PUT', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' },
