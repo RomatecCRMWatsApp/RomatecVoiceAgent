@@ -1486,6 +1486,121 @@ app.put('/api/fiscal-config', async (req: Request, res: Response) => {
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// ─── v1.99.25: Laudo de Demarcacao — Fase 1 (Contratantes/Executantes/Laudo) ──
+
+// CONTRATANTES
+app.get('/api/contratantes', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/contratantes');
+    const r = await m.listarContratantes({
+      q: typeof req.query.q === 'string' ? req.query.q : undefined,
+      tipo_pessoa: req.query.tipo_pessoa === 'PF' || req.query.tipo_pessoa === 'PJ'
+        ? req.query.tipo_pessoa : undefined,
+      apenas_ativos: req.query.apenas_ativos !== 'false',
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+      offset: req.query.offset ? Number(req.query.offset) : undefined,
+    });
+    res.json(r);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.get('/api/contratantes/:id', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/contratantes');
+    const c = await m.buscarContratante(String(req.params.id));
+    if (!c) { res.status(404).json({ error: 'Contratante nao encontrado' }); return; }
+    res.json(c);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.post('/api/contratantes', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/contratantes');
+    const c = await m.criarContratante(req.body || {});
+    res.status(201).json(c);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+app.put('/api/contratantes/:id', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/contratantes');
+    const c = await m.atualizarContratante(String(req.params.id), req.body || {});
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+app.delete('/api/contratantes/:id', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/contratantes');
+    if (req.query.hard === 'true') {
+      await m.excluirContratante(String(req.params.id));
+    } else {
+      await m.desativarContratante(String(req.params.id));
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// EXECUTANTES
+app.get('/api/executantes', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/executantes');
+    const items = await m.listarExecutantes({ apenas_ativos: req.query.apenas_ativos !== 'false' });
+    res.json(items);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.post('/api/executantes', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/executantes');
+    const e = await m.criarExecutante(req.body || {});
+    res.status(201).json(e);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+app.put('/api/executantes/:id', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/executantes');
+    const e = await m.atualizarExecutante(String(req.params.id), req.body || {});
+    res.json(e);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// LAUDOS DE DEMARCACAO (Fase 1: rascunho + listagem)
+app.get('/api/laudos-demarcacao', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const statusValido = ['RASCUNHO','PREENCHIDO','ASSINADO','RECIBO_GERADO','ENVIADO','CONFIRMADO','CANCELADO'];
+    const status = typeof req.query.status === 'string' && statusValido.includes(req.query.status)
+      ? (req.query.status as 'RASCUNHO' | 'PREENCHIDO' | 'ASSINADO' | 'RECIBO_GERADO' | 'ENVIADO' | 'CONFIRMADO' | 'CANCELADO')
+      : undefined;
+    const r = await m.listarLaudos({
+      status,
+      contratante_id: req.query.contratante_id ? Number(req.query.contratante_id) : undefined,
+      apenas_ativos: req.query.apenas_ativos !== 'false',
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+      offset: req.query.offset ? Number(req.query.offset) : undefined,
+    });
+    res.json(r);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.get('/api/laudos-demarcacao/:id', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const l = await m.buscarLaudo(String(req.params.id));
+    if (!l) { res.status(404).json({ error: 'Laudo nao encontrado' }); return; }
+    res.json(l);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.post('/api/laudos-demarcacao', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const l = await m.criarLaudoRascunho(req.body || {});
+    res.status(201).json(l);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+app.delete('/api/laudos-demarcacao/:id', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    await m.desativarLaudo(String(req.params.id));
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // ─── v1.99.3: Certificados Digitais ICP-Brasil ─────────────────────────────
 // GET — lista certs cadastrados (sem expor pfx/senha)
 app.get('/api/signing-cert', async (_req: Request, res: Response) => {
@@ -2176,6 +2291,16 @@ app.listen(PORT, () => {
       await m.runSigningMigrations();
     } catch (err) {
       console.error('[signing-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v1.99.25: migrations do modulo Laudo de Demarcacao — independente.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-laudos');
+      await m.runLaudosMigrations();
+    } catch (err) {
+      console.error('[laudos-migrations] FALHA fatal:', err);
     }
   })();
 
