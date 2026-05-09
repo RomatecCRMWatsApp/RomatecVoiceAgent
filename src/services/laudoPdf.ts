@@ -48,6 +48,19 @@ function fmtData(d: Date): string {
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
+// v2.0.1: formata CPF/CNPJ pra exibicao com mascara
+function formatarCpfCnpj(v: string | null, tipo: 'PF' | 'PJ'): string {
+  if (!v) return '—';
+  const d = String(v).replace(/\D/g, '');
+  if (tipo === 'PF' && d.length === 11) {
+    return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+  }
+  if (tipo === 'PJ' && d.length === 14) {
+    return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  }
+  return d;
+}
+
 function fmtDataExtenso(d: Date): string {
   const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
   return `${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}`;
@@ -156,7 +169,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   cy += 14;
   doc.fontSize(9).fillColor('#444').font('Helvetica');
   const partesC: string[] = [];
-  partesC.push(`${contratante.tipo_pessoa === 'PF' ? 'CPF' : 'CNPJ'}: ${contratante.cpf_cnpj || '—'}`);
+  partesC.push(`${contratante.tipo_pessoa === 'PF' ? 'CPF' : 'CNPJ'}: ${formatarCpfCnpj(contratante.cpf_cnpj, contratante.tipo_pessoa)}`);
   if (contratante.rg_ie) partesC.push(`${contratante.tipo_pessoa === 'PF' ? 'RG' : 'IE'}: ${contratante.rg_ie}`);
   if (contratante.nacionalidade) partesC.push(contratante.nacionalidade);
   if (contratante.estado_civil) partesC.push(contratante.estado_civil);
@@ -169,6 +182,15 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
       contratante.bairro, contratante.cidade, contratante.uf, contratante.cep,
     ].filter(Boolean).join(', ');
     doc.text(end, 40, cy, { width: 515 });
+    cy += 12;
+  }
+  // v2.0.1: Representante legal quando PJ
+  if (contratante.tipo_pessoa === 'PJ' && contratante.representante_nome) {
+    doc.fontSize(9).fillColor('#666').font('Helvetica-Oblique')
+      .text(`Representante legal: ${contratante.representante_nome}` +
+        (contratante.representante_cargo ? ` (${contratante.representante_cargo})` : '') +
+        (contratante.representante_cpf ? ` — CPF: ${formatarCpfCnpj(contratante.representante_cpf, 'PF')}` : ''),
+        40, cy, { width: 515 });
     cy += 12;
   }
   cy += 8;

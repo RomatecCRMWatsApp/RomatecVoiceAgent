@@ -12575,6 +12575,45 @@ async function abrirZayraVisual() {
 render();
 
 // ── v2.0.0: LAUDOS DE DEMARCACAO (Fase 7) ─────────────────────────────────
+// v2.0.1: mascaras de input pra CPF/CNPJ/telefone
+function aplicarMascaraCpfCnpj(v) {
+  const d = String(v||'').replace(/\D/g, '').slice(0, 14);
+  if (d.length <= 11) {
+    // CPF: 000.000.000-00
+    return d
+      .replace(/^(\d{3})(\d)/, '$1.$2')
+      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1-$2')
+      .slice(0, 14);
+  }
+  // CNPJ: 00.000.000/0000-00
+  return d
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2')
+    .slice(0, 18);
+}
+function aplicarMascaraTel(v) {
+  const d = String(v||'').replace(/\D/g, '').slice(0, 11);
+  if (d.length <= 10) return d.replace(/^(\d{2})(\d)/, '($1) $2').replace(/(\d{4})(\d)/, '$1-$2');
+  return d.replace(/^(\d{2})(\d)/, '($1) $2').replace(/(\d{5})(\d)/, '$1-$2');
+}
+function aplicarMascarasLn() {
+  document.querySelectorAll('[data-mask="cpfcnpj"]').forEach(el => {
+    el.value = aplicarMascaraCpfCnpj(el.value);
+    el.oninput = e => {
+      const cur = e.target.selectionStart;
+      e.target.value = aplicarMascaraCpfCnpj(e.target.value);
+      try { e.target.setSelectionRange(cur+1, cur+1); } catch(_) {}
+    };
+  });
+  document.querySelectorAll('[data-mask="tel"]').forEach(el => {
+    el.value = aplicarMascaraTel(el.value);
+    el.oninput = e => { e.target.value = aplicarMascaraTel(e.target.value); };
+  });
+}
+
 const LAUDO_STATUS_COR = {
   RASCUNHO: '#94a3b8', PREENCHIDO: '#3b82f6', ASSINADO: '#1F5C3A',
   RECIBO_GERADO: '#f59e0b', ENVIADO: '#0ea5e9', CONFIRMADO: '#16a34a',
@@ -12802,15 +12841,26 @@ function renderLaudoNovo(v) {
             <option value="PF">Pessoa Física</option>
             <option value="PJ">Pessoa Jurídica</option>
           </select>
-          <input id="ln-c-cpf" placeholder="CPF ou CNPJ">
+          <input id="ln-c-cpf" placeholder="CPF (000.000.000-00)" maxlength="18" data-mask="cpfcnpj">
           <input id="ln-c-nome" placeholder="Nome / Razão Social" style="grid-column:1/3;">
-          <input id="ln-c-tel" placeholder="Telefone (com DDD)">
+          <input id="ln-c-tel" placeholder="Telefone (com DDD)" data-mask="tel">
           <input id="ln-c-email" placeholder="Email" type="email">
           <input id="ln-c-end" placeholder="Endereço completo" style="grid-column:1/3;">
           <input id="ln-c-rg" placeholder="RG / Insc. Estadual">
-          <input id="ln-c-nac" placeholder="Nacionalidade (PF)" value="brasileiro(a)">
-          <input id="ln-c-est" placeholder="Estado civil (PF)">
-          <input id="ln-c-prof" placeholder="Profissão (PF)">
+          <input id="ln-c-nac" class="ln-pf-only" placeholder="Nacionalidade (PF)" value="brasileiro(a)">
+          <input id="ln-c-est" class="ln-pf-only" placeholder="Estado civil (PF)">
+          <input id="ln-c-prof" class="ln-pf-only" placeholder="Profissão (PF)">
+        </div>
+        <!-- v2.0.1: campos exclusivos PJ — representante legal -->
+        <div id="ln-pj-block" style="display:none; margin-top:8px; padding:8px; background:var(--bg-secondary); border-radius:4px; border-left:3px solid var(--gold);">
+          <p style="margin:0 0 8px; font-size:12px; color:var(--text-muted);">
+            👤 <strong>Representante legal</strong> (obrigatório para PJ — sócio/administrador que assina contratos)
+          </p>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <input id="ln-c-rep-nome" placeholder="Nome completo do representante" style="grid-column:1/3;">
+            <input id="ln-c-rep-cpf" placeholder="CPF do representante (000.000.000-00)" maxlength="14" data-mask="cpfcnpj">
+            <input id="ln-c-rep-cargo" placeholder="Cargo (Sócio, Administrador, etc.)">
+          </div>
         </div>
         <button id="ln-c-salvar" style="margin-top:8px; background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Salvar contratante</button>
       </div>
@@ -12833,21 +12883,41 @@ function renderLaudoNovo(v) {
   document.getElementById('laudo-novo-back').onclick = () => { state.laudosView='lista'; renderLaudos(); };
   document.getElementById('ln-novo-cont').onclick = () => {
     document.getElementById('ln-cont-form').style.display = 'block';
+    aplicarMascarasLn();
   };
+  // v2.0.1: toggle PJ block + esconde campos PF
+  const togglePfPj = () => {
+    const tipo = document.getElementById('ln-c-tipo').value;
+    document.getElementById('ln-pj-block').style.display = tipo === 'PJ' ? 'block' : 'none';
+    document.querySelectorAll('.ln-pf-only').forEach(el => el.style.display = tipo === 'PF' ? '' : 'none');
+    // Reformata CPF/CNPJ ao trocar tipo
+    const cpfEl = document.getElementById('ln-c-cpf');
+    cpfEl.maxLength = tipo === 'PF' ? 14 : 18;
+    cpfEl.placeholder = tipo === 'PF' ? 'CPF (000.000.000-00)' : 'CNPJ (00.000.000/0000-00)';
+    cpfEl.value = aplicarMascaraCpfCnpj(cpfEl.value);
+  };
+  document.getElementById('ln-c-tipo').onchange = togglePfPj;
   document.getElementById('ln-c-salvar').onclick = async () => {
+    const tipo = document.getElementById('ln-c-tipo').value;
     const body = {
-      tipo_pessoa: document.getElementById('ln-c-tipo').value,
-      cpf_cnpj: document.getElementById('ln-c-cpf').value.trim(),
+      tipo_pessoa: tipo,
+      cpf_cnpj: document.getElementById('ln-c-cpf').value.replace(/\D/g, ''),
       nome: document.getElementById('ln-c-nome').value.trim(),
-      telefone: document.getElementById('ln-c-tel').value.trim() || null,
+      telefone: document.getElementById('ln-c-tel').value.replace(/\D/g, '') || null,
       email: document.getElementById('ln-c-email').value.trim() || null,
       endereco: document.getElementById('ln-c-end').value.trim() || null,
       rg_ie: document.getElementById('ln-c-rg').value.trim() || null,
-      nacionalidade: document.getElementById('ln-c-nac').value.trim() || null,
-      estado_civil: document.getElementById('ln-c-est').value.trim() || null,
-      profissao: document.getElementById('ln-c-prof').value.trim() || null,
+      nacionalidade: tipo === 'PF' ? (document.getElementById('ln-c-nac').value.trim() || null) : null,
+      estado_civil: tipo === 'PF' ? (document.getElementById('ln-c-est').value.trim() || null) : null,
+      profissao: tipo === 'PF' ? (document.getElementById('ln-c-prof').value.trim() || null) : null,
+      representante_nome: tipo === 'PJ' ? (document.getElementById('ln-c-rep-nome').value.trim() || null) : null,
+      representante_cpf: tipo === 'PJ' ? (document.getElementById('ln-c-rep-cpf').value.replace(/\D/g, '') || null) : null,
+      representante_cargo: tipo === 'PJ' ? (document.getElementById('ln-c-rep-cargo').value.trim() || null) : null,
     };
     if (!body.cpf_cnpj || !body.nome) return alert('CPF/CNPJ e nome obrigatórios');
+    if (tipo === 'PJ' && (!body.representante_nome || !body.representante_cpf)) {
+      return alert('Para PJ, nome e CPF do representante legal são obrigatórios');
+    }
     try {
       const novo = await api('/api/contratantes', {
         method:'POST',
@@ -13000,83 +13070,208 @@ function renderLaudoTabDados(c) {
   };
 }
 
+// v2.0.1: gerador de SVG do croqui CLIENT-SIDE (preview em tempo real).
+// Espelha src/services/croquiSvg.ts mas roda no browser sem ida ao server.
+function gerarCroquiSvgClient(pontos, lados, opts) {
+  opts = opts || {};
+  const W = opts.larguraPx || 380;
+  const H = opts.alturaPx || 380;
+  const cor = opts.corPoligonal || '#10b981';
+  const escapeXml = s => String(s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]));
+
+  if (!pontos || pontos.length < 2) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:#fff; border-radius:4px;"><text x="${W/2}" y="${H/2}" text-anchor="middle" font-family="Helvetica" font-size="13" fill="#888">Adicione ao menos 2 vértices</text></svg>`;
+  }
+  const minE = Math.min.apply(null, pontos.map(p => p.e));
+  const maxE = Math.max.apply(null, pontos.map(p => p.e));
+  const minN = Math.min.apply(null, pontos.map(p => p.n));
+  const maxN = Math.max.apply(null, pontos.map(p => p.n));
+  const dE = maxE - minE || 1;
+  const dN = maxN - minN || 1;
+  const margem = 0.10;
+  const wContent = W * (1 - 2*margem);
+  const hContent = H * (1 - 2*margem);
+  const escala = Math.min(wContent/dE, hContent/dN);
+  const offsetX = (W - dE*escala) / 2;
+  const offsetY = (H - dN*escala) / 2;
+  const toSvg = (e, n) => ({ x: offsetX + (e-minE)*escala, y: offsetY + (maxN-n)*escala });
+  const svgPontos = pontos.map(p => toSvg(p.e, p.n));
+  const pathD = svgPontos.map((p,i)=>`${i===0?'M':'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ') + ' Z';
+
+  let rotulosSvg = svgPontos.map((sp,i) => `<g>
+    <circle cx="${sp.x.toFixed(2)}" cy="${sp.y.toFixed(2)}" r="3.5" fill="${cor}" stroke="#fff" stroke-width="1.2"/>
+    <text x="${(sp.x+6).toFixed(2)}" y="${(sp.y-6).toFixed(2)}" font-family="Helvetica" font-size="10" font-weight="bold" fill="#222">${escapeXml(pontos[i].rotulo||('V'+(i+1)))}</text>
+  </g>`).join('');
+
+  let distSvg = '';
+  if (lados && lados.length) {
+    distSvg = lados.map(ld => {
+      const p1 = svgPontos[ld.i_idx]; const p2 = svgPontos[ld.f_idx];
+      if (!p1||!p2) return '';
+      const mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+      const ang = Math.atan2(p2.y-p1.y, p2.x-p1.x) * 180 / Math.PI;
+      const angT = ang>90 || ang<-90 ? ang+180 : ang;
+      return `<text x="${mx.toFixed(2)}" y="${my.toFixed(2)}" font-family="Helvetica" font-size="9" fill="#444" text-anchor="middle" dy="-3" transform="rotate(${angT.toFixed(1)} ${mx.toFixed(2)} ${my.toFixed(2)})">${ld.distancia_m.toFixed(2)}m</text>`;
+    }).join('');
+  }
+
+  const norteSvg = `<g transform="translate(${W-32},32)">
+    <line x1="0" y1="-18" x2="0" y2="10" stroke="#222" stroke-width="1.5"/>
+    <polygon points="0,-22 -5,-10 5,-10" fill="#222"/>
+    <text x="0" y="22" font-family="Helvetica" font-size="11" font-weight="bold" fill="#222" text-anchor="middle">N</text>
+  </g>`;
+
+  // Calcula area Gauss + perimetro client-side pra resumo
+  let area=0, perim=0;
+  for (let i=0;i<pontos.length;i++){
+    const p1=pontos[i], p2=pontos[(i+1)%pontos.length];
+    area += (p1.e*p2.n - p2.e*p1.n);
+    perim += Math.hypot(p2.e-p1.e, p2.n-p1.n);
+  }
+  area = Math.abs(area)/2;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:#fff; border-radius:4px;">
+    <rect width="${W}" height="${H}" fill="#fff"/>
+    <path d="${pathD}" fill="${cor}22" stroke="${cor}" stroke-width="2" stroke-linejoin="round"/>
+    ${distSvg}
+    ${rotulosSvg}
+    ${norteSvg}
+    <text x="8" y="${H-8}" font-family="Helvetica" font-size="9" fill="#666">${pontos.length} vért. · A=${area.toFixed(2)}m² · P=${perim.toFixed(2)}m</text>
+  </svg>`;
+}
+
 function renderLaudoTabPontos(c) {
   const l = state.laudoAtual;
   const pontos = l.pontos || [];
   const lados = l.lados || [];
+
+  // Pontos pendentes (parseados mas nao salvos ainda) — preview imediato
+  const pontosPreview = (state.laudoPontosPreview && state.laudoPontosPreview.length)
+    ? state.laudoPontosPreview
+    : pontos.map((p,i) => ({
+        rotulo: p.identificador || ('V'+(i+1)),
+        e: p.utm_x_e ? Number(p.utm_x_e) : 0,
+        n: p.utm_y_n ? Number(p.utm_y_n) : 0,
+      })).filter(p => p.e && p.n);
+
+  const ladosPreview = pontosPreview.length >= 2
+    ? pontosPreview.map((_, i) => {
+        const j = (i+1) % pontosPreview.length;
+        const p1 = pontosPreview[i], p2 = pontosPreview[j];
+        return { i_idx: i, f_idx: j, distancia_m: Math.hypot(p2.e-p1.e, p2.n-p1.n) };
+      })
+    : [];
+
   c.innerHTML = `
-    <div class="card">
-      <h3 style="margin-top:0;">📍 Importar pontos RTK (CSV/TXT)</h3>
-      <p style="color:var(--text-muted); font-size:12px; margin:4px 0 8px;">
-        Cole o conteúdo do arquivo (formato livre — ID, X, Y, Z; ou ID, Lat, Lng).
-        Detecção automática de zona UTM e conversão Lat/Lng↔UTM.
-      </p>
-      <textarea id="lp-rtk" rows="6" style="width:100%; font-family:monospace; font-size:12px;" placeholder="P1, 9234567.123, 567890.456&#10;P2, 9234578.234, 567901.567&#10;..."></textarea>
-      <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
-        <label>Zona UTM padrão: <input id="lp-zona" type="number" value="23" min="1" max="60" style="width:60px;"></label>
-        <label>Hem.: <select id="lp-hem"><option value="S" selected>Sul</option><option value="N">Norte</option></select></label>
-        <span style="flex:1;"></span>
-        <button id="lp-import">📥 Importar e parsear</button>
+    <div style="display:grid; grid-template-columns: 1fr 400px; gap:12px; align-items:start;">
+      <!-- ESQUERDA: import + tabelas -->
+      <div>
+        <div class="card">
+          <h3 style="margin-top:0;">📍 Importar pontos RTK (CSV/TXT)</h3>
+          <p style="color:var(--text-muted); font-size:12px; margin:4px 0 8px;">
+            Cole o conteúdo do arquivo (formato livre — ID, X, Y, Z; ou ID, Lat, Lng).
+            <strong>O preview ao lado atualiza em tempo real</strong> ao parsear.
+          </p>
+          <textarea id="lp-rtk" rows="6" style="width:100%; font-family:monospace; font-size:12px;" placeholder="P1, 9234567.123, 567890.456&#10;P2, 9234578.234, 567901.567&#10;..."></textarea>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+            <label>Zona UTM: <input id="lp-zona" type="number" value="23" min="1" max="60" style="width:60px;"></label>
+            <label>Hem.: <select id="lp-hem"><option value="S" selected>Sul</option><option value="N">Norte</option></select></label>
+            <span style="flex:1;"></span>
+            <button id="lp-parse">👁 Apenas preview</button>
+            <button id="lp-import" style="background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Salvar no laudo</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0;">📐 Pontos atuais (${pontos.length})</h3>
+          ${pontos.length === 0 ? '<p style="color:var(--text-muted);">Nenhum ponto salvo ainda. Importe RTK acima.</p>' : `
+            <div style="overflow-x:auto;">
+              <table style="width:100%; font-size:11px; font-family:monospace;">
+                <thead><tr style="border-bottom:1px solid var(--border);">
+                  <th style="padding:4px; text-align:left;">#</th>
+                  <th style="padding:4px; text-align:left;">Vert.</th>
+                  <th style="padding:4px; text-align:right;">UTM E</th>
+                  <th style="padding:4px; text-align:right;">UTM N</th>
+                  <th style="padding:4px; text-align:right;">Lat</th>
+                  <th style="padding:4px; text-align:right;">Lng</th>
+                </tr></thead>
+                <tbody>
+                  ${pontos.map(p => `<tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:4px;">${p.ordem}</td>
+                    <td style="padding:4px;">${escape(p.identificador||'')}</td>
+                    <td style="padding:4px; text-align:right;">${p.utm_x_e!=null?Number(p.utm_x_e).toFixed(3):'-'}</td>
+                    <td style="padding:4px; text-align:right;">${p.utm_y_n!=null?Number(p.utm_y_n).toFixed(3):'-'}</td>
+                    <td style="padding:4px; text-align:right;">${p.latitude!=null?Number(p.latitude).toFixed(6):'-'}</td>
+                    <td style="padding:4px; text-align:right;">${p.longitude!=null?Number(p.longitude).toFixed(6):'-'}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+            ${lados.length ? `
+            <h4 style="margin-top:12px;">📏 Lados calculados</h4>
+            <div style="overflow-x:auto;">
+              <table style="width:100%; font-size:11px; font-family:monospace;">
+                <thead><tr style="border-bottom:1px solid var(--border);">
+                  <th style="padding:4px;">#</th>
+                  <th style="padding:4px;">De → Para</th>
+                  <th style="padding:4px; text-align:right;">Dist. (m)</th>
+                  <th style="padding:4px; text-align:right;">Azimute</th>
+                </tr></thead>
+                <tbody>
+                  ${lados.map(s => `<tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:4px;">${s.ordem}</td>
+                    <td style="padding:4px;">${escape(s.de_identificador||'')} → ${escape(s.para_identificador||'')}</td>
+                    <td style="padding:4px; text-align:right;">${Number(s.distancia_m||0).toFixed(2)}</td>
+                    <td style="padding:4px; text-align:right;">${escape(s.azimute_dms||'')}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>` : ''}
+            <div style="margin-top:12px; padding:8px; background:var(--bg-secondary); border-radius:4px;">
+              <strong>📊 Resumo:</strong>
+              Área: <strong>${l.area_total_m2?Number(l.area_total_m2).toLocaleString('pt-BR',{maximumFractionDigits:2}):'-'} m²</strong> ·
+              Perímetro: <strong>${l.perimetro_m?Number(l.perimetro_m).toFixed(2):'-'} m</strong>
+            </div>
+          `}
+        </div>
+      </div>
+      <!-- DIREITA: preview do croqui (sticky) -->
+      <div style="position:sticky; top:8px;">
+        <div class="card">
+          <h3 style="margin-top:0; font-size:13px;">🗺️ Pré-visualização do croqui</h3>
+          <p style="font-size:10px; color:var(--text-muted); margin:0 0 8px;">
+            Atualiza em tempo real conforme você importa pontos. Este é o croqui automático que vai pro PDF.
+          </p>
+          <div id="lp-preview-svg" style="width:100%; min-height:380px; background:#fff; border:1px solid var(--border); border-radius:4px; overflow:hidden;">
+            ${gerarCroquiSvgClient(pontosPreview, ladosPreview)}
+          </div>
+        </div>
       </div>
     </div>
-    <div class="card">
-      <h3 style="margin-top:0;">📐 Pontos atuais (${pontos.length})</h3>
-      ${pontos.length === 0 ? '<p style="color:var(--text-muted);">Nenhum ponto. Importe RTK ou adicione manualmente.</p>' : `
-        <div style="overflow-x:auto;">
-          <table style="width:100%; font-size:11px; font-family:monospace;">
-            <thead><tr style="border-bottom:1px solid var(--border);">
-              <th style="padding:4px; text-align:left;">#</th>
-              <th style="padding:4px; text-align:left;">Vert.</th>
-              <th style="padding:4px; text-align:right;">UTM E (X)</th>
-              <th style="padding:4px; text-align:right;">UTM N (Y)</th>
-              <th style="padding:4px; text-align:right;">Lat</th>
-              <th style="padding:4px; text-align:right;">Lng</th>
-            </tr></thead>
-            <tbody>
-              ${pontos.map(p => `<tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:4px;">${p.ordem}</td>
-                <td style="padding:4px;">${escape(p.identificador||'')}</td>
-                <td style="padding:4px; text-align:right;">${p.utm_x_e!=null?Number(p.utm_x_e).toFixed(3):'-'}</td>
-                <td style="padding:4px; text-align:right;">${p.utm_y_n!=null?Number(p.utm_y_n).toFixed(3):'-'}</td>
-                <td style="padding:4px; text-align:right;">${p.latitude!=null?Number(p.latitude).toFixed(6):'-'}</td>
-                <td style="padding:4px; text-align:right;">${p.longitude!=null?Number(p.longitude).toFixed(6):'-'}</td>
-              </tr>`).join('')}
-            </tbody>
-          </table>
+
+    <!-- v2.0.1: preview compacto embaixo (visivel em mobile) -->
+    <div class="card" style="margin-top:12px;" id="lp-preview-mobile-card">
+      <details>
+        <summary style="cursor:pointer; font-weight:600;">📱 Ver preview embaixo (útil em telas pequenas)</summary>
+        <div id="lp-preview-svg-mobile" style="margin-top:8px;">
+          ${gerarCroquiSvgClient(pontosPreview, ladosPreview, { larguraPx: 600, alturaPx: 600 })}
         </div>
-        ${lados.length ? `
-        <h4 style="margin-top:12px;">📏 Lados calculados</h4>
-        <div style="overflow-x:auto;">
-          <table style="width:100%; font-size:11px; font-family:monospace;">
-            <thead><tr style="border-bottom:1px solid var(--border);">
-              <th style="padding:4px;">#</th>
-              <th style="padding:4px;">De</th>
-              <th style="padding:4px;">Para</th>
-              <th style="padding:4px; text-align:right;">Distância (m)</th>
-              <th style="padding:4px; text-align:right;">Azimute</th>
-            </tr></thead>
-            <tbody>
-              ${lados.map(s => `<tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:4px;">${s.ordem}</td>
-                <td style="padding:4px;">${escape(s.de_identificador||'')}</td>
-                <td style="padding:4px;">${escape(s.para_identificador||'')}</td>
-                <td style="padding:4px; text-align:right;">${Number(s.distancia_m||0).toFixed(2)}</td>
-                <td style="padding:4px; text-align:right;">${escape(s.azimute_dms||'')}</td>
-              </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>` : ''}
-        <div style="margin-top:12px; padding:8px; background:var(--bg-secondary); border-radius:4px;">
-          <strong>📊 Resumo:</strong>
-          Área: <strong>${l.area_total_m2?Number(l.area_total_m2).toLocaleString('pt-BR',{maximumFractionDigits:2}):'-'} m²</strong> ·
-          Perímetro: <strong>${l.perimetro_m?Number(l.perimetro_m).toFixed(2):'-'} m</strong>
-        </div>
-      `}
+      </details>
     </div>
   `;
-  document.getElementById('lp-import').onclick = async () => {
+
+  const atualizarPreview = (pts) => {
+    const lds = pts.length >= 2 ? pts.map((_,i)=>{
+      const j=(i+1)%pts.length, p1=pts[i], p2=pts[j];
+      return { i_idx:i, f_idx:j, distancia_m: Math.hypot(p2.e-p1.e, p2.n-p1.n) };
+    }) : [];
+    document.getElementById('lp-preview-svg').innerHTML = gerarCroquiSvgClient(pts, lds);
+    const m = document.getElementById('lp-preview-svg-mobile');
+    if (m) m.innerHTML = gerarCroquiSvgClient(pts, lds, { larguraPx: 600, alturaPx: 600 });
+  };
+
+  const parsearRtk = async () => {
     const texto = document.getElementById('lp-rtk').value.trim();
-    if (!texto) return alert('Cole o conteúdo do RTK');
+    if (!texto) return null;
     const zona = Number(document.getElementById('lp-zona').value) || 23;
     const hem = document.getElementById('lp-hem').value;
     try {
@@ -13085,17 +13280,37 @@ function renderLaudoTabPontos(c) {
         body: JSON.stringify({ texto, default_zona: zona, default_hemisferio: hem }),
         headers: { 'Content-Type': 'application/json' },
       });
-      if (!r.pontos || !r.pontos.length) return alert('Não foi possível parsear pontos');
-      if (!confirm('Encontrados '+r.pontos.length+' pontos. Salvar no laudo? (substitui os atuais)')) return;
+      return r;
+    } catch (err) { alert('Erro parseando RTK: '+err.message); return null; }
+  };
+
+  document.getElementById('lp-parse').onclick = async () => {
+    const r = await parsearRtk();
+    if (!r || !r.pontos || !r.pontos.length) return alert('Não foi possível parsear pontos');
+    state.laudoPontosPreview = r.pontos.map((p,i) => ({
+      rotulo: p.identificador || ('V'+(i+1)),
+      e: Number(p.utm_x_e || 0),
+      n: Number(p.utm_y_n || 0),
+    }));
+    atualizarPreview(state.laudoPontosPreview);
+  };
+
+  document.getElementById('lp-import').onclick = async () => {
+    const r = await parsearRtk();
+    if (!r || !r.pontos || !r.pontos.length) return alert('Não foi possível parsear pontos');
+    if (!confirm('Encontrados '+r.pontos.length+' pontos. Salvar no laudo? (substitui os atuais)')) return;
+    const zona = Number(document.getElementById('lp-zona').value) || 23;
+    const hem = document.getElementById('lp-hem').value;
+    try {
       await api('/api/laudos-demarcacao/'+l.id+'/pontos', {
         method:'POST',
         body: JSON.stringify({ pontos: r.pontos, default_zona: zona, default_hemisferio: hem }),
         headers: { 'Content-Type': 'application/json' },
       });
+      state.laudoPontosPreview = null;
       await loadLaudoDetalhe(l.id);
-      alert('✅ '+r.pontos.length+' pontos importados. Área e perímetro calculados.');
       renderLaudoEditor(document.getElementById('view-laudos'));
-    } catch (err) { alert('Erro: '+err.message); }
+    } catch (err) { alert('Erro ao salvar: '+err.message); }
   };
 }
 

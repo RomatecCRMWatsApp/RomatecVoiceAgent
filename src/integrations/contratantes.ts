@@ -25,6 +25,10 @@ export interface Contratante {
   telefone: string | null;
   email: string | null;
   observacoes: string | null;
+  // v2.0.1 — representante legal (obrigatorio quando PJ)
+  representante_nome: string | null;
+  representante_cpf: string | null;
+  representante_cargo: string | null;
   ativo: boolean;
   created_at: string;
   updated_at: string;
@@ -49,6 +53,9 @@ interface ContratanteRow extends RowDataPacket {
   telefone: string | null;
   email: string | null;
   observacoes: string | null;
+  representante_nome: string | null;
+  representante_cpf: string | null;
+  representante_cargo: string | null;
   ativo: 0 | 1;
   created_at: Date | string;
   updated_at: Date | string;
@@ -74,6 +81,9 @@ function mapRow(r: ContratanteRow): Contratante {
     telefone: r.telefone ?? null,
     email: r.email ?? null,
     observacoes: r.observacoes ?? null,
+    representante_nome: r.representante_nome ?? null,
+    representante_cpf: r.representante_cpf ?? null,
+    representante_cargo: r.representante_cargo ?? null,
     ativo: r.ativo === 1,
     created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
     updated_at: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
@@ -180,6 +190,9 @@ export interface CriarContratanteInput {
   telefone?: string | null;
   email?: string | null;
   observacoes?: string | null;
+  representante_nome?: string | null;
+  representante_cpf?: string | null;
+  representante_cargo?: string | null;
 }
 
 export async function criarContratante(input: CriarContratanteInput): Promise<Contratante> {
@@ -197,6 +210,20 @@ export async function criarContratante(input: CriarContratanteInput): Promise<Co
     }
   }
 
+  // PJ: valida representante legal
+  const repCpfLimpo = (input.representante_cpf ?? '').replace(/\D/g, '') || null;
+  if (input.tipo_pessoa === 'PJ') {
+    if (!input.representante_nome?.trim()) {
+      throw new Error('PJ precisa informar nome do representante legal');
+    }
+    if (!repCpfLimpo) {
+      throw new Error('PJ precisa informar CPF do representante legal');
+    }
+    if (!validarCPF(repCpfLimpo)) {
+      throw new Error('CPF do representante invalido');
+    }
+  }
+
   // Telefone (so digitos)
   const telLimpo = (input.telefone ?? '').replace(/\D/g, '') || null;
 
@@ -204,14 +231,16 @@ export async function criarContratante(input: CriarContratanteInput): Promise<Co
     `INSERT INTO contratantes
       (tipo_pessoa, nome, cpf_cnpj, rg_ie, nacionalidade, estado_civil, profissao,
        cep, logradouro, numero, complemento, bairro, cidade, uf,
-       telefone, email, observacoes)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       telefone, email, observacoes,
+       representante_nome, representante_cpf, representante_cargo)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       input.tipo_pessoa, input.nome.trim(), cpfCnpjLimpo,
       input.rg_ie ?? null, input.nacionalidade ?? null, input.estado_civil ?? null, input.profissao ?? null,
       input.cep ?? null, input.logradouro ?? null, input.numero ?? null, input.complemento ?? null,
       input.bairro ?? null, input.cidade ?? null, input.uf ?? null,
       telLimpo, input.email ?? null, input.observacoes ?? null,
+      input.representante_nome?.trim() || null, repCpfLimpo, input.representante_cargo?.trim() || null,
     ]
   );
   const created = await buscarContratante(r.insertId);
@@ -270,6 +299,14 @@ export async function atualizarContratante(
   }
   set('email', input.email);
   set('observacoes', input.observacoes);
+  set('representante_nome', input.representante_nome?.trim() || null);
+  set('representante_cargo', input.representante_cargo?.trim() || null);
+  if (input.representante_cpf !== undefined) {
+    const repCpfLimpo = (input.representante_cpf ?? '').replace(/\D/g, '') || null;
+    if (repCpfLimpo && !validarCPF(repCpfLimpo)) throw new Error('CPF do representante invalido');
+    fields.push('representante_cpf = ?');
+    params.push(repCpfLimpo);
+  }
 
   if (fields.length === 0) return existente;
 

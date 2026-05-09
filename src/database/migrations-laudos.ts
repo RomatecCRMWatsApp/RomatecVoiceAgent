@@ -203,6 +203,10 @@ export async function runLaudosMigrations(): Promise<void> {
     // v1.99.27 — Fase 3: croqui upload em LONGTEXT base64 + mime
     { label: 'ALTER croqui_b64', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN croqui_b64 LONGTEXT NULL' },
     { label: 'ALTER croqui_mime', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN croqui_mime VARCHAR(50) NULL' },
+    // v2.0.1 — Representante legal (PJ) e CEP/endereco no contratante
+    { label: 'ALTER representante_nome', sql: 'ALTER TABLE contratantes ADD COLUMN representante_nome VARCHAR(255) NULL' },
+    { label: 'ALTER representante_cpf', sql: 'ALTER TABLE contratantes ADD COLUMN representante_cpf VARCHAR(20) NULL' },
+    { label: 'ALTER representante_cargo', sql: 'ALTER TABLE contratantes ADD COLUMN representante_cargo VARCHAR(120) NULL' },
   ];
   for (const { label, sql } of ops) {
     try {
