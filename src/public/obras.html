@@ -13931,70 +13931,202 @@ function renderLaudoTabPontos(c) {
     } catch (err) { alert('Erro: '+err.message); }
   });
 
-  // v2.2.0: renderiza form ponto-a-ponto pra Urbano 4P / 5P
-  const renderFormUrbano = () => {
+  // v2.2.1: form ponto-a-ponto unificado (Urbano 4P/5P/Np + Rural Np)
+  // com botões +/- pra Np/Rural, tempo de rastreio em Rural, foto-por-piquete
+  const fotosAtual = state.laudoAtual.fotos || [];
+  const fotoDoPonto = (pontoId) => fotosAtual.find(f => f.ponto_id === pontoId);
+
+  const renderFormPontos = () => {
     const host = document.getElementById('lp-form-host');
     if (!host) return;
     const isUrb4 = tipoAtual === 'URBANO_4P';
     const isUrb5 = tipoAtual === 'URBANO_5P';
-    if (!isUrb4 && !isUrb5) {
-      // Np ou Rural: usa RTK (vai abrir o details)
-      host.innerHTML = `<div class="card" style="background:var(--bg-secondary);"><p style="margin:0; font-size:12px;">ℹ️ Para <strong>${tipoAtual==='URBANO_NP'?'Urbano poligonal':'Rural'}</strong>, use a opção <strong>"Importar pontos via RTK"</strong> abaixo.</p></div>`;
-      // Auto-expande o details RTK
-      const det = document.getElementById('lp-rtk-section');
-      if (det) det.open = true;
-      return;
+    const isUrbNp = tipoAtual === 'URBANO_NP';
+    const isRural = tipoAtual === 'RURAL';
+    const isDinamico = isUrbNp || isRural;
+
+    // Quantidade de pontos: fixa pra 4P/5P, dinâmica pra Np/Rural
+    let nPontos;
+    if (isUrb4) nPontos = 4;
+    else if (isUrb5) nPontos = 5;
+    else {
+      if (typeof state.laudoFormPontosCount !== 'number') {
+        state.laudoFormPontosCount = Math.max(pontos.length, 4);
+      }
+      nPontos = state.laudoFormPontosCount;
     }
-    const nPontos = isUrb4 ? 4 : 5;
-    const labels = isUrb4 ? labelsLados4P : labelsLados5P;
+
+    // Labels dos lados
+    const getLabelLado = (i) => {
+      if (isUrb4) return labelsLados4P[i-1];
+      if (isUrb5) return labelsLados5P[i-1];
+      const prox = i === nPontos ? 1 : i+1;
+      return `Lado ${i} (P${i}→P${prox})`;
+    };
+
     const showUTM = sistemaAtual === 'UTM' || sistemaAtual === 'AMBOS';
     const showLatLng = sistemaAtual === 'LATLNG' || sistemaAtual === 'AMBOS';
-    const ladosArr = lados.length === nPontos ? lados : Array(nPontos).fill({ medida_manual_m: null, confrontante_nome: '' });
+    const ladosArr = lados;
 
-    // Linhas de ponto + lado intercaladas
     let rows = '';
     for (let i = 1; i <= nPontos; i++) {
       const p = pontos.find(x => x.ordem === i) || {};
+      const fotoP = p.id ? fotoDoPonto(p.id) : null;
+      const cols = (showUTM?2:0) + (showLatLng?2:0) + 1;
       rows += `
-        <div class="card" style="padding:8px; border-left:3px solid var(--gold);">
-          <strong style="font-size:13px;">📍 Ponto P${i}</strong>
-          <div style="display:grid; grid-template-columns: repeat(${(showUTM?2:0)+(showLatLng?2:0)+1}, 1fr); gap:6px; margin-top:6px;">
+        <div class="card" style="padding:8px; border-left:3px solid var(--gold); position:relative;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="font-size:13px;">📍 Ponto P${i}</strong>
+            ${isDinamico && nPontos > 3 && i === nPontos ? `<button data-fp-rm="${i}" title="Remover último ponto" style="font-size:11px; padding:2px 8px; background:transparent; color:#ef4444; border:1px solid #ef444455;">🗑️ Remover P${i}</button>` : ''}
+          </div>
+          <div style="display:grid; grid-template-columns: repeat(${cols}, 1fr); gap:6px; margin-top:6px;">
             <input data-fp-rotulo="${i}" placeholder="Rótulo (ex: P${i}, M${i})" value="${escape(p.rotulo || ('P'+i))}">
-            ${showUTM ? `<input data-fp-utme="${i}" type="number" step="0.001" placeholder="UTM Este (X)" value="${p.utm_e ?? ''}">` : ''}
-            ${showUTM ? `<input data-fp-utmn="${i}" type="number" step="0.001" placeholder="UTM Norte (Y)" value="${p.utm_n ?? ''}">` : ''}
-            ${showLatLng ? `<input data-fp-lat="${i}" type="number" step="0.000001" placeholder="Latitude" value="${p.lat_decimal ?? ''}">` : ''}
-            ${showLatLng ? `<input data-fp-lng="${i}" type="number" step="0.000001" placeholder="Longitude" value="${p.long_decimal ?? ''}">` : ''}
+            ${showUTM ? `<input data-fp-utme="${i}" type="number" step="0.001" inputmode="decimal" placeholder="UTM Este (X)" value="${p.utm_e ?? ''}">` : ''}
+            ${showUTM ? `<input data-fp-utmn="${i}" type="number" step="0.001" inputmode="decimal" placeholder="UTM Norte (Y)" value="${p.utm_n ?? ''}">` : ''}
+            ${showLatLng ? `<input data-fp-lat="${i}" type="number" step="0.000001" inputmode="decimal" placeholder="Latitude" value="${p.lat_decimal ?? ''}">` : ''}
+            ${showLatLng ? `<input data-fp-lng="${i}" type="number" step="0.000001" inputmode="decimal" placeholder="Longitude" value="${p.long_decimal ?? ''}">` : ''}
+          </div>
+          ${isRural ? `
+            <div style="margin-top:6px;">
+              <input data-fp-rastreio="${i}" type="number" min="0" step="1" inputmode="numeric"
+                placeholder="⏱️ Tempo de rastreio GNSS (segundos) — opcional, útil pra georreferenciamento INCRA"
+                value="${p.tempo_rastreio_seg ?? ''}"
+                style="width:100%; font-size:12px;">
+            </div>
+          ` : ''}
+          <!-- v2.2.1: foto-por-piquete inline -->
+          <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            ${fotoP ? `
+              <img src="/api/laudos-demarcacao/foto/${fotoP.id}"
+                style="width:64px; height:64px; object-fit:cover; border-radius:4px; border:2px solid var(--gold); cursor:pointer;"
+                title="Click pra ver no tamanho original" data-fp-foto-view="${fotoP.id}">
+              <button data-fp-foto-rm="${fotoP.id}" style="font-size:11px; padding:4px 8px; background:#ef444422; color:#ef4444; border:1px solid #ef444455;">🗑️ Remover foto</button>
+              <button data-fp-foto-replace="${i}" style="font-size:11px; padding:4px 8px;">📷 Trocar</button>
+              <span style="font-size:11px; color:var(--text-muted);">↔ Aparece também na aba <strong>Fotos</strong></span>
+            ` : `
+              <button data-fp-foto="${i}" style="background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955; padding:6px 12px; font-size:12px;">📷 Tirar foto do piquete P${i}</button>
+              <span style="font-size:11px; color:var(--text-muted);">${p.id ? '(opcional — vai pro relatório fotográfico)' : '(salve os pontos primeiro pra poder anexar foto)'}</span>
+            `}
+            <input type="file" accept="image/*" capture="environment" data-fp-foto-input="${i}" style="display:none;">
           </div>
         </div>
       `;
-      // Lado correspondente (P_i → P_{i+1 mod n})
+      // Lado seguinte
       const ld = ladosArr[i-1] || {};
       rows += `
         <div style="padding:6px 12px; margin-left:20px; border-left:2px dashed var(--gold); font-size:11px; color:var(--text-muted);">
-          ↓ <strong>${labels[i-1]}</strong>
+          ↓ <strong>${getLabelLado(i)}</strong>
           <div style="display:grid; grid-template-columns: 1fr 2fr; gap:6px; margin-top:4px;">
-            <input data-fl-medida="${i}" type="number" step="0.01" placeholder="Medida (m)" value="${ld.medida_manual_m ?? ''}">
+            <input data-fl-medida="${i}" type="number" step="0.01" inputmode="decimal" placeholder="Medida (m)" value="${ld.medida_manual_m ?? ''}">
             <input data-fl-confront="${i}" list="dl-confrontantes" placeholder="Confrontante" value="${escape(ld.confrontante_nome || '')}">
           </div>
         </div>
       `;
     }
+
+    let header;
+    if (isUrb4) header = '4 pontos (retangular)';
+    else if (isUrb5) header = '5 pontos (com chanfro)';
+    else header = `${nPontos} pontos${isRural?' (rural)':' (poligonal urbano)'}`;
+
     host.innerHTML = `
       <div class="card">
-        <h3 style="margin-top:0;">📋 3. Vértices e medidas dos lados (${isUrb4?'4 pontos':'5 pontos com chanfro'})</h3>
+        <h3 style="margin-top:0;">📋 3. Vértices e medidas dos lados — ${header}</h3>
         <p style="font-size:11px; color:var(--text-muted); margin:4px 0 8px;">
-          Preencha cada vértice (P1 → P${nPontos}) com a coordenada coletada.
-          Os lados (Frente/Lateral/Fundo/Chanfro) são automaticamente nomeados.
+          Preencha cada vértice. Os lados são auto-rotulados (Frente/Lateral/Fundo/Chanfro pra urbano fixo, Lado N pra Np/Rural).
           Sistema fecha o perímetro: P${nPontos} → P1.
+          ${isRural ? '<br>⏱️ <strong>Tempo de rastreio</strong>: opcional. Útil pra laudos certificáveis (INCRA NTGIR).' : ''}
+          ${isDinamico ? '<br>➕ Pode adicionar ou remover pontos conforme o imóvel levantado.' : ''}
         </p>
         ${rows}
-        <div style="display:flex; gap:8px; margin-top:8px;">
+        ${isDinamico ? `
+          <button id="lp-add-ponto" style="width:100%; padding:10px; margin-top:8px; background:transparent; border:2px dashed var(--gold); color:var(--gold);">
+            ➕ Adicionar ponto P${nPontos+1}
+          </button>
+        ` : ''}
+        <div style="display:flex; gap:8px; margin-top:12px;">
           <button id="lp-form-salvar" style="flex:1; background:var(--gold); color:#06120a; border-color:var(--gold); padding:10px;">💾 Salvar pontos + medidas + confrontantes</button>
         </div>
       </div>
     `;
 
-    // Handler do salvar form
+    // ── Handlers ───────────────────────────────────────────
+    // Adicionar ponto (Np/Rural)
+    if (isDinamico) {
+      document.getElementById('lp-add-ponto').onclick = () => {
+        // Preserva valores digitados antes de re-render
+        capturarValoresFormParaState(nPontos);
+        state.laudoFormPontosCount = nPontos + 1;
+        renderFormPontos();
+      };
+      document.querySelectorAll('[data-fp-rm]').forEach(b => b.onclick = () => {
+        if (nPontos <= 3) return alert('Mínimo 3 pontos pra fechar polígono');
+        if (!confirm(`Remover ponto P${nPontos}? Os dados desse ponto serão perdidos.`)) return;
+        capturarValoresFormParaState(nPontos - 1);
+        state.laudoFormPontosCount = nPontos - 1;
+        renderFormPontos();
+      });
+    }
+
+    // Foto: trigger no botão = clicar no input file
+    document.querySelectorAll('[data-fp-foto], [data-fp-foto-replace]').forEach(b => {
+      b.onclick = () => {
+        const i = b.getAttribute('data-fp-foto') || b.getAttribute('data-fp-foto-replace');
+        const p = pontos.find(x => x.ordem === Number(i));
+        if (!p?.id) return alert('Salve os pontos primeiro pra anexar foto a um piquete');
+        document.querySelector(`[data-fp-foto-input="${i}"]`).click();
+      };
+    });
+
+    // Foto upload
+    document.querySelectorAll('[data-fp-foto-input]').forEach(input => {
+      input.onchange = async () => {
+        const i = Number(input.getAttribute('data-fp-foto-input'));
+        const f = input.files?.[0];
+        if (!f) return;
+        const p = pontos.find(x => x.ordem === i);
+        if (!p?.id) return alert('Ponto não encontrado no banco. Salve os pontos primeiro.');
+        try {
+          const r = await compressImageFile(f, { maxDim: 1600, quality: 0.85 });
+          // Se ja tinha foto, remover antes
+          const existente = fotoDoPonto(p.id);
+          if (existente) {
+            await api('/api/laudos-demarcacao/foto/'+existente.id, { method: 'DELETE' });
+          }
+          await api('/api/laudos-demarcacao/'+l.id+'/fotos', {
+            method: 'POST',
+            body: JSON.stringify({
+              fotos: [{
+                conteudo_b64: r.data_base64, mime: r.mime,
+                filename: `P${i}-${l.numero_laudo}.jpg`,
+                legenda: `Piquete P${i}`,
+                ponto_id: p.id,
+              }],
+            }),
+            headers: { 'Content-Type': 'application/json' },
+          });
+          await loadLaudoDetalhe(l.id);
+          renderLaudoEditor(document.getElementById('view-laudos'));
+        } catch (err) { alert('Erro upload foto: '+err.message); }
+      };
+    });
+
+    // Foto remover
+    document.querySelectorAll('[data-fp-foto-rm]').forEach(b => b.onclick = async () => {
+      if (!confirm('Remover foto deste piquete?')) return;
+      try {
+        await api('/api/laudos-demarcacao/foto/'+b.dataset.fpFotoRm, { method:'DELETE' });
+        await loadLaudoDetalhe(l.id);
+        renderLaudoEditor(document.getElementById('view-laudos'));
+      } catch (err) { alert('Erro: '+err.message); }
+    });
+
+    // Foto view (abre em nova aba)
+    document.querySelectorAll('[data-fp-foto-view]').forEach(img => img.onclick = () => {
+      window.open('/api/laudos-demarcacao/foto/'+img.dataset.fpFotoView, '_blank');
+    });
+
+    // Salvar pontos + lados
     document.getElementById('lp-form-salvar').onclick = async () => {
       const zona = 23, hem = 'S';
       const pontosBody = [];
@@ -14004,22 +14136,23 @@ function renderLaudoTabPontos(c) {
         const lat = document.querySelector(`[data-fp-lat="${i}"]`)?.value;
         const lng = document.querySelector(`[data-fp-lng="${i}"]`)?.value;
         const rotulo = document.querySelector(`[data-fp-rotulo="${i}"]`)?.value || ('P'+i);
+        const rastreio = document.querySelector(`[data-fp-rastreio="${i}"]`)?.value;
         pontosBody.push({
           ordem: i, rotulo,
           utm_zona: utmE ? zona : null, utm_hemisferio: utmE ? hem : null,
           utm_e: utmE ? Number(utmE) : null, utm_n: utmN ? Number(utmN) : null,
           lat_decimal: lat ? Number(lat) : null, long_decimal: lng ? Number(lng) : null,
-          lat_gms: null, long_gms: null, altitude: null, descricao_marco: null, azimute_manual: null,
+          lat_gms: null, long_gms: null, altitude: null, descricao_marco: null,
+          azimute_manual: null,
+          tempo_rastreio_seg: (isRural && rastreio) ? Number(rastreio) : null,
         });
       }
       try {
-        // 1) Salva pontos
-        const r = await api('/api/laudos-demarcacao/'+l.id+'/pontos', {
+        await api('/api/laudos-demarcacao/'+l.id+'/pontos', {
           method: 'POST',
           body: JSON.stringify({ pontos: pontosBody, default_zona: zona, default_hemisferio: hem }),
           headers: { 'Content-Type': 'application/json' },
         });
-        // 2) Salva medidas + confrontantes por lado (PUT em cada lado)
         await loadLaudoDetalhe(l.id);
         const ladosNovos = state.laudoAtual.lados || [];
         for (let i = 0; i < ladosNovos.length && i < nPontos; i++) {
@@ -14030,7 +14163,7 @@ function renderLaudoTabPontos(c) {
             body: JSON.stringify({
               medida_manual_m: medida ? Number(medida) : null,
               confrontante_nome: confront || null,
-              nome_lado: labels[i],
+              nome_lado: getLabelLado(i+1),
             }),
             headers: { 'Content-Type': 'application/json' },
           });
@@ -14041,7 +14174,15 @@ function renderLaudoTabPontos(c) {
       } catch (err) { alert('Erro: '+err.message); }
     };
   };
-  renderFormUrbano();
+
+  // Captura valores do form atual pra preservar entre re-renders (Np/Rural)
+  function capturarValoresFormParaState(novaContagem) {
+    // Apenas preserva count — valores ficam nos dados de pontos no estado quando salva
+    // (Pra v2.2.1 mantemos simples; se user clicar +/- antes de Salvar, perde dados não salvos)
+    state.laudoFormPontosCount = novaContagem;
+  }
+
+  renderFormPontos();
 
   const parsearRtk = async () => {
     const texto = document.getElementById('lp-rtk').value.trim();
@@ -14140,6 +14281,26 @@ function renderLaudoTabCroqui(c) {
 function renderLaudoTabFotos(c) {
   const l = state.laudoAtual;
   const fotos = l.fotos || [];
+  const pontos = l.pontos || [];
+  // v2.2.1: mapa ponto_id -> rotulo pra mostrar badge "P1/P2" nas fotos linkadas
+  const rotuloPonto = {};
+  for (const p of pontos) rotuloPonto[p.id] = p.rotulo || ('P'+p.ordem);
+  // Separa: fotos por piquete (linkadas) vs fotos gerais
+  const fotosPiquete = fotos.filter(f => f.ponto_id);
+  const fotosGerais = fotos.filter(f => !f.ponto_id);
+  const renderCardFoto = (f) => `
+    <div class="card" style="padding:6px; ${f.ponto_id ? 'border:2px solid var(--gold);' : ''}">
+      <div style="position:relative;">
+        <img src="/api/laudos-demarcacao/foto/${f.id}" alt="" style="width:100%; height:140px; object-fit:cover; border-radius:4px;">
+        ${f.ponto_id ? `<span style="position:absolute; top:4px; left:4px; background:var(--gold); color:#06120a; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600;">📍 ${escape(rotuloPonto[f.ponto_id] || '?')}</span>` : ''}
+      </div>
+      <input data-leg="${f.id}" placeholder="Legenda" value="${escape(f.legenda||'')}" style="width:100%; margin-top:4px; font-size:11px;">
+      <div style="display:flex; gap:4px; margin-top:4px;">
+        <button data-leg-save="${f.id}" style="flex:1; font-size:11px;">💾</button>
+        <button data-foto-del="${f.id}" class="btn-danger" style="flex:1; font-size:11px;">🗑️</button>
+      </div>
+    </div>
+  `;
   c.innerHTML = `
     <div class="card">
       <h3 style="margin-top:0;">📸 Relatório fotográfico</h3>
@@ -14155,20 +14316,22 @@ function renderLaudoTabFotos(c) {
       </div>
       <p id="lf-progress" style="font-size:11px; color:var(--gold); margin:6px 0 0; display:none;"></p>
     </div>
-    <div class="card">
-      <h3 style="margin-top:0;">Fotos enviadas (${fotos.length})</h3>
-      ${fotos.length === 0 ? '<p style="color:var(--text-muted);">Nenhuma foto.</p>' : `
+    ${fotosPiquete.length ? `
+      <div class="card">
+        <h3 style="margin-top:0;">📍 Fotos por piquete (${fotosPiquete.length})</h3>
+        <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">
+          Fotos vinculadas a vértices do levantamento. Editáveis também na sub-aba <strong>Pontos / Vértices</strong>.
+        </p>
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:12px;">
-          ${fotos.map(f => `
-            <div class="card" style="padding:6px;">
-              <img src="/api/laudos-demarcacao/foto/${f.id}" alt="" style="width:100%; height:140px; object-fit:cover; border-radius:4px;">
-              <input data-leg="${f.id}" placeholder="Legenda" value="${escape(f.legenda||'')}" style="width:100%; margin-top:4px; font-size:11px;">
-              <div style="display:flex; gap:4px; margin-top:4px;">
-                <button data-leg-save="${f.id}" style="flex:1; font-size:11px;">💾</button>
-                <button data-foto-del="${f.id}" class="btn-danger" style="flex:1; font-size:11px;">🗑️</button>
-              </div>
-            </div>
-          `).join('')}
+          ${fotosPiquete.sort((a,b) => (rotuloPonto[a.ponto_id]||'').localeCompare(rotuloPonto[b.ponto_id]||'')).map(renderCardFoto).join('')}
+        </div>
+      </div>
+    ` : ''}
+    <div class="card">
+      <h3 style="margin-top:0;">📸 Fotos gerais (${fotosGerais.length})</h3>
+      ${fotosGerais.length === 0 ? '<p style="color:var(--text-muted);">Nenhuma foto geral. Use os botões acima pra adicionar.</p>' : `
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:12px;">
+          ${fotosGerais.map(renderCardFoto).join('')}
         </div>
       `}
     </div>

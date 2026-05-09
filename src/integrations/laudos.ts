@@ -430,6 +430,8 @@ export interface PontoLaudo {
   descricao_marco: string | null;
   // v2.1.0
   azimute_manual: string | null;
+  // v2.2.1: tempo de rastreio GNSS em segundos (opcional, util em rural)
+  tempo_rastreio_seg: number | null;
 }
 
 interface PontoRow extends RowDataPacket {
@@ -440,6 +442,7 @@ interface PontoRow extends RowDataPacket {
   lat_gms: string | null; long_gms: string | null;
   altitude: string | number | null; descricao_marco: string | null;
   azimute_manual: string | null;
+  tempo_rastreio_seg: string | number | null;
 }
 
 function mapPontoRow(r: PontoRow): PontoLaudo {
@@ -459,6 +462,7 @@ function mapPontoRow(r: PontoRow): PontoLaudo {
     altitude: asNum(r.altitude),
     descricao_marco: r.descricao_marco ?? null,
     azimute_manual: r.azimute_manual ?? null,
+    tempo_rastreio_seg: r.tempo_rastreio_seg != null ? Number(r.tempo_rastreio_seg) : null,
   };
 }
 
@@ -544,6 +548,7 @@ export async function salvarPontosDoLaudo(
         altitude: p.altitude ?? null,
         descricao_marco: p.descricao_marco ?? null,
         azimute_manual: p.azimute_manual ?? null,
+        tempo_rastreio_seg: (p as Partial<PontoLaudo>).tempo_rastreio_seg ?? null,
       };
     });
 
@@ -553,12 +558,14 @@ export async function salvarPontosDoLaudo(
       const [r] = await conn.execute<ResultSetHeader>(
         `INSERT INTO laudos_demarcacao_pontos
           (laudo_id, ordem, rotulo, utm_zona, utm_hemisferio, utm_e, utm_n,
-           lat_decimal, long_decimal, lat_gms, long_gms, altitude, descricao_marco, azimute_manual)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           lat_decimal, long_decimal, lat_gms, long_gms, altitude, descricao_marco,
+           azimute_manual, tempo_rastreio_seg)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [Number(laudoId), p.ordem, p.rotulo,
          p.utm_zona, p.utm_hemisferio, p.utm_e, p.utm_n,
          p.lat_decimal, p.long_decimal, p.lat_gms, p.long_gms,
-         p.altitude, p.descricao_marco, p.azimute_manual ?? null]
+         p.altitude, p.descricao_marco, p.azimute_manual ?? null,
+         (p as Partial<PontoLaudo>).tempo_rastreio_seg ?? null]
       );
       idsInseridos.push(r.insertId);
     }

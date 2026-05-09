@@ -237,6 +237,9 @@ export async function runLaudosMigrations(): Promise<void> {
     // v2.1.6 — Descricao do loteamento/area de atuacao da PJ
     // (ex: "Loteamento Colina Park - 156 lotes residenciais Acailandia/MA")
     { label: 'ALTER contratante descricao_area', sql: 'ALTER TABLE contratantes ADD COLUMN descricao_area TEXT NULL' },
+    // v2.2.1 — Tempo de rastreio GNSS por ponto (segundos) — opcional
+    // Usado em laudo rural pra georreferenciamento NTGIR/INCRA certificavel
+    { label: 'ALTER ponto tempo_rastreio_seg', sql: 'ALTER TABLE laudos_demarcacao_pontos ADD COLUMN tempo_rastreio_seg INT NULL' },
   ];
   for (const { label, sql } of ops) {
     try {
