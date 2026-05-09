@@ -1765,6 +1765,155 @@ app.put('/api/laudos-demarcacao/foto/:fotoId/legenda', requireCeoToken, async (r
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v1.99.29 — Fase 5: Assina digital + serve PDF assinado
+app.post('/api/laudos-demarcacao/:id/assinar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const laudosMod = await import('./integrations/laudos');
+    const certsMod = await import('./services/signingCertificates');
+    const pdfSignerMod = await import('./services/pdfSigner');
+
+    // Reusa cert PJ Romatec (cadastrado em /obras → 🔒 Certs).
+    // Se preferirem assinar com PF, passar { perfil: 'pf' } no body.
+    const perfil = (req.body?.perfil === 'pf' ? 'pf' : 'pj') as 'pj' | 'pf';
+    const cert = await certsMod.getCertForSigning(perfil);
+    if (!cert) {
+      res.status(400).json({ error: `Certificado digital ${perfil.toUpperCase()} nao cadastrado em /obras → Certs` });
+      return;
+    }
+
+    // Gera PDF base do laudo (chama o gerador da Fase 4)
+    const laudo = await laudosMod.buscarLaudo(id);
+    if (!laudo) { res.status(404).json({ error: 'Laudo nao encontrado' }); return; }
+    const contratantesMod = await import('./integrations/contratantes');
+    const executantesMod = await import('./integrations/executantes');
+    const { gerarPdfLaudo } = await import('./services/laudoPdf');
+    const contratante = await contratantesMod.buscarContratante(laudo.contratante_id);
+    const executante = await executantesMod.buscarExecutante(laudo.executante_id);
+    if (!contratante || !executante) { res.status(500).json({ error: 'Contratante/Executante associado nao encontrado' }); return; }
+    const [pontos, lados, fotos, croquiUpload] = await Promise.all([
+      laudosMod.listarPontosDoLaudo(id),
+      laudosMod.listarLadosDoLaudo(id),
+      laudosMod.listarFotosDoLaudo(id),
+      laudosMod.getCroquiUpload(id),
+    ]);
+    const pdfBase = await gerarPdfLaudo({
+      laudo, contratante, executante, pontos, lados,
+      fotos: fotos.map(f => ({ id: f.id, mime: f.mime, legenda: f.legenda })),
+      fotoBase64Loader: async (fotoId) => {
+        const f = await laudosMod.getFotoConteudo(fotoId);
+        return f ? { base64: f.base64, mime: f.mime } : null;
+      },
+      croquiUpload: croquiUpload ?? null,
+    });
+
+    // Aplica PAdES (PKCS#7 detached, ICP-Brasil)
+    const pdfAssinado = await pdfSignerMod.signPdfBuffer(pdfBase, cert.pfx, cert.senha, {
+      name: cert.meta.subject_cn || executante.nome,
+      reason: `Laudo ${laudo.numero_laudo} — Demarcacao`,
+      location: `${laudo.municipio || 'Açailândia'}/${laudo.uf_imovel || 'MA'}`,
+      contactInfo: cert.meta.subject_doc || '',
+    });
+    await laudosMod.salvarPdfAssinado(id, pdfAssinado);
+    res.json({
+      ok: true,
+      numero: laudo.numero_laudo,
+      assinado_por: cert.meta.subject_cn,
+      cert_validade: cert.meta.validade_ate,
+      pdf_size_bytes: pdfAssinado.length,
+      link_validacao: `${getBaseUrl()}/v/laudo/${laudo.hash_validacao}`,
+    });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// PDF assinado (gera novo se nao existe)
+app.get('/api/laudos-demarcacao/:id/pdf-assinado', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const data = await m.getPdfAssinado(String(req.params.id));
+    if (!data) {
+      res.status(404).json({ error: 'Laudo ainda nao foi assinado' });
+      return;
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Laudo-${data.numero}-assinado.pdf"`);
+    res.send(data.pdf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// Pagina publica de validacao /v/laudo/:hash
+app.get('/v/laudo/:hash', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const cMod = await import('./integrations/contratantes');
+    const eMod = await import('./integrations/executantes');
+    const laudo = await m.buscarLaudoPorHash(String(req.params.hash));
+    if (!laudo) {
+      res.status(404).set('Content-Type', 'text/html; charset=utf-8').send(`
+        <!doctype html><html lang=pt-br><head><meta charset=utf-8>
+        <title>Laudo nao encontrado</title>
+        <style>body{font-family:system-ui;max-width:600px;margin:60px auto;padding:0 20px;background:#fff8f8}
+        .x{background:#fee;border:1px solid #fcc;padding:20px;border-radius:8px;text-align:center}</style>
+        </head><body><div class=x><h1>❌ Laudo não encontrado</h1>
+        <p>Hash inválido ou laudo removido.</p></div></body></html>
+      `);
+      return;
+    }
+    const contratante = await cMod.buscarContratante(laudo.contratante_id);
+    const executante = await eMod.buscarExecutante(laudo.executante_id);
+    const fmtBR = (n: number | null): string => n != null
+      ? Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+      : '—';
+    const statusCor = laudo.status === 'CONFIRMADO' ? '#10b981'
+                    : laudo.status === 'CANCELADO' ? '#ef4444'
+                    : laudo.status === 'ASSINADO' || laudo.status === 'ENVIADO' ? '#3b82f6'
+                    : '#6b7280';
+    const statusEmoji = laudo.status === 'CONFIRMADO' ? '✓'
+                      : laudo.status === 'CANCELADO' ? '✗'
+                      : laudo.status === 'ASSINADO' ? '🔏'
+                      : laudo.status === 'ENVIADO' ? '📤'
+                      : '📋';
+    res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html><html lang=pt-br>
+<head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Laudo ${laudo.numero_laudo} — Romatec</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;max-width:760px;margin:0 auto;padding:24px;background:#f5f5f0;color:#222}
+.card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}
+h1{margin:0 0 8px;font-size:24px;color:#1F5C3A}
+.sub{color:#666;font-size:14px;margin-bottom:16px}
+.badge{display:inline-block;background:${statusCor};color:#fff;padding:4px 12px;border-radius:14px;font-weight:600;font-size:12px;margin-left:6px}
+.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee}
+.row:last-child{border-bottom:0}
+.label{color:#888;font-size:13px}.value{font-weight:500}
+.dest{background:#1F5C3A;color:#fff;padding:24px;border-radius:12px;margin-bottom:16px;text-align:center}
+.dest h2{margin:0 0 4px;font-size:28px}.dest p{margin:0;font-size:13px;opacity:0.9}
+.btn{display:inline-block;background:#1F5C3A;color:#fff!important;text-decoration:none;padding:12px 20px;border-radius:8px;margin-top:8px}
+</style>
+</head>
+<body>
+<div class=dest>
+  <h2>📐 Laudo Técnico de Demarcação</h2>
+  <p>Romatec Consultoria Imobiliária</p>
+</div>
+<div class=card>
+  <h1>${laudo.numero_laudo} <span class=badge>${statusEmoji} ${laudo.status}</span></h1>
+  <p class=sub>Documento autenticado pelo Romatec — hash SHA-256 verificado</p>
+  <div class=row><span class=label>Tipo de imóvel</span><span class=value>${laudo.tipo_imovel}</span></div>
+  ${contratante ? `<div class=row><span class=label>Contratante</span><span class=value>${contratante.nome}</span></div>` : ''}
+  ${executante ? `<div class=row><span class=label>Executante</span><span class=value>${executante.nome}${executante.registro_cft ? ` · CFT ${executante.registro_cft}` : ''}</span></div>` : ''}
+  ${laudo.area_total_m2 ? `<div class=row><span class=label>Área total</span><span class=value>${fmtBR(laudo.area_total_m2)} m²</span></div>` : ''}
+  ${laudo.perimetro_m ? `<div class=row><span class=label>Perímetro</span><span class=value>${fmtBR(laudo.perimetro_m)} m</span></div>` : ''}
+  ${laudo.municipio ? `<div class=row><span class=label>Município</span><span class=value>${laudo.municipio}/${laudo.uf_imovel || ''}</span></div>` : ''}
+  ${laudo.assinado_em ? `<div class=row><span class=label>Assinado digitalmente em</span><span class=value>${new Date(laudo.assinado_em).toLocaleString('pt-BR')}</span></div>` : ''}
+  <div class=row><span class=label>Emitido em</span><span class=value>${new Date(laudo.created_at).toLocaleString('pt-BR')}</span></div>
+</div>
+<div style="text-align:center"><a class=btn href="/api/laudos-demarcacao/${laudo.id}/pdf-assinado">📄 Baixar PDF assinado</a></div>
+<p style="text-align:center;color:#888;font-size:11px;margin-top:16px">Documento validado pelo sistema Romatec — para questionar autenticidade entre em contato (99) 99181-1246.</p>
+</body></html>`);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // v1.99.28 — Fase 4: PDF do Laudo (memorial NTGIR, croqui, fotos)
 app.get('/api/laudos-demarcacao/:id/pdf', async (req: Request, res: Response) => {
   try {

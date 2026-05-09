@@ -759,3 +759,38 @@ export async function atualizarLegendaFoto(fotoId: number | string, legenda: str
     [legenda, Number(fotoId)]
   );
 }
+
+// ── v1.99.29: Fase 5 — Assinatura digital + persistir PDF assinado ────────
+
+export async function salvarPdfAssinado(
+  laudoId: number | string,
+  pdfBuffer: Buffer
+): Promise<void> {
+  await pool.execute(
+    `UPDATE laudos_demarcacao
+       SET pdf_assinado_blob = ?,
+           assinado_em = NOW(),
+           status = IF(status IN ('RASCUNHO','PREENCHIDO'), 'ASSINADO', status)
+     WHERE id = ?`,
+    [pdfBuffer, Number(laudoId)]
+  );
+}
+
+export async function getPdfAssinado(laudoId: number | string): Promise<{
+  pdf: Buffer; numero: string; assinado_em: string | null;
+} | null> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT numero_laudo, pdf_assinado_blob, assinado_em
+       FROM laudos_demarcacao WHERE id = ? LIMIT 1`,
+    [Number(laudoId)]
+  );
+  if (!rows.length || !rows[0].pdf_assinado_blob) return null;
+  const r = rows[0];
+  return {
+    pdf: r.pdf_assinado_blob as Buffer,
+    numero: String(r.numero_laudo),
+    assinado_em: r.assinado_em
+      ? (r.assinado_em instanceof Date ? r.assinado_em.toISOString() : String(r.assinado_em))
+      : null,
+  };
+}
