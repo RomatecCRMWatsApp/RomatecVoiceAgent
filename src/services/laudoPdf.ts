@@ -299,8 +299,31 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   doc.fontSize(10).fillColor('#888').font('Helvetica-Bold')
      .text('5. EQUIPAMENTOS UTILIZADOS', 40, cy);
   cy += 14;
+  // v2.2.3: equipamentos dinamicos (base/rover/coletor por laudo) com fallback
+  const baseTxt = laudo.base_nome || 'Receptor GNSS RTK S6 ComNAV';
+  const roverTxt = laudo.rover_nome || 'Receptor GNSS RTK T30 Laser Plus (SinoGNSS)';
+  const coletorTxt = laudo.coletor_nome || 'Coletor de dados R60 (SinoGNSS)';
+  let eqTxt = `Equipamentos topográficos e instrumentação utilizados:\n\n` +
+    `• RECEPTOR BASE GNSS: ${baseTxt} — estação de referência fixa montada sobre tripé com base niveladora.\n\n` +
+    `• RECEPTOR ROVER GNSS: ${roverTxt} — receptor móvel multibanda com rastreio simultâneo das constelações ativas (GPS, BeiDou, GLONASS, Galileo).\n\n` +
+    `• COLETOR DE DADOS: ${coletorTxt} — controlador robusto e ergonômico que proporciona profissionalismo e flexibilidade no levantamento topográfico em campo.\n\n` +
+    `• ACESSÓRIOS DE CAMPO: tripé robusto para a base, bastão telescópico de 2m para o rover, bipé estabilizador, base niveladora ótica, trena de aferição.\n\n` +
+    `Software de pós-processamento: Topcon Tools + MetricaTOPO.`;
+  if (laudo.base_inicio_rastreio && laudo.base_fim_rastreio) {
+    const ini = new Date(laudo.base_inicio_rastreio);
+    const fim = new Date(laudo.base_fim_rastreio);
+    const dur = (fim.getTime() - ini.getTime()) / 1000;
+    if (dur > 0) {
+      const h = Math.floor(dur / 3600);
+      const m = Math.floor((dur % 3600) / 60);
+      eqTxt += `\n\n📡 RASTREIO DA BASE: início ${fmtData(ini)} ${ini.toLocaleTimeString('pt-BR').slice(0,5)} → fim ${fmtData(fim)} ${fim.toLocaleTimeString('pt-BR').slice(0,5)} · Duração total: ${h}h ${m}min (${(dur/3600).toFixed(2)} horas).`;
+    }
+  }
+  if (laudo.base_observacoes) {
+    eqTxt += `\n\nObservações da base: ${laudo.base_observacoes}`;
+  }
   doc.fontSize(9).fillColor('#222').font('Helvetica')
-     .text(EQUIPAMENTOS_PADRAO, 40, cy, { width: 515, align: 'justify' });
+     .text(eqTxt, 40, cy, { width: 515, align: 'justify' });
   cy = doc.y + 14;
 
   // ── 6. Tabela de coordenadas ───────────────────────────────────────

@@ -12572,6 +12572,33 @@ async function abrirZayraVisual() {
   document.getElementById('zvLiveScreen').onclick = () => iniciarLive('tela');
 }
 
+// v2.2.3 FIX: persiste state.currentTab/currentObra em localStorage
+// Antes: ao voltar de visualizar PDF (window.open novo tab + foco volta),
+// algumas vezes a PWA recarregava (SW update) e state.currentTab voltava
+// pro 'dashboard' default — usuário perdia o contexto da aba.
+// Agora: carrega do localStorage no boot, salva a cada render().
+const PERSIST_KEY_OBRAS = 'romatec_obras_state_v1';
+(function loadPersistedState() {
+  try {
+    const s = JSON.parse(localStorage.getItem(PERSIST_KEY_OBRAS) || '{}');
+    if (s.currentTab && document.querySelector(`.tab[data-tab="${s.currentTab}"]`)) {
+      state.currentTab = s.currentTab;
+    }
+    if (s.currentObra) state.currentObra = s.currentObra;
+  } catch (_) {}
+})();
+const _origRender = render;
+window.render = render = async function() {
+  try {
+    localStorage.setItem(PERSIST_KEY_OBRAS, JSON.stringify({
+      currentTab: state.currentTab,
+      currentObra: state.currentObra,
+      _ts: Date.now(),
+    }));
+  } catch (_) {}
+  return _origRender.apply(this, arguments);
+};
+
 render();
 
 // ── v2.0.0: LAUDOS DE DEMARCACAO (Fase 7) ─────────────────────────────────
@@ -12685,6 +12712,23 @@ const ACAILANDIA_DEFAULTS = {
     'Rio Ararandeua', 'Rio Azul', 'Rio Gurupi', 'Rio Itinga', 'Rio Pindaré',
     'Rio Verde',
   ],
+  // v2.2.3: Equipamentos GNSS — defaults Romatec (CEO confirmou)
+  equipBase: [
+    'Receptor GNSS RTK S6 ComNAV',
+    'Receptor GNSS RTK T30 Laser Plus',
+    'ComNav T300 Pro',
+  ],
+  equipRover: [
+    'Receptor GNSS RTK T30 Laser Plus',
+    'Receptor GNSS RTK S6 ComNAV',
+    'SinoGNSS T30 Pro',
+  ],
+  equipColetor: [
+    'Coletor R60',
+    'Coletor R80',
+    'Coletor SinoGNSS R60 (Android 12)',
+    'Coletor SinoGNSS R80 (Android 12)',
+  ],
 };
 
 // v2.1.8: Cadastros locais — extensiveis via localStorage
@@ -12724,7 +12768,8 @@ function adicionarCadastroLocal(tipo, valor) {
 }
 // Re-injeta datalists apos cadastro novo (pra atualizar sugestoes ao vivo)
 function reinjetarDatalists() {
-  ['dl-bairros','dl-loteamentos','dl-povoados','dl-municipios','dl-cursos-agua','dl-confrontantes'].forEach(id => {
+  ['dl-bairros','dl-loteamentos','dl-povoados','dl-municipios','dl-cursos-agua','dl-confrontantes',
+   'dl-equip-base','dl-equip-rover','dl-equip-coletor'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.remove();
   });
@@ -14099,14 +14144,24 @@ function renderLaudoTabPontos(c) {
     // Card Base GNSS (rural sempre, urbano se toggle ON)
     const baseHtml = cronoAtivo ? `
       <div class="card" style="border:1px solid #f59e0b;">
-        <h3 style="margin-top:0;">📡 Base GNSS — estação de referência ${isRural?'(NTGIR/INCRA)':''}</h3>
+        <h3 style="margin-top:0;">📡 Equipamentos GNSS + rastreio da base ${isRural?'(NTGIR/INCRA)':''}</h3>
         <p style="font-size:11px; color:var(--text-muted); margin:4px 0 8px;">
-          ${isRural ? '⚠️ <strong>Obrigatório para georreferenciamento rural certificável.</strong>' : '🕐 Registre o início e fim do rastreio da base.'}
-          Use os botões <strong>📌 Marcar agora</strong> em campo — sistema calcula a duração automaticamente.
+          ${isRural ? '⚠️ <strong>Obrigatório para georreferenciamento rural certificável.</strong>' : '🕐 Registre os equipamentos + início e fim do rastreio da base.'}
+          Use os botões <strong>📌 Agora</strong> em campo — sistema calcula a duração automaticamente.
         </p>
         <div style="display:grid; grid-template-columns:1fr; gap:6px;">
-          <input id="lp-base-nome" placeholder="Nome/ID da base (ex: ComNav T30 RTK Romatec, RBMC PARA, etc)"
-            value="${escape(l.base_nome || 'ComNav T30 RTK Romatec')}">
+          <label style="font-size:11px; color:var(--text-muted);">📡 Receptor BASE
+            <input id="lp-base-nome" list="dl-equip-base" placeholder="Receptor GNSS BASE"
+              value="${escape(l.base_nome || 'Receptor GNSS RTK S6 ComNAV')}" style="width:100%;">
+          </label>
+          <label style="font-size:11px; color:var(--text-muted);">📡 Receptor ROVER (móvel)
+            <input id="lp-rover-nome" list="dl-equip-rover" placeholder="Receptor GNSS ROVER"
+              value="${escape(l.rover_nome || 'Receptor GNSS RTK T30 Laser Plus')}" style="width:100%;">
+          </label>
+          <label style="font-size:11px; color:var(--text-muted);">📱 Coletor de dados
+            <input id="lp-coletor-nome" list="dl-equip-coletor" placeholder="Coletor"
+              value="${escape(l.coletor_nome || 'Coletor R60')}" style="width:100%;">
+          </label>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
             <div>
               <label style="font-size:11px; color:var(--text-muted); display:block;">⏱️ Início do rastreio</label>
@@ -14348,10 +14403,12 @@ function renderLaudoTabPontos(c) {
         });
       }
       try {
-        // 1) Salva Base GNSS (se cronômetro ativo)
+        // 1) Salva Base GNSS + Rover + Coletor (se cronômetro ativo)
         if (cronoAtivo) {
           const baseBody = {
             base_nome: document.getElementById('lp-base-nome')?.value.trim() || null,
+            rover_nome: document.getElementById('lp-rover-nome')?.value.trim() || null,
+            coletor_nome: document.getElementById('lp-coletor-nome')?.value.trim() || null,
             base_inicio_rastreio: document.getElementById('lp-base-inicio')?.value || null,
             base_fim_rastreio: document.getElementById('lp-base-fim')?.value || null,
             base_observacoes: document.getElementById('lp-base-obs')?.value.trim() || null,
@@ -14360,6 +14417,13 @@ function renderLaudoTabPontos(c) {
             method: 'PUT', body: JSON.stringify(baseBody),
             headers: { 'Content-Type': 'application/json' },
           });
+          // Auto-harvest equipamentos pra cadastros locais (gerenciados pelos datalists)
+          if (typeof adicionarCadastroLocal === 'function') {
+            adicionarCadastroLocal('equipBase', baseBody.base_nome);
+            adicionarCadastroLocal('equipRover', baseBody.rover_nome);
+            adicionarCadastroLocal('equipColetor', baseBody.coletor_nome);
+            if (typeof reinjetarDatalists === 'function') reinjetarDatalists();
+          }
         }
         await api('/api/laudos-demarcacao/'+l.id+'/pontos', {
           method: 'POST',
@@ -14686,6 +14750,10 @@ function injetarDatalistsAcailandia() {
   mk('dl-bairros', getListaCombined('bairros'));
   mk('dl-loteamentos', getListaCombined('loteamentos'));
   mk('dl-povoados', getListaCombined('povoados'));
+  // v2.2.3: equipamentos GNSS
+  mk('dl-equip-base', getListaCombined('equipBase'));
+  mk('dl-equip-rover', getListaCombined('equipRover'));
+  mk('dl-equip-coletor', getListaCombined('equipColetor'));
   // Municipios sao guardados em chave diferente (municipiosLimitrofes vs municipios)
   const munDef = ACAILANDIA_DEFAULTS.municipiosLimitrofes.map(s => s.split('/')[0]);
   const munCustom = (getCadastrosLocais().municipios || []);

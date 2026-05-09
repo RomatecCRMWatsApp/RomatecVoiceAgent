@@ -69,6 +69,9 @@ export interface Laudo {
   base_inicio_rastreio: string | null;
   base_fim_rastreio: string | null;
   base_observacoes: string | null;
+  // v2.2.3: equipamento Rover (receptor movel) + Coletor de dados
+  rover_nome: string | null;
+  coletor_nome: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -124,6 +127,8 @@ interface LaudoRow extends RowDataPacket {
   base_inicio_rastreio: Date | string | null;
   base_fim_rastreio: Date | string | null;
   base_observacoes: string | null;
+  rover_nome: string | null;
+  coletor_nome: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -195,6 +200,8 @@ function mapRow(r: LaudoRow): Laudo {
     base_inicio_rastreio: asISO(r.base_inicio_rastreio),
     base_fim_rastreio: asISO(r.base_fim_rastreio),
     base_observacoes: r.base_observacoes ?? null,
+    rover_nome: r.rover_nome ?? null,
+    coletor_nome: r.coletor_nome ?? null,
     created_at: asISO(r.created_at) ?? '',
     updated_at: asISO(r.updated_at) ?? '',
   };
@@ -368,6 +375,9 @@ export interface AtualizarLaudoInput {
   base_inicio_rastreio?: string | null;
   base_fim_rastreio?: string | null;
   base_observacoes?: string | null;
+  // v2.2.3 — Rover + Coletor
+  rover_nome?: string | null;
+  coletor_nome?: string | null;
 }
 
 export async function atualizarLaudo(id: number | string, input: AtualizarLaudoInput): Promise<Laudo> {
@@ -416,6 +426,8 @@ export async function atualizarLaudo(id: number | string, input: AtualizarLaudoI
   set('base_inicio_rastreio', input.base_inicio_rastreio);
   set('base_fim_rastreio', input.base_fim_rastreio);
   set('base_observacoes', input.base_observacoes);
+  set('rover_nome', input.rover_nome);
+  set('coletor_nome', input.coletor_nome);
 
   if (fields.length === 0) return existente;
   params.push(Number(id));

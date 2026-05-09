@@ -247,6 +247,11 @@ export async function runLaudosMigrations(): Promise<void> {
     { label: 'ALTER laudo base_inicio_rastreio', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN base_inicio_rastreio DATETIME NULL' },
     { label: 'ALTER laudo base_fim_rastreio', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN base_fim_rastreio DATETIME NULL' },
     { label: 'ALTER laudo base_observacoes', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN base_observacoes TEXT NULL' },
+    // v2.2.3: equipamento ROVER (receptor movel). Default no front:
+    // 'Receptor GNSS RTK T30 Laser Plus' — mas customizavel por laudo
+    { label: 'ALTER laudo rover_nome', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN rover_nome VARCHAR(120) NULL' },
+    // v2.2.3: coletor de dados (controlador). Default 'Coletor R60'
+    { label: 'ALTER laudo coletor_nome', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN coletor_nome VARCHAR(120) NULL' },
   ];
   for (const { label, sql } of ops) {
     try {
