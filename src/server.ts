@@ -1841,6 +1841,155 @@ app.get('/api/laudos-demarcacao/:id/pdf-assinado', async (req: Request, res: Res
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v1.99.30 — Fase 6: Gerar recibo do laudo + Enviar Z-API (laudo + recibo)
+
+// POST /:id/gerar-recibo — cria recibo universal pre-preenchido com dados do laudo
+app.post('/api/laudos-demarcacao/:id/gerar-recibo', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const laudosMod = await import('./integrations/laudos');
+    const cMod = await import('./integrations/contratantes');
+    const recMod = await import('./integrations/recibos');
+
+    const laudo = await laudosMod.buscarLaudo(id);
+    if (!laudo) { res.status(404).json({ error: 'Laudo nao encontrado' }); return; }
+    if (!laudo.valor_servico) {
+      res.status(400).json({ error: 'Laudo sem valor_servico definido' });
+      return;
+    }
+    const contratante = await cMod.buscarContratante(laudo.contratante_id);
+    if (!contratante) { res.status(500).json({ error: 'Contratante nao encontrado' }); return; }
+    if (!contratante.telefone) {
+      res.status(400).json({ error: 'Contratante sem telefone — necessario pra envio do recibo' });
+      return;
+    }
+
+    // Mapeia FormaPagamentoLaudo → FormaPagamento de recibo
+    const formaPagMap: Record<string, 'pix' | 'dinheiro' | 'transferencia' | 'boleto'> = {
+      PIX: 'pix', DINHEIRO: 'dinheiro', TRANSFERENCIA: 'transferencia', BOLETO: 'boleto',
+    };
+    const formaPagRecibo = laudo.forma_pagamento ? formaPagMap[laudo.forma_pagamento] || 'pix' : 'pix';
+
+    const identImovel = laudo.tipo_imovel === 'URBANO'
+      ? `${laudo.loteamento ? laudo.loteamento + ' — ' : ''}Quadra ${laudo.quadra || '?'} Lote ${laudo.numero_lote || '?'}`
+      : laudo.denominacao_imovel || 'Imóvel rural';
+
+    const reciboCriado = await recMod.criarRecibo({
+      tenant_id: 1,
+      tipo: 'custom',
+      resource_type: 'laudo_demarcacao',
+      resource_id: String(laudo.id),
+      destinatario_nome: contratante.nome,
+      destinatario_doc: contratante.cpf_cnpj,
+      destinatario_phone: contratante.telefone,
+      destinatario_email: contratante.email,
+      valor: laudo.valor_servico,
+      forma_pagamento: formaPagRecibo,
+      descricao_servico: `Referente ao serviço de demarcação do imóvel: ${identImovel} — Laudo nº ${laudo.numero_laudo}`,
+      categoria_servico: 'demarcacao_imovel',
+      categoria_grupo: null,
+      emitente_perfil: 'romatec_pj',
+      expira_em_dias: 30,
+    });
+
+    // Liga recibo ao laudo
+    const pool1 = (await import('./database/connection')).default;
+    await pool1.execute(
+      `UPDATE laudos_demarcacao SET recibo_id = ?, status = IF(status='ASSINADO','RECIBO_GERADO',status) WHERE id = ?`,
+      [reciboCriado.id, laudo.id]
+    );
+
+    res.json({
+      ok: true,
+      recibo_id: reciboCriado.id,
+      recibo_numero: reciboCriado.numero,
+      token: reciboCriado.token,
+      hash: reciboCriado.hash_validacao,
+    });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// POST /:id/enviar-zapi — envia laudo assinado + recibo, 2 disparos sequenciais
+app.post('/api/laudos-demarcacao/:id/enviar-zapi', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const laudosMod = await import('./integrations/laudos');
+    const cMod = await import('./integrations/contratantes');
+    const recMod = await import('./integrations/recibos');
+    const wa = await import('./integrations/whatsapp');
+
+    const laudo = await laudosMod.buscarLaudo(id);
+    if (!laudo) { res.status(404).json({ error: 'Laudo nao encontrado' }); return; }
+    const contratante = await cMod.buscarContratante(laudo.contratante_id);
+    if (!contratante?.telefone) { res.status(400).json({ error: 'Contratante sem telefone' }); return; }
+    const phoneOverride = typeof req.body?.phone_override === 'string'
+      ? req.body.phone_override.replace(/\D/g, '') : '';
+    const phone = phoneOverride || (contratante.telefone || '').replace(/\D/g, '');
+
+    // 1) PDF do laudo assinado
+    const pdfLaudoData = await laudosMod.getPdfAssinado(id);
+    if (!pdfLaudoData) { res.status(400).json({ error: 'Laudo ainda nao foi assinado — chame /assinar antes' }); return; }
+
+    const enviosOk: string[] = [];
+    const enviosFalha: string[] = [];
+
+    // Mensagem inicial
+    try {
+      const msg = `📐 *Laudo Técnico de Demarcação ${laudo.numero_laudo}*\n\n` +
+        `${contratante.nome}, segue o laudo técnico assinado digitalmente.\n` +
+        `🔗 Validar: ${getBaseUrl()}/v/laudo/${laudo.hash_validacao}\n\n— Romatec`;
+      await wa.sendReply(phone, msg);
+    } catch (err) {
+      console.warn('[laudo:zapi:msg]', (err as Error).message);
+    }
+
+    // Disparo 1: laudo assinado
+    try {
+      await wa.sendDocument(phone, pdfLaudoData.pdf.toString('base64'), `Laudo-${laudo.numero_laudo}.pdf`);
+      enviosOk.push('laudo');
+    } catch (err) {
+      console.error('[laudo:zapi:laudo]', (err as Error).message);
+      enviosFalha.push('laudo');
+    }
+
+    // Pausa 1.2s pra ZAPI processar (primeiro disparo) antes do segundo
+    await new Promise(r => setTimeout(r, 1200));
+
+    // Disparo 2: recibo (se existe)
+    if (laudo.recibo_id) {
+      try {
+        const recibo = await recMod.buscarReciboPorId(laudo.recibo_id);
+        if (recibo) {
+          const { gerarPdfRecibo } = await import('./services/reciboPdf');
+          const pdfRecibo = await gerarPdfRecibo(recibo);
+          await wa.sendDocument(phone, pdfRecibo.toString('base64'), `Recibo-${recibo.numero}.pdf`);
+          enviosOk.push('recibo');
+          // Marca recibo como enviado
+          await recMod.marcarEvento(recibo.id, 'enviado').catch(() => {});
+        }
+      } catch (err) {
+        console.error('[laudo:zapi:recibo]', (err as Error).message);
+        enviosFalha.push('recibo');
+      }
+    }
+
+    // Atualiza status do laudo
+    const pool2 = (await import('./database/connection')).default;
+    await pool2.execute(
+      `UPDATE laudos_demarcacao
+         SET status = 'ENVIADO', zapi_enviado_em = NOW()
+       WHERE id = ?`,
+      [laudo.id]
+    );
+
+    res.json({
+      ok: enviosFalha.length === 0,
+      enviado_pra: phone,
+      envios: { ok: enviosOk, falha: enviosFalha },
+    });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // Pagina publica de validacao /v/laudo/:hash
 app.get('/v/laudo/:hash', async (req: Request, res: Response) => {
   try {
