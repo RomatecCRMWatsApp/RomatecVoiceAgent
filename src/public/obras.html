@@ -13761,26 +13761,66 @@ function renderLaudoTabPontos(c) {
       })
     : [];
 
+  // v2.2.0: tipo e sistema atual (default URBANO_4P + AMBOS)
+  const tipoAtual = l.tipo_levantamento || 'URBANO_4P';
+  const sistemaAtual = l.sistema_coord || 'AMBOS';
+  // Labels dos lados conforme tipo de levantamento (urbano)
+  const labelsLados4P = ['Frente (P1→P2)', 'Lateral Direita (P2→P3)', 'Fundo (P3→P4)', 'Lateral Esquerda (P4→P1)'];
+  const labelsLados5P = ['Frente (P1→P2)', 'Lateral Direita (P2→P3)', 'Fundo (P3→P4)', 'Chanfro (P4→P5)', 'Lateral Esquerda (P5→P1)'];
+
   c.innerHTML = `
-    <style>@media (max-width: 900px) { #lpSplitGrid { grid-template-columns: 1fr !important; } #lpSplitGrid > div:last-child { position: static !important; } }</style>
+    <style>@media (max-width: 900px) { #lpSplitGrid { grid-template-columns: 1fr !important; } #lpSplitGrid > div:last-child { position: static !important; } }
+      .lp-card-opt { display:flex; align-items:center; gap:6px; padding:10px; border:1px solid var(--border); border-radius:6px; cursor:pointer; transition:all 0.15s; }
+      .lp-card-opt:hover { background:var(--bg-secondary); }
+      .lp-card-opt input[type=radio]:checked + span { color:var(--gold); font-weight:600; }
+      .lp-card-opt:has(input:checked) { border-color:var(--gold); background:rgba(255,200,50,0.08); }
+    </style>
+
+    <!-- CARD 1: Tipo de levantamento -->
+    <div class="card">
+      <h3 style="margin-top:0;">📐 1. Tipo de levantamento</h3>
+      <p style="font-size:11px; color:var(--text-muted); margin:4px 0 8px;">Escolha o formato do lote pra o sistema gerar a tabela correta de Frente/Lateral/Fundo.</p>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap:8px;">
+        <label class="lp-card-opt"><input type="radio" name="lp-tipo" value="URBANO_4P" ${tipoAtual==='URBANO_4P'?'checked':''}><span>🏘️ <strong>Urbano 4P</strong> (retangular padrão)</span></label>
+        <label class="lp-card-opt"><input type="radio" name="lp-tipo" value="URBANO_5P" ${tipoAtual==='URBANO_5P'?'checked':''}><span>🏙️ <strong>Urbano 5P</strong> (esquina/chanfro)</span></label>
+        <label class="lp-card-opt"><input type="radio" name="lp-tipo" value="URBANO_NP" ${tipoAtual==='URBANO_NP'?'checked':''}><span>🌆 <strong>Urbano Np</strong> (poligonal grande)</span></label>
+        <label class="lp-card-opt"><input type="radio" name="lp-tipo" value="RURAL" ${tipoAtual==='RURAL'?'checked':''}><span>🌾 <strong>Rural Np</strong> (gleba/fazenda)</span></label>
+      </div>
+    </div>
+
+    <!-- CARD 2: Sistema de coordenadas -->
+    <div class="card">
+      <h3 style="margin-top:0;">🌐 2. Sistema de coordenadas</h3>
+      <p style="font-size:11px; color:var(--text-muted); margin:4px 0 8px;">Em qual formato você vai inserir as coordenadas? Sistema converte a outra automaticamente.</p>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap:8px;">
+        <label class="lp-card-opt"><input type="radio" name="lp-sis" value="UTM" ${sistemaAtual==='UTM'?'checked':''}><span>🗺️ <strong>UTM</strong> (E, N em metros)</span></label>
+        <label class="lp-card-opt"><input type="radio" name="lp-sis" value="LATLNG" ${sistemaAtual==='LATLNG'?'checked':''}><span>📍 <strong>Lat / Lng</strong> (graus decimais)</span></label>
+        <label class="lp-card-opt"><input type="radio" name="lp-sis" value="AMBOS" ${sistemaAtual==='AMBOS'?'checked':''}><span>📐 <strong>Ambas</strong> (preencho as duas)</span></label>
+      </div>
+    </div>
+
+    <!-- CARD 3: Form ponto-a-ponto (urbano 4P/5P) ou RTK (Np/rural) -->
+    <div id="lp-form-host"></div>
+
     <div id="lpSplitGrid" style="display:grid; grid-template-columns: 1fr 400px; gap:12px; align-items:start;">
-      <!-- ESQUERDA: import + tabelas -->
+      <!-- ESQUERDA: tabela atual -->
       <div>
-        <div class="card">
-          <h3 style="margin-top:0;">📍 Importar pontos RTK (CSV/TXT)</h3>
-          <p style="color:var(--text-muted); font-size:12px; margin:4px 0 8px;">
-            Cole o conteúdo do arquivo (formato livre — ID, X, Y, Z; ou ID, Lat, Lng).
-            <strong>O preview ao lado atualiza em tempo real</strong> ao parsear.
-          </p>
-          <textarea id="lp-rtk" rows="6" style="width:100%; font-family:monospace; font-size:12px;" placeholder="P1, 9234567.123, 567890.456&#10;P2, 9234578.234, 567901.567&#10;..."></textarea>
-          <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
-            <label>Zona UTM: <input id="lp-zona" type="number" value="23" min="1" max="60" style="width:60px;"></label>
-            <label>Hem.: <select id="lp-hem"><option value="S" selected>Sul</option><option value="N">Norte</option></select></label>
-            <span style="flex:1;"></span>
-            <button id="lp-parse">👁 Apenas preview</button>
-            <button id="lp-import" style="background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Salvar no laudo</button>
+        <details id="lp-rtk-section" style="margin-bottom:8px;">
+          <summary style="cursor:pointer; font-weight:600; padding:8px; background:var(--bg-secondary); border-radius:4px;">📋 Alternativa: Importar pontos via RTK (CSV/TXT)</summary>
+          <div class="card" style="margin-top:8px;">
+            <p style="color:var(--text-muted); font-size:12px; margin:4px 0 8px;">
+              Cole o conteúdo do arquivo (formato livre — ID, X, Y, Z; ou ID, Lat, Lng). Útil pra Np pontos ou rural.
+            </p>
+            <textarea id="lp-rtk" rows="6" style="width:100%; font-family:monospace; font-size:12px;" placeholder="P1, 9234567.123, 567890.456&#10;P2, 9234578.234, 567901.567&#10;..."></textarea>
+            <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+              <label>Zona UTM: <input id="lp-zona" type="number" value="23" min="1" max="60" style="width:60px;"></label>
+              <label>Hem.: <select id="lp-hem"><option value="S" selected>Sul</option><option value="N">Norte</option></select></label>
+              <span style="flex:1;"></span>
+              <button id="lp-parse">👁 Apenas preview</button>
+              <button id="lp-import" style="background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Salvar no laudo</button>
+            </div>
           </div>
-        </div>
+        </details>
         <div class="card">
           <h3 style="margin-top:0;">📐 Pontos atuais (${pontos.length})</h3>
           ${pontos.length === 0 ? '<p style="color:var(--text-muted);">Nenhum ponto salvo ainda. Importe RTK acima.</p>' : `
@@ -13868,6 +13908,140 @@ function renderLaudoTabPontos(c) {
     const m = document.getElementById('lp-preview-svg-mobile');
     if (m) m.innerHTML = gerarCroquiSvgClient(pts, lds, { larguraPx: 600, alturaPx: 600 });
   };
+
+  // v2.2.0: handlers dos cards de tipo + sistema (salva via PUT)
+  document.querySelectorAll('input[name="lp-tipo"]').forEach(r => r.onchange = async () => {
+    try {
+      await api('/api/laudos-demarcacao/'+l.id, {
+        method:'PUT', body: JSON.stringify({ tipo_levantamento: r.value }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await loadLaudoDetalhe(l.id);
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  });
+  document.querySelectorAll('input[name="lp-sis"]').forEach(r => r.onchange = async () => {
+    try {
+      await api('/api/laudos-demarcacao/'+l.id, {
+        method:'PUT', body: JSON.stringify({ sistema_coord: r.value }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await loadLaudoDetalhe(l.id);
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: '+err.message); }
+  });
+
+  // v2.2.0: renderiza form ponto-a-ponto pra Urbano 4P / 5P
+  const renderFormUrbano = () => {
+    const host = document.getElementById('lp-form-host');
+    if (!host) return;
+    const isUrb4 = tipoAtual === 'URBANO_4P';
+    const isUrb5 = tipoAtual === 'URBANO_5P';
+    if (!isUrb4 && !isUrb5) {
+      // Np ou Rural: usa RTK (vai abrir o details)
+      host.innerHTML = `<div class="card" style="background:var(--bg-secondary);"><p style="margin:0; font-size:12px;">ℹ️ Para <strong>${tipoAtual==='URBANO_NP'?'Urbano poligonal':'Rural'}</strong>, use a opção <strong>"Importar pontos via RTK"</strong> abaixo.</p></div>`;
+      // Auto-expande o details RTK
+      const det = document.getElementById('lp-rtk-section');
+      if (det) det.open = true;
+      return;
+    }
+    const nPontos = isUrb4 ? 4 : 5;
+    const labels = isUrb4 ? labelsLados4P : labelsLados5P;
+    const showUTM = sistemaAtual === 'UTM' || sistemaAtual === 'AMBOS';
+    const showLatLng = sistemaAtual === 'LATLNG' || sistemaAtual === 'AMBOS';
+    const ladosArr = lados.length === nPontos ? lados : Array(nPontos).fill({ medida_manual_m: null, confrontante_nome: '' });
+
+    // Linhas de ponto + lado intercaladas
+    let rows = '';
+    for (let i = 1; i <= nPontos; i++) {
+      const p = pontos.find(x => x.ordem === i) || {};
+      rows += `
+        <div class="card" style="padding:8px; border-left:3px solid var(--gold);">
+          <strong style="font-size:13px;">📍 Ponto P${i}</strong>
+          <div style="display:grid; grid-template-columns: repeat(${(showUTM?2:0)+(showLatLng?2:0)+1}, 1fr); gap:6px; margin-top:6px;">
+            <input data-fp-rotulo="${i}" placeholder="Rótulo (ex: P${i}, M${i})" value="${escape(p.rotulo || ('P'+i))}">
+            ${showUTM ? `<input data-fp-utme="${i}" type="number" step="0.001" placeholder="UTM Este (X)" value="${p.utm_e ?? ''}">` : ''}
+            ${showUTM ? `<input data-fp-utmn="${i}" type="number" step="0.001" placeholder="UTM Norte (Y)" value="${p.utm_n ?? ''}">` : ''}
+            ${showLatLng ? `<input data-fp-lat="${i}" type="number" step="0.000001" placeholder="Latitude" value="${p.lat_decimal ?? ''}">` : ''}
+            ${showLatLng ? `<input data-fp-lng="${i}" type="number" step="0.000001" placeholder="Longitude" value="${p.long_decimal ?? ''}">` : ''}
+          </div>
+        </div>
+      `;
+      // Lado correspondente (P_i → P_{i+1 mod n})
+      const ld = ladosArr[i-1] || {};
+      rows += `
+        <div style="padding:6px 12px; margin-left:20px; border-left:2px dashed var(--gold); font-size:11px; color:var(--text-muted);">
+          ↓ <strong>${labels[i-1]}</strong>
+          <div style="display:grid; grid-template-columns: 1fr 2fr; gap:6px; margin-top:4px;">
+            <input data-fl-medida="${i}" type="number" step="0.01" placeholder="Medida (m)" value="${ld.medida_manual_m ?? ''}">
+            <input data-fl-confront="${i}" list="dl-confrontantes" placeholder="Confrontante" value="${escape(ld.confrontante_nome || '')}">
+          </div>
+        </div>
+      `;
+    }
+    host.innerHTML = `
+      <div class="card">
+        <h3 style="margin-top:0;">📋 3. Vértices e medidas dos lados (${isUrb4?'4 pontos':'5 pontos com chanfro'})</h3>
+        <p style="font-size:11px; color:var(--text-muted); margin:4px 0 8px;">
+          Preencha cada vértice (P1 → P${nPontos}) com a coordenada coletada.
+          Os lados (Frente/Lateral/Fundo/Chanfro) são automaticamente nomeados.
+          Sistema fecha o perímetro: P${nPontos} → P1.
+        </p>
+        ${rows}
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button id="lp-form-salvar" style="flex:1; background:var(--gold); color:#06120a; border-color:var(--gold); padding:10px;">💾 Salvar pontos + medidas + confrontantes</button>
+        </div>
+      </div>
+    `;
+
+    // Handler do salvar form
+    document.getElementById('lp-form-salvar').onclick = async () => {
+      const zona = 23, hem = 'S';
+      const pontosBody = [];
+      for (let i = 1; i <= nPontos; i++) {
+        const utmE = document.querySelector(`[data-fp-utme="${i}"]`)?.value;
+        const utmN = document.querySelector(`[data-fp-utmn="${i}"]`)?.value;
+        const lat = document.querySelector(`[data-fp-lat="${i}"]`)?.value;
+        const lng = document.querySelector(`[data-fp-lng="${i}"]`)?.value;
+        const rotulo = document.querySelector(`[data-fp-rotulo="${i}"]`)?.value || ('P'+i);
+        pontosBody.push({
+          ordem: i, rotulo,
+          utm_zona: utmE ? zona : null, utm_hemisferio: utmE ? hem : null,
+          utm_e: utmE ? Number(utmE) : null, utm_n: utmN ? Number(utmN) : null,
+          lat_decimal: lat ? Number(lat) : null, long_decimal: lng ? Number(lng) : null,
+          lat_gms: null, long_gms: null, altitude: null, descricao_marco: null, azimute_manual: null,
+        });
+      }
+      try {
+        // 1) Salva pontos
+        const r = await api('/api/laudos-demarcacao/'+l.id+'/pontos', {
+          method: 'POST',
+          body: JSON.stringify({ pontos: pontosBody, default_zona: zona, default_hemisferio: hem }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        // 2) Salva medidas + confrontantes por lado (PUT em cada lado)
+        await loadLaudoDetalhe(l.id);
+        const ladosNovos = state.laudoAtual.lados || [];
+        for (let i = 0; i < ladosNovos.length && i < nPontos; i++) {
+          const medida = document.querySelector(`[data-fl-medida="${i+1}"]`)?.value;
+          const confront = document.querySelector(`[data-fl-confront="${i+1}"]`)?.value;
+          await api('/api/laudos-demarcacao/lado/'+ladosNovos[i].id, {
+            method: 'PUT',
+            body: JSON.stringify({
+              medida_manual_m: medida ? Number(medida) : null,
+              confrontante_nome: confront || null,
+              nome_lado: labels[i],
+            }),
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        await loadLaudoDetalhe(l.id);
+        alert('✅ Pontos + medidas + confrontantes salvos. Área e perímetro recalculados.');
+        renderLaudoEditor(document.getElementById('view-laudos'));
+      } catch (err) { alert('Erro: '+err.message); }
+    };
+  };
+  renderFormUrbano();
 
   const parsearRtk = async () => {
     const texto = document.getElementById('lp-rtk').value.trim();
