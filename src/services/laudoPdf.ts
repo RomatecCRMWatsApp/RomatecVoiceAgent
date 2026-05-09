@@ -266,7 +266,8 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
     cy += 12;
   }
   if (laudo.municipio || laudo.uf_imovel) {
-    doc.text(`Município/UF: ${laudo.municipio || '—'}/${laudo.uf_imovel || '—'}${laudo.comarca ? ` · Comarca: ${laudo.comarca}` : ''}`, 40, cy, { width: 515 });
+    // v2.1.8: comarca usa fallback do municipio quando vazia
+    doc.text(`Município/UF: ${laudo.municipio || '—'}/${laudo.uf_imovel || '—'} · Comarca: ${laudo.comarca || laudo.municipio || '—'}`, 40, cy, { width: 515 });
     cy += 12;
   }
   cy += 4;

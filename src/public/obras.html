@@ -12687,6 +12687,50 @@ const ACAILANDIA_DEFAULTS = {
   ],
 };
 
+// v2.1.8: Cadastros locais — extensiveis via localStorage
+// User pode adicionar bairros/loteamentos/etc novos que ficam salvos no celular
+const CADASTROS_LOCAIS_KEY = 'romatec_cadastros_locais_v1';
+function getCadastrosLocais() {
+  try { return JSON.parse(localStorage.getItem(CADASTROS_LOCAIS_KEY) || '{}'); }
+  catch (_) { return {}; }
+}
+function saveCadastrosLocais(c) {
+  try { localStorage.setItem(CADASTROS_LOCAIS_KEY, JSON.stringify(c)); } catch (_) {}
+}
+// Retorna lista combinada (defaults + locais), ordenada e sem duplicatas
+function getListaCombined(tipo) {
+  const def = ACAILANDIA_DEFAULTS[tipo] || [];
+  const custom = (getCadastrosLocais()[tipo] || []);
+  const seen = new Set(def.map(s => String(s).toLowerCase()));
+  const merged = [...def];
+  for (const c of custom) {
+    const k = String(c).toLowerCase();
+    if (!seen.has(k)) { merged.push(c); seen.add(k); }
+  }
+  return merged.sort((a, b) => String(a).localeCompare(String(b), 'pt-BR'));
+}
+// Adiciona ao localStorage. Retorna true se adicionou (era novo), false se ja existia
+function adicionarCadastroLocal(tipo, valor) {
+  const v = String(valor||'').trim();
+  if (!v || v.length < 3) return false;
+  const def = ACAILANDIA_DEFAULTS[tipo] || [];
+  if (def.some(x => String(x).toLowerCase() === v.toLowerCase())) return false;
+  const c = getCadastrosLocais();
+  c[tipo] = c[tipo] || [];
+  if (c[tipo].some(x => String(x).toLowerCase() === v.toLowerCase())) return false;
+  c[tipo].push(v);
+  saveCadastrosLocais(c);
+  return true;
+}
+// Re-injeta datalists apos cadastro novo (pra atualizar sugestoes ao vivo)
+function reinjetarDatalists() {
+  ['dl-bairros','dl-loteamentos','dl-povoados','dl-municipios','dl-cursos-agua','dl-confrontantes'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  });
+  if (typeof injetarDatalistsAcailandia === 'function') injetarDatalistsAcailandia();
+}
+
 async function loadLaudos() {
   try {
     const [r, c, e] = await Promise.all([
@@ -13512,6 +13556,8 @@ function renderLaudoTabDados(c) {
       <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">
         ℹ️ Preencha apenas os campos disponíveis. Particular (PF) costuma ter só rua/quadra/lote.
         Demarcação para incorporadora/loteadora preenche também Loteamento + Contrato.
+        <br>💡 <strong>Bairros/loteamentos novos</strong> são cadastrados automaticamente ao salvar (ficam no celular pra próxima).
+        <a href="#" id="ld-gerenciar-cad" style="color:var(--gold); text-decoration:underline;">Gerenciar cadastros locais</a>
       </p>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
         ${isUrbano ? `
@@ -13532,7 +13578,7 @@ function renderLaudoTabDados(c) {
         <input id="ld-end" placeholder="${isUrbano ? 'Rua / Endereço completo' : 'Endereço do imóvel'}" value="${escape(l.endereco_imovel||'')}" style="grid-column:1/3;">
         <input id="ld-mun" list="dl-municipios" placeholder="Município" value="${escape(l.municipio || ACAILANDIA_DEFAULTS.municipio)}">
         <input id="ld-uf" placeholder="UF" maxlength="2" value="${escape(l.uf_imovel || ACAILANDIA_DEFAULTS.uf)}">
-        <input id="ld-comarca" list="dl-municipios" placeholder="Comarca" value="${escape(l.comarca || ACAILANDIA_DEFAULTS.comarca)}" style="grid-column:1/3;">
+        <input id="ld-comarca" list="dl-municipios" placeholder="Comarca (deixe em branco se for a mesma do município)" value="${escape(l.comarca || '')}" style="grid-column:1/3;">
       </div>
     </div>
     <div class="card">
@@ -13578,10 +13624,48 @@ function renderLaudoTabDados(c) {
       await api('/api/laudos-demarcacao/'+l.id, {
         method:'PUT', body:JSON.stringify(body), headers:{'Content-Type':'application/json'},
       });
+      // v2.1.8: auto-harvest de cadastros novos (bairros/loteamentos/etc)
+      const novosCadastros = [];
+      if (adicionarCadastroLocal('loteamentos', body.loteamento)) novosCadastros.push('loteamento "'+body.loteamento+'"');
+      if (adicionarCadastroLocal('municipios', body.municipio)) novosCadastros.push('município "'+body.municipio+'"');
+      ['confrontante_frente','confrontante_fundo','confrontante_lat_dir','confrontante_lat_esq','confrontante_extra'].forEach(k => {
+        if (adicionarCadastroLocal('confrontantes', body[k])) novosCadastros.push('confrontante "'+body[k]+'"');
+      });
+      if (novosCadastros.length) {
+        reinjetarDatalists();
+        console.log('[laudos] Cadastros locais atualizados:', novosCadastros);
+      }
       await loadLaudoDetalhe(l.id);
-      alert('✅ Salvo');
+      alert('✅ Salvo' + (novosCadastros.length ? '\n📌 ' + novosCadastros.length + ' novo(s) cadastro(s) salvo(s) localmente' : ''));
       renderLaudoEditor(document.getElementById('view-laudos'));
     } catch (err) { alert('Erro: '+err.message); }
+  };
+
+  // v2.1.8: gerenciador de cadastros locais (modal simples)
+  const gerenciar = document.getElementById('ld-gerenciar-cad');
+  if (gerenciar) gerenciar.onclick = (e) => {
+    e.preventDefault();
+    const c = getCadastrosLocais();
+    const tipos = ['bairros','loteamentos','povoados','municipios','cursosAgua','confrontantes'];
+    let msg = '📌 CADASTROS LOCAIS (salvos no seu celular)\n\n';
+    let total = 0;
+    for (const t of tipos) {
+      const lista = c[t] || [];
+      if (lista.length) {
+        msg += `▸ ${t} (${lista.length}): ${lista.join(', ')}\n\n`;
+        total += lista.length;
+      }
+    }
+    if (!total) msg += '(nenhum cadastro local ainda — aparecem aqui após salvar laudos)';
+    msg += '\n\nPara apagar TUDO, digite EXCLUIR no prompt seguinte. Cancelar pra manter.';
+    if (confirm(msg)) {
+      const conf = prompt('Digite EXCLUIR pra apagar todos os cadastros locais:');
+      if (conf === 'EXCLUIR') {
+        localStorage.removeItem(CADASTROS_LOCAIS_KEY);
+        reinjetarDatalists();
+        alert('✅ Cadastros locais apagados. Defaults Açailândia mantidos.');
+      }
+    }
   };
 }
 
@@ -14038,8 +14122,9 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// v2.1.7: injeta datalists Açailândia no DOM (autocomplete dos campos do laudo)
-(function injetarDatalistsAcailandia() {
+// v2.1.7+v2.1.8: injeta datalists Açailândia no DOM (autocomplete dos campos do laudo)
+// Inclui defaults + cadastros locais (user pode adicionar novos bairros)
+function injetarDatalistsAcailandia() {
   if (typeof ACAILANDIA_DEFAULTS === 'undefined') return;
   const mk = (id, items) => {
     if (document.getElementById(id)) return;
@@ -14048,21 +14133,27 @@ if ('serviceWorker' in navigator) {
     dl.innerHTML = items.map(v => `<option value="${escape(v)}">`).join('');
     document.body.appendChild(dl);
   };
-  mk('dl-bairros', ACAILANDIA_DEFAULTS.bairros);
-  mk('dl-loteamentos', ACAILANDIA_DEFAULTS.loteamentos);
-  mk('dl-povoados', ACAILANDIA_DEFAULTS.povoados);
-  mk('dl-municipios', ACAILANDIA_DEFAULTS.municipiosLimitrofes.map(s => s.split('/')[0]));
-  mk('dl-cursos-agua', ACAILANDIA_DEFAULTS.cursosAgua);
-  // Confrontantes: combina bairros + loteamentos + cursos d'agua + municipios
-  const confrontantes = [...new Set([
-    ...ACAILANDIA_DEFAULTS.bairros,
-    ...ACAILANDIA_DEFAULTS.loteamentos,
-    ...ACAILANDIA_DEFAULTS.cursosAgua,
-    ...ACAILANDIA_DEFAULTS.povoados,
+  mk('dl-bairros', getListaCombined('bairros'));
+  mk('dl-loteamentos', getListaCombined('loteamentos'));
+  mk('dl-povoados', getListaCombined('povoados'));
+  // Municipios sao guardados em chave diferente (municipiosLimitrofes vs municipios)
+  const munDef = ACAILANDIA_DEFAULTS.municipiosLimitrofes.map(s => s.split('/')[0]);
+  const munCustom = (getCadastrosLocais().municipios || []);
+  const mun = [...new Set([...munDef, ...munCustom])].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  mk('dl-municipios', mun);
+  mk('dl-cursos-agua', getListaCombined('cursosAgua'));
+  // Confrontantes: combina tudo + cadastros locais especificos de confrontantes
+  const confDef = [...new Set([
+    ...getListaCombined('bairros'),
+    ...getListaCombined('loteamentos'),
+    ...getListaCombined('cursosAgua'),
+    ...getListaCombined('povoados'),
+    ...(getCadastrosLocais().confrontantes || []),
     'Via pública', 'Avenida', 'Rua sem nome', 'Estrada vicinal',
-  ])].sort();
-  mk('dl-confrontantes', confrontantes);
-})();
+  ])].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  mk('dl-confrontantes', confDef);
+}
+injetarDatalistsAcailandia();
 </script>
 </body>
 </html>
