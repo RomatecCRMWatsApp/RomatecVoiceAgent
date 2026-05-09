@@ -234,6 +234,9 @@ export async function runLaudosMigrations(): Promise<void> {
     // v2.1.1 — Numero de contrato com loteadora (ex: "26/15-0024" do Colina Park)
     // Opcional — PF nao preenche, PJ/loteadora preenche
     { label: 'ALTER numero_contrato', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN numero_contrato VARCHAR(50) NULL' },
+    // v2.1.6 — Descricao do loteamento/area de atuacao da PJ
+    // (ex: "Loteamento Colina Park - 156 lotes residenciais Acailandia/MA")
+    { label: 'ALTER contratante descricao_area', sql: 'ALTER TABLE contratantes ADD COLUMN descricao_area TEXT NULL' },
   ];
   for (const { label, sql } of ops) {
     try {

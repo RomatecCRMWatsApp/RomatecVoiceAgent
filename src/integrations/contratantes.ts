@@ -29,6 +29,8 @@ export interface Contratante {
   representante_nome: string | null;
   representante_cpf: string | null;
   representante_cargo: string | null;
+  // v2.1.6: descricao do loteamento / area de atuacao (PJ tipo loteadora)
+  descricao_area: string | null;
   ativo: boolean;
   created_at: string;
   updated_at: string;
@@ -56,6 +58,7 @@ interface ContratanteRow extends RowDataPacket {
   representante_nome: string | null;
   representante_cpf: string | null;
   representante_cargo: string | null;
+  descricao_area: string | null;
   ativo: 0 | 1;
   created_at: Date | string;
   updated_at: Date | string;
@@ -84,6 +87,7 @@ function mapRow(r: ContratanteRow): Contratante {
     representante_nome: r.representante_nome ?? null,
     representante_cpf: r.representante_cpf ?? null,
     representante_cargo: r.representante_cargo ?? null,
+    descricao_area: r.descricao_area ?? null,
     ativo: r.ativo === 1,
     created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
     updated_at: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
@@ -193,6 +197,7 @@ export interface CriarContratanteInput {
   representante_nome?: string | null;
   representante_cpf?: string | null;
   representante_cargo?: string | null;
+  descricao_area?: string | null;
 }
 
 export async function criarContratante(input: CriarContratanteInput): Promise<Contratante> {
@@ -226,8 +231,8 @@ export async function criarContratante(input: CriarContratanteInput): Promise<Co
       (tipo_pessoa, nome, cpf_cnpj, rg_ie, nacionalidade, estado_civil, profissao,
        cep, logradouro, numero, complemento, bairro, cidade, uf,
        telefone, email, observacoes,
-       representante_nome, representante_cpf, representante_cargo)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       representante_nome, representante_cpf, representante_cargo, descricao_area)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       input.tipo_pessoa, input.nome.trim(), cpfCnpjLimpo,
       input.rg_ie ?? null, input.nacionalidade ?? null, input.estado_civil ?? null, input.profissao ?? null,
@@ -235,6 +240,7 @@ export async function criarContratante(input: CriarContratanteInput): Promise<Co
       input.bairro ?? null, input.cidade ?? null, input.uf ?? null,
       telLimpo, input.email ?? null, input.observacoes ?? null,
       input.representante_nome?.trim() || null, repCpfLimpo as string | null, input.representante_cargo?.trim() || null,
+      input.descricao_area?.trim() || null,
     ]
   );
   const created = await buscarContratante(r.insertId);
@@ -295,6 +301,7 @@ export async function atualizarContratante(
   set('observacoes', input.observacoes);
   set('representante_nome', input.representante_nome?.trim() || null);
   set('representante_cargo', input.representante_cargo?.trim() || null);
+  set('descricao_area', input.descricao_area?.trim() || null);
   if (input.representante_cpf !== undefined) {
     let repCpfLimpo = (input.representante_cpf ?? '').replace(/\D/g, '') || null;
     if (repCpfLimpo && /^(\d)\1+$/.test(repCpfLimpo)) repCpfLimpo = null;
