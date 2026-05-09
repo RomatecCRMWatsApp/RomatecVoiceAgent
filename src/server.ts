@@ -1765,6 +1765,26 @@ app.put('/api/laudos-demarcacao/foto/:fotoId/legenda', requireCeoToken, async (r
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v2.1.0 — atualiza UM lado individualmente (medida manual + confrontante + nome do lado)
+app.put('/api/laudos-demarcacao/lado/:ladoId', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const b = (req.body || {}) as { medida_manual_m?: number | null; confrontante_nome?: string | null; nome_lado?: string | null };
+    await m.atualizarLado(String(req.params.ladoId), b);
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// v2.1.0 — atualiza UM ponto individualmente (azimute manual + descricao do marco)
+app.put('/api/laudos-demarcacao/ponto/:pontoId', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const b = (req.body || {}) as { azimute_manual?: string | null; descricao_marco?: string | null };
+    await m.atualizarPonto(String(req.params.pontoId), b);
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // v1.99.29 — Fase 5: Assina digital + serve PDF assinado
 app.post('/api/laudos-demarcacao/:id/assinar', requireCeoToken, async (req: Request, res: Response) => {
   try {

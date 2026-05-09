@@ -8,6 +8,9 @@ import crypto from 'crypto';
 
 export type TipoImovel = 'URBANO' | 'RURAL';
 export type TipoLoteUrbano = 'MEIO_QUADRA' | 'ESQUINA';
+// v2.1.0 — modos de levantamento (UI ponto-a-ponto)
+export type TipoLevantamento = 'URBANO_4P' | 'URBANO_5P' | 'URBANO_NP' | 'RURAL';
+export type SistemaCoord = 'UTM' | 'LATLNG' | 'AMBOS';
 export type StatusLaudo =
   | 'RASCUNHO' | 'PREENCHIDO' | 'ASSINADO' | 'RECIBO_GERADO'
   | 'ENVIADO' | 'CONFIRMADO' | 'CANCELADO';
@@ -57,6 +60,9 @@ export interface Laudo {
   status: StatusLaudo;
   observacoes: string | null;
   ativo: boolean;
+  // v2.1.0
+  tipo_levantamento: TipoLevantamento | null;
+  sistema_coord: SistemaCoord;
   created_at: string;
   updated_at: string;
 }
@@ -105,6 +111,8 @@ interface LaudoRow extends RowDataPacket {
   status: StatusLaudo;
   observacoes: string | null;
   ativo: 0 | 1;
+  tipo_levantamento: TipoLevantamento | null;
+  sistema_coord: SistemaCoord | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -169,6 +177,8 @@ function mapRow(r: LaudoRow): Laudo {
     status: r.status,
     observacoes: r.observacoes ?? null,
     ativo: r.ativo === 1,
+    tipo_levantamento: r.tipo_levantamento ?? null,
+    sistema_coord: (r.sistema_coord ?? 'AMBOS') as SistemaCoord,
     created_at: asISO(r.created_at) ?? '',
     updated_at: asISO(r.updated_at) ?? '',
   };
@@ -329,6 +339,10 @@ export interface AtualizarLaudoInput {
   forma_pagamento?: FormaPagamentoLaudo | null;
   data_pagamento?: string | null;
   observacoes?: string | null;
+  // v2.1.0
+  tipo_levantamento?: TipoLevantamento | null;
+  sistema_coord?: SistemaCoord;
+  escala?: string | null;
 }
 
 export async function atualizarLaudo(id: number | string, input: AtualizarLaudoInput): Promise<Laudo> {
@@ -367,6 +381,9 @@ export async function atualizarLaudo(id: number | string, input: AtualizarLaudoI
   set('forma_pagamento', input.forma_pagamento);
   set('data_pagamento', input.data_pagamento);
   set('observacoes', input.observacoes);
+  set('tipo_levantamento', input.tipo_levantamento);
+  set('sistema_coord', input.sistema_coord);
+  set('escala', input.escala);
 
   if (fields.length === 0) return existente;
   params.push(Number(id));
@@ -401,6 +418,8 @@ export interface PontoLaudo {
   long_gms: string | null;
   altitude: number | null;
   descricao_marco: string | null;
+  // v2.1.0
+  azimute_manual: string | null;
 }
 
 interface PontoRow extends RowDataPacket {
@@ -410,6 +429,7 @@ interface PontoRow extends RowDataPacket {
   lat_decimal: string | number | null; long_decimal: string | number | null;
   lat_gms: string | null; long_gms: string | null;
   altitude: string | number | null; descricao_marco: string | null;
+  azimute_manual: string | null;
 }
 
 function mapPontoRow(r: PontoRow): PontoLaudo {
@@ -428,6 +448,7 @@ function mapPontoRow(r: PontoRow): PontoLaudo {
     long_gms: r.long_gms ?? null,
     altitude: asNum(r.altitude),
     descricao_marco: r.descricao_marco ?? null,
+    azimute_manual: r.azimute_manual ?? null,
   };
 }
 
@@ -512,6 +533,7 @@ export async function salvarPontosDoLaudo(
         lat_gms: latGms, long_gms: longGms,
         altitude: p.altitude ?? null,
         descricao_marco: p.descricao_marco ?? null,
+        azimute_manual: p.azimute_manual ?? null,
       };
     });
 
@@ -521,12 +543,12 @@ export async function salvarPontosDoLaudo(
       const [r] = await conn.execute<ResultSetHeader>(
         `INSERT INTO laudos_demarcacao_pontos
           (laudo_id, ordem, rotulo, utm_zona, utm_hemisferio, utm_e, utm_n,
-           lat_decimal, long_decimal, lat_gms, long_gms, altitude, descricao_marco)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           lat_decimal, long_decimal, lat_gms, long_gms, altitude, descricao_marco, azimute_manual)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [Number(laudoId), p.ordem, p.rotulo,
          p.utm_zona, p.utm_hemisferio, p.utm_e, p.utm_n,
          p.lat_decimal, p.long_decimal, p.lat_gms, p.long_gms,
-         p.altitude, p.descricao_marco]
+         p.altitude, p.descricao_marco, p.azimute_manual ?? null]
       );
       idsInseridos.push(r.insertId);
     }
@@ -578,12 +600,19 @@ export interface LadoLaudo {
   id: number; laudo_id: number; ordem: number;
   ponto_inicio_id: number; ponto_fim_id: number;
   rotulo: string | null; distancia_m: number | null; azimute: number | null;
+  // v2.1.0
+  medida_manual_m: number | null;
+  confrontante_nome: string | null;
+  nome_lado: string | null;
 }
 
 interface LadoRow extends RowDataPacket {
   id: number; laudo_id: number; ordem: number;
   ponto_inicio_id: number; ponto_fim_id: number;
   rotulo: string | null; distancia_m: string | number | null; azimute: string | number | null;
+  medida_manual_m: string | number | null;
+  confrontante_nome: string | null;
+  nome_lado: string | null;
 }
 
 export async function listarLadosDoLaudo(laudoId: number | string): Promise<LadoLaudo[]> {
@@ -596,7 +625,60 @@ export async function listarLadosDoLaudo(laudoId: number | string): Promise<Lado
     ponto_inicio_id: Number(r.ponto_inicio_id), ponto_fim_id: Number(r.ponto_fim_id),
     rotulo: r.rotulo ?? null,
     distancia_m: asNum(r.distancia_m), azimute: asNum(r.azimute),
+    medida_manual_m: asNum(r.medida_manual_m),
+    confrontante_nome: r.confrontante_nome ?? null,
+    nome_lado: r.nome_lado ?? null,
   }));
+}
+
+// v2.1.0 — atualiza dados do lado (medida manual + confrontante + nome)
+export async function atualizarLado(
+  ladoId: number | string,
+  input: { medida_manual_m?: number | null; confrontante_nome?: string | null; nome_lado?: string | null }
+): Promise<void> {
+  const fields: string[] = [];
+  const params: (string | number | null)[] = [];
+  if (input.medida_manual_m !== undefined) {
+    fields.push('medida_manual_m = ?');
+    params.push(input.medida_manual_m);
+  }
+  if (input.confrontante_nome !== undefined) {
+    fields.push('confrontante_nome = ?');
+    params.push(input.confrontante_nome?.trim() || null);
+  }
+  if (input.nome_lado !== undefined) {
+    fields.push('nome_lado = ?');
+    params.push(input.nome_lado?.trim() || null);
+  }
+  if (!fields.length) return;
+  params.push(Number(ladoId));
+  await pool.execute(
+    `UPDATE laudos_demarcacao_lados SET ${fields.join(', ')} WHERE id = ?`,
+    params
+  );
+}
+
+// v2.1.0 — atualiza dados do ponto (azimute manual + descricao marco)
+export async function atualizarPonto(
+  pontoId: number | string,
+  input: { azimute_manual?: string | null; descricao_marco?: string | null }
+): Promise<void> {
+  const fields: string[] = [];
+  const params: (string | null)[] = [];
+  if (input.azimute_manual !== undefined) {
+    fields.push('azimute_manual = ?');
+    params.push(input.azimute_manual?.trim() || null);
+  }
+  if (input.descricao_marco !== undefined) {
+    fields.push('descricao_marco = ?');
+    params.push(input.descricao_marco?.trim() || null);
+  }
+  if (!fields.length) return;
+  params.push(String(pontoId));
+  await pool.execute(
+    `UPDATE laudos_demarcacao_pontos SET ${fields.join(', ')} WHERE id = ?`,
+    params
+  );
 }
 
 // ── v1.99.27: Fase 3 — Croqui SVG / Upload + Relatorio Fotografico ────────

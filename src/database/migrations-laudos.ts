@@ -220,6 +220,17 @@ export async function runLaudosMigrations(): Promise<void> {
     { label: 'ALTER representante_nome', sql: 'ALTER TABLE contratantes ADD COLUMN representante_nome VARCHAR(255) NULL' },
     { label: 'ALTER representante_cpf', sql: 'ALTER TABLE contratantes ADD COLUMN representante_cpf VARCHAR(20) NULL' },
     { label: 'ALTER representante_cargo', sql: 'ALTER TABLE contratantes ADD COLUMN representante_cargo VARCHAR(120) NULL' },
+    // v2.1.0 — Levantamento ponto-a-ponto + foto-por-piquete + azimute manual
+    // 4 tipos: URBANO_4P (retangular), URBANO_5P (chanfro), URBANO_NP (poligonal), RURAL
+    { label: 'ALTER tipo_levantamento', sql: "ALTER TABLE laudos_demarcacao ADD COLUMN tipo_levantamento ENUM('URBANO_4P','URBANO_5P','URBANO_NP','RURAL') NULL" },
+    // Sistema de coordenadas escolhido pelo user (display): UTM | LATLNG | AMBOS
+    { label: 'ALTER sistema_coord', sql: "ALTER TABLE laudos_demarcacao ADD COLUMN sistema_coord ENUM('UTM','LATLNG','AMBOS') DEFAULT 'AMBOS'" },
+    // Azimute opcional manual por ponto (urbano + rural)
+    { label: 'ALTER ponto azimute_manual', sql: 'ALTER TABLE laudos_demarcacao_pontos ADD COLUMN azimute_manual VARCHAR(30) NULL' },
+    // Lado: medida manual (override do calculado) + confrontante por lado
+    { label: 'ALTER lado medida_manual_m', sql: 'ALTER TABLE laudos_demarcacao_lados ADD COLUMN medida_manual_m DECIMAL(10,3) NULL' },
+    { label: 'ALTER lado confrontante_nome', sql: 'ALTER TABLE laudos_demarcacao_lados ADD COLUMN confrontante_nome VARCHAR(255) NULL' },
+    { label: 'ALTER lado nome_lado', sql: "ALTER TABLE laudos_demarcacao_lados ADD COLUMN nome_lado VARCHAR(50) NULL" },
   ];
   for (const { label, sql } of ops) {
     try {
