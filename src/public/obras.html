@@ -15012,6 +15012,15 @@ function renderLaudoTabPontos(c) {
           ${isRural ? '⚠️ <strong>Obrigatório para georreferenciamento rural certificável.</strong>' : '🕐 Registre os equipamentos + tempo de rastreio da base.'}
           Use o cronômetro <strong>▶ Iniciar</strong> ao ligar a base e <strong>⏸ Pausar</strong> ao desligar.
         </p>
+        ${l.clonado_de_id && (l.base_inicio_rastreio || l.base_fim_rastreio) ? `
+        <div style="background:rgba(217,119,6,0.08); border-left:3px solid #d97706; padding:8px 12px; border-radius:4px; margin:0 0 8px; font-size:12px;">
+          <strong style="color:#d97706;">⚠️ Tempo da base herdado do laudo original.</strong>
+          <p style="margin:4px 0 8px;">
+            Confirme se a base está sendo reaproveitada da mesma sessão de campo.
+            Caso contrário, clique em "Resetar tempo da base" para iniciar novo cronômetro.
+          </p>
+          <button id="lp-base-reset-clonado" style="font-size:11px; padding:4px 10px;">↺ Resetar tempo da base</button>
+        </div>` : ''}
         <div style="display:grid; grid-template-columns:1fr; gap:6px;">
           <label style="font-size:11px; color:var(--text-muted);">📡 Receptor BASE
             <input id="lp-base-nome" list="dl-equip-base" placeholder="Receptor GNSS BASE"
@@ -15203,6 +15212,25 @@ function renderLaudoTabPontos(c) {
     };
     if (baseIniEl) baseIniEl.oninput = recomputarBaseFromManual;
     if (baseFimEl) baseFimEl.oninput = recomputarBaseFromManual;
+
+    // v3.1.0: handler do botão "Resetar tempo da base" (clones com tempo herdado)
+    document.getElementById('lp-base-reset-clonado')?.addEventListener('click', async () => {
+      if (!confirm('Resetar tempo da base?\n\nIsso vai zerar:\n- Inicio do rastreio\n- Fim do rastreio\n- Observacoes da base\n\nUse pra iniciar novo cronometro de campo.')) return;
+      try {
+        await api('/api/laudos-demarcacao/' + l.id, {
+          method: 'PUT',
+          body: JSON.stringify({
+            base_inicio_rastreio: null,
+            base_fim_rastreio: null,
+            base_observacoes: null,
+          }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        await loadLaudoDetalhe(l.id);
+        alert('✓ Tempo da base resetado');
+        renderLaudos();
+      } catch (err) { alert('Erro: ' + err.message); }
+    });
 
     // v2.9.0: live update do badge de divergencia ao digitar medida real (urb 4P)
     if (isUrb4 && state.laudoLoteVinculado) {
