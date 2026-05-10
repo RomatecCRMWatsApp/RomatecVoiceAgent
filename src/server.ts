@@ -3061,6 +3061,16 @@ app.listen(PORT, () => {
     }
   })();
 
+  // v3.0.0: migrations da Precificacao INCRA (Portaria 12/2025).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-precificacao-incra');
+      await m.runPrecificacaoIncraMigrations();
+    } catch (err) {
+      console.error('[precif-incra-migrations] FALHA fatal:', err);
+    }
+  })();
+
   void initDb()
     .then(() => loadSessionFromDb())
     .then(() => import('./services/whatsappDrafts'))
