@@ -1648,10 +1648,17 @@ app.post('/api/laudos-demarcacao/:id/pontos', requireCeoToken, async (req: Reque
 // Import RTK (CSV/TXT) — recebe { texto: string } e retorna pontos parseados
 app.post('/api/laudos-demarcacao/import-rtk', requireCeoToken, async (req: Request, res: Response) => {
   try {
-    const { importarRTK } = await import('./services/geometria');
+    // v2.5.0: dispatcher auto-deteta CSV/TXT/KML/GPX. Aceita default_zona e
+    // default_hemisferio pra conversao lat/lng -> UTM quando o arquivo trouxer
+    // coordenadas geograficas (KML, GPX, ou CSV com colunas lat/lng).
+    const { importarPontosArquivo } = await import('./services/geometria');
     const texto = typeof req.body?.texto === 'string' ? req.body.texto : '';
     if (!texto.trim()) { res.status(400).json({ error: 'campo `texto` obrigatorio' }); return; }
-    const r = importarRTK(texto);
+    const defaultZona = req.body?.default_zona ? Number(req.body.default_zona) : undefined;
+    const defaultHemisferio = (req.body?.default_hemisferio === 'N' || req.body?.default_hemisferio === 'S')
+      ? req.body.default_hemisferio
+      : undefined;
+    const r = importarPontosArquivo(texto, { defaultZona, defaultHemisferio });
     res.json(r);
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });

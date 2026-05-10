@@ -14352,12 +14352,20 @@ function renderLaudoTabPontos(c) {
       <!-- ESQUERDA: tabela atual -->
       <div>
         <details id="lp-rtk-section" style="margin-bottom:8px;">
-          <summary style="cursor:pointer; font-weight:600; padding:8px; background:var(--bg-secondary); border-radius:4px;">📋 Alternativa: Importar pontos via RTK (CSV/TXT)</summary>
+          <summary style="cursor:pointer; font-weight:600; padding:8px; background:var(--bg-secondary); border-radius:4px;">📋 Alternativa: Importar pontos da coletora (CSV / TXT / KML / GPX)</summary>
           <div class="card" style="margin-top:8px;">
             <p style="color:var(--text-muted); font-size:12px; margin:4px 0 8px;">
-              Cole o conteúdo do arquivo (formato livre — ID, X, Y, Z; ou ID, Lat, Lng). Útil pra Np pontos ou rural.
+              <strong>Formatos:</strong> CSV/TXT (cabeçalho na linha 1: <code>ponto, e, n</code> ou <code>id, lat, lng</code>) · KML (Google Earth) · GPX (genérico GPS).<br>
+              <strong>Coordenadas:</strong> UTM (E/N) ou geográficas (Lat/Lng) — a conversão pra UTM é automática.<br>
+              <strong>BOM UTF-16</strong> de coletoras antigas é removido automaticamente.
             </p>
-            <textarea id="lp-rtk" rows="6" style="width:100%; font-family:monospace; font-size:12px;" placeholder="P1, 9234567.123, 567890.456&#10;P2, 9234578.234, 567901.567&#10;..."></textarea>
+            <!-- v2.5.0: Upload de arquivo (com decode UTF-16/8 + auto-parse) -->
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+              <button id="lp-rtk-upload-btn" style="background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955; padding:6px 12px; font-size:12px;">📁 Selecionar arquivo da coletora</button>
+              <span id="lp-rtk-upload-info" style="font-size:11px; color:var(--text-muted);">aceita .csv .txt .kml .gpx .dat</span>
+              <input type="file" id="lp-rtk-file" accept=".csv,.txt,.kml,.gpx,.dat,text/csv,text/plain,application/vnd.google-earth.kml+xml,application/gpx+xml" style="display:none;">
+            </div>
+            <textarea id="lp-rtk" rows="6" style="width:100%; font-family:monospace; font-size:12px;" placeholder="ponto,e,n,h&#10;P1,567890.456,9234567.123,142.5&#10;P2,567901.567,9234578.234,142.4&#10;ou: id,lat,lng&#10;P1,-4.95234,-47.49876"></textarea>
             <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
               <label>Zona UTM: <input id="lp-zona" type="number" value="23" min="1" max="60" style="width:60px;"></label>
               <label>Hem.: <select id="lp-hem"><option value="S" selected>Sul</option><option value="N">Norte</option></select></label>
@@ -15229,31 +15237,94 @@ function renderLaudoTabPontos(c) {
   document.getElementById('lp-parse').onclick = async () => {
     const r = await parsearRtk();
     if (!r || !r.pontos || !r.pontos.length) return alert('Não foi possível parsear pontos');
-    state.laudoPontosPreview = r.pontos.map((p,i) => ({
-      rotulo: p.identificador || ('V'+(i+1)),
-      e: Number(p.utm_x_e || 0),
-      n: Number(p.utm_y_n || 0),
+    // v2.5.0: parser retorna { rotulo, e, n, lat, lng, altitude }
+    state.laudoPontosPreview = r.pontos.map((p, i) => ({
+      rotulo: p.rotulo || ('V'+(i+1)),
+      e: Number(p.e || 0),
+      n: Number(p.n || 0),
     }));
     atualizarPreview(state.laudoPontosPreview);
+    if (r.formato) {
+      mostrarToastOffline(`✅ Formato detectado: ${r.formato} · ${r.pontos.length} ponto(s) encontrado(s)`, 'success');
+    }
   };
 
   document.getElementById('lp-import').onclick = async () => {
     const r = await parsearRtk();
     if (!r || !r.pontos || !r.pontos.length) return alert('Não foi possível parsear pontos');
-    if (!confirm('Encontrados '+r.pontos.length+' pontos. Salvar no laudo? (substitui os atuais)')) return;
+    if (!confirm('Encontrados '+r.pontos.length+' pontos'+(r.formato?` (${r.formato})`:'')+'. Salvar no laudo? (substitui os atuais)')) return;
     const zona = Number(document.getElementById('lp-zona').value) || 23;
     const hem = document.getElementById('lp-hem').value;
+    // v2.5.0: transforma shape do parser pra shape do salvarPontosDoLaudo
+    const pontosSave = r.pontos.map((p, i) => ({
+      ordem: i + 1,
+      rotulo: p.rotulo || ('V'+(i+1)),
+      utm_zona: (p.e != null && p.n != null) ? zona : null,
+      utm_hemisferio: (p.e != null && p.n != null) ? hem : null,
+      utm_e: p.e ?? null,
+      utm_n: p.n ?? null,
+      lat_decimal: p.lat ?? null,
+      long_decimal: p.lng ?? null,
+      lat_gms: null,
+      long_gms: null,
+      altitude: p.altitude ?? null,
+      descricao_marco: null,
+      azimute_manual: null,
+      tempo_rastreio_seg: null,
+    }));
     try {
       await api('/api/laudos-demarcacao/'+l.id+'/pontos', {
         method:'POST',
-        body: JSON.stringify({ pontos: r.pontos, default_zona: zona, default_hemisferio: hem }),
+        body: JSON.stringify({ pontos: pontosSave, default_zona: zona, default_hemisferio: hem }),
         headers: { 'Content-Type': 'application/json' },
       });
       state.laudoPontosPreview = null;
+      // Atualiza contador do form ponto-a-ponto pra refletir os novos
+      state.laudoFormPontosCount = pontosSave.length;
       await loadLaudoDetalhe(l.id);
       renderLaudoEditor(document.getElementById('view-laudos'));
     } catch (err) { alert('Erro ao salvar: '+err.message); }
   };
+
+  // v2.5.0: Upload de arquivo da coletora (CSV/TXT/KML/GPX) com decode UTF-16/8
+  const rtkFileInput = document.getElementById('lp-rtk-file');
+  const rtkUploadBtn = document.getElementById('lp-rtk-upload-btn');
+  if (rtkUploadBtn && rtkFileInput) {
+    rtkUploadBtn.onclick = () => rtkFileInput.click();
+    rtkFileInput.onchange = async () => {
+      const f = rtkFileInput.files?.[0];
+      if (!f) return;
+      try {
+        const buf = await f.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let texto;
+        // Detecta BOM e decodifica com encoding correto
+        if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+          // UTF-16 LE BOM
+          texto = new TextDecoder('utf-16le').decode(bytes.slice(2));
+        } else if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+          // UTF-16 BE BOM
+          texto = new TextDecoder('utf-16be').decode(bytes.slice(2));
+        } else if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+          // UTF-8 BOM
+          texto = new TextDecoder('utf-8').decode(bytes.slice(3));
+        } else {
+          // Sem BOM → tenta UTF-8
+          texto = new TextDecoder('utf-8').decode(bytes);
+        }
+        // Strip BOM residual de seguranca (caso o decoder n tenha removido)
+        texto = texto.replace(/^﻿/, '');
+        document.getElementById('lp-rtk').value = texto;
+        document.getElementById('lp-rtk-upload-info').textContent = `📄 ${f.name} (${(f.size/1024).toFixed(1)} KB)`;
+        // Auto-preview imediato
+        document.getElementById('lp-parse').click();
+      } catch (err) {
+        alert('Erro lendo arquivo: ' + err.message);
+      } finally {
+        rtkFileInput.value = ''; // permite re-selecionar mesmo arquivo
+      }
+    };
+  }
 }
 
 function renderLaudoTabCroqui(c) {

@@ -136,25 +136,55 @@ export function calcularLados(pontos: Array<{ e: number; n: number }>): Array<{
 }
 
 /**
- * Importa CSV/TXT de RTK. Formato esperado:
- *   - Linha 1: header com nomes de colunas (ex: "ponto,e,n,h" ou "id,N,E,Z")
- *   - Linhas seguintes: dados separados por virgula, ponto-virgula, ou tab
+ * v2.5.0: Importa pontos da coletora em multiplos formatos.
+ *   - CSV/TXT (cabecalhos: ponto/id, e/n OU lat/lng, opcional h/z)
+ *   - KML (Google Earth, coordinates="lng,lat,alt")
+ *   - GPX (track/waypoint, lat="" lon="")
  *
- * Retorna lista de pontos com mapeamento auto de colunas comuns.
- * Reconhece (case-insensitive): ponto/id/nome, e/leste/x, n/norte/y, h/z/altitude
+ * BOM UTF-8 (﻿) e BOM UTF-16 sao removidos automaticamente.
+ *
+ * Quando o arquivo traz lat/lng, converte automaticamente para UTM
+ * usando zona detectada (a partir da longitude) + hemisferio S (Brasil).
+ * Pra outras zonas/hemisferios passar via opts.
  */
 export interface PontoImportadoRTK {
   rotulo: string;
   e: number | null;
   n: number | null;
   altitude: number | null;
+  /** v2.5.0: tambem expostos quando origem e lat/lng (KML/GPX/CSV-geo) */
+  lat: number | null;
+  lng: number | null;
   raw: Record<string, string>;
 }
-export function importarRTK(text: string): {
+export interface ImportarOpts {
+  defaultZona?: number;        // pra conversao lat/lng -> UTM
+  defaultHemisferio?: 'N' | 'S';
+}
+
+/** Remove BOM (UTF-8 e UTF-16). Lida com encoding-detect ja feito antes. */
+function stripBOM(s: string): string {
+  // UTF-8 BOM apos decode = U+FEFF; UTF-16 BOM idem (TextDecoder ja processou).
+  // Tambem cobre BOMs duplicados (raro mas acontece em arquivos editados).
+  return s.replace(/^﻿+/, '');
+}
+
+/** Detecta formato pelo conteudo (sem depender de extensao). */
+export function detectarFormatoArquivo(text: string): 'KML' | 'GPX' | 'CSV' {
+  const head = stripBOM(text).trimStart().slice(0, 200).toLowerCase();
+  if (head.includes('<gpx')) return 'GPX';
+  if (head.includes('<kml')) return 'KML';
+  // <?xml + nada conhecido: cai no CSV (eventualmente quebra com erro claro)
+  return 'CSV';
+}
+
+/** Importa CSV/TXT (separador auto: virgula, ponto-virgula, tab). */
+export function importarRTK(text: string, opts: ImportarOpts = {}): {
   pontos: PontoImportadoRTK[];
   cabecalhos: string[];
 } {
-  const linhas = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const cleaned = stripBOM(text);
+  const linhas = cleaned.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   if (linhas.length === 0) return { pontos: [], cabecalhos: [] };
 
   // Detecta separador (preferencia: virgula > ponto-virgula > tab)
@@ -166,28 +196,157 @@ export function importarRTK(text: string): {
   const cabecalhos = linhas[0].split(sep).map(c => c.trim());
   const cabBaixo = cabecalhos.map(c => c.toLowerCase().replace(/[^a-z0-9]/g, ''));
 
-  const idxRotulo = cabBaixo.findIndex(c => /^(ponto|id|nome|nro|numero|vert)/.test(c));
-  const idxE      = cabBaixo.findIndex(c => /^(e|este|leste|x|easting)/.test(c));
-  const idxN      = cabBaixo.findIndex(c => /^(n|norte|y|northing)/.test(c));
-  const idxAlt    = cabBaixo.findIndex(c => /^(h|z|alt|elev)/.test(c));
+  // v2.5.0: rotulo usa prefix-match (vert, vertice). Demais usam exact-match
+  // pra evitar falsos positivos (ex: "Latitude Corrections" nao deve casar com Lat).
+  // "name" e "elevation" adicionados pro formato SinoGNSS R60/R80 (ingles).
+  const idxRotulo = cabBaixo.findIndex(c => /^(ponto|id|nome|name|nro|numero|vert)/.test(c));
+  const idxLat    = cabBaixo.findIndex(c => /^(lat|latitude)$/.test(c));
+  const idxLng    = cabBaixo.findIndex(c => /^(lng|long|longitude|lon)$/.test(c));
+  const idxE      = cabBaixo.findIndex(c => /^(e|este|leste|x|easting)$/.test(c));
+  const idxN      = cabBaixo.findIndex(c => /^(n|norte|y|northing)$/.test(c));
+  const idxAlt    = cabBaixo.findIndex(c => /^(h|z|alt|elev|altitude|elevation)$/.test(c));
+
+  const parseNum = (s: string | undefined): number | null => {
+    if (!s) return null;
+    const n = Number(s.replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  };
 
   const pontos: PontoImportadoRTK[] = [];
   for (let i = 1; i < linhas.length; i++) {
     const cols = linhas[i].split(sep).map(c => c.trim().replace(/^["']|["']$/g, ''));
     const raw: Record<string, string> = {};
     cabecalhos.forEach((h, k) => { raw[h] = cols[k] ?? ''; });
-    const parseNum = (s: string | undefined): number | null => {
-      if (!s) return null;
-      const n = Number(s.replace(',', '.'));
-      return Number.isFinite(n) ? n : null;
-    };
-    pontos.push({
-      rotulo: idxRotulo >= 0 ? (cols[idxRotulo] || `V${i}`) : `V${i}`,
-      e:      idxE      >= 0 ? parseNum(cols[idxE])  : null,
-      n:      idxN      >= 0 ? parseNum(cols[idxN])  : null,
-      altitude: idxAlt  >= 0 ? parseNum(cols[idxAlt]) : null,
-      raw,
-    });
+
+    const rotulo = idxRotulo >= 0 ? (cols[idxRotulo] || `V${i}`) : `V${i}`;
+    const altitude = idxAlt >= 0 ? parseNum(cols[idxAlt]) : null;
+
+    let e: number | null = idxE >= 0 ? parseNum(cols[idxE]) : null;
+    let n: number | null = idxN >= 0 ? parseNum(cols[idxN]) : null;
+    const lat = idxLat >= 0 ? parseNum(cols[idxLat]) : null;
+    const lng = idxLng >= 0 ? parseNum(cols[idxLng]) : null;
+
+    // v2.5.0: se vieram lat/lng e e/n estao vazios, converte
+    if ((e == null || n == null) && lat != null && lng != null) {
+      try {
+        const zona = opts.defaultZona ?? detectarZonaUtm(lng);
+        const hemisferio = opts.defaultHemisferio ?? (lat < 0 ? 'S' : 'N');
+        const utm = geoParaUtm({ lat, lng, zona, hemisferio });
+        e = utm.e;
+        n = utm.n;
+      } catch (_) { /* deixa null se proj4 falhar */ }
+    }
+
+    pontos.push({ rotulo, e, n, altitude, lat, lng, raw });
   }
   return { pontos, cabecalhos };
+}
+
+/** v2.5.0: Importa KML (Google Earth, coletoras pro). */
+export function importarKML(text: string, opts: ImportarOpts = {}): {
+  pontos: PontoImportadoRTK[];
+  cabecalhos: string[];
+} {
+  const cleaned = stripBOM(text);
+  const pontos: PontoImportadoRTK[] = [];
+
+  // Parser regex-based — KMLs reais sao XML mas parsear arvore aqui seria
+  // overkill. Pega cada <Placemark>...</Placemark> e extrai <name> + <coordinates>.
+  // Tolera variacoes de namespace (<kml:Placemark>) e whitespace.
+  const placemarkRe = /<Placemark[^>]*>([\s\S]*?)<\/Placemark>/gi;
+  let m: RegExpExecArray | null;
+  let idx = 1;
+  while ((m = placemarkRe.exec(cleaned)) !== null) {
+    const inner = m[1];
+    const nameMatch = inner.match(/<name[^>]*>([\s\S]*?)<\/name>/i);
+    const coordsMatch = inner.match(/<coordinates[^>]*>([\s\S]*?)<\/coordinates>/i);
+    if (!coordsMatch) continue;
+    const rotuloBase = (nameMatch?.[1] || '').trim() || `V${idx}`;
+
+    // Cada coord pode ser "lng,lat,alt" separados por whitespace (Point ou LineString)
+    const coordTokens = coordsMatch[1].trim().split(/\s+/).filter(Boolean);
+    coordTokens.forEach((tok, j) => {
+      const parts = tok.split(',').map(p => Number(p.trim()));
+      const lng = parts[0];
+      const lat = parts[1];
+      const altitude = parts[2] ?? null;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      let e: number | null = null;
+      let n: number | null = null;
+      try {
+        const zona = opts.defaultZona ?? detectarZonaUtm(lng);
+        const hemisferio = opts.defaultHemisferio ?? (lat < 0 ? 'S' : 'N');
+        const utm = geoParaUtm({ lat, lng, zona, hemisferio });
+        e = utm.e;
+        n = utm.n;
+      } catch (_) { /* null */ }
+      const rotulo = coordTokens.length > 1 ? `${rotuloBase}-${j + 1}` : rotuloBase;
+      pontos.push({
+        rotulo, e, n,
+        altitude: Number.isFinite(altitude as number) ? (altitude as number) : null,
+        lat, lng,
+        raw: { source: 'kml', name: rotuloBase },
+      });
+    });
+    idx++;
+  }
+  return { pontos, cabecalhos: ['name', 'lng', 'lat', 'altitude'] };
+}
+
+/** v2.5.0: Importa GPX (waypoints e trackpoints). */
+export function importarGPX(text: string, opts: ImportarOpts = {}): {
+  pontos: PontoImportadoRTK[];
+  cabecalhos: string[];
+} {
+  const cleaned = stripBOM(text);
+  const pontos: PontoImportadoRTK[] = [];
+
+  // Captura wpt|trkpt|rtept; lat e lon como atributos. Tolera ordem invertida.
+  const ptRe = /<(wpt|trkpt|rtept)\b([^>]*?)\/?>([\s\S]*?)(?:<\/\1>|\/>)/gi;
+  let m: RegExpExecArray | null;
+  let idx = 1;
+  while ((m = ptRe.exec(cleaned)) !== null) {
+    const attrs = m[2];
+    const inner = m[3] || '';
+    const latMatch = attrs.match(/\blat=["']([^"']+)["']/i);
+    const lonMatch = attrs.match(/\blon=["']([^"']+)["']/i);
+    if (!latMatch || !lonMatch) continue;
+    const lat = Number(latMatch[1]);
+    const lng = Number(lonMatch[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const nameMatch = inner.match(/<name[^>]*>([\s\S]*?)<\/name>/i);
+    const eleMatch = inner.match(/<ele[^>]*>([\s\S]*?)<\/ele>/i);
+    const rotulo = (nameMatch?.[1] || '').trim() || `V${idx}`;
+    const altitude = eleMatch ? Number((eleMatch[1] || '').trim()) : null;
+    let e: number | null = null;
+    let n: number | null = null;
+    try {
+      const zona = opts.defaultZona ?? detectarZonaUtm(lng);
+      const hemisferio = opts.defaultHemisferio ?? (lat < 0 ? 'S' : 'N');
+      const utm = geoParaUtm({ lat, lng, zona, hemisferio });
+      e = utm.e;
+      n = utm.n;
+    } catch (_) { /* null */ }
+    pontos.push({
+      rotulo, e, n,
+      altitude: Number.isFinite(altitude as number) ? (altitude as number) : null,
+      lat, lng,
+      raw: { source: 'gpx', tag: m[1] },
+    });
+    idx++;
+  }
+  return { pontos, cabecalhos: ['name', 'lat', 'lon', 'ele'] };
+}
+
+/** v2.5.0: Dispatcher que detecta formato e roteia pra parser certo. */
+export function importarPontosArquivo(text: string, opts: ImportarOpts = {}): {
+  pontos: PontoImportadoRTK[];
+  cabecalhos: string[];
+  formato: 'KML' | 'GPX' | 'CSV';
+} {
+  const formato = detectarFormatoArquivo(text);
+  const r = formato === 'KML' ? importarKML(text, opts)
+         : formato === 'GPX' ? importarGPX(text, opts)
+         : importarRTK(text, opts);
+  return { ...r, formato };
 }
