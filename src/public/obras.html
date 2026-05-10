@@ -15709,6 +15709,10 @@ function renderLaudoTabPontos(c) {
 
 function renderLaudoTabCroqui(c) {
   const l = state.laudoAtual;
+  // v3.0.5: cache-bust pra forcar reload do croqui depois de upload/reset
+  const cacheBust = Date.now();
+  const numPontos = (l.pontos || []).length;
+  const temPontos = numPontos >= 3;
   c.innerHTML = `
     <div class="card">
       <h3 style="margin-top:0;">🗺️ Croqui</h3>
@@ -15726,6 +15730,17 @@ function renderLaudoTabCroqui(c) {
           ℹ️ O croqui automático é gerado a partir dos pontos importados (norte, escala, distâncias).
           Se preferir um croqui customizado (CAD/Google Earth), faça upload de uma imagem.
         </p>
+      </div>
+      <div style="margin-top:12px; background:#fff; border:1px solid var(--border); border-radius:4px; min-height:420px; overflow:hidden; display:flex; align-items:center; justify-content:center; padding:8px;">
+        ${l.croqui_tipo === 'UPLOAD' || temPontos
+          ? `<img src="/api/laudos-demarcacao/${l.id}/croqui?_t=${cacheBust}"
+                  alt="Croqui do laudo ${escape(l.numero_laudo)}"
+                  style="max-width:100%; max-height:600px; display:block;"
+                  onerror="this.parentElement.innerHTML='<p style=\\'color:#888; font-size:13px; text-align:center; padding:24px;\\'>⚠️ Falha ao carregar o croqui. Tente recarregar a página ou substituir por upload.</p>'">`
+          : `<p style="color:#888; font-size:13px; text-align:center; padding:24px; max-width:400px;">
+              ⚙️ O croqui automático precisa de pelo menos <strong>3 pontos</strong> importados (atualmente: ${numPontos}).
+              <br><br>Vá na aba <strong>📍 Pontos / Vértices</strong> pra adicionar pontos, OU envie uma imagem customizada acima.
+            </p>`}
       </div>
     </div>
   `;
