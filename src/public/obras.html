@@ -13373,12 +13373,45 @@ function renderLaudosLista(v) {
   });
   v.querySelectorAll('[data-laudo-sig]').forEach(b => b.onclick = async () => {
     if (!confirm('Assinar digitalmente este laudo (PAdES ICP-Brasil)?')) return;
-    const senha = prompt('Senha do certificado A1:');
+    // v2.10.3: lista certificados ativos antes de pedir senha. Se houver
+    // mais de um (PF + PJ), pergunta qual usar.
+    let perfil = 'pj'; // default
+    try {
+      const certsResp = await api('/api/signing-cert');
+      const certs = (certsResp?.certs || certsResp || []).filter(c => c.ativo);
+      const certPf = certs.find(c => c.perfil === 'pf');
+      const certPj = certs.find(c => c.perfil === 'pj');
+      if (certPf && certPj) {
+        // Tem ambos — pergunta
+        const escolha = prompt(
+          'Qual certificado usar pra assinar?\n\n' +
+          '  1 — PJ (Romatec): ' + (certPj.label || certPj.subject_cn || '—') + '\n' +
+          '  2 — PF (pessoal): ' + (certPf.label || certPf.subject_cn || '—') + '\n\n' +
+          'Digite 1 ou 2:',
+          '1'
+        );
+        if (escolha == null) return;
+        const op = String(escolha).trim();
+        if (op === '2') perfil = 'pf';
+        else if (op === '1') perfil = 'pj';
+        else return alert('Opção inválida (use 1 ou 2).');
+      } else if (certPf && !certPj) {
+        perfil = 'pf';
+      } else if (!certPj && !certPf) {
+        return alert('Nenhum certificado digital cadastrado. Vá em 🔒 Certs (topo da tela) pra cadastrar.');
+      }
+      // Se só tem PJ, mantem perfil='pj' default
+    } catch (errCerts) {
+      // Falhou listar — segue com PJ default
+      console.warn('[assinar] erro listando certs:', errCerts.message);
+    }
+    const labelPerfil = perfil === 'pf' ? 'PF (pessoal)' : 'PJ (Romatec)';
+    const senha = prompt(`Senha do certificado ${labelPerfil}:`);
     if (!senha) return;
     try {
       await api('/api/laudos-demarcacao/' + b.dataset.laudoSig + '/assinar', {
         method: 'POST',
-        body: JSON.stringify({ senha }),
+        body: JSON.stringify({ senha, perfil }),
         headers: { 'Content-Type': 'application/json' },
       });
       await render();
