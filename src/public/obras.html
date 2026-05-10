@@ -15385,7 +15385,8 @@ function renderLaudoTabPontos(c) {
           return;
         }
 
-        // Texto: caminho antigo (BOM detection no client + textarea)
+        // Texto: detecta BOM + tenta UTF-8 strict, fallback Windows-1252
+        // (v2.7.1: coletoras brasileiras antigas e softwares CAD geram em CP1252)
         const buf = await f.arrayBuffer();
         const bytes = new Uint8Array(buf);
         let texto;
@@ -15396,7 +15397,13 @@ function renderLaudoTabPontos(c) {
         } else if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
           texto = new TextDecoder('utf-8').decode(bytes.slice(3));
         } else {
-          texto = new TextDecoder('utf-8').decode(bytes);
+          // Sem BOM: tenta UTF-8 strict — se falhar, cai pra Windows-1252
+          try {
+            texto = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          } catch (_) {
+            console.log('[upload] UTF-8 falhou, tentando Windows-1252');
+            texto = new TextDecoder('windows-1252').decode(bytes);
+          }
         }
         texto = texto.replace(/^﻿/, '');
         document.getElementById('lp-rtk').value = texto;

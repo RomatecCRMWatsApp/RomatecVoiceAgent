@@ -169,11 +169,71 @@ function stripBOM(s: string): string {
   return s.replace(/^﻿+/, '');
 }
 
+/**
+ * v2.7.1: Parse numero com tolerancia a formato BR (`9.449.891,6805`) e ingles
+ * (`9449891.6805`). Tambem remove unidades comuns (`191,57 m`, `19,5 ha`).
+ *
+ * Regra: se a string contem virgula, considera virgula = decimal e ponto =
+ * milhar (formato BR). Senao, ponto = decimal (formato EN). Heuristica simples
+ * que cobre 99% dos casos sem precisar de locale parsing complexo.
+ */
+export function parseNumBR(s: string | undefined): number | null {
+  if (!s) return null;
+  let limpo = String(s).trim().replace(/^["']|["']$/g, '');
+  // Strip unidades comuns no final
+  limpo = limpo.replace(/\s+(m|km|cm|mm|ha|m[²2]|m\^2|graus|deg)\s*$/i, '');
+  if (!limpo) return null;
+  // Formato BR: tem virgula → ponto eh milhar, virgula eh decimal
+  if (limpo.includes(',')) {
+    limpo = limpo.replace(/\./g, '').replace(',', '.');
+  }
+  const n = Number(limpo);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * v2.7.1: Converte DMS (graus/minutos/segundos com hemisferio) para decimal.
+ * Aceita formatos:
+ *   `04°58'19.995"S`     → -4.972220...
+ *   `04°58'19,995997"S`  → idem (decimal BR)
+ *   `47°28'35"W`         → -47.476388...
+ *   `-4° 58' 19" S`      → -4.972...
+ *   `-4.972220`          → -4.972220 (passa direto se ja decimal)
+ *
+ * Hemisferio S/W/O = negativo; N/E ou ausente = sinal preservado.
+ */
+export function parseDMS(s: string | undefined): number | null {
+  if (!s) return null;
+  const limpo = String(s).trim().replace(/^["']|["']$/g, '');
+  if (!limpo) return null;
+  // Tenta decimal direto primeiro (caso seja "-4.97222" ou "-4,97222")
+  const direto = parseNumBR(limpo);
+  if (direto != null && !/[°'"′″]/.test(limpo)) return direto;
+  // DMS: graus + (minutos + (segundos)) + (hemisferio?)
+  const m = limpo.match(/^\s*(-?\d+(?:[.,]\d+)?)\s*°\s*(?:(\d+(?:[.,]\d+)?)\s*['′]\s*)?(?:(\d+(?:[.,]\d+)?)\s*["″]?\s*)?\s*([NSEWO])?\s*$/i);
+  if (!m) return null;
+  const grausStr = m[1];
+  const grausNum = Number(grausStr.replace(',', '.'));
+  if (!Number.isFinite(grausNum)) return null;
+  const min = m[2] ? Number(m[2].replace(',', '.')) : 0;
+  const seg = m[3] ? Number(m[3].replace(',', '.')) : 0;
+  const hem = (m[4] || '').toUpperCase();
+  let dec = Math.abs(grausNum) + min / 60 + seg / 3600;
+  if (grausNum < 0 || hem === 'S' || hem === 'W' || hem === 'O') dec = -dec;
+  return dec;
+}
+
 /** Detecta formato pelo conteudo (sem depender de extensao). */
-export function detectarFormatoArquivo(text: string): 'KML' | 'GPX' | 'CSV' {
-  const head = stripBOM(text).trimStart().slice(0, 200).toLowerCase();
+export function detectarFormatoArquivo(text: string): 'KML' | 'GPX' | 'CSV' | 'MEMORIAL' {
+  const cleaned = stripBOM(text);
+  const head = cleaned.trimStart().slice(0, 500).toLowerCase();
   if (head.includes('<gpx')) return 'GPX';
   if (head.includes('<kml')) return 'KML';
+  // v2.7.1: memorial descritivo brasileiro tem cabecalho "De ... Para ... Coord"
+  // (com Azimute e/ou Distancia perto). Detecta nas primeiras 500 chars.
+  const temDeParaCoord = /\bde\b/.test(head) && /\bpara\b/.test(head)
+    && (/coord/.test(head) || /azimute/.test(head) || /dist[áa]ncia/.test(head));
+  if (temDeParaCoord) return 'MEMORIAL';
   // <?xml + nada conhecido: cai no CSV (eventualmente quebra com erro claro)
   return 'CSV';
 }
@@ -248,11 +308,8 @@ export function importarRTK(text: string, opts: ImportarOpts = {}): {
   const idxN      = temHeader ? cabBaixo.findIndex(c => /^(n|norte|y|northing)$/.test(c))                 : -1;
   const idxAlt    = temHeader ? cabBaixo.findIndex(c => /^(h|z|alt|elev|altitude|elevation)$/.test(c))    : -1;
 
-  const parseNum = (s: string | undefined): number | null => {
-    if (!s) return null;
-    const n = Number(s.replace(',', '.'));
-    return Number.isFinite(n) ? n : null;
-  };
+  // v2.7.1: usa parseNumBR (cobre BR `1.234,56` e EN `1234.56`)
+  const parseNum = parseNumBR;
 
   const pontos: PontoImportadoRTK[] = [];
   for (let i = dataStart; i < linhas.length; i++) {
@@ -419,15 +476,135 @@ export function importarGPX(text: string, opts: ImportarOpts = {}): {
   return { pontos, cabecalhos: ['name', 'lat', 'lon', 'ele'] };
 }
 
+/**
+ * v2.7.1: Importa MEMORIAL DESCRITIVO (relatorio de laterais De/Para/Coord).
+ * Formato tipico de softwares topograficos brasileiros (Posiciona, TopoEvn,
+ * AutoCAD memorial export):
+ *
+ *   De           Para         Coord. N(Y)      Coord. E(X)   Azimute       Distância    Fator K       Latitude            Longitude
+ *   FQNS-P-003   AVEX-M-0123  9.449.891,6805   225.372,3751  124°05'41"    191,57 m     1,00053356    04°58'19,995997"S   47°28'35,415962"W
+ *
+ * Cada linha descreve um SEGMENTO (lado), nao um vertice. As coordenadas
+ * referem-se ao "Para" (vertice destino). Ao parsear, cada linha vira um
+ * ponto com rotulo = "Para".
+ *
+ * Suporta:
+ *   - Numeros formato BR (9.449.891,6805 = 9449891.6805)
+ *   - DMS na latitude/longitude com sufixo de hemisferio
+ *   - Linhas separadoras (==== ou ----) e linhas de sumario (Perímetro:, Área:)
+ *     sao ignoradas
+ *   - Separador: tab ou multi-espaco (auto-detectado)
+ */
+export function importarMemorial(text: string, opts: ImportarOpts = {}): {
+  pontos: PontoImportadoRTK[];
+  cabecalhos: string[];
+} {
+  const cleaned = stripBOM(text);
+  const linhas = cleaned.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (linhas.length === 0) return { pontos: [], cabecalhos: [] };
+
+  // Encontra o cabecalho (linha que tem "De" e "Para" como tokens)
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(linhas.length, 20); i++) {
+    const tokens = linhas[i].split(/\s{2,}|\t+/).map(t => t.trim().toLowerCase());
+    if (tokens.includes('de') && tokens.includes('para')) {
+      headerIdx = i;
+      break;
+    }
+    // Alternativa: split por whitespace simples
+    const tokensSimples = linhas[i].split(/\s+/).map(t => t.toLowerCase());
+    if (tokensSimples.includes('de') && tokensSimples.includes('para')) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx < 0) return { pontos: [], cabecalhos: [] };
+
+  // Detecta separador: tab > multi-espaco
+  const headerLine = linhas[headerIdx];
+  const usaTab = headerLine.includes('\t');
+  const splitLine = (s: string): string[] => {
+    if (usaTab) return s.split('\t').map(t => t.trim()).filter(t => t !== '');
+    // Multi-espaco (2+ espacos consecutivos = separador). Funciona pra "191,57 m"
+    // ficar como uma celula.
+    return s.split(/\s{2,}/).map(t => t.trim()).filter(t => t !== '');
+  };
+
+  const cabecalhos = splitLine(headerLine);
+  const cabBaixo = cabecalhos.map(c => c.toLowerCase().replace(/[^a-z0-9]/g, ''));
+
+  // Localiza colunas
+  const idxDe   = cabBaixo.findIndex(c => c === 'de');
+  const idxPara = cabBaixo.findIndex(c => c === 'para');
+  // "Coord. N(Y)" e "Coord. E(X)" → "coordny" e "coordex". Ou ja vieram so como
+  // "n" e "e" se o usuario abriu no Excel e salvou como CSV. Tentamos varios.
+  const idxN = cabBaixo.findIndex(c => /^(coordny|n|northing|coordn)$/.test(c));
+  const idxE = cabBaixo.findIndex(c => /^(coordex|e|easting|coorde)$/.test(c));
+  const idxLat = cabBaixo.findIndex(c => c === 'latitude' || c === 'lat');
+  const idxLng = cabBaixo.findIndex(c => c === 'longitude' || c === 'lng' || c === 'long' || c === 'lon');
+
+  if (idxPara < 0 || idxN < 0 || idxE < 0) {
+    // Estrutura nao reconhecida, retorna vazio
+    return { pontos: [], cabecalhos };
+  }
+
+  const pontos: PontoImportadoRTK[] = [];
+  const ignoraLinha = (l: string) => {
+    if (/^[=\-_*\s]+$/.test(l)) return true; // separadores
+    const lcase = l.toLowerCase();
+    if (/^per[íi]metro\s*:/i.test(l)) return true;
+    if (/^[áa]rea\s*(total)?\s*:/i.test(l)) return true;
+    if (/^total\s*:/i.test(lcase)) return true;
+    return false;
+  };
+
+  // Tambem captura o "De" da primeira linha pra fechar o poligono
+  let primeiroDe: { rotulo: string; e: number | null; n: number | null; lat: number | null; lng: number | null } | null = null;
+
+  for (let i = headerIdx + 1; i < linhas.length; i++) {
+    const l = linhas[i];
+    if (ignoraLinha(l)) continue;
+    const cols = splitLine(l);
+    if (cols.length < Math.max(idxPara, idxN, idxE) + 1) continue;
+    const para = cols[idxPara] || `V${pontos.length + 1}`;
+    const n = parseNumBR(cols[idxN]);
+    const e = parseNumBR(cols[idxE]);
+    const lat = idxLat >= 0 ? parseDMS(cols[idxLat]) : null;
+    const lng = idxLng >= 0 ? parseDMS(cols[idxLng]) : null;
+
+    if (e == null || n == null) continue; // Sem coords UTM, pula
+
+    pontos.push({
+      rotulo: para,
+      e, n,
+      altitude: null,
+      lat, lng,
+      raw: { source: 'memorial', de: cols[idxDe] || '', para },
+    });
+
+    // Guarda o primeiro "De" caso o poligono nao feche em "Para"
+    if (primeiroDe == null && idxDe >= 0) {
+      const deRot = cols[idxDe];
+      primeiroDe = { rotulo: deRot, e: null, n: null, lat: null, lng: null };
+    }
+  }
+
+  // Se o ultimo "Para" === primeiro "De", o poligono fecha — nao precisa adicionar
+  // o "De" (ja apareceu como Para da ultima linha). Caso contrario, e arquivo
+  // que so tem laterais sem fechar.
+  return { pontos, cabecalhos };
+}
+
 /** v2.5.0: Dispatcher que detecta formato e roteia pra parser certo. */
 export function importarPontosArquivo(text: string, opts: ImportarOpts = {}): {
   pontos: PontoImportadoRTK[];
   cabecalhos: string[];
-  formato: 'KML' | 'GPX' | 'CSV';
+  formato: 'KML' | 'GPX' | 'CSV' | 'MEMORIAL';
 } {
   const formato = detectarFormatoArquivo(text);
   const r = formato === 'KML' ? importarKML(text, opts)
          : formato === 'GPX' ? importarGPX(text, opts)
+         : formato === 'MEMORIAL' ? importarMemorial(text, opts)
          : importarRTK(text, opts);
   return { ...r, formato };
 }

@@ -1692,8 +1692,15 @@ app.post('/api/laudos-demarcacao/import-arquivo', requireCeoToken, upload.single
       formato = 'SHP';
       r = await importarSHP(req.file.buffer, opts);
     } else if (ext === 'csv' || ext === 'txt' || ext === 'dat' || ext === 'kml' || ext === 'gpx') {
-      // Texto: passa pelo dispatcher antigo (que ja faz BOM strip + auto-detect)
-      const texto = req.file.buffer.toString('utf8');
+      // Texto: tenta UTF-8 strict, fallback Windows-1252 (v2.7.1)
+      // Coletoras brasileiras e softwares CAD frequentemente geram em CP1252.
+      let texto: string;
+      try {
+        texto = new TextDecoder('utf-8', { fatal: true }).decode(req.file.buffer);
+      } catch (_) {
+        console.log('[import-arquivo] UTF-8 falhou em', filename, '— tentando windows-1252');
+        texto = new TextDecoder('windows-1252').decode(req.file.buffer);
+      }
       const r2 = importarPontosArquivo(texto, opts);
       formato = r2.formato;
       r = r2;
