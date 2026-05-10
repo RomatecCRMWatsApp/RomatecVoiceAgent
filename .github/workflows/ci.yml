@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Least-privilege: read-only by default (agent style guide)
+permissions:
+  contents: read
+
+# Cancel in-progress runs for the same branch/PR to avoid wasting runners
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Typecheck · Test · Build
+    runs-on: ubuntu-latest
+
+    # Node 22 only — a single target version keeps CI fast and matches Railway.
+    # A 20/22 matrix adds ~2 min per run with no practical benefit: Railway is
+    # pinned to 22, and the codebase uses ES2022 features not available on 20.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+        # Tests are fully standalone (no MySQL / Anthropic key needed).
+        # See vitest.config.ts and src/test-setup.ts for the mocking strategy.
+
+      - name: Build
+        run: npm run build
