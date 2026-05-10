@@ -13143,20 +13143,107 @@ const ACAILANDIA_DEFAULTS = {
     'Coletor SinoGNSS R60 (Android 12)',
     'Coletor SinoGNSS R80 (Android 12)',
   ],
-  // v2.6.0 — Cartorios de Açailândia/MA + região (CNS preenchido manualmente
-  // pelo user porque não temos base nacional integrada — cadastros locais
-  // crescem com uso, mesma pauta de bairros/loteamentos).
+  // v2.6.0 / v2.10.4 — Cartorios (serventias extrajudiciais) do MA.
+  // Lista curada por regiao, foco em cidades onde a Romatec atua.
+  // CNS preenchido manualmente pelo user (CNJ tem ~13k serventias no BR;
+  // pra MA inteiro nao empacotamos a base oficial — caso o user precise,
+  // adiciona localmente via cadastros locais que crescem com uso.
   cartorios: [
+    // ── Açailândia (sede) ────────────────────────────────────────────
     'Cartório do 1º Ofício de Açailândia/MA',
     'Cartório do 2º Ofício de Açailândia/MA',
     'Cartório de Registro de Imóveis de Açailândia/MA',
     'Cartório de Registro Civil de Pessoas Naturais de Açailândia/MA',
-    'Cartório do 1º Ofício de Imperatriz/MA',
-    'Cartório do 2º Ofício de Imperatriz/MA',
-    'Cartório de Registro de Imóveis de Imperatriz/MA',
+    'Tabelionato de Notas e Protestos de Açailândia/MA',
+
+    // ── Sudoeste MA (region Romatec) ─────────────────────────────────
     'Cartório de Itinga do Maranhão/MA',
     'Cartório de João Lisboa/MA',
     'Cartório de Cidelândia/MA',
+    'Cartório de Bom Jesus das Selvas/MA',
+    'Cartório de São Francisco do Brejão/MA',
+    'Cartório de Buriticupu/MA',
+    'Cartório de Bom Jardim/MA',
+    'Cartório de Vila Nova dos Martírios/MA',
+    'Cartório de Davinópolis/MA',
+    'Cartório de Senador La Rocque/MA',
+    'Cartório de Ribamar Fiquene/MA',
+    'Cartório de Lajeado Novo/MA',
+
+    // ── Imperatriz e regiao ──────────────────────────────────────────
+    'Cartório do 1º Ofício de Imperatriz/MA',
+    'Cartório do 2º Ofício de Imperatriz/MA',
+    'Cartório do 3º Ofício de Imperatriz/MA',
+    'Cartório de Registro de Imóveis da 1ª Zona de Imperatriz/MA',
+    'Cartório de Registro de Imóveis da 2ª Zona de Imperatriz/MA',
+    'Cartório de Registro Civil de Pessoas Naturais de Imperatriz/MA',
+    'Tabelionato de Protestos de Imperatriz/MA',
+    'Cartório de Montes Altos/MA',
+    'Cartório de Amarante do Maranhão/MA',
+    'Cartório de Sítio Novo/MA',
+
+    // ── Sul MA (Tocantina / fronteira TO/GO) ─────────────────────────
+    'Cartório de Estreito/MA',
+    'Cartório de Porto Franco/MA',
+    'Cartório de Carolina/MA',
+    'Cartório de Riachão/MA',
+    'Cartório de Balsas/MA',
+    'Cartório de Registro de Imóveis de Balsas/MA',
+    'Cartório de São Raimundo das Mangabeiras/MA',
+    'Cartório de Tasso Fragoso/MA',
+    'Cartório de Loreto/MA',
+    'Cartório de Sambaíba/MA',
+
+    // ── São Luís (capital) ───────────────────────────────────────────
+    'Cartório do 1º Ofício de São Luís/MA',
+    'Cartório do 2º Ofício de São Luís/MA',
+    'Cartório do 3º Ofício de São Luís/MA',
+    'Cartório do 4º Ofício de São Luís/MA',
+    'Cartório do 5º Ofício de São Luís/MA',
+    'Cartório de Registro de Imóveis da 1ª Zona de São Luís/MA',
+    'Cartório de Registro de Imóveis da 2ª Zona de São Luís/MA',
+    'Cartório de Registro de Imóveis da 3ª Zona de São Luís/MA',
+    'Cartório de Registro Civil de Pessoas Naturais de São Luís/MA',
+    'Cartório de Registro Civil de Pessoas Jurídicas de São Luís/MA',
+    'Tabelionato de Protestos de São Luís/MA',
+
+    // ── Grande São Luís ──────────────────────────────────────────────
+    'Cartório de São José de Ribamar/MA',
+    'Cartório de Paço do Lumiar/MA',
+    'Cartório de Raposa/MA',
+    'Cartório de Alcântara/MA',
+
+    // ── Norte / Litoral ──────────────────────────────────────────────
+    'Cartório de Pinheiro/MA',
+    'Cartório de Viana/MA',
+    'Cartório de Cururupu/MA',
+    'Cartório de Turiaçu/MA',
+    'Cartório de Cândido Mendes/MA',
+
+    // ── Centro-Norte (Vale do Itapecuru) ─────────────────────────────
+    'Cartório de Caxias/MA',
+    'Cartório de Registro de Imóveis de Caxias/MA',
+    'Cartório de Codó/MA',
+    'Cartório de Coroatá/MA',
+    'Cartório de Chapadinha/MA',
+    'Cartório de Timon/MA',
+    'Cartório de Registro de Imóveis de Timon/MA',
+
+    // ── Vale do Mearim ───────────────────────────────────────────────
+    'Cartório de Bacabal/MA',
+    'Cartório de Registro de Imóveis de Bacabal/MA',
+    'Cartório de Pedreiras/MA',
+    'Cartório de Lago da Pedra/MA',
+    'Cartório de Santa Inês/MA',
+    'Cartório de Pindaré-Mirim/MA',
+    'Cartório de Vitorino Freire/MA',
+
+    // ── Centro-Sul ───────────────────────────────────────────────────
+    'Cartório de Presidente Dutra/MA',
+    'Cartório de Barra do Corda/MA',
+    'Cartório de Grajaú/MA',
+    'Cartório de Tuntum/MA',
+    'Cartório de Colinas/MA',
   ],
 };
 
