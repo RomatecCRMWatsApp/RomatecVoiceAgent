@@ -14666,6 +14666,11 @@ function renderLaudoTabPontos(c) {
         salvarCronos();
       }
     }
+    // v2.4.4: Foto da base instalada — armazenada como foto com ponto_id=null
+    // e legenda começando com '📡 Base instalada' para identificação
+    const fotoBase = (state.laudoAtual.fotos || []).find(f =>
+      !f.ponto_id && (f.legenda || '').startsWith('📡 Base instalada')
+    );
     const baseAccumDisplay = fmtCrono(getCronoSec('base', cronos, 0));
     const baseRunning = cronos.base?.running === true;
     const baseInicioISO = cronos.base?.inicioISO || (l.base_inicio_rastreio ? new Date(l.base_inicio_rastreio).toISOString() : '');
@@ -14720,6 +14725,24 @@ function renderLaudoTabPontos(c) {
               </div>
               <p style="font-size:10px; color:var(--text-muted); margin:4px 0 0;">Use só pra ajustar se esqueceu de pausar — o cronômetro acima é a fonte oficial.</p>
             </details>
+          </div>
+
+          <!-- v2.4.4: Foto da base instalada (com carimbo geo) -->
+          <div style="padding:8px; background:var(--bg-secondary); border-radius:6px; margin-top:4px;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <span style="font-size:12px; color:var(--text-muted);">📷 Registro fotográfico:</span>
+              ${fotoBase ? `
+                <img src="/api/laudos-demarcacao/foto/${fotoBase.id}"
+                  style="width:80px; height:80px; object-fit:cover; border-radius:4px; border:2px solid var(--gold); cursor:pointer;"
+                  title="Click pra ver no tamanho original" data-base-foto-view="${fotoBase.id}">
+                <button data-base-foto-rm="${fotoBase.id}" style="font-size:11px; padding:4px 8px; background:#ef444422; color:#ef4444; border:1px solid #ef444455;">🗑️ Remover</button>
+                <button data-base-foto-trocar style="font-size:11px; padding:4px 8px;">📷 Trocar</button>
+              ` : `
+                <button data-base-foto-trocar style="background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955; padding:6px 12px; font-size:12px;">📷 Tirar foto da base instalada</button>
+                <span style="font-size:11px; color:var(--text-muted);">(opcional — registra onde a base ficou montada)</span>
+              `}
+              <input type="file" accept="image/*" capture="environment" id="lp-base-foto-input" style="display:none;">
+            </div>
           </div>
 
           <textarea id="lp-base-obs" rows="2" placeholder="Observações da base (opcional — equipamento, condições, marco oficial, etc)" style="width:100%; font-size:11px;">${escape(l.base_observacoes || '')}</textarea>
@@ -14853,6 +14876,64 @@ function renderLaudoTabPontos(c) {
     };
     if (baseIniEl) baseIniEl.oninput = recomputarBaseFromManual;
     if (baseFimEl) baseFimEl.oninput = recomputarBaseFromManual;
+
+    // v2.4.4: Handlers da foto da base instalada
+    const baseFotoInput = document.getElementById('lp-base-foto-input');
+    document.querySelectorAll('[data-base-foto-trocar]').forEach(b => b.onclick = () => {
+      if (baseFotoInput) baseFotoInput.click();
+    });
+    if (baseFotoInput) {
+      baseFotoInput.onchange = async () => {
+        const f = baseFotoInput.files?.[0];
+        if (!f) return;
+        try {
+          const gps = (typeof getGPSAtual === 'function') ? await getGPSAtual(8000).catch(() => null) : null;
+          const now = new Date();
+          const dataStr = now.toLocaleDateString('pt-BR');
+          const horaStr = now.toLocaleTimeString('pt-BR').slice(0, 8);
+          const baseNomeAtual = document.getElementById('lp-base-nome')?.value.trim() || l.base_nome || '';
+          const stampInfo = (gps && typeof compressImageFileComStamp === 'function') ? {
+            label: `📡 BASE${baseNomeAtual ? ' · ' + baseNomeAtual.slice(0, 30) : ''}`,
+            numeroLaudo: l.numero_laudo,
+            dataStr, horaStr,
+            lat: gps.lat, lng: gps.lng,
+            source: `📱 GPS celular${gps.accuracy ? ' (±' + Math.round(gps.accuracy) + 'm)' : ''}`,
+          } : null;
+          const r = stampInfo
+            ? await compressImageFileComStamp(f, { maxDim: 1600, quality: 0.85 }, stampInfo)
+            : await compressImageFile(f, { maxDim: 1600, quality: 0.85 });
+          const legendaCarimbo = `📡 Base instalada${baseNomeAtual ? ' · ' + baseNomeAtual : ''} · ${dataStr} ${horaStr}${gps ? ` · Lat ${gps.lat.toFixed(6)} Lng ${gps.lng.toFixed(6)}` : ''}`;
+          // Replace: deleta a anterior se existir
+          if (fotoBase?.id) {
+            try { await api('/api/laudos-demarcacao/foto/' + fotoBase.id, { method: 'DELETE' }); } catch (_) {}
+          }
+          await api('/api/laudos-demarcacao/' + l.id + '/fotos', {
+            method: 'POST',
+            body: JSON.stringify({
+              fotos: [{
+                conteudo_b64: r.data_base64, mime: r.mime,
+                filename: `base-instalada-${l.numero_laudo}.jpg`,
+                legenda: legendaCarimbo, ponto_id: null,
+              }],
+            }),
+            headers: { 'Content-Type': 'application/json' },
+          });
+          await loadLaudoDetalhe(l.id);
+          renderLaudoEditor(document.getElementById('view-laudos'));
+        } catch (err) { alert('Erro upload foto base: ' + err.message); }
+      };
+    }
+    document.querySelectorAll('[data-base-foto-rm]').forEach(b => b.onclick = async () => {
+      if (!confirm('Remover foto da base instalada?')) return;
+      try {
+        await api('/api/laudos-demarcacao/foto/' + b.dataset.baseFotoRm, { method: 'DELETE' });
+        await loadLaudoDetalhe(l.id);
+        renderLaudoEditor(document.getElementById('view-laudos'));
+      } catch (err) { alert('Erro: ' + err.message); }
+    });
+    document.querySelectorAll('[data-base-foto-view]').forEach(img => img.onclick = () => {
+      window.open('/api/laudos-demarcacao/foto/' + img.dataset.baseFotoView, '_blank');
+    });
 
     // Adicionar ponto (Np/Rural)
     if (isDinamico) {
