@@ -103,6 +103,36 @@
     display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;
   }
   @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+
+  /* === LP-GRID: utility classes responsivas (v3.3.0) === */
+  .lp-grid-auto {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+  }
+  .lp-grid-2 { display: grid; grid-template-columns: 1fr 1fr;        gap: 8px; }
+  .lp-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr;    gap: 8px; }
+  .lp-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .lp-grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+
+  @media (max-width: 768px) {
+    .lp-grid-auto, .lp-grid-2, .lp-grid-3, .lp-grid-4, .lp-grid-5 {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 900px) and (min-width: 769px) {
+    .lp-grid-4, .lp-grid-5 { grid-template-columns: 1fr 1fr; }
+  }
+
+  /* === SAFETY NET: força 1 coluna em qualquer inline grid não migrado === */
+  /* Opt-out: marque o elemento com data-keep-grid para preservar multi-coluna em mobile */
+  @media (max-width: 768px) {
+    [style*="grid-template-columns"]:not([data-keep-grid]) {
+      grid-template-columns: 1fr !important;
+    }
+  }
+
   input, select, textarea, button {
     font-family: inherit; font-size: 14px; padding: 8px 12px;
     border: 1px solid var(--border); border-radius: var(--radius);
@@ -861,7 +891,7 @@ async function abrirModalCerts() {
             <span style="display:block; margin-bottom:4px;">Senha do certificado</span>
             <input type="password" name="senha" placeholder="Senha que você criou ao emitir" required style="width:100%;">
           </label>
-          <div style="display:grid; grid-template-columns:1fr 2fr; gap:10px;">
+          <div class="lp-grid-auto" style="gap:10px;">
             <label style="font-size:12px;">
               <span style="display:block; margin-bottom:4px;">Perfil</span>
               <select name="perfil" required style="width:100%;">
@@ -5727,7 +5757,7 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
         <label>Endereço / localização do imóvel rural
           <input id="geoEndereco" placeholder="Sítio/Fazenda Tal, zona rural, município-UF" style="width:100%;">
         </label>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Município
             <input id="geoMunicipio" value="Açailândia" style="width:100%;">
           </label>
@@ -5737,7 +5767,7 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
         </div>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📐 Levantamento</p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Área (hectares)
             <input id="geoArea" type="number" min="0.1" step="0.01" placeholder="ex: 25.5" style="width:100%;">
           </label>
@@ -5746,7 +5776,7 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
             <span style="font-size:10px; color:var(--text-muted);">Mínimo 3 (poligonal)</span>
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Distância de deslocamento (km)
             <input id="geoDistKm" type="number" min="0" step="1" value="0" style="width:100%;">
             <span style="font-size:10px; color:var(--text-muted);">Ida+volta a partir de Açailândia</span>
@@ -5758,7 +5788,7 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
         </div>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💰 Valores unitários (deixe 0 pra usar tabela CONFEA)</p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>R$/hectare
             <input id="geoValHa" type="number" min="0" step="0.01" placeholder="80.00 (default)" style="width:100%;">
           </label>
@@ -5766,7 +5796,7 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
             <input id="geoValVert" type="number" min="0" step="0.01" placeholder="200.00 (default)" style="width:100%;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>R$/diária
             <input id="geoValDia" type="number" min="0" step="0.01" placeholder="600.00 (default)" style="width:100%;">
           </label>
@@ -5944,7 +5974,7 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
         </label>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📐 Dados do imóvel</p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Área total (m²)
             <input id="dxArea" type="number" min="1" step="0.01" style="width:100%;">
             <span style="font-size:10px; color:var(--text-muted);">${isDesm ? 'Área da matriz' : 'Soma das áreas a unificar'}</span>
@@ -6123,7 +6153,7 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
         </label>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📊 Áreas (em m² ou hectares)</p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Área atual (matrícula)
             <input id="rxAreaAtual" type="number" min="0.01" step="0.01" style="width:100%;">
             <span style="font-size:10px; color:var(--text-muted);">Como está na matrícula hoje</span>
@@ -6287,7 +6317,7 @@ async function renderConsultoriaFormPTAM(v, toggleHTML) {
         <label>Endereço do imóvel a avaliar
           <input id="ptEndereco" placeholder="Rua, nº, bairro, cidade-UF (ou descrição rural)" style="width:100%;">
         </label>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Município
             <input id="ptMunicipio" value="Açailândia" style="width:100%;">
           </label>
@@ -6306,7 +6336,7 @@ async function renderConsultoriaFormPTAM(v, toggleHTML) {
             <option value="industrial">Industrial (instalações + maquinário)</option>
           </select>
         </label>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Área do terreno (m² ou ha)
             <input id="ptAreaTerreno" type="number" min="0" step="0.01" value="0" style="width:100%;">
           </label>
@@ -6721,7 +6751,7 @@ async function abrirNovaConsultoriaPasso1() {
     </button>`).join('');
 
   const html = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">${cards}</div>
+    <div class="lp-grid-2">${cards}</div>
   `;
   const modal = abrirModal(html, { title: 'Nova Proposta de Consultoria', subtitle: 'Selecione o tipo' });
   modal.querySelectorAll('[data-pick-subtipo]:not([disabled])').forEach(b => b.onclick = () => {
@@ -6798,7 +6828,7 @@ async function abrirCadastroClienteModal(subtipoParaVoltar) {
       <label>Nome completo / Razão Social *
         <input id="novCliNome" placeholder="Maria Ester R. Sampaio" style="width:100%;" autofocus>
       </label>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <label>CPF / CNPJ
           <input id="novCliCpf" placeholder="000.000.000-00" style="width:100%;">
         </label>
@@ -6812,7 +6842,7 @@ async function abrirCadastroClienteModal(subtipoParaVoltar) {
       <label>Endereço completo
         <input id="novCliEnd" placeholder="Rua Bom Jesus, 236, Centro" style="width:100%;">
       </label>
-      <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px;">
+      <div class="lp-grid-auto">
         <label>Cidade
           <input id="novCliCidade" placeholder="Açailândia" style="width:100%;" value="Açailândia">
         </label>
@@ -6892,7 +6922,7 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
       <label>Endereço do imóvel
         <input id="cnsEndereco" placeholder="Rua, número, bairro, cidade-UF" style="width:100%;">
       </label>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <label>Área construída (m²)
           <input id="cnsArea" type="number" min="1" step="0.01" style="width:100%;">
         </label>
@@ -6900,7 +6930,7 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
           <input id="cnsValorVenal" type="number" min="0" step="0.01" style="width:100%;">
         </label>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <label>
           <span style="display:flex; align-items:center; gap:4px;">Padrão construtivo
             <button type="button" id="cnsPadraoHelp" title="Como escolher" style="background:transparent; border:1px solid var(--border); color:var(--neon); border-radius:50%; width:18px; height:18px; padding:0; line-height:1; cursor:pointer; font-size:12px;">?</button>
@@ -6947,7 +6977,7 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
         ⚠️ Comercial: pacote completo obrigatório (7 projetos: Mapa, Arquitetônico, Elétrico, Hidrossanitário, Estrutural, PPCI, Memorial).
       </div>` : ''}
       <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Status atual dos documentos do cliente:</div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:12px;">
+      <div class="lp-grid-2" style="gap:4px; font-size:12px;">
         <label><input id="cnsAlvara" type="checkbox"> Já tem Alvará</label>
         <label><input id="cnsHabite" type="checkbox"> Já tem Habite-se</label>
         <label><input id="cnsIptu" type="checkbox" checked> IPTU em dia</label>
@@ -9540,7 +9570,7 @@ function renderReciboForm(v) {
         </label>
         <!-- v1.85.0: catálogo de serviços (somente quando tipo='custom') -->
         <div id="recCatalogoBox" style="display:${f.tipo==='custom'?'block':'none'};">
-          <div style="display:grid; grid-template-columns:1fr 2fr; gap:8px;">
+          <div class="lp-grid-auto">
             <label>Categoria de serviço
               <select id="recCategoria" style="width:100%;">
                 <option value="">— Personalizado / Em branco —</option>
@@ -9577,7 +9607,7 @@ function renderReciboForm(v) {
             <input id="recEmail" type="email" placeholder="email@dominio.com" value="${escape(f.destinatario_email)}" style="width:100%;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr 120px; gap:8px;">
+        <div class="lp-grid-auto">
           <label>Valor (R$)
             <input id="recValor" type="number" step="0.01" min="0" placeholder="0,00" value="${escape(f.valor)}" style="width:100%;">
           </label>
@@ -9599,7 +9629,7 @@ function renderReciboForm(v) {
           Após salvar, você poderá enviar pelo WhatsApp com 1 clique.
         </p>
         <!-- v1.89.0: 3 botões com fluxo separado de salvar/enviar -->
-        <div style="display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px; margin-top:6px;">
+        <div class="lp-grid-auto" style="margin-top:6px;">
           <button id="recSalvarRascunho" title="Salvar como rascunho — pode editar depois, número provisório" style="background:transparent; border:1px solid #444; color:#888;">💾 Salvar rascunho</button>
           <button id="recSalvarSemEnviar" title="Emite o recibo (gera número definitivo) sem enviar agora" style="background:#1F5C3A; color:#fff; border-color:#1F5C3A;">✅ Salvar sem enviar</button>
           <button id="recSalvarEnviar" title="Salva e dispara WhatsApp imediatamente" style="background:#25D366; color:#fff; border-color:#25D366; font-weight:600;">🚀 Salvar e enviar via WhatsApp</button>
@@ -10074,7 +10104,7 @@ function abrirModalNovoCliente() {
       <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
         <legend style="padding:0 8px; font-size:12px; color:var(--gold); font-weight:600;">DADOS PRINCIPAIS</legend>
         <div style="display:grid; gap:10px;">
-          <div style="display:grid; grid-template-columns:2fr 1fr; gap:8px;">
+          <div class="lp-grid-auto">
             <label>Nome completo / Razão Social *
               <input id="cli_nome" placeholder="Nome ou Razão Social" maxlength="150" style="width:100%;">
             </label>
@@ -10083,7 +10113,7 @@ function abrirModalNovoCliente() {
               <span id="cli_doc_status" style="font-size:10px; color:var(--text-muted);"></span>
             </label>
           </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+          <div class="lp-grid-3">
             <label>Celular / WhatsApp *
               <input id="cli_tel" placeholder="(99) 99999-9999" maxlength="15" style="width:100%; font-family:monospace;">
             </label>
@@ -10101,7 +10131,7 @@ function abrirModalNovoCliente() {
       <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;" id="cli_fs_pessoais">
         <legend style="padding:0 8px; font-size:12px; color:var(--gold); font-weight:600;">DADOS PESSOAIS / EMPRESARIAIS</legend>
         <div style="display:grid; gap:10px;">
-          <div style="display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px;">
+          <div class="lp-grid-auto">
             <label>
               <span data-cli-pf-only>Data de nascimento</span><span data-cli-pj-only style="display:none;">Data de fundação</span>
               <input id="cli_dtnasc" type="date" style="width:100%;">
@@ -10121,7 +10151,7 @@ function abrirModalNovoCliente() {
               <input id="cli_profissao" maxlength="120" style="width:100%;">
             </label>
           </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;" data-cli-pj-only>
+          <div class="lp-grid-2" data-cli-pj-only>
             <label>Razão Social (se diferente do nome)
               <input id="cli_razao" maxlength="150" style="width:100%;">
             </label>
@@ -10135,7 +10165,7 @@ function abrirModalNovoCliente() {
       <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
         <legend style="padding:0 8px; font-size:12px; color:var(--gold); font-weight:600;">ENDEREÇO</legend>
         <div style="display:grid; gap:10px;">
-          <div style="display:grid; grid-template-columns:140px 2fr 80px 1fr; gap:8px;">
+          <div class="lp-grid-auto">
             <label>CEP
               <input id="cli_cep" placeholder="00000-000" maxlength="9" style="width:100%; font-family:monospace;">
               <span id="cli_cep_status" style="font-size:10px; color:var(--text-muted);"></span>
@@ -10150,7 +10180,7 @@ function abrirModalNovoCliente() {
               <input id="cli_compl" maxlength="120" style="width:100%;">
             </label>
           </div>
-          <div style="display:grid; grid-template-columns:2fr 2fr 60px; gap:8px;">
+          <div class="lp-grid-auto">
             <label>Bairro
               <input id="cli_bairro" maxlength="80" style="width:100%;">
             </label>
@@ -10496,7 +10526,7 @@ function abrirModalNF(opts) {
         Digite o CEP — endereço auto-completa via Brasil API.
       </p>
       <div style="display:grid; gap:10px;">
-        <div style="display:grid; grid-template-columns:1fr 2fr; gap:8px;">
+        <div class="lp-grid-auto">
           <label>CPF/CNPJ ${opts.ehObrigatorioDoc ? '*' : ''}
             <input id="mnfDoc" placeholder="000.000.000-00" value="${escape(p.tomador_doc || '')}" style="width:100%;">
             <span id="mnfDocStatus" style="font-size:10px; color:var(--text-muted);"></span>
@@ -10505,7 +10535,7 @@ function abrirModalNF(opts) {
             <input id="mnfNome" value="${escape(p.tomador_nome || '')}" style="width:100%;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px;">
+        <div class="lp-grid-auto">
           <label>Email
             <input id="mnfEmail" type="email" value="${escape(p.tomador_email || '')}" style="width:100%;">
           </label>
@@ -10517,7 +10547,7 @@ function abrirModalNF(opts) {
             <input id="mnfLogr" value="${escape(p.logradouro || '')}" style="width:100%;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 2fr 2fr 80px; gap:8px;">
+        <div class="lp-grid-auto">
           <label>Número
             <input id="mnfNum" value="${escape(p.numero || 'S/N')}" style="width:100%;">
           </label>
@@ -10876,7 +10906,7 @@ function renderFiscalConfigBox() {
             </select>
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>NFe.io Company ID
             <input id="cfgCompany" placeholder="UUID da empresa no NFe.io" value="${escape(c.provider_company_id||'')}" style="width:100%; font-family:monospace; font-size:12px;">
           </label>
@@ -10967,7 +10997,7 @@ function renderNFAvulsaBox() {
             <input id="nfaUf" maxlength="2" value="MA" style="width:100%; text-transform:uppercase;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1.5fr 1fr 1fr; gap:8px;">
+        <div class="lp-grid-auto">
           <label>Logradouro
             <input id="nfaLogr" placeholder="Av. Brasil" style="width:100%;">
           </label>
@@ -10978,7 +11008,7 @@ function renderNFAvulsaBox() {
             <input id="nfaBairro" style="width:100%;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+        <div class="lp-grid-3">
           <label>Valor do serviço (R$) *
             <input id="nfaValor" type="number" step="0.01" min="0.01" placeholder="0,00" style="width:100%;">
           </label>
@@ -11880,7 +11910,7 @@ function baixarDxfCobPlanta() {
 // ─── 2. CONCRETO ───────────────────────────────────────────────────────
 function renderCalcConcreto() {
   document.getElementById('calcContent').innerHTML = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div class="lp-grid-2" style="gap:14px;">
       <div class="card">
         <p class="section-title">Concreto Estrutural</p>
         <div class="form-grid">
@@ -11961,7 +11991,7 @@ function renderCalcConcreto() {
 // ─── 3. ALVENARIA ──────────────────────────────────────────────────────
 function renderCalcAlvenaria() {
   document.getElementById('calcContent').innerHTML = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div class="lp-grid-2" style="gap:14px;">
       <div class="card">
         <p class="section-title">Alvenaria</p>
         <div class="form-grid">
@@ -12032,7 +12062,7 @@ function renderCalcAlvenaria() {
 // ─── 4. ARGAMASSA ──────────────────────────────────────────────────────
 function renderCalcArgamassa() {
   document.getElementById('calcContent').innerHTML = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div class="lp-grid-2" style="gap:14px;">
       <div class="card">
         <p class="section-title">Argamassa</p>
         <div class="form-grid">
@@ -12092,7 +12122,7 @@ function renderCalcArgamassa() {
 // ─── 5. PINTURA ────────────────────────────────────────────────────────
 function renderCalcPintura() {
   document.getElementById('calcContent').innerHTML = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div class="lp-grid-2" style="gap:14px;">
       <div class="card">
         <p class="section-title">Pintura</p>
         <div class="form-grid">
@@ -12167,7 +12197,7 @@ function renderCalcPintura() {
 // ─── 6. RESERVATÓRIO DE ÁGUA ──────────────────────────────────────────
 function renderCalcReservatorio() {
   document.getElementById('calcContent').innerHTML = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div class="lp-grid-2" style="gap:14px;">
       <div class="card">
         <p class="section-title">Reservatório de Água — NBR 5626</p>
         <div class="form-grid">
@@ -12273,7 +12303,7 @@ const PISOS_TIPOS = {
 
 function renderCalcPisos() {
   document.getElementById('calcContent').innerHTML = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div class="lp-grid-2" style="gap:14px;">
       <div class="card">
         <p class="section-title">Pisos / Revestimentos</p>
         <div class="form-grid">
@@ -12753,7 +12783,7 @@ async function abrirZayraVisual() {
       <p style="margin:0; font-size:13px; color:var(--text-muted);">
         Capture uma imagem ou ative o modo LIVE (frames a cada 5s).
       </p>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <button id="zvCam" style="padding:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text); cursor:pointer;">
           <div style="font-size:32px;">📱</div>
           <div style="font-size:12px; margin-top:4px;">Câmera (foto única)</div>
@@ -12765,7 +12795,7 @@ async function abrirZayraVisual() {
           <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">~R$ 0,02 · Claude</div>
         </button>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <button id="zvLiveCam" style="padding:14px; background:rgba(0,255,136,0.06); border:2px solid var(--neon); border-radius:8px; color:var(--text); cursor:pointer;">
           <div style="font-size:32px;">🎥</div>
           <div style="font-size:12px; margin-top:4px; color:var(--neon); font-weight:600;">LIVE Câmera</div>
@@ -13654,7 +13684,7 @@ function renderLaudoNovo(v) {
         <button id="ln-novo-cont">➕ Cadastrar novo</button>
       </div>
       <div id="ln-cont-form" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
-        <div class="grid-2" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <select id="ln-c-tipo">
             <option value="PF">Pessoa Física</option>
             <option value="PJ">Pessoa Jurídica</option>
@@ -13675,7 +13705,7 @@ function renderLaudoNovo(v) {
           <p style="margin:0 0 8px; font-size:12px; color:var(--text-muted);">
             👤 <strong>Representante legal</strong> (opcional — sócio/administrador que assina contratos, se aplicável)
           </p>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div class="lp-grid-2">
             <input id="ln-c-rep-nome" placeholder="Nome completo do representante" style="grid-column:1/3;">
             <input id="ln-c-rep-cpf" placeholder="CPF do representante (000.000.000-00)" maxlength="14" data-mask="cpfcnpj">
             <input id="ln-c-rep-cargo" placeholder="Cargo (Sócio, Administrador, etc.)">
@@ -13697,7 +13727,7 @@ function renderLaudoNovo(v) {
         <button id="ln-novo-exec">➕ Cadastrar novo</button>
       </div>
       <div id="ln-exec-form" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <input id="ln-e-nome" placeholder="Nome completo" style="grid-column:1/3;">
           <input id="ln-e-qual" placeholder="Qualificação (Téc. em Agrimensura, Eng. Civil, etc.)" style="grid-column:1/3;">
           <input id="ln-e-cft" placeholder="CFT (Conselho Federal Técnicos)">
@@ -14131,7 +14161,7 @@ function renderLaudoTabCadastros(c) {
         </div>
       </div>
       <div id="lec-cont-form" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <select id="lec-c-tipo">
             <option value="PF">Pessoa Física</option>
             <option value="PJ">Pessoa Jurídica</option>
@@ -14151,7 +14181,7 @@ function renderLaudoTabCadastros(c) {
           <p style="margin:0 0 8px; font-size:12px; color:var(--text-muted);">
             👤 <strong>Representante legal</strong> (opcional)
           </p>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div class="lp-grid-2">
             <input id="lec-c-rep-nome" placeholder="Nome do representante" style="grid-column:1/3;">
             <input id="lec-c-rep-cpf" placeholder="CPF do representante" maxlength="14" data-mask="cpfcnpj">
             <input id="lec-c-rep-cargo" placeholder="Cargo (Sócio, Adm, etc.)">
@@ -14194,7 +14224,7 @@ function renderLaudoTabCadastros(c) {
         </div>
       </div>
       <div id="lec-exec-form" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <input id="lec-e-nome" placeholder="Nome completo" style="grid-column:1/3;">
           <input id="lec-e-qual" placeholder="Qualificação (Téc. em Agrimensura, etc.)" style="grid-column:1/3;">
           <input id="lec-e-cft" placeholder="CFT">
@@ -14374,7 +14404,7 @@ function renderLaudoTabDados(c) {
         <br>💡 <strong>Bairros/loteamentos novos</strong> são cadastrados automaticamente ao salvar (ficam no celular pra próxima).
         <a href="#" id="ld-gerenciar-cad" style="color:var(--gold); text-decoration:underline;">Gerenciar cadastros locais</a>
       </p>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         ${isUrbano ? `
           <select id="ld-tipo-lote">
             <option value="">— tipo de lote —</option>
@@ -14402,12 +14432,12 @@ function renderLaudoTabDados(c) {
         ℹ️ Opcional — preencha se o imóvel já tem registro. Aplica em rural (fazenda) e urbano.
         <br>💡 v3.2.0: catálogo nacional CNJ com ~3.7k cartórios de Registro de Imóveis. Digite 3+ letras pra buscar (filtra pela UF do imóvel).
       </p>
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+      <div class="lp-grid-3">
         <input id="ld-matricula" placeholder="Matrícula" value="${escape(l.matricula||'')}">
         <input id="ld-livro" placeholder="Livro (ex: 2-A)" value="${escape(l.livro||'')}">
         <input id="ld-folhas" placeholder="Folhas (ex: 123/v)" value="${escape(l.folhas||'')}">
       </div>
-      <div style="display:grid; grid-template-columns:2fr 1fr; gap:8px; margin-top:8px;">
+      <div class="lp-grid-auto" style="margin-top:8px;">
         <div style="position:relative;">
           <input id="ld-cartorio-nome" placeholder="Cartório (digite cidade, nome ou responsável)" value="${escape(l.cartorio_nome||'')}" autocomplete="off">
           <div id="ld-cartorio-sugestoes" style="display:none; position:absolute; top:100%; left:0; right:0; background:#1a1a1a; border:1px solid var(--gold); border-top:none; max-height:280px; overflow-y:auto; z-index:1000; box-shadow:0 4px 12px rgba(0,0,0,0.6); font-size:12px;"></div>
@@ -14420,7 +14450,7 @@ function renderLaudoTabDados(c) {
         <h3 style="margin:0;">Confrontantes</h3>
         <button id="ld-cf-swap-fb" type="button" title="Trocar valores entre Frente e Fundo" style="font-size:11px; padding:3px 8px;">🔄 Trocar Frente↔Fundo</button>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+      <div class="lp-grid-2" style="margin-top:8px;">
         <input id="ld-cf-frente" list="dl-confrontantes" placeholder="Frente (ex: Rua, Avenida, vizinho)" value="${escape(l.confrontante_frente||'')}">
         <input id="ld-cf-fundo" list="dl-confrontantes" placeholder="Fundo" value="${escape(l.confrontante_fundo||'')}">
         <input id="ld-cf-dir" list="dl-confrontantes" placeholder="Lateral direita" value="${escape(l.confrontante_lat_dir||'')}">
@@ -14818,7 +14848,7 @@ function renderLaudoTabPontos(c) {
     <div class="card" style="margin-top:12px;" id="lp-preview-mobile-card">
       <details ${pontosPreview.length >= 3 ? 'open' : ''}>
         <summary style="cursor:pointer; font-weight:600;">📱 Preview + Memorial Descritivo (vai pro PDF)</summary>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px;">
+        <div class="lp-grid-2" style="gap:12px; margin-top:8px;">
           <div id="lp-preview-svg-mobile">
             ${gerarCroquiSvgClient(pontosPreview, ladosPreview, { larguraPx: 600, alturaPx: 600, tipoImovel: l.tipo_imovel, areaTotalM2: l.area_total_m2 ? Number(l.area_total_m2) : undefined, utmZona: pontos[0]?.utm_zona ? Number(pontos[0].utm_zona) : undefined, utmHemisferio: pontos[0]?.utm_hemisferio || 'S' })}
           </div>
@@ -15002,7 +15032,7 @@ function renderLaudoTabPontos(c) {
             <strong style="font-size:13px;">📍 Ponto P${i}</strong>
             ${isDinamico && nPontos > 3 && i === nPontos ? `<button data-fp-rm="${i}" title="Remover último ponto" style="font-size:11px; padding:2px 8px; background:transparent; color:#ef4444; border:1px solid #ef444455;">🗑️ Remover P${i}</button>` : ''}
           </div>
-          <div style="display:grid; grid-template-columns: repeat(${cols}, 1fr); gap:6px; margin-top:6px;">
+          <div class="lp-grid-auto" style="gap:6px; margin-top:6px;">
             <input data-fp-rotulo="${i}" placeholder="Rótulo (ex: P${i}, M${i})" value="${escape(p.rotulo || ('P'+i))}">
             ${showUTM ? `<input data-fp-utme="${i}" type="number" step="0.001" inputmode="decimal" placeholder="UTM Este (X)" value="${p.utm_e ?? ''}">` : ''}
             ${showUTM ? `<input data-fp-utmn="${i}" type="number" step="0.001" inputmode="decimal" placeholder="UTM Norte (Y)" value="${p.utm_n ?? ''}">` : ''}
@@ -15078,7 +15108,7 @@ function renderLaudoTabPontos(c) {
       rows += !mostrarLado ? '' : `
         <div style="padding:6px 12px; margin-left:20px; border-left:2px dashed var(--gold); font-size:11px; color:var(--text-muted);">
           ↓ <strong>${getLabelLado(i)}</strong>${memorialHtml}${badgeHtml}
-          <div style="display:grid; grid-template-columns: 1fr 2fr; gap:6px; margin-top:4px;">
+          <div class="lp-grid-auto" style="gap:6px; margin-top:4px;">
             <input data-fl-medida="${i}" type="number" step="0.01" inputmode="decimal" placeholder="Medida (m)" value="${ld.medida_manual_m ?? ''}">
             <input data-fl-confront="${i}" list="dl-confrontantes" placeholder="Confrontante" value="${escape(ld.confrontante_nome || '')}">
           </div>
@@ -15171,7 +15201,7 @@ function renderLaudoTabPontos(c) {
             </div>
             <details style="margin-top:8px;">
               <summary style="font-size:11px; cursor:pointer; color:var(--text-muted);">⚙️ Editar manualmente (retroativo)</summary>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px;">
+              <div class="lp-grid-2" style="gap:6px; margin-top:6px;">
                 <div>
                   <label style="font-size:10px; color:var(--text-muted); display:block;">Início manual</label>
                   <input id="lp-base-inicio" type="datetime-local" value="${baseInicioISO ? new Date(baseInicioISO).toISOString().slice(0,16) : ''}" style="width:100%;">
@@ -16082,7 +16112,7 @@ function renderLaudoTabArt(c) {
   c.innerHTML = `
     <div class="card">
       <h3 style="margin-top:0;">📜 ART / TRT</h3>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <label><input id="la-art" type="checkbox" ${l.usa_art?'checked':''}> Possui ART (CREA)</label>
         <input id="la-art-num" placeholder="Número da ART" value="${escape(l.numero_art||'')}">
         <label><input id="la-trt" type="checkbox" ${l.usa_trt?'checked':''}> Possui TRT (CFT)</label>
@@ -16148,7 +16178,7 @@ function renderLaudoTabArt(c) {
     </div>
     <div class="card">
       <h3 style="margin-top:0;">💰 Financeiro</h3>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <input id="la-valor" type="number" step="0.01" placeholder="Valor do serviço (R$)" value="${l.valor_servico ?? ''}">
         <select id="la-fp">
           <option value="">— forma de pagamento —</option>
@@ -16581,7 +16611,7 @@ function renderLoteamentoUpload(v) {
       relEl.innerHTML = `
         <div class="card" style="border-left:3px solid ${preview ? '#0ea5e9' : 'var(--gold)'};">
           <h4 style="margin:0 0 6px;">${preview ? '👁 Preview' : '✅ Import realizado'} · ${escape(r.loteamento_nome || '—')}</h4>
-          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; font-size:13px;">
+          <div class="lp-grid-3" style="gap:6px; font-size:13px;">
             <div>📋 Total linhas: <strong>${r.total_linhas}</strong></div>
             <div>🆕 Lotes criados: <strong style="color:var(--gold);">${r.lotes_criados}</strong></div>
             <div>🔄 Atualizados: <strong>${r.lotes_atualizados}</strong></div>
@@ -16719,7 +16749,7 @@ async function mountLoteamentoSelectorsLaudo() {
         medidas teóricas e área.
         ${loteamentos.length === 0 ? '<br><em>⚠️ Nenhum loteamento cadastrado. Vá na aba <strong>🏘️ Loteamentos</strong> pra importar.</em>' : ''}
       </p>
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+      <div class="lp-grid-3">
         <select id="ld-lt-loteamento" ${loteamentos.length === 0 ? 'disabled' : ''}>
           <option value="">— loteamento —</option>
           ${loteamentos.map(lt => `<option value="${lt.id}" ${preSel.loteamentoId === lt.id ? 'selected' : ''}>${escape(lt.nome)}</option>`).join('')}
