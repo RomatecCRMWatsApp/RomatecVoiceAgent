@@ -103,6 +103,28 @@
     display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;
   }
   @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+
+  /* === LP-GRID: utility classes responsivas (v3.3.0) === */
+  .lp-grid-auto {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+  }
+  .lp-grid-2 { display: grid; grid-template-columns: 1fr 1fr;        gap: 8px; }
+  .lp-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr;    gap: 8px; }
+  .lp-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .lp-grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+
+  @media (max-width: 768px) {
+    .lp-grid-auto, .lp-grid-2, .lp-grid-3, .lp-grid-4, .lp-grid-5 {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 900px) and (min-width: 769px) {
+    .lp-grid-4, .lp-grid-5 { grid-template-columns: 1fr 1fr; }
+  }
+
   input, select, textarea, button {
     font-family: inherit; font-size: 14px; padding: 8px 12px;
     border: 1px solid var(--border); border-radius: var(--radius);
