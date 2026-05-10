@@ -414,33 +414,70 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   }
 
   // ── 11. Fotos ──────────────────────────────────────────────────────
+  // v2.4.5: foto da Base ganha subseção dedicada (11.1, foto grande centralizada).
+  // Demais fotos (piquetes + gerais) na 11.2 com grid 2 colunas como antes.
   if (input.fotos.length > 0 && input.fotoBase64Loader) {
     if (cy > 600) { doc.addPage(); cy = 60; }
     doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('11. RELATÓRIO FOTOGRÁFICO', 40, cy);
     cy += 14;
-    const fotoW = 250;
-    const fotoH = 180;
-    let col = 0;
-    for (const f of input.fotos) {
-      if (cy + fotoH + 20 > 800) { doc.addPage(); cy = 60; col = 0; }
-      const conteudo = await input.fotoBase64Loader(f.id);
+
+    // Categorização por prefixo de legenda (sem precisar de ponto_id no input)
+    const fotoBase = input.fotos.find(f => (f.legenda || '').startsWith('📡 Base instalada'));
+    const fotosOutras = input.fotos.filter(f => f !== fotoBase);
+
+    // 11.1 — Base GNSS instalada (single column, foto grande centralizada)
+    if (fotoBase) {
+      doc.fontSize(9).fillColor('#444').font('Helvetica-Bold')
+         .text('11.1 Base GNSS instalada em campo', 40, cy);
+      cy += 14;
+      const bigW = 400;
+      const bigH = 290;
+      if (cy + bigH + 22 > 800) { doc.addPage(); cy = 60; }
+      const conteudo = await input.fotoBase64Loader(fotoBase.id);
       if (conteudo && conteudo.mime.startsWith('image/')) {
         try {
           const buf = Buffer.from(conteudo.base64, 'base64');
-          const x = col === 0 ? 40 : 305;
-          doc.image(buf, x, cy, { width: fotoW, height: fotoH, fit: [fotoW, fotoH] });
+          const x = Math.round((595 - bigW) / 2); // largura A4 ≈ 595pt, centraliza
+          doc.image(buf, x, cy, { width: bigW, height: bigH, fit: [bigW, bigH] });
           doc.fontSize(8).fillColor('#444').font('Helvetica')
-             .text(f.legenda || `Foto ${f.id}`, x, cy + fotoH + 2, { width: fotoW, align: 'center' });
+             .text(fotoBase.legenda || `Foto ${fotoBase.id}`, x, cy + bigH + 2, { width: bigW, align: 'center' });
         } catch { /* ignora foto ruim */ }
       }
-      if (col === 1) {
-        cy += fotoH + 18;
-        col = 0;
-      } else {
-        col = 1;
-      }
+      cy += bigH + 24;
     }
-    if (col === 1) cy += fotoH + 18; // fecha linha incompleta
+
+    // 11.2 — Vértices e demais fotos (grid 2 colunas, comportamento antigo)
+    if (fotosOutras.length > 0) {
+      if (cy > 700) { doc.addPage(); cy = 60; }
+      if (fotoBase) {
+        doc.fontSize(9).fillColor('#444').font('Helvetica-Bold')
+           .text('11.2 Vértices e demais registros fotográficos', 40, cy);
+        cy += 14;
+      }
+      const fotoW = 250;
+      const fotoH = 180;
+      let col = 0;
+      for (const f of fotosOutras) {
+        if (cy + fotoH + 20 > 800) { doc.addPage(); cy = 60; col = 0; }
+        const conteudo = await input.fotoBase64Loader(f.id);
+        if (conteudo && conteudo.mime.startsWith('image/')) {
+          try {
+            const buf = Buffer.from(conteudo.base64, 'base64');
+            const x = col === 0 ? 40 : 305;
+            doc.image(buf, x, cy, { width: fotoW, height: fotoH, fit: [fotoW, fotoH] });
+            doc.fontSize(8).fillColor('#444').font('Helvetica')
+               .text(f.legenda || `Foto ${f.id}`, x, cy + fotoH + 2, { width: fotoW, align: 'center' });
+          } catch { /* ignora foto ruim */ }
+        }
+        if (col === 1) {
+          cy += fotoH + 18;
+          col = 0;
+        } else {
+          col = 1;
+        }
+      }
+      if (col === 1) cy += fotoH + 18; // fecha linha incompleta
+    }
     cy += 10;
   }
 
