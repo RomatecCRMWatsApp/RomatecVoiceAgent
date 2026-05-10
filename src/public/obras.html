@@ -15899,19 +15899,19 @@ function renderLaudoTabArt(c) {
       </div>
     </div>
     <div class="card">
-      <h3 style="margin-top:0;">💰 Precificação INCRA (Portaria 12/2025)</h3>
+      <h3 style="margin-top:0;">📐 Precificação INCRA (Portaria 12/2025)</h3>
 
-      <div style="display:flex; gap:12px; margin-bottom:8px; flex-wrap:wrap;">
-        <label style="display:flex; gap:4px; align-items:center;">
+      <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+        <label style="display:flex; gap:6px; align-items:center; padding:6px 8px; cursor:pointer;">
           <input type="radio" name="incraUnidade" value="km" id="incraUniKm"> km linear
         </label>
-        <label style="display:flex; gap:4px; align-items:center;">
+        <label style="display:flex; gap:6px; align-items:center; padding:6px 8px; cursor:pointer;">
           <input type="radio" name="incraUnidade" value="hectare" id="incraUniHa" checked> Hectare
         </label>
-        <label style="display:flex; gap:4px; align-items:center;">
+        <label style="display:flex; gap:6px; align-items:center; padding:6px 8px; cursor:pointer;">
           <input type="radio" name="incraUnidade" value="lote" id="incraUniLote"> Lote
         </label>
-        <input id="incraQtd" type="number" step="0.0001" placeholder="Quantidade" style="flex:1; min-width:140px;">
+        <input id="incraQtd" type="number" step="0.0001" placeholder="Quantidade" style="flex:1 1 140px; min-width:0;">
       </div>
 
       <div id="incraCriterios" style="display:grid; grid-template-columns: 1fr; gap:8px;">
@@ -15925,12 +15925,18 @@ function renderLaudoTabArt(c) {
         <div style="font-size:13px; color:var(--text-muted); margin-top:4px;"><span id="incraFormula">—</span></div>
       </div>
 
-      <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <div style="margin-top:10px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
         <span style="color:var(--text-muted); font-size:12px;">Desconto:</span>
-        <label><input type="radio" name="incraDescTipo" value="nenhum" id="incraDescNenhum" checked> Nenhum</label>
-        <label><input type="radio" name="incraDescTipo" value="percentual" id="incraDescPct"> %</label>
-        <label><input type="radio" name="incraDescTipo" value="fixo" id="incraDescFixo"> R$</label>
-        <input id="incraDescValor" type="number" step="0.01" placeholder="0" style="width:120px;" disabled>
+        <label style="display:inline-flex; gap:6px; align-items:center; padding:6px 8px; cursor:pointer;">
+          <input type="radio" name="incraDescTipo" value="nenhum" id="incraDescNenhum" checked> Nenhum
+        </label>
+        <label style="display:inline-flex; gap:6px; align-items:center; padding:6px 8px; cursor:pointer;">
+          <input type="radio" name="incraDescTipo" value="percentual" id="incraDescPct"> %
+        </label>
+        <label style="display:inline-flex; gap:6px; align-items:center; padding:6px 8px; cursor:pointer;">
+          <input type="radio" name="incraDescTipo" value="fixo" id="incraDescFixo"> R$
+        </label>
+        <input id="incraDescValor" type="number" step="0.01" placeholder="0" style="flex:1 1 80px; min-width:0; max-width:120px;" disabled>
       </div>
 
       <div id="incraAvisos" style="margin-top:8px; color:#d97706; font-size:12px;"></div>
@@ -16004,10 +16010,10 @@ async function setupIncraBlock(laudoId) {
       const maxP = n.maxPonto;
       return `<option value="${minP}-${maxP}">${n.rotulo} (${minP}-${maxP})</option>`;
     }).join('');
-    return `<div style="display:grid; grid-template-columns: 130px 90px 1fr; gap:8px; align-items:center;">
-      <label>${def.label}:</label>
-      <input type="number" min="1" max="10" value="5" data-incra-criterio="${k}" style="width:80px;">
-      <select data-incra-faixa="${k}">${niveisOpts}</select>
+    return `<div style="display:grid; grid-template-columns: 80px 1fr; gap:4px 8px; align-items:center;">
+      <label style="grid-column: 1 / -1; font-size:12px; color:var(--text-muted);">${def.label}</label>
+      <input type="number" min="1" max="10" value="5" data-incra-criterio="${k}" style="width:100%; min-width:0;">
+      <select data-incra-faixa="${k}" style="width:100%; min-width:0;">${niveisOpts}</select>
     </div>`;
   }).join('');
 
