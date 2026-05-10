@@ -221,3 +221,32 @@ export function calcularPrecificacao(input: InputPrecificacao): ResultadoPrecifi
     },
   };
 }
+
+export function sugerirCriterios(dados: DadosLaudoParaSugestao): CriteriosPontuacao {
+  const c: CriteriosPontuacao = {
+    vegetacao: 5,
+    relevo: 5,
+    insalubridade: 5,
+    acesso: 5,
+    clima: 5,
+    area_media: 5,
+  };
+
+  if (dados.tipo_vegetacao === 'aberta') c.vegetacao = 2;
+  else if (dados.tipo_vegetacao === 'intermediaria') c.vegetacao = 5;
+  else if (dados.tipo_vegetacao === 'fechada') c.vegetacao = 8;
+
+  if (typeof dados.area_total_m2 === 'number' && dados.area_total_m2 > 0) {
+    const ha = dados.area_total_m2 / 10000;
+    if (ha > 35)      c.area_media = 2;
+    else if (ha > 15) c.area_media = 5;
+    else              c.area_media = 8;
+  }
+
+  const ufsAlta = ['MA', 'PA', 'AM', 'AC', 'RO', 'RR', 'AP', 'TO', 'MT'];
+  if (dados.uf && ufsAlta.includes(dados.uf.toUpperCase())) {
+    c.insalubridade = 7;
+  }
+
+  return c;
+}

@@ -197,3 +197,63 @@ describe('calcularPrecificacao — aviso de variação', () => {
     expect(r.detalhamento.avisos.length).toBe(1);
   });
 });
+
+import { sugerirCriterios } from './incra';
+
+describe('sugerirCriterios', () => {
+  it('sem dados → todos os critérios = 5 (default conservador)', () => {
+    const c = sugerirCriterios({});
+    expect(c.vegetacao).toBe(5);
+    expect(c.relevo).toBe(5);
+    expect(c.insalubridade).toBe(5);
+    expect(c.acesso).toBe(5);
+    expect(c.clima).toBe(5);
+    expect(c.area_media).toBe(5);
+  });
+
+  it('area_total_m2 = 500.000 (50 ha) → area_media = 2 (>35 ha favorável)', () => {
+    const c = sugerirCriterios({ area_total_m2: 500_000 });
+    expect(c.area_media).toBe(2);
+  });
+
+  it('area_total_m2 = 250.000 (25 ha) → area_media = 5 (15-35 ha mediano)', () => {
+    const c = sugerirCriterios({ area_total_m2: 250_000 });
+    expect(c.area_media).toBe(5);
+  });
+
+  it('area_total_m2 = 100.000 (10 ha) → area_media = 8 (≤15 ha desfavorável)', () => {
+    const c = sugerirCriterios({ area_total_m2: 100_000 });
+    expect(c.area_media).toBe(8);
+  });
+
+  it('UF=MA → insalubridade = 7 (Amazônia Legal)', () => {
+    const c = sugerirCriterios({ uf: 'MA' });
+    expect(c.insalubridade).toBe(7);
+  });
+
+  it('UF=ma (lower) → insalubridade = 7', () => {
+    const c = sugerirCriterios({ uf: 'ma' });
+    expect(c.insalubridade).toBe(7);
+  });
+
+  it('UF=SP → insalubridade = 5 (default)', () => {
+    const c = sugerirCriterios({ uf: 'SP' });
+    expect(c.insalubridade).toBe(5);
+  });
+
+  it('tipo_vegetacao=fechada → vegetacao = 8', () => {
+    const c = sugerirCriterios({ tipo_vegetacao: 'fechada' });
+    expect(c.vegetacao).toBe(8);
+  });
+
+  it('tipo_vegetacao=aberta → vegetacao = 2', () => {
+    const c = sugerirCriterios({ tipo_vegetacao: 'aberta' });
+    expect(c.vegetacao).toBe(2);
+  });
+
+  it('combinação MA + 10ha → insalubridade=7, area_media=8', () => {
+    const c = sugerirCriterios({ uf: 'MA', area_total_m2: 100_000 });
+    expect(c.insalubridade).toBe(7);
+    expect(c.area_media).toBe(8);
+  });
+});
