@@ -3251,6 +3251,16 @@ app.listen(PORT, () => {
     }
   })();
 
+  // v3.2.0: tabela `cartorios` (catalogo nacional CNJ p/ autocomplete).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-cartorios');
+      await m.runCartoriosMigrations();
+    } catch (err) {
+      console.error('[cartorios-migrations] FALHA fatal:', err);
+    }
+  })();
+
   void initDb()
     .then(() => loadSessionFromDb())
     .then(() => import('./services/whatsappDrafts'))
