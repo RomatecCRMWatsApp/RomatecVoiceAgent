@@ -2281,12 +2281,23 @@ app.post('/api/laudos-demarcacao/:id/gerar-recibo', requireCeoToken, async (req:
       [reciboCriado.id, laudo.id]
     );
 
+    // v3.0.0: monta resumo INCRA pra uso no PDF do recibo (quando precificacao foi aplicada)
+    const incraRecibo = (laudo.precificacao_calculada_em && laudo.valor_final != null) ? {
+      faixa_aplicada:       String(laudo.faixa_aplicada),
+      unidade_calculo:      laudo.unidade_calculo as 'km' | 'hectare' | 'lote',
+      valor_base_calculado: Number(laudo.valor_base_calculado),
+      desconto_tipo:        (laudo.desconto_tipo ?? 'nenhum') as 'percentual' | 'fixo' | 'nenhum',
+      desconto_valor:       Number(laudo.desconto_valor ?? 0),
+      valor_final:          Number(laudo.valor_final),
+    } : undefined;
+
     res.json({
       ok: true,
       recibo_id: reciboCriado.id,
       recibo_numero: reciboCriado.numero,
       token: reciboCriado.token,
       hash: reciboCriado.hash_validacao,
+      incra_aplicado: !!incraRecibo,
     });
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
@@ -2343,7 +2354,16 @@ app.post('/api/laudos-demarcacao/:id/enviar-zapi', requireCeoToken, async (req: 
         const recibo = await recMod.buscarReciboPorId(laudo.recibo_id);
         if (recibo) {
           const { gerarPdfRecibo } = await import('./services/reciboPdf');
-          const pdfRecibo = await gerarPdfRecibo(recibo);
+          // v3.0.0: passa resumo INCRA quando laudo tem precificacao aplicada
+          const incraEnvio = (laudo.precificacao_calculada_em && laudo.valor_final != null) ? {
+            faixa_aplicada:       String(laudo.faixa_aplicada),
+            unidade_calculo:      laudo.unidade_calculo as 'km' | 'hectare' | 'lote',
+            valor_base_calculado: Number(laudo.valor_base_calculado),
+            desconto_tipo:        (laudo.desconto_tipo ?? 'nenhum') as 'percentual' | 'fixo' | 'nenhum',
+            desconto_valor:       Number(laudo.desconto_valor ?? 0),
+            valor_final:          Number(laudo.valor_final),
+          } : undefined;
+          const pdfRecibo = await gerarPdfRecibo(recibo, undefined, incraEnvio);
           await wa.sendDocument(phone, pdfRecibo.toString('base64'), `Recibo-${recibo.numero}.pdf`);
           enviosOk.push('recibo');
           // Marca recibo como enviado

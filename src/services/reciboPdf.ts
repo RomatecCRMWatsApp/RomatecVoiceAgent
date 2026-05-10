@@ -124,9 +124,20 @@ export interface SignatureVisualMeta {
   thumbprint?: string | null; // hash do cert
 }
 
+// v3.0.0: resumo da precificacao INCRA passado pelo caller
+export interface ReciboIncraResumo {
+  faixa_aplicada: string;
+  unidade_calculo: 'km' | 'hectare' | 'lote';
+  valor_base_calculado: number;
+  desconto_tipo: 'percentual' | 'fixo' | 'nenhum';
+  desconto_valor: number;
+  valor_final: number;
+}
+
 export async function gerarPdfRecibo(
   recibo: Recibo,
   signatureMeta?: SignatureVisualMeta,
+  incra?: ReciboIncraResumo,
 ): Promise<Buffer> {
   const t = await getTenantSettings(recibo.tenant_id).catch(() => null);
   // v1.95.0: tenta tambem o tenant_fiscal_config (CNPJ, IE)
@@ -260,6 +271,25 @@ export async function gerarPdfRecibo(
     doc.fontSize(9.5).fillColor('#111').font('Helvetica')
        .text(recibo.descricao_servico, 40, cy, { width: 515 });
     cy = doc.y + 8;
+  }
+
+  // v3.0.0: resumo INCRA (3 linhas) quando laudo tem precificacao aplicada
+  if (incra) {
+    const fmtBRLLocal = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+    const unidadeLabel = incra.unidade_calculo === 'km' ? 'km'
+                       : incra.unidade_calculo === 'hectare' ? 'hectare'
+                       : 'lote';
+    doc.fontSize(8.5).fillColor('#444').font('Helvetica');
+    doc.text(`Faixa INCRA aplicada:    ${incra.faixa_aplicada}`, 40, cy, { width: 515 }); cy += 11;
+    doc.text(`Valor base (${unidadeLabel}):${' '.repeat(Math.max(1, 12 - unidadeLabel.length))}${fmtBRLLocal(incra.valor_base_calculado)}`, 40, cy, { width: 515 }); cy += 11;
+    if (incra.desconto_tipo !== 'nenhum' && incra.desconto_valor > 0) {
+      const descontoNum = incra.valor_base_calculado - incra.valor_final;
+      const tipoLabel = incra.desconto_tipo === 'percentual'
+        ? `${incra.desconto_valor.toFixed(2)}%`
+        : 'fixo';
+      doc.text(`Desconto:                ${fmtBRLLocal(descontoNum)} (${tipoLabel})`, 40, cy, { width: 515 }); cy += 11;
+    }
+    cy += 4;
   }
 
   // ── Forma de pagamento + DADOS BANCÁRIOS ────────────────────────────
