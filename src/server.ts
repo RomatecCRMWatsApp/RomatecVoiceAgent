@@ -1655,7 +1655,9 @@ app.post('/api/laudos-demarcacao/:id/clonar', requireCeoToken, async (req: Reque
     const clone = await m.clonarLaudo(id);
     res.json(clone);
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
+    const msg = (err as Error).message;
+    const status = /nao encontrado|inativo/i.test(msg) ? 404 : 400;
+    res.status(status).json({ error: msg });
   }
 });
 
