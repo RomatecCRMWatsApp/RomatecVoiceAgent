@@ -139,3 +139,7 @@ export function validarCriterios(c: CriteriosPontuacao): { ok: boolean; erros: s
   }
   return { ok: erros.length === 0, erros };
 }
+
+export function calcularPontuacaoTotal(c: CriteriosPontuacao): number {
+  return c.vegetacao + c.relevo + c.insalubridade + c.acesso + c.clima + c.area_media;
+}
