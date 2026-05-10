@@ -20,12 +20,37 @@ function fmtNum(n: number, decimais = 3): string {
   return dec ? `${intFmt},${dec}` : intFmt;
 }
 
-function fmtArea(m2: number): string {
+// v2.10.1: grandezas tipo-aware (confirmado pelo CEO regional MA)
+// - URBANO: m² (com ha entre parenteses se >= 1ha)
+// - RURAL: hectares (principal) + alqueires + linhas de terra
+//
+// Conversoes regionais (Maranhao / fronteira agricola Norte/Centro-Oeste):
+//   1 alqueire = 4,84 ha (= 48.400 m²)  ← confirmado pelo CEO
+//   1 linha de terra = 3.025 m² (= 1/16 do alqueire) ← confirmado pelo CEO
+// Outras regioes do Brasil tem definicoes diferentes (alqueire paulista 2,42 ha,
+// alqueire baiano 9,68 ha, linha SP 605 m²). Se for atender outras regioes,
+// adicionar parametrizacao por configuracao.
+const ALQUEIRE_M2 = 48400;
+const LINHA_TERRA_M2 = 3025;
+
+function fmtAreaUrbano(m2: number): string {
   if (m2 >= 10000) {
     const ha = m2 / 10000;
     return `${fmtNum(m2, 2)} m² (${fmtNum(ha, 4)} ha)`;
   }
   return `${fmtNum(m2, 2)} m²`;
+}
+
+function fmtAreaRural(m2: number): string {
+  const ha = m2 / 10000;
+  const alq = m2 / ALQUEIRE_M2;
+  const linhas = m2 / LINHA_TERRA_M2;
+  // Principal em ha. Conversoes em parenteses.
+  return `${fmtNum(ha, 4)} ha (≈ ${fmtNum(alq, 4)} alqueires · ≈ ${fmtNum(linhas, 2)} linhas de terra)`;
+}
+
+function fmtArea(m2: number, tipoImovel?: string | null): string {
+  return tipoImovel === 'RURAL' ? fmtAreaRural(m2) : fmtAreaUrbano(m2);
 }
 
 export interface MemorialInput {
@@ -103,7 +128,7 @@ export function gerarMemorialDescritivo(input: MemorialInput): MemorialOutput {
     linhasCab.push(`Cartório: ${laudo.cartorio_nome}${laudo.cartorio_cns ? ` (CNS ${laudo.cartorio_cns})` : ''}`);
   }
   // Métricas
-  if (laudo.area_total_m2 != null) linhasCab.push(`Área: ${fmtArea(laudo.area_total_m2)}`);
+  if (laudo.area_total_m2 != null) linhasCab.push(`Área: ${fmtArea(laudo.area_total_m2, laudo.tipo_imovel)}`);
   if (laudo.perimetro_m != null) linhasCab.push(`Perímetro: ${fmtNum(laudo.perimetro_m, 2)} m`);
   // CRS
   const utmZona = pontos.find(p => p.utm_zona)?.utm_zona;
@@ -153,7 +178,7 @@ export function gerarMemorialDescritivo(input: MemorialInput): MemorialOutput {
 
       const ehUltimo = i === ladosOrd.length - 1;
       if (ehUltimo) {
-        txt += `deste segue com azimute de ${az} e distância de ${dist}, ${conf}fechando o perímetro no vértice ${v0.rotulo || 'P1'} (ponto inicial), totalizando uma área de ${laudo.area_total_m2 != null ? fmtArea(laudo.area_total_m2) : '— m²'}.`;
+        txt += `deste segue com azimute de ${az} e distância de ${dist}, ${conf}fechando o perímetro no vértice ${v0.rotulo || 'P1'} (ponto inicial), totalizando uma área de ${laudo.area_total_m2 != null ? fmtArea(laudo.area_total_m2, laudo.tipo_imovel) : '— m²'}.`;
       } else {
         txt += `deste segue com azimute de ${az} e distância de ${dist}, ${conf}até atingir o vértice ${verticeFim.rotulo || `P${i + 2}`}, definido pelas ${coordTxt(verticeFim)}; `;
       }
@@ -165,7 +190,7 @@ export function gerarMemorialDescritivo(input: MemorialInput): MemorialOutput {
   const linhasResumo: string[] = [];
   if (laudo.area_total_m2 != null && laudo.perimetro_m != null) {
     linhasResumo.push(
-      `Totalizando área de ${fmtArea(laudo.area_total_m2)} e perímetro de ${fmtNum(laudo.perimetro_m, 2)} m, conforme calculado a partir dos vértices acima descritos.`
+      `Totalizando área de ${fmtArea(laudo.area_total_m2, laudo.tipo_imovel)} e perímetro de ${fmtNum(laudo.perimetro_m, 2)} m, conforme calculado a partir dos vértices acima descritos.`
     );
   }
   const resumo = linhasResumo.join('\n');

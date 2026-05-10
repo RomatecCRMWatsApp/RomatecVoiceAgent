@@ -389,41 +389,58 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
      .text(mem.descricao, 40, cy, { width: 515, align: 'justify' });
   cy = doc.y + 12;
 
-  // ── 8. Tabela de lados ─────────────────────────────────────────────
+  // ── 8. Tabela de lados (v2.10.1: colunas alargadas pra rotulos longos) ──
   if (lados.length > 0) {
     if (cy > 720) { doc.addPage(); cy = 60; }
     doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('8. LADOS DA POLIGONAL', 40, cy);
     cy += 14;
     doc.fontSize(8).fillColor('#666').font('Helvetica-Bold');
-    doc.text('Lado', 40, cy, { width: 100 });
-    doc.text('Distância', 145, cy, { width: 80 });
-    doc.text('Azimute', 230, cy, { width: 100 });
+    // Layout: Lado (300pt — caber "AVEX-M-0123-APG-M-30105") + Dist (90) + Azimute (110)
+    doc.text('Lado', 40, cy, { width: 300 });
+    doc.text('Distância', 345, cy, { width: 90 });
+    doc.text('Azimute', 440, cy, { width: 110 });
     cy += 10;
     doc.moveTo(40, cy).lineTo(555, cy).strokeColor('#ddd').lineWidth(0.5).stroke();
     cy += 4;
     doc.font('Helvetica').fillColor('#222');
     for (const l of [...lados].sort((a, b) => a.ordem - b.ordem)) {
       if (cy > 770) { doc.addPage(); cy = 60; }
-      doc.text(l.rotulo || `${l.ordem}`, 40, cy, { width: 100 });
-      doc.text(l.distancia_m != null ? `${l.distancia_m.toFixed(2)} m` : '—', 145, cy, { width: 80 });
-      doc.text(l.azimute != null ? azimuteParaDMS(l.azimute) : '—', 230, cy, { width: 100 });
+      doc.text(l.rotulo || `${l.ordem}`, 40, cy, { width: 300, ellipsis: true });
+      doc.text(l.distancia_m != null ? `${l.distancia_m.toFixed(2).replace('.', ',')} m` : '—', 345, cy, { width: 90 });
+      doc.text(l.azimute != null ? azimuteParaDMS(l.azimute) : '—', 440, cy, { width: 110 });
       cy += 11;
     }
     cy += 8;
   }
 
-  // ── 9. Area + perimetro ────────────────────────────────────────────
+  // ── 9. Area + perimetro (v2.10.1: tipo-aware — rural usa ha+alq+linha) ──
   if (cy > 720) { doc.addPage(); cy = 60; }
   doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('9. ÁREA E PERÍMETRO', 40, cy);
   cy += 14;
   doc.fontSize(11).fillColor(corGold).font('Helvetica-Bold');
-  if (laudo.area_total_m2 != null) doc.text(`Área total: ${fmtArea(laudo.area_total_m2)}`, 40, cy);
-  cy += 14;
+  if (laudo.area_total_m2 != null) {
+    if (laudo.tipo_imovel === 'RURAL') {
+      const ha = laudo.area_total_m2 / 10000;
+      const alq = laudo.area_total_m2 / 48400;       // 1 alqueire = 4,84 ha (MA)
+      const linhas = laudo.area_total_m2 / 3025;     // 1 linha = 3.025 m² (1/16 alq)
+      doc.text(`Área total: ${ha.toFixed(4).replace('.', ',')} ha`, 40, cy);
+      cy += 14;
+      doc.fontSize(9).fillColor('#444').font('Helvetica');
+      doc.text(`(≈ ${alq.toFixed(4).replace('.', ',')} alqueires · ≈ ${linhas.toFixed(2).replace('.', ',')} linhas de terra)`, 40, cy);
+      cy += 14;
+      doc.fontSize(11).fillColor(corGold).font('Helvetica-Bold');
+    } else {
+      doc.text(`Área total: ${fmtArea(laudo.area_total_m2)}`, 40, cy);
+      cy += 14;
+    }
+  }
   if (laudo.perimetro_m != null) doc.text(`Perímetro: ${laudo.perimetro_m.toFixed(2).replace('.', ',')} m`, 40, cy);
   cy += 16;
 
   // ── 10. Croqui ─────────────────────────────────────────────────────
-  if (cy > 600) { doc.addPage(); cy = 60; }
+  // v2.10.1: quando nao ha upload de imagem, desenhamos o poligono INLINE
+  // direto no PDFKit (PDFKit nao tem SVG nativo, mas paths simples bastam).
+  if (cy > 540) { doc.addPage(); cy = 60; }
   doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('10. CROQUI DO LEVANTAMENTO', 40, cy);
   cy += 14;
   if (input.croquiUpload && input.croquiUpload.mime.startsWith('image/')) {
@@ -433,9 +450,89 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
       doc.image(buf, 40, cy, { width: 515, fit: [515, maxH], align: 'center' });
       cy += maxH + 10;
     } catch { /* ignora se imagem ruim */ }
+  } else if (pontos.length >= 3) {
+    // v2.10.1: desenha o poligono inline com vertices + medidas dos lados
+    const ptsOrd = [...pontos].sort((a, b) => a.ordem - b.ordem)
+      .filter(p => p.utm_e != null && p.utm_n != null);
+    if (ptsOrd.length >= 3) {
+      const xs = ptsOrd.map(p => Number(p.utm_e));
+      const ys = ptsOrd.map(p => Number(p.utm_n));
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const rangeX = Math.max(maxX - minX, 0.001);
+      const rangeY = Math.max(maxY - minY, 0.001);
+      const padding = 60;
+      const boxX = 40, boxY = cy;
+      const boxW = 515, boxH = 320;
+      // Box de fundo
+      doc.rect(boxX, boxY, boxW, boxH).strokeColor('#ddd').lineWidth(0.5).stroke();
+      // Escala mantendo aspect ratio
+      const scale = Math.min(
+        (boxW - 2 * padding) / rangeX,
+        (boxH - 2 * padding) / rangeY
+      );
+      const drawW = rangeX * scale;
+      const drawH = rangeY * scale;
+      const offX = boxX + (boxW - drawW) / 2;
+      const offY = boxY + (boxH - drawH) / 2;
+      // PDFKit Y eh top-down; UTM N eh bottom-up → inverter Y
+      const toX = (utmE: number) => offX + (utmE - minX) * scale;
+      const toY = (utmN: number) => offY + drawH - (utmN - minY) * scale;
+      // Polygon fill (verde claro 10% opacity) + outline dourado
+      doc.fillColor('#10b981').fillOpacity(0.12);
+      ptsOrd.forEach((p, i) => {
+        const x = toX(Number(p.utm_e));
+        const y = toY(Number(p.utm_n));
+        if (i === 0) doc.moveTo(x, y);
+        else doc.lineTo(x, y);
+      });
+      doc.closePath().fill();
+      doc.fillOpacity(1);
+      doc.strokeColor(corGold).lineWidth(1.2);
+      ptsOrd.forEach((p, i) => {
+        const x = toX(Number(p.utm_e));
+        const y = toY(Number(p.utm_n));
+        if (i === 0) doc.moveTo(x, y);
+        else doc.lineTo(x, y);
+      });
+      doc.closePath().stroke();
+      // Vertices + labels
+      doc.fontSize(7).fillColor('#222').font('Helvetica-Bold');
+      ptsOrd.forEach((p) => {
+        const x = toX(Number(p.utm_e));
+        const y = toY(Number(p.utm_n));
+        doc.circle(x, y, 2).fillColor(corGold).fill();
+        doc.fillColor('#222').text(p.rotulo || `P${p.ordem}`, x + 4, y - 4);
+      });
+      // Medidas dos lados (no meio de cada segmento)
+      doc.fontSize(6).fillColor('#444').font('Helvetica');
+      ptsOrd.forEach((p, i) => {
+        const next = ptsOrd[(i + 1) % ptsOrd.length];
+        const lado = lados.find(l => l.ordem === p.ordem);
+        const dist = lado?.medida_manual_m ?? lado?.distancia_m;
+        if (dist == null) return;
+        const x1 = toX(Number(p.utm_e)), y1 = toY(Number(p.utm_n));
+        const x2 = toX(Number(next.utm_e)), y2 = toY(Number(next.utm_n));
+        const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+        doc.text(`${dist.toFixed(2).replace('.', ',')} m`, mx - 18, my - 3, { width: 36, align: 'center' });
+      });
+      // Norte (seta no canto superior direito)
+      doc.fontSize(8).fillColor('#222').font('Helvetica-Bold').text('N', boxX + boxW - 20, boxY + 8);
+      doc.moveTo(boxX + boxW - 16, boxY + 30).lineTo(boxX + boxW - 16, boxY + 18).strokeColor('#222').lineWidth(1).stroke();
+      doc.moveTo(boxX + boxW - 19, boxY + 22).lineTo(boxX + boxW - 16, boxY + 18).lineTo(boxX + boxW - 13, boxY + 22).stroke();
+      cy = boxY + boxH + 8;
+      // Legenda inferior
+      doc.fontSize(7).fillColor('#666').font('Helvetica-Oblique')
+         .text(`${ptsOrd.length} vértices · Sistema: UTM Zona ${ptsOrd[0].utm_zona || 23}${ptsOrd[0].utm_hemisferio || 'S'} · SIRGAS 2000`, 40, cy, { width: 515, align: 'center' });
+      cy += 14;
+    } else {
+      doc.fontSize(8).fillColor('#666').font('Helvetica-Oblique')
+         .text('(Pontos sem coordenadas UTM — croqui nao gerado)', 40, cy, { width: 515, align: 'center' });
+      cy += 12;
+    }
   } else {
     doc.fontSize(8).fillColor('#666').font('Helvetica-Oblique')
-       .text('(Croqui auto-gerado disponivel em /api/laudos-demarcacao/' + laudo.id + '/croqui)', 40, cy, { width: 515, align: 'center' });
+       .text('(Croqui nao disponivel — adicione 3 ou mais vertices)', 40, cy, { width: 515, align: 'center' });
     cy += 12;
   }
 

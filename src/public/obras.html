@@ -14367,12 +14367,15 @@ function renderLaudoTabPontos(c) {
   const lados = l.lados || [];
 
   // Pontos pendentes (parseados mas nao salvos ainda) — preview imediato
+  // v2.10.1 BUG FIX: campos eram p.identificador/p.utm_x_e/p.utm_y_n (que nunca
+  // existiram no banco — campos corretos sao p.rotulo/p.utm_e/p.utm_n).
+  // Sintoma: croqui preview ficava sempre vazio mesmo com pontos salvos.
   const pontosPreview = (state.laudoPontosPreview && state.laudoPontosPreview.length)
     ? state.laudoPontosPreview
     : pontos.map((p,i) => ({
-        rotulo: p.identificador || ('V'+(i+1)),
-        e: p.utm_x_e ? Number(p.utm_x_e) : 0,
-        n: p.utm_y_n ? Number(p.utm_y_n) : 0,
+        rotulo: p.rotulo || ('V'+(i+1)),
+        e: p.utm_e != null ? Number(p.utm_e) : 0,
+        n: p.utm_n != null ? Number(p.utm_n) : 0,
       })).filter(p => p.e && p.n);
 
   const ladosPreview = pontosPreview.length >= 2
@@ -16242,22 +16245,32 @@ function aplicarAutoFillLote(lote) {
     if (el && (!el.value || !el.value.trim()) && val != null) el.value = val;
   };
 
-  // v2.9.2: HEURISTICA de correcao do CSV mal-formatado
-  // CSV do Colina Park (e similares) tem padrao onde conf_frente eh
-  // o "lote do outro lado da rua" (geometricamente o fundo) quando o
-  // lote da pra uma rua. Quando detectamos:
-  //   rua_frente preenchida + conf_frente eh LOTE:* (resolvido) + conf_fundo vazio
-  // assumimos que o usuario QUERIA: conf_frente = nome da rua, conf_fundo = lote.
+  // v2.9.2 / v2.10.1: HEURISTICA de correcao do CSV mal-formatado
+  // CSV do Colina Park (e similares) tem padrao inconsistente:
+  //   (A) Lote regular: conf_frente=LOTE:* (deveria ser a rua) + conf_fundo vazio
+  //   (B) Lote de esquina: conf_frente vazio + rua_frente preenchida
+  //
+  // Em ambos os casos, rua_frente eh a Frente real e o lote referenciado
+  // (quando existe) eh o Fundo geometrico.
   let confFrente = lote.conf_frente_resolvido || '';
   let confFundo = lote.conf_fundo_resolvido || '';
   const ehReferenciaLote = (s) => /^lote\s+/i.test(s || '');
-  const heuristicaTrocaAplicada =
+  let heuristicaTrocaAplicada = false;
+
+  // Heuristica A (v2.9.2): conf_frente=LOTE + conf_fundo vazio + rua_frente OK
+  if (
     !!lote.rua_frente_nome &&
     ehReferenciaLote(confFrente) &&
-    !confFundo.trim();
-  if (heuristicaTrocaAplicada) {
+    !confFundo.trim()
+  ) {
     confFundo = confFrente;
     confFrente = lote.rua_frente_nome;
+    heuristicaTrocaAplicada = true;
+  }
+  // Heuristica B (v2.10.1): conf_frente vazio + rua_frente preenchida (lote de esquina)
+  else if (!confFrente.trim() && !!lote.rua_frente_nome) {
+    confFrente = lote.rua_frente_nome;
+    heuristicaTrocaAplicada = true;
   }
 
   // Identificacao do imovel — para urbano: loteamento/quadra/lote
