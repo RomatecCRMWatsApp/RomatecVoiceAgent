@@ -503,96 +503,81 @@ export function importarMemorial(text: string, opts: ImportarOpts = {}): {
   const linhas = cleaned.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   if (linhas.length === 0) return { pontos: [], cabecalhos: [] };
 
-  // Encontra o cabecalho (linha que tem "De" e "Para" como tokens)
+  // v2.9.1: detecta posicao do header (linha com "De" + "Para" + coord/dist/azimute)
+  // Tolera single-space, multi-space, tab. Ignora prefixo (IMÓVEL, MUNICÍPIO,
+  // SISTEMA GEODÉSICO, MERIDIANO CENTRAL, etc).
   let headerIdx = -1;
-  for (let i = 0; i < Math.min(linhas.length, 20); i++) {
-    const tokens = linhas[i].split(/\s{2,}|\t+/).map(t => t.trim().toLowerCase());
-    if (tokens.includes('de') && tokens.includes('para')) {
-      headerIdx = i;
-      break;
-    }
-    // Alternativa: split por whitespace simples
-    const tokensSimples = linhas[i].split(/\s+/).map(t => t.toLowerCase());
-    if (tokensSimples.includes('de') && tokensSimples.includes('para')) {
+  for (let i = 0; i < Math.min(linhas.length, 30); i++) {
+    const lower = linhas[i].toLowerCase();
+    const tokens = lower.split(/\s+/);
+    if (tokens.includes('de') && tokens.includes('para') && /coord|azimute|dist[áa]ncia/.test(lower)) {
       headerIdx = i;
       break;
     }
   }
   if (headerIdx < 0) return { pontos: [], cabecalhos: [] };
 
-  // Detecta separador: tab > multi-espaco
-  const headerLine = linhas[headerIdx];
-  const usaTab = headerLine.includes('\t');
-  const splitLine = (s: string): string[] => {
-    if (usaTab) return s.split('\t').map(t => t.trim()).filter(t => t !== '');
-    // Multi-espaco (2+ espacos consecutivos = separador). Funciona pra "191,57 m"
-    // ficar como uma celula.
-    return s.split(/\s{2,}/).map(t => t.trim()).filter(t => t !== '');
-  };
+  // v2.9.1: parser regex POSICIONAL (nao depende de split de colunas).
+  // Cada linha de dados tem sempre: <De> <Para> <N-BR> <E-BR> ... resto opcional.
+  // Funciona com qualquer espacamento (single/multi/tab) e tolera mojibake
+  // nos simbolos de DMS (°/"/').
+  //
+  // Numeros BR: "9.449.891,6805" — pontos como milhares, virgula como decimal.
+  // Regex aceita digitos, ponto, virgula, sinal negativo.
+  const dataLineRe = /^(\S+)\s+(\S+)\s+([-+]?[\d.,]+)\s+([-+]?[\d.,]+)/;
 
-  const cabecalhos = splitLine(headerLine);
-  const cabBaixo = cabecalhos.map(c => c.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  // Captura DMS lat/lng do resto da linha. Aceita tambem mojibake (`Â°` em
+  // lugar de `°`) — usamos `[^a-zA-Z0-9\s\-+,.]` como hint de "simbolo grau".
+  // Mas pra simplificar, usamos parseDMS que ja eh robusto se o token completo
+  // for passado.
+  const dmsRe = /(-?\d+(?:[.,]\d+)?)\s*[°°Â]+\s*(\d+(?:[.,]\d+)?)\s*['′´]\s*(\d+(?:[.,]\d+)?)\s*["″]?\s*([NSEWO])/gi;
 
-  // Localiza colunas
-  const idxDe   = cabBaixo.findIndex(c => c === 'de');
-  const idxPara = cabBaixo.findIndex(c => c === 'para');
-  // "Coord. N(Y)" e "Coord. E(X)" → "coordny" e "coordex". Ou ja vieram so como
-  // "n" e "e" se o usuario abriu no Excel e salvou como CSV. Tentamos varios.
-  const idxN = cabBaixo.findIndex(c => /^(coordny|n|northing|coordn)$/.test(c));
-  const idxE = cabBaixo.findIndex(c => /^(coordex|e|easting|coorde)$/.test(c));
-  const idxLat = cabBaixo.findIndex(c => c === 'latitude' || c === 'lat');
-  const idxLng = cabBaixo.findIndex(c => c === 'longitude' || c === 'lng' || c === 'long' || c === 'lon');
-
-  if (idxPara < 0 || idxN < 0 || idxE < 0) {
-    // Estrutura nao reconhecida, retorna vazio
-    return { pontos: [], cabecalhos };
-  }
-
-  const pontos: PontoImportadoRTK[] = [];
   const ignoraLinha = (l: string) => {
     if (/^[=\-_*\s]+$/.test(l)) return true; // separadores
-    const lcase = l.toLowerCase();
     if (/^per[íi]metro\s*:/i.test(l)) return true;
     if (/^[áa]rea\s*(total)?\s*:/i.test(l)) return true;
-    if (/^total\s*:/i.test(lcase)) return true;
+    if (/^total\s*:/i.test(l)) return true;
+    if (/^im[óo]vel\s*:/i.test(l)) return true;
+    if (/^munic[íi]pio\s*:/i.test(l)) return true;
+    if (/^sistema\s+geod[ée]sico/i.test(l)) return true;
+    if (/^meridiano\s+central/i.test(l)) return true;
     return false;
   };
 
-  // Tambem captura o "De" da primeira linha pra fechar o poligono
-  let primeiroDe: { rotulo: string; e: number | null; n: number | null; lat: number | null; lng: number | null } | null = null;
+  const pontos: PontoImportadoRTK[] = [];
 
   for (let i = headerIdx + 1; i < linhas.length; i++) {
     const l = linhas[i];
     if (ignoraLinha(l)) continue;
-    const cols = splitLine(l);
-    if (cols.length < Math.max(idxPara, idxN, idxE) + 1) continue;
-    const para = cols[idxPara] || `V${pontos.length + 1}`;
-    const n = parseNumBR(cols[idxN]);
-    const e = parseNumBR(cols[idxE]);
-    const lat = idxLat >= 0 ? parseDMS(cols[idxLat]) : null;
-    const lng = idxLng >= 0 ? parseDMS(cols[idxLng]) : null;
+    const m = l.match(dataLineRe);
+    if (!m) continue;
+    const [, _de, para, nStr, eStr] = m;
+    const n = parseNumBR(nStr);
+    const e = parseNumBR(eStr);
+    if (e == null || n == null) continue;
 
-    if (e == null || n == null) continue; // Sem coords UTM, pula
+    // Tenta extrair lat/lng DMS do resto da linha
+    let lat: number | null = null;
+    let lng: number | null = null;
+    const dmsMatches = [...l.matchAll(dmsRe)];
+    for (const dm of dmsMatches) {
+      const dec = parseDMS(dm[0]);
+      if (dec == null) continue;
+      const hem = (dm[4] || '').toUpperCase();
+      if (hem === 'S' || hem === 'N') lat = dec;
+      else if (hem === 'W' || hem === 'E' || hem === 'O') lng = dec;
+    }
 
     pontos.push({
       rotulo: para,
       e, n,
       altitude: null,
       lat, lng,
-      raw: { source: 'memorial', de: cols[idxDe] || '', para },
+      raw: { source: 'memorial', de: _de, para },
     });
-
-    // Guarda o primeiro "De" caso o poligono nao feche em "Para"
-    if (primeiroDe == null && idxDe >= 0) {
-      const deRot = cols[idxDe];
-      primeiroDe = { rotulo: deRot, e: null, n: null, lat: null, lng: null };
-    }
   }
 
-  // Se o ultimo "Para" === primeiro "De", o poligono fecha — nao precisa adicionar
-  // o "De" (ja apareceu como Para da ultima linha). Caso contrario, e arquivo
-  // que so tem laterais sem fechar.
-  return { pontos, cabecalhos };
+  return { pontos, cabecalhos: ['de', 'para', 'n', 'e', 'lat', 'lng'] };
 }
 
 /** v2.5.0: Dispatcher que detecta formato e roteia pra parser certo. */
