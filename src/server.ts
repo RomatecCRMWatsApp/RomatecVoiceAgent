@@ -3227,6 +3227,16 @@ app.listen(PORT, () => {
     }
   })();
 
+  // v3.1.0: migrations da clonagem de laudo (clonado_de_id + clonado_em).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-clonagem-laudo');
+      await m.runClonagemLaudoMigrations();
+    } catch (err) {
+      console.error('[clonagem-laudo-migrations] FALHA fatal:', err);
+    }
+  })();
+
   void initDb()
     .then(() => loadSessionFromDb())
     .then(() => import('./services/whatsappDrafts'))
