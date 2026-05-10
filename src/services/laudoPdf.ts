@@ -389,53 +389,62 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
      .text(mem.descricao, 40, cy, { width: 515, align: 'justify' });
   cy = doc.y + 12;
 
-  // ── 8. Tabela de lados (v2.10.1: colunas alargadas pra rotulos longos) ──
+  // ── 8. Tabela de lados (v2.10.2: linhas com 13pt, fontSize controlado linha-a-linha) ──
   if (lados.length > 0) {
-    if (cy > 720) { doc.addPage(); cy = 60; }
+    if (cy > 700) { doc.addPage(); cy = 60; }
     doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('8. LADOS DA POLIGONAL', 40, cy);
-    cy += 14;
+    cy += 16;
     doc.fontSize(8).fillColor('#666').font('Helvetica-Bold');
     // Layout: Lado (300pt — caber "AVEX-M-0123-APG-M-30105") + Dist (90) + Azimute (110)
-    doc.text('Lado', 40, cy, { width: 300 });
-    doc.text('Distância', 345, cy, { width: 90 });
-    doc.text('Azimute', 440, cy, { width: 110 });
-    cy += 10;
+    doc.text('Lado', 40, cy, { width: 300, lineBreak: false });
+    doc.text('Distância', 345, cy, { width: 90, lineBreak: false });
+    doc.text('Azimute', 440, cy, { width: 110, lineBreak: false });
+    cy += 12;
     doc.moveTo(40, cy).lineTo(555, cy).strokeColor('#ddd').lineWidth(0.5).stroke();
-    cy += 4;
+    cy += 5;
     doc.font('Helvetica').fillColor('#222');
     for (const l of [...lados].sort((a, b) => a.ordem - b.ordem)) {
       if (cy > 770) { doc.addPage(); cy = 60; }
-      doc.text(l.rotulo || `${l.ordem}`, 40, cy, { width: 300, ellipsis: true });
-      doc.text(l.distancia_m != null ? `${l.distancia_m.toFixed(2).replace('.', ',')} m` : '—', 345, cy, { width: 90 });
-      doc.text(l.azimute != null ? azimuteParaDMS(l.azimute) : '—', 440, cy, { width: 110 });
-      cy += 11;
+      // v2.10.2: lineBreak:false garante que ficam em UMA linha (sem quebrar pra
+      // varias por causa de wrap automatico) — evita sobreposicao com proxima linha
+      doc.text(l.rotulo || `${l.ordem}`, 40, cy, { width: 300, ellipsis: true, lineBreak: false });
+      doc.text(l.distancia_m != null ? `${l.distancia_m.toFixed(2).replace('.', ',')} m` : '—', 345, cy, { width: 90, lineBreak: false });
+      doc.text(l.azimute != null ? azimuteParaDMS(l.azimute) : '—', 440, cy, { width: 110, lineBreak: false });
+      cy += 13; // v2.10.2: era 11pt, aumentado pra 13pt (font 8 + leading 5)
     }
-    cy += 8;
+    cy += 12;
   }
 
-  // ── 9. Area + perimetro (v2.10.1: tipo-aware — rural usa ha+alq+linha) ──
-  if (cy > 720) { doc.addPage(); cy = 60; }
+  // ── 9. Area + perimetro (v2.10.2: tipo-aware com cy correto pra rural) ──
+  // Rural ocupa 3 linhas (ha + alq/linha + perimetro). Garante quebra antes se
+  // restar < 80pt na pagina.
+  const espacoNecessario = laudo.tipo_imovel === 'RURAL' ? 80 : 60;
+  if (cy > (792 - espacoNecessario)) { doc.addPage(); cy = 60; }
   doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('9. ÁREA E PERÍMETRO', 40, cy);
-  cy += 14;
-  doc.fontSize(11).fillColor(corGold).font('Helvetica-Bold');
+  cy += 16;
   if (laudo.area_total_m2 != null) {
     if (laudo.tipo_imovel === 'RURAL') {
       const ha = laudo.area_total_m2 / 10000;
       const alq = laudo.area_total_m2 / 48400;       // 1 alqueire = 4,84 ha (MA)
       const linhas = laudo.area_total_m2 / 3025;     // 1 linha = 3.025 m² (1/16 alq)
-      doc.text(`Área total: ${ha.toFixed(4).replace('.', ',')} ha`, 40, cy);
-      cy += 14;
-      doc.fontSize(9).fillColor('#444').font('Helvetica');
-      doc.text(`(≈ ${alq.toFixed(4).replace('.', ',')} alqueires · ≈ ${linhas.toFixed(2).replace('.', ',')} linhas de terra)`, 40, cy);
-      cy += 14;
       doc.fontSize(11).fillColor(corGold).font('Helvetica-Bold');
-    } else {
-      doc.text(`Área total: ${fmtArea(laudo.area_total_m2)}`, 40, cy);
+      doc.text(`Área total: ${ha.toFixed(4).replace('.', ',')} ha`, 40, cy, { lineBreak: false });
+      cy += 16;
+      doc.fontSize(9).fillColor('#444').font('Helvetica');
+      doc.text(`(≈ ${alq.toFixed(4).replace('.', ',')} alqueires · ≈ ${linhas.toFixed(2).replace('.', ',')} linhas de terra)`, 40, cy, { lineBreak: false, width: 515 });
       cy += 14;
+    } else {
+      doc.fontSize(11).fillColor(corGold).font('Helvetica-Bold');
+      doc.text(`Área total: ${fmtArea(laudo.area_total_m2)}`, 40, cy, { lineBreak: false, width: 515 });
+      cy += 16;
     }
   }
-  if (laudo.perimetro_m != null) doc.text(`Perímetro: ${laudo.perimetro_m.toFixed(2).replace('.', ',')} m`, 40, cy);
-  cy += 16;
+  if (laudo.perimetro_m != null) {
+    doc.fontSize(11).fillColor(corGold).font('Helvetica-Bold');
+    doc.text(`Perímetro: ${laudo.perimetro_m.toFixed(2).replace('.', ',')} m`, 40, cy, { lineBreak: false });
+    cy += 18;
+  }
+  cy += 8;
 
   // ── 10. Croqui ─────────────────────────────────────────────────────
   // v2.10.1: quando nao ha upload de imagem, desenhamos o poligono INLINE

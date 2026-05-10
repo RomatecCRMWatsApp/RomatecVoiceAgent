@@ -13048,6 +13048,28 @@ const LAUDO_STATUS_LABEL = {
   CANCELADO: 'Cancelado',
 };
 
+// v2.10.2: helper de area tipo-aware (mesmo padrao do server memorialDescritivo.ts)
+// URBANO: m² (com ha entre parenteses se >= 1ha)
+// RURAL: ha (principal) + alqueires + linhas de terra
+// Conversoes regionais MA: 1 alq = 4,84 ha (48.400 m²) · 1 linha = 3.025 m²
+function fmtAreaTipoLaudo(m2, tipoImovel) {
+  if (m2 == null || !Number.isFinite(m2)) return '-';
+  const fmtBR = (n, dec) => n.toFixed(dec).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  if (tipoImovel === 'RURAL') {
+    const ha = m2 / 10000;
+    const alq = m2 / 48400;
+    const linhas = m2 / 3025;
+    return `${fmtBR(ha, 4)} ha (≈ ${fmtBR(alq, 4)} alq · ≈ ${fmtBR(linhas, 2)} linhas)`;
+  }
+  // URBANO
+  const m2Fmt = fmtBR(m2, 2);
+  if (m2 >= 10000) {
+    const ha = m2 / 10000;
+    return `${m2Fmt} m² (${fmtBR(ha, 4)} ha)`;
+  }
+  return `${m2Fmt} m²`;
+}
+
 // v2.1.7: defaults Acailandia/MA — extraidos do PMSB municipal 2019 + lista do CEO
 const ACAILANDIA_DEFAULTS = {
   uf: 'MA',
@@ -13267,7 +13289,7 @@ function renderLaudosLista(v) {
     const cont = state.laudoContratantes.find(c => c.id === l.contratante_id);
     const data = l.created_at ? parseDataBR(l.created_at) : '-';
     const valor = l.valor_servico != null ? fmt(l.valor_servico) : '';
-    const area = l.area_total_m2 != null ? Number(l.area_total_m2).toLocaleString('pt-BR',{maximumFractionDigits:2}) + ' m²' : '';
+    const area = l.area_total_m2 != null ? fmtAreaTipoLaudo(Number(l.area_total_m2), l.tipo_imovel) : '';
     const localizacao = [l.loteamento, l.numero_contrato && 'Contr. '+l.numero_contrato, l.quadra && 'Q.'+l.quadra, l.numero_lote && 'Lote '+l.numero_lote, l.municipio].filter(Boolean).join(' · ');
     return `
     <div class="card" style="border-left:4px solid ${cor};">
@@ -14501,8 +14523,8 @@ function renderLaudoTabPontos(c) {
             </div>` : ''}
             <div style="margin-top:12px; padding:8px; background:var(--bg-secondary); border-radius:4px;">
               <strong>📊 Resumo:</strong>
-              Área: <strong>${l.area_total_m2?Number(l.area_total_m2).toLocaleString('pt-BR',{maximumFractionDigits:2}):'-'} m²</strong> ·
-              Perímetro: <strong>${l.perimetro_m?Number(l.perimetro_m).toFixed(2):'-'} m</strong>
+              Área: <strong>${l.area_total_m2 ? fmtAreaTipoLaudo(Number(l.area_total_m2), l.tipo_imovel) : '-'}</strong> ·
+              Perímetro: <strong>${l.perimetro_m?Number(l.perimetro_m).toFixed(2).replace('.', ','):'-'} m</strong>
             </div>
           `}
         </div>
