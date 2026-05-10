@@ -3,6 +3,7 @@
 // nas Fases 2-7.
 
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
+import type { PoolConnection } from 'mysql2/promise';
 import pool from '../database/connection';
 import crypto from 'crypto';
 
@@ -870,17 +871,25 @@ import { gerarCroquiSvg } from '../services/croquiSvg';
  * Quando user prefere croqui manual, sobrepoe via salvarCroquiUpload().
  */
 export async function gerarCroquiAutoSvg(laudoId: number | string): Promise<string> {
-  const pontos = await listarPontosDoLaudo(laudoId);
-  const lados = await listarLadosDoLaudo(laudoId);
-  const pontosSvg = pontos
-    .filter(p => p.utm_e != null && p.utm_n != null)
-    .map(p => ({ rotulo: p.rotulo, e: p.utm_e as number, n: p.utm_n as number }));
+  const [laudo, pontos, lados] = await Promise.all([
+    buscarLaudo(laudoId),
+    listarPontosDoLaudo(laudoId),
+    listarLadosDoLaudo(laudoId),
+  ]);
+  const pontosFiltrados = pontos.filter(p => p.utm_e != null && p.utm_n != null);
+  const pontosSvg = pontosFiltrados.map(p => ({ rotulo: p.rotulo, e: p.utm_e as number, n: p.utm_n as number }));
   const ladosSvg = lados.map(l => ({
     i_idx: pontos.findIndex(p => p.id === l.ponto_inicio_id),
     f_idx: pontos.findIndex(p => p.id === l.ponto_fim_id),
     distancia_m: l.distancia_m ?? 0,
   }));
-  return gerarCroquiSvg(pontosSvg, ladosSvg);
+  return gerarCroquiSvg(pontosSvg, ladosSvg, {
+    // v3.1.0: area no centro + tarjeta SIRGAS
+    tipoImovel: laudo?.tipo_imovel as 'URBANO' | 'RURAL' | undefined,
+    areaTotalM2: laudo?.area_total_m2 != null ? Number(laudo.area_total_m2) : undefined,
+    utmZona: pontosFiltrados[0]?.utm_zona ? Number(pontosFiltrados[0].utm_zona) : undefined,
+    utmHemisferio: pontosFiltrados[0]?.utm_hemisferio || 'S',
+  });
 }
 
 /** Salva croqui manual (upload imagem PNG/JPG/PDF base64). */
@@ -1117,4 +1126,196 @@ export async function atualizarApenasDesconto(
       WHERE id = ?`,
     [desconto.tipo, desconto.valor, novoValorFinal, novoValorFinal, Number(id)],
   );
+}
+
+// v3.1.0: helpers da clonagem de laudo
+export function construirPontosZerados(
+  tipoLevantamento: string,
+  laudoId: number,
+): Array<{ laudo_id: number; ordem: number; rotulo: string }> {
+  const make = (n: number) => Array.from({ length: n }, (_, i) => ({
+    laudo_id: laudoId, ordem: i + 1, rotulo: `V${i + 1}`,
+  }));
+  switch (tipoLevantamento) {
+    case 'URBANO_4P': return make(4);
+    case 'URBANO_5P': return make(5);
+    case 'URBANO_NP': return make(1);
+    case 'RURAL':     return make(1);
+    default:          return [];
+  }
+}
+
+export async function prePopularLadosDoLote(
+  conn: PoolConnection,
+  loteamentoLoteId: number,
+  novoLaudoId: number,
+): Promise<Array<{
+  laudo_id: number;
+  ordem: number;
+  rotulo: string;
+  confrontante_nome: string | null;
+  nome_lado: string;
+}>> {
+  const [rows] = await conn.execute<RowDataPacket[]>(
+    `SELECT conf_frente_texto, conf_fundo_texto,
+            conf_lateral_dir_texto, conf_lateral_esq_texto,
+            conf_frente_lote_id, conf_fundo_lote_id,
+            conf_lateral_dir_lote_id, conf_lateral_esq_lote_id
+       FROM loteamento_lotes WHERE id = ? LIMIT 1`,
+    [Number(loteamentoLoteId)],
+  );
+  if (!rows.length) return [];
+  const r = rows[0];
+
+  const resolverFk = async (fkId: unknown): Promise<string | null> => {
+    if (!fkId) return null;
+    const [r2] = await conn.execute<RowDataPacket[]>(
+      `SELECT numero_lote FROM loteamento_lotes WHERE id = ? LIMIT 1`,
+      [Number(fkId)],
+    );
+    return r2.length ? `Lote ${r2[0].numero_lote}` : null;
+  };
+
+  const conf_frente  = (r.conf_frente_texto      as string | null) || (await resolverFk(r.conf_frente_lote_id));
+  const conf_fundo   = (r.conf_fundo_texto       as string | null) || (await resolverFk(r.conf_fundo_lote_id));
+  const conf_lat_dir = (r.conf_lateral_dir_texto as string | null) || (await resolverFk(r.conf_lateral_dir_lote_id));
+  const conf_lat_esq = (r.conf_lateral_esq_texto as string | null) || (await resolverFk(r.conf_lateral_esq_lote_id));
+
+  return [
+    { laudo_id: novoLaudoId, ordem: 1, rotulo: 'V1-V2', nome_lado: 'Frente',       confrontante_nome: conf_frente },
+    { laudo_id: novoLaudoId, ordem: 2, rotulo: 'V2-V3', nome_lado: 'Lateral Dir',  confrontante_nome: conf_lat_dir },
+    { laudo_id: novoLaudoId, ordem: 3, rotulo: 'V3-V4', nome_lado: 'Fundo',        confrontante_nome: conf_fundo },
+    { laudo_id: novoLaudoId, ordem: 4, rotulo: 'V4-V1', nome_lado: 'Lateral Esq',  confrontante_nome: conf_lat_esq },
+  ];
+}
+
+/**
+ * v3.1.0: Clona um laudo de demarcacao.
+ * - Copia campos descritivos (cliente, loteamento, equipamentos, ART/TRT, precif INCRA, etc)
+ * - Zera identidade/estado: numero_laudo (gera novo), numero_lote, areas, hashes,
+ *   pdf_assinado, recibo, zapi_*, status volta pra 'PREENCHIDO'
+ * - Cria pontos zerados conforme tipo_levantamento (4P→4, 5P→5, NP/RURAL→1)
+ * - Pre-popula lados com confrontantes do lote (se lote_loteamento_id existir)
+ * - Registra em audit_log
+ * - Atomic: toda a operacao em transacao com rollback em caso de erro
+ *
+ * NOTA: representante_nome/cpf/cargo e descricao_area foram OMITIDOS do camposCopiar
+ * pois pertencem a tabela contratantes, nao a laudos_demarcacao.
+ */
+export async function clonarLaudo(originalId: number): Promise<Laudo> {
+  // gera numero_laudo ANTES de abrir transacao (gerarNumeroLaudo ja tem seu
+  // proprio lock pessimista; chamar de dentro de outra transacao causaria deadlock)
+  const novoNumero = await gerarNumeroLaudo();
+  const novoUuid = crypto.randomUUID();
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // 1. Carrega original
+    const [origRows] = await conn.execute<LaudoRow[]>(
+      `SELECT * FROM laudos_demarcacao WHERE id = ? AND ativo = 1 LIMIT 1`,
+      [Number(originalId)],
+    );
+    if (!origRows.length) throw new Error('Laudo nao encontrado ou inativo');
+    const o = origRows[0] as unknown as Record<string, unknown>;
+
+    // 2. Lista de campos descritivos a COPIAR (ordem importa pra o INSERT)
+    // REMOVIDOS (pertencem a contratantes, nao a laudos_demarcacao):
+    //   representante_nome, representante_cpf, representante_cargo, descricao_area
+    const camposCopiar = [
+      'tipo_imovel', 'tipo_lote_urbano', 'tipo_levantamento',
+      'contratante_id', 'executante_id',
+      'quadra', 'loteamento', 'numero_contrato',
+      'denominacao_imovel', 'nirf', 'ccir',
+      'endereco_imovel', 'municipio', 'uf_imovel', 'comarca',
+      'confrontante_frente', 'confrontante_lat_dir', 'confrontante_lat_esq',
+      'confrontante_fundo', 'confrontante_extra',
+      'croqui_tipo', 'croqui_path', 'croqui_b64', 'croqui_mime', 'escala',
+      'usa_art', 'numero_art', 'usa_trt', 'numero_trt',
+      'sistema_coord',
+      'base_nome', 'base_inicio_rastreio', 'base_fim_rastreio', 'base_observacoes',
+      'rover_nome', 'coletor_nome',
+      'matricula', 'livro', 'folhas', 'cartorio_nome', 'cartorio_cns',
+      'lote_loteamento_id',
+      // Precificacao INCRA (v3.0.0)
+      'unidade_calculo', 'pont_vegetacao', 'pont_relevo', 'pont_insalubridade',
+      'pont_acesso', 'pont_clima', 'pont_area_media',
+      'pontuacao_total', 'faixa_aplicada',
+      'valor_unitario', 'quantidade_calculo', 'valor_base_calculado',
+      'desconto_tipo', 'desconto_valor', 'valor_final',
+      'precificacao_observacoes', 'precificacao_calculada_em',
+      'valor_servico', 'forma_pagamento',
+    ];
+
+    // 3. Monta INSERT
+    const placeholders = camposCopiar.map(() => '?').join(',');
+    // cast explícito: o[c] é unknown (Record<string,unknown>); mysql2 só aceita primitivos
+    const values = camposCopiar.map(c => (o[c] ?? null) as string | number | boolean | Date | null);
+
+    const [insertResult] = await conn.execute<ResultSetHeader>(
+      `INSERT INTO laudos_demarcacao
+         (numero_laudo, token_uuid, status,
+          ${camposCopiar.join(',')},
+          numero_lote, area_total_m2, perimetro_m,
+          clonado_de_id, clonado_em,
+          ativo, created_at, updated_at)
+       VALUES (?, ?, 'PREENCHIDO',
+          ${placeholders},
+          NULL, NULL, NULL,
+          ?, NOW(),
+          1, NOW(), NOW())`,
+      [novoNumero, novoUuid, ...values, Number(originalId)],
+    );
+    const cloneId = insertResult.insertId;
+
+    // 4. Pontos zerados conforme tipo_levantamento
+    const pontos = construirPontosZerados(String(o.tipo_levantamento ?? ''), cloneId);
+    if (pontos.length > 0) {
+      const ph = pontos.map(() => '(?, ?, ?)').join(',');
+      const flat = pontos.flatMap(p => [p.laudo_id, p.ordem, p.rotulo]);
+      await conn.execute(
+        `INSERT INTO laudos_demarcacao_pontos (laudo_id, ordem, rotulo) VALUES ${ph}`,
+        flat,
+      );
+    }
+
+    // 5. Lados pre-preenchidos com confrontantes do lote (se houver)
+    if (o.lote_loteamento_id != null) {
+      const lados = await prePopularLadosDoLote(conn, Number(o.lote_loteamento_id), cloneId);
+      if (lados.length > 0) {
+        const ph = lados.map(() => '(?, ?, ?, ?, ?)').join(',');
+        const flat = lados.flatMap(l =>
+          [l.laudo_id, l.ordem, l.rotulo, l.confrontante_nome, l.nome_lado]);
+        await conn.execute(
+          `INSERT INTO laudos_demarcacao_lados
+             (laudo_id, ordem, rotulo, confrontante_nome, nome_lado)
+           VALUES ${ph}`,
+          flat,
+        );
+      }
+    }
+
+    // 6. Audit log (tenant_id NOT NULL no schema; usa 1 como padrao mono-tenant)
+    await conn.execute(
+      `INSERT INTO audit_log (tenant_id, action, resource_type, resource_id, payload)
+       VALUES (1, 'laudo:clonar', 'laudo', ?, ?)`,
+      [String(originalId), JSON.stringify({
+        novo_id: cloneId,
+        novo_numero: novoNumero,
+        tipo_levantamento: o.tipo_levantamento,
+      })],
+    );
+
+    await conn.commit();
+
+    const clone = await buscarLaudo(cloneId);
+    if (!clone) throw new Error('Erro ao carregar clone recem-criado');
+    return clone;
+  } catch (err) {
+    try { await conn.rollback(); } catch { /* ignore */ }
+    throw err;
+  } finally {
+    conn.release();
+  }
 }

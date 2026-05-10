@@ -1647,6 +1647,20 @@ app.post('/api/laudos-demarcacao/:id/pontos', requireCeoToken, async (req: Reque
 
 // Import RTK (CSV/TXT) — recebe { texto: string } e retorna pontos parseados
 
+// v3.1.0: clonagem 1-clique de laudo
+app.post('/api/laudos-demarcacao/:id/clonar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const id = await m.resolverLaudoId(String(req.params.id));
+    const clone = await m.clonarLaudo(id);
+    res.json(clone);
+  } catch (err) {
+    const msg = (err as Error).message;
+    const status = /nao encontrado|inativo/i.test(msg) ? 404 : 400;
+    res.status(status).json({ error: msg });
+  }
+});
+
 // v3.0.0: precificação INCRA — sugestão de critérios baseada nos dados do laudo
 app.get('/api/laudos-demarcacao/:id/precificacao/sugerir', requireCeoToken, async (req: Request, res: Response) => {
   try {
@@ -3224,6 +3238,16 @@ app.listen(PORT, () => {
       await m.runPrecificacaoIncraMigrations();
     } catch (err) {
       console.error('[precif-incra-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.1.0: migrations da clonagem de laudo (clonado_de_id + clonado_em).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-clonagem-laudo');
+      await m.runClonagemLaudoMigrations();
+    } catch (err) {
+      console.error('[clonagem-laudo-migrations] FALHA fatal:', err);
     }
   })();
 

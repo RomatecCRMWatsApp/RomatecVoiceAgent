@@ -34,6 +34,7 @@ import type { Contratante } from '../integrations/contratantes';
 import type { Executante } from '../integrations/executantes';
 import { azimuteParaDMS } from './geometria';
 import { CRITERIOS_INCRA } from './pricing/incra';
+import { calcularCentroide, formatarAreaParaCentro, calcularMC } from './croquiHelpers';
 
 const fmtBRL = (n: number) =>
   'R$ ' + Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -535,6 +536,41 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
         const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
         doc.text(`${dist.toFixed(2).replace('.', ',')} m`, mx - 18, my - 3, { width: 36, align: 'center' });
       });
+      // v3.1.0: ÁREA TOTAL no centro do poligono (modelo INCRA)
+      if (laudo.area_total_m2 != null && Number(laudo.area_total_m2) > 0 && laudo.tipo_imovel) {
+        const centUtm = calcularCentroide(
+          ptsOrd.map(p => ({ utm_e: Number(p.utm_e), utm_n: Number(p.utm_n) }))
+        );
+        const cx = toX(centUtm.x);
+        const cy2 = toY(centUtm.y);
+        const areaTxt = formatarAreaParaCentro(
+          Number(laudo.area_total_m2),
+          laudo.tipo_imovel as 'URBANO' | 'RURAL',
+        );
+        doc.fontSize(13).fillColor('#222').font('Helvetica-Bold')
+           .text(areaTxt, cx - 60, cy2 - 8, { width: 120, align: 'center', lineBreak: false });
+        doc.fontSize(7).fillColor('#888').font('Helvetica')
+           .text('ÁREA TOTAL', cx - 60, cy2 + 7, { width: 120, align: 'center', lineBreak: false });
+      }
+
+      // v3.1.0: tarjeta SIRGAS 2000 no canto inferior direito do quadro
+      const utmZonaNum = Number(ptsOrd[0]?.utm_zona) || 23;
+      const utmHemi = ptsOrd[0]?.utm_hemisferio || 'S';
+      const mcCalc = calcularMC(utmZonaNum);
+      const tw = 100, th = 38;
+      const tx = boxX + boxW - tw - 6;
+      const ty = boxY + boxH - th - 6;
+      doc.save()
+         .rect(tx, ty, tw, th)
+         .fillColor('#fff').fill()
+         .restore();
+      doc.rect(tx, ty, tw, th).strokeColor('#888').lineWidth(0.5).stroke();
+      doc.fontSize(7.5).fillColor('#222').font('Helvetica-Bold')
+         .text('SIRGAS 2000', tx + 5, ty + 5, { width: tw - 10, lineBreak: false });
+      doc.fontSize(6.5).fillColor('#444').font('Helvetica')
+         .text(`UTM Zona ${utmZonaNum}${utmHemi}`, tx + 5, ty + 16, { width: tw - 10, lineBreak: false });
+      doc.fontSize(6.5).fillColor('#444').font('Helvetica')
+         .text(`MC ${mcCalc}°`, tx + 5, ty + 26, { width: tw - 10, lineBreak: false });
       // Norte (seta no canto superior direito)
       doc.fontSize(8).fillColor('#222').font('Helvetica-Bold').text('N', boxX + boxW - 20, boxY + 8);
       doc.moveTo(boxX + boxW - 16, boxY + 30).lineTo(boxX + boxW - 16, boxY + 18).strokeColor('#222').lineWidth(1).stroke();
@@ -542,7 +578,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
       cy = boxY + boxH + 8;
       // Legenda inferior
       doc.fontSize(7).fillColor('#666').font('Helvetica-Oblique')
-         .text(`${ptsOrd.length} vértices · Sistema: UTM Zona ${ptsOrd[0].utm_zona || 23}${ptsOrd[0].utm_hemisferio || 'S'} · SIRGAS 2000`, 40, cy, { width: 515, align: 'center' });
+         .text(`${ptsOrd.length} vértices`, 40, cy, { width: 515, align: 'center' });
       cy += 14;
     } else {
       doc.fontSize(8).fillColor('#666').font('Helvetica-Oblique')

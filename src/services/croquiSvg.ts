@@ -5,6 +5,8 @@
 // Saida: string SVG (XML). Pode ser embutida no HTML ou convertida
 // pra raster pra inserir no PDF.
 
+import { calcularCentroide, formatarAreaParaCentro, calcularMC } from './croquiHelpers';
+
 export interface PontoSvg {
   rotulo: string;
   e: number;
@@ -30,6 +32,14 @@ export interface CroquiOpcoes {
   mostrarDistancias?: boolean;
   /** Mostra indicador de norte */
   mostrarNorte?: boolean;
+  /** v3.1.0: tipo do imovel pra formatacao da area */
+  tipoImovel?: 'URBANO' | 'RURAL';
+  /** v3.1.0: area total em m² (renderizada no centro) */
+  areaTotalM2?: number;
+  /** v3.1.0: zona UTM (renderizada na tarjeta SIRGAS) */
+  utmZona?: number;
+  /** v3.1.0: hemisferio UTM ('S' ou 'N'). Default 'S' (Brasil). */
+  utmHemisferio?: string;
 }
 
 /**
@@ -127,13 +137,43 @@ export function gerarCroquiSvg(
       </g>`;
   }
 
+  // v3.1.0: area no centro do poligono (se areaTotalM2 e tipoImovel fornecidos)
+  let areaSvg = '';
+  if (opts.areaTotalM2 != null && opts.areaTotalM2 > 0 && opts.tipoImovel) {
+    const centUtm = calcularCentroide(pontos.map(p => ({ utm_e: p.e, utm_n: p.n })));
+    // Mesma transformacao usada no toSvg() acima: offsetX + (e - minE) * escala, offsetY + (maxN - n) * escala
+    const cx = offsetX + (centUtm.x - minE) * escala;
+    const cy_c = offsetY + (maxN - centUtm.y) * escala;
+    const areaTxt = formatarAreaParaCentro(opts.areaTotalM2, opts.tipoImovel);
+    areaSvg = `
+  <text x="${cx.toFixed(1)}" y="${cy_c.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" font-family="Helvetica" font-size="14" font-weight="bold" fill="#222">${escapeXml(areaTxt)}</text>
+  <text x="${cx.toFixed(1)}" y="${(cy_c + 16).toFixed(1)}" text-anchor="middle" font-family="Helvetica" font-size="9" fill="#888">ÁREA TOTAL</text>`;
+  }
+
+  // v3.1.0: tarjeta SIRGAS no canto inferior direito
+  let tarjetaSvg = '';
+  if (opts.utmZona != null) {
+    const tw = 100, th = 42;
+    const tx = W - tw - 10;
+    const ty = H - th - 10;
+    const hemi = opts.utmHemisferio || 'S';
+    const mc = calcularMC(opts.utmZona);
+    tarjetaSvg = `
+  <g>
+    <rect x="${tx}" y="${ty}" width="${tw}" height="${th}" fill="#fff" stroke="#888" stroke-width="0.5"/>
+    <text x="${tx + 6}" y="${ty + 13}" font-family="Helvetica" font-size="8" font-weight="bold" fill="#222">SIRGAS 2000</text>
+    <text x="${tx + 6}" y="${ty + 25}" font-family="Helvetica" font-size="7" fill="#444">UTM Zona ${opts.utmZona}${escapeXml(hemi)}</text>
+    <text x="${tx + 6}" y="${ty + 36}" font-family="Helvetica" font-size="7" fill="#444">MC ${mc}°</text>
+  </g>`;
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <rect width="${W}" height="${H}" fill="#fff"/>
   <path d="${pathD}" fill="${cor}22" stroke="${cor}" stroke-width="2" stroke-linejoin="round"/>
   ${distanciasSvg}
   ${rotulosSvg}
-  ${norteSvg}
+  ${norteSvg}${areaSvg}${tarjetaSvg}
   <text x="10" y="${H - 10}" font-family="Helvetica" font-size="11" fill="#666">Escala aprox.: ${escapeXml(escalaTexto)} (UTM)</text>
 </svg>`;
 }
