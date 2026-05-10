@@ -749,7 +749,13 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   }
 
   // ── 14. Local + data + assinatura ──────────────────────────────────
-  if (cy > 720) { doc.addPage(); cy = 60; }
+  // v3.0.4: garante que TODO o bloco final (local/data + caixa ICP + linha + nome +
+  // qualif + QR + hash + footer) cabe na pagina atual. Sem isso, conteudo extrapolava
+  // o bottomMargin (802pt) e o PDFKit criava 1-2 paginas vazias com so footer/hash.
+  // Espaco necessario: 30 (local/data) + (caixa ICP 75 OU gap 20) + 6+11+15 (linha+nome+qualif)
+  // + 100 (QR/hash) + 25 (gap+footer) ≈ 187 com ICP ou 132 sem.
+  const espacoFinal = (input.signatureMeta ? 187 : 132);
+  if (cy + espacoFinal > 800) { doc.addPage(); cy = 60; }
   const cidade = laudo.municipio || 'Açailândia';
   const uf = laudo.uf_imovel || 'MA';
   doc.fontSize(10).fillColor('#111').font('Helvetica')
@@ -810,24 +816,30 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   if (executante.qualificacao) partesAssina.push(executante.qualificacao);
   if (executante.registro_cft) partesAssina.push(`CFT ${executante.registro_cft}`);
   doc.text(partesAssina.join(' · '), 40, cy, { width: 515, align: 'center' });
+  cy += 18;
 
   // ── 14. QR + hash + selo ───────────────────────────────────────────
+  // v3.0.4: Y do QR/hash relativo a cy (era Y=720 absoluto). Garantido caber
+  // pela checagem de `espacoFinal` antes do bloco local/data acima.
   if (laudo.hash_validacao) {
     const baseUrl = getBaseUrl();
+    const yQrHash = cy;
     const qrUrl = await renderQRValidacao(
       doc, laudo.hash_validacao, `${baseUrl}/v/laudo`,
-      460, 720,
+      460, yQrHash,
       { size: 75, corHex, comLabel: true }
     );
-    renderHashFooter(doc, laudo.hash_validacao, qrUrl, 40, 720, 410);
+    renderHashFooter(doc, laudo.hash_validacao, qrUrl, 40, yQrHash, 410);
     if (laudo.status === 'CONFIRMADO') {
       renderSeloConfirmado(doc, 310, 460);
     }
+    cy = yQrHash + 95; // QR (75) + label (10) + gap (10)
   }
-  // Footer fixo
+  // Footer fixo (v3.0.4: Y dinamico com fallback Y=785, sempre < bottomMargin 802
+  // pra evitar auto-pagebreak desnecessario)
   doc.fontSize(7).fillColor('#999').font('Helvetica-Oblique')
      .text(`${brand} · Laudo ${laudo.numero_laudo} · ${fmtData(dataEmissao)}`,
-           40, 800, { width: 515, align: 'center' });
+           40, Math.min(Math.max(cy, 770), 790), { width: 515, align: 'center', lineBreak: false });
 
   doc.end();
   await new Promise<void>(resolve => doc.on('end', () => resolve()));
