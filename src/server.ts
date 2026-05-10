@@ -2283,7 +2283,7 @@ app.post('/api/laudos-demarcacao/:id/gerar-recibo', requireCeoToken, async (req:
 
     // v3.0.0: monta resumo INCRA pra uso no PDF do recibo (quando precificacao foi aplicada)
     const incraRecibo = (laudo.precificacao_calculada_em && laudo.valor_final != null) ? {
-      faixa_aplicada:       String(laudo.faixa_aplicada),
+      faixa_aplicada:       String(laudo.faixa_aplicada ?? '—'),
       unidade_calculo:      laudo.unidade_calculo as 'km' | 'hectare' | 'lote',
       valor_base_calculado: Number(laudo.valor_base_calculado),
       desconto_tipo:        (laudo.desconto_tipo ?? 'nenhum') as 'percentual' | 'fixo' | 'nenhum',
@@ -2356,7 +2356,7 @@ app.post('/api/laudos-demarcacao/:id/enviar-zapi', requireCeoToken, async (req: 
           const { gerarPdfRecibo } = await import('./services/reciboPdf');
           // v3.0.0: passa resumo INCRA quando laudo tem precificacao aplicada
           const incraEnvio = (laudo.precificacao_calculada_em && laudo.valor_final != null) ? {
-            faixa_aplicada:       String(laudo.faixa_aplicada),
+            faixa_aplicada:       String(laudo.faixa_aplicada ?? '—'),
             unidade_calculo:      laudo.unidade_calculo as 'km' | 'hectare' | 'lote',
             valor_base_calculado: Number(laudo.valor_base_calculado),
             desconto_tipo:        (laudo.desconto_tipo ?? 'nenhum') as 'percentual' | 'fixo' | 'nenhum',
