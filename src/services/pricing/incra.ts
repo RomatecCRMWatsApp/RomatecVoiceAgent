@@ -129,3 +129,13 @@ export interface DadosLaudoParaSugestao {
   uf?: string;
   tipo_vegetacao?: 'aberta' | 'intermediaria' | 'fechada';
 }
+
+export function validarCriterios(c: CriteriosPontuacao): { ok: boolean; erros: string[] } {
+  const erros: string[] = [];
+  for (const [k, v] of Object.entries(c) as Array<[keyof CriteriosPontuacao, number]>) {
+    if (!Number.isInteger(v) || v < 1 || v > 10) {
+      erros.push(`Critério ${k}: pontuação deve ser inteiro de 1 a 10 (recebido: ${v})`);
+    }
+  }
+  return { ok: erros.length === 0, erros };
+}
