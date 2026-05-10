@@ -15914,6 +15914,9 @@ function renderLaudoTabArt(c) {
         <input id="incraQtd" type="number" step="0.0001" placeholder="Quantidade" style="flex:1 1 140px; min-width:0;">
       </div>
 
+      <p style="font-size:11px; color:var(--text-muted); margin:0 0 6px;">
+        Ajuste a nota (1–10) ou selecione o nível diretamente — os dois ficam sincronizados.
+      </p>
       <div id="incraCriterios" style="display:grid; grid-template-columns: 1fr; gap:8px;">
         <!-- preenchido por setupIncraBlock -->
       </div>
@@ -15946,9 +15949,9 @@ function renderLaudoTabArt(c) {
         <strong id="incraValorFinal" style="font-size:18px; color:#10b981;">—</strong>
       </div>
 
-      <div style="margin-top:8px; display:flex; gap:8px;">
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
         <button class="btn-primary" id="incraSalvar">💾 Salvar precificação</button>
-        <span id="incraStatus" style="color:var(--text-muted); font-size:12px;"></span>
+        <span id="incraStatus" style="color:var(--text-muted); font-size:12px; min-height:1.2em;"></span>
       </div>
     </div>
     <div class="card">
@@ -16053,6 +16056,33 @@ async function setupIncraBlock(laudoId) {
   }
   setQuantidadeDefault();
 
+  // v3.0.2: helpers de UX (feedback "nao salvo" + lock visual do valor_servico)
+  let isDirty = false;
+  function applyDirtyVisual() {
+    const btn = document.getElementById('incraSalvar');
+    if (!btn) return;
+    btn.style.boxShadow = isDirty ? '0 0 0 2px var(--gold)' : '';
+  }
+  function markValorServicoLocked(locked) {
+    const valSrv = document.getElementById('la-valor');
+    if (!valSrv) return;
+    valSrv.disabled = locked;
+    let hint = document.getElementById('la-valor-incra-hint');
+    if (locked) {
+      valSrv.title = 'Calculado pela precificacao INCRA — para alterar, recalcule acima';
+      if (!hint) {
+        hint = document.createElement('small');
+        hint.id = 'la-valor-incra-hint';
+        hint.style.cssText = 'grid-column: 1 / -1; color:#10b981; font-size:11px; display:block;';
+        hint.textContent = '🔒 Calculado pela precificação INCRA — recalcule acima para alterar.';
+        valSrv.parentElement?.appendChild(hint);
+      }
+    } else {
+      valSrv.removeAttribute('title');
+      if (hint) hint.remove();
+    }
+  }
+
   // Listeners
   document.querySelectorAll('input[name="incraUnidade"]').forEach(r => r.addEventListener('change', () => { setQuantidadeDefault(); recalc(); }));
   document.querySelectorAll('[data-incra-criterio]').forEach(i => i.addEventListener('input', recalc));
@@ -16080,6 +16110,8 @@ async function setupIncraBlock(laudoId) {
 
   let recalcTimer = null;
   function recalc() {
+    isDirty = true;
+    applyDirtyVisual();
     clearTimeout(recalcTimer);
     recalcTimer = setTimeout(doRecalc, 300);
   }
@@ -16137,11 +16169,14 @@ async function setupIncraBlock(laudoId) {
       status.textContent = '✓ Salvo (R$ ' + r.valorFinal.toFixed(2).replace('.', ',') + ')';
       // Trava o campo valor_servico do bloco financeiro
       const valSrv = document.getElementById('la-valor');
-      if (valSrv) {
-        valSrv.value = r.valorFinal;
-        valSrv.disabled = true;
-        valSrv.title = 'Calculado pela precificacao INCRA — para alterar, recalcule acima';
-      }
+      if (valSrv) valSrv.value = r.valorFinal;
+      markValorServicoLocked(true);
+      isDirty = false;
+      applyDirtyVisual();
+      // v3.0.2: limpa msg de sucesso depois de 5s pra nao poluir tela
+      setTimeout(() => {
+        if (status.textContent.startsWith('✓')) status.textContent = '';
+      }, 5000);
     } catch (err) {
       status.textContent = '✗ ' + err.message;
     }
@@ -16150,13 +16185,9 @@ async function setupIncraBlock(laudoId) {
   // Calculo inicial
   doRecalc();
 
-  // Se o laudo ja tinha precificacao salva, trava o campo de valor_servico de saida
+  // Se o laudo ja tinha precificacao salva, trava o campo de valor_servico
   if (laudo.precificacao_calculada_em) {
-    const valSrv = document.getElementById('la-valor');
-    if (valSrv) {
-      valSrv.disabled = true;
-      valSrv.title = 'Calculado pela precificacao INCRA — para alterar, recalcule acima';
-    }
+    markValorServicoLocked(true);
   }
 }
 
