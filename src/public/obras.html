@@ -14404,7 +14404,7 @@ function renderLaudoTabDados(c) {
         <br>💡 <strong>Bairros/loteamentos novos</strong> são cadastrados automaticamente ao salvar (ficam no celular pra próxima).
         <a href="#" id="ld-gerenciar-cad" style="color:var(--gold); text-decoration:underline;">Gerenciar cadastros locais</a>
       </p>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         ${isUrbano ? `
           <select id="ld-tipo-lote">
             <option value="">— tipo de lote —</option>
@@ -14432,12 +14432,12 @@ function renderLaudoTabDados(c) {
         ℹ️ Opcional — preencha se o imóvel já tem registro. Aplica em rural (fazenda) e urbano.
         <br>💡 v3.2.0: catálogo nacional CNJ com ~3.7k cartórios de Registro de Imóveis. Digite 3+ letras pra buscar (filtra pela UF do imóvel).
       </p>
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+      <div class="lp-grid-3">
         <input id="ld-matricula" placeholder="Matrícula" value="${escape(l.matricula||'')}">
         <input id="ld-livro" placeholder="Livro (ex: 2-A)" value="${escape(l.livro||'')}">
         <input id="ld-folhas" placeholder="Folhas (ex: 123/v)" value="${escape(l.folhas||'')}">
       </div>
-      <div style="display:grid; grid-template-columns:2fr 1fr; gap:8px; margin-top:8px;">
+      <div class="lp-grid-auto" style="margin-top:8px;">
         <div style="position:relative;">
           <input id="ld-cartorio-nome" placeholder="Cartório (digite cidade, nome ou responsável)" value="${escape(l.cartorio_nome||'')}" autocomplete="off">
           <div id="ld-cartorio-sugestoes" style="display:none; position:absolute; top:100%; left:0; right:0; background:#1a1a1a; border:1px solid var(--gold); border-top:none; max-height:280px; overflow-y:auto; z-index:1000; box-shadow:0 4px 12px rgba(0,0,0,0.6); font-size:12px;"></div>
@@ -14450,7 +14450,7 @@ function renderLaudoTabDados(c) {
         <h3 style="margin:0;">Confrontantes</h3>
         <button id="ld-cf-swap-fb" type="button" title="Trocar valores entre Frente e Fundo" style="font-size:11px; padding:3px 8px;">🔄 Trocar Frente↔Fundo</button>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+      <div class="lp-grid-2" style="margin-top:8px;">
         <input id="ld-cf-frente" list="dl-confrontantes" placeholder="Frente (ex: Rua, Avenida, vizinho)" value="${escape(l.confrontante_frente||'')}">
         <input id="ld-cf-fundo" list="dl-confrontantes" placeholder="Fundo" value="${escape(l.confrontante_fundo||'')}">
         <input id="ld-cf-dir" list="dl-confrontantes" placeholder="Lateral direita" value="${escape(l.confrontante_lat_dir||'')}">
