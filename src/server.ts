@@ -1646,6 +1646,26 @@ app.post('/api/laudos-demarcacao/:id/pontos', requireCeoToken, async (req: Reque
 });
 
 // Import RTK (CSV/TXT) — recebe { texto: string } e retorna pontos parseados
+// v2.10.0: Memorial descritivo do laudo (texto narrativo padrao tecnico)
+// Usado pelo painel lateral do preview e pelo PDF (mesma funcao).
+app.get('/api/laudos-demarcacao/:id/memorial', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const c = await import('./integrations/contratantes');
+    const memMod = await import('./services/memorialDescritivo');
+    const id = await m.resolverLaudoId(String(req.params.id));
+    const laudo = await m.buscarLaudo(id);
+    if (!laudo) { res.status(404).json({ error: 'Laudo nao encontrado' }); return; }
+    const [pontos, lados, contratante] = await Promise.all([
+      m.listarPontosDoLaudo(id),
+      m.listarLadosDoLaudo(id),
+      c.buscarContratante(laudo.contratante_id).catch(() => null),
+    ]);
+    const out = memMod.gerarMemorialDescritivo({ laudo, pontos, lados, contratante });
+    res.json(out);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 app.post('/api/laudos-demarcacao/import-rtk', requireCeoToken, async (req: Request, res: Response) => {
   try {
     // v2.5.0: dispatcher auto-deteta CSV/TXT/KML/GPX. Aceita default_zona e

@@ -377,13 +377,16 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   }
   cy += 10;
 
-  // ── 7. Memorial NTGIR ──────────────────────────────────────────────
+  // ── 7. Memorial Descritivo (v2.10.0: gerador unificado com confrontantes) ──
   if (cy > 660) { doc.addPage(); cy = 60; }
   doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('7. MEMORIAL DESCRITIVO', 40, cy);
   cy += 14;
-  const memorial = gerarMemorialNTGIR(pontos, lados);
+  const { gerarMemorialDescritivo } = await import('./memorialDescritivo');
+  const mem = gerarMemorialDescritivo({ laudo, pontos, lados, contratante: input.contratante });
+  // No PDF, omitimos o cabecalho do memorial (info ja apresentada nas secoes 3-5).
+  // Renderizamos apenas a descricao narrativa (parte mais importante).
   doc.fontSize(9).fillColor('#222').font('Helvetica')
-     .text(memorial, 40, cy, { width: 515, align: 'justify' });
+     .text(mem.descricao, 40, cy, { width: 515, align: 'justify' });
   cy = doc.y + 12;
 
   // ── 8. Tabela de lados ─────────────────────────────────────────────

@@ -14519,11 +14519,24 @@ function renderLaudoTabPontos(c) {
     </div>
 
     <!-- v2.0.1: preview compacto embaixo (visivel em mobile) -->
+    <!-- v2.10.0: + painel direito com Memorial Descritivo (texto pro laudo) -->
     <div class="card" style="margin-top:12px;" id="lp-preview-mobile-card">
-      <details>
-        <summary style="cursor:pointer; font-weight:600;">📱 Ver preview embaixo (útil em telas pequenas)</summary>
-        <div id="lp-preview-svg-mobile" style="margin-top:8px;">
-          ${gerarCroquiSvgClient(pontosPreview, ladosPreview, { larguraPx: 600, alturaPx: 600 })}
+      <details ${pontosPreview.length >= 3 ? 'open' : ''}>
+        <summary style="cursor:pointer; font-weight:600;">📱 Preview + Memorial Descritivo (vai pro PDF)</summary>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px;">
+          <div id="lp-preview-svg-mobile">
+            ${gerarCroquiSvgClient(pontosPreview, ladosPreview, { larguraPx: 600, alturaPx: 600 })}
+          </div>
+          <div id="lp-memorial-host" style="display:flex; flex-direction:column;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <strong style="font-size:13px; color:var(--gold);">📜 Memorial Descritivo</strong>
+              <div style="display:flex; gap:4px;">
+                <button id="lp-memorial-refresh" type="button" title="Atualizar" style="font-size:10px; padding:2px 8px;">🔄</button>
+                <button id="lp-memorial-copy" type="button" title="Copiar texto" style="font-size:10px; padding:2px 8px;">📋 Copiar</button>
+              </div>
+            </div>
+            <div id="lp-memorial-body" style="flex:1; min-height:300px; max-height:600px; overflow:auto; background:var(--bg-secondary); border:1px solid var(--border); border-radius:4px; padding:10px; font-family:'Courier New', monospace; font-size:11px; line-height:1.5; white-space:pre-wrap; color:var(--text-primary);">⏳ Carregando…</div>
+          </div>
         </div>
       </details>
     </div>
@@ -14537,6 +14550,38 @@ function renderLaudoTabPontos(c) {
     document.getElementById('lp-preview-svg').innerHTML = gerarCroquiSvgClient(pts, lds);
     const m = document.getElementById('lp-preview-svg-mobile');
     if (m) m.innerHTML = gerarCroquiSvgClient(pts, lds, { larguraPx: 600, alturaPx: 600 });
+  };
+
+  // v2.10.0: Memorial Descritivo no painel direito do preview
+  const carregarMemorial = async () => {
+    const body = document.getElementById('lp-memorial-body');
+    if (!body) return;
+    body.textContent = '⏳ Carregando…';
+    try {
+      const r = await api('/api/laudos-demarcacao/' + l.id + '/memorial');
+      body.textContent = r.texto || '(memorial vazio)';
+    } catch (err) {
+      body.textContent = '❌ Erro: ' + err.message;
+    }
+  };
+  // Lazy load: carrega ao abrir o <details> ou se ja estiver aberto no render
+  const memDetails = document.querySelector('#lp-preview-mobile-card details');
+  if (memDetails) {
+    if (memDetails.open) carregarMemorial();
+    memDetails.addEventListener('toggle', () => {
+      if (memDetails.open) carregarMemorial();
+    });
+  }
+  const btnMemRefresh = document.getElementById('lp-memorial-refresh');
+  if (btnMemRefresh) btnMemRefresh.onclick = carregarMemorial;
+  const btnMemCopy = document.getElementById('lp-memorial-copy');
+  if (btnMemCopy) btnMemCopy.onclick = async () => {
+    const body = document.getElementById('lp-memorial-body');
+    if (!body) return;
+    try {
+      await navigator.clipboard.writeText(body.textContent || '');
+      mostrarToastOffline('📋 Memorial copiado para a área de transferência', 'success');
+    } catch (err) { alert('Erro ao copiar: ' + err.message); }
   };
 
   // v2.2.0: handlers dos cards de tipo + sistema (salva via PUT)
