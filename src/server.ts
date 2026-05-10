@@ -1712,6 +1712,131 @@ app.post('/api/laudos-demarcacao/import-arquivo', requireCeoToken, upload.single
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// ─── v2.8.0: Modulo Loteamentos / Auto-preenchimento ──────────────────────────
+// CRUD de leitura + import CSV/XLSX em 2 passadas.
+
+app.get('/api/loteamentos', requireCeoToken, async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/loteamentos');
+    const list = await m.listarLoteamentos();
+    res.json({ loteamentos: list });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/loteamentos/:id', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/loteamentos');
+    const id = Number(req.params.id);
+    const loteamento = await m.buscarLoteamento(id);
+    if (!loteamento) { res.status(404).json({ error: 'Loteamento nao encontrado' }); return; }
+    const quadras = await m.listarQuadras(id);
+    res.json({ loteamento, quadras });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/loteamentos/quadra/:quadraId/lotes', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/loteamentos');
+    const lotes = await m.listarLotesPorQuadra(Number(req.params.quadraId));
+    res.json({ lotes });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/loteamentos/lote/:loteId', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/loteamentos');
+    const lote = await m.buscarLote(Number(req.params.loteId));
+    if (!lote) { res.status(404).json({ error: 'Lote nao encontrado' }); return; }
+    res.json({ lote });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/configuracoes-demarcacao', requireCeoToken, async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/loteamentos');
+    const cfg = await m.getConfig();
+    res.json(cfg);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.put('/api/configuracoes-demarcacao', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/loteamentos');
+    const tol = Number(req.body?.tolerancia_medida_cm ?? 5);
+    if (!Number.isFinite(tol) || tol < 0) { res.status(400).json({ error: 'tolerancia_medida_cm invalida' }); return; }
+    await m.setTolerancia(tol);
+    const cfg = await m.getConfig();
+    res.json(cfg);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+/**
+ * Import unificado CSV/XLSX. Multipart upload com campo `arquivo`.
+ * Query param `preview=1` valida sem persistir e retorna relatorio.
+ * Detecta formato por extensao + decode UTF-8 strict / fallback CP1252.
+ */
+app.post('/api/loteamentos/import', requireCeoToken, upload.single('arquivo'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) { res.status(400).json({ error: 'arquivo obrigatorio (campo `arquivo`)' }); return; }
+    const m = await import('./integrations/loteamentos');
+    const filename = req.file.originalname || '';
+    const ext = filename.toLowerCase().split('.').pop() || '';
+    const preview = String(req.query.preview || req.body?.preview || '').toLowerCase() === '1' || req.query.preview === 'true';
+    type LinhaImportT = Parameters<typeof m.importarLinhas>[0][number];
+    type OrigemT = Parameters<typeof m.importarLinhas>[1];
+    let linhas: LinhaImportT[] = [];
+    let origem: OrigemT;
+
+    if (ext === 'csv' || ext === 'txt') {
+      // Decode com fallback CP1252
+      let texto: string;
+      try {
+        texto = new TextDecoder('utf-8', { fatal: true }).decode(req.file.buffer);
+      } catch (_) {
+        texto = new TextDecoder('windows-1252').decode(req.file.buffer);
+      }
+      // Strip BOM
+      texto = texto.replace(/^﻿/, '');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const Papa = require('papaparse') as typeof import('papaparse');
+      const parsed = Papa.parse<LinhaImportT>(texto, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (h: string) => h.trim().toLowerCase(),
+      });
+      if (parsed.errors?.length) {
+        // Apenas avisa; papaparse e lenient
+        console.warn('[import-loteamento] avisos parse:', parsed.errors.slice(0, 3));
+      }
+      linhas = parsed.data;
+      origem = 'csv';
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const xlsx = require('xlsx') as typeof import('xlsx');
+      const wb = xlsx.read(req.file.buffer, { type: 'buffer' });
+      const sheetName = wb.SheetNames[0];
+      if (!sheetName) { res.status(400).json({ error: 'arquivo XLSX sem sheets' }); return; }
+      const ws = wb.Sheets[sheetName];
+      const json = xlsx.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+      // Normaliza chaves (lowercase)
+      linhas = json.map(row => {
+        const norm: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(row)) {
+          norm[String(k).trim().toLowerCase()] = v;
+        }
+        return norm as LinhaImportT;
+      });
+      origem = 'xlsx';
+    } else {
+      res.status(400).json({ error: `extensao .${ext} nao suportada — use .csv ou .xlsx` });
+      return;
+    }
+
+    const relatorio = await m.importarLinhas(linhas, origem, { preview });
+    res.json({ preview, ...relatorio });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // v1.99.27 — Fase 3: Croqui SVG / Upload + Fotos
 
 // GET croqui — gera SVG auto OU retorna o upload manual
@@ -2887,6 +3012,16 @@ app.listen(PORT, () => {
       await m.runLaudosMigrations();
     } catch (err) {
       console.error('[laudos-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v2.8.0: migrations do modulo Loteamentos / Auto-preenchimento.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-loteamentos');
+      await m.runLoteamentosMigrations();
+    } catch (err) {
+      console.error('[loteamentos-migrations] FALHA fatal:', err);
     }
   })();
 

@@ -629,6 +629,7 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="folha">Folha Mensal</button>
     <button class="tab" data-tab="vto">Vistoria (VTO)</button>
     <button class="tab" data-tab="laudos">📐 Laudo Demarcação</button>
+    <button class="tab" data-tab="loteamentos">🏘️ Loteamentos</button>
     <button class="tab" data-tab="proposta">Proposta</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
   </div>
@@ -648,6 +649,7 @@ window.forcarUpdateApp = forcarUpdate;
   <div id="view-recibos" class="view"></div>
   <div id="view-notas" class="view"></div>
   <div id="view-laudos" class="view"></div>
+  <div id="view-loteamentos" class="view"></div>
   <div id="view-calculos" class="view"></div>
 </div>
 
@@ -1401,6 +1403,7 @@ async function render() {
       recibos: async () => { await Promise.all([loadObras(), loadRecibos()]); renderRecibos(); },
       notas:   async () => { await Promise.all([loadNotas(), loadFiscalConfig()]); renderNotas(); },
       laudos:  async () => { await loadLaudos(); renderLaudos(); },
+      loteamentos: async () => { await loadLoteamentos(); renderLoteamentos(); },
     };
     await fns[state.currentTab]();
   } catch (e) {
@@ -15664,6 +15667,248 @@ if ('serviceWorker' in navigator) {
       console.warn('[PWA] SW register falhou:', err.message);
     });
   });
+}
+
+// ─── v2.8.0: Modulo Loteamentos / Auto-preenchimento ──────────────────────────
+// Aba Loteamentos: lista loteamentos + upload de CSV/XLSX + drilldown
+// Quadras→Lotes. Integracao com laudo vem na v2.9.0.
+
+state.loteamentos = state.loteamentos || [];
+state.loteamentoView = 'lista'; // 'lista' | 'detalhe' | 'upload'
+state.loteamentoAtual = null;
+state.loteamentoQuadras = [];
+state.loteamentoLotesDoQuadra = {};
+
+async function loadLoteamentos() {
+  try {
+    const r = await api('/api/loteamentos');
+    state.loteamentos = r.loteamentos || [];
+  } catch (err) { console.warn('[loteamentos]', err.message); state.loteamentos = []; }
+}
+
+async function loadLoteamentoDetalhe(id) {
+  try {
+    const r = await api('/api/loteamentos/' + id);
+    state.loteamentoAtual = r.loteamento;
+    state.loteamentoQuadras = r.quadras || [];
+    state.loteamentoLotesDoQuadra = {};
+  } catch (err) { console.warn('[loteamento-detalhe]', err.message); }
+}
+
+async function loadLotesDeQuadra(quadraId) {
+  try {
+    const r = await api('/api/loteamentos/quadra/' + quadraId + '/lotes');
+    state.loteamentoLotesDoQuadra[quadraId] = r.lotes || [];
+  } catch (err) {
+    console.warn('[lotes-quadra]', err.message);
+    state.loteamentoLotesDoQuadra[quadraId] = [];
+  }
+}
+
+function renderLoteamentos() {
+  const v = document.getElementById('view-loteamentos');
+  if (!v) return;
+  if (state.loteamentoView === 'detalhe' && state.loteamentoAtual) {
+    return renderLoteamentoDetalhe(v);
+  }
+  if (state.loteamentoView === 'upload') {
+    return renderLoteamentoUpload(v);
+  }
+
+  const lots = state.loteamentos || [];
+  v.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <h3 style="margin:0;">🏘️ Loteamentos cadastrados (${lots.length})</h3>
+        <button id="lt-btn-upload" style="background:var(--gold); color:#06120a; border-color:var(--gold);">📥 Importar CSV/XLSX</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin:8px 0 0;">
+        Cadastre previamente loteamentos com suas quadras, ruas, lotes e medidas teóricas do memorial.
+        Em campo, o técnico só seleciona <strong>Loteamento → Quadra → Lote</strong> e o sistema preenche
+        automaticamente confrontantes, medidas e área. <em>(Integração com Laudo: v2.9.0.)</em>
+      </p>
+    </div>
+    ${lots.length === 0 ? `
+      <div class="card empty">Nenhum loteamento cadastrado. Clique em <strong>📥 Importar CSV/XLSX</strong> pra começar.</div>
+    ` : `
+      <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; margin-top:12px;">
+        ${lots.map(l => `
+          <div class="card" style="cursor:pointer; border-left:3px solid var(--gold);" data-lt-open="${l.id}">
+            <h4 style="margin:0 0 6px;">${escape(l.nome)}</h4>
+            <p style="font-size:11px; color:var(--text-muted); margin:0;">
+              ${escape(l.municipio || '—')}/${escape(l.uf || '—')}<br>
+              <span style="opacity:0.7;">Atualizado: ${escape((l.updated_at||'').slice(0,10))}</span>
+            </p>
+          </div>
+        `).join('')}
+      </div>
+    `}
+  `;
+
+  document.getElementById('lt-btn-upload').onclick = () => {
+    state.loteamentoView = 'upload';
+    renderLoteamentos();
+  };
+  v.querySelectorAll('[data-lt-open]').forEach(el => el.onclick = async () => {
+    const id = Number(el.dataset.ltOpen);
+    await loadLoteamentoDetalhe(id);
+    state.loteamentoView = 'detalhe';
+    renderLoteamentos();
+  });
+}
+
+function renderLoteamentoUpload(v) {
+  v.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">📥 Importar Loteamento (CSV ou XLSX)</h3>
+        <button id="lt-back" style="font-size:12px;">← Voltar</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin:8px 0;">
+        Aceita <strong>.csv</strong> e <strong>.xlsx</strong>. Colunas obrigatórias:
+        <code>loteamento, quadra, lote, rua_frente, conf_frente, conf_fundo, conf_lateral_dir, conf_lateral_esq,
+        medida_frente_m, medida_fundo_m, medida_lateral_dir_m, medida_lateral_esq_m, area_m2</code>.
+        Colunas opcionais: <code>area_calculada_m2, numero_de_lados, observacoes</code>.<br>
+        <strong>Convenção pra confrontante lote→lote:</strong> <code>LOTE:Q. 02/03</code> (resolve para FK do Lote 03 da Quadra Q. 02).
+        Texto livre fica como descritivo (ex: "RUA EVANGELINA DA CRUZ", "APP - Rio Açailândia").
+      </p>
+      <input type="file" id="lt-file" accept=".csv,.txt,.xlsx,.xls" style="display:none;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <button id="lt-pick" style="background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955;">📁 Selecionar arquivo</button>
+        <span id="lt-fileinfo" style="font-size:12px; color:var(--text-muted); align-self:center;">nenhum arquivo</span>
+        <span style="flex:1;"></span>
+        <button id="lt-preview" disabled style="opacity:0.5;">👁 Apenas preview</button>
+        <button id="lt-import" disabled style="background:var(--gold); color:#06120a; border-color:var(--gold); opacity:0.5;">💾 Importar pra valer</button>
+      </div>
+      <div id="lt-relatorio" style="margin-top:12px;"></div>
+    </div>
+  `;
+
+  document.getElementById('lt-back').onclick = () => { state.loteamentoView = 'lista'; renderLoteamentos(); };
+
+  const fileInput = document.getElementById('lt-file');
+  let arquivoSelecionado = null;
+
+  document.getElementById('lt-pick').onclick = () => fileInput.click();
+  fileInput.onchange = () => {
+    arquivoSelecionado = fileInput.files?.[0] || null;
+    document.getElementById('lt-fileinfo').textContent = arquivoSelecionado
+      ? `📄 ${arquivoSelecionado.name} (${(arquivoSelecionado.size/1024).toFixed(1)} KB)`
+      : 'nenhum arquivo';
+    const enable = !!arquivoSelecionado;
+    ['lt-preview','lt-import'].forEach(id => {
+      const b = document.getElementById(id);
+      b.disabled = !enable;
+      b.style.opacity = enable ? '1' : '0.5';
+    });
+  };
+
+  const enviar = async (preview) => {
+    if (!arquivoSelecionado) return;
+    const fd = new FormData();
+    fd.append('arquivo', arquivoSelecionado, arquivoSelecionado.name);
+    const url = '/api/loteamentos/import' + (preview ? '?preview=1' : '');
+    const relEl = document.getElementById('lt-relatorio');
+    relEl.innerHTML = '<div class="card empty">⏳ Processando ' + arquivoSelecionado.name + '…</div>';
+    try {
+      const resp = await fetch(API + url, {
+        method: 'POST',
+        headers: { 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+        body: fd,
+      });
+      const r = await resp.json();
+      if (!resp.ok) throw new Error(r.error || 'Erro no server');
+      const errosHtml = r.erros && r.erros.length
+        ? `<details style="margin-top:8px;"><summary style="cursor:pointer; color:#ef4444;">⚠️ ${r.erros.length} aviso(s)</summary>
+            <ul style="font-size:11px; color:#ef4444; max-height:200px; overflow:auto;">
+              ${r.erros.slice(0, 50).map(e => `<li>linha ${e.linha}: ${escape(e.mensagem)}</li>`).join('')}
+              ${r.erros.length > 50 ? `<li>… (+${r.erros.length-50} avisos truncados)</li>` : ''}
+            </ul></details>`
+        : '';
+      relEl.innerHTML = `
+        <div class="card" style="border-left:3px solid ${preview ? '#0ea5e9' : 'var(--gold)'};">
+          <h4 style="margin:0 0 6px;">${preview ? '👁 Preview' : '✅ Import realizado'} · ${escape(r.loteamento_nome || '—')}</h4>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; font-size:13px;">
+            <div>📋 Total linhas: <strong>${r.total_linhas}</strong></div>
+            <div>🆕 Lotes criados: <strong style="color:var(--gold);">${r.lotes_criados}</strong></div>
+            <div>🔄 Atualizados: <strong>${r.lotes_atualizados}</strong></div>
+            <div>🔗 FKs resolvidas: <strong style="color:#10b981;">${r.fks_resolvidas}</strong></div>
+            <div>⏳ FKs pendentes: <strong style="color:#f59e0b;">${r.fks_pendentes}</strong></div>
+            <div>🔁 Duplicatas: <strong>${r.duplicatas}</strong></div>
+          </div>
+          ${errosHtml}
+        </div>
+      `;
+      if (!preview) {
+        await loadLoteamentos();
+      }
+    } catch (err) {
+      relEl.innerHTML = '<div class="card empty" style="color:#ef4444;">❌ ' + escape(err.message) + '</div>';
+    }
+  };
+
+  document.getElementById('lt-preview').onclick = () => enviar(true);
+  document.getElementById('lt-import').onclick = async () => {
+    if (!confirm('Importar pra valer? Lotes existentes serão atualizados.')) return;
+    await enviar(false);
+  };
+}
+
+function renderLoteamentoDetalhe(v) {
+  const lt = state.loteamentoAtual;
+  const quadras = state.loteamentoQuadras || [];
+  v.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
+        <h3 style="margin:0;">🏘️ ${escape(lt.nome)}</h3>
+        <button id="lt-back-list" style="font-size:12px;">← Lista</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin:8px 0 0;">
+        ${escape(lt.municipio || '—')}/${escape(lt.uf || '—')} · ${quadras.length} quadra(s) ·
+        Atualizado em ${escape((lt.updated_at||'').slice(0,10))}
+      </p>
+    </div>
+    ${quadras.length === 0 ? '<div class="card empty">Sem quadras. Importe um CSV/XLSX.</div>' : `
+      <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:8px; margin-top:8px;">
+        ${quadras.map(q => `
+          <details class="card" style="padding:8px;" data-lt-q="${q.id}">
+            <summary style="cursor:pointer; font-weight:600;">📍 ${escape(q.nome)}</summary>
+            <div data-lt-q-content="${q.id}" style="margin-top:6px; font-size:11px;">⏳ Carregando lotes…</div>
+          </details>
+        `).join('')}
+      </div>
+    `}
+  `;
+  document.getElementById('lt-back-list').onclick = () => { state.loteamentoView = 'lista'; renderLoteamentos(); };
+
+  v.querySelectorAll('[data-lt-q]').forEach(d => d.addEventListener('toggle', async () => {
+    if (!d.open) return;
+    const qId = Number(d.dataset.ltQ);
+    const cont = d.querySelector(`[data-lt-q-content="${qId}"]`);
+    if (state.loteamentoLotesDoQuadra[qId]) {
+      // Re-render apenas (cache)
+      cont.innerHTML = renderLotesQuadra(state.loteamentoLotesDoQuadra[qId]);
+      return;
+    }
+    await loadLotesDeQuadra(qId);
+    cont.innerHTML = renderLotesQuadra(state.loteamentoLotesDoQuadra[qId] || []);
+  }));
+}
+
+function renderLotesQuadra(lotes) {
+  if (!lotes.length) return '<em>Sem lotes nesta quadra.</em>';
+  return `<table style="width:100%; font-size:11px;">
+    <thead><tr><th style="text-align:left;">Lote</th><th>Frente</th><th>Fundo</th><th>L.Dir</th><th>L.Esq</th><th>Área (m²)</th></tr></thead>
+    <tbody>${lotes.map(l => `
+      <tr>
+        <td><strong>${escape(l.numero_lote)}</strong></td>
+        <td>${l.medida_frente_m ?? '—'}</td>
+        <td>${l.medida_fundo_m ?? '—'}</td>
+        <td>${l.medida_lateral_dir_m ?? '—'}</td>
+        <td>${l.medida_lateral_esq_m ?? '—'}</td>
+        <td>${l.area_m2 ?? '—'}</td>
+      </tr>`).join('')}
+    </tbody></table>`;
 }
 
 // v2.1.7+v2.1.8: injeta datalists Açailândia no DOM (autocomplete dos campos do laudo)

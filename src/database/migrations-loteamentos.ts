@@ -1,0 +1,140 @@
+// v2.8.0 — Migrations DEDICADAS do modulo Loteamentos / Auto-preenchimento.
+// Roda independente de runMigrations principal (mesma pauta de migrations-laudos).
+//
+// Cria 5 tabelas:
+//   loteamentos                — cabecalho do loteamento (Colina, Park, etc)
+//   loteamento_ruas            — ruas dentro do loteamento
+//   loteamento_quadras         — quadras (Q. 01, Q. 02, ...)
+//   loteamento_lotes           — lotes individuais (com FK pra rua, quadra, e
+//                                confrontantes hibrido FK+texto)
+//   configuracoes_demarcacao   — config global (tolerancia de medida em cm)
+
+import pool from './connection';
+
+const CREATE_LOTEAMENTOS = `
+  CREATE TABLE IF NOT EXISTS loteamentos (
+    id                    INT AUTO_INCREMENT PRIMARY KEY,
+    nome                  VARCHAR(255) NOT NULL,
+    municipio             VARCHAR(120),
+    uf                    CHAR(2),
+    arquivo_planta_pdf    VARCHAR(255) NULL,
+    arquivo_dwg_original  VARCHAR(255) NULL,
+    sistema_coordenadas   VARCHAR(120) NULL,
+    observacoes           TEXT NULL,
+    ativo                 BOOLEAN DEFAULT TRUE,
+    created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_loteamento_nome (nome),
+    INDEX idx_loteamento_ativo (ativo)
+  )
+`;
+
+const CREATE_LOTEAMENTO_RUAS = `
+  CREATE TABLE IF NOT EXISTS loteamento_ruas (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    loteamento_id   INT NOT NULL,
+    nome            VARCHAR(200) NOT NULL,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (loteamento_id) REFERENCES loteamentos(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_loteamento_rua (loteamento_id, nome),
+    INDEX idx_rua_loteamento (loteamento_id)
+  )
+`;
+
+const CREATE_LOTEAMENTO_QUADRAS = `
+  CREATE TABLE IF NOT EXISTS loteamento_quadras (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    loteamento_id   INT NOT NULL,
+    nome            VARCHAR(60) NOT NULL,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (loteamento_id) REFERENCES loteamentos(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_loteamento_quadra (loteamento_id, nome),
+    INDEX idx_quadra_loteamento (loteamento_id)
+  )
+`;
+
+// Lotes — confrontantes em modelo hibrido (FK pra outro lote OU texto livre).
+// Pelo menos um dos dois preenchido; ambos podem coexistir (FK = oficial,
+// texto = descricao livre fallback). origem_dado rastreia procedencia
+// ('manual' | 'csv' | 'xlsx' | 'dwg') pra auditoria.
+const CREATE_LOTEAMENTO_LOTES = `
+  CREATE TABLE IF NOT EXISTS loteamento_lotes (
+    id                          INT AUTO_INCREMENT PRIMARY KEY,
+    quadra_id                   INT NOT NULL,
+    numero_lote                 VARCHAR(20) NOT NULL,
+    rua_frente_id               INT NULL,
+
+    conf_frente_lote_id         INT NULL,
+    conf_frente_texto           VARCHAR(255) NULL,
+    conf_fundo_lote_id          INT NULL,
+    conf_fundo_texto            VARCHAR(255) NULL,
+    conf_lateral_dir_lote_id    INT NULL,
+    conf_lateral_dir_texto      VARCHAR(255) NULL,
+    conf_lateral_esq_lote_id    INT NULL,
+    conf_lateral_esq_texto      VARCHAR(255) NULL,
+
+    medida_frente_m             DECIMAL(10,2) NULL,
+    medida_fundo_m              DECIMAL(10,2) NULL,
+    medida_lateral_dir_m        DECIMAL(10,2) NULL,
+    medida_lateral_esq_m        DECIMAL(10,2) NULL,
+    area_m2                     DECIMAL(12,2) NULL,
+    area_calculada_m2           DECIMAL(12,2) NULL,
+    numero_lados                INT NULL,
+
+    vertices_geojson            TEXT NULL,
+
+    origem_dado                 ENUM('manual','csv','xlsx','dwg') DEFAULT 'manual',
+    observacoes                 TEXT NULL,
+    created_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (quadra_id)                REFERENCES loteamento_quadras(id) ON DELETE CASCADE,
+    FOREIGN KEY (rua_frente_id)            REFERENCES loteamento_ruas(id)    ON DELETE SET NULL,
+    FOREIGN KEY (conf_frente_lote_id)      REFERENCES loteamento_lotes(id)   ON DELETE SET NULL,
+    FOREIGN KEY (conf_fundo_lote_id)       REFERENCES loteamento_lotes(id)   ON DELETE SET NULL,
+    FOREIGN KEY (conf_lateral_dir_lote_id) REFERENCES loteamento_lotes(id)   ON DELETE SET NULL,
+    FOREIGN KEY (conf_lateral_esq_lote_id) REFERENCES loteamento_lotes(id)   ON DELETE SET NULL,
+    UNIQUE KEY uk_quadra_lote (quadra_id, numero_lote),
+    INDEX idx_lote_quadra (quadra_id),
+    INDEX idx_lote_rua    (rua_frente_id)
+  )
+`;
+
+const CREATE_CONFIGURACOES_DEMARCACAO = `
+  CREATE TABLE IF NOT EXISTS configuracoes_demarcacao (
+    id                    INT PRIMARY KEY,
+    tolerancia_medida_cm  INT NOT NULL DEFAULT 5,
+    updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )
+`;
+
+// Seed: garante que existe a config global (id=1)
+const SEED_CONFIG = `
+  INSERT IGNORE INTO configuracoes_demarcacao (id, tolerancia_medida_cm)
+  VALUES (1, 5)
+`;
+
+export async function runLoteamentosMigrations(): Promise<void> {
+  const ops: Array<{ label: string; sql: string }> = [
+    { label: 'loteamentos', sql: CREATE_LOTEAMENTOS },
+    { label: 'loteamento_ruas', sql: CREATE_LOTEAMENTO_RUAS },
+    { label: 'loteamento_quadras', sql: CREATE_LOTEAMENTO_QUADRAS },
+    { label: 'loteamento_lotes', sql: CREATE_LOTEAMENTO_LOTES },
+    { label: 'configuracoes_demarcacao', sql: CREATE_CONFIGURACOES_DEMARCACAO },
+    { label: 'seed: config global default', sql: SEED_CONFIG },
+  ];
+  for (const { label, sql } of ops) {
+    try {
+      await pool.execute(sql);
+      console.log(`[loteamentos-migrations] OK: ${label}`);
+    } catch (err) {
+      const msg = (err as Error).message || '';
+      if (/already exists|Duplicate/i.test(msg)) {
+        console.log(`[loteamentos-migrations] ja existe (OK): ${label}`);
+      } else {
+        console.error(`[loteamentos-migrations] FALHA ${label}:`, msg.slice(0, 200));
+      }
+    }
+  }
+}
