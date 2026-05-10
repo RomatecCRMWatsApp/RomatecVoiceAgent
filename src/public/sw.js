@@ -1,11 +1,24 @@
 // Service Worker da ZAYRA — versão atrelada à versão do app pra forçar
 // rotação de cache em todo deploy. Se você bumpar a versão do app, bumpe esta
 // constante também (ou no futuro, gere via build).
-const CACHE = 'zayra-v2.4.2';
+const CACHE = 'zayra-v2.4.3';
 
-// App shell — recursos pequenos que podem ser cacheados.
-// HTML NÃO está aqui de propósito — é network-first.
-const PRECACHE = ['/avatar.png', '/manifest.json', '/manifest.webmanifest', '/manifest-obras.webmanifest', '/logo_R-removebg-preview.png', '/romatec-logo-removebg-preview.png'];
+// App shell — recursos cacheados na instalação para garantir abertura offline.
+// v2.4.3 P0.3: pre-cacheia também /obras e /js/catalogo-servicos.js — sem isso,
+// quando o usuário abre o app sem internet em campo, o HTML não está disponível
+// e o navegador mostra a tela "sem conexão" nativa. Mesmo HTML sendo
+// network-first no fetch handler, o pre-cache é o fallback inicial.
+const PRECACHE = [
+  '/',
+  '/obras',
+  '/js/catalogo-servicos.js',
+  '/avatar.png',
+  '/manifest.json',
+  '/manifest.webmanifest',
+  '/manifest-obras.webmanifest',
+  '/logo_R-removebg-preview.png',
+  '/romatec-logo-removebg-preview.png',
+];
 
 // ── Install: pré-cacheia só recursos estáticos pequenos ─────────────────────
 self.addEventListener('install', e => {

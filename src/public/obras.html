@@ -13111,6 +13111,8 @@ const ACAILANDIA_DEFAULTS = {
     'SinoGNSS T30 Pro',
   ],
   equipColetor: [
+    'Coletor RC 60',
+    'Coletor R 80',
     'Coletor R60',
     'Coletor R80',
     'Coletor SinoGNSS R60 (Android 12)',
@@ -13717,6 +13719,36 @@ function gerarUuidFallback() {
     const r = Math.random() * 16 | 0;
     return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
   });
+}
+
+// v2.4.3 P0.2: Cache local de fotos pendentes (antes do save de pontos)
+// User pode tirar foto enquanto rastreia, sem precisar salvar ponto antes.
+// Flush automatico quando salvar pontos com sucesso.
+const FOTOS_PENDENTES_KEY = (laudoId) => 'romatec_fotos_pendentes_' + laudoId;
+function salvarFotoPendente(laudoId, ordem, dataB64, mime, legenda) {
+  try {
+    const list = JSON.parse(localStorage.getItem(FOTOS_PENDENTES_KEY(laudoId)) || '[]');
+    const filt = list.filter(f => f.ordem !== ordem); // substitui se ja tinha
+    filt.push({ ordem, dataB64, mime, legenda, ts: Date.now() });
+    localStorage.setItem(FOTOS_PENDENTES_KEY(laudoId), JSON.stringify(filt));
+  } catch (err) {
+    console.warn('[fotos pendentes] localStorage cheio:', err.message);
+    alert('⚠️ Espaço local cheio. Salve os pontos pra liberar espaço (foto vai pro server).');
+  }
+}
+function getFotosPendentes(laudoId) {
+  try { return JSON.parse(localStorage.getItem(FOTOS_PENDENTES_KEY(laudoId)) || '[]'); }
+  catch (_) { return []; }
+}
+function removerFotoPendente(laudoId, ordem) {
+  try {
+    const list = JSON.parse(localStorage.getItem(FOTOS_PENDENTES_KEY(laudoId)) || '[]');
+    const filt = list.filter(f => f.ordem !== ordem);
+    localStorage.setItem(FOTOS_PENDENTES_KEY(laudoId), JSON.stringify(filt));
+  } catch (_) {}
+}
+function limparFotosPendentes(laudoId) {
+  try { localStorage.removeItem(FOTOS_PENDENTES_KEY(laudoId)); } catch (_) {}
 }
 
 // Cache local de laudos criados offline pra poder editá-los antes do sync
@@ -14492,12 +14524,14 @@ function renderLaudoTabPontos(c) {
     const isDinamico = isUrbNp || isRural;
 
     // Quantidade de pontos: fixa pra 4P/5P, dinâmica pra Np/Rural
+    // v2.4.3 P1.4: Np/Rural começam com 1 ponto e crescem incrementalmente
+    // (em campo, user cadastra P1, depois P2, depois P3... conforme rastreia)
     let nPontos;
     if (isUrb4) nPontos = 4;
     else if (isUrb5) nPontos = 5;
     else {
       if (typeof state.laudoFormPontosCount !== 'number') {
-        state.laudoFormPontosCount = Math.max(pontos.length, 4);
+        state.laudoFormPontosCount = Math.max(pontos.length, 1);
       }
       nPontos = state.laudoFormPontosCount;
     }
@@ -14534,6 +14568,8 @@ function renderLaudoTabPontos(c) {
     for (let i = 1; i <= nPontos; i++) {
       const p = pontos.find(x => x.ordem === i) || {};
       const fotoP = p.id ? fotoDoPonto(p.id) : null;
+      // v2.4.3: tambem checa fotos pendentes locais (caso ponto nao salvo ainda)
+      const fotoPendente = !fotoP ? getFotosPendentes(l.id).find(f => f.ordem === i) : null;
       const cols = (showUTM?2:0) + (showLatLng?2:0) + 1;
       rows += `
         <div class="card" style="padding:8px; border-left:3px solid var(--gold); position:relative;">
@@ -14571,17 +14607,26 @@ function renderLaudoTabPontos(c) {
               <button data-fp-foto-rm="${fotoP.id}" style="font-size:11px; padding:4px 8px; background:#ef444422; color:#ef4444; border:1px solid #ef444455;">🗑️ Remover foto</button>
               <button data-fp-foto-replace="${i}" style="font-size:11px; padding:4px 8px;">📷 Trocar</button>
               <span style="font-size:11px; color:var(--text-muted);">↔ Aparece também na aba <strong>Fotos</strong></span>
+            ` : fotoPendente ? `
+              <img src="data:${fotoPendente.mime};base64,${fotoPendente.dataB64}"
+                style="width:64px; height:64px; object-fit:cover; border-radius:4px; border:2px dashed #f59e0b; cursor:pointer;"
+                title="Foto cacheada localmente — sobe pro server quando salvar pontos">
+              <button data-fp-foto-replace="${i}" style="font-size:11px; padding:4px 8px;">📷 Trocar</button>
+              <span style="font-size:11px; color:#f59e0b;">⏳ pendente — sobe quando salvar pontos</span>
             ` : `
               <button data-fp-foto="${i}" style="background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955; padding:6px 12px; font-size:12px;">📷 Tirar foto do piquete P${i}</button>
-              <span style="font-size:11px; color:var(--text-muted);">${p.id ? '(opcional — vai pro relatório fotográfico)' : '(salve os pontos primeiro pra poder anexar foto)'}</span>
+              <span style="font-size:11px; color:var(--text-muted);">(opcional — vai pro relatório fotográfico)</span>
             `}
             <input type="file" accept="image/*" capture="environment" data-fp-foto-input="${i}" style="display:none;">
           </div>
         </div>
       `;
       // Lado seguinte
+      // v2.4.3 P1.4: em modo incremental (Np/Rural), não mostra lados enquanto
+      // o polígono não pode fechar (precisa 3+ pontos). Pra urbano fixo, sempre mostra.
+      const mostrarLado = !isDinamico || nPontos >= 3;
       const ld = ladosArr[i-1] || {};
-      rows += `
+      rows += !mostrarLado ? '' : `
         <div style="padding:6px 12px; margin-left:20px; border-left:2px dashed var(--gold); font-size:11px; color:var(--text-muted);">
           ↓ <strong>${getLabelLado(i)}</strong>
           <div style="display:grid; grid-template-columns: 1fr 2fr; gap:6px; margin-top:4px;">
@@ -14610,13 +14655,30 @@ function renderLaudoTabPontos(c) {
       </div>
     ` : '';
 
+    // v2.4.3 P1.5: Base GNSS com Play/Pause (igual rover) — datetime manual fica em <details>
+    // Se o laudo já tem base_inicio salvo, hidrata o cronômetro a partir desse timestamp
+    if (cronoAtivo && !cronos.base) {
+      const iniSalvo = l.base_inicio_rastreio ? new Date(l.base_inicio_rastreio) : null;
+      const fimSalvo = l.base_fim_rastreio ? new Date(l.base_fim_rastreio) : null;
+      if (iniSalvo && fimSalvo) {
+        const diffSec = Math.max(0, Math.floor((fimSalvo - iniSalvo) / 1000));
+        cronos.base = { running:false, startMs:null, accumulated:diffSec, inicioISO:iniSalvo.toISOString(), fimISO:fimSalvo.toISOString() };
+        salvarCronos();
+      }
+    }
+    const baseAccumDisplay = fmtCrono(getCronoSec('base', cronos, 0));
+    const baseRunning = cronos.base?.running === true;
+    const baseInicioISO = cronos.base?.inicioISO || (l.base_inicio_rastreio ? new Date(l.base_inicio_rastreio).toISOString() : '');
+    const baseFimISO = cronos.base?.fimISO || (l.base_fim_rastreio ? new Date(l.base_fim_rastreio).toISOString() : '');
+    const fmtTs = (iso) => { try { return iso ? new Date(iso).toLocaleString('pt-BR') : '—'; } catch(_) { return '—'; } };
+
     // Card Base GNSS (rural sempre, urbano se toggle ON)
     const baseHtml = cronoAtivo ? `
       <div class="card" style="border:1px solid #f59e0b;">
-        <h3 style="margin-top:0;">📡 Equipamentos GNSS + rastreio da base ${isRural?'(NTGIR/INCRA)':''}</h3>
+        <h3 style="margin-top:0;">📡 Equipamentos GNSS + rastreio da Base ${isRural?'(NTGIR/INCRA)':''}</h3>
         <p style="font-size:11px; color:var(--text-muted); margin:4px 0 8px;">
-          ${isRural ? '⚠️ <strong>Obrigatório para georreferenciamento rural certificável.</strong>' : '🕐 Registre os equipamentos + início e fim do rastreio da base.'}
-          Use os botões <strong>📌 Agora</strong> em campo — sistema calcula a duração automaticamente.
+          ${isRural ? '⚠️ <strong>Obrigatório para georreferenciamento rural certificável.</strong>' : '🕐 Registre os equipamentos + tempo de rastreio da base.'}
+          Use o cronômetro <strong>▶ Iniciar</strong> ao ligar a base e <strong>⏸ Pausar</strong> ao desligar.
         </p>
         <div style="display:grid; grid-template-columns:1fr; gap:6px;">
           <label style="font-size:11px; color:var(--text-muted);">📡 Receptor BASE
@@ -14631,25 +14693,35 @@ function renderLaudoTabPontos(c) {
             <input id="lp-coletor-nome" list="dl-equip-coletor" placeholder="Coletor"
               value="${escape(l.coletor_nome || 'Coletor R60')}" style="width:100%;">
           </label>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-            <div>
-              <label style="font-size:11px; color:var(--text-muted); display:block;">⏱️ Início do rastreio</label>
-              <div style="display:flex; gap:4px;">
-                <input id="lp-base-inicio" type="datetime-local" value="${l.base_inicio_rastreio ? new Date(l.base_inicio_rastreio).toISOString().slice(0,16) : ''}" style="flex:1;">
-                <button id="lp-base-marcar-inicio" title="Marcar início agora" style="padding:6px 10px; background:#16a34a22; color:#16a34a; border:1px solid #16a34a55;">📌 Agora</button>
-              </div>
+
+          <!-- v2.4.3 P1.5: Cronômetro Play/Pause estilo Rover -->
+          <div style="padding:10px; background:var(--bg-secondary); border-radius:6px; margin-top:4px;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <span style="font-size:12px; color:var(--text-muted);">⏱️ Tempo de rastreio:</span>
+              <span data-crono-display="base" style="font-family:monospace; font-size:20px; font-weight:700; min-width:96px; color:var(--gold);">${baseAccumDisplay}</span>
+              <button data-crono-toggle="base" style="padding:6px 14px; background:${baseRunning?'#f59e0b22':'#16a34a22'}; color:${baseRunning?'#f59e0b':'#16a34a'}; border:1px solid ${baseRunning?'#f59e0b55':'#16a34a55'}; font-size:14px;">${baseRunning ? '⏸ Pausar' : '▶ Iniciar'}</button>
+              <button data-crono-reset="base" title="Zerar cronômetro da base" style="padding:6px 10px; font-size:11px;">↺</button>
             </div>
-            <div>
-              <label style="font-size:11px; color:var(--text-muted); display:block;">⏱️ Fim do rastreio</label>
-              <div style="display:flex; gap:4px;">
-                <input id="lp-base-fim" type="datetime-local" value="${l.base_fim_rastreio ? new Date(l.base_fim_rastreio).toISOString().slice(0,16) : ''}" style="flex:1;">
-                <button id="lp-base-marcar-fim" title="Marcar fim agora" style="padding:6px 10px; background:#ef444422; color:#ef4444; border:1px solid #ef444455;">📌 Agora</button>
-              </div>
+            <div id="lp-base-timestamps" style="margin-top:6px; font-size:11px; color:var(--text-muted);">
+              <span>Início: <strong>${fmtTs(baseInicioISO)}</strong></span>
+              <span style="margin-left:12px;">Fim: <strong>${fmtTs(baseFimISO)}</strong></span>
             </div>
+            <details style="margin-top:8px;">
+              <summary style="font-size:11px; cursor:pointer; color:var(--text-muted);">⚙️ Editar manualmente (retroativo)</summary>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px;">
+                <div>
+                  <label style="font-size:10px; color:var(--text-muted); display:block;">Início manual</label>
+                  <input id="lp-base-inicio" type="datetime-local" value="${baseInicioISO ? new Date(baseInicioISO).toISOString().slice(0,16) : ''}" style="width:100%;">
+                </div>
+                <div>
+                  <label style="font-size:10px; color:var(--text-muted); display:block;">Fim manual</label>
+                  <input id="lp-base-fim" type="datetime-local" value="${baseFimISO ? new Date(baseFimISO).toISOString().slice(0,16) : ''}" style="width:100%;">
+                </div>
+              </div>
+              <p style="font-size:10px; color:var(--text-muted); margin:4px 0 0;">Use só pra ajustar se esqueceu de pausar — o cronômetro acima é a fonte oficial.</p>
+            </details>
           </div>
-          <div id="lp-base-duracao" style="padding:10px; background:var(--bg-secondary); border-radius:4px; font-size:14px; text-align:center; font-family:monospace;">
-            Duração: <strong>—</strong>
-          </div>
+
           <textarea id="lp-base-obs" rows="2" placeholder="Observações da base (opcional — equipamento, condições, marco oficial, etc)" style="width:100%; font-size:11px;">${escape(l.base_observacoes || '')}</textarea>
         </div>
       </div>
@@ -14686,7 +14758,24 @@ function renderLaudoTabPontos(c) {
       renderFormPontos();
     });
 
-    // v2.2.2: Cronômetros por ponto (▶/⏸/↺)
+    // v2.2.2 + v2.4.3 P1.5: Cronômetros (▶/⏸/↺) — pontos do Rover + Base
+    // Pra Base ('base'), também grava inicioISO/fimISO e sincroniza datetime-local manual
+    const isoLocalDoDate = (d) => {
+      const tz = d.getTimezoneOffset() * 60000;
+      return new Date(d - tz).toISOString().slice(0,16);
+    };
+    const sincBaseManualInputs = () => {
+      const baseIniInp = document.getElementById('lp-base-inicio');
+      const baseFimInp = document.getElementById('lp-base-fim');
+      if (baseIniInp) baseIniInp.value = cronos.base?.inicioISO ? isoLocalDoDate(new Date(cronos.base.inicioISO)) : '';
+      if (baseFimInp) baseFimInp.value = cronos.base?.fimISO ? isoLocalDoDate(new Date(cronos.base.fimISO)) : '';
+      const tsEl = document.getElementById('lp-base-timestamps');
+      if (tsEl) {
+        const fmt = (iso) => { try { return iso ? new Date(iso).toLocaleString('pt-BR') : '—'; } catch(_) { return '—'; } };
+        tsEl.innerHTML = `<span>Início: <strong>${fmt(cronos.base?.inicioISO)}</strong></span><span style="margin-left:12px;">Fim: <strong>${fmt(cronos.base?.fimISO)}</strong></span>`;
+      }
+    };
+
     document.querySelectorAll('[data-crono-toggle]').forEach(b => b.onclick = () => {
       const key = b.dataset.cronoToggle;
       if (!cronos[key]) cronos[key] = { running:false, startMs:null, accumulated:0 };
@@ -14697,28 +14786,44 @@ function renderLaudoTabPontos(c) {
         cronos[key].startMs = null;
         b.textContent = '▶ Iniciar';
         b.style.background = '#16a34a22'; b.style.color = '#16a34a'; b.style.borderColor = '#16a34a55';
-        // Atualiza input manual
-        const i = key.replace('p','');
-        const inp = document.querySelector(`[data-fp-rastreio="${i}"]`);
-        if (inp) inp.value = cronos[key].accumulated;
+        if (key === 'base') {
+          cronos.base.fimISO = new Date().toISOString();
+          sincBaseManualInputs();
+        } else {
+          // Atualiza input manual de tempo do ponto
+          const i = key.replace('p','');
+          const inp = document.querySelector(`[data-fp-rastreio="${i}"]`);
+          if (inp) inp.value = cronos[key].accumulated;
+        }
       } else {
         cronos[key].running = true;
         cronos[key].startMs = Date.now();
         b.textContent = '⏸ Pausar';
         b.style.background = '#f59e0b22'; b.style.color = '#f59e0b'; b.style.borderColor = '#f59e0b55';
+        if (key === 'base') {
+          // Primeira vez: marca inicioISO; reinicia: limpa fimISO
+          if (!cronos.base.inicioISO) cronos.base.inicioISO = new Date().toISOString();
+          cronos.base.fimISO = null;
+          sincBaseManualInputs();
+        }
       }
       salvarCronos();
     });
+
     document.querySelectorAll('[data-crono-reset]').forEach(b => b.onclick = () => {
-      if (!confirm('Zerar cronômetro deste ponto?')) return;
       const key = b.dataset.cronoReset;
+      const label = key === 'base' ? 'da BASE' : 'deste ponto';
+      if (!confirm(`Zerar cronômetro ${label}?`)) return;
       cronos[key] = { running:false, startMs:null, accumulated:0 };
+      if (key === 'base') { cronos.base.inicioISO = null; cronos.base.fimISO = null; sincBaseManualInputs(); }
       salvarCronos();
       const disp = document.querySelector(`[data-crono-display="${key}"]`);
       if (disp) disp.textContent = '00:00:00';
-      const i = key.replace('p','');
-      const inp = document.querySelector(`[data-fp-rastreio="${i}"]`);
-      if (inp) inp.value = '';
+      if (key !== 'base') {
+        const i = key.replace('p','');
+        const inp = document.querySelector(`[data-fp-rastreio="${i}"]`);
+        if (inp) inp.value = '';
+      }
       const btn = document.querySelector(`[data-crono-toggle="${key}"]`);
       if (btn) {
         btn.textContent = '▶ Iniciar';
@@ -14726,36 +14831,28 @@ function renderLaudoTabPontos(c) {
       }
     });
 
-    // v2.2.2: Botões "Marcar agora" da Base + auto-calc duração
-    const calcDuracao = () => {
-      const ini = document.getElementById('lp-base-inicio')?.value;
-      const fim = document.getElementById('lp-base-fim')?.value;
-      const el = document.getElementById('lp-base-duracao');
-      if (!el) return;
-      if (ini && fim) {
-        const diff = (new Date(fim) - new Date(ini)) / 1000;
-        if (diff > 0) {
-          const h = Math.floor(diff / 3600);
-          const m = Math.floor((diff % 3600) / 60);
-          const s = Math.floor(diff % 60);
-          el.innerHTML = `Duração: <strong style="color:var(--gold);">${h}h ${m}min ${s}s</strong> (${Math.round(diff)} segundos / ${(diff/3600).toFixed(2)} horas)`;
-        } else el.innerHTML = '<strong style="color:#ef4444;">⚠️ Fim deve ser posterior ao início</strong>';
-      } else el.innerHTML = 'Duração: <strong>—</strong>';
-    };
+    // v2.4.3 P1.5: Edição manual dos datetime-local da Base sincroniza ISO no crono
     const baseIniEl = document.getElementById('lp-base-inicio');
     const baseFimEl = document.getElementById('lp-base-fim');
-    if (baseIniEl) baseIniEl.oninput = calcDuracao;
-    if (baseFimEl) baseFimEl.oninput = calcDuracao;
-    const marcarIni = document.getElementById('lp-base-marcar-inicio');
-    const marcarFim = document.getElementById('lp-base-marcar-fim');
-    const isoLocalAgora = () => {
-      const d = new Date();
-      const tz = d.getTimezoneOffset() * 60000;
-      return new Date(d - tz).toISOString().slice(0,16);
+    const recomputarBaseFromManual = () => {
+      if (!cronos.base) cronos.base = { running:false, startMs:null, accumulated:0 };
+      const ini = baseIniEl?.value || null;
+      const fim = baseFimEl?.value || null;
+      cronos.base.inicioISO = ini ? new Date(ini).toISOString() : null;
+      cronos.base.fimISO = fim ? new Date(fim).toISOString() : null;
+      if (ini && fim) {
+        const diff = Math.max(0, Math.floor((new Date(fim) - new Date(ini)) / 1000));
+        cronos.base.accumulated = diff;
+        cronos.base.running = false;
+        cronos.base.startMs = null;
+        const disp = document.querySelector('[data-crono-display="base"]');
+        if (disp) disp.textContent = fmtCrono(diff);
+      }
+      salvarCronos();
+      sincBaseManualInputs();
     };
-    if (marcarIni) marcarIni.onclick = () => { baseIniEl.value = isoLocalAgora(); calcDuracao(); };
-    if (marcarFim) marcarFim.onclick = () => { baseFimEl.value = isoLocalAgora(); calcDuracao(); };
-    calcDuracao();
+    if (baseIniEl) baseIniEl.oninput = recomputarBaseFromManual;
+    if (baseFimEl) baseFimEl.oninput = recomputarBaseFromManual;
 
     // Adicionar ponto (Np/Rural)
     if (isDinamico) {
@@ -14766,7 +14863,9 @@ function renderLaudoTabPontos(c) {
         renderFormPontos();
       };
       document.querySelectorAll('[data-fp-rm]').forEach(b => b.onclick = () => {
-        if (nPontos <= 3) return alert('Mínimo 3 pontos pra fechar polígono');
+        // v2.4.3 P1.4: permite reduzir até 1 ponto (cadastro incremental em campo).
+        // Polígono fechado precisa 3+ — validação fica pro server na hora de calcular área.
+        if (nPontos <= 1) return alert('Mínimo 1 ponto.');
         if (!confirm(`Remover ponto P${nPontos}? Os dados desse ponto serão perdidos.`)) return;
         capturarValoresFormParaState(nPontos - 1);
         state.laudoFormPontosCount = nPontos - 1;
@@ -14774,28 +14873,34 @@ function renderLaudoTabPontos(c) {
       });
     }
 
-    // Foto: trigger no botão = clicar no input file
+    // v2.4.3 P0.2: Foto pode ser tirada ANTES de salvar pontos (cache local)
     document.querySelectorAll('[data-fp-foto], [data-fp-foto-replace]').forEach(b => {
       b.onclick = () => {
         const i = b.getAttribute('data-fp-foto') || b.getAttribute('data-fp-foto-replace');
-        const p = pontos.find(x => x.ordem === Number(i));
-        if (!p?.id) return alert('Salve os pontos primeiro pra anexar foto a um piquete');
         document.querySelector(`[data-fp-foto-input="${i}"]`).click();
       };
     });
 
-    // Foto upload — v2.3.0: carimbo geo automático (GPS + timestamp + ponto)
+    // v2.4.3 P0.2: Foto pode ser tirada SEM ponto salvo (cache local).
+    // Se ponto já existe no banco, upload direto. Se não, cacheia em
+    // localStorage e faz flush quando user clicar "Salvar pontos".
     document.querySelectorAll('[data-fp-foto-input]').forEach(input => {
       input.onchange = async () => {
         const i = Number(input.getAttribute('data-fp-foto-input'));
         const f = input.files?.[0];
         if (!f) return;
         const p = pontos.find(x => x.ordem === i);
-        if (!p?.id) return alert('Ponto não encontrado no banco. Salve os pontos primeiro.');
-
-        // Monta info do carimbo: prioriza coords do ponto (RTK), senão GPS celular
-        let stampLat = p.lat_decimal != null ? Number(p.lat_decimal) : null;
-        let stampLng = p.long_decimal != null ? Number(p.long_decimal) : null;
+        // Coordenadas: ponto salvo → usa do banco; senão tenta inputs do form ao vivo
+        let stampLat = p?.lat_decimal != null ? Number(p.lat_decimal) : null;
+        let stampLng = p?.long_decimal != null ? Number(p.long_decimal) : null;
+        if (stampLat == null) {
+          const fLat = document.querySelector(`[data-fp-lat="${i}"]`)?.value;
+          if (fLat) stampLat = Number(fLat);
+        }
+        if (stampLng == null) {
+          const fLng = document.querySelector(`[data-fp-lng="${i}"]`)?.value;
+          if (fLng) stampLng = Number(fLng);
+        }
         let source = '';
         if (stampLat != null && stampLng != null) {
           source = '📡 Coordenada RTK do ponto';
@@ -14809,33 +14914,40 @@ function renderLaudoTabPontos(c) {
         const now = new Date();
         const dataStr = now.toLocaleDateString('pt-BR');
         const horaStr = now.toLocaleTimeString('pt-BR').slice(0, 8);
+        const rotulo = document.querySelector(`[data-fp-rotulo="${i}"]`)?.value || `P${i}`;
         const stampInfo = {
-          label: `📍 ${p.rotulo || 'P'+i}`,
+          label: `📍 ${rotulo}`,
           numeroLaudo: l.numero_laudo,
           dataStr, horaStr,
           lat: stampLat, lng: stampLng,
           source,
         };
-
         try {
           const r = await compressImageFileComStamp(f, { maxDim: 1600, quality: 0.85 }, stampInfo);
-          const existente = fotoDoPonto(p.id);
-          if (existente) {
-            await api('/api/laudos-demarcacao/foto/'+existente.id, { method: 'DELETE' });
+          const legenda = `Piquete ${rotulo} · ${dataStr} ${horaStr}${stampLat?` · Lat ${stampLat.toFixed(6)} Lng ${stampLng.toFixed(6)}`:''}`;
+          if (p?.id) {
+            // Ponto já está no banco → upload direto
+            const existente = fotoDoPonto(p.id);
+            if (existente) {
+              await api('/api/laudos-demarcacao/foto/'+existente.id, { method: 'DELETE' });
+            }
+            await api('/api/laudos-demarcacao/'+l.id+'/fotos', {
+              method: 'POST',
+              body: JSON.stringify({
+                fotos: [{
+                  conteudo_b64: r.data_base64, mime: r.mime,
+                  filename: `${rotulo}-${l.numero_laudo}.jpg`,
+                  legenda, ponto_id: p.id,
+                }],
+              }),
+              headers: { 'Content-Type': 'application/json' },
+            });
+            await loadLaudoDetalhe(l.id);
+          } else {
+            // Ponto ainda não salvo → cache local (flush no save)
+            salvarFotoPendente(l.id, i, r.data_base64, r.mime, legenda);
+            mostrarToastOffline(`📷 Foto P${i} salva localmente — vai pro server quando você salvar pontos`, 'success');
           }
-          await api('/api/laudos-demarcacao/'+l.id+'/fotos', {
-            method: 'POST',
-            body: JSON.stringify({
-              fotos: [{
-                conteudo_b64: r.data_base64, mime: r.mime,
-                filename: `P${i}-${l.numero_laudo}.jpg`,
-                legenda: `Piquete ${p.rotulo || 'P'+i} · ${dataStr} ${horaStr}${stampLat?` · Lat ${stampLat.toFixed(6)} Lng ${stampLng.toFixed(6)}`:''}`,
-                ponto_id: p.id,
-              }],
-            }),
-            headers: { 'Content-Type': 'application/json' },
-          });
-          await loadLaudoDetalhe(l.id);
           renderLaudoEditor(document.getElementById('view-laudos'));
         } catch (err) { alert('Erro upload foto: '+err.message); }
       };
@@ -14859,22 +14971,43 @@ function renderLaudoTabPontos(c) {
     // Salvar pontos + lados + Base GNSS (v2.2.2)
     document.getElementById('lp-form-salvar').onclick = async () => {
       const zona = 23, hem = 'S';
-      // Validação rural: base + tempo de rastreio obrigatórios
+      // v2.4.3 P1.5: Se cronômetro Base ainda rodando, auto-pausa antes de salvar
+      if (cronoAtivo && cronos.base?.running) {
+        cronos.base.accumulated = (cronos.base.accumulated || 0) + Math.floor((Date.now() - cronos.base.startMs) / 1000);
+        cronos.base.running = false;
+        cronos.base.startMs = null;
+        if (!cronos.base.fimISO) cronos.base.fimISO = new Date().toISOString();
+        salvarCronos();
+        sincBaseManualInputs();
+        const btn = document.querySelector('[data-crono-toggle="base"]');
+        if (btn) {
+          btn.textContent = '▶ Iniciar';
+          btn.style.background = '#16a34a22'; btn.style.color = '#16a34a'; btn.style.borderColor = '#16a34a55';
+        }
+      }
+      // v2.4.3 P0.1: Base e pontos sao INDEPENDENTES — sem mais bloqueio.
+      // Validações antes eram blocking, agora viram avisos não-fatais (warning logs).
+      // User pode salvar pontos sem base preenchida e completar a base depois.
       if (isRural) {
+        const avisos = [];
         const baseNome = document.getElementById('lp-base-nome')?.value.trim();
         const baseIni = document.getElementById('lp-base-inicio')?.value;
         const baseFim = document.getElementById('lp-base-fim')?.value;
         if (!baseNome || !baseIni || !baseFim) {
-          return alert('🚨 RURAL: Base GNSS obrigatória (NTGIR/INCRA).\nPreencha nome, início e fim do rastreio da base.');
+          avisos.push('Base GNSS incompleta (importante pra certificação NTGIR/INCRA)');
         }
-        if (new Date(baseFim) <= new Date(baseIni)) {
-          return alert('🚨 Fim do rastreio da base deve ser POSTERIOR ao início.');
+        if (baseIni && baseFim && new Date(baseFim) <= new Date(baseIni)) {
+          avisos.push('Fim da base deve ser posterior ao início');
         }
+        let semRastreio = 0;
         for (let i = 1; i <= nPontos; i++) {
           const r = document.querySelector(`[data-fp-rastreio="${i}"]`)?.value;
-          if (!r || Number(r) <= 0) {
-            return alert(`🚨 Tempo de rastreio do ponto P${i} é OBRIGATÓRIO em rural (use o cronômetro ou digite manualmente).`);
-          }
+          if (!r || Number(r) <= 0) semRastreio++;
+        }
+        if (semRastreio > 0) avisos.push(`${semRastreio} ponto(s) sem tempo de rastreio (recomendado pra certificação)`);
+        if (avisos.length) {
+          const ok = confirm('⚠️ Avisos rural (não-bloqueante):\n\n• ' + avisos.join('\n• ') + '\n\nSalvar mesmo assim?');
+          if (!ok) return;
         }
       }
       const pontosBody = [];
@@ -14924,6 +15057,49 @@ function renderLaudoTabPontos(c) {
           headers: { 'Content-Type': 'application/json' },
         });
         await loadLaudoDetalhe(l.id);
+
+        // v2.4.3 P0.2: Flush fotos pendentes — tiradas antes do save dos pontos
+        // Cada foto pendente tem `ordem` que casa com `pontos[].ordem`; o `ponto_id` agora existe
+        try {
+          const fotosPend = getFotosPendentes(l.id);
+          let flushed = 0, errosFlush = 0;
+          for (const fp of fotosPend) {
+            const pm = (state.laudoAtual.pontos || []).find(x => x.ordem === fp.ordem);
+            if (!pm?.id) continue;
+            const existente = (state.laudoAtual.fotos || []).find(f => f.ponto_id === pm.id);
+            if (existente) {
+              try { await api('/api/laudos-demarcacao/foto/'+existente.id, { method:'DELETE' }); } catch(_) {}
+            }
+            try {
+              await api('/api/laudos-demarcacao/'+l.id+'/fotos', {
+                method: 'POST',
+                body: JSON.stringify({
+                  fotos: [{
+                    conteudo_b64: fp.dataB64, mime: fp.mime,
+                    filename: `P${fp.ordem}-${l.numero_laudo}.jpg`,
+                    legenda: fp.legenda, ponto_id: pm.id,
+                  }],
+                }),
+                headers: { 'Content-Type': 'application/json' },
+              });
+              removerFotoPendente(l.id, fp.ordem);
+              flushed++;
+            } catch (errF) {
+              console.warn('[flush foto pendente P'+fp.ordem+']', errF.message);
+              errosFlush++;
+            }
+          }
+          if (flushed) {
+            mostrarToastOffline(`📷 ${flushed} foto(s) sincronizada(s) com o servidor`, 'success');
+            await loadLaudoDetalhe(l.id);
+          }
+          if (errosFlush) {
+            mostrarToastOffline(`⚠️ ${errosFlush} foto(s) ficaram em cache local — tente salvar de novo`, 'warn');
+          }
+        } catch (errFlush) {
+          console.warn('[flush global]', errFlush.message);
+        }
+
         const ladosNovos = state.laudoAtual.lados || [];
         for (let i = 0; i < ladosNovos.length && i < nPontos; i++) {
           const medida = document.querySelector(`[data-fl-medida="${i+1}"]`)?.value;
@@ -15117,16 +15293,33 @@ function renderLaudoTabFotos(c) {
     if (!files.length) return;
     try {
       progressEl.style.display = 'block';
+      // v2.4.3 P2.7: pega GPS uma vez antes do batch — todas as fotos do
+      // batch ficam com a mesma localização (rajada típica de campo).
+      progressEl.textContent = 'Capturando GPS...';
+      const gps = (typeof getGPSAtual === 'function') ? await getGPSAtual(8000).catch(() => null) : null;
       progressEl.textContent = 'Comprimindo ' + files.length + ' foto(s)...';
       const fotosBody = [];
+      const now = new Date();
+      const dataStr = now.toLocaleDateString('pt-BR');
+      const horaStr = now.toLocaleTimeString('pt-BR').slice(0, 8);
       for (let i = 0; i < files.length; i++) {
         progressEl.textContent = `Comprimindo ${i+1}/${files.length}...`;
-        const r = await compressImageFile(files[i], { maxDim: 1600, quality: 0.85 });
+        const stampInfo = (gps && typeof compressImageFileComStamp === 'function') ? {
+          label: `📍 Foto ${i+1}`,
+          numeroLaudo: l.numero_laudo,
+          dataStr, horaStr,
+          lat: gps.lat, lng: gps.lng,
+          source: '📱 GPS celular',
+        } : null;
+        const r = stampInfo
+          ? await compressImageFileComStamp(files[i], { maxDim: 1600, quality: 0.85 }, stampInfo)
+          : await compressImageFile(files[i], { maxDim: 1600, quality: 0.85 });
+        const legendaCarimbo = gps ? `${dataStr} ${horaStr} · Lat ${gps.lat.toFixed(6)} Lng ${gps.lng.toFixed(6)}` : '';
         fotosBody.push({
           conteudo_b64: r.data_base64,
           mime: r.mime,
           filename: files[i].name || ('foto-'+Date.now()+'.jpg'),
-          legenda: '',
+          legenda: legendaCarimbo,
         });
       }
       progressEl.textContent = 'Enviando...';
