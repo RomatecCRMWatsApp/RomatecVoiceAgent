@@ -1647,6 +1647,18 @@ app.post('/api/laudos-demarcacao/:id/pontos', requireCeoToken, async (req: Reque
 
 // Import RTK (CSV/TXT) — recebe { texto: string } e retorna pontos parseados
 
+// v3.1.0: clonagem 1-clique de laudo
+app.post('/api/laudos-demarcacao/:id/clonar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const id = await m.resolverLaudoId(String(req.params.id));
+    const clone = await m.clonarLaudo(id);
+    res.json(clone);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
 // v3.0.0: precificação INCRA — sugestão de critérios baseada nos dados do laudo
 app.get('/api/laudos-demarcacao/:id/precificacao/sugerir', requireCeoToken, async (req: Request, res: Response) => {
   try {
