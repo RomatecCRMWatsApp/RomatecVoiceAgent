@@ -9570,7 +9570,7 @@ function renderReciboForm(v) {
         </label>
         <!-- v1.85.0: catálogo de serviços (somente quando tipo='custom') -->
         <div id="recCatalogoBox" style="display:${f.tipo==='custom'?'block':'none'};">
-          <div style="display:grid; grid-template-columns:1fr 2fr; gap:8px;">
+          <div class="lp-grid-auto">
             <label>Categoria de serviço
               <select id="recCategoria" style="width:100%;">
                 <option value="">— Personalizado / Em branco —</option>
@@ -9607,7 +9607,7 @@ function renderReciboForm(v) {
             <input id="recEmail" type="email" placeholder="email@dominio.com" value="${escape(f.destinatario_email)}" style="width:100%;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr 120px; gap:8px;">
+        <div class="lp-grid-auto">
           <label>Valor (R$)
             <input id="recValor" type="number" step="0.01" min="0" placeholder="0,00" value="${escape(f.valor)}" style="width:100%;">
           </label>
@@ -9629,7 +9629,7 @@ function renderReciboForm(v) {
           Após salvar, você poderá enviar pelo WhatsApp com 1 clique.
         </p>
         <!-- v1.89.0: 3 botões com fluxo separado de salvar/enviar -->
-        <div style="display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px; margin-top:6px;">
+        <div class="lp-grid-auto" style="margin-top:6px;">
           <button id="recSalvarRascunho" title="Salvar como rascunho — pode editar depois, número provisório" style="background:transparent; border:1px solid #444; color:#888;">💾 Salvar rascunho</button>
           <button id="recSalvarSemEnviar" title="Emite o recibo (gera número definitivo) sem enviar agora" style="background:#1F5C3A; color:#fff; border-color:#1F5C3A;">✅ Salvar sem enviar</button>
           <button id="recSalvarEnviar" title="Salva e dispara WhatsApp imediatamente" style="background:#25D366; color:#fff; border-color:#25D366; font-weight:600;">🚀 Salvar e enviar via WhatsApp</button>
@@ -10104,7 +10104,7 @@ function abrirModalNovoCliente() {
       <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
         <legend style="padding:0 8px; font-size:12px; color:var(--gold); font-weight:600;">DADOS PRINCIPAIS</legend>
         <div style="display:grid; gap:10px;">
-          <div style="display:grid; grid-template-columns:2fr 1fr; gap:8px;">
+          <div class="lp-grid-auto">
             <label>Nome completo / Razão Social *
               <input id="cli_nome" placeholder="Nome ou Razão Social" maxlength="150" style="width:100%;">
             </label>
@@ -10113,7 +10113,7 @@ function abrirModalNovoCliente() {
               <span id="cli_doc_status" style="font-size:10px; color:var(--text-muted);"></span>
             </label>
           </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+          <div class="lp-grid-3">
             <label>Celular / WhatsApp *
               <input id="cli_tel" placeholder="(99) 99999-9999" maxlength="15" style="width:100%; font-family:monospace;">
             </label>
@@ -10131,7 +10131,7 @@ function abrirModalNovoCliente() {
       <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;" id="cli_fs_pessoais">
         <legend style="padding:0 8px; font-size:12px; color:var(--gold); font-weight:600;">DADOS PESSOAIS / EMPRESARIAIS</legend>
         <div style="display:grid; gap:10px;">
-          <div style="display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px;">
+          <div class="lp-grid-auto">
             <label>
               <span data-cli-pf-only>Data de nascimento</span><span data-cli-pj-only style="display:none;">Data de fundação</span>
               <input id="cli_dtnasc" type="date" style="width:100%;">
@@ -10151,7 +10151,7 @@ function abrirModalNovoCliente() {
               <input id="cli_profissao" maxlength="120" style="width:100%;">
             </label>
           </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;" data-cli-pj-only>
+          <div class="lp-grid-2" data-cli-pj-only>
             <label>Razão Social (se diferente do nome)
               <input id="cli_razao" maxlength="150" style="width:100%;">
             </label>
@@ -10165,7 +10165,7 @@ function abrirModalNovoCliente() {
       <fieldset style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
         <legend style="padding:0 8px; font-size:12px; color:var(--gold); font-weight:600;">ENDEREÇO</legend>
         <div style="display:grid; gap:10px;">
-          <div style="display:grid; grid-template-columns:140px 2fr 80px 1fr; gap:8px;">
+          <div class="lp-grid-auto">
             <label>CEP
               <input id="cli_cep" placeholder="00000-000" maxlength="9" style="width:100%; font-family:monospace;">
               <span id="cli_cep_status" style="font-size:10px; color:var(--text-muted);"></span>
@@ -10180,7 +10180,7 @@ function abrirModalNovoCliente() {
               <input id="cli_compl" maxlength="120" style="width:100%;">
             </label>
           </div>
-          <div style="display:grid; grid-template-columns:2fr 2fr 60px; gap:8px;">
+          <div class="lp-grid-auto">
             <label>Bairro
               <input id="cli_bairro" maxlength="80" style="width:100%;">
             </label>
@@ -10526,7 +10526,7 @@ function abrirModalNF(opts) {
         Digite o CEP — endereço auto-completa via Brasil API.
       </p>
       <div style="display:grid; gap:10px;">
-        <div style="display:grid; grid-template-columns:1fr 2fr; gap:8px;">
+        <div class="lp-grid-auto">
           <label>CPF/CNPJ ${opts.ehObrigatorioDoc ? '*' : ''}
             <input id="mnfDoc" placeholder="000.000.000-00" value="${escape(p.tomador_doc || '')}" style="width:100%;">
             <span id="mnfDocStatus" style="font-size:10px; color:var(--text-muted);"></span>
@@ -10535,7 +10535,7 @@ function abrirModalNF(opts) {
             <input id="mnfNome" value="${escape(p.tomador_nome || '')}" style="width:100%;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px;">
+        <div class="lp-grid-auto">
           <label>Email
             <input id="mnfEmail" type="email" value="${escape(p.tomador_email || '')}" style="width:100%;">
           </label>
@@ -10547,7 +10547,7 @@ function abrirModalNF(opts) {
             <input id="mnfLogr" value="${escape(p.logradouro || '')}" style="width:100%;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 2fr 2fr 80px; gap:8px;">
+        <div class="lp-grid-auto">
           <label>Número
             <input id="mnfNum" value="${escape(p.numero || 'S/N')}" style="width:100%;">
           </label>
