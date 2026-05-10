@@ -58,3 +58,29 @@ describe('calcularPontuacaoTotal', () => {
     })).toBe(60);
   });
 });
+
+import { obterFaixa } from './incra';
+
+describe('obterFaixa', () => {
+  it('pontuação 6 → faixa 06-15', () => {
+    expect(obterFaixa(6).label).toBe('06-15');
+  });
+  it('pontuação 15 → faixa 06-15 (limite alto)', () => {
+    expect(obterFaixa(15).label).toBe('06-15');
+  });
+  it('pontuação 16 → faixa 16-25', () => {
+    expect(obterFaixa(16).label).toBe('16-25');
+  });
+  it('pontuação 35 → faixa 26-35', () => {
+    expect(obterFaixa(35).label).toBe('26-35');
+  });
+  it('pontuação 60 → faixa 56-60', () => {
+    expect(obterFaixa(60).label).toBe('56-60');
+  });
+  it('pontuação 5 → throw', () => {
+    expect(() => obterFaixa(5)).toThrow(/abaixo do mínimo/);
+  });
+  it('pontuação 61 → throw', () => {
+    expect(() => obterFaixa(61)).toThrow(/acima do máximo/);
+  });
+});

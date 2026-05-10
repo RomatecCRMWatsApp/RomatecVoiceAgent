@@ -143,3 +143,11 @@ export function validarCriterios(c: CriteriosPontuacao): { ok: boolean; erros: s
 export function calcularPontuacaoTotal(c: CriteriosPontuacao): number {
   return c.vegetacao + c.relevo + c.insalubridade + c.acesso + c.clima + c.area_media;
 }
+
+export function obterFaixa(pontuacao: number): FaixaIncra {
+  if (pontuacao < 6)  throw new Error(`Pontuação ${pontuacao} abaixo do mínimo (6)`);
+  if (pontuacao > 60) throw new Error(`Pontuação ${pontuacao} acima do máximo (60)`);
+  const faixa = TABELA_INCRA_2025.find(f => pontuacao >= f.pontuacaoMin && pontuacao <= f.pontuacaoMax);
+  if (!faixa) throw new Error(`Faixa não encontrada para pontuação ${pontuacao}`);
+  return faixa;
+}
