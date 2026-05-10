@@ -1941,6 +1941,50 @@ app.put('/api/configuracoes-demarcacao', requireCeoToken, async (req: Request, r
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// ============================================================
+// v3.2.0: Cartorios nacional (CNJ) — autocomplete no campo Cartorio
+// ============================================================
+//
+// Catalogo nacional (3.7k cartorios com atribuicao Registro de Imoveis).
+// Endpoint admin POST /api/admin/cartorios/importar dispara o importer
+// que le data/cartorios-cns.csv e faz UPSERT em batches. Endpoint publico
+// GET /api/cartorios filtra por UF + texto livre para alimentar a UI.
+app.post('/api/admin/cartorios/importar', requireCeoToken, async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./services/cartoriosImporter');
+    const result = await m.importarCartoriosFromFile();
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/cartorios', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const uf = String(req.query.uf || '').trim().toUpperCase();
+    const q = String(req.query.q || '').trim();
+    const limit = Math.min(Number(req.query.limit ?? 50) || 50, 200);
+    if (uf && uf.length !== 2) { res.status(400).json({ error: 'uf invalida (use sigla de 2 letras)' }); return; }
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (uf) { where.push('uf = ?'); params.push(uf); }
+    if (q) {
+      // Busca tolerante: normaliza o termo igual a coluna cidade_normalizada
+      // e tambem permite match em denominacao/responsavel.
+      const qNorm = q.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+      where.push('(cidade_normalizada LIKE ? OR denominacao LIKE ? OR responsavel LIKE ?)');
+      params.push(`%${qNorm}%`, `%${q}%`, `%${q}%`);
+    }
+    const sql =
+      `SELECT cns, cns_formatado, denominacao, uf, cidade, responsavel, status
+         FROM cartorios
+        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY uf, cidade, denominacao
+        LIMIT ${limit}`;
+    const m = await import('./database/connection');
+    const [rows] = await m.default.execute(sql, params);
+    res.json({ cartorios: rows, total: (rows as unknown[]).length, uf: uf || null, q: q || null });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 /**
  * Import unificado CSV/XLSX. Multipart upload com campo `arquivo`.
  * Query param `preview=1` valida sem persistir e retorna relatorio.
