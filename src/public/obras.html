@@ -13294,6 +13294,74 @@ function reinjetarDatalists() {
   if (typeof injetarDatalistsAcailandia === 'function') injetarDatalistsAcailandia();
 }
 
+// v3.2.0: autocomplete do campo Cartorio contra catalogo nacional CNJ.
+// Debounce 300ms, minimo 3 chars, filtra pela UF do imovel (ld-uf).
+// Click/Enter preenche o input + auto-preenche o CNS no ld-cartorio-cns.
+function setupCartorioAutocomplete() {
+  const input = document.getElementById('ld-cartorio-nome');
+  const dropdown = document.getElementById('ld-cartorio-sugestoes');
+  const cnsInput = document.getElementById('ld-cartorio-cns');
+  if (!input || !dropdown) return;
+  let timer = null;
+  let ultimaQuery = '';
+
+  function fechar() { dropdown.style.display = 'none'; dropdown.innerHTML = ''; }
+  function escHtml(s) { return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  async function buscar(q) {
+    const ufEl = document.getElementById('ld-uf');
+    const uf = (ufEl?.value || '').trim().toUpperCase();
+    const params = new URLSearchParams();
+    if (uf && uf.length === 2) params.set('uf', uf);
+    params.set('q', q);
+    params.set('limit', '15');
+    try {
+      const r = await api('/api/cartorios?' + params.toString());
+      if (q !== ultimaQuery) return; // resposta atrasada, ignora
+      const lista = r.cartorios || [];
+      if (lista.length === 0) {
+        dropdown.innerHTML = '<div style="padding:8px; color:var(--text-muted);">Nenhum cartório encontrado'+(uf?` em ${uf}`:'')+'.</div>';
+        dropdown.style.display = 'block';
+        return;
+      }
+      dropdown.innerHTML = lista.map(c => {
+        const denom = escHtml(c.denominacao);
+        const local = escHtml(c.cidade) + '/' + escHtml(c.uf);
+        const cns = escHtml(c.cns_formatado);
+        const resp = c.responsavel ? '<br><span style="color:#888; font-size:11px;">Resp.: ' + escHtml(c.responsavel) + '</span>' : '';
+        return `<div class="ld-sug-item" data-nome="${denom}" data-cns="${cns}" style="padding:8px 10px; border-bottom:1px solid #333; cursor:pointer;"><strong>${denom}</strong><br><span style="color:#aaa;">${local} — CNS ${cns}</span>${resp}</div>`;
+      }).join('');
+      dropdown.style.display = 'block';
+      dropdown.querySelectorAll('.ld-sug-item').forEach(el => {
+        el.addEventListener('click', () => {
+          input.value = el.getAttribute('data-nome') || '';
+          if (cnsInput) cnsInput.value = el.getAttribute('data-cns') || '';
+          fechar();
+        });
+        el.addEventListener('mouseenter', () => { el.style.background = '#2a2a2a'; });
+        el.addEventListener('mouseleave', () => { el.style.background = ''; });
+      });
+    } catch (err) {
+      console.warn('[cartorio-autocomplete] falhou:', err.message);
+      dropdown.innerHTML = '<div style="padding:8px; color:#e88;">Erro ao buscar — tente novamente.</div>';
+      dropdown.style.display = 'block';
+    }
+  }
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    ultimaQuery = q;
+    if (timer) clearTimeout(timer);
+    if (q.length < 3) { fechar(); return; }
+    timer = setTimeout(() => buscar(q), 300);
+  });
+  input.addEventListener('focus', () => { if (input.value.trim().length >= 3) buscar(input.value.trim()); });
+  document.addEventListener('click', (e) => {
+    if (e.target !== input && !dropdown.contains(e.target)) fechar();
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') fechar(); });
+}
+
 async function loadLaudos() {
   try {
     const [r, c, e] = await Promise.all([
@@ -14332,7 +14400,7 @@ function renderLaudoTabDados(c) {
       <h3 style="margin-top:0;">📜 Dados Registrais (Cartório)</h3>
       <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">
         ℹ️ Opcional — preencha se o imóvel já tem registro. Aplica em rural (fazenda) e urbano.
-        <br>💡 Cartórios novos cadastrados aqui ficam salvos no celular pra próxima.
+        <br>💡 v3.2.0: catálogo nacional CNJ com ~3.7k cartórios de Registro de Imóveis. Digite 3+ letras pra buscar (filtra pela UF do imóvel).
       </p>
       <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
         <input id="ld-matricula" placeholder="Matrícula" value="${escape(l.matricula||'')}">
@@ -14340,7 +14408,10 @@ function renderLaudoTabDados(c) {
         <input id="ld-folhas" placeholder="Folhas (ex: 123/v)" value="${escape(l.folhas||'')}">
       </div>
       <div style="display:grid; grid-template-columns:2fr 1fr; gap:8px; margin-top:8px;">
-        <input id="ld-cartorio-nome" list="dl-cartorios" placeholder="Cartório (nome completo)" value="${escape(l.cartorio_nome||'')}">
+        <div style="position:relative;">
+          <input id="ld-cartorio-nome" placeholder="Cartório (digite cidade, nome ou responsável)" value="${escape(l.cartorio_nome||'')}" autocomplete="off">
+          <div id="ld-cartorio-sugestoes" style="display:none; position:absolute; top:100%; left:0; right:0; background:#1a1a1a; border:1px solid var(--gold); border-top:none; max-height:280px; overflow-y:auto; z-index:1000; box-shadow:0 4px 12px rgba(0,0,0,0.6); font-size:12px;"></div>
+        </div>
         <input id="ld-cartorio-cns" placeholder="CNS (Cód. Nacional)" value="${escape(l.cartorio_cns||'')}" maxlength="20">
       </div>
     </div>
@@ -14365,6 +14436,10 @@ function renderLaudoTabDados(c) {
       <button id="ld-salvar" style="background:var(--gold); color:#06120a; border-color:var(--gold); padding:10px 20px;">💾 Salvar dados</button>
     </div>
   `;
+  // v3.2.0: autocomplete dinamico do campo Cartorio contra catalogo nacional
+  // CNJ. Debounce 300ms, minimo 3 chars, filtra pela UF do imovel.
+  setupCartorioAutocomplete();
+
   document.getElementById('ld-salvar').onclick = async () => {
     const body = {
       tipo_lote_urbano: isUrbano ? (document.getElementById('ld-tipo-lote').value || null) : null,
