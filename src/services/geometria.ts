@@ -178,7 +178,34 @@ export function detectarFormatoArquivo(text: string): 'KML' | 'GPX' | 'CSV' {
   return 'CSV';
 }
 
-/** Importa CSV/TXT (separador auto: virgula, ponto-virgula, tab). */
+/** v2.5.1: palavras que costumam aparecer em headers de coletoras. */
+const PALAVRAS_HEADER = new Set([
+  'ponto','id','nome','name','vert','vertice','nro','numero',
+  'lat','latitude','lng','long','lon','longitude',
+  'e','este','leste','x','easting',
+  'n','norte','y','northing',
+  'h','z','alt','elev','altitude','elevation',
+  'code','rms','pdop','hdop','vdop','tdop','gdop','depth','b','l',
+]);
+
+/** v2.5.1: detecta string como numero (com sinal e ponto/virgula decimal). */
+function ehNumerico(s: string): boolean {
+  if (!s) return false;
+  const limpo = s.trim().replace(/^["']|["']$/g, '').replace(',', '.');
+  return /^[-+]?\d+(\.\d+)?$/.test(limpo);
+}
+
+/**
+ * Importa CSV/TXT (separador auto: virgula, ponto-virgula, tab).
+ *
+ * v2.5.1: aceita arquivos SEM header (formato "name,E,N,Z" comum em
+ * coletoras). Quando nao detecta palavras-chave de header na linha 1,
+ * cai pro modo posicional com inferencia de E/N/altitude por magnitude:
+ *   - |valor| > 1_000_000 → UTM Northing (Brasil S: 7M-10M)
+ *   - 10_000 ≤ |valor| ≤ 1_000_000 → UTM Easting
+ *   - |valor| ≤ 10_000 → Altitude (em metros)
+ *   - Se nao tiver E/N e os 2 primeiros numeros forem ≤ 180 → Lat/Lng
+ */
 export function importarRTK(text: string, opts: ImportarOpts = {}): {
   pontos: PontoImportadoRTK[];
   cabecalhos: string[];
@@ -193,18 +220,33 @@ export function importarRTK(text: string, opts: ImportarOpts = {}): {
             : linhas[0].includes('\t') ? '\t'
             : ',';
 
-  const cabecalhos = linhas[0].split(sep).map(c => c.trim());
-  const cabBaixo = cabecalhos.map(c => c.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  // v2.5.1: detecta se linha 1 e header ou ja e dado
+  const cols0 = linhas[0].split(sep).map(c => c.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
+  const temHeader = cols0.some(c => PALAVRAS_HEADER.has(c));
+
+  let cabecalhos: string[];
+  let cabBaixo: string[];
+  let dataStart: number;
+  if (temHeader) {
+    cabecalhos = linhas[0].split(sep).map(c => c.trim());
+    cabBaixo = cabecalhos.map(c => c.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    dataStart = 1;
+  } else {
+    const ncols = linhas[0].split(sep).length;
+    cabecalhos = Array.from({ length: ncols }, (_, i) => `col${i}`);
+    cabBaixo = cabecalhos.slice();
+    dataStart = 0;
+  }
 
   // v2.5.0: rotulo usa prefix-match (vert, vertice). Demais usam exact-match
   // pra evitar falsos positivos (ex: "Latitude Corrections" nao deve casar com Lat).
   // "name" e "elevation" adicionados pro formato SinoGNSS R60/R80 (ingles).
-  const idxRotulo = cabBaixo.findIndex(c => /^(ponto|id|nome|name|nro|numero|vert)/.test(c));
-  const idxLat    = cabBaixo.findIndex(c => /^(lat|latitude)$/.test(c));
-  const idxLng    = cabBaixo.findIndex(c => /^(lng|long|longitude|lon)$/.test(c));
-  const idxE      = cabBaixo.findIndex(c => /^(e|este|leste|x|easting)$/.test(c));
-  const idxN      = cabBaixo.findIndex(c => /^(n|norte|y|northing)$/.test(c));
-  const idxAlt    = cabBaixo.findIndex(c => /^(h|z|alt|elev|altitude|elevation)$/.test(c));
+  const idxRotulo = temHeader ? cabBaixo.findIndex(c => /^(ponto|id|nome|name|nro|numero|vert)/.test(c)) : -1;
+  const idxLat    = temHeader ? cabBaixo.findIndex(c => /^(lat|latitude)$/.test(c))                       : -1;
+  const idxLng    = temHeader ? cabBaixo.findIndex(c => /^(lng|long|longitude|lon)$/.test(c))             : -1;
+  const idxE      = temHeader ? cabBaixo.findIndex(c => /^(e|este|leste|x|easting)$/.test(c))             : -1;
+  const idxN      = temHeader ? cabBaixo.findIndex(c => /^(n|norte|y|northing)$/.test(c))                 : -1;
+  const idxAlt    = temHeader ? cabBaixo.findIndex(c => /^(h|z|alt|elev|altitude|elevation)$/.test(c))    : -1;
 
   const parseNum = (s: string | undefined): number | null => {
     if (!s) return null;
@@ -213,18 +255,57 @@ export function importarRTK(text: string, opts: ImportarOpts = {}): {
   };
 
   const pontos: PontoImportadoRTK[] = [];
-  for (let i = 1; i < linhas.length; i++) {
+  for (let i = dataStart; i < linhas.length; i++) {
     const cols = linhas[i].split(sep).map(c => c.trim().replace(/^["']|["']$/g, ''));
     const raw: Record<string, string> = {};
     cabecalhos.forEach((h, k) => { raw[h] = cols[k] ?? ''; });
 
-    const rotulo = idxRotulo >= 0 ? (cols[idxRotulo] || `V${i}`) : `V${i}`;
-    const altitude = idxAlt >= 0 ? parseNum(cols[idxAlt]) : null;
+    let rotulo: string;
+    let e: number | null = null;
+    let n: number | null = null;
+    let lat: number | null = null;
+    let lng: number | null = null;
+    let altitude: number | null = null;
 
-    let e: number | null = idxE >= 0 ? parseNum(cols[idxE]) : null;
-    let n: number | null = idxN >= 0 ? parseNum(cols[idxN]) : null;
-    const lat = idxLat >= 0 ? parseNum(cols[idxLat]) : null;
-    const lng = idxLng >= 0 ? parseNum(cols[idxLng]) : null;
+    if (temHeader) {
+      rotulo   = idxRotulo >= 0 ? (cols[idxRotulo] || `V${i}`) : `V${i}`;
+      altitude = idxAlt    >= 0 ? parseNum(cols[idxAlt])  : null;
+      e        = idxE      >= 0 ? parseNum(cols[idxE])    : null;
+      n        = idxN      >= 0 ? parseNum(cols[idxN])    : null;
+      lat      = idxLat    >= 0 ? parseNum(cols[idxLat])  : null;
+      lng      = idxLng    >= 0 ? parseNum(cols[idxLng])  : null;
+    } else {
+      // v2.5.1: modo posicional sem header. col[0] e rotulo (se nao-numerico),
+      // restantes sao coords. Inferencia por magnitude.
+      const idxData = (cols[0] && !ehNumerico(cols[0])) ? 1 : 0;
+      rotulo = idxData === 1 ? cols[0] : `V${i - dataStart + 1}`;
+      const nums: Array<number | null> = cols.slice(idxData).map(parseNum);
+      const restantes: number[] = [];
+      for (const v of nums) {
+        if (v == null) continue;
+        const abs = Math.abs(v);
+        if (abs > 1_000_000 && n == null) {
+          n = v;
+        } else if (abs >= 10_000 && abs <= 1_000_000 && e == null) {
+          e = v;
+        } else if (abs <= 10_000 && altitude == null) {
+          altitude = v;
+        } else {
+          restantes.push(v);
+        }
+      }
+      // Fallback geo: se nao deu UTM, talvez sejam lat/lng decimais
+      if (e == null && n == null) {
+        const validos = nums.filter((x): x is number => x != null);
+        if (validos.length >= 2 && validos.slice(0, 2).every(v => Math.abs(v) <= 180)) {
+          const a = validos[0];
+          const b = validos[1];
+          // Heuristica: lat <= 90, lng <= 180. Se a > 90 → ordem invertida.
+          if (Math.abs(a) > 90) { lng = a; lat = b; } else { lat = a; lng = b; }
+          altitude = validos[2] ?? altitude;
+        }
+      }
+    }
 
     // v2.5.0: se vieram lat/lng e e/n estao vazios, converte
     if ((e == null || n == null) && lat != null && lng != null) {
