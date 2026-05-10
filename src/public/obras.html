@@ -13405,6 +13405,7 @@ function renderLaudosLista(v) {
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
             <button data-laudo-edit="${l.id}" style="flex:1; background:var(--gold); color:#06120a; border-color:var(--gold);">✏️ Abrir</button>
             <button data-laudo-pdf="${l.id}" title="Baixar PDF" style="flex:1;">📄 PDF</button>
+            <button data-laudo-clonar="${l.id}" title="Criar uma cópia editável deste laudo (zera pontos, fotos e número do lote)" style="flex:1; background:transparent; color:var(--gold); border:1px dashed var(--gold);">📋 Clonar</button>
           </div>
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
             ${l.assinado_em
@@ -13457,6 +13458,25 @@ function renderLaudosLista(v) {
   });
   v.querySelectorAll('[data-laudo-pdf]').forEach(b => b.onclick = () => {
     window.open('/api/laudos-demarcacao/' + b.dataset.laudoPdf + '/pdf', '_blank');
+  });
+  v.querySelectorAll('[data-laudo-clonar]').forEach(b => b.onclick = async () => {
+    if (!confirm('Clonar este laudo?\n\n✓ Cliente, loteamento, equipamentos, técnico copiados\n✗ Número do lote ficará vazio (preencher do novo lote)\n✗ Pontos GNSS zerados (rastrear novamente)\n✗ Fotos não copiadas\n⚠️ Tempo da base virá copiado — confirme em campo se é a mesma sessão')) return;
+    try {
+      const clone = await api('/api/laudos-demarcacao/' + b.dataset.laudoClonar + '/clonar', {
+        method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' },
+      });
+      alert('✓ Laudo clonado: ' + clone.numero_laudo);
+      await loadLaudoDetalhe(clone.id);
+      state.laudosView = 'editor';
+      state.laudoEditorTab = 'dados';
+      renderLaudos();
+      // Foco automatico no campo certo conforme tipo
+      setTimeout(() => {
+        const targetId = clone.tipo_imovel === 'RURAL' ? 'ld-denom' : 'ld-lote';
+        const el = document.getElementById(targetId);
+        if (el) { el.focus(); if (typeof el.select === 'function') el.select(); }
+      }, 250);
+    } catch (err) { alert('Erro ao clonar: ' + err.message); }
   });
   v.querySelectorAll('[data-laudo-pdf-sig]').forEach(b => b.onclick = () => {
     window.open('/api/laudos-demarcacao/' + b.dataset.laudoPdfSig + '/pdf-assinado', '_blank');
