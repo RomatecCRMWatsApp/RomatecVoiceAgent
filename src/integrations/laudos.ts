@@ -871,17 +871,25 @@ import { gerarCroquiSvg } from '../services/croquiSvg';
  * Quando user prefere croqui manual, sobrepoe via salvarCroquiUpload().
  */
 export async function gerarCroquiAutoSvg(laudoId: number | string): Promise<string> {
-  const pontos = await listarPontosDoLaudo(laudoId);
-  const lados = await listarLadosDoLaudo(laudoId);
-  const pontosSvg = pontos
-    .filter(p => p.utm_e != null && p.utm_n != null)
-    .map(p => ({ rotulo: p.rotulo, e: p.utm_e as number, n: p.utm_n as number }));
+  const [laudo, pontos, lados] = await Promise.all([
+    buscarLaudo(laudoId),
+    listarPontosDoLaudo(laudoId),
+    listarLadosDoLaudo(laudoId),
+  ]);
+  const pontosFiltrados = pontos.filter(p => p.utm_e != null && p.utm_n != null);
+  const pontosSvg = pontosFiltrados.map(p => ({ rotulo: p.rotulo, e: p.utm_e as number, n: p.utm_n as number }));
   const ladosSvg = lados.map(l => ({
     i_idx: pontos.findIndex(p => p.id === l.ponto_inicio_id),
     f_idx: pontos.findIndex(p => p.id === l.ponto_fim_id),
     distancia_m: l.distancia_m ?? 0,
   }));
-  return gerarCroquiSvg(pontosSvg, ladosSvg);
+  return gerarCroquiSvg(pontosSvg, ladosSvg, {
+    // v3.1.0: area no centro + tarjeta SIRGAS
+    tipoImovel: laudo?.tipo_imovel as 'URBANO' | 'RURAL' | undefined,
+    areaTotalM2: laudo?.area_total_m2 != null ? Number(laudo.area_total_m2) : undefined,
+    utmZona: pontosFiltrados[0]?.utm_zona ? Number(pontosFiltrados[0].utm_zona) : undefined,
+    utmHemisferio: pontosFiltrados[0]?.utm_hemisferio || 'S',
+  });
 }
 
 /** Salva croqui manual (upload imagem PNG/JPG/PDF base64). */
