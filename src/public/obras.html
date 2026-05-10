@@ -16112,7 +16112,7 @@ function renderLaudoTabArt(c) {
   c.innerHTML = `
     <div class="card">
       <h3 style="margin-top:0;">📜 ART / TRT</h3>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <label><input id="la-art" type="checkbox" ${l.usa_art?'checked':''}> Possui ART (CREA)</label>
         <input id="la-art-num" placeholder="Número da ART" value="${escape(l.numero_art||'')}">
         <label><input id="la-trt" type="checkbox" ${l.usa_trt?'checked':''}> Possui TRT (CFT)</label>
@@ -16178,7 +16178,7 @@ function renderLaudoTabArt(c) {
     </div>
     <div class="card">
       <h3 style="margin-top:0;">💰 Financeiro</h3>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <input id="la-valor" type="number" step="0.01" placeholder="Valor do serviço (R$)" value="${l.valor_servico ?? ''}">
         <select id="la-fp">
           <option value="">— forma de pagamento —</option>
