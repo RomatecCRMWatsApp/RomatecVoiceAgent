@@ -28,6 +28,7 @@ describe('validarCriterios', () => {
   it('rejeita não-inteiro', () => {
     const r = validarCriterios({ ...valido, clima: 5.5 });
     expect(r.ok).toBe(false);
+    expect(r.erros[0]).toMatch(/clima/);
   });
 
   it('acumula múltiplos erros', () => {
