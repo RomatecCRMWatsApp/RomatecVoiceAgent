@@ -14470,6 +14470,11 @@ function gerarCroquiSvgClient(pontos, lados, opts) {
   const H = opts.alturaPx || 380;
   const cor = opts.corPoligonal || '#10b981';
   const escapeXml = s => String(s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]));
+  // v3.1.0: parametros pro modo INCRA (area no centro + tarjeta SIRGAS)
+  const tipoImovel = opts.tipoImovel || 'URBANO';
+  const areaInformada = typeof opts.areaTotalM2 === 'number' ? opts.areaTotalM2 : null;
+  const utmZona = typeof opts.utmZona === 'number' ? opts.utmZona : null;
+  const utmHemi = opts.utmHemisferio || 'S';
 
   if (!pontos || pontos.length < 2) {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:#fff; border-radius:4px;"><text x="${W/2}" y="${H/2}" text-anchor="middle" font-family="Helvetica" font-size="13" fill="#888">Adicione ao menos 2 vértices</text></svg>`;
@@ -14522,12 +14527,53 @@ function gerarCroquiSvgClient(pontos, lados, opts) {
   }
   area = Math.abs(area)/2;
 
+  // v3.1.0: area no centro do poligono
+  let areaSvg = '';
+  if (pontos.length >= 3) {
+    // Centroide nas coordenadas SVG usando a mesma transformacao de toSvg()
+    let sumX = 0, sumY = 0;
+    for (const p of pontos) {
+      const sp = toSvg(p.e, p.n);
+      sumX += sp.x; sumY += sp.y;
+    }
+    const cx = sumX / pontos.length;
+    const cy = sumY / pontos.length;
+    const areaParaExibir = areaInformada != null ? areaInformada : area;
+    let areaTxt;
+    if (tipoImovel === 'RURAL') {
+      areaTxt = (areaParaExibir / 10000).toFixed(4).replace('.', ',') + ' ha';
+    } else {
+      areaTxt = new Intl.NumberFormat('pt-BR', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+      }).format(areaParaExibir) + ' m²';
+    }
+    areaSvg = `
+    <text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" font-family="Helvetica" font-size="13" font-weight="bold" fill="#222">${escapeXml(areaTxt)}</text>
+    <text x="${cx.toFixed(1)}" y="${(cy + 14).toFixed(1)}" text-anchor="middle" font-family="Helvetica" font-size="8" fill="#888">ÁREA TOTAL</text>`;
+  }
+
+  // v3.1.0: tarjeta SIRGAS canto inf direito
+  let tarjetaSvg = '';
+  if (utmZona !== null) {
+    const tw = 88, th = 38;
+    const tx = W - tw - 8;
+    const ty = H - th - 8;
+    const mc = -180 + utmZona * 6 - 3;
+    tarjetaSvg = `
+    <g>
+      <rect x="${tx}" y="${ty}" width="${tw}" height="${th}" fill="#fff" stroke="#888" stroke-width="0.5"/>
+      <text x="${tx + 5}" y="${ty + 11}" font-family="Helvetica" font-size="7" font-weight="bold" fill="#222">SIRGAS 2000</text>
+      <text x="${tx + 5}" y="${ty + 22}" font-family="Helvetica" font-size="6" fill="#444">UTM Zona ${escapeXml(String(utmZona))}${escapeXml(utmHemi)}</text>
+      <text x="${tx + 5}" y="${ty + 32}" font-family="Helvetica" font-size="6" fill="#444">MC ${mc}°</text>
+    </g>`;
+  }
+
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:#fff; border-radius:4px;">
     <rect width="${W}" height="${H}" fill="#fff"/>
     <path d="${pathD}" fill="${cor}22" stroke="${cor}" stroke-width="2" stroke-linejoin="round"/>
     ${distSvg}
     ${rotulosSvg}
-    ${norteSvg}
+    ${norteSvg}${areaSvg}${tarjetaSvg}
     <text x="8" y="${H-8}" font-family="Helvetica" font-size="9" fill="#666">${pontos.length} vért. · A=${area.toFixed(2)}m² · P=${perim.toFixed(2)}m</text>
   </svg>`;
 }
@@ -14686,7 +14732,7 @@ function renderLaudoTabPontos(c) {
             Atualiza em tempo real conforme você importa pontos. Este é o croqui automático que vai pro PDF.
           </p>
           <div id="lp-preview-svg" style="width:100%; min-height:380px; background:#fff; border:1px solid var(--border); border-radius:4px; overflow:hidden;">
-            ${gerarCroquiSvgClient(pontosPreview, ladosPreview)}
+            ${gerarCroquiSvgClient(pontosPreview, ladosPreview, { tipoImovel: l.tipo_imovel, areaTotalM2: l.area_total_m2 ? Number(l.area_total_m2) : undefined, utmZona: pontos[0]?.utm_zona ? Number(pontos[0].utm_zona) : undefined, utmHemisferio: pontos[0]?.utm_hemisferio || 'S' })}
           </div>
         </div>
       </div>
@@ -14699,7 +14745,7 @@ function renderLaudoTabPontos(c) {
         <summary style="cursor:pointer; font-weight:600;">📱 Preview + Memorial Descritivo (vai pro PDF)</summary>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px;">
           <div id="lp-preview-svg-mobile">
-            ${gerarCroquiSvgClient(pontosPreview, ladosPreview, { larguraPx: 600, alturaPx: 600 })}
+            ${gerarCroquiSvgClient(pontosPreview, ladosPreview, { larguraPx: 600, alturaPx: 600, tipoImovel: l.tipo_imovel, areaTotalM2: l.area_total_m2 ? Number(l.area_total_m2) : undefined, utmZona: pontos[0]?.utm_zona ? Number(pontos[0].utm_zona) : undefined, utmHemisferio: pontos[0]?.utm_hemisferio || 'S' })}
           </div>
           <div id="lp-memorial-host" style="display:flex; flex-direction:column;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -14721,9 +14767,10 @@ function renderLaudoTabPontos(c) {
       const j=(i+1)%pts.length, p1=pts[i], p2=pts[j];
       return { i_idx:i, f_idx:j, distancia_m: Math.hypot(p2.e-p1.e, p2.n-p1.n) };
     }) : [];
-    document.getElementById('lp-preview-svg').innerHTML = gerarCroquiSvgClient(pts, lds);
+    const croquiOpts = { tipoImovel: l.tipo_imovel, areaTotalM2: l.area_total_m2 ? Number(l.area_total_m2) : undefined, utmZona: pontos[0]?.utm_zona ? Number(pontos[0].utm_zona) : undefined, utmHemisferio: pontos[0]?.utm_hemisferio || 'S' };
+    document.getElementById('lp-preview-svg').innerHTML = gerarCroquiSvgClient(pts, lds, croquiOpts);
     const m = document.getElementById('lp-preview-svg-mobile');
-    if (m) m.innerHTML = gerarCroquiSvgClient(pts, lds, { larguraPx: 600, alturaPx: 600 });
+    if (m) m.innerHTML = gerarCroquiSvgClient(pts, lds, { ...croquiOpts, larguraPx: 600, alturaPx: 600 });
   };
 
   // v2.10.0: Memorial Descritivo no painel direito do preview
