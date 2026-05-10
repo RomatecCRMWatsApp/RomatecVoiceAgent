@@ -14174,8 +14174,11 @@ function renderLaudoTabDados(c) {
       </div>
     </div>
     <div class="card">
-      <h3 style="margin-top:0;">Confrontantes</h3>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Confrontantes</h3>
+        <button id="ld-cf-swap-fb" type="button" title="Trocar valores entre Frente e Fundo" style="font-size:11px; padding:3px 8px;">🔄 Trocar Frente↔Fundo</button>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
         <input id="ld-cf-frente" list="dl-confrontantes" placeholder="Frente (ex: Rua, Avenida, vizinho)" value="${escape(l.confrontante_frente||'')}">
         <input id="ld-cf-fundo" list="dl-confrontantes" placeholder="Fundo" value="${escape(l.confrontante_fundo||'')}">
         <input id="ld-cf-dir" list="dl-confrontantes" placeholder="Lateral direita" value="${escape(l.confrontante_lat_dir||'')}">
@@ -14247,6 +14250,18 @@ function renderLaudoTabDados(c) {
   if (typeof mountLoteamentoSelectorsLaudo === 'function') {
     mountLoteamentoSelectorsLaudo();
   }
+
+  // v2.9.2: botao manual pra trocar valores Frente <-> Fundo dos confrontantes
+  const swapBtn = document.getElementById('ld-cf-swap-fb');
+  if (swapBtn) swapBtn.onclick = () => {
+    const fr = document.getElementById('ld-cf-frente');
+    const fu = document.getElementById('ld-cf-fundo');
+    if (!fr || !fu) return;
+    const tmp = fr.value;
+    fr.value = fu.value;
+    fu.value = tmp;
+    mostrarToastOffline('🔄 Frente e Fundo trocados', 'success');
+  };
 
   // v2.1.8: gerenciador de cadastros locais (modal simples)
   const gerenciar = document.getElementById('ld-gerenciar-cad');
@@ -16181,6 +16196,25 @@ function aplicarAutoFillLote(lote) {
     const el = document.getElementById(id);
     if (el && (!el.value || !el.value.trim()) && val != null) el.value = val;
   };
+
+  // v2.9.2: HEURISTICA de correcao do CSV mal-formatado
+  // CSV do Colina Park (e similares) tem padrao onde conf_frente eh
+  // o "lote do outro lado da rua" (geometricamente o fundo) quando o
+  // lote da pra uma rua. Quando detectamos:
+  //   rua_frente preenchida + conf_frente eh LOTE:* (resolvido) + conf_fundo vazio
+  // assumimos que o usuario QUERIA: conf_frente = nome da rua, conf_fundo = lote.
+  let confFrente = lote.conf_frente_resolvido || '';
+  let confFundo = lote.conf_fundo_resolvido || '';
+  const ehReferenciaLote = (s) => /^lote\s+/i.test(s || '');
+  const heuristicaTrocaAplicada =
+    !!lote.rua_frente_nome &&
+    ehReferenciaLote(confFrente) &&
+    !confFundo.trim();
+  if (heuristicaTrocaAplicada) {
+    confFundo = confFrente;
+    confFrente = lote.rua_frente_nome;
+  }
+
   // Identificacao do imovel — para urbano: loteamento/quadra/lote
   setIfEmpty('ld-loteamento', lote.loteamento.nome);
   setIfEmpty('ld-quadra', lote.quadra.nome);
@@ -16189,11 +16223,12 @@ function aplicarAutoFillLote(lote) {
   setIfEmpty('ld-mun', lote.loteamento.municipio || '');
   setIfEmpty('ld-uf', lote.loteamento.uf || '');
   // Confrontantes
-  setIfEmpty('ld-cf-frente', lote.conf_frente_resolvido || '');
-  setIfEmpty('ld-cf-fundo', lote.conf_fundo_resolvido || '');
+  setIfEmpty('ld-cf-frente', confFrente);
+  setIfEmpty('ld-cf-fundo', confFundo);
   setIfEmpty('ld-cf-dir', lote.conf_lateral_dir_resolvido || '');
   setIfEmpty('ld-cf-esq', lote.conf_lateral_esq_resolvido || '');
-  mostrarToastOffline('🏘️ Campos auto-preenchidos do Lote ' + lote.numero_lote, 'success');
+  const sufixo = heuristicaTrocaAplicada ? ' (Frente↔Fundo corrigido)' : '';
+  mostrarToastOffline('🏘️ Campos auto-preenchidos do Lote ' + lote.numero_lote + sufixo, 'success');
 }
 
 // v2.1.7+v2.1.8: injeta datalists Açailândia no DOM (autocomplete dos campos do laudo)
