@@ -1003,3 +1003,65 @@ export async function getPdfAssinado(laudoId: number | string): Promise<{
       : null,
   };
 }
+
+// v3.0.0: persistência da precificação INCRA (Portaria 12/2025)
+import type {
+  CriteriosPontuacao,
+  UnidadeCalculo,
+  DescontoTipo,
+  ResultadoPrecificacao,
+} from '../services/pricing/incra';
+
+export interface DadosPrecificacaoPersistir {
+  unidade: UnidadeCalculo;
+  criterios: CriteriosPontuacao;
+  quantidade: number;
+  resultado: ResultadoPrecificacao;
+  desconto: { tipo: DescontoTipo; valor: number };
+  observacoes?: string | null;
+}
+
+export async function atualizarPrecificacao(
+  id: number,
+  d: DadosPrecificacaoPersistir,
+): Promise<void> {
+  await pool.execute(
+    `UPDATE laudos_demarcacao SET
+        unidade_calculo = ?,
+        pont_vegetacao = ?, pont_relevo = ?, pont_insalubridade = ?,
+        pont_acesso = ?,    pont_clima = ?,  pont_area_media = ?,
+        pontuacao_total = ?, faixa_aplicada = ?,
+        valor_unitario = ?, quantidade_calculo = ?, valor_base_calculado = ?,
+        desconto_tipo = ?, desconto_valor = ?,
+        valor_final = ?,    valor_servico = ?,
+        precificacao_observacoes = ?,
+        precificacao_calculada_em = NOW()
+      WHERE id = ?`,
+    [
+      d.unidade,
+      d.criterios.vegetacao, d.criterios.relevo, d.criterios.insalubridade,
+      d.criterios.acesso,    d.criterios.clima,  d.criterios.area_media,
+      d.resultado.pontuacaoTotal, d.resultado.faixa.label,
+      d.resultado.valorUnitario, d.quantidade, d.resultado.valorBase,
+      d.desconto.tipo, d.desconto.valor,
+      d.resultado.valorFinal, d.resultado.valorFinal,
+      d.observacoes ?? null,
+      Number(id),
+    ],
+  );
+}
+
+export async function atualizarApenasDesconto(
+  id: number,
+  desconto: { tipo: DescontoTipo; valor: number },
+  novoValorFinal: number,
+): Promise<void> {
+  await pool.execute(
+    `UPDATE laudos_demarcacao SET
+        desconto_tipo = ?, desconto_valor = ?,
+        valor_final = ?, valor_servico = ?,
+        precificacao_calculada_em = NOW()
+      WHERE id = ?`,
+    [desconto.tipo, desconto.valor, novoValorFinal, novoValorFinal, Number(id)],
+  );
+}
