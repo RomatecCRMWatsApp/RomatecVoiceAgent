@@ -10906,7 +10906,7 @@ function renderFiscalConfigBox() {
             </select>
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>NFe.io Company ID
             <input id="cfgCompany" placeholder="UUID da empresa no NFe.io" value="${escape(c.provider_company_id||'')}" style="width:100%; font-family:monospace; font-size:12px;">
           </label>
@@ -10997,7 +10997,7 @@ function renderNFAvulsaBox() {
             <input id="nfaUf" maxlength="2" value="MA" style="width:100%; text-transform:uppercase;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1.5fr 1fr 1fr; gap:8px;">
+        <div class="lp-grid-auto">
           <label>Logradouro
             <input id="nfaLogr" placeholder="Av. Brasil" style="width:100%;">
           </label>
@@ -11008,7 +11008,7 @@ function renderNFAvulsaBox() {
             <input id="nfaBairro" style="width:100%;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+        <div class="lp-grid-3">
           <label>Valor do serviço (R$) *
             <input id="nfaValor" type="number" step="0.01" min="0.01" placeholder="0,00" style="width:100%;">
           </label>
