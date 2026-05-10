@@ -5757,7 +5757,7 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
         <label>Endereço / localização do imóvel rural
           <input id="geoEndereco" placeholder="Sítio/Fazenda Tal, zona rural, município-UF" style="width:100%;">
         </label>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Município
             <input id="geoMunicipio" value="Açailândia" style="width:100%;">
           </label>
@@ -5767,7 +5767,7 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
         </div>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📐 Levantamento</p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Área (hectares)
             <input id="geoArea" type="number" min="0.1" step="0.01" placeholder="ex: 25.5" style="width:100%;">
           </label>
@@ -5776,7 +5776,7 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
             <span style="font-size:10px; color:var(--text-muted);">Mínimo 3 (poligonal)</span>
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Distância de deslocamento (km)
             <input id="geoDistKm" type="number" min="0" step="1" value="0" style="width:100%;">
             <span style="font-size:10px; color:var(--text-muted);">Ida+volta a partir de Açailândia</span>
@@ -5788,7 +5788,7 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
         </div>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💰 Valores unitários (deixe 0 pra usar tabela CONFEA)</p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>R$/hectare
             <input id="geoValHa" type="number" min="0" step="0.01" placeholder="80.00 (default)" style="width:100%;">
           </label>
@@ -5796,7 +5796,7 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
             <input id="geoValVert" type="number" min="0" step="0.01" placeholder="200.00 (default)" style="width:100%;">
           </label>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>R$/diária
             <input id="geoValDia" type="number" min="0" step="0.01" placeholder="600.00 (default)" style="width:100%;">
           </label>
@@ -5974,7 +5974,7 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
         </label>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📐 Dados do imóvel</p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Área total (m²)
             <input id="dxArea" type="number" min="1" step="0.01" style="width:100%;">
             <span style="font-size:10px; color:var(--text-muted);">${isDesm ? 'Área da matriz' : 'Soma das áreas a unificar'}</span>
@@ -6153,7 +6153,7 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
         </label>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📊 Áreas (em m² ou hectares)</p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Área atual (matrícula)
             <input id="rxAreaAtual" type="number" min="0.01" step="0.01" style="width:100%;">
             <span style="font-size:10px; color:var(--text-muted);">Como está na matrícula hoje</span>
@@ -6317,7 +6317,7 @@ async function renderConsultoriaFormPTAM(v, toggleHTML) {
         <label>Endereço do imóvel a avaliar
           <input id="ptEndereco" placeholder="Rua, nº, bairro, cidade-UF (ou descrição rural)" style="width:100%;">
         </label>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Município
             <input id="ptMunicipio" value="Açailândia" style="width:100%;">
           </label>
@@ -6336,7 +6336,7 @@ async function renderConsultoriaFormPTAM(v, toggleHTML) {
             <option value="industrial">Industrial (instalações + maquinário)</option>
           </select>
         </label>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div class="lp-grid-2">
           <label>Área do terreno (m² ou ha)
             <input id="ptAreaTerreno" type="number" min="0" step="0.01" value="0" style="width:100%;">
           </label>
@@ -6751,7 +6751,7 @@ async function abrirNovaConsultoriaPasso1() {
     </button>`).join('');
 
   const html = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">${cards}</div>
+    <div class="lp-grid-2">${cards}</div>
   `;
   const modal = abrirModal(html, { title: 'Nova Proposta de Consultoria', subtitle: 'Selecione o tipo' });
   modal.querySelectorAll('[data-pick-subtipo]:not([disabled])').forEach(b => b.onclick = () => {
@@ -6828,7 +6828,7 @@ async function abrirCadastroClienteModal(subtipoParaVoltar) {
       <label>Nome completo / Razão Social *
         <input id="novCliNome" placeholder="Maria Ester R. Sampaio" style="width:100%;" autofocus>
       </label>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <label>CPF / CNPJ
           <input id="novCliCpf" placeholder="000.000.000-00" style="width:100%;">
         </label>
@@ -6842,7 +6842,7 @@ async function abrirCadastroClienteModal(subtipoParaVoltar) {
       <label>Endereço completo
         <input id="novCliEnd" placeholder="Rua Bom Jesus, 236, Centro" style="width:100%;">
       </label>
-      <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px;">
+      <div class="lp-grid-auto">
         <label>Cidade
           <input id="novCliCidade" placeholder="Açailândia" style="width:100%;" value="Açailândia">
         </label>
@@ -6922,7 +6922,7 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
       <label>Endereço do imóvel
         <input id="cnsEndereco" placeholder="Rua, número, bairro, cidade-UF" style="width:100%;">
       </label>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <label>Área construída (m²)
           <input id="cnsArea" type="number" min="1" step="0.01" style="width:100%;">
         </label>
@@ -6930,7 +6930,7 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
           <input id="cnsValorVenal" type="number" min="0" step="0.01" style="width:100%;">
         </label>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="lp-grid-2">
         <label>
           <span style="display:flex; align-items:center; gap:4px;">Padrão construtivo
             <button type="button" id="cnsPadraoHelp" title="Como escolher" style="background:transparent; border:1px solid var(--border); color:var(--neon); border-radius:50%; width:18px; height:18px; padding:0; line-height:1; cursor:pointer; font-size:12px;">?</button>
@@ -6977,7 +6977,7 @@ async function abrirNovaConsultoriaPasso2(subtipo) {
         ⚠️ Comercial: pacote completo obrigatório (7 projetos: Mapa, Arquitetônico, Elétrico, Hidrossanitário, Estrutural, PPCI, Memorial).
       </div>` : ''}
       <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Status atual dos documentos do cliente:</div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:12px;">
+      <div class="lp-grid-2" style="gap:4px; font-size:12px;">
         <label><input id="cnsAlvara" type="checkbox"> Já tem Alvará</label>
         <label><input id="cnsHabite" type="checkbox"> Já tem Habite-se</label>
         <label><input id="cnsIptu" type="checkbox" checked> IPTU em dia</label>
