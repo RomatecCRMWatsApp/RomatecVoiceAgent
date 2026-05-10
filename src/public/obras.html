@@ -14848,7 +14848,7 @@ function renderLaudoTabPontos(c) {
     <div class="card" style="margin-top:12px;" id="lp-preview-mobile-card">
       <details ${pontosPreview.length >= 3 ? 'open' : ''}>
         <summary style="cursor:pointer; font-weight:600;">📱 Preview + Memorial Descritivo (vai pro PDF)</summary>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px;">
+        <div class="lp-grid-2" style="gap:12px; margin-top:8px;">
           <div id="lp-preview-svg-mobile">
             ${gerarCroquiSvgClient(pontosPreview, ladosPreview, { larguraPx: 600, alturaPx: 600, tipoImovel: l.tipo_imovel, areaTotalM2: l.area_total_m2 ? Number(l.area_total_m2) : undefined, utmZona: pontos[0]?.utm_zona ? Number(pontos[0].utm_zona) : undefined, utmHemisferio: pontos[0]?.utm_hemisferio || 'S' })}
           </div>
@@ -15032,7 +15032,7 @@ function renderLaudoTabPontos(c) {
             <strong style="font-size:13px;">📍 Ponto P${i}</strong>
             ${isDinamico && nPontos > 3 && i === nPontos ? `<button data-fp-rm="${i}" title="Remover último ponto" style="font-size:11px; padding:2px 8px; background:transparent; color:#ef4444; border:1px solid #ef444455;">🗑️ Remover P${i}</button>` : ''}
           </div>
-          <div style="display:grid; grid-template-columns: repeat(${cols}, 1fr); gap:6px; margin-top:6px;">
+          <div class="lp-grid-auto" style="gap:6px; margin-top:6px;">
             <input data-fp-rotulo="${i}" placeholder="Rótulo (ex: P${i}, M${i})" value="${escape(p.rotulo || ('P'+i))}">
             ${showUTM ? `<input data-fp-utme="${i}" type="number" step="0.001" inputmode="decimal" placeholder="UTM Este (X)" value="${p.utm_e ?? ''}">` : ''}
             ${showUTM ? `<input data-fp-utmn="${i}" type="number" step="0.001" inputmode="decimal" placeholder="UTM Norte (Y)" value="${p.utm_n ?? ''}">` : ''}
@@ -15108,7 +15108,7 @@ function renderLaudoTabPontos(c) {
       rows += !mostrarLado ? '' : `
         <div style="padding:6px 12px; margin-left:20px; border-left:2px dashed var(--gold); font-size:11px; color:var(--text-muted);">
           ↓ <strong>${getLabelLado(i)}</strong>${memorialHtml}${badgeHtml}
-          <div style="display:grid; grid-template-columns: 1fr 2fr; gap:6px; margin-top:4px;">
+          <div class="lp-grid-auto" style="gap:6px; margin-top:4px;">
             <input data-fl-medida="${i}" type="number" step="0.01" inputmode="decimal" placeholder="Medida (m)" value="${ld.medida_manual_m ?? ''}">
             <input data-fl-confront="${i}" list="dl-confrontantes" placeholder="Confrontante" value="${escape(ld.confrontante_nome || '')}">
           </div>
@@ -15201,7 +15201,7 @@ function renderLaudoTabPontos(c) {
             </div>
             <details style="margin-top:8px;">
               <summary style="font-size:11px; cursor:pointer; color:var(--text-muted);">⚙️ Editar manualmente (retroativo)</summary>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px;">
+              <div class="lp-grid-2" style="gap:6px; margin-top:6px;">
                 <div>
                   <label style="font-size:10px; color:var(--text-muted); display:block;">Início manual</label>
                   <input id="lp-base-inicio" type="datetime-local" value="${baseInicioISO ? new Date(baseInicioISO).toISOString().slice(0,16) : ''}" style="width:100%;">
