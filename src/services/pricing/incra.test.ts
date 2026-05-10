@@ -1,5 +1,8 @@
 // src/services/pricing/incra.test.ts
 import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as vm from 'node:vm';
 import {
   validarCriterios,
   calcularPontuacaoTotal,
@@ -257,4 +260,58 @@ describe('sugerirCriterios', () => {
     expect(c.insalubridade).toBe(7);
     expect(c.area_media).toBe(8);
   });
+});
+
+describe('paridade back↔front', () => {
+  const jsPath = path.resolve(__dirname, '../../public/js/incraCalc.js');
+  const jsCode = fs.readFileSync(jsPath, 'utf-8');
+  const ctx: any = {};
+  vm.createContext(ctx);
+  vm.runInContext(jsCode, ctx);
+  const front = ctx.IncraCalc;
+
+  const pontuacoesPorFaixa = [10, 20, 30, 40, 50, 58]; // 1 representante por faixa
+  const unidades: Array<'km' | 'hectare' | 'lote'> = ['km', 'hectare', 'lote'];
+  const descontos: Array<{ tipo: 'nenhum' | 'percentual' | 'fixo'; valor: number }> = [
+    { tipo: 'nenhum', valor: 0 },
+    { tipo: 'percentual', valor: 5 },
+    { tipo: 'fixo', valor: 100 },
+  ];
+
+  for (const ponto of pontuacoesPorFaixa) {
+    for (const unidade of unidades) {
+      for (const desconto of descontos) {
+        it(`paridade: ponto=${ponto} unidade=${unidade} desconto=${desconto.tipo}/${desconto.valor}`, () => {
+          // Distribui 'ponto' entre os 6 critérios garantindo cada um entre 1 e 10
+          const base = Math.floor(ponto / 6);
+          const sobra = ponto - base * 6;
+          const criterios: CriteriosPontuacao = {
+            vegetacao:     Math.max(1, base + (sobra > 0 ? 1 : 0)),
+            relevo:        Math.max(1, base + (sobra > 1 ? 1 : 0)),
+            insalubridade: Math.max(1, base + (sobra > 2 ? 1 : 0)),
+            acesso:        Math.max(1, base + (sobra > 3 ? 1 : 0)),
+            clima:         Math.max(1, base + (sobra > 4 ? 1 : 0)),
+            area_media:    Math.max(1, base + (sobra > 5 ? 1 : 0)),
+          };
+
+          const input: InputPrecificacao = {
+            criterios,
+            unidade,
+            quantidade: 10,
+            desconto,
+          };
+
+          const back = calcularPrecificacao(input);
+          const frnt = front.calcularPrecificacao(input);
+
+          expect(frnt.pontuacaoTotal).toBe(back.pontuacaoTotal);
+          expect(frnt.faixa.label).toBe(back.faixa.label);
+          expect(frnt.valorUnitario).toBe(back.valorUnitario);
+          expect(frnt.valorBase).toBe(back.valorBase);
+          expect(frnt.descontoAplicado).toBe(back.descontoAplicado);
+          expect(frnt.valorFinal).toBe(back.valorFinal);
+        });
+      }
+    }
+  }
 });
