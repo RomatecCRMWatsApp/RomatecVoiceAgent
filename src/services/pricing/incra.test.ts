@@ -171,3 +171,29 @@ describe('calcularPrecificacao — descontos', () => {
     expect(() => calcularPrecificacao({ ...base, desconto: { tipo: 'fixo', valor: -1 } })).toThrow(/não pode ser negativo/);
   });
 });
+
+describe('calcularPrecificacao — aviso de variação', () => {
+  const base: InputPrecificacao = {
+    criterios: { vegetacao: 5, relevo: 5, insalubridade: 5, acesso: 5, clima: 5, area_media: 5 },
+    unidade: 'hectare',
+    quantidade: 10,
+    desconto: { tipo: 'nenhum', valor: 0 },
+  };
+
+  it('desconto 10% — sem aviso', () => {
+    const r = calcularPrecificacao({ ...base, desconto: { tipo: 'percentual', valor: 10 } });
+    expect(r.detalhamento.avisos).toEqual([]);
+  });
+
+  it('desconto 11% — emite aviso', () => {
+    const r = calcularPrecificacao({ ...base, desconto: { tipo: 'percentual', valor: 11 } });
+    expect(r.detalhamento.avisos.length).toBe(1);
+    expect(r.detalhamento.avisos[0]).toMatch(/Portaria INCRA 12\/2025/);
+    expect(r.detalhamento.avisos[0]).toMatch(/±10%/);
+  });
+
+  it('desconto 25% — emite aviso', () => {
+    const r = calcularPrecificacao({ ...base, desconto: { tipo: 'percentual', valor: 25 } });
+    expect(r.detalhamento.avisos.length).toBe(1);
+  });
+});
