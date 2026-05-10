@@ -1,6 +1,15 @@
 // src/services/pricing/incra.test.ts
 import { describe, it, expect } from 'vitest';
-import { validarCriterios, type CriteriosPontuacao } from './incra';
+import {
+  validarCriterios,
+  calcularPontuacaoTotal,
+  obterFaixa,
+  obterValorUnitario,
+  calcularPrecificacao,
+  sugerirCriterios,
+  type CriteriosPontuacao,
+  type InputPrecificacao,
+} from './incra';
 
 const valido: CriteriosPontuacao = {
   vegetacao: 5, relevo: 5, insalubridade: 5, acesso: 5, clima: 5, area_media: 5,
@@ -37,8 +46,6 @@ describe('validarCriterios', () => {
   });
 });
 
-import { calcularPontuacaoTotal } from './incra';
-
 describe('calcularPontuacaoTotal', () => {
   it('soma 6 critérios = 30', () => {
     expect(calcularPontuacaoTotal({
@@ -58,8 +65,6 @@ describe('calcularPontuacaoTotal', () => {
     })).toBe(60);
   });
 });
-
-import { obterFaixa } from './incra';
 
 describe('obterFaixa', () => {
   it('pontuação 6 → faixa 06-15', () => {
@@ -84,8 +89,6 @@ describe('obterFaixa', () => {
     expect(() => obterFaixa(61)).toThrow(/acima do máximo/);
   });
 });
-
-import { obterValorUnitario, calcularPrecificacao, type InputPrecificacao } from './incra';
 
 describe('obterValorUnitario', () => {
   it('faixa 26-35 km → R$ 1.571,64', () => {
@@ -197,8 +200,6 @@ describe('calcularPrecificacao — aviso de variação', () => {
     expect(r.detalhamento.avisos.length).toBe(1);
   });
 });
-
-import { sugerirCriterios } from './incra';
 
 describe('sugerirCriterios', () => {
   it('sem dados → todos os critérios = 5 (default conservador)', () => {

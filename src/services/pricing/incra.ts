@@ -157,6 +157,7 @@ export function obterValorUnitario(faixa: FaixaIncra, unidade: UnidadeCalculo): 
     case 'km':      return faixa.valorPorKm;
     case 'hectare': return faixa.valorPorHectare;
     case 'lote':    return faixa.valorPorLote;
+    default:        throw new Error(`Unidade inválida: ${unidade}`);
   }
 }
 
