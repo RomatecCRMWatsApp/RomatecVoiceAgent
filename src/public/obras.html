@@ -456,6 +456,8 @@
 </style>
 <!-- v1.84.0: catálogo de serviços técnico-legais (auto-preenchimento descrição recibo) -->
 <script src="/js/catalogo-servicos.js"></script>
+<!-- v3.0.0: cálculo de precificação INCRA (Portaria 12/2025) -->
+<script src="/js/incraCalc.js" defer></script>
 <!-- v1.99.2: auto-update SILENCIOSO via SKIP_WAITING + controllerchange.
      Antes (v1.93): banner "Atualizar agora" pedia clique. Resultado: usuário
      via banner com "v1.99.1" e badge "v1.99.1" e ficava confuso (mesma versão).
@@ -15897,6 +15899,53 @@ function renderLaudoTabArt(c) {
       </div>
     </div>
     <div class="card">
+      <h3 style="margin-top:0;">💰 Precificação INCRA (Portaria 12/2025)</h3>
+
+      <div style="display:flex; gap:12px; margin-bottom:8px; flex-wrap:wrap;">
+        <label style="display:flex; gap:4px; align-items:center;">
+          <input type="radio" name="incraUnidade" value="km" id="incraUniKm"> km linear
+        </label>
+        <label style="display:flex; gap:4px; align-items:center;">
+          <input type="radio" name="incraUnidade" value="hectare" id="incraUniHa" checked> Hectare
+        </label>
+        <label style="display:flex; gap:4px; align-items:center;">
+          <input type="radio" name="incraUnidade" value="lote" id="incraUniLote"> Lote
+        </label>
+        <input id="incraQtd" type="number" step="0.0001" placeholder="Quantidade" style="flex:1; min-width:140px;">
+      </div>
+
+      <div id="incraCriterios" style="display:grid; grid-template-columns: 1fr; gap:8px;">
+        <!-- preenchido por setupIncraBlock -->
+      </div>
+
+      <div id="incraCalculo" style="margin-top:10px; padding:8px; background:rgba(16,185,129,0.06); border-left:3px solid #10b981;">
+        <div style="display:flex; justify-content:space-between;"><span>Pontuação total:</span><strong id="incraPontuacao">—</strong></div>
+        <div style="display:flex; justify-content:space-between;"><span>Faixa:</span><strong id="incraFaixa">—</strong></div>
+        <div style="display:flex; justify-content:space-between;"><span>Valor unitário:</span><strong id="incraValorUnit">—</strong></div>
+        <div style="font-size:13px; color:var(--text-muted); margin-top:4px;"><span id="incraFormula">—</span></div>
+      </div>
+
+      <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <span style="color:var(--text-muted); font-size:12px;">Desconto:</span>
+        <label><input type="radio" name="incraDescTipo" value="nenhum" id="incraDescNenhum" checked> Nenhum</label>
+        <label><input type="radio" name="incraDescTipo" value="percentual" id="incraDescPct"> %</label>
+        <label><input type="radio" name="incraDescTipo" value="fixo" id="incraDescFixo"> R$</label>
+        <input id="incraDescValor" type="number" step="0.01" placeholder="0" style="width:120px;" disabled>
+      </div>
+
+      <div id="incraAvisos" style="margin-top:8px; color:#d97706; font-size:12px;"></div>
+
+      <div style="margin-top:12px; padding:10px; background:rgba(16,185,129,0.10); border:1px solid #10b981; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:14px;">VALOR FINAL:</span>
+        <strong id="incraValorFinal" style="font-size:18px; color:#10b981;">—</strong>
+      </div>
+
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button class="btn-primary" id="incraSalvar">💾 Salvar precificação</button>
+        <span id="incraStatus" style="color:var(--text-muted); font-size:12px;"></span>
+      </div>
+    </div>
+    <div class="card">
       <h3 style="margin-top:0;">💰 Financeiro</h3>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
         <input id="la-valor" type="number" step="0.01" placeholder="Valor do serviço (R$)" value="${l.valor_servico ?? ''}">
@@ -15934,6 +15983,175 @@ function renderLaudoTabArt(c) {
       renderLaudoEditor(document.getElementById('view-laudos'));
     } catch (err) { alert('Erro: '+err.message); }
   };
+  // v3.0.0: ativa bloco de precificacao INCRA
+  setupIncraBlock(l.id);
+}
+
+async function setupIncraBlock(laudoId) {
+  if (!laudoId) return;
+  const C = window.IncraCalc;
+  if (!C) { console.error('[incra] incraCalc.js nao carregou'); return; }
+
+  const criteriosKeys = ['vegetacao','relevo','insalubridade','acesso','clima','area_media'];
+
+  // Monta steppers + dropdowns
+  const cont = document.getElementById('incraCriterios');
+  if (!cont) return; // bloco nao montado
+  cont.innerHTML = criteriosKeys.map(k => {
+    const def = C.CRITERIOS_INCRA[k];
+    const niveisOpts = def.niveis.map((n, idx) => {
+      const minP = idx === 0 ? 1 : def.niveis[idx-1].maxPonto + 1;
+      const maxP = n.maxPonto;
+      return `<option value="${minP}-${maxP}">${n.rotulo} (${minP}-${maxP})</option>`;
+    }).join('');
+    return `<div style="display:grid; grid-template-columns: 130px 90px 1fr; gap:8px; align-items:center;">
+      <label>${def.label}:</label>
+      <input type="number" min="1" max="10" value="5" data-incra-criterio="${k}" style="width:80px;">
+      <select data-incra-faixa="${k}">${niveisOpts}</select>
+    </div>`;
+  }).join('');
+
+  // Carrega laudo + sugestao em paralelo
+  let laudo, sugestao;
+  try {
+    [laudo, sugestao] = await Promise.all([
+      api('/api/laudos-demarcacao/' + laudoId),
+      api('/api/laudos-demarcacao/' + laudoId + '/precificacao/sugerir'),
+    ]);
+  } catch (err) {
+    console.warn('[incra] falha carregando dados:', err.message);
+    return;
+  }
+
+  // Pre-popula os 6 steppers
+  for (const k of criteriosKeys) {
+    const inp = document.querySelector(`[data-incra-criterio="${k}"]`);
+    if (inp && sugestao.criterios && sugestao.criterios[k] != null) {
+      inp.value = sugestao.criterios[k];
+      // Sync dropdown
+      const ponto = Number(inp.value);
+      const sel = document.querySelector(`[data-incra-faixa="${k}"]`);
+      const niveis = C.CRITERIOS_INCRA[k].niveis;
+      const idx = ponto <= niveis[0].maxPonto ? 0 : ponto <= niveis[1].maxPonto ? 1 : 2;
+      if (sel) sel.selectedIndex = idx;
+    }
+  }
+
+  // Quantidade default conforme unidade selecionada
+  function setQuantidadeDefault() {
+    const unidade = document.querySelector('input[name="incraUnidade"]:checked').value;
+    const qtdInput = document.getElementById('incraQtd');
+    if (unidade === 'km') qtdInput.value = laudo.perimetro_m ? (laudo.perimetro_m / 1000).toFixed(4) : '';
+    else if (unidade === 'hectare') qtdInput.value = laudo.area_total_m2 ? (laudo.area_total_m2 / 10000).toFixed(4) : '';
+    else qtdInput.value = '1';
+  }
+  setQuantidadeDefault();
+
+  // Listeners
+  document.querySelectorAll('input[name="incraUnidade"]').forEach(r => r.addEventListener('change', () => { setQuantidadeDefault(); recalc(); }));
+  document.querySelectorAll('[data-incra-criterio]').forEach(i => i.addEventListener('input', recalc));
+  document.querySelectorAll('input[name="incraDescTipo"]').forEach(r => r.addEventListener('change', () => {
+    const tipo = document.querySelector('input[name="incraDescTipo"]:checked').value;
+    const inp = document.getElementById('incraDescValor');
+    inp.disabled = (tipo === 'nenhum');
+    if (tipo === 'nenhum') inp.value = 0;
+    recalc();
+  }));
+  document.getElementById('incraDescValor').addEventListener('input', recalc);
+  document.getElementById('incraQtd').addEventListener('input', recalc);
+
+  // Sync stepper → dropdown
+  document.querySelectorAll('[data-incra-criterio]').forEach(i => {
+    i.addEventListener('input', () => {
+      const k = i.dataset.incraCriterio;
+      const ponto = Number(i.value);
+      const sel = document.querySelector(`[data-incra-faixa="${k}"]`);
+      const niveis = C.CRITERIOS_INCRA[k].niveis;
+      const idx = ponto <= niveis[0].maxPonto ? 0 : ponto <= niveis[1].maxPonto ? 1 : 2;
+      if (sel) sel.selectedIndex = idx;
+    });
+  });
+
+  let recalcTimer = null;
+  function recalc() {
+    clearTimeout(recalcTimer);
+    recalcTimer = setTimeout(doRecalc, 300);
+  }
+
+  function doRecalc() {
+    try {
+      const criterios = {};
+      for (const k of criteriosKeys) {
+        criterios[k] = Number(document.querySelector(`[data-incra-criterio="${k}"]`).value);
+      }
+      const unidade = document.querySelector('input[name="incraUnidade"]:checked').value;
+      const quantidade = Number(document.getElementById('incraQtd').value);
+      const descTipo = document.querySelector('input[name="incraDescTipo"]:checked').value;
+      const descValor = Number(document.getElementById('incraDescValor').value || 0);
+
+      if (!quantidade || quantidade <= 0) {
+        document.getElementById('incraValorFinal').textContent = '—';
+        document.getElementById('incraAvisos').textContent = '';
+        return;
+      }
+
+      const r = C.calcularPrecificacao({ criterios, unidade, quantidade, desconto: { tipo: descTipo, valor: descValor } });
+
+      document.getElementById('incraPontuacao').textContent = r.pontuacaoTotal;
+      document.getElementById('incraFaixa').textContent = r.faixa.label;
+      document.getElementById('incraValorUnit').textContent = 'R$ ' + r.valorUnitario.toFixed(2).replace('.', ',') + ' / ' + unidade;
+      document.getElementById('incraFormula').textContent = r.detalhamento.formula;
+      document.getElementById('incraValorFinal').textContent = 'R$ ' + r.valorFinal.toFixed(2).replace('.', ',');
+      document.getElementById('incraAvisos').textContent = r.detalhamento.avisos.join(' ');
+    } catch (err) {
+      document.getElementById('incraValorFinal').textContent = '—';
+      document.getElementById('incraAvisos').textContent = err.message;
+    }
+  }
+
+  // Salvar precificação
+  document.getElementById('incraSalvar').addEventListener('click', async () => {
+    const status = document.getElementById('incraStatus');
+    status.textContent = 'Salvando...';
+    try {
+      const criterios = {};
+      for (const k of criteriosKeys) {
+        criterios[k] = Number(document.querySelector(`[data-incra-criterio="${k}"]`).value);
+      }
+      const unidade = document.querySelector('input[name="incraUnidade"]:checked').value;
+      const quantidade = Number(document.getElementById('incraQtd').value);
+      const descTipo = document.querySelector('input[name="incraDescTipo"]:checked').value;
+      const descValor = Number(document.getElementById('incraDescValor').value || 0);
+
+      const r = await api('/api/laudos-demarcacao/' + laudoId + '/precificacao/calcular', {
+        method: 'POST',
+        body: JSON.stringify({ unidade, criterios, quantidade, desconto: { tipo: descTipo, valor: descValor } }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      status.textContent = '✓ Salvo (R$ ' + r.valorFinal.toFixed(2).replace('.', ',') + ')';
+      // Trava o campo valor_servico do bloco financeiro
+      const valSrv = document.getElementById('la-valor');
+      if (valSrv) {
+        valSrv.value = r.valorFinal;
+        valSrv.disabled = true;
+        valSrv.title = 'Calculado pela precificacao INCRA — para alterar, recalcule acima';
+      }
+    } catch (err) {
+      status.textContent = '✗ ' + err.message;
+    }
+  });
+
+  // Calculo inicial
+  doRecalc();
+
+  // Se o laudo ja tinha precificacao salva, trava o campo de valor_servico de saida
+  if (laudo.precificacao_calculada_em) {
+    const valSrv = document.getElementById('la-valor');
+    if (valSrv) {
+      valSrv.disabled = true;
+      valSrv.title = 'Calculado pela precificacao INCRA — para alterar, recalcule acima';
+    }
+  }
 }
 
 // v1.66.6: registra service worker pra PWA instalavel (desktop + mobile)
