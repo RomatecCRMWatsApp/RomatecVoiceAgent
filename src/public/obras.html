@@ -13408,7 +13408,8 @@ function renderLaudosLista(v) {
           </div>
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
             ${l.assinado_em
-              ? `<button data-laudo-pdf-sig="${l.id}" title="PDF assinado digitalmente" style="flex:1; background:#1F5C3A22; color:#1F5C3A; border:1px solid #1F5C3A55;">🔏 Assinado</button>`
+              ? `<button data-laudo-pdf-sig="${l.id}" title="Baixar PDF assinado digitalmente" style="flex:1; background:#1F5C3A22; color:#1F5C3A; border:1px solid #1F5C3A55;">🔏 Assinado</button>
+                 <button data-laudo-sig="${l.id}" data-laudo-resign="1" title="Re-assinar — sobrescreve o PDF atual com a versão atualizada do laudo" style="flex:1; background:transparent; color:var(--text-muted); border:1px dashed var(--border); font-size:12px;">🔁 Re-assinar</button>`
               : `<button data-laudo-sig="${l.id}" title="Assinar digitalmente (PAdES ICP-Brasil)" style="flex:1; background:transparent; color:var(--text-muted); border:1px dashed var(--border);">🔏 Assinar</button>`}
             ${l.recibo_id
               ? `<button data-laudo-recibo-ver="${l.recibo_id}" title="Ver recibo gerado" style="flex:1; background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b55;">🧾 Recibo</button>`
@@ -13461,7 +13462,12 @@ function renderLaudosLista(v) {
     window.open('/api/laudos-demarcacao/' + b.dataset.laudoPdfSig + '/pdf-assinado', '_blank');
   });
   v.querySelectorAll('[data-laudo-sig]').forEach(b => b.onclick = async () => {
-    if (!confirm('Assinar digitalmente este laudo (PAdES ICP-Brasil)?')) return;
+    // v3.0.3: distingue re-assinar (laudo já assinado) de assinar novo
+    const isResign = b.dataset.laudoResign === '1';
+    const confirmMsg = isResign
+      ? 'Re-assinar este laudo?\n\nO PDF assinado atual sera SOBRESCRITO com a versao mais nova do laudo (incluindo a caixa visual ICP-Brasil, secao de precificacao INCRA se aplicavel, etc).\n\nVoce vai precisar digitar a senha do certificado novamente.'
+      : 'Assinar digitalmente este laudo (PAdES ICP-Brasil)?';
+    if (!confirm(confirmMsg)) return;
     // v2.10.3: lista certificados ativos antes de pedir senha. Se houver
     // mais de um (PF + PJ), pergunta qual usar.
     let perfil = 'pj'; // default
@@ -13503,8 +13509,9 @@ function renderLaudosLista(v) {
         body: JSON.stringify({ senha, perfil }),
         headers: { 'Content-Type': 'application/json' },
       });
+      if (isResign) alert('✅ Laudo re-assinado! O PDF foi atualizado com a versao mais nova.');
       await render();
-    } catch (err) { alert('Erro ao assinar: '+err.message); }
+    } catch (err) { alert('Erro ao ' + (isResign ? 're-assinar' : 'assinar') + ': '+err.message); }
   });
   v.querySelectorAll('[data-laudo-recibo]').forEach(b => b.onclick = async () => {
     if (!confirm('Gerar recibo a partir deste laudo?')) return;
