@@ -134,3 +134,40 @@ describe('calcularPrecificacao — sem desconto', () => {
     })).toThrow(/Critérios inválidos/);
   });
 });
+
+describe('calcularPrecificacao — descontos', () => {
+  const base: InputPrecificacao = {
+    criterios: { vegetacao: 5, relevo: 5, insalubridade: 5, acesso: 5, clima: 5, area_media: 5 },
+    unidade: 'hectare',
+    quantidade: 10,
+    desconto: { tipo: 'nenhum', valor: 0 },
+  };
+
+  it('desconto percentual 10% sobre R$ 1.047,80 = R$ 104,78', () => {
+    const r = calcularPrecificacao({ ...base, desconto: { tipo: 'percentual', valor: 10 } });
+    expect(r.valorBase).toBe(1047.80);
+    expect(r.descontoAplicado).toBe(104.78);
+    expect(r.valorFinal).toBe(943.02);
+  });
+
+  it('desconto fixo R$ 47,80 sobre R$ 1.047,80 = R$ 1.000,00', () => {
+    const r = calcularPrecificacao({ ...base, desconto: { tipo: 'fixo', valor: 47.80 } });
+    expect(r.valorFinal).toBe(1000.00);
+  });
+
+  it('desconto percentual > 100 → throw', () => {
+    expect(() => calcularPrecificacao({ ...base, desconto: { tipo: 'percentual', valor: 110 } })).toThrow(/entre 0 e 100/);
+  });
+
+  it('desconto percentual < 0 → throw', () => {
+    expect(() => calcularPrecificacao({ ...base, desconto: { tipo: 'percentual', valor: -5 } })).toThrow(/entre 0 e 100/);
+  });
+
+  it('desconto fixo > valor base → throw', () => {
+    expect(() => calcularPrecificacao({ ...base, desconto: { tipo: 'fixo', valor: 9999 } })).toThrow(/maior que o valor base/);
+  });
+
+  it('desconto fixo negativo → throw', () => {
+    expect(() => calcularPrecificacao({ ...base, desconto: { tipo: 'fixo', valor: -1 } })).toThrow(/não pode ser negativo/);
+  });
+});
