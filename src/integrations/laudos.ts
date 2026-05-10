@@ -80,6 +80,8 @@ export interface Laudo {
   coletor_nome: string | null;
   // v2.4.2: uuid gerado pelo cliente pra suportar criacao offline
   uuid_local: string | null;
+  // v2.9.0: vincula laudo ao lote cadastrado em loteamentos (auto-preenchimento)
+  lote_loteamento_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -143,6 +145,7 @@ interface LaudoRow extends RowDataPacket {
   rover_nome: string | null;
   coletor_nome: string | null;
   uuid_local: string | null;
+  lote_loteamento_id: number | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -222,6 +225,7 @@ function mapRow(r: LaudoRow): Laudo {
     rover_nome: r.rover_nome ?? null,
     coletor_nome: r.coletor_nome ?? null,
     uuid_local: r.uuid_local ?? null,
+    lote_loteamento_id: r.lote_loteamento_id != null ? Number(r.lote_loteamento_id) : null,
     created_at: asISO(r.created_at) ?? '',
     updated_at: asISO(r.updated_at) ?? '',
   };
@@ -442,6 +446,8 @@ export interface AtualizarLaudoInput {
   // v2.2.3 — Rover + Coletor
   rover_nome?: string | null;
   coletor_nome?: string | null;
+  // v2.9.0 — Vincula laudo a lote do cadastro de loteamentos
+  lote_loteamento_id?: number | null;
 }
 
 export async function atualizarLaudo(id: number | string, input: AtualizarLaudoInput): Promise<Laudo> {
@@ -497,6 +503,7 @@ export async function atualizarLaudo(id: number | string, input: AtualizarLaudoI
   set('base_observacoes', input.base_observacoes);
   set('rover_nome', input.rover_nome);
   set('coletor_nome', input.coletor_nome);
+  set('lote_loteamento_id', input.lote_loteamento_id);
 
   if (fields.length === 0) return existente;
   params.push(Number(id));

@@ -265,6 +265,11 @@ export async function runLaudosMigrations(): Promise<void> {
     { label: 'ALTER laudo folhas', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN folhas VARCHAR(40) NULL' },
     { label: 'ALTER laudo cartorio_nome', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN cartorio_nome VARCHAR(200) NULL' },
     { label: 'ALTER laudo cartorio_cns', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN cartorio_cns VARCHAR(20) NULL' },
+    // v2.9.0 — Vincula laudo a um lote do cadastro de loteamentos (auto-preenchimento).
+    // Quando preenchido, o sistema usa medidas teoricas do lote pra comparar com
+    // medidas reais e mostra badge de divergencia se exceder a tolerancia.
+    { label: 'ALTER laudo lote_loteamento_id', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN lote_loteamento_id INT NULL' },
+    { label: 'INDEX lote_loteamento_id', sql: 'ALTER TABLE laudos_demarcacao ADD INDEX idx_lote_loteamento (lote_loteamento_id)' },
   ];
   for (const { label, sql } of ops) {
     try {

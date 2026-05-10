@@ -1745,7 +1745,8 @@ app.get('/api/loteamentos/quadra/:quadraId/lotes', requireCeoToken, async (req: 
 app.get('/api/loteamentos/lote/:loteId', requireCeoToken, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/loteamentos');
-    const lote = await m.buscarLote(Number(req.params.loteId));
+    // v2.9.0: devolve "completo" com quadra + loteamento + confrontantes resolvidos
+    const lote = await m.buscarLoteCompleto(Number(req.params.loteId));
     if (!lote) { res.status(404).json({ error: 'Lote nao encontrado' }); return; }
     res.json({ lote });
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }

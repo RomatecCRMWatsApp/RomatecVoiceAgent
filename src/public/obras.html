@@ -13224,6 +13224,15 @@ async function loadLaudoDetalhe(id) {
     lados: geom.lados || [],
     fotos: fotos.items || fotos || [],
   };
+  // v2.9.0: pre-carrega o lote vinculado (se existir) pra estar disponivel
+  // em todas as abas (Pontos usa pra comparar medidas teoricas vs reais)
+  state.laudoLoteVinculado = null;
+  if (state.laudoAtual.lote_loteamento_id) {
+    try {
+      const r = await api('/api/loteamentos/lote/' + state.laudoAtual.lote_loteamento_id);
+      if (r?.lote) state.laudoLoteVinculado = r.lote;
+    } catch (_) { /* lote pode ter sido deletado */ }
+  }
 }
 
 function renderLaudos() {
@@ -14114,7 +14123,10 @@ function renderLaudoTabCadastros(c) {
 function renderLaudoTabDados(c) {
   const l = state.laudoAtual;
   const isUrbano = l.tipo_imovel === 'URBANO';
+  // v2.9.0: render do bloco de selectors loteamento (acima de Identificacao)
+  // injetado depois via mountLoteamentoSelectorsLaudo() pra carregar lista async
   c.innerHTML = `
+    <div id="ld-loteamento-selector-host"></div>
     <div class="card">
       <h3 style="margin-top:0;">Identificação do imóvel</h3>
       <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">
@@ -14195,6 +14207,8 @@ function renderLaudoTabDados(c) {
       folhas: document.getElementById('ld-folhas')?.value.trim() || null,
       cartorio_nome: document.getElementById('ld-cartorio-nome')?.value.trim() || null,
       cartorio_cns: document.getElementById('ld-cartorio-cns')?.value.trim() || null,
+      // v2.9.0: vincula laudo ao lote do cadastro de loteamentos (se selecionado)
+      lote_loteamento_id: state.laudoLoteVinculado?.id ?? l.lote_loteamento_id ?? null,
       endereco_imovel: document.getElementById('ld-end').value.trim() || null,
       municipio: document.getElementById('ld-mun').value.trim() || null,
       uf_imovel: document.getElementById('ld-uf').value.trim().toUpperCase() || null,
@@ -14228,6 +14242,11 @@ function renderLaudoTabDados(c) {
       renderLaudoEditor(document.getElementById('view-laudos'));
     } catch (err) { alert('Erro: '+err.message); }
   };
+
+  // v2.9.0: monta os 3 selectors Loteamento → Quadra → Lote
+  if (typeof mountLoteamentoSelectorsLaudo === 'function') {
+    mountLoteamentoSelectorsLaudo();
+  }
 
   // v2.1.8: gerenciador de cadastros locais (modal simples)
   const gerenciar = document.getElementById('ld-gerenciar-cad');
@@ -14676,9 +14695,33 @@ function renderLaudoTabPontos(c) {
       // o polígono não pode fechar (precisa 3+ pontos). Pra urbano fixo, sempre mostra.
       const mostrarLado = !isDinamico || nPontos >= 3;
       const ld = ladosArr[i-1] || {};
+      // v2.9.0: medida teorica do memorial (so urbano 4P por enquanto — outros
+      // tipos requerem mapping mais complexo lado→confrontante)
+      let memorialHtml = '';
+      let badgeHtml = '';
+      if (mostrarLado && isUrb4 && state.laudoLoteVinculado) {
+        const lvc = state.laudoLoteVinculado;
+        const map4P = [null, lvc.medida_frente_m, lvc.medida_lateral_dir_m, lvc.medida_fundo_m, lvc.medida_lateral_esq_m];
+        const teorica = Number(map4P[i]);
+        const real = Number(ld.medida_manual_m);
+        if (Number.isFinite(teorica)) {
+          memorialHtml = `<span style="margin-left:8px; color:var(--gold); font-weight:600;">📐 Memorial: ${teorica.toFixed(2)}m</span>`;
+          if (Number.isFinite(real) && real > 0) {
+            const diffCm = Math.abs(real - teorica) * 100;
+            const tol = state.toleranciaCm || 5;
+            if (diffCm > tol) {
+              badgeHtml = `<span data-lado-badge="${i}" style="margin-left:6px; padding:2px 6px; background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b55; border-radius:3px; font-weight:600;">⚠️ Δ ${diffCm.toFixed(0)}cm</span>`;
+            } else {
+              badgeHtml = `<span data-lado-badge="${i}" style="margin-left:6px; padding:2px 6px; background:#10b98122; color:#10b981; border:1px solid #10b98155; border-radius:3px; font-weight:600;">✅ ±${diffCm.toFixed(0)}cm</span>`;
+            }
+          } else {
+            badgeHtml = `<span data-lado-badge="${i}" style="margin-left:6px; padding:2px 6px; background:transparent; color:var(--text-muted); font-size:10px;">aguardando medida</span>`;
+          }
+        }
+      }
       rows += !mostrarLado ? '' : `
         <div style="padding:6px 12px; margin-left:20px; border-left:2px dashed var(--gold); font-size:11px; color:var(--text-muted);">
-          ↓ <strong>${getLabelLado(i)}</strong>
+          ↓ <strong>${getLabelLado(i)}</strong>${memorialHtml}${badgeHtml}
           <div style="display:grid; grid-template-columns: 1fr 2fr; gap:6px; margin-top:4px;">
             <input data-fl-medida="${i}" type="number" step="0.01" inputmode="decimal" placeholder="Medida (m)" value="${ld.medida_manual_m ?? ''}">
             <input data-fl-confront="${i}" list="dl-confrontantes" placeholder="Confrontante" value="${escape(ld.confrontante_nome || '')}">
@@ -14926,6 +14969,34 @@ function renderLaudoTabPontos(c) {
     };
     if (baseIniEl) baseIniEl.oninput = recomputarBaseFromManual;
     if (baseFimEl) baseFimEl.oninput = recomputarBaseFromManual;
+
+    // v2.9.0: live update do badge de divergencia ao digitar medida real (urb 4P)
+    if (isUrb4 && state.laudoLoteVinculado) {
+      const lvc = state.laudoLoteVinculado;
+      const map4P = [null, lvc.medida_frente_m, lvc.medida_lateral_dir_m, lvc.medida_fundo_m, lvc.medida_lateral_esq_m];
+      const tol = state.toleranciaCm || 5;
+      document.querySelectorAll('[data-fl-medida]').forEach(inp => inp.oninput = () => {
+        const i = Number(inp.dataset.flMedida);
+        const teorica = Number(map4P[i]);
+        if (!Number.isFinite(teorica)) return;
+        const real = Number(inp.value);
+        const badge = document.querySelector(`[data-lado-badge="${i}"]`);
+        if (!badge) return;
+        if (!Number.isFinite(real) || real <= 0) {
+          badge.textContent = 'aguardando medida';
+          badge.style.cssText = 'margin-left:6px; padding:2px 6px; background:transparent; color:var(--text-muted); font-size:10px;';
+          return;
+        }
+        const diffCm = Math.abs(real - teorica) * 100;
+        if (diffCm > tol) {
+          badge.textContent = `⚠️ Δ ${diffCm.toFixed(0)}cm`;
+          badge.style.cssText = 'margin-left:6px; padding:2px 6px; background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b55; border-radius:3px; font-weight:600;';
+        } else {
+          badge.textContent = `✅ ±${diffCm.toFixed(0)}cm`;
+          badge.style.cssText = 'margin-left:6px; padding:2px 6px; background:#10b98122; color:#10b981; border:1px solid #10b98155; border-radius:3px; font-weight:600;';
+        }
+      });
+    }
 
     // v2.4.4: Handlers da foto da base instalada
     const baseFotoInput = document.getElementById('lp-base-foto-input');
@@ -15683,6 +15754,10 @@ async function loadLoteamentos() {
   try {
     const r = await api('/api/loteamentos');
     state.loteamentos = r.loteamentos || [];
+    // v2.9.0: carrega tolerancia junto pra exibir no header da aba
+    if (typeof carregarToleranciaSeNecessario === 'function') {
+      await carregarToleranciaSeNecessario();
+    }
   } catch (err) { console.warn('[loteamentos]', err.message); state.loteamentos = []; }
 }
 
@@ -15720,12 +15795,15 @@ function renderLoteamentos() {
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
         <h3 style="margin:0;">🏘️ Loteamentos cadastrados (${lots.length})</h3>
-        <button id="lt-btn-upload" style="background:var(--gold); color:#06120a; border-color:var(--gold);">📥 Importar CSV/XLSX</button>
+        <div style="display:flex; gap:6px;">
+          <button id="lt-btn-config" title="Configurar tolerância de medida" style="font-size:12px;">⚙️ Tolerância: <strong>${state.toleranciaCm ?? 5}cm</strong></button>
+          <button id="lt-btn-upload" style="background:var(--gold); color:#06120a; border-color:var(--gold);">📥 Importar CSV/XLSX</button>
+        </div>
       </div>
       <p style="font-size:12px; color:var(--text-muted); margin:8px 0 0;">
         Cadastre previamente loteamentos com suas quadras, ruas, lotes e medidas teóricas do memorial.
         Em campo, o técnico só seleciona <strong>Loteamento → Quadra → Lote</strong> e o sistema preenche
-        automaticamente confrontantes, medidas e área. <em>(Integração com Laudo: v2.9.0.)</em>
+        automaticamente confrontantes, medidas e área. <em>v2.9.0: integrado ao Laudo (badge ⚠️ de divergência ao digitar medida real).</em>
       </p>
     </div>
     ${lots.length === 0 ? `
@@ -15748,6 +15826,29 @@ function renderLoteamentos() {
   document.getElementById('lt-btn-upload').onclick = () => {
     state.loteamentoView = 'upload';
     renderLoteamentos();
+  };
+  document.getElementById('lt-btn-config').onclick = async () => {
+    await carregarToleranciaSeNecessario();
+    const novo = prompt(
+      'Tolerância para divergência entre medida teórica (memorial) e medida real (rastreio).\n\n' +
+      'Quando a diferença excede a tolerância, aparece badge ⚠️ amarelo no lado.\n' +
+      'Default: 5cm. Aceita qualquer valor inteiro >= 0.',
+      String(state.toleranciaCm ?? 5)
+    );
+    if (novo == null) return;
+    const tol = Number(String(novo).replace(',', '.'));
+    if (!Number.isFinite(tol) || tol < 0) return alert('Valor inválido. Use um número inteiro >= 0.');
+    try {
+      await api('/api/configuracoes-demarcacao', {
+        method: 'PUT',
+        body: JSON.stringify({ tolerancia_medida_cm: Math.round(tol) }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      state.toleranciaCm = Math.round(tol);
+      state.toleranciaCmCarregada = true;
+      mostrarToastOffline(`✅ Tolerância atualizada para ±${state.toleranciaCm}cm`, 'success');
+      renderLoteamentos();
+    } catch (err) { alert('Erro: ' + err.message); }
   };
   v.querySelectorAll('[data-lt-open]').forEach(el => el.onclick = async () => {
     const id = Number(el.dataset.ltOpen);
@@ -15909,6 +16010,190 @@ function renderLotesQuadra(lotes) {
         <td>${l.area_m2 ?? '—'}</td>
       </tr>`).join('')}
     </tbody></table>`;
+}
+
+// ─── v2.9.0: Selectors Loteamento → Quadra → Lote no form do Laudo ────────────
+// Render dos 3 dropdowns + auto-preenchimento ao selecionar lote.
+// Pre-seleciona se l.lote_loteamento_id ja existe.
+
+state.laudoLoteVinculado = null; // LoteCompleto quando user seleciona um lote
+state.toleranciaCm = 5;          // v2.9.0: cache da tolerancia (cm) pra comparacao
+
+async function carregarToleranciaSeNecessario() {
+  if (state.toleranciaCmCarregada) return;
+  try {
+    const cfg = await api('/api/configuracoes-demarcacao');
+    state.toleranciaCm = Number(cfg?.tolerancia_medida_cm) || 5;
+    state.toleranciaCmCarregada = true;
+  } catch (_) { /* ignora — usa default 5cm */ }
+}
+
+async function mountLoteamentoSelectorsLaudo() {
+  const host = document.getElementById('ld-loteamento-selector-host');
+  if (!host) return;
+  const l = state.laudoAtual;
+
+  // Carrega lista de loteamentos (cache se ja foi) + tolerancia
+  await carregarToleranciaSeNecessario();
+  if (!state.loteamentos || state.loteamentos.length === 0) {
+    await loadLoteamentos();
+  }
+  const loteamentos = state.loteamentos || [];
+
+  // Se laudo ja tem lote vinculado, busca info pra pre-selecionar
+  let preSel = { loteamentoId: null, quadraId: null, loteId: null, lote: null };
+  if (l.lote_loteamento_id) {
+    try {
+      const r = await api('/api/loteamentos/lote/' + l.lote_loteamento_id);
+      if (r?.lote) {
+        preSel.loteId = r.lote.id;
+        preSel.quadraId = r.lote.quadra.id;
+        preSel.loteamentoId = r.lote.loteamento.id;
+        preSel.lote = r.lote;
+        state.laudoLoteVinculado = r.lote;
+      }
+    } catch (_) { /* ignora — lote pode ter sido deletado */ }
+  }
+
+  host.innerHTML = `
+    <div class="card" style="border-left:3px solid var(--gold);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <strong style="font-size:13px;">🏘️ Vincular a um Lote cadastrado (auto-preenchimento)</strong>
+        ${preSel.lote ? `<button id="ld-lt-desvincular" style="font-size:11px; background:#ef444422; color:#ef4444; border:1px solid #ef444455;">🔓 Desvincular</button>` : ''}
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">
+        Opcional. Se o imóvel está num loteamento já cadastrado, escolha
+        Loteamento → Quadra → Lote pra preencher automaticamente confrontantes,
+        medidas teóricas e área.
+        ${loteamentos.length === 0 ? '<br><em>⚠️ Nenhum loteamento cadastrado. Vá na aba <strong>🏘️ Loteamentos</strong> pra importar.</em>' : ''}
+      </p>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+        <select id="ld-lt-loteamento" ${loteamentos.length === 0 ? 'disabled' : ''}>
+          <option value="">— loteamento —</option>
+          ${loteamentos.map(lt => `<option value="${lt.id}" ${preSel.loteamentoId === lt.id ? 'selected' : ''}>${escape(lt.nome)}</option>`).join('')}
+        </select>
+        <select id="ld-lt-quadra" disabled>
+          <option value="">— quadra —</option>
+        </select>
+        <select id="ld-lt-lote" disabled>
+          <option value="">— lote —</option>
+        </select>
+      </div>
+      <div id="ld-lt-info" style="margin-top:6px; font-size:11px; color:var(--text-muted);">
+        ${preSel.lote ? renderLoteVinculadoInfo(preSel.lote) : ''}
+      </div>
+    </div>
+  `;
+
+  const selLote = document.getElementById('ld-lt-loteamento');
+  const selQuadra = document.getElementById('ld-lt-quadra');
+  const selLoteEl = document.getElementById('ld-lt-lote');
+  const infoEl = document.getElementById('ld-lt-info');
+
+  // Pre-popula quadras se ja tem loteamento selecionado
+  if (preSel.loteamentoId) {
+    const quadras = await fetchQuadras(preSel.loteamentoId);
+    selQuadra.disabled = false;
+    selQuadra.innerHTML = '<option value="">— quadra —</option>' +
+      quadras.map(q => `<option value="${q.id}" ${preSel.quadraId === q.id ? 'selected' : ''}>${escape(q.nome)}</option>`).join('');
+  }
+  // Pre-popula lotes se ja tem quadra selecionada
+  if (preSel.quadraId) {
+    const lotes = await fetchLotes(preSel.quadraId);
+    selLoteEl.disabled = false;
+    selLoteEl.innerHTML = '<option value="">— lote —</option>' +
+      lotes.map(lo => `<option value="${lo.id}" ${preSel.loteId === lo.id ? 'selected' : ''}>${escape(lo.numero_lote)}</option>`).join('');
+  }
+
+  // Handlers cascata
+  selLote.onchange = async () => {
+    const lotId = Number(selLote.value);
+    selQuadra.innerHTML = '<option value="">— quadra —</option>';
+    selLoteEl.innerHTML = '<option value="">— lote —</option>';
+    selQuadra.disabled = !lotId;
+    selLoteEl.disabled = true;
+    if (!lotId) return;
+    const quadras = await fetchQuadras(lotId);
+    selQuadra.innerHTML = '<option value="">— quadra —</option>' +
+      quadras.map(q => `<option value="${q.id}">${escape(q.nome)}</option>`).join('');
+  };
+  selQuadra.onchange = async () => {
+    const qId = Number(selQuadra.value);
+    selLoteEl.innerHTML = '<option value="">— lote —</option>';
+    selLoteEl.disabled = !qId;
+    if (!qId) return;
+    const lotes = await fetchLotes(qId);
+    selLoteEl.innerHTML = '<option value="">— lote —</option>' +
+      lotes.map(lo => `<option value="${lo.id}">${escape(lo.numero_lote)}</option>`).join('');
+  };
+  selLoteEl.onchange = async () => {
+    const loteId = Number(selLoteEl.value);
+    if (!loteId) {
+      state.laudoLoteVinculado = null;
+      infoEl.innerHTML = '';
+      return;
+    }
+    try {
+      const r = await api('/api/loteamentos/lote/' + loteId);
+      const lote = r.lote;
+      state.laudoLoteVinculado = lote;
+      infoEl.innerHTML = renderLoteVinculadoInfo(lote);
+      aplicarAutoFillLote(lote);
+    } catch (err) { alert('Erro ao buscar lote: ' + err.message); }
+  };
+
+  const btnDesv = document.getElementById('ld-lt-desvincular');
+  if (btnDesv) btnDesv.onclick = () => {
+    if (!confirm('Desvincular o lote? Os campos preenchidos manualmente continuam, mas a comparação de medidas teóricas será desativada.')) return;
+    state.laudoLoteVinculado = null;
+    state.laudoAtual.lote_loteamento_id = null;
+    renderLaudoEditor(document.getElementById('view-laudos'));
+  };
+}
+
+function renderLoteVinculadoInfo(lote) {
+  return `
+    <div style="padding:6px 8px; background:var(--bg-secondary); border-radius:4px;">
+      ✅ Vinculado: <strong>Lote ${escape(lote.numero_lote)}</strong> da Quadra <strong>${escape(lote.quadra.nome)}</strong> (${escape(lote.loteamento.nome)})<br>
+      <span style="opacity:0.8;">Memorial — Frente ${lote.medida_frente_m ?? '—'}m · Fundo ${lote.medida_fundo_m ?? '—'}m · L.Dir ${lote.medida_lateral_dir_m ?? '—'}m · L.Esq ${lote.medida_lateral_esq_m ?? '—'}m · Área ${lote.area_m2 ?? '—'}m²</span>
+    </div>
+  `;
+}
+
+async function fetchQuadras(loteamentoId) {
+  try {
+    const r = await api('/api/loteamentos/' + loteamentoId);
+    return r.quadras || [];
+  } catch (_) { return []; }
+}
+
+async function fetchLotes(quadraId) {
+  try {
+    const r = await api('/api/loteamentos/quadra/' + quadraId + '/lotes');
+    return r.lotes || [];
+  } catch (_) { return []; }
+}
+
+function aplicarAutoFillLote(lote) {
+  // v2.9.0: ao selecionar lote, popula campos do form. Não sobrescreve campos
+  // que o user já editou (mantém a digitação manual prevalente).
+  const setIfEmpty = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && (!el.value || !el.value.trim()) && val != null) el.value = val;
+  };
+  // Identificacao do imovel — para urbano: loteamento/quadra/lote
+  setIfEmpty('ld-loteamento', lote.loteamento.nome);
+  setIfEmpty('ld-quadra', lote.quadra.nome);
+  setIfEmpty('ld-lote', lote.numero_lote);
+  setIfEmpty('ld-end', lote.rua_frente_nome || '');
+  setIfEmpty('ld-mun', lote.loteamento.municipio || '');
+  setIfEmpty('ld-uf', lote.loteamento.uf || '');
+  // Confrontantes
+  setIfEmpty('ld-cf-frente', lote.conf_frente_resolvido || '');
+  setIfEmpty('ld-cf-fundo', lote.conf_fundo_resolvido || '');
+  setIfEmpty('ld-cf-dir', lote.conf_lateral_dir_resolvido || '');
+  setIfEmpty('ld-cf-esq', lote.conf_lateral_esq_resolvido || '');
+  mostrarToastOffline('🏘️ Campos auto-preenchidos do Lote ' + lote.numero_lote, 'success');
 }
 
 // v2.1.7+v2.1.8: injeta datalists Açailândia no DOM (autocomplete dos campos do laudo)

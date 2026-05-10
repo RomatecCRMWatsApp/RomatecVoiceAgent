@@ -152,6 +152,81 @@ export async function buscarLote(id: number | string): Promise<LoteamentoLote | 
   return rows.length ? rowToLote(rows[0]) : null;
 }
 
+/**
+ * v2.9.0: Versao "completa" com info de quadra, rua_frente e loteamento.
+ * Usada pelo cliente pra auto-preencher os campos do laudo + resolver
+ * confrontantes lote→lote pra string descritiva ("Lote 17 da Quadra Centro").
+ */
+export interface LoteCompleto extends LoteamentoLote {
+  quadra: { id: number; nome: string };
+  loteamento: { id: number; nome: string; municipio: string | null; uf: string | null };
+  rua_frente_nome: string | null;
+  // Confrontantes resolvidos (texto pronto pro form do laudo)
+  conf_frente_resolvido: string | null;
+  conf_fundo_resolvido: string | null;
+  conf_lateral_dir_resolvido: string | null;
+  conf_lateral_esq_resolvido: string | null;
+}
+export async function buscarLoteCompleto(id: number | string): Promise<LoteCompleto | null> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT l.*,
+            q.id AS q_id, q.nome AS q_nome, q.loteamento_id AS lt_id,
+            lt.nome AS lt_nome, lt.municipio AS lt_municipio, lt.uf AS lt_uf,
+            r.nome AS rua_nome
+       FROM loteamento_lotes l
+       JOIN loteamento_quadras q   ON q.id = l.quadra_id
+       JOIN loteamentos lt         ON lt.id = q.loteamento_id
+  LEFT JOIN loteamento_ruas r      ON r.id = l.rua_frente_id
+      WHERE l.id = ?`,
+    [Number(id)]
+  );
+  if (!rows.length) return null;
+  const r = rows[0];
+  const lote = rowToLote(r);
+
+  // Resolve cada confrontante: prioridade FK > texto. Quando FK, busca nome
+  // do lote + quadra ("Lote 17 da Quadra Centro").
+  const ids = [
+    lote.conf_frente_lote_id,
+    lote.conf_fundo_lote_id,
+    lote.conf_lateral_dir_lote_id,
+    lote.conf_lateral_esq_lote_id,
+  ].filter((x): x is number => x != null);
+  const fkMap = new Map<number, string>();
+  if (ids.length) {
+    const placeholders = ids.map(() => '?').join(',');
+    const [refRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT l.id, l.numero_lote, q.nome AS quadra_nome
+         FROM loteamento_lotes l JOIN loteamento_quadras q ON q.id = l.quadra_id
+        WHERE l.id IN (${placeholders})`,
+      ids
+    );
+    for (const ref of refRows) {
+      fkMap.set(Number(ref.id), `Lote ${ref.numero_lote} da Quadra ${ref.quadra_nome}`);
+    }
+  }
+  const resolverConf = (fk: number | null, texto: string | null): string | null => {
+    if (fk != null && fkMap.has(fk)) return fkMap.get(fk)!;
+    return texto;
+  };
+
+  return {
+    ...lote,
+    quadra: { id: Number(r.q_id), nome: r.q_nome },
+    loteamento: {
+      id: Number(r.lt_id),
+      nome: r.lt_nome,
+      municipio: r.lt_municipio ?? null,
+      uf: r.lt_uf ?? null,
+    },
+    rua_frente_nome: r.rua_nome ?? null,
+    conf_frente_resolvido: resolverConf(lote.conf_frente_lote_id, lote.conf_frente_texto),
+    conf_fundo_resolvido: resolverConf(lote.conf_fundo_lote_id, lote.conf_fundo_texto),
+    conf_lateral_dir_resolvido: resolverConf(lote.conf_lateral_dir_lote_id, lote.conf_lateral_dir_texto),
+    conf_lateral_esq_resolvido: resolverConf(lote.conf_lateral_esq_lote_id, lote.conf_lateral_esq_texto),
+  };
+}
+
 function rowToLote(r: RowDataPacket): LoteamentoLote {
   return {
     id: Number(r.id),
