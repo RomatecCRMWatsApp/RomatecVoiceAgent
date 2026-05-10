@@ -151,3 +151,73 @@ export function obterFaixa(pontuacao: number): FaixaIncra {
   if (!faixa) throw new Error(`Faixa não encontrada para pontuação ${pontuacao}`);
   return faixa;
 }
+
+export function obterValorUnitario(faixa: FaixaIncra, unidade: UnidadeCalculo): number {
+  switch (unidade) {
+    case 'km':      return faixa.valorPorKm;
+    case 'hectare': return faixa.valorPorHectare;
+    case 'lote':    return faixa.valorPorLote;
+  }
+}
+
+export function calcularPrecificacao(input: InputPrecificacao): ResultadoPrecificacao {
+  const validacao = validarCriterios(input.criterios);
+  if (!validacao.ok) {
+    throw new Error(`Critérios inválidos: ${validacao.erros.join('; ')}`);
+  }
+  if (input.quantidade <= 0) {
+    throw new Error('Quantidade deve ser maior que zero');
+  }
+
+  const pontuacaoTotal = calcularPontuacaoTotal(input.criterios);
+  const faixa = obterFaixa(pontuacaoTotal);
+  const valorUnitario = obterValorUnitario(faixa, input.unidade);
+  const valorBase = +(valorUnitario * input.quantidade).toFixed(2);
+
+  let descontoAplicado = 0;
+  const avisos: string[] = [];
+
+  if (input.desconto.tipo === 'percentual') {
+    if (input.desconto.valor < 0 || input.desconto.valor > 100) {
+      throw new Error('Desconto percentual deve estar entre 0 e 100');
+    }
+    descontoAplicado = +(valorBase * (input.desconto.valor / 100)).toFixed(2);
+  } else if (input.desconto.tipo === 'fixo') {
+    if (input.desconto.valor < 0) {
+      throw new Error('Desconto fixo não pode ser negativo');
+    }
+    if (input.desconto.valor > valorBase) {
+      throw new Error('Desconto fixo não pode ser maior que o valor base');
+    }
+    descontoAplicado = +input.desconto.valor.toFixed(2);
+  }
+
+  const valorFinal = +(valorBase - descontoAplicado).toFixed(2);
+
+  if (valorBase > 0) {
+    const percentualDesconto = (descontoAplicado / valorBase) * 100;
+    if (percentualDesconto > 10) {
+      avisos.push(
+        `Desconto aplicado (${percentualDesconto.toFixed(1)}%) excede a variação admissível ` +
+        `de ±10% prevista na Portaria INCRA 12/2025.`
+      );
+    }
+  }
+
+  const unidadeLabel = input.unidade === 'km' ? 'km lineares'
+                     : input.unidade === 'hectare' ? 'hectares'
+                     : 'lotes';
+
+  return {
+    pontuacaoTotal,
+    faixa,
+    valorUnitario,
+    valorBase,
+    descontoAplicado,
+    valorFinal,
+    detalhamento: {
+      formula: `${input.quantidade} ${unidadeLabel} × R$ ${valorUnitario.toFixed(2)} = R$ ${valorBase.toFixed(2)}`,
+      avisos,
+    },
+  };
+}

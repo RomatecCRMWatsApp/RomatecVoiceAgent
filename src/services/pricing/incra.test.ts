@@ -84,3 +84,53 @@ describe('obterFaixa', () => {
     expect(() => obterFaixa(61)).toThrow(/acima do máximo/);
   });
 });
+
+import { obterValorUnitario, calcularPrecificacao, type InputPrecificacao } from './incra';
+
+describe('obterValorUnitario', () => {
+  it('faixa 26-35 km → R$ 1.571,64', () => {
+    const f = obterFaixa(30);
+    expect(obterValorUnitario(f, 'km')).toBe(1571.64);
+  });
+  it('faixa 26-35 hectare → R$ 104,78', () => {
+    expect(obterValorUnitario(obterFaixa(30), 'hectare')).toBe(104.78);
+  });
+  it('faixa 26-35 lote → R$ 1.298,88', () => {
+    expect(obterValorUnitario(obterFaixa(30), 'lote')).toBe(1298.88);
+  });
+});
+
+describe('calcularPrecificacao — sem desconto', () => {
+  const baseInput: InputPrecificacao = {
+    criterios: { vegetacao: 5, relevo: 5, insalubridade: 5, acesso: 5, clima: 5, area_media: 5 },
+    unidade: 'km',
+    quantidade: 100,
+    desconto: { tipo: 'nenhum', valor: 0 },
+  };
+
+  it('100 km × faixa 26-35 = R$ 157.164,00', () => {
+    const r = calcularPrecificacao(baseInput);
+    expect(r.pontuacaoTotal).toBe(30);
+    expect(r.faixa.label).toBe('26-35');
+    expect(r.valorUnitario).toBe(1571.64);
+    expect(r.valorBase).toBe(157164.00);
+    expect(r.descontoAplicado).toBe(0);
+    expect(r.valorFinal).toBe(157164.00);
+    expect(r.detalhamento.avisos).toEqual([]);
+  });
+
+  it('quantidade 0 → throw', () => {
+    expect(() => calcularPrecificacao({ ...baseInput, quantidade: 0 })).toThrow(/maior que zero/);
+  });
+
+  it('quantidade negativa → throw', () => {
+    expect(() => calcularPrecificacao({ ...baseInput, quantidade: -1 })).toThrow(/maior que zero/);
+  });
+
+  it('critérios inválidos → throw', () => {
+    expect(() => calcularPrecificacao({
+      ...baseInput,
+      criterios: { ...baseInput.criterios, vegetacao: 11 },
+    })).toThrow(/Critérios inválidos/);
+  });
+});
