@@ -16611,7 +16611,7 @@ function renderLoteamentoUpload(v) {
       relEl.innerHTML = `
         <div class="card" style="border-left:3px solid ${preview ? '#0ea5e9' : 'var(--gold)'};">
           <h4 style="margin:0 0 6px;">${preview ? '👁 Preview' : '✅ Import realizado'} · ${escape(r.loteamento_nome || '—')}</h4>
-          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; font-size:13px;">
+          <div class="lp-grid-3" style="gap:6px; font-size:13px;">
             <div>📋 Total linhas: <strong>${r.total_linhas}</strong></div>
             <div>🆕 Lotes criados: <strong style="color:var(--gold);">${r.lotes_criados}</strong></div>
             <div>🔄 Atualizados: <strong>${r.lotes_atualizados}</strong></div>
@@ -16749,7 +16749,7 @@ async function mountLoteamentoSelectorsLaudo() {
         medidas teóricas e área.
         ${loteamentos.length === 0 ? '<br><em>⚠️ Nenhum loteamento cadastrado. Vá na aba <strong>🏘️ Loteamentos</strong> pra importar.</em>' : ''}
       </p>
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+      <div class="lp-grid-3">
         <select id="ld-lt-loteamento" ${loteamentos.length === 0 ? 'disabled' : ''}>
           <option value="">— loteamento —</option>
           ${loteamentos.map(lt => `<option value="${lt.id}" ${preSel.loteamentoId === lt.id ? 'selected' : ''}>${escape(lt.nome)}</option>`).join('')}
