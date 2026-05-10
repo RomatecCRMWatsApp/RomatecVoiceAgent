@@ -31,6 +31,12 @@ export interface Laudo {
   denominacao_imovel: string | null;
   nirf: string | null;
   ccir: string | null;
+  // v2.6.0 — Dados Registrais (Cartorio): aplica em rural e urbano
+  matricula: string | null;
+  livro: string | null;
+  folhas: string | null;
+  cartorio_nome: string | null;
+  cartorio_cns: string | null;
   endereco_imovel: string | null;
   municipio: string | null;
   uf_imovel: string | null;
@@ -92,6 +98,11 @@ interface LaudoRow extends RowDataPacket {
   denominacao_imovel: string | null;
   nirf: string | null;
   ccir: string | null;
+  matricula: string | null;
+  livro: string | null;
+  folhas: string | null;
+  cartorio_nome: string | null;
+  cartorio_cns: string | null;
   endereco_imovel: string | null;
   municipio: string | null;
   uf_imovel: string | null;
@@ -163,6 +174,11 @@ function mapRow(r: LaudoRow): Laudo {
     denominacao_imovel: r.denominacao_imovel ?? null,
     nirf: r.nirf ?? null,
     ccir: r.ccir ?? null,
+    matricula: r.matricula ?? null,
+    livro: r.livro ?? null,
+    folhas: r.folhas ?? null,
+    cartorio_nome: r.cartorio_nome ?? null,
+    cartorio_cns: r.cartorio_cns ?? null,
     endereco_imovel: r.endereco_imovel ?? null,
     municipio: r.municipio ?? null,
     uf_imovel: r.uf_imovel ?? null,
@@ -391,6 +407,12 @@ export interface AtualizarLaudoInput {
   denominacao_imovel?: string | null;
   nirf?: string | null;
   ccir?: string | null;
+  // v2.6.0 — Dados Registrais
+  matricula?: string | null;
+  livro?: string | null;
+  folhas?: string | null;
+  cartorio_nome?: string | null;
+  cartorio_cns?: string | null;
   endereco_imovel?: string | null;
   municipio?: string | null;
   uf_imovel?: string | null;
@@ -444,6 +466,11 @@ export async function atualizarLaudo(id: number | string, input: AtualizarLaudoI
   set('denominacao_imovel', input.denominacao_imovel);
   set('nirf', input.nirf);
   set('ccir', input.ccir);
+  set('matricula', input.matricula);
+  set('livro', input.livro);
+  set('folhas', input.folhas);
+  set('cartorio_nome', input.cartorio_nome);
+  set('cartorio_cns', input.cartorio_cns);
   set('endereco_imovel', input.endereco_imovel);
   set('municipio', input.municipio);
   set('uf_imovel', input.uf_imovel);

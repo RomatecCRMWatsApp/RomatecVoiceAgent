@@ -270,6 +270,29 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
     doc.text(`Município/UF: ${laudo.municipio || '—'}/${laudo.uf_imovel || '—'} · Comarca: ${laudo.comarca || laudo.municipio || '—'}`, 40, cy, { width: 515 });
     cy += 12;
   }
+  // v2.6.0 — Dados Registrais (Cartorio): so renderiza se tiver pelo menos um campo
+  const temRegistrais = laudo.matricula || laudo.livro || laudo.folhas || laudo.cartorio_nome || laudo.cartorio_cns;
+  if (temRegistrais) {
+    cy += 2;
+    doc.fontSize(9).fillColor('#888').font('Helvetica-Bold').text('Registro:', 40, cy);
+    cy += 12;
+    doc.fontSize(9).fillColor('#444').font('Helvetica');
+    const partesReg: string[] = [];
+    if (laudo.matricula) partesReg.push(`Matrícula: ${laudo.matricula}`);
+    if (laudo.livro) partesReg.push(`Livro: ${laudo.livro}`);
+    if (laudo.folhas) partesReg.push(`Fls.: ${laudo.folhas}`);
+    if (partesReg.length) {
+      doc.text(partesReg.join(' · '), 40, cy, { width: 515 });
+      cy += 12;
+    }
+    if (laudo.cartorio_nome) {
+      const cartLinha = laudo.cartorio_cns
+        ? `${laudo.cartorio_nome} · CNS ${laudo.cartorio_cns}`
+        : laudo.cartorio_nome;
+      doc.text(cartLinha, 40, cy, { width: 515 });
+      cy += 12;
+    }
+  }
   cy += 4;
 
   // Confrontantes

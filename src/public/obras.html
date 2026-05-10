@@ -13118,6 +13118,21 @@ const ACAILANDIA_DEFAULTS = {
     'Coletor SinoGNSS R60 (Android 12)',
     'Coletor SinoGNSS R80 (Android 12)',
   ],
+  // v2.6.0 — Cartorios de Açailândia/MA + região (CNS preenchido manualmente
+  // pelo user porque não temos base nacional integrada — cadastros locais
+  // crescem com uso, mesma pauta de bairros/loteamentos).
+  cartorios: [
+    'Cartório do 1º Ofício de Açailândia/MA',
+    'Cartório do 2º Ofício de Açailândia/MA',
+    'Cartório de Registro de Imóveis de Açailândia/MA',
+    'Cartório de Registro Civil de Pessoas Naturais de Açailândia/MA',
+    'Cartório do 1º Ofício de Imperatriz/MA',
+    'Cartório do 2º Ofício de Imperatriz/MA',
+    'Cartório de Registro de Imóveis de Imperatriz/MA',
+    'Cartório de Itinga do Maranhão/MA',
+    'Cartório de João Lisboa/MA',
+    'Cartório de Cidelândia/MA',
+  ],
 };
 
 // v2.1.8: Cadastros locais — extensiveis via localStorage
@@ -13158,7 +13173,7 @@ function adicionarCadastroLocal(tipo, valor) {
 // Re-injeta datalists apos cadastro novo (pra atualizar sugestoes ao vivo)
 function reinjetarDatalists() {
   ['dl-bairros','dl-loteamentos','dl-povoados','dl-municipios','dl-cursos-agua','dl-confrontantes',
-   'dl-equip-base','dl-equip-rover','dl-equip-coletor'].forEach(id => {
+   'dl-equip-base','dl-equip-rover','dl-equip-coletor','dl-cartorios'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.remove();
   });
@@ -14128,6 +14143,22 @@ function renderLaudoTabDados(c) {
       </div>
     </div>
     <div class="card">
+      <h3 style="margin-top:0;">📜 Dados Registrais (Cartório)</h3>
+      <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">
+        ℹ️ Opcional — preencha se o imóvel já tem registro. Aplica em rural (fazenda) e urbano.
+        <br>💡 Cartórios novos cadastrados aqui ficam salvos no celular pra próxima.
+      </p>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+        <input id="ld-matricula" placeholder="Matrícula" value="${escape(l.matricula||'')}">
+        <input id="ld-livro" placeholder="Livro (ex: 2-A)" value="${escape(l.livro||'')}">
+        <input id="ld-folhas" placeholder="Folhas (ex: 123/v)" value="${escape(l.folhas||'')}">
+      </div>
+      <div style="display:grid; grid-template-columns:2fr 1fr; gap:8px; margin-top:8px;">
+        <input id="ld-cartorio-nome" list="dl-cartorios" placeholder="Cartório (nome completo)" value="${escape(l.cartorio_nome||'')}">
+        <input id="ld-cartorio-cns" placeholder="CNS (Cód. Nacional)" value="${escape(l.cartorio_cns||'')}" maxlength="20">
+      </div>
+    </div>
+    <div class="card">
       <h3 style="margin-top:0;">Confrontantes</h3>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
         <input id="ld-cf-frente" list="dl-confrontantes" placeholder="Frente (ex: Rua, Avenida, vizinho)" value="${escape(l.confrontante_frente||'')}">
@@ -14155,6 +14186,12 @@ function renderLaudoTabDados(c) {
       denominacao_imovel: !isUrbano ? (document.getElementById('ld-denom').value.trim() || null) : null,
       nirf: !isUrbano ? (document.getElementById('ld-nirf').value.trim() || null) : null,
       ccir: !isUrbano ? (document.getElementById('ld-ccir').value.trim() || null) : null,
+      // v2.6.0: dados registrais (rural + urbano)
+      matricula: document.getElementById('ld-matricula')?.value.trim() || null,
+      livro: document.getElementById('ld-livro')?.value.trim() || null,
+      folhas: document.getElementById('ld-folhas')?.value.trim() || null,
+      cartorio_nome: document.getElementById('ld-cartorio-nome')?.value.trim() || null,
+      cartorio_cns: document.getElementById('ld-cartorio-cns')?.value.trim() || null,
       endereco_imovel: document.getElementById('ld-end').value.trim() || null,
       municipio: document.getElementById('ld-mun').value.trim() || null,
       uf_imovel: document.getElementById('ld-uf').value.trim().toUpperCase() || null,
@@ -14174,6 +14211,8 @@ function renderLaudoTabDados(c) {
       const novosCadastros = [];
       if (adicionarCadastroLocal('loteamentos', body.loteamento)) novosCadastros.push('loteamento "'+body.loteamento+'"');
       if (adicionarCadastroLocal('municipios', body.municipio)) novosCadastros.push('município "'+body.municipio+'"');
+      // v2.6.0: cartorio novo vai pra cadastros locais
+      if (adicionarCadastroLocal('cartorios', body.cartorio_nome)) novosCadastros.push('cartório "'+body.cartorio_nome+'"');
       ['confrontante_frente','confrontante_fundo','confrontante_lat_dir','confrontante_lat_esq','confrontante_extra'].forEach(k => {
         if (adicionarCadastroLocal('confrontantes', body[k])) novosCadastros.push('confrontante "'+body[k]+'"');
       });
@@ -15592,6 +15631,8 @@ function injetarDatalistsAcailandia() {
   mk('dl-equip-base', getListaCombined('equipBase'));
   mk('dl-equip-rover', getListaCombined('equipRover'));
   mk('dl-equip-coletor', getListaCombined('equipColetor'));
+  // v2.6.0: cartorios (cresce com cadastros locais)
+  mk('dl-cartorios', getListaCombined('cartorios'));
   // Municipios sao guardados em chave diferente (municipiosLimitrofes vs municipios)
   const munDef = ACAILANDIA_DEFAULTS.municipiosLimitrofes.map(s => s.split('/')[0]);
   const munCustom = (getCadastrosLocais().municipios || []);

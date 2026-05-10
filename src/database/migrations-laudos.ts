@@ -257,6 +257,14 @@ export async function runLaudosMigrations(): Promise<void> {
     // uuid_local → id numerico interno. Frontend pode usar uuid em URLs.
     { label: 'ALTER laudo uuid_local', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN uuid_local CHAR(36) NULL' },
     { label: 'INDEX uuid_local UNIQUE', sql: 'ALTER TABLE laudos_demarcacao ADD UNIQUE INDEX idx_uuid_local (uuid_local)' },
+    // v2.6.0 — Dados Registrais (Cartorio): rural (fazenda) e urbano podem ter
+    // matricula/livro/folhas + nome do cartorio + CNS (Codigo Nacional de Serventia).
+    // CNS e o identificador nacional do cartorio mantido pelo CNJ.
+    { label: 'ALTER laudo matricula', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN matricula VARCHAR(60) NULL' },
+    { label: 'ALTER laudo livro', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN livro VARCHAR(40) NULL' },
+    { label: 'ALTER laudo folhas', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN folhas VARCHAR(40) NULL' },
+    { label: 'ALTER laudo cartorio_nome', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN cartorio_nome VARCHAR(200) NULL' },
+    { label: 'ALTER laudo cartorio_cns', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN cartorio_cns VARCHAR(20) NULL' },
   ];
   for (const { label, sql } of ops) {
     try {
