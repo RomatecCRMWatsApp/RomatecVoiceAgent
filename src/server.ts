@@ -2028,6 +2028,20 @@ app.post('/api/laudos-demarcacao/:id/assinar', requireCeoToken, async (req: Requ
       laudosMod.listarFotosDoLaudo(id),
       laudosMod.getCroquiUpload(id),
     ]);
+
+    // v2.11.0: monta meta da assinatura digital ANTES de gerar o PDF, pra que
+    // a caixa verde "ASSINADO DIGITALMENTE - ICP-Brasil (PAdES)" seja desenhada
+    // no miolo do documento (mesmo padrao usado em recibos).
+    const agoraAssin = new Date();
+    const signatureVisualMeta = {
+      signer_cn: cert.meta.subject_cn ?? executante.nome,
+      signer_doc: cert.meta.subject_doc,
+      issuer_cn: cert.meta.issuer_cn,
+      validade_ate: cert.meta.validade_ate,
+      data_assinatura: agoraAssin,
+      thumbprint: cert.meta.thumbprint,
+    };
+
     const pdfBase = await gerarPdfLaudo({
       laudo, contratante, executante, pontos, lados,
       fotos: fotos.map(f => ({ id: f.id, mime: f.mime, legenda: f.legenda })),
@@ -2036,6 +2050,7 @@ app.post('/api/laudos-demarcacao/:id/assinar', requireCeoToken, async (req: Requ
         return f ? { base64: f.base64, mime: f.mime } : null;
       },
       croquiUpload: croquiUpload ?? null,
+      signatureMeta: signatureVisualMeta,
     });
 
     // Aplica PAdES (PKCS#7 detached, ICP-Brasil)

@@ -28,6 +28,7 @@ import {
   renderSeloConfirmado,
 } from './reciboPdfShared';
 import { getBaseUrl } from './reciboPdf';
+import type { SignatureVisualMeta } from './reciboPdf';
 import type { Laudo, PontoLaudo, LadoLaudo } from '../integrations/laudos';
 import type { Contratante } from '../integrations/contratantes';
 import type { Executante } from '../integrations/executantes';
@@ -145,6 +146,11 @@ export interface LaudoPdfInput {
   fotoBase64Loader?: (fotoId: number) => Promise<{ base64: string; mime: string } | null>;
   croquiUpload?: { mime: string; base64: string } | null;
   croquiSvg?: string | null;
+  // v2.11.0: bloco visual ICP-Brasil renderizado quando o laudo e assinado
+  // digitalmente. Mesmo padrao do reciboPdf.ts (caixa verde com signatario,
+  // CN, doc, data e validade). Quando undefined, NAO renderiza o bloco —
+  // util pro endpoint GET /pdf (preview sem assinatura).
+  signatureMeta?: SignatureVisualMeta;
 }
 
 export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
@@ -350,30 +356,33 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   cy = doc.y + 14;
 
   // ── 6. Tabela de coordenadas ───────────────────────────────────────
+  // v2.11.0: largura da coluna "Vert." aumentada de 35→80pt pra caber rotulos
+  // longos como "AVEX-M-0123" sem quebrar. lineBreak:false em todas as celulas
+  // garante uma linha por vertice (sem sobreposicao com a linha seguinte).
   if (cy > 700) { doc.addPage(); cy = 60; }
   doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('6. COORDENADAS DOS VÉRTICES', 40, cy);
   cy += 16;
   // Header da tabela
   doc.fontSize(8).fillColor('#666').font('Helvetica-Bold');
-  doc.text('Vért.', 40, cy, { width: 35 });
-  doc.text('UTM-E (m)', 80, cy, { width: 95 });
-  doc.text('UTM-N (m)', 180, cy, { width: 95 });
-  doc.text('Latitude', 280, cy, { width: 100 });
-  doc.text('Longitude', 385, cy, { width: 105 });
-  doc.text('Alt.', 495, cy, { width: 60 });
+  doc.text('Vért.', 40, cy, { width: 80, lineBreak: false });
+  doc.text('UTM-E (m)', 125, cy, { width: 85, lineBreak: false });
+  doc.text('UTM-N (m)', 215, cy, { width: 85, lineBreak: false });
+  doc.text('Latitude', 305, cy, { width: 85, lineBreak: false });
+  doc.text('Longitude', 395, cy, { width: 95, lineBreak: false });
+  doc.text('Alt.', 495, cy, { width: 60, lineBreak: false });
   cy += 10;
   doc.moveTo(40, cy).lineTo(555, cy).strokeColor('#ddd').lineWidth(0.5).stroke();
   cy += 4;
   doc.font('Helvetica').fillColor('#222');
   for (const p of [...pontos].sort((a, b) => a.ordem - b.ordem)) {
     if (cy > 770) { doc.addPage(); cy = 60; }
-    doc.text(p.rotulo, 40, cy, { width: 35 });
-    doc.text(p.utm_e != null ? fmtNum(p.utm_e, 3) : '—', 80, cy, { width: 95 });
-    doc.text(p.utm_n != null ? fmtNum(p.utm_n, 3) : '—', 180, cy, { width: 95 });
-    doc.text(p.lat_gms || (p.lat_decimal != null ? p.lat_decimal.toFixed(6) : '—'), 280, cy, { width: 100 });
-    doc.text(p.long_gms || (p.long_decimal != null ? p.long_decimal.toFixed(6) : '—'), 385, cy, { width: 105 });
-    doc.text(p.altitude != null ? `${p.altitude.toFixed(1)}m` : '—', 495, cy, { width: 60 });
-    cy += 11;
+    doc.text(p.rotulo, 40, cy, { width: 80, ellipsis: true, lineBreak: false });
+    doc.text(p.utm_e != null ? fmtNum(p.utm_e, 3) : '—', 125, cy, { width: 85, lineBreak: false });
+    doc.text(p.utm_n != null ? fmtNum(p.utm_n, 3) : '—', 215, cy, { width: 85, lineBreak: false });
+    doc.text(p.lat_gms || (p.lat_decimal != null ? p.lat_decimal.toFixed(6) : '—'), 305, cy, { width: 85, lineBreak: false });
+    doc.text(p.long_gms || (p.long_decimal != null ? p.long_decimal.toFixed(6) : '—'), 395, cy, { width: 95, lineBreak: false });
+    doc.text(p.altitude != null ? `${p.altitude.toFixed(1)}m` : '—', 495, cy, { width: 60, lineBreak: false });
+    cy += 13; // v2.11.0: era 11pt → 13pt pra dar respiro entre linhas
   }
   cy += 10;
 
@@ -625,13 +634,69 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   else doc.text('☐ TRT (CFT): não aplicável', 40, cy);
   cy += 16;
 
-  // ── 13. Local + data + assinatura ──────────────────────────────────
+  // ── 13. Observacoes (v2.11.0: campo do laudo finalmente renderizado) ─
+  if (laudo.observacoes && String(laudo.observacoes).trim()) {
+    if (cy > 700) { doc.addPage(); cy = 60; }
+    doc.fontSize(10).fillColor('#888').font('Helvetica-Bold')
+       .text('13. OBSERVAÇÕES', 40, cy);
+    cy += 14;
+    doc.fontSize(9).fillColor('#222').font('Helvetica')
+       .text(String(laudo.observacoes).trim(), 40, cy, { width: 515, align: 'justify' });
+    cy = doc.y + 16;
+  }
+
+  // ── 14. Local + data + assinatura ──────────────────────────────────
   if (cy > 720) { doc.addPage(); cy = 60; }
   const cidade = laudo.municipio || 'Açailândia';
   const uf = laudo.uf_imovel || 'MA';
   doc.fontSize(10).fillColor('#111').font('Helvetica')
      .text(`${cidade}/${uf}, ${fmtDataExtenso(dataEmissao)}.`, 40, cy, { width: 515, align: 'center' });
-  cy += 50;
+  cy += 30;
+
+  // v2.11.0: BLOCO VISUAL DA ASSINATURA DIGITAL ICP-Brasil (caixa verde).
+  // Renderizado APENAS quando o PDF e gerado dentro do fluxo /assinar
+  // (input.signatureMeta vem populado). Mesmo padrao do reciboPdf.ts.
+  if (input.signatureMeta) {
+    const meta = input.signatureMeta;
+    const fmtDataAssin = (d: Date) =>
+      `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const validadeFmt = meta.validade_ate ? fmtData(new Date(meta.validade_ate)) : '—';
+    const docFmt = (() => {
+      const d = (meta.signer_doc || '').replace(/\D/g, '');
+      if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+      if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+      return meta.signer_doc || '—';
+    })();
+    const dataAssinFmt = fmtDataAssin(meta.data_assinatura);
+    const cnLimpo = (meta.signer_cn || executante.nome).replace(/:\d+$/, '');
+
+    const boxX = 130;
+    const boxW = 355;
+    if (cy + 70 > 800) { doc.addPage(); cy = 60; }
+    doc.save()
+       .lineWidth(0.8)
+       .strokeColor('#10b981')
+       .roundedRect(boxX, cy, boxW, 56, 4)
+       .stroke()
+       .restore();
+    doc.fontSize(8).fillColor('#10b981').font('Helvetica-Bold')
+       .text('ASSINADO DIGITALMENTE — ICP-Brasil (PAdES)', boxX, cy + 5, {
+         width: boxW, align: 'center', lineBreak: false,
+       });
+    doc.fontSize(8).fillColor('#222').font('Helvetica-Bold')
+       .text(cnLimpo, boxX + 6, cy + 19, { width: boxW - 12, align: 'center', lineBreak: false });
+    doc.fontSize(7).fillColor('#444').font('Helvetica')
+       .text(`${docFmt} · Assinado em ${dataAssinFmt}`, boxX + 6, cy + 31, {
+         width: boxW - 12, align: 'center', lineBreak: false,
+       });
+    doc.fontSize(6.5).fillColor('#666').font('Helvetica')
+       .text(`Cert: ${meta.issuer_cn || '—'} · Válido até ${validadeFmt} · Validar em validar.iti.gov.br`,
+             boxX + 6, cy + 42, { width: boxW - 12, align: 'center', lineBreak: false });
+    cy += 75;
+  } else {
+    cy += 20;
+  }
+
   doc.moveTo(180, cy).lineTo(415, cy).strokeColor('#444').lineWidth(0.5).stroke();
   cy += 6;
   doc.fontSize(9).fillColor('#222').font('Helvetica-Bold')
