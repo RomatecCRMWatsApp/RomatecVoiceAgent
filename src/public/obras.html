@@ -14394,15 +14394,15 @@ function renderLaudoTabPontos(c) {
           <summary style="cursor:pointer; font-weight:600; padding:8px; background:var(--bg-secondary); border-radius:4px;">📋 Alternativa: Importar pontos da coletora (CSV / TXT / KML / GPX)</summary>
           <div class="card" style="margin-top:8px;">
             <p style="color:var(--text-muted); font-size:12px; margin:4px 0 8px;">
-              <strong>Formatos:</strong> CSV/TXT (cabeçalho na linha 1: <code>ponto, e, n</code> ou <code>id, lat, lng</code>) · KML (Google Earth) · GPX (genérico GPS).<br>
-              <strong>Coordenadas:</strong> UTM (E/N) ou geográficas (Lat/Lng) — a conversão pra UTM é automática.<br>
-              <strong>BOM UTF-16</strong> de coletoras antigas é removido automaticamente.
+              <strong>Formatos texto:</strong> CSV/TXT (com ou sem cabeçalho) · KML (Google Earth) · GPX (GPS).<br>
+              <strong>Formatos binários:</strong> XLSX (Excel) · DXF (AutoCAD) · SHP (ESRI Shapefile).<br>
+              <strong>Coordenadas:</strong> UTM (E/N) ou geográficas (Lat/Lng) — conversão automática. BOM UTF-16 removido auto.
             </p>
-            <!-- v2.5.0: Upload de arquivo (com decode UTF-16/8 + auto-parse) -->
+            <!-- v2.5.0/v2.7.0: Upload de arquivo (texto e binario) -->
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
               <button id="lp-rtk-upload-btn" style="background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955; padding:6px 12px; font-size:12px;">📁 Selecionar arquivo da coletora</button>
-              <span id="lp-rtk-upload-info" style="font-size:11px; color:var(--text-muted);">aceita .csv .txt .kml .gpx .dat</span>
-              <input type="file" id="lp-rtk-file" accept=".csv,.txt,.kml,.gpx,.dat,text/csv,text/plain,application/vnd.google-earth.kml+xml,application/gpx+xml" style="display:none;">
+              <span id="lp-rtk-upload-info" style="font-size:11px; color:var(--text-muted);">aceita .csv .txt .kml .gpx .dat .xlsx .dxf .shp</span>
+              <input type="file" id="lp-rtk-file" accept=".csv,.txt,.kml,.gpx,.dat,.xlsx,.xls,.dxf,.shp,text/csv,text/plain,application/vnd.google-earth.kml+xml,application/gpx+xml,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" style="display:none;">
             </div>
             <textarea id="lp-rtk" rows="6" style="width:100%; font-family:monospace; font-size:12px;" placeholder="ponto,e,n,h&#10;P1,567890.456,9234567.123,142.5&#10;P2,567901.567,9234578.234,142.4&#10;ou: id,lat,lng&#10;P1,-4.95234,-47.49876"></textarea>
             <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
@@ -15274,7 +15274,8 @@ function renderLaudoTabPontos(c) {
   };
 
   document.getElementById('lp-parse').onclick = async () => {
-    const r = await parsearRtk();
+    // v2.7.0: se ja temos cache de import binario, usa-o pro preview
+    const r = state.laudoArquivoImportado || await parsearRtk();
     if (!r || !r.pontos || !r.pontos.length) return alert('Não foi possível parsear pontos');
     // v2.5.0: parser retorna { rotulo, e, n, lat, lng, altitude }
     state.laudoPontosPreview = r.pontos.map((p, i) => ({
@@ -15289,7 +15290,8 @@ function renderLaudoTabPontos(c) {
   };
 
   document.getElementById('lp-import').onclick = async () => {
-    const r = await parsearRtk();
+    // v2.7.0: se ja temos resultado de import binario (xlsx/dxf/shp), usa direto
+    const r = state.laudoArquivoImportado || await parsearRtk();
     if (!r || !r.pontos || !r.pontos.length) return alert('Não foi possível parsear pontos');
     if (!confirm('Encontrados '+r.pontos.length+' pontos'+(r.formato?` (${r.formato})`:'')+'. Salvar no laudo? (substitui os atuais)')) return;
     const zona = Number(document.getElementById('lp-zona').value) || 23;
@@ -15318,6 +15320,7 @@ function renderLaudoTabPontos(c) {
         headers: { 'Content-Type': 'application/json' },
       });
       state.laudoPontosPreview = null;
+      state.laudoArquivoImportado = null; // v2.7.0: limpa cache binario apos salvar
       // Atualiza contador do form ponto-a-ponto pra refletir os novos
       state.laudoFormPontosCount = pontosSave.length;
       await loadLaudoDetalhe(l.id);
@@ -15325,7 +15328,9 @@ function renderLaudoTabPontos(c) {
     } catch (err) { alert('Erro ao salvar: '+err.message); }
   };
 
-  // v2.5.0: Upload de arquivo da coletora (CSV/TXT/KML/GPX) com decode UTF-16/8
+  // v2.5.0/v2.7.0: Upload de arquivo. Detecta extensao e roteia:
+  //   - Texto (csv/txt/kml/gpx/dat) → decodifica BOM no client + textarea + flow antigo
+  //   - Binario (xlsx/dxf/shp) → multipart upload pro endpoint /import-arquivo
   const rtkFileInput = document.getElementById('lp-rtk-file');
   const rtkUploadBtn = document.getElementById('lp-rtk-upload-btn');
   if (rtkUploadBtn && rtkFileInput) {
@@ -15333,34 +15338,75 @@ function renderLaudoTabPontos(c) {
     rtkFileInput.onchange = async () => {
       const f = rtkFileInput.files?.[0];
       if (!f) return;
+      const ext = (f.name.split('.').pop() || '').toLowerCase();
+      const isBinario = ['xlsx', 'xls', 'dxf', 'shp'].includes(ext);
+      const zona = Number(document.getElementById('lp-zona').value) || 23;
+      const hem = document.getElementById('lp-hem').value;
+
       try {
+        if (isBinario) {
+          // v2.7.0: binario vai via multipart pro server parsear
+          document.getElementById('lp-rtk-upload-info').textContent = `📄 ${f.name} (${(f.size/1024).toFixed(1)} KB) — processando no server...`;
+          const fd = new FormData();
+          fd.append('arquivo', f, f.name);
+          fd.append('default_zona', String(zona));
+          fd.append('default_hemisferio', hem);
+          // Usa fetch direto porque api() so monta JSON; multipart precisa FormData puro
+          const resp = await fetch(API + '/api/laudos-demarcacao/import-arquivo', {
+            method: 'POST',
+            headers: { 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+            body: fd,
+          });
+          if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Erro no server');
+          const r = await resp.json();
+          if (!r?.pontos?.length) {
+            alert('Nenhum ponto encontrado no arquivo.');
+            return;
+          }
+          // Hidrata o textarea com um sumario textual + dispara preview
+          const sumario = r.pontos.slice(0, 5).map(p =>
+            `${p.rotulo}\t${p.e?.toFixed(3) ?? ''}\t${p.n?.toFixed(3) ?? ''}\t${p.altitude ?? ''}`
+          ).join('\n');
+          document.getElementById('lp-rtk').value =
+            `# ${r.formato} parseado server-side · ${r.pontos.length} ponto(s) · use 💾 Salvar pra persistir\n` +
+            `nome\te\tn\tz\n` + sumario +
+            (r.pontos.length > 5 ? `\n... (+${r.pontos.length - 5} pontos)` : '');
+          document.getElementById('lp-rtk-upload-info').textContent = `📄 ${f.name} · ${r.formato} · ${r.pontos.length} ponto(s)`;
+          // Guarda o resultado pra usar no save (sem precisar re-parsear)
+          state.laudoArquivoImportado = r;
+          // Mostra preview do polígono na lateral
+          state.laudoPontosPreview = r.pontos.map((p, i) => ({
+            rotulo: p.rotulo || ('V'+(i+1)),
+            e: Number(p.e || 0),
+            n: Number(p.n || 0),
+          }));
+          if (typeof atualizarPreview === 'function') atualizarPreview(state.laudoPontosPreview);
+          mostrarToastOffline(`✅ ${r.formato} · ${r.pontos.length} ponto(s) carregado(s) — clique 💾 Salvar`, 'success');
+          return;
+        }
+
+        // Texto: caminho antigo (BOM detection no client + textarea)
         const buf = await f.arrayBuffer();
         const bytes = new Uint8Array(buf);
         let texto;
-        // Detecta BOM e decodifica com encoding correto
         if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
-          // UTF-16 LE BOM
           texto = new TextDecoder('utf-16le').decode(bytes.slice(2));
         } else if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
-          // UTF-16 BE BOM
           texto = new TextDecoder('utf-16be').decode(bytes.slice(2));
         } else if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
-          // UTF-8 BOM
           texto = new TextDecoder('utf-8').decode(bytes.slice(3));
         } else {
-          // Sem BOM → tenta UTF-8
           texto = new TextDecoder('utf-8').decode(bytes);
         }
-        // Strip BOM residual de seguranca (caso o decoder n tenha removido)
         texto = texto.replace(/^﻿/, '');
         document.getElementById('lp-rtk').value = texto;
         document.getElementById('lp-rtk-upload-info').textContent = `📄 ${f.name} (${(f.size/1024).toFixed(1)} KB)`;
-        // Auto-preview imediato
+        state.laudoArquivoImportado = null; // limpa cache binario antigo
         document.getElementById('lp-parse').click();
       } catch (err) {
         alert('Erro lendo arquivo: ' + err.message);
       } finally {
-        rtkFileInput.value = ''; // permite re-selecionar mesmo arquivo
+        rtkFileInput.value = '';
       }
     };
   }

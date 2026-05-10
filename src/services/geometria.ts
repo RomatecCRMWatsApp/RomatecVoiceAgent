@@ -431,3 +431,245 @@ export function importarPontosArquivo(text: string, opts: ImportarOpts = {}): {
          : importarRTK(text, opts);
   return { ...r, formato };
 }
+
+/**
+ * v2.7.0: Importa XLSX (Excel) — converte primeira sheet pra CSV e
+ * delega pra importarRTK. Cabe headers ou sem header (mesma logica).
+ */
+export function importarXLSX(buffer: Buffer, opts: ImportarOpts = {}): {
+  pontos: PontoImportadoRTK[];
+  cabecalhos: string[];
+} {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const xlsx = require('xlsx') as typeof import('xlsx');
+  const wb = xlsx.read(buffer, { type: 'buffer' });
+  const sheetName = wb.SheetNames[0];
+  if (!sheetName) return { pontos: [], cabecalhos: [] };
+  const ws = wb.Sheets[sheetName];
+  const csv = xlsx.utils.sheet_to_csv(ws, { strip: false, blankrows: false });
+  return importarRTK(csv, opts);
+}
+
+/**
+ * v2.7.0: Importa DXF (AutoCAD ASCII). Parser minimalista que extrai:
+ *   - Entidades POINT (com layer name como rotulo)
+ *   - Vertices de LWPOLYLINE / POLYLINE (cada vertice vira ponto)
+ *
+ * DXF e formato tagged-value: linhas alternadas de codigo (par) e valor
+ * (impar). Codigos relevantes:
+ *   0  = tipo de entidade (POINT, LWPOLYLINE, POLYLINE, VERTEX, ...)
+ *   8  = layer name
+ *  10  = X
+ *  20  = Y
+ *  30  = Z (opcional)
+ *
+ * Suporta DXF R12-R2018 ASCII. Binary DXF nao suportado.
+ */
+export function importarDXF(text: string, opts: ImportarOpts = {}): {
+  pontos: PontoImportadoRTK[];
+  cabecalhos: string[];
+} {
+  const cleaned = stripBOM(text);
+  const linhas = cleaned.split(/\r?\n/).map(l => l.trim());
+  const pontos: PontoImportadoRTK[] = [];
+  let i = 0;
+  let idxAuto = 1;
+
+  // Le par de linhas (codigo, valor) e avanca i por 2
+  const lerPar = (): { codigo: number; valor: string } | null => {
+    if (i + 1 >= linhas.length) return null;
+    const codigo = Number(linhas[i]);
+    const valor = linhas[i + 1] ?? '';
+    i += 2;
+    return Number.isFinite(codigo) ? { codigo, valor } : null;
+  };
+
+  while (i < linhas.length) {
+    const par = lerPar();
+    if (!par) break;
+    if (par.codigo !== 0) continue; // procura inicio de entidade
+
+    const tipo = par.valor.toUpperCase();
+    if (tipo !== 'POINT' && tipo !== 'LWPOLYLINE' && tipo !== 'POLYLINE' && tipo !== 'VERTEX') continue;
+
+    let layer = '';
+    let x: number | null = null;
+    let y: number | null = null;
+    let z: number | null = null;
+    const vertices: Array<{ x: number; y: number; z: number | null }> = [];
+
+    // Le pares ate proximo 0 (proxima entidade)
+    while (i < linhas.length) {
+      const peek = Number(linhas[i]);
+      if (peek === 0) break; // proxima entidade
+      const sub = lerPar();
+      if (!sub) break;
+      if (sub.codigo === 8) layer = sub.valor;
+      else if (sub.codigo === 10) x = Number(sub.valor);
+      else if (sub.codigo === 20) y = Number(sub.valor);
+      else if (sub.codigo === 30) z = Number(sub.valor);
+
+      // LWPOLYLINE empacota multiplos pares 10/20 num so bloco
+      if (tipo === 'LWPOLYLINE' && sub.codigo === 20 && x != null && Number.isFinite(y as number)) {
+        vertices.push({ x, y: y as number, z: Number.isFinite(z as number) ? (z as number) : null });
+        x = null; y = null; z = null;
+      }
+    }
+
+    if (tipo === 'POINT' && Number.isFinite(x as number) && Number.isFinite(y as number)) {
+      pontos.push({
+        rotulo: layer || `V${idxAuto++}`,
+        e: x, n: y,
+        altitude: Number.isFinite(z as number) ? z : null,
+        lat: null, lng: null,
+        raw: { source: 'dxf', layer, tipo: 'POINT' },
+      });
+    } else if (tipo === 'LWPOLYLINE') {
+      const baseRot = layer || `Poly${idxAuto++}`;
+      vertices.forEach((v, k) => {
+        pontos.push({
+          rotulo: vertices.length > 1 ? `${baseRot}-${k + 1}` : baseRot,
+          e: v.x, n: v.y, altitude: v.z,
+          lat: null, lng: null,
+          raw: { source: 'dxf', layer, tipo: 'LWPOLYLINE' },
+        });
+      });
+    } else if (tipo === 'VERTEX' && Number.isFinite(x as number) && Number.isFinite(y as number)) {
+      // VERTEX (de POLYLINE classico) vira ponto solo
+      pontos.push({
+        rotulo: layer || `V${idxAuto++}`,
+        e: x, n: y,
+        altitude: Number.isFinite(z as number) ? z : null,
+        lat: null, lng: null,
+        raw: { source: 'dxf', layer, tipo: 'VERTEX' },
+      });
+    }
+    // POLYLINE container: ignora — vertices vem em entidades VERTEX subsequentes
+  }
+
+  // Inferencia: se as coords parecem latitude (|x| < 180 e |y| < 90), trata como geo
+  if (pontos.length > 0) {
+    const todosGeo = pontos.every(p => p.e != null && p.n != null && Math.abs(p.e) <= 180 && Math.abs(p.n) <= 90);
+    if (todosGeo) {
+      for (const p of pontos) {
+        if (p.e != null && p.n != null) {
+          // DXF geo: assumindo lon=X, lat=Y (convencao usual)
+          p.lng = p.e;
+          p.lat = p.n;
+          p.e = null; p.n = null;
+          try {
+            const zona = opts.defaultZona ?? detectarZonaUtm(p.lng);
+            const hemisferio = opts.defaultHemisferio ?? (p.lat < 0 ? 'S' : 'N');
+            const utm = geoParaUtm({ lat: p.lat, lng: p.lng, zona, hemisferio });
+            p.e = utm.e;
+            p.n = utm.n;
+          } catch (_) { /* deixa null */ }
+        }
+      }
+    }
+  }
+
+  return { pontos, cabecalhos: ['layer', 'x', 'y', 'z'] };
+}
+
+/**
+ * v2.7.0: Importa SHP (ESRI Shapefile). Recebe Buffer do .shp e
+ * extrai geometrias Point e Polygon (cada vertice vira ponto).
+ *
+ * shapefile lib (mbostock) precisa de path em disco. Salva em temp,
+ * processa, apaga.
+ */
+export async function importarSHP(buffer: Buffer, opts: ImportarOpts = {}): Promise<{
+  pontos: PontoImportadoRTK[];
+  cabecalhos: string[];
+}> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const shapefile = require('shapefile') as { open: (path: string) => Promise<{ read: () => Promise<{ done: boolean; value: { type: string; coordinates: unknown; properties?: Record<string, unknown> } }> }> };
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require('fs/promises') as typeof import('fs/promises');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const os = require('os') as typeof import('os');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require('path') as typeof import('path');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const crypto = require('crypto') as typeof import('crypto');
+
+  const tmp = path.join(os.tmpdir(), `shp-${crypto.randomBytes(8).toString('hex')}.shp`);
+  await fs.writeFile(tmp, buffer);
+  const pontos: PontoImportadoRTK[] = [];
+  let idxAuto = 1;
+
+  try {
+    const source = await shapefile.open(tmp);
+    while (true) {
+      const { done, value } = await source.read();
+      if (done) break;
+      if (!value) continue;
+
+      const handlePoint = (coords: number[], rotulo: string) => {
+        const x = coords[0];
+        const y = coords[1];
+        const z = coords[2] ?? null;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        // SHP Point: coords sao [lon, lat] ou [E, N] dependendo do CRS.
+        // Heuristica: se |x| <= 180 e |y| <= 90 → lon/lat; senao UTM.
+        let e: number | null = null, n: number | null = null;
+        let lat: number | null = null, lng: number | null = null;
+        let altitude: number | null = Number.isFinite(z as number) ? (z as number) : null;
+        if (Math.abs(x) <= 180 && Math.abs(y) <= 90) {
+          lng = x; lat = y;
+          try {
+            const zona = opts.defaultZona ?? detectarZonaUtm(lng);
+            const hemisferio = opts.defaultHemisferio ?? (lat < 0 ? 'S' : 'N');
+            const utm = geoParaUtm({ lat, lng, zona, hemisferio });
+            e = utm.e;
+            n = utm.n;
+          } catch (_) { /* null */ }
+        } else {
+          e = x; n = y;
+        }
+        pontos.push({ rotulo, e, n, altitude, lat, lng, raw: { source: 'shp', tipo: value.type } });
+      };
+
+      const props = value.properties || {};
+      const baseRotulo = String(props.NAME || props.Name || props.name || props.ID || props.id || '').trim();
+
+      if (value.type === 'Point') {
+        const coords = value.coordinates as number[];
+        handlePoint(coords, baseRotulo || `V${idxAuto++}`);
+      } else if (value.type === 'MultiPoint' || value.type === 'LineString') {
+        const arr = value.coordinates as number[][];
+        const rot = baseRotulo || `Geom${idxAuto++}`;
+        arr.forEach((c, k) => handlePoint(c, arr.length > 1 ? `${rot}-${k + 1}` : rot));
+      } else if (value.type === 'Polygon') {
+        // Anel externo apenas (primeiro array)
+        const rings = value.coordinates as number[][][];
+        const ext = rings[0] || [];
+        const rot = baseRotulo || `Pol${idxAuto++}`;
+        // Polygon GeoJSON repete o primeiro ponto no fim — descarta
+        const limite = ext.length > 1 && ext[0][0] === ext[ext.length - 1][0] && ext[0][1] === ext[ext.length - 1][1]
+          ? ext.length - 1
+          : ext.length;
+        for (let k = 0; k < limite; k++) {
+          handlePoint(ext[k], `${rot}-${k + 1}`);
+        }
+      } else if (value.type === 'MultiPolygon') {
+        const polys = value.coordinates as number[][][][];
+        polys.forEach((rings, j) => {
+          const ext = rings[0] || [];
+          const rot = baseRotulo ? `${baseRotulo}-${j + 1}` : `Pol${idxAuto++}`;
+          const limite = ext.length > 1 && ext[0][0] === ext[ext.length - 1][0] && ext[0][1] === ext[ext.length - 1][1]
+            ? ext.length - 1
+            : ext.length;
+          for (let k = 0; k < limite; k++) {
+            handlePoint(ext[k], `${rot}-${k + 1}`);
+          }
+        });
+      }
+    }
+  } finally {
+    try { await fs.unlink(tmp); } catch (_) { /* ignora */ }
+  }
+
+  return { pontos, cabecalhos: ['name', 'x/lng', 'y/lat', 'z'] };
+}

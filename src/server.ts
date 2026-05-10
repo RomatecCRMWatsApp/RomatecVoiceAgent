@@ -1663,6 +1663,48 @@ app.post('/api/laudos-demarcacao/import-rtk', requireCeoToken, async (req: Reque
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+/**
+ * v2.7.0: Import binario (XLSX, DXF, SHP) via multipart upload.
+ * Detecta formato pela extensao + dispatcha pro parser apropriado.
+ * CSV/TXT/KML/GPX continuam pelo /import-rtk com texto no body — esse
+ * endpoint e so pros formatos binarios ou que tem encoding especial.
+ */
+app.post('/api/laudos-demarcacao/import-arquivo', requireCeoToken, upload.single('arquivo'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) { res.status(400).json({ error: 'arquivo obrigatorio (campo `arquivo` em multipart)' }); return; }
+    const { importarXLSX, importarDXF, importarSHP, importarPontosArquivo } = await import('./services/geometria');
+    const filename = req.file.originalname || '';
+    const ext = filename.toLowerCase().split('.').pop() || '';
+    const defaultZona = req.body?.default_zona ? Number(req.body.default_zona) : undefined;
+    const defaultHemisferio = (req.body?.default_hemisferio === 'N' || req.body?.default_hemisferio === 'S')
+      ? req.body.default_hemisferio
+      : undefined;
+    const opts = { defaultZona, defaultHemisferio };
+    let formato: string;
+    let r: { pontos: unknown[]; cabecalhos: string[] };
+    if (ext === 'xlsx' || ext === 'xls') {
+      formato = 'XLSX';
+      r = importarXLSX(req.file.buffer, opts);
+    } else if (ext === 'dxf') {
+      formato = 'DXF';
+      r = importarDXF(req.file.buffer.toString('utf8'), opts);
+    } else if (ext === 'shp') {
+      formato = 'SHP';
+      r = await importarSHP(req.file.buffer, opts);
+    } else if (ext === 'csv' || ext === 'txt' || ext === 'dat' || ext === 'kml' || ext === 'gpx') {
+      // Texto: passa pelo dispatcher antigo (que ja faz BOM strip + auto-detect)
+      const texto = req.file.buffer.toString('utf8');
+      const r2 = importarPontosArquivo(texto, opts);
+      formato = r2.formato;
+      r = r2;
+    } else {
+      res.status(400).json({ error: `extensao .${ext} nao suportada — use csv/txt/dat/kml/gpx/xlsx/dxf/shp` });
+      return;
+    }
+    res.json({ ...r, formato });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // v1.99.27 — Fase 3: Croqui SVG / Upload + Fotos
 
 // GET croqui — gera SVG auto OU retorna o upload manual
