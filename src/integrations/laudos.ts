@@ -84,6 +84,24 @@ export interface Laudo {
   lote_loteamento_id: number | null;
   created_at: string;
   updated_at: string;
+  // v3.0.0: precificação INCRA (Portaria 12/2025)
+  unidade_calculo?: 'km' | 'hectare' | 'lote' | null;
+  pont_vegetacao?: number | null;
+  pont_relevo?: number | null;
+  pont_insalubridade?: number | null;
+  pont_acesso?: number | null;
+  pont_clima?: number | null;
+  pont_area_media?: number | null;
+  pontuacao_total?: number | null;
+  faixa_aplicada?: string | null;
+  valor_unitario?: number | null;
+  quantidade_calculo?: number | null;
+  valor_base_calculado?: number | null;
+  desconto_tipo?: 'percentual' | 'fixo' | 'nenhum' | null;
+  desconto_valor?: number | null;
+  valor_final?: number | null;
+  precificacao_observacoes?: string | null;
+  precificacao_calculada_em?: Date | string | null;
 }
 
 interface LaudoRow extends RowDataPacket {
@@ -148,6 +166,24 @@ interface LaudoRow extends RowDataPacket {
   lote_loteamento_id: number | null;
   created_at: Date | string;
   updated_at: Date | string;
+  // v3.0.0: precificação INCRA
+  unidade_calculo: 'km' | 'hectare' | 'lote' | null;
+  pont_vegetacao: string | number | null;
+  pont_relevo: string | number | null;
+  pont_insalubridade: string | number | null;
+  pont_acesso: string | number | null;
+  pont_clima: string | number | null;
+  pont_area_media: string | number | null;
+  pontuacao_total: string | number | null;
+  faixa_aplicada: string | null;
+  valor_unitario: string | number | null;
+  quantidade_calculo: string | number | null;
+  valor_base_calculado: string | number | null;
+  desconto_tipo: 'percentual' | 'fixo' | 'nenhum' | null;
+  desconto_valor: string | number | null;
+  valor_final: string | number | null;
+  precificacao_observacoes: string | null;
+  precificacao_calculada_em: Date | string | null;
 }
 
 function asISO(v: Date | string | null): string | null {
@@ -228,6 +264,23 @@ function mapRow(r: LaudoRow): Laudo {
     lote_loteamento_id: r.lote_loteamento_id != null ? Number(r.lote_loteamento_id) : null,
     created_at: asISO(r.created_at) ?? '',
     updated_at: asISO(r.updated_at) ?? '',
+    unidade_calculo: r.unidade_calculo ?? null,
+    pont_vegetacao: r.pont_vegetacao != null ? Number(r.pont_vegetacao) : null,
+    pont_relevo: r.pont_relevo != null ? Number(r.pont_relevo) : null,
+    pont_insalubridade: r.pont_insalubridade != null ? Number(r.pont_insalubridade) : null,
+    pont_acesso: r.pont_acesso != null ? Number(r.pont_acesso) : null,
+    pont_clima: r.pont_clima != null ? Number(r.pont_clima) : null,
+    pont_area_media: r.pont_area_media != null ? Number(r.pont_area_media) : null,
+    pontuacao_total: r.pontuacao_total != null ? Number(r.pontuacao_total) : null,
+    faixa_aplicada: r.faixa_aplicada ?? null,
+    valor_unitario: r.valor_unitario != null ? Number(r.valor_unitario) : null,
+    quantidade_calculo: r.quantidade_calculo != null ? Number(r.quantidade_calculo) : null,
+    valor_base_calculado: r.valor_base_calculado != null ? Number(r.valor_base_calculado) : null,
+    desconto_tipo: r.desconto_tipo ?? null,
+    desconto_valor: r.desconto_valor != null ? Number(r.desconto_valor) : null,
+    valor_final: r.valor_final != null ? Number(r.valor_final) : null,
+    precificacao_observacoes: r.precificacao_observacoes ?? null,
+    precificacao_calculada_em: r.precificacao_calculada_em ?? null,
   };
 }
 
@@ -1002,4 +1055,66 @@ export async function getPdfAssinado(laudoId: number | string): Promise<{
       ? (r.assinado_em instanceof Date ? r.assinado_em.toISOString() : String(r.assinado_em))
       : null,
   };
+}
+
+// v3.0.0: persistência da precificação INCRA (Portaria 12/2025)
+import type {
+  CriteriosPontuacao,
+  UnidadeCalculo,
+  DescontoTipo,
+  ResultadoPrecificacao,
+} from '../services/pricing/incra';
+
+export interface DadosPrecificacaoPersistir {
+  unidade: UnidadeCalculo;
+  criterios: CriteriosPontuacao;
+  quantidade: number;
+  resultado: ResultadoPrecificacao;
+  desconto: { tipo: DescontoTipo; valor: number };
+  observacoes?: string | null;
+}
+
+export async function atualizarPrecificacao(
+  id: number,
+  d: DadosPrecificacaoPersistir,
+): Promise<void> {
+  await pool.execute(
+    `UPDATE laudos_demarcacao SET
+        unidade_calculo = ?,
+        pont_vegetacao = ?, pont_relevo = ?, pont_insalubridade = ?,
+        pont_acesso = ?,    pont_clima = ?,  pont_area_media = ?,
+        pontuacao_total = ?, faixa_aplicada = ?,
+        valor_unitario = ?, quantidade_calculo = ?, valor_base_calculado = ?,
+        desconto_tipo = ?, desconto_valor = ?,
+        valor_final = ?,    valor_servico = ?,
+        precificacao_observacoes = ?,
+        precificacao_calculada_em = NOW()
+      WHERE id = ?`,
+    [
+      d.unidade,
+      d.criterios.vegetacao, d.criterios.relevo, d.criterios.insalubridade,
+      d.criterios.acesso,    d.criterios.clima,  d.criterios.area_media,
+      d.resultado.pontuacaoTotal, d.resultado.faixa.label,
+      d.resultado.valorUnitario, d.quantidade, d.resultado.valorBase,
+      d.desconto.tipo, d.desconto.valor,
+      d.resultado.valorFinal, d.resultado.valorFinal,
+      d.observacoes ?? null,
+      Number(id),
+    ],
+  );
+}
+
+export async function atualizarApenasDesconto(
+  id: number,
+  desconto: { tipo: DescontoTipo; valor: number },
+  novoValorFinal: number,
+): Promise<void> {
+  await pool.execute(
+    `UPDATE laudos_demarcacao SET
+        desconto_tipo = ?, desconto_valor = ?,
+        valor_final = ?, valor_servico = ?,
+        precificacao_calculada_em = NOW()
+      WHERE id = ?`,
+    [desconto.tipo, desconto.valor, novoValorFinal, novoValorFinal, Number(id)],
+  );
 }

@@ -33,6 +33,7 @@ import type { Laudo, PontoLaudo, LadoLaudo } from '../integrations/laudos';
 import type { Contratante } from '../integrations/contratantes';
 import type { Executante } from '../integrations/executantes';
 import { azimuteParaDMS } from './geometria';
+import { CRITERIOS_INCRA } from './pricing/incra';
 
 const fmtBRL = (n: number) =>
   'R$ ' + Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -622,9 +623,111 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
     cy += 10;
   }
 
-  // ── 12. ART/TRT ────────────────────────────────────────────────────
+  // v3.0.0: ── 12. PRECIFICACAO DO SERVICO (so se INCRA aplicada) ─────
+  const temPrecif = laudo.valor_final != null && laudo.precificacao_calculada_em != null;
+  if (temPrecif) {
+    if (cy > 600) { doc.addPage(); cy = 60; }
+    doc.fontSize(10).fillColor('#888').font('Helvetica-Bold')
+       .text('12. PRECIFICAÇÃO DO SERVIÇO', 40, cy);
+    cy += 14;
+    doc.fontSize(8).fillColor('#444').font('Helvetica')
+       .text('Cálculo conforme Tabela de Preços Referenciais aprovada pela Portaria INCRA nº 12, de 23 de abril de 2025 (3ª Edição da Norma Técnica para Georreferenciamento de Imóveis Rurais).',
+             40, cy, { width: 515, align: 'justify' });
+    cy = doc.y + 10;
+
+    // Subtítulo
+    doc.fontSize(9).fillColor('#222').font('Helvetica-Bold').text('CRITÉRIOS DE CLASSIFICAÇÃO (Quadro 1 — Anexo I)', 40, cy);
+    cy += 12;
+
+    // Tabela 3 colunas
+    const colCrit = 40;
+    const colPts  = 280;
+    const colCls  = 340;
+    doc.fontSize(8).fillColor('#666').font('Helvetica-Bold');
+    doc.text('Critério', colCrit, cy, { width: 240, lineBreak: false });
+    doc.text('Pontos',   colPts,  cy, { width: 60,  lineBreak: false });
+    doc.text('Classificação', colCls, cy, { width: 215, lineBreak: false });
+    cy += 10;
+    doc.moveTo(40, cy).lineTo(555, cy).strokeColor('#ddd').lineWidth(0.5).stroke();
+    cy += 4;
+    doc.font('Helvetica').fillColor('#222').fontSize(8);
+
+    const nivelDescritivo = (criterio: keyof typeof CRITERIOS_INCRA, ponto: number): string => {
+      const niveis = CRITERIOS_INCRA[criterio]?.niveis ?? [];
+      if (ponto >= 1 && ponto <= 3) return niveis[0]?.rotulo ?? '';
+      if (ponto >= 4 && ponto <= 6) return niveis[1]?.rotulo ?? '';
+      if (ponto >= 7 && ponto <= 10) return niveis[2]?.rotulo ?? '';
+      return '—';
+    };
+
+    const linhas: Array<[string, number, string]> = [
+      ['Vegetação',           Number(laudo.pont_vegetacao || 0),    nivelDescritivo('vegetacao',     Number(laudo.pont_vegetacao || 0))],
+      ['Relevo',              Number(laudo.pont_relevo || 0),       nivelDescritivo('relevo',        Number(laudo.pont_relevo || 0))],
+      ['Insalubridade',       Number(laudo.pont_insalubridade || 0),nivelDescritivo('insalubridade', Number(laudo.pont_insalubridade || 0))],
+      ['Acesso',              Number(laudo.pont_acesso || 0),       nivelDescritivo('acesso',        Number(laudo.pont_acesso || 0))],
+      ['Clima',               Number(laudo.pont_clima || 0),        nivelDescritivo('clima',         Number(laudo.pont_clima || 0))],
+      ['Área média dos lotes',Number(laudo.pont_area_media || 0),   nivelDescritivo('area_media',    Number(laudo.pont_area_media || 0))],
+    ];
+    for (const [crit, pts, cls] of linhas) {
+      doc.text(crit, colCrit, cy, { width: 240, lineBreak: false });
+      doc.text(String(pts), colPts, cy, { width: 60, lineBreak: false });
+      doc.text(cls, colCls, cy, { width: 215, lineBreak: false });
+      cy += 11;
+    }
+    doc.moveTo(40, cy).lineTo(555, cy).strokeColor('#ddd').lineWidth(0.5).stroke();
+    cy += 4;
+    doc.font('Helvetica-Bold').fillColor('#222');
+    doc.text('TOTAL', colCrit, cy, { width: 240, lineBreak: false });
+    doc.text(String(laudo.pontuacao_total ?? 0), colPts, cy, { width: 60, lineBreak: false });
+    doc.text(`Faixa ${laudo.faixa_aplicada ?? '—'}`, colCls, cy, { width: 215, lineBreak: false });
+    cy += 18;
+
+    // Valor aplicado
+    if (cy > 700) { doc.addPage(); cy = 60; }
+    doc.fontSize(9).fillColor('#222').font('Helvetica-Bold').text('VALOR APLICADO (Quadro 2 — Anexo I)', 40, cy);
+    cy += 12;
+    doc.fontSize(8).fillColor('#222').font('Helvetica');
+    const fmtBRLPrecif = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+    const unidadeLabel = laudo.unidade_calculo === 'km' ? 'km lineares'
+                       : laudo.unidade_calculo === 'hectare' ? 'hectares'
+                       : laudo.unidade_calculo === 'lote' ? 'lotes' : '—';
+    const qtdFmt = laudo.unidade_calculo === 'lote'
+      ? String(Math.round(Number(laudo.quantidade_calculo || 0)))
+      : Number(laudo.quantidade_calculo || 0).toFixed(4);
+    doc.text(`Unidade:           ${unidadeLabel}`,                         60, cy); cy += 11;
+    doc.text(`Valor unitário:    ${fmtBRLPrecif(Number(laudo.valor_unitario || 0))} / ${laudo.unidade_calculo ?? '—'}`, 60, cy); cy += 11;
+    doc.text(`Quantidade:        ${qtdFmt} ${unidadeLabel}`,               60, cy); cy += 11;
+    doc.text(`Valor base:        ${fmtBRLPrecif(Number(laudo.valor_base_calculado || 0))}`, 60, cy); cy += 16;
+
+    // Desconto (se aplicável)
+    if (laudo.desconto_tipo && laudo.desconto_tipo !== 'nenhum' && Number(laudo.desconto_valor) > 0) {
+      if (cy > 720) { doc.addPage(); cy = 60; }
+      doc.fontSize(9).fillColor('#222').font('Helvetica-Bold').text('DESCONTO COMERCIAL', 40, cy);
+      cy += 12;
+      doc.fontSize(8).fillColor('#222').font('Helvetica');
+      const tipoLabel = laudo.desconto_tipo === 'percentual'
+        ? `Percentual (${Number(laudo.desconto_valor).toFixed(2)}%)`
+        : `Valor fixo`;
+      const descontoCalc = Number(laudo.valor_base_calculado || 0) - Number(laudo.valor_final || 0);
+      doc.text(`Tipo:              ${tipoLabel}`, 60, cy); cy += 11;
+      doc.text(`Valor descontado:  ${fmtBRLPrecif(descontoCalc)}`, 60, cy); cy += 16;
+    }
+
+    // Valor final em destaque verde
+    if (cy > 720) { doc.addPage(); cy = 60; }
+    doc.fontSize(11).fillColor('#10b981').font('Helvetica-Bold')
+       .text(`VALOR FINAL DO SERVIÇO   ▶   ${fmtBRLPrecif(Number(laudo.valor_final))}`, 40, cy, { width: 515 });
+    cy += 16;
+
+    doc.fontSize(7).fillColor('#666').font('Helvetica')
+       .text('A Portaria INCRA 12/2025 admite variação de ±10% sobre os valores médios em função de particularidades do objeto, encargos e insumos regionais. Este laudo apresenta os valores aplicados ao serviço prestado, conforme acordo entre as partes.',
+             40, cy, { width: 515, align: 'justify' });
+    cy = doc.y + 14;
+  }
+
+  // ── 12/13. ART/TRT ────────────────────────────────────────────────────
   if (cy > 720) { doc.addPage(); cy = 60; }
-  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('12. RESPONSABILIDADE TÉCNICA', 40, cy);
+  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text(`${temPrecif ? '13' : '12'}. RESPONSABILIDADE TÉCNICA`, 40, cy);
   cy += 14;
   doc.fontSize(9).fillColor('#444').font('Helvetica');
   if (laudo.usa_art) doc.text(`☑ ART (CREA): ${laudo.numero_art || '—'}`, 40, cy, { width: 515 });
@@ -638,7 +741,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   if (laudo.observacoes && String(laudo.observacoes).trim()) {
     if (cy > 700) { doc.addPage(); cy = 60; }
     doc.fontSize(10).fillColor('#888').font('Helvetica-Bold')
-       .text('13. OBSERVAÇÕES', 40, cy);
+       .text(`${temPrecif ? '14' : '13'}. OBSERVAÇÕES`, 40, cy);
     cy += 14;
     doc.fontSize(9).fillColor('#222').font('Helvetica')
        .text(String(laudo.observacoes).trim(), 40, cy, { width: 515, align: 'justify' });

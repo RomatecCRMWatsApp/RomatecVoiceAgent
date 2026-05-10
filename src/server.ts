@@ -1646,6 +1646,142 @@ app.post('/api/laudos-demarcacao/:id/pontos', requireCeoToken, async (req: Reque
 });
 
 // Import RTK (CSV/TXT) — recebe { texto: string } e retorna pontos parseados
+
+// v3.0.0: precificação INCRA — sugestão de critérios baseada nos dados do laudo
+app.get('/api/laudos-demarcacao/:id/precificacao/sugerir', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/laudos');
+    const { sugerirCriterios } = await import('./services/pricing/incra');
+    const id = await m.resolverLaudoId(String(req.params.id));
+    const laudo = await m.buscarLaudo(id);
+    if (!laudo) return res.status(404).json({ error: 'Laudo nao encontrado' });
+
+    const criterios = sugerirCriterios({
+      area_total_m2: laudo.area_total_m2 ?? undefined,
+      perimetro_m:   laudo.perimetro_m ?? undefined,
+      uf:            laudo.uf_imovel ?? undefined,
+      municipio:     laudo.municipio ?? undefined,
+    });
+
+    res.json({
+      criterios,
+      fonte: {
+        area_ha:      laudo.area_total_m2 ? +(laudo.area_total_m2 / 10000).toFixed(4) : null,
+        perimetro_km: laudo.perimetro_m ? +(laudo.perimetro_m / 1000).toFixed(4) : null,
+        uf:           laudo.uf_imovel ?? null,
+      },
+    });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+// v3.0.0: precificação INCRA — calcular e persistir
+app.post('/api/laudos-demarcacao/:id/precificacao/calcular', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const body = req.body ?? {};
+    const unidade = String(body.unidade ?? '');
+    if (!['km','hectare','lote'].includes(unidade)) {
+      return res.status(400).json({ error: "Campo 'unidade' obrigatorio: km, hectare ou lote" });
+    }
+    const quantidade = Number(body.quantidade);
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      return res.status(400).json({ error: "Campo 'quantidade' deve ser numero > 0" });
+    }
+    const c = body.criterios ?? {};
+    const criterios = {
+      vegetacao:     Number(c.vegetacao),
+      relevo:        Number(c.relevo),
+      insalubridade: Number(c.insalubridade),
+      acesso:        Number(c.acesso),
+      clima:         Number(c.clima),
+      area_media:    Number(c.area_media),
+    };
+    const desc = body.desconto ?? { tipo: 'nenhum', valor: 0 };
+    const desconto = {
+      tipo:  String(desc.tipo ?? 'nenhum') as 'percentual' | 'fixo' | 'nenhum',
+      valor: Number(desc.valor ?? 0),
+    };
+    if (!['percentual','fixo','nenhum'].includes(desconto.tipo)) {
+      return res.status(400).json({ error: "desconto.tipo invalido" });
+    }
+
+    const m = await import('./integrations/laudos');
+    const { calcularPrecificacao } = await import('./services/pricing/incra');
+    const id = await m.resolverLaudoId(String(req.params.id));
+    const laudo = await m.buscarLaudo(id);
+    if (!laudo) return res.status(404).json({ error: 'Laudo nao encontrado' });
+
+    const resultado = calcularPrecificacao({ criterios, unidade: unidade as 'km'|'hectare'|'lote', quantidade, desconto });
+
+    await m.atualizarPrecificacao(id, {
+      unidade: unidade as 'km'|'hectare'|'lote',
+      criterios,
+      quantidade,
+      resultado,
+      desconto,
+      observacoes: body.observacoes ?? null,
+    });
+
+    res.json(resultado);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+// v3.0.0: precificação INCRA — recalcula só desconto (laudo já com precificação base)
+app.patch('/api/laudos-demarcacao/:id/precificacao', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const desc = req.body?.desconto ?? {};
+    const desconto = {
+      tipo:  String(desc.tipo ?? 'nenhum') as 'percentual' | 'fixo' | 'nenhum',
+      valor: Number(desc.valor ?? 0),
+    };
+    if (!['percentual','fixo','nenhum'].includes(desconto.tipo)) {
+      return res.status(400).json({ error: "desconto.tipo invalido" });
+    }
+
+    const m = await import('./integrations/laudos');
+    const id = await m.resolverLaudoId(String(req.params.id));
+    const laudo = await m.buscarLaudo(id);
+    if (!laudo) return res.status(404).json({ error: 'Laudo nao encontrado' });
+    if (!laudo.precificacao_calculada_em || laudo.valor_base_calculado == null) {
+      return res.status(409).json({ error: 'Laudo nao possui precificacao base. Use POST /precificacao/calcular primeiro.' });
+    }
+
+    const valorBase = Number(laudo.valor_base_calculado);
+    let descontoAplicado = 0;
+    const avisos: string[] = [];
+
+    if (desconto.tipo === 'percentual') {
+      if (desconto.valor < 0 || desconto.valor > 100) {
+        return res.status(400).json({ error: 'Desconto percentual deve estar entre 0 e 100' });
+      }
+      descontoAplicado = +(valorBase * (desconto.valor / 100)).toFixed(2);
+    } else if (desconto.tipo === 'fixo') {
+      if (desconto.valor < 0) return res.status(400).json({ error: 'Desconto fixo nao pode ser negativo' });
+      if (desconto.valor > valorBase) return res.status(400).json({ error: 'Desconto fixo nao pode ser maior que o valor base' });
+      descontoAplicado = +desconto.valor.toFixed(2);
+    }
+
+    const valorFinal = +(valorBase - descontoAplicado).toFixed(2);
+    if (valorBase > 0 && (descontoAplicado / valorBase) * 100 > 10) {
+      avisos.push(`Desconto aplicado (${((descontoAplicado / valorBase) * 100).toFixed(1)}%) excede a variacao admissivel de 10% prevista na Portaria INCRA 12/2025.`);
+    }
+
+    await m.atualizarApenasDesconto(id, desconto, valorFinal);
+
+    res.json({
+      valorBase,
+      descontoAplicado,
+      valorFinal,
+      avisos,
+    });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
 // v2.10.0: Memorial descritivo do laudo (texto narrativo padrao tecnico)
 // Usado pelo painel lateral do preview e pelo PDF (mesma funcao).
 app.get('/api/laudos-demarcacao/:id/memorial', requireCeoToken, async (req: Request, res: Response) => {
@@ -2145,12 +2281,23 @@ app.post('/api/laudos-demarcacao/:id/gerar-recibo', requireCeoToken, async (req:
       [reciboCriado.id, laudo.id]
     );
 
+    // v3.0.0: monta resumo INCRA pra uso no PDF do recibo (quando precificacao foi aplicada)
+    const incraRecibo = (laudo.precificacao_calculada_em && laudo.valor_final != null) ? {
+      faixa_aplicada:       String(laudo.faixa_aplicada ?? '—'),
+      unidade_calculo:      laudo.unidade_calculo as 'km' | 'hectare' | 'lote',
+      valor_base_calculado: Number(laudo.valor_base_calculado),
+      desconto_tipo:        (laudo.desconto_tipo ?? 'nenhum') as 'percentual' | 'fixo' | 'nenhum',
+      desconto_valor:       Number(laudo.desconto_valor ?? 0),
+      valor_final:          Number(laudo.valor_final),
+    } : undefined;
+
     res.json({
       ok: true,
       recibo_id: reciboCriado.id,
       recibo_numero: reciboCriado.numero,
       token: reciboCriado.token,
       hash: reciboCriado.hash_validacao,
+      incra_aplicado: !!incraRecibo,
     });
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
@@ -2207,7 +2354,16 @@ app.post('/api/laudos-demarcacao/:id/enviar-zapi', requireCeoToken, async (req: 
         const recibo = await recMod.buscarReciboPorId(laudo.recibo_id);
         if (recibo) {
           const { gerarPdfRecibo } = await import('./services/reciboPdf');
-          const pdfRecibo = await gerarPdfRecibo(recibo);
+          // v3.0.0: passa resumo INCRA quando laudo tem precificacao aplicada
+          const incraEnvio = (laudo.precificacao_calculada_em && laudo.valor_final != null) ? {
+            faixa_aplicada:       String(laudo.faixa_aplicada ?? '—'),
+            unidade_calculo:      laudo.unidade_calculo as 'km' | 'hectare' | 'lote',
+            valor_base_calculado: Number(laudo.valor_base_calculado),
+            desconto_tipo:        (laudo.desconto_tipo ?? 'nenhum') as 'percentual' | 'fixo' | 'nenhum',
+            desconto_valor:       Number(laudo.desconto_valor ?? 0),
+            valor_final:          Number(laudo.valor_final),
+          } : undefined;
+          const pdfRecibo = await gerarPdfRecibo(recibo, undefined, incraEnvio);
           await wa.sendDocument(phone, pdfRecibo.toString('base64'), `Recibo-${recibo.numero}.pdf`);
           enviosOk.push('recibo');
           // Marca recibo como enviado
@@ -3058,6 +3214,16 @@ app.listen(PORT, () => {
       await m.runLoteamentosMigrations();
     } catch (err) {
       console.error('[loteamentos-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.0.0: migrations da Precificacao INCRA (Portaria 12/2025).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-precificacao-incra');
+      await m.runPrecificacaoIncraMigrations();
+    } catch (err) {
+      console.error('[precif-incra-migrations] FALHA fatal:', err);
     }
   })();
 
