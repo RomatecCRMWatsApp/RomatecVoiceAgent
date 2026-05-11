@@ -385,6 +385,16 @@
        com text-transform:uppercase + letter-spacing:1px estoura o card em
        mobile. word-break:break-word quebra o titulo em linhas. */
     .section-title { font-size: 13px; word-break: break-word; overflow-wrap: break-word; line-height: 1.3; }
+    /* v3.4.6: donut SVG do dashboard tem size=140 default — em mobile (cards
+       em 1 coluna) deixa eles altos demais e ainda aperta a legenda lateral.
+       Reduz pra 100px → cards 30% menores em altura. */
+    svg[width="140"] { width: 100px !important; height: 100px !important; }
+    /* v3.4.6: legenda do donut tem <span flex:1> com label do segmento. Sem
+       min-width:0 o texto longo empurra o <strong> do valor pra fora do card. */
+    .card span[style*="flex:1"], .card span[style*="flex: 1"] { min-width: 0; }
+    /* v3.4.6: metric-card (KPIs) com label longo ou value enorme corta texto.
+       Permite wrap. */
+    .metric-label, .metric-value { word-break: break-word; overflow-wrap: break-word; }
 
     /* Inputs/botões touch-friendly (mín 44px conforme Apple HIG) */
     input, select, textarea, button {
