@@ -362,8 +362,21 @@ import { sendDocument as sendWhatsAppDocument } from './whatsapp';
 import { sendDocument as sendTelegramDocument } from './telegram';
 import { getTenantSettings } from '../services/tenantSettings';
 
-export async function gerarPdfVistoria(vistoriaId: string): Promise<Buffer> {
-  const v = await buscarVistoria(vistoriaId);
+// v3.4.0: meta visual de assinatura — renderiza bloco "Assinado Digitalmente" no PDF
+export interface SignatureVisualMeta {
+  signer_cn: string;
+  signer_doc: string | null;
+  issuer_cn: string | null;
+  validade_ate: string | null;
+  data_assinatura: Date;
+  thumbprint: string | null;
+}
+
+export async function gerarPdfVistoria(
+  vistoriaId: string | number,
+  signatureVisualMeta?: SignatureVisualMeta,
+): Promise<Buffer> {
+  const v = await buscarVistoria(String(vistoriaId));
   const [obras] = await pool.execute<RowDataPacket[]>(
     'SELECT nome, cliente, endereco, cidade FROM romatec_obras WHERE id = ?', [v.obra_id]
   );
@@ -393,15 +406,30 @@ export async function gerarPdfVistoria(vistoriaId: string): Promise<Buffer> {
   doc.strokeColor(corHex).lineWidth(2).moveTo(48, doc.y).lineTo(547, doc.y).stroke();
   doc.moveDown(0.8);
   doc.fontSize(15).fillColor('#111').text('RELATÓRIO DE VISTORIA TÉCNICA', { align: 'center' });
-  doc.fontSize(11).fillColor('#444').text(`${v.titulo || 'Vistoria #' + v.id}  ·  ${formatBRDate(v.data)}`, { align: 'center' });
+
+  // Subtitulo com numero/titulo da vistoria
+  const subtitulo = `${v.titulo || 'Vistoria #' + v.id}`;
+  doc.fontSize(11).fillColor('#444').text(subtitulo, { align: 'center' });
   doc.moveDown(0.8);
 
-  doc.fontSize(11).fillColor(corHex).text('Obra');
+  // v3.4.0: bloco "Dados da Vistoria" — formato tabular com Data e Hora + Local explicitos
+  doc.fontSize(11).fillColor(corHex).text('Dados da Vistoria');
   doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.2);
   doc.fontSize(10).fillColor('#111');
-  doc.text(`${obra.nome}${obra.cliente ? ' — ' + obra.cliente : ''}`);
-  if (obra.endereco) doc.text(`${obra.endereco}${obra.cidade ? ', ' + obra.cidade : ''}`);
+
+  // Data e Hora juntos (formato brasileiro). Hora opcional pra compat com registros antigos.
+  const dataHoraStr = v.hora
+    ? `${formatBRDate(v.data)} as ${String(v.hora).slice(0, 5)}`
+    : formatBRDate(v.data);
+  doc.text(`Data e Hora: ${dataHoraStr}`);
+
+  // Local: cidade explicita (puxa da obra)
+  const localStr = obra.cidade ? String(obra.cidade) : '—';
+  doc.text(`Local: ${localStr}`);
+
+  doc.text(`Obra: ${obra.nome}${obra.cliente ? ' — ' + obra.cliente : ''}`);
+  if (obra.endereco) doc.text(`Endereco: ${obra.endereco}`);
   if (v.vistoriador) doc.text(`Vistoriador: ${v.vistoriador}`);
   doc.text(`Status: ${v.status_obra.toUpperCase()}`);
   doc.moveDown(0.6);
@@ -427,17 +455,86 @@ export async function gerarPdfVistoria(vistoriaId: string): Promise<Buffer> {
     doc.moveDown(0.6);
   }
 
-  // Fotos: cada uma em pagina propria com legenda
-  for (const f of fotos) {
-    doc.addPage();
-    doc.fontSize(11).fillColor(corHex).text(`Foto ${f.ordem + 1}${f.legenda ? ' — ' + f.legenda : ''}`);
-    doc.moveDown(0.4);
+  // v3.4.0: Fotos — 2 por pagina (em vez de 1 por pagina)
+  // Carimbo GPS ja embutido no pixel da imagem (Canvas no client v2.4.1+),
+  // PDF apenas renderiza como esta.
+  const renderFotoNoPdf = (foto: FotoRow, indice: number) => {
+    const caption = `Foto ${indice}${foto.legenda ? ' — ' + foto.legenda : ''}`;
+    doc.fontSize(11).fillColor(corHex).text(caption, { width: 499 });
+    doc.moveDown(0.3);
     try {
-      const buf = Buffer.from(f.data_base64, 'base64');
-      doc.image(buf, { fit: [499, 650], align: 'center' });
+      const buf = Buffer.from(foto.data_base64, 'base64');
+      doc.image(buf, { fit: [499, 310], align: 'center' });
     } catch (err) {
       doc.fontSize(9).fillColor('#999').text(`(falha ao renderizar foto: ${(err as Error).message})`);
     }
+  };
+
+  // Itera em pares: (0,1), (2,3), (4,5)...
+  for (let i = 0; i < fotos.length; i += 2) {
+    doc.addPage();
+    // Cabecalho da pagina de fotos
+    doc.fontSize(12).fillColor(corHex).text('Relatorio Fotografico', { align: 'left' });
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.4);
+
+    renderFotoNoPdf(fotos[i], i + 1);
+
+    if (fotos[i + 1]) {
+      doc.moveDown(0.8);
+      renderFotoNoPdf(fotos[i + 1], i + 2);
+    }
+  }
+
+  // v3.4.0: bloco visual de assinatura ICP-Brasil (so renderiza se signatureVisualMeta fornecida)
+  if (signatureVisualMeta) {
+    doc.addPage();
+    doc.fontSize(13).fillColor(corHex).text('ASSINATURA DIGITAL', { align: 'center' });
+    doc.moveDown(0.3);
+    doc.fontSize(10).fillColor('#444').text('Padrao ICP-Brasil (MP 2.200-2 / 2001)', { align: 'center' });
+    doc.moveDown(0.8);
+
+    doc.strokeColor(corHex).lineWidth(1).moveTo(48, doc.y).lineTo(547, doc.y).stroke();
+    doc.moveDown(0.5);
+
+    const m = signatureVisualMeta;
+    doc.fontSize(10).fillColor('#111');
+
+    doc.font('Helvetica-Bold').text('Signatario: ', { continued: true })
+       .font('Helvetica').text(m.signer_cn);
+
+    if (m.signer_doc) {
+      doc.font('Helvetica-Bold').text('CPF/CNPJ: ', { continued: true })
+         .font('Helvetica').text(m.signer_doc);
+    }
+    if (m.issuer_cn) {
+      doc.font('Helvetica-Bold').text('Emissor: ', { continued: true })
+         .font('Helvetica').text(m.issuer_cn);
+    }
+    if (m.validade_ate) {
+      doc.font('Helvetica-Bold').text('Validade do certificado: ate ', { continued: true })
+         .font('Helvetica').text(String(m.validade_ate).slice(0, 10));
+    }
+
+    const dataAssStr = m.data_assinatura.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    doc.font('Helvetica-Bold').text('Data da assinatura: ', { continued: true })
+       .font('Helvetica').text(`${dataAssStr} (UTC-3 / Brasilia)`);
+
+    if (m.thumbprint) {
+      doc.font('Helvetica-Bold').text('Thumbprint SHA-1: ', { continued: true })
+         .font('Helvetica').fontSize(8).text(m.thumbprint, { width: 400 });
+      doc.fontSize(10);
+    }
+
+    doc.moveDown(0.8);
+    doc.strokeColor(corHex).lineWidth(1).moveTo(48, doc.y).lineTo(547, doc.y).stroke();
+    doc.moveDown(0.5);
+
+    doc.fontSize(9).fillColor('#666').text(
+      'Documento assinado digitalmente conforme MP 2.200-2/2001 (ICP-Brasil). ' +
+      'Validavel em https://validar.iti.gov.br/validar e no painel "Assinaturas" do Adobe Acrobat Reader.',
+      { align: 'center', width: 499 }
+    );
   }
 
   const footerY = 800;
