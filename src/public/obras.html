@@ -13680,7 +13680,8 @@ function renderLaudosLista(v) {
               : (l.assinado_em ? `<button data-laudo-recibo="${l.id}" title="Gerar recibo" style="flex:1;">🧾 Gerar recibo</button>` : '')}
           </div>
           ${l.assinado_em ? `<div style="display:flex; gap:4px; flex-wrap:wrap;">
-            <button data-laudo-zapi="${l.id}" title="Enviar pelo WhatsApp (Z-API)" style="flex:1; background:#25d36622; color:#25d366; border-color:#25d36655;">📱 Enviar WhatsApp</button>
+            <button data-laudo-zapi="${l.id}" title="Enviar pelo WhatsApp (Z-API)" style="flex:1; background:#25d36622; color:#25d366; border-color:#25d36655;">📱 WhatsApp</button>
+            <button data-laudo-telegram="${l.id}" title="Enviar pelo Telegram" style="flex:1; background:#0088cc22; color:#0088cc; border:1px solid #0088cc55;">✈️ Telegram</button>
           </div>` : ''}
           <button data-laudo-del="${l.id}" class="btn-danger" style="font-size:11px; padding:4px;" title="Desativar laudo">🗑️ Excluir</button>
         </div>
@@ -13820,6 +13821,19 @@ function renderLaudosLista(v) {
       alert('✅ Enviado! ' + (r.message_id ? 'ID: '+r.message_id : ''));
       await render();
     } catch (err) { alert('Erro Z-API: '+err.message); }
+  });
+  // v3.5.0: enviar laudo via Telegram (default CEO, override via prompt)
+  v.querySelectorAll('[data-laudo-telegram]').forEach(b => b.onclick = async () => {
+    const chatId = prompt('Chat ID Telegram (vazio = CEO):') || '';
+    try {
+      const r = await api('/api/laudos-demarcacao/' + b.dataset.laudoTelegram + '/enviar-telegram', {
+        method: 'POST',
+        body: JSON.stringify(chatId ? { chat_id: chatId } : {}),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      alert('✅ ' + r.message);
+      await render();
+    } catch (err) { alert('Erro Telegram: ' + err.message); }
   });
   v.querySelectorAll('[data-laudo-del]').forEach(b => b.onclick = async () => {
     if (!confirm('Desativar este laudo? (soft delete — pode ser recuperado pelo banco)')) return;
