@@ -2450,6 +2450,19 @@ app.post('/api/laudos-demarcacao/:id/enviar-zapi', requireCeoToken, async (req: 
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v3.5.0: envio do laudo assinado via Telegram. chatId opcional no body.
+app.post('/api/laudos-demarcacao/:id/enviar-telegram', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const chatIdOverride = typeof req.body?.chat_id === 'string' ? req.body.chat_id : undefined;
+    const m = await import('./integrations/laudos');
+    const result = await m.enviarLaudoTelegram({ id, chatId: chatIdOverride });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
 // Pagina publica de validacao /v/laudo/:hash
 app.get('/v/laudo/:hash', async (req: Request, res: Response) => {
   try {

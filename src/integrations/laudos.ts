@@ -1141,6 +1141,47 @@ export async function getPdfAssinado(laudoId: number | string): Promise<{
   };
 }
 
+// v3.5.0: envia laudo assinado via Telegram. Replica padrao de enviarVistoriaTelegram.
+// chatId opcional → default TELEGRAM_LEAD_CHAT_ID (CEO) ou primeiro de
+// TELEGRAM_AUTHORIZED_USER_IDS (CSV).
+export async function enviarLaudoTelegram(input: { id: string | number; chatId?: string }) {
+  const id = Number(input.id);
+  const laudo = await buscarLaudo(id);
+  if (!laudo) throw new Error('Laudo nao encontrado.');
+
+  const chatId = (input.chatId || '').trim()
+    || (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
+    || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
+  if (!chatId) throw new Error('chatId Telegram obrigatorio (TELEGRAM_LEAD_CHAT_ID ou TELEGRAM_AUTHORIZED_USER_IDS).');
+
+  const pdfData = await getPdfAssinado(id);
+  if (!pdfData) throw new Error('Laudo ainda nao foi assinado — assine antes de enviar.');
+  const pdfBuf = pdfData.pdf;
+  if (pdfBuf.length > 50 * 1024 * 1024) {
+    throw new Error(`PDF tem ${(pdfBuf.length / 1024 / 1024).toFixed(1)}MB e Telegram aceita ate 50MB.`);
+  }
+
+  const imovelCurto = (laudo.denominacao_imovel || laudo.endereco_imovel || 'imovel')
+    .replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+  const fileName = `Laudo_${pdfData.numero}_${imovelCurto}.pdf`;
+  const caption = `Laudo #${pdfData.numero} — ${laudo.denominacao_imovel || laudo.endereco_imovel || ''}`;
+
+  const { sendDocument: sendTelegramDocument } = await import('./telegram');
+  try {
+    await sendTelegramDocument(chatId, pdfBuf, fileName, caption);
+  } catch (err) {
+    const e = err as Error & { response?: { data?: { description?: string; error_code?: number } } };
+    const desc = e.response?.data?.description || e.message;
+    const code = e.response?.data?.error_code;
+    throw new Error(`Telegram rejeitou: ${desc}${code ? ` (code ${code})` : ''}`);
+  }
+  return {
+    ok: true as const,
+    message: `Laudo #${pdfData.numero} enviado via Telegram (chat ${chatId}, ${(pdfBuf.length / 1024).toFixed(0)} KB).`,
+    chat_id: chatId,
+  };
+}
+
 // v3.0.0: persistência da precificação INCRA (Portaria 12/2025)
 import type {
   CriteriosPontuacao,
