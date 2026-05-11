@@ -4652,25 +4652,41 @@ function renderVto() {
   const obraTel = state.obras.find(o => String(o.id) === String(state.currentObra))?.telefone_cliente || '';
   const lista = state.vistorias.map(vis => {
     const sb = { regular:'badge-success', atencao:'badge-warning', critica:'badge-danger' }[vis.status_obra] || 'badge-info';
+    // v3.4.0: status de assinatura ICP-Brasil
+    const assinada = !!vis.assinado;
+    const dataAssStr = vis.assinado_em
+      ? new Date(vis.assinado_em).toLocaleDateString('pt-BR')
+      : null;
+    const btnAssinarLabel = assinada ? '🔄 Re-assinar' : '🔏 Assinar';
+    const badgeAssinada = assinada
+      ? `<span class="badge badge-success" style="font-size:10px; margin-left:6px;">✅ Assinada em ${dataAssStr}</span>`
+      : '';
+    const horaStr = vis.hora ? ' às ' + String(vis.hora).slice(0,5) : '';
+
     return `<div class="card">
       <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
         <div style="flex:1; min-width:200px;">
           <p style="margin:0; font-weight:600;">${escape(vis.titulo || 'Vistoria #' + vis.id)}</p>
           <p style="margin:4px 0; font-size:12px; color:var(--text-muted);">
-            ${escape(vis.data)} · ${escape(vis.vistoriador||'-')}
+            ${escape(vis.data)}${horaStr} · ${escape(vis.vistoriador||'-')}
             ${vis.qtd_fotos > 0 ? ` · 📷 ${vis.qtd_fotos} foto${vis.qtd_fotos>1?'s':''}` : ''}
           </p>
-          <span class="badge ${sb}">${escape(vis.status_obra)}</span>
+          <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
+            <span class="badge ${sb}">${escape(vis.status_obra)}</span>
+            ${badgeAssinada}
+          </div>
           <p style="margin:6px 0 0; font-size:12px; color:var(--text-muted);">${escape((vis.descricao||'').slice(0,150))}${(vis.descricao||'').length>150?'…':''}</p>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; min-width:230px;">
           <input data-tel-vto="${vis.id}" placeholder="WhatsApp (ex: 5598...)" value="${escape(obraTel)}" style="font-size:12px; padding:6px 8px;">
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
             <button data-view-vto="${vis.id}" title="Visualizar HTML" style="flex:1; min-width:70px;">👁 Ver</button>
-            <button data-pdf-vto="${vis.id}" title="Baixar PDF" style="flex:1; min-width:70px;">📄 PDF</button>
+            <button data-pdf-vto="${vis.id}" title="Baixar PDF (rascunho)" style="flex:1; min-width:70px;">📄 PDF</button>
+            ${assinada ? `<button data-pdf-assinado-vto="${vis.id}" title="Baixar PDF assinado ICP-Brasil" style="flex:1; min-width:90px; background:#10b981; color:#fff; border-color:#10b981;">🔏 PDF Assinado</button>` : ''}
             <button data-send-vto="${vis.id}" title="Enviar WhatsApp" style="flex:1; min-width:80px; background:var(--success); color:#fff; border-color:var(--success);">📱 Enviar</button>
           </div>
-          <div style="display:flex; gap:4px;">
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-assinar-vto="${vis.id}" title="${assinada ? 'Re-assinar com cert atual' : 'Assinar digitalmente ICP-Brasil (PF default)'}" style="flex:1; min-width:90px; background:${assinada ? '#f59e0b' : '#16a34a'}; color:#fff; border-color:${assinada ? '#f59e0b' : '#16a34a'};">${btnAssinarLabel}</button>
             <button data-tele-vto="${vis.id}" style="flex:1;">✈️ Telegram</button>
             <button data-edit-vto="${vis.id}" style="flex:1;">✏️ Editar</button>
             <button class="btn-danger" data-del-vto="${vis.id}" style="flex:1;">Excluir</button>
@@ -4997,6 +5013,37 @@ function renderVto() {
       alert('✅ ' + r.message);
     } catch (e) { alert('Erro: ' + e.message); }
     finally { b.disabled = false; b.textContent = '✈️ Telegram'; }
+  });
+
+  // v3.4.0: Assinar / Re-assinar vistoria (ICP-Brasil, PF default)
+  document.querySelectorAll('[data-assinar-vto]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.assinarVto;
+    if (!confirm(`Assinar vistoria #${id} digitalmente (cert PF padrão)?`)) return;
+    const lbl = b.textContent;
+    b.textContent = '⏳ Assinando...';
+    b.disabled = true;
+    try {
+      const r = await fetch(`/api/vistorias/${id}/assinar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),  // perfil opcional — omite usa 'pf' default
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Falha na assinatura');
+      alert(`✅ Vistoria assinada por ${data.cert.subject_cn || '(sem CN)'} em ${new Date(data.assinado_em).toLocaleString('pt-BR')}`);
+      await loadVistorias();
+      renderVto();
+    } catch (err) {
+      alert(`❌ Erro: ${err.message}`);
+      b.textContent = lbl;
+      b.disabled = false;
+    }
+  });
+
+  // v3.4.0: Baixar PDF assinado
+  document.querySelectorAll('[data-pdf-assinado-vto]').forEach(b => b.onclick = () => {
+    const id = b.dataset.pdfAssinadoVto;
+    window.open(`/api/vistorias/${id}/pdf-assinado`, '_blank');
   });
 
   // v1.67.12: handler do botao Editar (faltava — botao existia sem onclick)
