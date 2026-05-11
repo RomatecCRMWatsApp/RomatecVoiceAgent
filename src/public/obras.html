@@ -14930,13 +14930,27 @@ function gerarCroquiSvgClient(pontos, lados, opts) {
 
   let distSvg = '';
   if (lados && lados.length) {
+    // v3.5.2: centroide + normal pra posicionar texto FORA do poligono
+    const cenX = svgPontos.reduce((s, p) => s + p.x, 0) / svgPontos.length;
+    const cenY = svgPontos.reduce((s, p) => s + p.y, 0) / svgPontos.length;
+    const offsetFora = 10; // preview client e' menor (380x380)
     distSvg = lados.map(ld => {
       const p1 = svgPontos[ld.i_idx]; const p2 = svgPontos[ld.f_idx];
       if (!p1||!p2) return '';
       const mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
-      const ang = Math.atan2(p2.y-p1.y, p2.x-p1.x) * 180 / Math.PI;
+      const dx = p2.x-p1.x, dy = p2.y-p1.y;
+      const len = Math.sqrt(dx*dx+dy*dy) || 1;
+      const n1x = -dy/len, n1y = dx/len;
+      const n2x =  dy/len, n2y = -dx/len;
+      const d1 = Math.hypot(mx+n1x*offsetFora-cenX, my+n1y*offsetFora-cenY);
+      const d2 = Math.hypot(mx+n2x*offsetFora-cenX, my+n2y*offsetFora-cenY);
+      const nx = d1>d2 ? n1x : n2x;
+      const ny = d1>d2 ? n1y : n2y;
+      const tx = mx + nx*offsetFora;
+      const ty = my + ny*offsetFora;
+      const ang = Math.atan2(dy, dx) * 180 / Math.PI;
       const angT = ang>90 || ang<-90 ? ang+180 : ang;
-      return `<text x="${mx.toFixed(2)}" y="${my.toFixed(2)}" font-family="Helvetica" font-size="10" font-weight="bold" fill="#222" text-anchor="middle" dy="-5" transform="rotate(${angT.toFixed(1)} ${mx.toFixed(2)} ${my.toFixed(2)})">${ld.distancia_m.toFixed(2)}m</text>`;
+      return `<text x="${tx.toFixed(2)}" y="${ty.toFixed(2)}" font-family="Helvetica" font-size="11" font-weight="bold" fill="#222" text-anchor="middle" dominant-baseline="middle" transform="rotate(${angT.toFixed(1)} ${tx.toFixed(2)} ${ty.toFixed(2)})">${ld.distancia_m.toFixed(2)}m</text>`;
     }).join('');
   }
 
