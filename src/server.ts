@@ -3092,6 +3092,32 @@ app.post('/api/vistorias/:id/enviar-whatsapp',
 app.post('/api/vistorias/:id/enviar-telegram',
   apiHandle(args => vistorias.enviarVistoriaTelegram(args as Parameters<typeof vistorias.enviarVistoriaTelegram>[0])));
 
+// v3.4.0: assinatura digital ICP-Brasil de vistorias (PF default — ato tecnico do RT)
+app.post('/api/vistorias/:id/assinar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/vistoriasAssinatura');
+    const perfilOverride = (req.body?.perfil as 'pj' | 'pf' | undefined);
+    const result = await m.assinarVistoria(String(req.params.id), { perfil: perfilOverride });
+    res.json(result);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// v3.4.0: baixa PDF assinado da vistoria (inline pra abrir no browser)
+app.get('/api/vistorias/:id/pdf-assinado', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const m = await import('./integrations/vistoriasAssinatura');
+    const data = await m.getVistoriaPdfAssinado(id);
+    if (!data) {
+      res.status(404).json({ error: 'Vistoria ainda nao foi assinada' });
+      return;
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="vistoria-${id}-assinada.pdf"`);
+    res.send(data.pdf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // Cofre Obsidian
 app.post('/api/cofre/sincronizar', apiHandle(() => cofre.sincronizarCofreMemoria()));
 app.get ('/api/cofre/exportar',    apiHandle(() => cofre.exportarVaultZip()));
