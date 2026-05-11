@@ -270,6 +270,21 @@ export async function runLaudosMigrations(): Promise<void> {
     // medidas reais e mostra badge de divergencia se exceder a tolerancia.
     { label: 'ALTER laudo lote_loteamento_id', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN lote_loteamento_id INT NULL' },
     { label: 'INDEX lote_loteamento_id', sql: 'ALTER TABLE laudos_demarcacao ADD INDEX idx_lote_loteamento (lote_loteamento_id)' },
+    // v3.5.0 — 14 campos BCI (Boletim do Cadastro Imobiliario - Prefeitura) opcionais
+    { label: 'ALTER bci_cod_imovel', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_cod_imovel VARCHAR(20) NULL' },
+    { label: 'ALTER bci_loc_cartografica', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_loc_cartografica VARCHAR(50) NULL' },
+    { label: 'ALTER bci_distrito', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_distrito VARCHAR(10) NULL' },
+    { label: 'ALTER bci_setor', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_setor VARCHAR(10) NULL' },
+    { label: 'ALTER bci_quadra', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_quadra VARCHAR(10) NULL' },
+    { label: 'ALTER bci_lote', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_lote VARCHAR(10) NULL' },
+    { label: 'ALTER bci_unidade', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_unidade VARCHAR(10) NULL' },
+    { label: 'ALTER bci_situacao', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_situacao VARCHAR(30) NULL' },
+    { label: 'ALTER bci_natureza', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_natureza VARCHAR(50) NULL' },
+    { label: 'ALTER bci_logradouro_tipo', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_logradouro_tipo VARCHAR(20) NULL' },
+    { label: 'ALTER bci_logradouro_nome', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_logradouro_nome VARCHAR(150) NULL' },
+    { label: 'ALTER bci_numero', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_numero VARCHAR(20) NULL' },
+    { label: 'ALTER bci_cep', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_cep VARCHAR(10) NULL' },
+    { label: 'ALTER bci_complemento', sql: 'ALTER TABLE laudos_demarcacao ADD COLUMN bci_complemento VARCHAR(100) NULL' },
   ];
   for (const { label, sql } of ops) {
     try {
