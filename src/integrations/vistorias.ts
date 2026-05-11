@@ -390,7 +390,10 @@ export async function gerarPdfVistoria(
   const corHex = t?.primary_color || '#10b981';
   const logoFile = path.join(__dirname, '..', 'public', 'romatec-logo-removebg-preview.png');
 
-  const doc = new PDFDocument({ size: 'A4', margin: 48, info: {
+  // v3.4.1: bufferPages permite desenhar footer em todas as paginas no final,
+  // evitando que o footer absoluto em Y=800 dispare auto-page-break e crie
+  // pagina em branco extra apos o bloco de assinatura digital.
+  const doc = new PDFDocument({ size: 'A4', margin: 48, bufferPages: true, info: {
     Title: `Vistoria ${v.titulo || '#' + v.id}`,
     Author: brand,
   }});
@@ -537,9 +540,18 @@ export async function gerarPdfVistoria(
     );
   }
 
-  const footerY = 800;
-  doc.fontSize(8).fillColor('#888')
-     .text(`${brand} — Relatório gerado eletronicamente.`, 48, footerY, { width: 499, align: 'center' });
+  // v3.4.1: itera buffered pages e desenha footer em CADA pagina (em vez de
+  // uma chamada solta no fim do doc que criava pagina vazia). lineBreak:false
+  // garante que o texto nao tente quebrar e disparar pagina nova.
+  const range = doc.bufferedPageRange();
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    doc.fontSize(8).fillColor('#888').text(
+      `${brand} — Relatório gerado eletronicamente.`,
+      48, doc.page.height - 30,
+      { width: 499, align: 'center', lineBreak: false },
+    );
+  }
   doc.end();
   await new Promise<void>(resolve => doc.on('end', () => resolve()));
   return Buffer.concat(chunks);
