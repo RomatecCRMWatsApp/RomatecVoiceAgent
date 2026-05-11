@@ -13741,8 +13741,9 @@ function renderLaudosLista(v) {
       }, 250);
     } catch (err) { alert('Erro ao clonar: ' + err.message); }
   });
+  // v3.5.0: modal fullscreen do PDF Assinado com botoes Baixar/Telegram/WhatsApp
   v.querySelectorAll('[data-laudo-pdf-sig]').forEach(b => b.onclick = () => {
-    window.open('/api/laudos-demarcacao/' + b.dataset.laudoPdfSig + '/pdf-assinado', '_blank');
+    abrirModalPdfLaudoAssinado(b.dataset.laudoPdfSig);
   });
   v.querySelectorAll('[data-laudo-sig]').forEach(b => b.onclick = async () => {
     // v3.0.3: distingue re-assinar (laudo já assinado) de assinar novo
@@ -13827,6 +13828,83 @@ function renderLaudosLista(v) {
       await render();
     } catch (err) { alert('Erro: '+err.message); }
   });
+}
+
+// v3.5.0: modal fullscreen do PDF Assinado de laudo com botoes Baixar/Telegram/WhatsApp
+function abrirModalPdfLaudoAssinado(laudoId) {
+  // remove modal existente (se houver)
+  const existente = document.getElementById('ld-pdf-modal');
+  if (existente) existente.remove();
+
+  const url = `/api/laudos-demarcacao/${laudoId}/pdf-assinado`;
+  const modal = document.createElement('div');
+  modal.id = 'ld-pdf-modal';
+  modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9999; display:flex; flex-direction:column;';
+  modal.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:var(--surface); border-bottom:1px solid var(--gold-dim);">
+      <strong style="color:var(--gold);">🔏 PDF Assinado — Laudo #${escape(laudoId)}</strong>
+      <button id="ld-pdf-modal-close" style="background:transparent; border:none; color:var(--text-muted); font-size:24px; cursor:pointer; padding:4px 12px;">✕</button>
+    </div>
+    <iframe id="ld-pdf-iframe" src="${url}" style="flex:1; width:100%; border:0; background:#222;"></iframe>
+    <div style="display:flex; gap:8px; padding:10px 16px; background:var(--surface); border-top:1px solid var(--gold-dim); justify-content:center; flex-wrap:wrap;">
+      <button id="ld-pdf-baixar" style="background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Baixar PDF</button>
+      <button id="ld-pdf-telegram" style="background:#0088cc22; color:#0088cc; border:1px solid #0088cc55;">✈️ Telegram</button>
+      <button id="ld-pdf-whatsapp" style="background:#25d36622; color:#25d366; border:1px solid #25d36655;">📱 WhatsApp</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const fechar = () => modal.remove();
+  document.getElementById('ld-pdf-modal-close').onclick = fechar;
+
+  // ESC fecha modal
+  const escHandler = (e) => {
+    if (e.key === 'Escape') { fechar(); document.removeEventListener('keydown', escHandler); }
+  };
+  document.addEventListener('keydown', escHandler);
+
+  // Botao Baixar: forca download via blob (evita abrir inline em mobile)
+  document.getElementById('ld-pdf-baixar').onclick = async () => {
+    try {
+      const resp = await fetch(url, { credentials: 'include' });
+      if (!resp.ok) throw new Error('Falha ao baixar PDF: ' + resp.status);
+      const blob = await resp.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `Laudo_${laudoId}_assinado.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (err) { alert('Erro ao baixar: ' + err.message); }
+  };
+
+  // Botao Telegram: prompt opcional de chat_id, default CEO
+  document.getElementById('ld-pdf-telegram').onclick = async () => {
+    const chatId = prompt('Chat ID Telegram (vazio = CEO):') || '';
+    try {
+      const r = await api('/api/laudos-demarcacao/' + laudoId + '/enviar-telegram', {
+        method: 'POST',
+        body: JSON.stringify(chatId ? { chat_id: chatId } : {}),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      alert('✅ ' + r.message);
+    } catch (err) { alert('Erro Telegram: ' + err.message); }
+  };
+
+  // Botao WhatsApp: prompt telefone, reaproveita endpoint /enviar-zapi
+  document.getElementById('ld-pdf-whatsapp').onclick = async () => {
+    const tel = prompt('WhatsApp do destinatário (DDD+número):');
+    if (!tel) return;
+    try {
+      const r = await api('/api/laudos-demarcacao/' + laudoId + '/enviar-zapi', {
+        method: 'POST',
+        body: JSON.stringify({ telefone: tel }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      alert('✅ Enviado! ' + (r.message_id ? 'ID: ' + r.message_id : ''));
+    } catch (err) { alert('Erro Z-API: ' + err.message); }
+  };
 }
 
 function renderLaudoNovo(v) {
