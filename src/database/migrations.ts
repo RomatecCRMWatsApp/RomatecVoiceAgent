@@ -339,6 +339,26 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  // v3.4.0: assinatura ICP-Brasil + hora explicita em vistorias
+  for (const sql of [
+    `ALTER TABLE romatec_obra_vistorias ADD COLUMN hora TIME NULL AFTER data`,
+    `ALTER TABLE romatec_obra_vistorias ADD COLUMN pdf_assinado LONGBLOB NULL`,
+    `ALTER TABLE romatec_obra_vistorias ADD COLUMN assinatura_meta JSON NULL`,
+    `ALTER TABLE romatec_obra_vistorias ADD COLUMN assinado_em DATETIME NULL`,
+    `ALTER TABLE romatec_obra_vistorias ADD COLUMN assinado_por_cert_id INT NULL`,
+  ]) {
+    try {
+      await pool.execute(sql);
+      console.log('[migrations:vto-v3.4.0] OK:', sql.slice(0, 70));
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (!/Duplicate column|already exists/i.test(msg)) {
+        console.error('[migrations:vto-v3.4.0] FAIL:', sql, msg);
+        throw err;
+      }
+    }
+  }
+
   // v1.19: alarmes/despertadores
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS zayra_alarmes (
