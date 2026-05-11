@@ -120,7 +120,7 @@ export function gerarCroquiSvg(
       // Rotacao do texto baseada no angulo do lado
       const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x) * (180 / Math.PI);
       const angTxt = ang > 90 || ang < -90 ? ang + 180 : ang; // mantem legivel
-      return `<text x="${meioX.toFixed(2)}" y="${meioY.toFixed(2)}" font-family="Helvetica" font-size="10" fill="#444" text-anchor="middle" dy="-3" transform="rotate(${angTxt.toFixed(1)} ${meioX.toFixed(2)} ${meioY.toFixed(2)})">${l.distancia_m.toFixed(2)}m</text>`;
+      return `<text x="${meioX.toFixed(2)}" y="${meioY.toFixed(2)}" font-family="Helvetica" font-size="12" font-weight="bold" fill="#222" text-anchor="middle" dy="-5" transform="rotate(${angTxt.toFixed(1)} ${meioX.toFixed(2)} ${meioY.toFixed(2)})">${l.distancia_m.toFixed(2)}m</text>`;
     }).join('');
   }
 
