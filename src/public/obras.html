@@ -161,6 +161,11 @@
     [style*="min-width:240px"], [style*="min-width: 240px"] {
       min-width: 0 !important;
     }
+    /* v3.4.4: select com max-width inline ignora o max-width em flex containers
+       porque o default min-width:auto = tamanho intrinseco da option mais longa
+       (ex: "RODO RANCHO COMBUSTIVEIS LTDA - Obra Posto Chapadao" = ~480px).
+       Forca min-width:0 pra realmente respeitar max-width e nao estourar. */
+    select[style*="max-width"] { min-width: 0 !important; }
   }
 
   input, select, textarea, button {
@@ -1480,7 +1485,7 @@ function obraSelector() {
     `<option value="${o.id}" ${o.id===state.currentObra?'selected':''}>${escape(o.nome)}</option>`).join('');
   return `<div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
     <label style="font-size:12px; color:var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Obra ativa:</label>
-    <select class="js-sel-obra" style="flex:1; max-width:300px;">${opts}</select>
+    <select class="js-sel-obra" style="flex:1; max-width:300px; min-width:0;">${opts}</select>
   </div>`;
 }
 function attachSel() {
@@ -3030,7 +3035,7 @@ function renderEquipe() {
           <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${escape(p.telefone||'-')}${p.especialidade?' · '+escape(p.especialidade):''}</p>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
-          <select data-status-eq="${p.id}" style="font-size:11px; padding:3px 6px; max-width:140px;">${statusSelectOpts(p.status)}</select>
+          <select data-status-eq="${p.id}" style="font-size:11px; padding:3px 6px; max-width:140px; min-width:0;">${statusSelectOpts(p.status)}</select>
           <button class="btn-gold" data-cal="${p.id}" data-nome="${escape(p.nome)}" data-vd="${p.valor_dia}">📅 Marcar dias</button>
           <button data-edit-eq="${p.id}">✏️ Editar</button>
           <button class="btn-danger" data-del-eq="${p.id}" data-del-nome="${escape(p.nome)}">Excluir</button>
