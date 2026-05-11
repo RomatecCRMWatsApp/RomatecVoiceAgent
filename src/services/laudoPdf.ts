@@ -301,6 +301,72 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
       cy += 12;
     }
   }
+
+  // v3.5.0: Dados do BCI (Boletim do Cadastro Imobiliario)
+  const temBci = laudo.bci_cod_imovel || laudo.bci_loc_cartografica || laudo.bci_distrito
+    || laudo.bci_setor || laudo.bci_quadra || laudo.bci_lote || laudo.bci_unidade
+    || laudo.bci_situacao || laudo.bci_natureza || laudo.bci_logradouro_tipo
+    || laudo.bci_logradouro_nome || laudo.bci_numero || laudo.bci_cep || laudo.bci_complemento;
+  if (temBci) {
+    doc.fontSize(9).fillColor('#888').font('Helvetica-Bold').text('Dados do BCI (Prefeitura Municipal):', 40, cy);
+    cy += 12;
+    doc.font('Helvetica').fillColor('#222');
+
+    // Linha 1: Cod imovel + Loc Cartografica
+    if (laudo.bci_cod_imovel || laudo.bci_loc_cartografica) {
+      const partes: string[] = [];
+      if (laudo.bci_cod_imovel) partes.push(`Cod: ${laudo.bci_cod_imovel}`);
+      if (laudo.bci_loc_cartografica) partes.push(`Loc. Cartografica: ${laudo.bci_loc_cartografica}`);
+      doc.text(partes.join('   ·   '), 40, cy, { width: 515 });
+      cy += 12;
+    }
+
+    // Linha 2: Distrito/Setor/Quadra/Lote/Unidade
+    if (laudo.bci_distrito || laudo.bci_setor || laudo.bci_quadra || laudo.bci_lote || laudo.bci_unidade) {
+      const partes: string[] = [];
+      if (laudo.bci_distrito) partes.push(`Distrito ${laudo.bci_distrito}`);
+      if (laudo.bci_setor)    partes.push(`Setor ${laudo.bci_setor}`);
+      if (laudo.bci_quadra)   partes.push(`Quadra ${laudo.bci_quadra}`);
+      if (laudo.bci_lote)     partes.push(`Lote ${laudo.bci_lote}`);
+      if (laudo.bci_unidade)  partes.push(`Unidade ${laudo.bci_unidade}`);
+      doc.text(partes.join('   ·   '), 40, cy, { width: 515 });
+      cy += 12;
+    }
+
+    // Linha 3: Situacao + Natureza
+    if (laudo.bci_situacao || laudo.bci_natureza) {
+      const partes: string[] = [];
+      if (laudo.bci_situacao) partes.push(`Situacao: ${laudo.bci_situacao}`);
+      if (laudo.bci_natureza) partes.push(`Natureza: ${laudo.bci_natureza}`);
+      doc.text(partes.join('   ·   '), 40, cy, { width: 515 });
+      cy += 12;
+    }
+
+    // Linha 4: Logradouro completo
+    const logradouroPartes: string[] = [];
+    if (laudo.bci_logradouro_tipo) logradouroPartes.push(laudo.bci_logradouro_tipo);
+    if (laudo.bci_logradouro_nome) logradouroPartes.push(laudo.bci_logradouro_nome);
+    let logradouroLinha = logradouroPartes.join(' ');
+    if (laudo.bci_numero) logradouroLinha += `, ${laudo.bci_numero}`;
+    if (laudo.bci_complemento) logradouroLinha += ` — ${laudo.bci_complemento}`;
+    if (logradouroLinha.trim()) {
+      doc.text(`Logradouro: ${logradouroLinha}`, 40, cy, { width: 515 });
+      cy += 12;
+    }
+
+    // Linha 5: CEP formatado
+    if (laudo.bci_cep) {
+      const cepLimpo = String(laudo.bci_cep).replace(/\D/g, '');
+      const cepFmt = cepLimpo.length === 8
+        ? `${cepLimpo.slice(0, 2)}.${cepLimpo.slice(2, 5)}-${cepLimpo.slice(5)}`
+        : laudo.bci_cep;
+      doc.text(`CEP: ${cepFmt}`, 40, cy, { width: 515 });
+      cy += 12;
+    }
+
+    cy += 6; // espaco antes do proximo bloco
+  }
+
   cy += 4;
 
   // Confrontantes

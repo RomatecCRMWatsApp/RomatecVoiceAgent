@@ -13680,7 +13680,8 @@ function renderLaudosLista(v) {
               : (l.assinado_em ? `<button data-laudo-recibo="${l.id}" title="Gerar recibo" style="flex:1;">🧾 Gerar recibo</button>` : '')}
           </div>
           ${l.assinado_em ? `<div style="display:flex; gap:4px; flex-wrap:wrap;">
-            <button data-laudo-zapi="${l.id}" title="Enviar pelo WhatsApp (Z-API)" style="flex:1; background:#25d36622; color:#25d366; border-color:#25d36655;">📱 Enviar WhatsApp</button>
+            <button data-laudo-zapi="${l.id}" title="Enviar pelo WhatsApp (Z-API)" style="flex:1; background:#25d36622; color:#25d366; border-color:#25d36655;">📱 WhatsApp</button>
+            <button data-laudo-telegram="${l.id}" title="Enviar pelo Telegram" style="flex:1; background:#0088cc22; color:#0088cc; border:1px solid #0088cc55;">✈️ Telegram</button>
           </div>` : ''}
           <button data-laudo-del="${l.id}" class="btn-danger" style="font-size:11px; padding:4px;" title="Desativar laudo">🗑️ Excluir</button>
         </div>
@@ -13741,8 +13742,9 @@ function renderLaudosLista(v) {
       }, 250);
     } catch (err) { alert('Erro ao clonar: ' + err.message); }
   });
+  // v3.5.0: modal fullscreen do PDF Assinado com botoes Baixar/Telegram/WhatsApp
   v.querySelectorAll('[data-laudo-pdf-sig]').forEach(b => b.onclick = () => {
-    window.open('/api/laudos-demarcacao/' + b.dataset.laudoPdfSig + '/pdf-assinado', '_blank');
+    abrirModalPdfLaudoAssinado(b.dataset.laudoPdfSig);
   });
   v.querySelectorAll('[data-laudo-sig]').forEach(b => b.onclick = async () => {
     // v3.0.3: distingue re-assinar (laudo já assinado) de assinar novo
@@ -13820,6 +13822,19 @@ function renderLaudosLista(v) {
       await render();
     } catch (err) { alert('Erro Z-API: '+err.message); }
   });
+  // v3.5.0: enviar laudo via Telegram (default CEO, override via prompt)
+  v.querySelectorAll('[data-laudo-telegram]').forEach(b => b.onclick = async () => {
+    const chatId = prompt('Chat ID Telegram (vazio = CEO):') || '';
+    try {
+      const r = await api('/api/laudos-demarcacao/' + b.dataset.laudoTelegram + '/enviar-telegram', {
+        method: 'POST',
+        body: JSON.stringify(chatId ? { chat_id: chatId } : {}),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      alert('✅ ' + r.message);
+      await render();
+    } catch (err) { alert('Erro Telegram: ' + err.message); }
+  });
   v.querySelectorAll('[data-laudo-del]').forEach(b => b.onclick = async () => {
     if (!confirm('Desativar este laudo? (soft delete — pode ser recuperado pelo banco)')) return;
     try {
@@ -13827,6 +13842,83 @@ function renderLaudosLista(v) {
       await render();
     } catch (err) { alert('Erro: '+err.message); }
   });
+}
+
+// v3.5.0: modal fullscreen do PDF Assinado de laudo com botoes Baixar/Telegram/WhatsApp
+function abrirModalPdfLaudoAssinado(laudoId) {
+  // remove modal existente (se houver)
+  const existente = document.getElementById('ld-pdf-modal');
+  if (existente) existente.remove();
+
+  const url = `/api/laudos-demarcacao/${laudoId}/pdf-assinado`;
+  const modal = document.createElement('div');
+  modal.id = 'ld-pdf-modal';
+  modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9999; display:flex; flex-direction:column;';
+  modal.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:var(--surface); border-bottom:1px solid var(--gold-dim);">
+      <strong style="color:var(--gold);">🔏 PDF Assinado — Laudo #${escape(laudoId)}</strong>
+      <button id="ld-pdf-modal-close" style="background:transparent; border:none; color:var(--text-muted); font-size:24px; cursor:pointer; padding:4px 12px;">✕</button>
+    </div>
+    <iframe id="ld-pdf-iframe" src="${url}" style="flex:1; width:100%; border:0; background:#222;"></iframe>
+    <div style="display:flex; gap:8px; padding:10px 16px; background:var(--surface); border-top:1px solid var(--gold-dim); justify-content:center; flex-wrap:wrap;">
+      <button id="ld-pdf-baixar" style="background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Baixar PDF</button>
+      <button id="ld-pdf-telegram" style="background:#0088cc22; color:#0088cc; border:1px solid #0088cc55;">✈️ Telegram</button>
+      <button id="ld-pdf-whatsapp" style="background:#25d36622; color:#25d366; border:1px solid #25d36655;">📱 WhatsApp</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const fechar = () => modal.remove();
+  document.getElementById('ld-pdf-modal-close').onclick = fechar;
+
+  // ESC fecha modal
+  const escHandler = (e) => {
+    if (e.key === 'Escape') { fechar(); document.removeEventListener('keydown', escHandler); }
+  };
+  document.addEventListener('keydown', escHandler);
+
+  // Botao Baixar: forca download via blob (evita abrir inline em mobile)
+  document.getElementById('ld-pdf-baixar').onclick = async () => {
+    try {
+      const resp = await fetch(url, { credentials: 'include' });
+      if (!resp.ok) throw new Error('Falha ao baixar PDF: ' + resp.status);
+      const blob = await resp.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `Laudo_${laudoId}_assinado.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (err) { alert('Erro ao baixar: ' + err.message); }
+  };
+
+  // Botao Telegram: prompt opcional de chat_id, default CEO
+  document.getElementById('ld-pdf-telegram').onclick = async () => {
+    const chatId = prompt('Chat ID Telegram (vazio = CEO):') || '';
+    try {
+      const r = await api('/api/laudos-demarcacao/' + laudoId + '/enviar-telegram', {
+        method: 'POST',
+        body: JSON.stringify(chatId ? { chat_id: chatId } : {}),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      alert('✅ ' + r.message);
+    } catch (err) { alert('Erro Telegram: ' + err.message); }
+  };
+
+  // Botao WhatsApp: prompt telefone, reaproveita endpoint /enviar-zapi
+  document.getElementById('ld-pdf-whatsapp').onclick = async () => {
+    const tel = prompt('WhatsApp do destinatário (DDD+número):');
+    if (!tel) return;
+    try {
+      const r = await api('/api/laudos-demarcacao/' + laudoId + '/enviar-zapi', {
+        method: 'POST',
+        body: JSON.stringify({ telefone: tel }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      alert('✅ Enviado! ' + (r.message_id ? 'ID: ' + r.message_id : ''));
+    } catch (err) { alert('Erro Z-API: ' + err.message); }
+  };
 }
 
 function renderLaudoNovo(v) {
@@ -14611,6 +14703,41 @@ function renderLaudoTabDados(c) {
       </div>
     </div>
     <div class="card">
+      <div id="ld-bci-header" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;">
+        <h3 style="margin:0;">🏛️ BCI (Boletim do Cadastro Imobiliário)</h3>
+        <span id="ld-bci-chevron" style="font-size:14px;">▼</span>
+      </div>
+      <div id="ld-bci-body" style="display:none; margin-top:12px;">
+        <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">
+          ℹ️ Opcional — preencha o que tiver. Dados extraídos do BCI da Prefeitura.
+        </p>
+        <div class="lp-grid-2">
+          <input id="ld-bci-cod-imovel" placeholder="Cód. Imóvel (ex: 0000004830)" value="${escape(l.bci_cod_imovel||'')}">
+          <input id="ld-bci-loc-cart" placeholder="Loc. Cartográfica (ex: 01.01.114.0249.00001)" value="${escape(l.bci_loc_cartografica||'')}">
+        </div>
+        <div class="lp-grid-5" style="margin-top:8px;">
+          <input id="ld-bci-distrito" placeholder="Distrito" value="${escape(l.bci_distrito||'')}">
+          <input id="ld-bci-setor"    placeholder="Setor"    value="${escape(l.bci_setor||'')}">
+          <input id="ld-bci-quadra"   placeholder="Quadra"   value="${escape(l.bci_quadra||'')}">
+          <input id="ld-bci-lote"     placeholder="Lote"     value="${escape(l.bci_lote||'')}">
+          <input id="ld-bci-unidade"  placeholder="Unidade"  value="${escape(l.bci_unidade||'')}">
+        </div>
+        <div class="lp-grid-2" style="margin-top:8px;">
+          <input id="ld-bci-situacao" placeholder="Situação (ex: Ativo)"   value="${escape(l.bci_situacao||'')}">
+          <input id="ld-bci-natureza" placeholder="Natureza (ex: Prédio)"   value="${escape(l.bci_natureza||'')}">
+        </div>
+        <div class="lp-grid-2" style="margin-top:8px;">
+          <input id="ld-bci-logr-tipo" placeholder="Logradouro Tipo (ex: RUA)" value="${escape(l.bci_logradouro_tipo||'')}">
+          <input id="ld-bci-logr-nome" placeholder="Nome do logradouro"        value="${escape(l.bci_logradouro_nome||'')}">
+        </div>
+        <div class="lp-grid-3" style="margin-top:8px;">
+          <input id="ld-bci-numero"      placeholder="Número"   value="${escape(l.bci_numero||'')}">
+          <input id="ld-bci-cep"         placeholder="CEP (8 dígitos)" maxlength="9" value="${escape(l.bci_cep||'')}">
+          <input id="ld-bci-complemento" placeholder="Complemento" value="${escape(l.bci_complemento||'')}">
+        </div>
+      </div>
+    </div>
+    <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <h3 style="margin:0;">Confrontantes</h3>
         <button id="ld-cf-swap-fb" type="button" title="Trocar valores entre Frente e Fundo" style="font-size:11px; padding:3px 8px;">🔄 Trocar Frente↔Fundo</button>
@@ -14634,6 +14761,22 @@ function renderLaudoTabDados(c) {
   // v3.2.0: autocomplete dinamico do campo Cartorio contra catalogo nacional
   // CNJ. Debounce 300ms, minimo 3 chars, filtra pela UF do imovel.
   setupCartorioAutocomplete();
+
+  // v3.5.0: toggle do card BCI + persistencia em localStorage
+  (() => {
+    const header = document.getElementById('ld-bci-header');
+    const body = document.getElementById('ld-bci-body');
+    const chev = document.getElementById('ld-bci-chevron');
+    if (!header || !body || !chev) return;
+    const expandido = localStorage.getItem('ld_bci_expanded') === '1';
+    if (expandido) { body.style.display = 'block'; chev.textContent = '▲'; }
+    header.onclick = () => {
+      const aberto = body.style.display !== 'none';
+      body.style.display = aberto ? 'none' : 'block';
+      chev.textContent = aberto ? '▼' : '▲';
+      localStorage.setItem('ld_bci_expanded', aberto ? '0' : '1');
+    };
+  })();
 
   document.getElementById('ld-salvar').onclick = async () => {
     const body = {
@@ -14663,6 +14806,21 @@ function renderLaudoTabDados(c) {
       confrontante_lat_esq: document.getElementById('ld-cf-esq').value.trim() || null,
       confrontante_extra: document.getElementById('ld-cf-extra').value.trim() || null,
       observacoes: document.getElementById('ld-obs').value.trim() || null,
+      // v3.5.0: BCI
+      bci_cod_imovel:        document.getElementById('ld-bci-cod-imovel')?.value.trim() || null,
+      bci_loc_cartografica:  document.getElementById('ld-bci-loc-cart')?.value.trim() || null,
+      bci_distrito:          document.getElementById('ld-bci-distrito')?.value.trim() || null,
+      bci_setor:             document.getElementById('ld-bci-setor')?.value.trim() || null,
+      bci_quadra:            document.getElementById('ld-bci-quadra')?.value.trim() || null,
+      bci_lote:              document.getElementById('ld-bci-lote')?.value.trim() || null,
+      bci_unidade:           document.getElementById('ld-bci-unidade')?.value.trim() || null,
+      bci_situacao:          document.getElementById('ld-bci-situacao')?.value.trim() || null,
+      bci_natureza:          document.getElementById('ld-bci-natureza')?.value.trim() || null,
+      bci_logradouro_tipo:   document.getElementById('ld-bci-logr-tipo')?.value.trim() || null,
+      bci_logradouro_nome:   document.getElementById('ld-bci-logr-nome')?.value.trim() || null,
+      bci_numero:            document.getElementById('ld-bci-numero')?.value.trim() || null,
+      bci_cep:               document.getElementById('ld-bci-cep')?.value.trim().replace(/\D/g, '') || null,
+      bci_complemento:       document.getElementById('ld-bci-complemento')?.value.trim() || null,
     };
     try {
       await api('/api/laudos-demarcacao/'+l.id, {
