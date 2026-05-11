@@ -109,18 +109,40 @@ export function gerarCroquiSvg(
   }
 
   // Distancias dos lados (se fornecidas)
+  // v3.5.2: usa normal perpendicular ao lado pra posicionar o texto FORA do
+  // poligono (centroide como referencia). Antes usava dy=-5 com rotacao,
+  // mas pra metade dos lados (rotacao+180 pra manter legivel) o dy negativo
+  // desloca pra DENTRO do poligono — texto atravessava a linha.
   let distanciasSvg = '';
   if (mostrarDistancias && lados.length > 0) {
+    // Centroide do poligono no espaco SVG (media simples dos vertices)
+    const cenX = svgPontos.reduce((s, p) => s + p.x, 0) / svgPontos.length;
+    const cenY = svgPontos.reduce((s, p) => s + p.y, 0) / svgPontos.length;
+    const offsetFora = 12; // pixels de afastamento da linha (PDF: SVG 600x600)
     distanciasSvg = lados.map(l => {
       const p1 = svgPontos[l.i_idx];
       const p2 = svgPontos[l.f_idx];
       if (!p1 || !p2) return '';
       const meioX = (p1.x + p2.x) / 2;
       const meioY = (p1.y + p2.y) / 2;
-      // Rotacao do texto baseada no angulo do lado
-      const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x) * (180 / Math.PI);
-      const angTxt = ang > 90 || ang < -90 ? ang + 180 : ang; // mantem legivel
-      return `<text x="${meioX.toFixed(2)}" y="${meioY.toFixed(2)}" font-family="Helvetica" font-size="12" font-weight="bold" fill="#222" text-anchor="middle" dy="-5" transform="rotate(${angTxt.toFixed(1)} ${meioX.toFixed(2)} ${meioY.toFixed(2)})">${l.distancia_m.toFixed(2)}m</text>`;
+      // Vetor direcao do lado e normais perpendiculares
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      // 2 normais possiveis (perpendiculares ao lado)
+      const n1x = -dy / len, n1y = dx / len;
+      const n2x =  dy / len, n2y = -dx / len;
+      // Escolhe a normal que aponta PRA FORA (longe do centroide)
+      const d1 = Math.hypot(meioX + n1x * offsetFora - cenX, meioY + n1y * offsetFora - cenY);
+      const d2 = Math.hypot(meioX + n2x * offsetFora - cenX, meioY + n2y * offsetFora - cenY);
+      const nx = d1 > d2 ? n1x : n2x;
+      const ny = d1 > d2 ? n1y : n2y;
+      const tx = meioX + nx * offsetFora;
+      const ty = meioY + ny * offsetFora;
+      // Rotacao do texto baseada no angulo do lado (mantem legivel)
+      const ang = Math.atan2(dy, dx) * (180 / Math.PI);
+      const angTxt = ang > 90 || ang < -90 ? ang + 180 : ang;
+      return `<text x="${tx.toFixed(2)}" y="${ty.toFixed(2)}" font-family="Helvetica" font-size="14" font-weight="bold" fill="#222" text-anchor="middle" dominant-baseline="middle" transform="rotate(${angTxt.toFixed(1)} ${tx.toFixed(2)} ${ty.toFixed(2)})">${l.distancia_m.toFixed(2)}m</text>`;
     }).join('');
   }
 
