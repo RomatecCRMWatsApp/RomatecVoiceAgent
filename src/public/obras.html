@@ -4680,11 +4680,16 @@ function renderVto() {
     </div>`;
   }).join('');
 
+  // v3.4.0: thumbnails 200x200 em grid responsivo + click abre lightbox
   const fotosPreview = state.vtoFotos.map((f, i) => `
-    <div style="position:relative; display:inline-block; margin:4px;">
-      <img src="data:${f.mime};base64,${f.data_base64}" style="width:80px; height:80px; object-fit:cover; border-radius:4px; border:1px solid var(--border-strong);">
-      <input data-leg="${i}" placeholder="Legenda" value="${escape(f.legenda||'')}" style="display:block; width:80px; font-size:10px; padding:2px 4px; margin-top:2px;">
-      <button data-rm-foto="${i}" style="position:absolute; top:-6px; right:-6px; width:18px; height:18px; padding:0; border-radius:50%; background:var(--danger); color:white; border:none; cursor:pointer; font-size:10px;">×</button>
+    <div style="position:relative;">
+      <img src="data:${f.mime};base64,${f.data_base64}"
+           data-foto-zoom="${i}"
+           style="width:100%; height:200px; object-fit:cover; border-radius:6px; border:1px solid var(--border-strong); cursor:zoom-in;">
+      <input data-leg="${i}" placeholder="Legenda da foto" value="${escape(f.legenda||'')}"
+             style="display:block; width:100%; font-size:11px; padding:4px 6px; margin-top:4px;">
+      <button data-rm-foto="${i}"
+              style="position:absolute; top:6px; right:6px; width:28px; height:28px; padding:0; border-radius:50%; background:var(--danger); color:white; border:none; cursor:pointer; font-size:16px; line-height:1; box-shadow:0 2px 6px rgba(0,0,0,0.4);">×</button>
     </div>
   `).join('');
 
@@ -4721,10 +4726,23 @@ function renderVto() {
       </label>
       <span style="margin-left:8px; font-size:12px; color:var(--text-muted);">${state.vtoFotos.length} foto(s) selecionada(s)${editandoId ? ' (substituirão as atuais ao salvar)' : ''}</span>
     </div>
-    ${state.vtoFotos.length > 0 ? `<div style="margin-bottom:12px;">${fotosPreview}</div>` : ''}
+    ${state.vtoFotos.length > 0 ? `<div style="margin-bottom:12px; display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">${fotosPreview}</div>` : ''}
 
     <button class="btn-primary" id="addVto">${labelBtn}</button>
   </div>
+
+  ${state.vtoFotos.length > 0 ? `
+    <!-- v3.4.0: Lightbox modal pra visualizar fotos em tamanho real -->
+    <div id="vto-lightbox" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:1000; align-items:center; justify-content:center; padding:20px;">
+      <button id="vto-lightbox-close" title="Fechar (ESC)" style="position:absolute; top:16px; right:16px; width:44px; height:44px; padding:0; background:rgba(255,255,255,0.1); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:50%; cursor:pointer; font-size:22px; line-height:1;">×</button>
+      <button id="vto-lightbox-prev" title="Foto anterior (←)" style="position:absolute; left:16px; top:50%; transform:translateY(-50%); width:44px; height:44px; padding:0; background:rgba(255,255,255,0.1); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:50%; cursor:pointer; font-size:22px; line-height:1;">‹</button>
+      <button id="vto-lightbox-next" title="Próxima foto (→)" style="position:absolute; right:16px; top:50%; transform:translateY(-50%); width:44px; height:44px; padding:0; background:rgba(255,255,255,0.1); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:50%; cursor:pointer; font-size:22px; line-height:1;">›</button>
+      <div style="display:flex; flex-direction:column; align-items:center; gap:12px;">
+        <img id="vto-lightbox-img" src="" style="max-width:90vw; max-height:78vh; object-fit:contain; touch-action:pinch-zoom; border-radius:4px;">
+        <div id="vto-lightbox-caption" style="color:white; font-size:13px; text-align:center; max-width:90vw; padding:0 60px;"></div>
+      </div>
+    </div>
+  ` : ''}
 
   <p class="section-title" style="margin-top:16px;">Vistorias da obra (${state.vistorias.length})</p>
   ${lista || '<div class="card empty">Nenhuma vistoria registrada.</div>'}`;
@@ -4820,6 +4838,49 @@ function renderVto() {
   document.querySelectorAll('[data-rm-foto]').forEach(b => b.onclick = () => {
     state.vtoFotos.splice(parseInt(b.dataset.rmFoto), 1); renderVto();
   });
+
+  // v3.4.0: Lightbox handlers — click no thumbnail abre modal com foto em tamanho real
+  (function setupLightbox() {
+    const lb = document.getElementById('vto-lightbox');
+    if (!lb) return;
+
+    let idxAtual = 0;
+
+    function abrir(idx) {
+      if (!state.vtoFotos[idx]) return;
+      idxAtual = idx;
+      const f = state.vtoFotos[idx];
+      document.getElementById('vto-lightbox-img').src = `data:${f.mime};base64,${f.data_base64}`;
+      document.getElementById('vto-lightbox-caption').textContent =
+        `Foto ${idx + 1} de ${state.vtoFotos.length}${f.legenda ? ' — ' + f.legenda : ''}`;
+      lb.style.display = 'flex';
+    }
+
+    function fechar() { lb.style.display = 'none'; }
+
+    function navegar(delta) {
+      const novoIdx = (idxAtual + delta + state.vtoFotos.length) % state.vtoFotos.length;
+      abrir(novoIdx);
+    }
+
+    document.querySelectorAll('[data-foto-zoom]').forEach(img => {
+      img.onclick = () => abrir(parseInt(img.dataset.fotoZoom));
+    });
+
+    document.getElementById('vto-lightbox-close').onclick = fechar;
+    document.getElementById('vto-lightbox-prev').onclick = () => navegar(-1);
+    document.getElementById('vto-lightbox-next').onclick = () => navegar(1);
+    lb.onclick = e => { if (e.target === lb) fechar(); };
+
+    function onKey(e) {
+      if (lb.style.display === 'none') return;
+      if (e.key === 'Escape') fechar();
+      else if (e.key === 'ArrowLeft') navegar(-1);
+      else if (e.key === 'ArrowRight') navegar(1);
+    }
+    document.addEventListener('keydown', onKey);
+  })();
+
   document.querySelectorAll('[data-leg]').forEach(i => i.oninput = e => {
     state.vtoFotos[parseInt(i.dataset.leg)].legenda = e.target.value;
   });
