@@ -540,17 +540,23 @@ export async function gerarPdfVistoria(
     );
   }
 
-  // v3.4.1: itera buffered pages e desenha footer em CADA pagina (em vez de
-  // uma chamada solta no fim do doc que criava pagina vazia). lineBreak:false
-  // garante que o texto nao tente quebrar e disparar pagina nova.
+  // v3.4.2: itera buffered pages e desenha footer em CADA pagina.
+  // CRITICO: footer fica em Y=812 (page.height - 30), que esta ABAIXO da margem
+  // inferior padrao (842-48=794). Sem mexer na margem, PDFKit dispara auto-page-
+  // break em cada chamada de text() e cria N paginas vazias (uma por pagina
+  // original). Setando margins.bottom=0 ao redor do text(), a area usavel se
+  // estende ate o fim da pagina e o footer fica abaixo sem disparar break.
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
+    const savedBottomMargin = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     doc.fontSize(8).fillColor('#888').text(
       `${brand} — Relatório gerado eletronicamente.`,
       48, doc.page.height - 30,
       { width: 499, align: 'center', lineBreak: false },
     );
+    doc.page.margins.bottom = savedBottomMargin;
   }
   doc.end();
   await new Promise<void>(resolve => doc.on('end', () => resolve()));
