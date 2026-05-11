@@ -7,12 +7,19 @@ import { formatBR, formatBRDate } from '../util/format';
 
 type VistoriaRow = RowDataPacket & {
   id: number; obra_id: number;
-  data: Date; titulo: string | null;
+  data: Date;
+  hora: string | null;  // v3.4.0: formato "HH:MM:SS" do TIME column
+  titulo: string | null;
   vistoriador: string | null;
   descricao: string;
   observacoes: string | null;
   pendencias: string | null;
   status_obra: 'regular' | 'atencao' | 'critica';
+  // v3.4.0: assinatura digital ICP-Brasil
+  pdf_assinado: Buffer | null;
+  assinatura_meta: string | Record<string, unknown> | null;
+  assinado_em: Date | string | null;
+  assinado_por_cert_id: number | null;
   created_at: Date; updated_at: Date;
 };
 
@@ -37,7 +44,9 @@ export async function listarVistorias(input: { obra_id?: string; limite?: number
   const limit = Math.min(Math.max(Number(input.limite) || 50, 1), 200);
   const params: (string | number)[] = [];
   let sql = `
-    SELECT v.*, COUNT(f.id) AS qtd_fotos
+    SELECT v.*,
+           COUNT(f.id) AS qtd_fotos,
+           CASE WHEN v.pdf_assinado IS NULL THEN 0 ELSE 1 END AS assinado
     FROM romatec_obra_vistorias v
     LEFT JOIN romatec_obra_vistoria_fotos f ON f.vistoria_id = v.id
   `;
@@ -48,6 +57,7 @@ export async function listarVistorias(input: { obra_id?: string; limite?: number
     id:           String(r.id),
     obra_id:      String(r.obra_id),
     data:         formatBRDate(r.data as Date),
+    hora:         r.hora as string | null,  // v3.4.0
     titulo:       r.titulo as string | null,
     vistoriador:  r.vistoriador as string | null,
     descricao:    r.descricao as string,
@@ -55,6 +65,13 @@ export async function listarVistorias(input: { obra_id?: string; limite?: number
     pendencias:   r.pendencias as string | null,
     status_obra:  r.status_obra as string,
     qtd_fotos:    Number(r.qtd_fotos ?? 0),
+    // v3.4.0: status de assinatura ICP-Brasil
+    assinado:     !!r.assinado,
+    assinado_em:  r.assinado_em
+      ? ((r.assinado_em as Date) instanceof Date
+          ? (r.assinado_em as Date).toISOString()
+          : String(r.assinado_em))
+      : null,
     created_at:   formatBR(r.created_at as Date),
   }));
 }
@@ -69,12 +86,26 @@ export async function buscarVistoria(id: string) {
     [id],
   );
 
+  // v3.4.0: assinatura ICP-Brasil — parse JSON + format datetime
+  const assinatura_meta = r.assinatura_meta == null
+    ? null
+    : (typeof r.assinatura_meta === 'string' ? JSON.parse(r.assinatura_meta) : r.assinatura_meta);
+  const assinadoEmIso = r.assinado_em
+    ? (r.assinado_em instanceof Date ? r.assinado_em.toISOString() : String(r.assinado_em))
+    : null;
+
   return {
     id: String(r.id), obra_id: String(r.obra_id),
-    data: formatBRDate(r.data), titulo: r.titulo,
+    data: formatBRDate(r.data),
+    hora: r.hora,  // v3.4.0: TIME format "HH:MM:SS" ou null
+    titulo: r.titulo,
     vistoriador: r.vistoriador, descricao: r.descricao,
     observacoes: r.observacoes, pendencias: r.pendencias,
     status_obra: r.status_obra,
+    // v3.4.0: status de assinatura (sem o blob — payload leve)
+    assinado: !!r.pdf_assinado,
+    assinado_em: assinadoEmIso,
+    assinatura_meta,
     fotos: fotos.map(f => ({
       id: String(f.id), legenda: f.legenda,
       mime: f.mime, ordem: f.ordem,
@@ -85,7 +116,9 @@ export async function buscarVistoria(id: string) {
 
 export async function criarVistoria(input: {
   obra_id: string; descricao: string;
-  data?: string; titulo?: string;
+  data?: string;
+  hora?: string | null;  // v3.4.0: "HH:MM" ou "HH:MM:SS"
+  titulo?: string;
   vistoriador?: string;
   observacoes?: string; pendencias?: string;
   status_obra?: 'regular' | 'atencao' | 'critica';
@@ -101,11 +134,12 @@ export async function criarVistoria(input: {
   }
   const [r] = await pool.execute<ResultSetHeader>(
     `INSERT INTO romatec_obra_vistorias
-      (obra_id, data, titulo, vistoriador, descricao, observacoes, pendencias, status_obra)
-     VALUES (?,?,?,?,?,?,?,?)`,
+      (obra_id, data, hora, titulo, vistoriador, descricao, observacoes, pendencias, status_obra)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
     [
       input.obra_id,
       input.data ?? new Date().toISOString().slice(0, 10),
+      input.hora ?? null,  // v3.4.0
       input.titulo ?? null,
       input.vistoriador ?? null,
       input.descricao,
@@ -159,6 +193,7 @@ export async function atualizarVistoria(input: {
   titulo?: string | null;
   vistoriador?: string | null;
   data?: string;
+  hora?: string | null;  // v3.4.0
   descricao?: string;
   observacoes?: string | null;
   pendencias?: string | null;
@@ -172,6 +207,8 @@ export async function atualizarVistoria(input: {
   const titulo      = input.titulo      !== undefined ? input.titulo      : atual.titulo;
   const vistoriador = input.vistoriador !== undefined ? input.vistoriador : atual.vistoriador;
   const data        = input.data        ?? (typeof atual.data === 'object' && atual.data && 'toISOString' in atual.data ? (atual.data as Date).toISOString().slice(0, 10) : String(atual.data).slice(0, 10));
+  // v3.4.0: hora separada (DATE+TIME, nao DATETIME — compatibilidade com registros antigos)
+  const hora        = input.hora        !== undefined ? input.hora        : atual.hora;
   const descricao   = input.descricao   ?? atual.descricao;
   const observacoes = input.observacoes !== undefined ? input.observacoes : atual.observacoes;
   const pendencias  = input.pendencias  !== undefined ? input.pendencias  : atual.pendencias;
@@ -179,10 +216,10 @@ export async function atualizarVistoria(input: {
 
   await pool.execute(
     `UPDATE romatec_obra_vistorias SET
-       titulo = ?, vistoriador = ?, data = ?, descricao = ?,
+       titulo = ?, vistoriador = ?, data = ?, hora = ?, descricao = ?,
        observacoes = ?, pendencias = ?, status_obra = ?
      WHERE id = ?`,
-    [titulo, vistoriador, data, descricao, observacoes, pendencias, status_obra, id]
+    [titulo, vistoriador, data, hora, descricao, observacoes, pendencias, status_obra, id]
   );
 
   // Se vier array de fotos, substitui as antigas
