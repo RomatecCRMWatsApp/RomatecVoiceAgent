@@ -103,6 +103,21 @@ export interface Laudo {
   valor_final?: number | null;
   precificacao_observacoes?: string | null;
   precificacao_calculada_em?: Date | string | null;
+  // v3.5.0: BCI (Boletim do Cadastro Imobiliario - Prefeitura) - todos opcionais
+  bci_cod_imovel: string | null;
+  bci_loc_cartografica: string | null;
+  bci_distrito: string | null;
+  bci_setor: string | null;
+  bci_quadra: string | null;
+  bci_lote: string | null;
+  bci_unidade: string | null;
+  bci_situacao: string | null;
+  bci_natureza: string | null;
+  bci_logradouro_tipo: string | null;
+  bci_logradouro_nome: string | null;
+  bci_numero: string | null;
+  bci_cep: string | null;
+  bci_complemento: string | null;
 }
 
 interface LaudoRow extends RowDataPacket {
@@ -185,6 +200,21 @@ interface LaudoRow extends RowDataPacket {
   valor_final: string | number | null;
   precificacao_observacoes: string | null;
   precificacao_calculada_em: Date | string | null;
+  // v3.5.0: BCI (Boletim do Cadastro Imobiliario - Prefeitura) - todos opcionais
+  bci_cod_imovel: string | null;
+  bci_loc_cartografica: string | null;
+  bci_distrito: string | null;
+  bci_setor: string | null;
+  bci_quadra: string | null;
+  bci_lote: string | null;
+  bci_unidade: string | null;
+  bci_situacao: string | null;
+  bci_natureza: string | null;
+  bci_logradouro_tipo: string | null;
+  bci_logradouro_nome: string | null;
+  bci_numero: string | null;
+  bci_cep: string | null;
+  bci_complemento: string | null;
 }
 
 function asISO(v: Date | string | null): string | null {
@@ -282,6 +312,21 @@ function mapRow(r: LaudoRow): Laudo {
     valor_final: r.valor_final != null ? Number(r.valor_final) : null,
     precificacao_observacoes: r.precificacao_observacoes ?? null,
     precificacao_calculada_em: r.precificacao_calculada_em ?? null,
+    // v3.5.0: BCI
+    bci_cod_imovel:        r.bci_cod_imovel        ?? null,
+    bci_loc_cartografica:  r.bci_loc_cartografica  ?? null,
+    bci_distrito:          r.bci_distrito          ?? null,
+    bci_setor:             r.bci_setor             ?? null,
+    bci_quadra:            r.bci_quadra            ?? null,
+    bci_lote:              r.bci_lote              ?? null,
+    bci_unidade:           r.bci_unidade           ?? null,
+    bci_situacao:          r.bci_situacao          ?? null,
+    bci_natureza:          r.bci_natureza          ?? null,
+    bci_logradouro_tipo:   r.bci_logradouro_tipo   ?? null,
+    bci_logradouro_nome:   r.bci_logradouro_nome   ?? null,
+    bci_numero:            r.bci_numero            ?? null,
+    bci_cep:                r.bci_cep               ?? null,
+    bci_complemento:       r.bci_complemento       ?? null,
   };
 }
 
@@ -502,6 +547,21 @@ export interface AtualizarLaudoInput {
   coletor_nome?: string | null;
   // v2.9.0 — Vincula laudo a lote do cadastro de loteamentos
   lote_loteamento_id?: number | null;
+  // v3.5.0: BCI (opcionais)
+  bci_cod_imovel?: string | null;
+  bci_loc_cartografica?: string | null;
+  bci_distrito?: string | null;
+  bci_setor?: string | null;
+  bci_quadra?: string | null;
+  bci_lote?: string | null;
+  bci_unidade?: string | null;
+  bci_situacao?: string | null;
+  bci_natureza?: string | null;
+  bci_logradouro_tipo?: string | null;
+  bci_logradouro_nome?: string | null;
+  bci_numero?: string | null;
+  bci_cep?: string | null;
+  bci_complemento?: string | null;
 }
 
 export async function atualizarLaudo(id: number | string, input: AtualizarLaudoInput): Promise<Laudo> {
@@ -558,6 +618,21 @@ export async function atualizarLaudo(id: number | string, input: AtualizarLaudoI
   set('rover_nome', input.rover_nome);
   set('coletor_nome', input.coletor_nome);
   set('lote_loteamento_id', input.lote_loteamento_id);
+  // v3.5.0: BCI
+  set('bci_cod_imovel',        input.bci_cod_imovel);
+  set('bci_loc_cartografica',  input.bci_loc_cartografica);
+  set('bci_distrito',          input.bci_distrito);
+  set('bci_setor',             input.bci_setor);
+  set('bci_quadra',            input.bci_quadra);
+  set('bci_lote',              input.bci_lote);
+  set('bci_unidade',           input.bci_unidade);
+  set('bci_situacao',          input.bci_situacao);
+  set('bci_natureza',          input.bci_natureza);
+  set('bci_logradouro_tipo',   input.bci_logradouro_tipo);
+  set('bci_logradouro_nome',   input.bci_logradouro_nome);
+  set('bci_numero',            input.bci_numero);
+  set('bci_cep',                input.bci_cep);
+  set('bci_complemento',       input.bci_complemento);
 
   if (fields.length === 0) return existente;
   params.push(Number(id));
