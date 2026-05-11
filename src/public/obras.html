@@ -131,6 +131,22 @@
     [style*="grid-template-columns"]:not([data-keep-grid]) {
       grid-template-columns: 1fr !important;
     }
+    /* v3.4.2: filhos do grid com grid-column inline (ex: "1/3") expandiam pra
+       2 colunas mesmo com o container forcado pra 1fr — o browser criava uma
+       coluna implicita e o card estourava o viewport. Reseta pra auto. */
+    .lp-grid-auto > [style*="grid-column"],
+    .lp-grid-2 > [style*="grid-column"],
+    .lp-grid-3 > [style*="grid-column"],
+    .lp-grid-4 > [style*="grid-column"],
+    .lp-grid-5 > [style*="grid-column"] {
+      grid-column: auto !important;
+    }
+    /* v3.4.2: select/input dentro de card nunca estoura coluna mesmo com
+       option longa (ex: "FAZENDA GLORIA - INCORPORADORA EXEMPLO LTDA") ou
+       datalist. min-width:0 e' o truque que permite o flex/grid encolher. */
+    .card select, .card input, .card textarea {
+      max-width: 100%; min-width: 0;
+    }
   }
 
   input, select, textarea, button {
