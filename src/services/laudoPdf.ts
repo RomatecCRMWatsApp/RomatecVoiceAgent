@@ -600,7 +600,6 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
       // Centroide do poligono em coords PDFKit
       const centX = ptsOrd.reduce((s, p) => s + toX(Number(p.utm_e)), 0) / ptsOrd.length;
       const centY = ptsOrd.reduce((s, p) => s + toY(Number(p.utm_n)), 0) / ptsOrd.length;
-      const offsetFora = 12; // pt de afastamento da linha
       ptsOrd.forEach((p, i) => {
         const next = ptsOrd[(i + 1) % ptsOrd.length];
         const lado = lados.find(l => l.ordem === p.ordem);
@@ -609,8 +608,14 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
         const x1 = toX(Number(p.utm_e)), y1 = toY(Number(p.utm_n));
         const x2 = toX(Number(next.utm_e)), y2 = toY(Number(next.utm_n));
         const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-        // Normal perpendicular ao lado (2 possibilidades, escolhe a "FORA")
+        // v3.5.4: offset dinamico — texto horizontal contra lado vertical
+        // precisa mais espaco (metade da caixa de 50px invadiria a linha).
+        // Lado horizontal: 12pt e' suficiente (caixa cresce paralela).
+        // Lado vertical: 26pt (= 25 metade-caixa + 1pt margem).
         const ldx = x2 - x1, ldy = y2 - y1;
+        const ehVertical = Math.abs(ldy) > Math.abs(ldx);
+        const offsetFora = ehVertical ? 26 : 12;
+        // Normal perpendicular ao lado (2 possibilidades, escolhe a "FORA")
         const llen = Math.sqrt(ldx * ldx + ldy * ldy) || 1;
         const n1x = -ldy / llen, n1y = ldx / llen;
         const n2x =  ldy / llen, n2y = -ldx / llen;
