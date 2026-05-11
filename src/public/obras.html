@@ -4701,6 +4701,7 @@ function renderVto() {
     </div>
     <div class="form-grid">
       <input id="vData" type="date" value="${editandoData ? (editandoData.data instanceof Date ? editandoData.data.toISOString().slice(0,10) : String(editandoData.data).slice(0,10)) : ''}">
+      <input id="vHora" type="time" value="${editandoData?.hora ? String(editandoData.hora).slice(0,5) : ''}" title="Horário da vistoria (auto-preenchido)">
       <input id="vTitulo" placeholder="Título (opcional)" value="${escape(editandoData?.titulo || '')}">
       <input id="vVistoriador" placeholder="Vistoriador (engenheiro/arquiteto)" value="${escape(editandoData?.vistoriador || '')}">
       <select id="vStatus">
@@ -4730,8 +4731,13 @@ function renderVto() {
 
   attachSel();
   // v1.67.9: nao sobrescreve a data se estiver editando
-  if (!editandoId) document.getElementById('vData').value = today();
-  else if (editandoData?.data) {
+  // v3.4.0: auto-preenche hora tambem
+  if (!editandoId) {
+    document.getElementById('vData').value = today();
+    const agora = new Date();
+    document.getElementById('vHora').value =
+      String(agora.getHours()).padStart(2,'0') + ':' + String(agora.getMinutes()).padStart(2,'0');
+  } else if (editandoData?.data) {
     const d = editandoData.data;
     const dStr = d instanceof Date ? d.toISOString().slice(0,10) : String(d).slice(0,10);
     document.getElementById('vData').value = dStr;
@@ -4838,6 +4844,7 @@ function renderVto() {
       const isEditando = !!state.vistoriaEditandoId;
       const payload = {
         data: document.getElementById('vData').value || today(),
+        hora: document.getElementById('vHora').value || null,  // v3.4.0
         titulo: document.getElementById('vTitulo').value.trim() || null,
         vistoriador: document.getElementById('vVistoriador').value.trim() || null,
         descricao: desc,
@@ -4870,6 +4877,7 @@ function renderVto() {
         body: JSON.stringify({
           obra_id: state.currentObra,
           data: document.getElementById('vData').value || today(),
+          hora: document.getElementById('vHora').value || null,  // v3.4.0
           titulo: document.getElementById('vTitulo').value.trim() || null,
           vistoriador: document.getElementById('vVistoriador').value.trim() || null,
           descricao: desc,
