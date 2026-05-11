@@ -590,8 +590,17 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
         doc.circle(x, y, 2).fillColor(corGold).fill();
         doc.fillColor('#222').text(p.rotulo || `P${p.ordem}`, x + 4, y - 4);
       });
-      // Medidas dos lados (no meio de cada segmento)
-      doc.fontSize(6).fillColor('#444').font('Helvetica');
+      // v3.5.3: Medidas dos lados em negrito, 9pt, #222 — mesmo destaque dos
+      // vertices (eram 6pt regular #444, ficavam menores e atravessavam a linha).
+      // Posiciona via normal perpendicular ao lado deslocada PRA FORA do
+      // poligono (centroide como referencia). PDFKit nao tem rotacao trivial,
+      // texto fica sempre horizontal (OK pra retangulos com lados ortogonais;
+      // em lados diagonais fica horizontal mesmo).
+      doc.fontSize(9).fillColor('#222').font('Helvetica-Bold');
+      // Centroide do poligono em coords PDFKit
+      const centX = ptsOrd.reduce((s, p) => s + toX(Number(p.utm_e)), 0) / ptsOrd.length;
+      const centY = ptsOrd.reduce((s, p) => s + toY(Number(p.utm_n)), 0) / ptsOrd.length;
+      const offsetFora = 12; // pt de afastamento da linha
       ptsOrd.forEach((p, i) => {
         const next = ptsOrd[(i + 1) % ptsOrd.length];
         const lado = lados.find(l => l.ordem === p.ordem);
@@ -600,7 +609,20 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
         const x1 = toX(Number(p.utm_e)), y1 = toY(Number(p.utm_n));
         const x2 = toX(Number(next.utm_e)), y2 = toY(Number(next.utm_n));
         const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-        doc.text(`${dist.toFixed(2).replace('.', ',')} m`, mx - 18, my - 3, { width: 36, align: 'center' });
+        // Normal perpendicular ao lado (2 possibilidades, escolhe a "FORA")
+        const ldx = x2 - x1, ldy = y2 - y1;
+        const llen = Math.sqrt(ldx * ldx + ldy * ldy) || 1;
+        const n1x = -ldy / llen, n1y = ldx / llen;
+        const n2x =  ldy / llen, n2y = -ldx / llen;
+        const d1 = Math.hypot(mx + n1x * offsetFora - centX, my + n1y * offsetFora - centY);
+        const d2 = Math.hypot(mx + n2x * offsetFora - centX, my + n2y * offsetFora - centY);
+        const nx = d1 > d2 ? n1x : n2x;
+        const ny = d1 > d2 ? n1y : n2y;
+        const tx = mx + nx * offsetFora;
+        const ty = my + ny * offsetFora;
+        // Caixa de 50px de largura centrada em (tx, ty); ty-5 pra centralizar
+        // verticalmente (texto 9pt ocupa ~11pt de altura)
+        doc.text(`${dist.toFixed(2).replace('.', ',')} m`, tx - 25, ty - 5, { width: 50, align: 'center' });
       });
       // v3.1.0: ÁREA TOTAL no centro do poligono (modelo INCRA)
       if (laudo.area_total_m2 != null && Number(laudo.area_total_m2) > 0 && laudo.tipo_imovel) {
