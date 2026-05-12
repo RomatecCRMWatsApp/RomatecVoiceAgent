@@ -107,9 +107,13 @@ export async function secaoPlantaQuadra(
      .text(`PLANTA DA QUADRA — ${fmtTituloQuadra(tituloQuadra)}`, 40, cy);
   cy += 14;
 
+  // v3.6.4 — box mais estreito centralizado pra sobrar margem horizontal
+  // pras ruas laterais (texto rotacionado nos lados Leste/Oeste). Largura
+  // antes era 515 (página A4 = 595pt), agora 380 → 107pt de margem cada lado.
   const padding = 60;
-  const boxX = 40, boxY = cy;
-  const boxW = 515, boxH = 500;
+  const boxW = 380, boxH = 500;
+  const boxX = (595 - boxW) / 2;
+  const boxY = cy;
   doc.rect(boxX, boxY, boxW, boxH).strokeColor('#ddd').lineWidth(0.5).stroke();
 
   const scale = Math.min(
@@ -238,28 +242,36 @@ export async function secaoPlantaQuadra(
       ladoMaisFreq.set(rid, lado);
     }
     // Desenha nome de cada rua na borda correspondente do box
+    // v3.6.4 — Posiciona FORA do box pras laterais (texto rotacionado nas
+    // margens da página, não dentro da quadra). Norte/Sul ficam no topo/baixo
+    // do box. Letter-spacing leve simulando estilo CAD.
+    const cyM = boxY + boxH / 2;
     for (const r of ruasInfo) {
       const lado = ladoMaisFreq.get(r.id);
       if (!lado) continue;
-      doc.fontSize(7).fillColor('#0f172a').font('Helvetica-Bold');
+      doc.fontSize(8).fillColor('#0f172a').font('Helvetica-Bold');
       const nome = r.nome.toUpperCase();
-      const cx = boxX + boxW / 2;
-      const cyM = boxY + boxH / 2;
       if (lado === 'N') {
-        doc.text(nome, boxX + 40, boxY + 6, { width: boxW - 80, align: 'center', lineBreak: false });
+        doc.text(nome, boxX + 40, boxY + 6,
+          { width: boxW - 80, align: 'center', lineBreak: false, characterSpacing: 2 });
       } else if (lado === 'S') {
-        doc.text(nome, boxX + 40, boxY + boxH - 14, { width: boxW - 80, align: 'center', lineBreak: false });
+        doc.text(nome, boxX + 40, boxY + boxH - 14,
+          { width: boxW - 80, align: 'center', lineBreak: false, characterSpacing: 2 });
       } else if (lado === 'L') {
+        // Leste: texto rotacionado na margem direita FORA do box
         doc.save();
-        doc.translate(boxX + boxW - 8, cyM);
+        doc.translate(boxX + boxW + 20, cyM);
         doc.rotate(-90);
-        doc.text(nome, -60, 0, { width: 120, align: 'center', lineBreak: false });
+        doc.text(nome, -100, -4,
+          { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
         doc.restore();
       } else {
+        // Oeste: texto rotacionado na margem esquerda FORA do box
         doc.save();
-        doc.translate(boxX + 8, cyM);
+        doc.translate(boxX - 14, cyM);
         doc.rotate(-90);
-        doc.text(nome, -60, -6, { width: 120, align: 'center', lineBreak: false });
+        doc.text(nome, -100, -4,
+          { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
         doc.restore();
       }
     }
