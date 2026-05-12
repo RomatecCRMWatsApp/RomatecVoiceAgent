@@ -41,7 +41,7 @@ export class DxfParseError extends Error {
 
 const SCRIPT = pathResolve(process.cwd(), 'scripts/parse_loteamento_dxf.py');
 const PYTHON = process.env.PYTHON_BIN || 'python';
-const TIMEOUT_MS = 60_000;
+const TIMEOUT_MS = 180_000; // 3min — DXFs reais de loteamento podem ter milhares de entidades
 
 export async function parseLoteamentoDxf(dxfPath: string): Promise<DxfReport> {
   return new Promise((resolve, reject) => {
