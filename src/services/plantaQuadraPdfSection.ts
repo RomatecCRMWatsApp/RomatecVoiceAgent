@@ -69,28 +69,35 @@ export async function secaoPlantaQuadra(
     .map(v => ({ info: v, ring: lerRing(v.geojson) }))
     .filter((x): x is { info: typeof data.vizinhos[number]; ring: Ring } => x.ring !== null);
 
-  // v3.7.0 — Quadras vizinhas próximas (do mesmo loteamento, geometria
-  // disponível, centroide até 3× a maior dimensão da quadra-objeto).
+  // v3.7.2 — Bbox principal SÓ do que é "Q.15 + ruas" (não inclui quadras
+  // vizinhas, senão a Q.15 fica microscópica). Quadras vizinhas são
+  // desenhadas DEPOIS, parcialmente visíveis nas margens — apenas as
+  // geograficamente adjacentes (até 25m da Q.15, medindo bbox-a-bbox).
   let qMinX0 = Infinity, qMinY0 = Infinity, qMaxX0 = -Infinity, qMaxY0 = -Infinity;
   for (const [x, y] of quadraRing) {
     if (x < qMinX0) qMinX0 = x; if (y < qMinY0) qMinY0 = y;
     if (x > qMaxX0) qMaxX0 = x; if (y > qMaxY0) qMaxY0 = y;
   }
-  const qCentroX = (qMinX0 + qMaxX0) / 2;
-  const qCentroY = (qMinY0 + qMaxY0) / 2;
-  const qDimMax = Math.max(qMaxX0 - qMinX0, qMaxY0 - qMinY0);
-  const raioBusca = qDimMax * 1.6;
+  const TOL_VIZINHA_M = 25; // até 25m de distância da Q.15
   const quadrasVizinhasProx = (data.quadras_vizinhas || [])
     .map(qv => ({ info: qv, ring: lerRing(qv.geojson) }))
     .filter((x): x is { info: typeof data.quadras_vizinhas[number]; ring: Ring } => x.ring !== null)
     .filter(({ ring }) => {
-      const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length;
-      const cy = ring.reduce((s, p) => s + p[1], 0) / ring.length;
-      return Math.hypot(cx - qCentroX, cy - qCentroY) <= raioBusca;
+      // bbox da vizinha
+      let vMinX = Infinity, vMinY = Infinity, vMaxX = -Infinity, vMaxY = -Infinity;
+      for (const [x, y] of ring) {
+        if (x < vMinX) vMinX = x; if (y < vMinY) vMinY = y;
+        if (x > vMaxX) vMaxX = x; if (y > vMaxY) vMaxY = y;
+      }
+      // Distância entre bboxes em cada eixo (0 se sobrepõem)
+      const dx = Math.max(0, Math.max(qMinX0 - vMaxX, vMinX - qMaxX0));
+      const dy = Math.max(0, Math.max(qMinY0 - vMaxY, vMinY - qMaxY0));
+      return Math.hypot(dx, dy) <= TOL_VIZINHA_M;
     });
 
+  // Bbox principal: APENAS quadra-objeto + lotes vizinhos (mantém zoom apertado)
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const r of [quadraRing, loteRing, ...vizinhos.map(v => v.ring), ...quadrasVizinhasProx.map(qv => qv.ring)]) {
+  for (const r of [quadraRing, loteRing, ...vizinhos.map(v => v.ring)]) {
     for (const [x, y] of r) {
       if (x < minX) minX = x;
       if (y < minY) minY = y;
@@ -98,6 +105,9 @@ export async function secaoPlantaQuadra(
       if (y > maxY) maxY = y;
     }
   }
+  // Pequeno padding (15m em UTM) ao redor pra deixar espaço pras vizinhas
+  // aparecerem parcialmente ao redor.
+  minX -= 15; minY -= 15; maxX += 15; maxY += 15;
   const rangeX = Math.max(maxX - minX, 0.001);
   const rangeY = Math.max(maxY - minY, 0.001);
 
