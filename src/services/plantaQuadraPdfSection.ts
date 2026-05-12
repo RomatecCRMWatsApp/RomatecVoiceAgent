@@ -136,13 +136,31 @@ export async function secaoPlantaQuadra(
   tracarRing(quadraRing);
   doc.strokeColor('#111').lineWidth(0.8).stroke();
 
+  // v3.6.2 — Helper shoelace pra calcular área do polígono (m²)
+  const areaShoelace = (ring: Ring): number => {
+    let a = 0;
+    const n = ring.length;
+    for (let i = 0; i < n - 1; i++) {
+      a += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+    }
+    return Math.abs(a) / 2;
+  };
+
   for (const { info, ring } of vizinhos) {
     tracarRing(ring);
     doc.strokeColor('#666').lineWidth(0.5).stroke();
     const cxN = ring.reduce((s, p) => s + p[0], 0) / ring.length;
     const cyN = ring.reduce((s, p) => s + p[1], 0) / ring.length;
-    doc.fontSize(7).fillColor('#444').font('Helvetica')
-       .text(info.numero_lote, toX(cxN) - 8, toY(cyN) - 4, { width: 16, align: 'center' });
+    // Número do lote (em cima)
+    doc.fontSize(7).fillColor('#444').font('Helvetica-Bold')
+       .text(info.numero_lote, toX(cxN) - 10, toY(cyN) - 6, { width: 20, align: 'center', lineBreak: false });
+    // v3.6.2 — Área m² (embaixo, fonte menor)
+    const aLote = areaShoelace(ring);
+    if (aLote > 0) {
+      doc.fontSize(5).fillColor('#64748b').font('Helvetica')
+         .text(`${aLote.toFixed(0)} m²`, toX(cxN) - 14, toY(cyN) + 2,
+           { width: 28, align: 'center', lineBreak: false });
+    }
   }
 
   tracarRing(loteRing);
@@ -154,6 +172,41 @@ export async function secaoPlantaQuadra(
   const cyO = loteRing.reduce((s, p) => s + p[1], 0) / loteRing.length;
   doc.fontSize(9).fillColor('#111').font('Helvetica-Bold')
      .text(`LOTE ${labelLote}`, toX(cxO) - 28, toY(cyO) - 5, { width: 56, align: 'center' });
+
+  // v3.6.2 — Cotas externas (testadas) do lote-objeto, estilo CAD.
+  // Texto em vermelho rotacionado alinhado a cada lado do polígono.
+  const ringClosed = loteRing[0][0] === loteRing[loteRing.length - 1][0]
+    && loteRing[0][1] === loteRing[loteRing.length - 1][1];
+  const ringPts = ringClosed ? loteRing.slice(0, -1) : loteRing;
+  for (let i = 0; i < ringPts.length; i++) {
+    const a = ringPts[i];
+    const b = ringPts[(i + 1) % ringPts.length];
+    const distM = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (distM < 1) continue;
+    const mx = (a[0] + b[0]) / 2;
+    const my = (a[1] + b[1]) / 2;
+    const ang = Math.atan2(toY(b[1]) - toY(a[1]), toX(b[0]) - toX(a[0]));
+    let angDeg = (ang * 180) / Math.PI;
+    if (angDeg > 90 || angDeg < -90) angDeg += 180;
+    doc.save();
+    doc.translate(toX(mx), toY(my));
+    doc.rotate(angDeg);
+    doc.fontSize(6).fillColor('#dc2626').font('Helvetica-Bold')
+       .text(`${distM.toFixed(2).replace('.', ',')} m`, -24, -9,
+         { width: 48, align: 'center', lineBreak: false });
+    doc.restore();
+  }
+
+  // v3.6.2 — Seta Norte no canto superior direito do box (orientação)
+  const nX = boxX + boxW - 24;
+  const nY = boxY + 30;
+  doc.save();
+  doc.fontSize(9).fillColor('#0f172a').font('Helvetica-Bold')
+     .text('N', nX - 4, nY - 22, { lineBreak: false });
+  doc.moveTo(nX, nY + 4).lineTo(nX, nY - 12)
+     .strokeColor('#0f172a').lineWidth(1.0).stroke();
+  doc.moveTo(nX - 3, nY - 8).lineTo(nX, nY - 12).lineTo(nX + 3, nY - 8).stroke();
+  doc.restore();
 
   doc.fontSize(8).fillColor('#666').font('Helvetica-Oblique')
      .text(`Lote-objeto da demarcação destacado em amarelo. ${vizinhos.length} lotes vizinhos.`,
