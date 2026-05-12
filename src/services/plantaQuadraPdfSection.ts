@@ -228,17 +228,37 @@ export async function secaoPlantaQuadra(
       if (!lotesPorRua.has(rid)) lotesPorRua.set(rid, []);
       lotesPorRua.get(rid)!.push(loteRing);
     }
+    // v3.6.5 — Heurística: lado MAIS PRÓXIMO do centroide dos lotes-da-rua,
+    // calculado em distância absoluta a cada uma das 4 bordas do bbox da
+    // quadra. Robusta pra quadras alongadas (212m × 22m). A heurística
+    // anterior somava vetores e o eixo dominante decidia — em quadras
+    // alongadas verticalmente, Y sempre dominava, atribuindo Norte/Sul mesmo
+    // pras ruas laterais (Leste/Oeste).
+    let qMinX = Infinity, qMinY = Infinity, qMaxX = -Infinity, qMaxY = -Infinity;
+    for (const [x, y] of quadraRing) {
+      if (x < qMinX) qMinX = x; if (y < qMinY) qMinY = y;
+      if (x > qMaxX) qMaxX = x; if (y > qMaxY) qMaxY = y;
+    }
     for (const [rid, rings] of lotesPorRua) {
-      let vx = 0, vy = 0;
+      let sumX = 0, sumY = 0;
       for (const ring of rings) {
         const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length;
         const cy_ = ring.reduce((s, p) => s + p[1], 0) / ring.length;
-        vx += cx - centroQuadra[0];
-        vy += cy_ - centroQuadra[1];
+        sumX += cx; sumY += cy_;
       }
+      const cx = sumX / rings.length;
+      const cy_ = sumY / rings.length;
+      // Distâncias a cada lado do bbox (UTM: Y cresce p/ Norte)
+      const dN = qMaxY - cy_;
+      const dS = cy_ - qMinY;
+      const dL = qMaxX - cx;
+      const dO = cx - qMinX;
+      const dMin = Math.min(dN, dS, dL, dO);
       let lado: Lado;
-      if (Math.abs(vx) > Math.abs(vy)) lado = vx > 0 ? 'L' : 'O';
-      else lado = vy > 0 ? 'N' : 'S';
+      if (dMin === dN) lado = 'N';
+      else if (dMin === dS) lado = 'S';
+      else if (dMin === dL) lado = 'L';
+      else lado = 'O';
       ladoMaisFreq.set(rid, lado);
     }
     // Desenha nome de cada rua na borda correspondente do box
