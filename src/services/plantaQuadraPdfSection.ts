@@ -283,54 +283,37 @@ export async function secaoPlantaQuadra(
       ladoMaisFreq.set(rid, lado);
     }
     // Desenha nome de cada rua na borda correspondente do box
-    // v3.6.6 — Texto das ruas rotacionado seguindo o azimute da quadra.
-    // Eixo principal (L/O em quadra alongada vertical) usa angEixoUtm direto.
-    // Eixos perpendiculares (N/S) usam angEixoUtm + 90°. Y do PDF é invertido
-    // (cresce pra baixo), então negamos o ângulo na conversão.
-    // Ajuste de orientação: se o texto ficaria de cabeça pra baixo, soma 180°
-    // pra leitura normal (esq→dir).
-    const angPdfPrincipal = -angEixoUtm * 180 / Math.PI;  // graus, PDF coord
-    const angPdfPerp = angPdfPrincipal + 90;
-    const normalizar = (g: number) => {
-      let v = ((g + 180) % 360 + 360) % 360 - 180; // -180..180
-      if (v > 90 || v < -90) v += 180;
-      return ((v + 180) % 360 + 360) % 360 - 180;
-    };
-    // Centroide da quadra projetado pra PDF (origem dos textos das ruas)
-    const cxQuadraPdf = toX(quadraRing.reduce((s, p) => s + p[0], 0) / quadraRing.length);
-    const cyQuadraPdf = toY(quadraRing.reduce((s, p) => s + p[1], 0) / quadraRing.length);
-    // Half-extent da quadra projetada (pra posicionar texto a essa distância + margem)
-    const projXs = quadraRing.map(p => toX(p[0]));
-    const projYs = quadraRing.map(p => toY(p[1]));
-    const halfW = (Math.max(...projXs) - Math.min(...projXs)) / 2;
-    const halfH = (Math.max(...projYs) - Math.min(...projYs)) / 2;
+    // v3.6.7 — REVERTIDO: texto sempre na orientação natural da página.
+    // v3.6.6 tentou aplicar azimute da quadra mas ficou difícil de ler.
+    // N/S: horizontal no topo/baixo do box. L/O: vertical (-90°) nas margens
+    // externas do box. Letter-spacing leve.
+    const cyM = boxY + boxH / 2;
     for (const r of ruasInfo) {
       const lado = ladoMaisFreq.get(r.id);
       if (!lado) continue;
       doc.fontSize(8).fillColor('#0f172a').font('Helvetica-Bold');
       const nome = r.nome.toUpperCase();
-      // Distância do centroide ao lugar do texto (fora do polígono)
-      let tx = cxQuadraPdf, ty = cyQuadraPdf;
-      let angDeg = 0;
       if (lado === 'N') {
-        ty -= (halfH + 18);
-        angDeg = normalizar(angPdfPerp);
+        doc.text(nome, boxX + 40, boxY + 6,
+          { width: boxW - 80, align: 'center', lineBreak: false, characterSpacing: 2 });
       } else if (lado === 'S') {
-        ty += (halfH + 18);
-        angDeg = normalizar(angPdfPerp);
+        doc.text(nome, boxX + 40, boxY + boxH - 14,
+          { width: boxW - 80, align: 'center', lineBreak: false, characterSpacing: 2 });
       } else if (lado === 'L') {
-        tx += (halfW + 18);
-        angDeg = normalizar(angPdfPrincipal);
+        doc.save();
+        doc.translate(boxX + boxW + 20, cyM);
+        doc.rotate(-90);
+        doc.text(nome, -100, -4,
+          { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
+        doc.restore();
       } else {
-        tx -= (halfW + 18);
-        angDeg = normalizar(angPdfPrincipal);
+        doc.save();
+        doc.translate(boxX - 14, cyM);
+        doc.rotate(-90);
+        doc.text(nome, -100, -4,
+          { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
+        doc.restore();
       }
-      doc.save();
-      doc.translate(tx, ty);
-      doc.rotate(angDeg);
-      doc.text(nome, -100, -4,
-        { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
-      doc.restore();
     }
   }
 
