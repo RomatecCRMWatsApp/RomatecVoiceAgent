@@ -105,10 +105,8 @@ export async function secaoPlantaQuadra(
       if (y > maxY) maxY = y;
     }
   }
-  // v3.7.3 — Padding pequeno (8m em UTM) — só pra dar margem visual sem
-  // diminuir muito o zoom da Q.15. Quadras vizinhas aparecem parcialmente
-  // se tocam essa borda; senão são cortadas pelo box do PDF.
-  minX -= 8; minY -= 8; maxX += 8; maxY += 8;
+  // v3.7.4 — Padding UTM ainda menor (4m) pra apertar zoom na Q.15.
+  minX -= 4; minY -= 4; maxX += 4; maxY += 4;
   const rangeX = Math.max(maxX - minX, 0.001);
   const rangeY = Math.max(maxY - minY, 0.001);
 
@@ -142,10 +140,9 @@ export async function secaoPlantaQuadra(
      .text(`PLANTA DA QUADRA — ${fmtTituloQuadra(tituloQuadra)}`, 40, cy);
   cy += 14;
 
-  // v3.7.3 — Box maior e centralizado na página A4 (595pt × 842pt).
-  // Padding interno reduzido pra dar mais zoom à Q.15.
-  const padding = 35;
-  const boxW = 480, boxH = 560;
+  // v3.7.4 — Box maior + padding menor pra mais zoom na Q.15.
+  const padding = 22;
+  const boxW = 480, boxH = 580;
   const boxX = (595 - boxW) / 2; // centralizado
   const boxY = cy;
   doc.rect(boxX, boxY, boxW, boxH).strokeColor('#ddd').lineWidth(0.5).stroke();
@@ -396,15 +393,16 @@ export async function secaoPlantaQuadra(
         doc.text(nome, qPdfCx - 100, qPdfMaxY + 8,
           { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
       } else if (lado === 'L') {
+        // v3.7.4 — afasta mais pra não colidir com as cotas vermelhas "12,00"
         doc.save();
-        doc.translate(qPdfMaxX + 18, qPdfCy);
+        doc.translate(qPdfMaxX + 32, qPdfCy);
         doc.rotate(-90);
         doc.text(nome, -100, -4,
           { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
         doc.restore();
       } else {
         doc.save();
-        doc.translate(qPdfMinX - 14, qPdfCy);
+        doc.translate(qPdfMinX - 28, qPdfCy);
         doc.rotate(-90);
         doc.text(nome, -100, -4,
           { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
