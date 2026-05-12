@@ -646,6 +646,7 @@ export async function carregarPlantaQuadra(loteId: number): Promise<{
   quadra: { id: number; nome: string; geojson: string };
   vizinhos: Array<{ id: number; numero_lote: string; geojson: string; rua_frente_id: number | null }>;
   ruas: Array<{ id: number; nome: string }>;
+  quadras_vizinhas: Array<{ id: number; nome: string; geojson: string }>;
 } | null> {
   const [loteRows] = await pool.execute(
     `SELECT l.id, l.numero_lote, l.geometria_geojson, l.quadra_id, l.rua_frente_id
@@ -687,6 +688,17 @@ export async function carregarPlantaQuadra(loteId: number): Promise<{
     [lote.quadra_id],
   );
 
+  // v3.7.0 — Quadras vizinhas do mesmo loteamento que tenham geometria.
+  // Filtragem por proximidade fica no renderer (sabe da bbox da quadra-objeto).
+  const [vizQuadrasRows] = await pool.execute(
+    `SELECT id, nome, geometria_geojson
+       FROM loteamento_quadras
+      WHERE loteamento_id = (SELECT loteamento_id FROM loteamento_quadras WHERE id = ?)
+        AND id <> ?
+        AND geometria_geojson IS NOT NULL`,
+    [lote.quadra_id, lote.quadra_id],
+  );
+
   return {
     lote: {
       id: lote.id, numero_lote: lote.numero_lote,
@@ -705,6 +717,13 @@ export async function carregarPlantaQuadra(loteId: number): Promise<{
     ruas: (ruasRows as Array<{ id: number; nome: string }>).map(r => ({
       id: Number(r.id),
       nome: r.nome,
+    })),
+    quadras_vizinhas: (vizQuadrasRows as Array<{
+      id: number; nome: string; geometria_geojson: string;
+    }>).map(r => ({
+      id: Number(r.id),
+      nome: r.nome,
+      geojson: r.geometria_geojson,
     })),
   };
 }

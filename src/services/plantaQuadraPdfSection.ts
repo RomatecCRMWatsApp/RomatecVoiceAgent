@@ -69,8 +69,28 @@ export async function secaoPlantaQuadra(
     .map(v => ({ info: v, ring: lerRing(v.geojson) }))
     .filter((x): x is { info: typeof data.vizinhos[number]; ring: Ring } => x.ring !== null);
 
+  // v3.7.0 — Quadras vizinhas próximas (do mesmo loteamento, geometria
+  // disponível, centroide até 3× a maior dimensão da quadra-objeto).
+  let qMinX0 = Infinity, qMinY0 = Infinity, qMaxX0 = -Infinity, qMaxY0 = -Infinity;
+  for (const [x, y] of quadraRing) {
+    if (x < qMinX0) qMinX0 = x; if (y < qMinY0) qMinY0 = y;
+    if (x > qMaxX0) qMaxX0 = x; if (y > qMaxY0) qMaxY0 = y;
+  }
+  const qCentroX = (qMinX0 + qMaxX0) / 2;
+  const qCentroY = (qMinY0 + qMaxY0) / 2;
+  const qDimMax = Math.max(qMaxX0 - qMinX0, qMaxY0 - qMinY0);
+  const raioBusca = qDimMax * 1.6;
+  const quadrasVizinhasProx = (data.quadras_vizinhas || [])
+    .map(qv => ({ info: qv, ring: lerRing(qv.geojson) }))
+    .filter((x): x is { info: typeof data.quadras_vizinhas[number]; ring: Ring } => x.ring !== null)
+    .filter(({ ring }) => {
+      const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+      const cy = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+      return Math.hypot(cx - qCentroX, cy - qCentroY) <= raioBusca;
+    });
+
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const r of [quadraRing, loteRing, ...vizinhos.map(v => v.ring)]) {
+  for (const r of [quadraRing, loteRing, ...vizinhos.map(v => v.ring), ...quadrasVizinhasProx.map(qv => qv.ring)]) {
     for (const [x, y] of r) {
       if (x < minX) minX = x;
       if (y < minY) minY = y;
@@ -135,6 +155,102 @@ export async function secaoPlantaQuadra(
     doc.closePath();
   };
 
+  // v3.7.0 — Eixos das ruas: linha tracejada azul paralela a cada lado da
+  // quadra correspondente, deslocada 6m pra fora. Funciona pras 4 ruas (N/S/L/O)
+  // sem precisar de geometria de rua no banco. Cota "12,00" em vermelho perto
+  // do meio do eixo.
+  const ringPtsQ = quadraRing[0][0] === quadraRing[quadraRing.length - 1][0]
+    && quadraRing[0][1] === quadraRing[quadraRing.length - 1][1]
+    ? quadraRing.slice(0, -1) : quadraRing;
+  const centroQuadraEixos: [number, number] = [
+    ringPtsQ.reduce((s, p) => s + p[0], 0) / ringPtsQ.length,
+    ringPtsQ.reduce((s, p) => s + p[1], 0) / ringPtsQ.length,
+  ];
+  // Pra cada lado N/S/L/O com rua associada, encontra o segmento da quadra
+  // que melhor representa esse lado (centroide do segmento mais próximo
+  // daquela borda do bbox) e desenha linha paralela.
+  const ladosUsados = new Set(Array.from(ladoMaisFreq.values()));
+  type LadoCardinal = 'N' | 'S' | 'L' | 'O';
+  const lados: LadoCardinal[] = ['N', 'S', 'L', 'O'];
+  doc.save();
+  for (const lado of lados) {
+    if (!ladosUsados.has(lado)) continue;
+    // Encontra segmento da quadra mais alinhado a esse lado
+    let bestI = 0, bestScore = -Infinity;
+    for (let i = 0; i < ringPtsQ.length; i++) {
+      const a = ringPtsQ[i];
+      const b = ringPtsQ[(i + 1) % ringPtsQ.length];
+      const mx = (a[0] + b[0]) / 2;
+      const my = (a[1] + b[1]) / 2;
+      // Score: quão "extremo" o ponto médio está naquele lado
+      let s = 0;
+      if (lado === 'N') s = my;
+      else if (lado === 'S') s = -my;
+      else if (lado === 'L') s = mx;
+      else s = -mx;
+      // Pondera pelo comprimento do segmento (lados longos vencem chanfros)
+      const comp = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      s = s * Math.sqrt(comp);
+      if (s > bestScore) { bestScore = s; bestI = i; }
+    }
+    const a = ringPtsQ[bestI];
+    const b = ringPtsQ[(bestI + 1) % ringPtsQ.length];
+    // Vetor normal pra fora da quadra
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy) || 1;
+    let nx = -dy / len, ny = dx / len;
+    // Garante que o normal aponta pra FORA da quadra
+    const mx = (a[0] + b[0]) / 2;
+    const my = (a[1] + b[1]) / 2;
+    const dxOut = mx + nx - centroQuadraEixos[0];
+    const dyOut = my + ny - centroQuadraEixos[1];
+    const dxIn = mx - centroQuadraEixos[0];
+    const dyIn = my - centroQuadraEixos[1];
+    if (dxOut * dxIn + dyOut * dyIn < 0) { nx = -nx; ny = -ny; }
+    // Desloca segmento 6m pra fora
+    const off = 6;
+    const ax = a[0] + nx * off, ay = a[1] + ny * off;
+    const bx = b[0] + nx * off, by = b[1] + ny * off;
+    // Desenha linha azul tracejada
+    doc.dash(3, { space: 2 });
+    doc.moveTo(toX(ax), toY(ay)).lineTo(toX(bx), toY(by))
+       .strokeColor('#2563eb').lineWidth(0.7).stroke();
+    doc.undash();
+    // Cota "12,00" em vermelho no meio da linha
+    const mxOff = (ax + bx) / 2;
+    const myOff = (ay + by) / 2;
+    // Posição da cota: 3m a mais pra fora
+    const cxR = mxOff + nx * 3;
+    const cyR = myOff + ny * 3;
+    doc.fontSize(6).fillColor('#dc2626').font('Helvetica-Bold')
+       .text('12,00', toX(cxR) - 12, toY(cyR) - 3,
+         { width: 24, align: 'center', lineBreak: false });
+  }
+  doc.restore();
+
+  // v3.7.0 — Quadras vizinhas: desenha contorno + círculo magenta com label
+  // "Q. NN" no centroide (estilo CAD do projeto Colina Park).
+  for (const { info, ring } of quadrasVizinhasProx) {
+    tracarRing(ring);
+    doc.fillColor('#fafafa').fillOpacity(0.6).fill();
+    doc.fillOpacity(1);
+    tracarRing(ring);
+    doc.strokeColor('#94a3b8').lineWidth(0.4).stroke();
+    const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+    const cy = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+    const px = toX(cx);
+    const py = toY(cy);
+    doc.save();
+    doc.circle(px, py, 11).fillColor('#fff').fillOpacity(0.92).fill();
+    doc.fillOpacity(1);
+    doc.circle(px, py, 11).strokeColor('#c026d3').lineWidth(0.7).stroke();
+    doc.fontSize(6.5).fillColor('#a21caf').font('Helvetica-Bold')
+       .text(fmtTituloQuadra(info.nome), px - 14, py - 3,
+         { width: 28, align: 'center', lineBreak: false });
+    doc.restore();
+  }
+
+  // Quadra-objeto (em cima das vizinhas, contorno preto mais grosso)
   tracarRing(quadraRing);
   doc.fillColor('#f3f4f6').fillOpacity(1).fill();
   tracarRing(quadraRing);
