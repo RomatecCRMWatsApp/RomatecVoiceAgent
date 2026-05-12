@@ -108,7 +108,11 @@ export async function secaoPlantaQuadra(
   const laudoLote = laudo.numero_lote != null ? String(laudo.numero_lote).trim() : '';
   const tituloQuadra = laudoQuadra || data.quadra.nome;
   const labelLote = laudoLote || data.lote.numero_lote;
-  if (laudoQuadra && laudoQuadra !== data.quadra.nome) {
+  // v3.7.1 — Normaliza antes de comparar pra evitar warn ruidoso quando a
+  // diferença é só de prefixo ("15" vs "Q. 15") ou letter-case.
+  const normCmpQuadra = (s: string) =>
+    String(s).trim().toUpperCase().replace(/^Q(UADRA)?[\s.\-]+/i, '');
+  if (laudoQuadra && normCmpQuadra(laudoQuadra) !== normCmpQuadra(data.quadra.nome)) {
     console.warn(
       `[plantaQuadra] laudo.quadra="${laudoQuadra}" != cadastro.quadra.nome="${data.quadra.nome}" ` +
       `(lote_loteamento_id=${laudo.lote_loteamento_id}) — usando label do laudo no PDF`,
