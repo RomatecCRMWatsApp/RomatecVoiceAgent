@@ -991,38 +991,25 @@ export async function relatorioMensalEquipe(input: {
 }) {
   const apenasEmAberto = input.apenas_em_aberto !== false;
 
-  // v3.9.0–v3.9.3 — Subquery por funcionário pra pegar data_limite (último recibo pago).
-  // v3.9.4 — REFATORADO: em vez de "data > MAX(pago_em)", agora usa NOT EXISTS
-  // checando se o DIA está dentro de algum período coberto por recibo PAGO
-  // (periodo_inicio..periodo_fim). Isso é mais robusto:
-  //   • Funciona pra múltiplos recibos pagos em sequência
-  //   • Respeita a janela EXATA definida no recibo (1ª quinzena = 01-15,
-  //     2ª = 16-último, ou janelas customizadas tipo 01-09 e 11-25)
-  //   • Não depende do timestamp `pago_em` ser igual à data correta
-  // O 'subqueryLimite' continua sendo retornado pra UI mostrar "Pago até DD/MM"
-  // — usa a data MAIOR do periodo_fim dos recibos pagos.
+  // v3.9.6 — SIMPLIFICAÇÃO: usa apenas MAX(DATE(pago_em)) como limite, ignora
+  // completamente periodo_inicio/periodo_fim do recibo (que pode estar com
+  // janela padrão 01-15 mesmo quando a quinzena REAL da obra é 27/04-10/05).
+  // Regra: dia trabalhado conta se data > data do último pagamento confirmado.
+  // Funciona pra quinzenas customizadas (alinhadas a parcelas da obra) ou
+  // padrão (01-15 / 16-fim). Quanto antes você marcar o recibo como pago,
+  // mais cedo a nova quinzena começa a contar.
   const subqueryLimite = `
-    (SELECT MAX(l2.periodo_fim)
+    (SELECT MAX(DATE(e2.pago_em))
        FROM recibos_envios e2
-       JOIN recibos_envios_lotes l2 ON l2.id = e2.lote_id
       WHERE e2.membro_id = d.funcionario_id
-        AND e2.status = 'pago')
+        AND e2.status = 'pago'
+        AND e2.pago_em IS NOT NULL)
   `;
 
-  // v3.9.5 — Janela efetiva de cada recibo = [periodo_inicio, LEAST(periodo_fim, pago_em)].
-  // Se você pagou em 09/05 dentro da janela 01-15, o pagamento cobre só 01-09;
-  // dias 10-15 ficam em aberto (próxima quinzena começa em 10).
-  // Se pagou em 20/05 (atrasado) dentro da janela 01-15, cobre 01-15 inteiro
-  // (não estende além da janela do recibo).
   const filtroEmAberto = apenasEmAberto
-    ? `AND NOT EXISTS (
-         SELECT 1
-           FROM recibos_envios e3
-           JOIN recibos_envios_lotes l3 ON l3.id = e3.lote_id
-          WHERE e3.membro_id = d.funcionario_id
-            AND e3.status = 'pago'
-            AND d.data BETWEEN l3.periodo_inicio
-                            AND LEAST(l3.periodo_fim, COALESCE(DATE(e3.pago_em), l3.periodo_fim))
+    ? `AND (
+         ${subqueryLimite} IS NULL
+         OR d.data > ${subqueryLimite}
        )`
     : '';
 
