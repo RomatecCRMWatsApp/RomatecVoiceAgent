@@ -17891,8 +17891,8 @@ async function onGaleriaFileSelected(ev) {
   const padding = fontSize * 0.5;
   const lineHeight = fontSize * 1.3;
   const boxH = linhas.length * lineHeight + padding * 2;
-  // Espaço reservado pra logo à direita (largura proporcional)
-  const logoSize = Math.round(boxH * 1.4); // logo um pouco maior que a faixa
+  // v3.9.2 — Logo do tamanho exato da altura da faixa (centralizado dentro)
+  const logoSize = Math.round(boxH * 0.88); // 88% da altura da faixa → respira
   const textoMaxW = canvas.width - logoSize - padding * 3;
   ctx.fillStyle = 'rgba(0,0,0,0.65)';
   ctx.fillRect(0, canvas.height - boxH, canvas.width, boxH);
@@ -17901,10 +17901,10 @@ async function onGaleriaFileSelected(ev) {
   linhas.forEach((line, i) => {
     ctx.fillText(line, padding, canvas.height - boxH + padding + i * lineHeight, textoMaxW);
   });
-  // v3.8.2 — Logo Romatec no canto inferior direito, sobreposto à faixa preta
+  // v3.8.2 / v3.9.2 — Logo Romatec dentro da faixa preta, centralizado vertical
   if (logoRomatec) {
     const lx = canvas.width - logoSize - padding;
-    const ly = canvas.height - logoSize - padding * 0.5;
+    const ly = canvas.height - boxH + (boxH - logoSize) / 2;
     ctx.drawImage(logoRomatec, lx, ly, logoSize, logoSize);
   }
 
