@@ -123,6 +123,8 @@ export async function runLoteamentosMigrations(): Promise<void> {
     { label: 'loteamento_lotes', sql: CREATE_LOTEAMENTO_LOTES },
     { label: 'configuracoes_demarcacao', sql: CREATE_CONFIGURACOES_DEMARCACAO },
     { label: 'seed: config global default', sql: SEED_CONFIG },
+    { label: 'ALTER quadra geometria_geojson', sql: 'ALTER TABLE loteamento_quadras ADD COLUMN geometria_geojson TEXT NULL' },
+    { label: 'ALTER lote geometria_geojson', sql: 'ALTER TABLE loteamento_lotes ADD COLUMN geometria_geojson TEXT NULL' },
   ];
   for (const { label, sql } of ops) {
     try {

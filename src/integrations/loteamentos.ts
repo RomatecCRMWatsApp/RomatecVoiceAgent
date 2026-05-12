@@ -41,6 +41,7 @@ export interface LoteamentoQuadra {
   id: number;
   loteamento_id: number;
   nome: string;
+  geometria_geojson?: string | null;
 }
 
 export interface LoteamentoLote {
@@ -66,6 +67,7 @@ export interface LoteamentoLote {
   vertices_geojson: string | null;
   origem_dado: OrigemDado;
   observacoes: string | null;
+  geometria_geojson?: string | null;
 }
 
 export interface ConfiguracoesDemarcacao {
@@ -614,4 +616,74 @@ export async function importarLinhas(
   }
 
   return relatorio;
+}
+
+// ============================================================================
+// v3.6.0 — Planta da Quadra: geometria persistida + carregamento p/ PDF
+// ============================================================================
+
+export async function salvarGeometriaQuadra(id: number, geojson: string | null): Promise<void> {
+  await pool.execute(
+    'UPDATE loteamento_quadras SET geometria_geojson = ? WHERE id = ?',
+    [geojson, id],
+  );
+}
+
+export async function salvarGeometriaLote(id: number, geojson: string | null): Promise<void> {
+  await pool.execute(
+    'UPDATE loteamento_lotes SET geometria_geojson = ? WHERE id = ?',
+    [geojson, id],
+  );
+}
+
+/**
+ * Carrega lote + quadra + irmãos com geometria pra render no PDF.
+ * Retorna null se lote ou quadra não tiver geometria — laudoPdf usa
+ * isso pra omitir silenciosamente a seção quando a guarda tripla falha.
+ */
+export async function carregarPlantaQuadra(loteId: number): Promise<{
+  lote: { id: number; numero_lote: string; geojson: string };
+  quadra: { id: number; nome: string; geojson: string };
+  vizinhos: Array<{ id: number; numero_lote: string; geojson: string }>;
+} | null> {
+  const [loteRows] = await pool.execute(
+    `SELECT l.id, l.numero_lote, l.geometria_geojson, l.quadra_id
+       FROM loteamento_lotes l
+      WHERE l.id = ?`,
+    [loteId],
+  );
+  const lote = (loteRows as Array<{
+    id: number; numero_lote: string; geometria_geojson: string | null; quadra_id: number;
+  }>)[0];
+  if (!lote || !lote.geometria_geojson) return null;
+
+  const [quadraRows] = await pool.execute(
+    `SELECT id, nome, geometria_geojson
+       FROM loteamento_quadras
+      WHERE id = ?`,
+    [lote.quadra_id],
+  );
+  const quadra = (quadraRows as Array<{
+    id: number; nome: string; geometria_geojson: string | null;
+  }>)[0];
+  if (!quadra || !quadra.geometria_geojson) return null;
+
+  const [vizRows] = await pool.execute(
+    `SELECT id, numero_lote, geometria_geojson
+       FROM loteamento_lotes
+      WHERE quadra_id = ? AND id <> ? AND geometria_geojson IS NOT NULL`,
+    [lote.quadra_id, loteId],
+  );
+
+  return {
+    lote: { id: lote.id, numero_lote: lote.numero_lote, geojson: lote.geometria_geojson },
+    quadra: { id: quadra.id, nome: quadra.nome, geojson: quadra.geometria_geojson },
+    vizinhos: (vizRows as Array<{
+      id: number; numero_lote: string; geometria_geojson: string;
+    }>).map(r => ({
+      id: r.id,
+      numero_lote: r.numero_lote,
+      geojson: r.geometria_geojson,
+    })),
+  };
 }
