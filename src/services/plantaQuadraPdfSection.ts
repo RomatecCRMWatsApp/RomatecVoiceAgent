@@ -155,6 +155,47 @@ export async function secaoPlantaQuadra(
     doc.closePath();
   };
 
+  // v3.7.0 — Pré-cálculo de qual lado (N/S/L/O) cada rua adjacente ocupa.
+  // Lógica antes ficava dentro do bloco de nomes das ruas; agora vem antes
+  // pra ser usado também pelos eixos das ruas (linhas tracejadas azuis).
+  type LadoCardinal = 'N' | 'S' | 'L' | 'O';
+  const ladoMaisFreq: Map<number, LadoCardinal> = new Map();
+  {
+    const lotesPorRua = new Map<number, Ring[]>();
+    for (const v of vizinhos) {
+      const rid = v.info.rua_frente_id;
+      if (rid == null) continue;
+      if (!lotesPorRua.has(rid)) lotesPorRua.set(rid, []);
+      lotesPorRua.get(rid)!.push(v.ring);
+    }
+    if (data.lote.rua_frente_id != null) {
+      const rid = data.lote.rua_frente_id;
+      if (!lotesPorRua.has(rid)) lotesPorRua.set(rid, []);
+      lotesPorRua.get(rid)!.push(loteRing);
+    }
+    let qMnX = Infinity, qMnY = Infinity, qMxX = -Infinity, qMxY = -Infinity;
+    for (const [x, y] of quadraRing) {
+      if (x < qMnX) qMnX = x; if (y < qMnY) qMnY = y;
+      if (x > qMxX) qMxX = x; if (y > qMxY) qMxY = y;
+    }
+    for (const [rid, rings] of lotesPorRua) {
+      let sumX = 0, sumY = 0;
+      for (const ring of rings) {
+        sumX += ring.reduce((s, p) => s + p[0], 0) / ring.length;
+        sumY += ring.reduce((s, p) => s + p[1], 0) / ring.length;
+      }
+      const cx = sumX / rings.length, cy_ = sumY / rings.length;
+      const dN = qMxY - cy_, dS = cy_ - qMnY, dL = qMxX - cx, dO = cx - qMnX;
+      const dMin = Math.min(dN, dS, dL, dO);
+      let lado: LadoCardinal;
+      if (dMin === dN) lado = 'N';
+      else if (dMin === dS) lado = 'S';
+      else if (dMin === dL) lado = 'L';
+      else lado = 'O';
+      ladoMaisFreq.set(rid, lado);
+    }
+  }
+
   // v3.7.0 — Eixos das ruas: linha tracejada azul paralela a cada lado da
   // quadra correspondente, deslocada 6m pra fora. Funciona pras 4 ruas (N/S/L/O)
   // sem precisar de geometria de rua no banco. Cota "12,00" em vermelho perto
@@ -166,11 +207,7 @@ export async function secaoPlantaQuadra(
     ringPtsQ.reduce((s, p) => s + p[0], 0) / ringPtsQ.length,
     ringPtsQ.reduce((s, p) => s + p[1], 0) / ringPtsQ.length,
   ];
-  // Pra cada lado N/S/L/O com rua associada, encontra o segmento da quadra
-  // que melhor representa esse lado (centroide do segmento mais próximo
-  // daquela borda do bbox) e desenha linha paralela.
   const ladosUsados = new Set(Array.from(ladoMaisFreq.values()));
-  type LadoCardinal = 'N' | 'S' | 'L' | 'O';
   const lados: LadoCardinal[] = ['N', 'S', 'L', 'O'];
   doc.save();
   for (const lado of lados) {
@@ -318,87 +355,9 @@ export async function secaoPlantaQuadra(
   }
 
   // v3.6.3 — Nomes das ruas adjacentes desenhados nas 4 bordas do box.
-  // Heurística: pra cada rua, identifica em qual lado da quadra (N/S/L/O)
-  // ficam mais lotes-com-aquela-rua_frente_id. Desenha o nome alinhado
-  // perpendicular ao lado, fora da bbox da quadra.
+  // Usa o `ladoMaisFreq` calculado mais acima (antes dos eixos).
   const ruasInfo = data.ruas;
   if (ruasInfo.length > 0) {
-    const centroQuadra: [number, number] = [
-      quadraRing.reduce((s, p) => s + p[0], 0) / quadraRing.length,
-      quadraRing.reduce((s, p) => s + p[1], 0) / quadraRing.length,
-    ];
-    // Pra cada rua, descobre o lado: olha lotes vizinhos com aquela rua
-    // e calcula o vetor médio (centroide do lote − centroide da quadra).
-    type Lado = 'N' | 'S' | 'L' | 'O';
-    const ladoMaisFreq: Map<number, Lado> = new Map();
-    const lotesPorRua = new Map<number, Ring[]>();
-    for (const v of vizinhos) {
-      const rid = v.info.rua_frente_id;
-      if (rid == null) continue;
-      if (!lotesPorRua.has(rid)) lotesPorRua.set(rid, []);
-      lotesPorRua.get(rid)!.push(v.ring);
-    }
-    // Inclui o lote-objeto também
-    if (data.lote.rua_frente_id != null) {
-      const rid = data.lote.rua_frente_id;
-      if (!lotesPorRua.has(rid)) lotesPorRua.set(rid, []);
-      lotesPorRua.get(rid)!.push(loteRing);
-    }
-    // v3.6.5 — Heurística: lado MAIS PRÓXIMO do centroide dos lotes-da-rua,
-    // calculado em distância absoluta a cada uma das 4 bordas do bbox da
-    // quadra. Robusta pra quadras alongadas (212m × 22m). A heurística
-    // anterior somava vetores e o eixo dominante decidia — em quadras
-    // alongadas verticalmente, Y sempre dominava, atribuindo Norte/Sul mesmo
-    // pras ruas laterais (Leste/Oeste).
-    let qMinX = Infinity, qMinY = Infinity, qMaxX = -Infinity, qMaxY = -Infinity;
-    for (const [x, y] of quadraRing) {
-      if (x < qMinX) qMinX = x; if (y < qMinY) qMinY = y;
-      if (x > qMaxX) qMaxX = x; if (y > qMaxY) qMaxY = y;
-    }
-    // v3.6.6 — Azimute do eixo principal da quadra: vetor entre os 2 vértices
-    // mais distantes do ring. Pra quadras retangulares alongadas, isso casa
-    // com o eixo Norte-Sul (lado longo). Texto das ruas vai seguir esse
-    // ângulo: L/O paralelo ao eixo principal, N/S perpendicular (= +90°).
-    // Em coords UTM (Y cresce p/ Norte); convertemos pra PDF (Y invertido) no
-    // momento de aplicar `doc.rotate()`.
-    let angEixoUtm = 0;
-    {
-      let maxD = -1;
-      let p1: [number, number] = quadraRing[0];
-      let p2: [number, number] = quadraRing[1];
-      for (let i = 0; i < quadraRing.length; i++) {
-        for (let j = i + 1; j < quadraRing.length; j++) {
-          const dx = quadraRing[i][0] - quadraRing[j][0];
-          const dy = quadraRing[i][1] - quadraRing[j][1];
-          const d = dx * dx + dy * dy;
-          if (d > maxD) { maxD = d; p1 = quadraRing[i]; p2 = quadraRing[j]; }
-        }
-      }
-      angEixoUtm = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
-    }
-    for (const [rid, rings] of lotesPorRua) {
-      let sumX = 0, sumY = 0;
-      for (const ring of rings) {
-        const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length;
-        const cy_ = ring.reduce((s, p) => s + p[1], 0) / ring.length;
-        sumX += cx; sumY += cy_;
-      }
-      const cx = sumX / rings.length;
-      const cy_ = sumY / rings.length;
-      // Distâncias a cada lado do bbox (UTM: Y cresce p/ Norte)
-      const dN = qMaxY - cy_;
-      const dS = cy_ - qMinY;
-      const dL = qMaxX - cx;
-      const dO = cx - qMinX;
-      const dMin = Math.min(dN, dS, dL, dO);
-      let lado: Lado;
-      if (dMin === dN) lado = 'N';
-      else if (dMin === dS) lado = 'S';
-      else if (dMin === dL) lado = 'L';
-      else lado = 'O';
-      ladoMaisFreq.set(rid, lado);
-    }
-    // Desenha nome de cada rua na borda correspondente do box
     // v3.6.7 — REVERTIDO: texto sempre na orientação natural da página.
     // v3.6.6 tentou aplicar azimute da quadra mas ficou difícil de ler.
     // N/S: horizontal no topo/baixo do box. L/O: vertical (-90°) nas margens
