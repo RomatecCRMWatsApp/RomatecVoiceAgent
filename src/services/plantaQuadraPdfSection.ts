@@ -16,9 +16,26 @@ import { carregarPlantaQuadra } from '../integrations/loteamentos';
 interface LaudoMinimo {
   tipo_imovel: string;
   lote_loteamento_id: number | null;
+  // v3.6.1 — rótulos digitados no laudo (seção 3 do PDF). Têm precedência
+  // sobre data.quadra.nome / data.lote.numero_lote pra manter a Planta da
+  // Quadra coerente com o resto do documento mesmo quando o cadastro vinculado
+  // (lote_loteamento_id) tem labels diferentes — caso observado no CSV Colina
+  // Park onde quadra/numero_lote do registro divergiam do laudo emitido.
+  quadra?: string | null;
+  numero_lote?: string | null;
 }
 
 type Ring = Array<[number, number]>;
+
+/**
+ * v3.6.1 — Normaliza o rótulo da quadra pro título do PDF. Aceita as variantes
+ * que aparecem nos CSVs reais ("Q. 24", "Q-01", "QUADRA 03") e o formato cru
+ * que vem do laudo digitado ("15"). Saída sempre canônica: "Q. 15".
+ */
+function fmtTituloQuadra(s: string): string {
+  const limpo = String(s).trim().replace(/^Q(uadra)?[\s.\-]+/i, '');
+  return `Q. ${limpo}`;
+}
 
 function lerRing(s: string): Ring | null {
   try {
@@ -64,10 +81,30 @@ export async function secaoPlantaQuadra(
   const rangeX = Math.max(maxX - minX, 0.001);
   const rangeY = Math.max(maxY - minY, 0.001);
 
+  // v3.6.1 — Labels do laudo têm precedência. Se laudo.quadra ou
+  // laudo.numero_lote diferem do cadastro vinculado, o operador vê um warn no
+  // log (data integrity) mas o PDF sai coerente com a seção 3.
+  const laudoQuadra = laudo.quadra != null ? String(laudo.quadra).trim() : '';
+  const laudoLote = laudo.numero_lote != null ? String(laudo.numero_lote).trim() : '';
+  const tituloQuadra = laudoQuadra || data.quadra.nome;
+  const labelLote = laudoLote || data.lote.numero_lote;
+  if (laudoQuadra && laudoQuadra !== data.quadra.nome) {
+    console.warn(
+      `[plantaQuadra] laudo.quadra="${laudoQuadra}" != cadastro.quadra.nome="${data.quadra.nome}" ` +
+      `(lote_loteamento_id=${laudo.lote_loteamento_id}) — usando label do laudo no PDF`,
+    );
+  }
+  if (laudoLote && laudoLote !== data.lote.numero_lote) {
+    console.warn(
+      `[plantaQuadra] laudo.numero_lote="${laudoLote}" != cadastro.lote.numero_lote="${data.lote.numero_lote}" ` +
+      `(lote_loteamento_id=${laudo.lote_loteamento_id}) — usando label do laudo no PDF`,
+    );
+  }
+
   doc.addPage();
   let cy = 60;
   doc.fontSize(10).fillColor('#888').font('Helvetica-Bold')
-     .text(`PLANTA DA QUADRA — ${data.quadra.nome}`, 40, cy);
+     .text(`PLANTA DA QUADRA — ${fmtTituloQuadra(tituloQuadra)}`, 40, cy);
   cy += 14;
 
   const padding = 60;
@@ -116,7 +153,7 @@ export async function secaoPlantaQuadra(
   const cxO = loteRing.reduce((s, p) => s + p[0], 0) / loteRing.length;
   const cyO = loteRing.reduce((s, p) => s + p[1], 0) / loteRing.length;
   doc.fontSize(9).fillColor('#111').font('Helvetica-Bold')
-     .text(`LOTE ${data.lote.numero_lote}`, toX(cxO) - 28, toY(cyO) - 5, { width: 56, align: 'center' });
+     .text(`LOTE ${labelLote}`, toX(cxO) - 28, toY(cyO) - 5, { width: 56, align: 'center' });
 
   doc.fontSize(8).fillColor('#666').font('Helvetica-Oblique')
      .text(`Lote-objeto da demarcação destacado em amarelo. ${vizinhos.length} lotes vizinhos.`,
