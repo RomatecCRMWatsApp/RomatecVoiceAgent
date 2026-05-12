@@ -4281,10 +4281,18 @@ function renderFolha() {
     return `${state.folhaAno}-${String(state.folhaMes).padStart(2,'0')}-${q}`;
   })();
   const linhas = f.funcionarios.map(p => {
-    // v3.9.0 — mostra info de "contador zerado após DD/MM" sob o nome
-    const labelZerado = p.data_ultimo_recibo_pago
-      ? `<span style="color:#22c55e;">✓ Pago até ${new Date(p.data_ultimo_recibo_pago + 'T00:00').toLocaleDateString('pt-BR')}</span>`
-      : '';
+    // v3.9.0 / v3.9.8 — mostra "Pago até DD/MM/AAAA" sob o nome.
+    // Backend pode retornar a data em vários formatos (string ISO YYYY-MM-DD,
+    // Date object stringificado, etc). Parseia robusto.
+    let labelZerado = '';
+    if (p.data_ultimo_recibo_pago) {
+      const raw = String(p.data_ultimo_recibo_pago);
+      const m = raw.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (m) {
+        const ddmmaa = `${m[3]}/${m[2]}/${m[1]}`;
+        labelZerado = `<span style="color:#22c55e;">✓ Pago até ${ddmmaa}</span>`;
+      }
+    }
     return `
     <tr>
       <td style="padding:8px; border-bottom:1px solid var(--border);">
@@ -4465,6 +4473,13 @@ function renderFolha() {
     await Promise.allSettled(f.funcionarios.map(async p => {
       const target = v.querySelector(`[data-folha-status="${p.funcionario_id}"]`);
       if (!target) return;
+      // v3.9.8 — Se o funcionário tem dias EM ABERTO (total_pagar > 0), mostra
+      // "Aberta" mesmo que o recibo da quinzena padrão esteja PAGO. Isso
+      // significa: já há uma nova quinzena em curso que precisa ser cobrada.
+      if (Number(p.total_pagar) > 0) {
+        target.innerHTML = `<span style="color:var(--gold); font-size:11px;">⚪ Aberta</span>`;
+        return;
+      }
       try {
         const r = await api(`/api/recibos/envio-status?membro_id=${p.funcionario_id}&periodo=${periodoFolhaAtual}`);
         const env = r && r.envio;
