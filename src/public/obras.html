@@ -4280,11 +4280,16 @@ function renderFolha() {
     }
     return `${state.folhaAno}-${String(state.folhaMes).padStart(2,'0')}-${q}`;
   })();
-  const linhas = f.funcionarios.map(p => `
+  const linhas = f.funcionarios.map(p => {
+    // v3.9.0 — mostra info de "contador zerado após DD/MM" sob o nome
+    const labelZerado = p.data_ultimo_recibo_pago
+      ? `<span style="color:#22c55e;">✓ Pago até ${new Date(p.data_ultimo_recibo_pago + 'T00:00').toLocaleDateString('pt-BR')}</span>`
+      : '';
+    return `
     <tr>
       <td style="padding:8px; border-bottom:1px solid var(--border);">
         <strong>${escape(p.nome)}</strong>
-        <p style="margin:2px 0; font-size:11px; color:var(--text-muted);">${escape(p.funcao||'-')} · ${fmt(p.valor_dia)}/dia</p>
+        <p style="margin:2px 0; font-size:11px; color:var(--text-muted);">${escape(p.funcao||'-')} · ${fmt(p.valor_dia)}/dia ${labelZerado ? '· ' + labelZerado : ''}</p>
       </td>
       <td style="text-align:center; color:var(--neon); font-weight:500;">${p.integral}</td>
       <td style="text-align:center; color:var(--gold);">${p.manha}</td>
@@ -4297,7 +4302,8 @@ function renderFolha() {
         <button data-passar-vale="${p.funcionario_id}" data-nome-vale="${escape(p.nome)}" data-tel-vale="${escape(p.telefone || '')}" data-saldo-vale="${p.total_pagar}" title="Passar vale (adiantamento) — desconta do recibo quinzenal" style="font-size:11px; padding:4px 8px; background:transparent; border:1px solid #f59e0b; color:#f59e0b; border-radius:4px; cursor:pointer; margin-left:4px;">💸 Vale</button>
       </td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   // v1.99.16: sub-aba ativa (mensal vs saldo em aberto)
   const subview = state.folhaSubview || 'mensal';

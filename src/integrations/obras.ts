@@ -981,17 +981,43 @@ export async function relatorioMensalFuncionario(input: {
 
 export async function relatorioMensalEquipe(input: {
   ano: number; mes: number; obra_id?: string;
+  /** v3.9.0 — Quando true (default), exclui dias já cobertos por recibos
+   * quinzenais PAGOS. Cada funcionário tem seu próprio "data_limite" baseado
+   * em MAX(periodo_fim) dos recibos_envios com status='pago'. Dias com
+   * data > data_limite entram na folha; dias <= data_limite são considerados
+   * já pagos e SAEM do contador. Se 'apenas_em_aberto=false' (passar
+   * explicitamente), retorna o histórico completo do mês. */
+  apenas_em_aberto?: boolean;
 }) {
+  const apenasEmAberto = input.apenas_em_aberto !== false;
+
+  // v3.9.0 — Subquery por funcionário pra pegar data_limite (último recibo pago).
+  // Se NULL → conta tudo do mês (mantém comportamento histórico pra membros
+  // sem nenhum recibo pago).
+  const subqueryLimite = `
+    (SELECT MAX(l.periodo_fim)
+       FROM recibos_envios e2
+       JOIN recibos_envios_lotes l ON l.id = e2.lote_id
+      WHERE e2.membro_id = d.funcionario_id
+        AND e2.status = 'pago')
+  `;
+
+  const filtroEmAberto = apenasEmAberto
+    ? `AND (${subqueryLimite} IS NULL OR d.data > ${subqueryLimite})`
+    : '';
+
   const params: (string | number)[] = [input.ano, input.mes];
   let sql = `
     SELECT d.funcionario_id, e.nome, e.funcao, e.valor_dia, e.telefone,
            COUNT(CASE WHEN d.periodo = 'integral' THEN 1 END) AS integral,
            COUNT(CASE WHEN d.periodo = 'manha'    THEN 1 END) AS manha,
            COUNT(CASE WHEN d.periodo = 'tarde'    THEN 1 END) AS tarde,
-           COALESCE(SUM(d.valor), 0) AS total_pagar
+           COALESCE(SUM(d.valor), 0) AS total_pagar,
+           ${subqueryLimite} AS data_ultimo_recibo_pago
     FROM romatec_obra_funcionario_dias d
     JOIN romatec_obra_equipe e ON e.id = d.funcionario_id
-    WHERE YEAR(d.data) = ? AND MONTH(d.data) = ?`;
+    WHERE YEAR(d.data) = ? AND MONTH(d.data) = ?
+    ${filtroEmAberto}`;
   if (input.obra_id) { sql += ' AND d.obra_id = ?'; params.push(input.obra_id); }
   sql += ' GROUP BY d.funcionario_id, e.nome, e.funcao, e.valor_dia, e.telefone ORDER BY e.nome ASC';
 
@@ -1007,6 +1033,10 @@ export async function relatorioMensalEquipe(input: {
     tarde:    Number(r.tarde),
     total_dias_equivalente: Number(r.integral) + (Number(r.manha) + Number(r.tarde)) * 0.5,
     total_pagar: num(String(r.total_pagar ?? '0')),
+    // v3.9.0 — Pra UI mostrar "Contador zerado após pagamento de DD/MM"
+    data_ultimo_recibo_pago: r.data_ultimo_recibo_pago
+      ? String(r.data_ultimo_recibo_pago).slice(0, 10)
+      : null,
   }));
   const total_geral = lista.reduce((s, l) => s + l.total_pagar, 0);
   return {
@@ -1014,6 +1044,7 @@ export async function relatorioMensalEquipe(input: {
     obra_id: input.obra_id ?? null,
     total_funcionarios: lista.length,
     total_geral,
+    apenas_em_aberto: apenasEmAberto,
     funcionarios: lista,
   };
 }
