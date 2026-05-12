@@ -991,15 +991,16 @@ export async function relatorioMensalEquipe(input: {
 }) {
   const apenasEmAberto = input.apenas_em_aberto !== false;
 
-  // v3.9.0 — Subquery por funcionário pra pegar data_limite (último recibo pago).
-  // Se NULL → conta tudo do mês (mantém comportamento histórico pra membros
-  // sem nenhum recibo pago).
+  // v3.9.0 / v3.9.1 — Subquery: usa DATA DO PAGAMENTO EFETIVO (pago_em),
+  // NÃO o periodo_fim (que é o fim padrão da quinzena, 15/05). Se quitou em
+  // 09/05, dias > 09/05 contam na próxima quinzena, mesmo que a 1ª quinzena
+  // se estendesse até 15/05 no calendário.
   const subqueryLimite = `
-    (SELECT MAX(l.periodo_fim)
+    (SELECT MAX(DATE(e2.pago_em))
        FROM recibos_envios e2
-       JOIN recibos_envios_lotes l ON l.id = e2.lote_id
       WHERE e2.membro_id = d.funcionario_id
-        AND e2.status = 'pago')
+        AND e2.status = 'pago'
+        AND e2.pago_em IS NOT NULL)
   `;
 
   const filtroEmAberto = apenasEmAberto
