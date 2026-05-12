@@ -1,7 +1,7 @@
 // Service Worker da ZAYRA — versão atrelada à versão do app pra forçar
 // rotação de cache em todo deploy. Se você bumpar a versão do app, bumpe esta
 // constante também (ou no futuro, gere via build).
-const CACHE = 'zayra-v3.8.1';
+const CACHE = 'zayra-v3.8.2';
 
 // App shell — recursos cacheados na instalação para garantir abertura offline.
 // v2.4.3 P0.3: pre-cacheia também /obras e /js/catalogo-servicos.js — sem isso,

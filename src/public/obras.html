@@ -17427,11 +17427,52 @@ async function confirmarDxf() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // v3.8.0 — Galeria de Fotos georreferenciadas (MVP)
-// v3.8.1 — Modo OFFLINE: fila local em IndexedDB. Fotos tiradas sem internet
-// ficam em "pendentes" e sobem sozinhas quando voltar online (auto-sync via
-// window.addEventListener('online')). Endereço reverso degradado quando sem
-// rede (salva sem endereço, tenta resolver na hora do sync).
+// v3.8.1 — Modo OFFLINE com IndexedDB + auto-sync
+// v3.8.2 — Logo Romatec no carimbo + coordenadas UTM (SIRGAS 2000)
 // ─────────────────────────────────────────────────────────────────────────────
+
+// v3.8.2 — Converte lat/lng (graus decimais, WGS84/SIRGAS2000) pra UTM (m).
+// Implementação direta da projeção Transversa de Mercator, sem dependências.
+function latLngParaUtm(lat, lng) {
+  const a = 6378137.0;                  // semi-eixo maior WGS84/SIRGAS2000
+  const f = 1 / 298.257223563;
+  const k0 = 0.9996;
+  const e2 = f * (2 - f);
+  const e_2 = e2 / (1 - e2);
+  const zone = Math.floor((lng + 180) / 6) + 1;
+  const lambda0 = ((zone - 1) * 6 - 180 + 3) * Math.PI / 180;
+  const phi = lat * Math.PI / 180;
+  const lambda = lng * Math.PI / 180;
+  const N = a / Math.sqrt(1 - e2 * Math.sin(phi) ** 2);
+  const T = Math.tan(phi) ** 2;
+  const C = e_2 * Math.cos(phi) ** 2;
+  const A = Math.cos(phi) * (lambda - lambda0);
+  const M = a * (
+      (1 - e2/4 - 3*e2*e2/64 - 5*e2*e2*e2/256) * phi
+    - (3*e2/8 + 3*e2*e2/32 + 45*e2*e2*e2/1024) * Math.sin(2*phi)
+    + (15*e2*e2/256 + 45*e2*e2*e2/1024) * Math.sin(4*phi)
+    - (35*e2*e2*e2/3072) * Math.sin(6*phi)
+  );
+  const E = k0 * N * (A + (1 - T + C) * A**3 / 6
+              + (5 - 18*T + T*T + 72*C - 58*e_2) * A**5 / 120) + 500000;
+  let Nrt = k0 * (M + N * Math.tan(phi) * (A*A/2
+              + (5 - T + 9*C + 4*C*C) * A**4 / 24
+              + (61 - 58*T + T*T + 600*C - 330*e_2) * A**6 / 720));
+  if (lat < 0) Nrt += 10000000;
+  return { zone, hemisferio: lat < 0 ? 'S' : 'N', E, N: Nrt };
+}
+
+// v3.8.2 — Pré-carrega o logo Romatec uma única vez (cacheado)
+let _logoRomatecCache = null;
+async function carregarLogoRomatec() {
+  if (_logoRomatecCache) return _logoRomatecCache;
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => { _logoRomatecCache = img; res(img); };
+    img.onerror = () => res(null);
+    img.src = '/logo_R-removebg-preview.png';
+  });
+}
 
 const GALERIA_DB_NAME = 'romatec-galeria';
 const GALERIA_DB_VERSION = 1;
@@ -17762,10 +17803,22 @@ async function onGaleriaFileSelected(ev) {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
+  // v3.8.2 — Pré-carrega logo Romatec pra desenhar no canto direito do carimbo
+  const logoRomatec = await carregarLogoRomatec();
+
   // Carimbo: faixa preta semi-transparente no rodapé + texto branco
   const userName = (window.state && state.userNome) || 'Romatec';
+  // v3.8.2 — Calcula UTM se houver coordenadas
+  let linhaUtm = null;
+  if (lat != null && lng != null) {
+    try {
+      const utm = latLngParaUtm(lat, lng);
+      linhaUtm = `🌐 UTM ${utm.zone}${utm.hemisferio} · E=${utm.E.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} · N=${utm.N.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} (SIRGAS 2000)`;
+    } catch (_) {}
+  }
   const linhas = [
     `📍 ${lat != null ? lat.toFixed(6) : '—'}, ${lng != null ? lng.toFixed(6) : '—'}${alt != null ? ' alt ' + alt.toFixed(0) + 'm' : ''}`,
+    linhaUtm,
     endereco ? endereco.slice(0, 80) : null,
     `🕒 ${new Date().toLocaleString('pt-BR')}`,
     `👤 ${userName} · Romatec`,
@@ -17775,13 +17828,22 @@ async function onGaleriaFileSelected(ev) {
   const padding = fontSize * 0.5;
   const lineHeight = fontSize * 1.3;
   const boxH = linhas.length * lineHeight + padding * 2;
+  // Espaço reservado pra logo à direita (largura proporcional)
+  const logoSize = Math.round(boxH * 1.4); // logo um pouco maior que a faixa
+  const textoMaxW = canvas.width - logoSize - padding * 3;
   ctx.fillStyle = 'rgba(0,0,0,0.65)';
   ctx.fillRect(0, canvas.height - boxH, canvas.width, boxH);
   ctx.fillStyle = '#fff';
   ctx.textBaseline = 'top';
   linhas.forEach((line, i) => {
-    ctx.fillText(line, padding, canvas.height - boxH + padding + i * lineHeight);
+    ctx.fillText(line, padding, canvas.height - boxH + padding + i * lineHeight, textoMaxW);
   });
+  // v3.8.2 — Logo Romatec no canto inferior direito, sobreposto à faixa preta
+  if (logoRomatec) {
+    const lx = canvas.width - logoSize - padding;
+    const ly = canvas.height - logoSize - padding * 0.5;
+    ctx.drawImage(logoRomatec, lx, ly, logoSize, logoSize);
+  }
 
   // v3.8.1 — Salva também na galeria do dispositivo (download da foto carimbada)
   // ANTES do upload, pra garantir que mesmo offline o user tem o arquivo.
