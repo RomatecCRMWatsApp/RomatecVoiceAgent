@@ -35,6 +35,7 @@ import type { Executante } from '../integrations/executantes';
 import { azimuteParaDMS } from './geometria';
 import { CRITERIOS_INCRA } from './pricing/incra';
 import { calcularCentroide, formatarAreaParaCentro, calcularMC } from './croquiHelpers';
+import { secaoPlantaQuadra } from './plantaQuadraPdfSection';
 
 const fmtBRL = (n: number) =>
   'R$ ' + Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -683,6 +684,11 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
        .text('(Croqui nao disponivel — adicione 3 ou mais vertices)', 40, cy, { width: 515, align: 'center' });
     cy += 12;
   }
+
+  // ── 10.1 Planta da Quadra (v3.6.0) ─────────────────────────────────
+  // Só renderiza se laudo.tipo_imovel === 'URBANO' E lote_loteamento_id != null
+  // E o loteamento já tem geometria DXF mapeada. Falha → omite silenciosamente.
+  await secaoPlantaQuadra(doc, laudo);
 
   // ── 11. Fotos ──────────────────────────────────────────────────────
   // v2.4.5: foto da Base ganha subseção dedicada (11.1, foto grande centralizada).
