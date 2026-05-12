@@ -685,10 +685,16 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
     cy += 12;
   }
 
-  // ── 10.1 Planta da Quadra (v3.6.0) ─────────────────────────────────
+  // ── 10.1 Planta da Quadra (v3.6.0+) ────────────────────────────────
   // Só renderiza se laudo.tipo_imovel === 'URBANO' E lote_loteamento_id != null
-  // E o loteamento já tem geometria DXF mapeada. Falha → omite silenciosamente.
-  await secaoPlantaQuadra(doc, laudo);
+  // E o loteamento já tem geometria mapeada. Falha → omite silenciosamente.
+  // v3.6.3 — retorna boolean. Quando renderiza, força nova página antes da
+  // seção 11 (Fotos) pra não espremer fotos por cima da planta.
+  const plantaDesenhada = await secaoPlantaQuadra(doc, laudo);
+  if (plantaDesenhada) {
+    doc.addPage();
+    cy = 60;
+  }
 
   // ── 11. Fotos ──────────────────────────────────────────────────────
   // v2.4.5: foto da Base ganha subseção dedicada (11.1, foto grande centralizada).

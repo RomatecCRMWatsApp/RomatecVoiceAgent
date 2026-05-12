@@ -642,18 +642,20 @@ export async function salvarGeometriaLote(id: number, geojson: string | null): P
  * isso pra omitir silenciosamente a seção quando a guarda tripla falha.
  */
 export async function carregarPlantaQuadra(loteId: number): Promise<{
-  lote: { id: number; numero_lote: string; geojson: string };
+  lote: { id: number; numero_lote: string; geojson: string; rua_frente_id: number | null };
   quadra: { id: number; nome: string; geojson: string };
-  vizinhos: Array<{ id: number; numero_lote: string; geojson: string }>;
+  vizinhos: Array<{ id: number; numero_lote: string; geojson: string; rua_frente_id: number | null }>;
+  ruas: Array<{ id: number; nome: string }>;
 } | null> {
   const [loteRows] = await pool.execute(
-    `SELECT l.id, l.numero_lote, l.geometria_geojson, l.quadra_id
+    `SELECT l.id, l.numero_lote, l.geometria_geojson, l.quadra_id, l.rua_frente_id
        FROM loteamento_lotes l
       WHERE l.id = ?`,
     [loteId],
   );
   const lote = (loteRows as Array<{
-    id: number; numero_lote: string; geometria_geojson: string | null; quadra_id: number;
+    id: number; numero_lote: string; geometria_geojson: string | null;
+    quadra_id: number; rua_frente_id: number | null;
   }>)[0];
   if (!lote || !lote.geometria_geojson) return null;
 
@@ -669,21 +671,40 @@ export async function carregarPlantaQuadra(loteId: number): Promise<{
   if (!quadra || !quadra.geometria_geojson) return null;
 
   const [vizRows] = await pool.execute(
-    `SELECT id, numero_lote, geometria_geojson
+    `SELECT id, numero_lote, geometria_geojson, rua_frente_id
        FROM loteamento_lotes
       WHERE quadra_id = ? AND id <> ? AND geometria_geojson IS NOT NULL`,
     [lote.quadra_id, loteId],
   );
 
+  // v3.6.3 — Ruas adjacentes à quadra (distintas, via FK rua_frente_id dos lotes)
+  const [ruasRows] = await pool.execute(
+    `SELECT DISTINCT r.id, r.nome
+       FROM loteamento_ruas r
+       JOIN loteamento_lotes l ON l.rua_frente_id = r.id
+      WHERE l.quadra_id = ?
+      ORDER BY r.nome`,
+    [lote.quadra_id],
+  );
+
   return {
-    lote: { id: lote.id, numero_lote: lote.numero_lote, geojson: lote.geometria_geojson },
+    lote: {
+      id: lote.id, numero_lote: lote.numero_lote,
+      geojson: lote.geometria_geojson,
+      rua_frente_id: lote.rua_frente_id != null ? Number(lote.rua_frente_id) : null,
+    },
     quadra: { id: quadra.id, nome: quadra.nome, geojson: quadra.geometria_geojson },
     vizinhos: (vizRows as Array<{
-      id: number; numero_lote: string; geometria_geojson: string;
+      id: number; numero_lote: string; geometria_geojson: string; rua_frente_id: number | null;
     }>).map(r => ({
       id: r.id,
       numero_lote: r.numero_lote,
       geojson: r.geometria_geojson,
+      rua_frente_id: r.rua_frente_id != null ? Number(r.rua_frente_id) : null,
+    })),
+    ruas: (ruasRows as Array<{ id: number; nome: string }>).map(r => ({
+      id: Number(r.id),
+      nome: r.nome,
     })),
   };
 }
