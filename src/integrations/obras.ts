@@ -991,20 +991,33 @@ export async function relatorioMensalEquipe(input: {
 }) {
   const apenasEmAberto = input.apenas_em_aberto !== false;
 
-  // v3.9.0 / v3.9.1 — Subquery: usa DATA DO PAGAMENTO EFETIVO (pago_em),
-  // NÃO o periodo_fim (que é o fim padrão da quinzena, 15/05). Se quitou em
-  // 09/05, dias > 09/05 contam na próxima quinzena, mesmo que a 1ª quinzena
-  // se estendesse até 15/05 no calendário.
+  // v3.9.0–v3.9.3 — Subquery por funcionário pra pegar data_limite (último recibo pago).
+  // v3.9.4 — REFATORADO: em vez de "data > MAX(pago_em)", agora usa NOT EXISTS
+  // checando se o DIA está dentro de algum período coberto por recibo PAGO
+  // (periodo_inicio..periodo_fim). Isso é mais robusto:
+  //   • Funciona pra múltiplos recibos pagos em sequência
+  //   • Respeita a janela EXATA definida no recibo (1ª quinzena = 01-15,
+  //     2ª = 16-último, ou janelas customizadas tipo 01-09 e 11-25)
+  //   • Não depende do timestamp `pago_em` ser igual à data correta
+  // O 'subqueryLimite' continua sendo retornado pra UI mostrar "Pago até DD/MM"
+  // — usa a data MAIOR do periodo_fim dos recibos pagos.
   const subqueryLimite = `
-    (SELECT MAX(DATE(e2.pago_em))
+    (SELECT MAX(l2.periodo_fim)
        FROM recibos_envios e2
+       JOIN recibos_envios_lotes l2 ON l2.id = e2.lote_id
       WHERE e2.membro_id = d.funcionario_id
-        AND e2.status = 'pago'
-        AND e2.pago_em IS NOT NULL)
+        AND e2.status = 'pago')
   `;
 
   const filtroEmAberto = apenasEmAberto
-    ? `AND (${subqueryLimite} IS NULL OR d.data > ${subqueryLimite})`
+    ? `AND NOT EXISTS (
+         SELECT 1
+           FROM recibos_envios e3
+           JOIN recibos_envios_lotes l3 ON l3.id = e3.lote_id
+          WHERE e3.membro_id = d.funcionario_id
+            AND e3.status = 'pago'
+            AND d.data BETWEEN l3.periodo_inicio AND l3.periodo_fim
+       )`
     : '';
 
   const params: (string | number)[] = [input.ano, input.mes];
