@@ -711,6 +711,7 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="vto">Vistoria (VTO)</button>
     <button class="tab" data-tab="laudos">📐 Laudo Demarcação</button>
     <button class="tab" data-tab="loteamentos">🏘️ Loteamentos</button>
+    <button class="tab" data-tab="galeria">📷 Galeria</button>
     <button class="tab" data-tab="proposta">Proposta</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
   </div>
@@ -731,6 +732,7 @@ window.forcarUpdateApp = forcarUpdate;
   <div id="view-notas" class="view"></div>
   <div id="view-laudos" class="view"></div>
   <div id="view-loteamentos" class="view"></div>
+  <div id="view-galeria" class="view"></div>
   <div id="view-calculos" class="view"></div>
 </div>
 
@@ -1485,6 +1487,7 @@ async function render() {
       notas:   async () => { await Promise.all([loadNotas(), loadFiscalConfig()]); renderNotas(); },
       laudos:  async () => { await loadLaudos(); renderLaudos(); },
       loteamentos: async () => { await loadLoteamentos(); renderLoteamentos(); },
+      galeria: async () => { await renderGaleria(); },
     };
     await fns[state.currentTab]();
   } catch (e) {
@@ -17420,6 +17423,209 @@ async function confirmarDxf() {
   } catch (err) {
     alert('Erro: ' + (err.message || err));
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v3.8.0 — Galeria de Fotos georreferenciadas (MVP)
+// ─────────────────────────────────────────────────────────────────────────────
+async function renderGaleria() {
+  const v = document.getElementById('view-galeria');
+  if (!v) return;
+  v.innerHTML = `
+    <div style="padding:16px;">
+      <h2 style="margin-top:0;">📷 Galeria de Fotos</h2>
+      <p style="opacity:.75;font-size:13px;margin:4px 0 12px;">Fotos com carimbo de GPS + endereço, reutilizáveis em laudos / VTO / propostas. Envio direto via WhatsApp/Telegram.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+        <input type="file" id="galeria-input" accept="image/*" capture="environment" style="display:none;">
+        <button class="btn-primary" onclick="document.getElementById('galeria-input').click()">📷 Tirar Foto</button>
+        <button class="btn-secondary" onclick="recarregarGaleria()">🔄 Recarregar</button>
+      </div>
+      <div id="galeria-status" style="font-size:12px;color:#888;margin-bottom:8px;"></div>
+      <div id="galeria-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;"></div>
+    </div>
+  `;
+  document.getElementById('galeria-input').addEventListener('change', onGaleriaFileSelected);
+  recarregarGaleria();
+}
+
+async function recarregarGaleria() {
+  const grid = document.getElementById('galeria-grid');
+  if (!grid) return;
+  grid.innerHTML = '<div style="opacity:.6;">Carregando…</div>';
+  try {
+    const r = await fetch('/api/galeria?limit=100');
+    const data = await r.json();
+    const fotos = data.fotos || [];
+    if (fotos.length === 0) {
+      grid.innerHTML = '<div style="opacity:.6;grid-column:1/-1;">Nenhuma foto ainda. Clique em 📷 Tirar Foto.</div>';
+      return;
+    }
+    grid.innerHTML = fotos.map(f => renderGaleriaCard(f)).join('');
+  } catch (err) {
+    grid.innerHTML = '<div style="color:#ff5577;">Erro: ' + (err.message || err) + '</div>';
+  }
+}
+
+function renderGaleriaCard(f) {
+  const esc = (s) => String(s || '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+  const dataFmt = f.capturada_em ? new Date(f.capturada_em).toLocaleString('pt-BR') : new Date(f.criada_em).toLocaleString('pt-BR');
+  const gps = (f.lat != null && f.lng != null) ? `${f.lat.toFixed(5)}, ${f.lng.toFixed(5)}` : '(sem GPS)';
+  const end = esc(f.endereco_reverso || '');
+  return `
+    <div style="border:1px solid var(--border-color,#333);border-radius:6px;overflow:hidden;background:var(--bg-secondary,#1a1a1a);">
+      <img src="/api/galeria/${f.id}/arquivo" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#000;" loading="lazy">
+      <div style="padding:8px;font-size:12px;">
+        <div style="font-weight:bold;margin-bottom:4px;">${esc(f.legenda || `Foto #${f.id}`)}</div>
+        <div style="opacity:.7;">📍 ${gps}</div>
+        ${end ? `<div style="opacity:.7;font-size:11px;">${end}</div>` : ''}
+        <div style="opacity:.6;font-size:11px;margin-top:4px;">${dataFmt}</div>
+        <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
+          <button onclick="enviarFotoGaleria(${f.id}, 'whatsapp')" style="font-size:11px;padding:4px 8px;">📱 WA</button>
+          <button onclick="enviarFotoGaleria(${f.id}, 'telegram')" style="font-size:11px;padding:4px 8px;">✈️ TG</button>
+          <button onclick="apagarFotoGaleria(${f.id})" style="font-size:11px;padding:4px 8px;color:#ff5577;">🗑</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function enviarFotoGaleria(id, canal) {
+  const destinatario = prompt(canal === 'whatsapp'
+    ? 'Número de WhatsApp (DDD+número, ex: 99987654321):'
+    : 'Chat ID do Telegram:');
+  if (!destinatario) return;
+  const caption = prompt('Legenda (opcional):') || '';
+  try {
+    const r = await fetch(`/api/galeria/${id}/enviar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+      body: JSON.stringify({ canal, destinatario, caption }),
+    });
+    const data = await r.json();
+    if (!r.ok) { alert('Falha: ' + (data.error || r.status)); return; }
+    alert(`✅ Enviado via ${canal}!`);
+  } catch (err) { alert('Erro: ' + (err.message || err)); }
+}
+
+async function apagarFotoGaleria(id) {
+  if (!confirm('Apagar essa foto da galeria?')) return;
+  try {
+    const r = await fetch(`/api/galeria/${id}`, {
+      method: 'DELETE',
+      headers: { 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+    });
+    if (r.ok) recarregarGaleria();
+    else alert('Falha ao apagar');
+  } catch (err) { alert('Erro: ' + (err.message || err)); }
+}
+
+// Captura: arquivo selecionado → lê GPS atual + canvas com carimbo → upload
+async function onGaleriaFileSelected(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = ''; // reset pra permitir foto seguinte
+  if (!file) return;
+  const status = document.getElementById('galeria-status');
+  const setStatus = (s) => { if (status) status.textContent = s; };
+
+  setStatus('📍 Capturando GPS...');
+  let lat = null, lng = null, alt = null, acc = null, endereco = null;
+  try {
+    const pos = await new Promise((res, rej) => {
+      navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 });
+    });
+    lat = pos.coords.latitude;
+    lng = pos.coords.longitude;
+    alt = pos.coords.altitude;
+    acc = pos.coords.accuracy;
+  } catch (err) {
+    setStatus('⚠️ GPS falhou: ' + err.message + '. Continuando sem coordenadas...');
+  }
+
+  // Endereço reverso via Nominatim (grátis)
+  if (lat != null && lng != null) {
+    setStatus('🗺 Buscando endereço...');
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+        { headers: { 'Accept-Language': 'pt-BR' } });
+      const j = await r.json();
+      endereco = j.display_name || null;
+    } catch (e) { /* ignora */ }
+  }
+
+  setStatus('🖼 Aplicando carimbo...');
+  // Lê imagem em canvas, aplica carimbo, exporta JPEG
+  const img = await readImageFile(file);
+  const canvas = document.createElement('canvas');
+  // Limita tamanho máximo pra 1920px no maior eixo (economiza banda)
+  const maxLado = 1920;
+  const scale = Math.min(1, maxLado / Math.max(img.width, img.height));
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  // Carimbo: faixa preta semi-transparente no rodapé + texto branco
+  const userName = (window.state && state.userNome) || 'Romatec';
+  const linhas = [
+    `📍 ${lat != null ? lat.toFixed(6) : '—'}, ${lng != null ? lng.toFixed(6) : '—'}${alt != null ? ' alt ' + alt.toFixed(0) + 'm' : ''}`,
+    endereco ? endereco.slice(0, 80) : null,
+    `🕒 ${new Date().toLocaleString('pt-BR')}`,
+    `👤 ${userName} · Romatec`,
+  ].filter(Boolean);
+  const fontSize = Math.max(14, Math.round(canvas.width * 0.022));
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  const padding = fontSize * 0.5;
+  const lineHeight = fontSize * 1.3;
+  const boxH = linhas.length * lineHeight + padding * 2;
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(0, canvas.height - boxH, canvas.width, boxH);
+  ctx.fillStyle = '#fff';
+  ctx.textBaseline = 'top';
+  linhas.forEach((line, i) => {
+    ctx.fillText(line, padding, canvas.height - boxH + padding + i * lineHeight);
+  });
+
+  setStatus('☁️ Enviando...');
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  const b64 = dataUrl.split(',')[1];
+  try {
+    const r = await fetch('/api/galeria', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+      body: JSON.stringify({
+        mime: 'image/jpeg',
+        arquivo_b64: b64,
+        user_nome: userName,
+        lat, lng, altitude_m: alt, accuracy_m: acc,
+        endereco_reverso: endereco,
+        capturada_em: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      }),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      setStatus('❌ Falha: ' + (e.error || r.status));
+      return;
+    }
+    setStatus('✅ Foto adicionada!');
+    setTimeout(() => setStatus(''), 3000);
+    recarregarGaleria();
+  } catch (err) {
+    setStatus('❌ Erro: ' + (err.message || err));
+  }
+}
+
+function readImageFile(file) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = rej;
+      img.src = fr.result;
+    };
+    fr.onerror = rej;
+    fr.readAsDataURL(file);
+  });
 }
 </script>
 </body>

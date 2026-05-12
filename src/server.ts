@@ -2142,6 +2142,138 @@ app.post(
   },
 );
 
+// v3.8.0 — Galeria de Fotos georreferenciadas
+
+app.get('/api/galeria', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    const limit = req.query.limit ? Number(req.query.limit) : 100;
+    const offset = req.query.offset ? Number(req.query.offset) : 0;
+    const obraId = req.query.obra_id ? Number(req.query.obra_id) : undefined;
+    const fotos = await m.listarFotos({ limit, offset, obra_id: obraId });
+    res.json({ fotos });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// Binário da foto (preview) — retorna data URI ou bytes
+app.get('/api/galeria/:id/arquivo', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    const foto = await m.buscarFotoComB64(Number(req.params.id));
+    if (!foto) { res.status(404).json({ error: 'Foto não encontrada' }); return; }
+    const buf = Buffer.from(foto.arquivo_b64, 'base64');
+    res.setHeader('Content-Type', foto.mime);
+    res.setHeader('Content-Disposition', `inline; filename="foto-${foto.id}.${foto.mime.split('/')[1] || 'jpg'}"`);
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/galeria', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    const b = (req.body || {}) as Record<string, unknown>;
+    if (!b.arquivo_b64 || typeof b.arquivo_b64 !== 'string') {
+      res.status(400).json({ error: 'arquivo_b64 obrigatório' });
+      return;
+    }
+    if (!b.mime || typeof b.mime !== 'string' || !b.mime.startsWith('image/')) {
+      res.status(400).json({ error: 'mime de imagem obrigatório (ex: image/jpeg)' });
+      return;
+    }
+    const id = await m.criarFoto({
+      mime: b.mime,
+      arquivo_b64: b.arquivo_b64,
+      user_nome: typeof b.user_nome === 'string' ? b.user_nome : null,
+      legenda: typeof b.legenda === 'string' ? b.legenda : null,
+      lat: typeof b.lat === 'number' ? b.lat : null,
+      lng: typeof b.lng === 'number' ? b.lng : null,
+      altitude_m: typeof b.altitude_m === 'number' ? b.altitude_m : null,
+      accuracy_m: typeof b.accuracy_m === 'number' ? b.accuracy_m : null,
+      endereco_reverso: typeof b.endereco_reverso === 'string' ? b.endereco_reverso : null,
+      capturada_em: typeof b.capturada_em === 'string' ? b.capturada_em : null,
+      tags: typeof b.tags === 'string' ? b.tags : null,
+      obra_id: typeof b.obra_id === 'number' ? b.obra_id : null,
+    });
+    res.json({ id });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.put('/api/galeria/:id', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    const b = (req.body || {}) as Record<string, unknown>;
+    const ok = await m.atualizarFoto(Number(req.params.id), {
+      legenda: typeof b.legenda === 'string' ? b.legenda : undefined,
+      tags: typeof b.tags === 'string' ? b.tags : undefined,
+      obra_id: typeof b.obra_id === 'number' ? b.obra_id : undefined,
+    });
+    res.json({ ok });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.delete('/api/galeria/:id', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    const ok = await m.apagarFoto(Number(req.params.id));
+    res.json({ ok });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// Envia a foto pra WhatsApp ou Telegram
+// body: { canal: 'whatsapp' | 'telegram', destinatario: string, caption?: string }
+app.post('/api/galeria/:id/enviar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const g = await import('./integrations/galeria');
+    const foto = await g.buscarFotoComB64(Number(req.params.id));
+    if (!foto) { res.status(404).json({ error: 'Foto não encontrada' }); return; }
+    const b = (req.body || {}) as { canal?: string; destinatario?: string; caption?: string };
+    const canal = (b.canal || '').toLowerCase();
+    const destinatario = String(b.destinatario || '').trim();
+    const caption = String(b.caption || '');
+    if (!destinatario) { res.status(400).json({ error: 'destinatario obrigatório' }); return; }
+
+    if (canal === 'whatsapp') {
+      const wa = await import('./integrations/whatsapp');
+      const dataUri = `data:${foto.mime};base64,${foto.arquivo_b64}`;
+      const r = await wa.sendImage(destinatario, dataUri, caption);
+      res.json({ ok: true, canal, messageId: r.messageId });
+      return;
+    }
+    if (canal === 'telegram') {
+      // Telegram sendPhoto via multipart upload
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      if (!token) { res.status(503).json({ error: 'TELEGRAM_BOT_TOKEN não configurado' }); return; }
+      const buf = Buffer.from(foto.arquivo_b64, 'base64');
+      const FormData = (await import('form-data')).default;
+      const fd = new FormData();
+      fd.append('chat_id', destinatario);
+      if (caption) fd.append('caption', caption);
+      fd.append('photo', buf, { filename: `foto-${foto.id}.jpg`, contentType: foto.mime });
+      const axios = (await import('axios')).default;
+      const resp = await axios.post(
+        `https://api.telegram.org/bot${token}/sendPhoto`,
+        fd,
+        { headers: fd.getHeaders(), timeout: 30000 },
+      );
+      res.json({ ok: true, canal, telegram: resp.data });
+      return;
+    }
+    res.status(400).json({ error: `canal inválido: ${canal} (esperado 'whatsapp' ou 'telegram')` });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // v1.99.27 — Fase 3: Croqui SVG / Upload + Fotos
 
 // GET croqui — gera SVG auto OU retorna o upload manual
@@ -3401,6 +3533,16 @@ app.listen(PORT, () => {
       await m.runLoteamentosMigrations();
     } catch (err) {
       console.error('[loteamentos-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.8.0: migrations da Galeria de Fotos georreferenciadas.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-galeria');
+      await m.runGaleriaMigrations();
+    } catch (err) {
+      console.error('[galeria-migrations] FALHA fatal:', err);
     }
   })();
 
