@@ -1009,6 +1009,11 @@ export async function relatorioMensalEquipe(input: {
         AND e2.status = 'pago')
   `;
 
+  // v3.9.5 — Janela efetiva de cada recibo = [periodo_inicio, LEAST(periodo_fim, pago_em)].
+  // Se você pagou em 09/05 dentro da janela 01-15, o pagamento cobre só 01-09;
+  // dias 10-15 ficam em aberto (próxima quinzena começa em 10).
+  // Se pagou em 20/05 (atrasado) dentro da janela 01-15, cobre 01-15 inteiro
+  // (não estende além da janela do recibo).
   const filtroEmAberto = apenasEmAberto
     ? `AND NOT EXISTS (
          SELECT 1
@@ -1016,7 +1021,8 @@ export async function relatorioMensalEquipe(input: {
            JOIN recibos_envios_lotes l3 ON l3.id = e3.lote_id
           WHERE e3.membro_id = d.funcionario_id
             AND e3.status = 'pago'
-            AND d.data BETWEEN l3.periodo_inicio AND l3.periodo_fim
+            AND d.data BETWEEN l3.periodo_inicio
+                            AND LEAST(l3.periodo_fim, COALESCE(DATE(e3.pago_em), l3.periodo_fim))
        )`
     : '';
 
