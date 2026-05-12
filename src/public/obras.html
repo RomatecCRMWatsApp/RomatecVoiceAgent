@@ -16979,9 +16979,12 @@ function renderLoteamentoDetalhe(v) {
   const quadras = state.loteamentoQuadras || [];
   v.innerHTML = `
     <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
         <h3 style="margin:0;">🏘️ ${escape(lt.nome)}</h3>
-        <button id="lt-back-list" style="font-size:12px;">← Lista</button>
+        <div style="display:flex; gap:6px;">
+          <button id="lt-vincular-dxf" style="font-size:12px;">⬆️ Vincular DXF da Planta</button>
+          <button id="lt-back-list" style="font-size:12px;">← Lista</button>
+        </div>
       </div>
       <p style="font-size:12px; color:var(--text-muted); margin:8px 0 0;">
         ${escape(lt.municipio || '—')}/${escape(lt.uf || '—')} · ${quadras.length} quadra(s) ·
@@ -17000,6 +17003,7 @@ function renderLoteamentoDetalhe(v) {
     `}
   `;
   document.getElementById('lt-back-list').onclick = () => { state.loteamentoView = 'lista'; renderLoteamentos(); };
+  document.getElementById('lt-vincular-dxf').onclick = () => abrirModalVincularDxf();
 
   v.querySelectorAll('[data-lt-q]').forEach(d => d.addEventListener('toggle', async () => {
     if (!d.open) return;
@@ -17283,6 +17287,140 @@ function injetarDatalistsAcailandia() {
   mk('dl-confrontantes', confDef);
 }
 injetarDatalistsAcailandia();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v3.6.0 — Modal "Vincular DXF da Planta" no detalhe do Loteamento
+// ─────────────────────────────────────────────────────────────────────────────
+let dxfState = { report: null, mapping: null };
+
+function abrirModalVincularDxf() {
+  const lt = state.loteamentoAtual;
+  if (!lt) { alert('Selecione um loteamento'); return; }
+  let m = document.getElementById('modal-vincular-dxf');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'modal-vincular-dxf';
+    m.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:9999;';
+    m.innerHTML = `
+      <div style="background:var(--bg, #1a1a1a); color:var(--text, #eee); border-radius:8px; padding:18px; width:min(720px, 92vw); max-height:90vh; overflow:auto; border:1px solid #333;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">⬆️ Vincular DXF — Planta do Loteamento</h3>
+          <button id="dxf-fechar" style="font-size:14px; padding:4px 10px;">×</button>
+        </div>
+        <p style="font-size:13px; color:#aaa; margin:0 0 10px;">
+          Envie o <strong>.dxf ASCII</strong> exportado do AutoCAD. O sistema vai
+          listar quadras e lotes detectados e pedir confirmação antes de gravar.
+          <em>DWG não é suportado direto — exporte como DXF.</em>
+        </p>
+        <input type="file" id="dxf-file" accept=".dxf" style="margin-bottom:8px;">
+        <button id="btn-dxf-preview" style="font-size:13px;">Analisar DXF</button>
+        <div id="dxf-preview-area" style="margin-top:14px; font-size:13px;"></div>
+        <div style="margin-top:14px;">
+          <button id="btn-dxf-confirmar" style="display:none; font-size:13px;">💾 Gravar geometrias</button>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+    document.getElementById('dxf-fechar').onclick = fecharModalVincularDxf;
+    document.getElementById('btn-dxf-preview').onclick = enviarDxfPreview;
+    document.getElementById('btn-dxf-confirmar').onclick = confirmarDxf;
+  } else {
+    m.style.display = 'flex';
+  }
+  document.getElementById('dxf-preview-area').innerHTML = '';
+  document.getElementById('btn-dxf-confirmar').style.display = 'none';
+  dxfState = { report: null, mapping: null };
+}
+
+function fecharModalVincularDxf() {
+  const m = document.getElementById('modal-vincular-dxf');
+  if (m) m.style.display = 'none';
+  dxfState = { report: null, mapping: null };
+}
+
+async function enviarDxfPreview() {
+  const file = document.getElementById('dxf-file').files[0];
+  if (!file) { alert('Selecione um arquivo .dxf'); return; }
+  const lt = state.loteamentoAtual;
+  if (!lt) { alert('Loteamento não carregado'); return; }
+  const fd = new FormData();
+  fd.append('arquivo', file);
+  try {
+    const r = await fetch(`/api/loteamentos/${lt.id}/importar-dxf`, {
+      method: 'POST',
+      headers: { 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+      body: fd,
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      alert(`Falha: ${e.erro || r.status} ${e.detalhe || ''}`);
+      return;
+    }
+    const { report, mapping } = await r.json();
+    dxfState = { report, mapping };
+    renderDxfPreview(mapping);
+  } catch (err) {
+    alert('Erro: ' + (err.message || err));
+  }
+}
+
+function renderDxfPreview(mapping) {
+  const area = document.getElementById('dxf-preview-area');
+  const esc = (s) => String(s || '').replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]));
+  const linhasQ = mapping.quadras.map(q => `
+    <li>${q.match ? '✅' : '⚠️'} Quadra <b>${esc(q.dxf.label)}</b> (${q.dxf.area_m2} m²)
+      → ${q.match ? esc(q.match.nome) : '<em>' + esc(q.motivo_unmapped || 'sem match') + '</em>'}
+    </li>`).join('');
+  const linhasL = mapping.lotes.map(l => `
+    <li>${l.match ? '✅' : '⚠️'} Lote <b>${esc(l.dxf.label)}</b> da quadra ${esc(l.dxf.quadra_label || '?')}
+      → ${l.match ? `Lote ${esc(l.match.numero_lote)}` : '<em>' + esc(l.motivo_unmapped || 'sem match') + '</em>'}
+    </li>`).join('');
+  area.innerHTML = `
+    <h4 style="margin:8px 0 4px;">Quadras (${mapping.relatorio.quadras_matched}/${mapping.relatorio.quadras_matched + mapping.relatorio.quadras_unmapped} mapeadas)</h4>
+    <ul style="margin:0; padding-left:18px;">${linhasQ}</ul>
+    <h4 style="margin:10px 0 4px;">Lotes (${mapping.relatorio.lotes_matched}/${mapping.relatorio.lotes_matched + mapping.relatorio.lotes_unmapped} mapeados)</h4>
+    <ul style="margin:0; padding-left:18px;">${linhasL}</ul>`;
+  document.getElementById('btn-dxf-confirmar').style.display =
+    (mapping.relatorio.quadras_matched + mapping.relatorio.lotes_matched) > 0 ? 'inline-block' : 'none';
+}
+
+function dxfPolyParaGeojson(coords) {
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  const ring = (first[0] === last[0] && first[1] === last[1]) ? coords : [...coords, first];
+  return JSON.stringify({ type: 'Polygon', coordinates: [ring] });
+}
+
+async function confirmarDxf() {
+  if (!dxfState.mapping) { alert('Faça o preview primeiro'); return; }
+  const matches = [];
+  for (const q of dxfState.mapping.quadras) {
+    if (q.match) matches.push({ tipo: 'quadra', cadastro_id: q.match.id, geojson: dxfPolyParaGeojson(q.dxf.coords) });
+  }
+  for (const l of dxfState.mapping.lotes) {
+    if (l.match) matches.push({ tipo: 'lote', cadastro_id: l.match.id, geojson: dxfPolyParaGeojson(l.dxf.coords) });
+  }
+  const lt = state.loteamentoAtual;
+  try {
+    const r = await fetch(`/api/loteamentos/${lt.id}/importar-dxf/confirmar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CEO-Token': localStorage.getItem('ceo_token') || '',
+      },
+      body: JSON.stringify({ matches }),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      alert(`Falha: ${e.erro || r.status}`);
+      return;
+    }
+    const out = await r.json();
+    alert(`Gravado: ${out.quadras_atualizadas} quadras + ${out.lotes_atualizados} lotes`);
+    fecharModalVincularDxf();
+  } catch (err) {
+    alert('Erro: ' + (err.message || err));
+  }
+}
 </script>
 </body>
 </html>
