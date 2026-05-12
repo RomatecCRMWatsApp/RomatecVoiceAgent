@@ -105,9 +105,10 @@ export async function secaoPlantaQuadra(
       if (y > maxY) maxY = y;
     }
   }
-  // Pequeno padding (15m em UTM) ao redor pra deixar espaço pras vizinhas
-  // aparecerem parcialmente ao redor.
-  minX -= 15; minY -= 15; maxX += 15; maxY += 15;
+  // v3.7.3 — Padding pequeno (8m em UTM) — só pra dar margem visual sem
+  // diminuir muito o zoom da Q.15. Quadras vizinhas aparecem parcialmente
+  // se tocam essa borda; senão são cortadas pelo box do PDF.
+  minX -= 8; minY -= 8; maxX += 8; maxY += 8;
   const rangeX = Math.max(maxX - minX, 0.001);
   const rangeY = Math.max(maxY - minY, 0.001);
 
@@ -141,12 +142,11 @@ export async function secaoPlantaQuadra(
      .text(`PLANTA DA QUADRA — ${fmtTituloQuadra(tituloQuadra)}`, 40, cy);
   cy += 14;
 
-  // v3.6.4 — box mais estreito centralizado pra sobrar margem horizontal
-  // pras ruas laterais (texto rotacionado nos lados Leste/Oeste). Largura
-  // antes era 515 (página A4 = 595pt), agora 380 → 107pt de margem cada lado.
-  const padding = 60;
-  const boxW = 380, boxH = 500;
-  const boxX = (595 - boxW) / 2;
+  // v3.7.3 — Box maior e centralizado na página A4 (595pt × 842pt).
+  // Padding interno reduzido pra dar mais zoom à Q.15.
+  const padding = 35;
+  const boxW = 480, boxH = 560;
+  const boxX = (595 - boxW) / 2; // centralizado
   const boxY = cy;
   doc.rect(boxX, boxY, boxW, boxH).strokeColor('#ddd').lineWidth(0.5).stroke();
 
@@ -368,36 +368,43 @@ export async function secaoPlantaQuadra(
     doc.restore();
   }
 
-  // v3.6.3 — Nomes das ruas adjacentes desenhados nas 4 bordas do box.
-  // Usa o `ladoMaisFreq` calculado mais acima (antes dos eixos).
+  // v3.6.3 — Nomes das ruas adjacentes desenhados nas 4 bordas.
+  // v3.7.3 — Posições agora relativas ao bbox PROJETADO da Q.15 (não fixas no
+  // box do PDF). Assim os nomes ficam alinhados ao eixo de cada rua mesmo
+  // quando a Q.15 não está centralizada no box.
   const ruasInfo = data.ruas;
   if (ruasInfo.length > 0) {
-    // v3.6.7 — REVERTIDO: texto sempre na orientação natural da página.
-    // v3.6.6 tentou aplicar azimute da quadra mas ficou difícil de ler.
-    // N/S: horizontal no topo/baixo do box. L/O: vertical (-90°) nas margens
-    // externas do box. Letter-spacing leve.
-    const cyM = boxY + boxH / 2;
+    // BBox projetada da Q.15
+    const projXs = quadraRing.map(p => toX(p[0]));
+    const projYs = quadraRing.map(p => toY(p[1]));
+    const qPdfMinX = Math.min(...projXs);
+    const qPdfMaxX = Math.max(...projXs);
+    const qPdfMinY = Math.min(...projYs);
+    const qPdfMaxY = Math.max(...projYs);
+    const qPdfCx = (qPdfMinX + qPdfMaxX) / 2;
+    const qPdfCy = (qPdfMinY + qPdfMaxY) / 2;
     for (const r of ruasInfo) {
       const lado = ladoMaisFreq.get(r.id);
       if (!lado) continue;
       doc.fontSize(8).fillColor('#0f172a').font('Helvetica-Bold');
       const nome = r.nome.toUpperCase();
       if (lado === 'N') {
-        doc.text(nome, boxX + 40, boxY + 6,
-          { width: boxW - 80, align: 'center', lineBreak: false, characterSpacing: 2 });
+        // Acima da Q.15
+        doc.text(nome, qPdfCx - 100, qPdfMinY - 18,
+          { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
       } else if (lado === 'S') {
-        doc.text(nome, boxX + 40, boxY + boxH - 14,
-          { width: boxW - 80, align: 'center', lineBreak: false, characterSpacing: 2 });
+        doc.text(nome, qPdfCx - 100, qPdfMaxY + 8,
+          { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
       } else if (lado === 'L') {
         doc.save();
-        doc.translate(boxX + boxW + 20, cyM);
+        doc.translate(qPdfMaxX + 18, qPdfCy);
         doc.rotate(-90);
         doc.text(nome, -100, -4,
           { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
         doc.restore();
       } else {
         doc.save();
-        doc.translate(boxX - 14, cyM);
+        doc.translate(qPdfMinX - 14, qPdfCy);
         doc.rotate(-90);
         doc.text(nome, -100, -4,
           { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
@@ -417,9 +424,15 @@ export async function secaoPlantaQuadra(
   doc.moveTo(nX - 3, nY - 8).lineTo(nX, nY - 12).lineTo(nX + 3, nY - 8).stroke();
   doc.restore();
 
-  doc.fontSize(8).fillColor('#666').font('Helvetica-Oblique')
-     .text(`Lote-objeto da demarcação destacado em amarelo. ${vizinhos.length} lotes vizinhos.` +
-       (data.ruas.length ? ` Ruas adjacentes: ${data.ruas.map(r => r.nome).join(' · ')}.` : ''),
-       40, boxY + boxH + 8, { width: 515, align: 'center' });
+  // v3.7.3 — Legenda inferior simplificada: só 2 linhas curtas no rodapé,
+  // sem repetir os nomes das ruas (que já aparecem na planta).
+  doc.fontSize(7).fillColor('#666').font('Helvetica-Oblique')
+     .text(`Lote-objeto destacado em amarelo · ${vizinhos.length} lotes vizinhos · ${data.ruas.length} ruas adjacentes`,
+       40, boxY + boxH + 6, { width: 515, align: 'center', lineBreak: false });
+  if (quadrasVizinhasProx.length > 0) {
+    doc.fontSize(6.5).fillColor('#a21caf').font('Helvetica')
+       .text(`Quadras adjacentes: ${quadrasVizinhasProx.map(qv => fmtTituloQuadra(qv.info.nome)).join(' · ')}`,
+         40, boxY + boxH + 16, { width: 515, align: 'center', lineBreak: false });
+  }
   return true;
 }
