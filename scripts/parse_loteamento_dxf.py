@@ -28,11 +28,13 @@ Saída: JSON em stdout com schema:
 """
 import json
 import sys
+import time
 from pathlib import Path
 
 try:
     import ezdxf
     from shapely.geometry import Polygon, Point
+    from shapely.strtree import STRtree
 except ImportError as e:
     print(json.dumps({
         'erro': 'dependencia_ausente',
@@ -40,6 +42,11 @@ except ImportError as e:
         'pip': 'pip install ezdxf shapely',
     }), file=sys.stderr)
     sys.exit(2)
+
+
+def log_diag(msg: str) -> None:
+    """Diagnóstico no stderr (não compete com stdout do JSON de resposta)."""
+    print(f'[parse-dxf] {msg}', file=sys.stderr, flush=True)
 
 # Layers reconhecidos por convenção (case-insensitive, contains)
 PADROES_QUADRA = ('quadra', 'block', 'qd')
@@ -74,25 +81,60 @@ def coletar_textos(msp) -> list:
     return out
 
 
-def label_proximo(centroide, textos: list, categoria: str = '') -> str:
-    """Texto mais próximo do centroide.
+class GridIndexTextos:
+    """Index espacial simples (grid-bucket) pra acelerar busca do texto mais
+    próximo. Substitui o O(N) linear original — pra DXFs reais com milhares
+    de TEXT/MTEXT isso é a diferença entre 60s e <1s.
 
-    Se `categoria` ('quadra'|'lote') é dado, filtra textos pelo layer
-    compatível — evita colar label de quadra em lote (e vice-versa)
-    quando os centroides coincidem.
+    Mantém 2 grids: um filtrado por layers de quadra, outro por lotes.
+    Fallback pro grid global quando o filtrado está vazio na vizinhança.
     """
-    if not textos:
+
+    def __init__(self, textos: list, cell_size: float = 30.0):
+        self.cell = cell_size
+        self.global_buckets = {}
+        self.quadra_buckets = {}
+        self.lote_buckets = {}
+        self.todos = textos
+        for t in textos:
+            key = (int(t['x'] // cell_size), int(t['y'] // cell_size))
+            self.global_buckets.setdefault(key, []).append(t)
+            if eh_layer_quadra(t['layer']):
+                self.quadra_buckets.setdefault(key, []).append(t)
+            elif eh_layer_lote(t['layer']):
+                self.lote_buckets.setdefault(key, []).append(t)
+
+    def nearest(self, x: float, y: float, categoria: str = '') -> str:
+        if categoria == 'quadra':
+            buckets = self.quadra_buckets
+        elif categoria == 'lote':
+            buckets = self.lote_buckets
+        else:
+            buckets = self.global_buckets
+
+        # Procura em raio crescente (1 célula, depois 2, depois 3, depois fallback global)
+        cx = int(x // self.cell)
+        cy = int(y // self.cell)
+        for r in (1, 2, 3):
+            candidatos = []
+            for dx in range(-r, r + 1):
+                for dy in range(-r, r + 1):
+                    candidatos.extend(buckets.get((cx + dx, cy + dy), []))
+            if candidatos:
+                melhor = min(candidatos, key=lambda t: (t['x'] - x) ** 2 + (t['y'] - y) ** 2)
+                return melhor['texto']
+
+        # Fallback: se o grid filtrado por categoria não tem nada perto, usa global
+        if buckets is not self.global_buckets:
+            return self._nearest_no_grid(x, y, self.todos)
         return ''
-    filtrados = textos
-    if categoria == 'quadra':
-        filtrados = [t for t in textos if eh_layer_quadra(t['layer'])]
-    elif categoria == 'lote':
-        filtrados = [t for t in textos if eh_layer_lote(t['layer'])]
-    if not filtrados:
-        filtrados = textos
-    cx, cy = centroide
-    melhor = min(filtrados, key=lambda t: (t['x'] - cx) ** 2 + (t['y'] - cy) ** 2)
-    return melhor['texto']
+
+    @staticmethod
+    def _nearest_no_grid(x: float, y: float, textos: list) -> str:
+        if not textos:
+            return ''
+        melhor = min(textos, key=lambda t: (t['x'] - x) ** 2 + (t['y'] - y) ** 2)
+        return melhor['texto']
 
 
 def extrair_poligonos(msp) -> list:
@@ -130,18 +172,31 @@ def main(argv: list) -> int:
         print(json.dumps({'erro': 'arquivo_nao_existe', 'path': str(dxf_file)}), file=sys.stderr)
         return 66
 
+    t_inicio = time.time()
     try:
         doc = ezdxf.readfile(str(dxf_file))
     except ezdxf.DXFStructureError as e:
         print(json.dumps({'erro': 'dxf_invalido', 'detalhe': str(e)}), file=sys.stderr)
         return 65
+    log_diag(f'DXF lido em {time.time() - t_inicio:.2f}s')
 
     msp = doc.modelspace()
+
+    t = time.time()
     polys = extrair_poligonos(msp)
+    log_diag(f'{len(polys)} poligonos extraidos em {time.time() - t:.2f}s')
+
+    t = time.time()
     textos = coletar_textos(msp)
+    log_diag(f'{len(textos)} textos coletados em {time.time() - t:.2f}s')
+
+    t = time.time()
+    idx_textos = GridIndexTextos(textos)
+    log_diag(f'index espacial montado em {time.time() - t:.2f}s')
 
     quadras_raw = []
     lotes_raw = []
+    t = time.time()
     for p in polys:
         if eh_layer_quadra(p['layer']):
             categoria = 'quadra'
@@ -151,22 +206,38 @@ def main(argv: list) -> int:
             categoria = 'quadra'
         else:
             categoria = 'lote'
-        label = label_proximo(p['centroide'], textos, categoria)
+        cx, cy = p['centroide']
+        label = idx_textos.nearest(cx, cy, categoria)
         if categoria == 'quadra':
             quadras_raw.append({**p, 'label': label})
         else:
             lotes_raw.append({**p, 'label': label})
+    log_diag(f'labels pareados ({len(quadras_raw)}Q + {len(lotes_raw)}L) em {time.time() - t:.2f}s')
 
-    # Para cada lote, inferir quadra-pai via ponto-em-polígono
-    quadras_shapely = [(q, q['shapely']) for q in quadras_raw]
-    for l in lotes_raw:
-        cx, cy = l['centroide']
-        pt = Point(cx, cy)
-        l['quadra_label'] = ''
-        for q, shp in quadras_shapely:
-            if shp.contains(pt) or shp.touches(pt):
-                l['quadra_label'] = q['label']
-                break
+    # Para cada lote, inferir quadra-pai via ponto-em-polígono usando STRtree
+    # (R-tree espacial — query rápida mesmo com 1000+ quadras).
+    t = time.time()
+    if quadras_raw:
+        quadra_shapes = [q['shapely'] for q in quadras_raw]
+        tree = STRtree(quadra_shapes)
+        # Mapa id(shape) -> quadra_raw, pra recuperar o label depois da query
+        idx_para_quadra = {i: q for i, q in enumerate(quadras_raw)}
+        for l in lotes_raw:
+            cx, cy = l['centroide']
+            pt = Point(cx, cy)
+            l['quadra_label'] = ''
+            # shapely 2.x STRtree.query retorna ndarray de índices
+            candidatos_idx = tree.query(pt)
+            for idx in candidatos_idx:
+                idx_int = int(idx)
+                q = idx_para_quadra[idx_int]
+                if q['shapely'].contains(pt) or q['shapely'].touches(pt):
+                    l['quadra_label'] = q['label']
+                    break
+    else:
+        for l in lotes_raw:
+            l['quadra_label'] = ''
+    log_diag(f'quadra-pai dos lotes inferida em {time.time() - t:.2f}s')
 
     def serializa(item, prefix, idx):
         base = {
