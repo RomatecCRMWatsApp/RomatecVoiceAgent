@@ -17698,9 +17698,11 @@ function renderGaleriaCard(f) {
         <div style="opacity:.6;font-size:11px;margin-top:4px;">${dataFmt}</div>
         <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
           ${isPend
-            ? `<button onclick="baixarPendente(${localId})" style="font-size:11px;padding:4px 8px;">💾 Baixar</button>
+            ? `<button onclick="verFotoPendente(${localId})" style="font-size:11px;padding:4px 8px;">👁 Ver</button>
+               <button onclick="baixarPendente(${localId})" style="font-size:11px;padding:4px 8px;">💾 Baixar</button>
                <button onclick="removerPendente(${localId})" style="font-size:11px;padding:4px 8px;color:#ff5577;">🗑</button>`
-            : `<button onclick="enviarFotoGaleria(${f.id}, 'whatsapp')" style="font-size:11px;padding:4px 8px;">📱 WA</button>
+            : `<button onclick="verFotoServer(${f.id})" style="font-size:11px;padding:4px 8px;">👁 Ver</button>
+               <button onclick="enviarFotoGaleria(${f.id}, 'whatsapp')" style="font-size:11px;padding:4px 8px;">📱 WA</button>
                <button onclick="enviarFotoGaleria(${f.id}, 'telegram')" style="font-size:11px;padding:4px 8px;">✈️ TG</button>
                <button onclick="baixarFotoServer(${f.id})" style="font-size:11px;padding:4px 8px;">💾</button>
                <button onclick="apagarFotoGaleria(${f.id})" style="font-size:11px;padding:4px 8px;color:#ff5577;">🗑</button>`
@@ -17709,6 +17711,61 @@ function renderGaleriaCard(f) {
       </div>
     </div>
   `;
+}
+
+// v3.9.1 — Lightbox fullscreen pra visualizar foto em tamanho grande.
+function abrirLightboxFoto(src, meta) {
+  // Remove qualquer lightbox anterior
+  const existente = document.getElementById('galeria-lightbox');
+  if (existente) existente.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'galeria-lightbox';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out;';
+  overlay.innerHTML = `
+    <button style="position:absolute;top:18px;right:18px;background:rgba(255,255,255,.1);color:#fff;border:none;border-radius:50%;width:42px;height:42px;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:1;">×</button>
+    <div style="position:absolute;top:18px;left:18px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;padding:8px 14px;border-radius:6px;max-width:60%;line-height:1.5;">${meta || ''}</div>
+    <img src="${src}" style="max-width:96vw;max-height:92vh;object-fit:contain;cursor:default;" onclick="event.stopPropagation();">
+    <a download="foto-${Date.now()}.jpg" href="${src}" style="position:absolute;bottom:18px;right:18px;background:#22c55e;color:#000;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:bold;font-size:13px;">💾 Baixar</a>
+  `;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay || e.target.tagName === 'BUTTON') overlay.remove(); });
+  document.body.appendChild(overlay);
+  // Esc fecha
+  const escListener = (ev) => { if (ev.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escListener); } };
+  document.addEventListener('keydown', escListener);
+}
+
+async function verFotoServer(id) {
+  // Pega metadados via lista (já em memória) ou refetch
+  let foto = null;
+  try {
+    const r = await fetch('/api/galeria?limit=200');
+    const data = await r.json();
+    foto = (data.fotos || []).find(x => x.id === id);
+  } catch (_) {}
+  const meta = foto ? buildLightboxMeta(foto) : '';
+  abrirLightboxFoto(`/api/galeria/${id}/arquivo`, meta);
+}
+
+async function verFotoPendente(localId) {
+  const pendentes = await listarPendentesLocal();
+  const p = pendentes.find(x => x.localId === localId);
+  if (!p) return;
+  const meta = buildLightboxMeta(p) + ' <span style="background:#f59e0b;color:#000;padding:2px 6px;border-radius:3px;font-weight:bold;">📵 PENDENTE</span>';
+  abrirLightboxFoto(`data:${p.mime || 'image/jpeg'};base64,${p.arquivo_b64}`, meta);
+}
+
+function buildLightboxMeta(f) {
+  const esc = (s) => String(s || '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+  const dataFmt = f.capturada_em ? new Date(f.capturada_em).toLocaleString('pt-BR') : (f.criada_em ? new Date(f.criada_em).toLocaleString('pt-BR') : '');
+  const gps = (f.lat != null && f.lng != null) ? `📍 ${Number(f.lat).toFixed(6)}, ${Number(f.lng).toFixed(6)}` : '';
+  const linhas = [
+    f.legenda ? `<strong>${esc(f.legenda)}</strong>` : '',
+    gps,
+    esc(f.endereco_reverso || ''),
+    `🕒 ${dataFmt}`,
+  ].filter(Boolean);
+  return linhas.join('<br>');
 }
 
 async function baixarPendente(localId) {
