@@ -17427,7 +17427,135 @@ async function confirmarDxf() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // v3.8.0 — Galeria de Fotos georreferenciadas (MVP)
+// v3.8.1 — Modo OFFLINE: fila local em IndexedDB. Fotos tiradas sem internet
+// ficam em "pendentes" e sobem sozinhas quando voltar online (auto-sync via
+// window.addEventListener('online')). Endereço reverso degradado quando sem
+// rede (salva sem endereço, tenta resolver na hora do sync).
 // ─────────────────────────────────────────────────────────────────────────────
+
+const GALERIA_DB_NAME = 'romatec-galeria';
+const GALERIA_DB_VERSION = 1;
+const GALERIA_STORE = 'pendentes';
+
+function galeriaDb() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(GALERIA_DB_NAME, GALERIA_DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(GALERIA_STORE)) {
+        db.createObjectStore(GALERIA_STORE, { keyPath: 'localId', autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function salvarPendenteLocal(foto) {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(GALERIA_STORE, 'readwrite');
+    const store = tx.objectStore(GALERIA_STORE);
+    const r = store.add({ ...foto, criada_em: new Date().toISOString() });
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function listarPendentesLocal() {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(GALERIA_STORE, 'readonly');
+    const r = tx.objectStore(GALERIA_STORE).getAll();
+    r.onsuccess = () => res(r.result || []);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function removerPendenteLocal(localId) {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(GALERIA_STORE, 'readwrite');
+    const r = tx.objectStore(GALERIA_STORE).delete(localId);
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
+  });
+}
+
+// Tenta fazer upload — se falhar OU se offline, salva em IndexedDB.
+async function uploadFotoOuFila(payload) {
+  if (!navigator.onLine) {
+    await salvarPendenteLocal(payload);
+    return { ok: true, offline: true };
+  }
+  try {
+    const r = await fetch('/api/galeria', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      // Servidor rejeitou — salva local pra sync depois
+      await salvarPendenteLocal(payload);
+      const e = await r.json().catch(() => ({}));
+      return { ok: false, offline: false, queued: true, error: e.error || r.status };
+    }
+    const data = await r.json();
+    return { ok: true, id: data.id };
+  } catch (err) {
+    // Erro de rede — salva local
+    await salvarPendenteLocal(payload);
+    return { ok: true, offline: true };
+  }
+}
+
+// Sincroniza pendentes: tenta enviar cada um, remove os que subirem.
+async function sincronizarPendentes() {
+  if (!navigator.onLine) return { enviados: 0, restantes: -1, motivo: 'offline' };
+  const pendentes = await listarPendentesLocal();
+  let enviados = 0;
+  let falhas = 0;
+  for (const p of pendentes) {
+    try {
+      const { localId, ...payload } = p;
+      // Se faltava endereço, tenta resolver agora que tem internet
+      if (!payload.endereco_reverso && payload.lat != null && payload.lng != null) {
+        try {
+          const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${payload.lat}&lon=${payload.lng}&zoom=18`,
+            { headers: { 'Accept-Language': 'pt-BR' } });
+          const j = await r.json();
+          if (j.display_name) payload.endereco_reverso = j.display_name;
+        } catch (_) {}
+      }
+      const r = await fetch('/api/galeria', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+        body: JSON.stringify(payload),
+      });
+      if (r.ok) {
+        await removerPendenteLocal(localId);
+        enviados++;
+      } else {
+        falhas++;
+      }
+    } catch (e) {
+      falhas++;
+    }
+  }
+  return { enviados, restantes: pendentes.length - enviados, falhas };
+}
+
+// Auto-sync quando voltar online
+window.addEventListener('online', async () => {
+  console.log('[galeria] back online, sincronizando pendentes...');
+  const r = await sincronizarPendentes();
+  if (r.enviados > 0) {
+    console.log(`[galeria] ${r.enviados} pendentes sincronizados`);
+    // Se a aba galeria estiver aberta, recarrega
+    if (state.currentTab === 'galeria') recarregarGaleria();
+  }
+});
+
 async function renderGaleria() {
   const v = document.getElementById('view-galeria');
   if (!v) return;
@@ -17435,10 +17563,12 @@ async function renderGaleria() {
     <div style="padding:16px;">
       <h2 style="margin-top:0;">📷 Galeria de Fotos</h2>
       <p style="opacity:.75;font-size:13px;margin:4px 0 12px;">Fotos com carimbo de GPS + endereço, reutilizáveis em laudos / VTO / propostas. Envio direto via WhatsApp/Telegram.</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
         <input type="file" id="galeria-input" accept="image/*" capture="environment" style="display:none;">
         <button class="btn-primary" onclick="document.getElementById('galeria-input').click()">📷 Tirar Foto</button>
         <button class="btn-secondary" onclick="recarregarGaleria()">🔄 Recarregar</button>
+        <button class="btn-secondary" onclick="syncManual()">☁️ Sincronizar pendentes</button>
+        <span id="galeria-net" style="font-size:12px;padding:2px 8px;border-radius:4px;"></span>
       </div>
       <div id="galeria-status" style="font-size:12px;color:#888;margin-bottom:8px;"></div>
       <div id="galeria-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;"></div>
@@ -17451,42 +17581,110 @@ async function renderGaleria() {
 async function recarregarGaleria() {
   const grid = document.getElementById('galeria-grid');
   if (!grid) return;
-  grid.innerHTML = '<div style="opacity:.6;">Carregando…</div>';
-  try {
-    const r = await fetch('/api/galeria?limit=100');
-    const data = await r.json();
-    const fotos = data.fotos || [];
-    if (fotos.length === 0) {
-      grid.innerHTML = '<div style="opacity:.6;grid-column:1/-1;">Nenhuma foto ainda. Clique em 📷 Tirar Foto.</div>';
-      return;
+  // Indicador de rede
+  const netEl = document.getElementById('galeria-net');
+  if (netEl) {
+    if (navigator.onLine) {
+      netEl.textContent = '🟢 Online';
+      netEl.style.background = 'rgba(34,197,94,.15)';
+      netEl.style.color = '#22c55e';
+    } else {
+      netEl.textContent = '🔴 Offline — fotos ficam em fila local';
+      netEl.style.background = 'rgba(239,68,68,.15)';
+      netEl.style.color = '#ef4444';
     }
-    grid.innerHTML = fotos.map(f => renderGaleriaCard(f)).join('');
-  } catch (err) {
-    grid.innerHTML = '<div style="color:#ff5577;">Erro: ' + (err.message || err) + '</div>';
   }
+  grid.innerHTML = '<div style="opacity:.6;">Carregando…</div>';
+  // Carrega pendentes locais sempre
+  const pendentes = await listarPendentesLocal().catch(() => []);
+  let fotosServer = [];
+  if (navigator.onLine) {
+    try {
+      const r = await fetch('/api/galeria?limit=100');
+      const data = await r.json();
+      fotosServer = data.fotos || [];
+    } catch (err) {
+      console.warn('[galeria] falha ao listar do server:', err);
+    }
+  }
+  if (pendentes.length === 0 && fotosServer.length === 0) {
+    grid.innerHTML = '<div style="opacity:.6;grid-column:1/-1;">Nenhuma foto ainda. Clique em 📷 Tirar Foto.</div>';
+    return;
+  }
+  const htmlPendentes = pendentes.map(p => renderGaleriaCard({
+    ...p, id: 'local-' + p.localId, _pendente: true,
+  })).join('');
+  const htmlServer = fotosServer.map(f => renderGaleriaCard(f)).join('');
+  grid.innerHTML = htmlPendentes + htmlServer;
+}
+
+async function syncManual() {
+  const status = document.getElementById('galeria-status');
+  const setStatus = (s) => { if (status) status.textContent = s; };
+  if (!navigator.onLine) { setStatus('🔴 Sem internet, não posso sincronizar agora'); return; }
+  setStatus('☁️ Sincronizando...');
+  const r = await sincronizarPendentes();
+  setStatus(`✅ ${r.enviados} enviados${r.restantes > 0 ? ', ' + r.restantes + ' falharam' : ''}`);
+  setTimeout(() => setStatus(''), 4000);
+  recarregarGaleria();
 }
 
 function renderGaleriaCard(f) {
   const esc = (s) => String(s || '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
-  const dataFmt = f.capturada_em ? new Date(f.capturada_em).toLocaleString('pt-BR') : new Date(f.criada_em).toLocaleString('pt-BR');
-  const gps = (f.lat != null && f.lng != null) ? `${f.lat.toFixed(5)}, ${f.lng.toFixed(5)}` : '(sem GPS)';
+  const dataFmt = f.capturada_em ? new Date(f.capturada_em).toLocaleString('pt-BR') : (f.criada_em ? new Date(f.criada_em).toLocaleString('pt-BR') : '');
+  const gps = (f.lat != null && f.lng != null) ? `${Number(f.lat).toFixed(5)}, ${Number(f.lng).toFixed(5)}` : '(sem GPS)';
   const end = esc(f.endereco_reverso || '');
+  const isPend = f._pendente === true;
+  // Source da imagem: pendentes locais têm base64; do servidor, usa /api/galeria/:id/arquivo
+  const imgSrc = isPend
+    ? `data:${f.mime || 'image/jpeg'};base64,${f.arquivo_b64}`
+    : `/api/galeria/${f.id}/arquivo`;
+  const localId = isPend ? f.localId : null;
   return `
-    <div style="border:1px solid var(--border-color,#333);border-radius:6px;overflow:hidden;background:var(--bg-secondary,#1a1a1a);">
-      <img src="/api/galeria/${f.id}/arquivo" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#000;" loading="lazy">
+    <div style="border:1px solid ${isPend ? '#f59e0b' : 'var(--border-color,#333)'};border-radius:6px;overflow:hidden;background:var(--bg-secondary,#1a1a1a);position:relative;">
+      ${isPend ? '<div style="position:absolute;top:6px;right:6px;background:#f59e0b;color:#000;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:3px;z-index:1;">📵 PENDENTE</div>' : ''}
+      <img src="${imgSrc}" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#000;" loading="lazy">
       <div style="padding:8px;font-size:12px;">
-        <div style="font-weight:bold;margin-bottom:4px;">${esc(f.legenda || `Foto #${f.id}`)}</div>
+        <div style="font-weight:bold;margin-bottom:4px;">${esc(f.legenda || (isPend ? '(aguardando sync)' : `Foto #${f.id}`))}</div>
         <div style="opacity:.7;">📍 ${gps}</div>
         ${end ? `<div style="opacity:.7;font-size:11px;">${end}</div>` : ''}
         <div style="opacity:.6;font-size:11px;margin-top:4px;">${dataFmt}</div>
         <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
-          <button onclick="enviarFotoGaleria(${f.id}, 'whatsapp')" style="font-size:11px;padding:4px 8px;">📱 WA</button>
-          <button onclick="enviarFotoGaleria(${f.id}, 'telegram')" style="font-size:11px;padding:4px 8px;">✈️ TG</button>
-          <button onclick="apagarFotoGaleria(${f.id})" style="font-size:11px;padding:4px 8px;color:#ff5577;">🗑</button>
+          ${isPend
+            ? `<button onclick="baixarPendente(${localId})" style="font-size:11px;padding:4px 8px;">💾 Baixar</button>
+               <button onclick="removerPendente(${localId})" style="font-size:11px;padding:4px 8px;color:#ff5577;">🗑</button>`
+            : `<button onclick="enviarFotoGaleria(${f.id}, 'whatsapp')" style="font-size:11px;padding:4px 8px;">📱 WA</button>
+               <button onclick="enviarFotoGaleria(${f.id}, 'telegram')" style="font-size:11px;padding:4px 8px;">✈️ TG</button>
+               <button onclick="baixarFotoServer(${f.id})" style="font-size:11px;padding:4px 8px;">💾</button>
+               <button onclick="apagarFotoGaleria(${f.id})" style="font-size:11px;padding:4px 8px;color:#ff5577;">🗑</button>`
+          }
         </div>
       </div>
     </div>
   `;
+}
+
+async function baixarPendente(localId) {
+  const pendentes = await listarPendentesLocal();
+  const p = pendentes.find(x => x.localId === localId);
+  if (!p) return;
+  baixarBlob(`data:${p.mime || 'image/jpeg'};base64,${p.arquivo_b64}`, `foto-pendente-${localId}.jpg`);
+}
+
+function baixarFotoServer(id) {
+  baixarBlob(`/api/galeria/${id}/arquivo`, `foto-${id}.jpg`);
+}
+
+function baixarBlob(url, filename) {
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+async function removerPendente(localId) {
+  if (!confirm('Apagar essa foto pendente do dispositivo? (Ela ainda não foi enviada ao servidor)')) return;
+  await removerPendenteLocal(localId);
+  recarregarGaleria();
 }
 
 async function enviarFotoGaleria(id, canal) {
@@ -17585,33 +17783,38 @@ async function onGaleriaFileSelected(ev) {
     ctx.fillText(line, padding, canvas.height - boxH + padding + i * lineHeight);
   });
 
-  setStatus('☁️ Enviando...');
+  // v3.8.1 — Salva também na galeria do dispositivo (download da foto carimbada)
+  // ANTES do upload, pra garantir que mesmo offline o user tem o arquivo.
   const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-  const b64 = dataUrl.split(',')[1];
+  const fileName = `romatec-${new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)}.jpg`;
   try {
-    const r = await fetch('/api/galeria', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
-      body: JSON.stringify({
-        mime: 'image/jpeg',
-        arquivo_b64: b64,
-        user_nome: userName,
-        lat, lng, altitude_m: alt, accuracy_m: acc,
-        endereco_reverso: endereco,
-        capturada_em: new Date().toISOString().slice(0, 19).replace('T', ' '),
-      }),
-    });
-    if (!r.ok) {
-      const e = await r.json().catch(() => ({}));
-      setStatus('❌ Falha: ' + (e.error || r.status));
-      return;
+    if (state.galeriaSalvarLocal !== false) {
+      baixarBlob(dataUrl, fileName);
     }
-    setStatus('✅ Foto adicionada!');
-    setTimeout(() => setStatus(''), 3000);
-    recarregarGaleria();
-  } catch (err) {
-    setStatus('❌ Erro: ' + (err.message || err));
+  } catch (_) {}
+
+  setStatus(navigator.onLine ? '☁️ Enviando...' : '📵 Sem internet — salvando local...');
+  const b64 = dataUrl.split(',')[1];
+  const payload = {
+    mime: 'image/jpeg',
+    arquivo_b64: b64,
+    user_nome: userName,
+    lat, lng, altitude_m: alt, accuracy_m: acc,
+    endereco_reverso: endereco,
+    capturada_em: new Date().toISOString().slice(0, 19).replace('T', ' '),
+  };
+  const result = await uploadFotoOuFila(payload);
+  if (result.offline) {
+    setStatus('📵 Foto salva localmente (sem internet). Vai subir sozinha quando voltar online.');
+  } else if (result.queued) {
+    setStatus('⚠️ Server rejeitou. Salva local pra tentar de novo: ' + result.error);
+  } else if (result.ok) {
+    setStatus('✅ Foto enviada!');
+  } else {
+    setStatus('❌ Falha desconhecida');
   }
+  setTimeout(() => setStatus(''), 4000);
+  recarregarGaleria();
 }
 
 function readImageFile(file) {
