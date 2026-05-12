@@ -2052,6 +2052,96 @@ app.post('/api/loteamentos/import', requireCeoToken, upload.single('arquivo'), a
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v3.6.0 — Planta da Quadra: upload DXF do loteamento + preview de mapeamento
+app.post(
+  '/api/loteamentos/:id/importar-dxf',
+  requireCeoToken,
+  upload.single('arquivo'),
+  async (req: Request, res: Response) => {
+    const loteamentoId = Number(req.params.id);
+    if (!req.file) {
+      res.status(400).json({ erro: 'arquivo ausente (multipart field: arquivo)' });
+      return;
+    }
+    const nome = (req.file.originalname || '').toLowerCase();
+    if (!nome.endsWith('.dxf')) {
+      res.status(400).json({ erro: 'apenas .dxf ASCII e suportado (exporte do AutoCAD como DXF)' });
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('node:fs/promises') as typeof import('node:fs/promises');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const os = require('node:os') as typeof import('node:os');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require('node:path') as typeof import('node:path');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const crypto = require('node:crypto') as typeof import('node:crypto');
+    const tmpPath = path.join(os.tmpdir(), `dxf-${crypto.randomUUID()}.dxf`);
+    try {
+      await fs.writeFile(tmpPath, req.file.buffer);
+      const parser = await import('./services/parserDxfPython');
+      const matcher = await import('./services/mapearDxfQuadras');
+      const m = await import('./integrations/loteamentos');
+
+      const report = await parser.parseLoteamentoDxf(tmpPath);
+      const quadrasCad = await m.listarQuadras(loteamentoId);
+      const lotesCadNested = await Promise.all(
+        quadrasCad.map(q =>
+          m.listarLotesPorQuadra(q.id).then(ls => ls.map(l => ({ ...l, quadra_id: q.id }))),
+        ),
+      );
+      const lotesCad = lotesCadNested.flat();
+      const mapping = matcher.mapearDxfQuadras(report, quadrasCad, lotesCad);
+      res.json({ report, mapping });
+    } catch (err) {
+      const parser = await import('./services/parserDxfPython');
+      if (err instanceof parser.DxfParseError) {
+        const status = err.codigo === 'dependencia_ausente' ? 503 : 400;
+        res.status(status).json({ erro: err.codigo, detalhe: err.detalhe });
+        return;
+      }
+      res.status(500).json({ erro: 'falha_interna', detalhe: (err as Error).message });
+    } finally {
+      await fs.unlink(tmpPath).catch(() => undefined);
+    }
+  },
+);
+
+// v3.6.0 — Planta da Quadra: confirma e persiste geometria
+app.post(
+  '/api/loteamentos/:id/importar-dxf/confirmar',
+  requireCeoToken,
+  async (req: Request, res: Response) => {
+    const body = req.body as {
+      matches?: Array<{
+        tipo: 'quadra' | 'lote';
+        cadastro_id: number;
+        geojson: string;
+      }>;
+    };
+    if (!Array.isArray(body?.matches)) {
+      res.status(400).json({ erro: 'matches[] ausente' });
+      return;
+    }
+    const m = await import('./integrations/loteamentos');
+    let quadras = 0, lotes = 0;
+    for (const item of body.matches) {
+      try {
+        const parsed = JSON.parse(item.geojson);
+        if (parsed?.type !== 'Polygon' || !Array.isArray(parsed.coordinates)) continue;
+      } catch { continue; }
+      if (item.tipo === 'quadra') {
+        await m.salvarGeometriaQuadra(item.cadastro_id, item.geojson);
+        quadras++;
+      } else if (item.tipo === 'lote') {
+        await m.salvarGeometriaLote(item.cadastro_id, item.geojson);
+        lotes++;
+      }
+    }
+    res.json({ quadras_atualizadas: quadras, lotes_atualizados: lotes });
+  },
+);
+
 // v1.99.27 — Fase 3: Croqui SVG / Upload + Fotos
 
 // GET croqui — gera SVG auto OU retorna o upload manual
