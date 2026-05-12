@@ -27,6 +27,7 @@ Saída: JSON em stdout com schema:
   }
 """
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -48,6 +49,50 @@ def log_diag(msg: str) -> None:
     """Diagnóstico no stderr (não compete com stdout do JSON de resposta)."""
     print(f'[parse-dxf] {msg}', file=sys.stderr, flush=True)
 
+
+# DXF/AutoCAD codifica chars não-ASCII como '\U+XXXX' literais nas strings de TEXT/MTEXT.
+# Ex: '\U+00C7AILANDIA' deveria ser 'ÇAILANDIA'. ezdxf retorna sem decodificar.
+_ESC_UNI = re.compile(r'\\U\+([0-9A-Fa-f]{4})')
+
+def decodificar_escape_unicode(s: str) -> str:
+    """Converte '\\U+00C7' em 'Ç'. Outros escapes (\\P, \\C1;, etc) ignorados."""
+    if not s:
+        return s
+    return _ESC_UNI.sub(lambda m: chr(int(m.group(1), 16)), s)
+
+
+# Polígonos válidos para virar QUADRA precisam estar nesse intervalo de área.
+# < 50 m² é ruído (pontos isolados, marcações)
+# > 50_000 m² (5 ha) é setor inteiro/loteamento/APP — não é quadra urbana
+AREA_MIN_QUADRA = 50.0
+AREA_MAX_QUADRA = 50_000.0
+
+# Labels que NUNCA são quadras reais (mesmo se o polígono passar no filtro de área)
+LABELS_BLACKLIST_QUADRA_FRAGS = (
+    'PRANCHA',
+    'RESIDENCIAL',
+    'EMPREENDIMENTO',
+    'MEIO-FIO',
+    'MEIO FIO',
+    'A.V.',
+    'AREA VERDE',
+    'ÁREA VERDE',
+    'A.P.M.',
+    'APM',
+    'APP',
+    'AREA DE PRESERVA',
+    'ÁREA DE PRESERVA',
+    'AREA DE USO',
+    'ÁREA DE USO',
+)
+
+
+def eh_label_de_quadra_real(label: str) -> bool:
+    if not label:
+        return False
+    L = label.upper()
+    return not any(frag in L for frag in LABELS_BLACKLIST_QUADRA_FRAGS)
+
 # Layers reconhecidos por convenção (case-insensitive, contains)
 PADROES_QUADRA = ('quadra', 'block', 'qd')
 PADROES_LOTE = ('lote', 'lot')
@@ -64,7 +109,7 @@ def eh_layer_lote(name: str) -> bool:
 
 
 def coletar_textos(msp) -> list:
-    """Retorna lista de textos com posição, layer e conteúdo."""
+    """Retorna lista de textos com posição, layer e conteúdo (Unicode decodificado)."""
     out = []
     for ent in msp.query('TEXT MTEXT'):
         try:
@@ -73,7 +118,7 @@ def coletar_textos(msp) -> list:
             out.append({
                 'x': float(insert.x),
                 'y': float(insert.y),
-                'texto': str(txt).strip(),
+                'texto': decodificar_escape_unicode(str(txt).strip()),
                 'layer': ent.dxf.layer,
             })
         except (AttributeError, ValueError):
@@ -196,6 +241,8 @@ def main(argv: list) -> int:
 
     quadras_raw = []
     lotes_raw = []
+    descartados_area = 0
+    descartados_blacklist = 0
     t = time.time()
     for p in polys:
         if eh_layer_quadra(p['layer']):
@@ -208,32 +255,51 @@ def main(argv: list) -> int:
             categoria = 'lote'
         cx, cy = p['centroide']
         label = idx_textos.nearest(cx, cy, categoria)
+
         if categoria == 'quadra':
+            # Filtro de área — fora desse intervalo não é quadra urbana real.
+            # Polígonos gigantes (setor, loteamento todo, APP) virariam "quadra"
+            # falsa, capturariam todos os lotes em ponto-em-polígono.
+            if p['area_m2'] < AREA_MIN_QUADRA or p['area_m2'] > AREA_MAX_QUADRA:
+                descartados_area += 1
+                continue
+            # Labels claramente não-quadra (APM, APP, RESIDENCIAL, etc).
+            if not eh_label_de_quadra_real(label):
+                descartados_blacklist += 1
+                continue
             quadras_raw.append({**p, 'label': label})
         else:
             lotes_raw.append({**p, 'label': label})
-    log_diag(f'labels pareados ({len(quadras_raw)}Q + {len(lotes_raw)}L) em {time.time() - t:.2f}s')
+    log_diag(
+        f'labels pareados ({len(quadras_raw)}Q + {len(lotes_raw)}L) em {time.time() - t:.2f}s '
+        f'(descartados {descartados_area} por area + {descartados_blacklist} por blacklist)'
+    )
 
-    # Para cada lote, inferir quadra-pai via ponto-em-polígono usando STRtree
-    # (R-tree espacial — query rápida mesmo com 1000+ quadras).
+    # Para cada lote, inferir quadra-pai via ponto-em-polígono usando STRtree.
+    # Quando o lote cai dentro de várias quadras (ex: dentro de Q. 08 E também
+    # dentro de um setor maior rotulado como quadra), escolhemos a de MENOR
+    # área — a mais específica. Sem isso, todos os lotes acabavam atribuídos
+    # ao polígono externo (bug crítico que vimos no DXF do Colina Park).
     t = time.time()
     if quadras_raw:
         quadra_shapes = [q['shapely'] for q in quadras_raw]
         tree = STRtree(quadra_shapes)
-        # Mapa id(shape) -> quadra_raw, pra recuperar o label depois da query
         idx_para_quadra = {i: q for i, q in enumerate(quadras_raw)}
         for l in lotes_raw:
             cx, cy = l['centroide']
             pt = Point(cx, cy)
             l['quadra_label'] = ''
-            # shapely 2.x STRtree.query retorna ndarray de índices
             candidatos_idx = tree.query(pt)
+            # Filtra os que realmente contêm e escolhe a quadra de menor área
+            contendo = []
             for idx in candidatos_idx:
-                idx_int = int(idx)
-                q = idx_para_quadra[idx_int]
+                q = idx_para_quadra[int(idx)]
                 if q['shapely'].contains(pt) or q['shapely'].touches(pt):
-                    l['quadra_label'] = q['label']
-                    break
+                    contendo.append(q)
+            if contendo:
+                # Menor área = mais específica = quadra real (não setor envolvente)
+                escolhida = min(contendo, key=lambda q: q['area_m2'])
+                l['quadra_label'] = escolhida['label']
     else:
         for l in lotes_raw:
             l['quadra_label'] = ''
