@@ -991,25 +991,28 @@ export async function relatorioMensalEquipe(input: {
 }) {
   const apenasEmAberto = input.apenas_em_aberto !== false;
 
-  // v3.9.6 — SIMPLIFICAÇÃO: usa apenas MAX(DATE(pago_em)) como limite, ignora
-  // completamente periodo_inicio/periodo_fim do recibo (que pode estar com
-  // janela padrão 01-15 mesmo quando a quinzena REAL da obra é 27/04-10/05).
-  // Regra: dia trabalhado conta se data > data do último pagamento confirmado.
-  // Funciona pra quinzenas customizadas (alinhadas a parcelas da obra) ou
-  // padrão (01-15 / 16-fim). Quanto antes você marcar o recibo como pago,
-  // mais cedo a nova quinzena começa a contar.
+  // v3.9.7 — Volta pra NOT EXISTS BETWEEN — confiando que `periodo_fim` do
+  // recibo reflete o ÚLTIMO DIA REAL coberto pelo pagamento (não a janela
+  // padrão da quinzena). Se o sistema gerou com janela errada (01-15 quando
+  // a quinzena real é 27/04-10/05), o user precisa corrigir manualmente o
+  // periodo_fim dos recibos (UPDATE) — depois a Folha respeita.
+  // Subquery limite (pra UI mostrar "Pago até DD/MM"): MAX(periodo_fim).
   const subqueryLimite = `
-    (SELECT MAX(DATE(e2.pago_em))
+    (SELECT MAX(l2.periodo_fim)
        FROM recibos_envios e2
+       JOIN recibos_envios_lotes l2 ON l2.id = e2.lote_id
       WHERE e2.membro_id = d.funcionario_id
-        AND e2.status = 'pago'
-        AND e2.pago_em IS NOT NULL)
+        AND e2.status = 'pago')
   `;
 
   const filtroEmAberto = apenasEmAberto
-    ? `AND (
-         ${subqueryLimite} IS NULL
-         OR d.data > ${subqueryLimite}
+    ? `AND NOT EXISTS (
+         SELECT 1
+           FROM recibos_envios e3
+           JOIN recibos_envios_lotes l3 ON l3.id = e3.lote_id
+          WHERE e3.membro_id = d.funcionario_id
+            AND e3.status = 'pago'
+            AND d.data BETWEEN l3.periodo_inicio AND l3.periodo_fim
        )`
     : '';
 
