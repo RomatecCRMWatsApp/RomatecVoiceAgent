@@ -239,6 +239,27 @@ export async function secaoPlantaQuadra(
       if (x < qMinX) qMinX = x; if (y < qMinY) qMinY = y;
       if (x > qMaxX) qMaxX = x; if (y > qMaxY) qMaxY = y;
     }
+    // v3.6.6 — Azimute do eixo principal da quadra: vetor entre os 2 vértices
+    // mais distantes do ring. Pra quadras retangulares alongadas, isso casa
+    // com o eixo Norte-Sul (lado longo). Texto das ruas vai seguir esse
+    // ângulo: L/O paralelo ao eixo principal, N/S perpendicular (= +90°).
+    // Em coords UTM (Y cresce p/ Norte); convertemos pra PDF (Y invertido) no
+    // momento de aplicar `doc.rotate()`.
+    let angEixoUtm = 0;
+    {
+      let maxD = -1;
+      let p1: [number, number] = quadraRing[0];
+      let p2: [number, number] = quadraRing[1];
+      for (let i = 0; i < quadraRing.length; i++) {
+        for (let j = i + 1; j < quadraRing.length; j++) {
+          const dx = quadraRing[i][0] - quadraRing[j][0];
+          const dy = quadraRing[i][1] - quadraRing[j][1];
+          const d = dx * dx + dy * dy;
+          if (d > maxD) { maxD = d; p1 = quadraRing[i]; p2 = quadraRing[j]; }
+        }
+      }
+      angEixoUtm = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
+    }
     for (const [rid, rings] of lotesPorRua) {
       let sumX = 0, sumY = 0;
       for (const ring of rings) {
@@ -262,38 +283,54 @@ export async function secaoPlantaQuadra(
       ladoMaisFreq.set(rid, lado);
     }
     // Desenha nome de cada rua na borda correspondente do box
-    // v3.6.4 — Posiciona FORA do box pras laterais (texto rotacionado nas
-    // margens da página, não dentro da quadra). Norte/Sul ficam no topo/baixo
-    // do box. Letter-spacing leve simulando estilo CAD.
-    const cyM = boxY + boxH / 2;
+    // v3.6.6 — Texto das ruas rotacionado seguindo o azimute da quadra.
+    // Eixo principal (L/O em quadra alongada vertical) usa angEixoUtm direto.
+    // Eixos perpendiculares (N/S) usam angEixoUtm + 90°. Y do PDF é invertido
+    // (cresce pra baixo), então negamos o ângulo na conversão.
+    // Ajuste de orientação: se o texto ficaria de cabeça pra baixo, soma 180°
+    // pra leitura normal (esq→dir).
+    const angPdfPrincipal = -angEixoUtm * 180 / Math.PI;  // graus, PDF coord
+    const angPdfPerp = angPdfPrincipal + 90;
+    const normalizar = (g: number) => {
+      let v = ((g + 180) % 360 + 360) % 360 - 180; // -180..180
+      if (v > 90 || v < -90) v += 180;
+      return ((v + 180) % 360 + 360) % 360 - 180;
+    };
+    // Centroide da quadra projetado pra PDF (origem dos textos das ruas)
+    const cxQuadraPdf = toX(quadraRing.reduce((s, p) => s + p[0], 0) / quadraRing.length);
+    const cyQuadraPdf = toY(quadraRing.reduce((s, p) => s + p[1], 0) / quadraRing.length);
+    // Half-extent da quadra projetada (pra posicionar texto a essa distância + margem)
+    const projXs = quadraRing.map(p => toX(p[0]));
+    const projYs = quadraRing.map(p => toY(p[1]));
+    const halfW = (Math.max(...projXs) - Math.min(...projXs)) / 2;
+    const halfH = (Math.max(...projYs) - Math.min(...projYs)) / 2;
     for (const r of ruasInfo) {
       const lado = ladoMaisFreq.get(r.id);
       if (!lado) continue;
       doc.fontSize(8).fillColor('#0f172a').font('Helvetica-Bold');
       const nome = r.nome.toUpperCase();
+      // Distância do centroide ao lugar do texto (fora do polígono)
+      let tx = cxQuadraPdf, ty = cyQuadraPdf;
+      let angDeg = 0;
       if (lado === 'N') {
-        doc.text(nome, boxX + 40, boxY + 6,
-          { width: boxW - 80, align: 'center', lineBreak: false, characterSpacing: 2 });
+        ty -= (halfH + 18);
+        angDeg = normalizar(angPdfPerp);
       } else if (lado === 'S') {
-        doc.text(nome, boxX + 40, boxY + boxH - 14,
-          { width: boxW - 80, align: 'center', lineBreak: false, characterSpacing: 2 });
+        ty += (halfH + 18);
+        angDeg = normalizar(angPdfPerp);
       } else if (lado === 'L') {
-        // Leste: texto rotacionado na margem direita FORA do box
-        doc.save();
-        doc.translate(boxX + boxW + 20, cyM);
-        doc.rotate(-90);
-        doc.text(nome, -100, -4,
-          { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
-        doc.restore();
+        tx += (halfW + 18);
+        angDeg = normalizar(angPdfPrincipal);
       } else {
-        // Oeste: texto rotacionado na margem esquerda FORA do box
-        doc.save();
-        doc.translate(boxX - 14, cyM);
-        doc.rotate(-90);
-        doc.text(nome, -100, -4,
-          { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
-        doc.restore();
+        tx -= (halfW + 18);
+        angDeg = normalizar(angPdfPrincipal);
       }
+      doc.save();
+      doc.translate(tx, ty);
+      doc.rotate(angDeg);
+      doc.text(nome, -100, -4,
+        { width: 200, align: 'center', lineBreak: false, characterSpacing: 2 });
+      doc.restore();
     }
   }
 
