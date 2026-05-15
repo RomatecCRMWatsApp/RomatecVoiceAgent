@@ -1017,6 +1017,8 @@ export async function relatorioMensalEquipe(input: {
     : '';
 
   const params: (string | number)[] = [input.ano, input.mes];
+  // v3.10.0: filtra dias já consolidados em fechamentos de folha.
+  // (Coluna `fechamento_id` é adicionada pela migration de Fechamento de Folha.)
   let sql = `
     SELECT d.funcionario_id, e.nome, e.funcao, e.valor_dia, e.telefone,
            COUNT(CASE WHEN d.periodo = 'integral' THEN 1 END) AS integral,
@@ -1027,6 +1029,7 @@ export async function relatorioMensalEquipe(input: {
     FROM romatec_obra_funcionario_dias d
     JOIN romatec_obra_equipe e ON e.id = d.funcionario_id
     WHERE YEAR(d.data) = ? AND MONTH(d.data) = ?
+      AND d.fechamento_id IS NULL
     ${filtroEmAberto}`;
   if (input.obra_id) { sql += ' AND d.obra_id = ?'; params.push(input.obra_id); }
   sql += ' GROUP BY d.funcionario_id, e.nome, e.funcao, e.valor_dia, e.telefone ORDER BY e.nome ASC';

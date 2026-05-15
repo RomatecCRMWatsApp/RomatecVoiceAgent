@@ -3389,6 +3389,89 @@ app.get   ('/api/relatorio-equipe',
 app.get   ('/api/folha/saldo-aberto',
   apiHandle(args => obras.relatorioSaldoEmAbertoEquipe(args as Parameters<typeof obras.relatorioSaldoEmAbertoEquipe>[0])));
 
+// v3.10.0: Fechamento de Folha por período flexível (preview + fechar + listar + pagar item + reverter).
+// Schema mapeado pra v3.9.x: romatec_obras, romatec_obra_equipe, romatec_obra_funcionario_dias.
+app.get('/api/folha/periodo-sugerido/:obraId', async (req: Request, res: Response) => {
+  try {
+    const obraId = Number(req.params.obraId);
+    if (!Number.isFinite(obraId)) { res.status(400).json({ error: 'obraId inválido' }); return; }
+    const { calcularPeriodoSugerido } = await import('./services/periodoSugerido');
+    const periodo = await calcularPeriodoSugerido(obraId);
+    res.json(periodo);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.post('/api/folha/preview', async (req: Request, res: Response) => {
+  try {
+    const { obraId, dataInicio, dataFim } = req.body ?? {};
+    if (!obraId || !dataInicio || !dataFim) {
+      res.status(400).json({ error: 'Parâmetros: obraId, dataInicio, dataFim' }); return;
+    }
+    const m = await import('./services/folhaFechamento');
+    const data = await m.previewFolha(Number(obraId), String(dataInicio), String(dataFim));
+    res.json(data);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.post('/api/folha/fechar', async (req: Request, res: Response) => {
+  try {
+    const body = req.body ?? {};
+    if (!body.obraId || !body.dataInicio || !body.dataFim) {
+      res.status(400).json({ error: 'obraId, dataInicio e dataFim são obrigatórios' }); return;
+    }
+    const m = await import('./services/folhaFechamento');
+    const result = await m.fecharFolha({
+      obraId: Number(body.obraId),
+      dataInicio: String(body.dataInicio),
+      dataFim: String(body.dataFim),
+      dataFimPrevista: body.dataFimPrevista ? String(body.dataFimPrevista) : undefined,
+      rotulo: body.rotulo,
+      fechadoPor: body.fechadoPor ? String(body.fechadoPor) : undefined,
+      observacoes: body.observacoes,
+    });
+    res.json(result);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/folha/listar/:obraId', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/folhaFechamento');
+    const lista = await m.listarPorObra(Number(req.params.obraId), req.query.status as string | undefined);
+    res.json(lista);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/folha/detalhe/:id', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/folhaFechamento');
+    const det = await m.obterDetalhe(Number(req.params.id));
+    if (!det) { res.status(404).json({ error: 'Fechamento não encontrado' }); return; }
+    res.json(det);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.post('/api/folha/item/:itemId/pagar', async (req: Request, res: Response) => {
+  try {
+    const { formaPagamento, usuario, observacao } = req.body ?? {};
+    if (!formaPagamento) { res.status(400).json({ error: 'formaPagamento é obrigatório' }); return; }
+    const m = await import('./services/folhaFechamento');
+    const r = await m.marcarItemPago({
+      itemId: Number(req.params.itemId),
+      formaPagamento, usuario, observacao,
+    });
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.post('/api/folha/item/:itemId/reverter', async (req: Request, res: Response) => {
+  try {
+    const { usuario, motivo } = req.body ?? {};
+    const m = await import('./services/folhaFechamento');
+    await m.reverterPagamento(Number(req.params.itemId), usuario, motivo);
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // v1.65.60: Webhook do AvalieImob — recebe leads (cadastros + assinaturas)
 // pra ZAYRA monitorar. Disparo em paralelo: WhatsApp CEO + Telegram CEO +
 // auto-resposta WhatsApp pro lead. Header X-Webhook-Secret obrigatorio.
@@ -3573,6 +3656,18 @@ app.listen(PORT, () => {
       await m.runCartoriosMigrations();
     } catch (err) {
       console.error('[cartorios-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.10.0: tabelas de Fechamento de Folha (folha_fechamentos + itens + log)
+  // + ALTERs em romatec_obras (ciclo_pagamento, dia_corte_padrao, ultima_data_fechada)
+  // + ALTERs em romatec_obra_funcionario_dias (fechamento_id, bloqueado_em).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-folha-fechamento');
+      await m.runFolhaFechamentoMigrations();
+    } catch (err) {
+      console.error('[folha-fechamento-migrations] FALHA fatal:', err);
     }
   })();
 
