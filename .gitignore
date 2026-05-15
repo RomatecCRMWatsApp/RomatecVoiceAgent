@@ -6,3 +6,7 @@ dist/
 .claude/
 *.log
 knowledge-pdfs/
+data/loteamentos/
+__pycache__/
+*.bak
+*.pyc
