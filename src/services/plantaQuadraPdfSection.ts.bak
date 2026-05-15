@@ -1,0 +1,163 @@
+// src/services/plantaQuadraPdfSection.ts
+//
+// v3.7.0 — Planta da Quadra estilo CAD (fiel à prancha do projeto).
+//
+// Desenha no PDF do laudo (uma página dedicada):
+//   • Faixas de eixo das ruas em volta da quadra com nomes alinhados
+//   • Quadra-objeto (fundo cinza claro, contorno preto)
+//   • Todos os lotes da quadra com número + área m² dentro
+//   • Lote-objeto destacado em âmbar
+//   • Cotas externas (testadas) do lote-objeto
+//   • Quadras vizinhas (Q. NN) como círculos rotulados
+//   • Seta Norte no canto superior direito
+//
+// Guarda tripla — só desenha se:
+//   1) laudo.tipo_imovel === 'URBANO'
+//   2) laudo.lote_loteamento_id != null
+//   3) carregarPlantaQuadra() retorna geometria de lote E quadra
+// Caso contrário, retorna silenciosamente. Nunca lança.
+
+import { carregarPlantaQuadra } from '../integrations/loteamentos';
+
+interface LaudoMinimo {
+  tipo_imovel: string;
+  lote_loteamento_id: number | null;
+  // v3.6.1 — rótulos digitados no laudo (seção 3 do PDF). Têm precedência
+  // sobre data.quadra.nome / data.lote.numero_lote pra manter a Planta da
+  // Quadra coerente com o resto do documento mesmo quando o cadastro vinculado
+  // (lote_loteamento_id) tem labels diferentes — caso observado no CSV Colina
+  // Park onde quadra/numero_lote do registro divergiam do laudo emitido.
+  quadra?: string | null;
+  numero_lote?: string | null;
+}
+
+type Pt = [number, number];
+type Ring = Pt[];
+type Line = Pt[];
+
+/**
+ * v3.6.1 — Normaliza o rótulo da quadra pro título do PDF. Aceita variantes
+ * ("Q. 24", "Q-01", "QUADRA 03") e formato cru ("15"). Saída sempre "Q. NN".
+ */
+function fmtTituloQuadra(s: string): string {
+  const limpo = String(s).trim().replace(/^Q(uadra)?[\s.\-]+/i, '');
+  return `Q. ${limpo}`;
+}
+
+function lerPolygonRing(s: string): Ring | null {
+  try {
+    const p = JSON.parse(s);
+    if (p?.type !== 'Polygon') return null;
+    const r = p.coordinates?.[0];
+    if (!Array.isArray(r) || r.length < 3) return null;
+    return r as Ring;
+  } catch { return null; }
+}
+
+function lerLine(s: string): Line | null {
+  try {
+    const p = JSON.parse(s);
+    if (p?.type === 'LineString' && Array.isArray(p.coordinates) && p.coordinates.length >= 2) {
+      return p.coordinates as Line;
+    }
+    // Também aceita Polygon (faixa) — pega o anel externo
+    if (p?.type === 'Polygon' && Array.isArray(p.coordinates?.[0]) && p.coordinates[0].length >= 2) {
+      return p.coordinates[0] as Line;
+    }
+    return null;
+  } catch { return null; }
+}
+
+function distancia(a: Pt, b: Pt): number {
+  return Math.hypot(b[0] - a[0], b[1] - a[1]);
+}
+
+function centroideRing(ring: Ring): Pt {
+  const n = ring.length;
+  let sx = 0, sy = 0;
+  for (const [x, y] of ring) { sx += x; sy += y; }
+  return [sx / n, sy / n];
+}
+
+function bboxRing(ring: Ring): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of ring) {
+    if (x < minX) minX = x; if (y < minY) minY = y;
+    if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/** Distância de ponto a segmento (em coords reais). */
+function distPtSeg(p: Pt, a: Pt, b: Pt): number {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const ll = dx * dx + dy * dy;
+  if (ll < 1e-9) return distancia(p, a);
+  const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ll));
+  return distancia(p, [a[0] + t * dx, a[1] + t * dy]);
+}
+
+/** Distância mínima do ponto à polyline. */
+function distPtPolyline(p: Pt, line: Line): number {
+  let best = Infinity;
+  for (let i = 0; i < line.length - 1; i++) {
+    const d = distPtSeg(p, line[i], line[i + 1]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/** Distância entre dois rings (mínima entre centroides — heurística rápida). */
+function distEntreRings(a: Ring, b: Ring): number {
+  return distancia(centroideRing(a), centroideRing(b));
+}
+
+export async function secaoPlantaQuadra(
+  doc: PDFKit.PDFDocument,
+  laudo: LaudoMinimo,
+): Promise<void> {
+  if (laudo.tipo_imovel !== 'URBANO') return;
+  if (!laudo.lote_loteamento_id) return;
+
+  let data;
+  try {
+    data = await carregarPlantaQuadra(Number(laudo.lote_loteamento_id));
+  } catch {
+    return;
+  }
+  if (!data) return;
+
+  const quadraRing = lerPolygonRing(data.quadra.geojson);
+  const loteRing = lerPolygonRing(data.lote.geojson);
+  if (!quadraRing || !loteRing) return;
+
+  const vizinhos = data.vizinhos
+    .map(v => ({ info: v, ring: lerPolygonRing(v.geojson) }))
+    .filter((x): x is { info: typeof data.vizinhos[number]; ring: Ring } => x.ring !== null);
+
+  // v3.7.0 — Ruas adjacentes (do laudo, via FK rua_frente_id)
+  const ruas = (data.ruas || [])
+    .map(r => ({ info: r, line: r.geojson ? lerLine(r.geojson) : null }))
+    .filter((x): x is { info: typeof data.ruas[number]; line: Line } => x.line !== null);
+
+  // v3.7.0 — Quadras vizinhas geograficamente próximas. Critério: centroide
+  // até 3× a maior dimensão da quadra-objeto (raio de busca).
+  const bbQuadra = bboxRing(quadraRing);
+  const dimQuadra = Math.max(bbQuadra.maxX - bbQuadra.minX, bbQuadra.maxY - bbQuadra.minY);
+  const raioVizinhas = Math.max(dimQuadra * 3, 100);
+  const centroQuadra = centroideRing(quadraRing);
+  const quadrasVizinhas = (data.quadras_vizinhas || [])
+    .map(q => ({ info: q, ring: lerPolygonRing(q.geojson) }))
+    .filter((x): x is { info: typeof data.quadras_vizinhas[number]; ring: Ring } => x.ring !== null)
+    .filter(x => distancia(centroQuadra, centroideRing(x.ring)) <= raioVizinhas);
+
+  // BBox global de tudo que vai ser desenhado
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const expand = (p: Pt) => {
+    if (p[0] < minX) minX = p[0]; if (p[1] < minY) minY = p[1];
+    if (p[0] > maxX) maxX = p[0]; if (p[1] > maxY) maxY = p[1];
+  };
+  for (const r of [quadraRing, loteRing, ...vizinhos.map(v => v.ring), ...quadrasVizinhas.map(q => q.ring)]) {
+    for (const p of r) expand(p);
+  }
+  // Adiciona ruas no bbox MAS limitan

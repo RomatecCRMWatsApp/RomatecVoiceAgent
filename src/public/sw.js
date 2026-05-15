@@ -1,13 +1,13 @@
-// Service Worker da ZAYRA — versão atrelada à versão do app pra forçar
-// rotação de cache em todo deploy. Se você bumpar a versão do app, bumpe esta
-// constante também (ou no futuro, gere via build).
-const CACHE = 'zayra-v3.9.8';
+﻿// Service Worker da ZAYRA â€” versÃ£o atrelada Ã  versÃ£o do app pra forÃ§ar
+// rotaÃ§Ã£o de cache em todo deploy. Se vocÃª bumpar a versÃ£o do app, bumpe esta
+// constante tambÃ©m (ou no futuro, gere via build).
+const CACHE = 'zayra-v3.10.0';
 
-// App shell — recursos cacheados na instalação para garantir abertura offline.
-// v2.4.3 P0.3: pre-cacheia também /obras e /js/catalogo-servicos.js — sem isso,
-// quando o usuário abre o app sem internet em campo, o HTML não está disponível
-// e o navegador mostra a tela "sem conexão" nativa. Mesmo HTML sendo
-// network-first no fetch handler, o pre-cache é o fallback inicial.
+// App shell â€” recursos cacheados na instalaÃ§Ã£o para garantir abertura offline.
+// v2.4.3 P0.3: pre-cacheia tambÃ©m /obras e /js/catalogo-servicos.js â€” sem isso,
+// quando o usuÃ¡rio abre o app sem internet em campo, o HTML nÃ£o estÃ¡ disponÃ­vel
+// e o navegador mostra a tela "sem conexÃ£o" nativa. Mesmo HTML sendo
+// network-first no fetch handler, o pre-cache Ã© o fallback inicial.
 const PRECACHE = [
   '/',
   '/obras',
@@ -20,11 +20,11 @@ const PRECACHE = [
   '/romatec-logo-removebg-preview.png',
 ];
 
-// ── Install: pré-cacheia só recursos estáticos pequenos ─────────────────────
+// â”€â”€ Install: prÃ©-cacheia sÃ³ recursos estÃ¡ticos pequenos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE)
-      // addAll é all-or-nothing: se um asset 404 (ex: manifest.json removido),
+      // addAll Ã© all-or-nothing: se um asset 404 (ex: manifest.json removido),
       // o install inteiro falha e o SW NUNCA atualiza. Em vez disso, tenta
       // cachear cada um individualmente e ignora os que falham.
       .then(c => Promise.all(PRECACHE.map(url =>
@@ -34,14 +34,14 @@ self.addEventListener('install', e => {
   );
 });
 
-// ── Activate: limpa caches antigos + força reload de todas as abas abertas ──
+// â”€â”€ Activate: limpa caches antigos + forÃ§a reload de todas as abas abertas â”€â”€
 self.addEventListener('activate', e => {
   e.waitUntil((async () => {
     const keys = await caches.keys();
     await Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)));
     await self.clients.claim();
     // v1.25.1: notifica clients abertos pra recarregar quando troca de SW.
-    // Sem isso, PWA standalone do iPhone fica grudado no JS antigo até
+    // Sem isso, PWA standalone do iPhone fica grudado no JS antigo atÃ©
     // user fechar/reabrir manualmente o app.
     const clientList = await self.clients.matchAll({ type: 'window' });
     for (const client of clientList) {
@@ -50,14 +50,14 @@ self.addEventListener('activate', e => {
   })());
 });
 
-// ── Fetch: HTML/SW = network-first, assets = cache-first ──────────────────
+// â”€â”€ Fetch: HTML/SW = network-first, assets = cache-first â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
   // Rotas de API: sempre rede, nunca cacheia
   const apiRoutes = ['/api/', '/text', '/voice', '/briefing', '/memory', '/notifications', '/webhook', '/zayra', '/auth', '/chat', '/health'];
   // v1.90.0: rotas que retornam binario (PDF, XML, imagens) NAO podem receber
-  // fallback JSON — quebra o iframe/download. Pass-through sem .catch.
+  // fallback JSON â€” quebra o iframe/download. Pass-through sem .catch.
   const BINARY_PATTERNS = ['/pdf', '/pdf-assinado', '/preview-pdf', '/relatorio-pdf', '/danfse', '/xml', '/raw', '/foto'];
   const isBinaryEndpoint = BINARY_PATTERNS.some(p =>
     url.pathname.endsWith(p) || url.pathname.includes(p + '/') || url.pathname.includes(p + '?')
@@ -75,11 +75,11 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // HTML e o próprio SW: NETWORK-FIRST.
-  // Garante que o usuário sempre veja a versão mais nova disponível.
+  // HTML e o prÃ³prio SW: NETWORK-FIRST.
+  // Garante que o usuÃ¡rio sempre veja a versÃ£o mais nova disponÃ­vel.
   // Se rede falhar, cai pro cache (modo offline).
   // Inclui rotas SPA-like servidas pelo Express que renderizam HTML mas
-  // não terminam em .html (ex: /obras, /vto se houver no futuro).
+  // nÃ£o terminam em .html (ex: /obras, /vto se houver no futuro).
   const HTML_ROUTES = ['/', '/obras', '/cartao', '/cartao/', '/sw.js'];
   const isHtml = HTML_ROUTES.includes(url.pathname) || url.pathname.endsWith('.html');
   const isSw   = url.pathname === '/sw.js';
@@ -113,20 +113,20 @@ self.addEventListener('fetch', e => {
   );
 });
 
-// ── SKIP_WAITING postMessage (v1.99.2: auto-update silencioso) ────────────
+// â”€â”€ SKIP_WAITING postMessage (v1.99.2: auto-update silencioso) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Permite que o front mande SKIP_WAITING pra ativar o SW novo imediatamente
 // sem precisar fechar/abrir aba. Combinado com 'controllerchange' listener no
-// front, fecha o ciclo de auto-update sem botão.
+// front, fecha o ciclo de auto-update sem botÃ£o.
 self.addEventListener('message', e => {
   if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
-// ── Push notifications (quando configurado com VAPID) ──────────────────────
+// â”€â”€ Push notifications (quando configurado com VAPID) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 self.addEventListener('push', e => {
   if (!e.data) return;
   const data = e.data.json();
   e.waitUntil(
-    self.registration.showNotification(data.title ?? 'ZAYRA — Romatec', {
+    self.registration.showNotification(data.title ?? 'ZAYRA â€” Romatec', {
       body:    data.message ?? '',
       icon:    '/avatar.png',
       badge:   '/avatar.png',

@@ -1,0 +1,78 @@
+// src/services/parserDxfPython.ts
+//
+// Wrapper Node do parser DXF em Python. Subprocess one-shot.
+// Requer python3 + ezdxf + shapely instalados no host.
+
+import { spawn } from 'node:child_process';
+import { resolve as pathResolve } from 'node:path';
+
+export interface DxfPoligono {
+  dxf_id: string;
+  label: string;
+  layer: string;
+  coords: Array<[number, number]>;
+  area_m2: number;
+  centroide: { x: number; y: number };
+  quadra_label?: string;
+}
+
+// v3.7.0 — Eixos de rua extraídos do DXF (LWPOLYLINE abertas + LINE em layers
+// `eixo ruas`, `eixo avenida`, etc.). Diferente de DxfPoligono: tem
+// `tipo_geom = 'linestring'` e `comprimento_m` em vez de `area_m2`.
+export interface DxfRua {
+  dxf_id: string;
+  label: string;
+  layer: string;
+  tipo_geom: 'linestring';
+  coords: Array<[number, number]>;
+  comprimento_m: number;
+  centroide: { x: number; y: number };
+}
+
+export interface DxfReport {
+  formato: 'DXF';
+  unidade: 'metros';
+  quadras: DxfPoligono[];
+  lotes: DxfPoligono[];
+  // v3.7.0 — Ruas. Opcional pra retrocompatibilidade com DXFs antigos.
+  ruas?: DxfRua[];
+  avisos: string[];
+}
+
+export type DxfErroCodigo =
+  | 'dependencia_ausente'
+  | 'arquivo_nao_existe'
+  | 'dxf_invalido'
+  | 'stdout_invalido'
+  | 'timeout'
+  | 'desconhecido';
+
+export class DxfParseError extends Error {
+  override name = 'DxfParseError';
+  constructor(public codigo: DxfErroCodigo, public detalhe: string) {
+    super(`[${codigo}] ${detalhe}`);
+  }
+}
+
+const SCRIPT = pathResolve(process.cwd(), 'scripts/parse_loteamento_dxf.py');
+const PYTHON = process.env.PYTHON_BIN || 'python';
+const TIMEOUT_MS = 180_000; // 3min — DXFs reais de loteamento podem ter milhares de entidades
+
+export async function parseLoteamentoDxf(dxfPath: string): Promise<DxfReport> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PYTHON, [SCRIPT, dxfPath]);
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new DxfParseError('timeout', `parser excedeu ${TIMEOUT_MS}ms`));
+    }, TIMEOUT_MS);
+
+    child.stdout!.on('data', d => (stdout += d.toString()));
+    child.stderr!.on('data', d => (stderr += d.toString()));
+
+    child.on('close', code => {
+      clearTimeout(timer);
+      if (code === 0) {
+        try {
+          resolve(JSON.parse(std
