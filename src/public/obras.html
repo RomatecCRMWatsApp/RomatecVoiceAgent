@@ -4755,7 +4755,7 @@ function renderVto() {
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
             <button data-view-vto="${vis.id}" title="Visualizar HTML" style="flex:1; min-width:70px;">👁 Ver</button>
             <button data-pdf-vto="${vis.id}" title="Baixar PDF (rascunho)" style="flex:1; min-width:70px;">📄 PDF</button>
-            ${assinada ? `<button data-pdf-assinado-vto="${vis.id}" title="Baixar PDF assinado ICP-Brasil" style="flex:1; min-width:90px; background:#10b981; color:#fff; border-color:#10b981;">🔏 PDF Assinado</button>` : ''}
+            ${assinada ? `<button data-pdf-assinado-vto="${vis.id}" title="Abrir PDF assinado ICP-Brasil com opções de envio (WhatsApp/Telegram)" style="flex:1; min-width:90px; background:#10b981; color:#fff; border-color:#10b981;">🔏 PDF Assinado</button>` : ''}
             <button data-send-vto="${vis.id}" title="Enviar WhatsApp" style="flex:1; min-width:80px; background:var(--success); color:#fff; border-color:var(--success);">📱 Enviar</button>
           </div>
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
@@ -5113,10 +5113,13 @@ function renderVto() {
     }
   });
 
-  // v3.4.0: Baixar PDF assinado
+  // v3.4.0 → v3.9.9: Abre modal fullscreen do PDF assinado com botoes
+  // Baixar / Telegram / WhatsApp (paridade com Laudo, ver abrirModalPdfLaudoAssinado)
   document.querySelectorAll('[data-pdf-assinado-vto]').forEach(b => b.onclick = () => {
     const id = b.dataset.pdfAssinadoVto;
-    window.open(`/api/vistorias/${id}/pdf-assinado`, '_blank');
+    // pega telefone default do card (mesmo input usado pelo botao Enviar acima)
+    const telDefault = (document.querySelector(`[data-tel-vto="${id}"]`)?.value || '').trim();
+    abrirModalPdfVistoriaAssinada(id, telDefault);
   });
 
   // v1.67.12: handler do botao Editar (faltava — botao existia sem onclick)
@@ -13942,6 +13945,101 @@ function abrirModalPdfLaudoAssinado(laudoId) {
       });
       alert('✅ Enviado! ' + (r.message_id ? 'ID: ' + r.message_id : ''));
     } catch (err) { alert('Erro Z-API: ' + err.message); }
+  };
+}
+
+// v3.9.9: modal fullscreen do PDF Assinado da Vistoria com botoes Baixar/Telegram/WhatsApp.
+// Mesma estrutura do abrirModalPdfLaudoAssinado, adaptada pra rota /api/vistorias/:id/...
+// Aceita opcionalmente um telefone default (vem do input do card).
+function abrirModalPdfVistoriaAssinada(vistoriaId, telDefault) {
+  // remove modal existente (se houver)
+  const existente = document.getElementById('vto-pdf-modal');
+  if (existente) existente.remove();
+
+  const url = `/api/vistorias/${vistoriaId}/pdf-assinado`;
+  const modal = document.createElement('div');
+  modal.id = 'vto-pdf-modal';
+  modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9999; display:flex; flex-direction:column;';
+  modal.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:var(--surface); border-bottom:1px solid var(--gold-dim); flex-wrap:wrap; gap:8px;">
+      <strong style="color:var(--gold);">🔏 PDF Assinado — Vistoria #${escape(String(vistoriaId))}</strong>
+      <button id="vto-pdf-modal-close" style="background:transparent; border:none; color:var(--text-muted); font-size:24px; cursor:pointer; padding:4px 12px;">✕</button>
+    </div>
+    <iframe id="vto-pdf-iframe" src="${url}" style="flex:1; width:100%; border:0; background:#222;"></iframe>
+    <div style="display:flex; gap:8px; padding:10px 16px; background:var(--surface); border-top:1px solid var(--gold-dim); justify-content:center; flex-wrap:wrap; align-items:center;">
+      <input id="vto-pdf-destino" placeholder="WhatsApp (5598...) ou chat_id Telegram"
+             value="${escape(telDefault || '')}"
+             style="flex:1; min-width:220px; max-width:340px; font-size:13px; padding:6px 10px;">
+      <button id="vto-pdf-baixar" style="background:var(--gold); color:#06120a; border-color:var(--gold);">💾 Baixar PDF</button>
+      <button id="vto-pdf-telegram" style="background:#0088cc22; color:#0088cc; border:1px solid #0088cc55;">✈️ Telegram</button>
+      <button id="vto-pdf-whatsapp" style="background:#25d36622; color:#25d366; border:1px solid #25d36655;">📱 WhatsApp</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const fechar = () => modal.remove();
+  document.getElementById('vto-pdf-modal-close').onclick = fechar;
+
+  // ESC fecha modal
+  const escHandler = (e) => {
+    if (e.key === 'Escape') { fechar(); document.removeEventListener('keydown', escHandler); }
+  };
+  document.addEventListener('keydown', escHandler);
+
+  // Botao Baixar: forca download via blob (evita abrir inline em mobile)
+  document.getElementById('vto-pdf-baixar').onclick = async () => {
+    try {
+      const resp = await fetch(url, { credentials: 'include' });
+      if (!resp.ok) throw new Error('Falha ao baixar PDF: ' + resp.status);
+      const blob = await resp.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `Vistoria_${vistoriaId}_assinada.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (err) { alert('Erro ao baixar: ' + err.message); }
+  };
+
+  // Botao Telegram: usa input do modal como chat_id (vazio = CEO default no backend)
+  document.getElementById('vto-pdf-telegram').onclick = async () => {
+    const destinoInput = document.getElementById('vto-pdf-destino');
+    const chatId = (destinoInput?.value || '').trim();
+    // chat_id pode ser numerico (-100123...) ou @username; se vazio, backend usa CEO
+    const body = chatId ? { id: vistoriaId, chat_id: chatId, assinada: true } : { id: vistoriaId, assinada: true };
+    const btn = document.getElementById('vto-pdf-telegram');
+    btn.disabled = true; const lbl = btn.textContent; btn.textContent = '⏳ Enviando...';
+    try {
+      const r = await api('/api/vistorias/' + vistoriaId + '/enviar-telegram', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      alert('✅ ' + (r.message || 'Enviado via Telegram!'));
+    } catch (err) { alert('Erro Telegram: ' + err.message); }
+    finally { btn.disabled = false; btn.textContent = lbl; }
+  };
+
+  // Botao WhatsApp: usa input do modal como numero (DDI+DDD+numero)
+  document.getElementById('vto-pdf-whatsapp').onclick = async () => {
+    const destinoInput = document.getElementById('vto-pdf-destino');
+    const tel = (destinoInput?.value || '').trim();
+    if (!tel) {
+      destinoInput?.focus();
+      return alert('Informe o WhatsApp de destino (ex: 5598999998888).');
+    }
+    const btn = document.getElementById('vto-pdf-whatsapp');
+    btn.disabled = true; const lbl = btn.textContent; btn.textContent = '⏳ Enviando...';
+    try {
+      const r = await api('/api/vistorias/' + vistoriaId + '/enviar-whatsapp', {
+        method: 'POST',
+        body: JSON.stringify({ id: vistoriaId, telefone: tel, assinada: true }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      alert('✅ ' + (r.message || 'Enviado via WhatsApp!'));
+    } catch (err) { alert('Erro WhatsApp: ' + err.message); }
+    finally { btn.disabled = false; btn.textContent = lbl; }
   };
 }
 

@@ -563,11 +563,25 @@ export async function gerarPdfVistoria(
   return Buffer.concat(chunks);
 }
 
-export async function enviarVistoriaWhatsApp(input: { id: string; telefone?: string }) {
+// v3.9.9: envio aceita flag `assinada` — quando true e a vistoria foi assinada,
+// envia o PDF assinado (ICP-Brasil); senao cai pra rascunho.
+export async function enviarVistoriaWhatsApp(input: { id: string; telefone?: string; assinada?: boolean }) {
   if (!input.telefone?.trim()) throw new Error('Telefone obrigatorio.');
   const v = await buscarVistoria(input.id);
-  const pdfBuf = await gerarPdfVistoria(input.id);
-  const fileName = `Vistoria_${v.id}_${(v.titulo || 'obra').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+
+  let pdfBuf: Buffer;
+  let fileName: string;
+  const querAssinada = input.assinada === true;
+  if (querAssinada) {
+    const m = await import('./vistoriasAssinatura');
+    const data = await m.getVistoriaPdfAssinado(input.id);
+    if (!data) throw new Error('Vistoria ainda nao foi assinada — assine antes de enviar a versao assinada.');
+    pdfBuf = data.pdf;
+    fileName = `Vistoria_${v.id}_${(v.titulo || 'obra').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}_assinada.pdf`;
+  } else {
+    pdfBuf = await gerarPdfVistoria(input.id);
+    fileName = `Vistoria_${v.id}_${(v.titulo || 'obra').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+  }
   const r = await sendWhatsAppDocument(input.telefone.trim(), pdfBuf.toString('base64'), fileName);
 
   // v1.79.0: trigger automatico de recibo de ciencia da vistoria
@@ -577,29 +591,47 @@ export async function enviarVistoriaWhatsApp(input: { id: string; telefone?: str
 
   return {
     ok: true as const,
-    message: `Vistoria #${v.id} enviada para ${r.phone} (msgId ${r.messageId || '?'}).`,
+    message: `Vistoria #${v.id}${querAssinada ? ' (assinada)' : ''} enviada para ${r.phone} (msgId ${r.messageId || '?'}).`,
     messageId: r.messageId, phone: r.phone,
+    assinada: querAssinada,
   };
 }
 
-export async function enviarVistoriaTelegram(input: { id: string; chatId?: string }) {
+export async function enviarVistoriaTelegram(input: { id: string; chatId?: string; assinada?: boolean }) {
   const v = await buscarVistoria(input.id);
   const chatId = input.chatId
     || (process.env.TELEGRAM_LEAD_CHAT_ID || '').trim()
     || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
   if (!chatId) throw new Error('chatId Telegram obrigatorio (TELEGRAM_LEAD_CHAT_ID ou TELEGRAM_AUTHORIZED_USER_IDS).');
-  const pdfBuf = await gerarPdfVistoria(input.id);
+
+  let pdfBuf: Buffer;
+  let fileName: string;
+  const querAssinada = input.assinada === true;
+  if (querAssinada) {
+    const m = await import('./vistoriasAssinatura');
+    const data = await m.getVistoriaPdfAssinado(input.id);
+    if (!data) throw new Error('Vistoria ainda nao foi assinada — assine antes de enviar a versao assinada.');
+    pdfBuf = data.pdf;
+    fileName = `Vistoria_${v.id}_${(v.titulo || 'obra').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}_assinada.pdf`;
+  } else {
+    pdfBuf = await gerarPdfVistoria(input.id);
+    fileName = `Vistoria_${v.id}_${(v.titulo || 'obra').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+  }
   if (pdfBuf.length > 50 * 1024 * 1024) {
     throw new Error(`PDF tem ${(pdfBuf.length / 1024 / 1024).toFixed(1)}MB e Telegram aceita ate 50MB.`);
   }
-  const fileName = `Vistoria_${v.id}_${(v.titulo || 'obra').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
   try {
-    await sendTelegramDocument(chatId, pdfBuf, fileName, `Vistoria #${v.id} — ${v.titulo || formatBRDate(v.data)}`);
+    await sendTelegramDocument(chatId, pdfBuf, fileName, `Vistoria #${v.id}${querAssinada ? ' (assinada)' : ''} — ${v.titulo || formatBRDate(v.data)}`);
   } catch (err) {
     const e = err as Error & { response?: { data?: { description?: string; error_code?: number } } };
     const desc = e.response?.data?.description || e.message;
     const code = e.response?.data?.error_code;
     throw new Error(`Telegram rejeitou: ${desc}${code ? ` (code ${code})` : ''}`);
   }
-  return { ok: true as const, message: `Vistoria #${v.id} enviada via Telegram (chat ${chatId}, ${(pdfBuf.length / 1024).toFixed(0)} KB).` };
+  return {
+    ok: true as const,
+    message: `Vistoria #${v.id}${querAssinada ? ' (assinada)' : ''} enviada via Telegram (chat ${chatId}, ${(pdfBuf.length / 1024).toFixed(0)} KB).`,
+    chat_id: chatId,
+    assinada: querAssinada,
+  };
 }
