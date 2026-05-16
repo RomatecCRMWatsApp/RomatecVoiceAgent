@@ -151,6 +151,8 @@ export interface CriarReciboInput {
   /** Em quantos dias expira o link (default: 7). */
   expira_em_dias?: number;
   created_by?: number | null;
+  /** UUID local gerado offline pelo cliente — ecoado de volta pra reconciliacao. */
+  uuid_local?: string;
 }
 
 export interface Recibo {
@@ -250,7 +252,7 @@ function mapRow(r: RowDataPacket): Recibo {
   };
 }
 
-export async function criarRecibo(input: CriarReciboInput & { _rascunho?: boolean }): Promise<Recibo> {
+export async function criarRecibo(input: CriarReciboInput & { _rascunho?: boolean }): Promise<Recibo & { uuid_local?: string }> {
   const tenant_id = input.tenant_id ?? 1;
   if (!input.tipo || !PREFIXOS[input.tipo]) throw new Error('tipo invalido');
   // v1.94: rascunho permite nome vazio (placeholder) — usuario complementa depois
@@ -335,7 +337,8 @@ export async function criarRecibo(input: CriarReciboInput & { _rascunho?: boolea
     }
   }
   await registrarEvento(res.insertId, 'created', { numero, tipo: input.tipo });
-  return await buscarReciboPorId(res.insertId);
+  const recibo = await buscarReciboPorId(res.insertId);
+  return input.uuid_local ? { ...recibo, uuid_local: input.uuid_local } : recibo;
 }
 
 export async function buscarReciboPorId(id: number | string): Promise<Recibo> {

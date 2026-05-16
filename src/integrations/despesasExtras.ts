@@ -185,6 +185,7 @@ export async function criarDespesaExtra(input: {
   observacoes?: string;
   desconto?: number;
   created_by?: string;
+  uuid_local?: string;
   _retried?: boolean; // v1.67.4: previne loop infinito no self-heal
 }) {
   // v1.67.4: garante schema atualizado (self-heal)
@@ -235,6 +236,7 @@ export async function criarDespesaExtra(input: {
 
     return {
       ok: true as const, insertId: despesaId, valor_total, desconto,
+      uuid_local: input.uuid_local,
       message: `Despesa #${despesaId} criada (R$ ${valor_total.toFixed(2)}${desconto > 0 ? ` com desconto de R$ ${desconto.toFixed(2)}` : ''}).`,
     };
   } catch (err) {

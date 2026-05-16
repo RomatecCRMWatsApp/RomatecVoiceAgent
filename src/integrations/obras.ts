@@ -90,6 +90,7 @@ export interface MutationResult {
   ok?:      true;
   affected?: number;
   insertId?: number;
+  uuid_local?: string;
   message:  string;
   query?:   string;
 }
@@ -201,6 +202,7 @@ export async function criarObra(input: {
   data_inicio?: string; data_previsao?: string;
   prazo_dias?: number; prazo_dias_uteis?: number;
   observacoes?: string;
+  uuid_local?: string;
   confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.nome) throw new Error('Nome da obra é obrigatório');
@@ -237,7 +239,7 @@ export async function criarObra(input: {
       input.observacoes ?? null,
     ],
   );
-  return { ok: true, insertId: r.insertId, affected: r.affectedRows, message: `Obra "${input.nome}" criada com ID ${r.insertId}.` };
+  return { ok: true, insertId: r.insertId, affected: r.affectedRows, uuid_local: input.uuid_local, message: `Obra "${input.nome}" criada com ID ${r.insertId}.` };
 }
 
 export async function atualizarObra(input: {
@@ -690,7 +692,9 @@ export async function criarMembroEquipe(input: {
   // v3.10.2: PIX
   chave_pix?: string | null;
   tipo_chave_pix?: 'cpf'|'cnpj'|'email'|'telefone'|'aleatoria' | null;
-  obras_ids?: string[]; obra_id?: string; confirm?: boolean;
+  obras_ids?: string[]; obra_id?: string;
+  uuid_local?: string;
+  confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.nome) throw new Error('nome obrigatório');
   if (!input.confirm) {
@@ -729,7 +733,7 @@ export async function criarMembroEquipe(input: {
   void import('../services/syncEquipeMembro')
     .then(s => s.syncEquipeMembro(r.insertId))
     .catch(err => console.warn('[syncEquipe] falhou após criar:', (err as Error).message));
-  return { ok: true, insertId: r.insertId, message: `${input.nome} adicionado${input.obra_id ? ` à obra ${input.obra_id}` : ' à equipe geral'} (ID ${r.insertId}).` };
+  return { ok: true, insertId: r.insertId, uuid_local: input.uuid_local, message: `${input.nome} adicionado${input.obra_id ? ` à obra ${input.obra_id}` : ' à equipe geral'} (ID ${r.insertId}).` };
 }
 
 // ── Materiais ────────────────────────────────────────────────────────────────
@@ -1366,6 +1370,7 @@ export async function criarParcela(input: {
   vencimento: string;       // YYYY-MM-DD
   prazo_dias?: number;
   observacoes?: string;
+  uuid_local?: string;
 }): Promise<MutationResult> {
   if (!input.obra_id) throw new Error('obra_id obrigatorio');
   if (!input.valor || input.valor <= 0) throw new Error('valor invalido');
@@ -1391,7 +1396,7 @@ export async function criarParcela(input: {
     ]
   );
   emitParcela('created', input.obra_id, r.insertId);
-  return { ok: true, insertId: r.insertId, affected: r.affectedRows, message: `Parcela ${numero} criada (id ${r.insertId}).` };
+  return { ok: true, insertId: r.insertId, affected: r.affectedRows, uuid_local: input.uuid_local, message: `Parcela ${numero} criada (id ${r.insertId}).` };
 }
 
 export async function atualizarParcela(input: {
