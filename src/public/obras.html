@@ -3120,6 +3120,18 @@ function renderEquipe() {
       <div style="margin-top:8px;">
         <input id="pFoto" placeholder="Foto (URL — opcional)" style="width:100%;">
       </div>
+      <p style="margin:14px 0 6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Dados de pagamento (PIX)</p>
+      <div class="form-grid">
+        <select id="pPixTipo">
+          <option value="">Tipo da chave PIX (opcional)</option>
+          <option value="cpf">CPF</option>
+          <option value="cnpj">CNPJ</option>
+          <option value="email">E-mail</option>
+          <option value="telefone">Telefone</option>
+          <option value="aleatoria">Aleatória</option>
+        </select>
+        <input id="pPixChave" placeholder="Chave PIX (ex: 123.456.789-00, email@x.com, +5599...)" style="grid-column: span 2;">
+      </div>
       <textarea id="pObs" placeholder="Observações" rows="2" style="margin:8px 0; width:100%;"></textarea>
       <div style="display:flex; gap:8px; justify-content:flex-end;">
         <button id="cancelNovoMembro">Cancelar</button>
@@ -3198,6 +3210,9 @@ function renderEquipe() {
           observacoes:     document.getElementById('pObs').value.trim() || null,
           obra_id:         document.getElementById('pObraId').value || null,
           status:          document.getElementById('pStatus').value || 'ativo',
+          // v3.10.2: PIX
+          chave_pix:       document.getElementById('pPixChave').value.trim() || null,
+          tipo_chave_pix:  document.getElementById('pPixTipo').value || null,
           confirm:         true,
         }),
       });
@@ -8224,6 +8239,18 @@ function abrirEditarMembro(m) {
       <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Foto (URL)</label>
       <input id="eFoto" placeholder="https://..." value="${escape(m.foto_url||'')}" style="width:100%; margin-top:4px;">
     </div>
+    <p style="margin:14px 0 6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Dados de pagamento (PIX)</p>
+    <div class="form-grid">
+      <select id="ePixTipo">
+        <option value="">Tipo da chave PIX</option>
+        <option value="cpf" ${m.tipo_chave_pix==='cpf'?'selected':''}>CPF</option>
+        <option value="cnpj" ${m.tipo_chave_pix==='cnpj'?'selected':''}>CNPJ</option>
+        <option value="email" ${m.tipo_chave_pix==='email'?'selected':''}>E-mail</option>
+        <option value="telefone" ${m.tipo_chave_pix==='telefone'?'selected':''}>Telefone</option>
+        <option value="aleatoria" ${m.tipo_chave_pix==='aleatoria'?'selected':''}>Aleatória</option>
+      </select>
+      <input id="ePixChave" placeholder="Chave PIX" value="${escape(m.chave_pix||'')}" style="grid-column: span 2;">
+    </div>
     <div style="margin-top:8px;">
       <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Observações</label>
       <textarea id="eObs" rows="3" style="width:100%; margin-top:4px; resize:vertical;">${escape(m.observacoes||'')}</textarea>
@@ -8270,6 +8297,9 @@ function abrirEditarMembro(m) {
         ativo:           document.getElementById('eAtivo').checked,
         status:          document.getElementById('eStatus').value || 'ativo',
         obra_id:         document.getElementById('eObraId').value || null,
+        // v3.10.2: PIX
+        chave_pix:       document.getElementById('ePixChave').value.trim() || null,
+        tipo_chave_pix:  document.getElementById('ePixTipo').value || null,
       }),
     });
   });

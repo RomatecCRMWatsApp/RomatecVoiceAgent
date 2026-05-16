@@ -148,3 +148,28 @@ export async function runFolhaFechamentoMigrations(): Promise<void> {
     }
   }
 }
+
+// v3.10.2 — Adiciona tipo_chave_pix em romatec_obra_equipe pra suportar
+// cadastro de PIX por tipo (cpf, cnpj, email, telefone, aleatoria).
+// chave_pix ja existe desde v1.65.x — so adiciona o tipo.
+export async function runEquipePixMigrations(): Promise<void> {
+  const ops: Array<{ label: string; sql: string }> = [
+    {
+      label: 'ALTER romatec_obra_equipe tipo_chave_pix',
+      sql: `ALTER TABLE romatec_obra_equipe ADD COLUMN tipo_chave_pix ENUM('cpf','cnpj','email','telefone','aleatoria') NULL`,
+    },
+  ];
+  for (const { label, sql } of ops) {
+    try {
+      await pool.execute(sql);
+      console.log(`[equipe-pix-migrations] OK: ${label}`);
+    } catch (err) {
+      const msg = (err as Error).message || '';
+      if (/Duplicate (column|key)|already exists/i.test(msg)) {
+        console.log(`[equipe-pix-migrations] ja existe (OK): ${label}`);
+      } else {
+        console.error(`[equipe-pix-migrations] FALHA ${label}:`, msg.slice(0, 200));
+      }
+    }
+  }
+}

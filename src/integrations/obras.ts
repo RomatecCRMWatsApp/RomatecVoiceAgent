@@ -536,6 +536,9 @@ export async function atualizarMembroEquipe(input: {
   foto_url?: string;
   obra_id?: string | null; ativo?: boolean;
   status?: 'ativo'|'ausente'|'doente'|'ferias'|'afastado'|'transferido'|'desligado';
+  // v3.10.2: PIX
+  chave_pix?: string | null;
+  tipo_chave_pix?: 'cpf'|'cnpj'|'email'|'telefone'|'aleatoria' | null;
   confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.id) throw new Error('id obrigatório');
@@ -552,6 +555,9 @@ export async function atualizarMembroEquipe(input: {
     endereco_estado: 'endereco_estado', endereco_cep: 'endereco_cep',
     foto_url: 'foto_url',
     status: 'status',
+    // v3.10.2: PIX
+    chave_pix: 'chave_pix',
+    tipo_chave_pix: 'tipo_chave_pix',
   };
   for (const [k, col] of Object.entries(map)) {
     const v = (input as Record<string, unknown>)[k];
@@ -666,6 +672,9 @@ export async function criarMembroEquipe(input: {
   endereco_cidade?: string; endereco_estado?: string; endereco_cep?: string;
   foto_url?: string;
   status?: 'ativo'|'ausente'|'doente'|'ferias'|'afastado'|'transferido'|'desligado';
+  // v3.10.2: PIX
+  chave_pix?: string | null;
+  tipo_chave_pix?: 'cpf'|'cnpj'|'email'|'telefone'|'aleatoria' | null;
   obras_ids?: string[]; obra_id?: string; confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.nome) throw new Error('nome obrigatório');
@@ -678,8 +687,9 @@ export async function criarMembroEquipe(input: {
       (nome, funcao, tipo_contrato, cpf, rg, telefone, email, valor_dia,
        especialidade, observacoes, data_admissao,
        endereco_rua, endereco_numero, endereco_bairro, endereco_cidade,
-       endereco_estado, endereco_cep, foto_url, obras_ids, obra_id, status)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       endereco_estado, endereco_cep, foto_url, obras_ids, obra_id, status,
+       chave_pix, tipo_chave_pix, chave_pix_atualizada_em)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       input.nome, input.funcao ?? null, input.tipo_contrato ?? 'diarista',
       input.cpf ?? null, input.rg ?? null,
@@ -693,6 +703,10 @@ export async function criarMembroEquipe(input: {
       (input.obras_ids ?? []).join(','),
       input.obra_id ? Number(input.obra_id) : null,
       input.status ?? 'ativo',
+      // v3.10.2: PIX
+      input.chave_pix ?? null,
+      input.tipo_chave_pix ?? null,
+      input.chave_pix ? new Date() : null,
     ],
   );
   // v1.65.10: sync Equipe → contacts → zayra_memory (fire-and-forget,

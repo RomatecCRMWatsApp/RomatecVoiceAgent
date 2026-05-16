@@ -3708,6 +3708,16 @@ app.listen(PORT, () => {
     }
   })();
 
+  // v3.10.2: tipo_chave_pix em romatec_obra_equipe (pra cadastro PIX por tipo).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-folha-fechamento');
+      await m.runEquipePixMigrations();
+    } catch (err) {
+      console.error('[equipe-pix-migrations] FALHA fatal:', err);
+    }
+  })();
+
   void initDb()
     .then(() => loadSessionFromDb())
     .then(() => import('./services/whatsappDrafts'))
