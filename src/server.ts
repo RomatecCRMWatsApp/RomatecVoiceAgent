@@ -58,6 +58,7 @@ import {
   getStatusAssinatura,
 } from './integrations/recibosAssinatura';
 import ragRoutes from './routes/rag';
+import { relatorioDemarcacaoRouter } from './routes/relatorioDemarcacao';
 import contractsRoutes from './routes/contracts';
 import painelRoutes from './routes/painel';
 
@@ -91,6 +92,7 @@ app.use((err: { type?: string; status?: number; message?: string; statusCode?: n
 app.use('/rag', ragRoutes);                 // v1.26.0 — endpoints de memoria vetorial
 app.use('/contracts', contractsRoutes);     // v1.27.1 — indexacao de contratos modelo (Fase 1)
 app.use(painelRoutes);                      // v1.47.0 — dashboard /painel + /api/painel/stats
+app.use('/api/relatorios-demarcacao', relatorioDemarcacaoRouter(pool as any)); // v3.14.0
 
 // Static files com Cache-Control inteligente:
 // HTML/SW/manifest = no-cache (browser revalida a cada request com ETag)
@@ -3805,6 +3807,13 @@ app.listen(PORT, () => {
       await m.runCobrancaParcelasMigrations();
     } catch (err) {
       console.error('[cobranca-parcelas-migrations] FALHA fatal:', err);
+    }
+    // v3.14.0
+    try {
+      const m = await import('./database/migrations-relatorio-demarcacao');
+      await m.runRelatorioDemarcacaoMigrations();
+    } catch (err) {
+      console.error('[relatorio-demarcacao-migrations] FALHA fatal:', err);
     }
   })();
 
