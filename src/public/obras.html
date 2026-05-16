@@ -2348,21 +2348,27 @@ async function abrirModalCobrancaPreview(parcelaId, onSuccess) {
         <strong>Venc.:</strong> ${(preview.vencimento || '').split('-').reverse().join('/')}<br>
         <strong>Cliente:</strong> ${escape(preview.cliente_nome || '-')} · ${vencidoLbl}
       </div>
-      <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:4px;">
-        Telefone destino (com DDD, com ou sem 55):
-      </label>
-      <input id="cob-tel" type="tel" inputmode="tel" autocomplete="off" name="cob-tel-${Date.now()}"
-        value="5599991811246" placeholder="5599999999999"
-        style="width:100%; padding:8px; background:var(--surface-1, #1a2920); border:1px solid var(--border, #2d4a3a); color:var(--text); border-radius:6px; margin-bottom:4px;">
-      <div style="margin:0 0 12px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-        <span style="font-size:11px; color:var(--text-muted);">⚙️ Default: CEO (99) 9 9181-1246</span>
-        ${preview.telefone
-          ? `<button type="button" id="cob-usar-cliente"
-              style="font-size:11px; padding:3px 8px; background:#25d36622; color:#25d366; border:1px solid #25d36655; border-radius:4px; cursor:pointer;">
-              📞 Usar telefone do cliente (${escape(preview.telefone)})
-            </button>`
-          : `<span style="font-size:11px; color:#dc2626;">⚠️ Obra sem telefone do cliente cadastrado.</span>`
-        }
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
+        <div>
+          <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:4px;">
+            📤 <strong>Destino</strong> (envia pra esse número):
+          </label>
+          <input id="cob-tel" type="tel" inputmode="tel" autocomplete="off" name="cob-tel-${Date.now()}"
+            value="${escape(preview.telefone || '')}" placeholder="5599999999999"
+            style="width:100%; padding:8px; background:var(--surface-1, #1a2920); border:1px solid var(--border, #2d4a3a); color:var(--text); border-radius:6px;">
+          <p style="margin:4px 0 0; font-size:11px; color:${preview.telefone ? 'var(--text-muted)' : '#dc2626'};">
+            ${preview.telefone ? '📞 Cliente cadastrado na obra' : '⚠️ Obra sem telefone — informe o destino'}
+          </p>
+        </div>
+        <div>
+          <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:4px;">
+            📞 <strong>Contato</strong> (vai dentro da msg, pra dúvidas):
+          </label>
+          <input id="cob-contato" type="tel" inputmode="tel" autocomplete="off" name="cob-contato-${Date.now()}"
+            value="(99) 9 9181-1246" placeholder="(99) 9 9999-9999"
+            style="width:100%; padding:8px; background:var(--surface-1, #1a2920); border:1px solid var(--border, #2d4a3a); color:var(--text); border-radius:6px;">
+          <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">⚙️ Default: CEO</p>
+        </div>
       </div>
       <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:4px;">Texto da cobrança (pode editar):</label>
       <textarea id="cob-texto" rows="14"
@@ -2377,10 +2383,19 @@ async function abrirModalCobrancaPreview(parcelaId, onSuccess) {
   const fechar = () => ov.remove();
   ov.querySelector('#cob-x').onclick = fechar;
   ov.querySelector('#cob-cancel').onclick = fechar;
-  const btnUsarCliente = ov.querySelector('#cob-usar-cliente');
-  if (btnUsarCliente) {
-    btnUsarCliente.onclick = () => { ov.querySelector('#cob-tel').value = preview.telefone || ''; };
-  }
+
+  // Quando o usuario edita o telefone de contato (CEO), atualiza no texto
+  const inpContato = ov.querySelector('#cob-contato');
+  const txtArea = ov.querySelector('#cob-texto');
+  let contatoAnterior = inpContato.value;
+  inpContato.oninput = () => {
+    const novo = inpContato.value;
+    if (novo && contatoAnterior && txtArea.value.includes(contatoAnterior)) {
+      txtArea.value = txtArea.value.split(contatoAnterior).join(novo);
+    }
+    contatoAnterior = novo;
+  };
+
   ov.querySelector('#cob-ok').onclick = async () => {
     const tel = ov.querySelector('#cob-tel').value.replace(/\D/g, '');
     const texto = ov.querySelector('#cob-texto').value.trim();

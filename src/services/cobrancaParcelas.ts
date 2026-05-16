@@ -53,10 +53,11 @@ function montarTextoCobranca(p: ParcelaRow): string {
   const obra = p.obra_nome;
   const parcela = `${p.numero}ª parcela`;
 
-  // Bloco comum: se ja pagou, manda comprovante e ignora
-  const blocoComprovante = [
-    `📎 *Se o pagamento já foi realizado:* por gentileza, encaminhe o comprovante (PIX, transferência ou recibo bancário) por esta mesma conversa para registro em nosso sistema e *desconsidere esta cobrança*.`,
-  ].join('\n');
+  // Telefone de contato pra duvidas (CEO) — UI permite editar antes do envio
+  const contatoRomatec = '(99) 9 9181-1246';
+
+  const blocoComprovante = `📎 *Se o pagamento já foi realizado:* por gentileza, encaminhe o comprovante (PIX, transferência ou recibo bancário) por esta mesma conversa para registro em nosso sistema e *desconsidere esta cobrança*.`;
+  const blocoContato = `📞 *Contato Romatec (dúvidas):* WhatsApp ${contatoRomatec}`;
 
   if (!vencido) {
     return [
@@ -74,6 +75,8 @@ function montarTextoCobranca(p: ParcelaRow): string {
       ``,
       blocoComprovante,
       ``,
+      blocoContato,
+      ``,
       `Permanecemos à disposição para quaisquer esclarecimentos técnicos, contratuais ou tributários relacionados a esta parcela.`,
       ``,
       `Atenciosamente,`,
@@ -82,7 +85,6 @@ function montarTextoCobranca(p: ParcelaRow): string {
     ].join('\n');
   }
 
-  // Vencida
   return [
     `Prezado(a) ${nomeCliente},`,
     ``,
@@ -98,7 +100,9 @@ function montarTextoCobranca(p: ParcelaRow): string {
     ``,
     blocoComprovante,
     ``,
-    `Reforçamos nosso compromisso com a *transparência*, a *qualidade técnica* e a *boa relação contratual*. Estamos à disposição para alinhamentos pelo telefone/WhatsApp desta conversa.`,
+    blocoContato,
+    ``,
+    `Reforçamos nosso compromisso com a *transparência*, a *qualidade técnica* e a *boa relação contratual*.`,
     ``,
     `Atenciosamente,`,
     `*Romatec Consultoria Imobiliária*`,
