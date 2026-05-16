@@ -47,37 +47,42 @@ export class RelatorioDemarcacaoService {
   constructor(private pool: Pool) {}
 
   // ===================== LISTAR A FATURAR =====================
+  // v3.15.9: usa nomes reais de coluna (laudos_demarcacao tem numero_laudo,
+  // denominacao_imovel, numero_contrato, numero_lote, area_total_m2 — sem
+  // data_demarcacao especifica, usa data_pagamento ou created_at)
   async listarAFaturar(filtro: ListarFiltro = {}): Promise<LaudoListado[]> {
-    const where: string[] = [`l.status_faturamento = 'pendente'`];
+    const where: string[] = [`l.status_faturamento = 'pendente'`, `l.ativo = 1`];
     const params: any[] = [];
 
-    if (filtro.loteadorId) {
-      where.push(`l.loteador_id = ?`);
-      params.push(filtro.loteadorId);
-    }
     if (filtro.loteamento) {
       where.push(`l.loteamento LIKE ?`);
       params.push(`%${filtro.loteamento}%`);
     }
-    if (filtro.dataInicio) { where.push(`l.data_demarcacao >= ?`); params.push(filtro.dataInicio); }
-    if (filtro.dataFim)    { where.push(`l.data_demarcacao <= ?`); params.push(filtro.dataFim); }
+    if (filtro.dataInicio) { where.push(`COALESCE(l.data_pagamento, DATE(l.created_at)) >= ?`); params.push(filtro.dataInicio); }
+    if (filtro.dataFim)    { where.push(`COALESCE(l.data_pagamento, DATE(l.created_at)) <= ?`); params.push(filtro.dataFim); }
     if (filtro.busca) {
-      where.push(`(l.numero LIKE ? OR l.contrato LIKE ? OR l.lote LIKE ? OR l.imovel_descricao LIKE ?)`);
+      where.push(`(l.numero_laudo LIKE ? OR l.numero_contrato LIKE ? OR l.numero_lote LIKE ? OR l.denominacao_imovel LIKE ? OR l.loteamento LIKE ?)`);
       const b = `%${filtro.busca}%`;
-      params.push(b, b, b, b);
+      params.push(b, b, b, b, b);
     }
 
     const [rows] = await this.pool.query<RowDataPacket[]>(
       `SELECT
-          l.id, l.numero, l.tipo_imovel,
-          l.imovel_descricao, l.contrato, l.quadra, l.lote,
-          l.data_demarcacao, l.area_m2,
+          l.id,
+          l.numero_laudo AS numero,
+          l.tipo_imovel,
+          l.denominacao_imovel AS imovel_descricao,
+          l.numero_contrato AS contrato,
+          l.quadra,
+          l.numero_lote AS lote,
+          COALESCE(l.data_pagamento, DATE(l.created_at)) AS data_demarcacao,
+          l.area_total_m2 AS area_m2,
           COALESCE(l.valor_demarcacao, 0) AS valor,
           l.status_faturamento, l.relatorio_id, l.faturado_em, l.pago_em,
           NULL AS relatorio_numero
          FROM laudos_demarcacao l
         WHERE ${where.join(' AND ')}
-        ORDER BY l.data_demarcacao DESC, l.id DESC`,
+        ORDER BY COALESCE(l.data_pagamento, l.created_at) DESC, l.id DESC`,
       params
     );
     return rows as any;
@@ -85,24 +90,29 @@ export class RelatorioDemarcacaoService {
 
   // ===================== LISTAR JÁ FATURADAS =====================
   async listarJaFaturadas(filtro: ListarFiltro = {}): Promise<LaudoListado[]> {
-    const where: string[] = [`l.status_faturamento IN ('faturado','pago')`];
+    const where: string[] = [`l.status_faturamento IN ('faturado','pago')`, `l.ativo = 1`];
     const params: any[] = [];
 
-    if (filtro.loteadorId) { where.push(`l.loteador_id = ?`); params.push(filtro.loteadorId); }
     if (filtro.loteamento) { where.push(`l.loteamento LIKE ?`); params.push(`%${filtro.loteamento}%`); }
-    if (filtro.dataInicio) { where.push(`l.data_demarcacao >= ?`); params.push(filtro.dataInicio); }
-    if (filtro.dataFim)    { where.push(`l.data_demarcacao <= ?`); params.push(filtro.dataFim); }
+    if (filtro.dataInicio) { where.push(`COALESCE(l.data_pagamento, DATE(l.created_at)) >= ?`); params.push(filtro.dataInicio); }
+    if (filtro.dataFim)    { where.push(`COALESCE(l.data_pagamento, DATE(l.created_at)) <= ?`); params.push(filtro.dataFim); }
     if (filtro.busca) {
-      where.push(`(l.numero LIKE ? OR l.contrato LIKE ? OR l.lote LIKE ? OR r.numero LIKE ?)`);
+      where.push(`(l.numero_laudo LIKE ? OR l.numero_contrato LIKE ? OR l.numero_lote LIKE ? OR r.numero LIKE ?)`);
       const b = `%${filtro.busca}%`;
       params.push(b, b, b, b);
     }
 
     const [rows] = await this.pool.query<RowDataPacket[]>(
       `SELECT
-          l.id, l.numero, l.tipo_imovel,
-          l.imovel_descricao, l.contrato, l.quadra, l.lote,
-          l.data_demarcacao, l.area_m2,
+          l.id,
+          l.numero_laudo AS numero,
+          l.tipo_imovel,
+          l.denominacao_imovel AS imovel_descricao,
+          l.numero_contrato AS contrato,
+          l.quadra,
+          l.numero_lote AS lote,
+          COALESCE(l.data_pagamento, DATE(l.created_at)) AS data_demarcacao,
+          l.area_total_m2 AS area_m2,
           COALESCE(l.valor_demarcacao, 0) AS valor,
           l.status_faturamento, l.relatorio_id, l.faturado_em, l.pago_em,
           r.numero AS relatorio_numero
@@ -125,9 +135,16 @@ export class RelatorioDemarcacaoService {
     if (!laudoIds?.length) return { itens: [], qtd: 0, areaTotal: 0, valorTotal: 0 };
     const [rows] = await this.pool.query<RowDataPacket[]>(
       `SELECT
-          l.id, l.numero, l.tipo_imovel, l.imovel_descricao,
-          l.contrato, l.quadra, l.lote, l.data_demarcacao,
-          l.area_m2, COALESCE(l.valor_demarcacao, 0) AS valor,
+          l.id,
+          l.numero_laudo AS numero,
+          l.tipo_imovel,
+          l.denominacao_imovel AS imovel_descricao,
+          l.numero_contrato AS contrato,
+          l.quadra,
+          l.numero_lote AS lote,
+          COALESCE(l.data_pagamento, DATE(l.created_at)) AS data_demarcacao,
+          l.area_total_m2 AS area_m2,
+          COALESCE(l.valor_demarcacao, 0) AS valor,
           l.status_faturamento, l.relatorio_id
          FROM laudos_demarcacao l
         WHERE l.id IN (?)`,
@@ -163,8 +180,15 @@ export class RelatorioDemarcacaoService {
 
       // 1) Buscar laudos selecionados COM LOCK
       const [laudos] = await conn.query<RowDataPacket[]>(
-        `SELECT id, numero, tipo_imovel, imovel_descricao, contrato, quadra, lote,
-                data_demarcacao, area_m2,
+        `SELECT id,
+                numero_laudo AS numero,
+                tipo_imovel,
+                denominacao_imovel AS imovel_descricao,
+                numero_contrato AS contrato,
+                quadra,
+                numero_lote AS lote,
+                COALESCE(data_pagamento, DATE(created_at)) AS data_demarcacao,
+                area_total_m2 AS area_m2,
                 COALESCE(valor_demarcacao, 0) AS valor,
                 status_faturamento
            FROM laudos_demarcacao
