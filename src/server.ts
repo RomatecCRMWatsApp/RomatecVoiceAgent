@@ -752,10 +752,33 @@ const apiHandle = (fn: (...args: never[]) => Promise<unknown> | unknown) =>
     }
   };
 
+// v3.16.0 P0 offline-first: variante do apiHandle para POSTs de criação dos
+// módulos P0 (obras, parcelas, recibos, despesas-extras, equipe). Se o cliente
+// mandar `uuid_local` no body (gerado offline pelo replay queue), ecoa de volta
+// junto da resposta — assim o frontend reconcilia id local com id real do DB.
+// Pass-through puro: não toca em schema nem na função de criação subjacente.
+const apiHandleEchoUuid = (fn: (...args: never[]) => Promise<unknown> | unknown) =>
+  async (req: Request, res: Response) => {
+    try {
+      const args: Record<string, unknown> = {
+        ...req.query, ...req.params, ...(req.body ?? {}), confirm: true,
+      };
+      const data = await (fn as (a: typeof args) => Promise<unknown>)(args);
+      const uuid_local = req.body?.uuid_local;
+      if (uuid_local && data && typeof data === 'object' && !Array.isArray(data)) {
+        res.json({ ...(data as Record<string, unknown>), uuid_local });
+      } else {
+        res.json(data);
+      }
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  };
+
 // Obras
 app.get   ('/api/obras',     apiHandle(args => obras.listarObras(args as Parameters<typeof obras.listarObras>[0])));
 app.get   ('/api/obras/:id', apiHandle(args => obras.buscarObra((args as { id: string }).id)));
-app.post  ('/api/obras',     apiHandle(args => obras.criarObra(args as Parameters<typeof obras.criarObra>[0])));
+app.post  ('/api/obras',     apiHandleEchoUuid(args => obras.criarObra(args as Parameters<typeof obras.criarObra>[0])));
 app.put   ('/api/obras/:id', apiHandle(args => obras.atualizarObra(args as Parameters<typeof obras.atualizarObra>[0])));
 app.delete('/api/obras/:id', apiHandle(args => obras.apagarObra(args as { id: string; confirm?: boolean })));
 
@@ -765,7 +788,7 @@ app.post  ('/api/obras/:id/enviar-telegram',
 
 // v1.65.40: Parcelas de pagamento do cliente (receita por obra)
 app.get   ('/api/obras/:obra_id/parcelas',     apiHandle(args => obras.listarParcelasObra((args as { obra_id: string }).obra_id)));
-app.post  ('/api/parcelas',                    apiHandle(args => obras.criarParcela(args as Parameters<typeof obras.criarParcela>[0])));
+app.post  ('/api/parcelas',                    apiHandleEchoUuid(args => obras.criarParcela(args as Parameters<typeof obras.criarParcela>[0])));
 app.put   ('/api/parcelas/:id',                apiHandle(args => obras.atualizarParcela(args as Parameters<typeof obras.atualizarParcela>[0])));
 app.delete('/api/parcelas/:id',                apiHandle(args => obras.apagarParcela(args as { id: string })));
 app.post  ('/api/obras/:obra_id/parcelas/auto-gerar', apiHandle(args => obras.gerarParcelasAutomaticas(args as Parameters<typeof obras.gerarParcelasAutomaticas>[0])));
@@ -824,7 +847,7 @@ app.delete('/api/transacoes/:id', requireCeoToken, apiHandle(args => obras.apaga
 
 // Equipe
 app.get   ('/api/equipe',     apiHandle(args => obras.listarEquipe(args as { obra_id?: string })));
-app.post  ('/api/equipe',     apiHandle(args => obras.criarMembroEquipe(args as Parameters<typeof obras.criarMembroEquipe>[0])));
+app.post  ('/api/equipe',     apiHandleEchoUuid(args => obras.criarMembroEquipe(args as Parameters<typeof obras.criarMembroEquipe>[0])));
 app.put   ('/api/equipe/:id', apiHandle(args => obras.atualizarMembroEquipe(args as Parameters<typeof obras.atualizarMembroEquipe>[0])));
 app.delete('/api/equipe/:id', apiHandle(args => obras.apagarMembroEquipe(args as { id: string; confirm?: boolean })));
 // v1.65.10: backfill manual de sync Equipe→contacts→zayra_memory.
@@ -1131,7 +1154,7 @@ app.get   ('/api/despesas-extras/resumo',
 app.get   ('/api/despesas-extras/:id',
   apiHandle(args => despesasExtras.buscarDespesaExtra((args as { id: string }).id)));
 app.post  ('/api/despesas-extras',
-  apiHandle(args => despesasExtras.criarDespesaExtra(args as Parameters<typeof despesasExtras.criarDespesaExtra>[0])));
+  apiHandleEchoUuid(args => despesasExtras.criarDespesaExtra(args as Parameters<typeof despesasExtras.criarDespesaExtra>[0])));
 app.put   ('/api/despesas-extras/:id',
   apiHandle(args => despesasExtras.atualizarDespesaExtra(args as Parameters<typeof despesasExtras.atualizarDespesaExtra>[0])));
 app.delete('/api/despesas-extras/:id', requireCeoToken,
@@ -3018,7 +3041,7 @@ app.get   ('/api/recibos/:id',
 app.get   ('/api/recibos/:id/eventos',
   apiHandle(args => recibos.listarEventos((args as { id: string }).id)));
 app.post  ('/api/recibos',
-  apiHandle(args => recibos.criarRecibo(args as Parameters<typeof recibos.criarRecibo>[0])));
+  apiHandleEchoUuid(args => recibos.criarRecibo(args as Parameters<typeof recibos.criarRecibo>[0])));
 app.post  ('/api/recibos/:id/enviar',
   apiHandle(args => recibos.enviarReciboWhatsApp(args as Parameters<typeof recibos.enviarReciboWhatsApp>[0])));
 app.post  ('/api/recibos/:id/reenviar',
