@@ -529,3 +529,52 @@ describe('carregarComCache', () => {
     expect(dados[0].numero).toBe('001');
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Task C3: executarFullSync — busca todas as listagens P0 e popula cache
+// Usado no boot inicial pra primeira sessao (pre-load offline-ready).
+// ──────────────────────────────────────────────────────────────────────
+describe('executarFullSync', () => {
+  beforeEach(async () => {
+    const eng = await carregarEngine();
+    const db = await eng.abrirCacheV2();
+    const stores = [...eng.CACHE_V2_STORES, 'sync_meta'];
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(stores, 'readwrite');
+      for (const s of stores) tx.objectStore(s).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  });
+
+  it('popula cache pras 5 entidades e chama onProgress', async () => {
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    Object.defineProperty(win.navigator, 'onLine', { value: true, configurable: true });
+    const payloads: Record<string, any[]> = {
+      obras: [{ id: 1, nome: 'O1' }, { id: 2, nome: 'O2' }],
+      parcelas: [{ id: 1, valor: 100 }],
+      recibos: [{ id: 1, numero: 'R001' }],
+      despesas: [{ id: 1, valor: 50 }],
+      equipe: [{ id: 1, nome: 'Joao' }],
+    };
+    win.fetch = vi.fn(async (url: string) => {
+      const ent = (url.match(/\/api\/([^?]+)/) || [])[1];
+      const key = ent === 'despesas-extras' ? 'despesas' : ent;
+      return { ok: true, json: async () => payloads[key] || [] };
+    });
+    const progresses: any[] = [];
+    await eng.executarFullSync((p: any) => progresses.push(p));
+    expect(progresses.length).toBe(6); // 5 entidades + 'done'
+    expect(progresses[5].entidade).toBe('done');
+    const obrasCache = await eng.cacheV2.getAll('obras');
+    expect(obrasCache).toHaveLength(2);
+  });
+
+  it('throw se offline', async () => {
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    Object.defineProperty(win.navigator, 'onLine', { value: false, configurable: true });
+    await expect(eng.executarFullSync()).rejects.toThrow(/offline/i);
+  });
+});

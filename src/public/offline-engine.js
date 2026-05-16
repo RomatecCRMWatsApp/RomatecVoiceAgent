@@ -586,6 +586,42 @@
     return cacheV2.getAll(entidade);
   }
 
+  // v3.16.0 P0 (Task C3): full sync inicial — busca todas as listagens P0 e
+  // popula cache_v2. Chama onProgress({entidade, atual, total}) a cada passo
+  // (UI usa pra mostrar barra de progresso). Falha por entidade nao aborta o
+  // restante — loga warn e segue (UI pode degradar graciosamente).
+  async function executarFullSync(onProgress) {
+    if (!navigator.onLine) throw new Error('Offline — nao da pra full sync');
+    const entidades = [
+      { nome: 'obras', endpoint: '/api/obras' },
+      { nome: 'parcelas', endpoint: '/api/parcelas' },
+      { nome: 'recibos', endpoint: '/api/recibos' },
+      { nome: 'despesas', endpoint: '/api/despesas-extras' },
+      { nome: 'equipe', endpoint: '/api/equipe' },
+    ];
+    const total = entidades.length;
+    for (let i = 0; i < total; i++) {
+      const e = entidades[i];
+      if (typeof onProgress === 'function') onProgress({ entidade: e.nome, atual: i, total });
+      try {
+        const url = getAPI() + e.endpoint + '?_t=' + Date.now();
+        const r = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
+        if (r.ok) {
+          const dados = await r.json();
+          // Aceita 2 formatos: array direto OU {items: [...]}
+          const lista = Array.isArray(dados) ? dados : (dados?.items || []);
+          if (Array.isArray(lista) && lista.length > 0) {
+            await cacheV2.bulkPut(e.nome, lista);
+            await cacheV2.setMeta(e.nome, { last_full_sync_at: Date.now() });
+          }
+        }
+      } catch (err) {
+        console.warn('[fullsync]', e.nome, 'falhou:', err.message);
+      }
+    }
+    if (typeof onProgress === 'function') onProgress({ entidade: 'done', atual: total, total });
+  }
+
   // Expoe a API:
   window.api = api; // CRITICO: obras.html chama api() em centenas de lugares
   window.OfflineEngine = {
@@ -609,5 +645,7 @@
     CACHE_V2_STORES,
     // v3.16.0 P0 Task C2
     carregarComCache,
+    // v3.16.0 P0 Task C3
+    executarFullSync,
   };
 })();

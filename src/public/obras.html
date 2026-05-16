@@ -18476,6 +18476,54 @@ function readImageFile(file) {
     fr.readAsDataURL(file);
   });
 }
+
+// v3.16.0 P0 (Task C3): modal de progresso pro full sync inicial.
+// Renderiza overlay fullscreen com barra animada e label dinamica baseada em
+// onProgress({entidade, atual, total}) emitido por OfflineEngine.executarFullSync.
+// Auto-fecha 800ms apos 'done' ou exibe a mensagem de erro se algo quebrou.
+async function abrirModalFullSync() {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:99999; display:flex; align-items:center; justify-content:center;';
+  ov.innerHTML = `
+    <div style="background:var(--surface, #0f1a14); border:1px solid var(--border, #2d4a3a); border-radius:12px; padding:30px; min-width:320px; text-align:center; color:var(--text, #e8f0eb);">
+      <h3 style="margin:0 0 16px; color:var(--gold, #d4a017);">🔄 Sincronizando dados</h3>
+      <p id="fs-label" style="margin:0 0 12px; color:var(--text-muted, #9ca3af);">Preparando…</p>
+      <div style="background:#1a2920; border-radius:8px; height:14px; overflow:hidden; margin-bottom:8px;">
+        <div id="fs-bar" style="background:#16a34a; height:100%; width:0%; transition:width 0.3s;"></div>
+      </div>
+      <p id="fs-pct" style="font-size:12px; color:var(--text-muted, #9ca3af);">0%</p>
+      <p style="font-size:11px; color:#9ca3af; margin-top:14px;">⏳ Não feche o app</p>
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  try {
+    await OfflineEngine.executarFullSync(({ entidade, atual, total }) => {
+      const pct = Math.round((atual / total) * 100);
+      ov.querySelector('#fs-label').textContent = entidade === 'done' ? '✓ Pronto!' : `Carregando ${entidade}…`;
+      ov.querySelector('#fs-bar').style.width = pct + '%';
+      ov.querySelector('#fs-pct').textContent = pct + '%';
+    });
+  } catch (err) {
+    ov.querySelector('#fs-label').textContent = '⚠️ Falha: ' + (err.message || err);
+  }
+  setTimeout(() => { try { ov.remove(); } catch {} }, 800);
+}
+
+// v3.16.0 P0 (Task C3): trigger do full sync inicial na primeira sessao.
+// Roda APOS offline-engine.js carregar (garantido pelo <script src> no <head>).
+// Usa localStorage flag pra rodar so 1x — sessoes subsequentes nao replicam
+// (cada loadXxx() ja sincroniza on-demand via carregarComCache).
+(async () => {
+  try {
+    if (!localStorage.getItem('offline_p0_first_sync') && navigator.onLine) {
+      await abrirModalFullSync();
+      localStorage.setItem('offline_p0_first_sync', String(Date.now()));
+    }
+  } catch (e) {
+    console.warn('[fullsync boot] erro:', e.message);
+  }
+})();
 </script>
 <!-- v3.10.0: Fechamento de Folha (modal + painel saldo) -->
 <script src="/folha-fechamento.js"></script>
