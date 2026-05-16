@@ -299,6 +299,28 @@ export class RelatorioDemarcacaoService {
     return { ...head[0], itens };
   }
 
+  // ===================== PREVIEW DO ENVIO (texto + telefone) =====================
+  // v3.15.7: gera texto formal pra WhatsApp com lista de serviços, totais,
+  // dados bancários, agradecimento e contato do CEO. UI pode editar antes de enviar.
+  async previewEnvio(relatorioId: number): Promise<{
+    relatorio_id: number;
+    telefone: string;
+    contato_default: string;
+    texto: string;
+    pdf_url: string;
+  }> {
+    const det: any = await this.obterDetalhe(relatorioId);
+    if (!det) throw new Error('Relatório não encontrado.');
+    const tel = String(det.loteador_whatsapp || '').replace(/\D/g, '');
+    return {
+      relatorio_id: relatorioId,
+      telefone: tel,
+      contato_default: '(99) 9 9181-1246',
+      texto: montarTextoEnvio(det),
+      pdf_url: `/api/relatorios-demarcacao/${relatorioId}/pdf`,
+    };
+  }
+
   // ===================== MARCAR COMO PAGO =====================
   async marcarPago(relatorioId: number, usuario: string): Promise<void> {
     const conn = await this.pool.getConnection();
@@ -364,4 +386,68 @@ export class RelatorioDemarcacaoService {
       conn.release();
     }
   }
+}
+
+// ===================== HELPERS =====================
+function fmtMoedaBR(v: number | string): string {
+  return Number(v || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+function fmtDataBR(d: any): string {
+  if (!d) return '-';
+  const s = String(d).slice(0, 10).split('-');
+  return s.length === 3 ? `${s[2]}/${s[1]}/${s[0]}` : '-';
+}
+function montarDescItem(it: any): string {
+  const partes: string[] = [];
+  if (it.imovel_descricao) partes.push(String(it.imovel_descricao));
+  if (it.contrato) partes.push(`Contr. ${it.contrato}`);
+  if (it.quadra) partes.push(`Q.${it.quadra}`);
+  if (it.lote) partes.push(`Lote ${it.lote}`);
+  return partes.join(' · ') || '-';
+}
+
+/** v3.15.7: texto formal pra envio do relatório via WhatsApp.
+ *  Inclui lista de serviços executados, totais, dados bancários completos,
+ *  agradecimento e contato CEO. UI permite editar antes do envio. */
+export function montarTextoEnvio(det: any): string {
+  const linhasServicos = (det.itens || []).map((it: any, i: number) =>
+    `${(i + 1).toString().padStart(2, '0')}. *${it.laudo_numero}* — ${montarDescItem(it)}` +
+    `\n     📏 ${fmtMoedaBR(it.area_m2)} m² · 💰 R$ ${fmtMoedaBR(it.valor)}`
+  ).join('\n');
+
+  const linhasBanco: string[] = [];
+  if (det.pagamento_pix)   linhasBanco.push(`• *PIX (${/@/.test(det.pagamento_pix) ? 'e-mail' : 'chave'}):* ${det.pagamento_pix}`);
+  if (det.pagamento_banco) linhasBanco.push(`• *Banco:* ${det.pagamento_banco} · *Ag.:* ${det.pagamento_agencia || '-'} · *C/C:* ${det.pagamento_conta || '-'}`);
+  if (det.pagamento_titular) linhasBanco.push(`• *Titular:* ${det.pagamento_titular}${det.pagamento_documento ? ` · *CNPJ/CPF:* ${det.pagamento_documento}` : ''}`);
+
+  const venc = det.data_vencimento ? `\n📅 *Vencimento:* ${fmtDataBR(det.data_vencimento)}` : '';
+
+  return [
+    `Prezado(a) ${det.loteador_nome},`,
+    ``,
+    `Esperamos que esteja bem.`,
+    ``,
+    `Em primeiro lugar, *agradecemos a confiança e a parceria* com a *Romatec Consultoria Imobiliária* na execução dos serviços técnicos de demarcação descritos abaixo.`,
+    ``,
+    `Encaminhamos, em caráter formal, o *Relatório de Demarcações Faturáveis ${det.numero}*, contendo o detalhamento dos serviços executados e o respectivo valor a receber:`,
+    ``,
+    `📋 *Serviços executados (${det.qtd_itens} ${det.qtd_itens === 1 ? 'laudo' : 'laudos'}):*`,
+    linhasServicos,
+    ``,
+    `📐 *Área total demarcada:* ${fmtMoedaBR(det.area_total_m2)} m²`,
+    `💰 *Valor total a receber:* *R$ ${fmtMoedaBR(det.valor_total)}*${venc}`,
+    ``,
+    `🏦 *Dados para pagamento:*`,
+    ...linhasBanco,
+    ``,
+    `📎 *PDF detalhado em anexo* (segue na próxima mensagem).`,
+    ``,
+    `📞 *Contato Romatec (dúvidas):* WhatsApp (99) 9 9181-1246`,
+    ``,
+    `Reforçamos nosso compromisso com a *qualidade técnica*, a *precisão dos levantamentos* e a *transparência* em toda a relação contratual. Agradecemos novamente a oportunidade de prestar nossos serviços.`,
+    ``,
+    `Cordialmente,`,
+    `*Romatec Consultoria Imobiliária*`,
+    `_Engenharia · Agrimensura · Gestão de Obras_`,
+  ].join('\n');
 }

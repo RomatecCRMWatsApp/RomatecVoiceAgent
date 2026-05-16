@@ -133,12 +133,27 @@ export async function runRelatorioDemarcacaoMigrations(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `, 'CREATE TABLE dados_pagamento_emissor');
 
-  // Seed do emissor (só insere se vazio)
+  // Seed do emissor (só insere se vazio) — v3.15.7: dados reais Romatec/J R P Bezerra LTDA
   try {
     await pool.execute(`
       INSERT IGNORE INTO dados_pagamento_emissor (id, pix, banco, agencia, conta, tipo_conta, titular, documento)
-      VALUES (1, 'PREENCHER_PIX', 'PREENCHER_BANCO', '0000', '00000-0', 'corrente',
-              'José Romário Pinto Bezerra', 'PREENCHER_CPF_CNPJ')
+      VALUES (1, 'romatec.cad@hotmail.com', 'Banco Santander', '1225', '130007144', 'corrente',
+              'J R P BEZERRA LTDA', '17.261.987/0001-09')
+    `);
+  } catch { /* nao bloqueia */ }
+  // v3.15.7: se row id=1 ainda tem os placeholders antigos, sobrescreve com dados reais
+  try {
+    await pool.execute(`
+      UPDATE dados_pagamento_emissor
+         SET pix = 'romatec.cad@hotmail.com',
+             banco = 'Banco Santander',
+             agencia = '1225',
+             conta = '130007144',
+             tipo_conta = 'corrente',
+             titular = 'J R P BEZERRA LTDA',
+             documento = '17.261.987/0001-09'
+       WHERE id = 1
+         AND (pix = 'PREENCHER_PIX' OR banco = 'PREENCHER_BANCO' OR documento = 'PREENCHER_CPF_CNPJ')
     `);
   } catch { /* nao bloqueia */ }
 

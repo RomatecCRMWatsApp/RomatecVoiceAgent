@@ -148,6 +148,17 @@ export function relatorioDemarcacaoRouter(pool: Pool): Router {
     }
   });
 
+  // ===== PREVIEW DO ENVIO (texto + telefone) =====
+  // v3.15.7: UI mostra preview editavel antes de mandar via WhatsApp
+  router.get('/:id/enviar-preview', async (req, res) => {
+    try {
+      const r = await service.previewEnvio(Number(req.params.id));
+      res.json(r);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   // ===== ENVIAR VIA Z-API =====
   router.post('/:id/enviar', async (req, res) => {
     try {
@@ -164,16 +175,12 @@ export function relatorioDemarcacaoRouter(pool: Pool): Router {
         return res.status(500).json({ error: 'Z-API não configurada' });
       }
 
-      // 1) Texto introdutório
-      const totalFmt = `R$ ${Number(det.valor_total).toFixed(2).replace('.', ',')}`;
-      const venc = det.data_vencimento
-        ? ` · Vencimento: ${String(det.data_vencimento).slice(0,10).split('-').reverse().join('/')}`
-        : '';
-      const msg = `Olá, ${det.loteador_nome}!\n\n` +
-                  `Segue o Relatório de Demarcações *${det.numero}*.\n` +
-                  `${det.qtd_itens} laudos · Total: *${totalFmt}*${venc}\n\n` +
-                  (det.pagamento_pix ? `💰 PIX: ${det.pagamento_pix}\n` : '') +
-                  `Qualquer dúvida, estou à disposição.\n\n_Romatec Consultoria Total_`;
+      // v3.15.7: aceita texto editado vindo do modal de preview, com fallback
+      // pro texto rico (lista de servicos, dados bancarios, agradecimento)
+      const { montarTextoEnvio } = await import('../services/relatorioDemarcacao');
+      const msg = (typeof req.body?.texto === 'string' && req.body.texto.trim())
+        ? req.body.texto
+        : montarTextoEnvio(det);
 
       await axios.post(
         `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,

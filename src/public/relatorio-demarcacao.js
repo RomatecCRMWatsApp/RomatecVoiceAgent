@@ -391,27 +391,105 @@
       const data = await r.json();
       if (!r.ok) throw new Error(data.error);
 
-      if (enviarZap && body.loteadorWhatsapp) {
-        const rEnv = await fetch(`${API}/${data.relatorioId}/enviar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telefone: body.loteadorWhatsapp }),
-        });
-        const dEnv = await rEnv.json();
-        if (!rEnv.ok) {
-          alert(`Relatório ${data.numero} gerado, mas falhou ao enviar: ${dEnv.error}`);
-        } else {
-          alert(`✓ Relatório ${data.numero} gerado e enviado para ${body.loteadorWhatsapp}`);
-        }
-      } else {
-        alert(`✓ Relatório ${data.numero} gerado.`);
-      }
       window.open(`${API}/${data.relatorioId}/pdf`, '_blank');
       form.remove();
       trocarAba('ja-faturadas');
+
+      // v3.15.7: ao inves de enviar direto, abre modal de preview do texto/telefone
+      if (enviarZap) {
+        await abrirModalEnvioPreview(data.relatorioId, data.numero);
+      } else {
+        alert(`✓ Relatório ${data.numero} gerado.`);
+      }
     } catch (err) {
       alert('Erro: ' + err.message);
     }
+  }
+
+  // v3.15.7: modal de preview do envio WhatsApp — texto rico (lista de servicos,
+  // dados bancarios, agradecimento) e telefone do loteador, AMBOS editaveis.
+  async function abrirModalEnvioPreview(relatorioId, numeroRel) {
+    let preview;
+    try {
+      const r = await fetch(`${API}/${relatorioId}/enviar-preview`);
+      preview = await r.json();
+      if (!r.ok) throw new Error(preview.error);
+    } catch (e) { return alert('Erro ao carregar preview: ' + e.message); }
+
+    const ov = document.createElement('div');
+    ov.style.cssText = `position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:10002;
+      display:flex; align-items:flex-start; justify-content:center; padding:20px; overflow-y:auto;`;
+    ov.innerHTML = `
+      <div style="background:#0f1a14; border:1px solid #2d4a3a; border-radius:12px; width:min(720px, 96vw); padding:20px; color:#e8f0eb;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0; color:#d4a017;">📤 Confirmar envio WhatsApp — ${escapeHtml(numeroRel)}</h3>
+          <button id="env-x" style="background:transparent; border:none; color:#9ca3af; font-size:22px; cursor:pointer;">×</button>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
+          <div>
+            <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:4px;">📤 <strong>Destino</strong>:</label>
+            <input id="env-tel" type="tel" inputmode="tel" autocomplete="off" name="env-tel-${Date.now()}"
+              value="${escapeHtml(preview.telefone || '')}" placeholder="5599999999999"
+              style="${inputStyle()} width:100%;">
+            <p style="margin:4px 0 0; font-size:11px; color:${preview.telefone ? '#9ca3af' : '#dc2626'};">
+              ${preview.telefone ? '📞 WhatsApp do loteador' : '⚠️ Loteador sem WhatsApp — informe o número'}
+            </p>
+          </div>
+          <div>
+            <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:4px;">📞 <strong>Contato</strong> (vai na msg):</label>
+            <input id="env-contato" type="tel" inputmode="tel" autocomplete="off" name="env-contato-${Date.now()}"
+              value="${escapeHtml(preview.contato_default || '(99) 9 9181-1246')}" placeholder="(99) 9 9999-9999"
+              style="${inputStyle()} width:100%;">
+            <p style="margin:4px 0 0; font-size:11px; color:#9ca3af;">⚙️ Default: CEO</p>
+          </div>
+        </div>
+        <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:4px;">Texto da mensagem (editável):</label>
+        <textarea id="env-texto" rows="20"
+          style="${inputStyle()} width:100%; font-family:inherit; font-size:12px; line-height:1.5; resize:vertical;">${escapeHtml(preview.texto)}</textarea>
+        <p style="margin:6px 0 0; font-size:11px; color:#9ca3af;">📎 O PDF será anexado automaticamente após esta mensagem.</p>
+        <div style="display:flex; gap:8px; margin-top:14px; justify-content:flex-end;">
+          <button id="env-cancel" style="padding:10px 16px; background:#374151; color:#fff; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+          <button id="env-ok" style="padding:10px 18px; background:#16a34a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✓ Confirmar e enviar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(ov);
+    const fechar = () => ov.remove();
+    ov.querySelector('#env-x').onclick = fechar;
+    ov.querySelector('#env-cancel').onclick = fechar;
+    // Sync do contato no texto
+    const inpContato = ov.querySelector('#env-contato');
+    const txtArea = ov.querySelector('#env-texto');
+    let contatoAnt = inpContato.value;
+    inpContato.oninput = () => {
+      const novo = inpContato.value;
+      if (novo && contatoAnt && txtArea.value.includes(contatoAnt)) {
+        txtArea.value = txtArea.value.split(contatoAnt).join(novo);
+      }
+      contatoAnt = novo;
+    };
+    ov.querySelector('#env-ok').onclick = async () => {
+      const tel = ov.querySelector('#env-tel').value.replace(/\D/g, '');
+      const texto = ov.querySelector('#env-texto').value.trim();
+      if (!tel || tel.length < 10) return alert('Telefone inválido (mín. 10 dígitos com DDD).');
+      if (!texto) return alert('Texto vazio.');
+      const btn = ov.querySelector('#env-ok');
+      btn.disabled = true; btn.textContent = '⏳ Enviando...';
+      try {
+        const r = await fetch(`${API}/${relatorioId}/enviar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telefone: tel, texto }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Falha no envio');
+        alert(`✓ Relatório ${numeroRel} enviado para ${tel}`);
+        fechar();
+      } catch (e) {
+        alert('Erro ao enviar: ' + e.message);
+        btn.disabled = false; btn.textContent = '✓ Confirmar e enviar';
+      }
+    };
   }
 
   // ===== UTILS =====
