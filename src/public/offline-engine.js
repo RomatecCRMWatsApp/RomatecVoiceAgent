@@ -262,8 +262,9 @@
   // mantem laudos-demarcacao/galeria que ja funcionavam. Modulos fora do P0
   // (vistorias, etc.) continuam exigindo rede e nao sao enfileirados.
   function ehMutacaoP0(method, path) {
+    method = String(method || '').toUpperCase();
     if (!['POST','PUT','DELETE'].includes(method)) return false;
-    return /\/api\/(obras|parcelas|recibos|despesas-extras|equipe|laudos-demarcacao|galeria)(?:[\/\?]|$)/.test(path);
+    return /^\/api\/(obras|parcelas|recibos|despesas-extras|equipe|laudos-demarcacao|galeria)(?:[\/\?]|$)/.test(path);
   }
 
   async function api(path, opts={}) {
@@ -290,10 +291,9 @@
     } else if (Object.keys(baseHeaders).length > 0) {
       fetchOpts.headers = baseHeaders;
     }
-    // v2.4.0 OFFLINE-FIRST: requests de mutação podem ser enfileiradas se a rede
-    // falhar. v3.16.0 P0: criterios delegados pra ehMutacaoP0 — cobre os 5
-    // modulos do P0 + laudos/galeria (retro-compat). GET continua sempre online
-    // (precisa de dados frescos).
+    // v3.16.0 P0 OFFLINE-FIRST: mutacoes em modulos P0 sao enfileiradas se network falhar
+    // — criterios delegados pra ehMutacaoP0 (cobre os 5 modulos do P0 + laudos/galeria
+    // retro-compat). GET continua sempre online (precisa de dados frescos).
     const ehMutacao = ehMutacaoP0(method, path);
     try {
       const r = await fetch(url, fetchOpts);
@@ -301,7 +301,7 @@
       if (!r.ok) throw new Error(d.error || 'Erro API');
       return d;
     } catch (err) {
-      // Erro de rede (offline ou timeout) — só enfileira se for laudo
+      // Erro de rede (offline ou timeout) — só enfileira se for mutacao P0
       const ehErroRede = err.message?.includes('Failed to fetch')
         || err.message?.includes('NetworkError')
         || err.name === 'TypeError'

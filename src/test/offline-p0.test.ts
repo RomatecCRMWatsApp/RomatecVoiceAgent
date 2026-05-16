@@ -94,4 +94,24 @@ describe('ehMutacaoP0 predicate', () => {
     const eng = await carregarEngine();
     expect(eng.ehMutacaoP0('POST', '/api/vistorias')).toBe(false);
   });
+
+  it('aceita path com query string', async () => {
+    const eng = await carregarEngine();
+    expect(eng.ehMutacaoP0('POST', '/api/obras?force=1')).toBe(true);
+  });
+
+  it('rejeita path look-alike (/api/obrasfoo)', async () => {
+    const eng = await carregarEngine();
+    expect(eng.ehMutacaoP0('POST', '/api/obrasfoo')).toBe(false);
+  });
+
+  it('rejeita path sem prefixo /api/', async () => {
+    const eng = await carregarEngine();
+    expect(eng.ehMutacaoP0('POST', '/v2/api/obras')).toBe(false);
+  });
+
+  it('aceita method case-insensitive', async () => {
+    const eng = await carregarEngine();
+    expect(eng.ehMutacaoP0('post', '/api/obras')).toBe(true);
+  });
 });
