@@ -41,7 +41,9 @@ function diasAtraso(vencimento: Date | string): number {
   return Math.floor((hoje.getTime() - venc.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-/** Monta texto formal de cobrança baseado no estado da parcela */
+/** Monta texto formal de cobrança baseado no estado da parcela.
+ *  v3.15.2: tom profissional + agradecimento + bloco claro sobre comprovante
+ *  (se ja pagou, mandar comprovante e desconsiderar a cobranca). */
 function montarTextoCobranca(p: ParcelaRow): string {
   const atraso = diasAtraso(p.vencimento);
   const vencido = atraso > 0;
@@ -51,20 +53,32 @@ function montarTextoCobranca(p: ParcelaRow): string {
   const obra = p.obra_nome;
   const parcela = `${p.numero}ª parcela`;
 
+  // Bloco comum: se ja pagou, manda comprovante e ignora
+  const blocoComprovante = [
+    `📎 *Se o pagamento já foi realizado:* por gentileza, encaminhe o comprovante (PIX, transferência ou recibo bancário) por esta mesma conversa para registro em nosso sistema e *desconsidere esta cobrança*.`,
+  ].join('\n');
+
   if (!vencido) {
     return [
       `Prezado(a) ${nomeCliente},`,
       ``,
-      `Lembramos que a *${parcela}* referente à obra *"${obra}"* vence em *${vencimento}*, no valor de *${valor}*.`,
+      `Inicialmente, *agradecemos a parceria* com a *Romatec Consultoria Imobiliária* e a confiança depositada em nossos serviços de engenharia e agrimensura.`,
       ``,
-      `Para evitar atrasos e manter o cronograma da obra em dia, solicitamos a gentileza de efetuar o pagamento até a data prevista.`,
+      `Trata-se de comunicação técnica e formal referente à *${parcela}* da obra *"${obra}"*, cujos dados seguem abaixo:`,
       ``,
-      `Caso já tenha realizado o pagamento, por favor desconsidere esta mensagem ou nos envie o comprovante para conferência.`,
+      `• *Vencimento:* ${vencimento}`,
+      `• *Valor:* ${valor}`,
+      `• *Forma de pagamento preferencial:* PIX (mediante envio dos dados em retorno)`,
       ``,
-      `Em caso de dúvidas, estamos à disposição.`,
+      `A quitação dentro do prazo é essencial para a *manutenção do cronograma físico-financeiro da obra* e para o cumprimento das próximas etapas contratuais.`,
+      ``,
+      blocoComprovante,
+      ``,
+      `Permanecemos à disposição para quaisquer esclarecimentos técnicos, contratuais ou tributários relacionados a esta parcela.`,
       ``,
       `Atenciosamente,`,
-      `*Romatec Consultoria Imobiliária — Engenharia e Agrimensura*`,
+      `*Romatec Consultoria Imobiliária*`,
+      `_Engenharia · Agrimensura · Gestão de Obras_`,
     ].join('\n');
   }
 
@@ -72,16 +86,23 @@ function montarTextoCobranca(p: ParcelaRow): string {
   return [
     `Prezado(a) ${nomeCliente},`,
     ``,
-    `Identificamos que a *${parcela}* referente à obra *"${obra}"*, no valor de *${valor}*, encontra-se *VENCIDA há ${atraso} dia(s)* (vencimento em ${vencimento}).`,
+    `Agradecemos a confiança depositada na *Romatec Consultoria Imobiliária* para a execução dos serviços técnicos da obra *"${obra}"*.`,
     ``,
-    `Solicitamos a regularização do débito o quanto antes para que possamos manter a continuidade dos serviços contratados.`,
+    `Comunicamos, em caráter formal, que a *${parcela}* referente à referida obra apresenta-se em *situação de inadimplência*, conforme dados abaixo:`,
     ``,
-    `Caso o pagamento já tenha sido efetuado, gentileza encaminhar o comprovante para baixarmos em nosso sistema. Caso contrário, ficamos à disposição para alinhar prazo de quitação.`,
+    `• *Vencimento original:* ${vencimento}`,
+    `• *Dias em atraso:* ${atraso}`,
+    `• *Valor:* ${valor}`,
     ``,
-    `Aguardamos seu retorno.`,
+    `Para preservarmos a continuidade dos serviços contratados e o regular andamento das próximas etapas, solicitamos a *regularização do débito no menor prazo possível*. Caso já haja previsão de pagamento, gentileza nos informar a *data prevista de quitação*.`,
+    ``,
+    blocoComprovante,
+    ``,
+    `Reforçamos nosso compromisso com a *transparência*, a *qualidade técnica* e a *boa relação contratual*. Estamos à disposição para alinhamentos pelo telefone/WhatsApp desta conversa.`,
     ``,
     `Atenciosamente,`,
-    `*Romatec Consultoria Imobiliária — Engenharia e Agrimensura*`,
+    `*Romatec Consultoria Imobiliária*`,
+    `_Engenharia · Agrimensura · Gestão de Obras_`,
   ].join('\n');
 }
 
