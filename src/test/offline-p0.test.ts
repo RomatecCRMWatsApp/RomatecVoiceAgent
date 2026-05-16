@@ -8,12 +8,17 @@
 // `window.OfflineEngine.ehMutacaoP0`.
 
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import * as fs from 'fs';
 import * as path from 'path';
 
 let _engineCache: any = null;
+let _windowCache: any = null;
+
+function getEngineWindow() {
+  return _windowCache;
+}
 
 async function carregarEngine() {
   if (_engineCache) return _engineCache;
@@ -46,6 +51,7 @@ async function carregarEngine() {
   // Executa o script no contexto do window
   dom.window.eval(src);
   _engineCache = dom.window.OfflineEngine;
+  _windowCache = dom.window;
   return _engineCache;
 }
 
@@ -284,5 +290,95 @@ describe('traduzirPath', () => {
   it('path sem placeholder passa intacto', async () => {
     const eng = await carregarEngine();
     expect(await eng.traduzirPath('/api/obras/42')).toBe('/api/obras/42');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Task A5: replay com cascade translation
+// ──────────────────────────────────────────────────────────────────────
+describe('Cascade replay', () => {
+  beforeEach(async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.clear();
+    const fila = await eng.listarFilaOffline();
+    for (const i of fila) await eng.removerDaFila(i.id);
+  });
+
+  // O engine roda dentro do JSDOM (dom.window.eval(src)), entao referencias a
+  // `fetch` e `navigator` resolvem pro window do JSDOM — nao pro `global` do
+  // Node. Por isso os testes patcham `win.fetch` e `win.navigator.onLine`
+  // diretamente em vez de `(global as any).fetch`.
+
+  it('POST cria mapeamento, PUT subsequente usa id real', async () => {
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    const calls: any[] = [];
+    win.fetch = vi.fn(async (url: string, opts: any) => {
+      calls.push({ url, method: opts.method });
+      if (opts.method === 'POST') {
+        return { ok: true, status: 200, json: async () => ({ id: 42, uuid_local: 'AAA-111' }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    });
+
+    await eng.enfileirarOffline({
+      method: 'POST', path: '/api/obras',
+      body: JSON.stringify({ nome: 'X', uuid_local: 'AAA-111' }),
+    });
+    await eng.enfileirarOffline({
+      method: 'PUT', path: '/api/obras/<uuid:AAA-111>',
+      body: JSON.stringify({ nome: 'Y' }),
+    });
+
+    Object.defineProperty(win.navigator, 'onLine', { value: true, configurable: true });
+    await eng.sincronizarFilaOffline();
+
+    expect(calls.length).toBe(2);
+    expect(calls[0].method).toBe('POST');
+    expect(calls[1].method).toBe('PUT');
+    expect(calls[1].url).toContain('/api/obras/42');
+    expect(await eng.idMap.get('AAA-111')).toBe(42);
+  });
+
+  it('POST de parcela traduz obra_uuid_local antes de enviar', async () => {
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    await eng.idMap.set('OBRA-X', 'obras', 99);
+    const calls: any[] = [];
+    win.fetch = vi.fn(async (url: string, opts: any) => {
+      calls.push({ url, method: opts.method, body: opts.body });
+      return { ok: true, status: 200, json: async () => ({ id: 100 }) };
+    });
+
+    await eng.enfileirarOffline({
+      method: 'POST', path: '/api/parcelas',
+      body: JSON.stringify({ obra_uuid_local: 'OBRA-X', valor: 5000, uuid_local: 'PARC-1' }),
+    });
+
+    Object.defineProperty(win.navigator, 'onLine', { value: true, configurable: true });
+    await eng.sincronizarFilaOffline();
+
+    const sentBody = JSON.parse(calls[0].body);
+    expect(sentBody.obra_id).toBe(99);
+    expect(sentBody.obra_uuid_local).toBeUndefined();
+    expect(sentBody.valor).toBe(5000);
+  });
+
+  it('PUT com uuid sem mapeamento adia (mantem na fila)', async () => {
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    win.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) }));
+
+    await eng.enfileirarOffline({
+      method: 'PUT', path: '/api/parcelas/<uuid:NAO-MAP>',
+      body: JSON.stringify({ pago: true }),
+    });
+
+    Object.defineProperty(win.navigator, 'onLine', { value: true, configurable: true });
+    await eng.sincronizarFilaOffline();
+
+    expect(win.fetch).not.toHaveBeenCalled();
+    const fila = await eng.listarFilaOffline();
+    expect(fila.length).toBe(1);  // continua na fila
   });
 });

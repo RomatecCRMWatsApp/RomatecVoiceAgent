@@ -147,21 +147,41 @@
     for (const item of fila.sort((a,b) => a.ts - b.ts)) {
       if ((item.tentativas || 0) >= 5) { fail++; continue; }
       try {
-        const url = getAPI() + item.path + (item.path.includes('?') ? '&' : '?') + '_t=' + Date.now();
+        // v3.16.0 Task A5: traduz path/body se contem refs a uuid_local.
+        // Se uuid no PATH nao tem mapeamento ainda — adia (next replay tenta
+        // de novo depois que o POST que cria o mapeamento tiver rodado).
+        let pathTrad;
+        try { pathTrad = await traduzirPath(item.path); }
+        catch (e) {
+          console.warn('[offline] adiando', item.id, e.message);
+          fail++;
+          continue;
+        }
+        const bodyTrad = await traduzirBody(item.body);
+
+        const url = getAPI() + pathTrad + (pathTrad.includes('?') ? '&' : '?') + '_t=' + Date.now();
         const r = await fetch(url, {
           method: item.method,
-          body: item.body,
-          headers: item.body
+          body: bodyTrad,
+          headers: bodyTrad
             ? { 'Content-Type': 'application/json', ...(item.headers || {}) }
             : item.headers,
         });
         if (r.ok) {
-          // v2.4.2: se foi POST /api/laudos-demarcacao (criação), remove do cache offline local
-          if (item.method === 'POST' && item.path === '/api/laudos-demarcacao' && item.body) {
+          // v3.16.0 Task A5: se foi POST com uuid_local, captura id real do
+          // server e grava no id_map pra cascata futura (PUT/DELETE
+          // subsequentes que referenciem essa entidade).
+          if (item.method === 'POST' && bodyTrad) {
             try {
-              const body = JSON.parse(item.body);
-              if (body.uuid_local && typeof window.removerLaudoOfflineLocal === 'function') {
-                window.removerLaudoOfflineLocal(body.uuid_local);
+              const reqBody = typeof bodyTrad === 'string' ? JSON.parse(bodyTrad) : bodyTrad;
+              const respBody = await r.json();
+              if (reqBody?.uuid_local && respBody?.id != null) {
+                const entidade = (pathTrad.match(/\/api\/([^\/\?]+)/) || [])[1] || 'unknown';
+                await idMap.set(reqBody.uuid_local, entidade, respBody.id);
+              }
+              // Retro-compat com laudos: remove do cache offline local
+              if (item.path === '/api/laudos-demarcacao' && reqBody?.uuid_local) {
+                try { window.removerLaudoOfflineLocal?.(reqBody.uuid_local); } catch (_) {}
               }
             } catch (_) {}
           }
