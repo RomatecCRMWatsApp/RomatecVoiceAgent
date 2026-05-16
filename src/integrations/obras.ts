@@ -6,6 +6,21 @@
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import pool from '../database/connection';
 import { formatBR, formatBRDate } from '../util/format';
+import { broadcastParcelaEvent, type ParcelaEventKind } from '../agent/proactive';
+
+function emitParcela(kind: ParcelaEventKind, obra_id: string | number, parcela_id?: string | number, status_cobranca?: string): void {
+  try {
+    broadcastParcelaEvent({
+      kind,
+      obra_id: String(obra_id),
+      parcela_id: parcela_id != null ? String(parcela_id) : undefined,
+      status_cobranca,
+      ts: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('[sse:parcela] broadcast falhou:', (err as Error).message);
+  }
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type ObraRow = RowDataPacket & {
@@ -1375,6 +1390,7 @@ export async function criarParcela(input: {
       input.prazo_dias ?? null, input.observacoes ?? null,
     ]
   );
+  emitParcela('created', input.obra_id, r.insertId);
   return { ok: true, insertId: r.insertId, affected: r.affectedRows, message: `Parcela ${numero} criada (id ${r.insertId}).` };
 }
 
@@ -1422,14 +1438,33 @@ export async function atualizarParcela(input: {
       .catch(err => console.warn('[trigger parcela_paga]', (err as Error).message));
   }
 
+  // SSE: notifica modal aberto pra refresh ao vivo. Busca obra_id da parcela.
+  try {
+    const [orow] = await pool.execute<RowDataPacket[]>(
+      'SELECT obra_id FROM romatec_obra_parcelas WHERE id = ? LIMIT 1', [input.id]
+    );
+    const obraId = (orow[0] as { obra_id: number } | undefined)?.obra_id;
+    if (obraId != null) {
+      const kind: ParcelaEventKind =
+        input.pago === true ? 'paid' : input.pago === false ? 'unpaid' : 'updated';
+      emitParcela(kind, obraId, input.id);
+    }
+  } catch { /* nao bloqueia mutacao */ }
+
   return { ok: true, affected: r.affectedRows, message: `Parcela ${input.id} atualizada.` };
 }
 
 export async function apagarParcela(input: { id: string }): Promise<MutationResult> {
   if (!input.id) throw new Error('id obrigatorio');
+  // Pega obra_id antes do delete pra emitir evento SSE.
+  const [orow] = await pool.execute<RowDataPacket[]>(
+    'SELECT obra_id FROM romatec_obra_parcelas WHERE id = ? LIMIT 1', [input.id]
+  );
+  const obraId = (orow[0] as { obra_id: number } | undefined)?.obra_id;
   const [r] = await pool.execute<ResultSetHeader>(
     `DELETE FROM romatec_obra_parcelas WHERE id = ?`, [input.id]
   );
+  if (obraId != null) emitParcela('deleted', obraId, input.id);
   return { ok: true, affected: r.affectedRows, message: `Parcela ${input.id} apagada.` };
 }
 
@@ -1479,6 +1514,7 @@ export async function gerarParcelasAutomaticas(input: {
     );
   }
 
+  emitParcela('auto-gerado', input.obra_id);
   return { ok: true, parcelas_criadas: input.qtd_parcelas, valor_parcela: valorParcela };
 }
 

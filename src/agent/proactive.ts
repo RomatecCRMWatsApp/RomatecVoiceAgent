@@ -45,6 +45,29 @@ export function broadcastNotification(n: Notification): void {
   broadcastSSE(n);
 }
 
+// Eventos de parcela — modal de obras escuta pra refresh ao vivo.
+// Usa SSE named event ('parcela') pra nao colidir com onmessage das notifs.
+export type ParcelaEventKind =
+  | 'created' | 'updated' | 'deleted'
+  | 'paid' | 'unpaid'
+  | 'cobrado' | 'respondeu'
+  | 'auto-gerado';
+
+export interface ParcelaEvent {
+  kind:      ParcelaEventKind;
+  obra_id:   string;
+  parcela_id?: string;
+  status_cobranca?: string;
+  ts:        string;
+}
+
+export function broadcastParcelaEvent(ev: ParcelaEvent): void {
+  const chunk = `event: parcela\ndata: ${JSON.stringify(ev)}\n\n`;
+  for (const c of [...clients]) {
+    try { c.res.write(chunk); } catch { removeSSEClient(c.id); }
+  }
+}
+
 const URGENCY_EMOJI: Record<Alert['urgency'], string> = {
   low:    '🟢',
   medium: '🟡',

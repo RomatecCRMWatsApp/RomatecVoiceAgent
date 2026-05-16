@@ -8,6 +8,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import pool from '../database/connection';
 import { sendReply as sendWhatsAppText } from '../integrations/whatsapp';
+import { broadcastParcelaEvent } from '../agent/proactive';
 
 interface ParcelaRow extends RowDataPacket {
   id: number;
@@ -127,6 +128,16 @@ export async function enviarCobrancaParcela(parcelaId: number): Promise<{
     [novoStatus, r.messageId || null, parcelaId]
   );
 
+  try {
+    broadcastParcelaEvent({
+      kind: 'cobrado',
+      obra_id: String(p.obra_id),
+      parcela_id: String(parcelaId),
+      status_cobranca: novoStatus,
+      ts: new Date().toISOString(),
+    });
+  } catch { /* nao bloqueia */ }
+
   return {
     ok: true,
     parcela_id: parcelaId,
@@ -222,6 +233,16 @@ export async function processarRespostaClienteParcela(input: {
       WHERE id = ?`,
     [input.text.slice(0, 2000), p.id]
   );
+
+  try {
+    broadcastParcelaEvent({
+      kind: 'respondeu',
+      obra_id: String(p.obra_id),
+      parcela_id: String(p.id),
+      status_cobranca: 'cliente_respondeu',
+      ts: new Date().toISOString(),
+    });
+  } catch { /* nao bloqueia */ }
 
   // Encaminha pro CEO via Telegram
   try {

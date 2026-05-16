@@ -2343,7 +2343,18 @@ function abrirEditarObra(obraId) {
       </div>
       <p id="eoFeriadosInfo" style="margin:6px 0 0; font-size:11px; color:var(--text-muted);"></p>
 
-      <p style="margin:14px 0 8px; font-size:13px; color:var(--gold); font-weight:600;">💳 Parcelas de pagamento do cliente</p>
+      <div style="display:flex; align-items:center; gap:8px; margin:14px 0 8px;">
+        <button id="eoParcelasToggle" type="button" aria-expanded="true"
+          style="background:transparent; border:1px solid var(--border); color:var(--gold); font-size:13px; font-weight:600; padding:4px 10px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:6px;">
+          <span id="eoParcelasCaret" style="display:inline-block; transition:transform .2s; transform:rotate(90deg);">▶</span>
+          💳 Parcelas de pagamento do cliente
+        </button>
+        <span id="eoParcelasLive" title="Atualizações ao vivo via SSE"
+          style="font-size:10px; color:var(--text-muted); display:inline-flex; align-items:center; gap:4px;">
+          <span id="eoParcelasLiveDot" style="width:7px; height:7px; border-radius:50%; background:#666; display:inline-block;"></span>
+          offline
+        </span>
+      </div>
       <div id="eoParcelasBox" style="border:1px solid var(--border); border-radius:8px; padding:10px; background:var(--surface-1); margin-bottom:10px;">
         <p style="margin:0; font-size:12px; color:var(--text-muted);">⏳ carregando parcelas…</p>
       </div>
@@ -2359,7 +2370,70 @@ function abrirEditarObra(obraId) {
   `;
   overlay.classList.add('open');
 
-  const fechar = () => overlay.classList.remove('open');
+  // Retratil: clique no header de Parcelas colapsa/expande o box
+  const parcelasBox = document.getElementById('eoParcelasBox');
+  const parcelasToggle = document.getElementById('eoParcelasToggle');
+  const parcelasCaret = document.getElementById('eoParcelasCaret');
+  const aplicarColapso = (colapsado) => {
+    parcelasBox.style.display = colapsado ? 'none' : '';
+    parcelasCaret.style.transform = colapsado ? 'rotate(0deg)' : 'rotate(90deg)';
+    parcelasToggle.setAttribute('aria-expanded', colapsado ? 'false' : 'true');
+    try { localStorage.setItem('eoParcelasColapsado', colapsado ? '1' : '0'); } catch {}
+  };
+  const colapsadoInicial = (() => { try { return localStorage.getItem('eoParcelasColapsado') === '1'; } catch { return false; } })();
+  aplicarColapso(colapsadoInicial);
+  parcelasToggle.onclick = () => {
+    const ehColapsado = parcelasBox.style.display === 'none';
+    aplicarColapso(!ehColapsado);
+  };
+
+  // SSE: escuta eventos 'parcela' e dispara recarregarParcelas() (debounced)
+  // quando a obra deste modal sofre mudancas em parcelas.
+  let _parcEs = null;
+  let _parcRefreshTimer = null;
+  const liveDot = document.getElementById('eoParcelasLiveDot');
+  const liveLbl = document.getElementById('eoParcelasLive');
+  const setLive = (estado) => {
+    const cores = { conectando: '#f59e0b', online: '#10b981', offline: '#666' };
+    const txts  = { conectando: 'conectando…', online: 'ao vivo', offline: 'offline' };
+    liveDot.style.background = cores[estado];
+    liveLbl.lastChild.textContent = ' ' + txts[estado];
+  };
+  const scheduleParcelasReload = () => {
+    if (_parcRefreshTimer) return;
+    _parcRefreshTimer = setTimeout(() => {
+      _parcRefreshTimer = null;
+      if (parcelasBox.style.display !== 'none') recarregarParcelas();
+    }, 250);
+  };
+  const conectarSSE = () => {
+    try {
+      setLive('conectando');
+      _parcEs = new EventSource('/notifications/stream');
+      _parcEs.onopen = () => setLive('online');
+      _parcEs.addEventListener('parcela', (e) => {
+        try {
+          const ev = JSON.parse(e.data);
+          if (String(ev.obra_id) === String(obraId)) scheduleParcelasReload();
+        } catch {}
+      });
+      _parcEs.onerror = () => {
+        setLive('offline');
+        try { _parcEs.close(); } catch {}
+        _parcEs = null;
+        if (overlay.classList.contains('open')) setTimeout(conectarSSE, 5000);
+      };
+    } catch (err) {
+      setLive('offline');
+    }
+  };
+  conectarSSE();
+
+  const fechar = () => {
+    overlay.classList.remove('open');
+    if (_parcEs) { try { _parcEs.close(); } catch {} _parcEs = null; }
+    if (_parcRefreshTimer) { clearTimeout(_parcRefreshTimer); _parcRefreshTimer = null; }
+  };
   document.getElementById('editObraX').onclick = fechar;
   document.getElementById('editObraCancel').onclick = fechar;
 
