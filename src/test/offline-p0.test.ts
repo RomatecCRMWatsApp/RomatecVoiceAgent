@@ -8,7 +8,7 @@
 // `window.OfflineEngine.ehMutacaoP0`.
 
 import 'fake-indexeddb/auto';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { JSDOM } from 'jsdom';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -186,5 +186,103 @@ describe('gerarUuidLocal', () => {
     const a = eng.gerarUuidLocal();
     const b = eng.gerarUuidLocal();
     expect(a).not.toBe(b);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Task A4: id_map IndexedDB (mapeamento UUID local -> server_id)
+// ──────────────────────────────────────────────────────────────────────
+describe('id_map (UUID -> server_id)', () => {
+  beforeEach(async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.clear();
+  });
+
+  it('grava e le mapeamento', async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.set('AAA-111', 'obras', 42);
+    const id = await eng.idMap.get('AAA-111');
+    expect(id).toBe(42);
+  });
+
+  it('devolve null pra uuid nao mapeado', async () => {
+    const eng = await carregarEngine();
+    expect(await eng.idMap.get('NAO-EXISTE')).toBeNull();
+  });
+
+  it('clear() apaga tudo', async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.set('X-1', 'obras', 1);
+    await eng.idMap.set('X-2', 'parcelas', 2);
+    await eng.idMap.clear();
+    expect(await eng.idMap.get('X-1')).toBeNull();
+    expect(await eng.idMap.get('X-2')).toBeNull();
+  });
+
+  it('overrride: set duas vezes mantem ultimo', async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.set('AAA', 'obras', 10);
+    await eng.idMap.set('AAA', 'obras', 20);
+    expect(await eng.idMap.get('AAA')).toBe(20);
+  });
+});
+
+describe('traduzirBody', () => {
+  beforeEach(async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.clear();
+  });
+
+  it('substitui campos *_uuid_local por *_id quando mapeado', async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.set('AAA-111', 'obras', 42);
+    const body = JSON.stringify({ obra_uuid_local: 'AAA-111', valor: 5000 });
+    const out = await eng.traduzirBody(body);
+    expect(JSON.parse(out)).toEqual({ obra_id: 42, valor: 5000 });
+  });
+
+  it('mantem campo intacto se uuid nao mapeado', async () => {
+    const eng = await carregarEngine();
+    const body = JSON.stringify({ obra_uuid_local: 'SEM-MAP', valor: 5000 });
+    const out = await eng.traduzirBody(body);
+    expect(JSON.parse(out)).toEqual({ obra_uuid_local: 'SEM-MAP', valor: 5000 });
+  });
+
+  it('aceita body objeto e devolve objeto', async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.set('BBB', 'parcelas', 99);
+    const out = await eng.traduzirBody({ parcela_uuid_local: 'BBB' });
+    expect(out).toEqual({ parcela_id: 99 });
+  });
+
+  it('passa body null/undefined sem erro', async () => {
+    const eng = await carregarEngine();
+    expect(await eng.traduzirBody(null)).toBe(null);
+    expect(await eng.traduzirBody(undefined)).toBe(undefined);
+  });
+});
+
+describe('traduzirPath', () => {
+  beforeEach(async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.clear();
+  });
+
+  it('substitui <uuid:XXX> em path pelo id real', async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.set('BBB-2', 'parcelas', 100);
+    const out = await eng.traduzirPath('/api/parcelas/<uuid:BBB-2>');
+    expect(out).toBe('/api/parcelas/100');
+  });
+
+  it('lanca erro se uuid no path nao tem mapeamento', async () => {
+    const eng = await carregarEngine();
+    await expect(eng.traduzirPath('/api/parcelas/<uuid:SEM-MAP>'))
+      .rejects.toThrow(/sem mapeamento/i);
+  });
+
+  it('path sem placeholder passa intacto', async () => {
+    const eng = await carregarEngine();
+    expect(await eng.traduzirPath('/api/obras/42')).toBe('/api/obras/42');
   });
 });

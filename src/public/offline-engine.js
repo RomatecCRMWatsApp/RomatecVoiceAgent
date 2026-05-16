@@ -42,11 +42,16 @@
   // ──────────────────────────────────────────────────────────────────────
   const OFFLINE_DB_NAME = 'romatec_offline_v1';
   const OFFLINE_STORE = 'pending_requests';
+  // v3.16.0 P0 (Task A4): store nova `id_map` (UUID local -> server_id) na
+  // MESMA database `romatec_offline_v1` pra simplificar transacoes e backup.
+  // Subimos a versao 1 -> 2 e adicionamos o store no onupgradeneeded sem
+  // tocar no `pending_requests` ja existente.
+  const ID_MAP_STORE = 'id_map';
 
   function abrirDBOffline() {
     return new Promise((resolve, reject) => {
       if (!window.indexedDB) return reject(new Error('IndexedDB nao suportado'));
-      const req = indexedDB.open(OFFLINE_DB_NAME, 1);
+      const req = indexedDB.open(OFFLINE_DB_NAME, 2);
       req.onerror = () => reject(req.error);
       req.onsuccess = () => resolve(req.result);
       req.onupgradeneeded = (e) => {
@@ -54,6 +59,9 @@
         if (!db.objectStoreNames.contains(OFFLINE_STORE)) {
           const store = db.createObjectStore(OFFLINE_STORE, { keyPath: 'id', autoIncrement: true });
           store.createIndex('ts', 'ts');
+        }
+        if (!db.objectStoreNames.contains(ID_MAP_STORE)) {
+          db.createObjectStore(ID_MAP_STORE, { keyPath: 'uuid_local' });
         }
       };
     });
@@ -351,6 +359,88 @@
     }
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // v3.16.0 P0 (Task A4): id_map (UUID local -> server_id)
+  // ──────────────────────────────────────────────────────────────────────
+  // Pequena store IndexedDB que guarda o mapeamento de UUID local (gerado em
+  // POSTs offline via `injetarUuidLocal`) pro server_id real devolvido pelo
+  // backend quando o replay subiu a entidade. Usado na cascata: PUT/DELETE
+  // ou POSTs subsequentes que referenciam a entidade nova (via campo
+  // `<entidade>_uuid_local` no body ou `<uuid:XXX>` no path) sao traduzidos
+  // pro id real ANTES de serem replayed.
+  const idMap = {
+    async set(uuid, entidade, serverId) {
+      const db = await abrirDBOffline();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(ID_MAP_STORE, 'readwrite');
+        tx.objectStore(ID_MAP_STORE).put({
+          uuid_local: uuid,
+          entidade,
+          server_id: serverId,
+          mapped_at: Date.now(),
+        });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    async get(uuid) {
+      const db = await abrirDBOffline();
+      return new Promise((resolve, reject) => {
+        const r = db.transaction(ID_MAP_STORE, 'readonly').objectStore(ID_MAP_STORE).get(uuid);
+        r.onsuccess = () => resolve(r.result?.server_id ?? null);
+        r.onerror = () => reject(r.error);
+      });
+    },
+    async clear() {
+      const db = await abrirDBOffline();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(ID_MAP_STORE, 'readwrite');
+        tx.objectStore(ID_MAP_STORE).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+  };
+
+  // v3.16.0 P0 (Task A4): traduz body — campos `*_uuid_local` viram `*_id`
+  // se houver mapeamento no `idMap`. Se o uuid ainda nao foi mapeado (porque
+  // o POST que cria a entidade pai ainda nao rodou), o campo original fica
+  // intacto — o caller deve adiar o replay (ver Task A5).
+  // Aceita body como string JSON ou objeto. Devolve no mesmo formato.
+  async function traduzirBody(body) {
+    if (body == null) return body;
+    let obj = body;
+    let eraString = false;
+    if (typeof body === 'string') {
+      try { obj = JSON.parse(body); eraString = true; }
+      catch { return body; }
+    }
+    if (!obj || typeof obj !== 'object') return body;
+    for (const k of Object.keys(obj)) {
+      if (k.endsWith('_uuid_local')) {
+        const id = await idMap.get(obj[k]);
+        if (id != null) {
+          const novoCampo = k.replace(/_uuid_local$/, '_id');
+          obj[novoCampo] = id;
+          delete obj[k];
+        }
+      }
+    }
+    return eraString ? JSON.stringify(obj) : obj;
+  }
+
+  // v3.16.0 P0 (Task A4): traduz path — placeholders `<uuid:XXX>` viram o id
+  // real do mapeamento. Lanca erro se o uuid nao tem mapeamento ainda — o
+  // caller (sincronizarFilaOffline) deve tratar isso pulando o item e tentando
+  // de novo no proximo replay (depois que o POST que cria a entidade pai rodar).
+  async function traduzirPath(path) {
+    const m = /<uuid:([^>]+)>/.exec(path);
+    if (!m) return path;
+    const id = await idMap.get(m[1]);
+    if (id == null) throw new Error('Path com uuid sem mapeamento: ' + m[1]);
+    return path.replace(/<uuid:[^>]+>/, String(id));
+  }
+
   // Expoe a API:
   window.api = api; // CRITICO: obras.html chama api() em centenas de lugares
   window.OfflineEngine = {
@@ -364,5 +454,9 @@
     sincronizarFilaOffline,
     atualizarBadgeOffline,
     mostrarToastOffline,
+    // v3.16.0 P0 Task A4
+    idMap,
+    traduzirBody,
+    traduzirPath,
   };
 })();
