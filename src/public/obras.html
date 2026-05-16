@@ -14319,6 +14319,10 @@ function renderLaudosLista(v) {
 
   document.getElementById('btn-laudo-novo').onclick = () => { state.laudosView='novo'; renderLaudos(); };
   document.getElementById('laudo-q').oninput = e => { state.laudosFiltro.q = e.target.value; renderLaudosLista(v); };
+
+  // v3.15.6: chama injecao dos botoes "📊 Gerar Relatório" e "📋 Relatórios Emitidos"
+  // (script /relatorio-demarcacao.js cuida de evitar duplicacao)
+  try { window.RelatorioDemarcacao?.injetar?.(); } catch {}
   document.getElementById('laudo-status').onchange = e => { state.laudosFiltro.status = e.target.value; renderLaudosLista(v); };
 
   v.querySelectorAll('[data-laudo-edit]').forEach(b => b.onclick = async () => {

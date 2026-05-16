@@ -437,6 +437,17 @@
   } else {
     injetarBotoes();
   }
-  // Exporta para uso manual também
-  window.RelatorioDemarcacao = { abrirModal };
+
+  // v3.15.6: re-injecao automatica via MutationObserver — header dos laudos eh
+  // renderizado dinamicamente quando user troca de aba, entao DOMContentLoaded
+  // sozinho nao basta. Observa o body e re-injeta sempre que aparecer header novo.
+  if (window.MutationObserver) {
+    const obs = new MutationObserver(() => {
+      if (!document.getElementById('btn-rel-gerar')) injetarBotoes();
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // Exporta para uso manual e pra trigger explicito do obras.html
+  window.RelatorioDemarcacao = { abrirModal, injetar: injetarBotoes };
 })();
