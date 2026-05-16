@@ -526,6 +526,77 @@
     obs.observe(document.body, { childList: true, subtree: true });
   }
 
+  // v3.15.8: chamado pela barra flutuante de obras.html — pula a tela de
+  // selecao e vai direto pro form com os IDs ja escolhidos no card da lista.
+  function gerarComIds(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return alert('Selecione ao menos um laudo.');
+    abrirFormFaturaComIds(ids);
+  }
+
+  function abrirFormFaturaComIds(ids) {
+    // Replica abrirFormFatura mas recebe ids ao inves de ler do modal
+    const form = document.createElement('div');
+    form.id = 'modal-form-fatura';
+    form.style.cssText = `position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:10000;
+      display:flex; align-items:center; justify-content:center; padding:20px;`;
+    form.innerHTML = `
+      <div style="background:#0f1a14; border:1px solid #2d4a3a; border-radius:12px;
+                  width:min(560px, 96vw); padding:24px; color:#e8f0eb;">
+        <h3 style="margin:0 0 16px 0; color:#4ade80;">Dados do Destinatário</h3>
+        <p style="color:#9ca3af; font-size:13px; margin:0 0 16px 0;">${ids.length} laudos selecionados</p>
+        <div style="display:grid; gap:10px;">
+          <div>
+            <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:3px;">Nome do loteador *</label>
+            <input id="rf-nome" type="text" style="${inputStyle()} width:100%;">
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div>
+              <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:3px;">CPF/CNPJ</label>
+              <input id="rf-doc" type="text" style="${inputStyle()} width:100%;">
+            </div>
+            <div>
+              <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:3px;">WhatsApp</label>
+              <input id="rf-zap" type="text" placeholder="5599999999999" style="${inputStyle()} width:100%;">
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:2fr 1fr; gap:10px;">
+            <div>
+              <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:3px;">Loteamento</label>
+              <input id="rf-lot" type="text" style="${inputStyle()} width:100%;">
+            </div>
+            <div>
+              <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:3px;">Vencimento</label>
+              <input id="rf-venc" type="date" style="${inputStyle()} width:100%;">
+            </div>
+          </div>
+          <div>
+            <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:3px;">Observações</label>
+            <textarea id="rf-obs" rows="2" style="${inputStyle()} width:100%;"></textarea>
+          </div>
+          <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+            <input id="rf-enviar" type="checkbox" checked style="width:16px; height:16px;">
+            Abrir preview de envio WhatsApp após gerar
+          </label>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:16px; justify-content:flex-end;">
+          <button id="rf-cancelar" style="padding:10px 18px; background:#374151; color:#fff; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+          <button id="rf-gerar" style="padding:10px 18px; background:#16a34a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✓ Gerar Relatório</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(form);
+    form.querySelector('#rf-cancelar').addEventListener('click', () => form.remove());
+    form.querySelector('#rf-gerar').addEventListener('click', () => {
+      gerarRelatorio(ids, form);
+      // Limpa selecao da barra flutuante de obras.html
+      try {
+        window._laudosSelRel?.clear();
+        document.querySelectorAll('[data-laudo-rel-sel]').forEach(c => c.checked = false);
+        document.getElementById('laudoSelBar')?.remove();
+      } catch {}
+    });
+  }
+
   // Exporta para uso manual e pra trigger explicito do obras.html
-  window.RelatorioDemarcacao = { abrirModal, injetar: injetarBotoes };
+  window.RelatorioDemarcacao = { abrirModal, injetar: injetarBotoes, gerarComIds };
 })();

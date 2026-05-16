@@ -14252,12 +14252,24 @@ function renderLaudosLista(v) {
     const valor = l.valor_servico != null ? fmt(l.valor_servico) : '';
     const area = l.area_total_m2 != null ? fmtAreaTipoLaudo(Number(l.area_total_m2), l.tipo_imovel) : '';
     const localizacao = [l.loteamento, l.numero_contrato && 'Contr. '+l.numero_contrato, l.quadra && 'Q.'+l.quadra, l.numero_lote && 'Lote '+l.numero_lote, l.municipio].filter(Boolean).join(' · ');
+    // v3.15.8: checkbox de selecao pra incluir laudo no proximo relatorio
+    // (so aparece em laudos pendentes — ja faturados/pagos sao ocultos)
+    const podeRelatorio = (l.status_faturamento || 'pendente') === 'pendente' && l.id != null && !String(l.id).match(/^[0-9a-f-]{36}$/i);
+    const jaSelecionado = window._laudosSelRel?.has(String(l.id));
     return `
     <div class="card" style="border-left:4px solid ${cor};">
       <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+        ${podeRelatorio ? `
+        <label title="Marcar para incluir no Relatorio de Demarcacoes Faturaveis"
+          style="display:flex; align-items:center; padding-top:2px; cursor:pointer;">
+          <input type="checkbox" data-laudo-rel-sel="${l.id}" ${jaSelecionado ? 'checked' : ''}
+            style="width:18px; height:18px; cursor:pointer; accent-color:var(--gold);">
+        </label>` : ''}
         <div style="flex:1; min-width:220px;">
           <p style="margin:0; font-weight:600; font-size:14px;">
             📐 ${escape(l.numero_laudo)} · ${escape(l.tipo_imovel)}
+            ${l.status_faturamento === 'faturado' ? '<span style="font-size:10px; color:#fbbf24; margin-left:6px;">📤 faturado</span>' : ''}
+            ${l.status_faturamento === 'pago' ? '<span style="font-size:10px; color:#4ade80; margin-left:6px;">✓ pago</span>' : ''}
           </p>
           <p style="margin:4px 0; font-size:12px;">
             <strong>${escape(cont?.nome || 'Contratante #'+l.contratante_id)}</strong>
@@ -14323,6 +14335,49 @@ function renderLaudosLista(v) {
   // v3.15.6: chama injecao dos botoes "📊 Gerar Relatório" e "📋 Relatórios Emitidos"
   // (script /relatorio-demarcacao.js cuida de evitar duplicacao)
   try { window.RelatorioDemarcacao?.injetar?.(); } catch {}
+
+  // v3.15.8: selecao de laudos via checkbox no card + barra flutuante
+  if (!window._laudosSelRel) window._laudosSelRel = new Set();
+  const atualizarBarraSelecao = () => {
+    const n = window._laudosSelRel.size;
+    let bar = document.getElementById('laudoSelBar');
+    if (n === 0) { if (bar) bar.remove(); return; }
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'laudoSelBar';
+      bar.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:9000; background:#16a34a; color:#fff; padding:12px 20px; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,0.5); display:flex; gap:12px; align-items:center; font-size:14px; font-weight:600;';
+      document.body.appendChild(bar);
+    }
+    bar.innerHTML = `
+      <span>✓ <strong id="laudoSelN">${n}</strong> laudo${n===1?'':'s'} selecionado${n===1?'':'s'}</span>
+      <button id="laudoSelGerar" style="background:#fff; color:#16a34a; border:0; padding:6px 14px; border-radius:6px; font-weight:700; cursor:pointer;">📊 Gerar Relatório</button>
+      <button id="laudoSelLimpar" style="background:transparent; color:#fff; border:1px solid #fff; padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12px;">Limpar</button>
+    `;
+    document.getElementById('laudoSelGerar').onclick = () => {
+      const ids = Array.from(window._laudosSelRel).map(Number);
+      if (window.RelatorioDemarcacao?.gerarComIds) {
+        window.RelatorioDemarcacao.gerarComIds(ids);
+      } else if (window.RelatorioDemarcacao?.abrirModal) {
+        window.RelatorioDemarcacao.abrirModal('a-faturar');
+      } else {
+        alert('Modulo de relatorio nao carregado. Recarregue a pagina.');
+      }
+    };
+    document.getElementById('laudoSelLimpar').onclick = () => {
+      window._laudosSelRel.clear();
+      v.querySelectorAll('[data-laudo-rel-sel]').forEach(c => c.checked = false);
+      atualizarBarraSelecao();
+    };
+  };
+  v.querySelectorAll('[data-laudo-rel-sel]').forEach(chk => {
+    chk.onchange = () => {
+      const id = chk.dataset.laudoRelSel;
+      if (chk.checked) window._laudosSelRel.add(id);
+      else window._laudosSelRel.delete(id);
+      atualizarBarraSelecao();
+    };
+  });
+  atualizarBarraSelecao();
   document.getElementById('laudo-status').onchange = e => { state.laudosFiltro.status = e.target.value; renderLaudosLista(v); };
 
   v.querySelectorAll('[data-laudo-edit]').forEach(b => b.onclick = async () => {
