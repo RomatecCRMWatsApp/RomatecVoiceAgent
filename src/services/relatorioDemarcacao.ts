@@ -288,7 +288,8 @@ export class RelatorioDemarcacaoService {
       }
 
       // 9) Marcar laudos como faturados
-      await conn.execute(
+      // v3.15.11: usa query() (nao execute) pra IN(?) expandir array corretamente
+      await conn.query(
         `UPDATE laudos_demarcacao
             SET status_faturamento = 'faturado',
                 relatorio_id = ?,
