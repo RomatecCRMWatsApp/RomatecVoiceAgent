@@ -58,6 +58,7 @@ import {
   getStatusAssinatura,
 } from './integrations/recibosAssinatura';
 import ragRoutes from './routes/rag';
+import pool from './database/connection';
 import { relatorioDemarcacaoRouter } from './routes/relatorioDemarcacao';
 import contractsRoutes from './routes/contracts';
 import painelRoutes from './routes/painel';
