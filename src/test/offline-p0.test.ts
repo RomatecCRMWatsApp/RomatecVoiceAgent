@@ -578,3 +578,94 @@ describe('executarFullSync', () => {
     await expect(eng.executarFullSync()).rejects.toThrow(/offline/i);
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Task D1: romatec_blobs — store de Blobs pendentes + drain
+// ──────────────────────────────────────────────────────────────────────
+describe('Blobs offline', () => {
+  beforeEach(async () => {
+    // Limpa store via transaction (deleteDatabase trava em conexoes abertas
+    // no fake-indexeddb, e o engine e singleton entao a conexao fica aberta).
+    const eng = await carregarEngine();
+    const db = await eng.abrirBlobsDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('pending_blobs', 'readwrite');
+      tx.objectStore('pending_blobs').clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    await eng.idMap.clear();
+  });
+
+  it('enfileira blob e lista', async () => {
+    const eng = await carregarEngine();
+    const fakeFile = { name: 'foto.jpg', type: 'image/jpeg' };
+    await eng.enfileirarBlob({
+      uuid_local: 'AAA', campo: 'comprovante', file: fakeFile as any,
+      endpointTemplate: '/api/despesas-extras/:id/comprovante',
+    });
+    const lista = await eng.listarBlobsPendentes();
+    expect(lista).toHaveLength(1);
+    expect(lista[0].uuid_local).toBe('AAA');
+    expect(lista[0].filename).toBe('foto.jpg');
+    expect(lista[0].uploaded).toBe(false);
+  });
+
+  it('marcarBlobUploaded remove da fila de pendentes', async () => {
+    const eng = await carregarEngine();
+    const id = await eng.enfileirarBlob({
+      uuid_local: 'BBB', campo: 'foto', file: { name: 'a.png', type: 'image/png' } as any,
+      endpointTemplate: '/api/equipe/:id/foto',
+    });
+    await eng.marcarBlobUploaded(id, 'https://server/url.png');
+    const lista = await eng.listarBlobsPendentes();
+    expect(lista).toHaveLength(0);
+  });
+
+  it('drenar: faz upload se id_map tem mapping', async () => {
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    await eng.idMap.set('CCC', 'despesas', 77);
+    // Mock FormData no JSDOM: o fake-indexeddb serializa o Blob via structured
+    // clone que perde identidade `instanceof Blob`, entao o FormData real do
+    // JSDOM rejeita o append. Em browser de verdade isso nao acontece — Blob
+    // sobrevive ao IndexedDB. Aqui substituimos FormData por shim "any-accepting"
+    // pra exercitar o fluxo drain → fetch → marcarBlobUploaded.
+    const appendCalls: any[] = [];
+    win.FormData = class FormDataShim {
+      append(k: string, v: any, name?: string) { appendCalls.push({ k, v, name }); }
+    } as any;
+    await eng.enfileirarBlob({
+      uuid_local: 'CCC', campo: 'comprovante',
+      file: { name: 'c.pdf', type: 'application/pdf' } as any,
+      endpointTemplate: '/api/despesas-extras/:id/comprovante',
+    });
+    win.fetch = vi.fn(async (url: string) => {
+      expect(url).toContain('/api/despesas-extras/77/comprovante');
+      return { ok: true, json: async () => ({ url: 'https://srv/c.pdf' }) };
+    });
+    const out = await eng.drenarBlobsPendentes();
+    expect(out.ok).toBe(1);
+    expect(appendCalls[0].k).toBe('comprovante');
+    expect(appendCalls[0].name).toBe('c.pdf');
+    const lista = await eng.listarBlobsPendentes();
+    expect(lista).toHaveLength(0);
+  });
+
+  it('drenar: adia se uuid sem mapping', async () => {
+    const eng = await carregarEngine();
+    await eng.enfileirarBlob({
+      uuid_local: 'DDD-sem-map', campo: 'foto',
+      file: { name: 'd.png', type: 'image/png' } as any,
+      endpointTemplate: '/api/equipe/:id/foto',
+    });
+    const win = getEngineWindow();
+    win.fetch = vi.fn();
+    const out = await eng.drenarBlobsPendentes();
+    expect(out.ok).toBe(0);
+    expect(out.fail).toBe(0);
+    expect(win.fetch).not.toHaveBeenCalled();
+    const lista = await eng.listarBlobsPendentes();
+    expect(lista).toHaveLength(1); // continua na fila
+  });
+});
