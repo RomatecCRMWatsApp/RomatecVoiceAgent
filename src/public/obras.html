@@ -1928,6 +1928,14 @@ function renderObras() {
           <button class="btn-danger" data-del-obra="${o.id}">Excluir</button>
         </div>
       </div>
+      <div style="margin-top:10px; border-top:1px dashed var(--border); padding-top:10px;">
+        <button class="btn-toggle-parc-inline" data-obra="${o.id}"
+          style="background:transparent; border:1px solid var(--border); color:var(--gold); font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+          <span class="caret-parc" style="display:inline-block; transition:transform .2s;">▶</span>
+          💳 Parcelas
+        </button>
+        <div class="parc-inline-box" data-obra="${o.id}" style="display:none; margin-top:8px;"></div>
+      </div>
     </div>`;
   }).join('');
 
@@ -2015,6 +2023,43 @@ function renderObras() {
   v.querySelectorAll('[data-edit-obra]').forEach(b => b.onclick = () => abrirEditarObra(b.dataset.editObra));
   // v1.65.42: visualizar / imprimir / PDF
   v.querySelectorAll('[data-view-obra]').forEach(b => b.onclick = () => abrirVisualizarObra(b.dataset.viewObra));
+
+  // v3.15.0: toggle painel de parcelas retratil abaixo de cada card
+  v.querySelectorAll('.btn-toggle-parc-inline').forEach(b => {
+    b.onclick = async () => {
+      const oid = b.dataset.obra;
+      const boxEl = v.querySelector(`.parc-inline-box[data-obra="${oid}"]`);
+      const caret = b.querySelector('.caret-parc');
+      if (!boxEl) return;
+      const ehFechado = boxEl.style.display === 'none';
+      boxEl.style.display = ehFechado ? '' : 'none';
+      caret.style.transform = ehFechado ? 'rotate(90deg)' : 'rotate(0deg)';
+      try { localStorage.setItem(`parcInlineOpen_${oid}`, ehFechado ? '1' : '0'); } catch {}
+      if (ehFechado) await montarParcelasInline(boxEl, oid);
+    };
+  });
+  // Restaura estado salvo (abre o que estava aberto antes do reload)
+  v.querySelectorAll('.btn-toggle-parc-inline').forEach(b => {
+    let aberto = false;
+    try { aberto = localStorage.getItem(`parcInlineOpen_${b.dataset.obra}`) === '1'; } catch {}
+    if (aberto) b.click();
+  });
+  // SSE: atualiza parcelas inline ao vivo (cobrancas, pagamentos, etc.)
+  // Reutiliza conexao global pra nao multiplicar EventSources entre renders.
+  if (!window._obrasInlineSSE) {
+    try {
+      window._obrasInlineSSE = new EventSource('/notifications/stream');
+      window._obrasInlineSSE.addEventListener('parcela', (e) => {
+        try {
+          const ev = JSON.parse(e.data);
+          const boxEl = document.querySelector(`.parc-inline-box[data-obra="${ev.obra_id}"]`);
+          if (boxEl && boxEl.style.display !== 'none') {
+            montarParcelasInline(boxEl, ev.obra_id);
+          }
+        } catch {}
+      });
+    } catch {}
+  }
 
   // v1.65.46/v1.67.15: constroi resumo da obra (compartilhado WhatsApp + Telegram)
   const construirResumoObra = async (o) => {
@@ -2271,6 +2316,301 @@ ${o.observacoes ? `<h2>Observações</h2><p>${escape(o.observacoes)}</p>` : ''}
   w.document.open();
   w.document.write(html);
   w.document.close();
+}
+
+// v3.15.0: Parcelas inline na lista — replica a logica do modal mas standalone,
+// pra operar parcelas sem abrir modal de edicao da obra.
+async function montarParcelasInline(box, obraId) {
+  const obra = state.obras?.find(o => String(o.id) === String(obraId));
+  if (!obra) { box.innerHTML = '<p style="color:var(--danger); padding:10px;">Obra não encontrada</p>'; return; }
+  try {
+    const parcelas = await api(`/api/obras/${obraId}/parcelas`);
+    const total = parcelas.reduce((s, p) => s + Number(p.valor || 0), 0);
+    const totalPago = parcelas.filter(p => p.pago).reduce((s, p) => s + Number(p.valor || 0), 0);
+    const uniq = `inl-${obraId}`;
+    box.innerHTML = `
+      <div style="border:1px solid var(--border); border-radius:8px; padding:10px; background:var(--surface-1);">
+        ${parcelas.length === 0
+          ? '<p style="margin:0 0 10px; font-size:12px; color:var(--text-muted);">Nenhuma parcela cadastrada. Use Auto-gerar ou adicione manual.</p>'
+          : `<div style="overflow-x:auto;"><table style="width:100%; font-size:12px; border-collapse:collapse; min-width:660px;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <th style="text-align:left; padding:6px 4px;">Nº</th>
+                  <th style="text-align:left; padding:6px 4px;">Quinz. ini</th>
+                  <th style="text-align:left; padding:6px 4px;">Quinz. fim</th>
+                  <th style="text-align:left; padding:6px 4px;">Valor</th>
+                  <th style="text-align:left; padding:6px 4px;">Vencimento</th>
+                  <th style="text-align:left; padding:6px 4px;">Status</th>
+                  <th style="text-align:right; padding:6px 4px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${parcelas.map(p => {
+                    const sc = p.status_cobranca || 'pendente';
+                    const statusBadge = p.pago
+                      ? '<span style="color:var(--success); font-weight:600;">✅ Pago</span>'
+                      : sc === 'cliente_respondeu'
+                        ? `<span style="color:#10b981; font-weight:600;" title="Cliente respondeu via WhatsApp">💬 Respondeu</span>`
+                      : sc === 'vencido_msg_enviada'
+                        ? `<span style="color:#dc2626; font-weight:600;" title="Vencida — cobrança enviada">⚠️ Vencido</span>`
+                      : sc === 'msg_enviada'
+                        ? `<span style="color:#3b82f6; font-weight:600;" title="Cobrança enviada">📤 Msg enviada</span>`
+                      : '<span style="color:var(--gold);">⏳ Pendente</span>';
+                    return `
+                  <tr style="border-bottom:1px solid rgba(255,255,255,0.05);" data-parc-id="${p.id}">
+                    <td style="padding:6px 4px;"><strong>${p.numero}ª</strong></td>
+                    <td style="padding:6px 4px;"><input type="date" data-pq-ini="${p.id}" value="${p.quinzena_inicio||''}" style="font-size:11px; padding:3px 6px;"></td>
+                    <td style="padding:6px 4px;"><input type="date" data-pq-fim="${p.id}" value="${p.quinzena_fim||''}" style="font-size:11px; padding:3px 6px;"></td>
+                    <td style="padding:6px 4px;"><input type="number" step="0.01" data-pq-val="${p.id}" value="${p.valor||0}" style="font-size:11px; padding:3px 6px; width:90px;"></td>
+                    <td style="padding:6px 4px;"><input type="date" data-pq-venc="${p.id}" value="${p.vencimento_iso||''}" style="font-size:11px; padding:3px 6px;"></td>
+                    <td style="padding:6px 4px;">${statusBadge}</td>
+                    <td style="padding:6px 4px; text-align:right; white-space:nowrap;">
+                      <button data-save-parc="${p.id}" class="btn-gold" style="padding:3px 8px; font-size:11px;" title="Salvar alteracoes">💾</button>
+                      <button data-toggle-pago="${p.id}" data-pago="${p.pago ? 1 : 0}" style="padding:3px 8px; font-size:11px; ${p.pago ? '' : 'background:var(--gold); color:#06120a; border-color:var(--gold); font-weight:600;'}" title="${p.pago ? 'Desmarcar como pago' : 'Marcar pago + recibo + NFe + WhatsApp'}">${p.pago ? 'Desmarcar' : '✓ Pago'}</button>
+                      ${!p.pago ? `<button data-cobrar-parc="${p.id}" style="padding:3px 8px; font-size:11px; background:#dc262622; color:#dc2626; border:1px solid #dc262655; font-weight:600;" title="Cobrança WhatsApp">📱 Cobrar</button>` : ''}
+                      <button data-wpp-parc="${p.id}" title="Resumo no WhatsApp" style="padding:3px 8px; font-size:11px; background:#25d36622; color:#25d366; border-color:#25d36655;">💬</button>
+                      <button data-tg-parc="${p.id}" title="Telegram CEO" style="padding:3px 8px; font-size:11px; background:#0088cc22; color:#0088cc; border-color:#0088cc55;">✈️</button>
+                      <button data-del-parc="${p.id}" class="btn-danger" style="padding:3px 8px; font-size:11px;" title="Excluir">🗑️</button>
+                    </td>
+                  </tr>`;
+                  }).join('')}
+              </tbody>
+              <tfoot>
+                <tr style="border-top:2px solid var(--border);">
+                  <td colspan="3" style="padding:6px 4px; font-weight:600;">Total: ${fmt(total)}</td>
+                  <td colspan="4" style="padding:6px 4px; text-align:right; color:var(--success);">Pago: ${fmt(totalPago)} · Pendente: ${fmt(total - totalPago)}</td>
+                </tr>
+              </tfoot>
+            </table></div>`}
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">
+          <button id="${uniq}-autogerar" class="btn-gold">⚙️ Auto-gerar parcelas</button>
+          <button id="${uniq}-addparc">➕ Adicionar parcela manual</button>
+        </div>
+      </div>
+    `;
+
+    const recarregar = () => montarParcelasInline(box, obraId);
+
+    // Toggle pago — replica fluxo do modal (recibo + NFe + WhatsApp)
+    box.querySelectorAll('[data-toggle-pago]').forEach(b => b.onclick = async () => {
+      const id = b.dataset.togglePago;
+      const desmarcando = b.dataset.pago === '1';
+      if (desmarcando) {
+        if (!confirm('Desmarcar como pago? Isso NAO cancela recibos/NFs ja emitidos.')) return;
+        try {
+          await api('/api/parcelas/' + id, { method: 'PUT', body: JSON.stringify({ id, pago: false }) });
+          await recarregar();
+        } catch (e) { alert('Erro: ' + (e?.message || e)); }
+        return;
+      }
+      const parcela = parcelas.find(p => String(p.id) === String(id));
+      if (!parcela) return alert('Parcela nao encontrada');
+      const tel = (obra.cliente_telefone || obra.telefone || '').replace(/\D/g, '');
+      const temTel = tel && tel.length >= 10;
+      let cfg = null;
+      try { cfg = await api('/api/fiscal-config'); } catch {}
+      const fiscalOk = cfg && cfg.cnpj && cfg.has_api_key && cfg.provider_company_id;
+      const opts = ['Marcar como pago (sempre)'];
+      if (temTel) opts.push('+ Criar recibo + enviar WhatsApp pro cliente');
+      if (fiscalOk) opts.push('+ Emitir Nota Fiscal automaticamente');
+      const continuar = confirm(
+        `Marcar ${parcela.numero}ª parcela como paga (${fmt(parcela.valor)})?\n\n` +
+        `Vou executar:\n  • ${opts.join('\n  • ')}\n\n` +
+        (!temTel ? '⚠ Cliente sem telefone — recibo nao sera enviado.\n' : '') +
+        (!fiscalOk ? '⚠ Config fiscal incompleta — NFe nao sera emitida.\n' : '') +
+        '\nConfirmar?'
+      );
+      if (!continuar) return;
+      b.disabled = true; b.textContent = 'Processando...';
+      let reciboInfo = '', nfInfo = '';
+      try {
+        await api('/api/parcelas/' + id, { method: 'PUT', body: JSON.stringify({ id, pago: true }) });
+        if (temTel) {
+          try {
+            const r = await api('/api/recibos', {
+              method:'POST',
+              body: JSON.stringify({
+                tipo: 'parcela', resource_type: 'romatec_obra_parcelas', resource_id: String(id),
+                destinatario_nome: obra.cliente || 'Cliente', destinatario_phone: tel,
+                destinatario_doc: obra.cliente_doc || null, valor: Number(parcela.valor),
+                forma_pagamento: 'pix', descricao_servico: `${parcela.numero}ª parcela da obra ${obra.nome}`,
+                expira_em_dias: 30,
+              }),
+            });
+            await api('/api/recibos/' + r.id + '/enviar', { method:'POST', body: JSON.stringify({}) });
+            reciboInfo = `Recibo ${r.numero} enviado pelo WhatsApp.`;
+          } catch (e) { reciboInfo = 'Falha no recibo: ' + (e?.message || e); }
+        }
+        if (fiscalOk) {
+          const dados = await abrirModalNF({
+            titulo: `Emitir NFe da ${parcela.numero}ª parcela`,
+            ehObrigatorioDoc: true,
+            prefilled: {
+              tomador_doc: obra.cliente_doc || '', tomador_nome: obra.cliente || '',
+              tomador_email: obra.cliente_email || '', logradouro: obra.endereco || '',
+              municipio: obra.cidade || 'Açailândia', uf: 'MA', codigo: '7.02',
+            },
+          });
+          if (dados) {
+            try {
+              const nf = await api('/api/notas-fiscais', {
+                method:'POST',
+                body: JSON.stringify({
+                  resource_type: 'romatec_obra_parcelas', resource_id: String(id),
+                  tomador_doc: dados.tomador_doc, tomador_nome: dados.tomador_nome,
+                  tomador_email: dados.tomador_email,
+                  tomador_endereco: { cep: dados.cep, logradouro: dados.logradouro, numero: dados.numero, bairro: dados.bairro, municipio: dados.municipio, uf: dados.uf },
+                  valor_servico: Number(parcela.valor), codigo_servico: dados.codigo,
+                  descricao: `${parcela.numero}ª parcela da obra ${obra.nome}`,
+                  iss_aliquota: Number(cfg.iss_aliquota) || 5,
+                }),
+              });
+              await api('/api/notas-fiscais/' + nf.id + '/emitir', { method:'POST', body: JSON.stringify({}) });
+              nfInfo = `NFe RPS ${nf.rps_numero} enviada pra ${cfg.ambiente === 'producao' ? 'PRODUÇÃO' : 'sandbox'}.`;
+            } catch (e) { nfInfo = 'Falha na NF: ' + (e?.message || e); }
+          } else { nfInfo = 'NF cancelada pelo usuário.'; }
+        }
+        alert('✅ Parcela marcada como paga!' + (reciboInfo ? '\n\n📜 ' + reciboInfo : '') + (nfInfo ? '\n\n🧾 ' + nfInfo : ''));
+        await recarregar();
+      } catch (e) {
+        alert('Erro: ' + (e?.message || e));
+        b.disabled = false; b.textContent = '✓ Pago';
+      }
+    });
+
+    // Delete
+    box.querySelectorAll('[data-del-parc]').forEach(b => b.onclick = async () => {
+      if (!confirm('Apagar essa parcela?')) return;
+      try {
+        await api('/api/parcelas/' + b.dataset.delParc, { method: 'DELETE' });
+        await recarregar();
+      } catch (e) { alert('Erro: ' + (e?.message || e)); }
+    });
+
+    // Cobrar
+    box.querySelectorAll('[data-cobrar-parc]').forEach(b => b.onclick = async () => {
+      const id = b.dataset.cobrarParc;
+      if (!confirm('Enviar cobrança formal desta parcela ao cliente via WhatsApp?')) return;
+      b.disabled = true; const lbl = b.textContent; b.textContent = '⏳';
+      try {
+        const r = await fetch(`/api/parcelas/${id}/cobrar`, { method: 'POST' });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error);
+        alert(`✅ Cobrança enviada${data.vencido ? ' (parcela VENCIDA)' : ''} pra ${data.enviado_para}\nStatus: ${data.status_novo}`);
+        await recarregar();
+      } catch (e) { alert('Erro ao cobrar: ' + e.message); }
+      finally { b.disabled = false; b.textContent = lbl; }
+    });
+
+    // WhatsApp resumo
+    box.querySelectorAll('[data-wpp-parc]').forEach(b => b.onclick = () => {
+      const parcela = parcelas.find(p => String(p.id) === String(b.dataset.wppParc));
+      if (!parcela) return;
+      const tel = (obra.cliente_telefone || obra.telefone || '').replace(/\D/g, '');
+      if (!tel || tel.length < 10) return alert('Cliente sem telefone cadastrado.');
+      const status = parcela.pago ? '✅ *PAGO*' : '⏳ Pendente';
+      const linhas = [
+        `🏗️ *Obra: ${obra.nome}*`, ``,
+        `Olá ${obra.cliente || ''}, sobre a *${parcela.numero}ª parcela*:`, ``,
+        `💰 Valor: *${fmt(parcela.valor)}*`,
+        `📅 Vencimento: ${parcela.vencimento || '-'}`,
+        `📊 Status: ${status}`, ``,
+        `_Romatec Consultoria Total_`,
+      ];
+      window.open(`https://wa.me/55${tel.replace(/^55/, '')}?text=${encodeURIComponent(linhas.join('\n'))}`, '_blank');
+    });
+
+    // Telegram
+    box.querySelectorAll('[data-tg-parc]').forEach(b => b.onclick = async () => {
+      const parcela = parcelas.find(p => String(p.id) === String(b.dataset.tgParc));
+      if (!parcela) return;
+      const status = parcela.pago ? '✅ *PAGO*' : '⏳ *Pendente*';
+      const texto = [
+        `📊 *Parcela ${parcela.numero}ª — ${obra.nome}*`, ``,
+        `Cliente: ${obra.cliente || '-'}`,
+        `Valor: ${fmt(parcela.valor)}`,
+        `Vencimento: ${parcela.vencimento || '-'}`,
+        `Status: ${status}`, ``,
+        `_via Romatec Gestao de Obras_`,
+      ].join('\n');
+      b.disabled = true; const orig = b.textContent; b.textContent = '⏳';
+      try {
+        await api('/api/zayra/telegram', { method: 'POST', body: JSON.stringify({ texto, parse_mode: 'Markdown' }) });
+        alert('✓ Enviado pro Telegram');
+      } catch (e) {
+        try {
+          await api('/api/obras/' + obra.id + '/enviar-telegram', { method: 'POST', body: JSON.stringify({ id: obra.id }) });
+          alert('✓ Enviado resumo da obra pro Telegram');
+        } catch (e2) { alert('Erro: ' + (e2?.message || e?.message || e)); }
+      } finally { b.disabled = false; b.textContent = orig; }
+    });
+
+    // Save inline (botao + auto-save on blur)
+    const salvarInline = async (id, btnFeedback) => {
+      const qIni = box.querySelector(`[data-pq-ini="${id}"]`).value || null;
+      const qFim = box.querySelector(`[data-pq-fim="${id}"]`).value || null;
+      const valor = parseFloat(box.querySelector(`[data-pq-val="${id}"]`).value);
+      const venc = box.querySelector(`[data-pq-venc="${id}"]`).value || null;
+      if (!venc) { alert('Vencimento obrigatório.'); return false; }
+      if (!isFinite(valor) || valor <= 0) { alert('Valor inválido.'); return false; }
+      try {
+        await api('/api/parcelas/' + id, { method: 'PUT', body: JSON.stringify({ id: String(id), quinzena_inicio: qIni, quinzena_fim: qFim, valor, vencimento: venc }) });
+        if (btnFeedback) {
+          const orig = btnFeedback.textContent;
+          btnFeedback.textContent = '✓';
+          btnFeedback.style.background = 'var(--success)'; btnFeedback.style.color = '#fff';
+          setTimeout(() => { btnFeedback.textContent = orig; btnFeedback.style.background = ''; btnFeedback.style.color = ''; }, 1500);
+        }
+        return true;
+      } catch (e) { alert('Erro ao salvar: ' + (e?.message || e)); return false; }
+    };
+    box.querySelectorAll('[data-save-parc]').forEach(b => b.onclick = async () => {
+      if (await salvarInline(b.dataset.saveParc, b)) await recarregar();
+    });
+    box.querySelectorAll('[data-pq-ini], [data-pq-fim], [data-pq-val], [data-pq-venc]').forEach(inp => {
+      inp.onblur = async () => {
+        const id = inp.dataset.pqIni || inp.dataset.pqFim || inp.dataset.pqVal || inp.dataset.pqVenc;
+        if (!id) return;
+        const btn = box.querySelector(`[data-save-parc="${id}"]`);
+        if (btn) btn.style.background = 'var(--gold)';
+        await salvarInline(id, btn);
+      };
+    });
+
+    // Auto-gerar parcelas (inline — usa obra.data_inicio e obra.valor_contrato como base)
+    document.getElementById(`${uniq}-autogerar`).onclick = async () => {
+      const dataIni = obra.data_inicio || prompt('Data início (YYYY-MM-DD):');
+      if (!dataIni || !/^\d{4}-\d{2}-\d{2}/.test(dataIni)) return alert('Data inicio invalida.');
+      const valorTotal = Number(obra.valor_contrato) || parseFloat(prompt('Valor total do contrato (R$):'));
+      if (!valorTotal || valorTotal <= 0) return alert('Valor total invalido.');
+      const qtd = parseInt(prompt('Quantas parcelas? (ex: 4 = 4 quinzenais)', '4'));
+      if (!qtd || qtd < 1) return;
+      const intervalo = parseInt(prompt('Intervalo entre parcelas em dias (14 = quinzenal):', '14')) || 14;
+      const primeiroVenc = parseInt(prompt('Primeiro vencimento em quantos dias após o início?', String(intervalo))) || intervalo;
+      try {
+        const out = await api(`/api/obras/${obraId}/parcelas/auto-gerar`, {
+          method: 'POST',
+          body: JSON.stringify({ obra_id: String(obraId), qtd_parcelas: qtd, valor_total: valorTotal, data_inicio: dataIni, intervalo_dias: intervalo, primeiro_vencimento_em: primeiroVenc }),
+        });
+        alert(`✅ ${out.parcelas_criadas} parcelas criadas (${fmt(out.valor_parcela)} cada).`);
+        await recarregar();
+      } catch (e) { alert('Erro: ' + (e?.message || e)); }
+    };
+
+    // Add manual
+    document.getElementById(`${uniq}-addparc`).onclick = async () => {
+      const valor = parseFloat(prompt('Valor da parcela (R$):'));
+      if (!valor || valor <= 0) return;
+      const venc = prompt('Vencimento (YYYY-MM-DD):');
+      if (!venc || !/^\d{4}-\d{2}-\d{2}$/.test(venc)) return alert('Data inválida.');
+      try {
+        await api('/api/parcelas', { method: 'POST', body: JSON.stringify({ obra_id: String(obraId), valor, vencimento: venc }) });
+        await recarregar();
+      } catch (e) { alert('Erro: ' + (e?.message || e)); }
+    };
+  } catch (e) {
+    box.innerHTML = `<p style="color:var(--danger); padding:10px;">Erro ao carregar: ${escape(e?.message || String(e))}</p>`;
+  }
 }
 
 function abrirEditarObra(obraId) {
