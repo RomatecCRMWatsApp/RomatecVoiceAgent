@@ -714,3 +714,156 @@ describe('pendentesPorEntidade', () => {
     expect(Object.keys(counts)).toHaveLength(1);
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Task F1: cenarios end-to-end integrados
+// Exercita varios componentes do engine juntos (cascade replay com 3 niveis,
+// blob com mapeamento via uuid_local, conflito client-wins). Cenarios
+// individuais ja sao cobertos pelos describes acima — aqui validamos que
+// eles funcionam combinados em fluxos realistas.
+// ──────────────────────────────────────────────────────────────────────
+describe('Cenarios end-to-end integrados', () => {
+  beforeEach(async () => {
+    const eng = await carregarEngine();
+    await eng.idMap.clear();
+    const fila = await eng.listarFilaOffline();
+    for (const i of fila) await eng.removerDaFila(i.id);
+    // Limpa cache_v2 (stores P0 + sync_meta) via transaction (deleteDatabase
+    // trava em conexoes abertas no fake-indexeddb).
+    const db = await eng.abrirCacheV2();
+    const stores = [...eng.CACHE_V2_STORES, 'sync_meta'];
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(stores, 'readwrite');
+      for (const s of stores) tx.objectStore(s).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    // Limpa blobs pendentes
+    try {
+      const dbBlob = await eng.abrirBlobsDB();
+      await new Promise<void>((resolve, reject) => {
+        const tx = dbBlob.transaction('pending_blobs', 'readwrite');
+        tx.objectStore('pending_blobs').clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {}
+  });
+
+  it('Cria obra + 2 parcelas em cascata offline -> online drena com IDs reais', async () => {
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    const calls: any[] = [];
+    let nextId = 100;
+    // Mock fetch: cada POST devolve um id incremental, ecoando o uuid_local
+    // recebido. Simula o backend pos-Task B1 (echo de uuid_local).
+    win.fetch = vi.fn(async (url: string, opts: any) => {
+      calls.push({ url, method: opts.method, body: opts.body });
+      if (opts.method === 'POST') {
+        const body = JSON.parse(opts.body);
+        return { ok: true, status: 200, json: async () => ({ id: nextId++, uuid_local: body.uuid_local }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    });
+    // Offline: cria obra
+    await eng.enfileirarOffline({
+      method: 'POST', path: '/api/obras',
+      body: JSON.stringify({ nome: 'Obra X', uuid_local: 'OBRA-AAA' }),
+    });
+    // Offline: cria 2 parcelas referenciando obra_uuid_local
+    await eng.enfileirarOffline({
+      method: 'POST', path: '/api/parcelas',
+      body: JSON.stringify({ obra_uuid_local: 'OBRA-AAA', valor: 5000, uuid_local: 'PARC-1' }),
+    });
+    await eng.enfileirarOffline({
+      method: 'POST', path: '/api/parcelas',
+      body: JSON.stringify({ obra_uuid_local: 'OBRA-AAA', valor: 7000, uuid_local: 'PARC-2' }),
+    });
+
+    Object.defineProperty(win.navigator, 'onLine', { value: true, configurable: true });
+    await eng.sincronizarFilaOffline();
+
+    // 3 POSTs enviados em ordem; 2 parcelas com obra_id=100 (id real da obra)
+    expect(calls).toHaveLength(3);
+    expect(calls[0].method).toBe('POST');
+    expect(calls[0].url).toContain('/api/obras');
+    const parc1Body = JSON.parse(calls[1].body);
+    const parc2Body = JSON.parse(calls[2].body);
+    expect(parc1Body.obra_id).toBe(100);
+    expect(parc1Body.obra_uuid_local).toBeUndefined();
+    expect(parc2Body.obra_id).toBe(100);
+    expect(parc2Body.obra_uuid_local).toBeUndefined();
+    // id_map foi populado pras 3 entidades
+    expect(await eng.idMap.get('OBRA-AAA')).toBe(100);
+    expect(await eng.idMap.get('PARC-1')).toBe(101);
+    expect(await eng.idMap.get('PARC-2')).toBe(102);
+  });
+
+  it('Blob enfileirado offline sobe apos sync que mapeia uuid', async () => {
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    // Mock FormData: fake-indexeddb perde identidade `instanceof Blob` no
+    // structured-clone, entao o FormData real do JSDOM rejeita o append.
+    // Shim "any-accepting" replica o comportamento do bloco D1.
+    win.FormData = class FormDataShim {
+      entries: any[] = [];
+      append(k: string, v: any, name?: string) { this.entries.push([k, v, name]); }
+    } as any;
+    const fetchCalls: any[] = [];
+    win.fetch = vi.fn(async (url: string, opts: any) => {
+      fetchCalls.push({ url, method: opts.method, hasBody: !!opts.body });
+      if (opts.method === 'POST' && url.includes('/api/despesas-extras') && !url.includes('/comprovante')) {
+        return { ok: true, status: 200, json: async () => ({ id: 200, uuid_local: 'DESP-ABC' }) };
+      }
+      if (url.includes('/comprovante')) {
+        return { ok: true, status: 200, json: async () => ({ url: 'https://srv/comp.pdf' }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    });
+    // Offline: cria despesa + anexa comprovante (blob com mesmo uuid_local)
+    await eng.enfileirarOffline({
+      method: 'POST', path: '/api/despesas-extras',
+      body: JSON.stringify({ categoria: 'material', valor: 100, uuid_local: 'DESP-ABC' }),
+    });
+    await eng.enfileirarBlob({
+      uuid_local: 'DESP-ABC', campo: 'comprovante',
+      file: { name: 'cupom.pdf', type: 'application/pdf' } as any,
+      endpointTemplate: '/api/despesas-extras/:id/comprovante',
+    });
+
+    Object.defineProperty(win.navigator, 'onLine', { value: true, configurable: true });
+    await eng.sincronizarFilaOffline();
+
+    // Fluxo: POST despesa primeiro (mapeia DESP-ABC=200), depois drain blob
+    // com endpoint :id substituido por 200.
+    expect(fetchCalls.length).toBe(2);
+    expect(fetchCalls[0].url).toContain('/api/despesas-extras?');
+    expect(fetchCalls[1].url).toContain('/api/despesas-extras/200/comprovante');
+    const pendentes = await eng.listarBlobsPendentes();
+    expect(pendentes).toHaveLength(0); // blob foi marcado uploaded
+  });
+
+  it('Conflito client-wins: PUT offline + replay envia body do cliente sem merge', async () => {
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    const calls: any[] = [];
+    win.fetch = vi.fn(async (url: string, opts: any) => {
+      calls.push({ url, method: opts.method, body: opts.body });
+      return { ok: true, status: 200, json: async () => ({ ok: true, id: 42 }) };
+    });
+    // Enfileira PUT offline com "ABC" como novo valor
+    await eng.enfileirarOffline({
+      method: 'PUT', path: '/api/obras/42',
+      body: JSON.stringify({ id: 42, observacoes: 'ABC do cliente' }),
+    });
+    Object.defineProperty(win.navigator, 'onLine', { value: true, configurable: true });
+    await eng.sincronizarFilaOffline();
+    // Verifica que o PUT levou exatamente o body que o cliente enfileirou —
+    // sem prompt, sem merge — sobrescreve servidor (client-wins).
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe('PUT');
+    const sent = JSON.parse(calls[0].body);
+    expect(sent.observacoes).toBe('ABC do cliente');
+    expect(sent.id).toBe(42);
+  });
+});
