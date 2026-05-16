@@ -382,3 +382,90 @@ describe('Cascade replay', () => {
     expect(fila.length).toBe(1);  // continua na fila
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Task C1: cache_v2 IndexedDB (cache de leitura full sync)
+// DB separada da romatec_offline_v1 (que guarda fila de mutacoes) pra
+// isolar concerns. 5 stores P0 + sync_meta.
+// ──────────────────────────────────────────────────────────────────────
+describe('cache_v2 (full sync stores)', () => {
+  beforeEach(async () => {
+    // O engine e cacheado em `_engineCache`, e cada chamada de abrirCacheV2 abre
+    // uma nova conexao com a DB. Conexoes abertas BLOQUEIAM deleteDatabase
+    // indefinidamente no fake-indexeddb (fica em onblocked sem auto-fechar),
+    // entao em vez de deletar a DB, limpamos cada store via transaction clear.
+    // Isso e suficiente pra isolar tests porque sync_meta + 5 stores cobrem
+    // toda a superficie exposta pelo cacheV2.
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    const db = await eng.abrirCacheV2();
+    const todasStores = [...eng.CACHE_V2_STORES, 'sync_meta'];
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(todasStores, 'readwrite');
+      for (const s of todasStores) tx.objectStore(s).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  });
+
+  it('cria stores pras 5 entidades + sync_meta', async () => {
+    const eng = await carregarEngine();
+    const db = await eng.abrirCacheV2();
+    const esperado = ['obras', 'parcelas', 'recibos', 'despesas', 'equipe', 'sync_meta'];
+    for (const s of esperado) {
+      expect(db.objectStoreNames.contains(s)).toBe(true);
+    }
+  });
+
+  it('put + get devolve registro', async () => {
+    const eng = await carregarEngine();
+    await eng.cacheV2.put('obras', { id: 1, nome: 'Obra A' });
+    const r = await eng.cacheV2.get('obras', 1);
+    expect(r?.nome).toBe('Obra A');
+  });
+
+  it('bulkPut insere multiplos registros', async () => {
+    const eng = await carregarEngine();
+    await eng.cacheV2.bulkPut('obras', [{ id: 1, nome: 'A' }, { id: 2, nome: 'B' }]);
+    const all = await eng.cacheV2.getAll('obras');
+    expect(all).toHaveLength(2);
+  });
+
+  it('bulkPut com array vazio nao quebra', async () => {
+    const eng = await carregarEngine();
+    await eng.cacheV2.bulkPut('obras', []);
+    const all = await eng.cacheV2.getAll('obras');
+    expect(all).toHaveLength(0);
+  });
+
+  it('put substitui registro existente (mesmo id)', async () => {
+    const eng = await carregarEngine();
+    await eng.cacheV2.put('parcelas', { id: 1, valor: 100 });
+    await eng.cacheV2.put('parcelas', { id: 1, valor: 200 });
+    const r = await eng.cacheV2.get('parcelas', 1);
+    expect(r.valor).toBe(200);
+  });
+
+  it('get devolve null pra id inexistente', async () => {
+    const eng = await carregarEngine();
+    expect(await eng.cacheV2.get('obras', 99)).toBeNull();
+  });
+
+  it('getAll devolve array vazio se store vazia', async () => {
+    const eng = await carregarEngine();
+    expect(await eng.cacheV2.getAll('recibos')).toEqual([]);
+  });
+
+  it('setMeta + getMeta funcionam', async () => {
+    const eng = await carregarEngine();
+    await eng.cacheV2.setMeta('obras', { last_full_sync_at: 12345 });
+    const meta = await eng.cacheV2.getMeta('obras');
+    expect(meta.last_full_sync_at).toBe(12345);
+  });
+
+  it('getMeta devolve objeto vazio se nunca foi setado', async () => {
+    const eng = await carregarEngine();
+    const meta = await eng.cacheV2.getMeta('parcelas');
+    expect(meta).toEqual({});
+  });
+});

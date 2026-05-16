@@ -461,6 +461,104 @@
     return path.replace(/<uuid:[^>]+>/, String(id));
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // v3.16.0 P0 (Task C1): cache_v2 — IndexedDB pra cache de leitura full sync
+  // ──────────────────────────────────────────────────────────────────────
+  // DB separada da romatec_offline_v1 (fila de mutacoes) pra isolar concerns:
+  //   - romatec_offline_v1: pending_requests + id_map (write-side, fragil, retry).
+  //   - romatec_cache_v2: snapshots de leitura das 5 entidades P0 + sync_meta.
+  // Se algo corromper o cache de leitura, basta deletar a DB e refazer full
+  // sync sem mexer na fila de mutacoes (que pode conter trabalho nao replicado).
+  const CACHE_V2_DB = 'romatec_cache_v2';
+  const CACHE_V2_STORES = ['obras', 'parcelas', 'recibos', 'despesas', 'equipe'];
+
+  function abrirCacheV2() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) return reject(new Error('IndexedDB nao suportado'));
+      const req = indexedDB.open(CACHE_V2_DB, 1);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => resolve(req.result);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        for (const s of CACHE_V2_STORES) {
+          if (!db.objectStoreNames.contains(s)) {
+            const store = db.createObjectStore(s, { keyPath: 'id' });
+            // Index `uuid_local` pra reconciliar registros criados offline (que
+            // tem uuid_local mas ainda nao tem id do servidor) com o snapshot
+            // sincronizado depois que o POST replay rodar.
+            store.createIndex('uuid_local', 'uuid_local', { unique: false });
+          }
+        }
+        if (!db.objectStoreNames.contains('sync_meta')) {
+          db.createObjectStore('sync_meta', { keyPath: 'entidade' });
+        }
+      };
+    });
+  }
+
+  const cacheV2 = {
+    async put(entidade, registro) {
+      const db = await abrirCacheV2();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(entidade, 'readwrite');
+        tx.objectStore(entidade).put(registro);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    async bulkPut(entidade, registros) {
+      if (!registros?.length) return;
+      const db = await abrirCacheV2();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(entidade, 'readwrite');
+        const store = tx.objectStore(entidade);
+        for (const r of registros) store.put(r);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    async get(entidade, id) {
+      const db = await abrirCacheV2();
+      return new Promise((resolve, reject) => {
+        const r = db.transaction(entidade, 'readonly').objectStore(entidade).get(id);
+        r.onsuccess = () => resolve(r.result || null);
+        r.onerror = () => reject(r.error);
+      });
+    },
+    async getAll(entidade) {
+      const db = await abrirCacheV2();
+      return new Promise((resolve, reject) => {
+        const r = db.transaction(entidade, 'readonly').objectStore(entidade).getAll();
+        r.onsuccess = () => resolve(r.result || []);
+        r.onerror = () => reject(r.error);
+      });
+    },
+    async setMeta(entidade, meta) {
+      const db = await abrirCacheV2();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('sync_meta', 'readwrite');
+        // Merge: preserva campos antigos. Util pra setar last_delta_sync_at sem
+        // apagar last_full_sync_at (e vice-versa).
+        const store = tx.objectStore('sync_meta');
+        const g = store.get(entidade);
+        g.onsuccess = () => {
+          const atual = g.result || {};
+          store.put({ ...atual, entidade, ...meta });
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    async getMeta(entidade) {
+      const db = await abrirCacheV2();
+      return new Promise((resolve, reject) => {
+        const r = db.transaction('sync_meta', 'readonly').objectStore('sync_meta').get(entidade);
+        r.onsuccess = () => resolve(r.result || {});
+        r.onerror = () => reject(r.error);
+      });
+    },
+  };
+
   // Expoe a API:
   window.api = api; // CRITICO: obras.html chama api() em centenas de lugares
   window.OfflineEngine = {
@@ -478,5 +576,9 @@
     idMap,
     traduzirBody,
     traduzirPath,
+    // v3.16.0 P0 Task C1
+    abrirCacheV2,
+    cacheV2,
+    CACHE_V2_STORES,
   };
 })();
