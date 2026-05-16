@@ -115,3 +115,76 @@ describe('ehMutacaoP0 predicate', () => {
     expect(eng.ehMutacaoP0('post', '/api/obras')).toBe(true);
   });
 });
+
+describe('UUID injection', () => {
+  it('injeta uuid_local em body de POST P0', async () => {
+    const eng = await carregarEngine();
+    const body = { nome: 'Obra X' };
+    const enriched = eng.injetarUuidLocal('POST', '/api/obras', body);
+    expect(enriched.uuid_local).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(enriched.nome).toBe('Obra X');
+  });
+
+  it('NAO injeta em PUT (entidade ja existe)', async () => {
+    const eng = await carregarEngine();
+    const body = { nome: 'Obra X' };
+    const out = eng.injetarUuidLocal('PUT', '/api/obras/42', body);
+    expect(out.uuid_local).toBeUndefined();
+  });
+
+  it('NAO injeta em DELETE', async () => {
+    const eng = await carregarEngine();
+    const body = { id: 1 };
+    const out = eng.injetarUuidLocal('DELETE', '/api/obras/1', body);
+    expect(out.uuid_local).toBeUndefined();
+  });
+
+  it('NAO injeta se body ja tem uuid_local (idempotente)', async () => {
+    const eng = await carregarEngine();
+    const body = { uuid_local: 'existing-uuid', nome: 'X' };
+    const out = eng.injetarUuidLocal('POST', '/api/obras', body);
+    expect(out.uuid_local).toBe('existing-uuid');
+  });
+
+  it('aceita body string JSON e devolve string com uuid', async () => {
+    const eng = await carregarEngine();
+    const body = JSON.stringify({ nome: 'X' });
+    const out = eng.injetarUuidLocal('POST', '/api/parcelas', body);
+    expect(typeof out).toBe('string');
+    const parsed = JSON.parse(out);
+    expect(parsed.uuid_local).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(parsed.nome).toBe('X');
+  });
+
+  it('NAO injeta em modulos fora do P0', async () => {
+    const eng = await carregarEngine();
+    const out = eng.injetarUuidLocal('POST', '/api/vistorias', { nome: 'X' });
+    expect(out.uuid_local).toBeUndefined();
+  });
+
+  it('lida com body invalido (string nao-JSON)', async () => {
+    const eng = await carregarEngine();
+    const out = eng.injetarUuidLocal('POST', '/api/obras', 'not-json');
+    expect(out).toBe('not-json');
+  });
+
+  it('lida com body null', async () => {
+    const eng = await carregarEngine();
+    const out = eng.injetarUuidLocal('POST', '/api/obras', null);
+    expect(out).toBe(null);
+  });
+});
+
+describe('gerarUuidLocal', () => {
+  it('gera string com formato UUID', async () => {
+    const eng = await carregarEngine();
+    expect(eng.gerarUuidLocal()).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
+  it('gera UUIDs diferentes em chamadas consecutivas', async () => {
+    const eng = await carregarEngine();
+    const a = eng.gerarUuidLocal();
+    const b = eng.gerarUuidLocal();
+    expect(a).not.toBe(b);
+  });
+});

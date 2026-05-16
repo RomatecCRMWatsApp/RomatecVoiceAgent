@@ -267,6 +267,35 @@
     return /^\/api\/(obras|parcelas|recibos|despesas-extras|equipe|laudos-demarcacao|galeria)(?:[\/\?]|$)/.test(path);
   }
 
+  // v3.16.0 P0: gera UUID v4 (RFC 4122). crypto.randomUUID em browsers modernos,
+  // fallback manual pra Safari < 15.4
+  function gerarUuidLocal() {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  // v3.16.0 P0: injeta uuid_local em body de POST P0 (se ainda nao tem).
+  // Aceita body como objeto OU string JSON. Devolve no mesmo formato recebido.
+  function injetarUuidLocal(method, path, body) {
+    if (body == null) return body;
+    if (!ehMutacaoP0(method, path)) return body;
+    if (String(method).toUpperCase() !== 'POST') return body;
+    let obj = body;
+    let eraString = false;
+    if (typeof body === 'string') {
+      try { obj = JSON.parse(body); eraString = true; }
+      catch { return body; }
+    }
+    if (!obj || typeof obj !== 'object') return body;
+    if (obj.uuid_local) return body;
+    obj.uuid_local = gerarUuidLocal();
+    return eraString ? JSON.stringify(obj) : obj;
+  }
+
   async function api(path, opts={}) {
     // Cache-busting via query param só em GET (Safari iOS engasga com cache:'no-store' + Content-Type)
     const method = (opts.method || 'GET').toUpperCase();
@@ -291,6 +320,12 @@
     } else if (Object.keys(baseHeaders).length > 0) {
       fetchOpts.headers = baseHeaders;
     }
+    // v3.16.0: injeta uuid_local em POSTs P0 (idempotente). Importante fazer
+    // ANTES do fetch — o servidor vai persistir o uuid_local, e se cair offline
+    // a fila guarda o mesmo body (com uuid_local) pra retry conseguir dedupe.
+    if (opts.body) {
+      fetchOpts.body = injetarUuidLocal(method, path, opts.body);
+    }
     // v3.16.0 P0 OFFLINE-FIRST: mutacoes em modulos P0 sao enfileiradas se network falhar
     // — criterios delegados pra ehMutacaoP0 (cobre os 5 modulos do P0 + laudos/galeria
     // retro-compat). GET continua sempre online (precisa de dados frescos).
@@ -307,7 +342,8 @@
         || err.name === 'TypeError'
         || !navigator.onLine;
       if (ehMutacao && ehErroRede && typeof enfileirarOffline === 'function') {
-        await enfileirarOffline({ method, path, body: opts.body, headers: baseHeaders });
+        // Usa fetchOpts.body (com uuid_local injetado), nao opts.body original
+        await enfileirarOffline({ method, path, body: fetchOpts.body, headers: baseHeaders });
         atualizarBadgeOffline();
         return { ok: true, _offline: true, _queued: true };
       }
@@ -320,6 +356,8 @@
   window.OfflineEngine = {
     api,
     ehMutacaoP0,
+    gerarUuidLocal,
+    injetarUuidLocal,
     enfileirarOffline,
     listarFilaOffline,
     removerDaFila,
