@@ -669,3 +669,48 @@ describe('Blobs offline', () => {
     expect(lista).toHaveLength(1); // continua na fila
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Task E1: pendentesPorEntidade — agrega count da fila por modulo P0
+// Usado pra badge por aba na UI (renderObras, renderParcelas, etc).
+// ──────────────────────────────────────────────────────────────────────
+describe('pendentesPorEntidade', () => {
+  beforeEach(async () => {
+    const eng = await carregarEngine();
+    const fila = await eng.listarFilaOffline();
+    for (const i of fila) await eng.removerDaFila(i.id);
+  });
+
+  it('conta por modulo', async () => {
+    const eng = await carregarEngine();
+    await eng.enfileirarOffline({ method: 'POST', path: '/api/obras', body: '{}' });
+    await eng.enfileirarOffline({ method: 'POST', path: '/api/obras', body: '{}' });
+    await eng.enfileirarOffline({ method: 'PUT', path: '/api/parcelas/42', body: '{}' });
+    const counts = await eng.pendentesPorEntidade();
+    expect(counts.obras).toBe(2);
+    expect(counts.parcelas).toBe(1);
+  });
+
+  it('despesas-extras vira despesas', async () => {
+    const eng = await carregarEngine();
+    await eng.enfileirarOffline({ method: 'POST', path: '/api/despesas-extras', body: '{}' });
+    const counts = await eng.pendentesPorEntidade();
+    expect(counts.despesas).toBe(1);
+    expect(counts['despesas-extras']).toBeUndefined();
+  });
+
+  it('fila vazia devolve objeto vazio', async () => {
+    const eng = await carregarEngine();
+    const counts = await eng.pendentesPorEntidade();
+    expect(counts).toEqual({});
+  });
+
+  it('ignora paths nao reconhecidos', async () => {
+    const eng = await carregarEngine();
+    await eng.enfileirarOffline({ method: 'POST', path: '/api/obras', body: '{}' });
+    await eng.enfileirarOffline({ method: 'POST', path: '/nada', body: '{}' });
+    const counts = await eng.pendentesPorEntidade();
+    expect(counts.obras).toBe(1);
+    expect(Object.keys(counts)).toHaveLength(1);
+  });
+});

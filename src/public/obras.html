@@ -1732,6 +1732,28 @@ function renderObras() {
     </div>
   `;
 
+  // v3.16.0 P0 (Task E1): badge de pendentes offline no titulo da aba.
+  // Async, nao bloqueante — se a engine nao expor pendentesPorEntidade ainda
+  // (ex: script ainda carregando), engole e segue. Re-renders reescrevem o
+  // innerHTML inteiro entao a checagem de duplicidade e defensiva pra caso
+  // alguem altere essa logica e o titulo persista entre renders.
+  (async () => {
+    try {
+      const pend = await window.OfflineEngine?.pendentesPorEntidade?.();
+      if (pend?.obras) {
+        const titulo = v.querySelector('.section-title');
+        if (titulo && !titulo.querySelector('.offline-pending-badge')) {
+          const span = document.createElement('span');
+          span.className = 'offline-pending-badge';
+          span.style.cssText = 'color:#f59e0b; font-size:11px; margin-left:8px; font-weight:600;';
+          span.title = `${pend.obras} alteração(ões) pendente(s) de sincronizar`;
+          span.textContent = `🟡 ${pend.obras}↻`;
+          titulo.appendChild(span);
+        }
+      }
+    } catch (_) {}
+  })();
+
   // Toggle do form de nova obra
   const toggleBtn = document.getElementById('toggleNovaObra');
   const novaBox = document.getElementById('novaObraBox');

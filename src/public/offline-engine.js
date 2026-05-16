@@ -711,6 +711,27 @@
     });
   }
 
+  // v3.16.0 P0 (Task E1): agrega contagem de mutacoes pendentes por entidade.
+  // Le a fila do `pending_requests` e devolve {obras:3, parcelas:5, ...}
+  // pra UI usar como badge por aba. Normaliza alias `despesas-extras` → `despesas`
+  // pra bater com o nome de aba/store do cache_v2 (que e `despesas` nao
+  // `despesas-extras`). Paths nao reconhecidos (sem prefixo /api/<entidade>)
+  // sao ignorados — incluem `/api/laudos-demarcacao` (retro-compat, nao tem
+  // aba dedicada) que vai aparecer agrupado como `laudos-demarcacao` mas
+  // sem badge visivel se a UI nao consultar essa chave.
+  async function pendentesPorEntidade() {
+    const fila = await listarFilaOffline();
+    const counts = {};
+    for (const item of fila) {
+      const m = item.path?.match(/^\/api\/([^\/\?]+)/);
+      if (!m) continue;
+      let nome = m[1];
+      if (nome === 'despesas-extras') nome = 'despesas';
+      counts[nome] = (counts[nome] || 0) + 1;
+    }
+    return counts;
+  }
+
   // v3.16.0 P0: drena blobs pendentes — chamado por sincronizarFilaOffline
   // apos drenar a fila de mutacoes (assim id_map ja tem os mapeamentos).
   async function drenarBlobsPendentes() {
@@ -777,5 +798,7 @@
     listarBlobsPendentes,
     marcarBlobUploaded,
     drenarBlobsPendentes,
+    // v3.16.0 P0 Task E1
+    pendentesPorEntidade,
   };
 })();
