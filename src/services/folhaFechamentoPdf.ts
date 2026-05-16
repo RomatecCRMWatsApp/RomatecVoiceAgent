@@ -300,33 +300,20 @@ export async function gerarPdfFechamento(fechamentoId: number): Promise<Buffer> 
   doc.y = y + 16;
 
   // DETALHE POR COLABORADOR
+  // v3.10.3: render defensivo com page-break manual + datas inline (em vez
+  // de grid absoluto que disparava auto-page-break por data).
   doc.fontSize(11).fillColor(COR.verde).font('Helvetica-Bold').text('Detalhamento por Colaborador', 40, doc.y);
   doc.moveDown(0.3);
 
-  for (const it of itens) {
-    if (doc.y > 700) { doc.addPage(); doc.y = doc.page.margins.top; }
+  const limiteY = doc.page.height - doc.page.margins.bottom - 40;
 
+  for (const it of itens) {
     const eq = dadosEquipe.get(it.funcionario_id);
     const dias = diasPorFuncionario.get(it.funcionario_id) || [];
     const stat = statusLabel(it.status_pagamento);
 
-    const blocoY = doc.y;
     const blocoX = 40;
     const blocoW = 515;
-
-    doc.save().rect(blocoX, blocoY, blocoW, 22).fillColor(COR.verdeEsc).fill().restore();
-    doc.font('Helvetica-Bold').fontSize(11).fillColor('#fff')
-       .text(it.funcionario_nome, blocoX + 8, blocoY + 6, { width: blocoW - 100, lineBreak: false });
-    doc.font('Helvetica-Bold').fontSize(9).fillColor('#fff')
-       .text(stat.txt, blocoX + blocoW - 90, blocoY + 7, { width: 82, align: 'right', lineBreak: false });
-    doc.font('Helvetica');
-
-    let by = blocoY + 22;
-
-    const colsDet: Col[] = [
-      { key: 'k', label: '', w: 140 },
-      { key: 'v', label: '', w: blocoW - 140 },
-    ];
     const semPix = !eq?.chave_pix;
     const pixLabel = eq?.chave_pix
       ? `${eq.chave_pix}${eq.tipo_chave_pix ? ' (' + eq.tipo_chave_pix.toUpperCase() + ')' : ''}`
@@ -348,6 +335,46 @@ export async function gerarPdfFechamento(fechamentoId: number): Promise<Buffer> 
       }] as Row[] : []),
     ];
 
+    // Texto inline das datas (string com separador, deixa o pdfkit fazer wrap)
+    const datasTexto = dias.length > 0
+      ? dias.map(d => `${fmtDDMM(d.data)} (${letraPeriodo(d.periodo)})`).join('   ·   ')
+      : '';
+
+    // Estimativa de altura do bloco:
+    //   header verde     = 22
+    //   linhas det       = ~22 * N
+    //   datas (se tiver) = label 18 + altura wrap do texto
+    const alturaLinhas = linhasDet.length * 22;
+    let alturaDatas = 0;
+    if (datasTexto) {
+      doc.fontSize(9);
+      alturaDatas = 18 + doc.heightOfString(datasTexto, { width: blocoW - 16 }) + 8;
+    }
+    const alturaTotal = 22 + alturaLinhas + alturaDatas + 12;
+
+    // Cabe na pagina atual?
+    if (doc.y + alturaTotal > limiteY) {
+      doc.addPage();
+      doc.y = doc.page.margins.top;
+    }
+
+    const blocoY = doc.y;
+
+    // Faixa verde do header
+    doc.save().rect(blocoX, blocoY, blocoW, 22).fillColor(COR.verdeEsc).fill().restore();
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#fff')
+       .text(it.funcionario_nome, blocoX + 8, blocoY + 6, { width: blocoW - 100, lineBreak: false });
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#fff')
+       .text(stat.txt, blocoX + blocoW - 90, blocoY + 7, { width: 82, align: 'right', lineBreak: false });
+    doc.font('Helvetica');
+
+    let by = blocoY + 22;
+
+    const colsDet: Col[] = [
+      { key: 'k', label: '', w: 140 },
+      { key: 'v', label: '', w: blocoW - 140 },
+    ];
+
     for (let i = 0; i < linhasDet.length; i++) {
       const isLiquido = linhasDet[i].k === 'Líquido a pagar';
       const isPix = linhasDet[i].k === 'Chave PIX';
@@ -359,24 +386,19 @@ export async function gerarPdfFechamento(fechamentoId: number): Promise<Buffer> 
       });
     }
 
-    if (dias.length > 0) {
+    // Datas inline com wrap (sem grid absoluto pra evitar auto-page-break por data)
+    if (datasTexto) {
       doc.font('Helvetica-Bold').fontSize(9).fillColor(COR.pretoTexto)
          .text('Datas trabalhadas (I = integral · M = manhã · T = tarde):', blocoX + 8, by + 4);
       doc.font('Helvetica');
       by += 18;
-
-      const POR_LINHA = 5;
-      const colW = (blocoW - 16) / POR_LINHA;
-      for (let i = 0; i < dias.length; i++) {
-        const col = i % POR_LINHA;
-        if (col === 0 && i > 0) by += 14;
-        const tag = `${fmtDDMM(dias[i].data)} (${letraPeriodo(dias[i].periodo)})`;
-        doc.fontSize(9).fillColor(COR.cinzaTexto)
-           .text(tag, blocoX + 8 + col * colW, by, { width: colW - 4, lineBreak: false });
-      }
-      by += 18;
+      doc.fontSize(9).fillColor(COR.cinzaTexto);
+      const hDatas = doc.heightOfString(datasTexto, { width: blocoW - 16 });
+      doc.text(datasTexto, blocoX + 8, by, { width: blocoW - 16, lineBreak: true });
+      by += hDatas + 8;
     }
 
+    // Borda do bloco inteiro
     doc.save().strokeColor(COR.cinzaBorda).lineWidth(0.5)
        .rect(blocoX, blocoY, blocoW, by - blocoY).stroke().restore();
 
