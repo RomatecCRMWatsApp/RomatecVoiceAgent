@@ -3564,11 +3564,25 @@ app.get('/api/folha/item/:itemId/comprovante', async (req: Request, res: Respons
 });
 
 // v3.12.0: cobranca manual de parcela (botao "Cobrar agora" na UI)
+// v3.15.0: aceita texto e telefone customizados (UI mostra preview pra editar antes de enviar)
 app.post('/api/parcelas/:id/cobrar', async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
     const m = await import('./services/cobrancaParcelas');
-    const r = await m.enviarCobrancaParcela(id);
+    const r = await m.enviarCobrancaParcela(id, {
+      texto: typeof req.body?.texto === 'string' ? req.body.texto : undefined,
+      telefone: typeof req.body?.telefone === 'string' ? req.body.telefone : undefined,
+    });
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// v3.15.0: preview do texto/telefone da cobranca — UI usa pra confirmar antes de enviar
+app.get('/api/parcelas/:id/cobrar-preview', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const m = await import('./services/cobrancaParcelas');
+    const r = await m.previewCobrancaParcela(id);
     res.json(r);
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });

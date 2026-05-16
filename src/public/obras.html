@@ -2318,6 +2318,77 @@ ${o.observacoes ? `<h2>Observações</h2><p>${escape(o.observacoes)}</p>` : ''}
   w.document.close();
 }
 
+// v3.15.0: modal de confirmacao de cobranca — busca preview, mostra texto e
+// telefone editaveis, so envia ao confirmar.
+async function abrirModalCobrancaPreview(parcelaId, onSuccess) {
+  let preview;
+  try {
+    preview = await api(`/api/parcelas/${parcelaId}/cobrar-preview`);
+  } catch (e) { return alert('Erro ao carregar preview: ' + (e?.message || e)); }
+
+  const ov = document.createElement('div');
+  ov.style.cssText = `
+    position:fixed; inset:0; background:rgba(0,0,0,.78); z-index:10001;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+    font-family:inherit;
+  `;
+  const vencidoLbl = preview.vencido
+    ? `<span style="color:#dc2626; font-weight:700;">⚠️ VENCIDA há ${preview.dias_atraso} dia(s)</span>`
+    : `<span style="color:#10b981; font-weight:700;">⏳ Pré-vencimento</span>`;
+  ov.innerHTML = `
+    <div style="background:var(--surface, #0f1a14); border:1px solid var(--border, #2d4a3a); border-radius:12px; width:min(640px, 96vw); padding:20px; color:var(--text, #e8f0eb); max-height:92vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0; color:var(--gold, #d4a017);">📱 Confirmar cobrança WhatsApp</h3>
+        <button id="cob-x" style="background:transparent; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;">×</button>
+      </div>
+      <div style="font-size:13px; color:var(--text-muted); margin-bottom:14px; padding:8px 10px; background:rgba(255,255,255,0.04); border-radius:6px;">
+        <strong>Obra:</strong> ${escape(preview.obra_nome)} ·
+        <strong>Parcela:</strong> ${preview.parcela_numero}ª ·
+        <strong>Valor:</strong> ${fmt(preview.valor)} ·
+        <strong>Venc.:</strong> ${(preview.vencimento || '').split('-').reverse().join('/')}<br>
+        <strong>Cliente:</strong> ${escape(preview.cliente_nome || '-')} · ${vencidoLbl}
+      </div>
+      <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:4px;">Telefone (com DDD, com ou sem 55):</label>
+      <input id="cob-tel" type="text" value="${escape(preview.telefone || '')}" placeholder="5599999999999"
+        style="width:100%; padding:8px; background:var(--surface-1, #1a2920); border:1px solid var(--border, #2d4a3a); color:var(--text); border-radius:6px; margin-bottom:12px;">
+      <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:4px;">Texto da cobrança (pode editar):</label>
+      <textarea id="cob-texto" rows="14"
+        style="width:100%; padding:8px; background:var(--surface-1, #1a2920); border:1px solid var(--border, #2d4a3a); color:var(--text); border-radius:6px; font-family:inherit; font-size:13px; line-height:1.5; resize:vertical;">${escape(preview.texto)}</textarea>
+      <div style="display:flex; gap:8px; margin-top:14px; justify-content:flex-end;">
+        <button id="cob-cancel" style="padding:10px 16px; background:#374151; color:#fff; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+        <button id="cob-ok" style="padding:10px 18px; background:#16a34a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✓ Confirmar e enviar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+  const fechar = () => ov.remove();
+  ov.querySelector('#cob-x').onclick = fechar;
+  ov.querySelector('#cob-cancel').onclick = fechar;
+  ov.querySelector('#cob-ok').onclick = async () => {
+    const tel = ov.querySelector('#cob-tel').value.replace(/\D/g, '');
+    const texto = ov.querySelector('#cob-texto').value.trim();
+    if (!tel || tel.length < 10) return alert('Telefone inválido (mínimo 10 dígitos com DDD).');
+    if (!texto) return alert('Texto vazio.');
+    const btn = ov.querySelector('#cob-ok');
+    btn.disabled = true; btn.textContent = '⏳ Enviando...';
+    try {
+      const r = await fetch(`/api/parcelas/${parcelaId}/cobrar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texto, telefone: tel }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Falha no envio');
+      alert(`✅ Cobrança enviada${data.vencido ? ' (parcela VENCIDA)' : ''} pra ${data.enviado_para}\nStatus: ${data.status_novo}`);
+      fechar();
+      if (typeof onSuccess === 'function') await onSuccess(data);
+    } catch (e) {
+      alert('Erro ao enviar: ' + (e?.message || e));
+      btn.disabled = false; btn.textContent = '✓ Confirmar e enviar';
+    }
+  };
+}
+
 // v3.15.0: Parcelas inline na lista — replica a logica do modal mas standalone,
 // pra operar parcelas sem abrir modal de edicao da obra.
 async function montarParcelasInline(box, obraId) {
@@ -2487,19 +2558,9 @@ async function montarParcelasInline(box, obraId) {
       } catch (e) { alert('Erro: ' + (e?.message || e)); }
     });
 
-    // Cobrar
-    box.querySelectorAll('[data-cobrar-parc]').forEach(b => b.onclick = async () => {
-      const id = b.dataset.cobrarParc;
-      if (!confirm('Enviar cobrança formal desta parcela ao cliente via WhatsApp?')) return;
-      b.disabled = true; const lbl = b.textContent; b.textContent = '⏳';
-      try {
-        const r = await fetch(`/api/parcelas/${id}/cobrar`, { method: 'POST' });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error);
-        alert(`✅ Cobrança enviada${data.vencido ? ' (parcela VENCIDA)' : ''} pra ${data.enviado_para}\nStatus: ${data.status_novo}`);
-        await recarregar();
-      } catch (e) { alert('Erro ao cobrar: ' + e.message); }
-      finally { b.disabled = false; b.textContent = lbl; }
+    // Cobrar — abre modal de preview com texto/telefone editaveis antes do envio
+    box.querySelectorAll('[data-cobrar-parc]').forEach(b => b.onclick = () => {
+      abrirModalCobrancaPreview(b.dataset.cobrarParc, async () => { await recarregar(); });
     });
 
     // WhatsApp resumo
@@ -3074,19 +3135,10 @@ function abrirEditarObra(obraId) {
       });
 
       // v1.76.0: 💬 WhatsApp — envia resumo da parcela ao cliente (link wa.me)
-      // v3.12.0: handler do botao "📱 Cobrar" — envia cobranca formal ao cliente
-      box.querySelectorAll('[data-cobrar-parc]').forEach(b => b.onclick = async () => {
-        const id = b.dataset.cobrarParc;
-        if (!confirm('Enviar cobrança formal desta parcela ao cliente via WhatsApp?')) return;
-        b.disabled = true; const lbl = b.textContent; b.textContent = '⏳';
-        try {
-          const r = await fetch(`/api/parcelas/${id}/cobrar`, { method: 'POST' });
-          const data = await r.json();
-          if (!r.ok) throw new Error(data.error);
-          alert(`✅ Cobrança enviada${data.vencido ? ' (parcela VENCIDA)' : ''} pra ${data.enviado_para}\nStatus: ${data.status_novo}`);
-          render();
-        } catch (e) { alert('Erro ao cobrar: ' + e.message); }
-        finally { b.disabled = false; b.textContent = lbl; }
+      // v3.12.0: handler do botao "📱 Cobrar"
+      // v3.15.0: agora abre modal de preview pra editar texto e telefone antes do envio
+      box.querySelectorAll('[data-cobrar-parc]').forEach(b => b.onclick = () => {
+        abrirModalCobrancaPreview(b.dataset.cobrarParc, async () => { await recarregarParcelas(); });
       });
       box.querySelectorAll('[data-wpp-parc]').forEach(b => b.onclick = async () => {
         const parcelaId = b.dataset.wppParc;
@@ -14215,11 +14267,11 @@ function renderLaudosLista(v) {
   }).join('');
 
   v.innerHTML = `
-    <div class="card" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <div class="card laudos-demarcacao-header" data-section="laudos-demarcacao" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
       <strong style="font-size:14px;">📐 Laudos de Demarcação</strong>
       <span style="color:var(--text-muted); font-size:12px;">${totalAtivos} ${totalAtivos===1?'laudo':'laudos'}</span>
       <span style="flex:1;"></span>
-      <button id="btn-laudo-novo" style="background:var(--gold); color:#06120a; border-color:var(--gold);">➕ Novo Laudo</button>
+      <button id="btn-laudo-novo" data-action="novo-laudo" style="background:var(--gold); color:#06120a; border-color:var(--gold);">➕ Novo Laudo</button>
     </div>
     <div class="card" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
       <input id="laudo-q" placeholder="Buscar por número, lote, imóvel..." value="${escape(f.q)}" style="flex:1; min-width:200px;">
@@ -17146,6 +17198,10 @@ function renderLaudoTabArt(c) {
         </select>
         <input id="la-data" type="date" value="${l.data_pagamento ? l.data_pagamento.split('T')[0] : ''}">
       </div>
+      <p style="margin:10px 0 4px; font-size:12px; color:var(--text-muted);">
+        💡 Valor da demarcação (vai no Relatório de Demarcações Faturáveis):
+      </p>
+      <input id="la-valor-dem" type="number" step="0.01" min="0" placeholder="Valor da demarcação (R$)" value="${l.valor_demarcacao ?? ''}" style="width:100%;">
     </div>
     <div class="card">
       <button id="la-salvar" style="background:var(--gold); color:#06120a; border-color:var(--gold); padding:10px 20px;">💾 Salvar</button>
@@ -17159,6 +17215,7 @@ function renderLaudoTabArt(c) {
       numero_trt: document.getElementById('la-trt-num').value.trim() || null,
       escala: document.getElementById('la-escala').value.trim() || null,
       valor_servico: document.getElementById('la-valor').value ? Number(document.getElementById('la-valor').value) : null,
+      valor_demarcacao: document.getElementById('la-valor-dem').value ? Number(document.getElementById('la-valor-dem').value) : null,
       forma_pagamento: document.getElementById('la-fp').value || null,
       data_pagamento: document.getElementById('la-data').value || null,
     };

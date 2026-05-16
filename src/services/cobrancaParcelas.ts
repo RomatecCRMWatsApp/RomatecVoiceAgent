@@ -97,8 +97,43 @@ async function buscarParcela(id: number): Promise<ParcelaRow | null> {
   return rows[0] || null;
 }
 
+/** Preview da cobranca — devolve texto + telefone pra UI confirmar antes do envio. */
+export async function previewCobrancaParcela(parcelaId: number): Promise<{
+  parcela_id: number;
+  cliente_nome: string | null;
+  telefone: string;
+  texto: string;
+  vencido: boolean;
+  dias_atraso: number;
+  obra_nome: string;
+  parcela_numero: number;
+  valor: number;
+  vencimento: string;
+}> {
+  const p = await buscarParcela(parcelaId);
+  if (!p) throw new Error('Parcela nao encontrada.');
+  if (p.pago) throw new Error('Parcela ja esta paga — nao precisa de cobranca.');
+  const tel = String(p.cliente_telefone || '').replace(/\D/g, '');
+  const atraso = diasAtraso(p.vencimento);
+  return {
+    parcela_id: parcelaId,
+    cliente_nome: p.cliente_nome,
+    telefone: tel,
+    texto: montarTextoCobranca(p),
+    vencido: atraso > 0,
+    dias_atraso: atraso,
+    obra_nome: p.obra_nome,
+    parcela_numero: p.numero,
+    valor: Number(p.valor),
+    vencimento: typeof p.vencimento === 'string' ? p.vencimento.slice(0,10) : p.vencimento.toISOString().slice(0,10),
+  };
+}
+
 /** Envia cobranca manual ou automatica pra UMA parcela. */
-export async function enviarCobrancaParcela(parcelaId: number): Promise<{
+export async function enviarCobrancaParcela(
+  parcelaId: number,
+  overrides?: { texto?: string; telefone?: string }
+): Promise<{
   ok: true;
   parcela_id: number;
   vencido: boolean;
@@ -109,12 +144,14 @@ export async function enviarCobrancaParcela(parcelaId: number): Promise<{
   const p = await buscarParcela(parcelaId);
   if (!p) throw new Error('Parcela nao encontrada.');
   if (p.pago) throw new Error('Parcela ja esta paga — nao precisa de cobranca.');
-  if (!p.cliente_telefone) throw new Error('Obra sem telefone do cliente cadastrado.');
 
-  const tel = String(p.cliente_telefone).replace(/\D/g, '');
-  if (tel.length < 10) throw new Error('Telefone do cliente invalido: ' + p.cliente_telefone);
+  const telFonte = overrides?.telefone || p.cliente_telefone || '';
+  if (!telFonte) throw new Error('Telefone nao informado e obra sem telefone do cliente.');
 
-  const texto = montarTextoCobranca(p);
+  const tel = String(telFonte).replace(/\D/g, '');
+  if (tel.length < 10) throw new Error('Telefone invalido: ' + telFonte);
+
+  const texto = (overrides?.texto && overrides.texto.trim()) || montarTextoCobranca(p);
   const r = await sendWhatsAppText(tel, texto);
 
   const vencido = diasAtraso(p.vencimento) > 0;
