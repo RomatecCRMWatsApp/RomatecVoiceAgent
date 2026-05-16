@@ -133,18 +133,69 @@ export function relatorioDemarcacaoRouter(pool: Pool): Router {
   });
 
   // ===== DOWNLOAD DO PDF =====
+  // v3.15.14: regera on-demand quando arquivo nao existe no disco (Railway sem
+  // disco persistente apaga PDFs entre deploys). Cache em disco continua valendo
+  // como otimizacao quando disponivel.
   router.get('/:id/pdf', async (req, res) => {
     try {
       const det = await service.obterDetalhe(Number(req.params.id)) as any;
       if (!det) return res.status(404).json({ error: 'Não encontrado' });
-      if (!det.pdf_path || !fs.existsSync(det.pdf_path)) {
-        return res.status(404).json({ error: 'PDF não disponível' });
+
+      // Cache hit: arquivo existe no disco
+      if (det.pdf_path && fs.existsSync(det.pdf_path)) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${det.numero}.pdf"`);
+        fs.createReadStream(det.pdf_path).pipe(res);
+        return;
       }
+
+      // Cache miss: regera o PDF dos dados do DB
+      const pdfPath = path.join(PDF_DIR, `${det.numero}.pdf`);
+      await gerarRelatorioDemarcacaoPdf({
+        numero: det.numero,
+        data_emissao: det.data_emissao,
+        data_vencimento: det.data_vencimento,
+        periodo_inicio: det.periodo_inicio,
+        periodo_fim: det.periodo_fim,
+        loteador_nome: det.loteador_nome,
+        loteador_documento: det.loteador_documento,
+        loteamento: det.loteamento,
+        qtd_itens: det.qtd_itens,
+        area_total_m2: Number(det.area_total_m2),
+        valor_total: Number(det.valor_total),
+        pagamento_pix: det.pagamento_pix,
+        pagamento_banco: det.pagamento_banco,
+        pagamento_agencia: det.pagamento_agencia,
+        pagamento_conta: det.pagamento_conta,
+        pagamento_titular: det.pagamento_titular,
+        pagamento_documento: det.pagamento_documento,
+        observacoes: det.observacoes,
+        hash_validacao: det.hash_validacao,
+        baseUrlValidacao: BASE_URL,
+        itens: det.itens.map((i: any) => ({
+          laudo_numero: i.laudo_numero,
+          tipo_imovel: i.tipo_imovel,
+          imovel_descricao: i.imovel_descricao,
+          contrato: i.contrato,
+          quadra: i.quadra,
+          lote: i.lote,
+          data_demarcacao: i.data_demarcacao,
+          area_m2: Number(i.area_m2),
+          valor: Number(i.valor),
+        })),
+      }, pdfPath);
+
+      // Atualiza pdf_path no DB pra proxima request
+      await pool.execute(
+        `UPDATE relatorios_demarcacao SET pdf_path = ? WHERE id = ?`,
+        [pdfPath, det.id]
+      ).catch(() => {});
+
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${det.numero}.pdf"`);
-      fs.createReadStream(det.pdf_path).pipe(res);
+      fs.createReadStream(pdfPath).pipe(res);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Falha ao gerar PDF: ' + err.message });
     }
   });
 
@@ -164,8 +215,30 @@ export function relatorioDemarcacaoRouter(pool: Pool): Router {
     try {
       const det = await service.obterDetalhe(Number(req.params.id)) as any;
       if (!det) return res.status(404).json({ error: 'Não encontrado' });
+
+      // v3.15.14: regera PDF se nao existe (Railway sem disco persistente)
       if (!det.pdf_path || !fs.existsSync(det.pdf_path)) {
-        return res.status(400).json({ error: 'PDF não gerado' });
+        const pdfPath = path.join(PDF_DIR, `${det.numero}.pdf`);
+        await gerarRelatorioDemarcacaoPdf({
+          numero: det.numero, data_emissao: det.data_emissao,
+          data_vencimento: det.data_vencimento, periodo_inicio: det.periodo_inicio,
+          periodo_fim: det.periodo_fim, loteador_nome: det.loteador_nome,
+          loteador_documento: det.loteador_documento, loteamento: det.loteamento,
+          qtd_itens: det.qtd_itens, area_total_m2: Number(det.area_total_m2),
+          valor_total: Number(det.valor_total), pagamento_pix: det.pagamento_pix,
+          pagamento_banco: det.pagamento_banco, pagamento_agencia: det.pagamento_agencia,
+          pagamento_conta: det.pagamento_conta, pagamento_titular: det.pagamento_titular,
+          pagamento_documento: det.pagamento_documento, observacoes: det.observacoes,
+          hash_validacao: det.hash_validacao, baseUrlValidacao: BASE_URL,
+          itens: det.itens.map((i: any) => ({
+            laudo_numero: i.laudo_numero, tipo_imovel: i.tipo_imovel,
+            imovel_descricao: i.imovel_descricao, contrato: i.contrato,
+            quadra: i.quadra, lote: i.lote, data_demarcacao: i.data_demarcacao,
+            area_m2: Number(i.area_m2), valor: Number(i.valor),
+          })),
+        }, pdfPath);
+        await pool.execute(`UPDATE relatorios_demarcacao SET pdf_path = ? WHERE id = ?`, [pdfPath, det.id]).catch(() => {});
+        det.pdf_path = pdfPath;
       }
 
       const numero = (req.body?.telefone || det.loteador_whatsapp || '').replace(/\D/g, '');
