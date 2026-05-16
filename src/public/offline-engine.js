@@ -257,6 +257,15 @@
     bootOffline();
   }
 
+  // v3.16.0 P0: predicate de mutacao offline-eligivel — generaliza ehMutacaoLaudo
+  // pros 5 modulos do P0 (obras, parcelas, recibos, despesas-extras, equipe) +
+  // mantem laudos-demarcacao/galeria que ja funcionavam. Modulos fora do P0
+  // (vistorias, etc.) continuam exigindo rede e nao sao enfileirados.
+  function ehMutacaoP0(method, path) {
+    if (!['POST','PUT','DELETE'].includes(method)) return false;
+    return /\/api\/(obras|parcelas|recibos|despesas-extras|equipe|laudos-demarcacao|galeria)(?:[\/\?]|$)/.test(path);
+  }
+
   async function api(path, opts={}) {
     // Cache-busting via query param só em GET (Safari iOS engasga com cache:'no-store' + Content-Type)
     const method = (opts.method || 'GET').toUpperCase();
@@ -281,13 +290,11 @@
     } else if (Object.keys(baseHeaders).length > 0) {
       fetchOpts.headers = baseHeaders;
     }
-    // v2.4.0 OFFLINE-FIRST: requests de mutação em laudos podem ser enfileiradas
-    // se network falhar. Critérios pra ser "queueable":
-    //   - método é POST/PUT/DELETE
-    //   - path contém /api/laudos-demarcacao (escopo: módulo de campo)
-    // GET continua sempre online (precisa de dados frescos).
-    const ehMutacaoLaudo = ['POST','PUT','DELETE'].includes(method)
-      && /\/api\/laudos-demarcacao/.test(path);
+    // v2.4.0 OFFLINE-FIRST: requests de mutação podem ser enfileiradas se a rede
+    // falhar. v3.16.0 P0: criterios delegados pra ehMutacaoP0 — cobre os 5
+    // modulos do P0 + laudos/galeria (retro-compat). GET continua sempre online
+    // (precisa de dados frescos).
+    const ehMutacao = ehMutacaoP0(method, path);
     try {
       const r = await fetch(url, fetchOpts);
       const d = await r.json();
@@ -299,7 +306,7 @@
         || err.message?.includes('NetworkError')
         || err.name === 'TypeError'
         || !navigator.onLine;
-      if (ehMutacaoLaudo && ehErroRede && typeof enfileirarOffline === 'function') {
+      if (ehMutacao && ehErroRede && typeof enfileirarOffline === 'function') {
         await enfileirarOffline({ method, path, body: opts.body, headers: baseHeaders });
         atualizarBadgeOffline();
         return { ok: true, _offline: true, _queued: true };
@@ -312,6 +319,7 @@
   window.api = api; // CRITICO: obras.html chama api() em centenas de lugares
   window.OfflineEngine = {
     api,
+    ehMutacaoP0,
     enfileirarOffline,
     listarFilaOffline,
     removerDaFila,
