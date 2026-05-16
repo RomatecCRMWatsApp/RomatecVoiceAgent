@@ -1735,6 +1735,39 @@ export async function runMigrations(): Promise<void> {
     VALUES (1, 'romatec', 'Romatec Consultoria', 'active', '#10b981', 'Romatec')
   `);
 
+  // Garante colunas do users (bancos antigos podem ter sido criados antes
+  // do schema atual — CREATE IF NOT EXISTS pula, deixando colunas faltando).
+  for (const col of [
+    `ADD COLUMN IF NOT EXISTS email_verified_at     DATETIME     NULL`,
+    `ADD COLUMN IF NOT EXISTS password_hash         VARCHAR(255) NULL`,
+    `ADD COLUMN IF NOT EXISTS name                  VARCHAR(120) NULL`,
+    `ADD COLUMN IF NOT EXISTS phone                 VARCHAR(30)  NULL`,
+    `ADD COLUMN IF NOT EXISTS avatar_url            VARCHAR(500) NULL`,
+    `ADD COLUMN IF NOT EXISTS locale                VARCHAR(10)  NOT NULL DEFAULT 'pt-BR'`,
+    `ADD COLUMN IF NOT EXISTS timezone              VARCHAR(50)  NOT NULL DEFAULT 'America/Sao_Paulo'`,
+    `ADD COLUMN IF NOT EXISTS mfa_secret            VARCHAR(64)  NULL`,
+    `ADD COLUMN IF NOT EXISTS mfa_enabled           BOOLEAN      NOT NULL DEFAULT FALSE`,
+    `ADD COLUMN IF NOT EXISTS failed_login_attempts INT          NOT NULL DEFAULT 0`,
+    `ADD COLUMN IF NOT EXISTS locked_until          DATETIME     NULL`,
+    `ADD COLUMN IF NOT EXISTS last_login_at         DATETIME     NULL`,
+    `ADD COLUMN IF NOT EXISTS last_login_ip         VARCHAR(45)  NULL`,
+    `ADD COLUMN IF NOT EXISTS deleted_at            DATETIME     NULL`,
+  ]) {
+    await pool.execute(`ALTER TABLE users ${col}`).catch(async () => {
+      const colName = (/ADD COLUMN IF NOT EXISTS (\w+)/.exec(col) || [])[1];
+      if (!colName) return;
+      const [c] = await pool.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = ?`,
+        [colName]
+      );
+      if (Number((c[0] as { n: number }).n) === 0) {
+        const sql = col.replace('IF NOT EXISTS ', '');
+        await pool.execute(`ALTER TABLE users ${sql}`);
+      }
+    });
+  }
+
   // CEO José Romário — placeholder hash bcrypt forçará reset no 1º login
   // Hash "$2b$12$placeholderForceReset0000000000000000000000000000000" — invalido propositalmente
   const CEO_EMAIL = (process.env.CEO_EMAIL || 'romateccrm@gmail.com').toLowerCase();
