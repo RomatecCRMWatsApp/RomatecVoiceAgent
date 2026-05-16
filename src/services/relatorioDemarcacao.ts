@@ -346,6 +346,31 @@ export class RelatorioDemarcacaoService {
     };
   }
 
+  // ===================== EDITAR METADADOS =====================
+  // v3.15.12: edita campos editaveis do relatorio (nao mexe nos itens/laudos)
+  async editar(relatorioId: number, input: {
+    loteadorNome?: string; loteadorDocumento?: string; loteadorWhatsapp?: string;
+    loteamento?: string; dataVencimento?: string; observacoes?: string;
+  }): Promise<void> {
+    const fields: string[] = [];
+    const params: (string | number | null)[] = [];
+    const set = (col: string, val: any) => {
+      if (val !== undefined) { fields.push(`${col} = ?`); params.push(val ?? null); }
+    };
+    set('loteador_nome', input.loteadorNome);
+    set('loteador_documento', input.loteadorDocumento);
+    set('loteador_whatsapp', input.loteadorWhatsapp);
+    set('loteamento', input.loteamento);
+    set('data_vencimento', input.dataVencimento);
+    set('observacoes', input.observacoes);
+    if (fields.length === 0) return;
+    params.push(relatorioId);
+    await this.pool.execute(
+      `UPDATE relatorios_demarcacao SET ${fields.join(', ')} WHERE id = ?`,
+      params
+    );
+  }
+
   // ===================== MARCAR COMO PAGO =====================
   async marcarPago(relatorioId: number, usuario: string): Promise<void> {
     const conn = await this.pool.getConnection();

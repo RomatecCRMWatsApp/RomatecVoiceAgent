@@ -224,6 +224,33 @@ export function relatorioDemarcacaoRouter(pool: Pool): Router {
     }
   });
 
+  // ===== LISTA DE LOTEADORES (pra autocomplete no form) =====
+  // v3.15.13: GET /api/relatorios-demarcacao/loteadores
+  router.get('/loteadores/lista', async (_req, res) => {
+    try {
+      const [rows] = await pool.query(
+        `SELECT id, nome, documento, whatsapp, telefone, email, loteamento_padrao
+           FROM loteadores
+          WHERE ativo = 1
+          ORDER BY nome ASC`
+      );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ===== EDITAR METADADOS DO RELATORIO =====
+  // v3.15.12: edita loteador, vencimento, observacoes — nao mexe nos itens
+  router.put('/:id', async (req, res) => {
+    try {
+      await service.editar(Number(req.params.id), req.body || {});
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   // ===== MARCAR PAGO =====
   router.post('/:id/pagar', async (req, res) => {
     try {
