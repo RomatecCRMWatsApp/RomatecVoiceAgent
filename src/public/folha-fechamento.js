@@ -459,8 +459,16 @@
           if (ext.confianca)    resumo += `Confianca OCR: ${ext.confianca}\n`;
         }
         if (data.marcado_pago) resumo += `\n✓ Item marcado como PAGO automaticamente`;
-        if (data.whatsapp_enviado) resumo += `\n📱 Enviado via WhatsApp pro colaborador`;
-        else if (data.whatsapp_erro) resumo += `\n⚠️ WhatsApp nao enviado: ${data.whatsapp_erro}`;
+        if (data.whatsapp_enviado) resumo += `\n📱 Comprovante enviado via WhatsApp pro colaborador`;
+        else if (data.whatsapp_erro) resumo += `\n⚠️ WhatsApp comprovante nao enviado: ${data.whatsapp_erro}`;
+        // v3.12.0: recibo de autenticacao Romatec
+        if (data.recibo_autenticacao) {
+          resumo += `\n\n🧾 Recibo Romatec emitido: ${data.recibo_autenticacao.numero}`;
+          resumo += `\nLink de confirmação: ${data.recibo_autenticacao.link}`;
+          if (data.recibo_autenticacao.enviado) resumo += `\n📱 Recibo enviado via WhatsApp`;
+        } else if (data.recibo_erro) {
+          resumo += `\n⚠️ Recibo Romatec nao gerado: ${data.recibo_erro}`;
+        }
 
         mostrarToastComprovante('', 'success', 0, true);
         alert(resumo);

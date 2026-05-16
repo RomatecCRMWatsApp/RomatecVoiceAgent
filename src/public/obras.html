@@ -2476,22 +2476,36 @@ function abrirEditarObra(obraId) {
                 </tr>
               </thead>
               <tbody>
-                ${parcelas.map(p => `
+                ${parcelas.map(p => {
+                    // v3.12.0: badge de status_cobranca
+                    const sc = p.status_cobranca || 'pendente';
+                    const statusBadge = p.pago
+                      ? '<span style="color:var(--success); font-weight:600;">✅ Pago</span>'
+                      : sc === 'cliente_respondeu'
+                        ? `<span style="color:#10b981; font-weight:600;" title="Cliente respondeu via WhatsApp — encaminhado ao CEO">💬 Respondeu</span>`
+                      : sc === 'vencido_msg_enviada'
+                        ? `<span style="color:#dc2626; font-weight:600;" title="Vencida — cobrança enviada">⚠️ Vencido (msg enviada)</span>`
+                      : sc === 'msg_enviada'
+                        ? `<span style="color:#3b82f6; font-weight:600;" title="Cobrança enviada antes do vencimento">📤 Msg enviada</span>`
+                      : '<span style="color:var(--gold);">⏳ Pendente</span>';
+                    return `
                   <tr style="border-bottom:1px solid rgba(255,255,255,0.05);" data-parc-id="${p.id}">
                     <td style="padding:6px 4px;"><strong>${p.numero}ª</strong></td>
                     <td style="padding:6px 4px;"><input type="date" data-pq-ini="${p.id}" value="${p.quinzena_inicio||''}" style="font-size:11px; padding:3px 6px;"></td>
                     <td style="padding:6px 4px;"><input type="date" data-pq-fim="${p.id}" value="${p.quinzena_fim||''}" style="font-size:11px; padding:3px 6px;"></td>
                     <td style="padding:6px 4px;"><input type="number" step="0.01" data-pq-val="${p.id}" value="${p.valor||0}" style="font-size:11px; padding:3px 6px; width:90px;"></td>
                     <td style="padding:6px 4px;"><input type="date" data-pq-venc="${p.id}" value="${p.vencimento_iso||''}" style="font-size:11px; padding:3px 6px;"></td>
-                    <td style="padding:6px 4px;">${p.pago ? '<span style="color:var(--success);">✅ Pago</span>' : '<span style="color:var(--gold);">⏳ Pendente</span>'}</td>
+                    <td style="padding:6px 4px;">${statusBadge}</td>
                     <td style="padding:6px 4px; text-align:right; white-space:nowrap;">
                       <button data-save-parc="${p.id}" class="btn-gold" style="padding:3px 8px; font-size:11px;" title="Salvar alteracoes">💾</button>
                       <button data-toggle-pago="${p.id}" data-pago="${p.pago ? 1 : 0}" style="padding:3px 8px; font-size:11px; ${p.pago ? '' : 'background:var(--gold); color:#06120a; border-color:var(--gold); font-weight:600;'}" title="${p.pago ? 'Desmarcar como pago' : 'Marcar pago + emitir Recibo + NFe + enviar WhatsApp'}">${p.pago ? 'Desmarcar' : '✓ Pago'}</button>
+                      ${!p.pago ? `<button data-cobrar-parc="${p.id}" style="padding:3px 8px; font-size:11px; background:#dc262622; color:#dc2626; border:1px solid #dc262655; font-weight:600;" title="Enviar cobrança formal pelo WhatsApp ao cliente">📱 Cobrar</button>` : ''}
                       <button data-wpp-parc="${p.id}" title="Enviar resumo desta parcela ao cliente via WhatsApp" style="padding:3px 8px; font-size:11px; background:#25d36622; color:#25d366; border-color:#25d36655;">💬</button>
                       <button data-tg-parc="${p.id}" title="Enviar pro Telegram do CEO" style="padding:3px 8px; font-size:11px; background:#0088cc22; color:#0088cc; border-color:#0088cc55;">✈️</button>
                       <button data-del-parc="${p.id}" class="btn-danger" style="padding:3px 8px; font-size:11px;" title="Excluir parcela">🗑️</button>
                     </td>
-                  </tr>`).join('')}
+                  </tr>`;
+                  }).join('')}
               </tbody>
               <tfoot>
                 <tr style="border-top:2px solid var(--border);">
@@ -2646,6 +2660,20 @@ function abrirEditarObra(obraId) {
       });
 
       // v1.76.0: 💬 WhatsApp — envia resumo da parcela ao cliente (link wa.me)
+      // v3.12.0: handler do botao "📱 Cobrar" — envia cobranca formal ao cliente
+      box.querySelectorAll('[data-cobrar-parc]').forEach(b => b.onclick = async () => {
+        const id = b.dataset.cobrarParc;
+        if (!confirm('Enviar cobrança formal desta parcela ao cliente via WhatsApp?')) return;
+        b.disabled = true; const lbl = b.textContent; b.textContent = '⏳';
+        try {
+          const r = await fetch(`/api/parcelas/${id}/cobrar`, { method: 'POST' });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error);
+          alert(`✅ Cobrança enviada${data.vencido ? ' (parcela VENCIDA)' : ''} pra ${data.enviado_para}\nStatus: ${data.status_novo}`);
+          render();
+        } catch (e) { alert('Erro ao cobrar: ' + e.message); }
+        finally { b.disabled = false; b.textContent = lbl; }
+      });
       box.querySelectorAll('[data-wpp-parc]').forEach(b => b.onclick = async () => {
         const parcelaId = b.dataset.wppParc;
         const parcela = parcelas.find(p => String(p.id) === String(parcelaId));

@@ -1306,10 +1306,13 @@ export async function resumoObras() {
 // + lembrete de NF.
 
 export async function listarParcelasObra(obraId: string) {
+  // v3.12.0: inclui status_cobranca + cliente_resposta_*
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT id, obra_id, numero, valor, vencimento, prazo_dias,
             quinzena_inicio, quinzena_fim, pago, pago_em,
             observacoes, calendar_event_id, nf_numero, nf_emitida_em,
+            status_cobranca, cobranca_enviada_em, cobranca_msg_id,
+            cliente_resposta_em, cliente_resposta_texto,
             created_at, updated_at
        FROM romatec_obra_parcelas
       WHERE obra_id = ?
@@ -1332,6 +1335,12 @@ export async function listarParcelasObra(obraId: string) {
     calendar_event_id: r.calendar_event_id as string | null,
     nf_numero: r.nf_numero as string | null,
     nf_emitida_em: r.nf_emitida_em as Date | null,
+    // v3.12.0
+    status_cobranca: (r.status_cobranca as string | null) || 'pendente',
+    cobranca_enviada_em: r.cobranca_enviada_em as Date | null,
+    cobranca_msg_id: r.cobranca_msg_id as string | null,
+    cliente_resposta_em: r.cliente_resposta_em as Date | null,
+    cliente_resposta_texto: r.cliente_resposta_texto as string | null,
   }));
 }
 

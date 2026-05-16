@@ -16,6 +16,9 @@ export interface UploadComprovanteResult {
   marcado_pago: boolean;
   whatsapp_enviado: boolean;
   whatsapp_erro?: string;
+  // v3.12.0: recibo Romatec de autenticacao
+  recibo_autenticacao?: { id: number; numero: string; link: string; enviado: boolean };
+  recibo_erro?: string;
 }
 
 export async function processarComprovantePagamento(
@@ -154,6 +157,48 @@ export async function processarComprovantePagamento(
     whatsappErro = 'Colaborador sem telefone cadastrado.';
   }
 
+  // 5. Cria recibo Romatec de autenticacao (paridade com recibos quinzenais).
+  //    Colaborador recebe link unico onde confirma o recebimento — gera prova
+  //    de recebimento alem do comprovante bancario.
+  let reciboInfo: UploadComprovanteResult['recibo_autenticacao'];
+  let reciboErro: string | undefined;
+  try {
+    const { criarRecibo, enviarReciboWhatsApp } = await import('../integrations/recibos');
+    const valor = Number(it.valor_liquido);
+    const recibo = await criarRecibo({
+      tipo: 'funcionario',
+      resource_type: 'folha_fechamento_item',
+      resource_id: String(itemId),
+      destinatario_nome: String(it.funcionario_nome),
+      destinatario_phone: it.telefone || '',
+      valor,
+      forma_pagamento: extraido?.tipo === 'pix' ? 'pix' : extraido?.tipo === 'ted' || extraido?.tipo === 'doc' ? 'transferencia' : undefined,
+      descricao_servico: `Pagamento de folha referente ao fechamento #${it.fechamento_id}` +
+        (extraido?.id_transacao ? ` · ID transação: ${extraido.id_transacao}` : ''),
+      expira_em_dias: 30,
+    });
+    // Tenta enviar via WhatsApp (best-effort)
+    let reciboEnviado = false;
+    try {
+      if (it.telefone) {
+        await enviarReciboWhatsApp({ id: recibo.id, enviar_pdf: false });
+        reciboEnviado = true;
+      }
+    } catch (errEnv) {
+      console.warn('[comprovante:recibo:envio]', (errEnv as Error).message);
+    }
+    const baseUrl = (process.env.APP_URL || '').replace(/\/$/, '') || '';
+    reciboInfo = {
+      id: recibo.id,
+      numero: recibo.numero,
+      link: baseUrl ? `${baseUrl}/r/${recibo.token}` : `/r/${recibo.token}`,
+      enviado: reciboEnviado,
+    };
+  } catch (err) {
+    reciboErro = (err as Error).message;
+    console.warn('[comprovante:recibo]', reciboErro);
+  }
+
   return {
     ok: true,
     item_id: itemId,
@@ -163,6 +208,8 @@ export async function processarComprovantePagamento(
     marcado_pago: marcouPago,
     whatsapp_enviado: whatsappOk,
     whatsapp_erro: whatsappErro,
+    recibo_autenticacao: reciboInfo,
+    recibo_erro: reciboErro,
   };
 }
 

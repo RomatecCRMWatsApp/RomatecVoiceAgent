@@ -491,6 +491,24 @@ function handleWhatsAppWebhook(req: Request, res: Response) {
                        : `[PDF: ${msg.document.filename}]`;
         void logInbound(msg.from, userText, msg.id).catch(() => {});
 
+        // v3.12.0 — roteamento de resposta de cliente cobrado por parcela vencida.
+        // Se o phone bate com cliente de obra com parcela em status_cobranca msg_enviada/vencido,
+        // marca como cliente_respondeu + encaminha pro CEO via Telegram, e silencia ZAYRA.
+        try {
+          if (msg.type === 'text') {
+            const cobMod = await import('./services/cobrancaParcelas');
+            const cob = await cobMod.processarRespostaClienteParcela({
+              phone: msg.from, text: msg.text.body, messageId: msg.id,
+            });
+            if (cob.handled) {
+              console.log(`[cobranca-parcelas] resposta cliente phone=${msg.from} parcela=${cob.parcela_id} encaminhada ao CEO. ZAYRA silenciada.`);
+              continue;
+            }
+          }
+        } catch (err) {
+          console.warn('[cobranca-parcelas] routing falhou:', (err as Error).message);
+        }
+
         // v1.65.15 — PR B.3: roteamento contextual de respostas de recibo.
         // v1.65.18 — bloqueio total: ZAYRA NÃO responde mensagem de colaborador.
         // Ordem:
@@ -3542,6 +3560,25 @@ app.get('/api/folha/item/:itemId/comprovante', async (req: Request, res: Respons
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v3.12.0: cobranca manual de parcela (botao "Cobrar agora" na UI)
+app.post('/api/parcelas/:id/cobrar', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const m = await import('./services/cobrancaParcelas');
+    const r = await m.enviarCobrancaParcela(id);
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// v3.12.0: trigger manual do ticker (admin only — pra testar/forcar checagem fora do horario)
+app.post('/api/parcelas/check-cobrancas', async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./services/cobrancaParcelas');
+    const r = await m.checkAndSendCobrancasDoDia();
+    res.json(r);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // v1.65.60: Webhook do AvalieImob — recebe leads (cadastros + assinaturas)
 // pra ZAYRA monitorar. Disparo em paralelo: WhatsApp CEO + Telegram CEO +
 // auto-resposta WhatsApp pro lead. Header X-Webhook-Secret obrigatorio.
@@ -3761,6 +3798,16 @@ app.listen(PORT, () => {
     }
   })();
 
+  // v3.12.0: colunas de cobranca em romatec_obra_parcelas.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-cobranca-parcelas');
+      await m.runCobrancaParcelasMigrations();
+    } catch (err) {
+      console.error('[cobranca-parcelas-migrations] FALHA fatal:', err);
+    }
+  })();
+
   void initDb()
     .then(() => loadSessionFromDb())
     .then(() => import('./services/whatsappDrafts'))
@@ -3769,6 +3816,8 @@ app.listen(PORT, () => {
     .then(m => m.startExpiracaoRecibosTicker()) // v1.65.16: expira recibos sem resposta há mais de 48h (ticker a cada 6h)
     .then(() => import('./services/reciboLembretes'))
     .then(m => m.iniciarLembretesCron()) // v1.72.0: lembretes universais + auto-expirar
+    .then(() => import('./services/cobrancaParcelas'))
+    .then(m => m.iniciarTickerCobrancaParcelas()) // v3.12.0: cobranca automatica de parcelas (6h cron)
     .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));
 
   // v1.39.1: sync contatos CRM → memória ZAYRA (1x ao boot + 1x/dia 04:00 BRT)
