@@ -64,6 +64,8 @@ type EquipeRow = RowDataPacket & {
   ativo: number;
   obras_ids: string | null;
   obra_id: number | null;
+  chave_pix: string | null;
+  tipo_chave_pix: string | null;
 };
 
 type MaterialRow = RowDataPacket & {
@@ -536,6 +538,8 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
     obras_ids: (r.obras_ids ?? '').split(',').filter(Boolean),
     // v1.65.55: status do colaborador (ativo/ausente/doente/ferias/afastado/transferido/desligado)
     status: ((r as unknown as { status?: string }).status as string) || 'ativo',
+    chave_pix: r.chave_pix,
+    tipo_chave_pix: r.tipo_chave_pix,
   }));
 }
 
