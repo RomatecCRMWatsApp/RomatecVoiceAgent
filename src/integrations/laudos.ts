@@ -530,6 +530,8 @@ export interface AtualizarLaudoInput {
   usa_trt?: boolean;
   numero_trt?: string | null;
   valor_servico?: number | null;
+  // v3.15.10: valor que vai pro Relatorio de Demarcacoes Faturaveis
+  valor_demarcacao?: number | null;
   forma_pagamento?: FormaPagamentoLaudo | null;
   data_pagamento?: string | null;
   observacoes?: string | null;
@@ -605,6 +607,7 @@ export async function atualizarLaudo(id: number | string, input: AtualizarLaudoI
   set('usa_trt', input.usa_trt);
   set('numero_trt', input.numero_trt);
   set('valor_servico', input.valor_servico);
+  set('valor_demarcacao', input.valor_demarcacao);
   set('forma_pagamento', input.forma_pagamento);
   set('data_pagamento', input.data_pagamento);
   set('observacoes', input.observacoes);
