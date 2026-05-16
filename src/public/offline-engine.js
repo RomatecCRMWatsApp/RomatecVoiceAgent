@@ -559,6 +559,33 @@
     },
   };
 
+  // v3.16.0 P0 (Task C2): helper pros loadXxx() — network-first com fallback
+  // pra cache. Se online: chama fetchFn, popula cache_v2 com o array retornado,
+  // atualiza sync_meta.last_full_sync_at e devolve os dados. Se rede falhar OU
+  // estiver offline, devolve direto o que tem no cache (getAll da entidade).
+  //
+  // Premissas:
+  //   - fetchFn deve devolver Array<T> (ou o cache nao e atualizado).
+  //   - entidade deve ser uma das CACHE_V2_STORES (obras, parcelas, recibos,
+  //     despesas, equipe). Outras entidades vao falhar com IDBError no bulkPut.
+  //   - Em caso de falha online, NAO propaga o erro — degrada pra cache pra
+  //     manter UI funcional. Console.warn pra rastrear nos devtools.
+  async function carregarComCache(entidade, fetchFn) {
+    if (navigator.onLine) {
+      try {
+        const dados = await fetchFn();
+        if (Array.isArray(dados)) {
+          await cacheV2.bulkPut(entidade, dados);
+          await cacheV2.setMeta(entidade, { last_full_sync_at: Date.now() });
+        }
+        return dados;
+      } catch (err) {
+        console.warn('[offline] carregarComCache(' + entidade + ') falhou — fallback cache:', err?.message || err);
+      }
+    }
+    return cacheV2.getAll(entidade);
+  }
+
   // Expoe a API:
   window.api = api; // CRITICO: obras.html chama api() em centenas de lugares
   window.OfflineEngine = {
@@ -580,5 +607,7 @@
     abrirCacheV2,
     cacheV2,
     CACHE_V2_STORES,
+    // v3.16.0 P0 Task C2
+    carregarComCache,
   };
 })();

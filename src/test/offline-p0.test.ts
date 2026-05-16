@@ -469,3 +469,63 @@ describe('cache_v2 (full sync stores)', () => {
     expect(meta).toEqual({});
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Task C2: carregarComCache — network-first com fallback pro cache
+// Wrapper que os loadXxx() em obras.html usam pra manter UI funcional offline.
+// ──────────────────────────────────────────────────────────────────────
+describe('carregarComCache', () => {
+  beforeEach(async () => {
+    // Mesmo padrao de cleanup do bloco cache_v2: limpa stores via transaction
+    // (deleteDatabase trava em conexoes abertas no fake-indexeddb).
+    const eng = await carregarEngine();
+    const db = await eng.abrirCacheV2();
+    const stores = [...eng.CACHE_V2_STORES, 'sync_meta'];
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(stores, 'readwrite');
+      for (const s of stores) tx.objectStore(s).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  });
+
+  it('online: chama fetchFn e popula cache', async () => {
+    const eng = await carregarEngine();
+    const win = getEngineWindow();
+    Object.defineProperty(win.navigator, 'onLine', { value: true, configurable: true });
+    const dados = await eng.carregarComCache('obras', async () => [
+      { id: 1, nome: 'A' },
+      { id: 2, nome: 'B' },
+    ]);
+    expect(dados).toHaveLength(2);
+    const cached = await eng.cacheV2.getAll('obras');
+    expect(cached).toHaveLength(2);
+    const meta = await eng.cacheV2.getMeta('obras');
+    expect(meta.last_full_sync_at).toBeGreaterThan(0);
+  });
+
+  it('offline: devolve do cache sem chamar fetchFn', async () => {
+    const eng = await carregarEngine();
+    await eng.cacheV2.bulkPut('parcelas', [{ id: 99, valor: 100 }]);
+    const win = getEngineWindow();
+    Object.defineProperty(win.navigator, 'onLine', { value: false, configurable: true });
+    const fetchFn = vi.fn(async () => [{ id: 1 }]);
+    const dados = await eng.carregarComCache('parcelas', fetchFn);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(dados).toHaveLength(1);
+    expect(dados[0].valor).toBe(100);
+  });
+
+  it('online com fetchFn throw: cai pro cache', async () => {
+    const eng = await carregarEngine();
+    await eng.cacheV2.bulkPut('recibos', [{ id: 42, numero: '001' }]);
+    const win = getEngineWindow();
+    Object.defineProperty(win.navigator, 'onLine', { value: true, configurable: true });
+    const fetchFn = async () => {
+      throw new Error('network down');
+    };
+    const dados = await eng.carregarComCache('recibos', fetchFn);
+    expect(dados).toHaveLength(1);
+    expect(dados[0].numero).toBe('001');
+  });
+});

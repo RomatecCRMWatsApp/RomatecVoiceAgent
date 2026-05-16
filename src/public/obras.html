@@ -1133,7 +1133,10 @@ async function loadDashboard() {
   } catch (e) { state.documentosVencendo = []; }
 }
 async function loadObras() {
-  state.obras = await api('/api/obras');
+  // v3.16.0 P0 Task C2: network-first com fallback IndexedDB (cache_v2.obras).
+  // Online: api() popula state.obras E o cache. Offline/falha de rede:
+  // devolve do cache pra UI manter funcional sem rede.
+  state.obras = await OfflineEngine.carregarComCache('obras', () => api('/api/obras'));
   if (!state.currentObra && state.obras.length) state.currentObra = state.obras[0].id;
 }
 async function loadEtapas() {
@@ -9645,7 +9648,15 @@ async function loadRecibos() {
   if (f.tipo)   qs.set('tipo', f.tipo);
   if (f.status) qs.set('status', f.status);
   qs.set('limite', '200');
-  state.recibos = await api('/api/recibos?' + qs.toString());
+  // v3.16.0 P0 Task C2: network-first com fallback IndexedDB (cache_v2.recibos).
+  // Cache guarda o ULTIMO resultado visto (incluindo filtros aplicados) — em
+  // offline a UI mostra esse snapshot mesmo se o usuario muda os filtros. Bom
+  // o suficiente pra "ver o que ja tinha" sem rede; usuario reaplica filtro
+  // quando reconectar.
+  state.recibos = await OfflineEngine.carregarComCache(
+    'recibos',
+    () => api('/api/recibos?' + qs.toString())
+  );
 }
 
 function recibosTipoMeta(tipo) {
