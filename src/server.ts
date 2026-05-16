@@ -3509,6 +3509,39 @@ app.post('/api/folha/funcionario/:funcionarioId/pix', async (req: Request, res: 
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v3.11.0: upload de comprovante de pagamento (JPG/PNG/PDF) com OCR + marca pago + envia WhatsApp
+app.post('/api/folha/item/:itemId/upload-comprovante', upload.single('arquivo'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) { res.status(400).json({ error: 'arquivo obrigatorio (multipart field: arquivo)' }); return; }
+    const itemId = Number(req.params.itemId);
+    if (!Number.isFinite(itemId)) { res.status(400).json({ error: 'itemId invalido' }); return; }
+    // Optional flag pra desabilitar envio WhatsApp (default true)
+    const enviar = req.body?.enviar_whatsapp !== 'false';
+    const m = await import('./services/folhaFechamentoComprovante');
+    const r = await m.processarComprovantePagamento(
+      itemId,
+      req.file.buffer,
+      req.file.mimetype,
+      req.file.originalname || `comprovante-${itemId}.${req.file.mimetype.split('/')[1] || 'bin'}`,
+      enviar,
+    );
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// v3.11.0: download do comprovante anexado (inline)
+app.get('/api/folha/item/:itemId/comprovante', async (req: Request, res: Response) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const m = await import('./services/folhaFechamentoComprovante');
+    const d = await m.getComprovanteItem(itemId);
+    if (!d) { res.status(404).json({ error: 'Comprovante nao encontrado' }); return; }
+    res.setHeader('Content-Type', d.mime);
+    res.setHeader('Content-Disposition', `inline; filename="${d.filename}"`);
+    res.send(d.arquivo);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // v1.65.60: Webhook do AvalieImob — recebe leads (cadastros + assinaturas)
 // pra ZAYRA monitorar. Disparo em paralelo: WhatsApp CEO + Telegram CEO +
 // auto-resposta WhatsApp pro lead. Header X-Webhook-Secret obrigatorio.
@@ -3715,6 +3748,16 @@ app.listen(PORT, () => {
       await m.runEquipePixMigrations();
     } catch (err) {
       console.error('[equipe-pix-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.11.0: colunas de comprovante em folha_fechamento_itens.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-folha-fechamento');
+      await m.runComprovanteMigrations();
+    } catch (err) {
+      console.error('[comprovante-migrations] FALHA fatal:', err);
     }
   })();
 

@@ -227,18 +227,27 @@
 
       const cards = await Promise.all(lista.map(async f => {
         const det = await fetch(`${API}/api/folha/detalhe/${f.id}`).then(x => x.json());
-        const itensHtml = det.itens.map(it => `
+        const itensHtml = det.itens.map(it => {
+          const temComp = !!it.comprovante_uploaded_em;
+          const pagoTxt = it.status_pagamento === 'paga'
+            ? `<span style="color:#4ade80;">✓ Pago ${new Date(it.data_pagamento).toLocaleDateString('pt-BR')}</span>`
+            : '';
+          const acoes = it.status_pagamento === 'paga'
+            ? `${pagoTxt} <button onclick="window.reverterItem(${it.id})" style="margin-left:8px; padding:2px 6px; background:#7f1d1d; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;">Reverter</button>`
+            : `<button onclick="window.pagarItem(${it.id})" style="padding:4px 10px; background:#16a34a; color:#fff; border:none; border-radius:4px; cursor:pointer;">Marcar Pago</button>`;
+          // v3.11.0: botao de upload de comprovante (sempre disponivel) + link pra ver comprovante existente
+          const compBtn = temComp
+            ? `<a href="/api/folha/item/${it.id}/comprovante" target="_blank" style="padding:4px 8px; background:#0e8c63; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none;" title="Ver comprovante">📄 Ver</a>
+               <button onclick="window.uploadComprovante(${it.id})" style="margin-left:4px; padding:4px 8px; background:#1e40af; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;" title="Substituir comprovante">📎 Trocar</button>`
+            : `<button onclick="window.uploadComprovante(${it.id})" style="padding:4px 10px; background:#1e40af; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:12px;" title="Anexar comprovante (JPG/PNG/PDF) — extrai dados, marca pago e envia via WhatsApp">📎 Comprovante</button>`;
+          return `
           <tr style="border-bottom:1px solid #2d4a3a;">
             <td style="padding:6px 8px;">${escapeHtml(it.funcionario_nome)}</td>
             <td style="padding:6px 8px; text-align:right;">R$ ${Number(it.valor_liquido).toFixed(2).replace('.', ',')}</td>
-            <td style="padding:6px 8px;">
-              ${it.status_pagamento === 'paga'
-                ? `<span style="color:#4ade80;">✓ Pago ${new Date(it.data_pagamento).toLocaleDateString('pt-BR')}</span>
-                   <button onclick="window.reverterItem(${it.id})" style="margin-left:8px; padding:2px 6px; background:#7f1d1d; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;">Reverter</button>`
-                : `<button onclick="window.pagarItem(${it.id})" style="padding:4px 10px; background:#16a34a; color:#fff; border:none; border-radius:4px; cursor:pointer;">Marcar Pago</button>`}
-            </td>
-          </tr>
-        `).join('');
+            <td style="padding:6px 8px; white-space:nowrap;">${acoes}</td>
+            <td style="padding:6px 8px; white-space:nowrap;">${compBtn}</td>
+          </tr>`;
+        }).join('');
         return `
           <div style="border:1px solid #2d4a3a; border-radius:8px; padding:12px; margin-bottom:12px; background:#0f1a14;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
@@ -403,6 +412,82 @@
       if (typeof window.recarregarSaldoAberto === 'function') window.recarregarSaldoAberto();
     } catch (err) { alert('Erro: ' + err.message); }
   };
+
+  // v3.11.0: upload de comprovante de pagamento (JPG/PNG/PDF). Cria <input file>
+  // hidden, faz upload, mostra dados extraidos via Claude Vision, marca pago,
+  // envia via WhatsApp pro colaborador (best-effort).
+  window.uploadComprovante = function (itemId) {
+    let input = document.getElementById('upload-comprovante-input');
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'file';
+      input.id = 'upload-comprovante-input';
+      input.accept = 'image/jpeg,image/png,image/webp,image/gif,application/pdf';
+      input.style.display = 'none';
+      document.body.appendChild(input);
+    }
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      input.value = '';
+
+      // toast de loading
+      mostrarToastComprovante('⏳ Enviando comprovante e extraindo dados...', 'info', 0);
+
+      const form = new FormData();
+      form.append('arquivo', file);
+
+      try {
+        const r = await fetch(`${API}/api/folha/item/${itemId}/upload-comprovante`, {
+          method: 'POST', body: form,
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Erro no upload');
+
+        // monta resumo dos dados extraidos
+        const ext = data.extraido || {};
+        let resumo = `✅ Comprovante anexado pra ${data.funcionario_nome}\n\n`;
+        if (ext.erro) {
+          resumo += `⚠️ Nao consegui extrair dados automaticamente: ${ext.erro}\n`;
+        } else {
+          if (ext.tipo)         resumo += `Tipo: ${ext.tipo.toUpperCase()}\n`;
+          if (ext.valor != null) resumo += `Valor: R$ ${Number(ext.valor).toFixed(2).replace('.', ',')}\n`;
+          if (ext.data_pagamento) resumo += `Data: ${ext.data_pagamento}\n`;
+          if (ext.emitente?.nome) resumo += `Emitente: ${ext.emitente.nome}\n`;
+          if (ext.destinatario?.nome) resumo += `Destinatario: ${ext.destinatario.nome}\n`;
+          if (ext.id_transacao) resumo += `ID Autenticacao: ${ext.id_transacao}\n`;
+          if (ext.confianca)    resumo += `Confianca OCR: ${ext.confianca}\n`;
+        }
+        if (data.marcado_pago) resumo += `\n✓ Item marcado como PAGO automaticamente`;
+        if (data.whatsapp_enviado) resumo += `\n📱 Enviado via WhatsApp pro colaborador`;
+        else if (data.whatsapp_erro) resumo += `\n⚠️ WhatsApp nao enviado: ${data.whatsapp_erro}`;
+
+        mostrarToastComprovante('', 'success', 0, true);
+        alert(resumo);
+
+        if (typeof window.recarregarSaldoAberto === 'function') window.recarregarSaldoAberto();
+        if (typeof window.recarregarFolhaMensal === 'function') window.recarregarFolhaMensal();
+      } catch (err) {
+        mostrarToastComprovante('', 'error', 0, true);
+        alert('Erro ao processar comprovante: ' + err.message);
+      }
+    };
+    input.click();
+  };
+
+  function mostrarToastComprovante(msg, tipo, timeout, fechar) {
+    let t = document.getElementById('comprovante-toast');
+    if (fechar) { if (t) t.remove(); return; }
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'comprovante-toast';
+      t.style.cssText = 'position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:10001; padding:12px 20px; border-radius:8px; color:#fff; font-family:Segoe UI,sans-serif; font-size:14px; box-shadow:0 4px 16px rgba(0,0,0,0.4);';
+      document.body.appendChild(t);
+    }
+    t.style.background = tipo === 'error' ? '#dc2626' : tipo === 'success' ? '#16a34a' : '#1e40af';
+    t.textContent = msg;
+    if (timeout > 0) setTimeout(() => t.remove(), timeout);
+  }
 
   // ============== UTILS ==============
   function escapeHtml(s) {
