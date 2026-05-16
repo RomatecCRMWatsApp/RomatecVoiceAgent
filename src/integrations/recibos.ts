@@ -427,6 +427,8 @@ export interface ListarFiltro {
   from?: string;          // YYYY-MM-DD
   to?: string;
   limite?: number;
+  /** v3.16.0 P0: ISO timestamp pra delta sync (updated_at > since). */
+  since?: string;
 }
 
 export async function listarRecibos(input: ListarFiltro = {}): Promise<Recibo[]> {
@@ -441,6 +443,7 @@ export async function listarRecibos(input: ListarFiltro = {}): Promise<Recibo[]>
   if (input.phone)         { sql += ' AND destinatario_phone = ?'; params.push(normalizarTelefone(input.phone)); }
   if (input.from)          { sql += ' AND created_at >= ?';    params.push(input.from); }
   if (input.to)            { sql += ' AND created_at <= ?';    params.push(input.to + ' 23:59:59'); }
+  if (input.since)         { sql += ' AND updated_at > ?';     params.push(input.since); }
   sql += ` ORDER BY created_at DESC LIMIT ${limite}`;
   const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
   return rows.map(mapRow);
