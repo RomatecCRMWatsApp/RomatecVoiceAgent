@@ -18546,6 +18546,117 @@ async function abrirModalFullSync() {
     console.warn('[fullsync boot] erro:', e.message);
   }
 })();
+
+// v3.16.0 P0 (Task E2): painel admin offline — ativado por Ctrl+Shift+O.
+// Permite inspecionar cache_v2 (stats por entidade) + fila pendente + blobs
+// pendentes, e expoe acoes: forcar full sync, drenar fila e limpar cache local.
+// Util pra debugging em campo (tecnicos podem mostrar pro suporte).
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && (e.key === 'O' || e.key === 'o')) {
+    e.preventDefault();
+    abrirPainelOffline();
+  }
+});
+
+async function abrirPainelOffline() {
+  if (document.getElementById('painelOffline')) return; // ja aberto
+  const ov = document.createElement('div');
+  ov.id = 'painelOffline';
+  ov.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:99999; display:flex; align-items:center; justify-content:center; padding:20px; font-family:inherit;';
+  ov.innerHTML = `
+    <div style="background:var(--surface, #0f1a14); border:1px solid var(--border, #2d4a3a); border-radius:10px; padding:24px; max-width:700px; width:100%; max-height:90vh; overflow:auto; color:var(--text, #e8f0eb);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h3 style="margin:0; color:var(--gold, #d4a017);">⚙️ Status offline</h3>
+        <button id="po-close" style="background:transparent; border:none; color:#9ca3af; font-size:22px; cursor:pointer;">×</button>
+      </div>
+      <h4 style="margin:6px 0; color:#9ca3af; font-size:13px;">📊 CACHE LOCAL (cache_v2)</h4>
+      <div id="po-cache-table">Carregando…</div>
+      <h4 style="margin:18px 0 6px; color:#9ca3af; font-size:13px;">📥 FILA PENDENTE</h4>
+      <div id="po-fila">Carregando…</div>
+      <h4 style="margin:18px 0 6px; color:#9ca3af; font-size:13px;">📸 BLOBS PENDENTES</h4>
+      <div id="po-blobs">Carregando…</div>
+      <div style="display:flex; gap:8px; margin-top:18px; flex-wrap:wrap;">
+        <button id="po-sync" style="padding:8px 14px; background:#16a34a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Forçar full sync</button>
+        <button id="po-drain" style="padding:8px 14px; background:#1e40af; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📤 Drenar fila agora</button>
+        <button id="po-clear" style="padding:8px 14px; background:#dc2626; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🗑️ Limpar cache local</button>
+        <button id="po-close2" style="padding:8px 14px; background:#374151; color:#fff; border:none; border-radius:6px; cursor:pointer;">Fechar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  const fechar = () => { try { ov.remove(); } catch {} };
+  ov.querySelector('#po-close').onclick = fechar;
+  ov.querySelector('#po-close2').onclick = fechar;
+
+  // Popula cache table
+  try {
+    const stores = OfflineEngine.CACHE_V2_STORES || ['obras','parcelas','recibos','despesas','equipe'];
+    const linhas = [];
+    for (const ent of stores) {
+      const meta = await OfflineEngine.cacheV2.getMeta(ent).catch(() => ({}));
+      const count = (await OfflineEngine.cacheV2.getAll(ent).catch(() => [])).length;
+      const ts = meta && meta.last_full_sync_at ? new Date(meta.last_full_sync_at).toLocaleString('pt-BR') : '—';
+      linhas.push(`<tr><td style="padding:4px 8px;">${ent}</td><td style="padding:4px 8px; text-align:right;">${count}</td><td style="padding:4px 8px; text-align:right; font-size:11px; color:#9ca3af;">${ts}</td></tr>`);
+    }
+    ov.querySelector('#po-cache-table').innerHTML = `
+      <table style="width:100%; font-size:13px; border-collapse:collapse;">
+        <thead><tr style="border-bottom:1px solid var(--border);"><th align="left" style="padding:4px 8px;">Entidade</th><th align="right" style="padding:4px 8px;">Registros</th><th align="right" style="padding:4px 8px;">Última sync</th></tr></thead>
+        <tbody>${linhas.join('')}</tbody>
+      </table>
+    `;
+  } catch (e) {
+    ov.querySelector('#po-cache-table').innerHTML = `<p style="color:#dc2626;">Erro: ${e.message}</p>`;
+  }
+
+  // Popula fila
+  try {
+    const fila = await OfflineEngine.listarFilaOffline();
+    if (fila.length === 0) {
+      ov.querySelector('#po-fila').innerHTML = '<p style="color:#10b981; font-size:13px;">✅ Vazia</p>';
+    } else {
+      const html = fila.map(f => `<div style="font-size:11px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05);"><code>${f.method} ${escape(f.path)}</code> ${f.tentativas ? `<span style="color:#f59e0b;">(tent. ${f.tentativas})</span>` : ''}${f.ultimoErro ? `<br><span style="color:#dc2626;">${escape(f.ultimoErro)}</span>` : ''}</div>`).join('');
+      ov.querySelector('#po-fila').innerHTML = `<div style="max-height:200px; overflow:auto;">${html}</div>`;
+    }
+  } catch (e) {
+    ov.querySelector('#po-fila').innerHTML = `<p style="color:#dc2626;">Erro: ${e.message}</p>`;
+  }
+
+  // Popula blobs pendentes
+  try {
+    const blobs = await OfflineEngine.listarBlobsPendentes?.();
+    if (!blobs || blobs.length === 0) {
+      ov.querySelector('#po-blobs').innerHTML = '<p style="color:#10b981; font-size:13px;">✅ Vazia</p>';
+    } else {
+      const html = blobs.map(b => `<div style="font-size:11px; padding:4px 0;"><code>${escape(b.filename)}</code> → <code>${escape(b.endpointTemplate)}</code> ${b.tentativas ? `<span style="color:#f59e0b;">(tent. ${b.tentativas})</span>` : ''}</div>`).join('');
+      ov.querySelector('#po-blobs').innerHTML = html;
+    }
+  } catch (e) {
+    ov.querySelector('#po-blobs').innerHTML = `<p style="color:#dc2626;">Erro: ${e.message}</p>`;
+  }
+
+  // Acoes
+  ov.querySelector('#po-sync').onclick = async () => {
+    fechar();
+    await abrirModalFullSync().catch(e => alert('Erro: ' + e.message));
+  };
+  ov.querySelector('#po-drain').onclick = async () => {
+    fechar();
+    try { await OfflineEngine.sincronizarFilaOffline(); alert('✓ Drain concluido'); }
+    catch (e) { alert('Erro: ' + e.message); }
+  };
+  ov.querySelector('#po-clear').onclick = async () => {
+    if (!confirm('⚠️ Limpar TODO cache local? Mutacoes pendentes serao perdidas.')) return;
+    try {
+      indexedDB.deleteDatabase('romatec_cache_v2');
+      indexedDB.deleteDatabase('romatec_offline_v1');
+      indexedDB.deleteDatabase('romatec_blobs');
+      try { localStorage.removeItem('offline_p0_first_sync'); } catch {}
+      alert('✓ Cache limpo. Recarregando…');
+      setTimeout(() => location.reload(), 500);
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+}
 </script>
 <!-- v3.10.0: Fechamento de Folha (modal + painel saldo) -->
 <script src="/folha-fechamento.js"></script>
