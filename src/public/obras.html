@@ -1062,7 +1062,7 @@ async function carregarListaCerts() {
     box.innerHTML = '<p style="color:#ef4444; font-size:12px;">Erro ao carregar: ' + escapeHtml(err.message) + '</p>';
   }
 }
-const state = {
+window.state = {
   currentObra: null, currentTab: 'dashboard',
   obras: [], etapas: [], transacoes: [],
   equipe: [], materiais: [], diario: [], resumo: null,

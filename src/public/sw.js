@@ -1,7 +1,7 @@
 ﻿// Service Worker da ZAYRA â€” versÃ£o atrelada Ã  versÃ£o do app pra forÃ§ar
 // rotaÃ§Ã£o de cache em todo deploy. Se vocÃª bumpar a versÃ£o do app, bumpe esta
 // constante tambÃ©m (ou no futuro, gere via build).
-const CACHE = 'zayra-v3.15.14';
+const CACHE = 'zayra-v3.15.15';
 
 // App shell â€” recursos cacheados na instalaÃ§Ã£o para garantir abertura offline.
 // v2.4.3 P0.3: pre-cacheia tambÃ©m /obras e /js/catalogo-servicos.js â€” sem isso,
@@ -11,6 +11,7 @@ const CACHE = 'zayra-v3.15.14';
 const PRECACHE = [
   '/',
   '/obras',
+  '/offline-engine.js', // v3.15.15: precache do offline engine extraido (sem ele, cold-install offline quebra)
   '/js/catalogo-servicos.js',
   '/avatar.png',
   '/manifest.json',

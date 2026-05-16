@@ -173,10 +173,10 @@
     if (ok > 0) {
       mostrarToastOffline(`✅ ${ok} ações sincronizadas${fail?` (${fail} pendentes)`:''}`, 'success');
       // Recarrega laudo atual se aberto
-      // state, loadLaudoDetalhe, renderLaudoEditor sao resolvidos via lookup
-      // no escopo de classic-scripts compartilhado.
+      // state agora vive em window.state (obras.html exporta explicitamente
+      // pra escapar do escopo de modulo "const" top-level que nao vaza pra global).
       try {
-        const st = (typeof state !== 'undefined') ? state : null;
+        const st = window.state || null;
         if (st && st.laudoAtual && typeof loadLaudoDetalhe === 'function') {
           await loadLaudoDetalhe(st.laudoAtual.id);
           if (st.laudosView === 'editor' && typeof renderLaudoEditor === 'function') {
@@ -243,11 +243,19 @@
     mostrarToastOffline('🔴 Offline — alterações ficam salvas localmente até reconectar', 'warn');
     atualizarBadgeOffline();
   });
-  // Boot: badge inicial + sync se já tiver fila pendente do refresh anterior
-  setTimeout(async () => {
-    await atualizarBadgeOffline();
+  // Boot: badge inicial + sync se já tiver fila pendente do refresh anterior.
+  // Antes usavamos setTimeout(1500) — fragil em devices lentos (sync podia
+  // disparar antes do DOM montar). DOMContentLoaded garante que body/badge
+  // ja estao prontos pra montagem.
+  function bootOffline() {
+    atualizarBadgeOffline();
     if (navigator.onLine) sincronizarFilaOffline();
-  }, 1500);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootOffline);
+  } else {
+    bootOffline();
+  }
 
   async function api(path, opts={}) {
     // Cache-busting via query param só em GET (Safari iOS engasga com cache:'no-store' + Content-Type)
