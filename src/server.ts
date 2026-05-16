@@ -3472,6 +3472,43 @@ app.post('/api/folha/item/:itemId/reverter', async (req: Request, res: Response)
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v3.10.1: PDF detalhado do fechamento
+app.get('/api/folha/fechamento/:id/pdf-relatorio', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) { res.status(400).json({ error: 'id invalido' }); return; }
+    const m = await import('./services/folhaFechamentoPdf');
+    const pdf = await m.gerarPdfFechamento(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="fechamento-${id}.pdf"`);
+    res.send(pdf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// v3.10.1: retorna dados do colaborador dono de um item (nome, PIX, etc) pra
+// pre-preencher o modal de "Marcar Pago".
+app.get('/api/folha/item/:itemId/dados-pagamento', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/folhaFechamentoPdf');
+    const d = await m.getDadosPagamentoItem(Number(req.params.itemId));
+    if (!d) { res.status(404).json({ error: 'Item nao encontrado' }); return; }
+    res.json(d);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// v3.10.1: salva/atualiza chave PIX do funcionario (vinda do modal Marcar Pago).
+app.post('/api/folha/funcionario/:funcionarioId/pix', async (req: Request, res: Response) => {
+  try {
+    const { chave_pix } = req.body ?? {};
+    if (!chave_pix || !String(chave_pix).trim()) {
+      res.status(400).json({ error: 'chave_pix obrigatoria' }); return;
+    }
+    const m = await import('./services/folhaFechamentoPdf');
+    await m.atualizarChavePixFuncionario(Number(req.params.funcionarioId), String(chave_pix));
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // v1.65.60: Webhook do AvalieImob — recebe leads (cadastros + assinaturas)
 // pra ZAYRA monitorar. Disparo em paralelo: WhatsApp CEO + Telegram CEO +
 // auto-resposta WhatsApp pro lead. Header X-Webhook-Secret obrigatorio.

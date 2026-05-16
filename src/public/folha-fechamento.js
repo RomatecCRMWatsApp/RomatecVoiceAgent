@@ -241,14 +241,19 @@
         `).join('');
         return `
           <div style="border:1px solid #2d4a3a; border-radius:8px; padding:12px; margin-bottom:12px; background:#0f1a14;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
               <div>
                 <strong style="color:#4ade80;">Fechamento #${f.id}</strong>
                 ${f.rotulo ? ' · ' + escapeHtml(f.rotulo) : ''}
                 <span style="color:#9ca3af; font-size:12px;"> · ${formatarData(f.data_inicio)} a ${formatarData(f.data_fim)}</span>
               </div>
-              <span style="padding:2px 8px; border-radius:4px; font-size:11px;
-                background:${f.status === 'aberta' ? '#7f1d1d' : '#92400e'};">${f.status}</span>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <!-- v3.10.1: botao PDF do fechamento -->
+                <a href="/api/folha/fechamento/${f.id}/pdf-relatorio" target="_blank"
+                   style="padding:4px 10px; background:#1e40af; color:#fff; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none; display:inline-block;">📄 PDF</a>
+                <span style="padding:2px 8px; border-radius:4px; font-size:11px;
+                  background:${f.status === 'aberta' ? '#7f1d1d' : '#92400e'};">${f.status}</span>
+              </div>
             </div>
             <table style="width:100%; border-collapse:collapse; font-size:12px; color:#e8f0eb;">
               <tbody>${itensHtml}</tbody>
@@ -262,20 +267,127 @@
     }
   }
 
+  // v3.10.1: modal completo de "Marcar Pago" com dados do colaborador + PIX
   window.pagarItem = async function (itemId) {
-    const forma = prompt('Forma de pagamento (pix, dinheiro, transferencia, cheque, outro):', 'pix');
-    if (!forma) return;
+    let dados;
     try {
-      const r = await fetch(`${API}/api/folha/item/${itemId}/pagar`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ formaPagamento: forma, usuario: window.USUARIO_ATUAL || 'José Romário' }),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error);
-      if (typeof window.recarregarSaldoAberto === 'function') window.recarregarSaldoAberto();
-    } catch (err) { alert('Erro: ' + err.message); }
+      const r = await fetch(`${API}/api/folha/item/${itemId}/dados-pagamento`);
+      dados = await r.json();
+      if (!r.ok) throw new Error(dados.error || 'Erro ao carregar dados');
+    } catch (err) { return alert('Erro ao carregar dados do colaborador: ' + err.message); }
+
+    abrirModalPagar(itemId, dados);
   };
+
+  function abrirModalPagar(itemId, dados) {
+    const existente = document.getElementById('modal-marcar-pago');
+    if (existente) existente.remove();
+
+    const valor = 'R$ ' + Number(dados.valor_liquido).toFixed(2).replace('.', ',');
+    const semPix = !dados.chave_pix;
+
+    const modal = document.createElement('div');
+    modal.id = 'modal-marcar-pago';
+    modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:10000; display:flex; align-items:center; justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:#0f1a14; border:1px solid #2d4a3a; border-radius:12px; width:min(540px, 96vw); padding:24px; color:#e8f0eb; max-height:90vh; overflow:auto; font-family:'Segoe UI',sans-serif;">
+        <h3 style="margin:0 0 6px 0; color:#4ade80;">Confirmar Pagamento</h3>
+        <p style="margin:0 0 16px 0; font-size:13px; color:#9ca3af;">
+          ${escapeHtml(dados.funcionario_nome)}${dados.funcao ? ' — <em>'+escapeHtml(dados.funcao)+'</em>' : ''}
+        </p>
+
+        <div style="background:#1a2920; border:1px solid #2d4a3a; border-radius:8px; padding:12px; margin-bottom:14px; font-size:13px;">
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+            <span style="color:#9ca3af;">Valor líquido a pagar:</span>
+            <strong style="color:#4ade80; font-size:16px;">${valor}</strong>
+          </div>
+          ${dados.cpf ? `<div style="color:#9ca3af; font-size:12px;">CPF: ${escapeHtml(dados.cpf)}</div>` : ''}
+          ${dados.telefone ? `<div style="color:#9ca3af; font-size:12px;">Telefone: ${escapeHtml(dados.telefone)}</div>` : ''}
+        </div>
+
+        <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:4px;">
+          Chave PIX ${semPix ? '<span style="color:#f59e0b;">(não cadastrada — informe abaixo)</span>' : '<span style="color:#10b981;">(cadastrada)</span>'}
+        </label>
+        <input id="mp-pix" type="text" value="${escapeHtml(dados.chave_pix || '')}"
+          placeholder="CPF, e-mail, telefone ou chave aleatória"
+          style="width:100%; padding:10px; background:#1a2920; border:1px solid ${semPix ? '#f59e0b' : '#2d4a3a'}; color:#e8f0eb; border-radius:6px; margin-bottom:12px; font-size:13px;">
+
+        ${semPix ? `
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#fbbf24; margin-bottom:12px;">
+          <input id="mp-salvar-pix" type="checkbox" checked>
+          Salvar essa chave PIX no cadastro do colaborador
+        </label>` : ''}
+
+        <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:4px;">Forma de pagamento</label>
+        <select id="mp-forma" style="width:100%; padding:10px; background:#1a2920; border:1px solid #2d4a3a; color:#e8f0eb; border-radius:6px; margin-bottom:12px; font-size:13px;">
+          <option value="pix" selected>PIX</option>
+          <option value="dinheiro">Dinheiro</option>
+          <option value="transferencia">Transferência</option>
+          <option value="cheque">Cheque</option>
+          <option value="outro">Outro</option>
+        </select>
+
+        <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:4px;">Observação (opcional)</label>
+        <textarea id="mp-obs" rows="2" placeholder="ex: pago dia 15/05/2026 às 14h"
+          style="width:100%; padding:10px; background:#1a2920; border:1px solid #2d4a3a; color:#e8f0eb; border-radius:6px; margin-bottom:14px; font-size:13px;"></textarea>
+
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button id="mp-cancelar" style="padding:10px 16px; background:#374151; color:#fff; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+          <button id="mp-confirmar" style="padding:10px 16px; background:#16a34a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✓ Confirmar Pagamento</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    const fechar = () => modal.remove();
+    document.getElementById('mp-cancelar').onclick = fechar;
+    modal.addEventListener('click', (e) => { if (e.target === modal) fechar(); });
+
+    document.getElementById('mp-confirmar').onclick = async () => {
+      const forma = document.getElementById('mp-forma').value;
+      const pix = (document.getElementById('mp-pix').value || '').trim();
+      const obs = (document.getElementById('mp-obs').value || '').trim();
+      const salvarPix = semPix ? document.getElementById('mp-salvar-pix')?.checked : false;
+
+      // Se forma=pix mas sem PIX, bloqueia
+      if (forma === 'pix' && !pix) {
+        return alert('Forma de pagamento PIX exige a chave. Informe ou troque a forma.');
+      }
+
+      const btn = document.getElementById('mp-confirmar');
+      btn.disabled = true; btn.textContent = 'Salvando...';
+
+      try {
+        // 1. Salva PIX no cadastro se requisitado
+        if (salvarPix && pix) {
+          await fetch(`${API}/api/folha/funcionario/${dados.funcionario_id}/pix`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chave_pix: pix }),
+          });
+        }
+
+        // 2. Marca pago
+        const r = await fetch(`${API}/api/folha/item/${itemId}/pagar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            formaPagamento: forma,
+            usuario: window.USUARIO_ATUAL || 'José Romário',
+            observacao: obs || undefined,
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error);
+
+        fechar();
+        if (typeof window.recarregarSaldoAberto === 'function') window.recarregarSaldoAberto();
+      } catch (err) {
+        alert('Erro: ' + err.message);
+        btn.disabled = false; btn.textContent = '✓ Confirmar Pagamento';
+      }
+    };
+  }
 
   window.reverterItem = async function (itemId) {
     const motivo = prompt('Motivo da reversão:');
