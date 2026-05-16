@@ -97,11 +97,16 @@ export interface MutationResult {
 const num = (v: string | null): number => v ? Number(v) : 0;
 
 // ── Obras ────────────────────────────────────────────────────────────────────
-export async function listarObras(input: { status?: string; limite?: number } = {}) {
+// v3.16.0 P0 offline-first: aceita `since` (ISO date/datetime) pra delta sync.
+// Quando passado, devolve so registros com updated_at > since (fallback created_at).
+export async function listarObras(input: { status?: string; limite?: number; since?: string } = {}) {
   const limit = Math.min(Math.max(Number(input.limite) || 50, 1), 500);
   const params: (string | number)[] = [];
+  const where: string[] = [];
+  if (input.status) { where.push('status = ?'); params.push(input.status); }
+  if (input.since)  { where.push('(updated_at > ? OR created_at > ?)'); params.push(input.since, input.since); }
   let sql = 'SELECT * FROM romatec_obras';
-  if (input.status) { sql += ' WHERE status = ?'; params.push(input.status); }
+  if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
   sql += ` ORDER BY updated_at DESC LIMIT ${limit}`;
   const [rows] = await pool.execute<ObraRow[]>(sql, params);
   return rows.map((r: ObraRow & {
@@ -516,7 +521,8 @@ export async function criarTransacaoObra(input: {
 }
 
 // ── Equipe ───────────────────────────────────────────────────────────────────
-export async function listarEquipe(input: { obra_id?: string; somente_geral?: boolean } = {}) {
+// v3.16.0 P0 offline-first: aceita `since` (ISO) pra delta sync.
+export async function listarEquipe(input: { obra_id?: string; somente_geral?: boolean; since?: string } = {}) {
   let sql = 'SELECT * FROM romatec_obra_equipe WHERE ativo = 1';
   const params: (string | number)[] = [];
   if (input.somente_geral) {
@@ -525,6 +531,10 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
     // Mostra membros dessa obra OU sem obra (geral, alocáveis em qualquer)
     sql += ' AND (obra_id = ? OR obra_id IS NULL OR FIND_IN_SET(?, obras_ids) > 0)';
     params.push(input.obra_id, input.obra_id);
+  }
+  if (input.since) {
+    sql += ' AND (updated_at > ? OR created_at > ?)';
+    params.push(input.since, input.since);
   }
   sql += ' ORDER BY (obra_id IS NULL) ASC, nome ASC';
   const [rows] = await pool.execute<EquipeRow[]>(sql, params);
@@ -1320,8 +1330,16 @@ export async function resumoObras() {
 // pagamento dos trabalhadores). ZAYRA pode usar pra criar evento Calendar
 // + lembrete de NF.
 
-export async function listarParcelasObra(obraId: string) {
+// v3.16.0 P0 offline-first: `opts.since` (ISO) filtra parcelas modificadas
+// pra delta sync. Quando ausente, comportamento original (todas as parcelas).
+export async function listarParcelasObra(obraId: string, opts: { since?: string } = {}) {
   // v3.12.0: inclui status_cobranca + cliente_resposta_*
+  const params: (string | number)[] = [obraId];
+  let whereSince = '';
+  if (opts.since) {
+    whereSince = ' AND (updated_at > ? OR created_at > ?)';
+    params.push(opts.since, opts.since);
+  }
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT id, obra_id, numero, valor, vencimento, prazo_dias,
             quinzena_inicio, quinzena_fim, pago, pago_em,
@@ -1330,9 +1348,9 @@ export async function listarParcelasObra(obraId: string) {
             cliente_resposta_em, cliente_resposta_texto,
             created_at, updated_at
        FROM romatec_obra_parcelas
-      WHERE obra_id = ?
+      WHERE obra_id = ?${whereSince}
       ORDER BY numero ASC, vencimento ASC`,
-    [obraId]
+    params
   );
   return rows.map((r: RowDataPacket) => ({
     id: String(r.id),

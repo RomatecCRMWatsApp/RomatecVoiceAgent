@@ -787,7 +787,11 @@ app.post  ('/api/obras/:id/enviar-telegram',
   apiHandle(args => obras.enviarObraTelegram(args as Parameters<typeof obras.enviarObraTelegram>[0])));
 
 // v1.65.40: Parcelas de pagamento do cliente (receita por obra)
-app.get   ('/api/obras/:obra_id/parcelas',     apiHandle(args => obras.listarParcelasObra((args as { obra_id: string }).obra_id)));
+// v3.16.0 P0 offline-first: aceita ?since=<ISO> pra delta sync.
+app.get   ('/api/obras/:obra_id/parcelas',     apiHandle(args => {
+  const a = args as { obra_id: string; since?: string };
+  return obras.listarParcelasObra(a.obra_id, { since: a.since });
+}));
 app.post  ('/api/parcelas',                    apiHandleEchoUuid(args => obras.criarParcela(args as Parameters<typeof obras.criarParcela>[0])));
 app.put   ('/api/parcelas/:id',                apiHandle(args => obras.atualizarParcela(args as Parameters<typeof obras.atualizarParcela>[0])));
 app.delete('/api/parcelas/:id',                apiHandle(args => obras.apagarParcela(args as { id: string })));
