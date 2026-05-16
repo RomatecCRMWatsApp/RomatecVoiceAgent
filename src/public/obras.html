@@ -4348,7 +4348,11 @@ function renderFolha() {
         <select id="folhaObra" style="flex:1 1 200px; min-width:0;">${obraOpts}</select>
         <button id="folhaPdf" class="btn-gold">📄 Exportar PDF</button>
         <button id="folhaCsv" class="btn-gold">📊 CSV</button>
+        <!-- v3.10.0: Fechamento de Folha (período flexível) -->
+        <button id="btn-fechar-folha" style="padding:8px 14px; background:#16a34a; color:#fff; border:1px solid #16a34a; border-radius:6px; cursor:pointer; font-weight:600;">🔒 Fechar Folha</button>
       </div>
+      <!-- v3.10.0: lista de fechamentos existentes da obra selecionada -->
+      <div id="painel-saldo-fechamentos" style="margin-bottom:12px;"></div>
       ${subview === 'saldo' ? `
       <!-- v1.99.23: filtro de intervalo (saldo em aberto cross-month) -->
       <div style="display:flex; gap:8px; align-items:end; flex-wrap:wrap; margin-bottom:12px; padding:10px; background:rgba(245,158,11,0.05); border:1px solid rgba(245,158,11,0.2); border-radius:8px;">
@@ -4391,6 +4395,28 @@ function renderFolha() {
   };
   document.getElementById('folhaPdf').onclick = () => exportarFolhaPdf(monthLabel);
   document.getElementById('folhaCsv').onclick = () => exportarFolhaCsv(monthLabel);
+
+  // v3.10.0: botao "Fechar Folha" + painel de fechamentos existentes
+  document.getElementById('btn-fechar-folha')?.addEventListener('click', () => {
+    const obraId = state.folhaObraId;
+    if (!obraId) return alert('Selecione uma obra antes de fechar a folha.');
+    const obra = state.obras.find(o => String(o.id) === String(obraId));
+    if (!obra) return alert('Obra nao encontrada.');
+    if (window.FolhaFechamento?.abrirModal) {
+      window.FolhaFechamento.abrirModal(obraId, obra.nome);
+    } else {
+      alert('Modulo de Fechamento de Folha nao carregado. Recarregue a pagina (F5).');
+    }
+  });
+  window.recarregarFolhaMensal = () => { state.folha = null; render(); };
+  window.recarregarSaldoAberto = () => {
+    if (state.folhaObraId && window.FolhaFechamento?.renderizarSaldoAberto) {
+      window.FolhaFechamento.renderizarSaldoAberto('painel-saldo-fechamentos', state.folhaObraId);
+    }
+  };
+  if (state.folhaObraId && window.FolhaFechamento?.renderizarSaldoAberto) {
+    window.FolhaFechamento.renderizarSaldoAberto('painel-saldo-fechamentos', state.folhaObraId);
+  }
   v.querySelectorAll('[data-recibo]').forEach(b => b.onclick = () => {
     // v1.65.40: clicar em Recibo abre o modal de Recibo Quinzenal direto
     // (mesmo que em Marcar Dias). Se quiser PDF tradicional, gerarRecibo()
