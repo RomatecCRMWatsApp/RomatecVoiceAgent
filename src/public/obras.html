@@ -1245,7 +1245,172 @@ async function render() {
     document.getElementById('view-' + state.currentTab).innerHTML =
       '<div class="card empty">Erro carregando dados: ' + escape(e.message) + '</div>';
   }
+  // v3.16.2 P0 (E1): atualiza badges de pendentes nas abas
+  try { atualizarBadgesOffline(); } catch (_) {}
 }
+
+// v3.16.2 P0 (E1): mostra pill amarela com count de pendentes em cada aba
+// que tem mutacao/anexo offline. Mapeia entidade -> data-tab da aba:
+//   obras -> obras + dashboard (ambas mostram obras)
+//   parcelas -> financeiro (parcelas vivem dentro da view financeiro)
+//   recibos -> recibos
+//   despesas -> despesas
+//   equipe -> equipe + marcar (marcar dias usa equipe)
+//   _blobs -> badge separado no topo (anexos)
+async function atualizarBadgesOffline() {
+  if (!window.OfflineEngine?.pendentesPorEntidade) return;
+  const pend = await window.OfflineEngine.pendentesPorEntidade();
+  const mapaTabs = {
+    obras: ['obras', 'dashboard'],
+    parcelas: ['financeiro'],
+    recibos: ['recibos'],
+    despesas: ['despesas'],
+    equipe: ['equipe', 'marcar'],
+    laudos: ['laudos'],
+  };
+  // Limpa badges antigos
+  document.querySelectorAll('.tab .offline-badge').forEach(b => b.remove());
+  // Adiciona badge novo onde tem pendencia
+  for (const [ent, tabs] of Object.entries(mapaTabs)) {
+    const count = pend[ent];
+    if (!count) continue;
+    for (const tab of tabs) {
+      const btn = document.querySelector(`.tab[data-tab="${tab}"]`);
+      if (!btn) continue;
+      const badge = document.createElement('span');
+      badge.className = 'offline-badge';
+      badge.textContent = count;
+      badge.title = `${count} ${ent} pendente${count>1?'s':''} de sincronizar`;
+      badge.style.cssText = 'display:inline-block; margin-left:6px; padding:1px 6px; background:#f59e0b; color:#06120a; border-radius:10px; font-size:10px; font-weight:700; vertical-align:middle;';
+      btn.appendChild(badge);
+    }
+  }
+  // Badge global de blobs/anexos (se tiver) — adiciona no titulo da aba galeria
+  if (pend._blobs) {
+    const galBtn = document.querySelector('.tab[data-tab="galeria"]');
+    if (galBtn) {
+      const badge = document.createElement('span');
+      badge.className = 'offline-badge';
+      badge.textContent = '📎' + pend._blobs;
+      badge.title = `${pend._blobs} anexo${pend._blobs>1?'s':''} pendente${pend._blobs>1?'s':''} de upload`;
+      badge.style.cssText = 'display:inline-block; margin-left:6px; padding:1px 6px; background:#7c3aed; color:#fff; border-radius:10px; font-size:10px; font-weight:700; vertical-align:middle;';
+      galBtn.appendChild(badge);
+    }
+  }
+}
+
+// v3.16.2 P0 (E1): re-renderiza badges quando a fila muda. O offline-engine
+// dispara 'offline-fila-changed' em todo atualizarBadgeOffline.
+window.addEventListener('online', () => { try { atualizarBadgesOffline(); } catch (_) {} });
+window.addEventListener('offline', () => { try { atualizarBadgesOffline(); } catch (_) {} });
+window.addEventListener('offline-fila-changed', () => { try { atualizarBadgesOffline(); } catch (_) {} });
+
+// v3.16.2 P0 (E2): painel admin offline — Ctrl+Shift+O ou link no menu.
+// Mostra cache_v2 (count + last sync), fila pendente, blobs pendentes.
+// Botoes: forcar full sync, limpar cache local.
+window.abrirPainelOffline = async function abrirPainelOffline() {
+  if (document.getElementById('painel-offline')) return;
+  const eng = window.OfflineEngine || {};
+  let fila = [];
+  try { fila = (await eng.listarFilaOffline?.()) || []; } catch (_) {}
+  let blobs = [];
+  try { blobs = (await eng.listarBlobsPendentes?.()) || []; } catch (_) {}
+  // Cache: pode nao estar disponivel se Phase C nao tiver subido
+  const cacheStores = eng.CACHE_V2_STORES || [];
+  const cacheStatus = [];
+  for (const ent of cacheStores) {
+    try {
+      const meta = (await eng.cacheV2?.getMeta(ent)) || {};
+      const todos = (await eng.cacheV2?.getAll(ent)) || [];
+      cacheStatus.push({
+        entidade: ent,
+        count: todos.length,
+        last: meta.last_full_sync_at ? new Date(meta.last_full_sync_at).toLocaleString('pt-BR') : '-',
+      });
+    } catch (_) {
+      cacheStatus.push({ entidade: ent, count: '?', last: '-' });
+    }
+  }
+
+  const ov = document.createElement('div');
+  ov.id = 'painel-offline';
+  ov.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:99999; display:flex; align-items:center; justify-content:center; padding:20px; font-family:Segoe UI,sans-serif;';
+
+  const tabelaCache = cacheStatus.length
+    ? `<table style="width:100%; font-size:13px; border-collapse:collapse;">
+         <thead><tr style="border-bottom:1px solid #2d4a3a;"><th style="text-align:left; padding:6px 4px;">Entidade</th><th style="text-align:right; padding:6px 4px;">Registros</th><th style="text-align:right; padding:6px 4px;">Última sync</th></tr></thead>
+         <tbody>
+           ${cacheStatus.map(c => `<tr style="border-bottom:1px solid #1a2920;"><td style="padding:5px 4px;">${c.entidade}</td><td style="text-align:right; padding:5px 4px; color:#4ade80;">${c.count}</td><td style="text-align:right; padding:5px 4px; color:#9ca3af; font-size:11px;">${c.last}</td></tr>`).join('')}
+         </tbody>
+       </table>`
+    : '<p style="color:#9ca3af; font-size:12px;">cache_v2 nao disponivel (Phase C ainda nao subiu).</p>';
+
+  const tabelaFila = fila.length
+    ? `<pre style="background:#0a0f0c; padding:10px; border-radius:6px; font-size:11px; max-height:200px; overflow:auto; color:#e8f0eb; margin:0;">${fila.map(f => `${f.method} ${f.path}${f.tentativas?` (tent ${f.tentativas})`:''}${f.ultimoErro?` — ${String(f.ultimoErro).slice(0,80)}`:''}`).join('\n')}</pre>`
+    : '<p style="color:#9ca3af; font-size:12px;">Fila vazia.</p>';
+
+  const tabelaBlobs = blobs.length
+    ? `<pre style="background:#0a0f0c; padding:10px; border-radius:6px; font-size:11px; max-height:150px; overflow:auto; color:#e8f0eb; margin:0;">${blobs.map(b => `${b.campo}: ${b.filename} (${Math.round(b.size/1024)}KB) → ${b.endpointTemplate}${b.tentativas?` tent ${b.tentativas}`:''}`).join('\n')}</pre>`
+    : '<p style="color:#9ca3af; font-size:12px;">Sem anexos pendentes.</p>';
+
+  ov.innerHTML = `
+    <div style="background:#0f1a14; border:1px solid #2d4a3a; border-radius:12px; padding:24px; max-width:760px; width:100%; max-height:90vh; overflow:auto; color:#e8f0eb;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h3 style="margin:0; color:#facc15;">⚙️ Status offline</h3>
+        <button onclick="document.getElementById('painel-offline').remove()" style="background:transparent; border:none; color:#9ca3af; font-size:22px; cursor:pointer;">×</button>
+      </div>
+
+      <h4 style="margin:14px 0 8px; color:#4ade80; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">📊 Cache local (cache_v2)</h4>
+      ${tabelaCache}
+
+      <h4 style="margin:18px 0 8px; color:#4ade80; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">📥 Fila de mutações (${fila.length})</h4>
+      ${tabelaFila}
+
+      <h4 style="margin:18px 0 8px; color:#4ade80; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">📎 Anexos pendentes (${blobs.length})</h4>
+      ${tabelaBlobs}
+
+      <div style="display:flex; gap:8px; margin-top:20px; flex-wrap:wrap;">
+        ${eng.executarFullSync ? `<button id="po-fullsync" style="padding:8px 14px; background:#16a34a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:12px;">🔄 Forçar full sync</button>` : ''}
+        ${eng.sincronizarFilaOffline ? `<button id="po-sync" style="padding:8px 14px; background:#1e40af; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:12px;">📤 Replayar fila agora</button>` : ''}
+        <button id="po-limpar" style="padding:8px 14px; background:#7f1d1d; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:12px;">🗑️ Limpar cache local</button>
+        <button onclick="document.getElementById('painel-offline').remove()" style="padding:8px 14px; background:#374151; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:12px;">Fechar</button>
+      </div>
+      <p style="margin-top:14px; font-size:11px; color:#9ca3af;">Atalho: Ctrl+Shift+O abre/fecha este painel.</p>
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  // Wire dos botoes
+  document.getElementById('po-fullsync')?.addEventListener('click', async () => {
+    ov.remove();
+    if (eng.abrirModalFullSync) eng.abrirModalFullSync();
+    else if (eng.executarFullSync) { await eng.executarFullSync(); alert('Full sync concluido'); }
+  });
+  document.getElementById('po-sync')?.addEventListener('click', async () => {
+    await eng.sincronizarFilaOffline?.();
+    ov.remove();
+    setTimeout(() => window.abrirPainelOffline(), 300);
+  });
+  document.getElementById('po-limpar')?.addEventListener('click', () => {
+    if (!confirm('Limpar TODO o cache local? Mutacoes/anexos pendentes serao PERDIDOS e nao subirao mais ao server. Continuar?')) return;
+    try {
+      indexedDB.deleteDatabase('romatec_cache_v2');
+      indexedDB.deleteDatabase('romatec_offline_v1');
+      indexedDB.deleteDatabase('romatec_blobs');
+      localStorage.removeItem('offline_p0_first_sync');
+      alert('Cache limpo. Recarregando...');
+      location.reload();
+    } catch (e) { alert('Erro: ' + e.message); }
+  });
+};
+
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && (e.key === 'O' || e.key === 'o')) {
+    e.preventDefault();
+    if (document.getElementById('painel-offline')) document.getElementById('painel-offline').remove();
+    else window.abrirPainelOffline();
+  }
+});
 
 function obraSelector() {
   if (state.obras.length === 0) return '';

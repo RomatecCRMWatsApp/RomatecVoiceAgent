@@ -265,6 +265,8 @@
     } else {
       el.style.display = 'none'; // Esconde quando online sem pendentes
     }
+    // v3.16.2 P0 (E1): notifica consumidores (obras.html atualiza badges nas abas)
+    try { window.dispatchEvent(new CustomEvent('offline-fila-changed', { detail: { count } })); } catch (_) {}
   }
 
   function mostrarToastOffline(msg, tipo) {
@@ -635,6 +637,30 @@
     return eraString ? JSON.stringify(obj) : obj;
   }
 
+  // v3.16.2 P0 (E1): conta itens pendentes por entidade extraindo o primeiro
+  // segmento de /api/<entidade>. Inclui blobs como sub-tipo da entidade dona.
+  // Retorna ex: { obras: 3, parcelas: 5, _blobs: 2 }.
+  async function pendentesPorEntidade() {
+    const counts = {};
+    try {
+      const fila = await listarFilaOffline();
+      for (const item of fila) {
+        const m = (item.path || '').match(/^\/api\/([^\/\?]+)/);
+        if (!m) continue;
+        // Normaliza nomes (despesas-extras -> despesas pra alinhar com cache_v2)
+        let ent = m[1];
+        if (ent === 'despesas-extras') ent = 'despesas';
+        if (ent === 'laudos-demarcacao') ent = 'laudos';
+        counts[ent] = (counts[ent] || 0) + 1;
+      }
+    } catch (_) {}
+    try {
+      const blobs = await listarBlobsPendentes();
+      if (blobs.length > 0) counts._blobs = blobs.length;
+    } catch (_) {}
+    return counts;
+  }
+
   // v3.16.0 P0 (Task A4): traduz path — placeholders `<uuid:XXX>` viram o id
   // real do mapeamento. Lanca erro se o uuid nao tem mapeamento ainda — o
   // caller (sincronizarFilaOffline) deve tratar isso pulando o item e tentando
@@ -669,5 +695,7 @@
     listarBlobsPendentes,
     drenarBlobsPendentes,
     removerBlob,
+    // v3.16.2 P0 Phase E — indicators
+    pendentesPorEntidade,
   };
 })();
