@@ -57,7 +57,10 @@ type TransacaoRow = RowDataPacket & {
 type EquipeRow = RowDataPacket & {
   id: number; nome: string; funcao: string | null;
   tipo_contrato: string; cpf: string | null;
+  rg: string | null;
   telefone: string | null;
+  email: string | null;
+  data_admissao: Date | string | null;
   valor_dia: string | null;
   especialidade: string | null;
   observacoes: string | null;
@@ -66,6 +69,13 @@ type EquipeRow = RowDataPacket & {
   obra_id: number | null;
   chave_pix: string | null;
   tipo_chave_pix: string | null;
+  endereco_rua: string | null;
+  endereco_numero: string | null;
+  endereco_bairro: string | null;
+  endereco_cidade: string | null;
+  endereco_estado: string | null;
+  endereco_cep: string | null;
+  foto_url: string | null;
 };
 
 type MaterialRow = RowDataPacket & {
@@ -548,6 +558,20 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
     status: ((r as unknown as { status?: string }).status as string) || 'ativo',
     chave_pix: r.chave_pix,
     tipo_chave_pix: r.tipo_chave_pix,
+    // v3.15.21: campos do form de edicao que estavam faltando no GET — pareciam "nao salvar"
+    cpf: r.cpf,
+    rg: r.rg,
+    email: r.email,
+    data_admissao: r.data_admissao ? String(r.data_admissao).slice(0, 10) : null,
+    observacoes: r.observacoes,
+    ativo: !!r.ativo,
+    endereco_rua: r.endereco_rua,
+    endereco_numero: r.endereco_numero,
+    endereco_bairro: r.endereco_bairro,
+    endereco_cidade: r.endereco_cidade,
+    endereco_estado: r.endereco_estado,
+    endereco_cep: r.endereco_cep,
+    foto_url: r.foto_url,
   }));
 }
 
