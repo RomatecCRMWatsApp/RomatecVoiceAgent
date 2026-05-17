@@ -1334,6 +1334,46 @@ export async function resumoObras() {
 // pagamento dos trabalhadores). ZAYRA pode usar pra criar evento Calendar
 // + lembrete de NF.
 
+// v3.16.0: listagem global de parcelas pra full sync offline. Sem obra_id —
+// retorna todas as parcelas (limitado por ?limite=). Compartilha o mesmo
+// shape de linhas que listarParcelasObra.
+export async function listarParcelas(opts: { since?: string; limite?: number } = {}) {
+  const limite = Math.min(Math.max(Number(opts.limite) || 500, 1), 2000);
+  let sql = `SELECT id, obra_id, numero, valor, vencimento, prazo_dias,
+            quinzena_inicio, quinzena_fim, pago, pago_em,
+            observacoes, calendar_event_id, nf_numero, nf_emitida_em,
+            status_cobranca, cobranca_enviada_em, cobranca_msg_id,
+            cliente_resposta_em, cliente_resposta_texto,
+            created_at, updated_at
+       FROM romatec_obra_parcelas`;
+  const params: (string | number)[] = [];
+  if (opts.since) { sql += ' WHERE updated_at > ?'; params.push(opts.since); }
+  sql += ` ORDER BY id DESC LIMIT ${limite}`;
+  const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
+  return rows.map((r: RowDataPacket) => ({
+    id: String(r.id),
+    obra_id: String(r.obra_id),
+    numero: Number(r.numero),
+    valor: num(r.valor),
+    vencimento: r.vencimento ? formatBRDate(r.vencimento as Date) : null,
+    vencimento_iso: r.vencimento ? new Date(r.vencimento as Date).toISOString().slice(0,10) : null,
+    prazo_dias: r.prazo_dias != null ? Number(r.prazo_dias) : null,
+    quinzena_inicio: r.quinzena_inicio ? new Date(r.quinzena_inicio as Date).toISOString().slice(0,10) : null,
+    quinzena_fim:    r.quinzena_fim    ? new Date(r.quinzena_fim    as Date).toISOString().slice(0,10) : null,
+    pago: !!r.pago,
+    pago_em: r.pago_em as Date | null,
+    observacoes: r.observacoes as string | null,
+    calendar_event_id: r.calendar_event_id as string | null,
+    nf_numero: r.nf_numero as string | null,
+    nf_emitida_em: r.nf_emitida_em as Date | null,
+    status_cobranca: (r.status_cobranca as string | null) || 'pendente',
+    cobranca_enviada_em: r.cobranca_enviada_em as Date | null,
+    cobranca_msg_id: r.cobranca_msg_id as string | null,
+    cliente_resposta_em: r.cliente_resposta_em as Date | null,
+    cliente_resposta_texto: r.cliente_resposta_texto as string | null,
+  }));
+}
+
 export async function listarParcelasObra(obraId: string, opts: { since?: string } = {}) {
   // v3.12.0: inclui status_cobranca + cliente_resposta_*
   // v3.16.0 P0: ?since=<ISO> filtra por updated_at pra delta sync

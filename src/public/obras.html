@@ -1133,7 +1133,13 @@ async function loadDashboard() {
   } catch (e) { state.documentosVencendo = []; }
 }
 async function loadObras() {
-  state.obras = await api('/api/obras');
+  // v3.16.0 P0 (C2): network-first com fallback do cache_v2. Garante que
+  // a lista de obras carrega mesmo offline (depois do full sync inicial).
+  if (window.OfflineEngine?.carregarComCache) {
+    state.obras = await window.OfflineEngine.carregarComCache('obras', () => api('/api/obras'));
+  } else {
+    state.obras = await api('/api/obras');
+  }
   if (!state.currentObra && state.obras.length) state.currentObra = state.obras[0].id;
 }
 async function loadEtapas() {
@@ -1145,8 +1151,20 @@ async function loadTransacoes() {
   state.transacoes = await api('/api/transacoes?obra_id=' + state.currentObra);
 }
 async function loadEquipe() {
+  // v3.16.0 P0 (C2): se rede falhar, filtra cache global por obra_id
   const q = state.currentObra ? '?obra_id=' + state.currentObra : '';
-  state.equipe = await api('/api/equipe' + q);
+  try {
+    state.equipe = await api('/api/equipe' + q);
+    // Repopula cache global em background quando carregou sem filtro
+    if (!state.currentObra && Array.isArray(state.equipe) && window.OfflineEngine?.cacheV2) {
+      window.OfflineEngine.cacheV2.bulkPut('equipe', state.equipe).catch(() => {});
+    }
+  } catch (err) {
+    const cache = await window.OfflineEngine?.cacheV2?.getAll('equipe') ?? [];
+    state.equipe = state.currentObra
+      ? cache.filter(e => String(e.obra_id || '') === String(state.currentObra))
+      : cache;
+  }
 }
 async function loadCatalogo() {
   if (state.catalogo.length === 0) state.catalogo = await api('/api/profissoes-catalogo');
@@ -1170,11 +1188,20 @@ async function loadDiario() {
 }
 // v1.67.0: Despesas Extras
 async function loadDespesasExtras() {
+  // v3.16.0 P0 (C2): fallback do cache_v2 quando offline (filtra por obra_id em JS)
   const q = state.currentObra ? '?obra_id=' + state.currentObra : '';
   try {
     const r = await api('/api/despesas-extras' + q);
     state.despesasExtras = r.items || [];
-  } catch (e) { state.despesasExtras = []; }
+    if (!state.currentObra && Array.isArray(state.despesasExtras) && window.OfflineEngine?.cacheV2) {
+      window.OfflineEngine.cacheV2.bulkPut('despesas', state.despesasExtras).catch(() => {});
+    }
+  } catch (e) {
+    const cache = await window.OfflineEngine?.cacheV2?.getAll('despesas') ?? [];
+    state.despesasExtras = state.currentObra
+      ? cache.filter(d => String(d.obra_id || '') === String(state.currentObra))
+      : cache;
+  }
 }
 
 // v1.65.2: Propostas
