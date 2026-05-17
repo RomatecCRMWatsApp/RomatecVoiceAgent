@@ -15,7 +15,7 @@ const FOTO_MAX_BYTES = 8 * 1024 * 1024; // 8MB (PDF tende a ser maior que JPG)
 
 export interface ItemInput { descricao: string; valor: number; quantidade?: number; ordem?: number }
 
-export async function listarDespesasExtras(input: { obra_id?: string; from?: string; to?: string; limite?: number } = {}) {
+export async function listarDespesasExtras(input: { obra_id?: string; from?: string; to?: string; limite?: number; since?: string } = {}) {
   const limite = Math.min(Math.max(Number(input.limite) || 100, 1), 500);
   const params: (string | number)[] = [];
   let sql = `SELECT d.*, o.nome AS obra_nome
@@ -25,6 +25,8 @@ export async function listarDespesasExtras(input: { obra_id?: string; from?: str
   if (input.obra_id) { sql += ' AND d.obra_id = ?'; params.push(Number(input.obra_id)); }
   if (input.from)    { sql += ' AND d.data >= ?'; params.push(input.from); }
   if (input.to)      { sql += ' AND d.data <= ?'; params.push(input.to); }
+  // v3.16.0 P0: ?since=<ISO> filtra por updated_at pra delta sync
+  if (input.since)   { sql += ' AND d.updated_at > ?'; params.push(input.since); }
   sql += ` ORDER BY d.data DESC, d.id DESC LIMIT ${limite}`;
   const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
   // Carrega itens em uma query
@@ -185,6 +187,7 @@ export async function criarDespesaExtra(input: {
   observacoes?: string;
   desconto?: number;
   created_by?: string;
+  uuid_local?: string;
   _retried?: boolean; // v1.67.4: previne loop infinito no self-heal
 }) {
   // v1.67.4: garante schema atualizado (self-heal)
@@ -235,6 +238,7 @@ export async function criarDespesaExtra(input: {
 
     return {
       ok: true as const, insertId: despesaId, valor_total, desconto,
+      uuid_local: input.uuid_local,
       message: `Despesa #${despesaId} criada (R$ ${valor_total.toFixed(2)}${desconto > 0 ? ` com desconto de R$ ${desconto.toFixed(2)}` : ''}).`,
     };
   } catch (err) {

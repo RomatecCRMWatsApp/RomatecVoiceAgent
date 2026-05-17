@@ -92,6 +92,7 @@ export interface MutationResult {
   ok?:      true;
   affected?: number;
   insertId?: number;
+  uuid_local?: string;
   message:  string;
   query?:   string;
 }
@@ -99,11 +100,15 @@ export interface MutationResult {
 const num = (v: string | null): number => v ? Number(v) : 0;
 
 // ── Obras ────────────────────────────────────────────────────────────────────
-export async function listarObras(input: { status?: string; limite?: number } = {}) {
+export async function listarObras(input: { status?: string; limite?: number; since?: string } = {}) {
   const limit = Math.min(Math.max(Number(input.limite) || 50, 1), 500);
   const params: (string | number)[] = [];
   let sql = 'SELECT * FROM romatec_obras';
-  if (input.status) { sql += ' WHERE status = ?'; params.push(input.status); }
+  const where: string[] = [];
+  if (input.status) { where.push('status = ?'); params.push(input.status); }
+  // v3.16.0 P0: ?since=<ISO> retorna so registros alterados depois (delta sync)
+  if (input.since) { where.push('updated_at > ?'); params.push(input.since); }
+  if (where.length > 0) sql += ' WHERE ' + where.join(' AND ');
   sql += ` ORDER BY updated_at DESC LIMIT ${limit}`;
   const [rows] = await pool.execute<ObraRow[]>(sql, params);
   return rows.map((r: ObraRow & {
@@ -203,6 +208,7 @@ export async function criarObra(input: {
   data_inicio?: string; data_previsao?: string;
   prazo_dias?: number; prazo_dias_uteis?: number;
   observacoes?: string;
+  uuid_local?: string;
   confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.nome) throw new Error('Nome da obra é obrigatório');
@@ -239,7 +245,7 @@ export async function criarObra(input: {
       input.observacoes ?? null,
     ],
   );
-  return { ok: true, insertId: r.insertId, affected: r.affectedRows, message: `Obra "${input.nome}" criada com ID ${r.insertId}.` };
+  return { ok: true, insertId: r.insertId, affected: r.affectedRows, uuid_local: input.uuid_local, message: `Obra "${input.nome}" criada com ID ${r.insertId}.` };
 }
 
 export async function atualizarObra(input: {
@@ -518,7 +524,7 @@ export async function criarTransacaoObra(input: {
 }
 
 // ── Equipe ───────────────────────────────────────────────────────────────────
-export async function listarEquipe(input: { obra_id?: string; somente_geral?: boolean } = {}) {
+export async function listarEquipe(input: { obra_id?: string; somente_geral?: boolean; since?: string } = {}) {
   let sql = 'SELECT * FROM romatec_obra_equipe WHERE ativo = 1';
   const params: (string | number)[] = [];
   if (input.somente_geral) {
@@ -528,6 +534,8 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
     sql += ' AND (obra_id = ? OR obra_id IS NULL OR FIND_IN_SET(?, obras_ids) > 0)';
     params.push(input.obra_id, input.obra_id);
   }
+  // v3.16.0 P0: ?since=<ISO> filtra por updated_at pra delta sync
+  if (input.since) { sql += ' AND updated_at > ?'; params.push(input.since); }
   sql += ' ORDER BY (obra_id IS NULL) ASC, nome ASC';
   const [rows] = await pool.execute<EquipeRow[]>(sql, params);
   return rows.map(r => ({
@@ -694,7 +702,9 @@ export async function criarMembroEquipe(input: {
   // v3.10.2: PIX
   chave_pix?: string | null;
   tipo_chave_pix?: 'cpf'|'cnpj'|'email'|'telefone'|'aleatoria' | null;
-  obras_ids?: string[]; obra_id?: string; confirm?: boolean;
+  obras_ids?: string[]; obra_id?: string;
+  uuid_local?: string;
+  confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.nome) throw new Error('nome obrigatório');
   if (!input.confirm) {
@@ -733,7 +743,7 @@ export async function criarMembroEquipe(input: {
   void import('../services/syncEquipeMembro')
     .then(s => s.syncEquipeMembro(r.insertId))
     .catch(err => console.warn('[syncEquipe] falhou após criar:', (err as Error).message));
-  return { ok: true, insertId: r.insertId, message: `${input.nome} adicionado${input.obra_id ? ` à obra ${input.obra_id}` : ' à equipe geral'} (ID ${r.insertId}).` };
+  return { ok: true, insertId: r.insertId, uuid_local: input.uuid_local, message: `${input.nome} adicionado${input.obra_id ? ` à obra ${input.obra_id}` : ' à equipe geral'} (ID ${r.insertId}).` };
 }
 
 // ── Materiais ────────────────────────────────────────────────────────────────
@@ -1324,20 +1334,21 @@ export async function resumoObras() {
 // pagamento dos trabalhadores). ZAYRA pode usar pra criar evento Calendar
 // + lembrete de NF.
 
-export async function listarParcelasObra(obraId: string) {
+export async function listarParcelasObra(obraId: string, opts: { since?: string } = {}) {
   // v3.12.0: inclui status_cobranca + cliente_resposta_*
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, obra_id, numero, valor, vencimento, prazo_dias,
+  // v3.16.0 P0: ?since=<ISO> filtra por updated_at pra delta sync
+  let sql = `SELECT id, obra_id, numero, valor, vencimento, prazo_dias,
             quinzena_inicio, quinzena_fim, pago, pago_em,
             observacoes, calendar_event_id, nf_numero, nf_emitida_em,
             status_cobranca, cobranca_enviada_em, cobranca_msg_id,
             cliente_resposta_em, cliente_resposta_texto,
             created_at, updated_at
        FROM romatec_obra_parcelas
-      WHERE obra_id = ?
-      ORDER BY numero ASC, vencimento ASC`,
-    [obraId]
-  );
+      WHERE obra_id = ?`;
+  const params: (string | number)[] = [obraId];
+  if (opts.since) { sql += ' AND updated_at > ?'; params.push(opts.since); }
+  sql += ' ORDER BY numero ASC, vencimento ASC';
+  const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
   return rows.map((r: RowDataPacket) => ({
     id: String(r.id),
     obra_id: String(r.obra_id),
@@ -1370,6 +1381,7 @@ export async function criarParcela(input: {
   vencimento: string;       // YYYY-MM-DD
   prazo_dias?: number;
   observacoes?: string;
+  uuid_local?: string;
 }): Promise<MutationResult> {
   if (!input.obra_id) throw new Error('obra_id obrigatorio');
   if (!input.valor || input.valor <= 0) throw new Error('valor invalido');
@@ -1395,7 +1407,7 @@ export async function criarParcela(input: {
     ]
   );
   emitParcela('created', input.obra_id, r.insertId);
-  return { ok: true, insertId: r.insertId, affected: r.affectedRows, message: `Parcela ${numero} criada (id ${r.insertId}).` };
+  return { ok: true, insertId: r.insertId, affected: r.affectedRows, uuid_local: input.uuid_local, message: `Parcela ${numero} criada (id ${r.insertId}).` };
 }
 
 export async function atualizarParcela(input: {
