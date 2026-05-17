@@ -548,7 +548,15 @@
         }
         const url = b.endpointTemplate.replace(':id', String(serverId));
         const fd = new FormData();
-        fd.append(b.campo, b.blob, b.filename);
+        // Reconstroi Blob se o round-trip pelo IndexedDB nao preservou a identidade
+        // (acontece em fake-indexeddb e em alguns browsers antigos). FormData.append
+        // exige um Blob real no parametro 2.
+        let blobToSend = b.blob;
+        if (blobToSend && !(blobToSend instanceof Blob)) {
+          try { blobToSend = new Blob([blobToSend], { type: b.mime || 'application/octet-stream' }); }
+          catch (_) { /* mantem o original se construcao falhar */ }
+        }
+        fd.append(b.campo, blobToSend, b.filename);
         const r = await fetch(getAPI() + url, { method: 'POST', body: fd });
         if (r.ok) {
           let serverResp = null;
