@@ -197,9 +197,25 @@
         fail++;
       }
     }
+    // v3.16.1 P0 Phase D: drena blobs pendentes (anexos enfileirados offline).
+    // Roda APOS o replay das mutacoes — idMap ja tem os mapeamentos de UUID
+    // pra server_id, entao endpointTemplate.replace(':id', serverId) resolve.
+    let blobsOk = 0, blobsFail = 0;
+    try {
+      const r = await drenarBlobsPendentes();
+      blobsOk = r.ok;
+      blobsFail = r.fail;
+    } catch (err) {
+      console.warn('[offline] drenagem de blobs falhou:', err.message);
+    }
+
     atualizarBadgeOffline();
-    if (ok > 0) {
-      mostrarToastOffline(`✅ ${ok} ações sincronizadas${fail?` (${fail} pendentes)`:''}`, 'success');
+    if (ok > 0 || blobsOk > 0) {
+      const partes = [];
+      if (ok > 0) partes.push(`${ok} açõe${ok>1?'s':''}`);
+      if (blobsOk > 0) partes.push(`${blobsOk} anexo${blobsOk>1?'s':''}`);
+      const totalFail = fail + blobsFail;
+      mostrarToastOffline(`✅ ${partes.join(' + ')} sincronizado${(ok+blobsOk)>1?'s':''}${totalFail?` (${totalFail} pendente${totalFail>1?'s':''})`:''}`, 'success');
       // Recarrega laudo atual se aberto
       // state agora vive em window.state (obras.html exporta explicitamente
       // pra escapar do escopo de modulo "const" top-level que nao vaza pra global).
@@ -380,6 +396,176 @@
   }
 
   // ──────────────────────────────────────────────────────────────────────
+  // v3.16.1 P0 Phase D: store de Blobs pendentes (anexos offline)
+  // ──────────────────────────────────────────────────────────────────────
+  // DB separada (romatec_blobs) — blobs binarios sao pesados e idealmente
+  // nao competem por transacoes com a fila de mutacoes. Cada blob aponta
+  // pra entidade dona via uuid_local (resolvido pelo idMap apos POST) OU
+  // diretamente pelo serverId (quando a entidade ja existe online).
+  const BLOBS_DB_NAME = 'romatec_blobs';
+  const BLOBS_STORE = 'pending_blobs';
+
+  function abrirBlobsDB() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) return reject(new Error('IndexedDB nao suportado'));
+      const req = indexedDB.open(BLOBS_DB_NAME, 1);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => resolve(req.result);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(BLOBS_STORE)) {
+          const s = db.createObjectStore(BLOBS_STORE, { keyPath: 'id', autoIncrement: true });
+          s.createIndex('uuid_local', 'uuid_local', { unique: false });
+          s.createIndex('uploaded', 'uploaded', { unique: false });
+        }
+      };
+    });
+  }
+
+  // Enfileira um anexo pra upload posterior. Aceita:
+  // - file: instancia File ou Blob
+  // - campo: nome do field multipart (ex: 'arquivo', 'comprovante')
+  // - endpointTemplate: path com ':id' que sera substituido pelo server_id
+  //   resolvido (via uuid_local no idMap, ou serverId se ja conhecido)
+  // - uuid_local: UUID da entidade dona OU null/undefined se serverId
+  // - serverId: se entidade ja existe no server (e.g. recibo ja criado),
+  //   passa direto e pula a etapa de resolver UUID
+  async function enfileirarBlob({ uuid_local, serverId, campo, file, endpointTemplate }) {
+    if (!file) throw new Error('file obrigatorio');
+    if (!campo) throw new Error('campo obrigatorio');
+    if (!endpointTemplate) throw new Error('endpointTemplate obrigatorio');
+    if (!uuid_local && serverId == null) {
+      throw new Error('uuid_local OU serverId obrigatorio');
+    }
+    const db = await abrirBlobsDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(BLOBS_STORE, 'readwrite');
+      const r = tx.objectStore(BLOBS_STORE).add({
+        uuid_local: uuid_local || null,
+        server_id: serverId != null ? Number(serverId) : null,
+        campo,
+        filename: file.name || `${campo}-${Date.now()}`,
+        mime: file.type || 'application/octet-stream',
+        size: file.size || 0,
+        blob: file,
+        endpointTemplate,
+        ts: Date.now(),
+        tentativas: 0,
+        uploaded: 0,    // boolean indexable como int (IndexedDB nao indexa boolean)
+      });
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  }
+
+  async function listarBlobsPendentes() {
+    try {
+      const db = await abrirBlobsDB();
+      return new Promise((resolve, reject) => {
+        const r = db.transaction(BLOBS_STORE, 'readonly').objectStore(BLOBS_STORE).getAll();
+        r.onsuccess = () => resolve((r.result || []).filter(b => !b.uploaded));
+        r.onerror = () => reject(r.error);
+      });
+    } catch (_) { return []; }
+  }
+
+  async function marcarBlobUploaded(id, serverResp) {
+    const db = await abrirBlobsDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(BLOBS_STORE, 'readwrite');
+      const store = tx.objectStore(BLOBS_STORE);
+      const g = store.get(id);
+      g.onsuccess = () => {
+        const b = g.result;
+        if (b) {
+          b.uploaded = 1;
+          b.uploaded_at = Date.now();
+          b.server_response = serverResp;
+          store.put(b);
+        }
+        tx.oncomplete = () => resolve();
+      };
+      g.onerror = () => reject(g.error);
+    });
+  }
+
+  async function incrementarTentativaBlob(id, erro) {
+    const db = await abrirBlobsDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(BLOBS_STORE, 'readwrite');
+      const store = tx.objectStore(BLOBS_STORE);
+      const g = store.get(id);
+      g.onsuccess = () => {
+        const b = g.result;
+        if (b) {
+          b.tentativas = (b.tentativas || 0) + 1;
+          b.ultimoErro = String(erro || '').slice(0, 200);
+          store.put(b);
+        }
+        tx.oncomplete = () => resolve();
+      };
+      g.onerror = () => reject(g.error);
+    });
+  }
+
+  async function removerBlob(id) {
+    try {
+      const db = await abrirBlobsDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(BLOBS_STORE, 'readwrite');
+        tx.objectStore(BLOBS_STORE).delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (_) {}
+  }
+
+  // Drena blobs: pra cada pendente, resolve endpoint (uuid_local -> server_id
+  // via idMap se necessario), faz POST multipart. Best-effort: erros NAO matam
+  // o batch. Skip silencioso se uuid_local ainda nao mapeado (POST que cria a
+  // entidade dona pode nao ter rodado ainda no replay).
+  async function drenarBlobsPendentes() {
+    if (!navigator.onLine) return { ok: 0, fail: 0 };
+    const blobs = await listarBlobsPendentes();
+    if (!blobs.length) return { ok: 0, fail: 0 };
+    console.log('[offline-blobs] drenando', blobs.length, 'anexos pendentes');
+    let ok = 0, fail = 0;
+    for (const b of blobs) {
+      if ((b.tentativas || 0) >= 5) { fail++; continue; }
+      try {
+        // Resolve serverId — preferencia: explicito > idMap(uuid_local)
+        let serverId = b.server_id;
+        if (serverId == null && b.uuid_local) {
+          serverId = await idMap.get(b.uuid_local);
+          if (serverId == null) {
+            // POST que cria a entidade ainda nao rodou — pula esta rodada
+            console.log('[offline-blobs] adiando blob', b.id, 'uuid_local sem mapeamento ainda');
+            fail++;
+            continue;
+          }
+        }
+        const url = b.endpointTemplate.replace(':id', String(serverId));
+        const fd = new FormData();
+        fd.append(b.campo, b.blob, b.filename);
+        const r = await fetch(getAPI() + url, { method: 'POST', body: fd });
+        if (r.ok) {
+          let serverResp = null;
+          try { serverResp = await r.json(); } catch (_) {}
+          await marcarBlobUploaded(b.id, serverResp);
+          ok++;
+        } else {
+          await incrementarTentativaBlob(b.id, `HTTP ${r.status}`);
+          fail++;
+        }
+      } catch (err) {
+        await incrementarTentativaBlob(b.id, err.message);
+        fail++;
+      }
+    }
+    return { ok, fail };
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
   // v3.16.0 P0 (Task A4): id_map (UUID local -> server_id)
   // ──────────────────────────────────────────────────────────────────────
   // Pequena store IndexedDB que guarda o mapeamento de UUID local (gerado em
@@ -478,5 +664,10 @@
     idMap,
     traduzirBody,
     traduzirPath,
+    // v3.16.1 P0 Phase D — blobs (anexos offline)
+    enfileirarBlob,
+    listarBlobsPendentes,
+    drenarBlobsPendentes,
+    removerBlob,
   };
 })();

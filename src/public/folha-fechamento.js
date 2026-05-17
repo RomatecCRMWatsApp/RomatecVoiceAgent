@@ -486,6 +486,28 @@
       if (!file) return;
       input.value = '';
 
+      // v3.16.1 P0 (D2): se offline, enfileira pra replay quando reconectar
+      if (!navigator.onLine && window.OfflineEngine?.enfileirarBlob) {
+        try {
+          await window.OfflineEngine.enfileirarBlob({
+            serverId: itemId, // item ja existe no server (fechamento online)
+            campo: 'arquivo',
+            file,
+            endpointTemplate: '/api/folha/item/:id/upload-comprovante',
+          });
+          mostrarToastComprovante('', 'success', 0, true);
+          alert('📎 Offline — comprovante salvo no aparelho. Vai subir quando reconectar a internet.');
+          if (typeof window.OfflineEngine.atualizarBadgeOffline === 'function') {
+            window.OfflineEngine.atualizarBadgeOffline();
+          }
+          return;
+        } catch (e) {
+          mostrarToastComprovante('', 'error', 0, true);
+          alert('Erro ao salvar comprovante offline: ' + e.message);
+          return;
+        }
+      }
+
       // toast de loading
       mostrarToastComprovante('⏳ Enviando comprovante e extraindo dados...', 'info', 0);
 
@@ -532,6 +554,22 @@
         if (typeof window.recarregarFolhaMensal === 'function') window.recarregarFolhaMensal();
       } catch (err) {
         mostrarToastComprovante('', 'error', 0, true);
+        // v3.16.1 P0 (D2): rede falhou no meio do upload — fallback pra fila offline
+        if (window.OfflineEngine?.enfileirarBlob && /Failed to fetch|NetworkError|timeout/i.test(err.message || '')) {
+          try {
+            await window.OfflineEngine.enfileirarBlob({
+              serverId: itemId,
+              campo: 'arquivo',
+              file,
+              endpointTemplate: '/api/folha/item/:id/upload-comprovante',
+            });
+            alert('📎 Conexao caiu — comprovante salvo no aparelho. Vai subir quando reconectar.');
+            if (typeof window.OfflineEngine.atualizarBadgeOffline === 'function') {
+              window.OfflineEngine.atualizarBadgeOffline();
+            }
+            return;
+          } catch (_) {}
+        }
         alert('Erro ao processar comprovante: ' + err.message);
       }
     };
