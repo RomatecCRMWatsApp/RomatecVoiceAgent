@@ -535,7 +535,17 @@ export async function criarTransacaoObra(input: {
 
 // ── Equipe ───────────────────────────────────────────────────────────────────
 export async function listarEquipe(input: { obra_id?: string; somente_geral?: boolean; since?: string } = {}) {
-  let sql = 'SELECT * FROM romatec_obra_equipe WHERE ativo = 1';
+  // v3.16.0: NAO usa SELECT * pra evitar puxar o BLOB foto_b64 (pesado).
+  // O front consome /api/equipe/:id/foto pra ler o binario quando precisar.
+  let sql = `SELECT id, nome, funcao, tipo_contrato, cpf, rg, telefone, email,
+                    valor_dia, especialidade, observacoes, data_admissao,
+                    endereco_rua, endereco_numero, endereco_bairro,
+                    endereco_cidade, endereco_estado, endereco_cep,
+                    foto_url, ativo, obras_ids, obra_id, status,
+                    chave_pix, tipo_chave_pix,
+                    foto_mime, foto_uploaded_em,
+                    updated_at
+               FROM romatec_obra_equipe WHERE ativo = 1`;
   const params: (string | number)[] = [];
   if (input.somente_geral) {
     sql += ' AND obra_id IS NULL';
@@ -572,6 +582,10 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
     endereco_estado: r.endereco_estado,
     endereco_cep: r.endereco_cep,
     foto_url: r.foto_url,
+    // v3.16.0: indica se tem upload de foto (binario salvo no DB).
+    // Cliente prefere /api/equipe/:id/foto quando tem_foto=true; senao foto_url.
+    tem_foto: !!((r as unknown as { foto_uploaded_em?: unknown }).foto_uploaded_em),
+    foto_uploaded_em: (r as unknown as { foto_uploaded_em?: Date | null }).foto_uploaded_em ?? null,
   }));
 }
 
@@ -670,6 +684,55 @@ export async function atualizarMaterial(input: {
     `UPDATE romatec_obra_materiais SET ${fields.join(', ')} WHERE id = ?`, params,
   );
   return { ok: true, affected: r.affectedRows, message: `Material ${input.id} atualizado.` };
+}
+
+// v3.16.0: salva foto do colaborador como BLOB. Aceita JPG/PNG/WEBP/GIF
+// ate 5MB. Reutilizada no recibo de funcionario e no relatorio de fechamento.
+const FOTO_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const FOTO_MAX_BYTES = 5 * 1024 * 1024;
+export async function uploadFotoMembroEquipe(
+  membroId: string,
+  buffer: Buffer,
+  mimetype: string,
+): Promise<{ ok: true; size: number; mime: string }> {
+  if (!FOTO_MIMES.includes(mimetype)) {
+    throw new Error(`Mimetype invalido: ${mimetype}. Aceito: JPG, PNG, WEBP, GIF.`);
+  }
+  if (buffer.length > FOTO_MAX_BYTES) {
+    throw new Error(`Foto excede 5MB (atual: ${(buffer.length / 1024 / 1024).toFixed(1)}MB).`);
+  }
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE romatec_obra_equipe
+        SET foto_b64 = ?, foto_mime = ?, foto_uploaded_em = NOW()
+      WHERE id = ?`,
+    [buffer, mimetype, membroId]
+  );
+  if (r.affectedRows === 0) throw new Error('Membro nao encontrado');
+  return { ok: true, size: buffer.length, mime: mimetype };
+}
+
+export async function getFotoMembroEquipe(membroId: string): Promise<{
+  arquivo: Buffer; mime: string;
+} | null> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT foto_b64, foto_mime FROM romatec_obra_equipe WHERE id = ? LIMIT 1`,
+    [membroId]
+  );
+  if (rows.length === 0 || !rows[0].foto_b64) return null;
+  return {
+    arquivo: rows[0].foto_b64 as Buffer,
+    mime: (rows[0].foto_mime as string) || 'image/jpeg',
+  };
+}
+
+export async function deletarFotoMembroEquipe(membroId: string): Promise<{ ok: true }> {
+  await pool.execute(
+    `UPDATE romatec_obra_equipe
+        SET foto_b64 = NULL, foto_mime = NULL, foto_uploaded_em = NULL
+      WHERE id = ?`,
+    [membroId]
+  );
+  return { ok: true };
 }
 
 export async function apagarMembroEquipe(input: {

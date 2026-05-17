@@ -134,12 +134,38 @@ export interface ReciboIncraResumo {
   valor_final: number;
 }
 
+// v3.16.0: busca foto do colaborador quando recibo eh de funcionario (folha).
+// Recibo aponta pra folha_fechamento_item -> funcionario_id -> equipe.foto_b64.
+async function buscarFotoColaboradorDoRecibo(recibo: Recibo): Promise<Buffer | null> {
+  try {
+    if (recibo.tipo !== 'funcionario') return null;
+    if (recibo.resource_type !== 'folha_fechamento_item') return null;
+    const itemId = Number(recibo.resource_id);
+    if (!Number.isFinite(itemId)) return null;
+    const pool = (await import('../database/connection')).default;
+    const [rows] = await pool.query<import('mysql2/promise').RowDataPacket[]>(
+      `SELECT e.foto_b64, e.foto_mime
+         FROM folha_fechamento_itens fi
+         JOIN romatec_obra_equipe e ON e.id = fi.funcionario_id
+        WHERE fi.id = ? LIMIT 1`,
+      [itemId]
+    );
+    if (!rows.length || !rows[0].foto_b64) return null;
+    return rows[0].foto_b64 as Buffer;
+  } catch (err) {
+    console.warn('[reciboPdf] foto do colaborador falhou:', (err as Error).message);
+    return null;
+  }
+}
+
 export async function gerarPdfRecibo(
   recibo: Recibo,
   signatureMeta?: SignatureVisualMeta,
   incra?: ReciboIncraResumo,
 ): Promise<Buffer> {
   const t = await getTenantSettings(recibo.tenant_id).catch(() => null);
+  // v3.16.0: foto do colaborador (se recibo de funcionario)
+  const fotoColaborador = await buscarFotoColaboradorDoRecibo(recibo);
   // v1.95.0: tenta tambem o tenant_fiscal_config (CNPJ, IE)
   let fiscal: { cnpj?: string; inscricao_estadual?: string | null; inscricao_municipal?: string | null } | null = null;
   try {
@@ -233,11 +259,30 @@ export async function gerarPdfRecibo(
   cy = doc.y + 8;
 
   // ── Bloco PAGADOR ───────────────────────────────────────────────────
+  // v3.16.0: se tem foto do colaborador (recibo de funcionario), desenha
+  // thumbnail 60x60 a direita do bloco PAGADOR. Padding garante que texto
+  // do PAGADOR nao colide com a foto.
+  const pagadorWidth = fotoColaborador ? 440 : 515;
+  if (fotoColaborador) {
+    try {
+      doc.save();
+      // Mascara circular (clip)
+      const cx = 510, cyImg = cy + 4, raio = 28;
+      doc.circle(cx, cyImg + raio, raio).clip();
+      doc.image(fotoColaborador, cx - raio, cyImg, { fit: [raio * 2, raio * 2] });
+      doc.restore();
+      // Borda circular dourada
+      doc.save().strokeColor(corDourada).lineWidth(1.5)
+        .circle(cx, cyImg + raio, raio).stroke().restore();
+    } catch (err) {
+      console.warn('[reciboPdf] embed foto colaborador falhou:', (err as Error).message);
+    }
+  }
   doc.fontSize(9).fillColor(corDourada).font('Helvetica-Bold')
      .text('PAGADOR — A IMPORTÂNCIA DE', 40, cy);
   cy += 11;
   doc.fontSize(11).fillColor('#111').font('Helvetica-Bold')
-     .text(recibo.destinatario_nome || '— preencher —', 40, cy);
+     .text(recibo.destinatario_nome || '— preencher —', 40, cy, { width: pagadorWidth });
   cy += 13;
   doc.fontSize(9).fillColor('#444').font('Helvetica');
   if (recibo.destinatario_doc) {

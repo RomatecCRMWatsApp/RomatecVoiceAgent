@@ -8513,7 +8513,21 @@ function abrirEditarMembro(m) {
       <select id="eObraId" style="width:100%; margin-top:4px;">${obraOpts}</select>
     </div>
     <div style="margin-top:8px;">
-      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Foto (URL)</label>
+      <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Foto do colaborador</label>
+      <div style="display:flex; gap:12px; align-items:center; margin-top:6px;">
+        <div id="eFotoPreview" style="width:72px; height:72px; border-radius:50%; background:#1a2920 center/cover no-repeat; border:1px solid var(--border); flex-shrink:0; ${
+          m.tem_foto ? `background-image:url('/api/equipe/${m.id}/foto?_=${m.foto_uploaded_em ? new Date(m.foto_uploaded_em).getTime() : Date.now()}');`
+          : m.foto_url ? `background-image:url('${escape(m.foto_url)}');`
+          : ''
+        }"></div>
+        <div style="flex:1; display:flex; flex-direction:column; gap:6px;">
+          <button type="button" id="eFotoBtn" style="padding:6px 12px; background:#1e40af; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:12px;">📷 Anexar foto</button>
+          ${m.tem_foto ? '<button type="button" id="eFotoDel" style="padding:4px 10px; background:#7f1d1d; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:11px;">Remover foto</button>' : ''}
+          <input type="file" id="eFotoFile" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none;">
+          <small style="color:var(--text-muted); font-size:10px;">JPG/PNG/WEBP/GIF até 5MB. Aparece em recibos e relatórios.</small>
+        </div>
+      </div>
+      <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; margin-top:10px; display:block;">Ou URL externa (fallback)</label>
       <input id="eFoto" placeholder="https://..." value="${escape(m.foto_url||'')}" style="width:100%; margin-top:4px;">
     </div>
     <p style="margin:14px 0 6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Dados de pagamento (PIX)</p>
@@ -8580,6 +8594,49 @@ function abrirEditarMembro(m) {
       }),
     });
   });
+
+  // v3.16.0: wire upload de foto APOS o modal abrir (saveHandler so roda no submit)
+  setTimeout(() => {
+    const btn = document.getElementById('eFotoBtn');
+    const del = document.getElementById('eFotoDel');
+    const file = document.getElementById('eFotoFile');
+    const prev = document.getElementById('eFotoPreview');
+    if (btn && file) {
+      btn.onclick = () => file.click();
+      file.onchange = async () => {
+        const f = file.files?.[0];
+        if (!f) return;
+        if (f.size > 5 * 1024 * 1024) { alert('Foto maior que 5MB'); return; }
+        const fd = new FormData();
+        fd.append('arquivo', f);
+        btn.disabled = true; const txtAntes = btn.textContent;
+        btn.textContent = '⏳ Enviando...';
+        try {
+          const r = await fetch('/api/equipe/' + m.id + '/foto', { method: 'POST', body: fd });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || 'falha');
+          if (prev) prev.style.backgroundImage = `url('/api/equipe/${m.id}/foto?_=${Date.now()}')`;
+          btn.textContent = '📷 Trocar foto';
+        } catch (e) {
+          alert('Erro no upload: ' + e.message);
+          btn.textContent = txtAntes;
+        } finally {
+          btn.disabled = false;
+          file.value = '';
+        }
+      };
+    }
+    if (del) {
+      del.onclick = async () => {
+        if (!confirm('Remover a foto do colaborador?')) return;
+        try {
+          await fetch('/api/equipe/' + m.id + '/foto', { method: 'DELETE' });
+          if (prev) prev.style.backgroundImage = '';
+          del.remove();
+        } catch (e) { alert('Erro: ' + e.message); }
+      };
+    }
+  }, 30);
 }
 
 // v1.62.0: editar transação financeira (admin/CEO only via X-CEO-Token).

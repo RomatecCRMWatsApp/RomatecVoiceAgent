@@ -174,6 +174,39 @@ export async function runEquipePixMigrations(): Promise<void> {
   }
 }
 
+// v3.16.0 — Foto do colaborador como arquivo binario (alem do foto_url externa).
+// Permite upload direto pelo modal de editar membro; a foto aparece nos
+// recibos de funcionario e no relatorio de fechamento de folha.
+export async function runEquipeFotoMigrations(): Promise<void> {
+  const ops: Array<{ label: string; sql: string }> = [
+    {
+      label: 'ALTER romatec_obra_equipe foto_b64',
+      sql: `ALTER TABLE romatec_obra_equipe ADD COLUMN foto_b64 LONGBLOB NULL`,
+    },
+    {
+      label: 'ALTER romatec_obra_equipe foto_mime',
+      sql: `ALTER TABLE romatec_obra_equipe ADD COLUMN foto_mime VARCHAR(60) NULL`,
+    },
+    {
+      label: 'ALTER romatec_obra_equipe foto_uploaded_em',
+      sql: `ALTER TABLE romatec_obra_equipe ADD COLUMN foto_uploaded_em TIMESTAMP NULL`,
+    },
+  ];
+  for (const { label, sql } of ops) {
+    try {
+      await pool.execute(sql);
+      console.log(`[equipe-foto-migrations] OK: ${label}`);
+    } catch (err) {
+      const msg = (err as Error).message || '';
+      if (/Duplicate (column|key)|already exists/i.test(msg)) {
+        console.log(`[equipe-foto-migrations] ja existe (OK): ${label}`);
+      } else {
+        console.error(`[equipe-foto-migrations] FALHA ${label}:`, msg.slice(0, 200));
+      }
+    }
+  }
+}
+
 // v3.11.0 — Adiciona colunas pra anexar comprovante de pagamento no item do fechamento.
 // Quando o usuario faz upload de comprovante (JPG/PDF), o sistema:
 //   1) Salva o arquivo binario em comprovante_arquivo

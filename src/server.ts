@@ -827,6 +827,31 @@ app.get   ('/api/equipe',     apiHandle(args => obras.listarEquipe(args as { obr
 app.post  ('/api/equipe',     apiHandle(args => obras.criarMembroEquipe(args as Parameters<typeof obras.criarMembroEquipe>[0])));
 app.put   ('/api/equipe/:id', apiHandle(args => obras.atualizarMembroEquipe(args as Parameters<typeof obras.atualizarMembroEquipe>[0])));
 app.delete('/api/equipe/:id', apiHandle(args => obras.apagarMembroEquipe(args as { id: string; confirm?: boolean })));
+
+// v3.16.0: foto do colaborador. Upload via multipart 'arquivo' (JPG/PNG/WEBP/GIF, max 5MB).
+// GET serve o binario inline com cache 1h. DELETE limpa.
+app.post('/api/equipe/:id/foto', upload.single('arquivo'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) { res.status(400).json({ error: 'arquivo obrigatorio (multipart field: arquivo)' }); return; }
+    const r = await obras.uploadFotoMembroEquipe(String(req.params.id), req.file.buffer, req.file.mimetype);
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+app.get('/api/equipe/:id/foto', async (req: Request, res: Response) => {
+  try {
+    const d = await obras.getFotoMembroEquipe(String(req.params.id));
+    if (!d) { res.status(404).json({ error: 'Sem foto' }); return; }
+    res.setHeader('Content-Type', d.mime);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(d.arquivo);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+app.delete('/api/equipe/:id/foto', async (req: Request, res: Response) => {
+  try {
+    const r = await obras.deletarFotoMembroEquipe(String(req.params.id));
+    res.json(r);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
 // v1.65.10: backfill manual de sync Equipe→contacts→zayra_memory.
 // Útil para popular tudo após deploy desta migração; depois disso, criar/editar
 // membro dispara sync automaticamente via hook em obras.ts.
@@ -3833,6 +3858,16 @@ app.listen(PORT, () => {
       await m.runEquipePixMigrations();
     } catch (err) {
       console.error('[equipe-pix-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.16.0: foto do colaborador como BLOB pra aparecer em recibos e relatorios.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-folha-fechamento');
+      await m.runEquipeFotoMigrations();
+    } catch (err) {
+      console.error('[equipe-foto-migrations] FALHA fatal:', err);
     }
   })();
 

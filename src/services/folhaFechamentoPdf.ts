@@ -55,6 +55,8 @@ interface EquipeRow extends RowDataPacket {
   chave_pix: string | null;
   tipo_chave_pix: string | null;
   cpf: string | null;
+  foto_b64: Buffer | null;
+  foto_mime: string | null;
 }
 
 function fmtMoeda(v: string | number | null | undefined): string {
@@ -199,7 +201,8 @@ export async function gerarPdfFechamento(fechamentoId: number): Promise<Buffer> 
   const diasPorFuncionario = new Map<number, DiaRow[]>();
   for (const it of itens) {
     const [equipe] = await pool.query<EquipeRow[]>(
-      `SELECT telefone, chave_pix, tipo_chave_pix, cpf FROM romatec_obra_equipe WHERE id = ? LIMIT 1`,
+      `SELECT telefone, chave_pix, tipo_chave_pix, cpf, foto_b64, foto_mime
+         FROM romatec_obra_equipe WHERE id = ? LIMIT 1`,
       [it.funcionario_id]
     );
     if (equipe.length > 0) dadosEquipe.set(it.funcionario_id, equipe[0]);
@@ -364,8 +367,24 @@ export async function gerarPdfFechamento(fechamentoId: number): Promise<Buffer> 
 
     // Faixa verde do header
     doc.save().rect(blocoX, blocoY, blocoW, 22).fillColor(COR.verdeEsc).fill().restore();
+    // v3.16.0: foto do colaborador embed (circular, 40x40) a esquerda do nome se tiver
+    const temFoto = !!eq?.foto_b64;
+    const nomeOffsetX = temFoto ? 56 : 8;
+    if (temFoto && eq?.foto_b64) {
+      try {
+        const cxF = blocoX + 28, cyF = blocoY + 11, rF = 16;
+        doc.save();
+        doc.circle(cxF, cyF, rF).clip();
+        doc.image(eq.foto_b64, cxF - rF, cyF - rF, { fit: [rF * 2, rF * 2] });
+        doc.restore();
+        doc.save().strokeColor('#fff').lineWidth(1.2)
+          .circle(cxF, cyF, rF).stroke().restore();
+      } catch (err) {
+        console.warn('[folhaFechamentoPdf] embed foto falhou:', (err as Error).message);
+      }
+    }
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#fff')
-       .text(it.funcionario_nome, blocoX + 8, blocoY + 6, { width: blocoW - 100, lineBreak: false });
+       .text(it.funcionario_nome, blocoX + nomeOffsetX, blocoY + 6, { width: blocoW - 100 - nomeOffsetX, lineBreak: false });
     doc.font('Helvetica-Bold').fontSize(9).fillColor('#fff')
        .text(stat.txt, blocoX + blocoW - 90, blocoY + 7, { width: 82, align: 'right', lineBreak: false });
     doc.font('Helvetica');
