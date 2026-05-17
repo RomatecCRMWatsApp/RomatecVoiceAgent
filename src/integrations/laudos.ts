@@ -1399,19 +1399,38 @@ export async function clonarLaudo(originalId: number): Promise<Laudo> {
       );
     }
 
-    // 5. Lados pre-preenchidos com confrontantes do lote (se houver)
+    // 5. Lados pre-preenchidos com confrontantes do lote (se houver).
+    // v3.15.19: a tabela laudos_demarcacao_lados exige ponto_inicio_id/ponto_fim_id
+    // NOT NULL. SELECT-back nos pontos recem-criados e referencia eles circularmente
+    // (V1-V2, V2-V3, V3-V4, V4-V1). Antes da v3.15.19 o INSERT explodia com
+    // "Field 'ponto_inicio_id' doesn't have a default value".
     if (o.lote_loteamento_id != null) {
       const lados = await prePopularLadosDoLote(conn, Number(o.lote_loteamento_id), cloneId);
       if (lados.length > 0) {
-        const ph = lados.map(() => '(?, ?, ?, ?, ?)').join(',');
-        const flat = lados.flatMap(l =>
-          [l.laudo_id, l.ordem, l.rotulo, l.confrontante_nome, l.nome_lado]);
-        await conn.execute(
-          `INSERT INTO laudos_demarcacao_lados
-             (laudo_id, ordem, rotulo, confrontante_nome, nome_lado)
-           VALUES ${ph}`,
-          flat,
+        const [pontosRows] = await conn.execute<RowDataPacket[]>(
+          `SELECT id, ordem FROM laudos_demarcacao_pontos
+            WHERE laudo_id = ? ORDER BY ordem ASC`,
+          [cloneId],
         );
+        const pontosIds = pontosRows.map(p => Number(p.id));
+        // So pre-popula lados se houver pontos suficientes pra fechar o circuito
+        // (prePopularLadosDoLote retorna 4 lados — precisa de pelo menos 4 pontos).
+        if (pontosIds.length >= lados.length) {
+          const ph = lados.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(',');
+          const flat = lados.flatMap((l, i) => {
+            const inicio = pontosIds[i % pontosIds.length];
+            const fim    = pontosIds[(i + 1) % pontosIds.length];
+            return [l.laudo_id, l.ordem, l.rotulo, l.confrontante_nome, l.nome_lado, inicio, fim];
+          });
+          await conn.execute(
+            `INSERT INTO laudos_demarcacao_lados
+               (laudo_id, ordem, rotulo, confrontante_nome, nome_lado, ponto_inicio_id, ponto_fim_id)
+             VALUES ${ph}`,
+            flat,
+          );
+        } else {
+          console.warn(`[clonarLaudo] laudo ${cloneId} tem ${pontosIds.length} pontos (<${lados.length} lados) — pulando pre-popular lados`);
+        }
       }
     }
 
