@@ -288,18 +288,30 @@ export async function obterDetalhe(fechamentoId: number) {
   // v3.15.17: NAO inclui comprovante_arquivo (LONGBLOB) na listagem — arrasta MB
   // por item em cada render do painel, deixava o painel lento/quebrado.
   // Arquivo binario fica acessivel via GET /api/folha/item/:id/comprovante.
+  // v3.15.18: LEFT JOIN com recibos (mais recente do tipo folha_fechamento_item)
+  // pra trazer status do envio + confirmacao do colaborador no mesmo payload.
   const [itens] = await pool.query<RowDataPacket[]>(
-    `SELECT id, fechamento_id, funcionario_id, funcionario_nome, funcao,
-            diaria, dias_integral, dias_manha, dias_tarde, dias_equivalente,
-            valor_total, valor_vales, valor_liquido,
-            status_pagamento, data_pagamento, recibo_id, forma_pagamento,
-            observacoes, created_at, updated_at,
-            comprovante_mime, comprovante_filename,
-            comprovante_extraido, comprovante_uploaded_em,
-            comprovante_enviado_whatsapp
-       FROM folha_fechamento_itens
-      WHERE fechamento_id = ?
-      ORDER BY funcionario_nome`,
+    `SELECT fi.id, fi.fechamento_id, fi.funcionario_id, fi.funcionario_nome, fi.funcao,
+            fi.diaria, fi.dias_integral, fi.dias_manha, fi.dias_tarde, fi.dias_equivalente,
+            fi.valor_total, fi.valor_vales, fi.valor_liquido,
+            fi.status_pagamento, fi.data_pagamento, fi.recibo_id, fi.forma_pagamento,
+            fi.observacoes, fi.created_at, fi.updated_at,
+            fi.comprovante_mime, fi.comprovante_filename,
+            fi.comprovante_extraido, fi.comprovante_uploaded_em,
+            fi.comprovante_enviado_whatsapp,
+            r.id AS recibo_link_id, r.numero AS recibo_numero,
+            r.status AS recibo_status, r.token AS recibo_token,
+            r.enviado_em AS recibo_enviado_em, r.lido_em AS recibo_lido_em,
+            r.respondido_em AS recibo_respondido_em,
+            r.resposta_acao AS recibo_resposta_acao
+       FROM folha_fechamento_itens fi
+       LEFT JOIN recibos r ON r.id = (
+         SELECT MAX(r2.id) FROM recibos r2
+          WHERE r2.resource_type = 'folha_fechamento_item'
+            AND r2.resource_id = CAST(fi.id AS CHAR)
+       )
+      WHERE fi.fechamento_id = ?
+      ORDER BY fi.funcionario_nome`,
     [fechamentoId]
   );
   return { ...head[0], itens };

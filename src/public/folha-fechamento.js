@@ -254,8 +254,10 @@
           const pagoTxt = it.status_pagamento === 'paga'
             ? `<span style="color:#4ade80;">✓ Pago ${new Date(it.data_pagamento).toLocaleDateString('pt-BR')}</span>`
             : '';
+          // v3.15.18: badge de status do recibo (envio + confirmacao do colaborador)
+          const reciboBadge = renderReciboBadge(it);
           const acoes = it.status_pagamento === 'paga'
-            ? `${pagoTxt} <button onclick="window.reverterItem(${it.id})" style="margin-left:8px; padding:2px 6px; background:#7f1d1d; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;">Reverter</button>`
+            ? `${pagoTxt} <button onclick="window.reverterItem(${it.id})" style="margin-left:8px; padding:2px 6px; background:#7f1d1d; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;">Reverter</button>${reciboBadge ? '<br>' + reciboBadge : ''}`
             : `<button onclick="window.pagarItem(${it.id})" style="padding:4px 10px; background:#16a34a; color:#fff; border:none; border-radius:4px; cursor:pointer;">Marcar Pago</button>`;
           // v3.11.0: botao de upload de comprovante (sempre disponivel) + link pra ver comprovante existente
           const compBtn = temComp
@@ -531,6 +533,94 @@
     t.style.background = tipo === 'error' ? '#dc2626' : tipo === 'success' ? '#16a34a' : '#1e40af';
     t.textContent = msg;
     if (timeout > 0) setTimeout(() => t.remove(), timeout);
+  }
+
+  // v3.15.18: badge visual do status do recibo Romatec vinculado ao item.
+  // Mostra envio (enviado/lido) + confirmacao pelo colaborador.
+  function renderReciboBadge(it) {
+    if (!it.recibo_link_id) {
+      return `<span style="display:inline-block; margin-top:4px; padding:2px 8px; border-radius:4px; font-size:10px; background:#374151; color:#9ca3af;" title="Nenhum recibo Romatec foi gerado pra esse item">📭 Sem recibo</span>`;
+    }
+    const status = String(it.recibo_status || '');
+    const numero = it.recibo_numero || '';
+    const enviadoDt = it.recibo_enviado_em ? new Date(it.recibo_enviado_em).toLocaleDateString('pt-BR') : null;
+    const respondidoDt = it.recibo_respondido_em ? new Date(it.recibo_respondido_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
+    const acao = it.recibo_resposta_acao;
+
+    // Confirmado pelo colaborador (cliente clicou "Confirmo" no link /r/:token)
+    if (status === 'confirmado' || (status === 'respondido' && acao === 'confirma')) {
+      return `<span style="display:inline-block; margin-top:4px; padding:3px 8px; border-radius:4px; font-size:10px; background:#15803d; color:#fff; font-weight:600;" title="${escapeHtml(numero)} confirmado pelo colaborador em ${respondidoDt || ''}">✅ Confirmado pelo colaborador${respondidoDt ? ' · ' + respondidoDt : ''}</span>`;
+    }
+    if (status === 'contestado' || (status === 'respondido' && acao === 'contesta')) {
+      return `<span style="display:inline-block; margin-top:4px; padding:3px 8px; border-radius:4px; font-size:10px; background:#991b1b; color:#fff; font-weight:600;" title="${escapeHtml(numero)} contestado em ${respondidoDt || ''}">⚠️ Contestado${respondidoDt ? ' · ' + respondidoDt : ''}</span>`;
+    }
+    if (status === 'lido' || status === 'entregue') {
+      const icon = status === 'lido' ? '👁' : '📬';
+      const txt  = status === 'lido' ? 'Visto pelo colaborador' : 'Entregue';
+      return `<span style="display:inline-block; margin-top:4px; padding:3px 8px; border-radius:4px; font-size:10px; background:#1e40af; color:#fff;" title="${escapeHtml(numero)} ${txt}">${icon} ${txt}${enviadoDt ? ' · enviado ' + enviadoDt : ''}</span>`;
+    }
+    if (status === 'enviado') {
+      return `<span style="display:inline-block; margin-top:4px; padding:3px 8px; border-radius:4px; font-size:10px; background:#2563eb; color:#fff;" title="${escapeHtml(numero)} enviado, aguardando confirmacao">📤 Enviado · aguardando${enviadoDt ? ' (' + enviadoDt + ')' : ''}</span>`;
+    }
+    if (status === 'cancelado') {
+      return `<span style="display:inline-block; margin-top:4px; padding:3px 8px; border-radius:4px; font-size:10px; background:#4b5563; color:#fff;">🚫 Cancelado</span>`;
+    }
+    if (status === 'expirado') {
+      return `<span style="display:inline-block; margin-top:4px; padding:3px 8px; border-radius:4px; font-size:10px; background:#7c2d12; color:#fff;">⏰ Expirado</span>`;
+    }
+    // rascunho / aguardando_envio
+    return `<span style="display:inline-block; margin-top:4px; padding:3px 8px; border-radius:4px; font-size:10px; background:#92400e; color:#fff;" title="${escapeHtml(numero)} ainda nao enviado">📨 Aguardando envio</span>`;
+  }
+
+  // ============== v3.15.18: Badge do recibo (envio + confirmacao) ==============
+  function renderReciboBadge(it) {
+    // Sem recibo vinculado ainda
+    if (!it.recibo_link_id) {
+      return '<span style="display:inline-block; padding:2px 6px; background:#374151; color:#9ca3af; border-radius:4px; font-size:10px; margin-top:4px;" title="Recibo ainda nao foi criado pra esse item">Sem recibo</span>';
+    }
+    const numero = it.recibo_numero ? ` ${escapeHtml(String(it.recibo_numero))}` : '';
+    const status = String(it.recibo_status || 'rascunho');
+    const respondidoEm = it.recibo_respondido_em
+      ? new Date(it.recibo_respondido_em).toLocaleDateString('pt-BR')
+      : null;
+    const enviadoEm = it.recibo_enviado_em
+      ? new Date(it.recibo_enviado_em).toLocaleDateString('pt-BR')
+      : null;
+    const lidoEm = it.recibo_lido_em
+      ? new Date(it.recibo_lido_em).toLocaleDateString('pt-BR')
+      : null;
+    // resposta_acao: confirma | contesta | outro — define se o badge eh "confirmado" ou "contestado"
+    const acao = it.recibo_resposta_acao;
+    let bg, fg, ico, txt, tip;
+    if (status === 'confirmado' || acao === 'confirma') {
+      bg = '#0e8c63'; fg = '#fff'; ico = '✅'; txt = `Confirmado pelo colaborador${respondidoEm ? ' ' + respondidoEm : ''}`;
+      tip = `Recibo${numero} confirmado via link em ${respondidoEm || '?'}.`;
+    } else if (status === 'contestado' || acao === 'contesta') {
+      bg = '#b91c1c'; fg = '#fff'; ico = '⚠️'; txt = `Contestado${respondidoEm ? ' ' + respondidoEm : ''}`;
+      tip = `Colaborador CONTESTOU o recibo${numero}. Abra pra ver a observacao.`;
+    } else if (status === 'lido') {
+      bg = '#1e40af'; fg = '#fff'; ico = '👁'; txt = `Visto${lidoEm ? ' ' + lidoEm : ''}`;
+      tip = `Recibo${numero} foi aberto pelo colaborador, falta confirmar.`;
+    } else if (status === 'entregue') {
+      bg = '#1d4ed8'; fg = '#fff'; ico = '📬'; txt = 'Entregue';
+      tip = `Recibo${numero} chegou no WhatsApp mas ainda nao foi aberto.`;
+    } else if (status === 'enviado') {
+      bg = '#1d4ed8'; fg = '#fff'; ico = '📤'; txt = `Enviado${enviadoEm ? ' ' + enviadoEm : ''}`;
+      tip = `Recibo${numero} enviado, aguardando o colaborador abrir e confirmar.`;
+    } else if (status === 'cancelado') {
+      bg = '#6b7280'; fg = '#fff'; ico = '🚫'; txt = 'Recibo cancelado'; tip = '';
+    } else if (status === 'expirado') {
+      bg = '#7c2d12'; fg = '#fff'; ico = '⏰'; txt = 'Link expirado';
+      tip = 'O link de confirmacao expirou. Reenvie pra emitir um novo.';
+    } else {
+      // rascunho | aguardando_envio
+      bg = '#374151'; fg = '#e5e7eb'; ico = '📨'; txt = 'Aguardando envio';
+      tip = `Recibo${numero} ainda nao foi enviado via WhatsApp. Use Reenviar.`;
+    }
+    const tokenLink = it.recibo_token
+      ? `<a href="/r/${escapeHtml(it.recibo_token)}" target="_blank" style="margin-left:4px; color:${fg}; text-decoration:underline; font-size:10px;" title="Abrir o link de confirmacao">link</a>`
+      : '';
+    return `<span style="display:inline-block; padding:3px 7px; background:${bg}; color:${fg}; border-radius:4px; font-size:10px; margin-top:4px;" title="${escapeHtml(tip)}">${ico} ${escapeHtml(txt)}${numero ? ' · ' + numero : ''}</span>${tokenLink}`;
   }
 
   // ============== UTILS ==============
