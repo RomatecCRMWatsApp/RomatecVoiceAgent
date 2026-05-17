@@ -132,6 +132,8 @@
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Erro no preview');
+      // v3.15.20: backend pode devolver sem .itens em alguns edge cases
+      if (!Array.isArray(data.itens)) throw new Error('Preview vazio ou invalido');
 
       const fmt = v => 'R$ ' + Number(v).toFixed(2).replace('.', ',');
       modal.querySelector('#ff-totais').innerHTML =
@@ -228,15 +230,16 @@
         </div>
       `;
 
-      // Busca conforme aba
+      // Busca conforme aba — sempre garante que lista eh array, mesmo se backend devolver erro
+      const asArray = (v) => Array.isArray(v) ? v : [];
       let lista;
       if (abaAtual === 'quitadas') {
         const r = await fetch(`${API}/api/folha/listar/${obraId}?status=quitada`);
-        lista = await r.json();
+        lista = asArray(await r.json());
       } else {
         const r = await fetch(`${API}/api/folha/listar/${obraId}?status=aberta`);
         const rAlt = await fetch(`${API}/api/folha/listar/${obraId}?status=parcialmente_paga`);
-        lista = [...await r.json(), ...await rAlt.json()];
+        lista = [...asArray(await r.json()), ...asArray(await rAlt.json())];
       }
 
       if (lista.length === 0) {
@@ -248,7 +251,21 @@
       }
 
       const cards = await Promise.all(lista.map(async f => {
-        const det = await fetch(`${API}/api/folha/detalhe/${f.id}`).then(x => x.json());
+        let det;
+        try {
+          const r = await fetch(`${API}/api/folha/detalhe/${f.id}`);
+          det = await r.json();
+        } catch (e) {
+          det = { error: e.message };
+        }
+        // v3.15.20: backend pode devolver {error:...} se a query falhar. Renderiza
+        // um card de erro em vez de explodir com "Cannot read properties of undefined".
+        if (det?.error || !Array.isArray(det?.itens)) {
+          return `
+            <div style="border:1px solid #b91c1c; border-radius:8px; padding:12px; margin-bottom:12px; background:#1a0f0f; color:#fca5a5;">
+              <strong>Fechamento #${f.id}</strong> — erro ao carregar detalhe: ${escapeHtml(det?.error || 'resposta invalida do servidor')}
+            </div>`;
+        }
         const itensHtml = det.itens.map(it => {
           const temComp = !!it.comprovante_uploaded_em;
           const pagoTxt = it.status_pagamento === 'paga'

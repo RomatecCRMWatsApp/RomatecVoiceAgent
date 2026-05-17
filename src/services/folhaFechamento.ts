@@ -286,34 +286,70 @@ export async function obterDetalhe(fechamentoId: number) {
   );
   if (head.length === 0) return null;
   // v3.15.17: NAO inclui comprovante_arquivo (LONGBLOB) na listagem — arrasta MB
-  // por item em cada render do painel, deixava o painel lento/quebrado.
-  // Arquivo binario fica acessivel via GET /api/folha/item/:id/comprovante.
-  // v3.15.18: LEFT JOIN com recibos (mais recente do tipo folha_fechamento_item)
-  // pra trazer status do envio + confirmacao do colaborador no mesmo payload.
-  const [itens] = await pool.query<RowDataPacket[]>(
-    `SELECT fi.id, fi.fechamento_id, fi.funcionario_id, fi.funcionario_nome, fi.funcao,
-            fi.diaria, fi.dias_integral, fi.dias_manha, fi.dias_tarde, fi.dias_equivalente,
-            fi.valor_total, fi.valor_vales, fi.valor_liquido,
-            fi.status_pagamento, fi.data_pagamento, fi.recibo_id, fi.forma_pagamento,
-            fi.observacoes, fi.created_at, fi.updated_at,
-            fi.comprovante_mime, fi.comprovante_filename,
-            fi.comprovante_extraido, fi.comprovante_uploaded_em,
-            fi.comprovante_enviado_whatsapp,
-            r.id AS recibo_link_id, r.numero AS recibo_numero,
-            r.status AS recibo_status, r.token AS recibo_token,
-            r.enviado_em AS recibo_enviado_em, r.lido_em AS recibo_lido_em,
-            r.respondido_em AS recibo_respondido_em,
-            r.resposta_acao AS recibo_resposta_acao
-       FROM folha_fechamento_itens fi
-       LEFT JOIN recibos r ON r.id = (
-         SELECT MAX(r2.id) FROM recibos r2
-          WHERE r2.resource_type = 'folha_fechamento_item'
-            AND r2.resource_id = CAST(fi.id AS CHAR)
-       )
-      WHERE fi.fechamento_id = ?
-      ORDER BY fi.funcionario_nome`,
-    [fechamentoId]
-  );
+  // por item em cada render do painel.
+  const SELECT_ITENS_BASE = `
+    SELECT fi.id, fi.fechamento_id, fi.funcionario_id, fi.funcionario_nome, fi.funcao,
+           fi.diaria, fi.dias_integral, fi.dias_manha, fi.dias_tarde, fi.dias_equivalente,
+           fi.valor_total, fi.valor_vales, fi.valor_liquido,
+           fi.status_pagamento, fi.data_pagamento, fi.recibo_id, fi.forma_pagamento,
+           fi.observacoes, fi.created_at, fi.updated_at,
+           fi.comprovante_mime, fi.comprovante_filename,
+           fi.comprovante_extraido, fi.comprovante_uploaded_em,
+           fi.comprovante_enviado_whatsapp
+      FROM folha_fechamento_itens fi
+     WHERE fi.fechamento_id = ?
+     ORDER BY fi.funcionario_nome`;
+
+  // Carrega itens base (sem o join de recibos primeiro — garantido funcionar)
+  const [itensBase] = await pool.query<RowDataPacket[]>(SELECT_ITENS_BASE, [fechamentoId]);
+  if (itensBase.length === 0) return { ...head[0], itens: [] };
+
+  // v3.15.20: enriquecimento opcional com recibo Romatec (status + token + datas).
+  // Roda em query separada pra nao quebrar o detalhe se a tabela recibos tiver
+  // algum problema (colacao de resource_id, falta de indice, etc). Se falhar,
+  // segue sem o badge — UI mostra "Sem recibo" e o painel continua funcional.
+  const ids = itensBase.map(it => Number(it.id));
+  let reciboByItem: Map<number, RowDataPacket> = new Map();
+  try {
+    const placeholders = ids.map(() => '?').join(',');
+    const [recibosRows] = await pool.query<RowDataPacket[]>(
+      `SELECT id AS recibo_link_id, numero AS recibo_numero,
+              status AS recibo_status, token AS recibo_token,
+              enviado_em AS recibo_enviado_em, lido_em AS recibo_lido_em,
+              respondido_em AS recibo_respondido_em,
+              resposta_acao AS recibo_resposta_acao,
+              resource_id
+         FROM recibos
+        WHERE resource_type = 'folha_fechamento_item'
+          AND resource_id IN (${placeholders})
+          AND id = (
+            SELECT MAX(r2.id) FROM recibos r2
+             WHERE r2.resource_type = 'folha_fechamento_item'
+               AND r2.resource_id = recibos.resource_id
+          )`,
+      ids.map(String)
+    );
+    for (const r of recibosRows) {
+      reciboByItem.set(Number(r.resource_id), r);
+    }
+  } catch (err) {
+    console.warn('[obterDetalhe] enriquecimento de recibo falhou:', (err as Error).message);
+  }
+  const itens = itensBase.map(it => {
+    const rec = reciboByItem.get(Number(it.id));
+    if (!rec) return it;
+    return {
+      ...it,
+      recibo_link_id: rec.recibo_link_id,
+      recibo_numero: rec.recibo_numero,
+      recibo_status: rec.recibo_status,
+      recibo_token: rec.recibo_token,
+      recibo_enviado_em: rec.recibo_enviado_em,
+      recibo_lido_em: rec.recibo_lido_em,
+      recibo_respondido_em: rec.recibo_respondido_em,
+      recibo_resposta_acao: rec.recibo_resposta_acao,
+    };
+  });
   return { ...head[0], itens };
 }
 
