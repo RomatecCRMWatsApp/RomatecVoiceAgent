@@ -765,6 +765,8 @@ app.post  ('/api/obras/:id/enviar-telegram',
 
 // v1.65.40: Parcelas de pagamento do cliente (receita por obra)
 app.get   ('/api/obras/:obra_id/parcelas',     apiHandle(args => obras.listarParcelasObra((args as { obra_id: string }).obra_id, args as { since?: string })));
+// v3.16.0: listagem global de parcelas (full sync offline cache_v2)
+app.get   ('/api/parcelas',                    apiHandle(args => obras.listarParcelas(args as { since?: string; limite?: number })));
 app.post  ('/api/parcelas',                    apiHandle(args => obras.criarParcela(args as Parameters<typeof obras.criarParcela>[0])));
 app.put   ('/api/parcelas/:id',                apiHandle(args => obras.atualizarParcela(args as Parameters<typeof obras.atualizarParcela>[0])));
 app.delete('/api/parcelas/:id',                apiHandle(args => obras.apagarParcela(args as { id: string })));

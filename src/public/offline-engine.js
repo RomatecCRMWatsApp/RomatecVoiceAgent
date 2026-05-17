@@ -278,6 +278,16 @@
   function bootOffline() {
     atualizarBadgeOffline();
     if (navigator.onLine) sincronizarFilaOffline();
+    // v3.16.0 P0 (C3): se for a primeira sessao em /obras (PWA recem-instalada
+    // ou cache_v2 zerado), dispara full sync com modal. Best-effort — falha
+    // nao quebra o boot.
+    try {
+      const naPaginaObras = /\/obras(\/|$)/i.test(location.pathname);
+      const jaSincronizou = localStorage.getItem('offline_p0_first_sync');
+      if (naPaginaObras && !jaSincronizou && navigator.onLine) {
+        setTimeout(() => abrirModalFullSync().catch(() => {}), 1200);
+      }
+    } catch (_) {}
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bootOffline);
@@ -461,6 +471,217 @@
     return path.replace(/<uuid:[^>]+>/, String(id));
   }
 
+  // ── v3.16.0 P0 Phase C: cache_v2 IndexedDB ──────────────────────────────────
+  // 5 stores (obras/parcelas/recibos/despesas/equipe) + sync_meta. Permite
+  // que loadXxx() funcione offline (network-first com fallback do cache) e
+  // permite full sync inicial pra puxar tudo de uma vez.
+  const CACHE_V2_DB = 'romatec_cache_v2';
+  const CACHE_V2_VERSION = 1;
+  const CACHE_V2_STORES = ['obras', 'parcelas', 'recibos', 'despesas', 'equipe'];
+
+  function abrirCacheV2() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(CACHE_V2_DB, CACHE_V2_VERSION);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => resolve(req.result);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        for (const s of CACHE_V2_STORES) {
+          if (!db.objectStoreNames.contains(s)) {
+            const store = db.createObjectStore(s, { keyPath: 'id' });
+            store.createIndex('uuid_local', 'uuid_local', { unique: false });
+          }
+        }
+        if (!db.objectStoreNames.contains('sync_meta')) {
+          db.createObjectStore('sync_meta', { keyPath: 'entidade' });
+        }
+      };
+    });
+  }
+
+  // Promise wrapper genérico pra IDBRequest
+  function ipromise(req) {
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  const cacheV2 = {
+    async put(entidade, registro) {
+      if (!registro || registro.id == null) return;
+      const db = await abrirCacheV2();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(entidade, 'readwrite');
+        tx.objectStore(entidade).put(registro);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    async bulkPut(entidade, registros) {
+      if (!Array.isArray(registros) || registros.length === 0) return;
+      const db = await abrirCacheV2();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(entidade, 'readwrite');
+        const store = tx.objectStore(entidade);
+        for (const r of registros) {
+          if (r && r.id != null) store.put(r);
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    async get(entidade, id) {
+      const db = await abrirCacheV2();
+      const tx = db.transaction(entidade, 'readonly');
+      return ipromise(tx.objectStore(entidade).get(id));
+    },
+    async getAll(entidade) {
+      const db = await abrirCacheV2();
+      const tx = db.transaction(entidade, 'readonly');
+      const res = await ipromise(tx.objectStore(entidade).getAll());
+      return res || [];
+    },
+    async clear(entidade) {
+      const db = await abrirCacheV2();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(entidade, 'readwrite');
+        tx.objectStore(entidade).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    async setMeta(entidade, meta) {
+      const db = await abrirCacheV2();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('sync_meta', 'readwrite');
+        tx.objectStore('sync_meta').put({ entidade, ...meta });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    async getMeta(entidade) {
+      const db = await abrirCacheV2();
+      const tx = db.transaction('sync_meta', 'readonly');
+      const r = await ipromise(tx.objectStore('sync_meta').get(entidade));
+      return r || {};
+    },
+  };
+
+  // v3.16.0 (C2): network-first com fallback de cache pras loadXxx().
+  // - Tenta o fetch online primeiro
+  // - Se vier array, salva no cache e atualiza sync_meta
+  // - Se rede falhar (ou navegador estiver offline), retorna cache.getAll(entidade)
+  // - Se nao temos cache nem rede, retorna []
+  async function carregarComCache(entidade, fetchFn) {
+    if (navigator.onLine !== false) {
+      try {
+        const dados = await fetchFn();
+        if (Array.isArray(dados)) {
+          // Substitui o cache inteiro pra evitar "fantasmas" de registros apagados.
+          // Cuidado: usuario que apenas filtrou no front nao deveria chamar
+          // carregarComCache — eh pra full sync da entidade.
+          await cacheV2.clear(entidade).catch(() => {});
+          await cacheV2.bulkPut(entidade, dados);
+          await cacheV2.setMeta(entidade, { last_full_sync_at: Date.now(), count: dados.length });
+        }
+        return dados;
+      } catch (err) {
+        console.warn('[carregarComCache]', entidade, 'fetch falhou, usando cache:', err.message);
+      }
+    }
+    return cacheV2.getAll(entidade);
+  }
+
+  // v3.16.0 (C3): modal de progresso do full sync — overlay fullscreen com
+  // barra que enche de 0 a 100. Best-effort: se o usuario fechar a aba no meio,
+  // o que ja foi populado fica no cache (parcial — proxima abertura completa).
+  async function abrirModalFullSync() {
+    if (document.getElementById('full-sync-modal')) return;
+    const ov = document.createElement('div');
+    ov.id = 'full-sync-modal';
+    ov.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:99999; display:flex; align-items:center; justify-content:center; font-family:Segoe UI,sans-serif;';
+    ov.innerHTML = `
+      <div style="background:#0f1a14; border:1px solid #2d4a3a; border-radius:12px; padding:28px; min-width:320px; max-width:90vw; text-align:center;">
+        <h3 style="margin:0 0 14px; color:#facc15;">Sincronizando dados</h3>
+        <p id="fs-label" style="margin:0 0 12px; color:#9ca3af; font-size:13px;">Preparando...</p>
+        <div style="background:#1a2920; border-radius:8px; height:14px; overflow:hidden; margin-bottom:8px;">
+          <div id="fs-bar" style="background:#16a34a; height:100%; width:0%; transition:width 0.3s;"></div>
+        </div>
+        <p id="fs-pct" style="font-size:12px; color:#9ca3af;">0%</p>
+        <p style="font-size:11px; color:#9ca3af; margin-top:14px;">Nao feche o app ate concluir.</p>
+      </div>`;
+    document.body.appendChild(ov);
+    try {
+      const r = await executarFullSync(({ entidade, atual, total }) => {
+        const pct = Math.round((atual / total) * 100);
+        const lbl = entidade === 'done' ? 'Concluido!' : 'Carregando ' + entidade + '...';
+        const elLabel = ov.querySelector('#fs-label');
+        const elBar = ov.querySelector('#fs-bar');
+        const elPct = ov.querySelector('#fs-pct');
+        if (elLabel) elLabel.textContent = lbl;
+        if (elBar) elBar.style.width = pct + '%';
+        if (elPct) elPct.textContent = pct + '%';
+      });
+      localStorage.setItem('offline_p0_first_sync', String(Date.now()));
+      // Se houver falhas, mantem modal aberto 1.5s com aviso
+      if (r.falha > 0) {
+        const elLabel = ov.querySelector('#fs-label');
+        if (elLabel) elLabel.textContent = r.falha + ' entidade(s) falharam — confira a conexao.';
+        setTimeout(() => ov.remove(), 1800);
+      } else {
+        setTimeout(() => ov.remove(), 600);
+      }
+      return r;
+    } catch (err) {
+      const elLabel = ov.querySelector('#fs-label');
+      if (elLabel) elLabel.textContent = 'Erro: ' + err.message;
+      setTimeout(() => ov.remove(), 1500);
+      throw err;
+    }
+  }
+
+  // v3.16.0 (C3): full sync inicial — itera todas as 5 entidades P0 e popula cache.
+  // onProgress recebe { entidade, atual, total } a cada passo.
+  // Best-effort: erros individuais nao matam o batch, so registram no console.
+  async function executarFullSync(onProgress) {
+    if (navigator.onLine === false) throw new Error('Offline — full sync exige rede');
+    const entidades = [
+      { nome: 'obras',    endpoint: '/api/obras' },
+      { nome: 'parcelas', endpoint: '/api/parcelas' },
+      { nome: 'recibos',  endpoint: '/api/recibos' },
+      { nome: 'despesas', endpoint: '/api/despesas-extras' },
+      { nome: 'equipe',   endpoint: '/api/equipe' },
+    ];
+    const total = entidades.length;
+    const resultado = { total, sucesso: 0, falha: 0, erros: [] };
+    for (let i = 0; i < total; i++) {
+      const e = entidades[i];
+      if (typeof onProgress === 'function') onProgress({ entidade: e.nome, atual: i, total });
+      try {
+        const r = await fetch(e.endpoint, { headers: { 'Content-Type': 'application/json' } });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const body = await r.json();
+        // Alguns endpoints (ex: /api/despesas-extras) podem retornar {items: [...]}
+        // ou direto o array. Aceita ambos.
+        let arr;
+        if (Array.isArray(body)) arr = body;
+        else if (Array.isArray(body?.items)) arr = body.items;
+        else throw new Error('Resposta nao eh array');
+        await cacheV2.clear(e.nome).catch(() => {});
+        await cacheV2.bulkPut(e.nome, arr);
+        await cacheV2.setMeta(e.nome, { last_full_sync_at: Date.now(), count: arr.length });
+        resultado.sucesso++;
+      } catch (err) {
+        resultado.falha++;
+        resultado.erros.push({ entidade: e.nome, motivo: err.message });
+        console.warn('[fullsync]', e.nome, 'falhou:', err.message);
+      }
+    }
+    if (typeof onProgress === 'function') onProgress({ entidade: 'done', atual: total, total });
+    return resultado;
+  }
+
   // Expoe a API:
   window.api = api; // CRITICO: obras.html chama api() em centenas de lugares
   window.OfflineEngine = {
@@ -478,5 +699,12 @@
     idMap,
     traduzirBody,
     traduzirPath,
+    // v3.16.0 P0 Phase C
+    abrirCacheV2,
+    cacheV2,
+    CACHE_V2_STORES,
+    carregarComCache,
+    executarFullSync,
+    abrirModalFullSync,
   };
 })();
