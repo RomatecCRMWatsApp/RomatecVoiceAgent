@@ -285,8 +285,19 @@ export async function obterDetalhe(fechamentoId: number) {
     [fechamentoId]
   );
   if (head.length === 0) return null;
+  // v3.15.17: NAO inclui comprovante_arquivo (LONGBLOB) na listagem — arrasta MB
+  // por item em cada render do painel, deixava o painel lento/quebrado.
+  // Arquivo binario fica acessivel via GET /api/folha/item/:id/comprovante.
   const [itens] = await pool.query<RowDataPacket[]>(
-    `SELECT * FROM folha_fechamento_itens
+    `SELECT id, fechamento_id, funcionario_id, funcionario_nome, funcao,
+            diaria, dias_integral, dias_manha, dias_tarde, dias_equivalente,
+            valor_total, valor_vales, valor_liquido,
+            status_pagamento, data_pagamento, recibo_id, forma_pagamento,
+            observacoes, created_at, updated_at,
+            comprovante_mime, comprovante_filename,
+            comprovante_extraido, comprovante_uploaded_em,
+            comprovante_enviado_whatsapp
+       FROM folha_fechamento_itens
       WHERE fechamento_id = ?
       ORDER BY funcionario_nome`,
     [fechamentoId]

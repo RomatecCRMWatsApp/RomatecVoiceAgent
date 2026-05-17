@@ -1,8 +1,10 @@
 // v3.10.2 — Relatório PDF do Fechamento de Folha em formato tabular.
+// v3.15.17 — gerarPdfFechamentoCompleto: relatorio + comprovantes embedded.
 
 import path from 'path';
 import fs from 'fs';
 import PDFDocument from 'pdfkit';
+import { PDFDocument as PDFLibDocument } from 'pdf-lib';
 import type { RowDataPacket } from 'mysql2/promise';
 import pool from '../database/connection';
 
@@ -487,4 +489,66 @@ export async function getDadosPagamentoItem(itemId: number): Promise<{
     tipo_chave_pix: r.tipo_chave_pix ?? null,
     valor_liquido: Number(r.valor_liquido),
   };
+}
+
+// v3.15.17: PDF unificado = relatorio do fechamento + 1 pagina por comprovante.
+// Imagens (JPG/PNG) viram pagina A4 com a foto ajustada. PDFs (boleto/comprovante
+// bancario) sao mergeados pagina-por-pagina via pdf-lib.
+export async function gerarPdfFechamentoCompleto(fechamentoId: number): Promise<Buffer> {
+  const relatorio = await gerarPdfFechamento(fechamentoId);
+
+  // Itens que tem comprovante anexado
+  const [itensComComprovante] = await pool.query<RowDataPacket[]>(
+    `SELECT id, funcionario_nome, comprovante_arquivo, comprovante_mime, comprovante_filename
+       FROM folha_fechamento_itens
+      WHERE fechamento_id = ?
+        AND comprovante_arquivo IS NOT NULL
+      ORDER BY funcionario_nome`,
+    [fechamentoId]
+  );
+  if (itensComComprovante.length === 0) return relatorio;
+
+  const merged = await PDFLibDocument.create();
+  const principal = await PDFLibDocument.load(relatorio);
+  const principalPages = await merged.copyPages(principal, principal.getPageIndices());
+  principalPages.forEach(p => merged.addPage(p));
+
+  const A4_W = 595.28, A4_H = 841.89;
+  const margem = 30;
+  for (const r of itensComComprovante) {
+    const nome = String(r.funcionario_nome);
+    const mime = String(r.comprovante_mime || '');
+    const buf = r.comprovante_arquivo as Buffer;
+    const filename = String(r.comprovante_filename || `comprovante-${r.id}`);
+    try {
+      if (mime === 'application/pdf') {
+        const anexo = await PDFLibDocument.load(buf);
+        const pgs = await merged.copyPages(anexo, anexo.getPageIndices());
+        pgs.forEach(p => merged.addPage(p));
+      } else if (mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/jpg' || mime === 'image/webp') {
+        // pdf-lib so suporta embedPng e embedJpg. webp precisa fallback — pula com aviso.
+        if (mime === 'image/webp') {
+          console.warn(`[pdf-completo] item ${r.id} webp nao suportado por pdf-lib, pulado`);
+          continue;
+        }
+        const img = mime === 'image/png'
+          ? await merged.embedPng(buf)
+          : await merged.embedJpg(buf);
+        const maxW = A4_W - 2 * margem;
+        const maxH = A4_H - 2 * margem - 40; // 40 reservado pro rotulo
+        const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+        const w = img.width * scale, h = img.height * scale;
+        const page = merged.addPage([A4_W, A4_H]);
+        page.drawImage(img, { x: (A4_W - w) / 2, y: A4_H - h - margem - 30, width: w, height: h });
+        page.drawText(`Comprovante: ${nome}`, { x: margem, y: A4_H - 18, size: 11 });
+        page.drawText(filename, { x: margem, y: 18, size: 8 });
+      } else {
+        console.warn(`[pdf-completo] item ${r.id} mime ${mime} nao suportado, pulado`);
+      }
+    } catch (err) {
+      console.warn(`[pdf-completo] falha mergear item ${r.id} (${filename}): ${(err as Error).message}`);
+    }
+  }
+  const out = await merged.save();
+  return Buffer.from(out);
 }

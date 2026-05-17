@@ -209,19 +209,41 @@
   }
 
   // ============== PAINEL "SALDO EM ABERTO" ==============
+  // v3.15.17: tab atual (persiste em closure, padrao 'aberto')
+  let abaAtual = 'aberto'; // 'aberto' | 'quitadas'
+
   async function renderizarSaldoAberto(containerId, obraId) {
     const container = document.getElementById(containerId);
     if (!container) return;
+    container.dataset.obraId = String(obraId);
     container.innerHTML = '<div style="padding:16px; color:#9ca3af;">Carregando...</div>';
     try {
-      const r = await fetch(`${API}/api/folha/listar/${obraId}?status=aberta`);
-      const rAlt = await fetch(`${API}/api/folha/listar/${obraId}?status=parcialmente_paga`);
-      const abertas = await r.json();
-      const parciais = await rAlt.json();
-      const lista = [...abertas, ...parciais];
+      // v3.15.17: tabs (Aberto/Quitadas)
+      const tabsHtml = `
+        <div style="display:flex; gap:4px; margin-bottom:12px; border-bottom:1px solid #2d4a3a; padding-bottom:0;">
+          <button onclick="window.FolhaFechamento.trocarAba('aberto')"
+            style="padding:8px 16px; background:${abaAtual === 'aberto' ? '#16a34a' : 'transparent'}; color:${abaAtual === 'aberto' ? '#fff' : '#9ca3af'}; border:1px solid #2d4a3a; border-bottom:none; border-radius:6px 6px 0 0; cursor:pointer; font-size:13px;">Em Aberto</button>
+          <button onclick="window.FolhaFechamento.trocarAba('quitadas')"
+            style="padding:8px 16px; background:${abaAtual === 'quitadas' ? '#0e8c63' : 'transparent'}; color:${abaAtual === 'quitadas' ? '#fff' : '#9ca3af'}; border:1px solid #2d4a3a; border-bottom:none; border-radius:6px 6px 0 0; cursor:pointer; font-size:13px;">Quitadas</button>
+        </div>
+      `;
+
+      // Busca conforme aba
+      let lista;
+      if (abaAtual === 'quitadas') {
+        const r = await fetch(`${API}/api/folha/listar/${obraId}?status=quitada`);
+        lista = await r.json();
+      } else {
+        const r = await fetch(`${API}/api/folha/listar/${obraId}?status=aberta`);
+        const rAlt = await fetch(`${API}/api/folha/listar/${obraId}?status=parcialmente_paga`);
+        lista = [...await r.json(), ...await rAlt.json()];
+      }
 
       if (lista.length === 0) {
-        container.innerHTML = '<div style="padding:16px; color:#9ca3af;">Nenhum fechamento em aberto.</div>';
+        const vazio = abaAtual === 'quitadas'
+          ? 'Nenhum fechamento quitado.'
+          : 'Nenhum fechamento em aberto.';
+        container.innerHTML = tabsHtml + `<div style="padding:16px; color:#9ca3af;">${vazio}</div>`;
         return;
       }
 
@@ -240,14 +262,26 @@
             ? `<a href="/api/folha/item/${it.id}/comprovante" target="_blank" style="padding:4px 8px; background:#0e8c63; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none;" title="Ver comprovante">📄 Ver</a>
                <button onclick="window.uploadComprovante(${it.id})" style="margin-left:4px; padding:4px 8px; background:#1e40af; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;" title="Substituir comprovante">📎 Trocar</button>`
             : `<button onclick="window.uploadComprovante(${it.id})" style="padding:4px 10px; background:#1e40af; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:12px;" title="Anexar comprovante (JPG/PNG/PDF) — extrai dados, marca pago e envia via WhatsApp">📎 Comprovante</button>`;
+          // v3.15.17: botao reenviar comprovante+recibo via WhatsApp (so faz sentido em item pago)
+          const reenviarBtn = it.status_pagamento === 'paga'
+            ? `<button onclick="window.reenviarItem(${it.id})" style="margin-left:4px; padding:4px 8px; background:#7c3aed; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;" title="Reenviar comprovante e recibo via WhatsApp">📤 Reenviar</button>`
+            : '';
           return `
           <tr style="border-bottom:1px solid #2d4a3a;">
             <td style="padding:6px 8px;">${escapeHtml(it.funcionario_nome)}</td>
             <td style="padding:6px 8px; text-align:right;">R$ ${Number(it.valor_liquido).toFixed(2).replace('.', ',')}</td>
             <td style="padding:6px 8px; white-space:nowrap;">${acoes}</td>
-            <td style="padding:6px 8px; white-space:nowrap;">${compBtn}</td>
+            <td style="padding:6px 8px; white-space:nowrap;">${compBtn}${reenviarBtn}</td>
           </tr>`;
         }).join('');
+        // v3.15.17: contagem de pagos pro botao "Enviar Tudo"
+        const totalPagos = (det.itens || []).filter(i => i.status_pagamento === 'paga').length;
+        const enviarTudoBtn = totalPagos > 0
+          ? `<button onclick="window.enviarTudoFechamento(${f.id})" style="padding:4px 10px; background:#7c3aed; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;" title="Reenvia comprovante+recibo de todos os ${totalPagos} pagos via WhatsApp">📤 Enviar Tudo (${totalPagos})</button>`
+          : '';
+        const pdfCompletoBtn = totalPagos > 0
+          ? `<a href="/api/folha/fechamento/${f.id}/pdf-completo" target="_blank" style="padding:4px 10px; background:#0e8c63; color:#fff; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none; display:inline-block;" title="PDF do fechamento + comprovantes anexados">📦 PDF Completo</a>`
+          : '';
         return `
           <div style="border:1px solid #2d4a3a; border-radius:8px; padding:12px; margin-bottom:12px; background:#0f1a14;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
@@ -256,12 +290,14 @@
                 ${f.rotulo ? ' · ' + escapeHtml(f.rotulo) : ''}
                 <span style="color:#9ca3af; font-size:12px;"> · ${formatarData(f.data_inicio)} a ${formatarData(f.data_fim)}</span>
               </div>
-              <div style="display:flex; gap:6px; align-items:center;">
+              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                 <!-- v3.10.1: botao PDF do fechamento -->
                 <a href="/api/folha/fechamento/${f.id}/pdf-relatorio" target="_blank"
                    style="padding:4px 10px; background:#1e40af; color:#fff; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none; display:inline-block;">📄 PDF</a>
+                ${pdfCompletoBtn}
+                ${enviarTudoBtn}
                 <span style="padding:2px 8px; border-radius:4px; font-size:11px;
-                  background:${f.status === 'aberta' ? '#7f1d1d' : '#92400e'};">${f.status}</span>
+                  background:${f.status === 'aberta' ? '#7f1d1d' : f.status === 'quitada' ? '#0e8c63' : '#92400e'};">${f.status}</span>
               </div>
             </div>
             <table style="width:100%; border-collapse:collapse; font-size:12px; color:#e8f0eb;">
@@ -270,7 +306,7 @@
           </div>
         `;
       }));
-      container.innerHTML = cards.join('');
+      container.innerHTML = tabsHtml + cards.join('');
     } catch (err) {
       container.innerHTML = `<div style="color:#f87171; padding:16px;">Erro: ${err.message}</div>`;
     }
@@ -508,9 +544,64 @@
     return `${s[2]}/${s[1]}/${s[0]}`;
   }
 
+  // ============== v3.15.17: Reenvio individual de comprovante+recibo ==============
+  window.reenviarItem = async function (itemId) {
+    if (!confirm('Reenviar comprovante e recibo Romatec via WhatsApp pra esse colaborador?')) return;
+    mostrarToastComprovante('⏳ Reenviando comprovante e recibo...', 'info', 0);
+    try {
+      const r = await fetch(`${API}/api/folha/item/${itemId}/reenviar`, { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Erro no reenvio');
+      mostrarToastComprovante('', 'success', 0, true);
+      let msg = `📤 Reenvio pra ${data.funcionario_nome}:\n`;
+      msg += data.comprovante_enviado ? '✓ Comprovante enviado\n' : `✗ Comprovante: ${data.comprovante_erro || 'falhou'}\n`;
+      msg += data.recibo_enviado ? `✓ Recibo ${data.recibo_numero} enviado` : `✗ Recibo: ${data.recibo_erro || 'falhou'}`;
+      alert(msg);
+    } catch (err) {
+      mostrarToastComprovante('', 'error', 0, true);
+      alert('Erro: ' + err.message);
+    }
+  };
+
+  // ============== v3.15.17: Envio em lote do fechamento inteiro ==============
+  window.enviarTudoFechamento = async function (fechamentoId) {
+    if (!confirm('Reenviar comprovante + recibo de TODOS os itens pagos desse fechamento? Vai mandar 1 documento + 1 mensagem por colaborador via WhatsApp.')) return;
+    mostrarToastComprovante('⏳ Enviando em lote, aguarde...', 'info', 0);
+    try {
+      const r = await fetch(`${API}/api/folha/fechamento/${fechamentoId}/enviar-tudo`, { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Erro no envio em lote');
+      mostrarToastComprovante('', 'success', 0, true);
+      let msg = `📤 Envio em lote — Fechamento #${data.fechamento_id}\n\n`;
+      msg += `Total de itens pagos: ${data.total}\n`;
+      msg += `Comprovantes enviados: ${data.comprovantes_enviados}/${data.total}\n`;
+      msg += `Recibos enviados: ${data.recibos_enviados}/${data.total}\n`;
+      if (data.falhas?.length) {
+        msg += `\n⚠️ ${data.falhas.length} falha(s):\n`;
+        msg += data.falhas.slice(0, 8).map(f => `• ${f.funcionario_nome}: ${f.motivo}`).join('\n');
+        if (data.falhas.length > 8) msg += `\n... e mais ${data.falhas.length - 8}`;
+      }
+      alert(msg);
+    } catch (err) {
+      mostrarToastComprovante('', 'error', 0, true);
+      alert('Erro: ' + err.message);
+    }
+  };
+
+  // ============== v3.15.17: Trocar aba (Aberto/Quitadas) ==============
+  function trocarAba(novaAba) {
+    if (novaAba !== 'aberto' && novaAba !== 'quitadas') return;
+    abaAtual = novaAba;
+    // Re-renderiza o container usando obra_id armazenado no dataset
+    const container = document.getElementById('painel-saldo-fechamentos');
+    const obraId = container?.dataset?.obraId;
+    if (obraId) renderizarSaldoAberto('painel-saldo-fechamentos', obraId);
+  }
+
   // ============== EXPORT ==============
   window.FolhaFechamento = {
     abrirModal,
     renderizarSaldoAberto,
+    trocarAba,
   };
 })();

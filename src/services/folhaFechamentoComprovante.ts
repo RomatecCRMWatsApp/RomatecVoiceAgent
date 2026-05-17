@@ -232,3 +232,136 @@ export async function getComprovanteItem(itemId: number): Promise<{
     filename: (rows[0].comprovante_filename as string) || `comprovante-${itemId}`,
   };
 }
+
+// v3.15.17: Reenvio manual de comprovante + recibo Romatec pra UM item.
+// Cobre o caso 'WhatsApp falhou' no upload original (ZAPI offline, telefone
+// invalido) e o caso 'preciso mandar de novo'. Idempotente — pode chamar N vezes.
+export interface ReenviarItemResult {
+  ok: true;
+  item_id: number;
+  funcionario_nome: string;
+  comprovante_enviado: boolean;
+  comprovante_erro?: string;
+  recibo_enviado: boolean;
+  recibo_numero?: string;
+  recibo_erro?: string;
+}
+
+export async function reenviarComprovanteRecibo(itemId: number): Promise<ReenviarItemResult> {
+  // 1) Item + telefone do colaborador
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT fi.id, fi.funcionario_nome,
+            fi.comprovante_arquivo, fi.comprovante_mime, fi.comprovante_filename,
+            e.telefone
+       FROM folha_fechamento_itens fi
+       LEFT JOIN romatec_obra_equipe e ON e.id = fi.funcionario_id
+      WHERE fi.id = ?
+      LIMIT 1`,
+    [itemId]
+  );
+  if (rows.length === 0) throw new Error('Item nao encontrado.');
+  const it = rows[0];
+  const telefone = String(it.telefone || '').replace(/\D/g, '');
+  if (!telefone || telefone.length < 10) {
+    throw new Error('Colaborador sem telefone valido cadastrado.');
+  }
+
+  const out: ReenviarItemResult = {
+    ok: true,
+    item_id: itemId,
+    funcionario_nome: String(it.funcionario_nome),
+    comprovante_enviado: false,
+    recibo_enviado: false,
+  };
+
+  // 2) Comprovante via WhatsApp (se existir blob salvo)
+  if (it.comprovante_arquivo) {
+    try {
+      const { sendDocument } = await import('../integrations/whatsapp');
+      const buf = it.comprovante_arquivo as Buffer;
+      const filename = String(it.comprovante_filename || `comprovante-${itemId}`)
+        .replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+      await sendDocument(telefone, buf.toString('base64'), filename);
+      await pool.execute(
+        `UPDATE folha_fechamento_itens SET comprovante_enviado_whatsapp = NOW() WHERE id = ?`,
+        [itemId]
+      );
+      out.comprovante_enviado = true;
+    } catch (err) {
+      out.comprovante_erro = (err as Error).message;
+    }
+  } else {
+    out.comprovante_erro = 'Nenhum comprovante anexado a este item.';
+  }
+
+  // 3) Recibo Romatec vinculado ao item
+  const [rec] = await pool.query<RowDataPacket[]>(
+    `SELECT id, numero FROM recibos
+      WHERE resource_type = 'folha_fechamento_item' AND resource_id = ?
+      ORDER BY id DESC LIMIT 1`,
+    [String(itemId)]
+  );
+  if (rec.length === 0) {
+    out.recibo_erro = 'Item sem recibo Romatec vinculado.';
+  } else {
+    try {
+      const { enviarReciboWhatsApp } = await import('../integrations/recibos');
+      const r = await enviarReciboWhatsApp({ id: Number(rec[0].id), enviar_pdf: false, forcar: true });
+      out.recibo_enviado = true;
+      out.recibo_numero = r.numero;
+    } catch (err) {
+      out.recibo_erro = (err as Error).message;
+    }
+  }
+  return out;
+}
+
+// v3.15.17: Acao em lote — reenvia todos os itens pagos de um fechamento.
+// Continua mesmo se um item falhar; retorna agregado.
+export interface EnviarTudoResult {
+  ok: true;
+  fechamento_id: number;
+  total: number;
+  comprovantes_enviados: number;
+  recibos_enviados: number;
+  falhas: Array<{ item_id: number; funcionario_nome: string; motivo: string }>;
+  itens: ReenviarItemResult[];
+}
+
+export async function enviarTudoFechamento(fechamentoId: number): Promise<EnviarTudoResult> {
+  const [itens] = await pool.query<RowDataPacket[]>(
+    `SELECT id FROM folha_fechamento_itens
+      WHERE fechamento_id = ? AND status_pagamento = 'paga'
+      ORDER BY funcionario_nome`,
+    [fechamentoId]
+  );
+  if (itens.length === 0) throw new Error('Fechamento nao tem itens pagos.');
+
+  const out: EnviarTudoResult = {
+    ok: true,
+    fechamento_id: fechamentoId,
+    total: itens.length,
+    comprovantes_enviados: 0,
+    recibos_enviados: 0,
+    falhas: [],
+    itens: [],
+  };
+  for (const row of itens) {
+    const itemId = Number(row.id);
+    try {
+      const r = await reenviarComprovanteRecibo(itemId);
+      out.itens.push(r);
+      if (r.comprovante_enviado) out.comprovantes_enviados++;
+      if (r.recibo_enviado) out.recibos_enviados++;
+      if (!r.comprovante_enviado && r.comprovante_erro) {
+        out.falhas.push({ item_id: itemId, funcionario_nome: r.funcionario_nome, motivo: `Comprovante: ${r.comprovante_erro}` });
+      }
+      if (!r.recibo_enviado && r.recibo_erro) {
+        out.falhas.push({ item_id: itemId, funcionario_nome: r.funcionario_nome, motivo: `Recibo: ${r.recibo_erro}` });
+      }
+    } catch (err) {
+      out.falhas.push({ item_id: itemId, funcionario_nome: `Item #${itemId}`, motivo: (err as Error).message });
+    }
+  }
+  return out;
+}

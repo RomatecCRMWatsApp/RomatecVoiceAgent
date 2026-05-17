@@ -3506,6 +3506,37 @@ app.get('/api/folha/fechamento/:id/pdf-relatorio', async (req: Request, res: Res
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v3.15.17: PDF unificado = relatorio + comprovantes anexados (1 pagina por item).
+app.get('/api/folha/fechamento/:id/pdf-completo', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) { res.status(400).json({ error: 'id invalido' }); return; }
+    const m = await import('./services/folhaFechamentoPdf');
+    const pdf = await m.gerarPdfFechamentoCompleto(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="fechamento-${id}-completo.pdf"`);
+    res.send(pdf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// v3.15.17: reenviar comprovante + recibo de UM item ja pago.
+app.post('/api/folha/item/:itemId/reenviar', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/folhaFechamentoComprovante');
+    const r = await m.reenviarComprovanteRecibo(Number(req.params.itemId));
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// v3.15.17: bulk - reenvia comprovantes + recibos de TODOS itens pagos do fechamento.
+app.post('/api/folha/fechamento/:id/enviar-tudo', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/folhaFechamentoComprovante');
+    const r = await m.enviarTudoFechamento(Number(req.params.id));
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // v3.10.1: retorna dados do colaborador dono de um item (nome, PIX, etc) pra
 // pre-preencher o modal de "Marcar Pago".
 app.get('/api/folha/item/:itemId/dados-pagamento', async (req: Request, res: Response) => {
