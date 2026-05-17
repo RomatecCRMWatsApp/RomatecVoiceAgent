@@ -8634,6 +8634,29 @@ function abrirEditarMembro(m) {
         const f = file.files?.[0];
         if (!f) return;
         if (f.size > 5 * 1024 * 1024) { alert('Foto maior que 5MB'); return; }
+        // v3.16.1 P0 (D2): se offline, enfileira pra subir depois
+        if (!navigator.onLine && window.OfflineEngine?.enfileirarBlob) {
+          try {
+            await window.OfflineEngine.enfileirarBlob({
+              serverId: m.id, // membro ja existe no server
+              campo: 'arquivo',
+              file: f,
+              endpointTemplate: '/api/equipe/:id/foto',
+            });
+            // Preview local com FileReader pra dar feedback imediato
+            const reader = new FileReader();
+            reader.onload = () => { if (prev) prev.style.backgroundImage = `url('${reader.result}')`; };
+            reader.readAsDataURL(f);
+            btn.textContent = '📎 Salva offline';
+            alert('📎 Foto salva no aparelho. Vai subir quando reconectar.');
+            window.OfflineEngine.atualizarBadgeOffline?.();
+            file.value = '';
+            return;
+          } catch (e) {
+            alert('Erro ao salvar offline: ' + e.message);
+            return;
+          }
+        }
         const fd = new FormData();
         fd.append('arquivo', f);
         btn.disabled = true; const txtAntes = btn.textContent;
@@ -8645,6 +8668,22 @@ function abrirEditarMembro(m) {
           if (prev) prev.style.backgroundImage = `url('/api/equipe/${m.id}/foto?_=${Date.now()}')`;
           btn.textContent = '📷 Trocar foto';
         } catch (e) {
+          // v3.16.1 P0 (D2): rede caiu no meio — fallback pra fila
+          if (window.OfflineEngine?.enfileirarBlob && /Failed to fetch|NetworkError|timeout/i.test(e.message || '')) {
+            try {
+              await window.OfflineEngine.enfileirarBlob({
+                serverId: m.id, campo: 'arquivo', file: f,
+                endpointTemplate: '/api/equipe/:id/foto',
+              });
+              const reader = new FileReader();
+              reader.onload = () => { if (prev) prev.style.backgroundImage = `url('${reader.result}')`; };
+              reader.readAsDataURL(f);
+              btn.textContent = '📎 Salva offline';
+              alert('📎 Conexao caiu — foto salva no aparelho. Vai subir quando reconectar.');
+              window.OfflineEngine.atualizarBadgeOffline?.();
+              return;
+            } catch (_) {}
+          }
           alert('Erro no upload: ' + e.message);
           btn.textContent = txtAntes;
         } finally {
