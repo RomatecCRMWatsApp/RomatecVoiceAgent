@@ -983,7 +983,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
 
       const baseUrlAv = getBaseUrl();
       const QRCode = (await import('qrcode')).default;
-      const tipoIcone = (t: string) => t === 'kml' ? '🌍' : '📐';
+      const tipoIcone = (t: string) => t === 'kml' ? '🌍' : (t === 'pdf' ? '📄' : '📐');
       const fmtBytes = (b: number) => {
         if (b < 1024) return `${b} B`;
         if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;

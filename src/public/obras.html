@@ -17707,7 +17707,7 @@ function renderLaudoTabArquivosVetoriais(c) {
     if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
     return (b / 1024 / 1024).toFixed(2) + ' MB';
   };
-  const tipoIcone = t => t === 'kml' ? '🌍' : '📐';
+  const tipoIcone = t => t === 'kml' ? '🌍' : (t === 'pdf' ? '📄' : '📐');
 
   const avisoJaEnviado = laudoJaEnviado ? `
     <div style="background:rgba(245,158,11,0.12); border:1px solid #f59e0b; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; color:#fbbf24;">
@@ -17717,10 +17717,10 @@ function renderLaudoTabArquivosVetoriais(c) {
 
   const dropzoneHtml = `
     <label id="lavDropZone" style="display:block; border:2px dashed var(--border-strong); border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:rgba(0,255,136,0.03); margin-bottom:12px;">
-      <input type="file" id="lavInput" multiple accept=".dxf,.dwg,.kml" style="display:none;">
+      <input type="file" id="lavInput" multiple accept=".dxf,.dwg,.kml,.pdf" style="display:none;">
       <div style="font-size:32px; margin-bottom:6px;">📤</div>
       <div style="font-size:14px; color:var(--neon); font-weight:600;">Arraste arquivos aqui ou clique para enviar</div>
-      <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">DXF · DWG (até 50 MB) · KML (até 20 MB)</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">DXF · DWG · PDF (até 50 MB) · KML (até 20 MB)</div>
     </label>
     <div id="lavProgresso" style="display:none; padding:8px; background:rgba(0,200,255,0.08); border:1px solid var(--neon); border-radius:6px; margin-bottom:8px; font-size:12px;"></div>
   `;
@@ -17769,8 +17769,8 @@ function renderLaudoTabArquivosVetoriais(c) {
   const uploadArquivos = async (fileList) => {
     if (!fileList || fileList.length === 0) return;
     // Validacao client de extensao
-    const extPermitidas = ['dxf', 'dwg', 'kml'];
-    const limitesMb = { dxf: 50, dwg: 50, kml: 20 };
+    const extPermitidas = ['dxf', 'dwg', 'kml', 'pdf'];
+    const limitesMb = { dxf: 50, dwg: 50, kml: 20, pdf: 50 };
     const validos = [];
     const erros = [];
     for (const f of fileList) {

@@ -120,6 +120,27 @@ describe('verificarMagicBytes — DXF', () => {
   });
 });
 
+describe('verificarMagicBytes — PDF', () => {
+  it('aceita header "%PDF-" nos primeiros 5 bytes', () => {
+    const buf = Buffer.concat([Buffer.from('%PDF-1.4\n', 'ascii'), Buffer.alloc(100)]);
+    expect(verificarMagicBytes('pdf', buf)).toBe(true);
+  });
+
+  it('aceita %PDF- com prefixo de até 1024 bytes (tolerância)', () => {
+    const buf = Buffer.concat([
+      Buffer.alloc(50, 0x20),
+      Buffer.from('%PDF-1.7\n', 'ascii'),
+      Buffer.alloc(100),
+    ]);
+    expect(verificarMagicBytes('pdf', buf)).toBe(true);
+  });
+
+  it('rejeita conteúdo sem %PDF-', () => {
+    const buf = Buffer.from('Hello, this is not a PDF', 'utf8');
+    expect(verificarMagicBytes('pdf', buf)).toBe(false);
+  });
+});
+
 describe('verificarMagicBytes — KML', () => {
   it('aceita XML com namespace KML', () => {
     const buf = Buffer.from('<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>', 'utf8');
@@ -167,7 +188,7 @@ describe('detectarTipoArquivo', () => {
   });
 
   it('rejeita extensão não suportada', () => {
-    expect(() => detectarTipoArquivo('arquivo.pdf', 'application/pdf', Buffer.alloc(10)))
+    expect(() => detectarTipoArquivo('arquivo.zip', 'application/zip', Buffer.alloc(10)))
       .toThrow(/Extensão.*não suportada/);
   });
 
@@ -182,5 +203,12 @@ describe('detectarTipoArquivo', () => {
     const buf = Buffer.from('  0\nSECTION\n', 'utf8');
     const r = detectarTipoArquivo('FAZENDA.DXF', 'application/dxf', buf);
     expect(r.tipo).toBe('dxf');
+  });
+
+  it('aceita .pdf com magic bytes válidos', () => {
+    const buf = Buffer.concat([Buffer.from('%PDF-1.5\n', 'ascii'), Buffer.alloc(100)]);
+    const r = detectarTipoArquivo('laudo-anterior.pdf', 'application/pdf', buf);
+    expect(r.tipo).toBe('pdf');
+    expect(r.magicBytesOk).toBe(true);
   });
 });

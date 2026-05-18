@@ -1,4 +1,5 @@
 // v3.17.0: Anexos vetoriais (DXF/DWG/KML) do Laudo de Demarcação.
+// v3.17.5: PDF adicionado ao ENUM (ALTER no fim — idempotente em DB ja criado).
 // Storage no próprio banco como LONGBLOB (mesmo padrão de laudos_demarcacao_fotos)
 // — Railway tem containers efêmeros sem volume persistente confiável.
 // Idempotente: re-execução ignora "already exists".
@@ -11,7 +12,7 @@ export async function runLaudosArquivosMigrations(): Promise<void> {
       sql: `CREATE TABLE laudos_demarcacao_arquivos (
         id INT AUTO_INCREMENT PRIMARY KEY,
         laudo_id INT NOT NULL,
-        tipo ENUM('dxf','dwg','kml') NOT NULL,
+        tipo ENUM('dxf','dwg','kml','pdf') NOT NULL,
         nome_original VARCHAR(255) NOT NULL COMMENT 'nome enviado pelo usuário',
         nome_armazenado VARCHAR(300) NOT NULL COMMENT 'nome sanitizado com hash',
         tamanho_bytes BIGINT NOT NULL,
@@ -53,6 +54,7 @@ export async function runLaudosArquivosMigrations(): Promise<void> {
     ['UPLOAD_MAX_SIZE_MB_DXF', '50', 'Tamanho máximo de arquivo DXF em MB'],
     ['UPLOAD_MAX_SIZE_MB_DWG', '50', 'Tamanho máximo de arquivo DWG em MB'],
     ['UPLOAD_MAX_SIZE_MB_KML', '20', 'Tamanho máximo de arquivo KML em MB'],
+    ['UPLOAD_MAX_SIZE_MB_PDF', '50', 'Tamanho máximo de arquivo PDF em MB'],
     ['DOWNLOAD_TOKEN_EXPIRACAO_DIAS', '365', 'Validade do token de download em dias (0 = sem expiração)'],
   ];
   for (const [chave, valor, descricao] of seeds) {
@@ -63,6 +65,23 @@ export async function runLaudosArquivosMigrations(): Promise<void> {
       );
     } catch (err) {
       console.error(`[laudos-arquivos-seed] FALHA ${chave}:`, (err as Error).message);
+    }
+  }
+
+  // v3.17.5: ALTER ENUM para adicionar 'pdf' caso a tabela já tenha sido criada
+  // em deploy anterior (DB em produção tem o ENUM antigo). MODIFY COLUMN é
+  // idempotente — repetir não falha.
+  try {
+    await pool.execute(
+      `ALTER TABLE laudos_demarcacao_arquivos
+         MODIFY COLUMN tipo ENUM('dxf','dwg','kml','pdf') NOT NULL`
+    );
+    console.log(`[laudos-arquivos-migrations] OK: ALTER ENUM tipo += 'pdf'`);
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    // Pode falhar se a tabela ainda não existe (CREATE acima falhou) — ignora silenciosamente
+    if (!/doesn't exist|Unknown table/i.test(msg)) {
+      console.warn(`[laudos-arquivos-migrations] aviso ALTER ENUM: ${msg.slice(0, 200)}`);
     }
   }
 }

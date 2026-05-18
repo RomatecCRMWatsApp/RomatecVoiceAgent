@@ -7,7 +7,7 @@ import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import pool from '../database/connection';
 import { getConfigNumber } from './configuracoes';
 
-export type TipoArquivoVetorial = 'dxf' | 'dwg' | 'kml';
+export type TipoArquivoVetorial = 'dxf' | 'dwg' | 'kml' | 'pdf';
 
 export interface ArquivoVetorialResumo {
   id: number;
@@ -26,13 +26,14 @@ export interface ArquivoVetorialResumo {
   created_at: string;
 }
 
-const EXTENSOES_VALIDAS: TipoArquivoVetorial[] = ['dxf', 'dwg', 'kml'];
+const EXTENSOES_VALIDAS: TipoArquivoVetorial[] = ['dxf', 'dwg', 'kml', 'pdf'];
 
 const MIME_POR_TIPO: Record<TipoArquivoVetorial, string[]> = {
   // DXF/DWG não têm MIME padrão consistente; navegadores variam.
   dxf: ['image/vnd.dxf', 'application/dxf', 'application/octet-stream', 'text/plain', ''],
   dwg: ['image/vnd.dwg', 'application/dwg', 'application/acad', 'application/octet-stream', ''],
   kml: ['application/vnd.google-earth.kml+xml', 'application/xml', 'text/xml', 'text/plain', ''],
+  pdf: ['application/pdf', 'application/octet-stream', ''],
 };
 
 /**
@@ -102,6 +103,15 @@ export function verificarMagicBytes(tipo: TipoArquivoVetorial, conteudo: Buffer)
     const offset = (conteudo[0] === 0xEF && conteudo[1] === 0xBB && conteudo[2] === 0xBF) ? 3 : 0;
     const head500 = conteudo.subarray(offset, offset + 500).toString('utf8');
     return /<\?xml[\s\S]*?\?>/.test(head500) && /opengis\.net\/kml/.test(head500);
+  }
+  if (tipo === 'pdf') {
+    // PDF: assinatura "%PDF-" nos primeiros 5 bytes (com possíveis bytes de BOM antes).
+    // PDFs raramente têm BOM, mas alguns viewers toleram bytes nulos no início.
+    const head5 = conteudo.subarray(0, 5).toString('ascii');
+    if (head5 === '%PDF-') return true;
+    // Tolerância: alguns geradores adicionam até 1024 bytes antes do %PDF-
+    const head1k = conteudo.subarray(0, 1024).toString('binary');
+    return head1k.includes('%PDF-');
   }
   return false;
 }
