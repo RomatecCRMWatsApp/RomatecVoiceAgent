@@ -904,6 +904,10 @@
 
   // Expoe a API:
   window.api = api; // CRITICO: obras.html chama api() em centenas de lugares
+  // v3.17.2: obras.html chama mostrarToastOffline() direto (sem prefixo) em 12 lugares.
+  // Sem isto, qualquer fluxo que dispara toast (sync de fotos, parse RTK, copiar
+  // memorial, etc.) quebra com ReferenceError e aborta a operacao.
+  window.mostrarToastOffline = mostrarToastOffline;
   window.OfflineEngine = {
     api,
     ehMutacaoP0,
