@@ -17663,11 +17663,12 @@ function renderLaudoTabFotos(c) {
 }
 
 // v3.17.0: Arquivos Técnicos Vetoriais (DXF / DWG / KML) — upload + listagem + download
+// v3.17.3: upload liberado mesmo apos laudo enviado/assinado (CEO precisa anexar
+// vetoriais retro-ativamente em laudos antigos). Apenas aviso visual.
 function renderLaudoTabArquivosVetoriais(c) {
   const l = state.laudoAtual;
   const arquivos = l.arquivosVetoriais || [];
-  // Laudo ja assinado/enviado: somente leitura (tokens continuam ativos pro cliente)
-  const readonly = ['ASSINADO','RECIBO_GERADO','ENVIADO','CONFIRMADO'].includes(l.status);
+  const laudoJaEnviado = ['ASSINADO','RECIBO_GERADO','ENVIADO','CONFIRMADO'].includes(l.status);
 
   const formatBytes = b => {
     if (!b || b <= 0) return '0 B';
@@ -17677,7 +17678,13 @@ function renderLaudoTabArquivosVetoriais(c) {
   };
   const tipoIcone = t => t === 'kml' ? '🌍' : '📐';
 
-  const dropzoneHtml = readonly ? '' : `
+  const avisoJaEnviado = laudoJaEnviado ? `
+    <div style="background:rgba(245,158,11,0.12); border:1px solid #f59e0b; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; color:#fbbf24;">
+      ⚠️ <strong>Laudo já foi enviado.</strong> Arquivos novos aparecerão na próxima geração do PDF — o documento que o cliente recebeu não muda. Os tokens permanecem válidos.
+    </div>
+  ` : '';
+
+  const dropzoneHtml = `
     <label id="lavDropZone" style="display:block; border:2px dashed var(--border-strong); border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:rgba(0,255,136,0.03); margin-bottom:12px;">
       <input type="file" id="lavInput" multiple accept=".dxf,.dwg,.kml" style="display:none;">
       <div style="font-size:32px; margin-bottom:6px;">📤</div>
@@ -17705,10 +17712,8 @@ function renderLaudoTabArquivosVetoriais(c) {
               </div>
             </div>
             <div style="display:flex; flex-direction:column; gap:4px;">
-              ${!readonly ? `
-                <button class="btn-secondary" data-lav-regen="${a.id}" title="Gerar novo token (invalida o anterior)" style="font-size:10px; padding:4px 8px;">🔄</button>
-                <button data-lav-del="${a.id}" title="Remover" style="background:#dc2626; color:#fff; border:none; padding:4px 8px; font-size:10px; border-radius:4px; cursor:pointer;">🗑</button>
-              ` : ''}
+              <button class="btn-secondary" data-lav-regen="${a.id}" title="Gerar novo token (invalida o anterior)" style="font-size:10px; padding:4px 8px;">🔄</button>
+              <button data-lav-del="${a.id}" title="Remover" style="background:#dc2626; color:#fff; border:none; padding:4px 8px; font-size:10px; border-radius:4px; cursor:pointer;">🗑</button>
             </div>
           </div>
         `;
@@ -17719,14 +17724,12 @@ function renderLaudoTabArquivosVetoriais(c) {
       <h3 style="margin-top:0; font-size:14px;">📐 Arquivos Técnicos Vetoriais</h3>
       <p style="font-size:11px; color:var(--text-muted); margin:0 0 12px;">
         Anexe arquivos CAD/GIS (DXF, DWG, KML) que serão disponibilizados via QR code e link no PDF do laudo.
-        ${readonly ? '<br><strong style="color:var(--gold);">Laudo já enviado — somente leitura.</strong>' : ''}
       </p>
+      ${avisoJaEnviado}
       ${dropzoneHtml}
       <div id="lavLista">${linhasHtml}</div>
     </div>
   `;
-
-  if (readonly) return;
 
   const dropZone = document.getElementById('lavDropZone');
   const input = document.getElementById('lavInput');
