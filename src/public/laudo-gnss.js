@@ -284,12 +284,50 @@
     };
   }
 
+  async function listarPontosDoLaudo(laudoId) {
+    return api(`/api/laudos-demarcacao/${laudoId}/pontos`);
+  }
+
+  async function abrirAplicarEmPonto(sessaoId, laudoId, onDone) {
+    const pontos = await listarPontosDoLaudo(laudoId).catch(() => []);
+    const opcoes = pontos.map(p => `<option value="${p.id}">${p.ordem} — ${p.rotulo}</option>`).join('');
+    const dlg = montarModal('Aplicar coordenadas em ponto do laudo', `
+      <label><input type="radio" name="ap-modo" value="existente" checked> Atualizar ponto existente</label>
+      <select id="ap-ponto">${opcoes || '<option value="">(nenhum ponto cadastrado)</option>'}</select>
+      <hr>
+      <label><input type="radio" name="ap-modo" value="novo"> Criar novo vertice</label>
+      <label>Ordem (numero do vertice)</label>
+      <input type="number" id="ap-ordem" min="1" value="${pontos.length + 1}" />
+      <label>Rotulo</label>
+      <input type="text" id="ap-rotulo" maxlength="50" />
+      <button id="ap-ok">Aplicar</button>
+    `);
+    dlg.querySelector('#ap-ok').onclick = async () => {
+      const modo = dlg.querySelector('input[name="ap-modo"]:checked').value;
+      try {
+        if (modo === 'existente') {
+          const ponto_id = dlg.querySelector('#ap-ponto').value;
+          if (!ponto_id) return alert('Selecione um ponto ou crie novo');
+          await aplicarEmPonto(sessaoId, { ponto_id: Number(ponto_id) });
+        } else {
+          await aplicarEmPonto(sessaoId, {
+            criar_novo: true,
+            ordem: Number(dlg.querySelector('#ap-ordem').value),
+            rotulo: dlg.querySelector('#ap-rotulo').value.trim() || undefined,
+          });
+        }
+        dlg.close(); dlg.remove();
+        onDone && onDone();
+      } catch (err) { alert('Erro: ' + err.message); }
+    };
+  }
+
   window.LaudoGnss = {
     listarSessoes, criarSessao, uploadRinex, parseRinex, empacotarIbge,
     importarRetornoIbge, importarPppExterno, inserirManual, aplicarEmPonto,
     renderListaEm,
     abrirNovaSessao,
     abrirImportarRetorno,
-    abrirAplicarEmPonto: null,     // setado na Task 6.3
+    abrirAplicarEmPonto,
   };
 })();
