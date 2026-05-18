@@ -1062,6 +1062,110 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
     console.warn(`[laudoPdf] falha seção arquivos anexos: ${(errAv as Error).message}`);
   }
 
+  // ── 13.6. Memorial de Processamento GNSS (v3.18.0) ──────────────────
+  // Renderiza apenas se houver sessoes GNSS processadas vinculadas a este laudo.
+  try {
+    const gnss = await import('../integrations/gnss');
+    const sessoes = await gnss.listarProcessamentos({ laudo_id: Number(laudo.id), status: 'processado' });
+    if (sessoes.length > 0) {
+      doc.addPage();
+      cy = 50;
+      doc.fontSize(14).fillColor(corHex).font('Helvetica-Bold')
+         .text('MEMORIAL DE PROCESSAMENTO GNSS', 40, cy, { width: 515, align: 'center' });
+      cy += 22;
+      doc.moveTo(40, cy).lineTo(555, cy).strokeColor(corHex).lineWidth(1).stroke();
+      cy += 12;
+
+      doc.fontSize(9).fillColor('#444').font('Helvetica')
+         .text(
+           'As coordenadas dos vertices deste laudo foram obtidas por meio de rastreio GNSS pos-processado, conforme detalhamento:',
+           40, cy, { width: 515, align: 'justify' }
+         );
+      cy = doc.y + 14;
+
+      const formatarDMS = (graus: number, hemPos: 'N' | 'E', hemNeg: 'S' | 'W'): string => {
+        const sinal = graus < 0 ? hemNeg : hemPos;
+        const abs = Math.abs(graus);
+        const g = Math.floor(abs);
+        const minDec = (abs - g) * 60;
+        const m = Math.floor(minDec);
+        const s = (minDec - m) * 60;
+        return `${g}° ${m.toString().padStart(2, '0')}' ${s.toFixed(5).padStart(8, '0')}" ${sinal}`;
+      };
+      const fmtNum = (n: number, dec = 3): string =>
+        Number(n).toLocaleString('pt-BR', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+
+      for (const s of sessoes) {
+        const cardH = 195;
+        if (cy + cardH > 770) { doc.addPage(); cy = 50; }
+
+        doc.save()
+           .lineWidth(0.8)
+           .strokeColor(corHex)
+           .roundedRect(40, cy, 515, cardH, 6)
+           .stroke()
+           .restore();
+
+        doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold')
+           .text(`Sessão ${s.rotulo}`, 52, cy + 8, { width: 491 });
+
+        const linhas: string[] = [];
+        if (s.receptor_modelo) linhas.push(
+          `Receptor:       ${s.receptor_modelo}${s.receptor_serial ? '  (SN: ' + s.receptor_serial + ')' : ''}`
+        );
+        if (s.antena_modelo) linhas.push(
+          `Antena:         ${s.antena_modelo}${s.antena_altura_m != null ? '  altura: ' + fmtNum(Number(s.antena_altura_m), 3) + ' m' : ''}`
+        );
+        if (s.duracao_segundos != null) linhas.push(
+          `Duração:        ${Math.floor(Number(s.duracao_segundos)/3600)}h ${Math.floor((Number(s.duracao_segundos)%3600)/60).toString().padStart(2,'0')}min` +
+          (s.intervalo_amostragem_s != null ? `  Intervalo: ${s.intervalo_amostragem_s}s` : '') +
+          (s.num_epocas != null ? `  ${s.num_epocas} épocas` : '')
+        );
+        if (s.sistemas_gnss) linhas.push(`Sistemas:       ${s.sistemas_gnss}`);
+        if (s.inicio_rastreio) {
+          const iso = s.inicio_rastreio instanceof Date
+            ? s.inicio_rastreio.toISOString()
+            : String(s.inicio_rastreio);
+          linhas.push(`Início:         ${iso.replace('T', ' ').slice(0, 19)} UTC`);
+        }
+        linhas.push(
+          `Processamento:  ${s.fonte === 'rinex_ibge' ? 'IBGE-PPP' : s.fonte}` +
+          `  ${s.ref_geodesico || 'SIRGAS2000'}` +
+          (s.modelo_geoidal ? '  ' + s.modelo_geoidal : '')
+        );
+        linhas.push('');
+        linhas.push('Coordenadas finais:');
+        if (s.latitude_graus != null) linhas.push(
+          `  Latitude:    ${formatarDMS(Number(s.latitude_graus), 'N', 'S')}` +
+          (s.sigma_lat_m != null ? `   σ = ${fmtNum(Number(s.sigma_lat_m), 3)} m` : '')
+        );
+        if (s.longitude_graus != null) linhas.push(
+          `  Longitude:   ${formatarDMS(Number(s.longitude_graus), 'E', 'W')}` +
+          (s.sigma_lon_m != null ? `   σ = ${fmtNum(Number(s.sigma_lon_m), 3)} m` : '')
+        );
+        if (s.altitude_ortometrica_m != null) linhas.push(
+          `  Alt. ortom.: ${fmtNum(Number(s.altitude_ortometrica_m), 3)} m` +
+          (s.sigma_alt_m != null ? `   σ = ${fmtNum(Number(s.sigma_alt_m), 3)} m` : '')
+        );
+        if (s.utm_zona && s.utm_norte_m != null && s.utm_leste_m != null) linhas.push(
+          `  UTM ${s.utm_zona}${s.utm_hemisferio || 'S'}:  N ${fmtNum(Number(s.utm_norte_m), 3)} m / E ${fmtNum(Number(s.utm_leste_m), 3)} m` +
+          (s.utm_mc != null ? `  MC ${s.utm_mc}° W` : '')
+        );
+        if (s.pdop_medio != null) linhas.push(`  PDOP médio: ${fmtNum(Number(s.pdop_medio), 2)}`);
+
+        doc.font('Courier').fontSize(8).fillColor('#222')
+           .text(linhas.join('\n'), 52, cy + 26, { width: 491 });
+        doc.font('Helvetica').fillColor('#111');
+
+        cy += cardH + 10;
+      }
+
+      if (cy > 700) { doc.addPage(); cy = 50; }
+    }
+  } catch (errGnss) {
+    console.warn(`[laudoPdf] falha memorial GNSS: ${(errGnss as Error).message}`);
+  }
+
   // ── 14. QR + hash + selo ───────────────────────────────────────────
   // v3.0.4: Y do QR/hash relativo a cy (era Y=720 absoluto). Garantido caber
   // pela checagem de `espacoFinal` antes do bloco local/data acima.
