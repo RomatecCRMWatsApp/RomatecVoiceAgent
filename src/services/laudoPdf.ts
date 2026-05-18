@@ -21,6 +21,8 @@
 import PDFDocument from 'pdfkit';
 import path from 'path';
 import fs from 'fs';
+import pool from '../database/connection';
+import type { RowDataPacket } from 'mysql2';
 import { getTenantSettings } from './tenantSettings';
 import {
   renderQRValidacao,
@@ -864,6 +866,82 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
        .text('A Portaria INCRA 12/2025 admite variação de ±10% sobre os valores médios em função de particularidades do objeto, encargos e insumos regionais. Este laudo apresenta os valores aplicados ao serviço prestado, conforme acordo entre as partes.',
              40, cy, { width: 515, align: 'justify' });
     cy = doc.y + 14;
+  }
+
+  // ── 11.5. DADOS PARA PAGAMENTO (PIX + QR Code) (v3.20.0) ─────────────
+  // Renderiza apenas se ha valor_final E dados_pagamento_emissor cadastrado.
+  // Puxa PIX/banco/agencia/conta do emissor ativo (Romatec) e gera BR Code
+  // (PIX Copia-e-Cola) embedando o valor_final pra cliente pagar direto.
+  try {
+    const [dpRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT pix, banco, agencia, conta, tipo_conta, titular, documento
+         FROM dados_pagamento_emissor WHERE ativo = 1 ORDER BY id DESC LIMIT 1`
+    );
+    const emissor = (dpRows && dpRows[0]) as Record<string, string | null> | undefined;
+    const valorPagar = laudo.valor_final != null ? Number(laudo.valor_final) : null;
+    const fmtBRL = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+    if (emissor && emissor.pix && valorPagar && valorPagar > 0) {
+      if (cy > 600) { doc.addPage(); cy = 60; }
+      doc.fontSize(10).fillColor('#888').font('Helvetica-Bold')
+         .text(`${temPrecif ? '12' : '11'}. DADOS PARA PAGAMENTO`, 40, cy);
+      cy += 14;
+
+      // Gera o BR Code (Copia-e-Cola) com o valor embedado
+      const { gerarPixBrCode } = await import('./pixBrCode');
+      const brCode = gerarPixBrCode({
+        chave: String(emissor.pix),
+        nome: String(emissor.titular || 'ROMATEC'),
+        cidade: 'ACAILANDIA',
+        valor: valorPagar,
+        txid: (laudo.numero_laudo || `LAUDO${laudo.id}`).replace(/[^a-zA-Z0-9]/g, '').slice(0, 25),
+        descricao: `Laudo ${laudo.numero_laudo || laudo.id}`,
+      });
+
+      const QRCode = (await import('qrcode')).default;
+      let qrPng: Buffer | null = null;
+      try {
+        qrPng = await QRCode.toBuffer(brCode, {
+          width: 130, margin: 1, errorCorrectionLevel: 'M',
+          color: { dark: '#000', light: '#FFF' },
+        });
+      } catch (qrErr) {
+        console.warn(`[laudoPdf] falha QR PIX: ${(qrErr as Error).message}`);
+      }
+
+      // Layout: bloco a esquerda (dados em texto) + QR a direita
+      const blocoY = cy;
+      doc.fontSize(9).fillColor('#222').font('Helvetica');
+      const linhas: string[] = [];
+      linhas.push(`Titular:    ${emissor.titular || '—'}`);
+      linhas.push(`Documento:  ${emissor.documento || '—'}`);
+      linhas.push(`PIX:        ${emissor.pix}`);
+      if (emissor.banco)   linhas.push(`Banco:      ${emissor.banco}`);
+      if (emissor.agencia) linhas.push(`Agência:    ${emissor.agencia}`);
+      if (emissor.conta)   linhas.push(`Conta:      ${emissor.conta}${emissor.tipo_conta ? ' (' + emissor.tipo_conta + ')' : ''}`);
+      linhas.push('');
+      linhas.push(`VALOR A PAGAR: ${fmtBRL(valorPagar)}`);
+      doc.font('Courier').fontSize(9).fillColor('#222')
+         .text(linhas.join('\n'), 40, blocoY, { width: 380 });
+
+      // QR Code a direita
+      if (qrPng) {
+        doc.image(qrPng, 425, blocoY, { width: 130 });
+        doc.fontSize(7).fillColor('#666').font('Helvetica-Oblique')
+           .text('Escaneie no app do banco', 425, blocoY + 132, { width: 130, align: 'center' });
+      }
+
+      cy = Math.max(doc.y, blocoY + 150) + 8;
+
+      // PIX Copia-e-Cola em fonte pequena (cliente pode copiar do PDF)
+      doc.fontSize(7).fillColor('#444').font('Helvetica-Bold')
+         .text('PIX Copia-e-Cola:', 40, cy);
+      cy = doc.y + 2;
+      doc.fontSize(7).fillColor('#444').font('Courier')
+         .text(brCode, 40, cy, { width: 515 });
+      cy = doc.y + 12;
+    }
+  } catch (errPix) {
+    console.warn(`[laudoPdf] falha secao DADOS PARA PAGAMENTO: ${(errPix as Error).message}`);
   }
 
   // ── 12/13. ART/TRT ────────────────────────────────────────────────────
