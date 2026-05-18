@@ -22,10 +22,32 @@ import { latLonToUtm, isWithinBrazil } from '../services/gnss/coordTransform';
 
 const gnssRouter = Router();
 
+// v3.18.1: limite por arquivo 100 MB — RINEX obs de sessoes longas (>2h) com
+// alta taxa de amostragem (1 Hz) e multiplos sistemas (GPS+GLO+GAL) facilmente
+// passa de 25 MB. ZIP de retorno do IBGE-PPP tambem pode crescer com PDF gerado.
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024, files: 10 },
+  limits: { fileSize: 100 * 1024 * 1024, files: 10 },
 });
+
+// v3.18.1: handler de erro do multer pra devolver mensagem util (em vez de 500
+// generico do Express default error handler). Aplicado a TODAS as rotas que
+// usam `upload.array(...)` mais abaixo.
+import type { NextFunction } from 'express';
+function multerErrorHandler(err: unknown, _req: Request, res: Response, next: NextFunction) {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = (err as { code?: string }).code;
+    if (code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        error: 'arquivo muito grande (limite 100 MB por arquivo). Para RINEX maiores, comprima em .zip antes de enviar.',
+      });
+    }
+    if (code === 'LIMIT_FILE_COUNT' || code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(400).json({ error: `multer: ${code}` });
+    }
+  }
+  return next(err);
+}
 
 // POST /api/gnss/processamentos
 //   body: { rotulo, fonte, laudo_id? }
@@ -442,5 +464,9 @@ gnssRouter.post('/processamentos/:id/manual', async (req: Request, res: Response
     res.json({ processamento: await obterProcessamento(id) });
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
+
+// v3.18.1: error middleware do router — captura erros do multer (LIMIT_FILE_SIZE
+// etc.) e devolve 413/400 com mensagem util. Deve ser o ULTIMO middleware do router.
+gnssRouter.use(multerErrorHandler);
 
 export default gnssRouter;
