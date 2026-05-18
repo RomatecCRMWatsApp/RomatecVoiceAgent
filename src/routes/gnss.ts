@@ -18,7 +18,9 @@ import {
   validarRinexParaSubmissao,
 } from '../services/gnss/processamentoService';
 import { empacotarParaIbge, desempacotarRetornoIbge } from '../services/gnss/ibgePppPackager';
-import { latLonToUtm, isWithinBrazil } from '../services/gnss/coordTransform';
+import { latLonToUtm, isWithinBrazil, decimalToDms } from '../services/gnss/coordTransform';
+import type { ProcessamentoGnss } from '../integrations/gnss';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 
 const gnssRouter = Router();
 
@@ -47,6 +49,109 @@ function multerErrorHandler(err: unknown, _req: Request, res: Response, next: Ne
     }
   }
   return next(err);
+}
+
+// v3.19.0: Auto-aplica os dados de uma sessao GNSS processada em um vertice
+// do laudo. Se a sessao ainda nao tem ponto_id vinculado, cria um NOVO vertice
+// com a proxima ordem disponivel (MAX(ordem)+1). Se ja tem, ATUALIZA o
+// existente — idempotente, re-importacao do retorno IBGE nao duplica vertices.
+async function autoAplicarEmVertice(p: ProcessamentoGnss): Promise<number | null> {
+  if (!p.laudo_id || p.latitude_graus == null || p.longitude_graus == null) return null;
+  const lat = Number(p.latitude_graus);
+  const lon = Number(p.longitude_graus);
+  const latGms = decimalToDms(lat, 'N', 'S');
+  const lonGms = decimalToDms(lon, 'E', 'W');
+
+  if (p.ponto_id) {
+    // UPDATE — sessao ja vinculada a um vertice (re-importacao)
+    await pool.execute(
+      `UPDATE laudos_demarcacao_pontos SET
+         utm_zona = ?, utm_hemisferio = ?, utm_e = ?, utm_n = ?,
+         lat_decimal = ?, long_decimal = ?, lat_gms = ?, long_gms = ?,
+         altitude = ?, tempo_rastreio_seg = ?
+       WHERE id = ? AND laudo_id = ?`,
+      [p.utm_zona, p.utm_hemisferio, p.utm_leste_m, p.utm_norte_m,
+       lat, lon, latGms, lonGms,
+       p.altitude_ortometrica_m, p.duracao_segundos,
+       p.ponto_id, p.laudo_id]
+    );
+    return p.ponto_id;
+  }
+
+  // INSERT — calcula proxima ordem
+  const [maxRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT COALESCE(MAX(ordem), 0) + 1 AS prox FROM laudos_demarcacao_pontos WHERE laudo_id = ?`,
+    [p.laudo_id]
+  );
+  const proximaOrdem = Number(maxRows[0]?.prox ?? 1);
+  const descricao = p.fonte === 'rinex_ibge'
+    ? `GNSS PPP IBGE — ${p.rotulo}`
+    : (p.fonte === 'ppp_manual' ? `PPP externo — ${p.rotulo}` : p.rotulo);
+
+  const [ins] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO laudos_demarcacao_pontos
+       (laudo_id, ordem, rotulo, utm_zona, utm_hemisferio, utm_e, utm_n,
+        lat_decimal, long_decimal, lat_gms, long_gms, altitude,
+        descricao_marco, tempo_rastreio_seg)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [p.laudo_id, proximaOrdem, p.rotulo,
+     p.utm_zona, p.utm_hemisferio, p.utm_leste_m, p.utm_norte_m,
+     lat, lon, latGms, lonGms,
+     p.altitude_ortometrica_m,
+     descricao,
+     p.duracao_segundos]
+  );
+  await atualizarProcessamento(p.id!, { ponto_id: ins.insertId });
+  return ins.insertId;
+}
+
+// v3.19.0: Auto-preenche os campos GNSS da base no laudo (base_nome,
+// base_inicio_rastreio, base_fim_rastreio, base_observacoes) — SO se ainda
+// estiverem vazios. Nao sobrescreve entrada manual do usuario.
+async function autoPreencherBaseGnssNoLaudo(p: ProcessamentoGnss): Promise<void> {
+  if (!p.laudo_id) return;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT base_nome, base_inicio_rastreio, base_fim_rastreio, base_observacoes
+       FROM laudos_demarcacao WHERE id = ?`,
+    [p.laudo_id]
+  );
+  if (!rows.length) return;
+  const l = rows[0];
+
+  const sets: string[] = [];
+  const vals: (string | Date | number | null)[] = [];
+  if (!l.base_nome && p.receptor_modelo) {
+    sets.push('base_nome = ?');
+    vals.push(p.receptor_modelo);
+  }
+  if (!l.base_inicio_rastreio && p.inicio_rastreio) {
+    sets.push('base_inicio_rastreio = ?');
+    vals.push(p.inicio_rastreio);
+  }
+  if (!l.base_fim_rastreio && p.fim_rastreio) {
+    sets.push('base_fim_rastreio = ?');
+    vals.push(p.fim_rastreio);
+  }
+  if (!l.base_observacoes) {
+    const fonteLabel = p.fonte === 'rinex_ibge' ? 'Pos-processado IBGE-PPP'
+      : (p.fonte === 'ppp_manual' ? 'Pos-processado PPP (externo)' : 'GNSS');
+    const obs = [
+      fonteLabel,
+      p.ref_geodesico || 'SIRGAS2000',
+      p.modelo_geoidal || null,
+      p.sistemas_gnss || null,
+    ].filter(Boolean).join(' — ');
+    sets.push('base_observacoes = ?');
+    vals.push(obs);
+  }
+
+  if (sets.length) {
+    vals.push(p.laudo_id);
+    await pool.execute(
+      `UPDATE laudos_demarcacao SET ${sets.join(', ')} WHERE id = ?`,
+      vals
+    );
+  }
 }
 
 // POST /api/gnss/processamentos
@@ -362,7 +467,21 @@ gnssRouter.post('/processamentos/:id/parse-ibge-retorno', upload.array('arquivos
       ref_geodesico: result.refGeodesico,
     });
 
-    res.json({ processamento: await obterProcessamento(id) });
+    // v3.19.0: auto-aplica em vertice + auto-preenche base GNSS do laudo
+    const pAtualizado = await obterProcessamento(id);
+    let pontoIdAplicado: number | null = null;
+    if (pAtualizado?.laudo_id) {
+      try {
+        pontoIdAplicado = await autoAplicarEmVertice(pAtualizado);
+        await autoPreencherBaseGnssNoLaudo(pAtualizado);
+      } catch (autoErr) {
+        console.warn('[gnss] auto-aplicar falhou (nao bloqueante):', (autoErr as Error).message);
+      }
+    }
+    res.json({
+      processamento: pontoIdAplicado ? await obterProcessamento(id) : pAtualizado,
+      ponto_id_aplicado: pontoIdAplicado,
+    });
   } catch (err) {
     console.error('[gnss] parse-ibge-retorno:', err);
     res.status(500).json({ error: (err as Error).message });
@@ -391,28 +510,37 @@ gnssRouter.post('/processamentos/:id/aplicar-em-ponto', async (req: Request, res
     const lat = p.latitude_graus, lon = p.longitude_graus;
     const alt = p.altitude_ortometrica_m;
     const utmZ = p.utm_zona, utmH = p.utm_hemisferio, utmE = p.utm_leste_m, utmN = p.utm_norte_m;
+    // v3.19.0: tambem grava lat_gms / long_gms (graus°min'seg") pra tabela
+    // de vertices do PDF
+    const latGms = lat != null ? decimalToDms(Number(lat), 'N', 'S') : null;
+    const lonGms = lon != null ? decimalToDms(Number(lon), 'E', 'W') : null;
 
     let pontoId = ponto_id != null ? Number(ponto_id) : null;
     if (criar_novo || pontoId == null) {
-      const [r] = await pool.execute<import('mysql2').ResultSetHeader>(
+      const [r] = await pool.execute<ResultSetHeader>(
         `INSERT INTO laudos_demarcacao_pontos
            (laudo_id, ordem, rotulo, utm_zona, utm_hemisferio, utm_e, utm_n,
-            lat_decimal, long_decimal, altitude, tempo_rastreio_seg)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            lat_decimal, long_decimal, lat_gms, long_gms, altitude, tempo_rastreio_seg)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [p.laudo_id, Number(ordem ?? 1), (rotulo ?? p.rotulo).toString().slice(0, 50),
-         utmZ, utmH, utmE, utmN, lat, lon, alt, p.duracao_segundos]
+         utmZ, utmH, utmE, utmN, lat, lon, latGms, lonGms, alt, p.duracao_segundos]
       );
       pontoId = r.insertId;
     } else {
       await pool.execute(
         `UPDATE laudos_demarcacao_pontos SET
             utm_zona = ?, utm_hemisferio = ?, utm_e = ?, utm_n = ?,
-            lat_decimal = ?, long_decimal = ?, altitude = ?, tempo_rastreio_seg = ?
+            lat_decimal = ?, long_decimal = ?, lat_gms = ?, long_gms = ?,
+            altitude = ?, tempo_rastreio_seg = ?
           WHERE id = ? AND laudo_id = ?`,
-        [utmZ, utmH, utmE, utmN, lat, lon, alt, p.duracao_segundos, pontoId, p.laudo_id]
+        [utmZ, utmH, utmE, utmN, lat, lon, latGms, lonGms, alt, p.duracao_segundos, pontoId, p.laudo_id]
       );
     }
     await atualizarProcessamento(id, { ponto_id: pontoId });
+    // v3.19.0: tambem preenche metadados GNSS do laudo (base_*) se vazios
+    try { await autoPreencherBaseGnssNoLaudo({ ...p, ponto_id: pontoId }); } catch (e) {
+      console.warn('[gnss] auto-preencher base falhou (nao bloqueante):', (e as Error).message);
+    }
     res.json({ ok: true, ponto_id: pontoId });
   } catch (err) {
     console.error('[gnss] aplicar-em-ponto:', err);
@@ -467,7 +595,22 @@ gnssRouter.post('/processamentos/:id/parse-ppp-externo', upload.array('arquivos'
       }
     }
     if (!parsed) return res.status(400).json({ error: 'nenhum .txt valido encontrado para preencher coordenadas' });
-    res.json({ processamento: await obterProcessamento(id) });
+
+    // v3.19.0: auto-aplica em vertice + auto-preenche base GNSS do laudo
+    const pAtualizado = await obterProcessamento(id);
+    let pontoIdAplicado: number | null = null;
+    if (pAtualizado?.laudo_id) {
+      try {
+        pontoIdAplicado = await autoAplicarEmVertice(pAtualizado);
+        await autoPreencherBaseGnssNoLaudo(pAtualizado);
+      } catch (autoErr) {
+        console.warn('[gnss] auto-aplicar falhou (nao bloqueante):', (autoErr as Error).message);
+      }
+    }
+    res.json({
+      processamento: pontoIdAplicado ? await obterProcessamento(id) : pAtualizado,
+      ponto_id_aplicado: pontoIdAplicado,
+    });
   } catch (err) {
     console.error('[gnss] parse-ppp-externo:', err);
     res.status(500).json({ error: (err as Error).message });
@@ -496,7 +639,22 @@ gnssRouter.post('/processamentos/:id/manual', async (req: Request, res: Response
       utm_leste_m: u.utmLeste, utm_norte_m: u.utmNorte, utm_mc: u.mc,
       ref_geodesico: 'SIRGAS2000',
     });
-    res.json({ processamento: await obterProcessamento(id) });
+
+    // v3.19.0: auto-aplica em vertice + auto-preenche base GNSS do laudo
+    const pAtualizado = await obterProcessamento(id);
+    let pontoIdAplicado: number | null = null;
+    if (pAtualizado?.laudo_id) {
+      try {
+        pontoIdAplicado = await autoAplicarEmVertice(pAtualizado);
+        await autoPreencherBaseGnssNoLaudo(pAtualizado);
+      } catch (autoErr) {
+        console.warn('[gnss] auto-aplicar falhou (nao bloqueante):', (autoErr as Error).message);
+      }
+    }
+    res.json({
+      processamento: pontoIdAplicado ? await obterProcessamento(id) : pAtualizado,
+      ponto_id_aplicado: pontoIdAplicado,
+    });
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 

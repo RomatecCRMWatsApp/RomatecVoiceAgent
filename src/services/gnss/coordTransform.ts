@@ -41,3 +41,17 @@ export function utmToLatLon(
 export function isWithinBrazil(lat: number, lon: number): boolean {
   return lat >= -34 && lat <= 6 && lon >= -75 && lon <= -28;
 }
+
+// v3.19.0: Formata graus decimais como string em graus°min'seg" — usado em
+// laudos_demarcacao_pontos.lat_gms / long_gms (apresentacao na tabela de
+// vertices do PDF). Hemisferio derivado do sinal: positivo=hemPos (N ou E),
+// negativo=hemNeg (S ou W).
+export function decimalToDms(deg: number, hemPos: 'N' | 'E', hemNeg: 'S' | 'W'): string {
+  const hem = deg < 0 ? hemNeg : hemPos;
+  const abs = Math.abs(deg);
+  const g = Math.floor(abs);
+  const minDec = (abs - g) * 60;
+  const m = Math.floor(minDec);
+  const s = (minDec - m) * 60;
+  return `${g}° ${m.toString().padStart(2, '0')}' ${s.toFixed(5).padStart(8, '0')}" ${hem}`;
+}
