@@ -6677,10 +6677,19 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
           <input id="dxEndereco" placeholder="Rua, nº, bairro, cidade-UF" style="width:100%;">
         </label>
 
+        ${isDesm ? `
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">🗺️ Modalidade</p>
+        <div style="display:flex; gap:0; border:1px solid var(--border); border-radius:6px; overflow:hidden;">
+          <button type="button" data-modalidade="urbana" id="dxModUrbana" style="flex:1; padding:8px; background:var(--success); color:#fff; border:none; cursor:pointer;">🏢 Desdobro Urbano (m²)</button>
+          <button type="button" data-modalidade="rural" id="dxModRural" style="flex:1; padding:8px; background:transparent; color:var(--text); border:none; border-left:1px solid var(--border); cursor:pointer;">🌾 Desmembramento Rural (ha)</button>
+        </div>
+        <p style="font-size:10px; color:var(--text-muted); margin:4px 0 0;">Urbano → Lei 6.766/79 · Rural → Lei 5.868/72 + INCRA</p>
+        ` : ''}
+
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📐 Dados do imóvel</p>
         <div class="lp-grid-2">
-          <label>Área total (m²)
-            <input id="dxArea" type="number" min="1" step="0.01" style="width:100%;">
+          <label>Área total (<span id="dxAreaUnidade">m²</span>)
+            <input id="dxArea" type="number" min="0.0001" step="0.0001" style="width:100%;">
             <span style="font-size:10px; color:var(--text-muted);">${isDesm ? 'Área da matriz' : 'Soma das áreas a unificar'}</span>
           </label>
           <label>Valor venal total (R$)
@@ -6714,6 +6723,86 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
           <input id="dxIptu" type="checkbox" checked>
           <span><strong>IPTU em dia</strong> (todos exercícios). Sem isso, Prefeitura/cartório recusam.</span>
         </label>
+
+        ${!isDesm ? `
+        <details style="margin-top:12px; border:1px solid var(--border); border-radius:6px; padding:6px 10px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--neon); font-size:12px;">🔗 Detalhar imóveis individualmente (modo avançado)</summary>
+          <div style="padding:8px 0;">
+            <p style="font-size:10px; color:var(--text-muted); margin:0 0 6px;">Quando informado, lista cada matrícula que será unificada. Área total derivada da soma.</p>
+            <div id="dxImoveisLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+            <button type="button" id="dxImovelAdd" class="btn-secondary" style="margin-top:6px; font-size:11px;">+ Adicionar imóvel</button>
+          </div>
+        </details>
+        ` : ''}
+
+        ${isDesm ? `
+        <details style="margin-top:12px; border:1px solid var(--border); border-radius:6px; padding:6px 10px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--neon); font-size:12px;">✂️ Detalhar imóvel matriz + frações (modo avançado)</summary>
+          <div style="padding:8px 0;">
+            <p style="font-size:10px; color:var(--text-muted); margin:0 0 6px;">Dados do imóvel a fracionar e lista de frações resultantes.</p>
+            <div class="lp-grid-2" style="margin-bottom:8px;">
+              <label style="font-size:11px;">Matrícula
+                <input id="dxMatrMatricula" type="text" style="width:100%;" placeholder="ex: 12.345">
+              </label>
+              <label style="font-size:11px;">CRI (opcional)
+                <input id="dxMatrCri" type="text" style="width:100%;" placeholder="ex: 1º CRI Açailândia">
+              </label>
+            </div>
+            <label style="font-size:11px;" id="dxMatrDenominacaoWrap">Denominação (rural)
+              <input id="dxMatrDenominacao" type="text" style="width:100%;" placeholder="ex: Fazenda Bom Jesus">
+            </label>
+            <button type="button" id="dxFracoesGerar" class="btn-secondary" style="margin-top:8px; font-size:11px;">⚙️ Gerar frações a partir de quantidade × área</button>
+            <div id="dxFracoesLista" style="display:flex; flex-direction:column; gap:6px; margin-top:6px;"></div>
+            <p id="dxFracoesResumo" style="font-size:10px; color:var(--text-muted); margin:6px 0 0;"></p>
+          </div>
+        </details>
+        ` : ''}
+
+        <details style="margin-top:12px; border:1px solid var(--border); border-radius:6px; padding:6px 10px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--neon); font-size:12px;">💰 Honorários personalizados (modo manual)</summary>
+          <div style="padding:8px 0;">
+            <label style="display:flex; gap:6px; align-items:center; font-size:11px;">
+              <input type="checkbox" id="dxModoManual">
+              <span>Definir honorários manualmente (substitui pacote SM)</span>
+            </label>
+            ${!isDesm ? `
+            <div id="dxManualBox" style="display:none; margin-top:8px;">
+              <div id="dxMapasLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+              <button type="button" id="dxMapaAdd" class="btn-secondary" style="margin-top:6px; font-size:11px;">+ Adicionar mapa</button>
+            </div>
+            ` : `
+            <p id="dxManualDesmHint" style="display:none; font-size:10px; color:var(--text-muted); margin-top:6px;">
+              Em modo manual com modalidade, os valores das frações (acima) substituem o pacote SM. Total = soma dos valores das frações + assessoria jurídica (se incluída).
+            </p>
+            `}
+          </div>
+        </details>
+
+        <details style="margin-top:12px; border:1px solid var(--border); border-radius:6px; padding:6px 10px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--neon); font-size:12px;">📋 Peça Técnica a Entregar</summary>
+          <div style="padding:8px 0; display:grid; gap:4px; font-size:11px;">
+            <label><input type="checkbox" id="dxPecaMapa" checked> Mapa / Planta</label>
+            <label><input type="checkbox" id="dxPecaMemorial" checked> Memorial Descritivo</label>
+            <label><input type="checkbox" id="dxPecaArt" checked> ART — Anotação de Responsabilidade Técnica (CREA)</label>
+            <label><input type="checkbox" id="dxPecaTrt"> TRT — Termo de Responsabilidade Técnica (CFT)</label>
+            <label><input type="checkbox" id="dxPecaReq" checked> Requerimentos administrativos (Município / Cartório${isDesm ? ' / INCRA quando rural' : ''})</label>
+            <p style="font-size:10px; color:#dc2626; margin:4px 0 0;">⚠️ Pelo menos ART ou TRT deve estar marcado.</p>
+          </div>
+        </details>
+
+        <details style="margin-top:12px; border:1px solid var(--border); border-radius:6px; padding:6px 10px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--neon); font-size:12px;">⚖️ Assessoria Técnica Jurídica</summary>
+          <div style="padding:8px 0;">
+            <label style="display:flex; gap:6px; align-items:center; font-size:11px;">
+              <input type="checkbox" id="dxAssIncluir">
+              <span>Incluir Assessoria Jurídica nos honorários</span>
+            </label>
+            <label id="dxAssValorWrap" style="display:none; margin-top:6px; font-size:11px;">Valor (R$)
+              <input id="dxAssValor" type="number" min="0" step="0.01" style="width:100%;">
+              <span style="font-size:10px; color:var(--text-muted);">Default: salário mínimo vigente</span>
+            </label>
+          </div>
+        </details>
 
         <div style="display:flex; gap:6px; margin-top:12px;">
           <button id="dxPreview" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
@@ -6774,7 +6863,273 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
     setVal('dxNumLotes',    isDesm ? d.numero_lotes_resultantes : d.numero_lotes_origem);
     setVal('dxPacote',      d.honorario_projeto_sm);
     setChk('dxIptu',        d.iptu_em_dia);
+    // v1.99.17: restaurar campos do modo avançado se vieram do cache
+    if (isDesm && d.modalidade) {
+      _setModalidadeDesm(d.modalidade);
+      if (d.matriz) {
+        setVal('dxMatrMatricula', d.matriz.matricula);
+        setVal('dxMatrCri', d.matriz.cri);
+        setVal('dxMatrDenominacao', d.matriz.denominacao);
+      }
+      if (Array.isArray(d.fracoes)) {
+        d.fracoes.forEach(f => _addFracaoLinha(f));
+      }
+    }
+    if (!isDesm && Array.isArray(d.imoveis)) {
+      d.imoveis.forEach(im => _addImovelLinha(im));
+    }
+    if (Array.isArray(d.mapas)) {
+      setChk('dxModoManual', true);
+      _toggleModoManual(true);
+      d.mapas.forEach(m => _addMapaLinha(m));
+    } else if (d.modo_calculo === 'manual') {
+      setChk('dxModoManual', true);
+      _toggleModoManual(true);
+    }
+    if (d.assessoria_juridica) {
+      setChk('dxAssIncluir', !!d.assessoria_juridica.incluir);
+      _toggleAssessoria(!!d.assessoria_juridica.incluir);
+      if (d.assessoria_juridica.valor) setVal('dxAssValor', d.assessoria_juridica.valor);
+    }
+    if (d.pecas_tecnicas) {
+      setChk('dxPecaMapa',     d.pecas_tecnicas.mapa);
+      setChk('dxPecaMemorial', d.pecas_tecnicas.memorial);
+      setChk('dxPecaArt',      d.pecas_tecnicas.art);
+      setChk('dxPecaTrt',      d.pecas_tecnicas.trt);
+      setChk('dxPecaReq',      d.pecas_tecnicas.requerimentos);
+    }
   }
+
+  // ── v1.99.17: handlers do modo avançado ─────────────────────────────────
+  // Modalidade (rural/urbana) — só desmembramento
+  let _modalidadeDesm = 'urbana'; // default
+  function _setModalidadeDesm(mod) {
+    _modalidadeDesm = mod === 'rural' ? 'rural' : 'urbana';
+    const urbBtn = document.getElementById('dxModUrbana');
+    const rurBtn = document.getElementById('dxModRural');
+    const unidSpan = document.getElementById('dxAreaUnidade');
+    const denomWrap = document.getElementById('dxMatrDenominacaoWrap');
+    if (urbBtn && rurBtn) {
+      const active = 'background:var(--success); color:#fff;';
+      const inactive = 'background:transparent; color:var(--text);';
+      urbBtn.setAttribute('style', `flex:1; padding:8px; ${_modalidadeDesm === 'urbana' ? active : inactive} border:none; cursor:pointer;`);
+      rurBtn.setAttribute('style', `flex:1; padding:8px; ${_modalidadeDesm === 'rural'  ? active : inactive} border:none; border-left:1px solid var(--border); cursor:pointer;`);
+    }
+    if (unidSpan) unidSpan.textContent = _modalidadeDesm === 'rural' ? 'ha' : 'm²';
+    if (denomWrap) denomWrap.style.display = _modalidadeDesm === 'rural' ? '' : 'none';
+    // Zona também segue a modalidade (sugestão)
+    const zonaEl = document.getElementById('dxZona');
+    if (zonaEl) zonaEl.value = _modalidadeDesm === 'rural' ? 'rural' : 'urbana';
+  }
+  if (isDesm) {
+    document.getElementById('dxModUrbana').onclick = () => _setModalidadeDesm('urbana');
+    document.getElementById('dxModRural').onclick  = () => _setModalidadeDesm('rural');
+    _setModalidadeDesm('urbana');
+  }
+
+  // Lista de imóveis (remembramento)
+  let _imovelSeq = 0;
+  function _addImovelLinha(init) {
+    _imovelSeq++;
+    const idx = _imovelSeq;
+    const wrap = document.createElement('div');
+    wrap.dataset.imovelOrdem = idx;
+    wrap.style.cssText = 'display:grid; grid-template-columns:60px 1fr 1fr 90px 30px; gap:4px; align-items:end; font-size:11px;';
+    wrap.innerHTML = `
+      <label>Área (m²)<input type="number" min="0.01" step="0.01" data-fld="area_m2" style="width:100%;"></label>
+      <label>Endereço<input type="text" data-fld="endereco" style="width:100%;" placeholder="Rua, nº, bairro"></label>
+      <label>Matrícula<input type="text" data-fld="matricula" style="width:100%;" placeholder="ex: 12.345"></label>
+      <label>CRI<input type="text" data-fld="cri" style="width:100%;" placeholder="opcional"></label>
+      <button type="button" data-remove style="background:#dc2626; color:#fff; border:none; height:28px; border-radius:4px; cursor:pointer;">×</button>
+    `;
+    wrap.querySelector('[data-remove]').onclick = () => wrap.remove();
+    if (init) {
+      wrap.querySelector('[data-fld="area_m2"]').value   = init.area_m2 ?? '';
+      wrap.querySelector('[data-fld="endereco"]').value  = init.endereco ?? '';
+      wrap.querySelector('[data-fld="matricula"]').value = init.matricula ?? '';
+      wrap.querySelector('[data-fld="cri"]').value       = init.cri ?? '';
+    }
+    document.getElementById('dxImoveisLista').appendChild(wrap);
+  }
+  function _collectImoveis() {
+    const lista = document.querySelectorAll('#dxImoveisLista > [data-imovel-ordem]');
+    if (lista.length === 0) return null;
+    const result = [];
+    let ordem = 1;
+    lista.forEach(w => {
+      const area = Number(w.querySelector('[data-fld="area_m2"]').value);
+      const endereco = w.querySelector('[data-fld="endereco"]').value.trim();
+      const matricula = w.querySelector('[data-fld="matricula"]').value.trim();
+      const cri = w.querySelector('[data-fld="cri"]').value.trim();
+      if (area > 0 || endereco || matricula) {
+        result.push({ ordem: ordem++, area_m2: area, endereco, matricula, cri: cri || undefined });
+      }
+    });
+    return result.length > 0 ? result : null;
+  }
+  const dxImovelAddBtn = document.getElementById('dxImovelAdd');
+  if (dxImovelAddBtn) dxImovelAddBtn.onclick = () => _addImovelLinha();
+
+  // Lista de mapas (modo manual remembramento)
+  let _mapaSeq = 0;
+  function _addMapaLinha(init) {
+    _mapaSeq++;
+    const numero = init?.numero ?? _mapaSeq;
+    const wrap = document.createElement('div');
+    wrap.dataset.mapaNum = numero;
+    wrap.style.cssText = 'display:grid; grid-template-columns:60px 1fr 100px 30px; gap:4px; align-items:end; font-size:11px;';
+    wrap.innerHTML = `
+      <label>Mapa<input type="number" min="1" step="1" value="${numero}" data-fld="numero" style="width:100%;"></label>
+      <label>Descrição<input type="text" data-fld="descricao" style="width:100%;" placeholder="opcional"></label>
+      <label>Valor (R$)<input type="number" min="0.01" step="0.01" data-fld="valor" style="width:100%;"></label>
+      <button type="button" data-remove style="background:#dc2626; color:#fff; border:none; height:28px; border-radius:4px; cursor:pointer;">×</button>
+    `;
+    wrap.querySelector('[data-remove]').onclick = () => wrap.remove();
+    if (init) {
+      wrap.querySelector('[data-fld="descricao"]').value = init.descricao ?? '';
+      wrap.querySelector('[data-fld="valor"]').value     = init.valor ?? '';
+    }
+    const lista = document.getElementById('dxMapasLista');
+    if (lista) lista.appendChild(wrap);
+  }
+  function _collectMapas() {
+    const lista = document.querySelectorAll('#dxMapasLista > [data-mapa-num]');
+    if (lista.length === 0) return null;
+    const result = [];
+    lista.forEach(w => {
+      const numero = Number(w.querySelector('[data-fld="numero"]').value);
+      const descricao = w.querySelector('[data-fld="descricao"]').value.trim();
+      const valor = Number(w.querySelector('[data-fld="valor"]').value);
+      if (valor > 0) {
+        result.push({ numero, valor, descricao: descricao || undefined });
+      }
+    });
+    return result.length > 0 ? result : null;
+  }
+  const dxMapaAddBtn = document.getElementById('dxMapaAdd');
+  if (dxMapaAddBtn) dxMapaAddBtn.onclick = () => _addMapaLinha();
+
+  // Lista de frações (desmembramento)
+  let _fracaoSeq = 0;
+  let _precoDefault = 450; // será atualizado por /api/configuracoes/defaults-precificacao
+  let _smVigente = 1518;
+  function _addFracaoLinha(init) {
+    _fracaoSeq++;
+    const numero = init?.numero ?? _fracaoSeq;
+    const wrap = document.createElement('div');
+    wrap.dataset.fracaoNum = numero;
+    wrap.style.cssText = 'display:grid; grid-template-columns:60px 90px 1fr 100px 30px; gap:4px; align-items:end; font-size:11px;';
+    const unid = _modalidadeDesm === 'rural' ? 'ha' : 'm²';
+    wrap.innerHTML = `
+      <label>Fração<input type="number" min="1" step="1" value="${numero}" data-fld="numero" style="width:100%;"></label>
+      <label>Área (${unid})<input type="number" min="0.0001" step="0.0001" data-fld="area" style="width:100%;"></label>
+      <label>Descrição<input type="text" data-fld="descricao" style="width:100%;" placeholder="opcional"></label>
+      <label>Valor (R$)<input type="number" min="0.01" step="0.01" value="${_precoDefault}" data-fld="valor" style="width:100%;"></label>
+      <button type="button" data-remove style="background:#dc2626; color:#fff; border:none; height:28px; border-radius:4px; cursor:pointer;">×</button>
+    `;
+    wrap.querySelector('[data-remove]').onclick = () => { wrap.remove(); _atualizarResumoFracoes(); };
+    if (init) {
+      wrap.querySelector('[data-fld="area"]').value      = init.area ?? '';
+      wrap.querySelector('[data-fld="descricao"]').value = init.descricao ?? '';
+      if (init.valor != null) wrap.querySelector('[data-fld="valor"]').value = init.valor;
+    }
+    wrap.querySelectorAll('input[data-fld]').forEach(i => i.addEventListener('input', _atualizarResumoFracoes));
+    document.getElementById('dxFracoesLista').appendChild(wrap);
+    _atualizarResumoFracoes();
+  }
+  function _atualizarResumoFracoes() {
+    const lista = document.querySelectorAll('#dxFracoesLista > [data-fracao-num]');
+    if (lista.length === 0) {
+      const el = document.getElementById('dxFracoesResumo');
+      if (el) el.textContent = '';
+      return;
+    }
+    let somaArea = 0;
+    lista.forEach(w => { somaArea += Number(w.querySelector('[data-fld="area"]').value) || 0; });
+    const areaMatriz = Number(document.getElementById('dxArea').value) || 0;
+    const unid = _modalidadeDesm === 'rural' ? 'ha' : 'm²';
+    const tol = _modalidadeDesm === 'rural' ? 0.01 : 1;
+    const dig = _modalidadeDesm === 'rural' ? 4 : 2;
+    const residuo = areaMatriz - somaArea;
+    let resumo = `Soma das frações: ${somaArea.toFixed(dig)} ${unid}`;
+    if (areaMatriz > 0) {
+      if (Math.abs(residuo) <= tol) {
+        resumo += ` · ✓ Bate com a matriz`;
+      } else if (residuo > 0) {
+        resumo += ` · Resíduo: ${residuo.toFixed(dig)} ${unid} (remanescente)`;
+      } else {
+        resumo += ` · ⚠ EXCEDE em ${Math.abs(residuo).toFixed(dig)} ${unid}`;
+      }
+    }
+    const el = document.getElementById('dxFracoesResumo');
+    if (el) {
+      el.textContent = resumo;
+      el.style.color = residuo < -tol ? '#dc2626' : 'var(--text-muted)';
+    }
+  }
+  function _collectFracoes() {
+    const lista = document.querySelectorAll('#dxFracoesLista > [data-fracao-num]');
+    if (lista.length === 0) return null;
+    const result = [];
+    lista.forEach(w => {
+      const numero = Number(w.querySelector('[data-fld="numero"]').value);
+      const area = Number(w.querySelector('[data-fld="area"]').value);
+      const descricao = w.querySelector('[data-fld="descricao"]').value.trim();
+      const valor = Number(w.querySelector('[data-fld="valor"]').value);
+      if (area > 0 && valor > 0) {
+        result.push({ numero, area, valor, descricao: descricao || undefined });
+      }
+    });
+    return result.length > 0 ? result : null;
+  }
+  const dxFracoesGerarBtn = document.getElementById('dxFracoesGerar');
+  if (dxFracoesGerarBtn) dxFracoesGerarBtn.onclick = () => {
+    const qtd = Number(document.getElementById('dxNumLotes').value);
+    const areaMatriz = Number(document.getElementById('dxArea').value);
+    if (!qtd || qtd < 2) return alert('Informe a quantidade de lotes (≥ 2) antes de gerar.');
+    const existe = document.querySelectorAll('#dxFracoesLista > [data-fracao-num]').length;
+    if (existe > 0 && !confirm('Frações já existem. Substituir?')) return;
+    document.getElementById('dxFracoesLista').innerHTML = '';
+    _fracaoSeq = 0;
+    const sugestao = areaMatriz > 0 ? areaMatriz / qtd : 0;
+    for (let i = 1; i <= qtd; i++) {
+      _addFracaoLinha({ numero: i, area: sugestao > 0 ? Number(sugestao.toFixed(_modalidadeDesm === 'rural' ? 4 : 2)) : 0, valor: _precoDefault });
+    }
+  };
+  // Recalcula resumo quando area matriz muda
+  document.getElementById('dxArea').addEventListener('input', _atualizarResumoFracoes);
+
+  // Toggle modo manual
+  function _toggleModoManual(on) {
+    const box = document.getElementById('dxManualBox');
+    if (box) box.style.display = on ? '' : 'none';
+    const hint = document.getElementById('dxManualDesmHint');
+    if (hint) hint.style.display = on ? '' : 'none';
+  }
+  const dxModoManualEl = document.getElementById('dxModoManual');
+  if (dxModoManualEl) dxModoManualEl.onchange = (e) => _toggleModoManual(e.target.checked);
+
+  // Toggle assessoria
+  function _toggleAssessoria(on) {
+    const wrap = document.getElementById('dxAssValorWrap');
+    if (wrap) wrap.style.display = on ? '' : 'none';
+    if (on) {
+      const inp = document.getElementById('dxAssValor');
+      if (inp && !inp.value) inp.value = _smVigente;
+    }
+  }
+  document.getElementById('dxAssIncluir').onchange = (e) => _toggleAssessoria(e.target.checked);
+
+  // Carrega defaults de precificação (assíncrono, não bloqueia render)
+  (async () => {
+    try {
+      const def = await api('/api/configuracoes/defaults-precificacao');
+      _precoDefault = Number(isDesm && _modalidadeDesm === 'rural'
+        ? def.preco_default_desmembramento_rural
+        : def.preco_default_desdobro_urbano) || 450;
+      _smVigente = Number(def.salario_minimo_vigente) || 1518;
+    } catch (_) { /* mantém defaults */ }
+  })();
 
   document.getElementById('dxPreview').onclick = async () => {
     const cliId = document.getElementById('dxCliente').value;
@@ -6782,9 +7137,14 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
     const valorVenal = Number(document.getElementById('dxValorVenal').value);
     const numLotes = Number(document.getElementById('dxNumLotes').value);
     if (!cliId) return alert('Selecione o cliente.');
-    if (!area || area <= 0) return alert('Informe a área total (m²).');
+    if (!area || area <= 0) return alert(`Informe a área total (${isDesm && _modalidadeDesm === 'rural' ? 'ha' : 'm²'}).`);
     if (valorVenal < 0) return alert('Valor venal inválido.');
     if (!numLotes || numLotes < 2) return alert(`${isDesm ? 'Quantidade de lotes' : 'Matrículas a unificar'} deve ser >= 2.`);
+
+    // Validação peças técnicas (ART ∨ TRT)
+    const pecaArt = document.getElementById('dxPecaArt').checked;
+    const pecaTrt = document.getElementById('dxPecaTrt').checked;
+    if (!pecaArt && !pecaTrt) return alert('Peça técnica: pelo menos ART ou TRT deve estar marcado.');
 
     const pacoteSM = Number(document.getElementById('dxPacote').value) === 0.5 ? 0.5 : 1.0;
 
@@ -6797,9 +7157,59 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
     };
     if (isDesm) {
       dados_imovel.numero_lotes_resultantes = numLotes;
+      // v1.99.17: modalidade + unidade_area + matriz + frações
+      dados_imovel.modalidade = _modalidadeDesm;
+      dados_imovel.unidade_area = _modalidadeDesm === 'rural' ? 'ha' : 'm2';
+      const matrMatricula = document.getElementById('dxMatrMatricula')?.value.trim();
+      const matrCri       = document.getElementById('dxMatrCri')?.value.trim();
+      const matrDenom     = document.getElementById('dxMatrDenominacao')?.value.trim();
+      if (matrMatricula) {
+        dados_imovel.matriz = {
+          matricula: matrMatricula,
+          cri: matrCri || undefined,
+          endereco: document.getElementById('dxEndereco').value.trim(),
+          denominacao: (_modalidadeDesm === 'rural' ? matrDenom : '') || undefined,
+        };
+      }
+      const fracoes = _collectFracoes();
+      if (fracoes) dados_imovel.fracoes = fracoes;
     } else {
       dados_imovel.numero_lotes_origem = numLotes;
+      const imoveis = _collectImoveis();
+      if (imoveis) dados_imovel.imoveis = imoveis;
     }
+
+    // Modo manual (substitui pacote SM)
+    const modoManual = document.getElementById('dxModoManual').checked;
+    if (modoManual) {
+      dados_imovel.modo_calculo = 'manual';
+      if (!isDesm) {
+        const mapas = _collectMapas();
+        if (!mapas || mapas.length === 0) return alert('Modo manual: adicione pelo menos 1 mapa com valor.');
+        dados_imovel.mapas = mapas;
+      } else {
+        if (!dados_imovel.fracoes || dados_imovel.fracoes.length === 0) {
+          return alert('Modo manual desmembramento exige frações detalhadas com valor.');
+        }
+      }
+    }
+
+    // Assessoria jurídica
+    const assIncluir = document.getElementById('dxAssIncluir').checked;
+    if (assIncluir) {
+      const assValor = Number(document.getElementById('dxAssValor').value);
+      if (!assValor || assValor <= 0) return alert('Assessoria Jurídica: informe um valor > 0.');
+      dados_imovel.assessoria_juridica = { incluir: true, valor: assValor };
+    }
+
+    // Peças técnicas
+    dados_imovel.pecas_tecnicas = {
+      mapa:          document.getElementById('dxPecaMapa').checked,
+      memorial:      document.getElementById('dxPecaMemorial').checked,
+      art:           pecaArt,
+      trt:           pecaTrt,
+      requerimentos: document.getElementById('dxPecaReq').checked,
+    };
 
     const enderecoTxt = document.getElementById('dxEndereco').value.trim();
 

@@ -9,6 +9,7 @@
 // Demais subtipos vem na Fase 3.
 
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
+import crypto from 'crypto';
 import pool from '../database/connection';
 import PDFDocument from 'pdfkit';
 import { PDFDocument as PDFLibDocument } from 'pdf-lib';
@@ -19,6 +20,8 @@ import { sendDocument as sendTelegramDocument } from './telegram';
 import { getTenantSettings } from '../services/tenantSettings';
 import { formatBRL } from '../util/format';
 import { calcularConsultoria } from '../services/pricing';
+// v1.99.17: helpers compartilhados de QR + hash footer no PDF
+import { renderQRValidacao, renderHashFooter } from '../services/reciboPdfShared';
 // v1.99.11: assinatura digital reutiliza tipos do reciboPdf
 import type { SignatureVisualMeta } from '../services/reciboPdf';
 import type {
@@ -199,6 +202,14 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     }
   }
 
+  // v1.99.17: gera hash SHA-256 de validação pública imediatamente após o INSERT
+  let hashValidacao: string | null = null;
+  try {
+    hashValidacao = await gerarOuBuscarHashProposta(r.insertId);
+  } catch (err) {
+    console.warn(`[propostas-consultoria] falha gerar hash da #${r.insertId}: ${(err as Error).message}`);
+  }
+
   return {
     ok: true as const,
     insertId: r.insertId,
@@ -208,6 +219,7 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     custos_calculados: resultado.custos,
     fontes_consulta: resultado.fontes,
     anexos_criados: anexosCriados,
+    hash_validacao: hashValidacao,
     message: `Proposta de Consultoria ${numero} (${subtipo}) criada. Valor R$ ${resultado.custos.secao_5_total.toFixed(2)}.${anexosCriados > 0 ? ` ${anexosCriados} anexo(s) salvos.` : ''}`,
   };
 }
@@ -786,6 +798,21 @@ export async function gerarPdfPropostaConsultoria(
     doc.fontSize(6.5).fillColor('#666').font('Helvetica')
        .text(`Cert: ${signatureMeta.issuer_cn || '—'} · Válido até ${validadeFmt} · Validar em validar.iti.gov.br`,
              boxX + 6, cy + 42, { width: boxW - 12, align: 'center', lineBreak: false });
+  }
+
+  // v1.99.17: QR Code + hash de autenticidade no rodapé (validação pública /v/:hash)
+  try {
+    const hashValidacao = await gerarOuBuscarHashProposta(Number(p.id));
+    const baseUrl = getValidacaoBaseUrl();
+    const qrY = 720;
+    const validUrl = await renderQRValidacao(doc, hashValidacao, baseUrl, 460, qrY, {
+      size: 80,
+      corHex,
+      comLabel: true,
+    });
+    renderHashFooter(doc, hashValidacao, validUrl, 48, qrY + 10, 380);
+  } catch (err) {
+    console.warn(`[propostas-consultoria-pdf] falha QR/hash: ${(err as Error).message}`);
   }
 
   // Footer
@@ -1375,3 +1402,104 @@ export async function getPropostaPdfAssinado(propostaId: number | string): Promi
     : '';
   return { pdf: r.pdf_assinado as Buffer, assinado_em: assinadoEm, meta };
 }
+
+// ─── v1.99.17: Hash de validação pública /v/:hash ──────────────────────────
+
+interface PropostaHashRow extends RowDataPacket {
+  id: number;
+  numero: string;
+  hash_validacao: string | null;
+  valor_total: string;
+  criado_em: Date | string | null;
+  cliente_id: number;
+}
+
+/**
+ * Gera hash SHA-256 determinístico (a partir de campos imutáveis) para uma proposta
+ * e grava em `propostas.hash_validacao`. Idempotente: se já houver hash, retorna o existente.
+ */
+export async function gerarOuBuscarHashProposta(propostaId: number | string): Promise<string> {
+  const id = Number(propostaId);
+  if (!id) throw new Error('proposta_id invalido');
+
+  const [rows] = await pool.execute<PropostaHashRow[]>(
+    `SELECT id, numero, hash_validacao, valor_total, criado_em, cliente_id
+       FROM propostas WHERE id = ? LIMIT 1`,
+    [id]
+  );
+  if (rows.length === 0) throw new Error('Proposta nao encontrada');
+  const r = rows[0];
+  if (r.hash_validacao) return String(r.hash_validacao);
+
+  const criadoIso = r.criado_em
+    ? (r.criado_em instanceof Date ? r.criado_em.toISOString() : String(r.criado_em))
+    : '';
+  const payload = `${r.numero}|${r.cliente_id}|${r.valor_total}|${criadoIso}`;
+  const hash = crypto.createHash('sha256').update(payload).digest('hex');
+
+  await pool.execute(
+    `UPDATE propostas SET hash_validacao = ? WHERE id = ? AND hash_validacao IS NULL`,
+    [hash, id]
+  );
+  return hash;
+}
+
+/**
+ * Busca proposta pelo hash de validação pública. Retorna shape enxuto
+ * (sem PDF assinado, sem custos completos) para a página /v/:hash.
+ */
+export async function buscarPropostaPorHash(hash: string): Promise<{
+  id: string;
+  numero: string;
+  tipo: string;
+  subtipo: string | null;
+  cliente_nome: string | null;
+  endereco_imovel: string | null;
+  data_proposta: string | null;
+  valor_total: number;
+  status: string;
+  assinado_em: string | null;
+} | null> {
+  if (!hash || typeof hash !== 'string' || hash.length < 16) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT p.id, p.numero, p.tipo, p.subtipo_consultoria, p.endereco_obra,
+            p.data_proposta, p.valor_total, p.status, p.assinado_em,
+            c.nome AS cliente_nome
+       FROM propostas p
+       LEFT JOIN propostas_clientes c ON c.id = p.cliente_id
+      WHERE p.hash_validacao = ? AND p.deleted_at IS NULL
+      LIMIT 1`,
+    [hash]
+  );
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    id: String(r.id),
+    numero: String(r.numero),
+    tipo: String(r.tipo),
+    subtipo: r.subtipo_consultoria ? String(r.subtipo_consultoria) : null,
+    cliente_nome: r.cliente_nome ? String(r.cliente_nome) : null,
+    endereco_imovel: r.endereco_obra ? String(r.endereco_obra) : null,
+    data_proposta: r.data_proposta
+      ? (r.data_proposta instanceof Date ? r.data_proposta.toISOString().slice(0, 10) : String(r.data_proposta))
+      : null,
+    valor_total: Number(r.valor_total),
+    status: String(r.status),
+    assinado_em: r.assinado_em
+      ? (r.assinado_em instanceof Date ? r.assinado_em.toISOString() : String(r.assinado_em))
+      : null,
+  };
+}
+
+/** Retorna a base URL pública usada para QR de validação ({BASE_URL}/v/:hash). */
+function getValidacaoBaseUrl(): string {
+  return (
+    process.env.BASE_URL
+    || process.env.PUBLIC_BASE_URL
+    || process.env.APP_URL
+    || 'http://localhost:3000'
+  ).replace(/\/+$/, '');
+}
+
+export { getValidacaoBaseUrl };
+

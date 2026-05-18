@@ -3239,20 +3239,42 @@ app.get('/v/:hash', (_req: Request, res: Response) => {
 
 app.get('/v/:hash/json', async (req: Request, res: Response) => {
   try {
-    const r = await recibos.buscarReciboPorHash(String(req.params.hash));
-    if (!r) return res.status(404).json({ error: 'Hash invalido' });
-    const tenant = await getTenantSettings(r.tenant_id).catch(() => null);
-    res.json({
-      recibo: r,
-      tenant: tenant ? {
-        brand_name: tenant.brand_name,
-        primary_color: tenant.primary_color,
-        cnpj: tenant.cnpj,
-        logo_url: tenant.logo_path
-          ? `/public/${tenant.logo_path.replace(/^\/?(public\/)?/, '')}`
-          : null,
-      } : null,
-    });
+    const hash = String(req.params.hash);
+    // Tenta recibo primeiro (compat legado)
+    const r = await recibos.buscarReciboPorHash(hash);
+    if (r) {
+      const tenant = await getTenantSettings(r.tenant_id).catch(() => null);
+      return res.json({
+        tipo: 'recibo',
+        recibo: r,
+        tenant: tenant ? {
+          brand_name: tenant.brand_name,
+          primary_color: tenant.primary_color,
+          cnpj: tenant.cnpj,
+          logo_url: tenant.logo_path
+            ? `/public/${tenant.logo_path.replace(/^\/?(public\/)?/, '')}`
+            : null,
+        } : null,
+      });
+    }
+    // v1.99.17: fallback para propostas (consultoria)
+    const p = await propostasConsultoria.buscarPropostaPorHash(hash);
+    if (p) {
+      const tenant = await getTenantSettings(1).catch(() => null);
+      return res.json({
+        tipo: 'proposta',
+        proposta: p,
+        tenant: tenant ? {
+          brand_name: tenant.brand_name,
+          primary_color: tenant.primary_color,
+          cnpj: tenant.cnpj,
+          logo_url: tenant.logo_path
+            ? `/public/${tenant.logo_path.replace(/^\/?(public\/)?/, '')}`
+            : null,
+        } : null,
+      });
+    }
+    return res.status(404).json({ error: 'Hash invalido' });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -3260,12 +3282,24 @@ app.get('/v/:hash/json', async (req: Request, res: Response) => {
 
 app.get('/v/:hash/pdf', async (req: Request, res: Response) => {
   try {
-    const r = await recibos.buscarReciboPorHash(String(req.params.hash));
-    if (!r) return res.status(404).json({ error: 'Hash invalido' });
-    const buf = await gerarPdfRecibo(r);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
-    res.send(buf);
+    const hash = String(req.params.hash);
+    // Tenta recibo primeiro
+    const r = await recibos.buscarReciboPorHash(hash);
+    if (r) {
+      const buf = await gerarPdfRecibo(r);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
+      return res.send(buf);
+    }
+    // v1.99.17: fallback para proposta — serve PDF completo (com anexos)
+    const p = await propostasConsultoria.buscarPropostaPorHash(hash);
+    if (p) {
+      const buf = await propostasConsultoria.gerarPdfPropostaConsultoriaCompleto(p.id);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${p.numero}.pdf"`);
+      return res.send(buf);
+    }
+    return res.status(404).json({ error: 'Hash invalido' });
   } catch (err) {
     res.status(404).json({ error: (err as Error).message });
   }
@@ -3858,6 +3892,16 @@ app.listen(PORT, () => {
       await m.runConfiguracoesMigrations();
     } catch (err) {
       console.error('[configuracoes-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v1.99.17: coluna hash_validacao (+UNIQUE) em `propostas` para validação pública /v/:hash.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-propostas-hash');
+      await m.runPropostasHashMigrations();
+    } catch (err) {
+      console.error('[propostas-hash-migrations] FALHA fatal:', err);
     }
   })();
 
