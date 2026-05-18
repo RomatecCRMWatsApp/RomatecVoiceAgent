@@ -260,12 +260,36 @@
     };
   }
 
+  async function abrirImportarRetorno(sessaoId, onDone, opts = {}) {
+    const externo = !!opts.externo;
+    const titulo = externo ? 'Importar PPP processado externamente' : 'Importar retorno do IBGE-PPP';
+    const dlg = montarModal(titulo, `
+      <p>${externo
+        ? 'Suba o arquivo .txt / .kml / .pos / .pdf gerado pelo seu software (Topcon Tools, Trimble Business Center, IBGE-PPP web, etc.)'
+        : 'Suba o .zip que o IBGE-PPP enviou por e-mail (ou faça upload individual de .txt/.pdf/.kml/.pos)'}.</p>
+      <input type="file" id="gi-files" multiple accept=".zip,.txt,.pdf,.kml,.pos" />
+      <button id="gi-ok">Processar</button>
+    `);
+    dlg.querySelector('#gi-ok').onclick = async () => {
+      const files = dlg.querySelector('#gi-files').files;
+      if (!files.length) return alert('Selecione 1 ou mais arquivos');
+      try {
+        const r = externo
+          ? await importarPppExterno(sessaoId, files)
+          : await importarRetornoIbge(sessaoId, files);
+        alert('Processado! Lat: ' + r.processamento.latitude_graus + ', Lon: ' + r.processamento.longitude_graus);
+        dlg.close(); dlg.remove();
+        onDone && onDone();
+      } catch (err) { alert('Erro: ' + err.message); }
+    };
+  }
+
   window.LaudoGnss = {
     listarSessoes, criarSessao, uploadRinex, parseRinex, empacotarIbge,
     importarRetornoIbge, importarPppExterno, inserirManual, aplicarEmPonto,
     renderListaEm,
     abrirNovaSessao,
-    abrirImportarRetorno: null,    // setado na Task 6.2
+    abrirImportarRetorno,
     abrirAplicarEmPonto: null,     // setado na Task 6.3
   };
 })();
