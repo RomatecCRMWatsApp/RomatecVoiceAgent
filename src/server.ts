@@ -4002,6 +4002,17 @@ app.listen(PORT, () => {
     }
   })();
 
+  // v3.18.0: tabelas processamentos_gnss + processamentos_gnss_arquivos (RINEX/PPP)
+  // + seeds de configuracoes (URL portal IBGE, tamanhos maximos, duracoes minimas).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-gnss');
+      await m.runGnssMigrations();
+    } catch (err) {
+      console.error('[gnss-migrations] FALHA fatal:', err);
+    }
+  })();
+
   // v3.10.0: tabelas de Fechamento de Folha (folha_fechamentos + itens + log)
   // + ALTERs em romatec_obras (ciclo_pagamento, dia_corte_padrao, ultima_data_fechada)
   // + ALTERs em romatec_obra_funcionario_dias (fechamento_id, bloqueado_em).
