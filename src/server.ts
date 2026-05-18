@@ -62,6 +62,7 @@ import pool from './database/connection';
 import { relatorioDemarcacaoRouter } from './routes/relatorioDemarcacao';
 import contractsRoutes from './routes/contracts';
 import painelRoutes from './routes/painel';
+import gnssRouter from './routes/gnss';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -96,6 +97,8 @@ app.use('/rag', ragRoutes);                 // v1.26.0 — endpoints de memoria 
 app.use('/contracts', contractsRoutes);     // v1.27.1 — indexacao de contratos modelo (Fase 1)
 app.use(painelRoutes);                      // v1.47.0 — dashboard /painel + /api/painel/stats
 app.use('/api/relatorios-demarcacao', relatorioDemarcacaoRouter(pool as any)); // v3.14.0
+// v3.18.0: rotas de processamento GNSS (RINEX / IBGE-PPP)
+app.use('/api/gnss', gnssRouter);
 
 // Static files com Cache-Control inteligente:
 // HTML/SW/manifest = no-cache (browser revalida a cada request com ETag)
