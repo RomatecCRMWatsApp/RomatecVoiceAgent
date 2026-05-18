@@ -67,6 +67,8 @@ const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
 app.set('trust proxy', 1);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+// v3.17.0: upload de arquivos vetoriais (DXF/DWG até 50MB, KML até 20MB — validado no service)
+const vectorUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024, files: 10 } });
 // Multer separado pra anexos multimodais (imagens/PDFs) — Claude aceita até 32MB/PDF e ~5MB/imagem
 const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 32 * 1024 * 1024, files: 5 } });
 
@@ -2450,6 +2452,83 @@ app.put('/api/laudos-demarcacao/foto/:fotoId/legenda', requireCeoToken, async (r
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// ─── v3.17.0: Anexos vetoriais (DXF / DWG / KML) do Laudo de Demarcação ────
+// Storage no banco (LONGBLOB). Download público via /d/:token.
+app.get('/api/laudos-demarcacao/:id/arquivos', async (req: Request, res: Response) => {
+  try {
+    const lm = await import('./integrations/laudos');
+    const id = await lm.resolverLaudoId(String(req.params.id));
+    const av = await import('./services/arquivosVetoriaisService');
+    const rows = await av.listarArquivosVetoriais(id);
+    res.json({ total: rows.length, items: rows });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.post('/api/laudos-demarcacao/:id/arquivos', requireCeoToken, vectorUpload.array('arquivos', 10), async (req: Request, res: Response) => {
+  try {
+    const lm = await import('./integrations/laudos');
+    const id = await lm.resolverLaudoId(String(req.params.id));
+    const av = await import('./services/arquivosVetoriaisService');
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length === 0) { res.status(400).json({ error: 'Nenhum arquivo enviado (use field "arquivos")' }); return; }
+    const criados: unknown[] = [];
+    const erros: Array<{ arquivo: string; erro: string }> = [];
+    for (const f of files) {
+      try {
+        const r = await av.criarArquivoVetorial({
+          laudo_id: id,
+          nome_original: f.originalname,
+          mime_type: f.mimetype,
+          conteudo: f.buffer,
+        });
+        criados.push(r);
+      } catch (e) {
+        erros.push({ arquivo: f.originalname, erro: (e as Error).message });
+      }
+    }
+    res.status(criados.length > 0 ? 201 : 400).json({ ok: criados.length > 0, criados, erros });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.delete('/api/laudos-demarcacao/:id/arquivos/:arquivoId', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const av = await import('./services/arquivosVetoriaisService');
+    const r = await av.removerArquivoVetorial(Number(req.params.arquivoId));
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.post('/api/laudos-demarcacao/:id/arquivos/:arquivoId/regenerar-token', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const av = await import('./services/arquivosVetoriaisService');
+    const r = await av.regenerarTokenArquivo(Number(req.params.arquivoId));
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// Rota pública de download — /d/:token (sem auth, token de 64 chars hex = 256 bits)
+app.get('/d/:token', async (req: Request, res: Response) => {
+  try {
+    const av = await import('./services/arquivosVetoriaisService');
+    const { arquivo, estado } = await av.buscarPorToken(String(req.params.token));
+    if (estado === 'inexistente') { res.status(404).send('Arquivo não encontrado'); return; }
+    if (estado === 'inativo')     { res.status(404).send('Arquivo removido'); return; }
+    if (estado === 'expirado')    { res.status(410).send('Link de download expirado'); return; }
+
+    const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+      || req.socket.remoteAddress
+      || null;
+    // Best-effort: incrementa contador (não bloqueia o download se falhar)
+    av.registrarDownload(arquivo.id, ip).catch(e => console.warn(`[arquivos-download] registrarDownload: ${(e as Error).message}`));
+
+    res.setHeader('Content-Type', arquivo.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${arquivo.nome_original.replace(/"/g, '')}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(arquivo.conteudo_blob);
+  } catch (err) { res.status(500).send((err as Error).message); }
+});
+
 // v2.1.0 — atualiza UM lado individualmente (medida manual + confrontante + nome do lado)
 app.put('/api/laudos-demarcacao/lado/:ladoId', requireCeoToken, async (req: Request, res: Response) => {
   try {
@@ -3902,6 +3981,17 @@ app.listen(PORT, () => {
       await m.runPropostasHashMigrations();
     } catch (err) {
       console.error('[propostas-hash-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.17.0: tabela laudos_demarcacao_arquivos (anexos vetoriais DXF/DWG/KML)
+  // + seeds de configurações de upload/download em `configuracoes`.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-laudos-arquivos');
+      await m.runLaudosArquivosMigrations();
+    } catch (err) {
+      console.error('[laudos-arquivos-migrations] FALHA fatal:', err);
     }
   })();
 
