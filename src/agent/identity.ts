@@ -1,7 +1,7 @@
 ﻿export const AGENT_IDENTITY = {
   name: 'ZAYRA',
   fullName: 'Zona de AutomaÃ§Ã£o e Yield Romatec Agent',
-  version: '3.17.5',
+  version: '3.17.6',
   company: 'Romatec Consultoria ImobiliÃ¡ria',
   ceo: 'JosÃ© RomÃ¡rio',
   language: 'pt-BR',

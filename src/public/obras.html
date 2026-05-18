@@ -16612,24 +16612,27 @@ function renderLaudoTabPontos(c) {
               ${isRural ? '<p style="margin:4px 0 0; font-size:10px; color:#f59e0b;">⚠️ Obrigatório em rural (NTGIR/INCRA)</p>' : ''}
             </div>
           ` : ''}
-          <!-- v2.2.1: foto-por-piquete inline -->
+          <!-- v2.2.1: foto-por-piquete inline · v3.17.6: + botão 🖼️ Galeria -->
           <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             ${fotoP ? `
               <img src="/api/laudos-demarcacao/foto/${fotoP.id}"
                 style="width:64px; height:64px; object-fit:cover; border-radius:4px; border:2px solid var(--gold); cursor:pointer;"
                 title="Click pra ver no tamanho original" data-fp-foto-view="${fotoP.id}">
               <button data-fp-foto-rm="${fotoP.id}" style="font-size:11px; padding:4px 8px; background:#ef444422; color:#ef4444; border:1px solid #ef444455;">🗑️ Remover foto</button>
-              <button data-fp-foto-replace="${i}" style="font-size:11px; padding:4px 8px;">📷 Trocar</button>
+              <button data-fp-foto-replace="${i}" style="font-size:11px; padding:4px 8px;">📷 Trocar (câmera)</button>
+              <button data-fp-foto-galeria-replace="${i}" style="font-size:11px; padding:4px 8px;">🖼️ Trocar (galeria)</button>
               <span style="font-size:11px; color:var(--text-muted);">↔ Aparece também na aba <strong>Fotos</strong></span>
             ` : fotoPendente ? `
               <img src="data:${fotoPendente.mime};base64,${fotoPendente.dataB64}"
                 style="width:64px; height:64px; object-fit:cover; border-radius:4px; border:2px dashed #f59e0b; cursor:pointer;"
                 title="Foto cacheada localmente — sobe pro server quando salvar pontos">
-              <button data-fp-foto-replace="${i}" style="font-size:11px; padding:4px 8px;">📷 Trocar</button>
+              <button data-fp-foto-replace="${i}" style="font-size:11px; padding:4px 8px;">📷 Trocar (câmera)</button>
+              <button data-fp-foto-galeria-replace="${i}" style="font-size:11px; padding:4px 8px;">🖼️ Trocar (galeria)</button>
               <span style="font-size:11px; color:#f59e0b;">⏳ pendente — sobe quando salvar pontos</span>
             ` : `
-              <button data-fp-foto="${i}" style="background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955; padding:6px 12px; font-size:12px;">📷 Tirar foto do piquete P${i}</button>
-              <span style="font-size:11px; color:var(--text-muted);">(opcional — vai pro relatório fotográfico)</span>
+              <button data-fp-foto="${i}" style="background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955; padding:6px 12px; font-size:12px;">📷 Câmera</button>
+              <button data-fp-foto-galeria="${i}" style="background:#10b98122; color:#10b981; border:1px solid #10b98155; padding:6px 12px; font-size:12px;">🖼️ Galeria</button>
+              <span style="font-size:11px; color:var(--text-muted);">P${i} (opcional — pode usar foto já existente do sistema)</span>
             `}
             <input type="file" accept="image/*" capture="environment" data-fp-foto-input="${i}" style="display:none;">
           </div>
@@ -16783,9 +16786,11 @@ function renderLaudoTabPontos(c) {
                   style="width:80px; height:80px; object-fit:cover; border-radius:4px; border:2px solid var(--gold); cursor:pointer;"
                   title="Click pra ver no tamanho original" data-base-foto-view="${fotoBase.id}">
                 <button data-base-foto-rm="${fotoBase.id}" style="font-size:11px; padding:4px 8px; background:#ef444422; color:#ef4444; border:1px solid #ef444455;">🗑️ Remover</button>
-                <button data-base-foto-trocar style="font-size:11px; padding:4px 8px;">📷 Trocar</button>
+                <button data-base-foto-trocar style="font-size:11px; padding:4px 8px;">📷 Trocar (câmera)</button>
+                <button data-base-foto-galeria style="font-size:11px; padding:4px 8px;">🖼️ Trocar (galeria)</button>
               ` : `
-                <button data-base-foto-trocar style="background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955; padding:6px 12px; font-size:12px;">📷 Tirar foto da base instalada</button>
+                <button data-base-foto-trocar style="background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955; padding:6px 12px; font-size:12px;">📷 Câmera</button>
+                <button data-base-foto-galeria style="background:#10b98122; color:#10b981; border:1px solid #10b98155; padding:6px 12px; font-size:12px;">🖼️ Galeria</button>
                 <span style="font-size:11px; color:var(--text-muted);">(opcional — registra onde a base ficou montada)</span>
               `}
               <input type="file" accept="image/*" capture="environment" id="lp-base-foto-input" style="display:none;">
@@ -16972,9 +16977,17 @@ function renderLaudoTabPontos(c) {
     }
 
     // v2.4.4: Handlers da foto da base instalada
+    // v3.17.6: data-base-foto-trocar = câmera (capture) · data-base-foto-galeria = sem capture
     const baseFotoInput = document.getElementById('lp-base-foto-input');
     document.querySelectorAll('[data-base-foto-trocar]').forEach(b => b.onclick = () => {
-      if (baseFotoInput) baseFotoInput.click();
+      if (!baseFotoInput) return;
+      baseFotoInput.setAttribute('capture', 'environment');
+      baseFotoInput.click();
+    });
+    document.querySelectorAll('[data-base-foto-galeria]').forEach(b => b.onclick = () => {
+      if (!baseFotoInput) return;
+      baseFotoInput.removeAttribute('capture');
+      baseFotoInput.click();
     });
     if (baseFotoInput) {
       baseFotoInput.onchange = async () => {
@@ -17049,10 +17062,23 @@ function renderLaudoTabPontos(c) {
     }
 
     // v2.4.3 P0.2: Foto pode ser tirada ANTES de salvar pontos (cache local)
+    // v3.17.6: 2 modos — câmera (capture="environment") vs galeria do sistema
+    // (sem capture, browser abre seletor de arquivos do dispositivo incluindo
+    // fotos baixadas de outros laudos via aba Fotos > ⬇️ Baixar).
     document.querySelectorAll('[data-fp-foto], [data-fp-foto-replace]').forEach(b => {
       b.onclick = () => {
         const i = b.getAttribute('data-fp-foto') || b.getAttribute('data-fp-foto-replace');
-        document.querySelector(`[data-fp-foto-input="${i}"]`).click();
+        const input = document.querySelector(`[data-fp-foto-input="${i}"]`);
+        input.setAttribute('capture', 'environment');
+        input.click();
+      };
+    });
+    document.querySelectorAll('[data-fp-foto-galeria], [data-fp-foto-galeria-replace]').forEach(b => {
+      b.onclick = () => {
+        const i = b.getAttribute('data-fp-foto-galeria') || b.getAttribute('data-fp-foto-galeria-replace');
+        const input = document.querySelector(`[data-fp-foto-input="${i}"]`);
+        input.removeAttribute('capture');
+        input.click();
       };
     });
 
