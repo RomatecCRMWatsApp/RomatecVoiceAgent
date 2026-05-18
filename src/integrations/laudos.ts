@@ -101,6 +101,7 @@ export interface Laudo {
   desconto_tipo?: 'percentual' | 'fixo' | 'nenhum' | null;
   desconto_valor?: number | null;
   valor_final?: number | null;
+  valor_demarcacao?: number | null;
   precificacao_observacoes?: string | null;
   precificacao_calculada_em?: Date | string | null;
   // v3.5.0: BCI (Boletim do Cadastro Imobiliario - Prefeitura) - todos opcionais
@@ -198,6 +199,7 @@ interface LaudoRow extends RowDataPacket {
   desconto_tipo: 'percentual' | 'fixo' | 'nenhum' | null;
   desconto_valor: string | number | null;
   valor_final: string | number | null;
+  valor_demarcacao: string | number | null;
   precificacao_observacoes: string | null;
   precificacao_calculada_em: Date | string | null;
   // v3.5.0: BCI (Boletim do Cadastro Imobiliario - Prefeitura) - todos opcionais
@@ -310,6 +312,7 @@ function mapRow(r: LaudoRow): Laudo {
     desconto_tipo: r.desconto_tipo ?? null,
     desconto_valor: r.desconto_valor != null ? Number(r.desconto_valor) : null,
     valor_final: r.valor_final != null ? Number(r.valor_final) : null,
+    valor_demarcacao: r.valor_demarcacao != null ? Number(r.valor_demarcacao) : null,
     precificacao_observacoes: r.precificacao_observacoes ?? null,
     precificacao_calculada_em: r.precificacao_calculada_em ?? null,
     // v3.5.0: BCI

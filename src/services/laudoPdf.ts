@@ -878,21 +878,25 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
          FROM dados_pagamento_emissor WHERE ativo = 1 ORDER BY id DESC LIMIT 1`
     );
     const emissor = (dpRows && dpRows[0]) as Record<string, string | null> | undefined;
-    const valorPagar = laudo.valor_final != null ? Number(laudo.valor_final) : null;
+    // v3.20.1: aceita valor_final (precificacao INCRA) OU valor_demarcacao (manual)
+    const valorPagar = laudo.valor_final != null ? Number(laudo.valor_final)
+      : (laudo.valor_demarcacao != null ? Number(laudo.valor_demarcacao) : null);
     const fmtBRL = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
-    if (emissor && emissor.pix && valorPagar && valorPagar > 0) {
+    // v3.20.1: PIX aparece SEMPRE que houver emissor cadastrado (mesmo sem valor_final).
+    // Sem valor, o QR vai sem amount embedado — cliente digita no app do banco.
+    if (emissor && emissor.pix) {
       if (cy > 600) { doc.addPage(); cy = 60; }
       doc.fontSize(10).fillColor('#888').font('Helvetica-Bold')
          .text(`${temPrecif ? '12' : '11'}. DADOS PARA PAGAMENTO`, 40, cy);
       cy += 14;
 
-      // Gera o BR Code (Copia-e-Cola) com o valor embedado
+      // Gera o BR Code (Copia-e-Cola). Se valor existe, embeda; senao QR aberto.
       const { gerarPixBrCode } = await import('./pixBrCode');
       const brCode = gerarPixBrCode({
         chave: String(emissor.pix),
         nome: String(emissor.titular || 'ROMATEC'),
         cidade: 'ACAILANDIA',
-        valor: valorPagar,
+        valor: valorPagar && valorPagar > 0 ? valorPagar : null,
         txid: (laudo.numero_laudo || `LAUDO${laudo.id}`).replace(/[^a-zA-Z0-9]/g, '').slice(0, 25),
         descricao: `Laudo ${laudo.numero_laudo || laudo.id}`,
       });
@@ -919,7 +923,9 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
       if (emissor.agencia) linhas.push(`Agência:    ${emissor.agencia}`);
       if (emissor.conta)   linhas.push(`Conta:      ${emissor.conta}${emissor.tipo_conta ? ' (' + emissor.tipo_conta + ')' : ''}`);
       linhas.push('');
-      linhas.push(`VALOR A PAGAR: ${fmtBRL(valorPagar)}`);
+      linhas.push(valorPagar && valorPagar > 0
+        ? `VALOR A PAGAR: ${fmtBRL(valorPagar)}`
+        : `VALOR A PAGAR: a combinar (cliente informa no app)`);
       doc.font('Courier').fontSize(9).fillColor('#222')
          .text(linhas.join('\n'), 40, blocoY, { width: 380 });
 

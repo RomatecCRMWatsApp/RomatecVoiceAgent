@@ -5,11 +5,19 @@
 (function () {
   'use strict';
 
-  const api = (url, opts = {}) =>
-    fetch(url, { credentials: 'same-origin', ...opts }).then(async r => {
+  // v3.20.1: api wrapper que tambem manda x-ceo-token (igual ao window.api do
+  // offline-engine). Necessario pra endpoints PUT/DELETE protegidos por
+  // requireCeoToken (ex: /api/laudos-demarcacao/:id PUT).
+  const api = (url, opts = {}) => {
+    const headers = Object.assign({}, opts.headers || {}, {
+      'x-ceo-token': (window.state && window.state.ceoToken) ||
+                     (typeof localStorage !== 'undefined' ? localStorage.getItem('ceo_token') : '') || '',
+    });
+    return fetch(url, { credentials: 'same-origin', ...opts, headers }).then(async r => {
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
       return r.json();
     });
+  };
 
   async function listarSessoes(laudoId) {
     return api(`/api/gnss/processamentos?laudo_id=${laudoId}`);
@@ -344,6 +352,76 @@
     };
   }
 
+  // v3.20.1: edicao manual de valor e base GNSS no laudo (sem precisar de
+  // sessao processada). Util pra quando o laudo ainda nao tem retorno IBGE
+  // mas voce ja sabe os dados da base (preenchidos em campo).
+  async function obterLaudo(laudoId) {
+    return api(`/api/laudos-demarcacao/${laudoId}`);
+  }
+  async function atualizarLaudo(laudoId, body) {
+    return api(`/api/laudos-demarcacao/${laudoId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  function toLocalDtInput(iso) {
+    // Converte ISO "2026-05-17T11:43:01.000Z" -> "2026-05-17T11:43" (input datetime-local)
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  function fromLocalDtInput(s) {
+    if (!s) return null;
+    return new Date(s).toISOString();
+  }
+
+  async function abrirEditarBaseEValor(laudoId, onDone) {
+    const l = await obterLaudo(laudoId);
+    const dlg = montarModal('Editar valor e dados da base GNSS deste laudo', `
+      <h4 style="margin:8px 0 4px">Valor do serviço</h4>
+      <label>Valor (R$) — usado no PIX do PDF</label>
+      <input type="number" step="0.01" id="ev-valor" value="${l.valor_demarcacao || l.valor_final || ''}" />
+
+      <h4 style="margin:14px 0 4px">Dados da base GNSS</h4>
+      <label>Nome do receptor base (ex: S6 PLUS ComNav SN: S61L04366)</label>
+      <input type="text" id="ev-base-nome" maxlength="150" value="${(l.base_nome || '').replace(/"/g,'&quot;')}" />
+
+      <label>Início do rastreio</label>
+      <input type="datetime-local" id="ev-base-ini" value="${toLocalDtInput(l.base_inicio_rastreio)}" />
+
+      <label>Fim do rastreio</label>
+      <input type="datetime-local" id="ev-base-fim" value="${toLocalDtInput(l.base_fim_rastreio)}" />
+
+      <label>Observações da base</label>
+      <textarea id="ev-base-obs" rows="3" style="width:100%">${(l.base_observacoes || '').replace(/</g,'&lt;')}</textarea>
+
+      <div style="margin-top:14px">
+        <button id="ev-ok" style="background:#10b981;color:#fff;border:0;padding:8px 16px;border-radius:4px;cursor:pointer">Salvar</button>
+        <button id="ev-cancel" style="margin-left:8px">Cancelar</button>
+      </div>
+    `);
+    dlg.querySelector('#ev-cancel').onclick = () => { dlg.close(); dlg.remove(); };
+    dlg.querySelector('#ev-ok').onclick = async () => {
+      try {
+        const valorRaw = dlg.querySelector('#ev-valor').value;
+        const baseIni = fromLocalDtInput(dlg.querySelector('#ev-base-ini').value);
+        const baseFim = fromLocalDtInput(dlg.querySelector('#ev-base-fim').value);
+        await atualizarLaudo(laudoId, {
+          valor_demarcacao: valorRaw ? Number(valorRaw) : null,
+          base_nome: dlg.querySelector('#ev-base-nome').value.trim() || null,
+          base_inicio_rastreio: baseIni,
+          base_fim_rastreio: baseFim,
+          base_observacoes: dlg.querySelector('#ev-base-obs').value.trim() || null,
+        });
+        dlg.close(); dlg.remove();
+        onDone && onDone();
+      } catch (err) { alert('Erro ao salvar: ' + err.message); }
+    };
+  }
+
   window.LaudoGnss = {
     listarSessoes, criarSessao, uploadRinex, parseRinex, empacotarIbge,
     importarRetornoIbge, importarPppExterno, inserirManual, aplicarEmPonto,
@@ -352,5 +430,6 @@
     abrirNovaSessao,
     abrirImportarRetorno,
     abrirAplicarEmPonto,
+    abrirEditarBaseEValor,
   };
 })();

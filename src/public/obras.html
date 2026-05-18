@@ -15609,6 +15609,7 @@ function renderLaudoEditor(v) {
           <div>
             <button id="gnss-nova">+ Nova Sessao (Upload RINEX)</button>
             <button id="gnss-ppp-externo">+ Importar PPP Externo</button>
+            <button id="gnss-editar-base" style="background:#3b82f6;color:#fff;border:0;padding:6px 12px;border-radius:4px;cursor:pointer">✏️ Editar valor + base manualmente</button>
           </div>
         </div>
         <div id="gnss-lista"></div>
@@ -15622,6 +15623,9 @@ function renderLaudoEditor(v) {
       window.LaudoGnss.abrirNovaSessao(laudoId,
         () => window.LaudoGnss.renderListaEm(document.getElementById('gnss-lista'), laudoId),
         { fonte: 'ppp_manual' });
+    document.getElementById('gnss-editar-base').onclick = () =>
+      window.LaudoGnss.abrirEditarBaseEValor(laudoId,
+        () => { try { loadLaudoDetalhe(laudoId).then(() => renderLaudos()); } catch {} });
     window.LaudoGnss.renderListaEm(document.getElementById('gnss-lista'), laudoId);
   }
 }
