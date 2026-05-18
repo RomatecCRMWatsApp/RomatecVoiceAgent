@@ -62,6 +62,13 @@
     });
   }
 
+  // v3.19.1: deletar sessao (hard delete + cascata em arquivos).
+  // Se apagarVertice=true e a sessao tinha vertice auto-criado, apaga junto.
+  async function deletarSessao(sessaoId, apagarVertice) {
+    const qs = apagarVertice ? '?apagar_vertice=1' : '';
+    return api(`/api/gnss/processamentos/${sessaoId}${qs}`, { method: 'DELETE' });
+  }
+
   function htmlSessao(s) {
     const lat = s.latitude_graus != null ? Number(s.latitude_graus).toFixed(7) : '—';
     const lon = s.longitude_graus != null ? Number(s.longitude_graus).toFixed(7) : '—';
@@ -87,6 +94,7 @@
           ? '<button data-gnss-importar-ret>Importar retorno IBGE</button>' : ''}
         ${s.status === 'processado' && s.laudo_id
           ? '<button data-gnss-aplicar>Aplicar em ponto</button>' : ''}
+        <button data-gnss-deletar style="background:#c0392b;color:#fff;border:0;padding:4px 10px;border-radius:4px;cursor:pointer;margin-left:auto">🗑️ Deletar</button>
       </div>
     </div>`;
   }
@@ -117,6 +125,20 @@
       containerEl.querySelectorAll('[data-gnss-aplicar]').forEach(b => b.onclick = (e) => {
         const id = e.target.closest('.gnss-card').dataset.sessaoId;
         window.LaudoGnss.abrirAplicarEmPonto(id, laudoId, () => renderListaEm(containerEl, laudoId));
+      });
+      containerEl.querySelectorAll('[data-gnss-deletar]').forEach(b => b.onclick = async (e) => {
+        const card = e.target.closest('.gnss-card');
+        const id = card.dataset.sessaoId;
+        const sessao = (await listarSessoes(laudoId)).find(s => Number(s.id) === Number(id));
+        const tinhaVertice = !!(sessao && sessao.ponto_id);
+        const msg = tinhaVertice
+          ? `Deletar a sessao ${sessao.rotulo}?\n\n[OK] = Apaga sessao + arquivos RINEX/IBGE armazenados + vertice criado no laudo (ponto #${sessao.ponto_id})\n[Cancelar] = Nada acontece\n\nPra apagar APENAS a sessao e manter o vertice no laudo, clique Cancelar e me avise.`
+          : `Deletar a sessao ${sessao ? sessao.rotulo : '#'+id}?\n\nIsso vai apagar a sessao e todos os arquivos armazenados (RINEX, .zip IBGE, retorno). Acao irreversivel.`;
+        if (!confirm(msg)) return;
+        try {
+          await deletarSessao(id, tinhaVertice);
+          await renderListaEm(containerEl, laudoId);
+        } catch (err) { alert('Erro ao deletar: ' + err.message); }
       });
     } catch (err) {
       containerEl.innerHTML = '<div class="gnss-err">Erro: ' + err.message + '</div>';
@@ -325,6 +347,7 @@
   window.LaudoGnss = {
     listarSessoes, criarSessao, uploadRinex, parseRinex, empacotarIbge,
     importarRetornoIbge, importarPppExterno, inserirManual, aplicarEmPonto,
+    deletarSessao,
     renderListaEm,
     abrirNovaSessao,
     abrirImportarRetorno,

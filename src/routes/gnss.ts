@@ -185,6 +185,33 @@ gnssRouter.get('/processamentos/:id', async (req: Request, res: Response) => {
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v3.19.1: DELETE /api/gnss/processamentos/:id
+// Hard delete da sessao + arquivos (cascata via FK ON DELETE CASCADE).
+// Query opcional ?apagar_vertice=1 tambem apaga o vertice vinculado (auto-criado).
+gnssRouter.delete('/processamentos/:id', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const apagarVertice = req.query.apagar_vertice === '1';
+    const p = await obterProcessamento(id);
+    if (!p) return res.status(404).json({ error: 'nao encontrado' });
+
+    let verticeApagado: number | null = null;
+    if (apagarVertice && p.ponto_id && p.laudo_id) {
+      const [r] = await pool.execute<ResultSetHeader>(
+        `DELETE FROM laudos_demarcacao_pontos WHERE id = ? AND laudo_id = ?`,
+        [p.ponto_id, p.laudo_id]
+      );
+      if (r.affectedRows > 0) verticeApagado = p.ponto_id;
+    }
+    // Arquivos sao apagados em cascata pela FK ON DELETE CASCADE
+    await pool.execute(`DELETE FROM processamentos_gnss WHERE id = ?`, [id]);
+    res.json({ ok: true, vertice_apagado: verticeApagado });
+  } catch (err) {
+    console.error('[gnss] DELETE /processamentos/:id:', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // GET /api/gnss/processamentos?laudo_id=...&status=...
 gnssRouter.get('/processamentos', async (req: Request, res: Response) => {
   try {
