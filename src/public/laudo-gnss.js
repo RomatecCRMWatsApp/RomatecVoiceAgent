@@ -123,11 +123,148 @@
     }
   }
 
+  function montarModal(titulo, contentHtml) {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'gnss-modal';
+    dlg.innerHTML = `<div class="gnss-modal-hdr"><h3>${titulo}</h3>
+      <button class="gnss-modal-close">x</button></div>
+      <div class="gnss-modal-body">${contentHtml}</div>`;
+    document.body.appendChild(dlg);
+    dlg.querySelector('.gnss-modal-close').onclick = () => { dlg.close(); dlg.remove(); };
+    dlg.showModal();
+    return dlg;
+  }
+
+  async function abrirNovaSessao(laudoId, onDone, opts = {}) {
+    const fonteInicial = opts.fonte || 'rinex_ibge';
+    const dlg = montarModal('Nova Sessao GNSS', `
+      <div class="gnss-wizard">
+        <div data-step="1">
+          <label>Rotulo do ponto (M01, V03...)</label>
+          <input type="text" id="gnss-rotulo" maxlength="50" autofocus />
+          <label>Fonte</label>
+          <select id="gnss-fonte">
+            <option value="rinex_ibge"${fonteInicial==='rinex_ibge'?' selected':''}>🇧🇷 Submeter ao IBGE-PPP (recomendado)</option>
+            <option value="ppp_manual"${fonteInicial==='ppp_manual'?' selected':''}>📥 Ja tenho resultado processado (PPP externo)</option>
+            <option value="outro">📋 Inserir coordenadas manualmente</option>
+          </select>
+          <button id="gnss-w-next">Proximo →</button>
+        </div>
+        <div data-step="2" style="display:none">
+          <label>Arquivos RINEX (.YYo obrigatorio; .YYn / .YYg opcionais)</label>
+          <input type="file" id="gnss-rinex-files" multiple accept=".rnx,.o,.n,.g,.l" />
+          <button id="gnss-w-upload">Enviar e ler cabecalho</button>
+        </div>
+        <div data-step="3" style="display:none">
+          <h4>Metadados extraidos</h4>
+          <div id="gnss-meta"></div>
+          <label>Altura da antena (m) — confirme</label>
+          <input type="number" step="0.001" id="gnss-altura" />
+          <button id="gnss-w-confirma">Confirmar →</button>
+        </div>
+        <div data-step="4" style="display:none">
+          <h4>Pacote IBGE-PPP pronto</h4>
+          <p>1. Baixe o .zip; 2. Submeta no <a href="#" id="gnss-w-portal" target="_blank">portal IBGE-PPP</a>; 3. Aguarde o retorno por e-mail; 4. Importe o .zip pela tela principal.</p>
+          <a id="gnss-w-download" href="#" target="_blank">⬇ Baixar pacote</a>
+          <button id="gnss-w-fim">Fechar</button>
+        </div>
+      </div>
+    `);
+
+    let sessaoCriadaId = null;
+
+    dlg.querySelector('#gnss-w-next').onclick = async () => {
+      const rotulo = dlg.querySelector('#gnss-rotulo').value.trim();
+      const fonte = dlg.querySelector('#gnss-fonte').value;
+      if (!rotulo) return alert('Informe o rotulo');
+      try {
+        const sess = await criarSessao(laudoId, rotulo, fonte);
+        sessaoCriadaId = sess.id;
+        if (fonte === 'outro') {
+          // pula direto para inserir manualmente
+          dlg.close(); dlg.remove();
+          abrirManual(sess.id, onDone);
+          return;
+        }
+        if (fonte === 'ppp_manual') {
+          dlg.close(); dlg.remove();
+          window.LaudoGnss.abrirImportarRetorno(sess.id, onDone, { externo: true });
+          return;
+        }
+        dlg.querySelector('[data-step="1"]').style.display = 'none';
+        dlg.querySelector('[data-step="2"]').style.display = '';
+      } catch (err) { alert('Erro: ' + err.message); }
+    };
+
+    dlg.querySelector('#gnss-w-upload').onclick = async () => {
+      const files = dlg.querySelector('#gnss-rinex-files').files;
+      if (!files.length) return alert('Selecione ao menos 1 arquivo');
+      try {
+        await uploadRinex(sessaoCriadaId, files);
+        const r = await parseRinex(sessaoCriadaId);
+        const m = r.header;
+        dlg.querySelector('#gnss-meta').innerHTML = `
+          <div>Receptor: ${m.receiverModel || '—'}</div>
+          <div>Antena: ${m.antennaModel || '—'}</div>
+          <div>Inicio: ${m.timeFirstObs || '—'}</div>
+          <div>Fim: ${m.timeLastObs || '—'}</div>
+          <div>Duracao: ${m.durationSeconds ? Math.round(m.durationSeconds/60)+' min' : '—'}</div>
+          <div>Intervalo: ${m.intervalSeconds || '—'} s</div>
+          <div>Sistemas: ${m.systems.join(', ') || '—'}</div>
+          ${r.validacao.warnings.length ? '<div class="warn">⚠ ' + r.validacao.warnings.join('<br>⚠ ') + '</div>' : ''}
+        `;
+        dlg.querySelector('#gnss-altura').value = m.antennaHeightM ?? '';
+        dlg.querySelector('[data-step="2"]').style.display = 'none';
+        dlg.querySelector('[data-step="3"]').style.display = '';
+      } catch (err) { alert('Erro: ' + err.message); }
+    };
+
+    dlg.querySelector('#gnss-w-confirma').onclick = async () => {
+      try {
+        const r = await empacotarIbge(sessaoCriadaId);
+        dlg.querySelector('#gnss-w-download').href = r.download_url;
+        // URL do portal IBGE — busca em /api/config se existir, senao usa hard-coded
+        dlg.querySelector('#gnss-w-portal').href =
+          'https://www.ibge.gov.br/geociencias/modelos-digitais-de-superficie/modelos-digitais-de-elevacao/19219-ppp-posicionamento-por-ponto-preciso.html';
+        dlg.querySelector('[data-step="3"]').style.display = 'none';
+        dlg.querySelector('[data-step="4"]').style.display = '';
+      } catch (err) { alert('Erro: ' + err.message); }
+    };
+
+    dlg.querySelector('#gnss-w-fim').onclick = () => {
+      dlg.close(); dlg.remove();
+      onDone && onDone();
+    };
+  }
+
+  function abrirManual(sessaoId, onDone) {
+    const dlg = montarModal('Inserir coordenadas manualmente', `
+      <label>Latitude (graus decimais, negativa no sul)</label>
+      <input type="number" step="0.0000001" id="gm-lat" />
+      <label>Longitude (graus decimais, negativa no oeste)</label>
+      <input type="number" step="0.0000001" id="gm-lon" />
+      <label>Altitude ortometrica (m)</label>
+      <input type="number" step="0.001" id="gm-alt" />
+      <button id="gm-ok">Salvar</button>
+    `);
+    dlg.querySelector('#gm-ok').onclick = async () => {
+      try {
+        await inserirManual(sessaoId, {
+          latitude: Number(dlg.querySelector('#gm-lat').value),
+          longitude: Number(dlg.querySelector('#gm-lon').value),
+          altitude_ortometrica_m: Number(dlg.querySelector('#gm-alt').value) || null,
+        });
+        dlg.close(); dlg.remove();
+        onDone && onDone();
+      } catch (err) { alert('Erro: ' + err.message); }
+    };
+  }
+
   window.LaudoGnss = {
     listarSessoes, criarSessao, uploadRinex, parseRinex, empacotarIbge,
     importarRetornoIbge, importarPppExterno, inserirManual, aplicarEmPonto,
     renderListaEm,
-    abrirNovaSessao: null,         // setado na Task 6.1
+    abrirNovaSessao,
     abrirImportarRetorno: null,    // setado na Task 6.2
     abrirAplicarEmPonto: null,     // setado na Task 6.3
   };
