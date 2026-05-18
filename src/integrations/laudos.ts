@@ -1321,7 +1321,11 @@ export async function prePopularLadosDoLote(
  * NOTA: representante_nome/cpf/cargo e descricao_area foram OMITIDOS do camposCopiar
  * pois pertencem a tabela contratantes, nao a laudos_demarcacao.
  */
-export async function clonarLaudo(originalId: number): Promise<Laudo> {
+export async function clonarLaudo(
+  originalId: number,
+  opts: { copiarFotos?: boolean } = {},
+): Promise<Laudo> {
+  const copiarFotos = !!opts.copiarFotos;
   // gera numero_laudo ANTES de abrir transacao (gerarNumeroLaudo ja tem seu
   // proprio lock pessimista; chamar de dentro de outra transacao causaria deadlock)
   const novoNumero = await gerarNumeroLaudo();
@@ -1434,6 +1438,22 @@ export async function clonarLaudo(originalId: number): Promise<Laudo> {
       }
     }
 
+    // 5.5. v3.17.4: copia fotos quando opt-in. INSERT...SELECT mantem mime/legenda/
+    // conteudo_b64 mas re-aponta laudo_id pro clone e zera ponto_id (pontos novos
+    // foram zerados na etapa 4, entao linkagem antiga nao serve).
+    let fotosCopiadas = 0;
+    if (copiarFotos) {
+      const [fotosResult] = await conn.execute<ResultSetHeader>(
+        `INSERT INTO laudos_demarcacao_fotos
+            (laudo_id, ponto_id, ordem, mime, conteudo_b64, legenda, created_at)
+         SELECT ?, NULL, ordem, mime, conteudo_b64, legenda, NOW()
+           FROM laudos_demarcacao_fotos
+          WHERE laudo_id = ?`,
+        [cloneId, Number(originalId)],
+      );
+      fotosCopiadas = fotosResult.affectedRows || 0;
+    }
+
     // 6. Audit log (tenant_id NOT NULL no schema; usa 1 como padrao mono-tenant)
     await conn.execute(
       `INSERT INTO audit_log (tenant_id, action, resource_type, resource_id, payload)
@@ -1442,6 +1462,8 @@ export async function clonarLaudo(originalId: number): Promise<Laudo> {
         novo_id: cloneId,
         novo_numero: novoNumero,
         tipo_levantamento: o.tipo_levantamento,
+        copiar_fotos: copiarFotos,
+        fotos_copiadas: fotosCopiadas,
       })],
     );
 

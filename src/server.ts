@@ -1702,7 +1702,10 @@ app.post('/api/laudos-demarcacao/:id/clonar', requireCeoToken, async (req: Reque
   try {
     const m = await import('./integrations/laudos');
     const id = await m.resolverLaudoId(String(req.params.id));
-    const clone = await m.clonarLaudo(id);
+    // v3.17.4: aceita { copiar_fotos: boolean } no body — quando true, INSERT...SELECT
+    // duplica fotos do original no clone (sem rastrear ponto_id, pois pontos foram zerados)
+    const copiarFotos = !!(req.body?.copiar_fotos);
+    const clone = await m.clonarLaudo(id, { copiarFotos });
     res.json(clone);
   } catch (err) {
     const msg = (err as Error).message;
@@ -2421,7 +2424,7 @@ app.post('/api/laudos-demarcacao/:id/fotos', requireCeoToken, async (req: Reques
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
-// FOTOS — get conteudo individual (binario)
+// FOTOS — get conteudo individual (binario). v3.17.4: ?download=1 forca attachment
 app.get('/api/laudos-demarcacao/foto/:fotoId', async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
@@ -2429,6 +2432,10 @@ app.get('/api/laudos-demarcacao/foto/:fotoId', async (req: Request, res: Respons
     if (!f) { res.status(404).json({ error: 'Foto nao encontrada' }); return; }
     const buf = Buffer.from(f.base64, 'base64');
     res.setHeader('Content-Type', f.mime);
+    if (req.query.download === '1') {
+      const ext = f.mime.includes('png') ? 'png' : (f.mime.includes('webp') ? 'webp' : 'jpg');
+      res.setHeader('Content-Disposition', `attachment; filename="foto-${req.params.fotoId}.${ext}"`);
+    }
     res.send(buf);
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });

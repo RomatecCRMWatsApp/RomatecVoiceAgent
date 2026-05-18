@@ -14845,12 +14845,16 @@ function renderLaudosLista(v) {
     window.open('/api/laudos-demarcacao/' + b.dataset.laudoPdf + '/pdf', '_blank');
   });
   v.querySelectorAll('[data-laudo-clonar]').forEach(b => b.onclick = async () => {
-    if (!confirm('Clonar este laudo?\n\n✓ Cliente, loteamento, equipamentos, técnico copiados\n✗ Número do lote ficará vazio (preencher do novo lote)\n✗ Pontos GNSS zerados (rastrear novamente)\n✗ Fotos não copiadas\n⚠️ Tempo da base virá copiado — confirme em campo se é a mesma sessão')) return;
+    if (!confirm('Clonar este laudo?\n\n✓ Cliente, loteamento, equipamentos, técnico copiados\n✗ Número do lote ficará vazio (preencher do novo lote)\n✗ Pontos GNSS zerados (rastrear novamente)\n⚠️ Tempo da base virá copiado — confirme em campo se é a mesma sessão')) return;
+    // v3.17.4: pergunta se copia fotos. OK = copia, Cancelar = sem fotos.
+    const copiarFotos = confirm('📷 Copiar também as fotos do laudo original?\n\n[OK] = Clona COM as fotos (úteis pra reuso visual)\n[Cancelar] = Clona SEM fotos');
     try {
       const clone = await api('/api/laudos-demarcacao/' + b.dataset.laudoClonar + '/clonar', {
-        method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        body: JSON.stringify({ copiar_fotos: copiarFotos }),
+        headers: { 'Content-Type': 'application/json' },
       });
-      alert('✓ Laudo clonado: ' + clone.numero_laudo);
+      alert('✓ Laudo clonado: ' + clone.numero_laudo + (copiarFotos ? '\n📷 Fotos copiadas' : ''));
       await loadLaudoDetalhe(clone.id);
       state.laudosView = 'editor';
       state.laudoEditorTab = 'dados';
@@ -17539,13 +17543,15 @@ function renderLaudoTabFotos(c) {
   const renderCardFoto = (f) => `
     <div class="card" style="padding:6px; ${f.ponto_id ? 'border:2px solid var(--gold);' : ''}">
       <div style="position:relative;">
-        <img src="/api/laudos-demarcacao/foto/${f.id}" alt="" style="width:100%; height:140px; object-fit:cover; border-radius:4px;">
+        <img src="/api/laudos-demarcacao/foto/${f.id}" alt="" style="width:100%; height:140px; object-fit:cover; border-radius:4px; cursor:zoom-in;" data-foto-view="${f.id}" title="Clique pra ampliar">
         ${f.ponto_id ? `<span style="position:absolute; top:4px; left:4px; background:var(--gold); color:#06120a; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600;">📍 ${escape(rotuloPonto[f.ponto_id] || '?')}</span>` : ''}
       </div>
       <input data-leg="${f.id}" placeholder="Legenda" value="${escape(f.legenda||'')}" style="width:100%; margin-top:4px; font-size:11px;">
       <div style="display:flex; gap:4px; margin-top:4px;">
-        <button data-leg-save="${f.id}" style="flex:1; font-size:11px;">💾</button>
-        <button data-foto-del="${f.id}" class="btn-danger" style="flex:1; font-size:11px;">🗑️</button>
+        <button data-foto-view="${f.id}" title="Ver em tamanho real" style="font-size:11px; padding:4px 6px;">👁️</button>
+        <button data-foto-baixar="${f.id}" title="Baixar pra usar em outro laudo" style="font-size:11px; padding:4px 6px; background:#0ea5e9; color:#fff; border-color:#0ea5e9;">⬇️</button>
+        <button data-leg-save="${f.id}" title="Salvar legenda" style="flex:1; font-size:11px;">💾</button>
+        <button data-foto-del="${f.id}" class="btn-danger" title="Remover" style="font-size:11px; padding:4px 6px;">🗑️</button>
       </div>
     </div>
   `;
@@ -17659,6 +17665,31 @@ function renderLaudoTabFotos(c) {
       await loadLaudoDetalhe(l.id);
       renderLaudoEditor(document.getElementById('view-laudos'));
     } catch (err) { alert('Erro: '+err.message); }
+  });
+  // v3.17.4: 👁️ ver foto ampliada (lightbox simples). Clique na propria <img> ou no botao 👁️.
+  c.querySelectorAll('[data-foto-view]').forEach(el => el.onclick = () => {
+    const id = el.dataset.fotoView;
+    let overlay = document.getElementById('fotoLightbox');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = 'fotoLightbox';
+    overlay.style.cssText = 'position:fixed; inset:0; z-index:99998; background:rgba(0,0,0,0.92); display:flex; align-items:center; justify-content:center; padding:20px; cursor:zoom-out;';
+    overlay.innerHTML = `
+      <img src="/api/laudos-demarcacao/foto/${id}" style="max-width:100%; max-height:90vh; object-fit:contain; border-radius:6px; box-shadow:0 10px 40px rgba(0,0,0,0.6);">
+      <button style="position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:6px 14px; border-radius:6px; cursor:pointer; font-size:14px;">✕ Fechar</button>
+    `;
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
+  });
+  // v3.17.4: ⬇️ baixar foto (Content-Disposition attachment via ?download=1)
+  c.querySelectorAll('[data-foto-baixar]').forEach(b => b.onclick = () => {
+    const id = b.dataset.fotoBaixar;
+    const a = document.createElement('a');
+    a.href = '/api/laudos-demarcacao/foto/' + id + '?download=1';
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 100);
   });
 }
 
