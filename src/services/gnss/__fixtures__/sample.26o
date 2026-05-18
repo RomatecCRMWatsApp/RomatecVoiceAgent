@@ -1,0 +1,13 @@
+﻿     2.11           OBSERVATION DATA    G (GPS)             RINEX VERSION / TYPE
+TOPCON HIPER V                                              REC # / TYPE / VERS 
+12345                                                       REC #               
+                    TPSHIPER_V          NONE                ANT # / TYPE        
+  4196543.8120 -4250176.2340  -517823.4560                  APPROX POSITION XYZ 
+        1.5800        0.0000        0.0000                  ANTENNA: DELTA H/E/N
+     1     1                                                WAVELENGTH FACT L1/2
+     8    L1    L2    C1    P1    P2    S1    S2            # / TYPES OF OBSERV 
+    15.0000                                                  INTERVAL           
+  2026     5    18    14    30   30.0000000     GPS         TIME OF FIRST OBS   
+  2026     5    18    15    35    0.0000000     GPS         TIME OF LAST OBS    
+G                                                           SYS / # / OBS TYPES 
+                                                            END OF HEADER       

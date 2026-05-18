@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Ponto IBGE-PPP</name>
+      <Point>
+        <coordinates>-47.503429353,-4.940197872,245.678</coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>
