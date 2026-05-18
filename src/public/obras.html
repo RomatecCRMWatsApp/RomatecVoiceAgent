@@ -14647,16 +14647,18 @@ async function loadLaudoDetalhe(id) {
       return;
     }
   }
-  const [laudo, geom, fotos] = await Promise.all([
+  const [laudo, geom, fotos, arquivos] = await Promise.all([
     api('/api/laudos-demarcacao/' + id),
     api('/api/laudos-demarcacao/' + id + '/pontos').catch(() => ({ pontos:[], lados:[] })),
     api('/api/laudos-demarcacao/' + id + '/fotos').catch(() => ({ items:[] })),
+    api('/api/laudos-demarcacao/' + id + '/arquivos').catch(() => ({ items:[] })),
   ]);
   state.laudoAtual = {
     ...laudo,
     pontos: geom.pontos || [],
     lados: geom.lados || [],
     fotos: fotos.items || fotos || [],
+    arquivosVetoriais: arquivos.items || [],
   };
   // v2.9.0: pre-carrega o lote vinculado (se existir) pra estar disponivel
   // em todas as abas (Pontos usa pra comparar medidas teoricas vs reais)
@@ -15552,6 +15554,7 @@ function renderLaudoEditor(v) {
     ['pontos', '📍 Pontos / Vértices'],
     ['croqui', '🗺️ Croqui'],
     ['fotos', '📸 Fotos (' + (l.fotos?.length || 0) + ')'],
+    ['arquivos', '📐 Arquivos (' + (l.arquivosVetoriais?.length || 0) + ')'],
     ['art', '📜 ART/TRT + Financeiro'],
     ['cadastros', '👥 Contratante / Profissional'],
   ];
@@ -15589,6 +15592,7 @@ function renderLaudoEditor(v) {
   else if (state.laudoEditorTab === 'pontos') renderLaudoTabPontos(c);
   else if (state.laudoEditorTab === 'croqui') renderLaudoTabCroqui(c);
   else if (state.laudoEditorTab === 'fotos')  renderLaudoTabFotos(c);
+  else if (state.laudoEditorTab === 'arquivos') renderLaudoTabArquivosVetoriais(c);
   else if (state.laudoEditorTab === 'art')    renderLaudoTabArt(c);
   else if (state.laudoEditorTab === 'cadastros') renderLaudoTabCadastros(c);
 }
@@ -17655,6 +17659,162 @@ function renderLaudoTabFotos(c) {
       await loadLaudoDetalhe(l.id);
       renderLaudoEditor(document.getElementById('view-laudos'));
     } catch (err) { alert('Erro: '+err.message); }
+  });
+}
+
+// v3.17.0: Arquivos Técnicos Vetoriais (DXF / DWG / KML) — upload + listagem + download
+function renderLaudoTabArquivosVetoriais(c) {
+  const l = state.laudoAtual;
+  const arquivos = l.arquivosVetoriais || [];
+  // Laudo ja assinado/enviado: somente leitura (tokens continuam ativos pro cliente)
+  const readonly = ['ASSINADO','RECIBO_GERADO','ENVIADO','CONFIRMADO'].includes(l.status);
+
+  const formatBytes = b => {
+    if (!b || b <= 0) return '0 B';
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+    return (b / 1024 / 1024).toFixed(2) + ' MB';
+  };
+  const tipoIcone = t => t === 'kml' ? '🌍' : '📐';
+
+  const dropzoneHtml = readonly ? '' : `
+    <label id="lavDropZone" style="display:block; border:2px dashed var(--border-strong); border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:rgba(0,255,136,0.03); margin-bottom:12px;">
+      <input type="file" id="lavInput" multiple accept=".dxf,.dwg,.kml" style="display:none;">
+      <div style="font-size:32px; margin-bottom:6px;">📤</div>
+      <div style="font-size:14px; color:var(--neon); font-weight:600;">Arraste arquivos aqui ou clique para enviar</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">DXF · DWG (até 50 MB) · KML (até 20 MB)</div>
+    </label>
+    <div id="lavProgresso" style="display:none; padding:8px; background:rgba(0,200,255,0.08); border:1px solid var(--neon); border-radius:6px; margin-bottom:8px; font-size:12px;"></div>
+  `;
+
+  const linhasHtml = arquivos.length === 0
+    ? '<p style="text-align:center; color:var(--text-muted); padding:20px; font-size:13px;">Nenhum arquivo anexado ainda.</p>'
+    : arquivos.map(a => {
+        const url = window.location.origin + '/d/' + a.download_token;
+        return `
+          <div style="display:flex; gap:10px; align-items:center; padding:10px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:6px; margin-bottom:6px;">
+            <span style="font-size:22px;">${tipoIcone(a.tipo)}</span>
+            <div style="flex:1; min-width:0;">
+              <div style="font-weight:600; font-size:13px; word-break:break-all;">${escape(a.nome_original)}</div>
+              <div style="font-size:11px; color:var(--text-muted);">
+                ${a.tipo.toUpperCase()} · ${formatBytes(a.tamanho_bytes)} · ${a.download_count || 0} download(s)
+                ${a.download_expira_em ? ' · expira ' + new Date(a.download_expira_em).toLocaleDateString('pt-BR') : ''}
+              </div>
+              <div style="font-size:10px; color:var(--text-muted); margin-top:2px; font-family:monospace; word-break:break-all;">
+                <a href="${url}" target="_blank" style="color:var(--neon);">${escape(url)}</a>
+              </div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              ${!readonly ? `
+                <button class="btn-secondary" data-lav-regen="${a.id}" title="Gerar novo token (invalida o anterior)" style="font-size:10px; padding:4px 8px;">🔄</button>
+                <button data-lav-del="${a.id}" title="Remover" style="background:#dc2626; color:#fff; border:none; padding:4px 8px; font-size:10px; border-radius:4px; cursor:pointer;">🗑</button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+  c.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0; font-size:14px;">📐 Arquivos Técnicos Vetoriais</h3>
+      <p style="font-size:11px; color:var(--text-muted); margin:0 0 12px;">
+        Anexe arquivos CAD/GIS (DXF, DWG, KML) que serão disponibilizados via QR code e link no PDF do laudo.
+        ${readonly ? '<br><strong style="color:var(--gold);">Laudo já enviado — somente leitura.</strong>' : ''}
+      </p>
+      ${dropzoneHtml}
+      <div id="lavLista">${linhasHtml}</div>
+    </div>
+  `;
+
+  if (readonly) return;
+
+  const dropZone = document.getElementById('lavDropZone');
+  const input = document.getElementById('lavInput');
+  const progresso = document.getElementById('lavProgresso');
+
+  const uploadArquivos = async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    // Validacao client de extensao
+    const extPermitidas = ['dxf', 'dwg', 'kml'];
+    const limitesMb = { dxf: 50, dwg: 50, kml: 20 };
+    const validos = [];
+    const erros = [];
+    for (const f of fileList) {
+      const ext = (f.name.split('.').pop() || '').toLowerCase();
+      if (!extPermitidas.includes(ext)) {
+        erros.push(`${f.name}: extensão .${ext} não suportada`);
+        continue;
+      }
+      const limiteBytes = (limitesMb[ext] || 50) * 1024 * 1024;
+      if (f.size > limiteBytes) {
+        erros.push(`${f.name}: excede ${limitesMb[ext]} MB`);
+        continue;
+      }
+      validos.push(f);
+    }
+    if (erros.length > 0) {
+      alert('Erros:\n' + erros.join('\n'));
+      if (validos.length === 0) return;
+    }
+
+    progresso.style.display = 'block';
+    progresso.textContent = `⏳ Enviando ${validos.length} arquivo(s)...`;
+
+    const fd = new FormData();
+    validos.forEach(f => fd.append('arquivos', f));
+    try {
+      const r = await fetch('/api/laudos-demarcacao/' + l.id + '/arquivos', {
+        method: 'POST',
+        body: fd,
+        headers: { 'x-ceo-token': (window.state?.ceoToken) || localStorage.getItem('ceo_token') || '' },
+      });
+      const j = await r.json();
+      if (!r.ok && !j.ok) {
+        throw new Error(j.error || ('erros: ' + (j.erros || []).map(e => e.arquivo + ' (' + e.erro + ')').join(', ')));
+      }
+      if (j.erros && j.erros.length > 0) {
+        alert('Alguns arquivos falharam:\n' + j.erros.map(e => e.arquivo + ': ' + e.erro).join('\n'));
+      }
+      await loadLaudoDetalhe(l.id);
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) {
+      progresso.textContent = '❌ Erro: ' + err.message;
+      progresso.style.color = '#dc2626';
+      setTimeout(() => { if (progresso) progresso.style.display = 'none'; }, 5000);
+    }
+  };
+
+  dropZone.onclick = () => input.click();
+  input.onchange = e => uploadArquivos(Array.from(e.target.files || []));
+
+  ['dragenter', 'dragover'].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    dropZone.style.background = 'rgba(0,255,136,0.15)';
+  }));
+  ['dragleave', 'drop'].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    dropZone.style.background = 'rgba(0,255,136,0.03)';
+  }));
+  dropZone.addEventListener('drop', e => {
+    uploadArquivos(Array.from(e.dataTransfer.files || []));
+  });
+
+  c.querySelectorAll('[data-lav-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Remover este arquivo? O link de download será invalidado imediatamente.')) return;
+    try {
+      await api('/api/laudos-demarcacao/' + l.id + '/arquivos/' + b.dataset.lavDel, { method: 'DELETE' });
+      await loadLaudoDetalhe(l.id);
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: ' + err.message); }
+  });
+
+  c.querySelectorAll('[data-lav-regen]').forEach(b => b.onclick = async () => {
+    if (!confirm('Gerar novo token? O link atual será invalidado.')) return;
+    try {
+      await api('/api/laudos-demarcacao/' + l.id + '/arquivos/' + b.dataset.lavRegen + '/regenerar-token', { method: 'POST' });
+      await loadLaudoDetalhe(l.id);
+      renderLaudoEditor(document.getElementById('view-laudos'));
+    } catch (err) { alert('Erro: ' + err.message); }
   });
 }
 

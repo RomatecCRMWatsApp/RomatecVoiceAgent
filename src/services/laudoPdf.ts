@@ -959,6 +959,109 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   doc.text(partesAssina.join(' · '), 40, cy, { width: 515, align: 'center' });
   cy += 18;
 
+  // ── 13.5. Arquivos Técnicos Anexos (v3.17.0) ────────────────────────
+  // Renderiza apenas se houver arquivos vetoriais ativos. Cada arquivo recebe
+  // um cartão com nome, tamanho, link clicável (truncado) e QR code.
+  try {
+    const av = await import('./arquivosVetoriaisService');
+    const arquivos = await av.listarArquivosVetoriais(Number(laudo.id));
+    if (arquivos.length > 0) {
+      doc.addPage();
+      cy = 50;
+      doc.fontSize(14).fillColor(corHex).font('Helvetica-Bold')
+         .text('ARQUIVOS TÉCNICOS ANEXOS', 40, cy, { width: 515, align: 'center' });
+      cy += 22;
+      doc.moveTo(40, cy).lineTo(555, cy).strokeColor(corHex).lineWidth(1).stroke();
+      cy += 12;
+
+      doc.fontSize(9).fillColor('#444').font('Helvetica')
+         .text(
+           'Os arquivos técnicos vetoriais a seguir compõem o presente laudo e estão disponíveis para download através dos links e QR Codes abaixo. Os links são individuais — podem ser acessados via navegador no computador ou escaneados pelo dispositivo móvel.',
+           40, cy, { width: 515, align: 'justify' }
+         );
+      cy = doc.y + 12;
+
+      const baseUrlAv = getBaseUrl();
+      const QRCode = (await import('qrcode')).default;
+      const tipoIcone = (t: string) => t === 'kml' ? '🌍' : '📐';
+      const fmtBytes = (b: number) => {
+        if (b < 1024) return `${b} B`;
+        if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+        return `${(b / 1024 / 1024).toFixed(2)} MB`;
+      };
+      const truncLink = (url: string) => {
+        if (url.length <= 56) return url;
+        return url.slice(0, 24) + '...' + url.slice(-8);
+      };
+
+      for (const a of arquivos) {
+        const url = `${baseUrlAv}/d/${a.download_token}`;
+        const cardH = 130;
+        if (cy + cardH > 770) { doc.addPage(); cy = 50; }
+
+        doc.save()
+           .lineWidth(0.8)
+           .strokeColor(corHex)
+           .roundedRect(40, cy, 515, cardH, 6)
+           .stroke()
+           .restore();
+
+        // Cabeçalho do card: icone + tipo + nome + tamanho
+        doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold')
+           .text(`${tipoIcone(a.tipo)} ARQUIVO ${a.tipo.toUpperCase()}`, 52, cy + 10, { width: 380 });
+        doc.fontSize(9).fillColor('#666').font('Helvetica')
+           .text(`(${fmtBytes(a.tamanho_bytes)})`, 380, cy + 12, { width: 60, align: 'right' });
+
+        doc.fontSize(10).fillColor('#111').font('Helvetica-Bold')
+           .text(a.nome_original, 52, cy + 28, { width: 388, lineBreak: false, ellipsis: true });
+
+        // Link clicável (URL completa no link, texto truncado)
+        doc.fontSize(8).fillColor('#444').font('Helvetica').text('Link de download:', 52, cy + 50);
+        doc.fontSize(8.5).fillColor('#1d4ed8').font('Courier')
+           .text(truncLink(url), 52, cy + 62, { width: 388, link: url, underline: true, lineBreak: false });
+
+        // Validade
+        if (a.download_expira_em) {
+          const dt = new Date(a.download_expira_em);
+          doc.fontSize(7.5).fillColor('#666').font('Helvetica-Oblique')
+             .text(`Validade do link: ${dt.toLocaleDateString('pt-BR')}`, 52, cy + 80);
+        } else {
+          doc.fontSize(7.5).fillColor('#666').font('Helvetica-Oblique')
+             .text('Validade do link: sem expiração', 52, cy + 80);
+        }
+        doc.font('Helvetica').fillColor('#111');
+
+        // QR code à direita (40×40 mm ≈ 113 pontos PDF)
+        try {
+          const qrPng = await QRCode.toBuffer(url, {
+            width: 110,
+            margin: 1,
+            errorCorrectionLevel: 'M',
+            color: { dark: corHex, light: '#FFFFFF' },
+          });
+          doc.image(qrPng, 442, cy + 10, { width: 100 });
+        } catch (qrErr) {
+          console.warn(`[laudoPdf] falha QR arquivo #${a.id}: ${(qrErr as Error).message}`);
+        }
+
+        cy += cardH + 10;
+      }
+
+      // Observação final
+      doc.fontSize(8).fillColor('#666').font('Helvetica-Oblique')
+         .text(
+           'Os links são individuais e protegidos por token de 256 bits. Em caso de expiração ou necessidade de novo link, entre em contato com o responsável técnico do laudo.',
+           40, cy, { width: 515, align: 'center' }
+         );
+      cy = doc.y + 16;
+
+      // Re-emitir página para o bloco QR/hash do laudo (que vem na sequência)
+      if (cy > 700) { doc.addPage(); cy = 50; }
+    }
+  } catch (errAv) {
+    console.warn(`[laudoPdf] falha seção arquivos anexos: ${(errAv as Error).message}`);
+  }
+
   // ── 14. QR + hash + selo ───────────────────────────────────────────
   // v3.0.4: Y do QR/hash relativo a cy (era Y=720 absoluto). Garantido caber
   // pela checagem de `espacoFinal` antes do bloco local/data acima.
