@@ -63,3 +63,49 @@ describe('parseRinexHeader (variantes)', () => {
     expect(h.type).toBe('OBSERVATION DATA');
   });
 });
+
+// v3.18.2: fallback body scan — alguns receptores (ComNav, CHC) nao escrevem
+// TIME OF LAST OBS no cabecalho. O parser precisa cair pro body e extrair o
+// ultimo epoch + sistemas pelos sat IDs.
+describe('parseRinexHeader — fallback body scan (RINEX 2.x MIXED sem TIME OF LAST OBS)', () => {
+  const txt =
+    '     2.10           OBSERVATION DATA    M (MIXED)           RINEX VERSION / TYPE\n' +
+    'S61L04366           ComNav              55.0                REC # / TYPE / VERS \n' +
+    '                    S6 PLUS                                 ANT # / TYPE        \n' +
+    '        1.8000        0.0000        0.0000                  ANTENNA: DELTA H/E/N\n' +
+    '     1.000                                                  INTERVAL            \n' +
+    '  2026     5    17    11    43    1.000000      GPS         TIME OF FIRST OBS   \n' +
+    '                                                            END OF HEADER       \n' +
+    ' 26  5 17 11 43  1.0000000  0 17G03G07G01G04G09G30G16G02G08G06R09R16\n' +
+    '                                R15R05R20R19R04\n' +
+    '  20592141.367   108212432.86708        51.000\n' +
+    ' 26  5 17 11 43  2.0000000  0 17G03G07G01G04G09G30G16G02G08G06R09R16\n' +
+    '                                R15R05R20R19R04\n' +
+    '  20591999.547   108211687.71908        51.000\n' +
+    ' 26  5 17 13 30  0.0000000  0 17G03G07G01G04G09G30G16G02G08G06R09R16\n' +
+    '                                R15R05R20R19R04\n' +
+    '  20580000.000   108200000.00000        51.000\n';
+
+  it('extrai TIME OF LAST OBS do ultimo epoch do body', () => {
+    const h = parseRinexHeader(txt);
+    expect(h.timeFirstObs?.toISOString()).toBe('2026-05-17T11:43:01.000Z');
+    expect(h.timeLastObs?.toISOString()).toBe('2026-05-17T13:30:00.000Z');
+  });
+
+  it('calcula duracao via header + body fallback', () => {
+    const h = parseRinexHeader(txt);
+    // 11:43:01 -> 13:30:00 = 1h 46min 59s = 6419s
+    expect(h.durationSeconds).toBe(6419);
+  });
+
+  it('detecta sistemas via sat IDs dos epoch records (GPS + GLO)', () => {
+    const h = parseRinexHeader(txt);
+    expect(h.systems.sort()).toEqual(['GLO', 'GPS']);
+  });
+
+  it('pega sat IDs tambem em continuation lines (R15 R05 R20 etc.)', () => {
+    // Garantia explicita de que linhas de continuacao tambem alimentam systems
+    const h = parseRinexHeader(txt);
+    expect(h.systems).toContain('GLO');
+  });
+});

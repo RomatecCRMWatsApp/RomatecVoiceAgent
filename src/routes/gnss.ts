@@ -179,13 +179,48 @@ gnssRouter.post('/processamentos/:id/parse-rinex', async (req: Request, res: Res
 gnssRouter.post('/processamentos/:id/empacotar-ibge', async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
-    const p = await obterProcessamento(id);
+    let p = await obterProcessamento(id);
     if (!p) return res.status(404).json({ error: 'nao encontrado' });
-    const validacao = validarRinexParaSubmissao({
+    let validacao = validarRinexParaSubmissao({
       durationSeconds: p.duracao_segundos,
       systems: (p.sistemas_gnss || '').split(',').filter(Boolean),
       antennaHeightM: p.antena_altura_m,
     });
+
+    // v3.18.2: se duracao_segundos esta nula, refaz o parse — o parser atual
+    // tem fallback de body scan que cobre receptores (ComNav/CHC) que nao
+    // escrevem TIME OF LAST OBS no header. Auto-cura sessoes criadas com
+    // versoes anteriores do parser.
+    if (validacao.bloqueia && p.duracao_segundos == null) {
+      const obsList = await listarArquivos(id, { papel: 'rinex_obs', soAtivos: true });
+      const rnx3List = obsList.length ? [] : await listarArquivos(id, { papel: 'rinex_rnx3', soAtivos: true });
+      const obsMeta = obsList[0] ?? rnx3List[0];
+      if (obsMeta) {
+        const c = await obterConteudoArquivo(obsMeta.id!);
+        if (c) {
+          const header = parseRinexHeader(c.conteudo.toString('utf8'));
+          if (header.timeFirstObs && header.timeLastObs) {
+            await atualizarProcessamento(id, {
+              inicio_rastreio: header.timeFirstObs,
+              fim_rastreio: header.timeLastObs,
+              duracao_segundos: header.durationSeconds,
+              intervalo_amostragem_s: header.intervalSeconds,
+              receptor_modelo: header.receiverModel,
+              receptor_serial: header.receiverSerial,
+              antena_modelo: header.antennaModel,
+              sistemas_gnss: header.systems.join(',') || null,
+            });
+            p = (await obterProcessamento(id))!;
+            validacao = validarRinexParaSubmissao({
+              durationSeconds: p.duracao_segundos,
+              systems: (p.sistemas_gnss || '').split(',').filter(Boolean),
+              antennaHeightM: p.antena_altura_m,
+            });
+          }
+        }
+      }
+    }
+
     if (validacao.bloqueia) return res.status(400).json({ error: 'validacao bloqueante', validacao });
     const papeis: GnssArquivoPapel[] = ['rinex_obs','rinex_nav_gps','rinex_nav_glo','rinex_nav_gal','rinex_nav_bds','rinex_rnx3'];
     const arquivos: Array<{ nome: string; conteudo: Buffer }> = [];
