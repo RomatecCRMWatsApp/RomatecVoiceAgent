@@ -1978,6 +1978,16 @@ app.get('/api/configuracoes-demarcacao', requireCeoToken, async (_req: Request, 
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v1.99.17: defaults globais de precificação (Desmembramento/Desdobro + salário mínimo).
+// Público intencional (sem requireCeoToken) — UI consome ao montar form de proposta.
+app.get('/api/configuracoes/defaults-precificacao', async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./services/configuracoes');
+    const defaults = await m.getDefaultsPrecificacao();
+    res.json(defaults);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 app.put('/api/configuracoes-demarcacao', requireCeoToken, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/loteamentos');
@@ -3838,6 +3848,16 @@ app.listen(PORT, () => {
       await m.runCartoriosMigrations();
     } catch (err) {
       console.error('[cartorios-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v1.99.17: tabela `configuracoes` (defaults globais — precificação, salário mínimo, etc).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-configuracoes');
+      await m.runConfiguracoesMigrations();
+    } catch (err) {
+      console.error('[configuracoes-migrations] FALHA fatal:', err);
     }
   })();
 

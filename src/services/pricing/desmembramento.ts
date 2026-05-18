@@ -66,6 +66,67 @@ export async function calcularDesmembramento(
   const hp = params.honorarios_projeto;
   const isDesm = input.tipo === 'desmembramento';
 
+  // v1.99.16: normalização opcional a partir de imoveis[] (modo detalhado do Remembramento)
+  if (input.imoveis && input.imoveis.length > 0) {
+    if (input.imoveis.length < 2) {
+      throw new Error('Lista de imóveis exige pelo menos 2 entradas (remembramento une 2 ou mais matrículas)');
+    }
+    for (const i of input.imoveis) {
+      if (!Number.isFinite(i.area_m2) || i.area_m2 <= 0) throw new Error(`Imóvel #${i.ordem}: área deve ser > 0`);
+      if (!i.endereco?.trim()) throw new Error(`Imóvel #${i.ordem}: endereço obrigatório`);
+      if (!i.matricula?.trim()) throw new Error(`Imóvel #${i.ordem}: matrícula obrigatória`);
+    }
+    const areaSoma = input.imoveis.reduce((s, i) => s + Number(i.area_m2 || 0), 0);
+    if (!input.area_total_m2 || input.area_total_m2 <= 0) {
+      input.area_total_m2 = areaSoma;
+    }
+    if (!isDesm && (!input.numero_lotes_origem || input.numero_lotes_origem < 2)) {
+      input.numero_lotes_origem = input.imoveis.length;
+    }
+  }
+
+  // v1.99.16: validação de peças técnicas (ART ∨ TRT obrigatório)
+  if (input.pecas_tecnicas) {
+    if (!input.pecas_tecnicas.art && !input.pecas_tecnicas.trt) {
+      throw new Error('Peça técnica: pelo menos ART (CREA) ou TRT (CFT) deve estar marcado');
+    }
+  }
+
+  // v1.99.17: validação modalidade/unidade_area (rural→ha, urbana→m2)
+  if (input.modalidade) {
+    const unitDerived: 'ha' | 'm2' = input.modalidade === 'rural' ? 'ha' : 'm2';
+    if (input.unidade_area && input.unidade_area !== unitDerived) {
+      throw new Error(`Modalidade '${input.modalidade}' exige unidade '${unitDerived}', mas recebeu '${input.unidade_area}'`);
+    }
+  }
+
+  // v1.99.17: validação de frações (lista de lotes resultantes do desmembramento/desdobro)
+  if (input.fracoes && input.fracoes.length > 0) {
+    if (input.fracoes.length < 2) {
+      throw new Error('Mínimo de 2 frações (desmembramento/desdobro divide em pelo menos 2 partes)');
+    }
+    for (const f of input.fracoes) {
+      if (!Number.isFinite(f.area) || f.area <= 0) {
+        throw new Error(`Fração ${f.numero}: área deve ser > 0`);
+      }
+      if (!Number.isFinite(f.valor) || f.valor <= 0) {
+        throw new Error(`Fração ${f.numero}: valor deve ser > 0`);
+      }
+    }
+    // Validação soma das áreas ≤ matriz (com tolerância: 0.01 ha ou 1 m²)
+    const somaAreas = input.fracoes.reduce((s, f) => s + Number(f.area || 0), 0);
+    const unidade: 'ha' | 'm2' = input.unidade_area
+      ?? (input.modalidade === 'rural' ? 'ha' : 'm2');
+    const tolerancia = unidade === 'ha' ? 0.01 : 1;
+    if (input.area_total_m2 && input.area_total_m2 > 0 && somaAreas > input.area_total_m2 + tolerancia) {
+      throw new Error(`Soma das frações (${somaAreas.toFixed(4)}) excede a área da matriz (${input.area_total_m2}) em ${unidade}`);
+    }
+    // Deriva numero_lotes_resultantes se não vier (modo desmembramento)
+    if (isDesm && (!input.numero_lotes_resultantes || input.numero_lotes_resultantes < 2)) {
+      input.numero_lotes_resultantes = input.fracoes.length;
+    }
+  }
+
   // Validacoes
   if (!Number.isFinite(input.area_total_m2) || input.area_total_m2 <= 0) {
     throw new Error('area_total_m2 deve ser > 0');
@@ -139,31 +200,81 @@ export async function calcularDesmembramento(
   }
 
   // ── Secao 3: honorarios Romatec ─────────────────────────────────────────
-  // Pacote basico (0.5 SM) ou completo (1.0 SM) — escolha do cliente.
-  // Multiplica pelo numero de lotes (desmembramento) ou matriculas origem (remembramento)
+  // v1.99.16: dois modos:
+  //   'auto'   → engine paramétrica (SM × fator × num matrículas + assessoria 1 SM)
+  //   'manual' → lista livre de Mapas + Assessoria Jurídica opcional (definidos pelo CEO)
+  const isManual = input.modo_calculo === 'manual';
+
+  // Valores do modo auto (sempre calculados — usados em base_calculo mesmo no manual pra referencia)
   const fatorSM = input.honorario_projeto_sm; // 0.5 ou 1.0
   const numeroLotes = isDesm ? (input.numero_lotes_resultantes ?? 0) : (input.numero_lotes_origem ?? 0);
   const honorario_projeto = sm * fatorSM * numeroLotes;
   const honorario_assessoria = sm * params.honorarios_assessoria.padrao_sm;
-
   const obsHonProjeto = `${fatorSM} SM × ${numeroLotes} lote(s) ${isDesm ? 'resultante(s)' : 'origem'} = R$ ${honorario_projeto.toFixed(2)} (1 SM = R$ ${sm.toFixed(2)})`;
 
-  const secao_3_honorarios: ItemCusto[] = [
-    {
-      ordem: ordem++,
-      descricao: isDesm
-        ? 'Honorarios de Projeto Urbanistico de Desmembramento — levantamento topografico, projeto, memorial descritivo de cada lote, planta, ARTs e responsabilidade tecnica'
-        : 'Honorarios de Projeto de Remembramento — levantamento topografico das matriculas, memorial unificado, planta resultante, ARTs e responsabilidade tecnica',
-      valor: honorario_projeto,
-      observacao: obsHonProjeto,
-    },
-    {
-      ordem: ordem++,
-      descricao: 'Honorarios de Assessoria e Acompanhamento — diligencias na Prefeitura (se aplicavel), protocolo em cartorio, acompanhamento ate emissao das matriculas finais',
-      valor: honorario_assessoria,
-      observacao: `1 salario minimo 2026 (R$ ${sm.toFixed(2)})`,
-    },
-  ];
+  let secao_3_honorarios: ItemCusto[];
+
+  if (isManual) {
+    // v1.99.17: modo manual aceita mapas[] (remembramento) OU fracoes[] (desmembramento/desdobro)
+    const hasMapas = input.mapas && input.mapas.length > 0;
+    const hasFracoes = input.fracoes && input.fracoes.length > 0;
+    if (!hasMapas && !hasFracoes) {
+      throw new Error('Modo manual exige pelo menos 1 mapa (remembramento) OU 1 fração (desmembramento/desdobro)');
+    }
+    if (hasMapas) {
+      for (const m of input.mapas!) {
+        if (!Number.isFinite(m.valor) || m.valor <= 0) {
+          throw new Error(`Mapa ${m.numero}: valor deve ser > 0`);
+        }
+      }
+      secao_3_honorarios = input.mapas!.map(m => ({
+        ordem: ordem++,
+        descricao: m.descricao
+          ? `Mapa ${String(m.numero).padStart(2, '0')} — ${m.descricao}`
+          : `Mapa ${String(m.numero).padStart(2, '0')}`,
+        valor: m.valor,
+      }));
+    } else {
+      // fracoes[] — cada fração vira um ItemCusto com área incluída na descrição
+      const unidade: 'ha' | 'm2' = input.unidade_area
+        ?? (input.modalidade === 'rural' ? 'ha' : 'm2');
+      const unidadeLabel = unidade === 'ha' ? 'ha' : 'm²';
+      secao_3_honorarios = input.fracoes!.map(f => ({
+        ordem: ordem++,
+        descricao: `Fração ${String(f.numero).padStart(2, '0')} — ${Number(f.area).toLocaleString('pt-BR', { minimumFractionDigits: unidade === 'ha' ? 4 : 2, maximumFractionDigits: unidade === 'ha' ? 4 : 2 })} ${unidadeLabel}${f.descricao ? ' · ' + f.descricao : ''}`,
+        valor: f.valor,
+      }));
+    }
+    if (input.assessoria_juridica?.incluir) {
+      const valorAss = input.assessoria_juridica.valor;
+      if (!Number.isFinite(valorAss) || (valorAss as number) <= 0) {
+        throw new Error('Assessoria Técnica Jurídica habilitada exige valor > 0');
+      }
+      secao_3_honorarios.push({
+        ordem: ordem++,
+        descricao: 'Assessoria Técnica Jurídica',
+        valor: valorAss as number,
+      });
+    }
+  } else {
+    // Modo auto (default — preserva comportamento original)
+    secao_3_honorarios = [
+      {
+        ordem: ordem++,
+        descricao: isDesm
+          ? 'Honorarios de Projeto Urbanistico de Desmembramento — levantamento topografico, projeto, memorial descritivo de cada lote, planta, ARTs e responsabilidade tecnica'
+          : 'Honorarios de Projeto de Remembramento — levantamento topografico das matriculas, memorial unificado, planta resultante, ARTs e responsabilidade tecnica',
+        valor: honorario_projeto,
+        observacao: obsHonProjeto,
+      },
+      {
+        ordem: ordem++,
+        descricao: 'Honorarios de Assessoria e Acompanhamento — diligencias na Prefeitura (se aplicavel), protocolo em cartorio, acompanhamento ate emissao das matriculas finais',
+        valor: honorario_assessoria,
+        observacao: `1 salario minimo 2026 (R$ ${sm.toFixed(2)})`,
+      },
+    ];
+  }
 
   // ── Secao 4: checklist documentos ───────────────────────────────────────
   const secao_4_checklist: DocumentoChecklist[] = [
@@ -248,8 +359,16 @@ export async function calcularDesmembramento(
   // ── Condicoes de pagamento ──────────────────────────────────────────────
   // Desm: 50% Projeto + 50% Assessoria na assinatura | restante na aprovacao Prefeitura
   // Rem: 100% Projeto + 50% Assessoria na assinatura | 50% Assessoria no protocolo cartorio
+  // v1.99.16: Modo manual — forma de pagamento a combinar entre as partes
   let condicoes_pagamento: CondicaoPagamento[];
-  if (isDesm) {
+  if (isManual) {
+    const totalManual = secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
+    condicoes_pagamento = [{
+      rotulo: 'A combinar entre as partes',
+      descricao: 'Forma e cronograma de pagamento dos honorários a serem definidos em comum acordo entre Contratante e Contratado, registrados em recibo próprio.',
+      valor: totalManual,
+    }];
+  } else if (isDesm) {
     condicoes_pagamento = [
       {
         rotulo: '1a parcela — na assinatura da proposta',
@@ -283,23 +402,52 @@ export async function calcularDesmembramento(
   }
 
   // ── Base de calculo ─────────────────────────────────────────────────────
-  const base_calculo: BaseCalculo[] = [
-    {
-      rotulo: 'Honorarios de Projeto',
-      formula: `${fatorSM} SM × ${numeroLotes} ${isDesm ? 'lote(s) resultante(s)' : 'matricula(s) origem'} × R$ ${sm.toFixed(2)}`,
-      valor_resultado: honorario_projeto,
-    },
-    {
-      rotulo: 'Honorarios de Assessoria',
-      formula: `1 SM × R$ ${sm.toFixed(2)}`,
-      valor_resultado: honorario_assessoria,
-    },
-    {
-      rotulo: 'Total Romatec',
-      formula: 'Projeto + Assessoria',
-      valor_resultado: honorario_projeto + honorario_assessoria,
-    },
-  ];
+  // v1.99.16: em modo manual, a base de cálculo reflete a soma dos mapas/frações + assessoria
+  // v1.99.17: também aceita fracoes[] como alternativa a mapas[]
+  const itensManual: BaseCalculo[] = (input.fracoes ?? []).length > 0
+    ? input.fracoes!.map(f => ({
+        rotulo: `Fração ${String(f.numero).padStart(2, '0')}${f.descricao ? ' — ' + f.descricao : ''}`,
+        formula: 'Honorário definido pelo Contratado',
+        valor_resultado: f.valor,
+      }))
+    : (input.mapas ?? []).map(m => ({
+        rotulo: `Mapa ${String(m.numero).padStart(2, '0')}${m.descricao ? ' — ' + m.descricao : ''}`,
+        formula: 'Honorário definido pelo Contratado',
+        valor_resultado: m.valor,
+      }));
+  const base_calculo: BaseCalculo[] = isManual
+    ? [
+        ...itensManual,
+        ...(input.assessoria_juridica?.incluir && input.assessoria_juridica.valor
+          ? [{
+              rotulo: 'Assessoria Técnica Jurídica',
+              formula: 'Honorário definido pelo Contratado',
+              valor_resultado: input.assessoria_juridica.valor,
+            }]
+          : []),
+        {
+          rotulo: 'Total Romatec',
+          formula: ((input.fracoes ?? []).length > 0 ? 'Soma das Frações' : 'Soma dos Mapas') + (input.assessoria_juridica?.incluir ? ' + Assessoria Jurídica' : ''),
+          valor_resultado: secao_3_honorarios.reduce((s, i) => s + i.valor, 0),
+        },
+      ]
+    : [
+        {
+          rotulo: 'Honorarios de Projeto',
+          formula: `${fatorSM} SM × ${numeroLotes} ${isDesm ? 'lote(s) resultante(s)' : 'matricula(s) origem'} × R$ ${sm.toFixed(2)}`,
+          valor_resultado: honorario_projeto,
+        },
+        {
+          rotulo: 'Honorarios de Assessoria',
+          formula: `1 SM × R$ ${sm.toFixed(2)}`,
+          valor_resultado: honorario_assessoria,
+        },
+        {
+          rotulo: 'Total Romatec',
+          formula: 'Projeto + Assessoria',
+          valor_resultado: honorario_projeto + honorario_assessoria,
+        },
+      ];
 
   const custos: CustosCalculados = {
     secao_1_projetos,

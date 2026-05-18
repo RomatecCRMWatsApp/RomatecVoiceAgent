@@ -376,7 +376,15 @@ export async function gerarPdfPropostaConsultoria(
   const corHex = t?.primary_color || '#10b981';
   const corVermelho = '#dc2626';
 
-  const subtipoLabel = SUBTIPO_LABEL[p.subtipo || ''] || (p.subtipo || '').toUpperCase();
+  // v1.99.17: subtipo + modalidade distinguem Desmembramento Rural (Lei 5.868/72)
+  // vs Desdobro Urbano (Lei 6.766/79) dentro do mesmo subtipo 'desmembramento'.
+  const dadosImovel = (p.dados_imovel as Record<string, unknown> | null) ?? {};
+  const modalidade = dadosImovel.modalidade as 'rural' | 'urbana' | undefined;
+  const isDesdobro = p.subtipo === 'desmembramento' && modalidade === 'urbana';
+  const isDesmRural = p.subtipo === 'desmembramento' && modalidade === 'rural';
+  let subtipoLabel = SUBTIPO_LABEL[p.subtipo || ''] || (p.subtipo || '').toUpperCase();
+  if (isDesdobro) subtipoLabel = 'DESDOBRO DE LOTE URBANO';
+  else if (isDesmRural) subtipoLabel = 'DESMEMBRAMENTO DE IMÓVEL RURAL';
   const isDesmRem = p.subtipo === 'desmembramento' || p.subtipo === 'remembramento';
 
   const doc = new PDFDocument({ size: 'A4', margin: 48, info: {
@@ -414,6 +422,200 @@ export async function gerarPdfPropostaConsultoria(
   if (p.cliente?.email)    doc.text(`E-mail: ${p.cliente.email}`);
   if (p.endereco_imovel)   doc.text(`Imovel: ${p.endereco_imovel}`);
   doc.moveDown(0.6);
+
+  // v1.99.16: Remembramento detalhado — tabela de imóveis + área total destacada
+  const dadosImv = dadosImovel; // alias para preservar bloco existente
+  const imoveisDetalhados = Array.isArray(dadosImv.imoveis)
+    ? (dadosImv.imoveis as Array<{ ordem: number; area_m2: number; endereco: string; matricula: string; cri?: string }>)
+    : null;
+
+  if (imoveisDetalhados && imoveisDetalhados.length >= 2 && p.subtipo === 'remembramento') {
+    if (doc.y > 680) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).text('Imóveis a Remembrar');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+
+    // Header da tabela
+    const colsImv = { ord: 48, area: 75, end: 145, mat: 395, cri: 480 };
+    const wImv = { ord: 25, area: 65, end: 245, mat: 80, cri: 65 };
+    doc.fontSize(8.5).fillColor('#444').font('Helvetica-Bold');
+    const hY = doc.y;
+    doc.text('#', colsImv.ord, hY, { width: wImv.ord });
+    doc.text('Área (m²)', colsImv.area, hY, { width: wImv.area, align: 'right' });
+    doc.text('Endereço', colsImv.end, hY, { width: wImv.end });
+    doc.text('Matrícula', colsImv.mat, hY, { width: wImv.mat });
+    doc.text('CRI', colsImv.cri, hY, { width: wImv.cri });
+    doc.font('Helvetica');
+    let cY = doc.y + 4;
+    doc.moveTo(48, cY).lineTo(547, cY).strokeColor('#888').lineWidth(0.5).stroke();
+    cY += 4;
+
+    doc.fontSize(8.5).fillColor('#111');
+    for (const iv of imoveisDetalhados) {
+      const hEnd = doc.heightOfString(iv.endereco || '-', { width: wImv.end });
+      const lineH = Math.max(hEnd, 12);
+      if (cY + lineH > 760) { doc.addPage(); cY = 60; }
+      doc.text(String(iv.ordem), colsImv.ord, cY, { width: wImv.ord });
+      doc.text(Number(iv.area_m2).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), colsImv.area, cY, { width: wImv.area, align: 'right' });
+      doc.text(iv.endereco || '-', colsImv.end, cY, { width: wImv.end });
+      doc.text(iv.matricula || '-', colsImv.mat, cY, { width: wImv.mat });
+      doc.text(iv.cri || '-', colsImv.cri, cY, { width: wImv.cri });
+      cY += lineH + 4;
+    }
+    doc.x = 48;
+    doc.y = cY;
+    doc.moveDown(0.3);
+
+    // Destaque "Área Total Remembrada"
+    const areaTotal = imoveisDetalhados.reduce((s, i) => s + Number(i.area_m2 || 0), 0);
+    const hectares = areaTotal / 10000;
+    const boxY = doc.y;
+    doc.rect(48, boxY, 499, 26).fillAndStroke('#ecfdf5', '#10b981');
+    doc.fontSize(10).fillColor('#065f46').font('Helvetica-Bold')
+       .text(
+         `Área Total Remembrada: ${areaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} m²${areaTotal >= 10000 ? `  ·  ${hectares.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ha` : ''}`,
+         52, boxY + 7, { width: 491, align: 'center' }
+       );
+    doc.font('Helvetica').fillColor('#111');
+    doc.y = boxY + 30;
+    doc.moveDown(0.4);
+  }
+
+  // v1.99.17: Imóvel matriz (Desmembramento/Desdobro) — bloco identificando a matrícula que será fracionada
+  const matriz = dadosImovel.matriz as { matricula?: string; cri?: string; endereco?: string; denominacao?: string; municipio?: string } | undefined;
+  if (matriz && p.subtipo === 'desmembramento') {
+    if (doc.y > 700) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).text(isDesmRural ? 'Imóvel Matriz (a desmembrar)' : 'Lote Matriz (a desdobrar)');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    doc.fontSize(9.5).fillColor('#111');
+    if (matriz.matricula) doc.text(`Matrícula nº: ${matriz.matricula}${matriz.cri ? '  ·  ' + matriz.cri : ''}`, { indent: 8 });
+    if (matriz.endereco)  doc.text(`Endereço: ${matriz.endereco}`, { indent: 8 });
+    if (isDesmRural && matriz.denominacao) doc.text(`Denominação: ${matriz.denominacao}`, { indent: 8 });
+    const unidadeArea = (dadosImovel.unidade_area as 'ha' | 'm2' | undefined) ?? (isDesmRural ? 'ha' : 'm2');
+    const unidadeLabel = unidadeArea === 'ha' ? 'ha' : 'm²';
+    const areaMatriz = Number(dadosImovel.area_total_m2 ?? 0);
+    if (areaMatriz > 0) {
+      doc.text(`Área total: ${areaMatriz.toLocaleString('pt-BR', { minimumFractionDigits: unidadeArea === 'ha' ? 4 : 2, maximumFractionDigits: unidadeArea === 'ha' ? 4 : 2 })} ${unidadeLabel}`, { indent: 8 });
+    }
+    doc.moveDown(0.5);
+  }
+
+  // v1.99.17: Frações resultantes (Desmembramento/Desdobro) — tabela detalhada
+  const fracoes = Array.isArray(dadosImovel.fracoes)
+    ? (dadosImovel.fracoes as Array<{ numero: number; area: number; valor: number; descricao?: string }>)
+    : null;
+  if (fracoes && fracoes.length >= 2 && p.subtipo === 'desmembramento') {
+    if (doc.y > 680) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).text(isDesmRural ? 'Glebas Resultantes' : 'Lotes Resultantes');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+
+    const unidadeArea = (dadosImovel.unidade_area as 'ha' | 'm2' | undefined) ?? (isDesmRural ? 'ha' : 'm2');
+    const unidadeLabel = unidadeArea === 'ha' ? 'ha' : 'm²';
+    const colsFr = { num: 48, area: 75, desc: 165, val: 470 };
+    const wFr = { num: 25, area: 80, desc: 295, val: 80 };
+    doc.fontSize(8.5).fillColor('#444').font('Helvetica-Bold');
+    const hY = doc.y;
+    doc.text('#', colsFr.num, hY, { width: wFr.num });
+    doc.text(`Área (${unidadeLabel})`, colsFr.area, hY, { width: wFr.area, align: 'right' });
+    doc.text('Descrição', colsFr.desc, hY, { width: wFr.desc });
+    doc.text('Valor (R$)', colsFr.val, hY, { width: wFr.val, align: 'right' });
+    doc.font('Helvetica');
+    let cY = doc.y + 4;
+    doc.moveTo(48, cY).lineTo(547, cY).strokeColor('#888').lineWidth(0.5).stroke();
+    cY += 4;
+
+    doc.fontSize(8.5).fillColor('#111');
+    const fracDigits = unidadeArea === 'ha' ? 4 : 2;
+    for (const fr of fracoes) {
+      const descTxt = fr.descricao || '-';
+      const hDesc = doc.heightOfString(descTxt, { width: wFr.desc });
+      const lineH = Math.max(hDesc, 12);
+      if (cY + lineH > 760) { doc.addPage(); cY = 60; }
+      doc.text(String(fr.numero).padStart(2, '0'), colsFr.num, cY, { width: wFr.num });
+      doc.text(
+        Number(fr.area).toLocaleString('pt-BR', { minimumFractionDigits: fracDigits, maximumFractionDigits: fracDigits }),
+        colsFr.area, cY, { width: wFr.area, align: 'right' }
+      );
+      doc.text(descTxt, colsFr.desc, cY, { width: wFr.desc });
+      doc.text(formatBRL(Number(fr.valor)), colsFr.val, cY, { width: wFr.val, align: 'right' });
+      cY += lineH + 4;
+    }
+    doc.x = 48;
+    doc.y = cY;
+    doc.moveDown(0.3);
+
+    // Resumo: soma das áreas + resíduo
+    const somaAreas = fracoes.reduce((s, f) => s + Number(f.area || 0), 0);
+    const somaValores = fracoes.reduce((s, f) => s + Number(f.valor || 0), 0);
+    const areaMatriz = Number(dadosImovel.area_total_m2 ?? 0);
+    const residuo = areaMatriz - somaAreas;
+    doc.fontSize(9).fillColor('#444');
+    doc.text(`Soma das frações: ${somaAreas.toLocaleString('pt-BR', { minimumFractionDigits: fracDigits, maximumFractionDigits: fracDigits })} ${unidadeLabel}`, { indent: 8 });
+    if (areaMatriz > 0 && Math.abs(residuo) > (unidadeArea === 'ha' ? 0.01 : 1)) {
+      doc.fillColor(residuo > 0 ? '#1e3a8a' : corVermelho);
+      doc.text(
+        `${residuo > 0 ? 'Área remanescente da matriz' : 'EXCEDE a matriz em'}: ${Math.abs(residuo).toLocaleString('pt-BR', { minimumFractionDigits: fracDigits, maximumFractionDigits: fracDigits })} ${unidadeLabel}`,
+        { indent: 8 }
+      );
+    }
+    doc.fillColor('#111').font('Helvetica-Bold')
+       .text(`Subtotal das frações: ${formatBRL(somaValores)}`, { indent: 8 });
+    doc.font('Helvetica');
+    doc.moveDown(0.5);
+  }
+
+  // v1.99.16/17: Peças técnicas marcadas — Mapa/Memorial/ART/TRT/Requerimentos (Remembramento + Desmembramento/Desdobro)
+  const pecas = (dadosImovel.pecas_tecnicas as { mapa?: boolean; memorial?: boolean; art?: boolean; trt?: boolean; requerimentos?: boolean } | undefined);
+  if (pecas && (p.subtipo === 'remembramento' || p.subtipo === 'desmembramento')) {
+    if (doc.y > 700) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).text('Peça Técnica a Ser Entregue');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    doc.fontSize(9.5).fillColor('#111');
+    const memorialLabel = (fracoes && fracoes.length >= 2)
+      ? 'Memorial Descritivo (um por fração)'
+      : 'Memorial Descritivo';
+    if (pecas.mapa)          doc.text('☑ Mapa / Planta', { indent: 8 });
+    if (pecas.memorial)      doc.text(`☑ ${memorialLabel}`, { indent: 8 });
+    if (pecas.art)           doc.text('☑ ART — Anotação de Responsabilidade Técnica (CREA)', { indent: 8 });
+    if (pecas.trt)           doc.text('☑ TRT — Termo de Responsabilidade Técnica (CFT)', { indent: 8 });
+    if (pecas.requerimentos) {
+      const reqExtra = isDesmRural ? ' / INCRA' : '';
+      doc.text(`☑ Requerimentos administrativos (Município${reqExtra}/Cartório)`, { indent: 8 });
+    }
+    doc.moveDown(0.5);
+  }
+
+  // v1.99.17: Texto do Objeto (base legal dinâmica) — exibido antes da Seção 1 quando desm/desdobro
+  if (p.subtipo === 'desmembramento' && modalidade) {
+    if (doc.y > 700) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).text('Objeto');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    doc.fontSize(9).fillColor('#111');
+    const unidadeArea = (dadosImovel.unidade_area as 'ha' | 'm2' | undefined) ?? (isDesmRural ? 'ha' : 'm2');
+    const unidadeLabel = unidadeArea === 'ha' ? 'ha' : 'm²';
+    const areaMatriz = Number(dadosImovel.area_total_m2 ?? 0);
+    const fracoesCount = fracoes?.length ?? 0;
+    const denominacao = (matriz?.denominacao || '').trim();
+    const matricula = matriz?.matricula || '—';
+    const cri = matriz?.cri || 'Cartório de Registro de Imóveis competente';
+    const endereco = matriz?.endereco || '—';
+    const municipio = (matriz?.municipio || '').trim() || 'Açailândia/MA';
+
+    const areaFmt = areaMatriz > 0
+      ? `${areaMatriz.toLocaleString('pt-BR', { minimumFractionDigits: unidadeArea === 'ha' ? 4 : 2, maximumFractionDigits: unidadeArea === 'ha' ? 4 : 2 })} ${unidadeLabel}`
+      : `[área a definir] ${unidadeLabel}`;
+
+    const txtObj = isDesmRural
+      ? `Prestação de serviços técnicos de agrimensura e engenharia para fins de desmembramento do imóvel rural${denominacao ? ' denominado ' + denominacao : ''}, matrícula nº ${matricula} do ${cri}, com área total de ${areaFmt}, em ${fracoesCount || 'N'} gleba(s), em conformidade com a Lei nº 5.868/1972, Lei nº 6.015/1973, Instrução Normativa do INCRA aplicável e NBR 13133, incluindo levantamento topográfico georreferenciado quando exigido, peças técnicas e requerimentos administrativos para registro junto ao Cartório de Registro de Imóveis competente e ao INCRA.`
+      : `Prestação de serviços técnicos de agrimensura e engenharia para fins de desdobro do lote urbano matrícula nº ${matricula} do ${cri}, situado à ${endereco}, com área total de ${areaFmt}, em ${fracoesCount || 'N'} lote(s), em conformidade com a Lei nº 6.766/1979, legislação municipal de parcelamento do solo vigente no município de ${municipio} e NBR 13133, incluindo levantamento topográfico, peças técnicas e requerimentos administrativos junto à Prefeitura Municipal e ao Cartório de Registro de Imóveis competente.`;
+
+    doc.text(txtObj, { width: 499, align: 'justify' });
+    doc.moveDown(0.5);
+  }
 
   // ── Secao 1: Projetos ───────────────────────────────────────────────────
   doc.fontSize(11).fillColor(corHex).text('1. Documentos de Projeto a Serem Confeccionados');

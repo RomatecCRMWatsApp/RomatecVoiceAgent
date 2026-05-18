@@ -109,6 +109,66 @@ export interface InputDesmembramento {
   tipo_zona: 'urbana' | 'rural';
   iptu_em_dia: boolean;
   honorario_projeto_sm: 0.5 | 1.0;
+
+  // ─── Remembramento detalhado (opcionais — quando informados, sobrescrevem a engine paramétrica)
+  // Quando imoveis[] presente, area_total_m2 e numero_lotes_origem podem ser derivados (validados).
+  imoveis?: Array<{
+    ordem: number;
+    area_m2: number;
+    endereco: string;
+    matricula: string;
+    cri?: string;
+  }>;
+
+  // Modo de cálculo dos honorários:
+  //   'auto'   → engine paramétrica (default — SM × fator × num matrículas)
+  //   'manual' → lista livre de "Mapas" + Assessoria Jurídica opcional
+  modo_calculo?: 'auto' | 'manual';
+  mapas?: Array<{
+    numero: number;
+    descricao?: string;
+    valor: number;
+  }>;
+  assessoria_juridica?: {
+    incluir: boolean;
+    valor?: number;
+  };
+
+  // Peças técnicas a entregar (default: mapa + memorial + art + requerimentos)
+  // Validação: pelo menos uma de { art, trt } deve estar marcada.
+  pecas_tecnicas?: {
+    mapa: boolean;
+    memorial: boolean;
+    art: boolean;
+    trt: boolean;
+    requerimentos: boolean;
+  };
+
+  // ─── Desmembramento (rural) / Desdobro (urbano) detalhado — opcionais
+  // Quando 'modalidade' presente, refina o PDF (Lei 5.868/72 vs Lei 6.766/79).
+  //   'rural'  → unidade_area implícita 'ha' (PDF: "DESMEMBRAMENTO DE IMÓVEL RURAL")
+  //   'urbana' → unidade_area implícita 'm2' (PDF: "DESDOBRO DE LOTE URBANO")
+  modalidade?: 'rural' | 'urbana';
+  unidade_area?: 'ha' | 'm2';
+
+  // Dados detalhados do imóvel matriz (quando informados, complementam area_total_m2)
+  matriz?: {
+    matricula: string;
+    cri?: string;
+    endereco: string;
+    denominacao?: string;     // só rural — ex: "Fazenda Bom Jesus", "Gleba 03"
+    municipio?: string;       // para texto do PDF em desdobro urbano
+  };
+
+  // Frações resultantes (substitui mapas[] no modo manual quando é desmembramento/desdobro)
+  // Cada fração tem área (na unidade_area) + valor cobrado + descrição.
+  // Validação: soma das áreas ≤ matriz_area (tolerância: 0.01 ha ou 1 m²).
+  fracoes?: Array<{
+    numero: number;
+    area: number;
+    valor: number;
+    descricao?: string;
+  }>;
 }
 
 export interface InputRetificacao {
