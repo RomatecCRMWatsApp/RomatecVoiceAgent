@@ -15561,6 +15561,7 @@ function renderLaudoEditor(v) {
     ['arquivos', '📐 Arquivos (' + (l.arquivosVetoriais?.length || 0) + ')'],
     ['art', '📜 ART/TRT + Financeiro'],
     ['cadastros', '👥 Contratante / Profissional'],
+    ['gnss', '📡 GNSS'],
   ];
 
   v.innerHTML = `
@@ -15599,6 +15600,30 @@ function renderLaudoEditor(v) {
   else if (state.laudoEditorTab === 'arquivos') renderLaudoTabArquivosVetoriais(c);
   else if (state.laudoEditorTab === 'art')    renderLaudoTabArt(c);
   else if (state.laudoEditorTab === 'cadastros') renderLaudoTabCadastros(c);
+  else if (state.laudoEditorTab === 'gnss') {
+    // v3.18.0: aba processamento GNSS
+    c.innerHTML = `
+      <div class="editor-secao">
+        <div class="editor-hdr">
+          <h3>Sessoes GNSS deste Laudo</h3>
+          <div>
+            <button id="gnss-nova">+ Nova Sessao (Upload RINEX)</button>
+            <button id="gnss-ppp-externo">+ Importar PPP Externo</button>
+          </div>
+        </div>
+        <div id="gnss-lista"></div>
+      </div>
+    `;
+    const laudoId = state.laudoAtual?.id;
+    document.getElementById('gnss-nova').onclick = () =>
+      window.LaudoGnss.abrirNovaSessao(laudoId,
+        () => window.LaudoGnss.renderListaEm(document.getElementById('gnss-lista'), laudoId));
+    document.getElementById('gnss-ppp-externo').onclick = () =>
+      window.LaudoGnss.abrirNovaSessao(laudoId,
+        () => window.LaudoGnss.renderListaEm(document.getElementById('gnss-lista'), laudoId),
+        { fonte: 'ppp_manual' });
+    window.LaudoGnss.renderListaEm(document.getElementById('gnss-lista'), laudoId);
+  }
 }
 
 // v2.1.4: aba pra editar contratante/executante vinculados ao laudo
@@ -19390,5 +19415,7 @@ function readImageFile(file) {
 <script src="/folha-fechamento.js"></script>
 <!-- v3.14.0: Relatório de Demarcações Faturáveis -->
 <script src="/relatorio-demarcacao.js"></script>
+<!-- v3.18.0: Processamento GNSS (RINEX -> IBGE-PPP) -->
+<script src="/laudo-gnss.js"></script>
 </body>
 </html>
