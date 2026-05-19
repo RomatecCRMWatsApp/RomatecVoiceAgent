@@ -117,12 +117,12 @@ export interface InputDesmembramento {
     area_m2: number;
     endereco: string;
     matricula: string;
-    // v2 — campos novos
+    // v3.22.0 — campos novos
     livro?: string;             // ex: '2-AA' (livro de transcrição/registro)
     folha?: string;             // ex: '101' (folha do livro)
     cri?: string;               // legado: nome livre do CRI (mantido p/ retrocompat)
-    cri_cns?: string;           // v2: CNS do cartório (FK natural para cartorios.cns)
-    cri_denominacao?: string;   // v2: snapshot do nome do cartório no momento da proposta
+    cri_cns?: string;           // v3.22.0: CNS do cartório (FK natural para cartorios.cns)
+    cri_denominacao?: string;   // v3.22.0: snapshot do nome do cartório no momento da proposta
   }>;
 
   // Modo de cálculo dos honorários:
@@ -139,20 +139,26 @@ export interface InputDesmembramento {
     valor?: number;
   };
 
-  // v2: status obrigatório de documentação (substitui parcialmente o checklist)
+  // v3.22.0: status obrigatório de documentação. Quando undefined cai no checklist
+  // legado (secao_4). Quando presente, a engine valida: CND/BCI anexados (bool) e
+  // certidão de inteiro teor com no máximo 30 dias desde a emissão.
+  // Sobrepõe semanticamente iptu_em_dia: o flag continua existindo, mas em v3.22.0
+  // a evidência (anexo) tem precedência sobre o boolean simples.
   status_documentacao?: {
     cnd_iptu_anexada: boolean;
     bci_anexado: boolean;
-    certidao_inteiro_teor_data: string;   // ISO YYYY-MM-DD; validade 30 dias a contar de hoje
+    certidao_inteiro_teor_data: string;   // ISO YYYY-MM-DD
   };
 
-  // v2: Assessoria Técnica (substitui assessoria_juridica para remembramento)
+  // v3.22.0: Assessoria Técnica — para remembramento, substitui assessoria_juridica.
+  // Quando habilitada=true, vira linha em secao_3_honorarios (descricao começa com
+  // "Assessoria Técnica"). Os dois campos coexistem por retrocompat.
   assessoria_tecnica?: {
     habilitada: boolean;
     valor?: number;
   };
 
-  // v2: estado civil do cliente (espelhado aqui pra validação de docs do cônjuge no PDF)
+  // v3.22.0: estado civil do cliente (espelhado aqui pra validação de docs do cônjuge no PDF)
   cliente_estado_civil?: 'solteiro' | 'casado' | 'divorciado' | 'viuvo' | 'uniao_estavel';
 
   // Peças técnicas a entregar (default: mapa + memorial + art + requerimentos)
