@@ -397,4 +397,21 @@ describe('remembramento — campos novos v2', () => {
     const temAssessoria = out.custos.secao_3_honorarios.some(h => /assessoria t/i.test(h.descricao));
     expect(temAssessoria).toBe(false);
   });
+
+  it('assessoria_tecnica habilitada aparece em secao_3 e em base_calculo', async () => {
+    const out = await calcularDesmembramento({
+      ...baseInput,
+      imoveis: [
+        { ordem: 1, area_m2: 250, endereco: 'R', matricula: 'M-001', livro: '2-A', folha: '1' },
+        { ordem: 2, area_m2: 300, endereco: 'R', matricula: 'M-002', livro: '2-B', folha: '2' },
+      ],
+      assessoria_tecnica: { habilitada: true, valor: 800 },
+    });
+    const linhaSec3 = out.custos.secao_3_honorarios.find(h => h.descricao === 'Assessoria Técnica');
+    expect(linhaSec3?.valor).toBe(800);
+    const linhaBase = out.custos.base_calculo?.find(b => b.rotulo === 'Assessoria Técnica');
+    expect(linhaBase?.valor_resultado).toBe(800);
+    const total = out.custos.base_calculo?.find(b => b.rotulo === 'Total Romatec');
+    expect(total?.formula).toMatch(/Assessoria Técnica/);
+  });
 });

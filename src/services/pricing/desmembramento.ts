@@ -111,7 +111,12 @@ export async function calcularDesmembramento(
     if (!sd.certidao_inteiro_teor_data) {
       throw new Error('Data de emissão da certidão de inteiro teor é obrigatória');
     }
-    const emissao = new Date(sd.certidao_inteiro_teor_data + 'T00:00:00');
+    // Strict ISO check (Date pode aceitar variações silenciosas tipo 2026-02-30 → mar 02)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(sd.certidao_inteiro_teor_data)) {
+      throw new Error('certidao_inteiro_teor_data inválida (use ISO YYYY-MM-DD)');
+    }
+    // UTC midnight para não depender do timezone do servidor (data-only no contrato)
+    const emissao = new Date(sd.certidao_inteiro_teor_data + 'T00:00:00Z');
     if (Number.isNaN(emissao.getTime())) {
       throw new Error('certidao_inteiro_teor_data inválida (use ISO YYYY-MM-DD)');
     }
@@ -119,8 +124,9 @@ export async function calcularDesmembramento(
     if (diffDias > 30) {
       throw new Error(`Certidão de inteiro teor vencida (${Math.floor(diffDias)} dias desde a emissão; validade máxima: 30 dias)`);
     }
+    // Tolerância de 1 dia para skew de relógio entre cliente e servidor
     if (diffDias < -1) {
-      throw new Error('certidao_inteiro_teor_data não pode ser futura');
+      throw new Error(`certidao_inteiro_teor_data não pode ser futura (tolerância de ±1 dia para skew de relógio)`);
     }
   }
 
@@ -323,7 +329,7 @@ export async function calcularDesmembramento(
       throw new Error('assessoria_tecnica.valor inválido');
     }
     secao_3_honorarios.push({
-      ordem: secao_3_honorarios.length + 1,
+      ordem: ordem++,
       descricao: 'Assessoria Técnica',
       valor: valorAT,
       observacao: 'Acompanhamento técnico junto ao cartório e prefeitura (contratação opcional)',
@@ -469,6 +475,15 @@ export async function calcularDesmembramento(
         formula: 'Honorário definido pelo Contratado',
         valor_resultado: m.valor,
       }));
+  // v3.22.0: assessoria_tecnica (Remembramento v2) aparece em base_calculo nos dois modos.
+  const linhaAssessoriaTecnica: BaseCalculo[] = input.assessoria_tecnica?.habilitada
+    ? [{
+        rotulo: 'Assessoria Técnica',
+        formula: 'Honorário definido pelo Contratado (opcional)',
+        valor_resultado: Number(input.assessoria_tecnica.valor ?? 0),
+      }]
+    : [];
+
   const base_calculo: BaseCalculo[] = isManual
     ? [
         ...itensManual,
@@ -479,9 +494,12 @@ export async function calcularDesmembramento(
               valor_resultado: input.assessoria_juridica.valor,
             }]
           : []),
+        ...linhaAssessoriaTecnica,
         {
           rotulo: 'Total Romatec',
-          formula: ((input.fracoes ?? []).length > 0 ? 'Soma das Frações' : 'Soma dos Mapas') + (input.assessoria_juridica?.incluir ? ' + Assessoria Jurídica' : ''),
+          formula: ((input.fracoes ?? []).length > 0 ? 'Soma das Frações' : 'Soma dos Mapas')
+            + (input.assessoria_juridica?.incluir ? ' + Assessoria Jurídica' : '')
+            + (input.assessoria_tecnica?.habilitada ? ' + Assessoria Técnica' : ''),
           valor_resultado: secao_3_honorarios.reduce((s, i) => s + i.valor, 0),
         },
       ]
@@ -496,10 +514,12 @@ export async function calcularDesmembramento(
           formula: `1 SM × R$ ${sm.toFixed(2)}`,
           valor_resultado: honorario_assessoria,
         },
+        ...linhaAssessoriaTecnica,
         {
           rotulo: 'Total Romatec',
-          formula: 'Projeto + Assessoria',
-          valor_resultado: honorario_projeto + honorario_assessoria,
+          formula: 'Projeto + Assessoria'
+            + (input.assessoria_tecnica?.habilitada ? ' + Assessoria Técnica' : ''),
+          valor_resultado: secao_3_honorarios.reduce((s, i) => s + i.valor, 0),
         },
       ];
 
