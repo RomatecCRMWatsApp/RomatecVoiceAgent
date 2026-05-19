@@ -319,3 +319,82 @@ describe('Remembramento — peças técnicas', () => {
     ).rejects.toThrow(/ART.*TRT/);
   });
 });
+
+describe('remembramento — campos novos v2', () => {
+  const baseInput: InputDesmembramento = {
+    tipo: 'remembramento',
+    area_total_m2: 0,
+    valor_venal_total: 100000,
+    tipo_zona: 'urbana',
+    iptu_em_dia: true,
+    honorario_projeto_sm: 1.0,
+    numero_lotes_origem: 2,
+  };
+
+  it('aceita livro/folha/cri_cns por imóvel', async () => {
+    const out = await calcularDesmembramento({
+      ...baseInput,
+      imoveis: [
+        { ordem: 1, area_m2: 250, endereco: 'Rua A, 1', matricula: 'M-001', livro: '2-AA', folha: '101', cri_cns: '00.123-4' },
+        { ordem: 2, area_m2: 300, endereco: 'Rua A, 2', matricula: 'M-002', livro: '2-AB', folha: '202', cri_cns: '00.123-4' },
+      ],
+    });
+    expect(out.custos.secao_5_total).toBeGreaterThan(0);
+  });
+
+  it('bloqueia quando livro vazio em algum imóvel (modo detalhado exige)', async () => {
+    await expect(calcularDesmembramento({
+      ...baseInput,
+      imoveis: [
+        { ordem: 1, area_m2: 250, endereco: 'R', matricula: 'M-001', livro: '', folha: '101' },
+        { ordem: 2, area_m2: 300, endereco: 'R', matricula: 'M-002', livro: '2-A', folha: '202' },
+      ],
+    })).rejects.toThrow(/livro/i);
+  });
+
+  it('valida status_documentacao: certidão > 30 dias rejeita', async () => {
+    const trintaUmDiasAtras = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    await expect(calcularDesmembramento({
+      ...baseInput,
+      imoveis: [
+        { ordem: 1, area_m2: 250, endereco: 'R', matricula: 'M-001', livro: '2-A', folha: '1' },
+        { ordem: 2, area_m2: 300, endereco: 'R', matricula: 'M-002', livro: '2-B', folha: '2' },
+      ],
+      status_documentacao: {
+        cnd_iptu_anexada: true,
+        bci_anexado: true,
+        certidao_inteiro_teor_data: trintaUmDiasAtras,
+      },
+    })).rejects.toThrow(/30 dias|vencida/i);
+  });
+
+  it('aceita certidão emitida hoje', async () => {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const out = await calcularDesmembramento({
+      ...baseInput,
+      imoveis: [
+        { ordem: 1, area_m2: 250, endereco: 'R', matricula: 'M-001', livro: '2-A', folha: '1' },
+        { ordem: 2, area_m2: 300, endereco: 'R', matricula: 'M-002', livro: '2-B', folha: '2' },
+      ],
+      status_documentacao: {
+        cnd_iptu_anexada: true,
+        bci_anexado: true,
+        certidao_inteiro_teor_data: hoje,
+      },
+    });
+    expect(out.custos.secao_5_total).toBeGreaterThan(0);
+  });
+
+  it('assessoria_tecnica desligada não soma no total', async () => {
+    const out = await calcularDesmembramento({
+      ...baseInput,
+      imoveis: [
+        { ordem: 1, area_m2: 250, endereco: 'R', matricula: 'M-001', livro: '2-A', folha: '1' },
+        { ordem: 2, area_m2: 300, endereco: 'R', matricula: 'M-002', livro: '2-B', folha: '2' },
+      ],
+      assessoria_tecnica: { habilitada: false, valor: 500 },
+    });
+    const temAssessoria = out.custos.secao_3_honorarios.some(h => /assessoria t/i.test(h.descricao));
+    expect(temAssessoria).toBe(false);
+  });
+});

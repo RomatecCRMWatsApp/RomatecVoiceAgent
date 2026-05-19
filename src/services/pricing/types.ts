@@ -117,7 +117,12 @@ export interface InputDesmembramento {
     area_m2: number;
     endereco: string;
     matricula: string;
-    cri?: string;
+    // v2 — campos novos
+    livro?: string;             // ex: '2-AA' (livro de transcrição/registro)
+    folha?: string;             // ex: '101' (folha do livro)
+    cri?: string;               // legado: nome livre do CRI (mantido p/ retrocompat)
+    cri_cns?: string;           // v2: CNS do cartório (FK natural para cartorios.cns)
+    cri_denominacao?: string;   // v2: snapshot do nome do cartório no momento da proposta
   }>;
 
   // Modo de cálculo dos honorários:
@@ -133,6 +138,22 @@ export interface InputDesmembramento {
     incluir: boolean;
     valor?: number;
   };
+
+  // v2: status obrigatório de documentação (substitui parcialmente o checklist)
+  status_documentacao?: {
+    cnd_iptu_anexada: boolean;
+    bci_anexado: boolean;
+    certidao_inteiro_teor_data: string;   // ISO YYYY-MM-DD; validade 30 dias a contar de hoje
+  };
+
+  // v2: Assessoria Técnica (substitui assessoria_juridica para remembramento)
+  assessoria_tecnica?: {
+    habilitada: boolean;
+    valor?: number;
+  };
+
+  // v2: estado civil do cliente (espelhado aqui pra validação de docs do cônjuge no PDF)
+  cliente_estado_civil?: 'solteiro' | 'casado' | 'divorciado' | 'viuvo' | 'uniao_estavel';
 
   // Peças técnicas a entregar (default: mapa + memorial + art + requerimentos)
   // Validação: pelo menos uma de { art, trt } deve estar marcada.
