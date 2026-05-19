@@ -438,8 +438,42 @@ export async function gerarPdfPropostaConsultoria(
   // v1.99.16: Remembramento detalhado — tabela de imóveis + área total destacada
   const dadosImv = dadosImovel; // alias para preservar bloco existente
   const imoveisDetalhados = Array.isArray(dadosImv.imoveis)
-    ? (dadosImv.imoveis as Array<{ ordem: number; area_m2: number; endereco: string; matricula: string; cri?: string }>)
+    ? (dadosImv.imoveis as Array<{
+        ordem: number; area_m2: number; endereco: string; matricula: string;
+        // v3.22.0: campos novos do Remembramento v2
+        livro?: string; folha?: string;
+        cri?: string;               // legado: free text
+        cri_cns?: string;           // v3.22.0: CNS do cartório (chave natural)
+        cri_denominacao?: string;   // v3.22.0: nome do cartório capturado pelo autocomplete
+      }>)
     : null;
+
+  // v3.22.0: Seção "Status da Documentação" (Remembramento v2)
+  // Renderiza somente quando status_documentacao é fornecido no JSON e o subtipo é remembramento.
+  const statusDoc = (dadosImv as any).status_documentacao as
+    | { cnd_iptu_anexada?: boolean; bci_anexado?: boolean; certidao_inteiro_teor_data?: string }
+    | undefined;
+  if (statusDoc && p.subtipo === 'remembramento') {
+    if (doc.y > 700) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('Status da Documentação');
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.3);
+    doc.font('Helvetica').fontSize(9.5).fillColor('#111');
+    const fmtCheck = (b: boolean | undefined) => (b ? '☑' : '☐');
+    doc.text(`${fmtCheck(dadosImv.iptu_em_dia as boolean | undefined)} IPTU em dia`);
+    doc.text(`${fmtCheck(statusDoc.cnd_iptu_anexada)} CND de IPTU anexada`);
+    doc.text(`${fmtCheck(statusDoc.bci_anexado)} BCI do imóvel anexado`);
+    if (statusDoc.certidao_inteiro_teor_data) {
+      const dt = new Date(statusDoc.certidao_inteiro_teor_data + 'T00:00:00Z');
+      const diff = Math.floor((Date.now() - dt.getTime()) / (1000 * 60 * 60 * 24));
+      const dtFmt = isNaN(dt.getTime()) ? statusDoc.certidao_inteiro_teor_data : dt.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+      const sufixo = diff <= 30 ? `(válida — ${30 - diff} dia(s) restante(s))` : `(VENCIDA — ${diff - 30} dia(s) atrasada)`;
+      doc.text(`☑ Certidão de inteiro teor (emitida em ${dtFmt}) ${sufixo}`);
+    } else {
+      doc.text(`☐ Certidão de inteiro teor não informada`);
+    }
+    doc.moveDown(0.6);
+  }
 
   if (imoveisDetalhados && imoveisDetalhados.length >= 2 && p.subtipo === 'remembramento') {
     if (doc.y > 680) doc.addPage();
@@ -448,15 +482,18 @@ export async function gerarPdfPropostaConsultoria(
     doc.moveDown(0.2);
 
     // Header da tabela
-    const colsImv = { ord: 48, area: 75, end: 145, mat: 395, cri: 480 };
-    const wImv = { ord: 25, area: 65, end: 245, mat: 80, cri: 65 };
+    // v3.22.0: layout com 7 colunas — #, Área, Endereço, Matrícula, Livro, Folha, CRI
+    const colsImv = { ord: 48, area: 75, end: 135, mat: 320, livro: 380, folha: 415, cri: 455 };
+    const wImv = { ord: 25, area: 55, end: 180, mat: 55, livro: 32, folha: 35, cri: 90 };
     doc.fontSize(8.5).fillColor('#444').font('Helvetica-Bold');
     const hY = doc.y;
-    doc.text('#', colsImv.ord, hY, { width: wImv.ord });
-    doc.text('Área (m²)', colsImv.area, hY, { width: wImv.area, align: 'right' });
-    doc.text('Endereço', colsImv.end, hY, { width: wImv.end });
-    doc.text('Matrícula', colsImv.mat, hY, { width: wImv.mat });
-    doc.text('CRI', colsImv.cri, hY, { width: wImv.cri });
+    doc.text('#',         colsImv.ord,   hY, { width: wImv.ord });
+    doc.text('Área (m²)', colsImv.area,  hY, { width: wImv.area, align: 'right' });
+    doc.text('Endereço',  colsImv.end,   hY, { width: wImv.end });
+    doc.text('Matrícula', colsImv.mat,   hY, { width: wImv.mat });
+    doc.text('Livro',     colsImv.livro, hY, { width: wImv.livro });
+    doc.text('Folha',     colsImv.folha, hY, { width: wImv.folha });
+    doc.text('CRI',       colsImv.cri,   hY, { width: wImv.cri });
     doc.font('Helvetica');
     let cY = doc.y + 4;
     doc.moveTo(48, cY).lineTo(547, cY).strokeColor('#888').lineWidth(0.5).stroke();
@@ -464,14 +501,19 @@ export async function gerarPdfPropostaConsultoria(
 
     doc.fontSize(8.5).fillColor('#111');
     for (const iv of imoveisDetalhados) {
+      // v3.22.0: cri_denominacao (capturado pelo autocomplete) tem precedência sobre cri (legado)
+      const criTexto = iv.cri_denominacao || iv.cri || '-';
       const hEnd = doc.heightOfString(iv.endereco || '-', { width: wImv.end });
-      const lineH = Math.max(hEnd, 12);
+      const hCri = doc.heightOfString(criTexto, { width: wImv.cri });
+      const lineH = Math.max(hEnd, hCri, 12);
       if (cY + lineH > 760) { doc.addPage(); cY = 60; }
-      doc.text(String(iv.ordem), colsImv.ord, cY, { width: wImv.ord });
+      doc.text(String(iv.ordem),           colsImv.ord,   cY, { width: wImv.ord });
       doc.text(Number(iv.area_m2).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), colsImv.area, cY, { width: wImv.area, align: 'right' });
-      doc.text(iv.endereco || '-', colsImv.end, cY, { width: wImv.end });
-      doc.text(iv.matricula || '-', colsImv.mat, cY, { width: wImv.mat });
-      doc.text(iv.cri || '-', colsImv.cri, cY, { width: wImv.cri });
+      doc.text(iv.endereco || '-',         colsImv.end,   cY, { width: wImv.end });
+      doc.text(iv.matricula || '-',        colsImv.mat,   cY, { width: wImv.mat });
+      doc.text(iv.livro || '-',            colsImv.livro, cY, { width: wImv.livro });
+      doc.text(iv.folha || '-',            colsImv.folha, cY, { width: wImv.folha });
+      doc.text(criTexto,                   colsImv.cri,   cY, { width: wImv.cri });
       cY += lineH + 4;
     }
     doc.x = 48;
