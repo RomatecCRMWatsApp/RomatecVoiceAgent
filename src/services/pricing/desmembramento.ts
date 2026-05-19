@@ -75,6 +75,18 @@ export async function calcularDesmembramento(
       if (!Number.isFinite(i.area_m2) || i.area_m2 <= 0) throw new Error(`Imóvel #${i.ordem}: área deve ser > 0`);
       if (!i.endereco?.trim()) throw new Error(`Imóvel #${i.ordem}: endereço obrigatório`);
       if (!i.matricula?.trim()) throw new Error(`Imóvel #${i.ordem}: matrícula obrigatória`);
+      // v3.22.0: livro e folha — opcionais NO TIPO, mas se vierem strings explicitamente,
+      // não podem ser vazias. UI sempre envia preenchido.
+      if (i.livro !== undefined && !i.livro.trim()) {
+        throw new Error(`Imóvel #${i.ordem}: livro não pode ser vazio`);
+      }
+      if (i.folha !== undefined && !i.folha.trim()) {
+        throw new Error(`Imóvel #${i.ordem}: folha não pode ser vazia`);
+      }
+      // v3.22.0: CNS (se vier) deve seguir formato CNJ XX.XXX-X
+      if (i.cri_cns && !/^\d{2}\.\d{3}-\d$/.test(i.cri_cns)) {
+        throw new Error(`Imóvel #${i.ordem}: cri_cns deve seguir formato XX.XXX-X`);
+      }
     }
     const areaSoma = input.imoveis.reduce((s, i) => s + Number(i.area_m2 || 0), 0);
     if (!input.area_total_m2 || input.area_total_m2 <= 0) {
@@ -82,6 +94,33 @@ export async function calcularDesmembramento(
     }
     if (!isDesm && (!input.numero_lotes_origem || input.numero_lotes_origem < 2)) {
       input.numero_lotes_origem = input.imoveis.length;
+    }
+  }
+
+  // v3.22.0: validação status_documentacao (regra dos 30 dias para certidão de inteiro teor).
+  // Quando o objeto é fornecido, CND e BCI viram obrigatórios e a certidão precisa estar
+  // dentro do prazo de 30 dias desde a data de emissão.
+  if (input.status_documentacao) {
+    const sd = input.status_documentacao;
+    if (!sd.cnd_iptu_anexada) {
+      throw new Error('CND de IPTU é obrigatória (anexar antes de submeter)');
+    }
+    if (!sd.bci_anexado) {
+      throw new Error('BCI do imóvel é obrigatório (anexar antes de submeter)');
+    }
+    if (!sd.certidao_inteiro_teor_data) {
+      throw new Error('Data de emissão da certidão de inteiro teor é obrigatória');
+    }
+    const emissao = new Date(sd.certidao_inteiro_teor_data + 'T00:00:00');
+    if (Number.isNaN(emissao.getTime())) {
+      throw new Error('certidao_inteiro_teor_data inválida (use ISO YYYY-MM-DD)');
+    }
+    const diffDias = (Date.now() - emissao.getTime()) / (1000 * 60 * 60 * 24);
+    if (diffDias > 30) {
+      throw new Error(`Certidão de inteiro teor vencida (${Math.floor(diffDias)} dias desde a emissão; validade máxima: 30 dias)`);
+    }
+    if (diffDias < -1) {
+      throw new Error('certidao_inteiro_teor_data não pode ser futura');
     }
   }
 
@@ -274,6 +313,21 @@ export async function calcularDesmembramento(
         observacao: `1 salario minimo 2026 (R$ ${sm.toFixed(2)})`,
       },
     ];
+  }
+
+  // v3.22.0: Assessoria Técnica — habilitada por toggle (substitui assessoria_juridica em remembramento v2).
+  // Vira linha em secao_3_honorarios e entra automaticamente no secao_5_total via a soma existente.
+  if (input.assessoria_tecnica?.habilitada) {
+    const valorAT = Number(input.assessoria_tecnica.valor ?? 0);
+    if (!Number.isFinite(valorAT) || valorAT < 0) {
+      throw new Error('assessoria_tecnica.valor inválido');
+    }
+    secao_3_honorarios.push({
+      ordem: secao_3_honorarios.length + 1,
+      descricao: 'Assessoria Técnica',
+      valor: valorAT,
+      observacao: 'Acompanhamento técnico junto ao cartório e prefeitura (contratação opcional)',
+    });
   }
 
   // ── Secao 4: checklist documentos ───────────────────────────────────────
