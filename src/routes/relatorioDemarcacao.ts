@@ -11,9 +11,11 @@ import { gerarRelatorioDemarcacaoPdf } from '../services/relatorioDemarcacaoPdf'
 
 const PDF_DIR = process.env.PDF_DIR || path.join(process.cwd(), 'storage', 'relatorios');
 const BASE_URL = process.env.BASE_URL || 'https://romatec-voice-agent.up.railway.app';
-const ZAPI_INSTANCE = process.env.ZAPI_INSTANCE_ID;
-const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
-const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN;
+// v3.20.2: fallback pra instancia DEDICADA ZAYRA (mesmo padrao de integrations/whatsapp.ts).
+// Sem esse fallback, dava "Z-API nao configurada" em prod onde so existe a _ZAYRA.
+const ZAPI_INSTANCE = process.env.ZAPI_INSTANCE_ID_ZAYRA ?? process.env.ZAPI_INSTANCE_ID;
+const ZAPI_TOKEN = process.env.ZAPI_TOKEN_ZAYRA ?? process.env.ZAPI_TOKEN;
+const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN_ZAYRA ?? process.env.ZAPI_CLIENT_TOKEN;
 
 export function relatorioDemarcacaoRouter(pool: Pool): Router {
   const router = Router();
