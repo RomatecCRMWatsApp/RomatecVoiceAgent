@@ -36,19 +36,25 @@ describe('GET /api/cartorios/autocomplete', () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringMatching(/mínimo 2/i) }));
   });
 
-  it('busca em denominacao e retorna até 10 resultados', async () => {
+  it('busca tolerante a acento: normaliza q para cidade_normalizada e mantém q original para denominacao', async () => {
     (pool.execute as any).mockResolvedValueOnce([
       [{ cns: '00.123-4', denominacao: '1º Ofício de Registro de Imóveis', uf: 'MA', cidade: 'Açailândia' }],
       [],
     ]);
     const handler = getAutocompleteHandler();
-    const req = { query: { q: 'Açailandia' } } as unknown as Request;
+    // Usuário digita SEM acento; cidade_normalizada precisa receber a forma sem acento
+    const req = { query: { q: 'Açailândia' } } as unknown as Request;
     const res = mockRes();
     await handler(req, res);
-    expect(pool.execute).toHaveBeenCalledWith(
-      expect.stringContaining('SELECT cns, denominacao, uf, cidade'),
-      expect.arrayContaining([expect.stringContaining('Açailandia')]),
-    );
+
+    const callArgs = (pool.execute as any).mock.calls[0];
+    expect(callArgs[0]).toContain('SELECT cns, denominacao, uf, cidade');
+    expect(callArgs[0]).toContain('cidade_normalizada LIKE ?');
+    expect(callArgs[0]).toContain('denominacao LIKE ?');
+    // 1º param: forma normalizada (lowercase sem acento)
+    expect(callArgs[1][0]).toBe('%acailandia%');
+    // 2º param: q original (preserva acentos para denominacao)
+    expect(callArgs[1][1]).toBe('%Açailândia%');
     expect(res.json).toHaveBeenCalledWith([
       { cns: '00.123-4', denominacao: '1º Ofício de Registro de Imóveis', uf: 'MA', cidade: 'Açailândia' },
     ]);
