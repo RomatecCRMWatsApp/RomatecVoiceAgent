@@ -465,10 +465,19 @@ export async function gerarPdfPropostaConsultoria(
     doc.text(`${fmtCheck(statusDoc.bci_anexado)} BCI do imóvel anexado`);
     if (statusDoc.certidao_inteiro_teor_data) {
       const dt = new Date(statusDoc.certidao_inteiro_teor_data + 'T00:00:00Z');
-      const diff = Math.floor((Date.now() - dt.getTime()) / (1000 * 60 * 60 * 24));
-      const dtFmt = isNaN(dt.getTime()) ? statusDoc.certidao_inteiro_teor_data : dt.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
-      const sufixo = diff <= 30 ? `(válida — ${30 - diff} dia(s) restante(s))` : `(VENCIDA — ${diff - 30} dia(s) atrasada)`;
-      doc.text(`☑ Certidão de inteiro teor (emitida em ${dtFmt}) ${sufixo}`);
+      if (isNaN(dt.getTime())) {
+        // Guard contra dados ruins no DB — exibe a string crua sem fazer math NaN
+        doc.text(`☑ Certidão de inteiro teor (emitida em ${statusDoc.certidao_inteiro_teor_data})`);
+      } else {
+        const diff = Math.floor((Date.now() - dt.getTime()) / (1000 * 60 * 60 * 24));
+        const dtFmt = dt.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+        const sufixo = diff < 30
+          ? `(válida — ${30 - diff} dia(s) restante(s))`
+          : diff === 30
+            ? `(válida — último dia)`
+            : `(VENCIDA — ${diff - 30} dia(s) atrasada)`;
+        doc.text(`☑ Certidão de inteiro teor (emitida em ${dtFmt}) ${sufixo}`);
+      }
     } else {
       doc.text(`☐ Certidão de inteiro teor não informada`);
     }
