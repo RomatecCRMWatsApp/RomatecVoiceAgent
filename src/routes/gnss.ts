@@ -57,6 +57,9 @@ function multerErrorHandler(err: unknown, _req: Request, res: Response, next: Ne
 // existente — idempotente, re-importacao do retorno IBGE nao duplica vertices.
 async function autoAplicarEmVertice(p: ProcessamentoGnss): Promise<number | null> {
   if (!p.laudo_id || p.latitude_graus == null || p.longitude_graus == null) return null;
+  // v3.21.0: sessao de BASE NAO cria vertice — base eh estacao de referencia,
+  // nao vertice do imovel. So preenche os campos base_* do laudo (separadamente).
+  if (p.tipo_sessao === 'base') return null;
   const lat = Number(p.latitude_graus);
   const lon = Number(p.longitude_graus);
   const latGms = decimalToDms(lat, 'N', 'S');
@@ -155,17 +158,21 @@ async function autoPreencherBaseGnssNoLaudo(p: ProcessamentoGnss): Promise<void>
 }
 
 // POST /api/gnss/processamentos
-//   body: { rotulo, fonte, laudo_id? }
+//   body: { rotulo, fonte, laudo_id?, tipo_sessao? }
 gnssRouter.post('/processamentos', async (req: Request, res: Response) => {
   try {
-    const { rotulo, fonte, laudo_id } = req.body || {};
+    const { rotulo, fonte, laudo_id, tipo_sessao } = req.body || {};
     if (!rotulo || typeof rotulo !== 'string') return res.status(400).json({ error: 'rotulo obrigatorio' });
     const fontes: GnssFonte[] = ['rinex_ibge', 'ppp_manual', 'rtk_csv', 'outro'];
     if (!fontes.includes(fonte)) return res.status(400).json({ error: 'fonte invalida' });
+    // v3.21.0: tipo_sessao opcional (default 'vertice'). Aceita 'base' pra sessoes
+    // da estacao de referencia GNSS que NAO devem virar vertice no laudo.
+    const tipo: 'vertice' | 'base' = tipo_sessao === 'base' ? 'base' : 'vertice';
     const id = await criarProcessamento({
       rotulo: rotulo.trim().slice(0, 50),
       fonte,
       laudo_id: laudo_id != null ? Number(laudo_id) : null,
+      tipo_sessao: tipo,
     });
     const p = await obterProcessamento(id);
     res.status(201).json(p);

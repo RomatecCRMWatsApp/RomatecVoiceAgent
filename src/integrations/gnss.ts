@@ -19,6 +19,10 @@ export type GnssStatus =
 
 export type GnssFonte = 'rinex_ibge' | 'ppp_manual' | 'rtk_csv' | 'outro';
 
+// v3.21.0: tipo da sessao — 'vertice' (M01, V01...) cria vertice no laudo via
+// auto-aplicar; 'base' (Base_RCP...) so preenche os campos base_* do laudo.
+export type GnssTipoSessao = 'vertice' | 'base';
+
 export type GnssArquivoPapel =
   | 'rinex_obs' | 'rinex_nav_gps' | 'rinex_nav_glo' | 'rinex_nav_gal' | 'rinex_nav_bds'
   | 'rinex_rnx3' | 'ibge_zip_envio' | 'ibge_zip_retorno' | 'ibge_pdf' | 'ibge_txt'
@@ -32,6 +36,7 @@ export interface ProcessamentoGnss {
   rotulo: string;
   status: GnssStatus;
   fonte: GnssFonte;
+  tipo_sessao: GnssTipoSessao;
   inicio_rastreio: Date | null;
   fim_rastreio: Date | null;
   duracao_segundos: number | null;
@@ -94,6 +99,7 @@ function mapProcRow(r: ProcRow): ProcessamentoGnss {
     rotulo: String(r.rotulo),
     status: r.status as GnssStatus,
     fonte: r.fonte as GnssFonte,
+    tipo_sessao: ((r.tipo_sessao as GnssTipoSessao) ?? 'vertice'),
     inicio_rastreio: r.inicio_rastreio ? new Date(r.inicio_rastreio as string) : null,
     fim_rastreio: r.fim_rastreio ? new Date(r.fim_rastreio as string) : null,
     duracao_segundos: asNum(r.duracao_segundos),
@@ -141,8 +147,10 @@ export async function criarProcessamento(p: Pick<ProcessamentoGnss,
   'laudo_id' | 'rotulo' | 'fonte'
 > & Partial<ProcessamentoGnss>): Promise<number> {
   const [res] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO processamentos_gnss (laudo_id, rotulo, status, fonte) VALUES (?, ?, ?, ?)`,
-    [p.laudo_id ?? null, p.rotulo, p.status ?? 'rinex_carregado', p.fonte]
+    `INSERT INTO processamentos_gnss (laudo_id, rotulo, status, fonte, tipo_sessao)
+     VALUES (?, ?, ?, ?, ?)`,
+    [p.laudo_id ?? null, p.rotulo, p.status ?? 'rinex_carregado', p.fonte,
+     p.tipo_sessao ?? 'vertice']
   );
   return res.insertId;
 }
@@ -173,7 +181,7 @@ export async function atualizarProcessamento(
   id: number, patch: Partial<ProcessamentoGnss>
 ): Promise<void> {
   const colunas = [
-    'laudo_id','ponto_id','rotulo','status','fonte','inicio_rastreio','fim_rastreio',
+    'laudo_id','ponto_id','rotulo','status','fonte','tipo_sessao','inicio_rastreio','fim_rastreio',
     'duracao_segundos','intervalo_amostragem_s','num_epocas','receptor_modelo',
     'receptor_serial','antena_modelo','antena_altura_m','sistemas_gnss','ref_geodesico',
     'latitude_graus','longitude_graus','altitude_geometrica_m','altitude_ortometrica_m',

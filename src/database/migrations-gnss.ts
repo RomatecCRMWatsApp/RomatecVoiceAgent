@@ -117,4 +117,42 @@ export async function runGnssMigrations(): Promise<void> {
       console.error(`[gnss-seed] FALHA ${chave}:`, (err as Error).message);
     }
   }
+
+  // v3.21.0: ALTER ADD COLUMN tipo_sessao — distingue sessao GNSS de vertice
+  // (M01, V01, P01...) de sessao da BASE de referencia (Base_RCP, B-XX...).
+  // Auto-aplicar so cria vertice no laudo quando tipo='vertice'. Base preenche
+  // somente os campos base_* do laudo (sem poluir a poligonal).
+  try {
+    await pool.execute(
+      `ALTER TABLE processamentos_gnss
+         ADD COLUMN tipo_sessao ENUM('vertice','base') NOT NULL DEFAULT 'vertice'
+         AFTER fonte`
+    );
+    console.log(`[gnss-migrations] OK: ALTER ADD tipo_sessao`);
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    if (/Duplicate column|already exists/i.test(msg)) {
+      console.log(`[gnss-migrations] ja existe (OK): tipo_sessao`);
+    } else {
+      console.warn(`[gnss-migrations] aviso ALTER tipo_sessao: ${msg.slice(0, 200)}`);
+    }
+  }
+
+  // v3.21.0: heuristica retroativa — marca sessoes ja criadas cujo rotulo
+  // sugere base (BASE/RCP/B-) como tipo='base'. Idempotente.
+  try {
+    await pool.execute(
+      `UPDATE processamentos_gnss
+          SET tipo_sessao = 'base'
+        WHERE tipo_sessao = 'vertice'
+          AND (rotulo LIKE 'Base%'
+            OR rotulo LIKE 'BASE%'
+            OR rotulo LIKE 'B-%'
+            OR rotulo LIKE 'B\\_%'
+            OR rotulo LIKE '%_RCP%')`
+    );
+    console.log(`[gnss-migrations] OK: heuristica retro tipo='base'`);
+  } catch (err) {
+    console.warn(`[gnss-migrations] aviso heuristica: ${(err as Error).message.slice(0, 200)}`);
+  }
 }

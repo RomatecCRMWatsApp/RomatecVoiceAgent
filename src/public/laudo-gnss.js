@@ -23,11 +23,12 @@
     return api(`/api/gnss/processamentos?laudo_id=${laudoId}`);
   }
 
-  async function criarSessao(laudoId, rotulo, fonte) {
+  async function criarSessao(laudoId, rotulo, fonte, tipoSessao) {
+    // v3.21.0: tipo_sessao opcional, default 'vertice'
     return api(`/api/gnss/processamentos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ laudo_id: laudoId, rotulo, fonte }),
+      body: JSON.stringify({ laudo_id: laudoId, rotulo, fonte, tipo_sessao: tipoSessao || 'vertice' }),
     });
   }
 
@@ -170,8 +171,13 @@
     const dlg = montarModal('Nova Sessao GNSS', `
       <div class="gnss-wizard">
         <div data-step="1">
-          <label>Rotulo do ponto (M01, V03...)</label>
+          <label>Rotulo do ponto (M01, V03, Base_RCP...)</label>
           <input type="text" id="gnss-rotulo" maxlength="50" autofocus />
+          <label>Tipo da sessao</label>
+          <select id="gnss-tipo">
+            <option value="vertice" selected>📍 Vertice do imovel (M01, V01...) — cria vertice no laudo</option>
+            <option value="base">📡 Base GNSS de referencia — so preenche dados da base</option>
+          </select>
           <label>Fonte</label>
           <select id="gnss-fonte">
             <option value="rinex_ibge"${fonteInicial==='rinex_ibge'?' selected':''}>🇧🇷 Submeter ao IBGE-PPP (recomendado)</option>
@@ -206,9 +212,10 @@
     dlg.querySelector('#gnss-w-next').onclick = async () => {
       const rotulo = dlg.querySelector('#gnss-rotulo').value.trim();
       const fonte = dlg.querySelector('#gnss-fonte').value;
+      const tipoSessao = dlg.querySelector('#gnss-tipo').value;
       if (!rotulo) return alert('Informe o rotulo');
       try {
-        const sess = await criarSessao(laudoId, rotulo, fonte);
+        const sess = await criarSessao(laudoId, rotulo, fonte, tipoSessao);
         sessaoCriadaId = sess.id;
         if (fonte === 'outro') {
           // pula direto para inserir manualmente
