@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proposta de Remembramento — Romatec</title>
+  <link rel="icon" type="image/png" href="/logo_R-removebg-preview.png" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 760px;
+      margin: 24px auto;
+      padding: 0 16px;
+      color: #1a1a1a;
+      background: #f4f7fa;
+    }
+    h1 {
+      color: #0a3d62;
+      border-bottom: 2px solid #0a3d62;
+      padding-bottom: 8px;
+      margin-top: 0;
+      font-weight: 600;
+    }
+    h2 {
+      color: #1f5b8d;
+      margin: 0 0 12px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: #0a3d62;
+      font-weight: 600;
+    }
+    .stepper {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .step-pill {
+      flex: 1;
+      min-width: 70px;
+      text-align: center;
+      font-size: 12px;
+      padding: 6px 4px;
+      background: #e6ecf2;
+      color: #6b7785;
+      border-radius: 4px;
+      border: 1px solid #d4dce5;
+    }
+    .step-pill.active {
+      background: #0a3d62;
+      color: #fff;
+      border-color: #0a3d62;
+      font-weight: 600;
+    }
+    .step-pill.done {
+      background: #cfeacd;
+      color: #1d6b32;
+      border-color: #b9dcb6;
+    }
+    .wizard-step {
+      display: none;
+      background: #fff;
+      border: 1px solid #d4dce5;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(10, 61, 98, 0.06);
+    }
+    .wizard-step.active { display: block; }
+    label {
+      display: block;
+      margin: 10px 0;
+      font-size: 13px;
+      color: #1a1a1a;
+    }
+    label.inline {
+      display: inline-block;
+      margin-right: 16px;
+    }
+    label > span.label-text {
+      display: block;
+      margin-bottom: 4px;
+      font-weight: 500;
+      color: #2c4760;
+    }
+    input[type="text"],
+    input[type="email"],
+    input[type="date"],
+    input[type="number"],
+    select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #c4cfdb;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+      background: #fff;
+      color: #1a1a1a;
+      font-family: inherit;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #1f5b8d;
+      box-shadow: 0 0 0 2px rgba(31, 91, 141, 0.18);
+    }
+    input[type="checkbox"] {
+      margin-right: 6px;
+      vertical-align: middle;
+      transform: translateY(-1px);
+    }
+    button {
+      background: #0a3d62;
+      color: #fff;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 8px;
+      font-family: inherit;
+      transition: background 0.15s;
+    }
+    button:hover { background: #1f5b8d; }
+    button:disabled { background: #9aa6b3; cursor: not-allowed; }
+    button.danger { background: #c0392b; }
+    button.danger:hover { background: #962d22; }
+    button.secondary {
+      background: transparent;
+      color: #0a3d62;
+      border: 1px solid #0a3d62;
+    }
+    button.secondary:hover { background: #eef5fb; color: #0a3d62; }
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .actions .left, .actions .right {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .imovel-card {
+      border: 1px solid #d4dce5;
+      padding: 12px;
+      margin-bottom: 12px;
+      border-radius: 6px;
+      background: #fafbfd;
+    }
+    .imovel-card .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 600px) {
+      .imovel-card .row { grid-template-columns: 1fr; }
+    }
+    .imovel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .autocomplete-wrap {
+      position: relative;
+    }
+    .autocomplete-list {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      background: #fff;
+      border: 1px solid #c4cfdb;
+      border-top: none;
+      border-radius: 0 0 4px 4px;
+      max-height: 220px;
+      overflow-y: auto;
+      z-index: 10;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    }
+    .autocomplete-list .item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      border-bottom: 1px solid #eef2f6;
+    }
+    .autocomplete-list .item:last-child { border-bottom: none; }
+    .autocomplete-list .item:hover { background: #eef5fb; }
+    .autocomplete-list .item small { color: #6b7785; display: block; margin-top: 2px; }
+    .autocomplete-list .empty {
+      padding: 8px 12px;
+      font-size: 13px;
+      color: #6b7785;
+      font-style: italic;
+    }
+    .docs-conjuge.hidden,
+    .assessoria-valor.hidden {
+      display: none;
+    }
+    .aviso {
+      font-size: 13px;
+      margin-top: 6px;
+      display: block;
+    }
+    .aviso.ok { color: #16a34a; }
+    .aviso.err { color: #c0392b; font-weight: 500; }
+    .area-total {
+      font-weight: bold;
+      color: #0a3d62;
+      font-size: 16px;
+    }
+    .area-total-bar {
+      background: #eef5fb;
+      border: 1px solid #cfdce8;
+      padding: 10px 12px;
+      border-radius: 6px;
+      margin-top: 8px;
+      font-size: 14px;
+      color: #2c4760;
+    }
+    fieldset {
+      margin: 12px 0;
+      border: 1px solid #d4dce5;
+      padding: 12px;
+      border-radius: 4px;
+      background: #fafbfd;
+    }
+    legend {
+      color: #0a3d62;
+      padding: 0 6px;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .info-text {
+      font-size: 13px;
+      color: #6b7785;
+      margin: 6px 0 0;
+      line-height: 1.5;
+    }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 10px 0;
+    }
+    .submitting { opacity: 0.6; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <h1>Proposta de Remembramento</h1>
+
+  <div class="stepper" id="stepper">
+    <div class="step-pill active" data-pill="1">1 · Cliente</div>
+    <div class="step-pill" data-pill="2">2 · Status</div>
+    <div class="step-pill" data-pill="3">3 · Imóveis</div>
+    <div class="step-pill" data-pill="4">4 · Documentos</div>
+    <div class="step-pill" data-pill="5">5 · Honorários</div>
+  </div>
+
+  <form id="form-remembramento" novalidate>
+    <!-- Step 1 — Dados do Cliente -->
+    <section class="wizard-step active" data-step="1">
+      <h2>1 · Dados do Cliente</h2>
+
+      <label>
+        <span class="label-text">Nome completo *</span>
+        <input type="text" id="cli_nome" required autocomplete="name" />
+      </label>
+
+      <div class="imovel-card" style="background:transparent; border:none; padding:0; margin:0;">
+        <div class="row">
+          <label>
+            <span class="label-text">CPF / CNPJ *</span>
+            <input type="text" id="cli_documento" required inputmode="numeric" />
+          </label>
+          <label>
+            <span class="label-text">Telefone / WhatsApp *</span>
+            <input type="text" id="cli_telefone" required inputmode="tel" placeholder="(99) 99999-9999" />
+          </label>
+        </div>
+      </div>
+
+      <label>
+        <span class="label-text">E-mail</span>
+        <input type="email" id="cli_email" autocomplete="email" />
+      </label>
+
+      <div class="imovel-card" style="background:transparent; border:none; padding:0; margin:0;">
+        <div class="row">
+          <label>
+            <span class="label-text">Estado civil *</span>
+            <select id="cli_estado_civil" required>
+              <option value="">— escolha —</option>
+              <option value="solteiro">Solteiro(a)</option>
+              <option value="casado">Casado(a)</option>
+              <option value="divorciado">Divorciado(a)</option>
+              <option value="viuvo">Viúvo(a)</option>
+              <option value="uniao_estavel">União estável</option>
+            </select>
+          </label>
+          <label>
+            <span class="label-text">Profissão</span>
+            <input type="text" id="cli_profissao" />
+          </label>
+        </div>
+      </div>
+
+      <label>
+        <span class="label-text">Tipo de imóvel *</span>
+        <select id="cli_tipo_imovel" required>
+          <option value="">— escolha —</option>
+          <option value="urbano_residencial">Urbano · Residencial</option>
+          <option value="urbano_comercial">Urbano · Comercial</option>
+          <option value="rural">Rural</option>
+        </select>
+      </label>
+
+      <div class="actions">
+        <div class="left"></div>
+        <div class="right">
+          <button type="button" data-next="2">Próximo →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 2 — Status Obrigatórios -->
+    <section class="wizard-step" data-step="2">
+      <h2>2 · Status Obrigatórios</h2>
+
+      <label>
+        <input type="checkbox" id="st_iptu_em_dia" />
+        IPTU em dia *
+      </label>
+
+      <label>
+        <input type="checkbox" id="st_cnd_iptu" />
+        CND de IPTU anexada *
+      </label>
+
+      <label>
+        <input type="checkbox" id="st_bci" />
+        BCI do imóvel anexado *
+      </label>
+
+      <label>
+        <span class="label-text">Certidão de Inteiro Teor — data de emissão *</span>
+        <input type="date" id="st_certidao_data" required />
+        <span class="aviso" id="st_certidao_aviso"></span>
+      </label>
+
+      <div class="actions">
+        <div class="left">
+          <button type="button" class="secondary" data-prev="1">← Voltar</button>
+        </div>
+        <div class="right">
+          <button type="button" data-next="3">Próximo →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 3 — Detalhamento dos Imóveis -->
+    <section class="wizard-step" data-step="3">
+      <h2>3 · Detalhamento dos Imóveis (mínimo 2)</h2>
+
+      <div id="imoveis-container"></div>
+
+      <button type="button" id="btn-add-imovel" class="secondary">+ Adicionar imóvel</button>
+
+      <div class="area-total-bar">
+        Área total: <span class="area-total" id="area-total">0</span> m²
+      </div>
+
+      <div class="actions">
+        <div class="left">
+          <button type="button" class="secondary" data-prev="2">← Voltar</button>
+        </div>
+        <div class="right">
+          <button type="button" data-next="4">Próximo →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 4 — Documentos Anexos -->
+    <section class="wizard-step" data-step="4">
+      <h2>4 · Documentos Anexos</h2>
+
+      <fieldset>
+        <legend>Documentos do cliente</legend>
+        <label><input type="checkbox" id="doc_rg" /> RG</label>
+        <label><input type="checkbox" id="doc_cpf" /> CPF</label>
+        <label><input type="checkbox" id="doc_cnh" /> CNH (alternativa a RG/CPF)</label>
+        <label><input type="checkbox" id="doc_certidao_nasc_cas" /> Certidão de nascimento ou casamento</label>
+        <label><input type="checkbox" id="doc_comprovante_endereco" /> Comprovante de endereço</label>
+      </fieldset>
+
+      <fieldset id="docs-conjuge" class="docs-conjuge hidden">
+        <legend>Documentos do cônjuge</legend>
+        <label><input type="checkbox" id="doc_conj_rg" /> RG do cônjuge</label>
+        <label><input type="checkbox" id="doc_conj_cpf" /> CPF do cônjuge</label>
+        <label><input type="checkbox" id="doc_conj_comprovante" /> Comprovante de endereço do cônjuge</label>
+        <label><input type="checkbox" id="doc_conj_certidao_casamento" /> Certidão de casamento</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Documentos do imóvel</legend>
+        <p class="info-text">
+          Mapa · Memorial descritivo · ART/TRT · Requerimento (anexar separadamente após a criação da proposta).
+        </p>
+      </fieldset>
+
+      <div class="actions">
+        <div class="left">
+          <button type="button" class="secondary" data-prev="3">← Voltar</button>
+        </div>
+        <div class="right">
+          <button type="button" data-next="5">Próximo →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 5 — Honorários e Assessoria Técnica -->
+    <section class="wizard-step" data-step="5">
+      <h2>5 · Honorários e Assessoria Técnica</h2>
+
+      <label>
+        <span class="label-text">Honorário do projeto (em SM)</span>
+        <select id="honorario_sm">
+          <option value="1.0" selected>1.0 SM</option>
+          <option value="0.5">0.5 SM</option>
+        </select>
+      </label>
+
+      <div class="toggle-row">
+        <label class="inline" style="margin:0;">
+          <input type="checkbox" id="assessoria_habilitada" />
+          Habilitar Assessoria Técnica
+        </label>
+      </div>
+
+      <label class="assessoria-valor hidden" id="assessoria-valor-wrap">
+        <span class="label-text">Valor da Assessoria Técnica (R$)</span>
+        <input type="number" id="assessoria_valor" min="0" step="0.01" />
+      </label>
+
+      <div class="actions">
+        <div class="left">
+          <button type="button" class="secondary" data-prev="4">← Voltar</button>
+        </div>
+        <div class="right">
+          <button type="submit" id="btn-submit">Criar proposta</button>
+        </div>
+      </div>
+    </section>
+  </form>
+
+  <script type="module" src="/js/proposta-remembramento.js"></script>
+</body>
+</html>
