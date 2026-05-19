@@ -311,14 +311,20 @@ function bindAutocompleteCRI(card) {
     });
   }
 
+  // AbortController garante que respostas obsoletas (race condition) não sobrescrevem a lista
+  let inflightController = null;
+
   const fetchCartorios = debounce(async function (termo) {
+    if (inflightController) inflightController.abort();
+    inflightController = new AbortController();
     try {
       const url = '/api/cartorios/autocomplete?q=' + encodeURIComponent(termo);
-      const resp = await fetch(url, { headers: { Accept: 'application/json' } });
+      const resp = await fetch(url, { headers: { Accept: 'application/json' }, signal: inflightController.signal });
       if (!resp.ok) { closeList(); return; }
       const data = await resp.json();
       renderResults(Array.isArray(data) ? data : []);
     } catch (err) {
+      if (err && err.name === 'AbortError') return; // descarta silenciosamente
       console.warn('[autocomplete CRI] erro:', err);
       closeList();
     }
@@ -328,7 +334,11 @@ function bindAutocompleteCRI(card) {
     const termo = input.value.trim();
     // Se o usuário altera o texto após ter selecionado um cartório, o hidden CNS perde a validade
     if (hidden.value) hidden.value = '';
-    if (termo.length < AUTOCOMPLETE_MIN_CHARS) { closeList(); return; }
+    if (termo.length < AUTOCOMPLETE_MIN_CHARS) {
+      if (inflightController) inflightController.abort();
+      closeList();
+      return;
+    }
     fetchCartorios(termo);
   });
 
@@ -440,11 +450,19 @@ function montarPayload() {
 
   return {
     subtipo: 'remembramento',
-    cliente_id: (typeof window.__CLIENTE_ID__ !== 'undefined' && window.__CLIENTE_ID__ !== null)
-      ? window.__CLIENTE_ID__
-      : null,
+    cliente_id: resolveClienteId(),
     dados_imovel: dadosImovel,
   };
+}
+
+// cliente_id: 1) window.__CLIENTE_ID__ (injected by host page) → 2) URL ?cliente_id=
+//             → null. Backend exige; UI mostra banner quando ausente.
+function resolveClienteId() {
+  if (typeof window.__CLIENTE_ID__ !== 'undefined' && window.__CLIENTE_ID__ !== null) {
+    return window.__CLIENTE_ID__;
+  }
+  const fromUrl = new URLSearchParams(window.location.search).get('cliente_id');
+  return fromUrl ? Number(fromUrl) || fromUrl : null;
 }
 
 async function submitForm(ev) {
@@ -506,6 +524,9 @@ function init() {
   const certInput = $('#st_certidao_data');
   if (certInput && !certInput.value) certInput.max = todayISO();
 
+  // Fail-fast: se cliente_id não estiver disponível, mostra banner e desabilita submit
+  checkClienteIdAvailability();
+
   bindNavButtons();
   bindCertidaoAviso();
   initImoveisStep();
@@ -513,6 +534,25 @@ function init() {
   bindAssessoriaToggle();
 
   $('#form-remembramento').addEventListener('submit', submitForm);
+}
+
+function checkClienteIdAvailability() {
+  const cid = resolveClienteId();
+  if (cid != null) return; // OK
+  const banner = document.createElement('div');
+  banner.id = 'cliente-id-banner';
+  banner.setAttribute('role', 'alert');
+  banner.style.cssText = 'background:#fef3c7;border:1px solid #f59e0b;color:#92400e;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:14px;';
+  banner.innerHTML = 'Atenção: nenhum <strong>cliente_id</strong> foi informado. ' +
+    'Abra esta página a partir do cadastro de um cliente, ou inclua <code>?cliente_id=&lt;ID&gt;</code> na URL. ' +
+    'O envio fica desabilitado até que o cliente seja vinculado.';
+  const form = $('#form-remembramento');
+  form.parentNode.insertBefore(banner, form);
+  const submitBtn = $('#btn-submit');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.title = 'Cliente não vinculado — não é possível enviar.';
+  }
 }
 
 if (document.readyState === 'loading') {
