@@ -155,4 +155,27 @@ export async function runGnssMigrations(): Promise<void> {
   } catch (err) {
     console.warn(`[gnss-migrations] aviso heuristica: ${(err as Error).message.slice(0, 200)}`);
   }
+
+  // v3.21.1: CLEANUP retroativo — apaga vertices fantasma que o auto-aplicar
+  // antigo (pre-v3.21.0) criou no laudo a partir de sessoes que agora estao
+  // marcadas como tipo='base'. Idempotente: re-execucao no-op quando vazio.
+  // Tambem zera processamentos_gnss.ponto_id pra base, pra nao restar referencia.
+  try {
+    const [delRes] = await pool.execute<import('mysql2').ResultSetHeader>(
+      `DELETE p FROM laudos_demarcacao_pontos p
+         INNER JOIN processamentos_gnss g ON g.ponto_id = p.id
+        WHERE g.tipo_sessao = 'base'`
+    );
+    const apagados = (delRes as { affectedRows?: number }).affectedRows ?? 0;
+    await pool.execute(
+      `UPDATE processamentos_gnss SET ponto_id = NULL WHERE tipo_sessao = 'base'`
+    );
+    if (apagados > 0) {
+      console.log(`[gnss-migrations] OK: cleanup ${apagados} vertice(s) fantasma de sessao base`);
+    } else {
+      console.log(`[gnss-migrations] cleanup vertices base: 0 (ja limpo)`);
+    }
+  } catch (err) {
+    console.warn(`[gnss-migrations] aviso cleanup vertices base: ${(err as Error).message.slice(0, 200)}`);
+  }
 }
