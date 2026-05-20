@@ -6697,12 +6697,14 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
             <span style="font-size:10px; color:var(--text-muted);">Soma dos valores venais</span>
           </label>
         </div>
+        ${!isDesm ? `
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">🗺️ Tipo de imóvel</p>
         <div style="display:flex; gap:0; border:1px solid var(--border); border-radius:6px; overflow:hidden;">
           <button type="button" data-zona="urbana" id="dxZonaUrbano" style="flex:1; padding:8px; background:var(--success); color:#fff; border:none; cursor:pointer;">🏢 Urbano (m²)</button>
           <button type="button" data-zona="rural" id="dxZonaRural" style="flex:1; padding:8px; background:transparent; color:var(--text); border:none; border-left:1px solid var(--border); cursor:pointer;">🌾 Rural (ha)</button>
         </div>
         <p style="font-size:10px; color:var(--text-muted); margin:4px 0 0;">Urbano → Lei 6.766/79 (m²) · Rural → Lei 5.868/72 + INCRA (ha)</p>
+        ` : ''}
         <input type="hidden" id="dxZona" value="urbana">
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">${isDesm ? '🏘️ Lotes resultantes' : '🔗 Matrículas a unificar'}</p>
@@ -6711,50 +6713,52 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
           <span style="font-size:10px; color:var(--text-muted);">Mínimo 2</span>
         </label>
 
-        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💰 Modo de precificação</p>
-        <div style="display:grid; gap:6px;">
-          <label style="display:flex; gap:6px; align-items:flex-start; padding:8px; border:1px solid var(--border); border-radius:6px; cursor:pointer;">
-            <input type="radio" name="dxModoPrec" value="por_imovel" checked>
-            <div style="flex:1;">
-              <div style="font-weight:600; font-size:12px;">A) Por quantidade de imóveis</div>
-              <div style="font-size:11px; color:var(--text-muted);">Valor unitário × quantidade. Recomendado para casos padrão.</div>
-            </div>
-          </label>
-          <label style="display:flex; gap:6px; align-items:flex-start; padding:8px; border:1px solid var(--border); border-radius:6px; cursor:pointer;">
-            <input type="radio" name="dxModoPrec" value="por_lote">
-            <div style="flex:1;">
-              <div style="font-weight:600; font-size:12px;">B) Por lote individual</div>
-              <div style="font-size:11px; color:var(--text-muted);">Um valor por lote (lista livre).</div>
-            </div>
-          </label>
-          <label style="display:flex; gap:6px; align-items:flex-start; padding:8px; border:1px solid var(--border); border-radius:6px; cursor:pointer;">
-            <input type="radio" name="dxModoPrec" value="personalizado">
-            <div style="flex:1;">
-              <div style="font-weight:600; font-size:12px;">C) Personalizado (valor fechado)</div>
-              <div style="font-size:11px; color:var(--text-muted);">Valor total único + descritivo.</div>
-            </div>
-          </label>
-        </div>
+        <div id="dxModoPrecBlock">
+          <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💰 Modo de precificação</p>
+          <div style="display:grid; gap:6px;">
+            <label style="display:flex; gap:6px; align-items:flex-start; padding:8px; border:1px solid var(--border); border-radius:6px; cursor:pointer;">
+              <input type="radio" name="dxModoPrec" value="por_imovel" checked>
+              <div style="flex:1;">
+                <div style="font-weight:600; font-size:12px;">A) Por quantidade de imóveis</div>
+                <div style="font-size:11px; color:var(--text-muted);">Valor unitário × quantidade. Recomendado para casos padrão.</div>
+              </div>
+            </label>
+            <label style="display:flex; gap:6px; align-items:flex-start; padding:8px; border:1px solid var(--border); border-radius:6px; cursor:pointer;">
+              <input type="radio" name="dxModoPrec" value="por_lote">
+              <div style="flex:1;">
+                <div style="font-weight:600; font-size:12px;">B) Por lote individual</div>
+                <div style="font-size:11px; color:var(--text-muted);">Um valor por lote (lista livre).</div>
+              </div>
+            </label>
+            <label style="display:flex; gap:6px; align-items:flex-start; padding:8px; border:1px solid var(--border); border-radius:6px; cursor:pointer;">
+              <input type="radio" name="dxModoPrec" value="personalizado">
+              <div style="flex:1;">
+                <div style="font-weight:600; font-size:12px;">C) Personalizado (valor fechado)</div>
+                <div style="font-size:11px; color:var(--text-muted);">Valor total único + descritivo.</div>
+              </div>
+            </label>
+          </div>
 
-        <div id="dxModoPorImovelBox" class="dx-modo-box" style="margin-top:8px;">
-          <label>Valor por imóvel (R$)
-            <input id="dxValorPorImovel" type="number" min="0" step="0.01" style="width:100%;" placeholder="ex: 1500.00">
-          </label>
-          <p style="font-size:10px; color:var(--text-muted); margin:4px 0 0;" id="dxValorPorImovelResumo">Preencha valor e quantidade.</p>
-        </div>
+          <div id="dxModoPorImovelBox" class="dx-modo-box" style="margin-top:8px;">
+            <label>Valor por imóvel (R$)
+              <input id="dxValorPorImovel" type="number" min="0" step="0.01" style="width:100%;" placeholder="ex: 1500.00">
+            </label>
+            <p style="font-size:10px; color:var(--text-muted); margin:4px 0 0;" id="dxValorPorImovelResumo">Preencha valor e quantidade.</p>
+          </div>
 
-        <div id="dxModoPorLoteBox" class="dx-modo-box" style="display:none; margin-top:8px;">
-          <div id="dxValoresPorLoteLista" style="display:flex; flex-direction:column; gap:6px;"></div>
-          <button type="button" id="dxValoresPorLoteAdd" class="btn-secondary" style="margin-top:6px; font-size:11px;">+ Adicionar lote</button>
-        </div>
+          <div id="dxModoPorLoteBox" class="dx-modo-box" style="display:none; margin-top:8px;">
+            <div id="dxValoresPorLoteLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+            <button type="button" id="dxValoresPorLoteAdd" class="btn-secondary" style="margin-top:6px; font-size:11px;">+ Adicionar lote</button>
+          </div>
 
-        <div id="dxModoPersonalizadoBox" class="dx-modo-box" style="display:none; margin-top:8px;">
-          <label>Valor total (R$)
-            <input id="dxHonPersValor" type="number" min="0" step="0.01" style="width:100%;">
-          </label>
-          <label style="margin-top:6px;">Descritivo / justificativa
-            <textarea id="dxHonPersDescritivo" rows="3" style="width:100%;" placeholder="ex: Pacote técnico fechado conforme acordo entre as partes"></textarea>
-          </label>
+          <div id="dxModoPersonalizadoBox" class="dx-modo-box" style="display:none; margin-top:8px;">
+            <label>Valor total (R$)
+              <input id="dxHonPersValor" type="number" min="0" step="0.01" style="width:100%;">
+            </label>
+            <label style="margin-top:6px;">Descritivo / justificativa
+              <textarea id="dxHonPersDescritivo" rows="3" style="width:100%;" placeholder="ex: Pacote técnico fechado conforme acordo entre as partes"></textarea>
+            </label>
+          </div>
         </div>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📋 Status</p>
@@ -7219,9 +7223,17 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
     if (box) box.style.display = on ? '' : 'none';
     const hint = document.getElementById('dxManualDesmHint');
     if (hint) hint.style.display = on ? '' : 'none';
+    // v3.23.0 (fix): esconde os 3 cards de modo de precificação quando manual está ativo,
+    // já que payload (linha ~7373) descarta o modoPrec quando dxModoManual.checked → evita silent data loss.
+    const modoPrecBlock = document.getElementById('dxModoPrecBlock');
+    if (modoPrecBlock) modoPrecBlock.style.display = on ? 'none' : 'block';
   }
   const dxModoManualEl = document.getElementById('dxModoManual');
-  if (dxModoManualEl) dxModoManualEl.onchange = (e) => _toggleModoManual(e.target.checked);
+  if (dxModoManualEl) {
+    dxModoManualEl.onchange = (e) => _toggleModoManual(e.target.checked);
+    // Aplica estado inicial (caso checkbox venha checked por restore de cache)
+    _toggleModoManual(dxModoManualEl.checked);
+  }
 
   // v3.23.0: Toggle assessoria técnica (renomeado de Assessoria Jurídica)
   document.getElementById('dxAssTecHabilitada').onchange = (e) => {
@@ -7240,17 +7252,28 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
 
   // v3.23.0: Tipo de zona (Urbano/Rural) — radio button + hidden input
   // (function declarations para serem hoisted e usáveis pelo bloco de cache acima)
+  // Em isDesm, os botões Urbano/Rural não são renderizados (modalidade desm já cobre);
+  // setZona segue defensivo para suportar chamada via cache restore + cascade de _setModalidadeDesm.
   function setZona(z) {
-    document.getElementById('dxZona').value = z;
-    document.getElementById('dxZonaUrbano').style.background = z === 'urbana' ? 'var(--success)' : 'transparent';
-    document.getElementById('dxZonaUrbano').style.color = z === 'urbana' ? '#fff' : 'var(--text)';
-    document.getElementById('dxZonaRural').style.background = z === 'rural' ? 'var(--success)' : 'transparent';
-    document.getElementById('dxZonaRural').style.color = z === 'rural' ? '#fff' : 'var(--text)';
+    const hidden = document.getElementById('dxZona');
+    if (hidden) hidden.value = z;
+    const urbano = document.getElementById('dxZonaUrbano');
+    const rural = document.getElementById('dxZonaRural');
+    if (urbano && rural) {
+      urbano.style.background = z === 'urbana' ? 'var(--success)' : 'transparent';
+      urbano.style.color = z === 'urbana' ? '#fff' : 'var(--text)';
+      rural.style.background = z === 'rural' ? 'var(--success)' : 'transparent';
+      rural.style.color = z === 'rural' ? '#fff' : 'var(--text)';
+    }
     const unidadeEl = document.getElementById('dxAreaUnidade');
     if (unidadeEl) unidadeEl.textContent = z === 'rural' ? 'ha' : 'm²';
   }
-  document.getElementById('dxZonaUrbano').onclick = () => setZona('urbana');
-  document.getElementById('dxZonaRural').onclick = () => setZona('rural');
+  const dxZonaUrbanoBtn = document.getElementById('dxZonaUrbano');
+  const dxZonaRuralBtn = document.getElementById('dxZonaRural');
+  if (dxZonaUrbanoBtn && dxZonaRuralBtn) {
+    dxZonaUrbanoBtn.onclick = () => setZona('urbana');
+    dxZonaRuralBtn.onclick = () => setZona('rural');
+  }
 
   // v3.23.0: Modo de precificação (3 cards)
   function switchModo(modo) {
