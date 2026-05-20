@@ -505,6 +505,21 @@ async function submitForm(ev) {
       return;
     }
 
+    // v3.23.0 — dispara o texto explicativo ANTES do redirect/PDF.
+    // Decisão: o envio do PDF (POST /api/propostas-consultoria/:id/enviar-whatsapp)
+    // não acontece neste handler — o usuário aciona depois no painel. Mesmo assim,
+    // o explicativo é disparado AGORA (com delay de 2s no helper) para garantir
+    // ordem temporal correta caso o envio do PDF seja feito logo em seguida.
+    try {
+      const criada = await resp.json().catch(() => ({}));
+      const propostaId = criada && criada.insertId;
+      if (propostaId) {
+        await dispararExplicativoExterno(propostaId);
+      }
+    } catch (err) {
+      console.warn('[explicativo] não foi possível disparar (ignorado):', err && err.message);
+    }
+
     // Sucesso — redireciona para o painel
     window.location.href = '/painel.html';
   } catch (err) {
@@ -560,3 +575,64 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
+// ─── v3.23.0 — Texto Explicativo (toggle + envio avulso) ────────────────────
+async function dispararExplicativoExterno(propostaId) {
+  const chk = document.getElementById('chk-enviar-explicativo');
+  if (chk && !chk.checked) return; // toggle desligado → nada a fazer
+  try {
+    const r = await fetch('/api/explicativo/enviar-com-proposta/' + propostaId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j && j.pulou) return;
+    if (j && j.ok === false && j.motivo === 'duplicado_60s') {
+      console.warn('[explicativo] envio duplicado dedup 60s — ignorado');
+      return;
+    }
+    // Espera 2s pra o PDF chegar DEPOIS do texto explicativo (ordem das mensagens)
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  } catch (err) {
+    console.warn('[explicativo] envio externo falhou (ignorado):', err && err.message);
+  }
+}
+
+// v3.23.0 — botão de envio avulso (sem PDF) na tela da proposta.
+// Selectors do cliente refletem os IDs reais do wizard: #cli_telefone e #cli_nome.
+document.getElementById('btn-enviar-explicativo-avulso')?.addEventListener('click', async () => {
+  const fb = document.getElementById('explicativo-feedback');
+  const inputTelefone = document.getElementById('cli_telefone');
+  const inputNome = document.getElementById('cli_nome');
+  const numero = (inputTelefone?.value || '').replace(/\D/g, '');
+  const clienteNome = inputNome?.value || '';
+  if (!numero || numero.length < 10) {
+    fb.textContent = '❌ Preencha o telefone do cliente antes.';
+    fb.style.color = '#8a1f1f';
+    return;
+  }
+  fb.textContent = 'Enviando…';
+  fb.style.color = '#8a6b1f';
+  try {
+    const r = await fetch('/api/explicativo/enviar-avulso', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dados: { tipoServico: 'remembramento', clienteNome },
+        numeroDestino: numero,
+      }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.erro || 'Falha no envio');
+    if (j.ok === false && j.motivo === 'duplicado_60s') {
+      fb.textContent = '⚠️ Já enviado a este número há menos de 60s.';
+      fb.style.color = '#8a6b1f';
+      return;
+    }
+    fb.textContent = '✅ Texto enviado (messageId: ' + (j.messageId || '—') + ')';
+    fb.style.color = '#1d6b32';
+  } catch (err) {
+    fb.textContent = '❌ ' + (err && err.message ? err.message : err);
+    fb.style.color = '#8a1f1f';
+  }
+});
