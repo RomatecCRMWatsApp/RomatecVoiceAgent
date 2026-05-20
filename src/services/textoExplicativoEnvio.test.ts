@@ -63,6 +63,7 @@ describe('enviarTextoExplicativo — deduplicação 60s', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.motivo).toBe('duplicado_60s');
     expect(sendReplyMock).not.toHaveBeenCalled();
+    expect(gerarMock).not.toHaveBeenCalled();
     const insertCall = executeMock.mock.calls.find(
       ([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO textos_explicativos_envios'),
     );

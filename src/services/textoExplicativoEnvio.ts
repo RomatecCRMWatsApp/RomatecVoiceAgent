@@ -38,6 +38,13 @@ export type EnvioResultado = EnvioOk | EnvioBloqueado;
 
 const DEDUP_WINDOW_SECONDS = 60;
 
+// Limitação conhecida: dedup é SELECT-então-INSERT, não atômico. Duas chamadas
+// concorrentes em < ~50ms podem ambas passar pelo SELECT antes de qualquer
+// INSERT, resultando em envio duplicado. Cenário plausível: double-click no
+// botão de envio. Mitigação atual: dedup de 60s cobre os casos > 50ms; para
+// quase-simultâneas, confia no debounce do front (no botão) ou no rate-limit
+// natural da Z-API. Se virar problema, evoluir para INSERT...SELECT WHERE
+// NOT EXISTS, ou unique constraint em (numero_destino, tipo_servico, bucket_60s).
 async function dedupRecente(
   numeroDestino: string,
   tipoServico: TipoServico,
@@ -122,16 +129,20 @@ export async function enviarTextoExplicativo(
     return { ok: true, messageId: resp.messageId };
   } catch (err) {
     const detalhe = err instanceof Error ? err.message : String(err);
-    await gravarLog({
-      tipoServico: dados.tipoServico,
-      clienteId,
-      propostaId,
-      numeroDestino,
-      modoEnvio,
-      texto,
-      status: 'erro',
-      erroDetalhe: detalhe,
-    });
+    try {
+      await gravarLog({
+        tipoServico: dados.tipoServico,
+        clienteId,
+        propostaId,
+        numeroDestino,
+        modoEnvio,
+        texto,
+        status: 'erro',
+        erroDetalhe: detalhe,
+      });
+    } catch (logErr) {
+      console.warn('[textoExplicativoEnvio] falha ao gravar log de erro (ignorado):', (logErr as Error).message);
+    }
     throw err;
   }
 }
