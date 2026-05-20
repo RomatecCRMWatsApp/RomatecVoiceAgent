@@ -115,7 +115,9 @@ export interface InputDesmembramento {
   valor_venal_total: number;
   tipo_zona: 'urbana' | 'rural';
   iptu_em_dia: boolean;
-  // Legado v3.22.0 — usado apenas quando modo_precificacao está ausente.
+  // Legado v3.22.0 — mantido obrigatório por compatibilidade de tipo (callers existentes não quebram).
+  // Quando modo_precificacao está presente, este valor é IGNORADO pela engine.
+  // Front-ends novos podem passar qualquer valor válido (default sugerido: 1.0).
   honorario_projeto_sm: 0.5 | 1.0;
 
   // ─── Remembramento detalhado (opcionais — quando informados, sobrescrevem a engine paramétrica)
