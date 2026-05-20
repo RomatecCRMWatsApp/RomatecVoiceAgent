@@ -160,3 +160,60 @@ describe('PUT /api/explicativo/templates/:tipo', () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe('POST /api/explicativo/enviar-avulso — validação de número', () => {
+  it('400 quando numeroDestino contém só ruído', async () => {
+    const r = await request(buildApp())
+      .post('/api/explicativo/enviar-avulso')
+      .send({
+        dados: { tipoServico: 'remembramento', clienteNome: 'X' },
+        numeroDestino: 'abc',
+      });
+    expect(r.status).toBe(400);
+    expect(enviarMock).not.toHaveBeenCalled();
+  });
+
+  it('aceita número com máscara e normaliza para dígitos', async () => {
+    enviarMock.mockResolvedValueOnce({ ok: true, messageId: 'OK' });
+    const r = await request(buildApp())
+      .post('/api/explicativo/enviar-avulso')
+      .send({
+        dados: { tipoServico: 'remembramento', clienteNome: 'Maria' },
+        numeroDestino: '(98) 99999-9999',
+      });
+    expect(r.status).toBe(200);
+    expect(enviarMock).toHaveBeenCalledWith(
+      expect.objectContaining({ numeroDestino: '98999999999' }),
+    );
+  });
+});
+
+describe('POST /api/explicativo/enviar-com-proposta/:id — validação de telefone', () => {
+  it('400 quando telefone do cliente é inválido', async () => {
+    queryMock.mockResolvedValueOnce([
+      [{
+        id: 7, cliente_id: 3, cliente_nome: 'Maria',
+        telefone: 'lixo',
+        subtipo_consultoria: 'remembramento',
+        dados_imovel: '{}',
+        enviar_explicativo_junto: 1,
+      }],
+    ]);
+    const r = await request(buildApp())
+      .post('/api/explicativo/enviar-com-proposta/7')
+      .send({});
+    expect(r.status).toBe(400);
+    expect(r.body.erro).toMatch(/[Tt]elefone/);
+    expect(enviarMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('PUT /api/explicativo/templates/:tipo — affectedRows', () => {
+  it('404 quando UPDATE não afeta nenhuma linha', async () => {
+    executeMock.mockResolvedValueOnce([{ affectedRows: 0 }]);
+    const r = await request(buildApp())
+      .put('/api/explicativo/templates/desmembramento')
+      .send({ template_texto: 'X' });
+    expect(r.status).toBe(404);
+  });
+});

@@ -9,7 +9,7 @@
 //   PUT  /api/explicativo/templates/:tipo          → atualiza template
 
 import { Router, type Request, type Response } from 'express';
-import type { RowDataPacket } from 'mysql2';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import pool from '../database/connection';
 import {
   gerarTextoExplicativo,
@@ -21,6 +21,13 @@ import { enviarTextoExplicativo } from '../services/textoExplicativoEnvio';
 
 const router = Router();
 const TIPOS_VALIDOS: TipoServico[] = ['remembramento', 'desmembramento'];
+
+function normalizarNumeroDestino(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const digits = String(input).replace(/\D/g, '');
+  if (digits.length < 10 || digits.length > 13) return null;
+  return digits;
+}
 
 function isTipoValido(s: unknown): s is TipoServico {
   return typeof s === 'string' && TIPOS_VALIDOS.includes(s as TipoServico);
@@ -62,12 +69,13 @@ router.post('/enviar-avulso', async (req: Request, res: Response) => {
     if (!dados || !isTipoValido(dados.tipoServico)) {
       return res.status(400).json({ erro: 'dados.tipoServico inválido' });
     }
-    if (!numeroDestino || !/\d{10,13}/.test(numeroDestino)) {
+    const numeroDigits = normalizarNumeroDestino(numeroDestino);
+    if (!numeroDigits) {
       return res.status(400).json({ erro: 'numeroDestino inválido' });
     }
     const result = await enviarTextoExplicativo({
       dados: { ...(dados as DadosTexto), tipoServico: dados.tipoServico },
-      numeroDestino,
+      numeroDestino: numeroDigits,
       modoEnvio: 'avulso',
       clienteId,
       propostaId,
@@ -123,6 +131,10 @@ router.post(
       if (!p.telefone) {
         return res.status(400).json({ erro: 'Cliente sem telefone cadastrado' });
       }
+      const numeroDigits = normalizarNumeroDestino(p.telefone);
+      if (!numeroDigits) {
+        return res.status(400).json({ erro: 'Telefone do cliente em formato inválido' });
+      }
 
       const dadosImovel: Record<string, unknown> = p.dados_imovel
         ? JSON.parse(p.dados_imovel)
@@ -171,7 +183,7 @@ router.post(
           uf,
           tipoImovel,
         },
-        numeroDestino: p.telefone,
+        numeroDestino: numeroDigits,
         modoEnvio: 'com_proposta',
         clienteId: p.cliente_id,
         propostaId: p.id,
@@ -223,7 +235,7 @@ router.put('/templates/:tipo', async (req: Request, res: Response) => {
   if (!template_texto || !template_texto.trim()) {
     return res.status(400).json({ erro: 'template_texto obrigatório' });
   }
-  await pool.execute(
+  const [r] = await pool.execute<ResultSetHeader>(
     `UPDATE textos_explicativos
         SET template_texto = ?,
             titulo = COALESCE(?, titulo),
@@ -236,6 +248,9 @@ router.put('/templates/:tipo', async (req: Request, res: Response) => {
       tipo,
     ],
   );
+  if (r.affectedRows === 0) {
+    return res.status(404).json({ erro: `Template não encontrado: ${tipo}` });
+  }
   return res.json({ ok: true });
 });
 
