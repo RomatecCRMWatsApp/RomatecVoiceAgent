@@ -6697,12 +6697,13 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
             <span style="font-size:10px; color:var(--text-muted);">Soma dos valores venais</span>
           </label>
         </div>
-        <label>Tipo de zona
-          <select id="dxZona" style="width:100%;">
-            <option value="urbana" selected>Urbana</option>
-            <option value="rural">Rural</option>
-          </select>
-        </label>
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">🗺️ Tipo de imóvel</p>
+        <div style="display:flex; gap:0; border:1px solid var(--border); border-radius:6px; overflow:hidden;">
+          <button type="button" data-zona="urbana" id="dxZonaUrbano" style="flex:1; padding:8px; background:var(--success); color:#fff; border:none; cursor:pointer;">🏢 Urbano (m²)</button>
+          <button type="button" data-zona="rural" id="dxZonaRural" style="flex:1; padding:8px; background:transparent; color:var(--text); border:none; border-left:1px solid var(--border); cursor:pointer;">🌾 Rural (ha)</button>
+        </div>
+        <p style="font-size:10px; color:var(--text-muted); margin:4px 0 0;">Urbano → Lei 6.766/79 (m²) · Rural → Lei 5.868/72 + INCRA (ha)</p>
+        <input type="hidden" id="dxZona" value="urbana">
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">${isDesm ? '🏘️ Lotes resultantes' : '🔗 Matrículas a unificar'}</p>
         <label>${isDesm ? 'Quantidade de lotes resultantes do desmembramento' : 'Quantidade de matrículas que serão unificadas'}
@@ -6710,13 +6711,51 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
           <span style="font-size:10px; color:var(--text-muted);">Mínimo 2</span>
         </label>
 
-        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💰 Pacote de honorários</p>
-        <label>Tipo de pacote (escolha do cliente)
-          <select id="dxPacote" style="width:100%;">
-            <option value="0.5">Básico (0,5 SM por ${isDesm ? 'lote resultante' : 'matrícula origem'}) — projeto técnico essencial</option>
-            <option value="1.0" selected>Completo (1,0 SM por ${isDesm ? 'lote resultante' : 'matrícula origem'}) — pacote técnico completo + apoio jurídico</option>
-          </select>
-        </label>
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💰 Modo de precificação</p>
+        <div style="display:grid; gap:6px;">
+          <label style="display:flex; gap:6px; align-items:flex-start; padding:8px; border:1px solid var(--border); border-radius:6px; cursor:pointer;">
+            <input type="radio" name="dxModoPrec" value="por_imovel" checked>
+            <div style="flex:1;">
+              <div style="font-weight:600; font-size:12px;">A) Por quantidade de imóveis</div>
+              <div style="font-size:11px; color:var(--text-muted);">Valor unitário × quantidade. Recomendado para casos padrão.</div>
+            </div>
+          </label>
+          <label style="display:flex; gap:6px; align-items:flex-start; padding:8px; border:1px solid var(--border); border-radius:6px; cursor:pointer;">
+            <input type="radio" name="dxModoPrec" value="por_lote">
+            <div style="flex:1;">
+              <div style="font-weight:600; font-size:12px;">B) Por lote individual</div>
+              <div style="font-size:11px; color:var(--text-muted);">Um valor por lote (lista livre).</div>
+            </div>
+          </label>
+          <label style="display:flex; gap:6px; align-items:flex-start; padding:8px; border:1px solid var(--border); border-radius:6px; cursor:pointer;">
+            <input type="radio" name="dxModoPrec" value="personalizado">
+            <div style="flex:1;">
+              <div style="font-weight:600; font-size:12px;">C) Personalizado (valor fechado)</div>
+              <div style="font-size:11px; color:var(--text-muted);">Valor total único + descritivo.</div>
+            </div>
+          </label>
+        </div>
+
+        <div id="dxModoPorImovelBox" class="dx-modo-box" style="margin-top:8px;">
+          <label>Valor por imóvel (R$)
+            <input id="dxValorPorImovel" type="number" min="0" step="0.01" style="width:100%;" placeholder="ex: 1500.00">
+          </label>
+          <p style="font-size:10px; color:var(--text-muted); margin:4px 0 0;" id="dxValorPorImovelResumo">Preencha valor e quantidade.</p>
+        </div>
+
+        <div id="dxModoPorLoteBox" class="dx-modo-box" style="display:none; margin-top:8px;">
+          <div id="dxValoresPorLoteLista" style="display:flex; flex-direction:column; gap:6px;"></div>
+          <button type="button" id="dxValoresPorLoteAdd" class="btn-secondary" style="margin-top:6px; font-size:11px;">+ Adicionar lote</button>
+        </div>
+
+        <div id="dxModoPersonalizadoBox" class="dx-modo-box" style="display:none; margin-top:8px;">
+          <label>Valor total (R$)
+            <input id="dxHonPersValor" type="number" min="0" step="0.01" style="width:100%;">
+          </label>
+          <label style="margin-top:6px;">Descritivo / justificativa
+            <textarea id="dxHonPersDescritivo" rows="3" style="width:100%;" placeholder="ex: Pacote técnico fechado conforme acordo entre as partes"></textarea>
+          </label>
+        </div>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📋 Status</p>
         <label style="display:flex; gap:6px; align-items:center;">
@@ -6791,16 +6830,37 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
         </details>
 
         <details style="margin-top:12px; border:1px solid var(--border); border-radius:6px; padding:6px 10px;">
-          <summary style="cursor:pointer; font-weight:600; color:var(--neon); font-size:12px;">⚖️ Assessoria Técnica Jurídica</summary>
+          <summary style="cursor:pointer; font-weight:600; color:var(--neon); font-size:12px;">⚖️ Assessoria Técnica e Diligências</summary>
           <div style="padding:8px 0;">
             <label style="display:flex; gap:6px; align-items:center; font-size:11px;">
-              <input type="checkbox" id="dxAssIncluir">
-              <span>Incluir Assessoria Jurídica nos honorários</span>
+              <input type="checkbox" id="dxAssTecHabilitada">
+              <span>Incluir assessoria técnica (diligências Prefeitura + Cartório)</span>
             </label>
-            <label id="dxAssValorWrap" style="display:none; margin-top:6px; font-size:11px;">Valor (R$)
-              <input id="dxAssValor" type="number" min="0" step="0.01" style="width:100%;">
-              <span style="font-size:10px; color:var(--text-muted);">Default: salário mínimo vigente</span>
+            <label id="dxAssTecValorWrap" style="display:none; margin-top:6px; font-size:11px;">Valor (R$)
+              <input id="dxAssTecValor" type="number" min="0" step="0.01" style="width:100%;">
             </label>
+            <p style="font-size:10px; color:var(--text-muted); margin:6px 0 0;">
+              Quando desligada, o PDF mostra "⚠ Serviço não contratado" e o cliente fica responsável pelas diligências.
+            </p>
+          </div>
+        </details>
+
+        <details style="margin-top:12px; border:1px solid var(--border); border-radius:6px; padding:6px 10px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--neon); font-size:12px;">📋 Despesas Administrativas (estimativa)</summary>
+          <div style="padding:8px 0;">
+            <label style="display:flex; gap:6px; align-items:center; font-size:11px;">
+              <input type="checkbox" id="dxDespAdmHabilitada">
+              <span>Incluir estimativa de despesas de parcelamento municipal</span>
+            </label>
+            <div id="dxDespAdmBox" style="display:none; margin-top:6px;">
+              <label style="font-size:11px;">Valor (R$)
+                <input id="dxDespAdmValor" type="number" min="0" step="0.01" style="width:100%;">
+              </label>
+              <label style="margin-top:6px; font-size:11px; display:block;">Descritivo
+                <textarea id="dxDespAdmDescritivo" rows="2" style="width:100%;">Taxas de parcelamento do solo conforme legislação municipal de Açailândia. Valores sujeitos a confirmação junto à Superintendência de Habitação e Regularização Fundiária.</textarea>
+              </label>
+              <p style="font-size:10px; color:var(--text-muted); margin:6px 0 0;">Esta estimativa NÃO compõe os honorários técnicos.</p>
+            </div>
           </div>
         </details>
 
@@ -6861,8 +6921,51 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
     setVal('dxValorVenal',  d.valor_venal_total);
     setVal('dxZona',        d.tipo_zona);
     setVal('dxNumLotes',    isDesm ? d.numero_lotes_resultantes : d.numero_lotes_origem);
-    setVal('dxPacote',      d.honorario_projeto_sm);
     setChk('dxIptu',        d.iptu_em_dia);
+    // v3.23.0: restaura tipo de zona via setZona (botões Urbano/Rural + hidden #dxZona)
+    if (d.tipo_zona && typeof setZona === 'function') {
+      setZona(d.tipo_zona === 'rural' ? 'rural' : 'urbana');
+    }
+    // v3.23.0: restaura modo de precificação
+    if (d.modo_precificacao) {
+      const radio = document.querySelector(`input[name="dxModoPrec"][value="${d.modo_precificacao}"]`);
+      if (radio) { radio.checked = true; if (typeof switchModo === 'function') switchModo(d.modo_precificacao); }
+      if (d.modo_precificacao === 'por_imovel' && d.valor_por_imovel != null) {
+        setVal('dxValorPorImovel', d.valor_por_imovel);
+      }
+      if (d.modo_precificacao === 'por_lote' && Array.isArray(d.valores_por_lote)) {
+        const lista = document.getElementById('dxValoresPorLoteLista');
+        if (lista) lista.innerHTML = '';
+        d.valores_por_lote.forEach(() => { if (typeof addValorPorLote === 'function') addValorPorLote(); });
+        const rows = document.querySelectorAll('.dx-lote-row');
+        d.valores_por_lote.forEach((lote, i) => {
+          const row = rows[i]; if (!row) return;
+          const descEl = row.querySelector('[data-lote-desc]');
+          const valEl = row.querySelector('[data-lote-valor]');
+          if (descEl && lote.descricao) descEl.value = lote.descricao;
+          if (valEl && lote.valor != null) valEl.value = lote.valor;
+        });
+      }
+      if (d.modo_precificacao === 'personalizado' && d.honorarios_personalizados) {
+        setVal('dxHonPersValor', d.honorarios_personalizados.valor_total);
+        setVal('dxHonPersDescritivo', d.honorarios_personalizados.descritivo);
+      }
+    }
+    // v3.23.0: restaura assessoria_tecnica (novo) — fallback para assessoria_juridica (legado)
+    if (d.assessoria_tecnica) {
+      setChk('dxAssTecHabilitada', !!d.assessoria_tecnica.habilitada);
+      const wrap = document.getElementById('dxAssTecValorWrap');
+      if (wrap) wrap.style.display = d.assessoria_tecnica.habilitada ? 'block' : 'none';
+      if (d.assessoria_tecnica.valor != null) setVal('dxAssTecValor', d.assessoria_tecnica.valor);
+    }
+    // v3.23.0: restaura despesas_administrativas
+    if (d.despesas_administrativas) {
+      setChk('dxDespAdmHabilitada', !!d.despesas_administrativas.habilitada);
+      const box = document.getElementById('dxDespAdmBox');
+      if (box) box.style.display = d.despesas_administrativas.habilitada ? 'block' : 'none';
+      if (d.despesas_administrativas.valor != null) setVal('dxDespAdmValor', d.despesas_administrativas.valor);
+      if (d.despesas_administrativas.descritivo) setVal('dxDespAdmDescritivo', d.despesas_administrativas.descritivo);
+    }
     // v1.99.17: restaurar campos do modo avançado se vieram do cache
     if (isDesm && d.modalidade) {
       _setModalidadeDesm(d.modalidade);
@@ -6886,10 +6989,12 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
       setChk('dxModoManual', true);
       _toggleModoManual(true);
     }
-    if (d.assessoria_juridica) {
-      setChk('dxAssIncluir', !!d.assessoria_juridica.incluir);
-      _toggleAssessoria(!!d.assessoria_juridica.incluir);
-      if (d.assessoria_juridica.valor) setVal('dxAssValor', d.assessoria_juridica.valor);
+    // v3.23.0: cache legado de assessoria_juridica → mapeia para dxAssTec*
+    if (d.assessoria_juridica && !d.assessoria_tecnica) {
+      setChk('dxAssTecHabilitada', !!d.assessoria_juridica.incluir);
+      const wrap = document.getElementById('dxAssTecValorWrap');
+      if (wrap) wrap.style.display = d.assessoria_juridica.incluir ? 'block' : 'none';
+      if (d.assessoria_juridica.valor) setVal('dxAssTecValor', d.assessoria_juridica.valor);
     }
     if (d.pecas_tecnicas) {
       setChk('dxPecaMapa',     d.pecas_tecnicas.mapa);
@@ -6917,9 +7022,18 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
     }
     if (unidSpan) unidSpan.textContent = _modalidadeDesm === 'rural' ? 'ha' : 'm²';
     if (denomWrap) denomWrap.style.display = _modalidadeDesm === 'rural' ? '' : 'none';
-    // Zona também segue a modalidade (sugestão)
+    // Zona também segue a modalidade (sugestão) — sincroniza hidden #dxZona + botões Urbano/Rural
     const zonaEl = document.getElementById('dxZona');
     if (zonaEl) zonaEl.value = _modalidadeDesm === 'rural' ? 'rural' : 'urbana';
+    const zonaUrb = document.getElementById('dxZonaUrbano');
+    const zonaRur = document.getElementById('dxZonaRural');
+    if (zonaUrb && zonaRur) {
+      const isRural = _modalidadeDesm === 'rural';
+      zonaUrb.style.background = isRural ? 'transparent' : 'var(--success)';
+      zonaUrb.style.color = isRural ? 'var(--text)' : '#fff';
+      zonaRur.style.background = isRural ? 'var(--success)' : 'transparent';
+      zonaRur.style.color = isRural ? '#fff' : 'var(--text)';
+    }
   }
   if (isDesm) {
     document.getElementById('dxModUrbana').onclick = () => _setModalidadeDesm('urbana');
@@ -7109,16 +7223,79 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
   const dxModoManualEl = document.getElementById('dxModoManual');
   if (dxModoManualEl) dxModoManualEl.onchange = (e) => _toggleModoManual(e.target.checked);
 
-  // Toggle assessoria
-  function _toggleAssessoria(on) {
-    const wrap = document.getElementById('dxAssValorWrap');
-    if (wrap) wrap.style.display = on ? '' : 'none';
-    if (on) {
-      const inp = document.getElementById('dxAssValor');
+  // v3.23.0: Toggle assessoria técnica (renomeado de Assessoria Jurídica)
+  document.getElementById('dxAssTecHabilitada').onchange = (e) => {
+    const wrap = document.getElementById('dxAssTecValorWrap');
+    if (wrap) wrap.style.display = e.target.checked ? 'block' : 'none';
+    if (e.target.checked) {
+      const inp = document.getElementById('dxAssTecValor');
       if (inp && !inp.value) inp.value = _smVigente;
     }
+  };
+
+  // v3.23.0: Toggle despesas administrativas
+  document.getElementById('dxDespAdmHabilitada').onchange = (e) => {
+    document.getElementById('dxDespAdmBox').style.display = e.target.checked ? 'block' : 'none';
+  };
+
+  // v3.23.0: Tipo de zona (Urbano/Rural) — radio button + hidden input
+  // (function declarations para serem hoisted e usáveis pelo bloco de cache acima)
+  function setZona(z) {
+    document.getElementById('dxZona').value = z;
+    document.getElementById('dxZonaUrbano').style.background = z === 'urbana' ? 'var(--success)' : 'transparent';
+    document.getElementById('dxZonaUrbano').style.color = z === 'urbana' ? '#fff' : 'var(--text)';
+    document.getElementById('dxZonaRural').style.background = z === 'rural' ? 'var(--success)' : 'transparent';
+    document.getElementById('dxZonaRural').style.color = z === 'rural' ? '#fff' : 'var(--text)';
+    const unidadeEl = document.getElementById('dxAreaUnidade');
+    if (unidadeEl) unidadeEl.textContent = z === 'rural' ? 'ha' : 'm²';
   }
-  document.getElementById('dxAssIncluir').onchange = (e) => _toggleAssessoria(e.target.checked);
+  document.getElementById('dxZonaUrbano').onclick = () => setZona('urbana');
+  document.getElementById('dxZonaRural').onclick = () => setZona('rural');
+
+  // v3.23.0: Modo de precificação (3 cards)
+  function switchModo(modo) {
+    document.getElementById('dxModoPorImovelBox').style.display = modo === 'por_imovel' ? 'block' : 'none';
+    document.getElementById('dxModoPorLoteBox').style.display = modo === 'por_lote' ? 'block' : 'none';
+    document.getElementById('dxModoPersonalizadoBox').style.display = modo === 'personalizado' ? 'block' : 'none';
+  }
+  document.querySelectorAll('input[name="dxModoPrec"]').forEach(r => r.onchange = (e) => switchModo(e.target.value));
+
+  function updatePorImovelResumo() {
+    const v = Number(document.getElementById('dxValorPorImovel').value || 0);
+    const n = Number(document.getElementById('dxNumLotes').value || 0);
+    const el = document.getElementById('dxValorPorImovelResumo');
+    el.textContent = v > 0 && n >= 2
+      ? `Cálculo: R$ ${v.toFixed(2)} × ${n} imóvel(eis) = R$ ${(v * n).toFixed(2)}`
+      : 'Preencha valor e quantidade.';
+  }
+  document.getElementById('dxValorPorImovel').oninput = updatePorImovelResumo;
+  const numLotesEl = document.getElementById('dxNumLotes');
+  if (numLotesEl) {
+    const prev = numLotesEl.oninput;
+    numLotesEl.oninput = (e) => { if (prev) prev(e); updatePorImovelResumo(); };
+  }
+
+  function addValorPorLote() {
+    const lista = document.getElementById('dxValoresPorLoteLista');
+    const idx = lista.children.length + 1;
+    const row = document.createElement('div');
+    row.className = 'dx-lote-row';
+    row.dataset.ordem = String(idx);
+    row.style.cssText = 'display:grid; grid-template-columns:60px 1fr 1fr 32px; gap:6px; align-items:center;';
+    row.innerHTML = `
+      <span style="font-size:11px; color:var(--text-muted);">Lote ${String(idx).padStart(2, '0')}</span>
+      <input type="text" data-lote-desc placeholder="Descrição (opcional)" style="font-size:11px; padding:4px;">
+      <input type="number" data-lote-valor min="0" step="0.01" placeholder="R$" style="font-size:11px; padding:4px;">
+      <button type="button" class="btn-danger" data-lote-remove style="font-size:11px; padding:2px 6px;">×</button>
+    `;
+    row.querySelector('[data-lote-remove]').onclick = () => row.remove();
+    lista.appendChild(row);
+  }
+  document.getElementById('dxValoresPorLoteAdd').onclick = addValorPorLote;
+  // Inicializa lista com 2 lotes (somente se ainda vazia — cache restore preenche antes se aplicável)
+  if (document.getElementById('dxValoresPorLoteLista').children.length === 0) {
+    addValorPorLote(); addValorPorLote();
+  }
 
   // Carrega defaults de precificação (assíncrono, não bloqueia render)
   (async () => {
@@ -7146,14 +7323,12 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
     const pecaTrt = document.getElementById('dxPecaTrt').checked;
     if (!pecaArt && !pecaTrt) return alert('Peça técnica: pelo menos ART ou TRT deve estar marcado.');
 
-    const pacoteSM = Number(document.getElementById('dxPacote').value) === 0.5 ? 0.5 : 1.0;
-
     const dados_imovel = {
       area_total_m2: area,
       valor_venal_total: valorVenal,
       tipo_zona: document.getElementById('dxZona').value,
       iptu_em_dia: document.getElementById('dxIptu').checked,
-      honorario_projeto_sm: pacoteSM,
+      honorario_projeto_sm: 1.0, // legado v3.22.0 — ignorado quando modo_precificacao está presente
     };
     if (isDesm) {
       dados_imovel.numero_lotes_resultantes = numLotes;
@@ -7194,12 +7369,41 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
       }
     }
 
-    // Assessoria jurídica
-    const assIncluir = document.getElementById('dxAssIncluir').checked;
-    if (assIncluir) {
-      const assValor = Number(document.getElementById('dxAssValor').value);
-      if (!assValor || assValor <= 0) return alert('Assessoria Jurídica: informe um valor > 0.');
-      dados_imovel.assessoria_juridica = { incluir: true, valor: assValor };
+    // v3.23.0: modo_precificacao substitui dxPacote (gate: manual mode preserva fluxo legado intacto)
+    if (!document.getElementById('dxModoManual')?.checked) {
+      const modoPrec = document.querySelector('input[name="dxModoPrec"]:checked')?.value || 'por_imovel';
+      dados_imovel.modo_precificacao = modoPrec;
+      if (modoPrec === 'por_imovel') {
+        dados_imovel.valor_por_imovel = Number(document.getElementById('dxValorPorImovel').value || 0);
+      } else if (modoPrec === 'por_lote') {
+        dados_imovel.valores_por_lote = Array.from(document.querySelectorAll('.dx-lote-row')).map((row, i) => ({
+          ordem: i + 1,
+          valor: Number(row.querySelector('[data-lote-valor]').value || 0),
+          descricao: row.querySelector('[data-lote-desc]').value || undefined,
+        }));
+      } else if (modoPrec === 'personalizado') {
+        dados_imovel.honorarios_personalizados = {
+          valor_total: Number(document.getElementById('dxHonPersValor').value || 0),
+          descritivo: document.getElementById('dxHonPersDescritivo').value || '',
+        };
+      }
+    }
+
+    // v3.23.0: assessoria_tecnica (renomeado de assessoria_juridica para este form)
+    if (document.getElementById('dxAssTecHabilitada').checked) {
+      dados_imovel.assessoria_tecnica = {
+        habilitada: true,
+        valor: Number(document.getElementById('dxAssTecValor').value || 0),
+      };
+    }
+
+    // v3.23.0: despesas_administrativas
+    if (document.getElementById('dxDespAdmHabilitada').checked) {
+      dados_imovel.despesas_administrativas = {
+        habilitada: true,
+        valor: Number(document.getElementById('dxDespAdmValor').value || 0),
+        descritivo: document.getElementById('dxDespAdmDescritivo').value || '',
+      };
     }
 
     // Peças técnicas
