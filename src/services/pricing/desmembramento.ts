@@ -321,6 +321,64 @@ export async function calcularDesmembramento(
     ];
   }
 
+  // v3.23.0: modo_precificacao substitui o pacote SM quando presente.
+  // Reescreve secao_3_honorarios do zero (ignora o que foi montado no isManual/auto acima).
+  if (input.modo_precificacao) {
+    secao_3_honorarios = [];
+    let ordemHon = 1;
+
+    if (input.modo_precificacao === 'por_imovel') {
+      const valorUnit = Number(input.valor_por_imovel ?? 0);
+      if (!Number.isFinite(valorUnit) || valorUnit <= 0) {
+        throw new Error('valor_por_imovel deve ser > 0 quando modo_precificacao=por_imovel');
+      }
+      const qtd = input.imoveis?.length
+        ?? input.numero_lotes_origem
+        ?? input.numero_lotes_resultantes
+        ?? 0;
+      if (qtd < 2) {
+        throw new Error('Modo por_imovel exige pelo menos 2 imóveis/lotes');
+      }
+      secao_3_honorarios.push({
+        ordem: ordemHon++,
+        descricao: `Honorários técnicos — ${qtd} imóvel(eis) × R$ ${valorUnit.toFixed(2)} por imóvel`,
+        valor: valorUnit * qtd,
+        observacao: 'Precificação por imóvel (modo padrão v3.23.0)',
+      });
+    } else if (input.modo_precificacao === 'por_lote') {
+      const lista = input.valores_por_lote ?? [];
+      if (lista.length === 0) {
+        throw new Error('valores_por_lote vazio ou ausente quando modo_precificacao=por_lote');
+      }
+      for (const item of lista) {
+        if (!Number.isFinite(item.valor) || item.valor <= 0) {
+          throw new Error(`valores_por_lote[${item.ordem}]: valor deve ser > 0`);
+        }
+        secao_3_honorarios.push({
+          ordem: ordemHon++,
+          descricao: item.descricao
+            ? `Lote ${String(item.ordem).padStart(2, '0')} — ${item.descricao}`
+            : `Lote ${String(item.ordem).padStart(2, '0')}`,
+          valor: item.valor,
+        });
+      }
+    } else if (input.modo_precificacao === 'personalizado') {
+      const hp = input.honorarios_personalizados;
+      if (!hp || !Number.isFinite(hp.valor_total) || hp.valor_total <= 0) {
+        throw new Error('honorarios_personalizados.valor_total deve ser > 0');
+      }
+      if (!hp.descritivo?.trim()) {
+        throw new Error('honorarios_personalizados.descritivo é obrigatório');
+      }
+      secao_3_honorarios.push({
+        ordem: ordemHon++,
+        descricao: 'Honorários técnicos — pacote fechado',
+        valor: hp.valor_total,
+        observacao: hp.descritivo,
+      });
+    }
+  }
+
   // v3.22.0: Assessoria Técnica — habilitada por toggle (substitui assessoria_juridica em remembramento v2).
   // Vira linha em secao_3_honorarios e entra automaticamente no secao_5_total via a soma existente.
   if (input.assessoria_tecnica?.habilitada) {
@@ -421,7 +479,8 @@ export async function calcularDesmembramento(
   // Rem: 100% Projeto + 50% Assessoria na assinatura | 50% Assessoria no protocolo cartorio
   // v1.99.16: Modo manual — forma de pagamento a combinar entre as partes
   let condicoes_pagamento: CondicaoPagamento[];
-  if (isManual) {
+  // v3.23.0: modo_precificacao=personalizado também usa "A combinar"
+  if (isManual || input.modo_precificacao === 'personalizado') {
     const totalManual = secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
     condicoes_pagamento = [{
       rotulo: 'A combinar entre as partes',
@@ -523,6 +582,21 @@ export async function calcularDesmembramento(
         },
       ];
 
+  // v3.23.0: despesas administrativas — seção separada, NÃO soma ao secao_5_total.
+  const despesasAdm = (input.despesas_administrativas?.habilitada)
+    ? (() => {
+        const valor = Number(input.despesas_administrativas?.valor ?? 0);
+        const descritivo = (input.despesas_administrativas?.descritivo ?? '').trim();
+        if (!Number.isFinite(valor) || valor < 0) {
+          throw new Error('despesas_administrativas.valor inválido');
+        }
+        if (!descritivo) {
+          throw new Error('despesas_administrativas.descritivo obrigatório quando habilitada=true');
+        }
+        return { valor, descritivo };
+      })()
+    : undefined;
+
   const custos: CustosCalculados = {
     secao_1_projetos,
     secao_2_taxas,
@@ -532,6 +606,7 @@ export async function calcularDesmembramento(
     secao_4_checklist,
     secao_5_total,
     avisos,
+    ...(despesasAdm ? { despesas_administrativas: despesasAdm } : {}),
   };
 
   return { custos, fontes };

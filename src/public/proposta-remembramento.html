@@ -450,6 +450,24 @@
         <input type="number" id="assessoria_valor" min="0" step="0.01" />
       </label>
 
+      <!-- v3.23.0 — texto explicativo integrado ao fluxo de envio -->
+      <div class="explicativo-section" style="border:1px solid #d4dce5;border-radius:6px;padding:12px;margin:14px 0;background:#f9fbfd">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:500;margin:0">
+          <input type="checkbox" id="chk-enviar-explicativo" checked />
+          <span>Enviar texto explicativo do serviço junto com a proposta no WhatsApp</span>
+        </label>
+        <div style="font-size:11px;color:#6b7785;margin-top:6px;margin-left:24px">
+          O texto explica o serviço de Remembramento ao cliente e chega 2 segundos antes do PDF da proposta.
+        </div>
+        <div style="margin-top:10px">
+          <button type="button" id="btn-enviar-explicativo-avulso"
+                  style="background:#1f5b8d;color:#fff;border:none;border-radius:4px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600">
+            📲 Enviar somente o texto explicativo (sem PDF)
+          </button>
+        </div>
+        <div id="explicativo-feedback" style="margin-top:8px;font-size:12px"></div>
+      </div>
+
       <div class="actions">
         <div class="left">
           <button type="button" class="secondary" data-prev="4">← Voltar</button>
