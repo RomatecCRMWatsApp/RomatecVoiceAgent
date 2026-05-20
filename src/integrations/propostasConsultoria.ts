@@ -749,6 +749,27 @@ export async function gerarPdfPropostaConsultoria(
     doc.moveDown(0.4);
   }
 
+  // v3.23.0: III — Despesas Administrativas (estimativa) — só renderiza se presente em custos.
+  // Restrito a remembramento/desmembramento (averbação/georref/etc não populam este campo).
+  const despesasAdm = custos.despesas_administrativas;
+  if (despesasAdm && (p.subtipo === 'remembramento' || p.subtipo === 'desmembramento')) {
+    if (doc.y > 680) doc.addPage();
+    doc.moveDown(0.6);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0a3d62');
+    doc.text('III — Despesas Administrativas (estimativa)');
+    doc.moveDown(0.2);
+    doc.font('Helvetica').fontSize(9).fillColor('#222');
+    doc.text(despesasAdm.descritivo, { align: 'justify' });
+    doc.moveDown(0.2);
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#222');
+    doc.text(`Estimativa: ${formatBRL(despesasAdm.valor)}`);
+    doc.moveDown(0.1);
+    doc.font('Helvetica-Oblique').fontSize(8).fillColor('#666');
+    doc.text('Esta estimativa NÃO compõe os honorários técnicos. Os valores definitivos correrão por conta do contratante conforme apuração junto à Superintendência de Habitação e Regularização Fundiária.', { align: 'justify' });
+    doc.font('Helvetica');
+    doc.moveDown(0.4);
+  }
+
   // ── Secao 4: Checklist de Documentos do Cliente ────────────────────────
   if (doc.y > 680) doc.addPage();
   doc.fontSize(11).fillColor(corHex).text('4. Documentos que o Cliente Deve Fornecer');
@@ -784,6 +805,71 @@ export async function gerarPdfPropostaConsultoria(
     doc.fontSize(9).fillColor('#444').font('Helvetica-Oblique').text('Avisos:');
     custos.avisos.forEach(a => doc.fontSize(8).text(`• ${a}`, { indent: 8 }));
     doc.font('Helvetica');
+    doc.moveDown(0.4);
+  }
+
+  // v3.23.0: V — Assessoria Técnica e Diligências — escopo completo OU aviso "NÃO CONTRATADO".
+  // Restrito a remembramento/desmembramento (averbação/georref/etc não usam este toggle).
+  const assTec = (dadosImovel as { assessoria_tecnica?: { habilitada: boolean; valor?: number } }).assessoria_tecnica;
+  if (p.subtipo === 'remembramento' || p.subtipo === 'desmembramento') {
+    if (doc.y > 600) doc.addPage();
+    doc.moveDown(0.6);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0a3d62');
+    doc.text('V — Assessoria Técnica e Diligências');
+    doc.moveDown(0.2);
+
+    if (assTec?.habilitada) {
+      doc.font('Helvetica').fontSize(9).fillColor('#222');
+      const tipoTexto = p.subtipo === 'remembramento' ? 'remembramento' : 'desmembramento';
+      doc.text(`A assessoria técnica e operacional consiste no acompanhamento técnico-administrativo do processo de ${tipoTexto} até o registro definitivo no Cartório de Registro de Imóveis competente, compreendendo:`, { align: 'justify' });
+      doc.moveDown(0.3);
+
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#222');
+      doc.text('1. PEÇAS TÉCNICAS');
+      doc.font('Helvetica').fontSize(9).fillColor('#333');
+      doc.text('   • Elaboração de Mapa Mural / Planta de Situação;');
+      doc.text('   • Memorial Descritivo das áreas;');
+      doc.text('   • Anotação de Responsabilidade Técnica (ART/CREA) ou Termo de Responsabilidade Técnica (TRT/CFT), conforme habilitação aplicável;');
+      doc.text('   • Visita técnica de campo quando necessária à confirmação dos limites.');
+      doc.moveDown(0.2);
+
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#222');
+      doc.text('2. RECOLHIMENTO DE ASSINATURAS');
+      doc.font('Helvetica').fontSize(9).fillColor('#333');
+      doc.text('   • Coleta das assinaturas das partes envolvidas (proprietários e/ou procuradores) nas ART/TRT, mapas, memoriais e requerimentos administrativos.');
+      doc.moveDown(0.2);
+
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#222');
+      doc.text('3. DILIGÊNCIAS NA SUPERINTENDÊNCIA DE HABITAÇÃO E REGULARIZAÇÃO FUNDIÁRIA');
+      doc.font('Helvetica').fontSize(9).fillColor('#333');
+      doc.text('   • Protocolo do processo completo junto ao órgão municipal competente;');
+      doc.text('   • Acompanhamento da análise técnica e vistorias designadas;');
+      doc.text('   • Verificação da regularidade fiscal dos imóveis (IPTUs em dia / certidão negativa);');
+      doc.text('   • Recolhimento das taxas de parcelamento do solo conforme legislação municipal;');
+      doc.text('   • Acompanhamento até a expedição do ofício de aprovação.');
+      doc.moveDown(0.2);
+
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#222');
+      doc.text('4. DILIGÊNCIAS NO CARTÓRIO DE REGISTRO DE IMÓVEIS');
+      doc.font('Helvetica').fontSize(9).fillColor('#333');
+      doc.text('   • Protocolo do acervo aprovado junto ao Cartório competente;');
+      doc.text('   • Acompanhamento da análise documental cartorária;');
+      doc.text(`   • Acompanhamento até a averbação e expedição das novas matrículas (${p.subtipo === 'remembramento' ? 'matrícula única' : 'matrículas das frações'}).`);
+      doc.moveDown(0.2);
+
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#222');
+      doc.text('5. CUSTAS E EMOLUMENTOS');
+      doc.font('Helvetica').fontSize(9).fillColor('#333');
+      doc.text('   Os custos de emolumentos cartorários (TJMA), taxas de parcelamento municipal e eventuais regularizações fiscais (IPTU) NÃO estão incluídos nos honorários técnicos e correrão por conta do contratante.', { align: 'justify' });
+    } else {
+      // v3.23.0: Assessoria NÃO contratada — aviso explícito
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#b91c1c');
+      doc.text('⚠ SERVIÇO NÃO CONTRATADO');
+      doc.moveDown(0.2);
+      doc.font('Helvetica').fontSize(9).fillColor('#222');
+      doc.text('A presente proposta contempla exclusivamente a elaboração das peças técnicas descritas no item anterior. As diligências administrativas (Superintendência de Habitação e Regularização Fundiária e Cartório de Registro de Imóveis), recolhimento de assinaturas e demais providências correrão por conta do contratante ou de procurador por ele constituído.', { align: 'justify' });
+    }
+    doc.font('Helvetica').fillColor('#111');
     doc.moveDown(0.4);
   }
 

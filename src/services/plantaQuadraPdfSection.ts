@@ -65,6 +65,7 @@ export async function secaoPlantaQuadra(
   const quadraRing = lerRing(data.quadra.geojson);
   const loteRing = lerRing(data.lote.geojson);
   if (!quadraRing || !loteRing) return false;
+
   const vizinhos = data.vizinhos
     .map(v => ({ info: v, ring: lerRing(v.geojson) }))
     .filter((x): x is { info: typeof data.vizinhos[number]; ring: Ring } => x.ring !== null);
@@ -107,6 +108,7 @@ export async function secaoPlantaQuadra(
   }
   // v3.7.4 — Padding UTM ainda menor (4m) pra apertar zoom na Q.15.
   minX -= 4; minY -= 4; maxX += 4; maxY += 4;
+
   const rangeX = Math.max(maxX - minX, 0.001);
   const rangeY = Math.max(maxY - minY, 0.001);
 
@@ -117,10 +119,12 @@ export async function secaoPlantaQuadra(
   const laudoLote = laudo.numero_lote != null ? String(laudo.numero_lote).trim() : '';
   const tituloQuadra = laudoQuadra || data.quadra.nome;
   const labelLote = laudoLote || data.lote.numero_lote;
+
   // v3.7.1 — Normaliza antes de comparar pra evitar warn ruidoso quando a
   // diferença é só de prefixo ("15" vs "Q. 15") ou letter-case.
   const normCmpQuadra = (s: string) =>
     String(s).trim().toUpperCase().replace(/^Q(UADRA)?[\s.\-]+/i, '');
+
   if (laudoQuadra && normCmpQuadra(laudoQuadra) !== normCmpQuadra(data.quadra.nome)) {
     console.warn(
       `[plantaQuadra] laudo.quadra="${laudoQuadra}" != cadastro.quadra.nome="${data.quadra.nome}" ` +
@@ -137,7 +141,7 @@ export async function secaoPlantaQuadra(
   doc.addPage();
   let cy = 60;
   doc.fontSize(10).fillColor('#888').font('Helvetica-Bold')
-     .text(`PLANTA DA QUADRA — ${fmtTituloQuadra(tituloQuadra)}`, 40, cy);
+    .text(`PLANTA DA QUADRA — ${fmtTituloQuadra(tituloQuadra)}`, 40, cy);
   cy += 14;
 
   // v3.7.4 — Box maior + padding menor pra mais zoom na Q.15.
@@ -145,6 +149,7 @@ export async function secaoPlantaQuadra(
   const boxW = 480, boxH = 580;
   const boxX = (595 - boxW) / 2; // centralizado
   const boxY = cy;
+
   doc.rect(boxX, boxY, boxW, boxH).strokeColor('#ddd').lineWidth(0.5).stroke();
 
   const scale = Math.min(
@@ -155,6 +160,7 @@ export async function secaoPlantaQuadra(
   const drawH = rangeY * scale;
   const offX = boxX + (boxW - drawW) / 2;
   const offY = boxY + (boxH - drawH) / 2;
+
   const toX = (x: number) => offX + (x - minX) * scale;
   const toY = (y: number) => offY + drawH - (y - minY) * scale;
 
@@ -184,11 +190,13 @@ export async function secaoPlantaQuadra(
       if (!lotesPorRua.has(rid)) lotesPorRua.set(rid, []);
       lotesPorRua.get(rid)!.push(loteRing);
     }
+
     let qMnX = Infinity, qMnY = Infinity, qMxX = -Infinity, qMxY = -Infinity;
     for (const [x, y] of quadraRing) {
       if (x < qMnX) qMnX = x; if (y < qMnY) qMnY = y;
       if (x > qMxX) qMxX = x; if (y > qMxY) qMxY = y;
     }
+
     for (const [rid, rings] of lotesPorRua) {
       let sumX = 0, sumY = 0;
       for (const ring of rings) {
@@ -218,11 +226,14 @@ export async function secaoPlantaQuadra(
     ringPtsQ.reduce((s, p) => s + p[0], 0) / ringPtsQ.length,
     ringPtsQ.reduce((s, p) => s + p[1], 0) / ringPtsQ.length,
   ];
+
   const ladosUsados = new Set(Array.from(ladoMaisFreq.values()));
   const lados: LadoCardinal[] = ['N', 'S', 'L', 'O'];
+
   doc.save();
   for (const lado of lados) {
     if (!ladosUsados.has(lado)) continue;
+
     // Encontra segmento da quadra mais alinhado a esse lado
     let bestI = 0, bestScore = -Infinity;
     for (let i = 0; i < ringPtsQ.length; i++) {
@@ -243,6 +254,7 @@ export async function secaoPlantaQuadra(
     }
     const a = ringPtsQ[bestI];
     const b = ringPtsQ[(bestI + 1) % ringPtsQ.length];
+
     // Vetor normal pra fora da quadra
     const dx = b[0] - a[0], dy = b[1] - a[1];
     const len = Math.hypot(dx, dy) || 1;
@@ -255,15 +267,18 @@ export async function secaoPlantaQuadra(
     const dxIn = mx - centroQuadraEixos[0];
     const dyIn = my - centroQuadraEixos[1];
     if (dxOut * dxIn + dyOut * dyIn < 0) { nx = -nx; ny = -ny; }
+
     // Desloca segmento 6m pra fora
     const off = 6;
     const ax = a[0] + nx * off, ay = a[1] + ny * off;
     const bx = b[0] + nx * off, by = b[1] + ny * off;
+
     // Desenha linha azul tracejada
     doc.dash(3, { space: 2 });
     doc.moveTo(toX(ax), toY(ay)).lineTo(toX(bx), toY(by))
-       .strokeColor('#2563eb').lineWidth(0.7).stroke();
+      .strokeColor('#2563eb').lineWidth(0.7).stroke();
     doc.undash();
+
     // Cota "12,00" em vermelho no meio da linha
     const mxOff = (ax + bx) / 2;
     const myOff = (ay + by) / 2;
@@ -271,8 +286,8 @@ export async function secaoPlantaQuadra(
     const cxR = mxOff + nx * 3;
     const cyR = myOff + ny * 3;
     doc.fontSize(6).fillColor('#dc2626').font('Helvetica-Bold')
-       .text('12,00', toX(cxR) - 12, toY(cyR) - 3,
-         { width: 24, align: 'center', lineBreak: false });
+      .text('12,00', toX(cxR) - 12, toY(cyR) - 3,
+        { width: 24, align: 'center', lineBreak: false });
   }
   doc.restore();
 
@@ -284,17 +299,19 @@ export async function secaoPlantaQuadra(
     doc.fillOpacity(1);
     tracarRing(ring);
     doc.strokeColor('#94a3b8').lineWidth(0.4).stroke();
+
     const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length;
     const cy = ring.reduce((s, p) => s + p[1], 0) / ring.length;
     const px = toX(cx);
     const py = toY(cy);
+
     doc.save();
     doc.circle(px, py, 11).fillColor('#fff').fillOpacity(0.92).fill();
     doc.fillOpacity(1);
     doc.circle(px, py, 11).strokeColor('#c026d3').lineWidth(0.7).stroke();
     doc.fontSize(6.5).fillColor('#a21caf').font('Helvetica-Bold')
-       .text(fmtTituloQuadra(info.nome), px - 14, py - 3,
-         { width: 28, align: 'center', lineBreak: false });
+      .text(fmtTituloQuadra(info.nome), px - 14, py - 3,
+        { width: 28, align: 'center', lineBreak: false });
     doc.restore();
   }
 
@@ -321,13 +338,13 @@ export async function secaoPlantaQuadra(
     const cyN = ring.reduce((s, p) => s + p[1], 0) / ring.length;
     // Número do lote (em cima)
     doc.fontSize(7).fillColor('#444').font('Helvetica-Bold')
-       .text(info.numero_lote, toX(cxN) - 10, toY(cyN) - 6, { width: 20, align: 'center', lineBreak: false });
+      .text(info.numero_lote, toX(cxN) - 10, toY(cyN) - 6, { width: 20, align: 'center', lineBreak: false });
     // v3.6.2 — Área m² (embaixo, fonte menor)
     const aLote = areaShoelace(ring);
     if (aLote > 0) {
       doc.fontSize(5).fillColor('#64748b').font('Helvetica')
-         .text(`${aLote.toFixed(0)} m²`, toX(cxN) - 14, toY(cyN) + 2,
-           { width: 28, align: 'center', lineBreak: false });
+        .text(`${aLote.toFixed(0)} m²`, toX(cxN) - 14, toY(cyN) + 2,
+          { width: 28, align: 'center', lineBreak: false });
     }
   }
 
@@ -339,7 +356,7 @@ export async function secaoPlantaQuadra(
   const cxO = loteRing.reduce((s, p) => s + p[0], 0) / loteRing.length;
   const cyO = loteRing.reduce((s, p) => s + p[1], 0) / loteRing.length;
   doc.fontSize(9).fillColor('#111').font('Helvetica-Bold')
-     .text(`LOTE ${labelLote}`, toX(cxO) - 28, toY(cyO) - 5, { width: 56, align: 'center' });
+    .text(`LOTE ${labelLote}`, toX(cxO) - 28, toY(cyO) - 5, { width: 56, align: 'center' });
 
   // v3.6.2 — Cotas externas (testadas) do lote-objeto, estilo CAD.
   // Texto em vermelho rotacionado alinhado a cada lado do polígono.
@@ -360,8 +377,8 @@ export async function secaoPlantaQuadra(
     doc.translate(toX(mx), toY(my));
     doc.rotate(angDeg);
     doc.fontSize(6).fillColor('#dc2626').font('Helvetica-Bold')
-       .text(`${distM.toFixed(2).replace('.', ',')} m`, -24, -9,
-         { width: 48, align: 'center', lineBreak: false });
+      .text(`${distM.toFixed(2).replace('.', ',')} m`, -24, -9,
+        { width: 48, align: 'center', lineBreak: false });
     doc.restore();
   }
 
@@ -380,11 +397,14 @@ export async function secaoPlantaQuadra(
     const qPdfMaxY = Math.max(...projYs);
     const qPdfCx = (qPdfMinX + qPdfMaxX) / 2;
     const qPdfCy = (qPdfMinY + qPdfMaxY) / 2;
+
     for (const r of ruasInfo) {
       const lado = ladoMaisFreq.get(r.id);
       if (!lado) continue;
+
       doc.fontSize(8).fillColor('#0f172a').font('Helvetica-Bold');
       const nome = r.nome.toUpperCase();
+
       if (lado === 'N') {
         // Acima da Q.15
         doc.text(nome, qPdfCx - 100, qPdfMinY - 18,
@@ -416,21 +436,22 @@ export async function secaoPlantaQuadra(
   const nY = boxY + 30;
   doc.save();
   doc.fontSize(9).fillColor('#0f172a').font('Helvetica-Bold')
-     .text('N', nX - 4, nY - 22, { lineBreak: false });
+    .text('N', nX - 4, nY - 22, { lineBreak: false });
   doc.moveTo(nX, nY + 4).lineTo(nX, nY - 12)
-     .strokeColor('#0f172a').lineWidth(1.0).stroke();
+    .strokeColor('#0f172a').lineWidth(1.0).stroke();
   doc.moveTo(nX - 3, nY - 8).lineTo(nX, nY - 12).lineTo(nX + 3, nY - 8).stroke();
   doc.restore();
 
   // v3.7.3 — Legenda inferior simplificada: só 2 linhas curtas no rodapé,
   // sem repetir os nomes das ruas (que já aparecem na planta).
   doc.fontSize(7).fillColor('#666').font('Helvetica-Oblique')
-     .text(`Lote-objeto destacado em amarelo · ${vizinhos.length} lotes vizinhos · ${data.ruas.length} ruas adjacentes`,
-       40, boxY + boxH + 6, { width: 515, align: 'center', lineBreak: false });
+    .text(`Lote-objeto destacado em amarelo · ${vizinhos.length} lotes vizinhos · ${data.ruas.length} ruas adjacentes`,
+      40, boxY + boxH + 6, { width: 515, align: 'center', lineBreak: false });
   if (quadrasVizinhasProx.length > 0) {
     doc.fontSize(6.5).fillColor('#a21caf').font('Helvetica')
-       .text(`Quadras adjacentes: ${quadrasVizinhasProx.map(qv => fmtTituloQuadra(qv.info.nome)).join(' · ')}`,
-         40, boxY + boxH + 16, { width: 515, align: 'center', lineBreak: false });
+      .text(`Quadras adjacentes: ${quadrasVizinhasProx.map(qv => fmtTituloQuadra(qv.info.nome)).join(' · ')}`,
+        40, boxY + boxH + 16, { width: 515, align: 'center', lineBreak: false });
   }
+
   return true;
 }

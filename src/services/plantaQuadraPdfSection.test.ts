@@ -1,7 +1,7 @@
 // src/services/plantaQuadraPdfSection.test.ts
 //
 // Testa a guarda tripla da seção "Planta da Quadra" (v3.6.0):
-//   URBANO + lote_loteamento_id + geometria existe.
+// URBANO + lote_loteamento_id + geometria existe.
 //
 // Mockamos carregarPlantaQuadra pra isolar a função.
 
@@ -15,7 +15,7 @@ vi.mock('../integrations/loteamentos', () => ({
 import { secaoPlantaQuadra } from './plantaQuadraPdfSection';
 
 function makeFakeDoc() {
-  const fake = {
+  const fake: any = {
     addPage: vi.fn(() => fake),
     fontSize: vi.fn(() => fake),
     fillColor: vi.fn(() => fake),
@@ -30,13 +30,16 @@ function makeFakeDoc() {
     closePath: vi.fn(() => fake),
     fill: vi.fn(() => fake),
     stroke: vi.fn(() => fake),
+    // v3.7.x — primitives novos exigidos pelo desenho de eixos/quadras vizinhas
     save: vi.fn(() => fake),
     restore: vi.fn(() => fake),
-    translate: vi.fn(() => fake),
-    rotate: vi.fn(() => fake),
-    circle: vi.fn(() => fake),
     dash: vi.fn(() => fake),
     undash: vi.fn(() => fake),
+    circle: vi.fn(() => fake),
+    translate: vi.fn(() => fake),
+    rotate: vi.fn(() => fake),
+    scale: vi.fn(() => fake),
+    image: vi.fn(() => fake),
   };
   return fake;
 }
@@ -82,8 +85,9 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
       type: 'Polygon',
       coordinates: [[[x0,0],[x0+10,0],[x0+10,20],[x0,20],[x0,0]]],
     });
+
     mockCarregar.mockResolvedValue({
-      lote: { id: 2, numero_lote: '2', geojson: polyJson(10) },
+      lote: { id: 2, numero_lote: '2', geojson: polyJson(10), rua_frente_id: null },
       quadra: {
         id: 100, nome: 'Q-01',
         geojson: JSON.stringify({
@@ -92,23 +96,28 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
         }),
       },
       vizinhos: [
-        { id: 1, numero_lote: '1', geojson: polyJson(0) },
-        { id: 3, numero_lote: '3', geojson: polyJson(20) },
+        { id: 1, numero_lote: '1', geojson: polyJson(0), rua_frente_id: null },
+        { id: 3, numero_lote: '3', geojson: polyJson(20), rua_frente_id: null },
       ],
+      quadras_vizinhas: [],
       ruas: [],
     });
+
     const doc = makeFakeDoc();
     await secaoPlantaQuadra(doc as unknown as PDFKit.PDFDocument, {
       tipo_imovel: 'URBANO',
       lote_loteamento_id: 2,
     });
+
     expect(mockCarregar).toHaveBeenCalledWith(2);
     expect(doc.addPage).toHaveBeenCalledTimes(1);
+
     // v3.6.1: título normaliza "Q-01" → "Q. 01"
     const tituloChamada = (doc.text.mock.calls as unknown[][]).find(
       args => typeof args[0] === 'string' && (args[0] as string).includes('Q. 01'),
     );
     expect(tituloChamada).toBeTruthy();
+
     // E o lote-objeto é rotulado pelo numero_lote do cadastro quando o laudo
     // não tem override
     const labelLoteChamada = (doc.text.mock.calls as unknown[][]).find(
@@ -126,9 +135,10 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
       type: 'Polygon',
       coordinates: [[[x0,0],[x0+10,0],[x0+10,20],[x0,20],[x0,0]]],
     });
+
     // Cadastro tem labels SWAPPED — quadra="24", lote="15"
     mockCarregar.mockResolvedValue({
-      lote: { id: 5, numero_lote: '15', geojson: polyJson(10) },
+      lote: { id: 5, numero_lote: '15', geojson: polyJson(10), rua_frente_id: null },
       quadra: {
         id: 200, nome: 'Q. 24',
         geojson: JSON.stringify({
@@ -137,8 +147,10 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
         }),
       },
       vizinhos: [],
+      quadras_vizinhas: [],
       ruas: [],
     });
+
     const doc = makeFakeDoc();
     // Laudo declara o que deve aparecer no PDF: Quadra 15, Lote 24
     await secaoPlantaQuadra(doc as unknown as PDFKit.PDFDocument, {
@@ -147,21 +159,25 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
       quadra: '15',
       numero_lote: '24',
     });
+
     // Título usa o valor do laudo, normalizado pra "Q. 15"
     const tituloChamada = (doc.text.mock.calls as unknown[][]).find(
       args => typeof args[0] === 'string' && (args[0] as string).includes('PLANTA DA QUADRA — Q. 15'),
     );
     expect(tituloChamada).toBeTruthy();
+
     // Não deve aparecer "Q. 24" (do cadastro divergente)
     const tituloErrado = (doc.text.mock.calls as unknown[][]).find(
       args => typeof args[0] === 'string' && (args[0] as string).includes('Q. 24'),
     );
     expect(tituloErrado).toBeFalsy();
+
     // Label do lote-objeto usa numero_lote do laudo
     const labelChamada = (doc.text.mock.calls as unknown[][]).find(
       args => typeof args[0] === 'string' && (args[0] as string) === 'LOTE 24',
     );
     expect(labelChamada).toBeTruthy();
+
     // Não deve aparecer "LOTE 15" (do cadastro divergente)
     const labelErrado = (doc.text.mock.calls as unknown[][]).find(
       args => typeof args[0] === 'string' && (args[0] as string) === 'LOTE 15',
@@ -177,23 +193,27 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
       ['Q. 24', 'PLANTA DA QUADRA — Q. 24'],
       ['15', 'PLANTA DA QUADRA — Q. 15'],
     ];
+
     for (const [nome, titulo] of variantes) {
       mockCarregar.mockReset();
       mockCarregar.mockResolvedValue({
-        lote: { id: 1, numero_lote: '1', geojson: JSON.stringify({
+        lote: { id: 1, numero_lote: '1', rua_frente_id: null, geojson: JSON.stringify({
           type: 'Polygon', coordinates: [[[5,5],[10,5],[10,10],[5,10],[5,5]]],
         })},
         quadra: { id: 1, nome, geojson: JSON.stringify({
           type: 'Polygon', coordinates: [[[0,0],[20,0],[20,20],[0,20],[0,0]]],
         })},
         vizinhos: [],
+        quadras_vizinhas: [],
         ruas: [],
       });
+
       const doc = makeFakeDoc();
       await secaoPlantaQuadra(doc as unknown as PDFKit.PDFDocument, {
         tipo_imovel: 'URBANO',
         lote_loteamento_id: 1,
       });
+
       const t = (doc.text.mock.calls as unknown[][]).find(
         args => typeof args[0] === 'string' && (args[0] as string) === titulo,
       );
@@ -204,6 +224,7 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
   it('carregar lança → não quebra, omite silenciosamente', async () => {
     mockCarregar.mockRejectedValue(new Error('db down'));
     const doc = makeFakeDoc();
+    // v3.6.0 — assinatura é Promise<boolean>; early-return em erro retorna false
     await expect(
       secaoPlantaQuadra(doc as unknown as PDFKit.PDFDocument, {
         tipo_imovel: 'URBANO',
