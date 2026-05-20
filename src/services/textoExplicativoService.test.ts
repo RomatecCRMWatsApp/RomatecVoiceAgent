@@ -99,3 +99,17 @@ describe('gerarTextoExplicativo — desmembramento', () => {
     expect(out).toContain('Imperatriz/MA');
   });
 });
+
+describe('gerarTextoExplicativo — segurança de substituição', () => {
+  it('não re-substitui tokens injetados por valores de usuário', async () => {
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      [{ template_texto: 'Olá {{cliente_nome}}, base: {{base_legal}}.' }],
+    ]);
+    const out = await gerarTextoExplicativo({
+      tipoServico: 'remembramento',
+      clienteNome: '{{base_legal}}',
+      tipoImovel: 'urbano',
+    });
+    expect(out).toBe('Olá {{base_legal}}, base: Lei Federal nº 6.766/79 e legislação municipal de parcelamento do solo.');
+  });
+});

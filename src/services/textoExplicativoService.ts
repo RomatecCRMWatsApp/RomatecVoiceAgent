@@ -1,9 +1,8 @@
 // Render do texto explicativo (remembramento / desmembramento).
 // Busca template ativo na tabela `textos_explicativos` e faz substituição
 // {{variavel}} por valor, com fallback se vazio. Sem libs de templating —
-// substituição simples por split/join é segura porque os valores são
-// dados de cliente (não inserem markup ZAPI sensível) e o destino é
-// texto plano do WhatsApp.
+// substituição single-pass via regex evita reentrância (valor injetado
+// não é reprocessado) e o destino é texto plano do WhatsApp.
 
 import type { RowDataPacket } from 'mysql2';
 import pool from '../database/connection';
@@ -64,8 +63,11 @@ export async function gerarTextoExplicativo(dados: DadosTexto): Promise<string> 
     '{{base_legal}}': calcularBaseLegal(dados.tipoImovel),
   };
 
-  for (const [chave, valor] of Object.entries(substituicoes)) {
-    texto = texto.split(chave).join(valor);
-  }
+  texto = texto.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+    const placeholder = `{{${key}}}`;
+    return Object.prototype.hasOwnProperty.call(substituicoes, placeholder)
+      ? substituicoes[placeholder]
+      : match;
+  });
   return texto;
 }
