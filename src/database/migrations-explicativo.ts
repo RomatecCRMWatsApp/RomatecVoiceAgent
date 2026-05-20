@@ -41,12 +41,10 @@ async function alterIgnoringDuplicate(sql: string): Promise<void> {
   try {
     await pool.execute(sql);
   } catch (err) {
-    if (!/Duplicate column|already exists/i.test((err as Error).message)) {
-      console.warn(
-        '[migrations-explicativo] alter falhou (não-bloqueante):',
-        (err as Error).message.slice(0, 200),
-      );
+    if (/Duplicate column|already exists/i.test((err as Error).message)) {
+      return; // expected on re-runs — ignore
     }
+    throw err;
   }
 }
 
