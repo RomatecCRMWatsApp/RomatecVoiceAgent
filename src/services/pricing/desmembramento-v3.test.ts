@@ -147,9 +147,12 @@ describe('v3 — despesas_administrativas', () => {
     expect(out.custos.secao_3_honorarios.length).toBeGreaterThan(0);
     // Contrato: habilitada=false → campo ausente em custos
     expect(out.custos.despesas_administrativas).toBeUndefined();
-    // Contrato extra: secao_5_total NÃO contém o valor 250 (não pode vazar)
-    const totalNoDespesas = out.custos.secao_5_total;
-    expect(totalNoDespesas).toBeLessThan(1000 * 2 + 250); // garante que 250 não foi somado em lugar nenhum
+    // Contrato extra: secao_5_total NÃO contém o valor 250 (não pode vazar).
+    // Mesmo padrão do teste habilitada=true: comparar contra taxas+honorarios reais,
+    // não contra constantes (taxas variam com valor venal e numero de matrículas).
+    const totalTaxas = out.custos.secao_2_taxas.reduce((s, i) => s + i.valor, 0);
+    expect(out.custos.secao_5_total).toBe(totalTaxas + 2000);
+    expect(out.custos.secao_5_total).not.toBe(totalTaxas + 2000 + 250);
   });
 });
 
