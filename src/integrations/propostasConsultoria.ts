@@ -766,7 +766,7 @@ export async function gerarPdfPropostaConsultoria(
     doc.moveDown(0.1);
     doc.font('Helvetica-Oblique').fontSize(8).fillColor('#666');
     doc.text('Esta estimativa NÃO compõe os honorários técnicos. Os valores definitivos correrão por conta do contratante conforme apuração junto à Superintendência de Habitação e Regularização Fundiária.', { align: 'justify' });
-    doc.font('Helvetica');
+    doc.font('Helvetica').fillColor('#111');
     doc.moveDown(0.4);
   }
 
