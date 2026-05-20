@@ -59,6 +59,7 @@ import {
 } from './integrations/recibosAssinatura';
 import ragRoutes from './routes/rag';
 import pool from './database/connection';
+import { runMigrationsExplicativo } from './database/migrations-explicativo';
 import { relatorioDemarcacaoRouter } from './routes/relatorioDemarcacao';
 import contractsRoutes from './routes/contracts';
 import painelRoutes from './routes/painel';
@@ -4075,6 +4076,16 @@ app.listen(PORT, () => {
       await m.runRelatorioDemarcacaoMigrations();
     } catch (err) {
       console.error('[relatorio-demarcacao-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // texto-explicativo: tabelas textos_explicativos + envios + coluna
+  // enviar_explicativo_junto em propostas + seed dos 2 templates.
+  void (async () => {
+    try {
+      await runMigrationsExplicativo();
+    } catch (err) {
+      console.error('[explicativo-migrations] FALHA fatal:', err);
     }
   })();
 
