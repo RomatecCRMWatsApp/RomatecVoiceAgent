@@ -50,6 +50,13 @@ export interface CustosCalculados {
   // v1.66.11: Condicoes de Pagamento (abaixo da Secao 3 Honorarios) +
   // Base de Calculo explicita da Receita Federal.
   condicoes_pagamento?: CondicaoPagamento[];
+  // v3.23.0: despesas administrativas (estimativa) — exibidas em seção separada no PDF, NÃO somam ao secao_5_total.
+  despesas_administrativas?: {
+    valor: number;
+    descritivo: string;
+  };
+  // Base de Cálculo: memória de cálculo Romatec (fórmula explícita por item).
+  // Não há consulta à Receita Federal; o termo "Base" refere-se à derivação interna dos honorários.
   base_calculo?: BaseCalculo[];
   secao_4_checklist: DocumentoChecklist[];   // documentos do cliente
   secao_5_total: number;                     // soma das secoes 2 + 3
@@ -108,6 +115,7 @@ export interface InputDesmembramento {
   valor_venal_total: number;
   tipo_zona: 'urbana' | 'rural';
   iptu_em_dia: boolean;
+  // Legado v3.22.0 — usado apenas quando modo_precificacao está ausente.
   honorario_projeto_sm: 0.5 | 1.0;
 
   // ─── Remembramento detalhado (opcionais — quando informados, sobrescrevem a engine paramétrica)
@@ -156,6 +164,35 @@ export interface InputDesmembramento {
   assessoria_tecnica?: {
     habilitada: boolean;
     valor?: number;
+  };
+
+  // v3.23.0: modo de precificação substitui o pacote SM legado.
+  //   'por_imovel'    → valor_por_imovel × imoveis.length
+  //   'por_lote'      → soma de valores_por_lote[]
+  //   'personalizado' → valor fechado + descritivo
+  // Quando ausente, cai no comportamento v3.22.0 (modo_calculo auto/manual + honorario_projeto_sm).
+  modo_precificacao?: 'por_imovel' | 'por_lote' | 'personalizado';
+
+  valor_por_imovel?: number;            // usado quando modo_precificacao='por_imovel'
+
+  valores_por_lote?: Array<{            // usado quando modo_precificacao='por_lote'
+    ordem: number;
+    valor: number;
+    descricao?: string;                 // ex: "Lote 03 — Quadra 7"
+  }>;
+
+  honorarios_personalizados?: {         // usado quando modo_precificacao='personalizado'
+    valor_total: number;
+    descritivo: string;
+  };
+
+  // v3.23.0: despesas administrativas (estimativa). Quando habilitada, vai em seção
+  // separada no PDF — NÃO soma aos honorários técnicos. Por ora valor manual; tabela
+  // automática (≈R$68 / 10% VRM por imóvel) virá em fase posterior.
+  despesas_administrativas?: {
+    habilitada: boolean;
+    valor: number;
+    descritivo: string;
   };
 
   // v3.22.0: estado civil do cliente (espelhado aqui pra validação de docs do cônjuge no PDF)
