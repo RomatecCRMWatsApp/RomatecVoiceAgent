@@ -6003,8 +6003,21 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
     try {
       const p = await api('/api/propostas-consultoria/' + id);
       const subtipo = p.subtipo;
-      if (!subtipo || (subtipo !== 'averbacao_residencial' && subtipo !== 'averbacao_comercial')) {
-        return alert('Edição disponível apenas para Averbação Residencial e Comercial nesta fase.');
+      if (!subtipo) {
+        return alert('Subtipo da proposta ausente — não é possível editar.');
+      }
+      // v3.23.0: Editar habilitado para todos os subtipos com form implementado.
+      const SUBTIPOS_EDITAVEIS = new Set([
+        'averbacao_residencial',
+        'averbacao_comercial',
+        'georreferenciamento_rural',
+        'desmembramento',
+        'remembramento',
+        'retificacao_area',
+        'avaliacao_ptam',
+      ]);
+      if (!SUBTIPOS_EDITAVEIS.has(subtipo)) {
+        return alert(`Edição não disponível para subtipo "${subtipo}".`);
       }
       // v1.66.15: tambem carrega anexos existentes da proposta
       const anexosExistentes = await api('/api/propostas-consultoria/' + id + '/anexos').catch(() => ({ items: [] }));
