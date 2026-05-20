@@ -30,6 +30,13 @@ function makeFakeDoc() {
     closePath: vi.fn(() => fake),
     fill: vi.fn(() => fake),
     stroke: vi.fn(() => fake),
+    save: vi.fn(() => fake),
+    restore: vi.fn(() => fake),
+    translate: vi.fn(() => fake),
+    rotate: vi.fn(() => fake),
+    circle: vi.fn(() => fake),
+    dash: vi.fn(() => fake),
+    undash: vi.fn(() => fake),
   };
   return fake;
 }
@@ -88,6 +95,7 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
         { id: 1, numero_lote: '1', geojson: polyJson(0) },
         { id: 3, numero_lote: '3', geojson: polyJson(20) },
       ],
+      ruas: [],
     });
     const doc = makeFakeDoc();
     await secaoPlantaQuadra(doc as unknown as PDFKit.PDFDocument, {
@@ -129,6 +137,7 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
         }),
       },
       vizinhos: [],
+      ruas: [],
     });
     const doc = makeFakeDoc();
     // Laudo declara o que deve aparecer no PDF: Quadra 15, Lote 24
@@ -178,6 +187,7 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
           type: 'Polygon', coordinates: [[[0,0],[20,0],[20,20],[0,20],[0,0]]],
         })},
         vizinhos: [],
+        ruas: [],
       });
       const doc = makeFakeDoc();
       await secaoPlantaQuadra(doc as unknown as PDFKit.PDFDocument, {
@@ -199,7 +209,7 @@ describe('secaoPlantaQuadra — guarda tripla', () => {
         tipo_imovel: 'URBANO',
         lote_loteamento_id: 7,
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
     expect(doc.addPage).not.toHaveBeenCalled();
   });
 });
