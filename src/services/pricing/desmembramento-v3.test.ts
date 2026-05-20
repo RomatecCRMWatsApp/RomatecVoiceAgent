@@ -163,3 +163,96 @@ describe('v3 — retrocompat: sem modo_precificacao usa SM legado', () => {
     expect(out.custos.secao_3_honorarios[0].descricao).toMatch(/Honorarios de Projeto/i);
   });
 });
+
+describe('v3 — condicoes_pagamento consistente com secao_3', () => {
+  it('por_imovel: soma das parcelas = total de honorários', async () => {
+    const out = await calcularDesmembramento({
+      ...baseValid,
+      modo_precificacao: 'por_imovel',
+      valor_por_imovel: 1500,
+      imoveis: [
+        { ordem: 1, area_m2: 200, endereco: 'R', matricula: 'M1' },
+        { ordem: 2, area_m2: 200, endereco: 'R', matricula: 'M2' },
+        { ordem: 3, area_m2: 200, endereco: 'R', matricula: 'M3' },
+      ],
+    });
+    const totalHonorarios = out.custos.secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
+    const somaParcelas = (out.custos.condicoes_pagamento ?? []).reduce((s, c) => s + c.valor, 0);
+    expect(somaParcelas).toBeCloseTo(totalHonorarios, 2);
+  });
+
+  it('por_lote: soma das parcelas = total de honorários', async () => {
+    const out = await calcularDesmembramento({
+      ...baseValid,
+      modo_precificacao: 'por_lote',
+      valores_por_lote: [
+        { ordem: 1, valor: 800 },
+        { ordem: 2, valor: 1200 },
+        { ordem: 3, valor: 1500 },
+      ],
+    });
+    const totalHonorarios = out.custos.secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
+    const somaParcelas = (out.custos.condicoes_pagamento ?? []).reduce((s, c) => s + c.valor, 0);
+    expect(somaParcelas).toBeCloseTo(totalHonorarios, 2);
+  });
+
+  it('personalizado: parcela única "A combinar" com valor = total', async () => {
+    const out = await calcularDesmembramento({
+      ...baseValid,
+      modo_precificacao: 'personalizado',
+      honorarios_personalizados: { valor_total: 5500, descritivo: 'Pacote completo' },
+    });
+    expect(out.custos.condicoes_pagamento).toHaveLength(1);
+    expect(out.custos.condicoes_pagamento![0].rotulo).toMatch(/a combinar/i);
+    expect(out.custos.condicoes_pagamento![0].valor).toBe(5500);
+  });
+});
+
+describe('v3 — base_calculo consistente com secao_3', () => {
+  it('por_imovel: total em base_calculo = secao_3 total', async () => {
+    const out = await calcularDesmembramento({
+      ...baseValid,
+      modo_precificacao: 'por_imovel',
+      valor_por_imovel: 1500,
+      imoveis: [
+        { ordem: 1, area_m2: 200, endereco: 'R', matricula: 'M1' },
+        { ordem: 2, area_m2: 200, endereco: 'R', matricula: 'M2' },
+        { ordem: 3, area_m2: 200, endereco: 'R', matricula: 'M3' },
+      ],
+    });
+    const totalHonorarios = out.custos.secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
+    const totalRomatec = out.custos.base_calculo?.find(b => /Total Romatec/i.test(b.rotulo));
+    expect(totalRomatec?.valor_resultado).toBe(totalHonorarios);
+    // base_calculo NÃO deve conter "Honorarios de Projeto" SM legado em modo_precificacao
+    const linhaSM = out.custos.base_calculo?.find(b => /Honorarios de Projeto/i.test(b.rotulo));
+    expect(linhaSM).toBeUndefined();
+  });
+});
+
+describe('v3 — desmembramento usa numero_lotes_resultantes (não numero_lotes_origem)', () => {
+  it('por_imovel em desmembramento sem imoveis[] usa numero_lotes_resultantes', async () => {
+    const out = await calcularDesmembramento({
+      tipo: 'desmembramento',
+      area_total_m2: 1000,
+      valor_venal_total: 200000,
+      tipo_zona: 'urbana',
+      iptu_em_dia: true,
+      honorario_projeto_sm: 1.0,
+      numero_lotes_resultantes: 4, // 1 matriz vira 4 lotes
+      modo_precificacao: 'por_imovel',
+      valor_por_imovel: 1000,
+    });
+    const totalHonorarios = out.custos.secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
+    expect(totalHonorarios).toBe(4000); // 1000 × 4
+  });
+});
+
+describe('v3 — modo_precificacao desconhecido rejeita', () => {
+  it('valor desconhecido lança erro descritivo', async () => {
+    await expect(calcularDesmembramento({
+      ...baseValid,
+      // @ts-expect-error testando runtime guard
+      modo_precificacao: 'bogus',
+    })).rejects.toThrow(/modo_precificacao desconhecido/i);
+  });
+});
