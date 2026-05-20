@@ -58,8 +58,10 @@
     "@types/node": "^22.15.3",
     "@types/node-forge": "^1.3.14",
     "@types/pdf-parse": "^1.1.5",
+    "@types/supertest": "^7.2.0",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
+    "supertest": "^7.2.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
     "vitest": "^2.1.9"

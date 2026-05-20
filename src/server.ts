@@ -59,11 +59,13 @@ import {
 } from './integrations/recibosAssinatura';
 import ragRoutes from './routes/rag';
 import pool from './database/connection';
+import { runMigrationsExplicativo } from './database/migrations-explicativo';
 import { relatorioDemarcacaoRouter } from './routes/relatorioDemarcacao';
 import contractsRoutes from './routes/contracts';
 import painelRoutes from './routes/painel';
 import gnssRouter from './routes/gnss';
 import cartoriosRouter from './routes/cartorios';
+import explicativoRouter from './routes/explicativo';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -102,6 +104,7 @@ app.use('/api/relatorios-demarcacao', relatorioDemarcacaoRouter(pool as any)); /
 app.use('/api/gnss', gnssRouter);
 // v3.22.0: autocomplete de cartórios (CNJ) p/ wizard de Proposta de Remembramento
 app.use('/api/cartorios', cartoriosRouter);
+app.use('/api/explicativo', explicativoRouter); // v3.23.0 — texto explicativo de serviço
 
 // Static files com Cache-Control inteligente:
 // HTML/SW/manifest = no-cache (browser revalida a cada request com ETag)
@@ -4075,6 +4078,16 @@ app.listen(PORT, () => {
       await m.runRelatorioDemarcacaoMigrations();
     } catch (err) {
       console.error('[relatorio-demarcacao-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // texto-explicativo: tabelas textos_explicativos + envios + coluna
+  // enviar_explicativo_junto em propostas + seed dos 2 templates.
+  void (async () => {
+    try {
+      await runMigrationsExplicativo();
+    } catch (err) {
+      console.error('[explicativo-migrations] FALHA fatal:', err);
     }
   })();
 

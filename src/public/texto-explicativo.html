@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Texto Explicativo de Serviço — Romatec</title>
+  <link rel="icon" type="image/png" href="/logo_R-removebg-preview.png" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 760px; margin: 24px auto; padding: 0 16px;
+      color: #1a1a1a; background: #f4f7fa;
+    }
+    h1 { color: #0a3d62; border-bottom: 2px solid #0a3d62; padding-bottom: 8px; margin-top: 0; font-weight: 600; }
+    h2 { color: #1f5b8d; margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+    .card { background: #fff; border: 1px solid #d4dce5; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(10,61,98,.06); }
+    label { display: block; margin: 10px 0; font-size: 13px; color: #1a1a1a; }
+    label > span { display: block; margin-bottom: 4px; font-weight: 500; color: #2c4760; }
+    input[type="text"], input[type="number"], select, textarea {
+      width: 100%; padding: 8px 10px; border: 1px solid #c4cfdb; border-radius: 4px; font-size: 14px;
+      font-family: inherit;
+    }
+    textarea { min-height: 280px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .row > label { flex: 1 1 200px; }
+    button {
+      cursor: pointer; padding: 10px 16px; border: none; border-radius: 4px;
+      font-size: 14px; font-weight: 600; margin-right: 8px;
+    }
+    .btn-preview { background: #1f5b8d; color: #fff; }
+    .btn-send    { background: #25d366; color: #fff; }
+    .btn-ghost   { background: #e6ecf2; color: #2c4760; }
+    .status { margin-top: 12px; padding: 10px; border-radius: 4px; font-size: 13px; }
+    .status.ok    { background: #cfeacd; color: #1d6b32; border: 1px solid #b9dcb6; }
+    .status.err   { background: #fbd5d5; color: #8a1f1f; border: 1px solid #f1a8a8; }
+    .status.warn  { background: #fff4d2; color: #8a6b1f; border: 1px solid #efd98a; }
+    .small { font-size: 11px; color: #6b7785; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <h1>📲 Texto Explicativo de Serviço</h1>
+  <div class="card">
+    <h2>Modo Avulso — sem proposta vinculada</h2>
+    <p class="small">Envia apenas a mensagem de texto explicando o serviço (Remembramento ou Desmembramento). Útil em prospecção, antes de fechar proposta.</p>
+
+    <div class="row">
+      <label>
+        <span>Tipo de serviço</span>
+        <select id="tipoServico">
+          <option value="remembramento">Remembramento</option>
+          <option value="desmembramento">Desmembramento / Desdobro</option>
+        </select>
+      </label>
+      <label>
+        <span>Tipo de imóvel</span>
+        <select id="tipoImovel">
+          <option value="">— não informar —</option>
+          <option value="urbano">Urbano</option>
+          <option value="rural">Rural</option>
+        </select>
+      </label>
+    </div>
+
+    <label>
+      <span>Nome do cliente</span>
+      <input id="clienteNome" type="text" placeholder="Maria Silva" />
+    </label>
+
+    <label>
+      <span>Número WhatsApp (com DDI/DDD)</span>
+      <input id="numeroDestino" type="text" placeholder="5598999999999" />
+    </label>
+
+    <div class="row">
+      <label>
+        <span>Município</span>
+        <input id="municipio" type="text" placeholder="Açailândia" />
+      </label>
+      <label>
+        <span>UF</span>
+        <input id="uf" type="text" maxlength="2" placeholder="MA" />
+      </label>
+    </div>
+
+    <div id="campos-remembramento" class="row">
+      <label>
+        <span>Quantidade de imóveis</span>
+        <input id="quantidadeImoveis" type="number" min="2" placeholder="2" />
+      </label>
+    </div>
+
+    <div id="campos-desmembramento" class="row" style="display:none">
+      <label>
+        <span>Área total</span>
+        <input id="areaTotal" type="number" step="0.01" placeholder="5000" />
+      </label>
+      <label>
+        <span>Unidade</span>
+        <select id="unidadeArea">
+          <option value="m²">m²</option>
+          <option value="ha">ha</option>
+        </select>
+      </label>
+      <label>
+        <span>Qtd. frações</span>
+        <input id="quantidadeFracoes" type="number" min="2" placeholder="3" />
+      </label>
+    </div>
+
+    <div style="margin-top:14px">
+      <button class="btn-preview" id="btnPreview">👁️ Preview</button>
+      <button class="btn-send" id="btnEnviar">📲 Enviar via WhatsApp</button>
+    </div>
+
+    <label style="margin-top:14px">
+      <span>Texto montado (visualização)</span>
+      <textarea id="textoMontado" placeholder="Clique em Preview para gerar o texto…" readonly></textarea>
+    </label>
+
+    <div id="status" class="status" style="display:none"></div>
+  </div>
+
+  <script src="/js/texto-explicativo.js"></script>
+</body>
+</html>
