@@ -65,6 +65,7 @@ import contractsRoutes from './routes/contracts';
 import painelRoutes from './routes/painel';
 import gnssRouter from './routes/gnss';
 import cartoriosRouter from './routes/cartorios';
+import explicativoRouter from './routes/explicativo';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -103,6 +104,7 @@ app.use('/api/relatorios-demarcacao', relatorioDemarcacaoRouter(pool as any)); /
 app.use('/api/gnss', gnssRouter);
 // v3.22.0: autocomplete de cartórios (CNJ) p/ wizard de Proposta de Remembramento
 app.use('/api/cartorios', cartoriosRouter);
+app.use('/api/explicativo', explicativoRouter); // v3.23.0 — texto explicativo de serviço
 
 // Static files com Cache-Control inteligente:
 // HTML/SW/manifest = no-cache (browser revalida a cada request com ETag)
