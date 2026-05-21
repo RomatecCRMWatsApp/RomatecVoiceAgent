@@ -3462,9 +3462,16 @@ app.get   ('/api/propostas-consultoria/:id/pdf', async (req: Request, res: Respo
 });
 
 // v1.99.11: Assinatura digital ICP-Brasil de propostas
+// v3.23.9: aceita body.perfil ('pj' | 'pf') pra escolher qual cert usar. Default 'pj'.
 app.post('/api/propostas-consultoria/:id/assinar', requireCeoToken, async (req: Request, res: Response) => {
   try {
-    const result = await propostasConsultoria.assinarProposta(String(req.params.id));
+    const body = (req.body || {}) as { perfil?: 'pj' | 'pf'; tipo_certificado?: 'pj' | 'pf' | 'e_cnpj' | 'e_cpf' };
+    // Aceita tanto perfil quanto tipo_certificado (alias) pra compat com clients diferentes.
+    // Tambem traduz e_cnpj/e_cpf (nomes alternativos do brief) pra pj/pf (nomes internos).
+    const rawPerfil = body.perfil ?? body.tipo_certificado ?? 'pj';
+    const perfil: 'pj' | 'pf' =
+      rawPerfil === 'pf' || rawPerfil === 'e_cpf' ? 'pf' : 'pj';
+    const result = await propostasConsultoria.assinarProposta(String(req.params.id), perfil);
     res.json(result);
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });

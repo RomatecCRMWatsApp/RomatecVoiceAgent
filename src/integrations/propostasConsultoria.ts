@@ -2015,14 +2015,25 @@ export interface AssinarPropostaResult {
 }
 
 /**
- * Assina proposta com certificado PJ (Romatec). PF nao faz sentido pra propostas
- * empresariais. Quando e-CNPJ A1 estiver cadastrado, esta funcao funciona.
+ * Assina proposta com certificado digital ICP-Brasil.
+ * v3.23.9: aceita parametro perfil ('pj'|'pf'). Default 'pj' por retrocompat com
+ * chamadas existentes (rota /api/.../assinar sem body). O comentario antigo
+ * "PF nao faz sentido pra propostas empresariais" estava errado — Tec. em
+ * Agrimensura assina como PF mesmo em proposta da Romatec (responsabilidade
+ * tecnica e' do profissional, nao da PJ).
  */
-export async function assinarProposta(propostaId: number | string): Promise<AssinarPropostaResult> {
-  const certData = await getCertForSigning('pj');
+export async function assinarProposta(
+  propostaId: number | string,
+  perfil: 'pj' | 'pf' = 'pj',
+): Promise<AssinarPropostaResult> {
+  if (perfil !== 'pj' && perfil !== 'pf') {
+    throw new Error(`perfil invalido: ${perfil} (esperado: 'pj' ou 'pf')`);
+  }
+  const certData = await getCertForSigning(perfil);
   if (!certData) {
+    const tipo = perfil === 'pj' ? 'e-CNPJ' : 'e-CPF';
     throw new Error(
-      'Nenhum certificado digital PJ cadastrado. Cadastre o e-CNPJ A1 da Romatec em /obras admin antes de assinar propostas.'
+      `Nenhum certificado digital ${perfil.toUpperCase()} cadastrado. Cadastre o ${tipo} ICP-Brasil A1 em /obras admin antes de assinar propostas com perfil ${perfil}.`
     );
   }
   if (certData.meta.expirado) {
@@ -2057,7 +2068,7 @@ export async function assinarProposta(propostaId: number | string): Promise<Assi
   const pdfAssinado = await signPdfBuffer(pdfBuffer, certData.pfx, certData.senha, signMeta);
 
   const meta = {
-    perfil: 'pj' as const,
+    perfil,                            // v3.23.9: vem do parametro (pj ou pf)
     cert_id: certData.meta.id,
     cert_label: certData.meta.label,
     subject_cn: certData.meta.subject_cn,
