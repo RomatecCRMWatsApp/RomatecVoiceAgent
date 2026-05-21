@@ -59,11 +59,13 @@ interface PricingParams {
   };
   tjma_emolumentos_2026: { fonte: string; limite_maximo_total: number };
   // v3.23.5: servicos adicionais opcionais de Georreferenciamento Rural.
+  // v3.23.6: `editavel` indica que o valor_unitario pode ser editado pelo
+  // usuario na UI no momento da proposta (sem afetar o default global).
   opcionais_georref?: {
-    ccir:        { rotulo: string; valor_unitario: number };
-    car:         { rotulo: string; valor_unitario: number };
-    itr:         { rotulo: string; valor_unitario: number; unidade?: string };
-    anuencia:    { rotulo: string; valor_unitario: number; unidade?: string };
+    ccir:        { rotulo: string; valor_unitario: number; editavel?: boolean };
+    car:         { rotulo: string; valor_unitario: number; editavel?: boolean };
+    itr:         { rotulo: string; valor_unitario: number; unidade?: string; editavel?: boolean };
+    anuencia:    { rotulo: string; valor_unitario: number; unidade?: string; editavel?: boolean };
     retificacao: { rotulo: string; valor: 'sob_orcamento' };
   };
   _meta?: { ultima_atualizacao: string; atualizado_por: string; versao: string };
