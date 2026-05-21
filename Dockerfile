@@ -1,6 +1,7 @@
 FROM node:20-alpine
 WORKDIR /app
 
+# cache-bust: 2026-05-20-v3.23.0
 # v3.6.0 — Python + deps para o parser DXF (módulo Planta da Quadra).
 # - shapely vem precompilado do repo Alpine (py3-shapely 2.x) → zero compilação C
 # - ezdxf é pure Python → pip install rápido
