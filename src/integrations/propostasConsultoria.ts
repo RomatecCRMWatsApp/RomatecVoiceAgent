@@ -32,6 +32,10 @@ import type {
 const LOGO_RELATORIO = '/romatec-logo-removebg-preview.png';
 
 // ── Numeracao compartilhada (delega a propostas.ts) ────────────────────────
+// v3.23.5: numero sempre nasce com sufixo -R1.
+//   Format: PROP-AAAA-NNNN-R1  (revisao inicial)
+//   Apos PUT em proposta status=ENVIADA -> R2, R3, ... (ver atualizarPropostaConsultoria)
+//   Sequencial unico por ano, independente da revisao (NNNN nao reinicia entre R1->R2).
 async function gerarNumeroProposta(): Promise<string> {
   const ano = new Date().getFullYear();
   const [rows] = await pool.execute<RowDataPacket[]>(
@@ -41,10 +45,26 @@ async function gerarNumeroProposta(): Promise<string> {
   );
   let seq = 1;
   if (rows.length > 0) {
+    // Captura o NNNN — funciona pra PROP-AAAA-NNNN e PROP-AAAA-NNNN-R{N}
     const m = String(rows[0].numero).match(/PROP-\d{4}-(\d+)/);
     if (m) seq = Number(m[1]) + 1;
   }
-  return `PROP-${ano}-${String(seq).padStart(4, '0')}`;
+  return `PROP-${ano}-${String(seq).padStart(4, '0')}-R1`;
+}
+
+// v3.23.5: helpers de manipulacao do sufixo -R{N}.
+function parseRevisao(numero: string): { base: string; revisao: number } {
+  const m = numero.match(/^(PROP-\d{4}-\d+)-R(\d+)$/);
+  if (m) return { base: m[1], revisao: Number(m[2]) };
+  // Numero legado sem sufixo: trata como R1
+  const legacy = numero.match(/^(PROP-\d{4}-\d+)$/);
+  if (legacy) return { base: legacy[1], revisao: 1 };
+  return { base: numero, revisao: 1 };
+}
+
+function bumpRevisao(numero: string): string {
+  const { base, revisao } = parseRevisao(numero);
+  return `${base}-R${revisao + 1}`;
 }
 
 // ── Tipos de input/output ──────────────────────────────────────────────────
@@ -373,6 +393,267 @@ const SUBTIPO_LABEL: Record<string, string> = {
   avaliacao_ptam: 'AVALIACAO DE IMOVEIS (PTAM)',
 };
 
+// v3.23.5: render do corpo do PDF de Georreferenciamento Rural conforme modelo
+// aprovado PROP-2026-0011-R1. Renderiza:
+//   - Identificacao do Imovel (extensao do bloco Cliente que ja foi renderizado pelo caller)
+//   - BOX DOURADO de FINALIDADE
+//   - 1. ESCOPO (8 itens)
+//   - 2. HONORARIOS ROMATEC (tabela 3 linhas: TRT + Tec + Assess) + BOX VERDE TOTAL
+//   - 3. CONDICOES DE PAGAMENTO (tabela 3 parcelas)
+//   - 4. CUSTOS DE TERCEIROS (box creme + tabela secao_2_taxas)
+//   - 5. SERVICOS ADICIONAIS OPCIONAIS (tabela 5 linhas sempre)
+//   - 6. DOCUMENTOS A SEREM FORNECIDOS PELO CLIENTE (checklist)
+//   - 7. AVISOS E CONDICOES TECNICAS
+// O caller continua com Data/Validade, Responsavel Tecnico, Signature, QR, Footer.
+function renderGeorrefRuralBody(
+  doc: PDFKit.PDFDocument,
+  p: Awaited<ReturnType<typeof buscarPropostaConsultoria>>,
+  dadosImovel: Record<string, unknown>,
+  custos: CustosCalculados,
+  corHex: string,
+): void {
+  const COL_X_INI = 48;
+  const COL_X_FIM = 547;
+  const COL_W = COL_X_FIM - COL_X_INI;
+
+  // Constants visuais
+  const COR_DOURADO_BG = '#fef3c7';     // amber-100
+  const COR_DOURADO_BORDA = '#d97706';  // amber-600
+  const COR_VERDE_BG = '#dcfce7';       // green-100
+  const COR_VERDE_BORDA = '#16a34a';    // green-600
+  const COR_CREME_BG = '#fef9c3';       // yellow-50
+  const COR_CREME_BORDA = '#ca8a04';    // yellow-600
+
+  // ── 1. IDENTIFICACAO — Imovel + Dados ─────────────────────────────────
+  // (Cliente ja foi renderizado pelo caller; aqui completa com imovel)
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('1. Identificacao do Imovel');
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+  doc.fontSize(9.5).fillColor('#111');
+
+  const matricula = (dadosImovel.matricula as string | undefined) || '—';
+  const cri = (dadosImovel.cri as string | undefined) || `CRI de ${dadosImovel.municipio || '—'}/${dadosImovel.estado || ''}`;
+  const municipio = (dadosImovel.municipio as string | undefined) || '—';
+  const estado = (dadosImovel.estado as string | undefined) || '';
+  const area = Number(dadosImovel.area_hectares ?? 0);
+  const vertices = Number(dadosImovel.numero_vertices ?? 0);
+  const perimetro = dadosImovel.perimetro_m ? Number(dadosImovel.perimetro_m) : null;
+
+  doc.text(`Municipio/UF:  ${municipio}${estado ? '/' + estado : ''}`);
+  doc.text(`Matricula:  ${matricula}`);
+  doc.text(`Cartorio:  ${cri}`);
+  const areaFmt = area > 0
+    ? area.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) + ' ha'
+    : '—';
+  const perimFmt = perimetro ? perimetro.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + ' m' : null;
+  doc.text(`Area:  ${areaFmt}    ·    Vertices:  ${vertices}${perimFmt ? '    ·    Perimetro:  ' + perimFmt : ''}`);
+  doc.moveDown(0.6);
+
+  // ── BOX DOURADO de FINALIDADE ─────────────────────────────────────────
+  const finalidade = (dadosImovel.finalidade as string | undefined) || 'CERTIFICACAO';
+  const finalidadeTextos: Record<string, string> = {
+    CERTIFICACAO:    'Georreferenciamento para fins de CERTIFICACAO no SIGEF/INCRA e averbacao do memorial certificado na matricula vigente.',
+    DESMEMBRAMENTO:  'Georreferenciamento para fins de DESMEMBRAMENTO — certificacao no SIGEF/INCRA, encerramento da matricula atual e abertura de nova matricula para a area desmembrada.',
+    REMEMBRAMENTO:   'Georreferenciamento para fins de REMEMBRAMENTO — certificacao no SIGEF/INCRA e unificacao de matriculas confrontantes em matricula unica.',
+    RETIFICACAO:     'Georreferenciamento para fins de RETIFICACAO DE AREA — certificacao no SIGEF/INCRA e averbacao da nova area na matricula.',
+  };
+  const finalidadeTexto = finalidadeTextos[finalidade] || finalidadeTextos.CERTIFICACAO;
+
+  const boxAlturaFinal = doc.heightOfString(finalidadeTexto, { width: COL_W - 28 }) + 28;
+  const boxY1 = doc.y;
+  doc.rect(COL_X_INI, boxY1, COL_W, boxAlturaFinal).fillAndStroke(COR_DOURADO_BG, COR_DOURADO_BORDA);
+  doc.fontSize(8.5).fillColor(COR_DOURADO_BORDA).font('Helvetica-Bold')
+     .text('FINALIDADE', COL_X_INI + 12, boxY1 + 8, { width: COL_W - 24 });
+  doc.fontSize(9.5).fillColor('#111').font('Helvetica')
+     .text(finalidadeTexto, COL_X_INI + 12, boxY1 + 22, { width: COL_W - 24, align: 'justify' });
+  doc.y = boxY1 + boxAlturaFinal + 8;
+  doc.x = COL_X_INI;
+
+  // ── 2. ESCOPO DO SERVICO ──────────────────────────────────────────────
+  if (doc.y > 700) doc.addPage();
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('2. Escopo do Servico');
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+  doc.fontSize(9.5).fillColor('#111');
+  custos.secao_1_projetos.forEach((item, i) => {
+    doc.text(`${i + 1}. ${item}`, { indent: 8, width: COL_W - 8 });
+  });
+  doc.moveDown(0.5);
+
+  // ── 3. HONORARIOS — ROMATEC CONSULTORIA TOTAL ─────────────────────────
+  if (doc.y > 640) doc.addPage();
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('3. Honorarios — Romatec Consultoria Total');
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+
+  // Tabela de honorarios — secao_3_honorarios (3 linhas: TRT + Tec + Assess)
+  custos.secao_3_honorarios.forEach((h, i) => {
+    const itemY0 = doc.y;
+    doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+       .text(`${i + 1}. ${h.descricao}`, COL_X_INI + 8, itemY0, { width: COL_W - 100 });
+    const itemY1 = doc.y;
+    // Valor a direita, alinhado ao topo
+    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+       .text(formatBRL(h.valor), COL_X_FIM - 80, itemY0, { width: 80, align: 'right' });
+    doc.y = itemY1;
+    if (h.observacao) {
+      doc.font('Helvetica').fontSize(8).fillColor('#555')
+         .text(h.observacao, COL_X_INI + 16, doc.y, { width: COL_W - 24, align: 'justify' });
+    }
+    doc.font('Helvetica').fillColor('#111');
+    doc.moveDown(0.3);
+  });
+  doc.moveDown(0.2);
+
+  // BOX VERDE — VALOR TOTAL DA PROPOSTA (Romatec)
+  const totalRomatec = custos.honorarios_romatec?.total ?? custos.secao_5_total;
+  if (doc.y > 700) doc.addPage();
+  const txtTotalLabel = 'VALOR TOTAL DA PROPOSTA (Romatec):';
+  const txtTotalNota = 'Soma de TRT + Honorarios Tecnicos + Honorarios de Assessoria. Custos de cartorio e SIGEF (Secao 4) sao pagos diretamente pelo cliente e NAO estao inclusos.';
+  const boxYT = doc.y;
+  const boxAlturaT = doc.heightOfString(txtTotalNota, { width: COL_W - 24 }) + 38;
+  doc.rect(COL_X_INI, boxYT, COL_W, boxAlturaT).fillAndStroke(COR_VERDE_BG, COR_VERDE_BORDA);
+  doc.fontSize(10).fillColor(COR_VERDE_BORDA).font('Helvetica-Bold')
+     .text(txtTotalLabel, COL_X_INI + 12, boxYT + 8, { width: COL_W - 120 });
+  doc.fontSize(14).fillColor('#065f46').font('Helvetica-Bold')
+     .text(formatBRL(totalRomatec), COL_X_FIM - 130, boxYT + 8, { width: 118, align: 'right' });
+  doc.fontSize(8).fillColor('#166534').font('Helvetica')
+     .text(txtTotalNota, COL_X_INI + 12, boxYT + 26, { width: COL_W - 24, align: 'justify' });
+  doc.y = boxYT + boxAlturaT + 10;
+  doc.x = COL_X_INI;
+
+  // ── 4. CONDICOES DE PAGAMENTO ─────────────────────────────────────────
+  if (custos.condicoes_pagamento && custos.condicoes_pagamento.length > 0) {
+    if (doc.y > 680) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4. Condicoes de Pagamento');
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    custos.condicoes_pagamento.forEach((cp) => {
+      const y0 = doc.y;
+      doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+         .text(cp.rotulo, COL_X_INI + 8, y0, { width: COL_W - 100 });
+      doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+         .text(formatBRL(cp.valor), COL_X_FIM - 80, y0, { width: 80, align: 'right' });
+      doc.font('Helvetica').fontSize(8.5).fillColor('#444')
+         .text(cp.descricao, COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+      doc.font('Helvetica').fillColor('#111');
+      doc.moveDown(0.2);
+    });
+    doc.moveDown(0.3);
+  }
+
+  // ── 5. CUSTOS DE TERCEIROS (INFORMATIVO — A CARGO DO CLIENTE) ────────
+  if (doc.y > 660) doc.addPage();
+  const txtCustosTerceirosAviso = 'Os valores abaixo NAO estao inclusos no total da proposta — sao taxas oficiais pagas diretamente pelo cliente nos respectivos orgaos. Valores aproximados, sujeitos a alteracao conforme tabelas vigentes no momento do pagamento.';
+  const boxYCT = doc.y;
+  const boxAlturaCT = doc.heightOfString(txtCustosTerceirosAviso, { width: COL_W - 24 }) + 26;
+  doc.rect(COL_X_INI, boxYCT, COL_W, boxAlturaCT).fillAndStroke(COR_CREME_BG, COR_CREME_BORDA);
+  doc.fontSize(10).fillColor(COR_CREME_BORDA).font('Helvetica-Bold')
+     .text('5. CUSTOS DE TERCEIROS (INFORMATIVO — A CARGO DO CLIENTE)', COL_X_INI + 12, boxYCT + 6, { width: COL_W - 24 });
+  doc.fontSize(8).fillColor('#713f12').font('Helvetica')
+     .text(txtCustosTerceirosAviso, COL_X_INI + 12, boxYCT + 20, { width: COL_W - 24, align: 'justify' });
+  doc.y = boxYCT + boxAlturaCT + 6;
+  doc.x = COL_X_INI;
+
+  // Tabela secao_2_taxas (terceiros)
+  custos.secao_2_taxas.forEach((t) => {
+    const y0 = doc.y;
+    doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+       .text(t.descricao, COL_X_INI + 8, y0, { width: COL_W - 100 });
+    const valorTxt = t.pendente ? 'A apurar' : (t.valor === 0 ? 'Gratuito' : formatBRL(t.valor));
+    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+       .text(valorTxt, COL_X_FIM - 90, y0, { width: 90, align: 'right' });
+    if (t.observacao) {
+      doc.font('Helvetica').fontSize(8).fillColor('#666')
+         .text(t.observacao, COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+    }
+    doc.font('Helvetica').fillColor('#111');
+    doc.moveDown(0.2);
+  });
+  doc.moveDown(0.4);
+
+  // ── 6. SERVICOS ADICIONAIS OPCIONAIS ──────────────────────────────────
+  const opc = custos.secao_opcionais_georref;
+  if (opc) {
+    if (doc.y > 660) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('6. Servicos Adicionais Opcionais');
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    doc.fontSize(8).fillColor('#666').font('Helvetica-Oblique')
+       .text('NAO somam ao total da proposta. Marcados se contratados; valor congelado no momento do envio.', { indent: 8, width: COL_W - 8 });
+    doc.font('Helvetica').fillColor('#111');
+    doc.moveDown(0.2);
+
+    opc.itens.forEach((it) => {
+      const y0 = doc.y;
+      const check = it.contratado ? '☑' : '☐';
+      doc.fontSize(9.5).fillColor('#111').font(it.contratado ? 'Helvetica-Bold' : 'Helvetica')
+         .text(`${check} ${it.rotulo}`, COL_X_INI + 8, y0, { width: COL_W - 100 });
+      let valorTxt: string;
+      if (it.subtotal === 'sob_orcamento') {
+        valorTxt = 'Sob orcamento';
+      } else if (it.subtotal === 0) {
+        valorTxt = it.quantidade != null && it.contratado === false
+          ? `R$ ${typeof it.valor_unitario === 'number' ? it.valor_unitario.toFixed(2) : '—'}/un.`
+          : '—';
+      } else {
+        valorTxt = formatBRL(it.subtotal as number);
+      }
+      doc.fontSize(9.5).fillColor(it.contratado ? corHex : '#666').font(it.contratado ? 'Helvetica-Bold' : 'Helvetica')
+         .text(valorTxt, COL_X_FIM - 100, y0, { width: 100, align: 'right' });
+      doc.font('Helvetica').fillColor('#111');
+      doc.moveDown(0.1);
+    });
+
+    if (opc.subtotal > 0) {
+      doc.moveDown(0.2);
+      doc.fontSize(9.5).fillColor('#666').font('Helvetica-Bold')
+         .text(`Subtotal opcionais contratados: ${formatBRL(opc.subtotal)}  (cobrado a parte)`, { indent: 8, align: 'right', width: COL_W - 16 });
+      doc.font('Helvetica');
+    }
+    doc.moveDown(0.4);
+  }
+
+  // ── 7. DOCUMENTOS A SEREM FORNECIDOS PELO CLIENTE ─────────────────────
+  if (doc.y > 660) doc.addPage();
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('7. Documentos a Serem Fornecidos pelo Cliente');
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+  doc.fontSize(9.5).fillColor('#111');
+  custos.secao_4_checklist.forEach((d) => {
+    if (d.imprescindivel) {
+      doc.fillColor('#dc2626').font('Helvetica-Bold')
+         .text(`☐ [IMPRESCINDIVEL] ${d.texto}`, { indent: 8, width: COL_W - 8 });
+      doc.font('Helvetica').fillColor('#111');
+    } else {
+      doc.text(`☐ ${d.texto}${d.obrigatorio ? '' : '  (opcional)'}`, { indent: 8, width: COL_W - 8 });
+    }
+  });
+  doc.moveDown(0.5);
+
+  // ── 8. AVISOS E CONDICOES TECNICAS ────────────────────────────────────
+  if (custos.avisos && custos.avisos.length > 0) {
+    if (doc.y > 660) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('8. Avisos e Condicoes Tecnicas');
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    doc.fontSize(8.5).fillColor('#444');
+    custos.avisos.forEach((a) => {
+      doc.text(`• ${a}`, { indent: 8, width: COL_W - 8, align: 'justify' });
+      doc.moveDown(0.15);
+    });
+    doc.fillColor('#111');
+    doc.moveDown(0.3);
+  }
+}
+
 export async function gerarPdfPropostaConsultoria(
   id: string,
   signatureMeta?: SignatureVisualMeta,
@@ -434,6 +715,15 @@ export async function gerarPdfPropostaConsultoria(
   if (p.cliente?.email)    doc.text(`E-mail: ${p.cliente.email}`);
   if (p.endereco_imovel)   doc.text(`Imovel: ${p.endereco_imovel}`);
   doc.moveDown(0.6);
+
+  // v3.23.5: Georreferenciamento Rural — layout aprovado PROP-2026-0011-R1.
+  // Renderiza um caminho proprio (Imovel/Dados, FINALIDADE box, ESCOPO, HONORARIOS
+  // Romatec + BOX TOTAL verde, CONDICOES, CUSTOS TERCEIROS, OPCIONAIS, DOCS, AVISOS)
+  // e PULA o resto do body (que e' generico pra outros subtipos). A signature/QR/footer
+  // do final da funcao continua valendo pros dois caminhos.
+  if (p.subtipo === 'georreferenciamento_rural') {
+    renderGeorrefRuralBody(doc, p, dadosImovel, custos, corHex);
+  } else {
 
   // v1.99.16: Remembramento detalhado — tabela de imóveis + área total destacada
   const dadosImv = dadosImovel; // alias para preservar bloco existente
@@ -873,6 +1163,8 @@ export async function gerarPdfPropostaConsultoria(
     doc.moveDown(0.4);
   }
 
+  } // v3.23.5: fim do "else (nao e' georref)" — o body generico acaba aqui
+
   doc.fontSize(9).fillColor('#444')
      .text(`Data: ${formatDataBR(p.data_proposta)}    ·    Validade: ${p.validade_dias} dias`, { width: 499 });
   doc.moveDown(0.4);
@@ -1118,7 +1410,8 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
 
 // v1.66.13: atualiza Proposta de Consultoria existente (mesmos dados que
 // criar — recalcula custos via engine OU usa custos_override se vier).
-// NAO mexe em numero, cliente_id, criado_em.
+// v3.23.5: quando status === 'ENVIADA', incrementa a revisao no numero (R1->R2->...)
+// e loga em custos_calculados.historico_revisoes. Cliente_id e criado_em nao mudam.
 export async function atualizarPropostaConsultoria(input: {
   id: string;
   endereco_imovel?: string;
@@ -1128,6 +1421,8 @@ export async function atualizarPropostaConsultoria(input: {
   gestor_telefone?: string;
   dados_imovel?: Record<string, unknown>;
   custos_override?: CustosCalculados;
+  motivo_revisao?: string;            // opcional: vai pro historico_revisoes
+  autor_revisao?: string;             // opcional: idem
 }) {
   const id = Number(input.id);
   if (!id) throw new Error('id obrigatorio');
@@ -1180,8 +1475,29 @@ export async function atualizarPropostaConsultoria(input: {
     custosFinal = r.custos;
   }
 
+  // v3.23.5: se proposta ja foi ENVIADA, edicao gera revisao (R1 -> R2 -> ...).
+  // Mantemos R1 quando ainda esta em RASCUNHO (edicao livre).
+  let novoNumero = atual.numero;
+  let revisaoIncrementada = false;
+  if (String(atual.status || '').toUpperCase() === 'ENVIADA') {
+    novoNumero = bumpRevisao(atual.numero);
+    revisaoIncrementada = true;
+    const { revisao } = parseRevisao(novoNumero);
+    const historico = Array.isArray(custosFinal.historico_revisoes)
+      ? [...custosFinal.historico_revisoes]
+      : [];
+    historico.push({
+      revisao,
+      timestamp: new Date().toISOString(),
+      autor: input.autor_revisao,
+      motivo: input.motivo_revisao,
+    });
+    custosFinal = { ...custosFinal, historico_revisoes: historico };
+  }
+
   await pool.execute(
     `UPDATE propostas SET
+       numero = ?,
        endereco_obra = COALESCE(?, endereco_obra),
        observacoes = COALESCE(?, observacoes),
        gestor_cargo = COALESCE(?, gestor_cargo),
@@ -1193,6 +1509,7 @@ export async function atualizarPropostaConsultoria(input: {
        atualizado_em = CURRENT_TIMESTAMP
      WHERE id = ? AND deleted_at IS NULL`,
     [
+      novoNumero,
       input.endereco_imovel ?? null,
       input.observacoes ?? null,
       input.gestor_cargo ?? null,
@@ -1208,8 +1525,12 @@ export async function atualizarPropostaConsultoria(input: {
   return {
     ok: true as const,
     id: input.id,
+    numero: novoNumero,
+    revisao_incrementada: revisaoIncrementada,
     valor_total: custosFinal.secao_5_total,
-    message: `Proposta ${atual.numero} atualizada. Novo total: R$ ${custosFinal.secao_5_total.toFixed(2)}.`,
+    message: revisaoIncrementada
+      ? `Proposta ${atual.numero} atualizada -> ${novoNumero} (revisao). Novo total: R$ ${custosFinal.secao_5_total.toFixed(2)}.`
+      : `Proposta ${atual.numero} atualizada. Novo total: R$ ${custosFinal.secao_5_total.toFixed(2)}.`,
   };
 }
 
