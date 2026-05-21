@@ -6104,6 +6104,120 @@ function fecharModal() {
   document.getElementById('consOverlay').classList.remove('open');
 }
 
+// v3.23.9: modal seletor PJ/PF para assinatura digital. Lista os certs ATIVOS
+// do tenant via /api/signing-cert (ja existe), monta cards radio com label,
+// subject_cn (titular), subject_doc (CPF/CNPJ), validade. Apos confirmar,
+// chama /api/propostas-consultoria/:id/assinar com body { perfil }.
+async function abrirModalAssinatura(propostaId, btnTrigger) {
+  // 1. Busca certs disponiveis
+  let certs = [];
+  try {
+    const resp = await api('/api/signing-cert');
+    certs = Array.isArray(resp) ? resp : (resp?.items || []);
+  } catch (e) {
+    alert('Erro ao buscar certificados: ' + e.message);
+    return;
+  }
+  const ativos = certs.filter(c => c.ativo && !c.expirado);
+  if (ativos.length === 0) {
+    alert('Nenhum certificado ATIVO cadastrado. Cadastre um e-CPF ou e-CNPJ ICP-Brasil A1 em /obras admin (botão 🔏 Certs no header) antes de assinar.');
+    return;
+  }
+
+  // 2. Monta cards (PJ primeiro se houver, default PJ se ambos)
+  const pj = ativos.find(c => c.perfil === 'pj');
+  const pf = ativos.find(c => c.perfil === 'pf');
+  const defaultPerfil = pj ? 'pj' : 'pf';
+
+  const cardHtml = (c, isDefault) => {
+    if (!c) return '';
+    const tipo = c.perfil === 'pj' ? 'e-CNPJ' : 'e-CPF';
+    const icone = c.perfil === 'pj' ? '🏢' : '👤';
+    const cor = c.perfil === 'pj' ? '#3b82f6' : '#a855f7';
+    const docTxt = c.subject_doc ? (c.perfil === 'pj'
+      ? c.subject_doc.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5')
+      : c.subject_doc.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+    ) : '—';
+    const dias = c.dias_para_vencer != null
+      ? (c.dias_para_vencer > 60
+          ? `<span style="color:var(--neon)">${c.dias_para_vencer} dias restantes</span>`
+          : `<span style="color:var(--warning)">⚠ ${c.dias_para_vencer} dias restantes</span>`)
+      : '';
+    return `
+      <label style="display:block; cursor:pointer; padding:14px; border:2px solid ${isDefault ? cor : 'var(--border)'}; border-radius:8px; background:${isDefault ? 'rgba(59,130,246,0.06)' : 'var(--bg-elev)'};" data-cert-card="${c.perfil}">
+        <div style="display:flex; gap:10px; align-items:center;">
+          <input type="radio" name="modalAssinPerfil" value="${c.perfil}" ${isDefault ? 'checked' : ''} style="margin:0;">
+          <div style="flex:1;">
+            <div style="font-size:14px; font-weight:600; color:${cor};">${icone} ${tipo} ${c.perfil === 'pj' ? 'Romatec' : 'José Romário'}</div>
+            <div style="font-size:12px; color:var(--text); margin-top:2px;">${escape(c.subject_cn || c.label || '—')}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${docTxt} · ${dias}</div>
+            <div style="font-size:10px; color:var(--text-muted); margin-top:4px; font-style:italic;">${c.perfil === 'pj' ? 'PJ — Propostas comerciais, contratos, NFS-e' : 'PF — Laudos, ART/TRT, peças com responsabilidade técnica pessoal'}</div>
+          </div>
+        </div>
+      </label>`;
+  };
+
+  const html = `
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <p style="margin:0; font-size:13px; color:var(--text-muted);">
+        Escolha o certificado digital para assinar a proposta. O tipo selecionado fica registrado no PDF e no histórico para auditoria.
+      </p>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        ${cardHtml(pj, defaultPerfil === 'pj')}
+        ${cardHtml(pf, defaultPerfil === 'pf' && !pj)}
+      </div>
+      <div style="padding:10px 12px; background:rgba(59,130,246,0.08); border-left:3px solid #3b82f6; border-radius:4px; font-size:12px; color:var(--text-muted);">
+        🔐 Assinatura ICP-Brasil A1 (PAdES). Validável no Adobe Reader e em validar.iti.gov.br.
+      </div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" id="modalAssinCancelar" class="btn-secondary">Cancelar</button>
+        <button type="button" id="modalAssinConfirmar" class="btn-primary">🔐 Assinar com certificado selecionado</button>
+      </div>
+    </div>
+  `;
+
+  abrirModal(html, { title: '🔐 Assinar Proposta Digitalmente', width: '560px' });
+
+  // Visual update do card selecionado
+  document.querySelectorAll('[data-cert-card]').forEach(card => {
+    card.querySelector('input[type=radio]').addEventListener('change', () => {
+      document.querySelectorAll('[data-cert-card]').forEach(c => {
+        const radio = c.querySelector('input[type=radio]');
+        const cor = c.dataset.certCard === 'pj' ? '#3b82f6' : '#a855f7';
+        c.style.borderColor = radio.checked ? cor : 'var(--border)';
+        c.style.background = radio.checked ? 'rgba(59,130,246,0.06)' : 'var(--bg-elev)';
+      });
+    });
+  });
+
+  document.getElementById('modalAssinCancelar').onclick = fecharModal;
+  document.getElementById('modalAssinConfirmar').onclick = async () => {
+    const perfilEscolhido = document.querySelector('input[name="modalAssinPerfil"]:checked')?.value;
+    if (!perfilEscolhido) { alert('Selecione um certificado.'); return; }
+    const confirmBtn = document.getElementById('modalAssinConfirmar');
+    confirmBtn.disabled = true; confirmBtn.textContent = '⏳ Assinando, aguarde...';
+    const origBtn = btnTrigger?.textContent;
+    if (btnTrigger) { btnTrigger.disabled = true; btnTrigger.textContent = '⏳'; }
+    try {
+      const r = await api('/api/propostas-consultoria/' + propostaId + '/assinar', {
+        method: 'POST',
+        body: JSON.stringify({ perfil: perfilEscolhido }),
+      });
+      fecharModal();
+      alert('✅ Proposta assinada com ' + (perfilEscolhido === 'pj' ? 'e-CNPJ Romatec' : 'e-CPF José Romário') +
+            '!\n\nTitular: ' + (r.cert.subject_cn || '?') +
+            '\nCertificado: ' + r.cert.label +
+            '\nTamanho do PDF: ' + Math.round(r.pdf_size_bytes/1024) + ' KB');
+      await loadPropostasConsultoria(); render();
+    } catch (e) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = '🔐 Assinar com certificado selecionado';
+      if (btnTrigger) { btnTrigger.disabled = false; btnTrigger.textContent = origBtn; }
+      alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : ''));
+    }
+  };
+}
+
 // Modal secundario de ajuda (nao destroi modal principal)
 function abrirHelpModal(htmlContent, title = 'Ajuda', subtitle = '') {
   const overlay = document.getElementById('helpOverlay');
@@ -6237,22 +6351,12 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
   document.querySelectorAll('[data-pdf-cons]').forEach(b => b.onclick = () => {
     window.open('/api/propostas-consultoria/' + b.dataset.pdfCons + '/pdf', '_blank');
   });
-  // v1.99.11: assinatura digital de propostas (PJ Romatec)
+  // v3.23.9: assinatura digital com modal seletor PJ/PF.
+  // Antes era um confirm() hardcoded "e-CNPJ Romatec" — agora abre um modal que
+  // lista os certs ativos no sistema (PJ e/ou PF) e deixa o user escolher qual usar.
   document.querySelectorAll('[data-cons-sig]').forEach(b => b.onclick = async () => {
     const id = b.dataset.consSig;
-    if (!confirm('Assinar esta proposta digitalmente com e-CNPJ Romatec?\n\nO PDF assinado fica salvo no banco. Validável no Adobe Reader e gov.br/validar.')) return;
-    const orig = b.textContent;
-    b.disabled = true; b.textContent = '⏳ Assinando...';
-    try {
-      const r = await api('/api/propostas-consultoria/' + id + '/assinar', { method:'POST', body:'{}' });
-      alert('✅ Proposta assinada!\n\nTitular: ' + (r.cert.subject_cn || '?') +
-            '\nCertificado: ' + r.cert.label +
-            '\nTamanho do PDF: ' + Math.round(r.pdf_size_bytes/1024) + ' KB');
-      await loadPropostasConsultoria(); render();
-    } catch (e) {
-      alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : ''));
-      b.disabled = false; b.textContent = orig;
-    }
+    await abrirModalAssinatura(id, b);
   });
   document.querySelectorAll('[data-cons-sig-pdf]').forEach(b => b.onclick = () => {
     window.open('/api/propostas-consultoria/' + b.dataset.consSigPdf + '/pdf-assinado', '_blank');
