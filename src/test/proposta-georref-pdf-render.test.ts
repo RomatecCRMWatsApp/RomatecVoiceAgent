@@ -11,22 +11,28 @@
 import { describe, it, expect } from 'vitest';
 import PDFDocument from 'pdfkit';
 
-// Importa o helper sob teste via dynamic import. Se quebrar por dep transitiva
-// (voyageai ESM), o teste sera marcado como nao-aplicavel.
-let renderGeorrefRuralBody: typeof import('../integrations/propostasConsultoria').renderGeorrefRuralBody | null = null;
-let loadError: string | null = null;
-try {
-  const mod = await import('../integrations/propostasConsultoria');
-  renderGeorrefRuralBody = mod.renderGeorrefRuralBody;
-} catch (err) {
-  loadError = (err as Error).message;
-  console.warn('[render-test] modulo nao importavel:', loadError);
+// Importa o helper sob teste via dynamic import lazy (NAO top-level — module:commonjs).
+// Se quebrar por dep transitiva (voyageai ESM), o teste sera marcado como nao-aplicavel.
+type RenderFn = typeof import('../integrations/propostasConsultoria').renderGeorrefRuralBody;
+let renderGeorrefRuralBody: RenderFn | null = null;
+let loadAttempted = false;
+async function carregarHelper(): Promise<RenderFn | null> {
+  if (loadAttempted) return renderGeorrefRuralBody;
+  loadAttempted = true;
+  try {
+    const mod = await import('../integrations/propostasConsultoria');
+    renderGeorrefRuralBody = mod.renderGeorrefRuralBody;
+  } catch (err) {
+    console.warn('[render-test] modulo nao importavel:', (err as Error).message);
+  }
+  return renderGeorrefRuralBody;
 }
 
 type AnyDoc = PDFKit.PDFDocument;
 
 async function renderEExtrairTexto(): Promise<string | null> {
-  if (!renderGeorrefRuralBody) return null;
+  const helper = await carregarHelper();
+  if (!helper) return null;
   // pdf-parse e' CJS — load dinamico evita issues de tipos
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pdfParse = require('pdf-parse') as (b: Buffer) => Promise<{ text: string }>;
@@ -111,7 +117,7 @@ async function renderEExtrairTexto(): Promise<string | null> {
     },
   } as Parameters<NonNullable<typeof renderGeorrefRuralBody>>[3];
 
-  renderGeorrefRuralBody!(doc, p, dadosImovel, custos, '#10b981');
+  helper(doc, p, dadosImovel, custos, '#10b981');
 
   doc.end();
   await new Promise<void>((r) => doc.on('end', () => r()));
