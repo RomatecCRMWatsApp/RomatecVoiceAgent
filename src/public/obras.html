@@ -6217,6 +6217,89 @@ function renderConsultoriaEscolhaInline(v, toggleHTML) {
   });
 }
 
+// v3.23.4: wireup unificado do dropzone de anexos (#cnsDropZone + #cnsAnexoInput).
+// Bug recorrente — cada um dos 5 forms de Nova Proposta renderiza esse mesmo HTML mas
+// originalmente so renderConsultoriaFormInline (Averbacao) anexava handlers. Nos outros
+// 4 (GeoRural, DesmRem, Retif, PTAM) o clique no dropzone nao abria o file picker
+// porque nenhum onclick estava attached. CEO reportou ao tentar anexar planta em
+// Desmembramento. Solucao: chamar essa funcao no final do render de cada form.
+// State compartilhado em state.consultoriaAnexosTemp / state.consultoriaAnexosExistentes.
+function wireUpAnexosDropzone(subtipo) {
+  const MIMES_OK = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
+  const MAX_BYTES = 15 * 1024 * 1024;
+
+  if (!state.consultoriaAnexosTemp) state.consultoriaAnexosTemp = [];
+  // Trocou de subtipo? Limpa temp pra nao misturar anexos de proposta anterior.
+  if (state.consultoriaUltimoSubtipo !== subtipo) {
+    state.consultoriaAnexosTemp = [];
+    state.consultoriaUltimoSubtipo = subtipo;
+  }
+
+  const renderAnexos = () => {
+    const lista = document.getElementById('cnsAnexosLista');
+    if (!lista) return;
+    const existentes = (state.consultoriaAnexosExistentes || []).map(a => `
+      <div style="display:flex; gap:8px; align-items:center; padding:6px 8px; background:rgba(0,255,136,0.04); border:1px solid var(--border); border-radius:6px;">
+        <span style="font-size:18px;">${a.mimetype.includes('pdf') ? '📄' : '🖼️'}</span>
+        <div style="flex:1; min-width:0; overflow:hidden;">
+          <div style="font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escape(a.filename)}</div>
+          <div style="font-size:10px; color:var(--text-muted);">${(a.tamanho_bytes / 1024).toFixed(1)} KB · ${a.mimetype} · <span style="color:var(--neon);">salvo</span></div>
+        </div>
+        <button type="button" data-rm-anexo-existente="${a.id}" class="btn-danger" style="padding:4px 8px; font-size:11px;" title="Remover do banco">×</button>
+      </div>`).join('');
+    const novos = state.consultoriaAnexosTemp.map((a, i) => `
+      <div style="display:flex; gap:8px; align-items:center; padding:6px 8px; background:var(--bg-elev); border:1px solid var(--border); border-radius:6px;">
+        <span style="font-size:18px;">${a.mimetype.includes('pdf') ? '📄' : '🖼️'}</span>
+        <div style="flex:1; min-width:0; overflow:hidden;">
+          <div style="font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escape(a.filename)}</div>
+          <div style="font-size:10px; color:var(--text-muted);">${(a.tamanho / 1024).toFixed(1)} KB · ${a.mimetype} · <span style="color:var(--gold);">novo</span></div>
+        </div>
+        <button type="button" data-rm-anexo="${i}" class="btn-danger" style="padding:4px 8px; font-size:11px;">×</button>
+      </div>`).join('');
+    lista.innerHTML = existentes + novos;
+    lista.querySelectorAll('[data-rm-anexo]').forEach(b => b.onclick = () => {
+      state.consultoriaAnexosTemp.splice(Number(b.dataset.rmAnexo), 1);
+      renderAnexos();
+    });
+    lista.querySelectorAll('[data-rm-anexo-existente]').forEach(b => b.onclick = async () => {
+      const aId = b.dataset.rmAnexoExistente;
+      if (!confirm('Remover anexo permanentemente do banco?')) return;
+      b.disabled = true;
+      try {
+        await api('/api/propostas-consultoria/anexos/' + aId, { method: 'DELETE' });
+        state.consultoriaAnexosExistentes = state.consultoriaAnexosExistentes.filter(x => String(x.id) !== String(aId));
+        renderAnexos();
+      } catch (e) { alert('Erro: ' + e.message); b.disabled = false; }
+    });
+  };
+  renderAnexos();
+
+  const dropZone = document.getElementById('cnsDropZone');
+  const fileInput = document.getElementById('cnsAnexoInput');
+  if (!dropZone || !fileInput) return;
+
+  const processarArquivos = async (files) => {
+    for (const file of Array.from(files)) {
+      if (!MIMES_OK.includes(file.type)) { alert(`"${file.name}" não suportado. Use PDF, PNG ou JPEG.`); continue; }
+      if (file.size > MAX_BYTES) { alert(`"${file.name}" excede 15 MB.`); continue; }
+      const conteudo_b64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1]);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      state.consultoriaAnexosTemp.push({ filename: file.name, mimetype: file.type, tamanho: file.size, conteudo_b64 });
+    }
+    renderAnexos();
+  };
+
+  dropZone.onclick = () => fileInput.click();
+  fileInput.onchange = (e) => processarArquivos(e.target.files);
+  dropZone.ondragover = (e) => { e.preventDefault(); dropZone.style.background = 'rgba(0,255,136,0.08)'; };
+  dropZone.ondragleave = () => { dropZone.style.background = 'rgba(0,255,136,0.03)'; };
+  dropZone.ondrop = (e) => { e.preventDefault(); dropZone.style.background = 'rgba(0,255,136,0.03)'; processarArquivos(e.dataTransfer.files); };
+}
+
 async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
   // v1.99.4+: cada subtipo nao-Averbacao tem form proprio. Aqui despacha.
   if (subtipo === 'georreferenciamento_rural') {
@@ -6411,78 +6494,10 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
   inpArea.oninput = recalcularValorVenal;
   selPadrao.onchange = recalcularValorVenal;
 
-  // v1.66.9: gestao de anexos (Planta/Mapa) durante o form
-  if (!state.consultoriaAnexosTemp) state.consultoriaAnexosTemp = [];
-  if (state.consultoriaUltimoSubtipo !== subtipo) {
-    state.consultoriaAnexosTemp = [];
-    state.consultoriaUltimoSubtipo = subtipo;
-  }
-  const renderAnexos = () => {
-    const lista = document.getElementById('cnsAnexosLista');
-    if (!lista) return;
-    // v1.66.15: anexos existentes (modo edicao) com badge "salvo" + delete via API
-    const existentes = (state.consultoriaAnexosExistentes || []).map(a => `
-      <div style="display:flex; gap:8px; align-items:center; padding:6px 8px; background:rgba(0,255,136,0.04); border:1px solid var(--border); border-radius:6px;">
-        <span style="font-size:18px;">${a.mimetype.includes('pdf') ? '📄' : '🖼️'}</span>
-        <div style="flex:1; min-width:0; overflow:hidden;">
-          <div style="font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escape(a.filename)}</div>
-          <div style="font-size:10px; color:var(--text-muted);">${(a.tamanho_bytes / 1024).toFixed(1)} KB · ${a.mimetype} · <span style="color:var(--neon);">salvo</span></div>
-        </div>
-        <button type="button" data-rm-anexo-existente="${a.id}" class="btn-danger" style="padding:4px 8px; font-size:11px;" title="Remover do banco">×</button>
-      </div>`).join('');
-    const novos = state.consultoriaAnexosTemp.map((a, i) => `
-      <div style="display:flex; gap:8px; align-items:center; padding:6px 8px; background:var(--bg-elev); border:1px solid var(--border); border-radius:6px;">
-        <span style="font-size:18px;">${a.mimetype.includes('pdf') ? '📄' : '🖼️'}</span>
-        <div style="flex:1; min-width:0; overflow:hidden;">
-          <div style="font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escape(a.filename)}</div>
-          <div style="font-size:10px; color:var(--text-muted);">${(a.tamanho / 1024).toFixed(1)} KB · ${a.mimetype} · <span style="color:var(--gold);">novo</span></div>
-        </div>
-        <button type="button" data-rm-anexo="${i}" class="btn-danger" style="padding:4px 8px; font-size:11px;">×</button>
-      </div>`).join('');
-    lista.innerHTML = existentes + novos;
-    lista.querySelectorAll('[data-rm-anexo]').forEach(b => b.onclick = () => {
-      state.consultoriaAnexosTemp.splice(Number(b.dataset.rmAnexo), 1);
-      renderAnexos();
-    });
-    // v1.66.15: remove anexo existente (DELETE imediato no banco)
-    lista.querySelectorAll('[data-rm-anexo-existente]').forEach(b => b.onclick = async () => {
-      const aId = b.dataset.rmAnexoExistente;
-      if (!confirm('Remover anexo permanentemente do banco?')) return;
-      b.disabled = true;
-      try {
-        await api('/api/propostas-consultoria/anexos/' + aId, { method: 'DELETE' });
-        state.consultoriaAnexosExistentes = state.consultoriaAnexosExistentes.filter(x => String(x.id) !== String(aId));
-        renderAnexos();
-      } catch (e) { alert('Erro: ' + e.message); b.disabled = false; }
-    });
-  };
-  renderAnexos();
-
-  const dropZone = document.getElementById('cnsDropZone');
-  const fileInput = document.getElementById('cnsAnexoInput');
-  const MIMES_OK = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
-  const MAX_BYTES = 15 * 1024 * 1024;
-  const processarArquivos = async (files) => {
-    for (const file of Array.from(files)) {
-      if (!MIMES_OK.includes(file.type)) { alert(`"${file.name}" não suportado. Use PDF, PNG ou JPEG.`); continue; }
-      if (file.size > MAX_BYTES) { alert(`"${file.name}" excede 15 MB.`); continue; }
-      const conteudo_b64 = await new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result).split(',')[1]);
-        r.onerror = reject;
-        r.readAsDataURL(file);
-      });
-      state.consultoriaAnexosTemp.push({ filename: file.name, mimetype: file.type, tamanho: file.size, conteudo_b64 });
-    }
-    renderAnexos();
-  };
-  if (dropZone && fileInput) {
-    dropZone.onclick = () => fileInput.click();
-    fileInput.onchange = (e) => processarArquivos(e.target.files);
-    dropZone.ondragover = (e) => { e.preventDefault(); dropZone.style.background = 'rgba(0,255,136,0.08)'; };
-    dropZone.ondragleave = () => { dropZone.style.background = 'rgba(0,255,136,0.03)'; };
-    dropZone.ondrop = (e) => { e.preventDefault(); dropZone.style.background = 'rgba(0,255,136,0.03)'; processarArquivos(e.dataTransfer.files); };
-  }
+  // v3.23.4: gestao de anexos extraida pra helper reutilizavel wireUpAnexosDropzone()
+  // — antes era inline aqui e nos outros 4 forms (DesmRem/Retif/PTAM/GeoRural) o
+  // wireup nao existia, deixando o dropzone inerte. Ver definicao acima do helper.
+  wireUpAnexosDropzone(subtipo);
 
   // v1.66.12: restaura form a partir do cache (volta do preview preserva dados)
   const cache = state.consultoriaFormCache;
@@ -6696,6 +6711,8 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
   document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
   document.getElementById('geoCancelar').onclick = voltarParaEscolha;
   document.getElementById('geoNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
+  // v3.23.4: wire-up dos anexos (sem isso clique no dropzone nao abria file picker)
+  wireUpAnexosDropzone(subtipo);
 
   // restaura cache se voltou do preview
   const cache = state.consultoriaFormCache;
@@ -7038,6 +7055,8 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
   document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
   document.getElementById('dxCancelar').onclick = voltarParaEscolha;
   document.getElementById('dxNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
+  // v3.23.4: wire-up dos anexos (sem isso clique no dropzone nao abria file picker)
+  wireUpAnexosDropzone(subtipo);
 
   // restaura cache
   const cache = state.consultoriaFormCache;
@@ -7696,6 +7715,8 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
   document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
   document.getElementById('rxCancelar').onclick = voltarParaEscolha;
   document.getElementById('rxNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
+  // v3.23.4: wire-up dos anexos (sem isso clique no dropzone nao abria file picker)
+  wireUpAnexosDropzone(subtipo);
 
   const cache = state.consultoriaFormCache;
   if (cache && cache.subtipo === subtipo) {
@@ -7888,6 +7909,8 @@ async function renderConsultoriaFormPTAM(v, toggleHTML) {
   document.querySelector('[data-cons-voltar]').onclick = voltarParaEscolha;
   document.getElementById('ptCancelar').onclick = voltarParaEscolha;
   document.getElementById('ptNovoCliente').onclick = () => abrirCadastroClienteModal(subtipo);
+  // v3.23.4: wire-up dos anexos (sem isso clique no dropzone nao abria file picker)
+  wireUpAnexosDropzone(subtipo);
 
   // Mostra/esconde campo de valor customizado
   const selFaixa = document.getElementById('ptFaixa');
