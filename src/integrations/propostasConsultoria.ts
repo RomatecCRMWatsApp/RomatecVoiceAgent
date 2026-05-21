@@ -1541,12 +1541,13 @@ function formatDataBR(d: Date | string): string {
 
 // ── Envio ──────────────────────────────────────────────────────────────────
 
-// v3.23.7: helper de delay entre envios pra nao estourar rate-limit da Z-API.
-// Z-API recomenda 1-2s entre mensagens; usamos 1500ms.
-const ANEXO_THROTTLE_MS = 1500;
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+// v3.23.7 a v3.23.9: helper sleep + ANEXO_THROTTLE_MS pra loop de envio
+// individual de anexos. v3.23.10 reverteu pra PDF unificado — helper nao usado
+// mais aqui, mantido caso outras integracoes futuras precisem.
+// const ANEXO_THROTTLE_MS = 1500;
+// function sleep(ms: number): Promise<void> {
+//   return new Promise((r) => setTimeout(r, ms));
+// }
 
 export async function enviarPropostaConsultoriaWhatsApp(input: { id: string; telefone?: string }) {
   const idNum = Number(input.id);
@@ -1555,27 +1556,14 @@ export async function enviarPropostaConsultoriaWhatsApp(input: { id: string; tel
   const tel = (input.telefone?.trim()) || p.cliente?.telefone || '';
   if (!tel) throw new Error('Telefone obrigatorio (informe ou cadastre no cliente).');
 
-  // v3.23.7: PDF SEM anexos. Antes mandava o merged (proposta + plantas/fotos/matriculas
-  // num PDF unico de 10+ paginas), agora manda so a proposta enxuta. Anexos seguem em
-  // mensagens separadas no Z-API — cliente recebe arquivos individuais (melhor pra
-  // download seletivo e organizacao no aparelho).
-  const propostaBuf = await gerarPdfPropostaConsultoria(input.id);
-  const safeNome = (p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
-  const fileNameProposta = `Proposta_${p.numero}_${safeNome}.pdf`;
-  const respPrincipal = await sendWhatsAppDocument(tel, propostaBuf.toString('base64'), fileNameProposta);
-
-  // Anexos enviados como mensagens separadas, com throttle pra nao dropar conexao Z-API.
-  const anexos = await carregarAnexosProposta(idNum);
-  const anexosEnviados: Array<{ filename: string; messageId?: string }> = [];
-  for (const anexo of anexos) {
-    await sleep(ANEXO_THROTTLE_MS);
-    try {
-      const r = await sendWhatsAppDocument(tel, anexo.buffer.toString('base64'), anexo.filename);
-      anexosEnviados.push({ filename: anexo.filename, messageId: r.messageId });
-    } catch (err) {
-      console.warn(`[whatsapp-consultoria] falha ao enviar anexo "${anexo.filename}": ${(err as Error).message}`);
-    }
-  }
+  // v3.23.10: PDF UNIFICADO (proposta + anexos no mesmo arquivo). Antes:
+  // - v3.23.7-9: enviava proposta separado + cada anexo em mensagem propria
+  //   com throttle. UX boa pra download seletivo mas o cliente acabou pedindo
+  //   pra voltar pra 1 unico arquivo (mais facil de armazenar/encaminhar).
+  // - Agora: PDF merged via gerarPdfPropostaConsultoriaComAnexos.
+  const pdfBuf = await gerarPdfPropostaConsultoriaComAnexos(input.id);
+  const fileName = `Proposta_${p.numero}_${(p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+  const r = await sendWhatsAppDocument(tel, pdfBuf.toString('base64'), fileName);
 
   await pool.execute(
     `UPDATE propostas
@@ -1588,11 +1576,9 @@ export async function enviarPropostaConsultoriaWhatsApp(input: { id: string; tel
 
   return {
     ok: true as const,
-    message: `Proposta ${p.numero} enviada via WhatsApp para ${respPrincipal.phone} (msgId ${respPrincipal.messageId || '?'}). ${anexosEnviados.length}/${anexos.length} anexo(s) enviado(s) em mensagens separadas.`,
-    messageId: respPrincipal.messageId,
-    phone: respPrincipal.phone,
-    anexos_enviados: anexosEnviados.length,
-    anexos_total: anexos.length,
+    message: `Proposta ${p.numero} enviada via WhatsApp para ${r.phone} (msgId ${r.messageId || '?'}, ${(pdfBuf.length / 1024).toFixed(0)} KB).`,
+    messageId: r.messageId,
+    phone: r.phone,
   };
 }
 
@@ -1607,27 +1593,23 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
   if (!chatId) throw new Error('chatId Telegram obrigatorio (defina TELEGRAM_LEAD_CHAT_ID ou TELEGRAM_AUTHORIZED_USER_IDS, ou passe explicit).');
 
   // v1.66.14: log + try/catch detalhado pra diagnosticar falhas no 2o envio
-  // v3.23.7: PDF SEM anexos (apenas proposta principal). Anexos vao em mensagens
-  // separadas com throttle. Antes o PDF unico passava de 50MB e o Telegram rejeitava;
-  // agora cada peca cabe folgado individualmente.
+  // v3.23.10: revertido pra PDF UNIFICADO (proposta + anexos no mesmo arquivo).
+  // CEO pediu — cliente prefere 1 arquivo unico. Telegram aceita ate 50MB; guard mantido.
   console.log(`[telegram-consultoria] iniciando envio proposta=${p.numero} chat=${chatId}`);
   let pdfBuf: Buffer;
   try {
-    pdfBuf = await gerarPdfPropostaConsultoria(input.id);
-    console.log(`[telegram-consultoria] PDF proposta gerado: ${(pdfBuf.length / 1024 / 1024).toFixed(2)} MB`);
+    pdfBuf = await gerarPdfPropostaConsultoriaComAnexos(input.id);
+    console.log(`[telegram-consultoria] PDF gerado: ${(pdfBuf.length / 1024 / 1024).toFixed(2)} MB`);
   } catch (err) {
     console.error('[telegram-consultoria] erro ao gerar PDF:', (err as Error).message);
     throw new Error(`Falha ao gerar PDF: ${(err as Error).message}`);
   }
 
-  // Telegram limita arquivos a 50MB. Como o PDF agora e' so a proposta (3-4 paginas),
-  // dificilmente passa disso, mas mantemos o guard pra robustez.
   if (pdfBuf.length > 50 * 1024 * 1024) {
-    throw new Error(`PDF tem ${(pdfBuf.length / 1024 / 1024).toFixed(1)} MB e o Telegram aceita ate 50 MB.`);
+    throw new Error(`PDF tem ${(pdfBuf.length / 1024 / 1024).toFixed(1)} MB e o Telegram aceita ate 50 MB. Reduza o tamanho dos anexos da proposta.`);
   }
 
-  const safeNome = (p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
-  const fileName = `Proposta_${p.numero}_${safeNome}.pdf`;
+  const fileName = `Proposta_${p.numero}_${(p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
   try {
     await sendTelegramDocument(chatId, pdfBuf, fileName, `Proposta ${p.numero} — ${SUBTIPO_LABEL[p.subtipo || ''] || p.subtipo}`);
     console.log(`[telegram-consultoria] envio OK proposta=${p.numero}`);
@@ -1639,19 +1621,6 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
     throw new Error(`Telegram rejeitou: ${desc}${code ? ` (code ${code})` : ''}`);
   }
 
-  // v3.23.7: anexos individuais (Telegram aceita ate 30 msgs/seg por chat — throttle leve)
-  const anexos = await carregarAnexosProposta(idNum);
-  let anexosEnviados = 0;
-  for (const anexo of anexos) {
-    await sleep(ANEXO_THROTTLE_MS);
-    try {
-      await sendTelegramDocument(chatId, anexo.buffer, anexo.filename, `Anexo: ${anexo.filename}`);
-      anexosEnviados++;
-    } catch (err) {
-      console.warn(`[telegram-consultoria] falha ao enviar anexo "${anexo.filename}": ${(err as Error).message}`);
-    }
-  }
-
   await pool.execute(
     `UPDATE propostas
         SET status = IF(status = 'rascunho', 'enviada', status)
@@ -1661,9 +1630,7 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
 
   return {
     ok: true as const,
-    message: `Proposta ${p.numero} enviada via Telegram (chat ${chatId}, ${(pdfBuf.length / 1024).toFixed(0)} KB). ${anexosEnviados}/${anexos.length} anexo(s) em mensagens separadas.`,
-    anexos_enviados: anexosEnviados,
-    anexos_total: anexos.length,
+    message: `Proposta ${p.numero} enviada via Telegram (chat ${chatId}, ${(pdfBuf.length / 1024).toFixed(0)} KB).`,
   };
 }
 
