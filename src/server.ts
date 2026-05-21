@@ -3408,14 +3408,12 @@ app.get('/v/:hash/pdf', async (req: Request, res: Response) => {
       res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
       return res.send(buf);
     }
-    // v1.99.17: fallback para proposta — serve só a proposta principal (sem anexos).
-    // v3.23.7: anexos foram REMOVIDOS do PDF servido pela rota publica /v/:hash/pdf.
-    // O cliente externo (cartorio, MPF, etc) recebia o PDF colado com plantas,
-    // matriculas e fotos do imovel; agora vê só a proposta tecnica/comercial. Os
-    // anexos seguem acessiveis via API autenticada /api/propostas-consultoria/:id/anexos.
+    // v1.99.17: fallback para proposta — serve PDF completo (proposta + anexos).
+    // v3.23.7-9: experimento serviu so a proposta principal — CEO pediu reverter
+    // em v3.23.10. Cliente externo/cartorio prefere um arquivo unico.
     const p = await propostasConsultoria.buscarPropostaPorHash(hash);
     if (p) {
-      const buf = await propostasConsultoria.gerarPdfPropostaConsultoria(p.id);
+      const buf = await propostasConsultoria.gerarPdfPropostaConsultoriaComAnexos(p.id);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${p.numero}.pdf"`);
       return res.send(buf);
@@ -3443,13 +3441,18 @@ app.post  ('/api/propostas-consultoria/preview',
 app.get   ('/api/propostas-consultoria/:id/pdf', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    // v3.23.7: INVERSAO DE DEFAULT — historico:
+    // Historico do default deste endpoint:
     //   v1.66.9: default era COMPLETO (merge proposta + anexos);  ?somente_principal=1 opt-out
-    //   v3.23.7: default e' SO A PROPOSTA;                        ?incluir_anexos=1 opt-in
-    // Razao: CEO reportou que o PDF "vazava" anexos do cliente (plantas, matriculas,
-    // fotos da fazenda) no documento da proposta. Cliente externo recebia bagunca.
-    // Compat retro: ?somente_principal=1 continua aceito (era no-op antes, agora redundante).
-    const incluirAnexos = req.query.incluir_anexos === '1';
+    //   v3.23.7: default invertido pra SO A PROPOSTA;             ?incluir_anexos=1 opt-in
+    //   v3.23.10: CEO pediu pra REVERTER ao default v1.66.9 — anexos JUNTOS no PDF.
+    //     Razao: cartorio/INCRA/cliente final preferem 1 arquivo unico do que multiplos
+    //     anexos avulsos. ?sem_anexos=1 e' o opt-out pra quem quer so a proposta enxuta.
+    //     Compat: ?somente_principal=1 (antigo) e ?incluir_anexos=1 (transient v3.23.7-9)
+    //     tambem sao aceitos. somente_principal=1 e sem_anexos=1 sao sinonimos.
+    const semAnexos = req.query.sem_anexos === '1' || req.query.somente_principal === '1';
+    // ?incluir_anexos=1 ainda funciona como opt-in explicito (caso alguem dependa)
+    const incluirExplicito = req.query.incluir_anexos === '1';
+    const incluirAnexos = incluirExplicito || !semAnexos;
     const buf = incluirAnexos
       ? await propostasConsultoria.gerarPdfPropostaConsultoriaComAnexos(id)
       : await propostasConsultoria.gerarPdfPropostaConsultoria(id);

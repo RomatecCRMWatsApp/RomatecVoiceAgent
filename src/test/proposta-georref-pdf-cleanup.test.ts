@@ -31,52 +31,46 @@ describe('Fix 1 — anexos nao vazam mais no PDF principal', () => {
     expect(propostasConsultoriaSrc).toMatch(/export async function gerarPdfPropostaConsultoriaComAnexos/);
   });
 
-  it('endpoint /api/.../pdf default e gerarPdfPropostaConsultoria (sem anexos)', () => {
-    // Default invertido em v3.23.7: antes era ComAnexos (default merge); agora e' sem.
-    // O caminho ComAnexos vira opt-in via ?incluir_anexos=1.
-    expect(serverSrc).toMatch(/req\.query\.incluir_anexos === '1'/);
-    expect(serverSrc).toMatch(
-      /incluirAnexos[\s\S]{0,80}gerarPdfPropostaConsultoriaComAnexos[\s\S]{0,80}gerarPdfPropostaConsultoria\(/,
-    );
+  it('endpoint /api/.../pdf default e ComAnexos (anexos juntos no PDF — v3.23.10)', () => {
+    // v3.23.10: REVERTIDO ao comportamento v1.66.9. Anexos voltaram pro PDF default.
+    // ?sem_anexos=1 (ou ?somente_principal=1 legado) e' o opt-out pra versao enxuta.
+    // ?incluir_anexos=1 ainda funciona como opt-in explicito (compat com v3.23.7-9).
+    expect(serverSrc).toMatch(/req\.query\.sem_anexos === '1'/);
+    expect(serverSrc).toMatch(/somente_principal === '1'/); // compat legado
+    // O default (sem nenhum query string) usa o ComAnexos
+    expect(serverSrc).toMatch(/incluirAnexos\s*=[\s\S]{0,80}!semAnexos/);
   });
 
-  it('rota publica /v/:hash/pdf usa gerarPdfPropostaConsultoria (sem anexos)', () => {
-    // Cliente externo (cartorio, MPF, INCRA) nao deve ver plantas/matriculas/fotos
-    // bagunçando o PDF da proposta tecnica. Anexos seguem na API autenticada.
+  it('rota publica /v/:hash/pdf usa ComAnexos (v3.23.10)', () => {
+    // Revertido em v3.23.10 — cliente final / cartorio prefere PDF unico.
     const idxVHash = serverSrc.indexOf("app.get('/v/:hash/pdf'");
     expect(idxVHash, '/v/:hash/pdf handler nao encontrado').toBeGreaterThan(0);
-    // Janela ate o proximo "app." (proximo handler) — pega o corpo inteiro
     const idxFim = serverSrc.indexOf('app.', idxVHash + 30);
     const trechoVHash = serverSrc.slice(idxVHash, idxFim > 0 ? idxFim : idxVHash + 2000);
-    expect(trechoVHash).toContain('gerarPdfPropostaConsultoria(p.id)');
-    expect(trechoVHash).not.toMatch(/gerarPdfPropostaConsultoriaComAnexos/);
+    expect(trechoVHash).toContain('gerarPdfPropostaConsultoriaComAnexos(p.id)');
   });
 
-  it('enviar-whatsapp envia proposta + cada anexo em mensagens separadas', () => {
+  it('enviar-whatsapp envia PDF unificado (v3.23.10)', () => {
+    // v3.23.10: revertido pra PDF unico (proposta + anexos no mesmo arquivo).
+    // CEO pediu — cliente prefere 1 arquivo unico de armazenar/encaminhar.
     const fn = propostasConsultoriaSrc.match(
       /export async function enviarPropostaConsultoriaWhatsApp[\s\S]+?\n\}/,
     );
     expect(fn).not.toBeNull();
     const body = fn![0];
-    // Usa o PDF SEM anexos
-    expect(body).toContain('gerarPdfPropostaConsultoria(input.id)');
-    expect(body).not.toContain('gerarPdfPropostaConsultoriaComAnexos');
-    // Loop de anexos com throttle
-    expect(body).toContain('carregarAnexosProposta');
-    expect(body).toMatch(/for \(const anexo of anexos\)/);
-    expect(body).toMatch(/await sleep\(ANEXO_THROTTLE_MS\)/);
+    expect(body).toContain('gerarPdfPropostaConsultoriaComAnexos(input.id)');
+    // Loop de anexos individuais foi removido
+    expect(body).not.toMatch(/for \(const anexo of anexos\)/);
   });
 
-  it('enviar-telegram tambem envia anexos em mensagens separadas', () => {
+  it('enviar-telegram envia PDF unificado (v3.23.10)', () => {
     const fn = propostasConsultoriaSrc.match(
       /export async function enviarPropostaConsultoriaTelegram[\s\S]+?\n\}/,
     );
     expect(fn).not.toBeNull();
     const body = fn![0];
-    expect(body).toContain('gerarPdfPropostaConsultoria(input.id)');
-    expect(body).not.toContain('gerarPdfPropostaConsultoriaComAnexos');
-    expect(body).toContain('carregarAnexosProposta');
-    expect(body).toMatch(/for \(const anexo of anexos\)/);
+    expect(body).toContain('gerarPdfPropostaConsultoriaComAnexos(input.id)');
+    expect(body).not.toMatch(/for \(const anexo of anexos\)/);
   });
 });
 
