@@ -113,25 +113,30 @@ describe('Fix 3 — renderGeorrefRuralBody usa full width', () => {
     expect(propostasConsultoriaSrc).toMatch(/export function renderGeorrefRuralBody/);
   });
 
-  it('seccoes 7 (Documentos) e 8 (Avisos) usam COL_W - 8 (full-width)', () => {
-    // Extracao por anchor (titulo da seccao) + janela suficiente pra pegar o forEach
-    // dos itens. As secoes 7 e 8 sao curtas dentro do helper renderGeorrefRuralBody.
+  it('seccoes 7 (Documentos) e 8 (Avisos) usam coords explicitas + width COL_W - 16 (v3.23.8)', () => {
+    // v3.23.8: ajustado de {indent:8, width: COL_W-8} para coords explicitas
+    // (COL_X_INI + 8, doc.y, { width: COL_W - 16 }). Resultado efetivo e' o
+    // mesmo (uma coluna full-width com margem de 8px), mas evita herancia de
+    // doc.x deslocado entre secoes que estava cortando texto em prod.
     const idx7 = propostasConsultoriaSrc.indexOf('7. Documentos a Serem Fornecidos');
     const idx8 = propostasConsultoriaSrc.indexOf('8. Avisos e Condicoes Tecnicas');
     expect(idx7).toBeGreaterThan(0);
     expect(idx8).toBeGreaterThan(idx7);
 
-    // Seccao 7 vai do anchor ate o inicio da 8
+    // Seccao 7
     const secao7Src = propostasConsultoriaSrc.slice(idx7, idx8);
     expect(secao7Src).toMatch(/secao_4_checklist\.forEach/);
-    expect(secao7Src).toMatch(/width:\s*COL_W\s*-\s*8/);
+    expect(secao7Src).toMatch(/width:\s*COL_W\s*-\s*16/);
+    // Reset explicito de doc.x antes da seccao + por iteracao
+    expect(secao7Src).toMatch(/doc\.x\s*=\s*COL_X_INI/);
 
-    // Seccao 8 vai do anchor ate a chamada renderAvisoDRL (final do helper)
+    // Seccao 8
     const idxFinal = propostasConsultoriaSrc.indexOf('renderAvisoDRL(doc, finalidadeDRL', idx8);
     expect(idxFinal).toBeGreaterThan(idx8);
     const secao8Src = propostasConsultoriaSrc.slice(idx8, idxFinal);
     expect(secao8Src).toMatch(/custos\.avisos\.forEach/);
-    expect(secao8Src).toMatch(/width:\s*COL_W\s*-\s*8/);
+    expect(secao8Src).toMatch(/width:\s*COL_W\s*-\s*16/);
+    expect(secao8Src).toMatch(/doc\.x\s*=\s*COL_X_INI/);
   });
 
   it('COL_W = COL_X_FIM - COL_X_INI = 499 (largura util A4 com margem 48)', () => {
