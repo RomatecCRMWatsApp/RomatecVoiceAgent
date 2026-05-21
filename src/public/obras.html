@@ -254,6 +254,65 @@
     }
   }
 
+  /* === v3.23.6: form Georref Rural — grid 60/40 explicito + anexos sticky === */
+  /* O grid antigo (auto-fit, minmax(360px,1fr)) deixava a coluna direita curta
+     "flutuando" visualmente quando a esquerda (apos os campos novos de v3.23.5:
+     Finalidade/Matricula/CRI/Perimetro/Opcionais) ficou muito mais alta. Agora
+     sao colunas explicitas 1.5fr/1fr e a coluna direita acompanha o scroll via
+     position:sticky. Em <768px empilha (anexos vai abaixo, full width). */
+  .form-georref-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
+    gap: 24px;
+    align-items: start;
+    margin-top: 4px;
+  }
+  .form-georref-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-size: 13px;
+    /* CRITICO em grid: permite o conteudo encolher (selects/inputs com option
+       longa nao estouram a coluna). Sem isso, a coluna esquerda empurra o anexos */
+    min-width: 0;
+  }
+  .form-georref-anexos {
+    position: sticky;
+    top: 16px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+  .form-georref-anexos h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--neon);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .form-georref-anexos .anexos-hint {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+  @media (max-width: 768px) {
+    .form-georref-grid {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .form-georref-anexos {
+      position: static; /* sticky perde sentido com 1 coluna */
+    }
+  }
+
   input, select, textarea, button {
     font-family: inherit; font-size: 14px; padding: 8px 12px;
     border: 1px solid var(--border); border-radius: var(--radius);
@@ -6591,8 +6650,12 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
       </div>
     </div>
     <div class="card">
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:16px;">
-       <div style="display:grid; gap:10px; font-size:13px;">
+      <!-- v3.23.6: grid explicito 1.5fr/1fr com anexos sticky (substitui auto-fit que
+           deixava colunas desbalanceadas apos as novas secoes de v3.23.5).
+           data-keep-grid impede o safety-net global (linha 130) de forcar 1 coluna em
+           viewport <=768px — o controle mobile fica na media query da .form-georref-grid. -->
+      <div class="form-georref-grid" data-keep-grid>
+       <div class="form-georref-fields">
         <label>Cliente
           <div style="display:flex; gap:6px;">
             <select id="geoCliente" style="flex:1;"><option value="">— escolher —</option>${cliOpts}</select>
@@ -6744,20 +6807,18 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
         </div>
        </div>
 
-       <div style="display:flex; flex-direction:column; gap:10px;">
-         <div>
-           <p style="margin:0; font-weight:600; font-size:13px;">📎 Anexos da Proposta</p>
-           <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">
-             Plantas anteriores, levantamentos prévios, croquis. Formatos: PDF, PNG, JPEG.
-           </p>
-         </div>
+       <aside class="form-georref-anexos">
+         <h3>📎 Anexos da Proposta</h3>
+         <p class="anexos-hint">
+           Plantas anteriores, levantamentos prévios, croquis. Formatos: PDF, PNG, JPEG.
+         </p>
          <label id="cnsDropZone" style="border:2px dashed var(--border-strong); border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:rgba(0,255,136,0.03);">
            <input type="file" id="cnsAnexoInput" multiple accept=".pdf,.png,.jpg,.jpeg" style="display:none;">
            <div style="font-size:28px; margin-bottom:6px;">📤</div>
            <div style="font-size:13px; color:var(--neon); font-weight:600;">Clique ou arraste arquivos</div>
          </label>
          <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
-       </div>
+       </aside>
       </div>
     </div>`;
 
