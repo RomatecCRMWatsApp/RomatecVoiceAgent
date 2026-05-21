@@ -593,6 +593,62 @@
     background: rgba(0,255,136,0.18); border-color: var(--neon);
     color: var(--neon); font-weight: 600;
   }
+  /* v3.23.11: estados pago/cancelado (folha_fechamento_itens.status_pagamento).
+     Cada dia carrega o status do item de fechamento do funcionario via JOIN
+     no endpoint listarDiasFuncionario. */
+  .cal-cell.pago-integral {
+    background: rgba(30, 58, 138, 0.35); border-color: #3b82f6;
+    color: #93c5fd; font-weight: 600;
+  }
+  .cal-cell.pago-manha {
+    background: linear-gradient(180deg, rgba(96, 165, 250, 0.45) 50%, var(--bg-elev) 50%);
+    border-color: #60a5fa; color: #93c5fd; font-weight: 600;
+  }
+  .cal-cell.pago-tarde {
+    background: linear-gradient(180deg, var(--bg-elev) 50%, rgba(96, 165, 250, 0.45) 50%);
+    border-color: #60a5fa; color: #93c5fd; font-weight: 600;
+  }
+  /* Checkmark discreto no canto inferior direito quando pago */
+  .cal-cell.pago-integral::after,
+  .cal-cell.pago-manha::after,
+  .cal-cell.pago-tarde::after {
+    content: '✓'; position: absolute; bottom: 2px; right: 3px;
+    font-size: 9px; opacity: 0.85; color: #93c5fd; z-index: 2;
+    line-height: 1;
+  }
+  /* Cancelado — fechamento existia mas foi anulado depois. Cinza translucido com strike */
+  .cal-cell.cancelado {
+    background: rgba(107, 114, 128, 0.18); border-color: #6b7280;
+    color: #9ca3af; font-weight: 500; text-decoration: line-through;
+  }
+  /* v3.23.11: botao Voltar — padrao iOS HIG min 44x44 area de toque.
+     Antes era um × no canto direito com font-size:22px e zero padding
+     (~16px de tap area). Mobile sofria pra acertar. */
+  .cal-voltar-btn {
+    min-height: 44px;
+    min-width: 88px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-elev);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: var(--radius);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transition: all 0.15s;
+  }
+  .cal-voltar-btn:hover {
+    background: var(--surface);
+    border-color: var(--neon);
+    color: var(--neon);
+  }
+  .cal-voltar-btn:active {
+    transform: scale(0.97);
+  }
   .cal-cell-label {
     position: absolute; bottom: 2px; right: 4px;
     font-size: 8px; opacity: 0.8;
@@ -1054,12 +1110,17 @@ window.forcarUpdateApp = forcarUpdate;
 
 <div class="cal-overlay" id="calOverlay">
   <div class="cal-modal" id="calModal">
+    <!-- v3.23.11: header reformulado. Antes tinha um × no canto direito com
+         font-size:22px e zero padding — area de toque ~16px, abaixo dos 44px
+         iOS HIG, dificil de acertar em mobile. Substituido por botao "◀ Voltar"
+         a esquerda com tap target 44x44, padrao iOS-like. Tem outro "◀ Voltar"
+         espelhado no rodape pra usuario nao precisar rolar pra fechar. -->
     <div class="cal-head">
-      <div>
+      <button id="calVoltarTop" class="cal-voltar-btn" type="button" aria-label="Voltar para lista">◀ Voltar</button>
+      <div style="flex:1; min-width:0;">
         <h2 id="calNome">—</h2>
         <p id="calMeta">—</p>
       </div>
-      <button id="calClose" style="border:none;background:transparent;color:var(--text-muted);font-size:22px;cursor:pointer;">×</button>
     </div>
     <div class="cal-nav">
       <button id="calPrev">◀ Anterior</button>
@@ -1069,10 +1130,15 @@ window.forcarUpdateApp = forcarUpdate;
     <div class="cal-help">
       <strong>1)</strong> Clique nos dias pra <strong>selecionar</strong> (pode marcar vários). <strong>2)</strong> Aperte o botão do período pra aplicar.
     </div>
+    <!-- v3.23.11: legenda ganha 4o item — azul (pago) + cinza (cancelado). Pago
+         e' por ITEM de fechamento (a quinzena inteira do funcionario), nao
+         dia-a-dia. Cancelado = fechamento foi anulado depois de criado. -->
     <div class="cal-legend">
-      <span><span class="cal-legend-dot" style="background:rgba(0,255,136,0.4);"></span>Integral</span>
+      <span><span class="cal-legend-dot" style="background:rgba(0,255,136,0.4);"></span>Integral pendente</span>
       <span><span class="cal-legend-dot" style="background:linear-gradient(180deg,rgba(201,168,76,0.5) 50%,transparent 50%);"></span>Meia (manhã)</span>
       <span><span class="cal-legend-dot" style="background:linear-gradient(180deg,transparent 50%,rgba(201,168,76,0.5) 50%);"></span>Meia (tarde)</span>
+      <span><span class="cal-legend-dot" style="background:rgba(59,130,246,0.35); border:1px solid #3b82f6;"></span>🔵 Pago</span>
+      <span><span class="cal-legend-dot" style="background:rgba(107,114,128,0.2); border:1px solid #6b7280;"></span>⚫ Cancelado</span>
     </div>
     <div class="cal-grid" id="calGrid"></div>
     <div id="calActions" style="padding: 12px 20px; border-top: 1px solid var(--border); display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -1091,6 +1157,11 @@ window.forcarUpdateApp = forcarUpdate;
     <div style="padding: 12px 20px 16px; display:flex; gap:8px; flex-wrap:wrap; border-top: 1px solid var(--border);">
       <button id="calResetMes" class="btn-danger" style="border:1px solid var(--danger); padding:6px 12px;">🗑️ Resetar mês</button>
       <button id="calResetTudo" class="btn-danger" style="border:1px solid var(--danger); padding:6px 12px;">🗑️ Resetar tudo</button>
+    </div>
+    <!-- v3.23.11: Voltar tambem no rodape — depois de marcar dias, usuario nao
+         precisa rolar pra cima pra fechar. Mobile-friendly. -->
+    <div style="padding: 12px 20px 16px; display:flex; gap:8px; border-top: 1px solid var(--border);">
+      <button id="calVoltarBottom" class="cal-voltar-btn" type="button" style="flex:1;" aria-label="Voltar para lista">◀ Voltar</button>
     </div>
   </div>
 </div>
@@ -10963,9 +11034,21 @@ function desenharCalendario() {
 
   // Mapa data → array de períodos marcados
   const marcado = {};
+  // v3.23.11: tambem mapa data → status do fechamento (paga|cancelada|aberta|null)
+  // Se o dia esta vinculado a um fechamento_item, mostra a cor do status.
+  // Se mais de um periodo no mesmo dia tem status diferente (raro), prevalece o
+  // mais "forte" na escala paga > cancelada > aberta.
+  const statusPorData = {};
+  const rankStatus = { 'paga': 3, 'cancelada': 2, 'aberta': 1 };
   cal.dias.forEach(d => {
     if (!marcado[d.data]) marcado[d.data] = new Set();
     marcado[d.data].add(d.periodo);
+    if (d.status_fechamento) {
+      const atual = statusPorData[d.data];
+      if (!atual || (rankStatus[d.status_fechamento] || 0) > (rankStatus[atual] || 0)) {
+        statusPorData[d.data] = d.status_fechamento;
+      }
+    }
   });
 
   const primeiroDia = new Date(cal.ano, cal.mes-1, 1);
@@ -10982,12 +11065,27 @@ function desenharCalendario() {
   for (let d = 1; d <= ultimoDia; d++) {
     const dataIso = `${cal.ano}-${String(cal.mes).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const periodos = marcado[dataIso] || new Set();
+    const status = statusPorData[dataIso] || null;
     let cls = '';
     let label = '';
-    if (periodos.has('integral')) { cls = 'integral'; label = '1d'; }
-    else if (periodos.has('manha') && periodos.has('tarde')) { cls = 'full-day'; label = '½+½'; }
-    else if (periodos.has('manha')) { cls = 'manha'; label = 'M'; }
-    else if (periodos.has('tarde')) { cls = 'tarde'; label = 'T'; }
+    // v3.23.11: 4 estados — cancelado, pago-{integral|manha|tarde}, pendente (verde/amarelo).
+    // Cancelado e' state final: independente do periodo, mostra cinza com strike.
+    if (status === 'cancelada' && periodos.size > 0) {
+      cls = 'cancelado';
+      label = periodos.has('integral') ? '1d' : (periodos.has('manha') && periodos.has('tarde') ? '½+½' : (periodos.has('manha') ? 'M' : 'T'));
+    } else if (status === 'paga') {
+      // Pago: azul. Mesma logica de periodo do pendente, prefixado com "pago-".
+      if (periodos.has('integral')) { cls = 'pago-integral'; label = '1d'; }
+      else if (periodos.has('manha') && periodos.has('tarde')) { cls = 'pago-integral'; label = '½+½'; }
+      else if (periodos.has('manha')) { cls = 'pago-manha'; label = 'M'; }
+      else if (periodos.has('tarde')) { cls = 'pago-tarde'; label = 'T'; }
+    } else {
+      // Pendente (status='aberta' ou null): verde/amarelo original.
+      if (periodos.has('integral')) { cls = 'integral'; label = '1d'; }
+      else if (periodos.has('manha') && periodos.has('tarde')) { cls = 'full-day'; label = '½+½'; }
+      else if (periodos.has('manha')) { cls = 'manha'; label = 'M'; }
+      else if (periodos.has('tarde')) { cls = 'tarde'; label = 'T'; }
+    }
     if (dataIso === todayIso) cls += ' today';
     if (cal.selecionados.has(dataIso)) cls += ' selected';
     html += `<div class="cal-cell ${cls}" data-d="${dataIso}"><span class="cal-day-num">${d}</span><span class="cal-cell-label">${label}</span></div>`;
@@ -11105,8 +11203,16 @@ async function resetarTudoCalendario() {
   }
 }
 
-document.getElementById('calClose').onclick = () => document.getElementById('calOverlay').classList.remove('open');
-document.getElementById('calOverlay').onclick = e => { if (e.target.id === 'calOverlay') document.getElementById('calOverlay').classList.remove('open'); };
+// v3.23.11: handler de fechar unificado — 2 botoes Voltar (topo + rodape) + ESC + click no overlay
+function _calFechar() {
+  document.getElementById('calOverlay').classList.remove('open');
+}
+document.getElementById('calVoltarTop').onclick = _calFechar;
+document.getElementById('calVoltarBottom').onclick = _calFechar;
+document.getElementById('calOverlay').onclick = e => { if (e.target.id === 'calOverlay') _calFechar(); };
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('calOverlay').classList.contains('open')) _calFechar();
+});
 document.getElementById('calPrev').onclick = () => {
   if (cal.mes === 1) { cal.mes = 12; cal.ano--; } else cal.mes--;
   carregarMesCalendario();
