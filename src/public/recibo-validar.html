@@ -53,6 +53,27 @@
     font-family:ui-monospace,Courier,monospace;font-size:11px;
     color:#444;word-break:break-all;line-height:1.4;
   }
+  /* v3.23.5: aviso DRL — espelha o box vermelho do PDF (regulamentar, sempre presente em georref) */
+  .aviso-drl{
+    border:2px solid #c0392b;
+    background:#fdecea;
+    border-radius:8px;
+    padding:16px;
+    width:100%;max-width:480px;
+    margin-bottom:14px;
+  }
+  .aviso-drl h3{
+    color:#922b21;
+    text-transform:uppercase;
+    font-size:13px;
+    font-weight:700;
+    margin:0 0 10px 0;
+    line-height:1.3;
+  }
+  .aviso-drl p{font-size:12.5px;color:#111;margin:0 0 8px 0;line-height:1.55;text-align:justify}
+  .aviso-drl p:last-child{margin-bottom:0}
+  .aviso-drl strong{color:#922b21;font-weight:700}
+  .aviso-drl .reforco{margin-top:8px;border-top:1px dashed #c0392b;padding-top:8px}
 </style>
 </head>
 <body>
@@ -101,6 +122,35 @@
     expirado:'⏱ Expirado',
     cancelado:'⊘ Cancelado'
   };
+
+  // v3.23.5: monta o HTML do aviso DRL (espelha renderAvisoDRL do PDF).
+  // Texto regulamentar fixo — sempre presente em proposta de georref_rural,
+  // qualquer finalidade. Reforco adicional para RETIFICACAO; paragrafo extra
+  // para DESMEMBRAMENTO/REMEMBRAMENTO. Fonte: Lei 10.267/2001, NTGIR 3a Ed.,
+  // Provimento CNJ 65/2017.
+  function avisoDRLHtml(finalidade){
+    const f = finalidade || 'CERTIFICACAO';
+    const paragrafos = [
+      `A coleta das <strong>Declarações de Respeito de Limite</strong> (DRLs) dos confrontantes é <strong>OBRIGAÇÃO LEGAL E EXCLUSIVA DO PROPRIETÁRIO</strong> do imóvel, nos termos da Lei 10.267/2001, NTGIR 3ª Edição (INCRA) e Provimento CNJ nº 65/2017.`,
+      `A Romatec (responsável técnico) <strong>GERA</strong> as declarações em formulário próprio, mas a obtenção das assinaturas dos confrontantes e o <strong>RECONHECIMENTO DE FIRMA EM CARTÓRIO</strong> são de inteira responsabilidade do contratante.`,
+      `Sem as DRLs devidamente assinadas e com firma reconhecida, <strong>o INCRA NÃO CERTIFICA</strong> o memorial no SIGEF e <strong>o cartório NÃO AVERBA</strong> o georreferenciamento na matrícula. O prazo de certificação (60–180 dias) só começa a contar após a entrega das DRLs completas.`,
+    ];
+    if (f === 'DESMEMBRAMENTO' || f === 'REMEMBRAMENTO') {
+      paragrafos.push(`Em operações de <strong>${escapeHtml(f)}</strong>, são exigidas DRLs de TODOS os confrontantes da poligonal resultante, inclusive dos lotes vizinhos que serão criados ou unificados.`);
+    }
+    let finalP;
+    if (f === 'RETIFICACAO') {
+      finalP = `<p class="reforco"><strong>⚠ ATENÇÃO REFORÇADA PARA RETIFICAÇÃO DE ÁREA:</strong> a ausência de qualquer DRL impede TOTALMENTE o procedimento, seja na via administrativa (Lei 10.931/2004) ou judicial. Recomenda-se fortemente a contratação prévia do serviço de coleta de anuências (item 6.4) para evitar atrasos.</p>`;
+    } else {
+      finalP = `<p>Caso o proprietário deseje contratar a coleta das anuências como serviço adicional, consultar o item 6.4 desta proposta (R$ 150,00 por confrontante).</p>`;
+    }
+    return `
+      <div class="aviso-drl">
+        <h3>⚠ Responsabilidade do Proprietário — DRL (Declaração de Respeito de Limite)</h3>
+        ${paragrafos.map(p => `<p>${p}</p>`).join('')}
+        ${finalP}
+      </div>`;
+  }
 
   // v3.23.5: textos da finalidade do Georref Rural (espelha o PDF/engine)
   const FINALIDADE_TEXTOS = {
@@ -213,6 +263,7 @@
         </div>
         ${finalidadeHtml}
         ${opcionaisHtml}
+        ${isGeo ? avisoDRLHtml(dados.finalidade) : ''}
         <div class="card">
           <h2>Hash de autenticidade</h2>
           <div class="hash-box">${escapeHtml(p.hash_validacao || hash)}</div>

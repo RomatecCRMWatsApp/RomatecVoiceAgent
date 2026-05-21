@@ -27,7 +27,11 @@ import type { SignatureVisualMeta } from '../services/reciboPdf';
 import type {
   SubtipoConsultoria, CustosCalculados, FontesConsulta, InputAverbacao, ItemCusto,
   InputGeorreferenciamento, InputDesmembramento, InputRetificacao, InputAvaliacaoPTAM,
+  FinalidadeGeorref,
 } from '../services/pricing/types';
+// v3.23.5: aviso DRL extraido pra modulo standalone (testavel sem arrastar
+// voyageai/mysql/pdfkit). Importamos aqui apenas pra reuso no renderAvisoDRL.
+import { montarAvisoDRL } from './avisoDRL';
 
 const LOGO_RELATORIO = '/romatec-logo-removebg-preview.png';
 
@@ -652,6 +656,89 @@ function renderGeorrefRuralBody(
     doc.fillColor('#111');
     doc.moveDown(0.3);
   }
+
+  // v3.23.5: Aviso DRL obrigatorio em TODA proposta de Georref Rural, qualquer
+  // finalidade. Regulamentar — texto fixo gerado pelo backend, NAO editavel.
+  // Texto base para CERTIFICACAO; reforco adicional pra RETIFICACAO; paragrafo
+  // extra pra DESMEMBRAMENTO/REMEMBRAMENTO.
+  const finalidadeDRL = (dadosImovel.finalidade as FinalidadeGeorref | undefined) || 'CERTIFICACAO';
+  renderAvisoDRL(doc, finalidadeDRL, COL_X_INI, COL_W);
+}
+
+// v3.23.5: render do box vermelho de aviso DRL no final da Secao 8.
+// NAO pode partir entre paginas — se nao couber inteiro, addPage antes.
+function renderAvisoDRL(
+  doc: PDFKit.PDFDocument,
+  finalidade: 'CERTIFICACAO' | 'DESMEMBRAMENTO' | 'REMEMBRAMENTO' | 'RETIFICACAO',
+  colXIni: number,
+  colW: number,
+): void {
+  const COR_BORDA = '#c0392b';
+  const COR_FUNDO = '#fdecea';
+  const COR_TITULO = '#922b21';
+  const PADDING = 12;
+  const LINE_GAP_PARAGRAFO = 0.4;
+
+  const bloco = montarAvisoDRL(finalidade);
+
+  // Pre-calcula altura: usa doc.heightOfString em fragmentos concatenados pra
+  // ter uma estimativa. PDFKit nao permite measure de texto com fontes/cores
+  // misturadas, entao concatenamos o plain text com font padrao.
+  doc.fontSize(10).font('Helvetica-Bold');
+  const alturaTitulo = doc.heightOfString(bloco.titulo, { width: colW - 2 * PADDING });
+  doc.fontSize(8.5).font('Helvetica');
+  let alturaConteudo = 0;
+  for (const p of bloco.paragrafos) {
+    const plain = p.fragmentos.map((f) => f.text).join('');
+    alturaConteudo += doc.heightOfString(plain, { width: colW - 2 * PADDING });
+    alturaConteudo += 6; // line gap
+  }
+  // Margem interna: PADDING top + titulo + 8px gap + conteudo + PADDING bottom
+  const alturaTotal = PADDING + alturaTitulo + 8 + alturaConteudo + PADDING;
+
+  // Quebra de pagina se nao couber inteiro (regra: o aviso nao pode ser cortado)
+  // Considera margem inferior segura de 60px (footer + QR podem ocupar)
+  if (doc.y + alturaTotal + 8 > doc.page.height - 100) {
+    doc.addPage();
+  }
+
+  const startY = doc.y + 6;
+  doc.save()
+     .roundedRect(colXIni, startY, colW, alturaTotal, 4)
+     .lineWidth(1.5)
+     .fillAndStroke(COR_FUNDO, COR_BORDA);
+  doc.restore();
+
+  // Conteudo
+  doc.x = colXIni + PADDING;
+  doc.y = startY + PADDING;
+
+  // Titulo
+  doc.fontSize(10).fillColor(COR_TITULO).font('Helvetica-Bold');
+  doc.text(`! ${bloco.titulo}`, { width: colW - 2 * PADDING, align: 'left', lineBreak: true });
+  doc.moveDown(0.4);
+
+  // Paragrafos com formatacao inline (continued: true alternando fonte/cor)
+  doc.fontSize(8.5);
+  for (const p of bloco.paragrafos) {
+    doc.x = colXIni + PADDING;
+    const last = p.fragmentos.length - 1;
+    p.fragmentos.forEach((frag, i) => {
+      doc.font(frag.bold ? 'Helvetica-Bold' : 'Helvetica')
+         .fillColor(frag.destaque ? COR_TITULO : '#000000');
+      doc.text(frag.text, {
+        continued: i < last,
+        width: colW - 2 * PADDING,
+        align: 'left',
+      });
+    });
+    doc.moveDown(LINE_GAP_PARAGRAFO);
+  }
+
+  // Reset apos o box
+  doc.y = startY + alturaTotal + 10;
+  doc.x = colXIni;
+  doc.font('Helvetica').fillColor('#111');
 }
 
 export async function gerarPdfPropostaConsultoria(
