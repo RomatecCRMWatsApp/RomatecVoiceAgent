@@ -1,28 +1,26 @@
 // v1.99.4: motor de calculo de Georreferenciamento Rural (INCRA/SIGEF).
+// v3.23.5: alinhado ao modelo aprovado PROP-2026-0011-R1.
+//
+// Mudancas v3.23.5 vs v1.99.4:
+//   - Anotacao tecnica trocada de ART CREA -> TRT CFT (CFT/MA, valor R$ 93,40)
+//   - TRT agora vai em secao_3_honorarios (linha 1, Romatec) — NAO mais em secao_2_taxas (terceiros)
+//   - secao_5_total = TRT + Tecnicos + Assessoria (so Romatec). Emolumentos
+//     cartorio e SIGEF permanecem em secao_2_taxas mas como INFORMATIVO (a cargo
+//     do cliente, fora do total). Isso bate com box "VALOR TOTAL (Romatec)" + box
+//     "Custos de Terceiros nao inclusos" do PDF aprovado.
+//   - Novos inputs opcionais: finalidade, matricula, cri, perimetro_m, opcionais
+//   - Linha condicional em secao_2_taxas: "Emolumentos — encerramento/abertura
+//     de matricula" quando finalidade in {DESMEMBRAMENTO, REMEMBRAMENTO}
+//   - Guard round2(p1+p2+p3) === round2(total_romatec) — falha em fechamento
+//     significa bug no calc, melhor crashar cedo do que mandar PDF errado
+//   - secao_opcionais_georref (CCIR, CAR, ITR, anuencia, retif) — sempre renderiza
+//     5 linhas, contratado ou nao. Subtotal proprio, NAO entra em secao_5_total
 //
 // Base normativa:
 //   - Lei 10.267/2001 (Cadastro Nacional Imoveis Rurais — CNIR)
 //   - NTGIR 3a Edicao (Norma Tecnica Georreferenciamento INCRA)
 //   - Resolucao CONFEA 1.108/2020 (servicos de Engenharia Cartografica)
 //   - Lei 6.015/1973 (Registro Publico — averbacao do memorial certificado)
-//
-// Fluxo do servico:
-//   1) Levantamento topografico (GPS RTK ou Estacao Total)
-//   2) Vertices marcados em campo + coleta de coordenadas WGS84
-//   3) Memorial descritivo + planta georreferenciada
-//   4) Submissao ao SIGEF/INCRA via certificado digital
-//   5) Certificacao INCRA + averbacao em cartorio
-//
-// Honorarios (referencial CONFEA/CREA-MA 2026):
-//   Honorario base = (area_ha × R$/ha) + (vertices × R$/vertice)
-//                  + (diarias × R$/dia) + (km × R$/km) + outros
-//   Multiplicado por complexidade (simples 1.0x, media 1.3x, alta 1.6x)
-//   Minimo garantido = 2 SM por matricula
-//
-// Taxas de terceiros:
-//   ART CREA = R$ 93,40 (Decisao Plenaria 0450/2025)
-//   Certificacao SIGEF/INCRA = gratuita oficial (custo zero, mas tempo de analise)
-//   Emolumentos cartorio (averbacao memorial certificado) — TJMA
 
 import type {
   InputGeorreferenciamento,
@@ -37,17 +35,23 @@ import type {
 import { calcularEmolumentos } from '../tjma';
 import { getParams, salarioMinimo, anotacaoTecnica } from './params';
 
-// ── Pacote de servicos do GEO Rural (Secao 1) ───────────────────────────────
+// Pacote de servicos do GEO Rural (Secao 1 — 8 itens fixos do modelo aprovado)
 const ESCOPO_GEO_RURAL = [
-  'Levantamento topografico (GPS RTK / Estacao Total)',
-  'Marcacao e coleta de coordenadas WGS84 nos vertices da poligonal',
-  'Calculo de area e perimetro georreferenciado',
-  'Memorial Descritivo (NTGIR 3a Edicao)',
-  'Planta georreferenciada com poligonal e confrontantes',
+  'Levantamento topografico georreferenciado (GNSS RTK / Estacao Total)',
+  'Marcacao fisica e coleta de coordenadas WGS84/SIRGAS2000 nos vertices da poligonal',
+  'Calculo analitico de area e perimetro com fechamento dentro da tolerancia NBR 13133',
+  'Memorial Descritivo conforme NTGIR 3a Edicao (INCRA)',
+  'Planta georreferenciada com poligonal, confrontantes e quadro de coordenadas',
   'Submissao ao SIGEF/INCRA com certificado digital',
-  'Acompanhamento ate certificacao final pelo INCRA',
-  'Averbacao do memorial certificado na matricula em cartorio',
+  'Acompanhamento de exigencias ate a certificacao final pelo INCRA',
+  'Apoio ao protocolo de averbacao do memorial certificado no Cartorio',
 ];
+
+// HALF_UP em 2 casas — JS arredondamento padrao usa banker's; aqui forcamos
+// pra garantir que 0.005 sobe (importante pra fechar p1+p2+p3 === total).
+export function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
 
 export async function calcularGeorreferenciamento(
   input: InputGeorreferenciamento,
@@ -63,57 +67,67 @@ export async function calcularGeorreferenciamento(
   if (!Number.isFinite(input.numero_vertices) || input.numero_vertices < 3) {
     throw new Error('numero_vertices deve ser >= 3 (poligonal minima)');
   }
+  if (input.complexidade !== 'simples' &&
+      input.complexidade !== 'media' &&
+      input.complexidade !== 'alta') {
+    throw new Error(`complexidade invalida: ${input.complexidade} (esperado: simples | media | alta)`);
+  }
 
   // ── Secao 1: escopo do servico ──────────────────────────────────────────
   const secao_1_projetos = [...ESCOPO_GEO_RURAL];
 
-  // ── Secao 2: taxas e emolumentos de terceiros ───────────────────────────
+  // ── Secao 2: taxas e emolumentos de terceiros (INFORMATIVO — pago pelo cliente)
+  // v3.23.5: TRT saiu daqui (foi pra secao_3 — Romatec). Aqui ficam SO emolumentos
+  // de cartorio, SIGEF (gratuito) e linha condicional pra DESM/REM.
   const secao_2_taxas: ItemCusto[] = [];
   const fontes: FontesConsulta = {};
   let ordem = 1;
 
-  // 1. Anotacao tecnica (ART/RRT/TRT — geo geralmente exige ART CREA)
-  const at = anotacaoTecnica('art_crea');
-  secao_2_taxas.push({
-    ordem: ordem++,
-    descricao: at.rotulo,
-    valor: at.valor,
-    observacao: at.fonte,
-  });
-
-  // 2. Emolumentos cartorio — averbacao do memorial certificado.
-  // TJMA: usa 'averbacao_construcao' como proxy (mesma faixa). Se nao tiver
-  // valor venal informado, usa estimativa conservadora baseada na area.
-  const valorEstimadoImovel = Math.max(input.area_hectares * 5000, 50000); // R$ 5k/ha minimo
+  // 1. Emolumentos cartorio — averbacao do memorial certificado
+  const valorEstimadoImovel = Math.max(input.area_hectares * 5000, 50000);
   try {
     const emol = await calcularEmolumentos('averbacao_construcao', valorEstimadoImovel);
     secao_2_taxas.push({
       ordem: ordem++,
-      descricao: 'Emolumentos cartorarios (averbacao do memorial certificado INCRA)',
+      descricao: 'Emolumentos cartorarios — averbacao do memorial certificado',
       valor: emol.valor,
-      observacao: `${emol.base_calculo} | Estimativa baseada em area × R$ 5.000/ha`,
+      observacao: `Tabela TJMA Res. 143/2025 | Estimativa baseada em area x R$ 5.000/ha`,
     });
     fontes.tjma = { fonte: emol.fonte, consultadoEm: emol.consultadoEm.toISOString() };
   } catch (err) {
-    // Fallback se tabela TJMA falhar
     secao_2_taxas.push({
       ordem: ordem++,
-      descricao: 'Emolumentos cartorarios (averbacao do memorial certificado INCRA)',
+      descricao: 'Emolumentos cartorarios — averbacao do memorial certificado',
       valor: 0,
       pendente: true,
       observacao: `A confirmar em cartorio competente. Erro consulta: ${(err as Error).message}`,
     });
   }
 
-  // 3. Certificacao SIGEF/INCRA — gratuita oficialmente
+  // 1b. Linha condicional: finalidade DESM/REM adiciona emolumentos extras de
+  // encerramento/abertura de matricula. Valor "A apurar" (varia caso a caso).
+  if (input.finalidade === 'DESMEMBRAMENTO' || input.finalidade === 'REMEMBRAMENTO') {
+    secao_2_taxas.push({
+      ordem: ordem++,
+      descricao:
+        input.finalidade === 'DESMEMBRAMENTO'
+          ? 'Emolumentos cartorarios — encerramento da matricula atual + abertura de nova matricula'
+          : 'Emolumentos cartorarios — unificacao das matriculas em matricula unica',
+      valor: 0,
+      pendente: true,
+      observacao: 'A apurar no Cartorio competente conforme tabela TJMA vigente',
+    });
+  }
+
+  // 2. Certificacao SIGEF/INCRA — gratuita oficialmente
   secao_2_taxas.push({
     ordem: ordem++,
-    descricao: 'Certificacao SIGEF/INCRA (Sistema de Gestao Fundiaria)',
+    descricao: 'Certificacao SIGEF/INCRA',
     valor: 0,
     observacao: 'Gratuita por lei (Lei 10.267/2001). Tempo medio analise INCRA: 60-180 dias.',
   });
 
-  // 4. Outros servicos opcionais informados pelo cliente
+  // 3. Outros servicos opcionais informados pelo cliente (legado v1.99.4)
   if (input.valor_outros_servicos > 0) {
     secao_2_taxas.push({
       ordem: ordem++,
@@ -123,60 +137,104 @@ export async function calcularGeorreferenciamento(
     });
   }
 
-  // ── Secao 3: honorarios Romatec ─────────────────────────────────────────
-  // Calculo do honorario tecnico em 4 parcelas + multiplicador complexidade
+  // ── Secao 3: honorarios Romatec — TRT + Tecnicos + Assessoria (3 linhas)
+  // v3.23.5: TRT entrou aqui (linha 1). Antes estava em secao_2_taxas.
 
-  // Permite override pelos valores do input (cliente pode propor valores diferentes)
+  // Permite override pelos valores do input
   const valorPorHectare = input.valor_por_hectare > 0 ? input.valor_por_hectare : hp.geo_rural_por_hectare;
   const valorPorVertice = input.valor_por_vertice > 0 ? input.valor_por_vertice : hp.geo_rural_por_vertice;
   const valorDiaria     = input.valor_diaria_campo > 0 ? input.valor_diaria_campo : hp.geo_rural_diaria_campo;
   const valorPorKm      = input.valor_km_deslocamento > 0 ? input.valor_km_deslocamento : hp.geo_rural_por_km_deslocamento;
 
-  const subtotal_area     = input.area_hectares * valorPorHectare;
-  const subtotal_vertices = input.numero_vertices * valorPorVertice;
-  const subtotal_diarias  = (input.numero_diarias || 0) * valorDiaria;
-  const subtotal_km       = (input.distancia_km || 0) * valorPorKm;
+  const subtotal_area     = round2(input.area_hectares * valorPorHectare);
+  const subtotal_vertices = round2(input.numero_vertices * valorPorVertice);
+  const subtotal_diarias  = round2((input.numero_diarias || 0) * valorDiaria);
+  const subtotal_km       = round2((input.distancia_km || 0) * valorPorKm);
+  const subtotal_campo    = round2(subtotal_area + subtotal_vertices + subtotal_diarias + subtotal_km);
 
-  const subtotal_campo = subtotal_area + subtotal_vertices + subtotal_diarias + subtotal_km;
-
-  // Multiplicador de complexidade
   const multiplicador =
-    input.complexidade === 'alta' ? hp.geo_rural_complexidade_alta :
+    input.complexidade === 'alta'  ? hp.geo_rural_complexidade_alta  :
     input.complexidade === 'media' ? hp.geo_rural_complexidade_media :
-    hp.geo_rural_complexidade_simples;
+                                     hp.geo_rural_complexidade_simples;
 
-  let honorario_tecnico = subtotal_campo * multiplicador;
+  let honorario_tecnico = round2(subtotal_campo * multiplicador);
 
-  // Minimo garantido: 2 SM por matricula
-  const minimoGarantido = sm * hp.geo_rural_minimo_sm;
+  const minimoGarantido = round2(sm * hp.geo_rural_minimo_sm);
   let aplicouMinimo = false;
   if (honorario_tecnico < minimoGarantido) {
     honorario_tecnico = minimoGarantido;
     aplicouMinimo = true;
   }
 
-  const honorario_assessoria = sm * params.honorarios_assessoria.padrao_sm;
+  const honorario_assessoria = round2(sm * params.honorarios_assessoria.padrao_sm);
 
-  const obsTecnico = aplicouMinimo
-    ? `Honorario minimo aplicado (${hp.geo_rural_minimo_sm} SM = R$ ${minimoGarantido.toFixed(2)}). Calculo de campo: R$ ${subtotal_campo.toFixed(2)} × ${multiplicador}x complexidade ${input.complexidade} = R$ ${(subtotal_campo * multiplicador).toFixed(2)} (abaixo do minimo).`
-    : `Area: ${input.area_hectares}ha × R$ ${valorPorHectare}/ha = R$ ${subtotal_area.toFixed(2)} | Vertices: ${input.numero_vertices} × R$ ${valorPorVertice} = R$ ${subtotal_vertices.toFixed(2)}${input.numero_diarias ? ` | Diarias: ${input.numero_diarias} × R$ ${valorDiaria} = R$ ${subtotal_diarias.toFixed(2)}` : ''}${input.distancia_km ? ` | Deslocamento: ${input.distancia_km}km × R$ ${valorPorKm} = R$ ${subtotal_km.toFixed(2)}` : ''} | Subtotal R$ ${subtotal_campo.toFixed(2)} × ${multiplicador}x (${input.complexidade}) = R$ ${honorario_tecnico.toFixed(2)}`;
+  // v3.23.5: TRT — opção (B) da resposta do CEO. Agora usa trt_cft (R$ 93,40)
+  // em vez de art_crea — semanticamente correto pra Tec. Agrimensura registrado
+  // no CFT (Conselho Federal dos Tecnicos Industriais), nao no CREA.
+  const at = anotacaoTecnica('trt_cft');
+  const trt = round2(at.valor);
+
+  // Memoria de calculo compacta (vai como subobservacao da linha "Honorarios Tecnicos" no PDF)
+  const memoriaTecnico = aplicouMinimo
+    ? `Minimo garantido aplicado (${hp.geo_rural_minimo_sm} SM = R$ ${minimoGarantido.toFixed(2)}). Calculo de campo: ${input.area_hectares}ha x R$ ${valorPorHectare.toFixed(2)} + ${input.numero_vertices}v x R$ ${valorPorVertice.toFixed(2)} + ${input.numero_diarias || 0}d x R$ ${valorDiaria.toFixed(2)} + ${input.distancia_km || 0}km x R$ ${valorPorKm.toFixed(2)} = R$ ${subtotal_campo.toFixed(2)} x ${multiplicador}x = R$ ${(subtotal_campo * multiplicador).toFixed(2)} (abaixo do minimo).`
+    : `Area: ${input.area_hectares} ha x R$ ${valorPorHectare.toFixed(2)}/ha = R$ ${subtotal_area.toFixed(2)} | Vertices: ${input.numero_vertices} x R$ ${valorPorVertice.toFixed(2)} = R$ ${subtotal_vertices.toFixed(2)} | Diarias de campo: ${input.numero_diarias || 0} x R$ ${valorDiaria.toFixed(2)} = R$ ${subtotal_diarias.toFixed(2)} | Deslocamento: ${input.distancia_km || 0} km x R$ ${valorPorKm.toFixed(2)}/km = R$ ${subtotal_km.toFixed(2)} | Subtotal R$ ${subtotal_campo.toFixed(2)} x ${multiplicador}x (complexidade ${input.complexidade}) = R$ ${honorario_tecnico.toFixed(2)}`;
 
   const secao_3_honorarios: ItemCusto[] = [
     {
       ordem: ordem++,
+      descricao: `${at.rotulo} — Tec. em Agrimensura CFT/MA n. 01209185369. Anotacao obrigatoria do responsavel tecnico.`,
+      valor: trt,
+      observacao: at.fonte,
+    },
+    {
+      ordem: ordem++,
       descricao: 'Honorarios Tecnicos de Georreferenciamento — levantamento topografico, marcacao de vertices, memorial descritivo, planta georreferenciada e submissao ao SIGEF/INCRA',
       valor: honorario_tecnico,
-      observacao: obsTecnico,
+      observacao: memoriaTecnico,
     },
     {
       ordem: ordem++,
       descricao: 'Honorarios de Assessoria e Acompanhamento — submissao SIGEF, diligencias junto ao INCRA, atendimento exigencias, emissao certificacao final, averbacao no cartorio',
       valor: honorario_assessoria,
-      observacao: `1 salario minimo 2026 (R$ ${sm.toFixed(2)})`,
+      observacao: `Referencia: 1 salario minimo 2026 (R$ ${sm.toFixed(2)})`,
     },
   ];
 
-  // ── Secao 4: checklist documentos ───────────────────────────────────────
+  // ── Total Romatec — SO os 3 itens acima (TRT + Tec + Assess) ────────────
+  const total_romatec = round2(trt + honorario_tecnico + honorario_assessoria);
+
+  // ── Condicoes de pagamento (3 parcelas) ─────────────────────────────────
+  const p1 = round2(trt + honorario_tecnico * 0.5 + honorario_assessoria * 0.5);
+  const p2 = round2(honorario_tecnico * 0.5);
+  const p3 = round2(honorario_assessoria * 0.5);
+
+  // Guard de fechamento — se nao bater dentro de 1 centavo, e' bug
+  const somaParcelas = round2(p1 + p2 + p3);
+  if (Math.abs(somaParcelas - total_romatec) > 0.01) {
+    throw new Error(
+      `Erro de fechamento das parcelas: p1+p2+p3 = R$ ${somaParcelas.toFixed(2)} != total R$ ${total_romatec.toFixed(2)} (diff R$ ${(somaParcelas - total_romatec).toFixed(4)})`,
+    );
+  }
+
+  const condicoes_pagamento: CondicaoPagamento[] = [
+    {
+      rotulo: '1a parcela — na assinatura',
+      descricao: 'TRT integral + 50% Honorarios Tecnicos + 50% Honorarios de Assessoria',
+      valor: p1,
+    },
+    {
+      rotulo: '2a parcela — entrega do memorial e submissao SIGEF',
+      descricao: '50% restante dos Honorarios Tecnicos',
+      valor: p2,
+    },
+    {
+      rotulo: '3a parcela — certificacao final INCRA',
+      descricao: '50% restante dos Honorarios de Assessoria',
+      valor: p3,
+    },
+  ];
+
+  // ── Secao 4: checklist documentos do cliente ────────────────────────────
   const secao_4_checklist: DocumentoChecklist[] = [
     {
       texto: 'Certidao de Inteiro Teor da Matricula — ATUALIZADA (max. 30 dias)',
@@ -198,18 +256,108 @@ export async function calcularGeorreferenciamento(
     { texto: 'Plantas, medicoes ou levantamentos anteriores do imovel (se houver)', obrigatorio: false },
   ];
 
-  // ── Secao 5: total ──────────────────────────────────────────────────────
-  const total_taxas = secao_2_taxas.reduce((s, i) => s + i.valor, 0);
-  const total_honorarios = secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
-  const secao_5_total = total_taxas + total_honorarios;
+  // ── Secao opcional: SERVICOS ADICIONAIS OPCIONAIS (5 linhas, sempre renderiza)
+  // v3.23.5: nao soma ao total Romatec — tabela informativa propria do PDF.
+  const opcionaisParam = params.opcionais_georref;
+  const opc = input.opcionais;
 
-  // ── Avisos legais ───────────────────────────────────────────────────────
+  const opcItens: NonNullable<CustosCalculados['secao_opcionais_georref']>['itens'] = [];
+  let subtotalOpcionais = 0;
+
+  // CCIR
+  {
+    const valorUnit = opc?.ccir.valor_unitario ?? opcionaisParam?.ccir.valor_unitario ?? 350.0;
+    const contratado = !!opc?.ccir.contratado;
+    const subtotal = contratado ? round2(valorUnit) : 0;
+    if (contratado) subtotalOpcionais = round2(subtotalOpcionais + subtotal);
+    opcItens.push({
+      chave: 'ccir',
+      rotulo: opcionaisParam?.ccir.rotulo ?? 'Atualizacao do CCIR (INCRA)',
+      contratado,
+      valor_unitario: valorUnit,
+      subtotal,
+    });
+  }
+  // CAR
+  {
+    const valorUnit = opc?.car.valor_unitario ?? opcionaisParam?.car.valor_unitario ?? 800.0;
+    const contratado = !!opc?.car.contratado;
+    const subtotal = contratado ? round2(valorUnit) : 0;
+    if (contratado) subtotalOpcionais = round2(subtotalOpcionais + subtotal);
+    opcItens.push({
+      chave: 'car',
+      rotulo: opcionaisParam?.car.rotulo ?? 'Atualizacao / emissao do CAR (SICAR)',
+      contratado,
+      valor_unitario: valorUnit,
+      subtotal,
+    });
+  }
+  // ITR (por exercicio)
+  {
+    const valorUnit = opc?.itr.valor_unitario ?? opcionaisParam?.itr.valor_unitario ?? 250.0;
+    const qtd = opc?.itr.quantidade ?? 0;
+    const contratado = !!opc?.itr.contratado;
+    const subtotal = contratado ? round2(valorUnit * qtd) : 0;
+    if (contratado) subtotalOpcionais = round2(subtotalOpcionais + subtotal);
+    opcItens.push({
+      chave: 'itr',
+      rotulo: opcionaisParam?.itr.rotulo ?? 'Regularizacao de ITR em atraso',
+      contratado,
+      quantidade: qtd,
+      valor_unitario: valorUnit,
+      subtotal,
+    });
+  }
+  // Anuencia (por confrontante)
+  {
+    const valorUnit = opc?.anuencia.valor_unitario ?? opcionaisParam?.anuencia.valor_unitario ?? 150.0;
+    const qtd = opc?.anuencia.quantidade ?? 0;
+    const contratado = !!opc?.anuencia.contratado;
+    const subtotal = contratado ? round2(valorUnit * qtd) : 0;
+    if (contratado) subtotalOpcionais = round2(subtotalOpcionais + subtotal);
+    opcItens.push({
+      chave: 'anuencia',
+      rotulo: opcionaisParam?.anuencia.rotulo ?? 'Coleta de anuencia dos confrontantes',
+      contratado,
+      quantidade: qtd,
+      valor_unitario: valorUnit,
+      subtotal,
+    });
+  }
+  // Retificacao (sob orcamento — nao soma)
+  {
+    const contratado = !!opc?.retificacao.contratado;
+    opcItens.push({
+      chave: 'retificacao',
+      rotulo: opcionaisParam?.retificacao.rotulo ?? 'Retificacao de area (Lei 10.931/2004)',
+      contratado,
+      valor_unitario: 'sob_orcamento',
+      subtotal: 'sob_orcamento',
+    });
+  }
+
+  const secao_opcionais_georref: NonNullable<CustosCalculados['secao_opcionais_georref']> = {
+    itens: opcItens,
+    subtotal: subtotalOpcionais,
+  };
+
+  // ── Avisos e condicoes tecnicas ─────────────────────────────────────────
   const avisos: string[] = [
-    'IMPORTANTE: Esta proposta esta em conformidade com a Lei 10.267/2001 (CNIR), NTGIR 3a Edicao (INCRA) e Resolucao CONFEA 1.108/2020. O servico exige profissional habilitado em Engenharia Cartografica/Agrimensura/Agronomia com habilitacao especifica no CREA.',
+    'IMPORTANTE: Esta proposta esta em conformidade com a Lei 10.267/2001 (CNIR), NTGIR 3a Edicao (INCRA) e Resolucao CONFEA 1.108/2020. O servico exige profissional habilitado em Engenharia Cartografica/Agrimensura/Agronomia com habilitacao especifica no CREA ou CFT.',
     'TEMPO DE EXECUCAO: levantamento de campo (3-15 dias conforme acessibilidade), gabinete e memorial (5-10 dias), submissao SIGEF (2-5 dias), analise INCRA (60-180 dias). Total tipico: 90-210 dias do contrato a certificacao.',
     'ANUENCIA DOS CONFRONTANTES E IMPRESCINDIVEL. Sem a assinatura dos vizinhos confrontantes na planta, o INCRA rejeita a certificacao. A Romatec orienta o proprietario sobre a coleta das anuencias.',
     'EVENTUAIS DIVERGENCIAS DE AREA: se a area certificada (real, GPS) divergir significativamente da area registrada na matricula, sera necessaria RETIFICACAO DE AREA em paralelo (Lei 10.931/2004 administrativa OU judicial). Isso e cobrado a parte como servico adicional.',
   ];
+
+  if (input.finalidade) {
+    const finalidadeAviso = {
+      CERTIFICACAO:    'FINALIDADE: Certificacao no SIGEF/INCRA e averbacao do memorial certificado na matricula vigente.',
+      DESMEMBRAMENTO:  'FINALIDADE: Certificacao no SIGEF/INCRA, encerramento da matricula atual e abertura de nova matricula para a area desmembrada.',
+      REMEMBRAMENTO:   'FINALIDADE: Certificacao no SIGEF/INCRA e unificacao de matriculas confrontantes em matricula unica.',
+      RETIFICACAO:     'FINALIDADE: Certificacao no SIGEF/INCRA e averbacao da nova area na matricula.',
+    }[input.finalidade];
+    avisos.push(finalidadeAviso);
+  }
 
   if (!input.tem_matricula) {
     avisos.push('ATENCAO: Imovel sem matricula registrada. Sera necessario USUCAPIAO ou abertura de matricula previa antes do georreferenciamento. Esses procedimentos sao cobrados a parte.');
@@ -219,70 +367,48 @@ export async function calcularGeorreferenciamento(
     avisos.push('COMPLEXIDADE ALTA: terreno acidentado, vegetacao densa, litigios de divisas ou inumeros confrontantes. Multiplicador 1.6x sobre o calculo de campo. Diarias podem aumentar conforme necessidade real.');
   }
 
-  // ── Condicoes de pagamento ──────────────────────────────────────────────
-  const primeira_parcela = honorario_tecnico * 0.5 + honorario_assessoria * 0.5;
-  const segunda_parcela  = honorario_tecnico * 0.5;
-  const terceira_parcela = honorario_assessoria * 0.5;
-  const condicoes_pagamento: CondicaoPagamento[] = [
-    {
-      rotulo: '1a parcela — na assinatura',
-      descricao: '50% Honorarios Tecnicos + 50% Honorarios de Assessoria',
-      valor: primeira_parcela,
-    },
-    {
-      rotulo: '2a parcela — na entrega do memorial e submissao ao SIGEF',
-      descricao: '50% restante dos Honorarios Tecnicos',
-      valor: segunda_parcela,
-    },
-    {
-      rotulo: '3a parcela — na certificacao final pelo INCRA',
-      descricao: '50% restante dos Honorarios de Assessoria',
-      valor: terceira_parcela,
-    },
-  ];
-
   // ── Base de calculo explicita (transparencia) ───────────────────────────
   const base_calculo: BaseCalculo[] = [
     {
       rotulo: 'Area (R$/hectare)',
-      formula: `${input.area_hectares} ha × R$ ${valorPorHectare.toFixed(2)}/ha`,
+      formula: `${input.area_hectares} ha x R$ ${valorPorHectare.toFixed(2)}/ha`,
       valor_resultado: subtotal_area,
     },
     {
       rotulo: 'Vertices (R$/vertice GPS RTK)',
-      formula: `${input.numero_vertices} vertices × R$ ${valorPorVertice.toFixed(2)}`,
+      formula: `${input.numero_vertices} vertices x R$ ${valorPorVertice.toFixed(2)}`,
       valor_resultado: subtotal_vertices,
     },
   ];
   if (input.numero_diarias > 0) {
     base_calculo.push({
       rotulo: 'Diarias de campo',
-      formula: `${input.numero_diarias} dia(s) × R$ ${valorDiaria.toFixed(2)}/dia`,
+      formula: `${input.numero_diarias} dia(s) x R$ ${valorDiaria.toFixed(2)}/dia`,
       valor_resultado: subtotal_diarias,
     });
   }
   if (input.distancia_km > 0) {
     base_calculo.push({
       rotulo: 'Deslocamento',
-      formula: `${input.distancia_km} km × R$ ${valorPorKm.toFixed(2)}/km`,
+      formula: `${input.distancia_km} km x R$ ${valorPorKm.toFixed(2)}/km`,
       valor_resultado: subtotal_km,
     });
   }
   base_calculo.push({
-    rotulo: `Subtotal de campo × complexidade ${input.complexidade}`,
-    formula: `R$ ${subtotal_campo.toFixed(2)} × ${multiplicador}x`,
-    valor_resultado: subtotal_campo * multiplicador,
+    rotulo: `Subtotal de campo x complexidade ${input.complexidade}`,
+    formula: `R$ ${subtotal_campo.toFixed(2)} x ${multiplicador}x`,
+    valor_resultado: round2(subtotal_campo * multiplicador),
   });
   if (aplicouMinimo) {
     base_calculo.push({
       rotulo: 'Minimo garantido aplicado',
-      formula: `${hp.geo_rural_minimo_sm} SM × R$ ${sm.toFixed(2)}`,
+      formula: `${hp.geo_rural_minimo_sm} SM x R$ ${sm.toFixed(2)}`,
       valor_resultado: minimoGarantido,
     });
   }
   base_calculo.push({
     rotulo: 'Honorarios Tecnicos finais',
-    formula: aplicouMinimo ? 'Maior entre calculado e minimo' : 'Subtotal × complexidade',
+    formula: aplicouMinimo ? 'Maior entre calculado e minimo' : 'Subtotal x complexidade',
     valor_resultado: honorario_tecnico,
   });
 
@@ -293,8 +419,16 @@ export async function calcularGeorreferenciamento(
     condicoes_pagamento,
     base_calculo,
     secao_4_checklist,
-    secao_5_total,
+    // v3.23.5: total agora e' so Romatec (antes incluia emolumentos cartorio)
+    secao_5_total: total_romatec,
     avisos,
+    honorarios_romatec: {
+      trt,
+      tecnicos: honorario_tecnico,
+      assessoria: honorario_assessoria,
+      total: total_romatec,
+    },
+    secao_opcionais_georref,
   };
 
   return { custos, fontes };
