@@ -1066,13 +1066,35 @@ export async function listarDiasFuncionario(input: {
 }) {
   if (!input.funcionario_id) throw new Error('funcionario_id obrigatório');
   const params: (string | number)[] = [input.funcionario_id];
-  let sql = 'SELECT * FROM romatec_obra_funcionario_dias WHERE funcionario_id = ?';
+  // v3.23.11: LEFT JOIN com folha_fechamento_itens — retorna status do
+  // fechamento pra UI poder colorir dias pagos (azul) vs pendentes (verde/amarelo)
+  // vs cancelados (cinza). O `pago` e' por ITEM de fechamento (a quinzena inteira
+  // do funcionario), nao dia-a-dia. Dia sem fechamento (`fechamento_id IS NULL`)
+  // continua aparecendo como pendente — caso comum da quinzena ativa.
+  let sql = `
+    SELECT
+      d.id, d.data, d.periodo, d.valor, d.obra_id, d.observacoes,
+      d.fechamento_id,
+      fi.status_pagamento AS status_fechamento,
+      fi.data_pagamento
+    FROM romatec_obra_funcionario_dias d
+    LEFT JOIN folha_fechamento_itens fi
+      ON d.fechamento_id IS NOT NULL
+     AND fi.fechamento_id = d.fechamento_id
+     AND fi.funcionario_id = d.funcionario_id
+    WHERE d.funcionario_id = ?
+  `;
   if (input.ano && input.mes) {
-    sql += ' AND YEAR(data) = ? AND MONTH(data) = ?';
+    sql += ' AND YEAR(d.data) = ? AND MONTH(d.data) = ?';
     params.push(input.ano, input.mes);
   }
-  sql += ' ORDER BY data ASC';
-  const [rows] = await pool.execute<DiaRow[]>(sql, params);
+  sql += ' ORDER BY d.data ASC';
+  type DiaRowExt = DiaRow & {
+    fechamento_id: number | null;
+    status_fechamento: 'aberta' | 'paga' | 'cancelada' | null;
+    data_pagamento: Date | string | null;
+  };
+  const [rows] = await pool.execute<DiaRowExt[]>(sql, params);
   return rows.map(r => ({
     id: String(r.id),
     data: r.data instanceof Date ? r.data.toISOString().slice(0, 10) : String(r.data),
@@ -1080,6 +1102,12 @@ export async function listarDiasFuncionario(input: {
     valor: num(r.valor),
     obra_id: r.obra_id ? String(r.obra_id) : null,
     observacoes: r.observacoes,
+    // v3.23.11: novos campos pra UI colorir
+    fechamento_id: r.fechamento_id ? Number(r.fechamento_id) : null,
+    status_fechamento: r.status_fechamento ?? null,
+    data_pagamento: r.data_pagamento
+      ? (r.data_pagamento instanceof Date ? r.data_pagamento.toISOString() : String(r.data_pagamento))
+      : null,
   }));
 }
 
