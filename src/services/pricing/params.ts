@@ -58,6 +58,14 @@ interface PricingParams {
     AVISO: string;
   };
   tjma_emolumentos_2026: { fonte: string; limite_maximo_total: number };
+  // v3.23.5: servicos adicionais opcionais de Georreferenciamento Rural.
+  opcionais_georref?: {
+    ccir:        { rotulo: string; valor_unitario: number };
+    car:         { rotulo: string; valor_unitario: number };
+    itr:         { rotulo: string; valor_unitario: number; unidade?: string };
+    anuencia:    { rotulo: string; valor_unitario: number; unidade?: string };
+    retificacao: { rotulo: string; valor: 'sob_orcamento' };
+  };
   _meta?: { ultima_atualizacao: string; atualizado_por: string; versao: string };
 }
 

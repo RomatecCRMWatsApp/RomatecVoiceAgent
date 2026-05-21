@@ -38,10 +38,10 @@
       "fonte": "Resolucao CAU/BR 91/2014 atualizada (Arquitetos e Urbanistas)"
     },
     "trt_cft": {
-      "rotulo": "TRT CFT (Termo de Responsabilidade Tecnica)",
+      "rotulo": "TRT CFT/MA (Termo de Responsabilidade Tecnica)",
       "conselho": "CFT",
-      "valor": 75.00,
-      "fonte": "Tabela CFT 2026 (Tecnicos Industriais)"
+      "valor": 93.40,
+      "fonte": "Tabela CFT 2026 — Tec. Agrim. CFT/MA n. 01209185369 (atualizada v3.23.5)"
     }
   },
   "honorarios_projeto": {
@@ -91,5 +91,30 @@
   "tjma_emolumentos_2026": {
     "fonte": "Resolucao GP 143/2025 TJMA - valores TOTAL (incluem FERC+FADEP+FEMP+FERRFIS)",
     "limite_maximo_total": 23946.65
+  },
+  "opcionais_georref": {
+    "_AVISO": "Servicos adicionais opcionais de Georreferenciamento Rural — NAO somam ao total Romatec (saem em seccao informativa propria do PDF). Valor_unitario congelado em dados_imovel.opcionais.<chave>.valor_unitario no momento da criacao da proposta — reajustes futuros aqui nao afetam propostas antigas.",
+    "ccir": {
+      "rotulo": "Atualizacao do CCIR (INCRA)",
+      "valor_unitario": 350.00
+    },
+    "car": {
+      "rotulo": "Atualizacao / emissao do CAR (SICAR)",
+      "valor_unitario": 800.00
+    },
+    "itr": {
+      "rotulo": "Regularizacao de ITR em atraso",
+      "valor_unitario": 250.00,
+      "unidade": "por exercicio"
+    },
+    "anuencia": {
+      "rotulo": "Coleta de anuencia dos confrontantes",
+      "valor_unitario": 150.00,
+      "unidade": "por confrontante"
+    },
+    "retificacao": {
+      "rotulo": "Retificacao de area (Lei 10.931/2004)",
+      "valor": "sob_orcamento"
+    }
   }
 }
