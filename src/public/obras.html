@@ -50,7 +50,12 @@
   body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg); color: var(--text); padding: 16px;
+    background: var(--bg); color: var(--text);
+    /* v3.23.3: safe-area iOS — evita header colidir com status bar (notch/Dynamic Island) */
+    padding-top: max(env(safe-area-inset-top), 16px);
+    padding-right: max(env(safe-area-inset-right), 16px);
+    padding-bottom: max(env(safe-area-inset-bottom), 16px);
+    padding-left: max(env(safe-area-inset-left), 16px);
     background-image: radial-gradient(circle at 0% 0%, rgba(0,255,136,0.04), transparent 50%),
                       radial-gradient(circle at 100% 100%, rgba(201,168,76,0.04), transparent 50%);
     min-height: 100vh;
@@ -166,6 +171,87 @@
        (ex: "RODO RANCHO COMBUSTIVEIS LTDA - Obra Posto Chapadao" = ~480px).
        Forca min-width:0 pra realmente respeitar max-width e nao estourar. */
     select[style*="max-width"] { min-width: 0 !important; }
+  }
+
+  /* === v3.23.3: card do funcionario na aba Marcar Dias === */
+  /* Bug reportado: nome "Cicero da Silva Oliveira" quebrava letra-a-letra no iOS porque
+     overflow-wrap:anywhere + coluna estreita forcavam quebra em qualquer char. Agora usa
+     break-word (so quebra entre palavras) e em mobile empilha vertical. */
+  .func-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .func-row__head { flex: 1 1 200px; min-width: 0; }
+  .func-row__head .nome {
+    margin: 0;
+    font-weight: 500;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+  .func-row__head .meta {
+    margin: 2px 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+  .func-row__head .quinzena {
+    margin: 4px 0 0;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .func-row__counters {
+    display: flex;
+    gap: 14px;
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+  }
+  .func-row__counters > span { white-space: nowrap; }
+  .func-row__actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  @media (max-width: 600px) {
+    .func-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .func-row__head { flex: 1 1 auto; }
+    .func-row__counters {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px 12px;
+    }
+    .func-row__actions > button { flex: 1 1 0; }
+  }
+
+  /* === v3.23.3: tabs com scroll horizontal em mobile === */
+  /* 16 tabs com flex-wrap empilhavam em 4-5 linhas. No iOS aparecia corte ("s Fiscais",
+     "Vistoria ("). Agora rolam horizontal com fade nas bordas indicando que ha mais. */
+  @media (max-width: 768px) {
+    .tabs {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scroll-snap-type: x proximity;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 10px;
+      mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+      -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    }
+    .tabs::-webkit-scrollbar { height: 4px; }
+    .tabs::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+    .tabs .tab {
+      flex-shrink: 0;
+      scroll-snap-align: start;
+    }
   }
 
   input, select, textarea, button {
@@ -480,6 +566,31 @@
     .header { flex-direction: column; align-items: flex-start; gap: 8px; }
     .header > div:last-child { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
     .header h1 { font-size: 18px; line-height: 1.2; }
+
+    /* v3.22.1: Marcar Dia — card cuja .card e' o proprio flex-row (sem div
+       interno wrapper) nao era atingido pelo seletor abaixo, e com o reset
+       de [style*="min-width:180px"] (linha ~158) o wrapper do nome reduzia
+       a quase zero, renderizando "Cicero da Silva Oliveira" letra-por-linha.
+       Fix: empilha o card em coluna no mobile + garante quebra de texto
+       horizontal normal nos paragrafos.
+       v3.23.3: trocado overflow-wrap:anywhere por break-word — o "anywhere"
+       AINDA quebrava letra-a-letra quando a coluna apertava (CEO reportou
+       de novo no iPhone). "break-word" so quebra entre palavras. */
+    .card[data-row-marcar-dia] {
+      flex-direction: column !important;
+      align-items: stretch !important;
+    }
+    .card[data-row-marcar-dia] > div {
+      width: 100%;
+      min-width: 0;
+    }
+    .card[data-row-marcar-dia] p {
+      writing-mode: horizontal-tb;
+      white-space: normal;
+      word-break: normal;
+      overflow-wrap: break-word;
+      width: 100%;
+    }
 
     /* Cards de obra/equipe/material: botoes empilham embaixo */
     .card > div[style*="display:flex"][style*="justify-content:space-between"] {
@@ -4556,24 +4667,26 @@ function renderMarcarDias() {
   })();
   const linhas = equipeObra.map(p => {
     const s = stats[p.id] || { integral:0, manha:0, tarde:0, total_dias_equivalente:0, total_pagar:0 };
-    return `<div class="card" style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap;">
-      <div style="flex:1; min-width:180px;">
-        <p style="margin:0; font-weight:500;">${escape(p.nome)}</p>
-        <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">
+    // v3.23.3: classes .func-row* movem layout pro CSS — em mobile empilha vertical e
+    // o nome volta a quebrar entre palavras (nao mais letra-a-letra como antes).
+    return `<div class="card func-row" data-row-marcar-dia>
+      <div class="func-row__head">
+        <p class="nome">${escape(p.nome)}</p>
+        <p class="meta">
           ${escape(p.funcao||'sem função')} · <span style="color:var(--gold);">${fmt(p.valor_dia)}/dia</span>
         </p>
-        <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);" data-status-quinzena="${p.id}">
+        <p class="quinzena" data-status-quinzena="${p.id}">
           ⏳ carregando quinzena…
         </p>
       </div>
-      <div style="display:flex; gap:14px; font-size:12px; color:var(--text-muted); flex-wrap:wrap;">
+      <div class="func-row__counters">
         <span>Integ: <strong style="color:var(--neon);">${s.integral}</strong></span>
         <span>Manhã: <strong style="color:var(--gold);">${s.manha}</strong></span>
         <span>Tarde: <strong style="color:var(--gold);">${s.tarde}</strong></span>
         <span>Equiv: <strong style="color:var(--text);">${s.total_dias_equivalente}</strong></span>
         <span>Total: <strong style="color:var(--gold);">${fmt(s.total_pagar)}</strong></span>
       </div>
-      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <div class="func-row__actions">
         <button class="btn-gold" data-cal-marcar="${p.id}" data-nome="${escape(p.nome)}" data-vd="${p.valor_dia}">📅 Marcar dias</button>
         <button data-recibo-q="${p.id}" data-nome="${escape(p.nome)}" title="Recibo quinzenal + ajustes">💰 Recibo</button>
       </div>
