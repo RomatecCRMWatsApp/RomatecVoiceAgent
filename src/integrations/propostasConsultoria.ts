@@ -154,10 +154,18 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
 
   // v1.66.8: aplica override se a UI editou valores no preview.
   // v1.66.17: guarda valor_original pra mostrar Desconto/Acrescimo no PDF.
+  // v3.23.8 BUG-FIX: o front (preview de Georref) NAO envia condicoes_pagamento /
+  // honorarios_romatec / opcionais / base_calculo no override — so manda
+  // secao_2_taxas e secao_3_honorarios editados. O spread `...ov` SUBSTITUIA o
+  // resultado calculado, apagando esses campos. Resultado no PDF: parcelas 1 e 2
+  // saiam R$ 0,00 (cp.valor lia undefined → formatBRL(undefined) → "R$ 0,00").
+  // Agora: fallback explicito pra cada campo derivado, preservando o que o engine
+  // ja calculou se o override nao trouxe.
   if (input.custos_override) {
     const ov = input.custos_override;
-    const origTaxas = resultado.custos.secao_2_taxas;
-    const origHon   = resultado.custos.secao_3_honorarios;
+    const calculado = resultado.custos;
+    const origTaxas = calculado.secao_2_taxas;
+    const origHon   = calculado.secao_3_honorarios;
     const taxasComOriginal = (ov.secao_2_taxas || []).map(i => {
       const orig = origTaxas.find(o => o.ordem === i.ordem);
       return { ...i, valor_original: orig?.valor };
@@ -166,14 +174,69 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
       const orig = origHon.find(o => o.ordem === i.ordem);
       return { ...i, valor_original: orig?.valor };
     });
-    const tot = taxasComOriginal.reduce((s, i) => s + Number(i.valor || 0), 0)
-              + honComOriginal.reduce((s, i) => s + Number(i.valor || 0), 0);
+    // v3.23.8: o totalRomatec deve refletir SO os honorarios (nao a soma com taxas
+    // que e' o legado pra averbacao). Pra georref, secao_5_total = total Romatec.
+    // Para nao quebrar outros subtipos, mantemos o legado e por cima derivamos
+    // honorarios_romatec do honComOriginal quando aplicavel.
+    const totHon = honComOriginal.reduce((s, i) => s + Number(i.valor || 0), 0);
+    const totTaxas = taxasComOriginal.reduce((s, i) => s + Number(i.valor || 0), 0);
+    const tot = taxasComOriginal.length > 0 ? totHon + totTaxas : totHon;
+
+    // Derivar condicoes_pagamento e honorarios_romatec a partir do honComOriginal
+    // SOMENTE pra Georreferenciamento Rural (que tem secao_3_honorarios em
+    // ordem fixa: TRT + Tecnicos + Assessoria). Outros subtipos preservam o que
+    // o engine calculou (fallback ?? calculado).
+    let condicoesPagamentoFinal = ov.condicoes_pagamento ?? calculado.condicoes_pagamento;
+    let honorariosRomatecFinal = ov.honorarios_romatec ?? calculado.honorarios_romatec;
+    if (subtipo === 'georreferenciamento_rural' && honComOriginal.length === 3) {
+      // Reconhecer linhas pelo conteudo da descricao (mais robusto que ordem,
+      // que muda entre engines).
+      const trtLinha = honComOriginal.find(i =>
+        /trt|tec\.?\s*responsabilidade|cft/i.test(i.descricao)
+      );
+      const tecLinha = honComOriginal.find(i =>
+        /honorarios\s+tecnicos|levantamento\s+topografico|memorial/i.test(i.descricao)
+      );
+      const assessLinha = honComOriginal.find(i =>
+        /assessoria/i.test(i.descricao)
+      );
+      if (trtLinha && tecLinha && assessLinha) {
+        const trt = Number(trtLinha.valor) || 0;
+        const tec = Number(tecLinha.valor) || 0;
+        const ass = Number(assessLinha.valor) || 0;
+        const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+        const p1 = round2(trt + tec * 0.5 + ass * 0.5);
+        const p2 = round2(tec * 0.5);
+        const p3 = round2(ass * 0.5);
+        condicoesPagamentoFinal = [
+          { rotulo: '1a parcela — na assinatura',
+            descricao: 'TRT integral + 50% Honorarios Tecnicos + 50% Honorarios de Assessoria',
+            valor: p1 },
+          { rotulo: '2a parcela — entrega do memorial e submissao SIGEF',
+            descricao: '50% restante dos Honorarios Tecnicos',
+            valor: p2 },
+          { rotulo: '3a parcela — certificacao final INCRA',
+            descricao: '50% restante dos Honorarios de Assessoria',
+            valor: p3 },
+        ];
+        honorariosRomatecFinal = { trt, tecnicos: tec, assessoria: ass, total: round2(trt + tec + ass) };
+      }
+    }
+
     resultado = {
       custos: {
         ...ov,
         secao_2_taxas: taxasComOriginal,
         secao_3_honorarios: honComOriginal,
         secao_5_total: tot,
+        // Fallback defensivo: nao deixar campos derivados sumirem
+        condicoes_pagamento: condicoesPagamentoFinal,
+        honorarios_romatec: honorariosRomatecFinal,
+        secao_opcionais_georref: ov.secao_opcionais_georref ?? calculado.secao_opcionais_georref,
+        base_calculo: ov.base_calculo ?? calculado.base_calculo,
+        avisos: ov.avisos ?? calculado.avisos,
+        secao_1_projetos: ov.secao_1_projetos ?? calculado.secao_1_projetos,
+        secao_4_checklist: ov.secao_4_checklist ?? calculado.secao_4_checklist,
       },
       fontes: { ...resultado.fontes, override_aplicado: true } as typeof resultado.fontes,
     };
@@ -625,19 +688,31 @@ export function renderGeorrefRuralBody(
   }
 
   // ── 7. DOCUMENTOS A SEREM FORNECIDOS PELO CLIENTE ─────────────────────
+  // v3.23.8 BUG-FIX: reset explicito de doc.x antes da seccao. Antes a tabela de
+  // honorarios renderizava valores com `text(..., COL_X_FIM - 80, ...)` deixando
+  // doc.x desalinhado; o forEach abaixo usava {indent: 8} relativo a esse x
+  // deslocado, reduzindo a largura efetiva pra ~150px (cortando texto a direita).
+  // Agora cada text() passa x/y absolutos + width: COL_W - 16 explicito.
   if (doc.y > 660) doc.addPage();
-  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('7. Documentos a Serem Fornecidos pelo Cliente');
+  doc.x = COL_X_INI;
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold')
+     .text('7. Documentos a Serem Fornecidos pelo Cliente', COL_X_INI, doc.y, { width: COL_W });
   doc.font('Helvetica');
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.2);
   doc.fontSize(9.5).fillColor('#111');
   custos.secao_4_checklist.forEach((d) => {
+    doc.x = COL_X_INI; // reset por iteracao — text() com align nao deixa lixo
     if (d.imprescindivel) {
       doc.fillColor('#dc2626').font('Helvetica-Bold')
-         .text(`☐ [IMPRESCINDIVEL] ${d.texto}`, { indent: 8, width: COL_W - 8 });
+         .text(`☐ [IMPRESCINDIVEL] ${d.texto}`, COL_X_INI + 8, doc.y, {
+           width: COL_W - 16, continued: false,
+         });
       doc.font('Helvetica').fillColor('#111');
     } else {
-      doc.text(`☐ ${d.texto}${d.obrigatorio ? '' : '  (opcional)'}`, { indent: 8, width: COL_W - 8 });
+      doc.text(`☐ ${d.texto}${d.obrigatorio ? '' : '  (opcional)'}`, COL_X_INI + 8, doc.y, {
+        width: COL_W - 16, continued: false,
+      });
     }
   });
   doc.moveDown(0.5);
@@ -645,13 +720,18 @@ export function renderGeorrefRuralBody(
   // ── 8. AVISOS E CONDICOES TECNICAS ────────────────────────────────────
   if (custos.avisos && custos.avisos.length > 0) {
     if (doc.y > 660) doc.addPage();
-    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('8. Avisos e Condicoes Tecnicas');
+    doc.x = COL_X_INI;
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold')
+       .text('8. Avisos e Condicoes Tecnicas', COL_X_INI, doc.y, { width: COL_W });
     doc.font('Helvetica');
     doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
     doc.moveDown(0.2);
     doc.fontSize(8.5).fillColor('#444');
     custos.avisos.forEach((a) => {
-      doc.text(`• ${a}`, { indent: 8, width: COL_W - 8, align: 'justify' });
+      doc.x = COL_X_INI;
+      doc.text(`• ${a}`, COL_X_INI + 8, doc.y, {
+        width: COL_W - 16, align: 'justify', continued: false,
+      });
       doc.moveDown(0.15);
     });
     doc.fillColor('#111');
@@ -1345,25 +1425,39 @@ export async function gerarPdfPropostaConsultoria(
 
   // v3.23.7: Footer global emitido em TODAS as paginas via bufferedPageRange.
   // Substitui o text() avulso em y=800 que causava paginas redundantes.
+  //
+  // v3.23.8 BUG-FIX: dentro do loop, ZERA margins.bottom temporariamente. O motivo:
+  // o footer e' renderizado em y=812 (page.height - 30), que esta DEPOIS da
+  // margin.bottom default (842 - 48 = 794). Mesmo com lineBreak:false, o text()
+  // seta doc.y=812 — e na proxima operacao PDFKit detecta `doc.y > margem inferior`
+  // e DISPARA auto-pagebreak. Resultado em v3.23.7: cada text() do footer criava
+  // pagina extra (3 paginas viraram 9). Zerando margins.bottom durante o loop o
+  // auto-pagebreak nao dispara.
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
-    const pageNum = i - range.start + 1;
-    const footerY = doc.page.height - 30;
-    const footerW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-    doc.fontSize(7).fillColor('#777').font('Helvetica-Oblique')
-       .text(
-         `${brand} — Acailandia/MA · Proposta ${p.numero} · Emitida ${formatDataBR(p.data_proposta)} · Validade ${p.validade_dias} dia${p.validade_dias === 1 ? '' : 's'}`,
-         doc.page.margins.left,
-         footerY,
-         { width: footerW - 80, align: 'left', lineBreak: false },
-       );
-    doc.text(
-      `Pagina ${pageNum} de ${range.count}`,
-      doc.page.margins.left,
-      footerY,
-      { width: footerW, align: 'right', lineBreak: false },
-    );
+    const origBottom = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
+    try {
+      const pageNum = i - range.start + 1;
+      const footerY = doc.page.height - 30;
+      const footerW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      doc.fontSize(7).fillColor('#777').font('Helvetica-Oblique')
+         .text(
+           `${brand} — Acailandia/MA · Proposta ${p.numero} · Emitida ${formatDataBR(p.data_proposta)} · Validade ${p.validade_dias} dia${p.validade_dias === 1 ? '' : 's'}`,
+           doc.page.margins.left,
+           footerY,
+           { width: footerW - 80, align: 'left', lineBreak: false },
+         );
+      doc.text(
+        `Pagina ${pageNum} de ${range.count}`,
+        doc.page.margins.left,
+        footerY,
+        { width: footerW, align: 'right', lineBreak: false },
+      );
+    } finally {
+      doc.page.margins.bottom = origBottom;
+    }
   }
   doc.font('Helvetica').fillColor('#111');
 
