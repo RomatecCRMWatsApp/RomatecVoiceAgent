@@ -409,7 +409,8 @@ const SUBTIPO_LABEL: Record<string, string> = {
 //   - 6. DOCUMENTOS A SEREM FORNECIDOS PELO CLIENTE (checklist)
 //   - 7. AVISOS E CONDICOES TECNICAS
 // O caller continua com Data/Validade, Responsavel Tecnico, Signature, QR, Footer.
-function renderGeorrefRuralBody(
+// v3.23.7: exportada pra ser testavel diretamente via smoke test (pdf-parse).
+export function renderGeorrefRuralBody(
   doc: PDFKit.PDFDocument,
   p: Awaited<ReturnType<typeof buscarPropostaConsultoria>>,
   dadosImovel: Record<string, unknown>,
@@ -767,7 +768,10 @@ export async function gerarPdfPropostaConsultoria(
   else if (isDesmRural) subtipoLabel = 'DESMEMBRAMENTO DE IMÓVEL RURAL';
   const isDesmRem = p.subtipo === 'desmembramento' || p.subtipo === 'remembramento';
 
-  const doc = new PDFDocument({ size: 'A4', margin: 48, info: {
+  // v3.23.7: bufferPages habilitado pra emitir footer global em TODAS as paginas
+  // via doc.bufferedPageRange() no fim. Antes o footer era um text() avulso em
+  // y=800 que criava uma pagina solta no final ("pagina 5 com 1 linha so").
+  const doc = new PDFDocument({ size: 'A4', margin: 48, bufferPages: true, info: {
     Title: `Proposta Consultoria ${p.numero}`,
     Author: brand,
     Subject: `Proposta de Consultoria — ${subtipoLabel} para ${p.cliente?.nome || ''}`,
@@ -1316,11 +1320,19 @@ export async function gerarPdfPropostaConsultoria(
              boxX + 6, cy + 42, { width: boxW - 12, align: 'center', lineBreak: false });
   }
 
-  // v1.99.17: QR Code + hash de autenticidade no rodapé (validação pública /v/:hash)
+  // v3.23.7: QR Code + hash de autenticidade renderizados RELATIVO a doc.y, garantindo
+  // que cabem inteiros na pagina atual (~120px). Se nao couber, addPage primeiro.
+  // Antes eram coords fixas y=720 e o footer em y=800 — se o conteudo passava de 720,
+  // o QR sobrepunha conteudo OU caia numa "pagina 4 quase vazia" + footer em "pagina 5".
   try {
     const hashValidacao = await gerarOuBuscarHashProposta(Number(p.id));
     const baseUrl = getValidacaoBaseUrl();
-    const qrY = 720;
+    const ALTURA_QR_BLOCO = 100; // QR (80) + label embaixo + margem inferior
+    const espacoRestante = doc.page.height - doc.page.margins.bottom - 50 /* footer reservado */ - doc.y;
+    if (espacoRestante < ALTURA_QR_BLOCO) {
+      doc.addPage();
+    }
+    const qrY = doc.y;
     const validUrl = await renderQRValidacao(doc, hashValidacao, baseUrl, 460, qrY, {
       size: 80,
       corHex,
@@ -1331,10 +1343,29 @@ export async function gerarPdfPropostaConsultoria(
     console.warn(`[propostas-consultoria-pdf] falha QR/hash: ${(err as Error).message}`);
   }
 
-  // Footer
-  const footerY = 800;
-  doc.fontSize(8).fillColor('#888')
-     .text(`${brand} — Proposta valida por ${p.validade_dias} dias.`, 48, footerY, { width: 499, align: 'center' });
+  // v3.23.7: Footer global emitido em TODAS as paginas via bufferedPageRange.
+  // Substitui o text() avulso em y=800 que causava paginas redundantes.
+  const range = doc.bufferedPageRange();
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    const pageNum = i - range.start + 1;
+    const footerY = doc.page.height - 30;
+    const footerW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    doc.fontSize(7).fillColor('#777').font('Helvetica-Oblique')
+       .text(
+         `${brand} — Acailandia/MA · Proposta ${p.numero} · Emitida ${formatDataBR(p.data_proposta)} · Validade ${p.validade_dias} dia${p.validade_dias === 1 ? '' : 's'}`,
+         doc.page.margins.left,
+         footerY,
+         { width: footerW - 80, align: 'left', lineBreak: false },
+       );
+    doc.text(
+      `Pagina ${pageNum} de ${range.count}`,
+      doc.page.margins.left,
+      footerY,
+      { width: footerW, align: 'right', lineBreak: false },
+    );
+  }
+  doc.font('Helvetica').fillColor('#111');
 
   doc.end();
   await new Promise<void>(resolve => doc.on('end', () => resolve()));
@@ -1416,6 +1447,13 @@ function formatDataBR(d: Date | string): string {
 
 // ── Envio ──────────────────────────────────────────────────────────────────
 
+// v3.23.7: helper de delay entre envios pra nao estourar rate-limit da Z-API.
+// Z-API recomenda 1-2s entre mensagens; usamos 1500ms.
+const ANEXO_THROTTLE_MS = 1500;
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export async function enviarPropostaConsultoriaWhatsApp(input: { id: string; telefone?: string }) {
   const idNum = Number(input.id);
   if (!idNum) throw new Error('id obrigatorio');
@@ -1423,9 +1461,27 @@ export async function enviarPropostaConsultoriaWhatsApp(input: { id: string; tel
   const tel = (input.telefone?.trim()) || p.cliente?.telefone || '';
   if (!tel) throw new Error('Telefone obrigatorio (informe ou cadastre no cliente).');
 
-  const pdfBuf = await gerarPdfPropostaConsultoriaCompleto(input.id);
-  const fileName = `Proposta_${p.numero}_${(p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
-  const r = await sendWhatsAppDocument(tel, pdfBuf.toString('base64'), fileName);
+  // v3.23.7: PDF SEM anexos. Antes mandava o merged (proposta + plantas/fotos/matriculas
+  // num PDF unico de 10+ paginas), agora manda so a proposta enxuta. Anexos seguem em
+  // mensagens separadas no Z-API — cliente recebe arquivos individuais (melhor pra
+  // download seletivo e organizacao no aparelho).
+  const propostaBuf = await gerarPdfPropostaConsultoria(input.id);
+  const safeNome = (p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+  const fileNameProposta = `Proposta_${p.numero}_${safeNome}.pdf`;
+  const respPrincipal = await sendWhatsAppDocument(tel, propostaBuf.toString('base64'), fileNameProposta);
+
+  // Anexos enviados como mensagens separadas, com throttle pra nao dropar conexao Z-API.
+  const anexos = await carregarAnexosProposta(idNum);
+  const anexosEnviados: Array<{ filename: string; messageId?: string }> = [];
+  for (const anexo of anexos) {
+    await sleep(ANEXO_THROTTLE_MS);
+    try {
+      const r = await sendWhatsAppDocument(tel, anexo.buffer.toString('base64'), anexo.filename);
+      anexosEnviados.push({ filename: anexo.filename, messageId: r.messageId });
+    } catch (err) {
+      console.warn(`[whatsapp-consultoria] falha ao enviar anexo "${anexo.filename}": ${(err as Error).message}`);
+    }
+  }
 
   await pool.execute(
     `UPDATE propostas
@@ -1438,9 +1494,11 @@ export async function enviarPropostaConsultoriaWhatsApp(input: { id: string; tel
 
   return {
     ok: true as const,
-    message: `Proposta ${p.numero} enviada via WhatsApp para ${r.phone} (msgId ${r.messageId || '?'}).`,
-    messageId: r.messageId,
-    phone: r.phone,
+    message: `Proposta ${p.numero} enviada via WhatsApp para ${respPrincipal.phone} (msgId ${respPrincipal.messageId || '?'}). ${anexosEnviados.length}/${anexos.length} anexo(s) enviado(s) em mensagens separadas.`,
+    messageId: respPrincipal.messageId,
+    phone: respPrincipal.phone,
+    anexos_enviados: anexosEnviados.length,
+    anexos_total: anexos.length,
   };
 }
 
@@ -1455,22 +1513,27 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
   if (!chatId) throw new Error('chatId Telegram obrigatorio (defina TELEGRAM_LEAD_CHAT_ID ou TELEGRAM_AUTHORIZED_USER_IDS, ou passe explicit).');
 
   // v1.66.14: log + try/catch detalhado pra diagnosticar falhas no 2o envio
+  // v3.23.7: PDF SEM anexos (apenas proposta principal). Anexos vao em mensagens
+  // separadas com throttle. Antes o PDF unico passava de 50MB e o Telegram rejeitava;
+  // agora cada peca cabe folgado individualmente.
   console.log(`[telegram-consultoria] iniciando envio proposta=${p.numero} chat=${chatId}`);
   let pdfBuf: Buffer;
   try {
-    pdfBuf = await gerarPdfPropostaConsultoriaCompleto(input.id);
-    console.log(`[telegram-consultoria] PDF gerado: ${(pdfBuf.length / 1024 / 1024).toFixed(2)} MB`);
+    pdfBuf = await gerarPdfPropostaConsultoria(input.id);
+    console.log(`[telegram-consultoria] PDF proposta gerado: ${(pdfBuf.length / 1024 / 1024).toFixed(2)} MB`);
   } catch (err) {
     console.error('[telegram-consultoria] erro ao gerar PDF:', (err as Error).message);
     throw new Error(`Falha ao gerar PDF: ${(err as Error).message}`);
   }
 
-  // Telegram limita arquivos a 50MB. Se passar, aborta com mensagem clara.
+  // Telegram limita arquivos a 50MB. Como o PDF agora e' so a proposta (3-4 paginas),
+  // dificilmente passa disso, mas mantemos o guard pra robustez.
   if (pdfBuf.length > 50 * 1024 * 1024) {
-    throw new Error(`PDF tem ${(pdfBuf.length / 1024 / 1024).toFixed(1)} MB e o Telegram aceita ate 50 MB. Reduza o tamanho dos anexos da proposta.`);
+    throw new Error(`PDF tem ${(pdfBuf.length / 1024 / 1024).toFixed(1)} MB e o Telegram aceita ate 50 MB.`);
   }
 
-  const fileName = `Proposta_${p.numero}_${(p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.pdf`;
+  const safeNome = (p.cliente?.nome || 'cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+  const fileName = `Proposta_${p.numero}_${safeNome}.pdf`;
   try {
     await sendTelegramDocument(chatId, pdfBuf, fileName, `Proposta ${p.numero} — ${SUBTIPO_LABEL[p.subtipo || ''] || p.subtipo}`);
     console.log(`[telegram-consultoria] envio OK proposta=${p.numero}`);
@@ -1482,6 +1545,19 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
     throw new Error(`Telegram rejeitou: ${desc}${code ? ` (code ${code})` : ''}`);
   }
 
+  // v3.23.7: anexos individuais (Telegram aceita ate 30 msgs/seg por chat — throttle leve)
+  const anexos = await carregarAnexosProposta(idNum);
+  let anexosEnviados = 0;
+  for (const anexo of anexos) {
+    await sleep(ANEXO_THROTTLE_MS);
+    try {
+      await sendTelegramDocument(chatId, anexo.buffer, anexo.filename, `Anexo: ${anexo.filename}`);
+      anexosEnviados++;
+    } catch (err) {
+      console.warn(`[telegram-consultoria] falha ao enviar anexo "${anexo.filename}": ${(err as Error).message}`);
+    }
+  }
+
   await pool.execute(
     `UPDATE propostas
         SET status = IF(status = 'rascunho', 'enviada', status)
@@ -1491,7 +1567,9 @@ export async function enviarPropostaConsultoriaTelegram(input: { id: string; cha
 
   return {
     ok: true as const,
-    message: `Proposta ${p.numero} enviada via Telegram (chat ${chatId}, ${(pdfBuf.length / 1024).toFixed(0)} KB).`,
+    message: `Proposta ${p.numero} enviada via Telegram (chat ${chatId}, ${(pdfBuf.length / 1024).toFixed(0)} KB). ${anexosEnviados}/${anexos.length} anexo(s) em mensagens separadas.`,
+    anexos_enviados: anexosEnviados,
+    anexos_total: anexos.length,
   };
 }
 
@@ -1710,7 +1788,7 @@ async function carregarAnexosProposta(propId: number): Promise<Array<{ filename:
 // v1.66.9: gera PDF da proposta com anexos mergeados ao final.
 // Imagens (PNG/JPG) viram pagina propria do PDF. PDFs anexos sao mergeados
 // pagina por pagina. Usa pdf-lib pra concatenacao real.
-export async function gerarPdfPropostaConsultoriaCompleto(id: string): Promise<Buffer> {
+export async function gerarPdfPropostaConsultoriaComAnexos(id: string): Promise<Buffer> {
   const propostaPdf = await gerarPdfPropostaConsultoria(id);
   const anexos = await carregarAnexosProposta(Number(id));
   if (anexos.length === 0) return propostaPdf;
