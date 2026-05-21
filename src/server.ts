@@ -3408,10 +3408,14 @@ app.get('/v/:hash/pdf', async (req: Request, res: Response) => {
       res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
       return res.send(buf);
     }
-    // v1.99.17: fallback para proposta — serve PDF completo (com anexos)
+    // v1.99.17: fallback para proposta — serve só a proposta principal (sem anexos).
+    // v3.23.7: anexos foram REMOVIDOS do PDF servido pela rota publica /v/:hash/pdf.
+    // O cliente externo (cartorio, MPF, etc) recebia o PDF colado com plantas,
+    // matriculas e fotos do imovel; agora vê só a proposta tecnica/comercial. Os
+    // anexos seguem acessiveis via API autenticada /api/propostas-consultoria/:id/anexos.
     const p = await propostasConsultoria.buscarPropostaPorHash(hash);
     if (p) {
-      const buf = await propostasConsultoria.gerarPdfPropostaConsultoriaCompleto(p.id);
+      const buf = await propostasConsultoria.gerarPdfPropostaConsultoria(p.id);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${p.numero}.pdf"`);
       return res.send(buf);
@@ -3439,12 +3443,16 @@ app.post  ('/api/propostas-consultoria/preview',
 app.get   ('/api/propostas-consultoria/:id/pdf', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    // v1.66.9: por padrao serve PDF completo (com anexos mergeados).
-    // Use ?somente_principal=1 pra pegar so a proposta sem anexos.
-    const somentePrincipal = req.query.somente_principal === '1';
-    const buf = somentePrincipal
-      ? await propostasConsultoria.gerarPdfPropostaConsultoria(id)
-      : await propostasConsultoria.gerarPdfPropostaConsultoriaCompleto(id);
+    // v3.23.7: INVERSAO DE DEFAULT — historico:
+    //   v1.66.9: default era COMPLETO (merge proposta + anexos);  ?somente_principal=1 opt-out
+    //   v3.23.7: default e' SO A PROPOSTA;                        ?incluir_anexos=1 opt-in
+    // Razao: CEO reportou que o PDF "vazava" anexos do cliente (plantas, matriculas,
+    // fotos da fazenda) no documento da proposta. Cliente externo recebia bagunca.
+    // Compat retro: ?somente_principal=1 continua aceito (era no-op antes, agora redundante).
+    const incluirAnexos = req.query.incluir_anexos === '1';
+    const buf = incluirAnexos
+      ? await propostasConsultoria.gerarPdfPropostaConsultoriaComAnexos(id)
+      : await propostasConsultoria.gerarPdfPropostaConsultoria(id);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="Proposta_Consultoria_${id}.pdf"`);
     res.send(buf);
