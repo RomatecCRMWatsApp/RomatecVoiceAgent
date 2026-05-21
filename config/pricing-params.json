@@ -94,23 +94,28 @@
   },
   "opcionais_georref": {
     "_AVISO": "Servicos adicionais opcionais de Georreferenciamento Rural — NAO somam ao total Romatec (saem em seccao informativa propria do PDF). Valor_unitario congelado em dados_imovel.opcionais.<chave>.valor_unitario no momento da criacao da proposta — reajustes futuros aqui nao afetam propostas antigas.",
+    "_AVISO_DEFAULTS_V3_23_6": "Valores atualizados em v3.23.6: CCIR 350->1621 (1 SM 2026, condiz com esforco real de acesso INCRA + delimitacao APP/RL); CAR 800->1621 (mesma logica); ITR 250->300 por exercicio (Receita Federal: geracao DARFs + parcelamento + acompanhamento). Anuencia mantida 150/confrontante. Retificacao mantida sob orcamento.",
     "ccir": {
       "rotulo": "Atualizacao do CCIR (INCRA)",
-      "valor_unitario": 350.00
+      "valor_unitario": 1621.00,
+      "editavel": true
     },
     "car": {
       "rotulo": "Atualizacao / emissao do CAR (SICAR)",
-      "valor_unitario": 800.00
+      "valor_unitario": 1621.00,
+      "editavel": true
     },
     "itr": {
       "rotulo": "Regularizacao de ITR em atraso",
-      "valor_unitario": 250.00,
-      "unidade": "por exercicio"
+      "valor_unitario": 300.00,
+      "unidade": "por exercicio",
+      "editavel": true
     },
     "anuencia": {
       "rotulo": "Coleta de anuencia dos confrontantes",
       "valor_unitario": 150.00,
-      "unidade": "por confrontante"
+      "unidade": "por confrontante",
+      "editavel": true
     },
     "retificacao": {
       "rotulo": "Retificacao de area (Lei 10.931/2004)",

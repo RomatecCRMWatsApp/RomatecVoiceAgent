@@ -313,6 +313,108 @@
     }
   }
 
+  /* === v3.23.6: opcionais editaveis (valor unitario + qty) com subtotal e total === */
+  .opcional-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.4fr) minmax(0, 2fr);
+    gap: 10px;
+    align-items: center;
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .opcional-row:last-of-type { border-bottom: none; }
+  .opcional-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: var(--text);
+    margin: 0;
+  }
+  .opcional-check input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--neon);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .opcional-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .opcional-controls .campo-qty,
+  .opcional-controls .campo-valor {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+  }
+  .opcional-controls .campo-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .opcional-controls .campo-qty input,
+  .opcional-controls .campo-valor input {
+    width: 78px;
+    padding: 4px 6px;
+    font-size: 12px;
+    text-align: right;
+    color: var(--gold);
+    font-weight: 600;
+  }
+  .opcional-controls input:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .opcional-subtotal {
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 110px;
+    text-align: right;
+  }
+  .opcional-subtotal strong {
+    color: var(--gold);
+    font-weight: 700;
+  }
+  .opcional-controls .campo-info {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+  .opcionais-total {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-top: 8px;
+    background: rgba(201, 168, 76, 0.08);
+    border: 1px solid var(--gold-dim);
+    border-radius: var(--radius);
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+  .opcionais-total strong {
+    color: var(--gold);
+    font-size: 14px;
+    font-weight: 700;
+  }
+  @media (max-width: 640px) {
+    .opcional-row {
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
+    .opcional-controls {
+      justify-content: flex-start;
+      padding-left: 24px;
+    }
+  }
+
   input, select, textarea, button {
     font-family: inherit; font-size: 14px; padding: 8px 12px;
     border: 1px solid var(--border); border-radius: var(--radius);
@@ -6763,43 +6865,90 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
           <input id="geoValidadeDias" type="number" min="1" step="1" value="15" style="width:100%;">
         </label>
 
-        <!-- v3.23.5: Servicos adicionais opcionais — NAO somam ao total Romatec.
-             Aparecem em seccao informativa propria no PDF (5 linhas sempre, marcadas
-             se contratadas). Valor unitario congelado no envio. -->
+        <!-- v3.23.6: Servicos adicionais opcionais TODOS editaveis — checkbox + valor
+             unitario + qty (quando aplica) + subtotal calculado on-change. Valor congela
+             no envio em dados_imovel.opcionais.<chave>.valor_unitario, entao reajustar
+             defaults aqui no futuro nao afeta propostas antigas.
+             Novos defaults v3.23.6 (acordados com CEO):
+               CCIR/CAR R$ 1.621 = 1 SM 2026 (esforco real INCRA/SICAR + APP/RL)
+               ITR R$ 300/exercicio (Receita: DARFs + parcelamento + acompanhamento)
+               Anuencia R$ 150/confrontante (visita + reconhecimento de firma) — inalterado
+               Retificacao: sob orcamento (caso a caso) -->
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">➕ Serviços adicionais opcionais</p>
-        <span style="font-size:10px; color:var(--text-muted); margin-bottom:4px;">Marque os que o cliente quer contratar — vão em seção informativa no PDF, NÃO somam ao total Romatec.</span>
+        <span style="font-size:10px; color:var(--text-muted); margin-bottom:4px;">Marque os contratados. Valores editáveis caso queira aplicar desconto ou ajuste pontual. NÃO somam ao total Romatec — vão em seção informativa do PDF.</span>
 
-        <label style="display:flex; gap:6px; align-items:center; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
-          <input id="geoOpcCcir" type="checkbox">
-          <span style="flex:1;">Atualização do CCIR (INCRA)</span>
-          <span style="color:var(--gold); font-weight:600;">R$ 350,00</span>
-        </label>
-
-        <label style="display:flex; gap:6px; align-items:center; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
-          <input id="geoOpcCar" type="checkbox">
-          <span style="flex:1;">Atualização / emissão do CAR (SICAR)</span>
-          <span style="color:var(--gold); font-weight:600;">R$ 800,00</span>
-        </label>
-
-        <div style="display:flex; gap:6px; align-items:center; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
-          <input id="geoOpcItr" type="checkbox">
-          <span style="flex:1;">Regularização de ITR em atraso</span>
-          <input id="geoOpcItrQty" type="number" min="0" step="1" placeholder="exerc." style="width:70px; font-size:12px;">
-          <span style="color:var(--gold); font-weight:600;">×R$ 250</span>
+        <div class="opcional-row" data-opcional="ccir">
+          <label class="opcional-check">
+            <input id="geoOpcCcir" type="checkbox">
+            <span>Atualização do CCIR (INCRA)</span>
+          </label>
+          <div class="opcional-controls">
+            <label class="campo-valor"><span class="campo-label">R$</span>
+              <input id="geoOpcCcirValor" type="number" step="0.01" min="0" value="1621.00">
+            </label>
+            <span class="opcional-subtotal">Subtotal: <strong id="geoOpcCcirSubtotal">R$ 0,00</strong></span>
+          </div>
         </div>
 
-        <div style="display:flex; gap:6px; align-items:center; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
-          <input id="geoOpcAnuencia" type="checkbox">
-          <span style="flex:1;">Coleta de anuência dos confrontantes</span>
-          <input id="geoOpcAnuenciaQty" type="number" min="0" step="1" placeholder="qtd" style="width:70px; font-size:12px;">
-          <span style="color:var(--gold); font-weight:600;">×R$ 150</span>
+        <div class="opcional-row" data-opcional="car">
+          <label class="opcional-check">
+            <input id="geoOpcCar" type="checkbox">
+            <span>Atualização / emissão do CAR (SICAR)</span>
+          </label>
+          <div class="opcional-controls">
+            <label class="campo-valor"><span class="campo-label">R$</span>
+              <input id="geoOpcCarValor" type="number" step="0.01" min="0" value="1621.00">
+            </label>
+            <span class="opcional-subtotal">Subtotal: <strong id="geoOpcCarSubtotal">R$ 0,00</strong></span>
+          </div>
         </div>
 
-        <label style="display:flex; gap:6px; align-items:center; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
-          <input id="geoOpcRetificacao" type="checkbox">
-          <span style="flex:1;">Retificação de área (Lei 10.931/2004)</span>
-          <span style="color:var(--text-muted); font-style:italic;">Sob orçamento</span>
-        </label>
+        <div class="opcional-row" data-opcional="itr">
+          <label class="opcional-check">
+            <input id="geoOpcItr" type="checkbox">
+            <span>Regularização de ITR em atraso</span>
+          </label>
+          <div class="opcional-controls">
+            <label class="campo-qty"><span class="campo-label">Exerc.</span>
+              <input id="geoOpcItrQty" type="number" min="0" step="1" value="0" placeholder="0">
+            </label>
+            <label class="campo-valor"><span class="campo-label">R$/exerc.</span>
+              <input id="geoOpcItrValor" type="number" step="0.01" min="0" value="300.00">
+            </label>
+            <span class="opcional-subtotal">Subtotal: <strong id="geoOpcItrSubtotal">R$ 0,00</strong></span>
+          </div>
+        </div>
+
+        <div class="opcional-row" data-opcional="anuencia">
+          <label class="opcional-check">
+            <input id="geoOpcAnuencia" type="checkbox">
+            <span>Coleta de anuência dos confrontantes</span>
+          </label>
+          <div class="opcional-controls">
+            <label class="campo-qty"><span class="campo-label">Confr.</span>
+              <input id="geoOpcAnuenciaQty" type="number" min="0" step="1" value="0" placeholder="0">
+            </label>
+            <label class="campo-valor"><span class="campo-label">R$/confr.</span>
+              <input id="geoOpcAnuenciaValor" type="number" step="0.01" min="0" value="150.00">
+            </label>
+            <span class="opcional-subtotal">Subtotal: <strong id="geoOpcAnuenciaSubtotal">R$ 0,00</strong></span>
+          </div>
+        </div>
+
+        <div class="opcional-row" data-opcional="retificacao">
+          <label class="opcional-check">
+            <input id="geoOpcRetificacao" type="checkbox">
+            <span>Retificação de área (Lei 10.931/2004)</span>
+          </label>
+          <div class="opcional-controls">
+            <span class="campo-info">Sob orçamento — valor a definir após análise</span>
+          </div>
+        </div>
+
+        <div class="opcionais-total">
+          <span>Total dos opcionais (informativo — NÃO soma ao Romatec):</span>
+          <strong id="geoOpcionaisTotal">R$ 0,00</strong>
+        </div>
 
         <div style="display:flex; gap:6px; margin-top:12px;">
           <button id="geoPreview" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
@@ -6846,6 +6995,54 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
   // v3.23.4: wire-up dos anexos (sem isso clique no dropzone nao abria file picker)
   wireUpAnexosDropzone(subtipo);
 
+  // v3.23.6: opcionais editaveis — calcula subtotal por linha + total geral
+  // on-change. Disabled visualmente quando checkbox desmarcado.
+  const _opcConfigs = [
+    { key: 'Ccir',      hasQty: false },
+    { key: 'Car',       hasQty: false },
+    { key: 'Itr',       hasQty: true  },
+    { key: 'Anuencia',  hasQty: true  },
+  ];
+  function _fmtBRL(n) {
+    return 'R$ ' + Number(n || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  }
+  function _calcOpcionalRow(cfg) {
+    const check = document.getElementById('geoOpc' + cfg.key);
+    const valor = document.getElementById('geoOpc' + cfg.key + 'Valor');
+    const qty   = cfg.hasQty ? document.getElementById('geoOpc' + cfg.key + 'Qty') : null;
+    const sub   = document.getElementById('geoOpc' + cfg.key + 'Subtotal');
+    if (!check || !valor || !sub) return 0;
+    const ativo = check.checked;
+    const v = parseFloat(valor.value) || 0;
+    const q = qty ? (parseInt(qty.value, 10) || 0) : 1;
+    valor.disabled = !ativo;
+    if (qty) qty.disabled = !ativo;
+    const s = ativo ? (v * q) : 0;
+    sub.textContent = _fmtBRL(s);
+    return s;
+  }
+  function _recalcularOpcionaisTotal() {
+    let t = 0;
+    for (const cfg of _opcConfigs) t += _calcOpcionalRow(cfg);
+    const totalEl = document.getElementById('geoOpcionaisTotal');
+    if (totalEl) totalEl.textContent = _fmtBRL(t);
+  }
+  // Wire-up listeners
+  for (const cfg of _opcConfigs) {
+    const ids = ['geoOpc' + cfg.key, 'geoOpc' + cfg.key + 'Valor'];
+    if (cfg.hasQty) ids.push('geoOpc' + cfg.key + 'Qty');
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.addEventListener('change', _recalcularOpcionaisTotal);
+      el.addEventListener('input',  _recalcularOpcionaisTotal);
+    }
+  }
+  // Retificacao — checkbox so pra payload, nao soma
+  const _retCheck = document.getElementById('geoOpcRetificacao');
+  if (_retCheck) _retCheck.addEventListener('change', _recalcularOpcionaisTotal);
+  _recalcularOpcionaisTotal(); // estado inicial: tudo desmarcado, subtotais zero, inputs disabled
+
   // restaura cache se voltou do preview
   const cache = state.consultoriaFormCache;
   if (cache && cache.subtipo === subtipo) {
@@ -6874,13 +7071,20 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
     setVal('geoPerimetro',     d.perimetro_m);
     setVal('geoValidadeDias',  d.validade_dias);
     const op = d.opcionais || {};
-    setChk('geoOpcCcir',       op.ccir?.contratado);
-    setChk('geoOpcCar',        op.car?.contratado);
-    setChk('geoOpcItr',        op.itr?.contratado);
-    setVal('geoOpcItrQty',     op.itr?.quantidade);
-    setChk('geoOpcAnuencia',   op.anuencia?.contratado);
-    setVal('geoOpcAnuenciaQty', op.anuencia?.quantidade);
-    setChk('geoOpcRetificacao', op.retificacao?.contratado);
+    setChk('geoOpcCcir',         op.ccir?.contratado);
+    // v3.23.6: restaura valor_unitario editado pelo usuario
+    setVal('geoOpcCcirValor',    op.ccir?.valor_unitario);
+    setChk('geoOpcCar',          op.car?.contratado);
+    setVal('geoOpcCarValor',     op.car?.valor_unitario);
+    setChk('geoOpcItr',          op.itr?.contratado);
+    setVal('geoOpcItrQty',       op.itr?.quantidade);
+    setVal('geoOpcItrValor',     op.itr?.valor_unitario);
+    setChk('geoOpcAnuencia',     op.anuencia?.contratado);
+    setVal('geoOpcAnuenciaQty',  op.anuencia?.quantidade);
+    setVal('geoOpcAnuenciaValor', op.anuencia?.valor_unitario);
+    setChk('geoOpcRetificacao',  op.retificacao?.contratado);
+    // dispara recalculo apos restore (estado dos checkboxes pode ter mudado)
+    if (typeof _recalcularOpcionaisTotal === 'function') _recalcularOpcionaisTotal();
   }
 
   document.getElementById('geoPreview').onclick = async () => {
@@ -6918,24 +7122,27 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
       cri: _criInput || `CRI de ${_municipio}/${_estado}`,
       perimetro_m: Number(document.getElementById('geoPerimetro').value) || undefined,
       validade_dias: Number(document.getElementById('geoValidadeDias').value) || 15,
+      // v3.23.6: valor_unitario agora vem dos inputs editaveis (nao mais hardcoded).
+      // Defaults dos inputs: CCIR/CAR 1621, ITR 300/exerc, Anuencia 150/confrontante.
+      // Usuario pode aplicar desconto/ajuste; valor congela aqui no envio.
       opcionais: {
         ccir: {
           contratado: document.getElementById('geoOpcCcir').checked,
-          valor_unitario: 350.00,
+          valor_unitario: Number(document.getElementById('geoOpcCcirValor').value) || 1621.00,
         },
         car: {
           contratado: document.getElementById('geoOpcCar').checked,
-          valor_unitario: 800.00,
+          valor_unitario: Number(document.getElementById('geoOpcCarValor').value) || 1621.00,
         },
         itr: {
           contratado: document.getElementById('geoOpcItr').checked,
           quantidade: Number(document.getElementById('geoOpcItrQty').value) || 0,
-          valor_unitario: 250.00,
+          valor_unitario: Number(document.getElementById('geoOpcItrValor').value) || 300.00,
         },
         anuencia: {
           contratado: document.getElementById('geoOpcAnuencia').checked,
           quantidade: Number(document.getElementById('geoOpcAnuenciaQty').value) || 0,
-          valor_unitario: 150.00,
+          valor_unitario: Number(document.getElementById('geoOpcAnuenciaValor').value) || 150.00,
         },
         retificacao: {
           contratado: document.getElementById('geoOpcRetificacao').checked,

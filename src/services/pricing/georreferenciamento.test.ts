@@ -248,6 +248,110 @@ describe('Opcionais (secao_opcionais_georref)', () => {
   });
 });
 
+// v3.23.6: valores default subiram (CCIR/CAR 350/800 -> 1621; ITR 250 -> 300) e
+// a UI agora permite editar valor_unitario por linha. Engine deve respeitar o
+// valor passado no payload (override) E cair no default do pricing-params.json
+// quando o payload omitir.
+describe('v3.23.6 — valor_unitario editavel (override do default)', () => {
+  it('respeita CCIR R$ 1.200 enviado pelo usuario (override do default 1621)', async () => {
+    const r = await calcularGeorreferenciamento({
+      ...inputBase,
+      opcionais: {
+        ccir: { contratado: true, valor_unitario: 1200 },
+        car:  { contratado: false, valor_unitario: 1621 },
+        itr:  { contratado: false, quantidade: 0, valor_unitario: 300 },
+        anuencia: { contratado: false, quantidade: 0, valor_unitario: 150 },
+        retificacao: { contratado: false, valor: 'sob_orcamento' },
+      },
+    });
+    const ccir = r.custos.secao_opcionais_georref!.itens.find((i) => i.chave === 'ccir')!;
+    expect(ccir.valor_unitario).toBe(1200);
+    expect(ccir.subtotal).toBe(1200);
+    expect(r.custos.secao_opcionais_georref!.subtotal).toBe(1200);
+  });
+
+  it('CCIR + CAR nos novos defaults (1621 + 1621 = 3242) — bate com 1 SM × 2', async () => {
+    const r = await calcularGeorreferenciamento({
+      ...inputBase,
+      opcionais: {
+        ccir: { contratado: true,  valor_unitario: 1621 },
+        car:  { contratado: true,  valor_unitario: 1621 },
+        itr:  { contratado: false, quantidade: 0, valor_unitario: 300 },
+        anuencia: { contratado: false, quantidade: 0, valor_unitario: 150 },
+        retificacao: { contratado: false, valor: 'sob_orcamento' },
+      },
+    });
+    expect(r.custos.secao_opcionais_georref!.subtotal).toBe(3242);
+  });
+
+  it('ITR multiplica corretamente: 5 exercicios x R$ 300 = R$ 1.500 (novo default)', async () => {
+    const r = await calcularGeorreferenciamento({
+      ...inputBase,
+      opcionais: {
+        ccir: { contratado: false, valor_unitario: 1621 },
+        car:  { contratado: false, valor_unitario: 1621 },
+        itr:  { contratado: true,  quantidade: 5, valor_unitario: 300 },
+        anuencia: { contratado: false, quantidade: 0, valor_unitario: 150 },
+        retificacao: { contratado: false, valor: 'sob_orcamento' },
+      },
+    });
+    const itr = r.custos.secao_opcionais_georref!.itens.find((i) => i.chave === 'itr')!;
+    expect(itr.quantidade).toBe(5);
+    expect(itr.valor_unitario).toBe(300);
+    expect(itr.subtotal).toBe(1500);
+  });
+
+  it('Cenario completo: CCIR 1621 + CAR 1621 + ITR 5x300 + Anuencia 3x150 = R$ 5.192', async () => {
+    const r = await calcularGeorreferenciamento({
+      ...inputBase,
+      opcionais: {
+        ccir: { contratado: true, valor_unitario: 1621 },
+        car:  { contratado: true, valor_unitario: 1621 },
+        itr:  { contratado: true, quantidade: 5, valor_unitario: 300 },
+        anuencia: { contratado: true, quantidade: 3, valor_unitario: 150 },
+        retificacao: { contratado: false, valor: 'sob_orcamento' },
+      },
+    });
+    // 1621 + 1621 + 1500 + 450 = 5192
+    expect(r.custos.secao_opcionais_georref!.subtotal).toBe(5192);
+    // total Romatec permanece inalterado (opcionais nao somam)
+    expect(r.custos.secao_5_total).toBe(11030.2);
+  });
+
+  it('cai no default do params (1621) quando payload tem contratado=true mas omite valor_unitario', async () => {
+    // Quando o frontend nao envia valor_unitario (campo undefined), o engine
+    // usa params.opcionais_georref.ccir.valor_unitario (atualizado pra 1621 em v3.23.6)
+    const r = await calcularGeorreferenciamento({
+      ...inputBase,
+      opcionais: {
+        ccir: { contratado: true } as any, // valor_unitario omitido
+        car:  { contratado: false, valor_unitario: 1621 },
+        itr:  { contratado: false, quantidade: 0, valor_unitario: 300 },
+        anuencia: { contratado: false, quantidade: 0, valor_unitario: 150 },
+        retificacao: { contratado: false, valor: 'sob_orcamento' },
+      },
+    });
+    const ccir = r.custos.secao_opcionais_georref!.itens.find((i) => i.chave === 'ccir')!;
+    expect(ccir.subtotal).toBe(1621); // novo default
+  });
+
+  it('desconto: usuario ajusta Anuencia pra R$ 100/confrontante (override)', async () => {
+    const r = await calcularGeorreferenciamento({
+      ...inputBase,
+      opcionais: {
+        ccir: { contratado: false, valor_unitario: 1621 },
+        car:  { contratado: false, valor_unitario: 1621 },
+        itr:  { contratado: false, quantidade: 0, valor_unitario: 300 },
+        anuencia: { contratado: true, quantidade: 4, valor_unitario: 100 },
+        retificacao: { contratado: false, valor: 'sob_orcamento' },
+      },
+    });
+    const anu = r.custos.secao_opcionais_georref!.itens.find((i) => i.chave === 'anuencia')!;
+    expect(anu.valor_unitario).toBe(100);
+    expect(anu.subtotal).toBe(400);
+  });
+});
+
 describe('Defaults quando opcionais omitidos', () => {
   it('roda sem finalidade nem opcionais (retrocompat com inputs antigos)', async () => {
     const r = await calcularGeorreferenciamento(inputBase);
