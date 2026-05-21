@@ -53,6 +53,27 @@
     font-family:ui-monospace,Courier,monospace;font-size:11px;
     color:#444;word-break:break-all;line-height:1.4;
   }
+  /* v3.23.5: aviso DRL — espelha o box vermelho do PDF (regulamentar, sempre presente em georref) */
+  .aviso-drl{
+    border:2px solid #c0392b;
+    background:#fdecea;
+    border-radius:8px;
+    padding:16px;
+    width:100%;max-width:480px;
+    margin-bottom:14px;
+  }
+  .aviso-drl h3{
+    color:#922b21;
+    text-transform:uppercase;
+    font-size:13px;
+    font-weight:700;
+    margin:0 0 10px 0;
+    line-height:1.3;
+  }
+  .aviso-drl p{font-size:12.5px;color:#111;margin:0 0 8px 0;line-height:1.55;text-align:justify}
+  .aviso-drl p:last-child{margin-bottom:0}
+  .aviso-drl strong{color:#922b21;font-weight:700}
+  .aviso-drl .reforco{margin-top:8px;border-top:1px dashed #c0392b;padding-top:8px}
 </style>
 </head>
 <body>
@@ -102,15 +123,59 @@
     cancelado:'⊘ Cancelado'
   };
 
+  // v3.23.5: monta o HTML do aviso DRL (espelha renderAvisoDRL do PDF).
+  // Texto regulamentar fixo — sempre presente em proposta de georref_rural,
+  // qualquer finalidade. Reforco adicional para RETIFICACAO; paragrafo extra
+  // para DESMEMBRAMENTO/REMEMBRAMENTO. Fonte: Lei 10.267/2001, NTGIR 3a Ed.,
+  // Provimento CNJ 65/2017.
+  function avisoDRLHtml(finalidade){
+    const f = finalidade || 'CERTIFICACAO';
+    const paragrafos = [
+      `A coleta das <strong>Declarações de Respeito de Limite</strong> (DRLs) dos confrontantes é <strong>OBRIGAÇÃO LEGAL E EXCLUSIVA DO PROPRIETÁRIO</strong> do imóvel, nos termos da Lei 10.267/2001, NTGIR 3ª Edição (INCRA) e Provimento CNJ nº 65/2017.`,
+      `A Romatec (responsável técnico) <strong>GERA</strong> as declarações em formulário próprio, mas a obtenção das assinaturas dos confrontantes e o <strong>RECONHECIMENTO DE FIRMA EM CARTÓRIO</strong> são de inteira responsabilidade do contratante.`,
+      `Sem as DRLs devidamente assinadas e com firma reconhecida, <strong>o INCRA NÃO CERTIFICA</strong> o memorial no SIGEF e <strong>o cartório NÃO AVERBA</strong> o georreferenciamento na matrícula. O prazo de certificação (60–180 dias) só começa a contar após a entrega das DRLs completas.`,
+    ];
+    if (f === 'DESMEMBRAMENTO' || f === 'REMEMBRAMENTO') {
+      paragrafos.push(`Em operações de <strong>${escapeHtml(f)}</strong>, são exigidas DRLs de TODOS os confrontantes da poligonal resultante, inclusive dos lotes vizinhos que serão criados ou unificados.`);
+    }
+    let finalP;
+    if (f === 'RETIFICACAO') {
+      finalP = `<p class="reforco"><strong>⚠ ATENÇÃO REFORÇADA PARA RETIFICAÇÃO DE ÁREA:</strong> a ausência de qualquer DRL impede TOTALMENTE o procedimento, seja na via administrativa (Lei 10.931/2004) ou judicial. Recomenda-se fortemente a contratação prévia do serviço de coleta de anuências (item 6.4) para evitar atrasos.</p>`;
+    } else {
+      finalP = `<p>Caso o proprietário deseje contratar a coleta das anuências como serviço adicional, consultar o item 6.4 desta proposta (R$ 150,00 por confrontante).</p>`;
+    }
+    return `
+      <div class="aviso-drl">
+        <h3>⚠ Responsabilidade do Proprietário — DRL (Declaração de Respeito de Limite)</h3>
+        ${paragrafos.map(p => `<p>${p}</p>`).join('')}
+        ${finalP}
+      </div>`;
+  }
+
+  // v3.23.5: textos da finalidade do Georref Rural (espelha o PDF/engine)
+  const FINALIDADE_TEXTOS = {
+    CERTIFICACAO:    'Certificação SIGEF/INCRA + averbação na matrícula vigente.',
+    DESMEMBRAMENTO:  'Desmembramento — encerramento da matrícula atual e abertura de nova matrícula.',
+    REMEMBRAMENTO:   'Remembramento — unificação de matrículas confrontantes em matrícula única.',
+    RETIFICACAO:     'Retificação de área — averbação da nova área na matrícula.',
+  };
+  const OPC_ROTULOS = {
+    ccir:        'Atualização do CCIR (INCRA)',
+    car:         'Atualização / emissão do CAR (SICAR)',
+    itr:         'Regularização de ITR em atraso',
+    anuencia:    'Coleta de anuência dos confrontantes',
+    retificacao: 'Retificação de área (Lei 10.931/2004)',
+  };
+
   try {
     const res = await fetch('/v/' + encodeURIComponent(hash) + '/json');
     if (!res.ok) {
-      const j = await res.json().catch(()=>({error:'Recibo não encontrado'}));
+      const j = await res.json().catch(()=>({error:'Documento não encontrado'}));
       root.innerHTML = `
         <div class="stamp invalid">
           <div class="check">✗</div>
           <h1>Documento inválido</h1>
-          <p>${escapeHtml(j.error || 'Hash não corresponde a nenhum recibo.')}</p>
+          <p>${escapeHtml(j.error || 'Hash não corresponde a nenhum documento.')}</p>
         </div>
         <div class="card">
           <p style="font-size:13px;color:#444">Verifique:</p>
@@ -122,21 +187,102 @@
         </div>`;
       return;
     }
-    const { recibo: r, tenant } = await res.json();
+    // v3.23.5: a rota /v/:hash/json retorna { tipo: 'recibo' | 'proposta', ... }.
+    // Antes a pagina sempre destrutuvava `recibo: r` — quebrava pra propostas.
+    const payload = await res.json();
+    const tenant = payload.tenant;
     document.documentElement.style.setProperty('--cor', tenant?.primary_color || '#10b981');
     document.documentElement.style.setProperty('--cor-dark', tenant?.primary_color_dark || '#059669');
 
+    const headerHtml = `
+      <div class="header">
+        ${tenant?.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" class="logo" alt="">` : ''}
+        <strong>${escapeHtml(tenant?.brand_name || 'Romatec')}</strong>
+        ${tenant?.cnpj ? `<div style="font-size:12px;color:#666">CNPJ ${escapeHtml(tenant.cnpj)}</div>` : ''}
+      </div>`;
+
+    if (payload.tipo === 'proposta') {
+      // v3.23.5: render proposta — especial pro subtipo georreferenciamento_rural
+      // (mostra finalidade + opcionais contratados). Outros subtipos mostram
+      // resumo basico (numero, cliente, valor, validade).
+      const p = payload.proposta;
+      const dados = p.dados_imovel || {};
+      const isGeo = (p.subtipo_consultoria || p.subtipo) === 'georreferenciamento_rural';
+      const statusUp = String(p.status || '').toUpperCase();
+      const statusClass =
+        statusUp === 'APROVADA' ? 'status-ok' :
+        statusUp === 'EXPIRADA' || statusUp === 'CANCELADA' ? 'status-no' :
+        'status-pending';
+
+      let opcionaisHtml = '';
+      if (isGeo && dados.opcionais) {
+        const op = dados.opcionais;
+        const contratados = [];
+        if (op.ccir?.contratado)        contratados.push(`<li>${escapeHtml(OPC_ROTULOS.ccir)} — ${fmtBRL(op.ccir.valor_unitario)}</li>`);
+        if (op.car?.contratado)         contratados.push(`<li>${escapeHtml(OPC_ROTULOS.car)} — ${fmtBRL(op.car.valor_unitario)}</li>`);
+        if (op.itr?.contratado)         contratados.push(`<li>${escapeHtml(OPC_ROTULOS.itr)} — ${op.itr.quantidade}× ${fmtBRL(op.itr.valor_unitario)} = ${fmtBRL((op.itr.quantidade||0)*(op.itr.valor_unitario||0))}</li>`);
+        if (op.anuencia?.contratado)    contratados.push(`<li>${escapeHtml(OPC_ROTULOS.anuencia)} — ${op.anuencia.quantidade}× ${fmtBRL(op.anuencia.valor_unitario)} = ${fmtBRL((op.anuencia.quantidade||0)*(op.anuencia.valor_unitario||0))}</li>`);
+        if (op.retificacao?.contratado) contratados.push(`<li>${escapeHtml(OPC_ROTULOS.retificacao)} — <em>Sob orçamento</em></li>`);
+        opcionaisHtml = contratados.length > 0
+          ? `<div class="card">
+               <h2>Serviços adicionais opcionais (não inclusos no total)</h2>
+               <ul style="font-size:13px;color:#333;line-height:1.7;margin-left:18px">${contratados.join('')}</ul>
+             </div>`
+          : '';
+      }
+
+      const finalidadeHtml = isGeo && dados.finalidade
+        ? `<div class="card" style="background:#fef3c7;border:1px solid #d97706">
+             <h2 style="color:#92400e">Finalidade</h2>
+             <p style="font-size:13px;color:#111;font-weight:600">${escapeHtml(FINALIDADE_TEXTOS[dados.finalidade] || dados.finalidade)}</p>
+           </div>`
+        : '';
+
+      root.innerHTML = `
+        ${headerHtml}
+        <div class="stamp">
+          <div class="check">✓</div>
+          <h1>Proposta autenticada</h1>
+          <p>Documento emitido oficialmente pelo sistema</p>
+        </div>
+        <div class="card">
+          <h2>Detalhes da proposta</h2>
+          <dl>
+            <dt>Número</dt><dd>${escapeHtml(p.numero || '-')}</dd>
+            <dt>Status</dt><dd><span class="status ${statusClass}">${escapeHtml(statusUp || 'RASCUNHO')}</span></dd>
+            <dt>Cliente</dt><dd>${escapeHtml(p.cliente?.nome || '-')}</dd>
+            ${p.cliente?.cpf_cnpj ? `<dt>Documento</dt><dd>${escapeHtml(p.cliente.cpf_cnpj)}</dd>` : ''}
+            ${isGeo && dados.municipio ? `<dt>Município</dt><dd>${escapeHtml(dados.municipio)}${dados.estado ? '/'+escapeHtml(dados.estado) : ''}</dd>` : ''}
+            ${isGeo && dados.matricula ? `<dt>Matrícula</dt><dd>${escapeHtml(dados.matricula)}</dd>` : ''}
+            ${isGeo && dados.area_hectares ? `<dt>Área</dt><dd>${Number(dados.area_hectares).toLocaleString('pt-BR',{minimumFractionDigits:4})} ha</dd>` : ''}
+            <dt>Valor total</dt><dd><strong>${escapeHtml(fmtBRL(p.valor_total))}</strong></dd>
+            <dt>Emitida em</dt><dd>${escapeHtml(fmtData(p.data_proposta || p.criado_em))}</dd>
+            <dt>Validade</dt><dd>${p.validade_dias || 15} dias</dd>
+          </dl>
+          <a href="/v/${encodeURIComponent(hash)}/pdf" class="pdf-link">📄 Abrir PDF original</a>
+        </div>
+        ${finalidadeHtml}
+        ${opcionaisHtml}
+        ${isGeo ? avisoDRLHtml(dados.finalidade) : ''}
+        <div class="card">
+          <h2>Hash de autenticidade</h2>
+          <div class="hash-box">${escapeHtml(p.hash_validacao || hash)}</div>
+          <p style="font-size:11px;color:#9ca3af;margin-top:8px">
+            Este hash é único e imutável. Vinculado ao conteúdo do PDF no momento da emissão.
+          </p>
+        </div>`;
+      return;
+    }
+
+    // Render recibo (caminho original)
+    const r = payload.recibo;
     const statusClass =
       r.status === 'confirmado' ? 'status-ok' :
       r.status === 'contestado' || r.status === 'expirado' || r.status === 'cancelado' ? 'status-no' :
       'status-pending';
 
     let html = `
-      <div class="header">
-        ${tenant?.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" class="logo" alt="">` : ''}
-        <strong>${escapeHtml(tenant?.brand_name || 'Romatec')}</strong>
-        ${tenant?.cnpj ? `<div style="font-size:12px;color:#666">CNPJ ${escapeHtml(tenant.cnpj)}</div>` : ''}
-      </div>
+      ${headerHtml}
       <div class="stamp">
         <div class="check">✓</div>
         <h1>Documento autenticado</h1>

@@ -6611,6 +6611,29 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
           </label>
         </div>
 
+        <!-- v3.23.5: Finalidade controla o box dourado do PDF + adiciona linha
+             extra de emolumentos quando DESM/REM -->
+        <label>🎯 Finalidade do georreferenciamento
+          <select id="geoFinalidade" style="width:100%;">
+            <option value="CERTIFICACAO" selected>Certificação SIGEF/INCRA + averbação na matrícula vigente</option>
+            <option value="DESMEMBRAMENTO">Desmembramento — abertura de nova matrícula</option>
+            <option value="REMEMBRAMENTO">Remembramento — unificação de matrículas confrontantes</option>
+            <option value="RETIFICACAO">Retificação de área — averbação da nova área na matrícula</option>
+          </select>
+          <span style="font-size:10px; color:var(--text-muted);">Controla o texto do box "FINALIDADE" no PDF e custos extras de cartório quando aplica.</span>
+        </label>
+
+        <!-- v3.23.5: matricula + CRI (opcionais) — aparecem em Identificacao no PDF -->
+        <div class="lp-grid-2">
+          <label>Matrícula (opcional)
+            <input id="geoMatricula" placeholder="ex: 12.345" style="width:100%;">
+          </label>
+          <label>CRI / Cartório (opcional)
+            <input id="geoCri" placeholder="CRI de Açailândia/MA" style="width:100%;">
+            <span style="font-size:10px; color:var(--text-muted);">Default = CRI de {Município}/{UF}</span>
+          </label>
+        </div>
+
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📐 Levantamento</p>
         <div class="lp-grid-2">
           <label>Área (hectares)
@@ -6631,6 +6654,11 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
             <span style="font-size:10px; color:var(--text-muted);">Quantidade de dias em campo</span>
           </label>
         </div>
+        <!-- v3.23.5: perimetro opcional — vai na Identificacao do PDF -->
+        <label>Perímetro da poligonal (m, opcional)
+          <input id="geoPerimetro" type="number" min="0" step="0.01" placeholder="ex: 1280.50" style="width:100%;">
+          <span style="font-size:10px; color:var(--text-muted);">Aparece na Identificação do PDF quando informado.</span>
+        </label>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💰 Valores unitários (deixe 0 pra usar tabela CONFEA)</p>
         <div class="lp-grid-2">
@@ -6665,6 +6693,49 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
         <label style="display:flex; gap:6px; align-items:center;">
           <input id="geoTemMatricula" type="checkbox" checked>
           <span>Imóvel TEM matrícula registrada em cartório</span>
+        </label>
+
+        <!-- v3.23.5: Validade da proposta — default 15 dias -->
+        <label>Validade da proposta (dias)
+          <input id="geoValidadeDias" type="number" min="1" step="1" value="15" style="width:100%;">
+        </label>
+
+        <!-- v3.23.5: Servicos adicionais opcionais — NAO somam ao total Romatec.
+             Aparecem em seccao informativa propria no PDF (5 linhas sempre, marcadas
+             se contratadas). Valor unitario congelado no envio. -->
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">➕ Serviços adicionais opcionais</p>
+        <span style="font-size:10px; color:var(--text-muted); margin-bottom:4px;">Marque os que o cliente quer contratar — vão em seção informativa no PDF, NÃO somam ao total Romatec.</span>
+
+        <label style="display:flex; gap:6px; align-items:center; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
+          <input id="geoOpcCcir" type="checkbox">
+          <span style="flex:1;">Atualização do CCIR (INCRA)</span>
+          <span style="color:var(--gold); font-weight:600;">R$ 350,00</span>
+        </label>
+
+        <label style="display:flex; gap:6px; align-items:center; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
+          <input id="geoOpcCar" type="checkbox">
+          <span style="flex:1;">Atualização / emissão do CAR (SICAR)</span>
+          <span style="color:var(--gold); font-weight:600;">R$ 800,00</span>
+        </label>
+
+        <div style="display:flex; gap:6px; align-items:center; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
+          <input id="geoOpcItr" type="checkbox">
+          <span style="flex:1;">Regularização de ITR em atraso</span>
+          <input id="geoOpcItrQty" type="number" min="0" step="1" placeholder="exerc." style="width:70px; font-size:12px;">
+          <span style="color:var(--gold); font-weight:600;">×R$ 250</span>
+        </div>
+
+        <div style="display:flex; gap:6px; align-items:center; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
+          <input id="geoOpcAnuencia" type="checkbox">
+          <span style="flex:1;">Coleta de anuência dos confrontantes</span>
+          <input id="geoOpcAnuenciaQty" type="number" min="0" step="1" placeholder="qtd" style="width:70px; font-size:12px;">
+          <span style="color:var(--gold); font-weight:600;">×R$ 150</span>
+        </div>
+
+        <label style="display:flex; gap:6px; align-items:center; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
+          <input id="geoOpcRetificacao" type="checkbox">
+          <span style="flex:1;">Retificação de área (Lei 10.931/2004)</span>
+          <span style="color:var(--text-muted); font-style:italic;">Sob orçamento</span>
         </label>
 
         <div style="display:flex; gap:6px; margin-top:12px;">
@@ -6735,6 +6806,20 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
     setVal('geoOutros',        d.valor_outros_servicos);
     setVal('geoComplexidade',  d.complexidade);
     setChk('geoTemMatricula',  d.tem_matricula);
+    // v3.23.5: restaura novos campos
+    setVal('geoFinalidade',    d.finalidade);
+    setVal('geoMatricula',     d.matricula);
+    setVal('geoCri',           d.cri);
+    setVal('geoPerimetro',     d.perimetro_m);
+    setVal('geoValidadeDias',  d.validade_dias);
+    const op = d.opcionais || {};
+    setChk('geoOpcCcir',       op.ccir?.contratado);
+    setChk('geoOpcCar',        op.car?.contratado);
+    setChk('geoOpcItr',        op.itr?.contratado);
+    setVal('geoOpcItrQty',     op.itr?.quantidade);
+    setChk('geoOpcAnuencia',   op.anuencia?.contratado);
+    setVal('geoOpcAnuenciaQty', op.anuencia?.quantidade);
+    setChk('geoOpcRetificacao', op.retificacao?.contratado);
   }
 
   document.getElementById('geoPreview').onclick = async () => {
@@ -6745,6 +6830,13 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
     if (!area || area <= 0) return alert('Informe a área em hectares (>0).');
     if (!vertices || vertices < 3) return alert('Informe nº de vértices (mínimo 3 — poligonal).');
 
+    // v3.23.5: dados_imovel agora carrega finalidade, matricula, cri, perimetro,
+    // validade_dias e opcionais (CCIR/CAR/ITR/anuencia/retificacao) — todos
+    // congelados no JSON pra a proposta nao mudar retroativamente se reajustarmos
+    // os valores unitarios no params.json depois.
+    const _municipio = document.getElementById('geoMunicipio').value.trim() || 'Açailândia';
+    const _estado = document.getElementById('geoEstado').value.trim().toUpperCase() || 'MA';
+    const _criInput = document.getElementById('geoCri').value.trim();
     const dados_imovel = {
       area_hectares: area,
       numero_vertices: vertices,
@@ -6755,10 +6847,40 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
       valor_diaria_campo: Number(document.getElementById('geoValDia').value) || 0,
       valor_km_deslocamento: Number(document.getElementById('geoValKm').value) || 0,
       valor_outros_servicos: Number(document.getElementById('geoOutros').value) || 0,
-      municipio: document.getElementById('geoMunicipio').value.trim() || 'Açailândia',
-      estado: document.getElementById('geoEstado').value.trim().toUpperCase() || 'MA',
+      municipio: _municipio,
+      estado: _estado,
       tem_matricula: document.getElementById('geoTemMatricula').checked,
       complexidade: document.getElementById('geoComplexidade').value,
+      // v3.23.5: campos novos
+      finalidade: document.getElementById('geoFinalidade').value,
+      matricula: document.getElementById('geoMatricula').value.trim() || undefined,
+      cri: _criInput || `CRI de ${_municipio}/${_estado}`,
+      perimetro_m: Number(document.getElementById('geoPerimetro').value) || undefined,
+      validade_dias: Number(document.getElementById('geoValidadeDias').value) || 15,
+      opcionais: {
+        ccir: {
+          contratado: document.getElementById('geoOpcCcir').checked,
+          valor_unitario: 350.00,
+        },
+        car: {
+          contratado: document.getElementById('geoOpcCar').checked,
+          valor_unitario: 800.00,
+        },
+        itr: {
+          contratado: document.getElementById('geoOpcItr').checked,
+          quantidade: Number(document.getElementById('geoOpcItrQty').value) || 0,
+          valor_unitario: 250.00,
+        },
+        anuencia: {
+          contratado: document.getElementById('geoOpcAnuencia').checked,
+          quantidade: Number(document.getElementById('geoOpcAnuenciaQty').value) || 0,
+          valor_unitario: 150.00,
+        },
+        retificacao: {
+          contratado: document.getElementById('geoOpcRetificacao').checked,
+          valor: 'sob_orcamento',
+        },
+      },
     };
     const enderecoTxt = document.getElementById('geoEndereco').value.trim();
 

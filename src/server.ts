@@ -4022,6 +4022,16 @@ app.listen(PORT, () => {
     }
   })();
 
+  // v3.23.5: backfill numero PROP-AAAA-NNNN -> PROP-AAAA-NNNN-R1 (propostas legado).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-propostas-revisao');
+      await m.runPropostasRevisaoMigrations();
+    } catch (err) {
+      console.error('[propostas-revisao-migrations] FALHA fatal:', err);
+    }
+  })();
+
   // v3.17.0: tabela laudos_demarcacao_arquivos (anexos vetoriais DXF/DWG/KML)
   // + seeds de configurações de upload/download em `configuracoes`.
   void (async () => {

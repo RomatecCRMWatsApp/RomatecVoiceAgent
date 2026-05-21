@@ -61,6 +61,38 @@ export interface CustosCalculados {
   secao_4_checklist: DocumentoChecklist[];   // documentos do cliente
   secao_5_total: number;                     // soma das secoes 2 + 3
   avisos: string[];                          // ex: aviso SERO, aviso Prefeitura
+  // v3.23.5: subtotais explicitos para o PDF (Georref Rural PROP-2026-0011-R1).
+  // Quando presentes, o PDF separa visualmente "Honorarios Romatec" (trt + tecnicos
+  // + assessoria) de "Custos de Terceiros" (emolumentos, SIGEF, outros).
+  // Tambem usado pra validar fechamento p1 + p2 + p3 === total_romatec.
+  honorarios_romatec?: {
+    trt: number;
+    tecnicos: number;
+    assessoria: number;
+    total: number;                           // trt + tecnicos + assessoria
+  };
+  // v3.23.5: seccao 6 informativa com servicos opcionais (CCIR/CAR/ITR/anuencia/retif).
+  // NAO soma ao secao_5_total — exibida em tabela separada no PDF, mesmo quando vazia.
+  secao_opcionais_georref?: {
+    itens: Array<{
+      chave: 'ccir' | 'car' | 'itr' | 'anuencia' | 'retificacao';
+      rotulo: string;
+      contratado: boolean;
+      quantidade?: number;
+      valor_unitario?: number | 'sob_orcamento';
+      subtotal: number | 'sob_orcamento';
+    }>;
+    subtotal: number;                        // soma dos contratados (excl. retificacao)
+  };
+  // v3.23.5: historico de revisoes (incremento -R{N} quando PUT apos status ENVIADA).
+  // Logado aqui em vez de tabela separada (decisao: tabela propostas_historico nao existe
+  // ainda; mantemos em JSON por enquanto, migration futura pode extrair).
+  historico_revisoes?: Array<{
+    revisao: number;                         // R{N}
+    timestamp: string;                       // ISO
+    autor?: string;
+    motivo?: string;
+  }>;
 }
 
 export interface FontesConsulta {
@@ -91,6 +123,30 @@ export interface InputAverbacao {
   numero_parcelas_inss?: number; // 2..60
 }
 
+// v3.23.5: Finalidade do servico — controla o box dourado no PDF e
+// se adiciona linha de "Emolumentos — encerramento/abertura de matricula"
+// nos Custos de Terceiros (quando DESMEMBRAMENTO/REMEMBRAMENTO).
+export type FinalidadeGeorref =
+  | 'CERTIFICACAO'
+  | 'DESMEMBRAMENTO'
+  | 'REMEMBRAMENTO'
+  | 'RETIFICACAO';
+
+// v3.23.5: opcionais nao somam ao total Romatec — ficam em seccao informativa
+// propria com subtotal proprio (ver propostasConsultoria.ts secao 6 do PDF).
+// valor_unitario congelado no momento da criacao da proposta (decisao tomada
+// na resposta as 6 perguntas — se eu reajustar daqui 6 meses, propostas
+// antigas nao mudam retroativamente).
+export interface OpcionaisGeorref {
+  ccir: { contratado: boolean; valor_unitario: number };
+  car:  { contratado: boolean; valor_unitario: number };
+  itr:  { contratado: boolean; quantidade: number; valor_unitario: number };
+  anuencia: { contratado: boolean; quantidade: number; valor_unitario: number };
+  // Retificacao e "sob orcamento" — nao soma; valor literal usado pra evitar
+  // misturar string/numero no mesmo campo de valor.
+  retificacao: { contratado: boolean; valor: 'sob_orcamento' };
+}
+
 export interface InputGeorreferenciamento {
   area_hectares: number;
   numero_vertices: number;
@@ -105,6 +161,16 @@ export interface InputGeorreferenciamento {
   estado: string;
   tem_matricula: boolean;
   complexidade: 'simples' | 'media' | 'alta';
+
+  // v3.23.5: campos novos do alinhamento ao modelo aprovado PROP-2026-0011-R1.
+  // Todos opcionais por retrocompat — propostas antigas em dados_imovel JSON
+  // continuam carregando sem esses campos.
+  finalidade?: FinalidadeGeorref;
+  matricula?: string;             // matricula atual (texto livre)
+  cri?: string;                   // Cartorio do Registro de Imoveis (texto livre)
+  perimetro_m?: number;           // perimetro da poligonal em metros
+  validade_dias?: number;         // override da validade (default 15 no backend)
+  opcionais?: OpcionaisGeorref;   // servicos adicionais que entram em seccao informativa
 }
 
 export interface InputDesmembramento {
