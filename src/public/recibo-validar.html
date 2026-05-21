@@ -102,15 +102,30 @@
     cancelado:'⊘ Cancelado'
   };
 
+  // v3.23.5: textos da finalidade do Georref Rural (espelha o PDF/engine)
+  const FINALIDADE_TEXTOS = {
+    CERTIFICACAO:    'Certificação SIGEF/INCRA + averbação na matrícula vigente.',
+    DESMEMBRAMENTO:  'Desmembramento — encerramento da matrícula atual e abertura de nova matrícula.',
+    REMEMBRAMENTO:   'Remembramento — unificação de matrículas confrontantes em matrícula única.',
+    RETIFICACAO:     'Retificação de área — averbação da nova área na matrícula.',
+  };
+  const OPC_ROTULOS = {
+    ccir:        'Atualização do CCIR (INCRA)',
+    car:         'Atualização / emissão do CAR (SICAR)',
+    itr:         'Regularização de ITR em atraso',
+    anuencia:    'Coleta de anuência dos confrontantes',
+    retificacao: 'Retificação de área (Lei 10.931/2004)',
+  };
+
   try {
     const res = await fetch('/v/' + encodeURIComponent(hash) + '/json');
     if (!res.ok) {
-      const j = await res.json().catch(()=>({error:'Recibo não encontrado'}));
+      const j = await res.json().catch(()=>({error:'Documento não encontrado'}));
       root.innerHTML = `
         <div class="stamp invalid">
           <div class="check">✗</div>
           <h1>Documento inválido</h1>
-          <p>${escapeHtml(j.error || 'Hash não corresponde a nenhum recibo.')}</p>
+          <p>${escapeHtml(j.error || 'Hash não corresponde a nenhum documento.')}</p>
         </div>
         <div class="card">
           <p style="font-size:13px;color:#444">Verifique:</p>
@@ -122,21 +137,101 @@
         </div>`;
       return;
     }
-    const { recibo: r, tenant } = await res.json();
+    // v3.23.5: a rota /v/:hash/json retorna { tipo: 'recibo' | 'proposta', ... }.
+    // Antes a pagina sempre destrutuvava `recibo: r` — quebrava pra propostas.
+    const payload = await res.json();
+    const tenant = payload.tenant;
     document.documentElement.style.setProperty('--cor', tenant?.primary_color || '#10b981');
     document.documentElement.style.setProperty('--cor-dark', tenant?.primary_color_dark || '#059669');
 
+    const headerHtml = `
+      <div class="header">
+        ${tenant?.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" class="logo" alt="">` : ''}
+        <strong>${escapeHtml(tenant?.brand_name || 'Romatec')}</strong>
+        ${tenant?.cnpj ? `<div style="font-size:12px;color:#666">CNPJ ${escapeHtml(tenant.cnpj)}</div>` : ''}
+      </div>`;
+
+    if (payload.tipo === 'proposta') {
+      // v3.23.5: render proposta — especial pro subtipo georreferenciamento_rural
+      // (mostra finalidade + opcionais contratados). Outros subtipos mostram
+      // resumo basico (numero, cliente, valor, validade).
+      const p = payload.proposta;
+      const dados = p.dados_imovel || {};
+      const isGeo = (p.subtipo_consultoria || p.subtipo) === 'georreferenciamento_rural';
+      const statusUp = String(p.status || '').toUpperCase();
+      const statusClass =
+        statusUp === 'APROVADA' ? 'status-ok' :
+        statusUp === 'EXPIRADA' || statusUp === 'CANCELADA' ? 'status-no' :
+        'status-pending';
+
+      let opcionaisHtml = '';
+      if (isGeo && dados.opcionais) {
+        const op = dados.opcionais;
+        const contratados = [];
+        if (op.ccir?.contratado)        contratados.push(`<li>${escapeHtml(OPC_ROTULOS.ccir)} — ${fmtBRL(op.ccir.valor_unitario)}</li>`);
+        if (op.car?.contratado)         contratados.push(`<li>${escapeHtml(OPC_ROTULOS.car)} — ${fmtBRL(op.car.valor_unitario)}</li>`);
+        if (op.itr?.contratado)         contratados.push(`<li>${escapeHtml(OPC_ROTULOS.itr)} — ${op.itr.quantidade}× ${fmtBRL(op.itr.valor_unitario)} = ${fmtBRL((op.itr.quantidade||0)*(op.itr.valor_unitario||0))}</li>`);
+        if (op.anuencia?.contratado)    contratados.push(`<li>${escapeHtml(OPC_ROTULOS.anuencia)} — ${op.anuencia.quantidade}× ${fmtBRL(op.anuencia.valor_unitario)} = ${fmtBRL((op.anuencia.quantidade||0)*(op.anuencia.valor_unitario||0))}</li>`);
+        if (op.retificacao?.contratado) contratados.push(`<li>${escapeHtml(OPC_ROTULOS.retificacao)} — <em>Sob orçamento</em></li>`);
+        opcionaisHtml = contratados.length > 0
+          ? `<div class="card">
+               <h2>Serviços adicionais opcionais (não inclusos no total)</h2>
+               <ul style="font-size:13px;color:#333;line-height:1.7;margin-left:18px">${contratados.join('')}</ul>
+             </div>`
+          : '';
+      }
+
+      const finalidadeHtml = isGeo && dados.finalidade
+        ? `<div class="card" style="background:#fef3c7;border:1px solid #d97706">
+             <h2 style="color:#92400e">Finalidade</h2>
+             <p style="font-size:13px;color:#111;font-weight:600">${escapeHtml(FINALIDADE_TEXTOS[dados.finalidade] || dados.finalidade)}</p>
+           </div>`
+        : '';
+
+      root.innerHTML = `
+        ${headerHtml}
+        <div class="stamp">
+          <div class="check">✓</div>
+          <h1>Proposta autenticada</h1>
+          <p>Documento emitido oficialmente pelo sistema</p>
+        </div>
+        <div class="card">
+          <h2>Detalhes da proposta</h2>
+          <dl>
+            <dt>Número</dt><dd>${escapeHtml(p.numero || '-')}</dd>
+            <dt>Status</dt><dd><span class="status ${statusClass}">${escapeHtml(statusUp || 'RASCUNHO')}</span></dd>
+            <dt>Cliente</dt><dd>${escapeHtml(p.cliente?.nome || '-')}</dd>
+            ${p.cliente?.cpf_cnpj ? `<dt>Documento</dt><dd>${escapeHtml(p.cliente.cpf_cnpj)}</dd>` : ''}
+            ${isGeo && dados.municipio ? `<dt>Município</dt><dd>${escapeHtml(dados.municipio)}${dados.estado ? '/'+escapeHtml(dados.estado) : ''}</dd>` : ''}
+            ${isGeo && dados.matricula ? `<dt>Matrícula</dt><dd>${escapeHtml(dados.matricula)}</dd>` : ''}
+            ${isGeo && dados.area_hectares ? `<dt>Área</dt><dd>${Number(dados.area_hectares).toLocaleString('pt-BR',{minimumFractionDigits:4})} ha</dd>` : ''}
+            <dt>Valor total</dt><dd><strong>${escapeHtml(fmtBRL(p.valor_total))}</strong></dd>
+            <dt>Emitida em</dt><dd>${escapeHtml(fmtData(p.data_proposta || p.criado_em))}</dd>
+            <dt>Validade</dt><dd>${p.validade_dias || 15} dias</dd>
+          </dl>
+          <a href="/v/${encodeURIComponent(hash)}/pdf" class="pdf-link">📄 Abrir PDF original</a>
+        </div>
+        ${finalidadeHtml}
+        ${opcionaisHtml}
+        <div class="card">
+          <h2>Hash de autenticidade</h2>
+          <div class="hash-box">${escapeHtml(p.hash_validacao || hash)}</div>
+          <p style="font-size:11px;color:#9ca3af;margin-top:8px">
+            Este hash é único e imutável. Vinculado ao conteúdo do PDF no momento da emissão.
+          </p>
+        </div>`;
+      return;
+    }
+
+    // Render recibo (caminho original)
+    const r = payload.recibo;
     const statusClass =
       r.status === 'confirmado' ? 'status-ok' :
       r.status === 'contestado' || r.status === 'expirado' || r.status === 'cancelado' ? 'status-no' :
       'status-pending';
 
     let html = `
-      <div class="header">
-        ${tenant?.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" class="logo" alt="">` : ''}
-        <strong>${escapeHtml(tenant?.brand_name || 'Romatec')}</strong>
-        ${tenant?.cnpj ? `<div style="font-size:12px;color:#666">CNPJ ${escapeHtml(tenant.cnpj)}</div>` : ''}
-      </div>
+      ${headerHtml}
       <div class="stamp">
         <div class="check">✓</div>
         <h1>Documento autenticado</h1>
