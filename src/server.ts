@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import './util/logBR';            // side-effect: patches console.* with [HH:MM BRT] prefix
+import fs from 'fs';
 import path from 'path';
 import express, { Request, Response } from 'express';
 import multer from 'multer';
@@ -105,6 +106,27 @@ app.use('/api/gnss', gnssRouter);
 // v3.22.0: autocomplete de cartórios (CNJ) p/ wizard de Proposta de Remembramento
 app.use('/api/cartorios', cartoriosRouter);
 app.use('/api/explicativo', explicativoRouter); // v3.23.0 — texto explicativo de serviço
+
+// v3.23.2: /sw.js servido com injecao de versao em runtime.
+// Fonte unica da verdade e' package.json (via AGENT_IDENTITY.version).
+// O arquivo em disco contem o placeholder __APP_VERSION__ no const CACHE;
+// aqui substituimos antes de enviar pro browser. Sem isso, esquecer de
+// bumpar a string em sw.js faz o SW nunca invalidar o cache antigo (bug
+// classico "deploy OK no Railway mas a versao no app nao muda").
+// PRECISA vir ANTES do express.static abaixo pra interceptar a request.
+app.get('/sw.js', (_req: Request, res: Response) => {
+  try {
+    const swPath = path.join(__dirname, 'public', 'sw.js');
+    const source = fs.readFileSync(swPath, 'utf8');
+    const injected = source.replace(/__APP_VERSION__/g, AGENT_IDENTITY.version);
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.send(injected);
+  } catch (err) {
+    console.error('[sw.js] falha ao servir:', err);
+    res.status(500).type('application/javascript').send('// sw.js read error');
+  }
+});
 
 // Static files com Cache-Control inteligente:
 // HTML/SW/manifest = no-cache (browser revalida a cada request com ETag)
