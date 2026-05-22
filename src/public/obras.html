@@ -21435,6 +21435,25 @@ function readImageFile(file) {
 state.configSub = state.configSub || 'usuarios';
 state.configCache = state.configCache || { users: [], catalogo: null, equipe: [], auditoria: [] };
 
+// v3.25.3: helper de timezone — server em UTC, exibe em BRT.
+// Backend retorna timestamps como ISO 8601 sem o "Z" final (ex: "2026-05-22T22:45:25.000")
+// — o JS interpreta como naive datetime no fuso LOCAL do navegador, dando bug
+// de -3h (BRT). Solucao: detectar string sem TZ e anexar "Z" pra tratar como UTC,
+// depois formatar com timeZone explicito 'America/Sao_Paulo'.
+function fmtDataBRT(d) {
+  if (!d) return '—';
+  let parsed;
+  if (typeof d === 'string') {
+    // String sem timezone (sem Z e sem +/-HH:MM no final) → assume UTC
+    const temTZ = /Z$|[+-]\d{2}:?\d{2}$/.test(d);
+    parsed = new Date(temTZ ? d : d + 'Z');
+  } else {
+    parsed = new Date(d);
+  }
+  if (isNaN(parsed.getTime())) return '—';
+  return parsed.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+}
+
 async function renderConfiguracoes() {
   const v = document.getElementById('view-config');
   v.innerHTML = `
@@ -21490,7 +21509,7 @@ async function renderCfgUsuarios() {
         ${u.permissions === null ? `<em>default do role</em>` : `${u.permissions.length} permissões custom`}
       </td>
       <td style="padding:8px; font-size:11px; color:var(--text-muted);">
-        ${u.last_login_at ? new Date(u.last_login_at).toLocaleString('pt-BR') : '<em>nunca</em>'}
+        ${u.last_login_at ? fmtDataBRT(u.last_login_at) : '<em>nunca</em>'}
       </td>
       <td style="padding:8px;">
         <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${u.active?'var(--neon)':'#666'};"></span>
@@ -21718,7 +21737,7 @@ async function renderCfgAuditoria() {
   const linhas = items.map(l => `
     <tr style="border-bottom:1px solid var(--border);">
       <td style="padding:6px; font-size:11px; color:var(--text-muted); white-space:nowrap;">
-        ${new Date(l.created_at).toLocaleString('pt-BR')}
+        ${fmtDataBRT(l.created_at)}
       </td>
       <td style="padding:6px;">
         <div>${escape(l.user_name || l.login_attempt || '—')}</div>
