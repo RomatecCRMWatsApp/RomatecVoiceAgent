@@ -8601,12 +8601,14 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
 
       <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">📐 Projeto Executivo — Arquitetura + Complementares · NBR 13531/13532, 5626, 8160, 5410, 6118, 9077</p>
 
-      <!-- v3.24.6 Ajuste 1: botao Novo Cliente -->
+      <!-- v3.24.6 Ajuste 1: botao Novo Cliente. v3.24.9: + Editar + Excluir -->
       <div style="margin-top:12px;">
         <p style="font-weight:600; color:var(--neon); font-size:13px;">📋 Cliente</p>
-        <div style="display:flex; gap:8px; align-items:flex-end;">
-          <label style="flex:1;">Cliente <select id="peCli" style="width:100%;"><option value="">— Selecione —</option>${cliOpts}</select></label>
+        <div style="display:flex; gap:6px; align-items:flex-end; flex-wrap:wrap;">
+          <label style="flex:1; min-width:200px;">Cliente <select id="peCli" style="width:100%;"><option value="">— Selecione —</option>${cliOpts}</select></label>
           <button type="button" id="peCliNovo" class="btn-secondary" style="min-height:44px; padding:8px 12px; white-space:nowrap;">➕ Novo</button>
+          <button type="button" id="peCliEditar" class="btn-secondary" style="min-height:44px; padding:8px 12px; white-space:nowrap;" disabled>✏ Editar</button>
+          <button type="button" id="peCliExcluir" class="btn-danger" style="min-height:44px; padding:8px 12px; white-space:nowrap;" disabled>🗑 Excluir</button>
         </div>
       </div>
 
@@ -8795,20 +8797,62 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
   // Handlers
   if (cache.cliId) document.getElementById('peCli').value = cache.cliId;
 
-  // v3.24.6 Ajuste 1: botao Novo Cliente
+  // v3.24.6 Ajuste 1: botao Novo Cliente. v3.24.9: + Editar/Excluir
+  function recarregarSelectClientesPE(idSelecionar) {
+    return loadPropostasClientes().then(() => {
+      const sel = document.getElementById('peCli');
+      sel.innerHTML = '<option value="">— Selecione —</option>' +
+        state.propostasClientes.map(c =>
+          `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
+        ).join('');
+      if (idSelecionar) sel.value = String(idSelecionar);
+      atualizarBotoesCliPE();
+    });
+  }
+
+  function atualizarBotoesCliPE() {
+    const sel = document.getElementById('peCli');
+    const temSel = !!sel.value;
+    document.getElementById('peCliEditar').disabled = !temSel;
+    document.getElementById('peCliExcluir').disabled = !temSel;
+  }
+  document.getElementById('peCli').addEventListener('change', atualizarBotoesCliPE);
+  atualizarBotoesCliPE();
+
   document.getElementById('peCliNovo').onclick = async () => {
     try {
       const novo = await abrirModalNovoCliente();
-      if (novo && novo.id) {
-        await loadPropostasClientes();
-        const sel = document.getElementById('peCli');
-        sel.innerHTML = '<option value="">— Selecione —</option>' +
-          state.propostasClientes.map(c =>
-            `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
-          ).join('');
-        sel.value = String(novo.id);
-      }
+      if (novo && novo.id) await recarregarSelectClientesPE(novo.id);
     } catch (e) { alert('Erro ao cadastrar cliente: ' + e.message); }
+  };
+
+  document.getElementById('peCliEditar').onclick = async () => {
+    const cliId = document.getElementById('peCli').value;
+    if (!cliId) return;
+    try {
+      // Pega do cache state.propostasClientes (carregado via listarClientesProposta
+      // que faz SELECT * — todos os campos vem)
+      const cli = state.propostasClientes.find(c => String(c.id) === String(cliId));
+      if (!cli) {
+        alert('Cliente nao encontrado no cache. Recarregue a pagina.');
+        return;
+      }
+      const atualizado = await abrirModalNovoCliente(cli);
+      if (atualizado && atualizado.id) await recarregarSelectClientesPE(atualizado.id);
+    } catch (e) { alert('Erro ao editar cliente: ' + e.message); }
+  };
+
+  document.getElementById('peCliExcluir').onclick = async () => {
+    const sel = document.getElementById('peCli');
+    const cliId = sel.value;
+    if (!cliId) return;
+    const nome = sel.options[sel.selectedIndex].textContent;
+    if (!confirm(`Excluir cliente "${nome}"?\n\nIMPORTANTE: o cliente sera desativado (soft delete). Propostas existentes nao sao apagadas. Esta acao pode falhar se o cliente tiver propostas ativas.`)) return;
+    try {
+      await api('/api/propostas-clientes/' + cliId, { method: 'DELETE' });
+      await recarregarSelectClientesPE();
+      alert('✅ Cliente excluido.');
+    } catch (e) { alert('Erro ao excluir cliente: ' + e.message); }
   };
 
   // v3.24.6 Ajuste 4: tags clicaveis de pagamento — estado local
@@ -13213,8 +13257,12 @@ function showToast(msg, tipo = 'info') {
 
 // ─── MODAL CADASTRO DE CLIENTE (v1.86.0) ──────────────────────────────
 // Promise<cliente | null>. Cliente = objeto retornado do POST /api/propostas-clientes.
-function abrirModalNovoCliente() {
+// v3.24.9: funcao aceita `clienteEditar` opcional. Quando passado, modal
+// vira modo EDICAO — pre-popula campos, muda titulo/botao, usa PUT em vez
+// de POST. Retorna o cliente atualizado (ou null se cancelado).
+function abrirModalNovoCliente(clienteEditar = null) {
   return new Promise(resolve => {
+    const isEdit = !!clienteEditar;
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px; overflow-y:auto;';
     const modal = document.createElement('div');
@@ -13222,7 +13270,7 @@ function abrirModalNovoCliente() {
     modal.style.cssText = 'max-width:780px; width:100%; max-height:92vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.5);';
     modal.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-        <p class="section-title" style="margin:0;">➕ Cadastrar novo cliente</p>
+        <p class="section-title" style="margin:0;">${isEdit ? '✏ Editar cliente' : '➕ Cadastrar novo cliente'}</p>
         <button data-cli-fechar style="background:transparent;">✕</button>
       </div>
       <!-- v1.90.0: toggle PF/PJ explícito no topo -->
@@ -13332,12 +13380,35 @@ function abrirModalNovoCliente() {
       </label>
 
       <div style="display:flex; gap:8px; margin-top:14px;">
-        <button data-cli-salvar class="btn-primary" style="flex:2; background:var(--success); color:#fff; border-color:var(--success); font-weight:600;">💾 Cadastrar e usar no recibo</button>
+        <button data-cli-salvar class="btn-primary" style="flex:2; background:var(--success); color:#fff; border-color:var(--success); font-weight:600;">${isEdit ? '💾 Salvar alteracoes' : '💾 Cadastrar e usar'}</button>
         <button data-cli-cancelar style="flex:1; background:transparent;">Cancelar</button>
       </div>
     `;
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
+
+    // v3.24.9: pre-popula campos quando em modo edicao
+    if (isEdit && clienteEditar) {
+      const setVal = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+      setVal('cli_nome', clienteEditar.nome);
+      setVal('cli_doc', clienteEditar.cpf_cnpj);
+      setVal('cli_tel', clienteEditar.telefone);
+      setVal('cli_email', clienteEditar.email);
+      setVal('cli_rgie', clienteEditar.rg_ie);
+      setVal('cli_dtnasc', (clienteEditar.data_nascimento || '').slice(0, 10));
+      setVal('cli_estciv', clienteEditar.estado_civil);
+      setVal('cli_profissao', clienteEditar.profissao);
+      setVal('cli_razao', clienteEditar.razao_social);
+      setVal('cli_fantasia', clienteEditar.nome_fantasia);
+      setVal('cli_cep', clienteEditar.cep);
+      setVal('cli_logr', clienteEditar.endereco);
+      setVal('cli_num', clienteEditar.numero);
+      setVal('cli_compl', clienteEditar.complemento);
+      setVal('cli_bairro', clienteEditar.bairro);
+      setVal('cli_cidade', clienteEditar.cidade);
+      setVal('cli_uf', clienteEditar.estado);
+      setVal('cli_obs', clienteEditar.observacoes);
+    }
 
     const cleanup = (val) => { try { document.body.removeChild(overlay); } catch {} resolve(val); };
 
@@ -13500,11 +13571,24 @@ function abrirModalNovoCliente() {
           estado: document.getElementById('cli_uf').value.trim().toUpperCase() || null,
           observacoes: document.getElementById('cli_obs').value.trim() || null,
         };
-        const r = await api('/api/propostas-clientes', { method: 'POST', body: JSON.stringify(payload) });
-        cleanup({
-          id: r.insertId,
-          nome, cpf_cnpj: doc, telefone: tel, email,
-        });
+        // v3.24.9: PUT quando edicao, POST quando novo
+        let r;
+        if (isEdit && clienteEditar?.id) {
+          r = await api('/api/propostas-clientes/' + clienteEditar.id, {
+            method: 'PUT', body: JSON.stringify(payload),
+          });
+          cleanup({
+            id: clienteEditar.id,
+            nome, cpf_cnpj: doc, telefone: tel, email,
+            ...payload,
+          });
+        } else {
+          r = await api('/api/propostas-clientes', { method: 'POST', body: JSON.stringify(payload) });
+          cleanup({
+            id: r.insertId,
+            nome, cpf_cnpj: doc, telefone: tel, email,
+          });
+        }
       } catch (e) {
         showToast('Erro: ' + (e?.message || e), 'error');
         btn.disabled = false; btn.textContent = orig;
