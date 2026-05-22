@@ -645,7 +645,10 @@ export function renderProjetoExecutivoBody(
   }
 
   // ── 3. ETAPA PRELIMINAR (box amarelo da TAXA DE R$ 750) ───────────────
-  if (doc.y > 600) doc.addPage();
+  // v3.24.15 FIX: bloco e' atomico — calcula altura real ANTES de decidir
+  // se cabe. Antes usava `if (doc.y > 600) addPage()`, limite estatico que
+  // nao considerava a altura do texto (~280px) — o box cortava entre paginas
+  // quando o conteudo anterior empurrava doc.y pra entre 514 e 600.
   const textoTaxa =
     `ETAPA PRELIMINAR — HORA TECNICA DE ANTEPROJETO E CROQUI\n\n` +
     `Valor: R$ ${taxaEsboco.toFixed(2).replace('.', ',')} (informativo, NAO incluido no VALOR TOTAL)\n\n` +
@@ -659,8 +662,14 @@ export function renderProjetoExecutivoBody(
     `► Caso o CONTRATANTE, apos a entrega e aprovacao do esboco, PROSSIGA com a contratacao integral dos projetos executivos descritos nesta proposta, o valor de R$ ${taxaEsboco.toFixed(2).replace('.', ',')} NAO SERA COBRADO, sendo absorvido pelo valor global do contrato.\n` +
     `► Caso o CONTRATANTE OPTE POR NAO PROSSEGUIR com a fase executiva apos a entrega do anteprojeto, fica acordado o pagamento da Hora Tecnica de R$ ${taxaEsboco.toFixed(2).replace('.', ',')}, que remunera exclusivamente o tempo tecnico empregado na elaboracao do croqui e estudos preliminares.\n\n` +
     `Este valor NAO esta incluido no VALOR TOTAL desta proposta (Secao 5), sendo mencionado apenas para clareza contratual.`;
+  // Mede altura real com fontSize 9 (mesmo que vai renderizar)
+  doc.fontSize(9).font('Helvetica');
+  const textoH = doc.heightOfString(textoTaxa, { width: COL_W - 24 });
+  const boxH = textoH + 20;
+  // Verifica se cabe na pagina atual: limiteY = page.height - margins.bottom - 8 buffer
+  const limiteY = doc.page.height - doc.page.margins.bottom - 8;
+  if (doc.y + boxH > limiteY) doc.addPage();
   const boxY = doc.y;
-  const boxH = doc.heightOfString(textoTaxa, { width: COL_W - 24 }) + 20;
   doc.rect(COL_X_INI, boxY, COL_W, boxH).fillAndStroke(COR_DOURADO_BG, COR_DOURADO_BORDA);
   doc.fontSize(9).fillColor('#713f12').font('Helvetica')
      .text(textoTaxa, COL_X_INI + 12, boxY + 10, { width: COL_W - 24, align: 'justify' });
