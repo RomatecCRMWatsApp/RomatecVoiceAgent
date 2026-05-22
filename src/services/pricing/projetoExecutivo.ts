@@ -1,18 +1,14 @@
 // v3.24.5: motor de calculo de Projeto Executivo (arquitetonico + complementares).
-//
-// Regra de negocio:
-//   Valor projetos = area_construir × valor_m2 (default R$ 25/m²)
-//   ART/TRT auto por area: > 80m² -> ART | <= 80m² -> TRT
-//   ART exige profissional CREA (Romatec subcontrata por aditivo);
-//   TRT pode ser emitida diretamente pelo Jose Romario (Tec. Edificacoes).
-//   Alvara e Placa: opcionais, valores informados ou 0 se desmarcados.
-//   Taxa esboco (R$750): INFORMATIVA — nao soma ao subtotal/total.
-//     Cobrada apenas se cliente desistir apos entrega do anteprojeto.
-//   Desconto: subtrai do subtotal.
+// v3.24.6: REESTRUTURADO em DOIS BLOCOS FINANCEIROS:
+//   🅰 HONORARIOS TECNICOS (Romatec)  → entra em parcelas 50/50
+//   🅱 DESPESAS ADMINISTRATIVAS (cliente paga a parte) → fora das parcelas
+// Forma de pagamento agora vem por TAG (sinal_mais_1 default = 50/50).
+// Taxa esboco R$ 750 continua INFORMATIVA (fora do total geral).
 
 import type {
   InputProjetoExecutivo,
   ProjetoSelecionado,
+  FormaPagamentoTag,
   CustosCalculados,
   ResultadoCalculo,
   ItemCusto,
@@ -21,23 +17,19 @@ import type {
   BaseCalculo,
 } from './types';
 
-// HALF_UP em 2 casas (mesma logica das outras engines)
+// HALF_UP em 2 casas
 export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
-// Defaults pra ART/TRT e config — sem dependencia de DB pra simplificar.
-// CEO pediu defaults conservadores e ajustaveis via input.
 export const DEFAULTS_PROJETO_EXECUTIVO = {
   VALOR_M2: 25.00,
   TAXA_ESBOCO: 750.00,
-  ART_VALOR: 233.94,     // CREA-MA referencia (subcontratacao)
-  TRT_VALOR: 93.40,      // CFT/MA referencia (mesma das outras propostas)
+  ART_VALOR: 233.94,
+  TRT_VALOR: 93.40,
   AREA_LIMITE_TRT: 80.00,
 } as const;
 
-// Lista padrao de projetos executivos com detalhamentos completos.
-// CEO pode customizar por proposta — o que vier no input substitui o default.
 export const PROJETOS_DEFAULT_PROJETO_EXECUTIVO: ProjetoSelecionado[] = [
   {
     codigo: 'mapa_situacao',
@@ -131,10 +123,10 @@ const AVISO_CNO_EXECUTIVO =
   'expedicao do Alvara de Construcao pela Prefeitura. A CONTRATADA executa o cadastramento ' +
   'quando o CONTRATANTE apresentar o Alvara.';
 
-const AVISO_ALVARA =
-  'O Alvara de Construcao e expedido pela Prefeitura Municipal de Acailandia mediante pagamento ' +
-  'das taxas municipais (TLE, ISS de aprovacao, etc) diretamente pelo CONTRATANTE. A CONTRATADA ' +
-  'acompanha o protocolo e exigencias ate a expedicao.';
+const AVISO_DESPESAS =
+  'Os valores das Despesas Administrativas NAO compoem os Honorarios Tecnicos e NAO estao ' +
+  'sujeitos ao parcelamento 50/50. Sao pagos pelo CONTRATANTE diretamente aos orgaos competentes ' +
+  'ou reembolsados a CONTRATADA mediante apresentacao dos comprovantes.';
 
 const AVISO_ART =
   'A ART (Anotacao de Responsabilidade Tecnica) junto ao CREA-MA exige profissional Engenheiro ' +
@@ -146,7 +138,6 @@ const AVISO_TRT =
   'profissional Jose Romario Pinto Bezerra — Tecnico em Edificacoes (CFT/MA 01209185369). ' +
   'Aplicavel a obras de ate 80m² conforme Lei 13.639/2018.';
 
-// Documentos obrigatorios do cliente pra dar inicio aos projetos
 const CHECKLIST_PROJETO_EXECUTIVO: DocumentoChecklist[] = [
   { texto: 'RG e CPF do proprietario (copia simples)', obrigatorio: true },
   { texto: 'Comprovante de residencia atualizado (max. 90 dias)', obrigatorio: true },
@@ -157,26 +148,117 @@ const CHECKLIST_PROJETO_EXECUTIVO: DocumentoChecklist[] = [
   { texto: 'Referencias visuais / inspiracao (opcional)', obrigatorio: false },
 ];
 
-export interface ResultadoProjetoExecutivoExtra {
-  area_construir: number;
-  valor_m2: number;
-  valor_projetos: number;
-  responsabilidade_tipo: 'ART' | 'TRT';
-  responsabilidade_valor: number;
-  responsabilidade_auto: boolean;
-  taxa_esboco: number;
-  alvara: { incluir: boolean; valor: number };
-  placa: { incluir: boolean; valor: number };
-  subtotal: number;
-  desconto: number;
-  valor_total: number;
+// v3.24.6: helper exportado pra rendering de Forma de Pagamento por TAG
+export function renderizarFormaPagamento(
+  tag: FormaPagamentoTag,
+  totalHonorarios: number,
+  custom?: string,
+): { tag: FormaPagamentoTag; texto_renderizado: string; detalhes_custom?: string } {
+  const fmt = (v: number) =>
+    v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  switch (tag) {
+    case 'integral':
+      return {
+        tag,
+        texto_renderizado:
+          `Pagamento a vista no valor de R$ ${fmt(totalHonorarios)} ` +
+          `na assinatura do contrato.`,
+      };
+
+    case 'sinal_mais_1': {
+      const metade = round2(totalHonorarios * 0.5);
+      const resto = round2(totalHonorarios - metade);
+      return {
+        tag,
+        texto_renderizado:
+          `Pagamento em 2 (duas) parcelas: ` +
+          `R$ ${fmt(metade)} como SINAL no inicio (assinatura do contrato / ` +
+          `aprovacao do anteprojeto) e R$ ${fmt(resto)} na ENTREGA FINAL ` +
+          `dos projetos executivos em PDF via WhatsApp e e-mail.`,
+      };
+    }
+
+    case 'sinal_mais_2': {
+      const sinal = round2(totalHonorarios * 0.5);
+      const restante = round2(totalHonorarios - sinal);
+      const parc = round2(restante / 2);
+      const ultima = round2(restante - parc);
+      return {
+        tag,
+        texto_renderizado:
+          `Pagamento em 3 (tres) parcelas: ` +
+          `R$ ${fmt(sinal)} como SINAL no inicio; ` +
+          `R$ ${fmt(parc)} na entrega do anteprojeto aprovado; ` +
+          `e R$ ${fmt(ultima)} na ENTREGA FINAL dos projetos executivos ` +
+          `em PDF via WhatsApp e e-mail.`,
+      };
+    }
+
+    case 'duas_vezes': {
+      const p1 = round2(totalHonorarios * 0.5);
+      const p2 = round2(totalHonorarios - p1);
+      return {
+        tag,
+        texto_renderizado:
+          `Pagamento em 2 (duas) parcelas: ` +
+          `R$ ${fmt(p1)} na assinatura do contrato e R$ ${fmt(p2)} ` +
+          `na ENTREGA FINAL dos projetos executivos em PDF via WhatsApp e e-mail.`,
+      };
+    }
+
+    case 'personalizada':
+      return {
+        tag,
+        texto_renderizado: (custom && custom.trim()) || 'A combinar entre as partes.',
+        detalhes_custom: custom,
+      };
+  }
+}
+
+// v3.24.6: estrutura completa de retorno (extends ResultadoCalculo via custos)
+export interface CustosProjetoExecutivoV2 {
+  honorarios: {
+    area_construir: number;
+    valor_m2: number;
+    valor_projetos: number;
+    responsabilidade_tipo: 'ART' | 'TRT';
+    responsabilidade_auto: boolean;
+    responsabilidade_valor: number;
+    subtotal_honorarios: number;
+    desconto_honorarios: number;
+    total_honorarios: number;
+    parcela_inicial: number;
+    parcela_final: number;
+  };
+  despesas_administrativas: {
+    diligencia_secretaria: { incluir: boolean; valor: number };
+    taxa_alvara_municipio: { incluir: boolean; valor: number };
+    placa_obra: { incluir: boolean; valor: number };
+    subtotal_despesas: number;
+  };
+  taxa_esboco: {
+    valor: number;
+    cobranca_condicional: boolean;
+    nota: string;
+  };
+  forma_pagamento: {
+    tag: FormaPagamentoTag;
+    texto_renderizado: string;
+    detalhes_custom?: string;
+  };
+  resumo: {
+    total_honorarios: number;
+    total_despesas: number;
+    total_geral: number;
+  };
   projetos_selecionados: ProjetoSelecionado[];
   cno_observacao: string;
 }
 
 export async function calcularProjetoExecutivo(
   input: InputProjetoExecutivo,
-): Promise<ResultadoCalculo & { projeto_executivo: ResultadoProjetoExecutivoExtra }> {
+): Promise<ResultadoCalculo & { projeto_executivo: CustosProjetoExecutivoV2 }> {
   if (!input.area_construir || input.area_construir <= 0) {
     throw new Error('area_construir deve ser maior que zero');
   }
@@ -186,9 +268,8 @@ export async function calcularProjetoExecutivo(
 
   const valorM2 = input.valor_m2;
   const valor_projetos = round2(input.area_construir * valorM2);
-  const taxa_esboco = round2(input.taxa_esboco ?? DEFAULTS_PROJETO_EXECUTIVO.TAXA_ESBOCO);
 
-  // ART/TRT — default auto por area (>80m² ART). Override manual respeita escolha.
+  // ART/TRT — auto por area
   const auto = input.responsabilidade_auto !== false;
   let responsabilidade_tipo: 'ART' | 'TRT';
   if (!auto && input.responsabilidade_tipo) {
@@ -197,7 +278,6 @@ export async function calcularProjetoExecutivo(
     responsabilidade_tipo =
       input.area_construir > DEFAULTS_PROJETO_EXECUTIVO.AREA_LIMITE_TRT ? 'ART' : 'TRT';
   }
-
   const responsabilidade_valor = round2(
     input.responsabilidade_valor != null
       ? input.responsabilidade_valor
@@ -206,71 +286,121 @@ export async function calcularProjetoExecutivo(
         : DEFAULTS_PROJETO_EXECUTIVO.TRT_VALOR),
   );
 
-  const alvara_valor = input.alvara_incluir ? round2(input.alvara_valor) : 0;
-  const placa_valor  = input.placa_incluir  ? round2(input.placa_valor)  : 0;
+  // 🅰 HONORARIOS
+  const subtotal_honorarios = round2(valor_projetos + responsabilidade_valor);
+  const desconto_honorarios = round2(input.desconto_honorarios ?? input.desconto ?? 0);
+  const total_honorarios = round2(subtotal_honorarios - desconto_honorarios);
+  const parcela_inicial = round2(total_honorarios * 0.5);
+  const parcela_final = round2(total_honorarios - parcela_inicial);
 
-  // Subtotal NAO inclui taxa_esboco
-  const subtotal = round2(valor_projetos + responsabilidade_valor + alvara_valor + placa_valor);
-  const desconto = round2(input.desconto ?? 0);
-  const valor_total = round2(subtotal - desconto);
+  // 🅱 DESPESAS ADMIN — usa forma nova (DespesaAdmItem) com fallback retro
+  // pra alvara_incluir/alvara_valor/placa_incluir/placa_valor (v3.24.5).
+  const diligenciaIn = input.diligencia_secretaria ?? { incluir: false, valor: 0 };
+  const alvaraIn = input.taxa_alvara_municipio
+    ?? (input.alvara_incluir != null
+      ? { incluir: !!input.alvara_incluir, valor: input.alvara_valor || 0 }
+      : { incluir: false, valor: 0 });
+  const placaIn = input.placa_obra
+    ?? (input.placa_incluir != null
+      ? { incluir: !!input.placa_incluir, valor: input.placa_valor || 0 }
+      : { incluir: false, valor: 0 });
 
-  // Projetos: aplica defaults SE input nao trouxe lista
+  const vDilig = diligenciaIn.incluir ? round2(diligenciaIn.valor) : 0;
+  const vAlvara = alvaraIn.incluir ? round2(alvaraIn.valor) : 0;
+  const vPlaca = placaIn.incluir ? round2(placaIn.valor) : 0;
+  const subtotal_despesas = round2(vDilig + vAlvara + vPlaca);
+
+  // Taxa esboco
+  const taxa_esboco_valor = round2(input.taxa_esboco ?? DEFAULTS_PROJETO_EXECUTIVO.TAXA_ESBOCO);
+
+  // Forma de pagamento por TAG
+  const formaTag: FormaPagamentoTag = input.forma_pagamento_tag ?? 'sinal_mais_1';
+  const forma_pagamento = renderizarFormaPagamento(formaTag, total_honorarios, input.forma_pagamento_custom);
+
+  // Resumo (total_geral = honorarios + despesas; taxa esboco FORA)
+  const total_geral = round2(total_honorarios + subtotal_despesas);
+
+  // Projetos selecionados
   const projetos = (input.projetos_selecionados && input.projetos_selecionados.length > 0)
     ? input.projetos_selecionados
     : PROJETOS_DEFAULT_PROJETO_EXECUTIVO;
-  // Filtra so os selecionados pra montar a lista do escopo (Secao 1)
   const projetosAtivos = projetos.filter(p => p.selecionado);
-
   const secao_1_projetos = projetosAtivos.map(p => `${p.nome}: ${p.detalhamento_entrega}`);
 
-  // Tabela financeira:
-  // Secao 2 (taxas) = ART/TRT + alvara + placa (sem taxas terceiros nesse subtipo)
-  // Secao 3 (honorarios) = valor_projetos (item unico, ja inclui o pacote completo)
+  // ── Estrutura CustosCalculados padrao (compat retro com renderers genericos)
+  // Mapeamento:
+  //   secao_3_honorarios = projetos + ART/TRT (HONORARIOS)
+  //   secao_2_taxas = despesas administrativas (alvara + placa + diligencia)
+  //   secao_5_total = total_geral (honorarios + despesas)
+  //   condicoes_pagamento = baseado na TAG (so 2 parcelas no sinal_mais_1)
+  const secao_3_honorarios: ItemCusto[] = [
+    {
+      ordem: 1,
+      descricao: `Projetos Executivos (${projetosAtivos.length} projeto${projetosAtivos.length === 1 ? '' : 's'}) — ` +
+                 `${input.area_construir.toFixed(2)}m² × R$ ${valorM2.toFixed(2)}/m²`,
+      valor: valor_projetos,
+    },
+    {
+      ordem: 2,
+      descricao: responsabilidade_tipo === 'ART'
+        ? 'ART — Anotacao de Responsabilidade Tecnica (CREA-MA)'
+        : 'TRT — Termo de Responsabilidade Tecnica (CFT/MA)',
+      valor: responsabilidade_valor,
+      observacao: responsabilidade_tipo === 'ART' ? AVISO_ART : AVISO_TRT,
+    },
+  ];
+
   const secao_2_taxas: ItemCusto[] = [];
-  secao_2_taxas.push({
-    ordem: 1,
-    descricao: responsabilidade_tipo === 'ART'
-      ? 'ART — Anotacao de Responsabilidade Tecnica (CREA-MA)'
-      : 'TRT — Termo de Responsabilidade Tecnica (CFT/MA)',
-    valor: responsabilidade_valor,
-    observacao: responsabilidade_tipo === 'ART' ? AVISO_ART : AVISO_TRT,
-  });
-  if (input.alvara_incluir) {
+  if (diligenciaIn.incluir) {
+    secao_2_taxas.push({
+      ordem: 1,
+      descricao: 'Diligencia de Protocolo na Secretaria de Habitacao e Regularizacao Fundiaria',
+      valor: vDilig,
+      observacao: 'Inclui impressao 2 vias, certidoes, protocolo, acompanhamento, retirada do Alvara.',
+    });
+  }
+  if (alvaraIn.incluir) {
     secao_2_taxas.push({
       ordem: 2,
-      descricao: 'Alvara de Construcao (Prefeitura de Acailandia/MA)',
-      valor: alvara_valor,
-      observacao: AVISO_ALVARA,
+      descricao: 'Taxa de Expedicao de Alvara de Construcao',
+      valor: vAlvara,
+      observacao: 'Valor da Prefeitura Municipal pago direto pelo cliente OU reembolsado.',
     });
   }
-  if (input.placa_incluir) {
+  if (placaIn.incluir) {
     secao_2_taxas.push({
       ordem: 3,
-      descricao: 'Placa de Obra (confeccao e instalacao)',
-      valor: placa_valor,
-      observacao: 'Placa padrao com identificacao do responsavel tecnico e numero da ART/TRT.',
+      descricao: 'Confeccao e Instalacao da Placa de Obra',
+      valor: vPlaca,
+      observacao: 'Padrao CREA/CFT + legislacao municipal.',
     });
   }
 
-  const secao_3_honorarios: ItemCusto[] = [{
-    ordem: 1,
-    descricao: `Projetos Executivos (${projetosAtivos.length} projeto${projetosAtivos.length === 1 ? '' : 's'}) — ` +
-               `${input.area_construir.toFixed(2)}m² × R$ ${valorM2.toFixed(2)}/m²`,
-    valor: valor_projetos,
-  }];
-
-  // Condicoes de pagamento sugeridas — 3 parcelas:
-  //   1a (40% subtotal) na assinatura
-  //   2a (40%) na entrega do anteprojeto aprovado
-  //   3a (20%) na entrega final dos projetos executivos
-  const p1 = round2(valor_total * 0.40);
-  const p2 = round2(valor_total * 0.40);
-  const p3 = round2(valor_total - p1 - p2);
-  const condicoes_pagamento: CondicaoPagamento[] = [
-    { rotulo: '1a parcela — na assinatura', descricao: '40% do valor total', valor: p1 },
-    { rotulo: '2a parcela — anteprojeto aprovado', descricao: '40% do valor total', valor: p2 },
-    { rotulo: '3a parcela — entrega final', descricao: '20% do valor total', valor: p3 },
-  ];
+  // Condicoes de pagamento — baseadas na TAG. Para tag != personalizada,
+  // expomos as parcelas estruturadas (front pode usar). Pra integral, 1 linha.
+  const condicoes_pagamento: CondicaoPagamento[] = [];
+  if (formaTag === 'integral') {
+    condicoes_pagamento.push({
+      rotulo: '1a parcela — a vista',
+      descricao: '100% na assinatura',
+      valor: total_honorarios,
+    });
+  } else if (formaTag === 'sinal_mais_1' || formaTag === 'duas_vezes') {
+    condicoes_pagamento.push(
+      { rotulo: '1a parcela — sinal', descricao: '50% na assinatura/aprovacao do anteprojeto', valor: parcela_inicial },
+      { rotulo: '2a parcela — entrega final', descricao: '50% na entrega via WhatsApp + e-mail', valor: parcela_final },
+    );
+  } else if (formaTag === 'sinal_mais_2') {
+    const restante = round2(total_honorarios - parcela_inicial);
+    const meio = round2(restante / 2);
+    const final = round2(restante - meio);
+    condicoes_pagamento.push(
+      { rotulo: '1a parcela — sinal', descricao: '50% na assinatura', valor: parcela_inicial },
+      { rotulo: '2a parcela — anteprojeto aprovado', descricao: '25%', valor: meio },
+      { rotulo: '3a parcela — entrega final', descricao: '25%', valor: final },
+    );
+  }
+  // 'personalizada' deixa condicoes_pagamento vazio — texto vai em forma_pagamento.texto_renderizado
 
   const base_calculo: BaseCalculo[] = [
     {
@@ -285,25 +415,17 @@ export async function calcularProjetoExecutivo(
         : `override manual = ${responsabilidade_tipo}`,
       valor_resultado: responsabilidade_valor,
     },
+    {
+      rotulo: 'Parcelamento 50/50',
+      formula: `total_honorarios / 2`,
+      valor_resultado: parcela_inicial,
+    },
   ];
-  if (input.alvara_incluir) {
-    base_calculo.push({
-      rotulo: 'Alvara',
-      formula: 'incluido pelo CONTRATANTE',
-      valor_resultado: alvara_valor,
-    });
-  }
-  if (input.placa_incluir) {
-    base_calculo.push({
-      rotulo: 'Placa',
-      formula: 'incluida pelo CONTRATANTE',
-      valor_resultado: placa_valor,
-    });
-  }
 
   const avisos = [
     AVISO_TAXA_ESBOCO,
     AVISO_CNO_EXECUTIVO,
+    AVISO_DESPESAS,
     responsabilidade_tipo === 'ART' ? AVISO_ART : AVISO_TRT,
   ];
 
@@ -314,7 +436,7 @@ export async function calcularProjetoExecutivo(
     condicoes_pagamento,
     base_calculo,
     secao_4_checklist: CHECKLIST_PROJETO_EXECUTIVO,
-    secao_5_total: valor_total,
+    secao_5_total: total_geral,
     avisos,
   };
 
@@ -322,18 +444,36 @@ export async function calcularProjetoExecutivo(
     custos,
     fontes: {},
     projeto_executivo: {
-      area_construir: input.area_construir,
-      valor_m2: valorM2,
-      valor_projetos,
-      responsabilidade_tipo,
-      responsabilidade_valor,
-      responsabilidade_auto: auto,
-      taxa_esboco,
-      alvara: { incluir: !!input.alvara_incluir, valor: alvara_valor },
-      placa:  { incluir: !!input.placa_incluir,  valor: placa_valor  },
-      subtotal,
-      desconto,
-      valor_total,
+      honorarios: {
+        area_construir: input.area_construir,
+        valor_m2: valorM2,
+        valor_projetos,
+        responsabilidade_tipo,
+        responsabilidade_auto: auto,
+        responsabilidade_valor,
+        subtotal_honorarios,
+        desconto_honorarios,
+        total_honorarios,
+        parcela_inicial,
+        parcela_final,
+      },
+      despesas_administrativas: {
+        diligencia_secretaria: { incluir: diligenciaIn.incluir, valor: vDilig },
+        taxa_alvara_municipio: { incluir: alvaraIn.incluir, valor: vAlvara },
+        placa_obra: { incluir: placaIn.incluir, valor: vPlaca },
+        subtotal_despesas,
+      },
+      taxa_esboco: {
+        valor: taxa_esboco_valor,
+        cobranca_condicional: true,
+        nota: 'Cobrada apenas se o CONTRATANTE nao prosseguir com a fase executiva.',
+      },
+      forma_pagamento,
+      resumo: {
+        total_honorarios,
+        total_despesas: subtotal_despesas,
+        total_geral,
+      },
       projetos_selecionados: projetos,
       cno_observacao: CNO_OBSERVACAO,
     },

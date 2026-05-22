@@ -8601,9 +8601,28 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
 
       <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">📐 Projeto Executivo — Arquitetura + Complementares · NBR 13531/13532, 5626, 8160, 5410, 6118, 9077</p>
 
+      <!-- v3.24.6 Ajuste 1: botao Novo Cliente -->
       <div style="margin-top:12px;">
         <p style="font-weight:600; color:var(--neon); font-size:13px;">📋 Cliente</p>
-        <label>Cliente <select id="peCli" style="width:100%;"><option value="">— Selecione —</option>${cliOpts}</select></label>
+        <div style="display:flex; gap:8px; align-items:flex-end;">
+          <label style="flex:1;">Cliente <select id="peCli" style="width:100%;"><option value="">— Selecione —</option>${cliOpts}</select></label>
+          <button type="button" id="peCliNovo" class="btn-secondary" style="min-height:44px; padding:8px 12px; white-space:nowrap;">➕ Novo</button>
+        </div>
+      </div>
+
+      <!-- v3.24.6 Ajuste 7: caixa amarela destacada da taxa R$ 750 (ANTES dos honorarios) -->
+      <div style="margin-top:14px; display:flex; gap:12px; padding:14px 16px; background:rgba(212,184,0,0.10); border:2px solid var(--gold); border-radius:8px;">
+        <div style="font-size:28px;">⚠️</div>
+        <div style="flex:1; min-width:0;">
+          <p style="margin:0; font-weight:700; color:var(--gold); font-size:14px;">
+            Hora Técnica de Anteprojeto: R$
+            <input id="peTax" type="number" step="0.01" min="0" value="${di.taxa_esboco||750}" style="width:90px; display:inline-block; background:rgba(0,0,0,0.3); color:var(--gold); border:1px solid var(--gold); border-radius:4px; padding:2px 6px;">
+          </p>
+          <p style="margin:6px 0 0; font-size:12px; color:var(--text-muted);">
+            Cobrança <strong>CONDICIONAL</strong> — só será cobrada se o cliente <strong>NÃO prosseguir</strong> com os projetos executivos após o esboço.
+            Este valor <u>NÃO está somado</u> ao Total de Honorários nem ao Investimento Total da Obra.
+          </p>
+        </div>
       </div>
 
       <div style="margin-top:12px;">
@@ -8658,22 +8677,68 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
         <p id="peArtAviso" style="margin:6px 0 0; padding:8px; background:rgba(251,191,36,0.12); border-left:3px solid var(--gold); border-radius:4px; font-size:11px; color:var(--gold); display:none;">⚠️ ART exige Engenheiro/Arquiteto CREA-MA ou CAU. Romatec subcontrata profissional habilitado mediante aditivo contratual.</p>
       </div>
 
-      <div style="margin-top:12px;">
-        <p style="font-weight:600; color:var(--neon); font-size:13px;">📋 Itens Opcionais</p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:center;">
-          <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="peAlvI" ${di.alvara_incluir!==false?'checked':''}> Alvará de Construção</label>
-          <label>Valor R$ <input id="peAlvV" type="number" step="0.01" min="0" value="${di.alvara_valor||0}" style="width:100%;"></label>
-          <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="pePlcI" ${di.placa_incluir!==false?'checked':''}> Placa de Obra</label>
-          <label>Valor R$ <input id="pePlcV" type="number" step="0.01" min="0" value="${di.placa_valor||0}" style="width:100%;"></label>
+      <!-- v3.24.6 Ajuste 2+3+5: Despesas Administrativas (a parte, NAO entram nos honorarios) -->
+      <div style="margin-top:14px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-elev);">
+        <p style="margin:0 0 8px; font-weight:600; color:var(--neon); font-size:13px;">💼 Despesas Administrativas <span style="color:var(--text-muted); font-weight:400; font-size:11px;">(opcionais — pagas a parte, fora das parcelas 50/50)</span></p>
+
+        <!-- DILIGENCIA SECRETARIA (NOVO) -->
+        <div style="border:1px solid var(--border); border-radius:6px; padding:8px; margin-bottom:8px;">
+          <label style="display:flex; gap:8px; align-items:center; cursor:pointer;">
+            <input type="checkbox" id="peDilI" ${di.diligencia_secretaria?.incluir?'checked':''}>
+            <strong style="font-size:13px;">Diligência de Protocolo na Secretaria de Habitação</strong>
+          </label>
+          <p style="margin:6px 0 4px; font-size:11px; color:var(--text-muted);">
+            Inclui impressão do acervo em 2 vias, certidão do imóvel, certidão negativa IPTU, protocolo físico, acompanhamento, recolhimento da taxa, e retirada do Alvará expedido.
+          </p>
+          <label style="font-size:12px;">Valor R$ <input id="peDilV" type="number" step="0.01" min="0" value="${di.diligencia_secretaria?.valor||0}" style="width:120px;"></label>
+        </div>
+
+        <!-- TAXA ALVARA -->
+        <div style="border:1px solid var(--border); border-radius:6px; padding:8px; margin-bottom:8px;">
+          <label style="display:flex; gap:8px; align-items:center; cursor:pointer;">
+            <input type="checkbox" id="peAlvI" ${(di.taxa_alvara_municipio?.incluir ?? di.alvara_incluir)?'checked':''}>
+            <strong style="font-size:13px;">Taxa de Expedição de Alvará de Construção</strong>
+          </label>
+          <p style="margin:6px 0 4px; font-size:11px; color:var(--text-muted);">
+            Valor cobrado pela Prefeitura Municipal de Açailândia conforme legislação vigente. Pago direto pelo cliente ou reembolsado mediante comprovante.
+          </p>
+          <label style="font-size:12px;">Valor R$ <input id="peAlvV" type="number" step="0.01" min="0" value="${di.taxa_alvara_municipio?.valor || di.alvara_valor || 0}" style="width:120px;"></label>
+        </div>
+
+        <!-- PLACA -->
+        <div style="border:1px solid var(--border); border-radius:6px; padding:8px;">
+          <label style="display:flex; gap:8px; align-items:center; cursor:pointer;">
+            <input type="checkbox" id="pePlcI" ${(di.placa_obra?.incluir ?? di.placa_incluir)?'checked':''}>
+            <strong style="font-size:13px;">Confecção e Instalação da Placa de Obra</strong>
+          </label>
+          <p style="margin:6px 0 4px; font-size:11px; color:var(--text-muted);">
+            Arte gráfica conforme exigências CREA/CFT e legislação municipal. Envio pra gráfica + instalação no canteiro antes do início da obra.
+          </p>
+          <label style="font-size:12px;">Valor R$ <input id="pePlcV" type="number" step="0.01" min="0" value="${di.placa_obra?.valor || di.placa_valor || 0}" style="width:120px;"></label>
         </div>
       </div>
 
-      <div style="margin-top:12px; padding:10px; background:rgba(251,191,36,0.10); border-left:4px solid var(--gold); border-radius:6px;">
-        <p style="margin:0; font-weight:600; color:var(--gold); font-size:13px;">⚠️ Hora Técnica de Anteprojeto: R$ <span id="peTxLbl">750,00</span> <span style="font-weight:400; font-size:11px;">(NÃO incluída no Valor Total)</span></p>
-        <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">Cobrança CONDICIONAL — apenas se o cliente NÃO prosseguir com os projetos executivos após o esboço/anteprojeto. Se prosseguir, é absorvida pelo contrato.</p>
-        <label style="margin-top:6px; display:block; font-size:11px;">Valor da Hora Técnica R$
-          <input id="peTax" type="number" step="0.01" min="0" value="${di.taxa_esboco||750}" style="width:120px;">
-        </label>
+      <!-- v3.24.6 Ajuste 4: Forma de Pagamento via TAGS clicaveis -->
+      <div style="margin-top:14px;">
+        <p style="margin:0 0 8px; font-weight:600; color:var(--neon); font-size:13px;">💳 Forma de Pagamento dos Honorários</p>
+        <div id="peTagsContainer" style="display:flex; flex-wrap:wrap; gap:8px;">
+          ${[
+            { tag: 'integral',     icon: '💯', label: 'À Vista (100%)' },
+            { tag: 'sinal_mais_1', icon: '✋', label: '50% Sinal + 50% Entrega' },
+            { tag: 'sinal_mais_2', icon: '✌',  label: 'Sinal + 2x na Entrega' },
+            { tag: 'duas_vezes',   icon: '2️⃣', label: '2x (50% + 50%)' },
+            { tag: 'personalizada', icon: '✏', label: 'Personalizada' },
+          ].map(t => `
+            <button type="button" class="peTag" data-tag="${t.tag}" style="padding:8px 14px; border:2px solid var(--border); background:var(--bg-elev); color:var(--text); border-radius:24px; cursor:pointer; font-size:12px; min-height:44px;">
+              ${t.icon} ${t.label}
+            </button>
+          `).join('')}
+        </div>
+        <textarea id="peFormaCustom" placeholder="Descreva a forma de pagamento personalizada..." style="width:100%; margin-top:8px; min-height:50px; display:none;">${escape(di.forma_pagamento_custom || '')}</textarea>
+        <div style="margin-top:10px; padding:10px; background:var(--bg-elev); border-left:3px solid var(--neon); border-radius:4px;">
+          <p style="margin:0; font-size:11px; color:var(--text-muted);">Pré-visualização:</p>
+          <p id="peFormaPreview" style="margin:4px 0 0; font-size:12px; color:var(--text);">—</p>
+        </div>
       </div>
 
       <div style="margin-top:12px;">
@@ -8682,10 +8747,22 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
       </div>
 
       <div style="margin-top:12px;">
-        <p style="font-weight:600; color:var(--neon); font-size:13px;">📋 Prazos e Condições</p>
+        <p style="font-weight:600; color:var(--neon); font-size:13px;">📋 Prazos e Observações</p>
         <label>Prazo de entrega (dias) <input id="pePrazo" type="number" min="1" value="${di.prazo_entrega_dias||30}" style="width:100%;"></label>
-        <label>Forma de pagamento <textarea id="pePag" style="width:100%; min-height:50px;">${escape(di.forma_pagamento||'')}</textarea></label>
         <label>Observações <textarea id="peObs" style="width:100%; min-height:50px;">${escape(di.observacoes||'')}</textarea></label>
+      </div>
+
+      <!-- v3.24.6 Ajuste 6: Dropzone de anexos (croqui PDF + imagens) -->
+      <div style="margin-top:14px;">
+        <p style="margin:0 0 8px; font-weight:600; color:var(--neon); font-size:13px;">📎 Anexos da Proposta</p>
+        <p style="margin:0 0 8px; font-size:11px; color:var(--text-muted);">Croqui arquitetônico, imagens renderizadas, documentos. PDF/JPG/PNG/WebP. Máx 10 arquivos · 15MB cada · 50MB total.</p>
+        <div id="peDropzone" style="border:2px dashed var(--border); border-radius:8px; padding:20px; text-align:center; cursor:pointer; background:var(--bg-elev); min-height:80px;">
+          <input type="file" id="peAnexosInput" multiple accept="application/pdf,image/jpeg,image/png,image/webp" style="display:none;">
+          <div style="font-size:24px;">📤</div>
+          <div style="font-size:13px; font-weight:600; margin-top:4px;">Clique ou arraste arquivos</div>
+          <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">PDF · JPG · PNG · WebP</div>
+        </div>
+        <ul id="peAnexosLista" style="list-style:none; padding:0; margin:8px 0 0;"></ul>
       </div>
 
       <div style="margin-top:16px;">
@@ -8696,6 +8773,68 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
 
   // Handlers
   if (cache.cliId) document.getElementById('peCli').value = cache.cliId;
+
+  // v3.24.6 Ajuste 1: botao Novo Cliente
+  document.getElementById('peCliNovo').onclick = async () => {
+    try {
+      const novo = await abrirModalNovoCliente();
+      if (novo && novo.id) {
+        await loadPropostasClientes();
+        const sel = document.getElementById('peCli');
+        sel.innerHTML = '<option value="">— Selecione —</option>' +
+          state.propostasClientes.map(c =>
+            `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
+          ).join('');
+        sel.value = String(novo.id);
+      }
+    } catch (e) { alert('Erro ao cadastrar cliente: ' + e.message); }
+  };
+
+  // v3.24.6 Ajuste 4: tags clicaveis de pagamento — estado local
+  let pePagTag = di.forma_pagamento_tag || 'sinal_mais_1';
+  function renderTagsPagamento() {
+    document.querySelectorAll('.peTag').forEach(b => {
+      const active = b.dataset.tag === pePagTag;
+      b.style.background = active ? 'var(--neon)' : 'var(--bg-elev)';
+      b.style.color = active ? '#0a1a0a' : 'var(--text)';
+      b.style.borderColor = active ? 'var(--neon)' : 'var(--border)';
+      b.style.fontWeight = active ? '700' : '400';
+    });
+    document.getElementById('peFormaCustom').style.display = pePagTag === 'personalizada' ? 'block' : 'none';
+  }
+  document.querySelectorAll('.peTag').forEach(b => b.onclick = () => {
+    pePagTag = b.dataset.tag;
+    renderTagsPagamento();
+    recalcResumo();
+  });
+  document.getElementById('peFormaCustom').addEventListener('input', recalcResumo);
+  renderTagsPagamento();
+
+  // Helper local: render texto da forma_pagamento por tag (espelho da engine)
+  function renderFormaPagamentoLocal(tag, totalHonorarios, custom) {
+    const fmtBR = (v) => v.toLocaleString('pt-BR', { minimumFractionDigits:2, maximumFractionDigits:2 });
+    const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+    switch (tag) {
+      case 'integral':
+        return `Pagamento à vista no valor de R$ ${fmtBR(totalHonorarios)} na assinatura do contrato.`;
+      case 'sinal_mais_1': {
+        const m = r2(totalHonorarios * 0.5);
+        return `Pagamento em 2 (duas) parcelas: R$ ${fmtBR(m)} como SINAL no início e R$ ${fmtBR(totalHonorarios - m)} na ENTREGA FINAL.`;
+      }
+      case 'sinal_mais_2': {
+        const sinal = r2(totalHonorarios * 0.5);
+        const rest = r2(totalHonorarios - sinal);
+        const meio = r2(rest / 2);
+        return `Pagamento em 3 (três) parcelas: R$ ${fmtBR(sinal)} sinal; R$ ${fmtBR(meio)} no anteprojeto aprovado; R$ ${fmtBR(rest - meio)} na entrega final.`;
+      }
+      case 'duas_vezes': {
+        const p1 = r2(totalHonorarios * 0.5);
+        return `Pagamento em 2 (duas) parcelas: R$ ${fmtBR(p1)} na assinatura e R$ ${fmtBR(totalHonorarios - p1)} na entrega final.`;
+      }
+      case 'personalizada':
+        return (custom && custom.trim()) || 'A combinar entre as partes.';
+    }
+  }
 
   function recalcResumo() {
     const area = Number(document.getElementById('peArea').value) || 0;
@@ -8709,7 +8848,6 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
       const tipo = area > 80 ? 'ART' : 'TRT';
       tipoSel.value = tipo;
       tipoSel.disabled = true;
-      // valor sugerido
       document.getElementById('peRtVlr').value = tipo === 'ART' ? 233.94 : 93.40;
     } else {
       tipoSel.disabled = false;
@@ -8718,29 +8856,88 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
     document.getElementById('peArtAviso').style.display = tipoAtual === 'ART' ? 'block' : 'none';
 
     const rtVlr = Number(document.getElementById('peRtVlr').value) || 0;
+    const dilI = document.getElementById('peDilI').checked;
+    const dilV = dilI ? (Number(document.getElementById('peDilV').value) || 0) : 0;
     const alvI = document.getElementById('peAlvI').checked;
     const alvV = alvI ? (Number(document.getElementById('peAlvV').value) || 0) : 0;
     const plcI = document.getElementById('pePlcI').checked;
     const plcV = plcI ? (Number(document.getElementById('pePlcV').value) || 0) : 0;
-    const tx = Number(document.getElementById('peTax').value) || 0;
-    document.getElementById('peTxLbl').textContent = tx.toFixed(2).replace('.', ',');
 
-    const subtotal = valorProj + rtVlr + alvV + plcV;
+    // v3.24.6: Honorarios (parcelas 50/50) vs Despesas Admin (a parte)
+    const honorarios = valorProj + rtVlr;
+    const despesas = dilV + alvV + plcV;
+    const totalGeral = honorarios + despesas;
+
+    const customTxt = document.getElementById('peFormaCustom').value;
+    const formaTxt = renderFormaPagamentoLocal(pePagTag, honorarios, customTxt);
+    document.getElementById('peFormaPreview').textContent = formaTxt;
+
     document.getElementById('peResumo').innerHTML = `
-      Projetos Executivos: <strong>${fmt(valorProj)}</strong><br>
-      ${tipoAtual}: <strong>${fmt(rtVlr)}</strong><br>
-      Alvará: <strong>${fmt(alvV)}</strong> · Placa: <strong>${fmt(plcV)}</strong><br>
-      <span style="color:var(--gold); font-size:14px;">VALOR TOTAL: <strong>${fmt(subtotal)}</strong></span><br>
-      <span style="color:var(--text-muted); font-size:11px;">+ Hora Técnica condicional ${fmt(tx)} (não somada)</span>
+      <p style="margin:0 0 6px; font-weight:600;">🅰 HONORÁRIOS TÉCNICOS</p>
+      <div style="padding-left:8px;">
+        Projetos: <strong>${fmt(valorProj)}</strong><br>
+        ${tipoAtual}: <strong>${fmt(rtVlr)}</strong><br>
+        <span style="color:var(--neon);">Total Honorários: <strong>${fmt(honorarios)}</strong></span>
+        ${honorarios > 0 ? `<br><span style="color:var(--text-muted); font-size:11px;">Parcela 1 (50%): ${fmt(honorarios * 0.5)} · Parcela 2 (50%): ${fmt(honorarios - Math.round(honorarios * 50) / 100)}</span>` : ''}
+      </div>
+      ${despesas > 0 ? `
+        <p style="margin:10px 0 6px; font-weight:600;">🅱 DESPESAS ADMINISTRATIVAS (à parte)</p>
+        <div style="padding-left:8px;">
+          ${dilV > 0 ? `Diligência: <strong>${fmt(dilV)}</strong><br>` : ''}
+          ${alvV > 0 ? `Alvará: <strong>${fmt(alvV)}</strong><br>` : ''}
+          ${plcV > 0 ? `Placa: <strong>${fmt(plcV)}</strong><br>` : ''}
+          <span style="color:var(--neon);">Total Despesas: <strong>${fmt(despesas)}</strong></span>
+        </div>
+      ` : ''}
+      <hr style="border:0; border-top:1px solid var(--border); margin:10px 0;">
+      <p style="margin:0; color:var(--gold); font-size:15px;">💰 INVESTIMENTO TOTAL DA OBRA: <strong>${fmt(totalGeral)}</strong></p>
     `;
   }
-  ['peArea','peVm2','peRtTipo','peRtVlr','peAlvI','peAlvV','pePlcI','pePlcV','peTax'].forEach(id => {
+  ['peArea','peVm2','peRtTipo','peRtVlr','peDilI','peDilV','peAlvI','peAlvV','pePlcI','pePlcV','peTax'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', recalcResumo);
     if (el && el.type === 'checkbox') el.addEventListener('change', recalcResumo);
   });
   document.getElementById('peRtAuto').addEventListener('change', recalcResumo);
   recalcResumo();
+
+  // v3.24.6 Ajuste 6: Anexos dropzone
+  state.peAnexosPendentes = state.peAnexosPendentes || [];
+  function adicionarAnexosPE(fileList) {
+    const MAX_FILE = 15 * 1024 * 1024;
+    const MAX_TOTAL = 50 * 1024 * 1024;
+    for (const f of fileList) {
+      if (state.peAnexosPendentes.length >= 10) return alert('Limite de 10 anexos atingido.');
+      if (f.size > MAX_FILE) { alert(`"${f.name}" excede 15MB.`); continue; }
+      const total = state.peAnexosPendentes.reduce((s,a) => s + a.file.size, 0);
+      if (total + f.size > MAX_TOTAL) return alert('Total excede 50MB.');
+      state.peAnexosPendentes.push({ file: f, legenda: f.name.replace(/\.[^.]+$/, '') });
+    }
+    renderAnexosLista();
+  }
+  function renderAnexosLista() {
+    const ul = document.getElementById('peAnexosLista');
+    if (state.peAnexosPendentes.length === 0) { ul.innerHTML = ''; return; }
+    ul.innerHTML = state.peAnexosPendentes.map((a, idx) => `
+      <li style="display:flex; gap:8px; align-items:center; padding:6px 8px; background:var(--bg-elev); border:1px solid var(--border); border-radius:4px; margin-bottom:4px;">
+        <span style="font-size:18px;">${a.file.type === 'application/pdf' ? '📄' : '🖼'}</span>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escape(a.file.name)}</div>
+          <div style="font-size:10px; color:var(--text-muted);">${(a.file.size/1024/1024).toFixed(2)}MB</div>
+        </div>
+        <button type="button" onclick="state.peAnexosPendentes.splice(${idx},1); document.getElementById('peAnexosLista').dispatchEvent(new Event('refresh'));" style="font-size:11px;">🗑</button>
+      </li>
+    `).join('');
+  }
+  document.getElementById('peAnexosLista').addEventListener('refresh', renderAnexosLista);
+  const dz = document.getElementById('peDropzone');
+  const dzInput = document.getElementById('peAnexosInput');
+  dz.onclick = () => dzInput.click();
+  dzInput.onchange = (e) => adicionarAnexosPE(e.target.files);
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.style.borderColor = 'var(--neon)'; }));
+  ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.style.borderColor = 'var(--border)'; }));
+  dz.addEventListener('drop', e => { if (e.dataTransfer?.files) adicionarAnexosPE(e.dataTransfer.files); });
+  renderAnexosLista();
 
   document.getElementById('peCalcular').onclick = async () => {
     const btn = document.getElementById('peCalcular');
@@ -8772,13 +8969,24 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
       responsabilidade_auto: document.getElementById('peRtAuto').checked,
       responsabilidade_tipo: document.getElementById('peRtTipo').value,
       responsabilidade_valor: Number(document.getElementById('peRtVlr').value) || 0,
-      alvara_incluir: document.getElementById('peAlvI').checked,
-      alvara_valor: Number(document.getElementById('peAlvV').value) || 0,
-      placa_incluir: document.getElementById('pePlcI').checked,
-      placa_valor: Number(document.getElementById('pePlcV').value) || 0,
+      // v3.24.6: Despesas Administrativas (estrutura nova)
+      diligencia_secretaria: {
+        incluir: document.getElementById('peDilI').checked,
+        valor: Number(document.getElementById('peDilV').value) || 0,
+      },
+      taxa_alvara_municipio: {
+        incluir: document.getElementById('peAlvI').checked,
+        valor: Number(document.getElementById('peAlvV').value) || 0,
+      },
+      placa_obra: {
+        incluir: document.getElementById('pePlcI').checked,
+        valor: Number(document.getElementById('pePlcV').value) || 0,
+      },
       taxa_esboco: Number(document.getElementById('peTax').value) || 750,
+      // v3.24.6: Forma de pagamento via TAG
+      forma_pagamento_tag: pePagTag,
+      forma_pagamento_custom: document.getElementById('peFormaCustom').value.trim(),
       prazo_entrega_dias: Number(document.getElementById('pePrazo').value) || 30,
-      forma_pagamento: document.getElementById('pePag').value.trim(),
       observacoes: document.getElementById('peObs').value.trim(),
       projetos_selecionados,
     };
@@ -9615,7 +9823,31 @@ function renderPreviewConsultoria(r, ctx) {
           dados_imovel: ctx.dados_imovel,
         }),
       });
-      alert('✅ ' + r2.message);
+
+      // v3.24.6: Upload de anexos pendentes (Projeto Executivo, mas funciona pra qualquer subtipo)
+      const anexosPendentes = state.peAnexosPendentes || [];
+      if (anexosPendentes.length > 0 && r2 && (r2.id || r2.proposta_id)) {
+        const propId = r2.id || r2.proposta_id;
+        let uploadOk = 0;
+        for (const a of anexosPendentes) {
+          try {
+            const fd = new FormData();
+            fd.append('arquivo', a.file);
+            if (a.legenda) fd.append('legenda', a.legenda);
+            await fetch('/api/propostas-consultoria/' + propId + '/anexos', {
+              method: 'POST', body: fd, credentials: 'same-origin',
+            });
+            uploadOk++;
+          } catch (uErr) {
+            console.warn('Falha upload anexo:', a.file.name, uErr);
+          }
+        }
+        state.peAnexosPendentes = []; // limpa
+        alert(`✅ ${r2.message}\n📎 ${uploadOk}/${anexosPendentes.length} anexo(s) enviado(s).`);
+      } else {
+        alert('✅ ' + r2.message);
+      }
+
       fecharModal();
       await loadPropostasConsultoria();
       render();

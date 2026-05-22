@@ -359,6 +359,21 @@ export interface ProjetoSelecionado {
   detalhamento_entrega: string;
 }
 
+// v3.24.6: Tag de Forma de Pagamento (radio visual no form).
+// "personalizada" usa forma_pagamento_custom como texto livre.
+export type FormaPagamentoTag =
+  | 'integral'        // 100% a vista
+  | 'sinal_mais_1'    // 50% sinal + 50% entrega (DEFAULT)
+  | 'sinal_mais_2'    // sinal + 2x na entrega
+  | 'duas_vezes'      // 2x iguais
+  | 'personalizada';
+
+// v3.24.6: Despesa Administrativa individual (incluir + valor)
+export interface DespesaAdmItem {
+  incluir: boolean;
+  valor: number;
+}
+
 export interface InputProjetoExecutivo {
   // Imovel/obra
   endereco_obra: string;
@@ -366,7 +381,7 @@ export interface InputProjetoExecutivo {
   uf_obra?: string;            // default MA
   tipo_edificacao: TipoEdificacao;
 
-  // Calculo principal
+  // Calculo principal (HONORARIOS)
   area_construir: number;       // m²
   valor_m2: number;             // R$/m² (default 25)
 
@@ -375,23 +390,37 @@ export interface InputProjetoExecutivo {
   responsabilidade_tipo?: 'ART' | 'TRT'; // so usado se auto=false
   responsabilidade_valor?: number;       // override do default da config
 
-  // Itens opcionais (cada um pode ser desligado)
-  alvara_incluir: boolean;
-  alvara_valor: number;
-  placa_incluir: boolean;
-  placa_valor: number;
+  // Desconto sobre HONORARIOS (apenas)
+  desconto_honorarios?: number;
+
+  // v3.24.6: DESPESAS ADMINISTRATIVAS (à parte — NAO entram nos honorarios
+  // nem nas parcelas 50/50). Cada item tem checkbox + valor independente.
+  diligencia_secretaria?: DespesaAdmItem;
+  taxa_alvara_municipio?: DespesaAdmItem;
+  placa_obra?: DespesaAdmItem;
+
+  // DEPRECATED v3.24.5 — mantidos pra compat retro com propostas antigas
+  // criadas antes do refactor. Front novo USA diligencia_secretaria/
+  // taxa_alvara_municipio/placa_obra. Engine ignora se forma nova presente.
+  alvara_incluir?: boolean;
+  alvara_valor?: number;
+  placa_incluir?: boolean;
+  placa_valor?: number;
+  desconto?: number; // mapeia pra desconto_honorarios
 
   // Taxa de esboco (R$750 default) — INFORMATIVA, fora do total
   taxa_esboco?: number;
 
-  // Descontos/desbloqueios manuais
-  desconto?: number;
+  // v3.24.6: Forma de pagamento via TAG (default 'sinal_mais_1')
+  forma_pagamento_tag?: FormaPagamentoTag;
+  forma_pagamento_custom?: string;
 
   // Projetos selecionados (lista vinda do front; defaults aplicados quando vazio)
   projetos_selecionados?: ProjetoSelecionado[];
 
   // Cliente — usado so na preview/rendering, nao no calculo
   prazo_entrega_dias?: number;
+  // DEPRECATED v3.24.6 — usar forma_pagamento_tag
   forma_pagamento?: string;
   observacoes?: string;
 }

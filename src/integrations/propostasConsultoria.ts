@@ -272,7 +272,15 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
       input.gestor_nome ?? null,
       input.gestor_telefone ?? null,
       JSON.stringify(input.dados_imovel),
-      JSON.stringify(resultado.custos),
+      // v3.24.6: pra projeto_executivo o resultado tem campo extra
+      // `projeto_executivo` com a estrutura nova (honorarios + despesas +
+      // forma_pagamento). Inclui no custos_calculados pra renderer ler.
+      JSON.stringify({
+        ...resultado.custos,
+        ...((resultado as unknown as { projeto_executivo?: unknown }).projeto_executivo
+          ? { projeto_executivo: (resultado as unknown as { projeto_executivo?: unknown }).projeto_executivo }
+          : {}),
+      }),
       JSON.stringify(resultado.fontes),
     ]
   );
@@ -595,64 +603,158 @@ export function renderProjetoExecutivoBody(
   });
   doc.moveDown(0.4);
 
-  // ── 5. ORCAMENTO (tabela) ─────────────────────────────────────────────
+  // ── 5. ORCAMENTO — REESTRUTURADO em v3.24.6 ─────────────────────────
+  // DUAS TABELAS DISTINTAS:
+  //   🅰 HONORARIOS TECNICOS (Romatec)        → parcelas 50/50
+  //   🅱 DESPESAS ADMINISTRATIVAS (a parte)   → fora das parcelas
+  // Bloco RESUMO no fim somando os 2 + INVESTIMENTO TOTAL DA OBRA.
   if (doc.y > 600) doc.addPage();
   doc.x = COL_X_INI;
-  doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold').text('5. Orcamento');
+
+  // Le os campos consolidados do projeto_executivo gravados em custos
+  const pe = (di.projeto_executivo as Record<string, unknown> | undefined) ||
+             (custos as unknown as { projeto_executivo?: Record<string, unknown> }).projeto_executivo;
+  const honorarios = pe?.honorarios as { valor_projetos: number; responsabilidade_tipo: string; responsabilidade_valor: number; subtotal_honorarios: number; desconto_honorarios: number; total_honorarios: number; parcela_inicial: number; parcela_final: number; } | undefined;
+  const despesas = pe?.despesas_administrativas as { diligencia_secretaria: { incluir: boolean; valor: number }; taxa_alvara_municipio: { incluir: boolean; valor: number }; placa_obra: { incluir: boolean; valor: number }; subtotal_despesas: number; } | undefined;
+  const formaPag = pe?.forma_pagamento as { texto_renderizado: string; tag: string; } | undefined;
+
+  const colDesc = COL_X_INI + 8;
+  const colValor = COL_X_FIM - 90;
+
+  // ─── 🅰 TABELA HONORARIOS TECNICOS ──────────────────────────────────
+  doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold').text('5. Honorarios Tecnicos');
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.3);
 
-  const allItens: Array<{ desc: string; valor: number; tipo: 'honorario' | 'taxa' | 'total' | 'subtotal' | 'desconto' }> = [];
-  custos.secao_3_honorarios.forEach(h => allItens.push({ desc: h.descricao, valor: h.valor, tipo: 'honorario' }));
-  custos.secao_2_taxas.forEach(t => allItens.push({ desc: t.descricao, valor: t.valor, tipo: 'taxa' }));
-  const subtotal = allItens.reduce((s, x) => s + x.valor, 0);
-  const desconto = (custos as unknown as { desconto?: number }).desconto ?? 0;
-
-  // Headers
-  const colDesc = COL_X_INI + 8;
-  const colValor = COL_X_FIM - 90;
   doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold');
-  const headerY = doc.y;
-  doc.text('Descricao', colDesc, headerY, { width: colValor - colDesc - 8 });
-  doc.text('Valor', colValor, headerY, { width: 80, align: 'right' });
+  const hHeaderY = doc.y;
+  doc.text('Descricao', colDesc, hHeaderY, { width: colValor - colDesc - 8 });
+  doc.text('Valor', colValor, hHeaderY, { width: 80, align: 'right' });
   doc.moveDown(0.5);
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ddd').lineWidth(0.5).stroke();
   doc.moveDown(0.2);
 
-  allItens.forEach((it) => {
+  // Linhas de honorarios (secao_3_honorarios = projetos + ART/TRT)
+  custos.secao_3_honorarios.forEach((h) => {
     const y0 = doc.y;
     doc.font('Helvetica').fontSize(9.5).fillColor('#222')
-       .text(it.desc, colDesc, y0, { width: colValor - colDesc - 8 });
+       .text(h.descricao, colDesc, y0, { width: colValor - colDesc - 8 });
     doc.font('Helvetica-Bold').fillColor(corHex)
-       .text(formatBRL(it.valor), colValor, y0, { width: 80, align: 'right' });
+       .text(formatBRL(h.valor), colValor, y0, { width: 80, align: 'right' });
     doc.moveDown(0.15);
   });
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#888').lineWidth(0.6).stroke();
   doc.moveDown(0.2);
 
-  // SUBTOTAL
-  const subY = doc.y;
+  // SUBTOTAL HONORARIOS
+  const subHonY = doc.y;
   doc.fontSize(10).fillColor('#111').font('Helvetica-Bold')
-     .text('SUBTOTAL', colDesc, subY, { width: colValor - colDesc - 8 });
-  doc.fillColor('#111').text(formatBRL(subtotal), colValor, subY, { width: 80, align: 'right' });
+     .text('SUBTOTAL HONORARIOS', colDesc, subHonY, { width: colValor - colDesc - 8 });
+  doc.text(formatBRL(honorarios?.subtotal_honorarios ?? 0), colValor, subHonY, { width: 80, align: 'right' });
   doc.moveDown(0.2);
 
-  if (desconto > 0) {
+  if ((honorarios?.desconto_honorarios ?? 0) > 0) {
     const dY = doc.y;
     doc.fontSize(9.5).fillColor('#444').font('Helvetica')
        .text('Desconto', colDesc, dY, { width: colValor - colDesc - 8 });
-    doc.text('- ' + formatBRL(desconto), colValor, dY, { width: 80, align: 'right' });
+    doc.text('- ' + formatBRL(honorarios!.desconto_honorarios), colValor, dY, { width: 80, align: 'right' });
     doc.moveDown(0.2);
   }
 
-  // VALOR TOTAL (box verde)
-  const totalBoxY = doc.y + 4;
-  const totalBoxH = 26;
-  doc.rect(COL_X_INI, totalBoxY, COL_W, totalBoxH).fillAndStroke(COR_VERDE_BG, COR_VERDE_BORDA);
+  // TOTAL HONORARIOS (box verde)
+  const totalHonBoxY = doc.y + 4;
+  const totalHonBoxH = 26;
+  doc.rect(COL_X_INI, totalHonBoxY, COL_W, totalHonBoxH).fillAndStroke(COR_VERDE_BG, COR_VERDE_BORDA);
   doc.fontSize(11).fillColor('#14532d').font('Helvetica-Bold')
-     .text('VALOR TOTAL', colDesc, totalBoxY + 8, { width: colValor - colDesc - 8 });
-  doc.text(formatBRL(custos.secao_5_total), colValor, totalBoxY + 8, { width: 80, align: 'right' });
-  doc.y = totalBoxY + totalBoxH + 6;
+     .text('TOTAL HONORARIOS', colDesc, totalHonBoxY + 8, { width: colValor - colDesc - 8 });
+  doc.text(formatBRL(honorarios?.total_honorarios ?? 0), colValor, totalHonBoxY + 8, { width: 80, align: 'right' });
+  doc.y = totalHonBoxY + totalHonBoxH + 6;
+
+  // PARCELAMENTO HONORARIOS — usa forma_pagamento.texto_renderizado quando tag != personalizada
+  if (honorarios) {
+    if (doc.y > 700) doc.addPage();
+    doc.x = COL_X_INI;
+    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+       .text('► PARCELAMENTO DOS HONORARIOS', COL_X_INI, doc.y, { width: COL_W });
+    doc.moveDown(0.2);
+    doc.fontSize(9.5).fillColor('#222').font('Helvetica')
+       .text(formaPag?.texto_renderizado || 'A combinar entre as partes.', COL_X_INI + 8, doc.y, {
+         width: COL_W - 16, align: 'justify', continued: false,
+       });
+    doc.moveDown(0.6);
+  }
+
+  // ─── 🅱 TABELA DESPESAS ADMINISTRATIVAS (so se houver) ──────────────
+  const temDespesas = !!(despesas && despesas.subtotal_despesas > 0);
+  if (temDespesas && despesas) {
+    if (doc.y > 600) doc.addPage();
+    doc.x = COL_X_INI;
+    doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold').text('6. Despesas Administrativas (pagas a parte)');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.3);
+
+    doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold');
+    const dHeaderY = doc.y;
+    doc.text('Descricao', colDesc, dHeaderY, { width: colValor - colDesc - 8 });
+    doc.text('Valor', colValor, dHeaderY, { width: 80, align: 'right' });
+    doc.moveDown(0.5);
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ddd').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+
+    // Linhas de despesas — secao_2_taxas (so as marcadas)
+    custos.secao_2_taxas.forEach((t) => {
+      const y0 = doc.y;
+      doc.font('Helvetica').fontSize(9.5).fillColor('#222')
+         .text(t.descricao, colDesc, y0, { width: colValor - colDesc - 8 });
+      doc.font('Helvetica-Bold').fillColor(corHex)
+         .text(formatBRL(t.valor), colValor, y0, { width: 80, align: 'right' });
+      doc.moveDown(0.15);
+    });
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#888').lineWidth(0.6).stroke();
+    doc.moveDown(0.2);
+
+    // SUBTOTAL DESPESAS
+    const totalDespY = doc.y;
+    doc.fontSize(10).fillColor('#111').font('Helvetica-Bold')
+       .text('TOTAL DESPESAS ADMINISTRATIVAS', colDesc, totalDespY, { width: colValor - colDesc - 8 });
+    doc.text(formatBRL(despesas.subtotal_despesas), colValor, totalDespY, { width: 80, align: 'right' });
+    doc.moveDown(0.4);
+
+    // Nota de rodape
+    doc.fontSize(8.5).fillColor('#666').font('Helvetica-Oblique')
+       .text(
+         'Os valores das Despesas Administrativas NAO compoem os Honorarios Tecnicos e NAO estao sujeitos ao parcelamento descrito acima. Sao pagos pelo CONTRATANTE diretamente aos orgaos competentes ou reembolsados a CONTRATADA mediante apresentacao dos comprovantes.',
+         COL_X_INI, doc.y, { width: COL_W, align: 'justify' },
+       );
+    doc.moveDown(0.6);
+  }
+
+  // ─── BLOCO RESUMO FINAL (INVESTIMENTO TOTAL DA OBRA) ────────────────
+  if (doc.y > 680) doc.addPage();
+  doc.x = COL_X_INI;
+  const resumoBoxY = doc.y + 4;
+  const resumoBoxH = temDespesas ? 78 : 38;
+  doc.rect(COL_X_INI, resumoBoxY, COL_W, resumoBoxH).fillAndStroke('#1e3a8a', '#3b82f6');
+  let resY = resumoBoxY + 8;
+  if (temDespesas) {
+    doc.fontSize(10).fillColor('#dbeafe').font('Helvetica')
+       .text('TOTAL HONORARIOS TECNICOS:', COL_X_INI + 8, resY, { width: COL_W - 100 });
+    doc.fillColor('#fff').font('Helvetica-Bold')
+       .text(formatBRL(honorarios?.total_honorarios ?? 0), COL_X_FIM - 100, resY, { width: 90, align: 'right' });
+    resY += 14;
+    doc.fontSize(10).fillColor('#dbeafe').font('Helvetica')
+       .text('TOTAL DESPESAS ADMINISTRATIVAS:', COL_X_INI + 8, resY, { width: COL_W - 100 });
+    doc.fillColor('#fff').font('Helvetica-Bold')
+       .text(formatBRL(despesas?.subtotal_despesas ?? 0), COL_X_FIM - 100, resY, { width: 90, align: 'right' });
+    resY += 14;
+    doc.moveTo(COL_X_INI + 8, resY).lineTo(COL_X_FIM - 8, resY).strokeColor('#60a5fa').lineWidth(0.7).stroke();
+    resY += 4;
+  }
+  doc.fontSize(12).fillColor('#fff').font('Helvetica-Bold')
+     .text('INVESTIMENTO TOTAL DA OBRA:', COL_X_INI + 8, resY, { width: COL_W - 110 });
+  doc.fontSize(13).fillColor('#fbbf24')
+     .text(formatBRL(custos.secao_5_total), COL_X_FIM - 110, resY, { width: 100, align: 'right' });
+  doc.y = resumoBoxY + resumoBoxH + 6;
 
   doc.fontSize(8.5).fillColor('#666').font('Helvetica-Oblique')
      .text(
@@ -660,29 +762,6 @@ export function renderProjetoExecutivoBody(
        COL_X_INI, doc.y, { width: COL_W, align: 'justify' },
      );
   doc.moveDown(0.6);
-
-  // ── 6. CONDICOES DE PAGAMENTO ─────────────────────────────────────────
-  if (custos.condicoes_pagamento && custos.condicoes_pagamento.length > 0) {
-    if (doc.y > 660) doc.addPage();
-    doc.x = COL_X_INI;
-    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('6. Condicoes de Pagamento');
-    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
-    doc.moveDown(0.3);
-    custos.condicoes_pagamento.forEach((cp) => {
-      const y0 = doc.y;
-      doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
-         .text(cp.rotulo, COL_X_INI + 8, y0, { width: COL_W - 100 });
-      doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
-         .text(formatBRL(cp.valor), COL_X_FIM - 90, y0, { width: 80, align: 'right' });
-      if (cp.descricao) {
-        doc.fontSize(8.5).fillColor('#666').font('Helvetica')
-           .text(cp.descricao, COL_X_INI + 16, doc.y, { width: COL_W - 24 });
-      }
-      doc.font('Helvetica').fillColor('#111');
-      doc.moveDown(0.2);
-    });
-    doc.moveDown(0.4);
-  }
 
   // ── 7. DOCUMENTOS DO CLIENTE ──────────────────────────────────────────
   if (doc.y > 660) doc.addPage();
