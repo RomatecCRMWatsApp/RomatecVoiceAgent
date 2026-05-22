@@ -73,24 +73,52 @@ export function requireRole(...rolesPermitidas: AuthRole[]) {
   };
 }
 
-// ─── requireCeoToken (destravado em v3.24.0) ──────────────────────────
-// Antes (até v3.23.11): NO-OP — chamava next() direto, deixando admin aberto.
-// Agora: checa header X-CEO-Token contra env CEO_API_TOKEN.
-// Compat: se CEO_API_TOKEN nao tiver setado, FALHA fechado (403) com log.
-// Antes era "FALHA aberto" — pior pra seguranca. Mude o env pra rodar.
+// ─── requireCeoToken (destravado em v3.24.0, hybrid v3.24.19) ─────────
+// Hibrido com JWT auth:
+//   1. JWT admin/owner valido -> libera (CEO ja autenticado via /login)
+//   2. JWT colaborador/gestor sem role admin -> 403
+//   3. Sem JWT -> tenta header X-CEO-Token contra env CEO_API_TOKEN
+//
+// Motivacao: depois que o /login com role=admin foi implementado, exigir
+// X-CEO-Token em paralelo era redundante e quebrava UX. CEO pediu que o
+// login dele e da Daniele ja viessem com "token CEO liberado". Solucao:
+// JWT admin == X-CEO-Token (mesmo nivel de poder). Compat com chamadas
+// scripted continua via env.
 export function requireCeoToken(req: Request, res: Response, next: NextFunction): void {
+  // 1. Tenta JWT primeiro (cookie definido em /api/auth/login)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { verifyJWT, isBlacklisted } = require('../services/auth') as typeof import('../services/auth');
+  const token = (req as { cookies?: { auth_token?: string } }).cookies?.auth_token
+             || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
+  if (token) {
+    try {
+      const claims = verifyJWT(token);
+      if (claims && !isBlacklisted(claims.jti) && (claims.role === 'admin' || claims.role === 'owner')) {
+        // Admin via JWT — libera (mesmo poder que X-CEO-Token)
+        (req as AuthedRequest).user = claims;
+        return next();
+      }
+      // Tem JWT mas nao e' admin -> 403 sem fallback (nao tenta token CEO)
+      res.status(403).json({
+        error: 'Forbidden — sua sessao nao tem permissao admin.',
+      });
+      return;
+    } catch (_) { /* JWT invalido/expirado -> cai pro fallback X-CEO-Token */ }
+  }
+
+  // 2. Fallback legacy: X-CEO-Token via env (scripts, integracoes)
   const expected = process.env.CEO_API_TOKEN;
   if (!expected) {
-    console.error('[auth] CEO_API_TOKEN não setado — rota admin BLOQUEADA. Configure no Railway pra liberar.');
+    console.error('[auth] CEO_API_TOKEN não setado e sem JWT admin — rota BLOQUEADA. Logue em /login como admin OU configure CEO_API_TOKEN no Railway.');
     res.status(403).json({
-      error: 'CEO_API_TOKEN não configurado no servidor. Contate o admin.',
+      error: 'Acesso negado. Faca login em /login como admin OU configure CEO_API_TOKEN.',
     });
     return;
   }
   const got = req.headers['x-ceo-token'] as string | undefined;
   if (got !== expected) {
     res.status(403).json({
-      error: 'Forbidden — header X-CEO-Token ausente ou inválido.',
+      error: 'Forbidden — sem sessao admin ou header X-CEO-Token invalido.',
     });
     return;
   }
