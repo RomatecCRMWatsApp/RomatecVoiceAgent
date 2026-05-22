@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#00ff88">
+<title>Minha Quinzena · ZAYRA · Romatec</title>
+<link rel="icon" type="image/png" href="/logo_R-removebg-preview.png">
+<style>
+  :root {
+    --bg: #0a0e0a;
+    --bg-elev: #0f1410;
+    --surface: #131a14;
+    --border: rgba(0, 255, 136, 0.12);
+    --text: #e0f2e6;
+    --text-muted: #7a9988;
+    --neon: #00ff88;
+    --gold: #c9a84c;
+    --danger: #ff5555;
+    --info: #3b82f6;
+    --info-light: #60a5fa;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: max(env(safe-area-inset-top), 16px) max(env(safe-area-inset-right), 14px)
+             max(env(safe-area-inset-bottom), 16px) max(env(safe-area-inset-left), 14px);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  header img { width: 36px; height: 36px; }
+  header .titulo { flex: 1; min-width: 0; }
+  header h1 { font-size: 16px; color: var(--neon); letter-spacing: 0.8px; }
+  header p { font-size: 11px; color: var(--text-muted); }
+  .btn-sair {
+    min-height: 44px;
+    padding: 8px 14px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: var(--radius);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn-sair:hover { color: var(--danger); border-color: var(--danger); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 14px;
+    margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+  .row {
+    display: flex; justify-content: space-between; gap: 10px;
+    padding: 6px 0;
+    font-size: 14px;
+  }
+  .row .label { color: var(--text-muted); }
+  .row .val { color: var(--text); font-weight: 600; }
+  .row .val.neon { color: var(--neon); }
+  .row .val.gold { color: var(--gold); }
+  .row .val.info { color: var(--info-light); }
+  .row .val.danger { color: var(--danger); }
+  .saldo-card {
+    background: linear-gradient(135deg, rgba(0,255,136,0.08), rgba(201,168,76,0.04));
+    border: 1px solid rgba(0,255,136,0.25);
+  }
+  .saldo-card .v-grande {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--neon);
+    text-align: center;
+    margin: 8px 0;
+  }
+  .saldo-card .v-grande.zero { color: var(--text-muted); }
+  .vale-item {
+    padding: 8px 10px;
+    background: var(--bg-elev);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+  .vale-item .v { color: var(--gold); font-weight: 600; }
+  .vale-item .d { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+  .historico-item {
+    padding: 10px 12px;
+    background: var(--bg-elev);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    border-left: 3px solid var(--text-muted);
+  }
+  .historico-item.paga { border-left-color: var(--info); }
+  .historico-item.cancelada { border-left-color: var(--text-muted); opacity: 0.6; }
+  .historico-item .periodo { font-size: 13px; font-weight: 600; }
+  .historico-item .valor { font-size: 15px; color: var(--neon); font-weight: 700; margin: 4px 0; }
+  .historico-item.paga .valor { color: var(--info-light); }
+  .historico-item .status {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    display: inline-block;
+  }
+  .historico-item .status.paga { background: rgba(59,130,246,0.2); color: var(--info-light); }
+  .historico-item .status.aberta { background: rgba(0,255,136,0.15); color: var(--neon); }
+  .historico-item .status.cancelada { background: rgba(107,114,128,0.2); color: #9ca3af; }
+  .btn-secao {
+    width: 100%;
+    min-height: 44px;
+    padding: 12px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    font-size: 14px;
+    cursor: pointer;
+    margin-bottom: 10px;
+  }
+  .btn-secao:hover { border-color: var(--neon); color: var(--neon); }
+  .loading { text-align: center; color: var(--text-muted); padding: 30px; font-size: 14px; }
+  .erro {
+    background: rgba(255,85,85,0.1);
+    border: 1px solid rgba(255,85,85,0.3);
+    color: var(--danger);
+    padding: 12px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+  .empty { color: var(--text-muted); font-style: italic; font-size: 13px; padding: 8px 0; }
+</style>
+</head>
+<body>
+  <header>
+    <img src="/logo_R-removebg-preview.png" alt="Romatec">
+    <div class="titulo">
+      <h1>Minha Quinzena</h1>
+      <p id="nomeUser">—</p>
+    </div>
+    <button class="btn-sair" id="btnSair">Sair</button>
+  </header>
+
+  <div id="erroBox"></div>
+  <div id="conteudo" class="loading">Carregando…</div>
+
+  <button class="btn-secao" id="btnHistorico" style="display:none;">Ver histórico de quinzenas pagas</button>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmtBRL = (v) => (Number(v) || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+const fmtData = (s) => {
+  if (!s) return '—';
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? s : d.toLocaleDateString('pt-BR');
+};
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { credentials: 'same-origin', ...opts });
+  if (r.status === 401) {
+    window.location.href = '/login';
+    return null;
+  }
+  const ct = r.headers.get('content-type') || '';
+  const data = ct.includes('json') ? await r.json() : await r.text();
+  if (!r.ok) throw new Error(typeof data === 'object' ? (data.error || JSON.stringify(data)) : data);
+  return data;
+}
+
+function mostrarErro(msg) {
+  $('erroBox').innerHTML = `<div class="erro">${msg}</div>`;
+}
+
+function renderResumo(data) {
+  const totalDias = (data.integral || 0) + (data.manha || 0) + (data.tarde || 0);
+  const saldoZero = !data.saldo_liquido || data.saldo_liquido === 0;
+
+  const html = `
+    <div class="card saldo-card">
+      <h2>💰 Saldo a Receber</h2>
+      <div class="v-grande ${saldoZero ? 'zero' : ''}">${fmtBRL(data.saldo_liquido || 0)}</div>
+      <div class="row">
+        <span class="label">Bruto (dias trabalhados)</span>
+        <span class="val gold">${fmtBRL(data.total_pagar || 0)}</span>
+      </div>
+      <div class="row">
+        <span class="label">Vales recebidos</span>
+        <span class="val danger">- ${fmtBRL(data.total_vales || 0)}</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📅 Dias da Quinzena · ${data.periodo || '—'}</h2>
+      <div class="row">
+        <span class="label">Diárias integrais</span>
+        <span class="val neon">${data.integral || 0}</span>
+      </div>
+      <div class="row">
+        <span class="label">Meias-manhãs</span>
+        <span class="val gold">${data.manha || 0}</span>
+      </div>
+      <div class="row">
+        <span class="label">Meias-tardes</span>
+        <span class="val gold">${data.tarde || 0}</span>
+      </div>
+      <div class="row" style="border-top:1px solid var(--border); padding-top:8px; margin-top:4px;">
+        <span class="label">Total equivalente</span>
+        <span class="val">${data.total_dias_equivalente || 0} dia(s)</span>
+      </div>
+      <div class="row">
+        <span class="label">Valor da diária</span>
+        <span class="val">${fmtBRL(data.funcionario?.valor_dia || 0)}</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>💵 Vales Recebidos (${data.vales?.length || 0})</h2>
+      ${
+        (data.vales && data.vales.length > 0)
+          ? data.vales.map(v => `
+              <div class="vale-item">
+                <div><span class="v">- ${fmtBRL(v.valor)}</span></div>
+                <div class="d">${fmtData(v.criado_em)}${v.descricao ? ' · ' + v.descricao : ''}</div>
+              </div>
+            `).join('')
+          : '<div class="empty">Nenhum vale recebido neste período.</div>'
+      }
+    </div>
+  `;
+  $('conteudo').innerHTML = html;
+  $('btnHistorico').style.display = 'block';
+  if (data.funcionario?.nome) {
+    $('nomeUser').textContent = data.funcionario.nome;
+  }
+}
+
+function renderHistorico(data) {
+  const itens = data.itens || [];
+  if (itens.length === 0) {
+    return '<div class="empty" style="padding: 20px;">Sem fechamentos anteriores registrados.</div>';
+  }
+  return itens.map(it => `
+    <div class="historico-item ${it.status_pagamento}">
+      <div class="periodo">${fmtData(it.periodo_inicio)} → ${fmtData(it.periodo_fim)}</div>
+      <div class="valor">${fmtBRL(it.valor_liquido)} líquido</div>
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">
+        ${it.dias_equivalente} dia(s) · diária ${fmtBRL(it.diaria)} · bruto ${fmtBRL(it.valor_total)}
+        ${it.valor_vales > 0 ? '· vales ' + fmtBRL(it.valor_vales) : ''}
+      </div>
+      <span class="status ${it.status_pagamento}">${
+        it.status_pagamento === 'paga' ? '✓ Pago em ' + fmtData(it.data_pagamento) + (it.forma_pagamento ? ' · ' + it.forma_pagamento : '')
+        : it.status_pagamento === 'cancelada' ? '✕ Cancelado'
+        : '⌛ Em aberto'
+      }</span>
+    </div>
+  `).join('');
+}
+
+async function carregar() {
+  try {
+    const me = await api('/api/auth/me');
+    if (!me) return;
+    if (me.name) $('nomeUser').textContent = me.name;
+
+    const data = await api('/api/minha-quinzena');
+    renderResumo(data);
+  } catch (err) {
+    $('conteudo').innerHTML = '';
+    mostrarErro('Erro ao carregar dados: ' + err.message);
+  }
+}
+
+$('btnSair').addEventListener('click', async () => {
+  try { await api('/api/auth/logout', { method: 'POST' }); }
+  catch (e) { /* segue mesmo se der erro */ }
+  window.location.href = '/login';
+});
+
+$('btnHistorico').addEventListener('click', async () => {
+  $('btnHistorico').textContent = 'Carregando…';
+  $('btnHistorico').disabled = true;
+  try {
+    const data = await api('/api/minha-quinzena/historico');
+    $('conteudo').insertAdjacentHTML('beforeend', `
+      <div class="card">
+        <h2>📜 Histórico de Quinzenas (${data.total || 0})</h2>
+        ${renderHistorico(data)}
+      </div>
+    `);
+    $('btnHistorico').style.display = 'none';
+  } catch (err) {
+    mostrarErro('Erro ao carregar histórico: ' + err.message);
+    $('btnHistorico').textContent = 'Tentar de novo';
+    $('btnHistorico').disabled = false;
+  }
+});
+
+carregar();
+</script>
+</body>
+</html>

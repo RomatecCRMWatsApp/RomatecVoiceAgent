@@ -97,6 +97,48 @@ export function requireCeoToken(req: Request, res: Response, next: NextFunction)
   next();
 }
 
+// ─── requireColaboradorOwnership (v3.24.1) ────────────────────────────
+// Garante que o user com role='colaborador' so acesse rotas filtradas pelo
+// SEU proprio equipe_id (a pessoa fisica em romatec_obra_equipe.id).
+//
+// Logica:
+// 1. requireAuth ja populou req.user com JWT claims (sub, role, equipe_id).
+// 2. Se role != 'colaborador', deixa passar (admin/gestor pode ver tudo).
+// 3. Se role === 'colaborador':
+//    - Exige equipe_id presente no JWT (senao 403)
+//    - Se rota tem :colaboradorId/:funcionarioId/:equipeId no path, exige
+//      bater com req.user.equipe_id
+//    - Se rota tem ?colaborador_id/?funcionario_id/?equipe_id no query, idem
+//    - Senao (rota generica /minha-quinzena sem param), apenas exige role
+export function requireColaboradorOwnership(req: Request, res: Response, next: NextFunction): void {
+  const user = (req as AuthedRequest).user;
+  if (!user) {
+    res.status(401).json({ error: 'requireColaboradorOwnership sem requireAuth — uso incorreto' });
+    return;
+  }
+  if (user.role !== 'colaborador') {
+    return next();
+  }
+  if (user.equipe_id == null) {
+    res.status(403).json({
+      error: 'Colaborador sem vinculo a equipe_id. Contate o admin pra finalizar o cadastro.',
+    });
+    return;
+  }
+  const pathId = req.params.colaboradorId || req.params.funcionarioId
+              || req.params.equipeId || req.params.colaborador_id;
+  const queryId = (req.query.colaborador_id || req.query.funcionario_id
+                || req.query.equipe_id) as string | undefined;
+  const alvo = pathId || queryId;
+  if (alvo != null && Number(alvo) !== user.equipe_id) {
+    res.status(403).json({
+      error: `Colaborador so pode acessar seus proprios dados. Voce e' equipe_id=${user.equipe_id}; tentou acessar=${alvo}.`,
+    });
+    return;
+  }
+  next();
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────
 function parseCookies(cookieHeader: string): Record<string, string> {
   const out: Record<string, string> = {};
