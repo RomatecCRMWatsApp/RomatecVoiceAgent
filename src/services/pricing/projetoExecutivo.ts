@@ -22,6 +22,16 @@ export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
+// v3.24.8: helper de Taxa de Ocupacao (TO%) — usado pela engine e exposto
+// pra testes. Quando area_terreno ausente/0/negativa, retorna undefined.
+export function calcularTaxaOcupacao(
+  areaConstruir: number,
+  areaTerreno?: number,
+): number | undefined {
+  if (!areaTerreno || areaTerreno <= 0) return undefined;
+  return round2((areaConstruir / areaTerreno) * 100);
+}
+
 export const DEFAULTS_PROJETO_EXECUTIVO = {
   VALOR_M2: 25.00,
   TAXA_ESBOCO: 750.00,
@@ -220,6 +230,8 @@ export function renderizarFormaPagamento(
 export interface CustosProjetoExecutivoV2 {
   honorarios: {
     area_construir: number;
+    area_terreno?: number;                 // v3.24.8
+    taxa_ocupacao_percentual?: number;     // v3.24.8 (0-100)
     valor_m2: number;
     valor_projetos: number;
     responsabilidade_tipo: 'ART' | 'TRT';
@@ -265,6 +277,13 @@ export async function calcularProjetoExecutivo(
   if (!input.valor_m2 || input.valor_m2 <= 0) {
     throw new Error('valor_m2 deve ser maior que zero');
   }
+  // v3.24.8: valida area_terreno quando informada
+  if (input.area_terreno !== undefined && input.area_terreno > 0) {
+    if (input.area_construir > input.area_terreno) {
+      throw new Error('Area a construir nao pode ser maior que a area do terreno.');
+    }
+  }
+  const taxa_ocupacao_percentual = calcularTaxaOcupacao(input.area_construir, input.area_terreno);
 
   const valorM2 = input.valor_m2;
   const valor_projetos = round2(input.area_construir * valorM2);
@@ -446,6 +465,8 @@ export async function calcularProjetoExecutivo(
     projeto_executivo: {
       honorarios: {
         area_construir: input.area_construir,
+        area_terreno: input.area_terreno,                  // v3.24.8
+        taxa_ocupacao_percentual,                          // v3.24.8
         valor_m2: valorM2,
         valor_projetos,
         responsabilidade_tipo,

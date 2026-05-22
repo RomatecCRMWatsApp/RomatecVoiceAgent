@@ -3464,6 +3464,18 @@ app.put   ('/api/propostas-consultoria/:id',
   apiHandle(args => propostasConsultoria.atualizarPropostaConsultoria(args as Parameters<typeof propostasConsultoria.atualizarPropostaConsultoria>[0])));
 app.post  ('/api/propostas-consultoria/preview',
   apiHandle(args => propostasConsultoria.previewCustoConsultoria(args as Parameters<typeof propostasConsultoria.previewCustoConsultoria>[0])));
+
+// v3.24.8: Catalogo de comodos do Programa de Necessidades (Projeto Executivo).
+// Publico (so leitura de constante TS), serve pro front montar tags clicaveis.
+app.get('/api/propostas-consultoria/projeto-executivo/comodos-catalogo', (_req: Request, res: Response) => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const m = require('./constants/comodosEdificacao');
+  res.json({
+    categorias: m.CATEGORIAS_LABEL,
+    comodos: m.COMODOS_CATALOGO,
+    ordem_categorias: m.ORDEM_CATEGORIAS,
+  });
+});
 app.get   ('/api/propostas-consultoria/:id/pdf', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
