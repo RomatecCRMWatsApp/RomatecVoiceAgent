@@ -698,9 +698,57 @@ export function renderProjetoExecutivoBody(
   // Le os campos consolidados do projeto_executivo gravados em custos
   const pe = (di.projeto_executivo as Record<string, unknown> | undefined) ||
              (custos as unknown as { projeto_executivo?: Record<string, unknown> }).projeto_executivo;
-  const honorarios = pe?.honorarios as { valor_projetos: number; responsabilidade_tipo: string; responsabilidade_valor: number; subtotal_honorarios: number; desconto_honorarios: number; total_honorarios: number; parcela_inicial: number; parcela_final: number; } | undefined;
-  const despesas = pe?.despesas_administrativas as { diligencia_secretaria: { incluir: boolean; valor: number }; taxa_alvara_municipio: { incluir: boolean; valor: number }; placa_obra: { incluir: boolean; valor: number }; subtotal_despesas: number; } | undefined;
-  const formaPag = pe?.forma_pagamento as { texto_renderizado: string; tag: string; } | undefined;
+  let honorarios = pe?.honorarios as { valor_projetos: number; responsabilidade_tipo: string; responsabilidade_valor: number; subtotal_honorarios: number; desconto_honorarios: number; total_honorarios: number; parcela_inicial: number; parcela_final: number; } | undefined;
+  let despesas = pe?.despesas_administrativas as { diligencia_secretaria: { incluir: boolean; valor: number }; taxa_alvara_municipio: { incluir: boolean; valor: number }; placa_obra: { incluir: boolean; valor: number }; subtotal_despesas: number; } | undefined;
+  let formaPag = pe?.forma_pagamento as { texto_renderizado: string; tag: string; } | undefined;
+
+  // v3.24.14 FIX: propostas criadas antes do spread `projeto_executivo` no
+  // custos_calculados ficam com `pe` undefined ou com honorarios sem valores
+  // somados. Resultado: SUBTOTAL/TOTAL aparecem R$ 0,00. Reconstroi a estrutura
+  // a partir do secao_3_honorarios + secao_2_taxas que SEMPRE existem.
+  const subHonCalc = (custos.secao_3_honorarios || []).reduce((s, h) => s + (Number(h.valor) || 0), 0);
+  const subDespCalc = (custos.secao_2_taxas || []).reduce((s, t) => s + (Number(t.valor) || 0), 0);
+  const totalHonCalc = Math.round((subHonCalc + Number.EPSILON) * 100) / 100;
+  const parcInicial = Math.round((totalHonCalc * 0.5 + Number.EPSILON) * 100) / 100;
+  const parcFinal = Math.round((totalHonCalc - parcInicial + Number.EPSILON) * 100) / 100;
+
+  if (!honorarios || !honorarios.subtotal_honorarios) {
+    honorarios = {
+      valor_projetos: (custos.secao_3_honorarios?.[0]?.valor) || 0,
+      responsabilidade_tipo: /ART/i.test(custos.secao_3_honorarios?.[1]?.descricao || '') ? 'ART' : 'TRT',
+      responsabilidade_valor: (custos.secao_3_honorarios?.[1]?.valor) || 0,
+      subtotal_honorarios: totalHonCalc,
+      desconto_honorarios: 0,
+      total_honorarios: totalHonCalc,
+      parcela_inicial: parcInicial,
+      parcela_final: parcFinal,
+    };
+  }
+  if (!despesas) {
+    // Reconstroi a partir de secao_2_taxas. Identifica por keyword da descricao.
+    const taxas = custos.secao_2_taxas || [];
+    const findT = (re: RegExp) => taxas.find(t => re.test(t.descricao));
+    const dilig = findT(/diligencia/i);
+    const alvara = findT(/alvara/i);
+    const placa = findT(/placa/i);
+    despesas = {
+      diligencia_secretaria: { incluir: !!dilig, valor: Number(dilig?.valor) || 0 },
+      taxa_alvara_municipio: { incluir: !!alvara, valor: Number(alvara?.valor) || 0 },
+      placa_obra: { incluir: !!placa, valor: Number(placa?.valor) || 0 },
+      subtotal_despesas: subDespCalc,
+    };
+  }
+  if (!formaPag) {
+    // Default: 50% sinal + 50% entrega (formato sinal_mais_1)
+    const fmtBR = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    formaPag = {
+      tag: 'sinal_mais_1',
+      texto_renderizado:
+        `Pagamento em 2 (duas) parcelas: R$ ${fmtBR(parcInicial)} como SINAL no inicio ` +
+        `(assinatura do contrato / aprovacao do anteprojeto) e R$ ${fmtBR(parcFinal)} ` +
+        `na ENTREGA FINAL dos projetos executivos em PDF via WhatsApp e e-mail.`,
+    };
+  }
 
   const colDesc = COL_X_INI + 8;
   const colValor = COL_X_FIM - 90;
@@ -2131,13 +2179,33 @@ export async function atualizarPropostaConsultoria(input: {
       secao_3_honorarios: honComOriginal,
       secao_5_total: tot,
     };
+    // v3.24.14: preserva projeto_executivo do custos atual se override nao trouxe
+    if (subtipo === 'projeto_executivo' && !(ov as unknown as { projeto_executivo?: unknown }).projeto_executivo) {
+      const atualPE = (atual.custos_calculados as unknown as { projeto_executivo?: unknown })?.projeto_executivo;
+      if (atualPE) {
+        (custosFinal as unknown as { projeto_executivo: unknown }).projeto_executivo = atualPE;
+      }
+    }
   } else {
     const subtipo = atual.subtipo as SubtipoConsultoria;
-    if (subtipo !== 'averbacao_residencial' && subtipo !== 'averbacao_comercial') {
+    // v3.24.14: subtipos com engine especifica — recalcula via calcularConsultoria.
+    // Antes so averbacao era suportada e outros subtipos lancavam Error. Agora
+    // projeto_executivo (que tem engine retornando { custos, projeto_executivo })
+    // re-deriva o objeto completo + ja inclui projeto_executivo no spread.
+    if (subtipo === 'projeto_executivo') {
+      const m = await import('../services/pricing/projetoExecutivo');
+      const r = await m.calcularProjetoExecutivo(
+        dadosFinal as unknown as Parameters<typeof m.calcularProjetoExecutivo>[0],
+      );
+      custosFinal = r.custos;
+      // Inclui projeto_executivo no objeto persistido (mesmo padrao do criar)
+      (custosFinal as unknown as { projeto_executivo: unknown }).projeto_executivo = r.projeto_executivo;
+    } else if (subtipo === 'averbacao_residencial' || subtipo === 'averbacao_comercial') {
+      const r = await calcularConsultoria({ subtipo, dados: dadosFinal });
+      custosFinal = r.custos;
+    } else {
       throw new Error(`Subtipo ${subtipo} nao suportado para edicao nesta fase.`);
     }
-    const r = await calcularConsultoria({ subtipo, dados: dadosFinal });
-    custosFinal = r.custos;
   }
 
   // v3.23.5: se proposta ja foi ENVIADA, edicao gera revisao (R1 -> R2 -> ...).
