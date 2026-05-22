@@ -9000,10 +9000,15 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
       }
       container.appendChild(sec);
     }
-    // Bind clicks
+    // Bind clicks — v3.24.10 FIX: b.closest('[data-codigo]') retornava o PROPRIO
+    // botao (que tambem tem data-codigo), nao o div pai com data-catalogo.
+    // Resultado: JSON.parse(undefined) lancava e o click falhava silenciosamente.
+    // Solucao: closest('[data-catalogo]') — busca o ancestral que tem o atributo
+    // serializado.
     container.querySelectorAll('.peComBtn').forEach(b => b.onclick = () => {
       const codigo = b.dataset.codigo;
-      const tag = b.closest('[data-codigo]');
+      const tag = b.closest('[data-catalogo]');
+      if (!tag) { console.warn('[peComodos] tag pai nao encontrada pra', codigo); return; }
       const catalogo = JSON.parse(tag.dataset.catalogo);
       if (state.peComodos.has(codigo)) {
         state.peComodos.delete(codigo);
