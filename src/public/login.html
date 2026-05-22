@@ -150,6 +150,50 @@
     color: var(--text-muted);
     opacity: 0.6;
   }
+  /* v3.24.18: relogio + data + globo girando (mesma vibe da tela ZAYRA chat) */
+  .clock-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-bottom: 18px;
+    padding: 14px 16px;
+    background: rgba(0, 255, 136, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .globo {
+    font-size: 38px;
+    display: inline-block;
+    animation: spin-globo 8s linear infinite;
+    filter: drop-shadow(0 0 8px rgba(0, 255, 136, 0.25));
+    transform-origin: 50% 50%;
+  }
+  @keyframes spin-globo {
+    from { transform: rotateY(0deg); }
+    to   { transform: rotateY(360deg); }
+  }
+  .clock-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+  }
+  #relogio {
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 24px;
+    color: var(--neon);
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    line-height: 1;
+    text-shadow: 0 0 10px rgba(0, 255, 136, 0.35);
+  }
+  #data {
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.4px;
+    text-transform: capitalize;
+  }
 </style>
 </head>
 <body>
@@ -158,6 +202,15 @@
       <img src="/logo_R-removebg-preview.png" alt="Romatec">
       <h1>ZAYRA</h1>
       <p>ROMATEC CONSULTORIA TOTAL</p>
+    </div>
+
+    <!-- v3.24.18: relogio + data + globo girando -->
+    <div class="clock-wrap" aria-label="Relogio e data">
+      <span class="globo" aria-hidden="true">🌍</span>
+      <div class="clock-info">
+        <div id="relogio">--:--:--</div>
+        <div id="data">—</div>
+      </div>
     </div>
 
     <div class="erro" id="erroBox" role="alert" aria-live="polite"></div>
@@ -264,6 +317,21 @@ linkEsqueci.addEventListener('click', (e) => {
   e.preventDefault();
   alert('Recuperação de senha: contate o administrador (José Romário) por enquanto. Fluxo automático será liberado em release próxima.');
 });
+
+// v3.24.18: relogio digital atualiza a cada segundo + data por extenso
+function atualizarRelogio() {
+  const agora = new Date();
+  const hh = String(agora.getHours()).padStart(2, '0');
+  const mm = String(agora.getMinutes()).padStart(2, '0');
+  const ss = String(agora.getSeconds()).padStart(2, '0');
+  document.getElementById('relogio').textContent = `${hh}:${mm}:${ss}`;
+  const dataFmt = agora.toLocaleDateString('pt-BR', {
+    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
+  });
+  document.getElementById('data').textContent = dataFmt;
+}
+atualizarRelogio();
+setInterval(atualizarRelogio, 1000);
 
 // Foco no campo login ao carregar
 window.addEventListener('DOMContentLoaded', () => inputLogin.focus());
