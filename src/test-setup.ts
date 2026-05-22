@@ -7,4 +7,5 @@
 
 process.env.DATABASE_URL ??= 'mysql://test:test@127.0.0.1:3306/test_db';
 process.env.NODE_ENV ??= 'test';
-process.env.JWT_SECRET ??= 'test-secret-please-change';
+// v3.24.0: minimo 32 chars exigido por bootValidateAuthEnv em src/services/auth.ts
+process.env.JWT_SECRET ??= 'test-secret-minimum-32-chars-long-for-tests-only';

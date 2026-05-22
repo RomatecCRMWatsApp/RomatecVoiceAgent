@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#00ff88">
+<title>Entrar · ZAYRA · Romatec</title>
+<link rel="icon" type="image/png" href="/logo_R-removebg-preview.png">
+<style>
+  :root {
+    --bg: #0a0e0a;
+    --bg-elev: #0f1410;
+    --surface: #131a14;
+    --border: rgba(0, 255, 136, 0.12);
+    --border-strong: rgba(0, 255, 136, 0.3);
+    --text: #e0f2e6;
+    --text-muted: #7a9988;
+    --neon: #00ff88;
+    --gold: #c9a84c;
+    --danger: #ff5555;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: max(env(safe-area-inset-top), 20px) max(env(safe-area-inset-right), 20px)
+             max(env(safe-area-inset-bottom), 20px) max(env(safe-area-inset-left), 20px);
+    background-image:
+      radial-gradient(circle at 20% 20%, rgba(0, 255, 136, 0.06), transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(201, 168, 76, 0.06), transparent 50%);
+  }
+  .login-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 24px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  }
+  .logo-wrap {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .logo-wrap img {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 12px rgba(0, 255, 136, 0.3));
+  }
+  .logo-wrap h1 {
+    font-size: 22px;
+    color: var(--neon);
+    letter-spacing: 1.5px;
+    font-weight: 600;
+    margin-top: 10px;
+  }
+  .logo-wrap p {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+  }
+  .field {
+    margin-bottom: 16px;
+  }
+  .field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+  .field input {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-elev);
+    color: var(--text);
+    font-size: 15px;
+    font-family: inherit;
+    min-height: 44px;
+  }
+  .field input:focus {
+    outline: none;
+    border-color: var(--neon);
+    box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.15);
+  }
+  .field input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-entrar {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, var(--neon), #00cc6e);
+    color: #06120a;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: all 0.15s;
+    min-height: 48px;
+  }
+  .btn-entrar:hover:not(:disabled) {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+  }
+  .btn-entrar:active:not(:disabled) {
+    transform: translateY(0);
+  }
+  .btn-entrar:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .esqueci {
+    display: block;
+    text-align: center;
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .esqueci:hover { color: var(--gold); }
+  .erro {
+    background: rgba(255, 85, 85, 0.1);
+    border: 1px solid rgba(255, 85, 85, 0.3);
+    color: var(--danger);
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    margin-bottom: 14px;
+    display: none;
+  }
+  .erro.show { display: block; }
+  .footer {
+    text-align: center;
+    margin-top: 24px;
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+  <form class="login-card" id="loginForm" autocomplete="on" novalidate>
+    <div class="logo-wrap">
+      <img src="/logo_R-removebg-preview.png" alt="Romatec">
+      <h1>ZAYRA</h1>
+      <p>ROMATEC CONSULTORIA TOTAL</p>
+    </div>
+
+    <div class="erro" id="erroBox" role="alert" aria-live="polite"></div>
+
+    <div class="field">
+      <label for="login">Login</label>
+      <input
+        type="text"
+        id="login"
+        name="login"
+        placeholder="email ou celular"
+        autocomplete="username"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+        required
+      >
+    </div>
+
+    <div class="field">
+      <label for="senha">Senha</label>
+      <input
+        type="password"
+        id="senha"
+        name="senha"
+        placeholder="••••••••"
+        autocomplete="current-password"
+        required
+        minlength="8"
+      >
+    </div>
+
+    <button type="submit" class="btn-entrar" id="btnEntrar">Entrar</button>
+
+    <a href="#" class="esqueci" id="linkEsqueci">Esqueci minha senha</a>
+
+    <p class="footer">v3.24.0 · Auth ICP-Brasil-grade · bcrypt + JWT httpOnly</p>
+  </form>
+
+<script>
+const form = document.getElementById('loginForm');
+const inputLogin = document.getElementById('login');
+const inputSenha = document.getElementById('senha');
+const btnEntrar = document.getElementById('btnEntrar');
+const erroBox = document.getElementById('erroBox');
+const linkEsqueci = document.getElementById('linkEsqueci');
+
+function mostrarErro(msg) {
+  erroBox.textContent = msg;
+  erroBox.classList.add('show');
+}
+function limparErro() {
+  erroBox.textContent = '';
+  erroBox.classList.remove('show');
+}
+function setLoading(loading) {
+  btnEntrar.disabled = loading;
+  inputLogin.disabled = loading;
+  inputSenha.disabled = loading;
+  btnEntrar.textContent = loading ? 'Entrando...' : 'Entrar';
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  limparErro();
+  const login = inputLogin.value.trim();
+  const senha = inputSenha.value;
+  if (!login || !senha) {
+    mostrarErro('Preencha login e senha.');
+    return;
+  }
+  setLoading(true);
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login, senha }),
+      credentials: 'same-origin', // cookie httpOnly e' setado pelo server
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      mostrarErro(data.error || 'Erro ao entrar. Tente novamente.');
+      setLoading(false);
+      return;
+    }
+    // Sucesso. Redireciona conforme role.
+    // colaborador -> /minha-quinzena (implementado em PR B; por enquanto fallback /obras)
+    // demais     -> /obras (painel admin existente)
+    const role = data.user && data.user.role;
+    if (role === 'colaborador') {
+      window.location.href = '/minha-quinzena';
+    } else {
+      window.location.href = '/obras';
+    }
+  } catch (err) {
+    mostrarErro('Erro de conexão. Verifique sua internet.');
+    setLoading(false);
+  }
+});
+
+// "Esqueci minha senha" — placeholder na PR A. Implementacao real na PR de
+// reset (futura). Apenas mostra mensagem amigavel por ora.
+linkEsqueci.addEventListener('click', (e) => {
+  e.preventDefault();
+  alert('Recuperação de senha: contate o administrador (José Romário) por enquanto. Fluxo automático será liberado em release próxima.');
+});
+
+// Foco no campo login ao carregar
+window.addEventListener('DOMContentLoaded', () => inputLogin.focus());
+</script>
+</body>
+</html>

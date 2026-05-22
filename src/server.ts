@@ -83,6 +83,27 @@ const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 app.use(express.json({ limit: '64mb' }));
 // v1.65.19: forms HTML do /recibos/confirmar/:token (POST application/x-www-form-urlencoded)
 app.use(express.urlencoded({ extended: false, limit: '128kb' }));
+// v3.24.0: cookie-parser pra requireAuth ler o cookie httpOnly do JWT.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const cookieParser = require('cookie-parser') as () => (req: Request, res: Response, next: (e?: unknown) => void) => void;
+app.use(cookieParser());
+
+// v3.24.0: PR A Auth Foundation — fail-fast no boot se JWT_SECRET nao
+// estiver setada ou for curta demais. Antes era so um placeholder mock
+// em test-setup.ts; agora exige real em prod.
+import { bootValidateAuthEnv } from './services/auth';
+bootValidateAuthEnv();
+
+// v3.24.0: rotas /api/auth/* (login, logout, me).
+import authRoutes from './routes/auth';
+app.use('/api/auth', authRoutes);
+
+// v3.24.0: tela /login (HTML mobile-first dark theme). Cache no-store pra
+// nao servir versao antiga apos deploy. /login.html tambem funciona via static.
+app.get('/login', (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
 
 // v1.99.18: error handler explicito pra payload demasiado grande.
 // Sem isso, Express retorna HTML padrao 413 e o JSON.parse no client falha
@@ -817,20 +838,11 @@ app.delete('/api/etapas/:id', apiHandle(args => obras.apagarEtapa(args as { id: 
 // sem necessidade de auth. Quando virar SaaS multi-tenant, reabilitar
 // validacao do header X-CEO-Token contra CEO_API_TOKEN do .env.
 // Pra reativar: descomentar o bloco abaixo e remover o "return next()".
-function requireCeoToken(_req: Request, _res: Response, next: () => void): void {
-  return next();
-  // const expected = process.env.CEO_API_TOKEN;
-  // if (!expected) {
-  //   console.warn('[auth] CEO_API_TOKEN não setado — endpoint admin LIBERADO. Configure no Railway pra proteger.');
-  //   return next();
-  // }
-  // const got = (_req.headers['x-ceo-token'] || _req.headers['X-CEO-Token']) as string | undefined;
-  // if (got !== expected) {
-  //   _res.status(403).json({ error: 'Forbidden — header X-CEO-Token ausente ou inválido.' });
-  //   return;
-  // }
-  // next();
-}
+// v3.24.0: requireCeoToken DESTRAVADO. Antes era no-op (return next() direto)
+// deixando todas as rotas admin abertas. Agora checa X-CEO-Token contra env real
+// e FALHA FECHADO se CEO_API_TOKEN nao estiver setada (antes falhava aberto).
+// Implementacao moveu pra src/middleware/auth.ts pra ficar perto do requireAuth.
+import { requireCeoToken } from './middleware/auth';
 
 // v1.64.0: tenant settings (white-label estrutural). GET é público, PUT só CEO.
 app.get('/api/tenant-settings', async (_req: Request, res: Response) => {
@@ -4037,6 +4049,16 @@ app.listen(PORT, () => {
       await m.runPropostasHashMigrations();
     } catch (err) {
       console.error('[propostas-hash-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.24.0: PR A Auth Foundation — auth_logs + ALTER tenant_users.equipe_id.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-auth');
+      await m.runAuthMigrations();
+    } catch (err) {
+      console.error('[auth-migrations] FALHA fatal:', err);
     }
   })();
 
