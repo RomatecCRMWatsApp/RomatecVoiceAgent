@@ -1023,6 +1023,8 @@ window.forcarUpdateApp = forcarUpdate;
       <span class="badge-zayra" id="versionBadge">v...</span>
       <button id="btnCeoToken" title="Login admin/CEO" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); cursor:pointer; padding:6px 10px; border-radius:var(--radius); font-size:12px;">🔒 Admin</button>
       <button id="btnCertsDigitais" title="Certificados digitais ICP-Brasil pra assinatura de recibos" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); cursor:pointer; padding:6px 10px; border-radius:var(--radius); font-size:12px;">🔏 Certs</button>
+      <!-- v3.24.17: botao Sair (logout JWT + redirect /login) -->
+      <button id="btnSairHeader" title="Sair da sessao" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); cursor:pointer; padding:6px 10px; border-radius:var(--radius); font-size:12px;">🚪 Sair</button>
       <a href="/" style="color: var(--text-muted); text-decoration: none; font-size: 13px; padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius);">← ZAYRA Chat</a>
     </div>
   </div>
@@ -1254,6 +1256,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // v1.99.3: certificados digitais ICP-Brasil
   const btnCerts = document.getElementById('btnCertsDigitais');
   if (btnCerts) btnCerts.onclick = abrirModalCerts;
+
+  // v3.24.17: botao Sair no header — POST /api/auth/logout + redirect /login
+  const btnSair = document.getElementById('btnSairHeader');
+  if (btnSair) btnSair.onclick = async () => {
+    if (!confirm('Sair da sessao?')) return;
+    try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); }
+    catch (_) { /* segue mesmo se der erro */ }
+    window.location.href = '/login';
+  };
 });
 
 // ─── v1.99.3: Modal de Certificados Digitais ─────────────────────────────
