@@ -1046,9 +1046,11 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="galeria">📷 Galeria</button>
     <button class="tab" data-tab="proposta">Proposta</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
+    <button class="tab" data-tab="config">⚙️ Configurações</button>
   </div>
 
   <div id="view-dashboard" class="view active"></div>
+  <div id="view-config" class="view"></div>
   <div id="view-obras" class="view"></div>
   <div id="view-cronograma" class="view"></div>
   <div id="view-despesas" class="view"></div>
@@ -1620,6 +1622,8 @@ async function render() {
       laudos:  async () => { await loadLaudos(); renderLaudos(); },
       loteamentos: async () => { await loadLoteamentos(); renderLoteamentos(); },
       galeria: async () => { await renderGaleria(); },
+      // v3.25.0: Configuracoes > Usuarios + Permissoes + Auditoria
+      config: async () => { await renderConfiguracoes(); },
     };
     await fns[state.currentTab]();
   } catch (e) {
@@ -21421,6 +21425,328 @@ function readImageFile(file) {
     fr.onerror = rej;
     fr.readAsDataURL(file);
   });
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// v3.25.0: Aba CONFIGURACOES — Usuarios + Permissoes + Auditoria
+// ───────────────────────────────────────────────────────────────────────
+
+// Estado local da aba (sub-tabs)
+state.configSub = state.configSub || 'usuarios';
+state.configCache = state.configCache || { users: [], catalogo: null, equipe: [], auditoria: [] };
+
+async function renderConfiguracoes() {
+  const v = document.getElementById('view-config');
+  v.innerHTML = `
+    <div class="card">
+      <p class="section-title">⚙️ Configurações</p>
+      <div style="display:flex; gap:6px; margin-bottom:14px; border-bottom:1px solid var(--border);">
+        <button class="cfg-tab" data-sub="usuarios"  style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">👥 Usuários</button>
+        <button class="cfg-tab" data-sub="auditoria" style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">📋 Auditoria</button>
+      </div>
+      <div id="cfg-body">Carregando…</div>
+    </div>
+  `;
+  v.querySelectorAll('.cfg-tab').forEach(b => {
+    const ativo = b.dataset.sub === state.configSub;
+    b.style.borderBottomColor = ativo ? 'var(--neon)' : 'transparent';
+    b.style.color = ativo ? 'var(--text)' : 'var(--text-muted)';
+    b.style.fontWeight = ativo ? '600' : '400';
+    b.onclick = () => { state.configSub = b.dataset.sub; renderConfiguracoes(); };
+  });
+  try {
+    if (state.configSub === 'usuarios') await renderCfgUsuarios();
+    else if (state.configSub === 'auditoria') await renderCfgAuditoria();
+  } catch (e) {
+    document.getElementById('cfg-body').innerHTML = `<div class="card empty">Erro: ${escape(e.message)}</div>`;
+  }
+}
+
+async function renderCfgUsuarios() {
+  // Carrega users + catalogo de permissoes em paralelo
+  const [{ items: users }, catalogo] = await Promise.all([
+    api('/api/admin/users-config'),
+    state.configCache.catalogo
+      ? Promise.resolve(state.configCache.catalogo)
+      : api('/api/admin/permissions-catalog'),
+  ]);
+  state.configCache.users = users;
+  state.configCache.catalogo = catalogo;
+
+  const corRole = { admin: '#ef4444', owner: '#ef4444', gestor: '#fbbf24', colaborador: '#60a5fa' };
+  const linhas = users.map(u => `
+    <tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:8px;">
+        <div style="font-weight:600;">${escape(u.name)}</div>
+        <div style="font-size:11px; color:var(--text-muted);">${escape(u.email)}</div>
+      </td>
+      <td style="padding:8px;">
+        <span style="background:${corRole[u.role]||'#666'}22; color:${corRole[u.role]||'#666'}; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">
+          ${escape(u.role.toUpperCase())}
+        </span>
+        ${u.equipe_nome ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px;">→ ${escape(u.equipe_nome)}</div>` : ''}
+      </td>
+      <td style="padding:8px; font-size:11px; color:var(--text-muted);">
+        ${u.permissions === null ? `<em>default do role</em>` : `${u.permissions.length} permissões custom`}
+      </td>
+      <td style="padding:8px; font-size:11px; color:var(--text-muted);">
+        ${u.last_login_at ? new Date(u.last_login_at).toLocaleString('pt-BR') : '<em>nunca</em>'}
+      </td>
+      <td style="padding:8px;">
+        <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${u.active?'var(--neon)':'#666'};"></span>
+        ${u.active ? 'Ativo' : 'Desativado'}
+      </td>
+      <td style="padding:8px; text-align:right;">
+        <button class="btn-secondary cfg-edit" data-id="${u.id}" style="padding:4px 10px; font-size:11px;">✏ Editar</button>
+        <button class="btn-secondary cfg-reset" data-id="${u.id}" style="padding:4px 10px; font-size:11px;">🔄 Resetar</button>
+        <button class="btn-danger cfg-del" data-id="${u.id}" style="padding:4px 10px; font-size:11px;">🗑</button>
+      </td>
+    </tr>
+  `).join('');
+
+  document.getElementById('cfg-body').innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <p style="margin:0; font-weight:600; color:var(--text-muted);">${users.length} usuário(s) cadastrado(s)</p>
+      <button class="btn-primary" id="cfgNovoUser">➕ Novo Usuário</button>
+    </div>
+    <table style="width:100%; border-collapse:collapse; font-size:13px;">
+      <thead>
+        <tr style="background:var(--bg-elev); text-align:left;">
+          <th style="padding:8px;">Nome / Email</th>
+          <th style="padding:8px;">Role</th>
+          <th style="padding:8px;">Permissões</th>
+          <th style="padding:8px;">Último login</th>
+          <th style="padding:8px;">Status</th>
+          <th style="padding:8px; text-align:right;">Ações</th>
+        </tr>
+      </thead>
+      <tbody>${linhas}</tbody>
+    </table>
+  `;
+  document.getElementById('cfgNovoUser').onclick = () => abrirModalCfgUser(null, catalogo);
+  document.querySelectorAll('.cfg-edit').forEach(b => b.onclick = () => {
+    const u = state.configCache.users.find(x => x.id === Number(b.dataset.id));
+    if (u) abrirModalCfgUser(u, state.configCache.catalogo);
+  });
+  document.querySelectorAll('.cfg-reset').forEach(b => b.onclick = async () => {
+    const u = state.configCache.users.find(x => x.id === Number(b.dataset.id));
+    if (!u) return;
+    if (!confirm(`Resetar senha de ${u.name}? Uma nova senha temporária será gerada.`)) return;
+    try {
+      const r = await api(`/api/admin/users-config/${u.id}/reset-senha`, { method:'POST', body:'{}' });
+      alert(`✅ Nova senha gerada pra ${u.name}:\n\n${r.senha_temporaria}\n\nAnote e envie pro usuário. Esta senha não será mostrada novamente.`);
+    } catch (e) { alert('Erro: ' + e.message); }
+  });
+  document.querySelectorAll('.cfg-del').forEach(b => b.onclick = async () => {
+    const u = state.configCache.users.find(x => x.id === Number(b.dataset.id));
+    if (!u) return;
+    if (!confirm(`Desativar usuário "${u.name}" (${u.email})?\n\nO acesso será bloqueado. Dados são preservados.`)) return;
+    try {
+      await api(`/api/admin/users-config/${u.id}`, { method:'DELETE' });
+      state.configCache.users = [];
+      await renderCfgUsuarios();
+    } catch (e) { alert('Erro: ' + e.message); }
+  });
+}
+
+function abrirModalCfgUser(user, catalogo) {
+  const isEdit = !!user;
+  const roleAtual = user?.role || 'colaborador';
+  const permsAtuais = user?.permissions; // null = default do role
+  const usaCustom = permsAtuais !== null && permsAtuais !== undefined;
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px; overflow-y:auto;';
+  const modal = document.createElement('div');
+  modal.className = 'card';
+  modal.style.cssText = 'max-width:840px; width:100%; max-height:92vh; overflow-y:auto;';
+
+  const categoriasHtml = catalogo.categorias.map(cat => `
+    <fieldset style="border:1px solid var(--border); border-radius:6px; padding:8px 10px; margin-bottom:6px;">
+      <legend style="padding:0 6px; font-size:12px; color:var(--neon); font-weight:600;">${cat.icone} ${escape(cat.label)}</legend>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:4px;">
+        ${cat.itens.map(it => `
+          <label style="display:flex; align-items:flex-start; gap:6px; font-size:12px; cursor:pointer; padding:3px;">
+            <input type="checkbox" class="cfg-perm" data-key="${it.key}" style="margin-top:2px;">
+            <div>
+              <div>${escape(it.label)}</div>
+              ${it.descricao ? `<div style="font-size:10px; color:var(--text-muted);">${escape(it.descricao)}</div>` : ''}
+            </div>
+          </label>
+        `).join('')}
+      </div>
+    </fieldset>
+  `).join('');
+
+  modal.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <p class="section-title" style="margin:0;">${isEdit ? '✏ Editar usuário' : '➕ Novo usuário'}</p>
+      <button data-cfg-fechar style="background:transparent;">✕</button>
+    </div>
+    <div class="form-grid">
+      <label>Nome completo *
+        <input id="cfg_nome" value="${escape(user?.name || '')}" style="width:100%;">
+      </label>
+      <label>Email (login) *
+        <input id="cfg_email" type="email" value="${escape(user?.email || '')}" ${isEdit?'disabled':''} style="width:100%; ${isEdit?'opacity:0.6;':''}">
+      </label>
+      <label>Telefone (WhatsApp)
+        <input id="cfg_phone" value="${escape(user?.phone || '')}" placeholder="(99) 99999-9999" style="width:100%;">
+      </label>
+      <label>Vincular a colaborador (opcional)
+        <select id="cfg_equipe" style="width:100%;">
+          <option value="">— Nenhum —</option>
+          ${(state.equipe||[]).map(e => `<option value="${e.id}" ${user?.equipe_id==e.id?'selected':''}>${escape(e.nome)}</option>`).join('')}
+        </select>
+      </label>
+    </div>
+    <div style="margin-top:14px;">
+      <label style="font-weight:600;">Perfil base</label>
+      <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;">
+        ${['admin','gestor','colaborador'].map(r => `
+          <label style="flex:1; min-width:120px; padding:8px 12px; border:2px solid var(--border); border-radius:6px; cursor:pointer; text-align:center;" data-role-wrap="${r}">
+            <input type="radio" name="cfg_role" value="${r}" ${roleAtual===r?'checked':''} style="margin-right:6px;">
+            ${r.toUpperCase()}
+          </label>
+        `).join('')}
+      </div>
+    </div>
+    <div style="margin-top:14px; padding:10px; background:var(--bg-elev); border-radius:6px;">
+      <label style="display:flex; gap:8px; align-items:center; cursor:pointer;">
+        <input type="checkbox" id="cfg_custom" ${usaCustom?'checked':''}>
+        <strong>Customizar permissões (em vez de usar defaults do role)</strong>
+      </label>
+      <p style="margin:6px 0 0; font-size:11px; color:var(--text-muted);">
+        Sem marcar: usa o conjunto padrão do role (admin=tudo, gestor=quase tudo, colaborador=sem /obras).<br>
+        Marcado: você escolhe permissão por permissão abaixo.
+      </p>
+    </div>
+    <div id="cfg_perms_grid" style="margin-top:14px; display:none;">
+      ${categoriasHtml}
+    </div>
+    ${isEdit ? `
+      <div style="margin-top:14px;">
+        <label style="display:flex; gap:8px; align-items:center;">
+          <input type="checkbox" id="cfg_active" ${user.active?'checked':''}>
+          <strong>Usuário ativo (pode fazer login)</strong>
+        </label>
+      </div>
+    ` : `
+      <div style="margin-top:14px; padding:10px; background:rgba(212,184,0,0.10); border-left:3px solid var(--gold); border-radius:4px;">
+        <p style="margin:0; font-size:12px; color:var(--gold); font-weight:600;">🔑 Senha temporária será gerada automaticamente</p>
+        <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">A senha aparece no alert após criar. Anote e envie pro usuário.</p>
+      </div>
+    `}
+    <div style="display:flex; gap:8px; margin-top:16px; justify-content:flex-end;">
+      <button data-cfg-cancelar style="background:transparent;">Cancelar</button>
+      <button class="btn-primary" id="cfg_salvar">${isEdit?'💾 Salvar alterações':'💾 Criar usuário'}</button>
+    </div>
+  `;
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  const cleanup = () => { try { document.body.removeChild(overlay); } catch {} };
+  modal.querySelector('[data-cfg-fechar]').onclick = cleanup;
+  modal.querySelector('[data-cfg-cancelar]').onclick = cleanup;
+  overlay.onclick = (e) => { if (e.target === overlay) cleanup(); };
+
+  // Highlight visual do role escolhido
+  function refletirRole() {
+    const val = modal.querySelector('input[name="cfg_role"]:checked').value;
+    modal.querySelectorAll('[data-role-wrap]').forEach(w => {
+      w.style.borderColor = w.dataset.roleWrap === val ? 'var(--neon)' : 'var(--border)';
+      w.style.background = w.dataset.roleWrap === val ? 'rgba(0,255,136,0.10)' : 'transparent';
+    });
+  }
+  modal.querySelectorAll('input[name="cfg_role"]').forEach(r => r.onchange = refletirRole);
+  refletirRole();
+
+  // Toggle grid de permissões custom
+  const chkCustom = modal.querySelector('#cfg_custom');
+  const grid = modal.querySelector('#cfg_perms_grid');
+  function refletirCustom() {
+    grid.style.display = chkCustom.checked ? 'block' : 'none';
+    if (chkCustom.checked) {
+      // Pre-marca permissoes (custom ou defaults do role)
+      const role = modal.querySelector('input[name="cfg_role"]:checked').value;
+      const perms = usaCustom ? permsAtuais : (catalogo.defaults_por_role[role] || []);
+      modal.querySelectorAll('.cfg-perm').forEach(c => c.checked = perms.includes(c.dataset.key));
+    }
+  }
+  chkCustom.onchange = refletirCustom;
+  modal.querySelectorAll('input[name="cfg_role"]').forEach(r => r.onchange = () => { refletirRole(); refletirCustom(); });
+  refletirCustom();
+
+  // Salvar
+  modal.querySelector('#cfg_salvar').onclick = async () => {
+    const nome = modal.querySelector('#cfg_nome').value.trim();
+    const email = modal.querySelector('#cfg_email').value.trim().toLowerCase();
+    const phone = modal.querySelector('#cfg_phone').value.trim() || null;
+    const role = modal.querySelector('input[name="cfg_role"]:checked').value;
+    const equipeRaw = modal.querySelector('#cfg_equipe').value;
+    const equipe_id = equipeRaw ? Number(equipeRaw) : null;
+    const customOn = chkCustom.checked;
+    const permissions = customOn
+      ? Array.from(modal.querySelectorAll('.cfg-perm:checked')).map(c => c.dataset.key)
+      : null;
+    if (!nome) return alert('Nome obrigatório');
+    if (!isEdit && (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return alert('Email inválido');
+
+    try {
+      if (isEdit) {
+        const active = modal.querySelector('#cfg_active').checked;
+        await api(`/api/admin/users-config/${user.id}`, {
+          method:'PUT', body: JSON.stringify({ name:nome, phone, role, equipe_id, permissions, active }),
+        });
+        alert('✅ Usuário atualizado.');
+      } else {
+        const r = await api('/api/admin/users-config', {
+          method:'POST', body: JSON.stringify({ email, name:nome, phone, role, equipe_id, permissions }),
+        });
+        alert(`✅ Usuário "${nome}" criado!\n\n🔑 Senha temporária: ${r.senha_temporaria}\n\nAnote e envie pro usuário. Esta senha não será mostrada novamente.`);
+      }
+      cleanup();
+      state.configCache.users = [];
+      await renderCfgUsuarios();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+}
+
+async function renderCfgAuditoria() {
+  const { items } = await api('/api/admin/auditoria?limite=100');
+  state.configCache.auditoria = items;
+  const linhas = items.map(l => `
+    <tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:6px; font-size:11px; color:var(--text-muted); white-space:nowrap;">
+        ${new Date(l.created_at).toLocaleString('pt-BR')}
+      </td>
+      <td style="padding:6px;">
+        <div>${escape(l.user_name || l.login_attempt || '—')}</div>
+        ${l.user_email ? `<div style="font-size:10px; color:var(--text-muted);">${escape(l.user_email)}</div>` : ''}
+      </td>
+      <td style="padding:6px; font-size:11px; color:var(--text-muted);">${escape(l.ip || '—')}</td>
+      <td style="padding:6px;">
+        ${l.sucesso
+          ? '<span style="background:rgba(0,255,136,0.15); color:var(--neon); padding:2px 8px; border-radius:10px; font-size:11px;">✓ Sucesso</span>'
+          : `<span style="background:rgba(239,68,68,0.15); color:#ef4444; padding:2px 8px; border-radius:10px; font-size:11px;">✗ ${escape(l.motivo_falha || 'Falha')}</span>`
+        }
+      </td>
+    </tr>
+  `).join('');
+  document.getElementById('cfg-body').innerHTML = `
+    <p style="margin:0 0 10px; font-weight:600; color:var(--text-muted);">📋 Últimos ${items.length} eventos de login</p>
+    <table style="width:100%; border-collapse:collapse; font-size:12px;">
+      <thead>
+        <tr style="background:var(--bg-elev); text-align:left;">
+          <th style="padding:8px;">Quando</th>
+          <th style="padding:8px;">Quem (ou tentativa)</th>
+          <th style="padding:8px;">IP</th>
+          <th style="padding:8px;">Resultado</th>
+        </tr>
+      </thead>
+      <tbody>${linhas || '<tr><td colspan="4" style="padding:14px; text-align:center; color:var(--text-muted);">Nenhum log ainda.</td></tr>'}</tbody>
+    </table>
+  `;
 }
 </script>
 <!-- v3.10.0: Fechamento de Folha (modal + painel saldo) -->

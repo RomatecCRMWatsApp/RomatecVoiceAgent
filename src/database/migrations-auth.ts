@@ -89,4 +89,42 @@ export async function runAuthMigrations(): Promise<void> {
     // Nao critico — se a coluna comment nao puder ser setada por permissao
     console.warn('[auth-migrations] aviso COMMENT users:', (err as Error).message);
   }
+
+  // 4) v3.25.0: users.permissions (JSON granular) + users.active + users.created_by
+  //    permissions: array de strings tipo ["proposta:criar","proposta:assinar",...]
+  //                 quando NULL = usa permissoes default do role (admin = tudo,
+  //                 gestor = quase tudo, colaborador = so /minha-quinzena)
+  //    active: soft-disable de user (mantem dados pra audit, bloqueia login)
+  //    created_by: user_id de quem criou (auditoria)
+  try {
+    if (!(await columnExists('users', 'permissions'))) {
+      await pool.execute(
+        `ALTER TABLE users ADD COLUMN permissions JSON NULL
+           COMMENT 'v3.25.0: array de strings com permissoes granulares. NULL = usa defaults do role'`,
+      );
+      console.log('[auth-migrations] OK: ADD COLUMN users.permissions');
+    } else {
+      console.log('[auth-migrations] ja existe (OK): users.permissions');
+    }
+    if (!(await columnExists('users', 'active'))) {
+      await pool.execute(
+        `ALTER TABLE users ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1
+           COMMENT 'v3.25.0: soft-disable. 0 = bloqueado pra login'`,
+      );
+      console.log('[auth-migrations] OK: ADD COLUMN users.active');
+    } else {
+      console.log('[auth-migrations] ja existe (OK): users.active');
+    }
+    if (!(await columnExists('users', 'created_by'))) {
+      await pool.execute(
+        `ALTER TABLE users ADD COLUMN created_by INT NULL
+           COMMENT 'v3.25.0: id do admin que criou este user'`,
+      );
+      console.log('[auth-migrations] OK: ADD COLUMN users.created_by');
+    } else {
+      console.log('[auth-migrations] ja existe (OK): users.created_by');
+    }
+  } catch (err) {
+    console.error('[auth-migrations] FALHA users.permissions/active/created_by:', (err as Error).message);
+  }
 }

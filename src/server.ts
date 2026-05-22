@@ -106,6 +106,10 @@ app.use('/api/minha-quinzena', minhaQuinzenaRoutes);
 import adminAcessosRoutes from './routes/adminAcessos';
 app.use('/api/admin', adminAcessosRoutes);
 
+// v3.25.0: rotas /api/admin/* — gestao de usuarios + permissoes (Configuracoes)
+import adminUsersRoutes from './routes/adminUsers';
+app.use('/api/admin', adminUsersRoutes);
+
 // v3.24.0: tela /login (HTML mobile-first dark theme). Cache no-store pra
 // nao servir versao antiga apos deploy. /login.html tambem funciona via static.
 app.get('/login', (_req: Request, res: Response) => {
