@@ -63,7 +63,9 @@ describe('Mudanca 2 — backend retorna status do fechamento', () => {
     expect(idxEnd).toBeGreaterThan(idxStart);
     const body = obrasTs.slice(idxStart, idxEnd);
     expect(body).toMatch(/fechamento_id:[\s\S]+?\?\s*Number\(r\.fechamento_id\)\s*:\s*null/);
-    expect(body).toMatch(/status_fechamento:\s*r\.status_fechamento\s*\?\?\s*null/);
+    // v3.24.3: status_fechamento agora usa variavel statusEfetivo (que considera
+    // legado via recibos_envios). O campo final no payload e' status_fechamento: statusEfetivo
+    expect(body).toMatch(/status_fechamento:\s*statusEfetivo/);
     expect(body).toMatch(/data_pagamento:/);
   });
 });
