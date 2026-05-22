@@ -2008,7 +2008,8 @@ function renderDashboard() {
   let cardEquipe = '';
   if (obra && state.equipe && state.equipe.length > 0) {
     const linhas = state.equipe.map(p => `
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border); flex-wrap:wrap;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 10px; border-bottom:1px solid var(--border); flex-wrap:wrap;">
+        ${avatarHtml(p, 40)}
         <div style="flex:1; min-width:160px;">
           <p style="margin:0; font-weight:500; font-size:13px;">${escape(p.nome)}</p>
           <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">${escape(p.funcao||'sem função')} · ${escape(p.tipo_contrato||'')} · <span style="color:var(--gold);">${fmt(p.valor_dia)}/dia</span></p>
@@ -3842,6 +3843,49 @@ function statusTag(status) {
   const s = STATUS_COLAB[status] || STATUS_COLAB.ativo;
   return `<span class="status-tag" data-status="${status||'ativo'}" style="display:inline-block; padding:2px 8px; border-radius:3px; font-size:10px; font-weight:700; letter-spacing:0.5px; background:${s.bg}; color:${s.fg}; border:1px solid ${s.fg}33;">${s.label}</span>`;
 }
+
+// v3.24.4: avatar do colaborador. Espelho da logica em
+// src/services/colaborador-avatar-helpers.ts (server-side pra PDFs).
+function gerarIniciais(nome) {
+  if (!nome || typeof nome !== 'string') return '?';
+  const limpo = nome.trim().replace(/\s+/g, ' ');
+  if (!limpo) return '?';
+  const partes = limpo.split(' ').filter(Boolean);
+  if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
+  return ((partes[0][0] || '') + (partes[partes.length - 1][0] || '')).toUpperCase();
+}
+function corDeFundoPorNome(nome) {
+  if (!nome) return 'hsl(0,0%,30%)';
+  let hash = 0;
+  for (let i = 0; i < nome.length; i++) {
+    hash = ((hash << 5) - hash) + nome.charCodeAt(i);
+    hash |= 0;
+  }
+  return `hsl(${Math.abs(hash) % 360}, 60%, 35%)`;
+}
+// Avatar 56px com fallback de iniciais. onError no <img> esconde a img e
+// mostra o div de iniciais que ja esta no DOM (display none por padrao).
+function avatarHtml(membro, size) {
+  const s = size || 56;
+  const half = Math.floor(s / 2);
+  const fontSize = Math.floor(s * 0.4);
+  const id = membro.id;
+  const nome = membro.nome || '';
+  const tem = !!membro.tem_foto;
+  const cacheBuster = membro.foto_uploaded_em
+    ? new Date(membro.foto_uploaded_em).getTime()
+    : (tem ? Date.now() : 0);
+  const url = tem ? `/api/equipe/${id}/foto?_=${cacheBuster}` : '';
+  const iniciais = gerarIniciais(nome);
+  const bg = corDeFundoPorNome(nome);
+  // Container relativo; img absoluta sobre div de fallback. Se img carregar,
+  // cobre o fallback. Se onerror, esconde a img (fallback aparece).
+  return `
+    <div style="position:relative; width:${s}px; height:${s}px; flex-shrink:0;">
+      <div style="width:${s}px;height:${s}px;border-radius:${half}px;background:${bg};color:#fff;font-weight:700;font-size:${fontSize}px;text-align:center;line-height:${s}px;border:2px solid var(--border, #333);font-family:inherit;">${iniciais}</div>
+      ${tem ? `<img src="${url}" alt="${escape(nome)}" style="position:absolute;top:0;left:0;width:${s}px;height:${s}px;border-radius:${half}px;object-fit:cover;border:2px solid var(--border, #333);background:#000;" onerror="this.style.display='none';">` : ''}
+    </div>`;
+}
 function statusSelectOpts(current) {
   return Object.entries(STATUS_COLAB).map(([k, v]) =>
     `<option value="${k}" ${k===(current||'ativo')?'selected':''}>${v.label}</option>`
@@ -3859,6 +3903,7 @@ function renderEquipe() {
     const tag = statusTag(p.status);
     return `<div class="card">
       <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
+        ${avatarHtml(p, 56)}
         <div style="flex:1; min-width:0;">
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:2px;">
             <p style="margin:0; font-weight:500; font-size:15px;">${escape(p.nome)}</p>
