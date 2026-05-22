@@ -2288,8 +2288,14 @@ async function carregarAnexosProposta(propId: number): Promise<Array<{ filename:
 // v1.66.9: gera PDF da proposta com anexos mergeados ao final.
 // Imagens (PNG/JPG) viram pagina propria do PDF. PDFs anexos sao mergeados
 // pagina por pagina. Usa pdf-lib pra concatenacao real.
-export async function gerarPdfPropostaConsultoriaComAnexos(id: string): Promise<Buffer> {
-  const propostaPdf = await gerarPdfPropostaConsultoria(id);
+// v3.24.12: aceita signatureMeta pra propagar pro PDF principal antes do merge.
+// Necessario porque assinarProposta gerava PDF sem anexos. CEO reportou que os
+// anexos somem no PDF assinado.
+export async function gerarPdfPropostaConsultoriaComAnexos(
+  id: string,
+  signatureMeta?: SignatureVisualMeta,
+): Promise<Buffer> {
+  const propostaPdf = await gerarPdfPropostaConsultoria(id, signatureMeta);
   const anexos = await carregarAnexosProposta(Number(id));
   if (anexos.length === 0) return propostaPdf;
 
@@ -2461,8 +2467,11 @@ export async function assinarProposta(
     throw new Error('Apenas propostas de consultoria sao suportadas neste momento');
   }
 
-  // Gera PDF JA com bloco visual + assina
-  const pdfBuffer = await gerarPdfPropostaConsultoria(String(propostaId), signatureMeta);
+  // Gera PDF JA com bloco visual + assina.
+  // v3.24.12 FIX: usa ComAnexos pra incluir croqui/imagens no PDF assinado.
+  // Antes usava gerarPdfPropostaConsultoria (sem anexos) — assinatura ficava
+  // so na proposta principal, anexos sumiam do PDF final salvo no banco.
+  const pdfBuffer = await gerarPdfPropostaConsultoriaComAnexos(String(propostaId), signatureMeta);
 
   const signMeta = {
     name: certData.meta.subject_cn ?? `Proposta ${proposta.numero}`,
