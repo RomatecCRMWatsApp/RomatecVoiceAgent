@@ -10,12 +10,14 @@ import type {
   InputDesmembramento,
   InputRetificacao,
   InputAvaliacaoPTAM,
+  InputProjetoExecutivo,
 } from './types';
 import { calcularAverbacao } from './averbacao';
 import { calcularGeorreferenciamento } from './georreferenciamento';
 import { calcularDesmembramento } from './desmembramento';
 import { calcularRetificacao } from './retificacao';
 import { calcularAvaliacaoPTAM } from './ptam';
+import { calcularProjetoExecutivo } from './projetoExecutivo';
 
 export type InputConsultoria =
   | { subtipo: 'averbacao_residencial' | 'averbacao_comercial'; dados: InputAverbacao }
@@ -23,7 +25,8 @@ export type InputConsultoria =
   | { subtipo: 'desmembramento';              dados: InputDesmembramento }
   | { subtipo: 'remembramento';               dados: InputDesmembramento }
   | { subtipo: 'retificacao_area';            dados: InputRetificacao }
-  | { subtipo: 'avaliacao_ptam';              dados: InputAvaliacaoPTAM };
+  | { subtipo: 'avaliacao_ptam';              dados: InputAvaliacaoPTAM }
+  | { subtipo: 'projeto_executivo';           dados: InputProjetoExecutivo };
 
 export async function calcularConsultoria(input: InputConsultoria): Promise<ResultadoCalculo> {
   switch (input.subtipo) {
@@ -41,6 +44,8 @@ export async function calcularConsultoria(input: InputConsultoria): Promise<Resu
       return calcularRetificacao(input.dados);
     case 'avaliacao_ptam':
       return calcularAvaliacaoPTAM(input.dados);
+    case 'projeto_executivo':
+      return calcularProjetoExecutivo(input.dados);
   }
 }
 
@@ -54,6 +59,7 @@ export const SUBTIPOS_DISPONIVEIS_FASE1: SubtipoConsultoria[] = [
   'remembramento',
   'retificacao_area',
   'avaliacao_ptam',
+  'projeto_executivo',
 ];
 
 export const TODOS_SUBTIPOS: SubtipoConsultoria[] = [
@@ -64,4 +70,5 @@ export const TODOS_SUBTIPOS: SubtipoConsultoria[] = [
   'remembramento',
   'retificacao_area',
   'avaliacao_ptam',
+  'projeto_executivo',
 ];

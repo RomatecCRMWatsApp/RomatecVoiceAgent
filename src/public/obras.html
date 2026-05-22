@@ -6522,6 +6522,8 @@ const SUBTIPOS_CONSULTORIA = [
   { slug: 'remembramento',             icone: '🔗', nome: 'Remembramento',            disponivel: true },
   { slug: 'retificacao_area',          icone: '📐', nome: 'Retificação de Área',      disponivel: true },
   { slug: 'avaliacao_ptam',            icone: '💰', nome: 'Avaliação PTAM',           disponivel: true },
+  // v3.24.5: Projeto Executivo (arquitetonico + complementares)
+  { slug: 'projeto_executivo',         icone: '📐', nome: 'Projeto Executivo',        disponivel: true },
   // v1.99.16: stub — Desmembramento de Obra (fracionamento de matricula de construcao) virá em fase posterior
   { slug: 'desmembramento_obra',       icone: '🏗️', nome: 'Desmembramento de Obra (Em breve)', disponivel: false },
 ];
@@ -6670,6 +6672,7 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
         'remembramento',
         'retificacao_area',
         'avaliacao_ptam',
+        'projeto_executivo', // v3.24.5
       ]);
       if (!SUBTIPOS_EDITAVEIS.has(subtipo)) {
         return alert(`Edição não disponível para subtipo "${subtipo}".`);
@@ -6855,6 +6858,9 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
   }
   if (subtipo === 'avaliacao_ptam') {
     return renderConsultoriaFormPTAM(v, toggleHTML);
+  }
+  if (subtipo === 'projeto_executivo') {
+    return renderConsultoriaFormProjetoExecutivo(v, toggleHTML);
   }
   await loadPropostasClientes();
   const cliOpts = state.propostasClientes.map(c =>
@@ -8525,6 +8531,258 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
     const enderecoTxt = document.getElementById('rxEndereco').value.trim();
 
     const btn = document.getElementById('rxPreview');
+    btn.disabled = true; btn.textContent = 'Calculando...';
+    try {
+      const r = await api('/api/propostas-consultoria/preview', {
+        method: 'POST',
+        body: JSON.stringify({ subtipo, dados_imovel }),
+      });
+      state.consultoriaFormCache = { subtipo, cliId, endereco: enderecoTxt, dados_imovel };
+      state.consultoriaPreviewData = { ctx: { cliId, dados_imovel, subtipo, endereco: enderecoTxt }, resultado: r };
+      setConsultoriaView('preview');
+    } catch (e) {
+      alert('Erro: ' + e.message);
+      btn.disabled = false; btn.textContent = '🧮 Calcular preview';
+    }
+  };
+}
+
+// ── v3.24.5: Form Projeto Executivo ────────────────────────────────────
+// Arquitetonico + complementares (hidraulico, sanitario, eletrico, estrutural,
+// PCI, mapa de situacao). Calculo principal: area × R$/m² + ART/TRT auto
+// + alvara opcional + placa opcional. Taxa esboco R$ 750 e' INFORMATIVA.
+const PROJETOS_PE_DEFAULT_FRONT = [
+  { codigo: 'mapa_situacao', nome: 'Mapa de Situacao e Localizacao',                       selecionado: true,  detalhamento: 'Prancha contendo planta de situacao (quadra/lote), planta de localizacao do imovel, orientacao magnetica (Norte), coordenadas de referencia (SIRGAS2000), confrontantes, vias de acesso, recuos, taxa de ocupacao e coeficiente de aproveitamento conforme legislacao municipal.' },
+  { codigo: 'arquitetonico',  nome: 'Projeto Arquitetonico',                                selecionado: true,  detalhamento: 'Plantas baixas de todos os pavimentos com cotas e areas, planta de cobertura, planta de implantacao, cortes longitudinal e transversal (minimo 2), fachadas (minimo 2), planta de layout, memorial descritivo e quadro de areas, em conformidade com as NBR 13531 e NBR 13532.' },
+  { codigo: 'hidraulico',     nome: 'Projeto Hidraulico (Agua Fria)',                       selecionado: true,  detalhamento: 'Planta baixa hidraulica por pavimento, vistas isometricas dos pontos de consumo, detalhes de barrilete e reservatorio, dimensionamento de tubulacoes, quantitativo de materiais e memorial de calculo conforme NBR 5626.' },
+  { codigo: 'sanitario',      nome: 'Projeto Sanitario (Esgoto e Aguas Pluviais)',          selecionado: true,  detalhamento: 'Planta baixa de esgoto sanitario, planta baixa de aguas pluviais, vistas isometricas, detalhes de caixa de inspecao, fossa septica e sumidouro (quando aplicavel), dimensionamento conforme NBR 8160 e NBR 10844, e quantitativo de materiais.' },
+  { codigo: 'eletrico',       nome: 'Projeto Eletrico',                                     selecionado: true,  detalhamento: 'Planta baixa de pontos eletricos por pavimento, diagrama unifilar, quadro de cargas, dimensionamento de condutores e protecoes, detalhe de entrada de energia conforme padrao da concessionaria (Equatorial Maranhao), memorial descritivo conforme NBR 5410 e quantitativo de materiais.' },
+  { codigo: 'estrutural',     nome: 'Projeto Estrutural',                                   selecionado: true,  detalhamento: 'Planta de locacao de pilares, planta de formas por pavimento, detalhamento de vigas, lajes, pilares e fundacoes, memorial de calculo, especificacao de materiais (concreto e aco), em conformidade com NBR 6118 e NBR 6122.' },
+  { codigo: 'pci',            nome: 'Projeto de Prevencao e Combate a Incendio (PCI)',      selecionado: false, detalhamento: 'Planta baixa de PCI com rotas de fuga, localizacao de extintores, hidrantes, iluminacao de emergencia e sinalizacao, memorial descritivo conforme Normas Tecnicas do CBMMA e NBR 9077, para protocolo junto ao Corpo de Bombeiros Militar do Maranhao.' },
+];
+
+async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
+  await loadPropostasClientes();
+  const cliOpts = state.propostasClientes.map(c =>
+    `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`
+  ).join('');
+  const subtipo = 'projeto_executivo';
+  const editando = !!state.consultoriaEditandoId;
+  const tituloHeader = editando
+    ? `Editando ${state.consultoriaPropostaOriginal?.numero || ''}`
+    : 'Nova Proposta de Projeto Executivo';
+  const cache = state.consultoriaFormCache || {};
+  const di = (state.consultoriaPropostaOriginal?.dados_imovel || cache.dados_imovel || {});
+
+  // Estado dos projetos: vem do cache ou defaults
+  const projetosState = Array.isArray(di.projetos_selecionados) && di.projetos_selecionados.length > 0
+    ? di.projetos_selecionados
+    : PROJETOS_PE_DEFAULT_FRONT.map(p => ({ ...p, detalhamento_entrega: p.detalhamento }));
+
+  const projetosHtml = projetosState.map((p, idx) => `
+    <div style="border:1px solid var(--border); border-radius:6px; padding:10px; margin-bottom:6px; background:var(--bg-elev);">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+        <input type="checkbox" data-pe-proj="${idx}" ${p.selecionado ? 'checked' : ''} style="width:18px; height:18px;">
+        <span style="font-weight:600; font-size:13px;">${escape(p.nome)}</span>
+      </label>
+      <details style="margin-top:6px;">
+        <summary style="font-size:11px; color:var(--text-muted); cursor:pointer;">Editar detalhamento ▼</summary>
+        <textarea data-pe-detail="${idx}" style="width:100%; margin-top:6px; min-height:60px; font-size:11px;">${escape(p.detalhamento_entrega || p.detalhamento || '')}</textarea>
+      </details>
+    </div>
+  `).join('');
+
+  v.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+        <p class="section-title" style="margin:0;">📐 ${escape(tituloHeader)}</p>
+        ${toggleHTML}
+      </div>
+
+      <p style="margin:4px 0 0; font-size:13px; color:var(--gold);">📐 Projeto Executivo — Arquitetura + Complementares · NBR 13531/13532, 5626, 8160, 5410, 6118, 9077</p>
+
+      <div style="margin-top:12px;">
+        <p style="font-weight:600; color:var(--neon); font-size:13px;">📋 Cliente</p>
+        <label>Cliente <select id="peCli" style="width:100%;"><option value="">— Selecione —</option>${cliOpts}</select></label>
+      </div>
+
+      <div style="margin-top:12px;">
+        <p style="font-weight:600; color:var(--neon); font-size:13px;">🏢 Imóvel / Obra</p>
+        <label>Endereço da Obra
+          <input id="peEnd" type="text" placeholder="Rua, número, bairro" value="${escape(di.endereco_obra||'')}" style="width:100%;">
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 80px; gap:8px;">
+          <label>Cidade <input id="peCidade" type="text" value="${escape(di.cidade_obra||'Açailândia')}" style="width:100%;"></label>
+          <label>UF <input id="peUf" type="text" maxlength="2" value="${escape(di.uf_obra||'MA')}" style="width:100%;"></label>
+        </div>
+        <label>Tipo de edificação
+          <select id="peTipo" style="width:100%;">
+            <option value="residencial"   ${di.tipo_edificacao==='residencial'?'selected':''}>Residencial</option>
+            <option value="comercial"     ${di.tipo_edificacao==='comercial'?'selected':''}>Comercial</option>
+            <option value="misto"         ${di.tipo_edificacao==='misto'?'selected':''}>Misto</option>
+            <option value="industrial"    ${di.tipo_edificacao==='industrial'?'selected':''}>Industrial</option>
+            <option value="institucional" ${di.tipo_edificacao==='institucional'?'selected':''}>Institucional</option>
+          </select>
+        </label>
+      </div>
+
+      <div style="margin-top:12px;">
+        <p style="font-weight:600; color:var(--neon); font-size:13px;">📐 Parâmetros de Cálculo</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>Área a construir (m²) <input id="peArea" type="number" step="0.01" min="0" value="${di.area_construir||''}" style="width:100%;"></label>
+          <label>Valor R$/m² <input id="peVm2" type="number" step="0.01" min="0" value="${di.valor_m2||25}" style="width:100%;"></label>
+        </div>
+        <p id="peValorProjetosLine" style="margin:6px 0 0; font-size:12px; color:var(--text-muted);">Valor dos Projetos: <span id="peValorProjetos">R$ 0,00</span></p>
+      </div>
+
+      <div style="margin-top:12px;">
+        <p style="font-weight:600; color:var(--neon); font-size:13px;">📋 Projetos a Entregar</p>
+        ${projetosHtml}
+      </div>
+
+      <div style="margin-top:12px;">
+        <p style="font-weight:600; color:var(--neon); font-size:13px;">⚖️ Responsabilidade Técnica</p>
+        <label style="display:flex; gap:8px; align-items:center; cursor:pointer;">
+          <input type="checkbox" id="peRtAuto" ${di.responsabilidade_auto===false?'':'checked'}>
+          <span>Automático pela área (≤80m² → TRT · &gt;80m² → ART)</span>
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px;">
+          <label>Tipo
+            <select id="peRtTipo" style="width:100%;">
+              <option value="TRT" ${di.responsabilidade_tipo==='TRT'?'selected':''}>TRT — Técnico (CFT/MA)</option>
+              <option value="ART" ${di.responsabilidade_tipo==='ART'?'selected':''}>ART — Engenheiro/Arquiteto (CREA-MA)</option>
+            </select>
+          </label>
+          <label>Valor <input id="peRtVlr" type="number" step="0.01" min="0" value="${di.responsabilidade_valor||93.40}" style="width:100%;"></label>
+        </div>
+        <p id="peArtAviso" style="margin:6px 0 0; padding:8px; background:rgba(251,191,36,0.12); border-left:3px solid var(--gold); border-radius:4px; font-size:11px; color:var(--gold); display:none;">⚠️ ART exige Engenheiro/Arquiteto CREA-MA ou CAU. Romatec subcontrata profissional habilitado mediante aditivo contratual.</p>
+      </div>
+
+      <div style="margin-top:12px;">
+        <p style="font-weight:600; color:var(--neon); font-size:13px;">📋 Itens Opcionais</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:center;">
+          <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="peAlvI" ${di.alvara_incluir!==false?'checked':''}> Alvará de Construção</label>
+          <label>Valor R$ <input id="peAlvV" type="number" step="0.01" min="0" value="${di.alvara_valor||0}" style="width:100%;"></label>
+          <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="pePlcI" ${di.placa_incluir!==false?'checked':''}> Placa de Obra</label>
+          <label>Valor R$ <input id="pePlcV" type="number" step="0.01" min="0" value="${di.placa_valor||0}" style="width:100%;"></label>
+        </div>
+      </div>
+
+      <div style="margin-top:12px; padding:10px; background:rgba(251,191,36,0.10); border-left:4px solid var(--gold); border-radius:6px;">
+        <p style="margin:0; font-weight:600; color:var(--gold); font-size:13px;">⚠️ Hora Técnica de Anteprojeto: R$ <span id="peTxLbl">750,00</span> <span style="font-weight:400; font-size:11px;">(NÃO incluída no Valor Total)</span></p>
+        <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">Cobrança CONDICIONAL — apenas se o cliente NÃO prosseguir com os projetos executivos após o esboço/anteprojeto. Se prosseguir, é absorvida pelo contrato.</p>
+        <label style="margin-top:6px; display:block; font-size:11px;">Valor da Hora Técnica R$
+          <input id="peTax" type="number" step="0.01" min="0" value="${di.taxa_esboco||750}" style="width:120px;">
+        </label>
+      </div>
+
+      <div style="margin-top:12px;">
+        <p style="font-weight:600; color:var(--neon); font-size:13px;">💰 Resumo</p>
+        <div id="peResumo" style="font-size:13px; padding:10px; background:var(--bg-elev); border-radius:6px;">—</div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <p style="font-weight:600; color:var(--neon); font-size:13px;">📋 Prazos e Condições</p>
+        <label>Prazo de entrega (dias) <input id="pePrazo" type="number" min="1" value="${di.prazo_entrega_dias||30}" style="width:100%;"></label>
+        <label>Forma de pagamento <textarea id="pePag" style="width:100%; min-height:50px;">${escape(di.forma_pagamento||'')}</textarea></label>
+        <label>Observações <textarea id="peObs" style="width:100%; min-height:50px;">${escape(di.observacoes||'')}</textarea></label>
+      </div>
+
+      <div style="margin-top:16px;">
+        <button id="peCalcular" class="btn-primary" style="width:100%;">🧮 Calcular preview</button>
+      </div>
+    </div>
+  `;
+
+  // Handlers
+  if (cache.cliId) document.getElementById('peCli').value = cache.cliId;
+
+  function recalcResumo() {
+    const area = Number(document.getElementById('peArea').value) || 0;
+    const vm2  = Number(document.getElementById('peVm2').value)  || 0;
+    const valorProj = area * vm2;
+    document.getElementById('peValorProjetos').textContent = fmt(valorProj);
+
+    const auto = document.getElementById('peRtAuto').checked;
+    const tipoSel = document.getElementById('peRtTipo');
+    if (auto) {
+      const tipo = area > 80 ? 'ART' : 'TRT';
+      tipoSel.value = tipo;
+      tipoSel.disabled = true;
+      // valor sugerido
+      document.getElementById('peRtVlr').value = tipo === 'ART' ? 233.94 : 93.40;
+    } else {
+      tipoSel.disabled = false;
+    }
+    const tipoAtual = tipoSel.value;
+    document.getElementById('peArtAviso').style.display = tipoAtual === 'ART' ? 'block' : 'none';
+
+    const rtVlr = Number(document.getElementById('peRtVlr').value) || 0;
+    const alvI = document.getElementById('peAlvI').checked;
+    const alvV = alvI ? (Number(document.getElementById('peAlvV').value) || 0) : 0;
+    const plcI = document.getElementById('pePlcI').checked;
+    const plcV = plcI ? (Number(document.getElementById('pePlcV').value) || 0) : 0;
+    const tx = Number(document.getElementById('peTax').value) || 0;
+    document.getElementById('peTxLbl').textContent = tx.toFixed(2).replace('.', ',');
+
+    const subtotal = valorProj + rtVlr + alvV + plcV;
+    document.getElementById('peResumo').innerHTML = `
+      Projetos Executivos: <strong>${fmt(valorProj)}</strong><br>
+      ${tipoAtual}: <strong>${fmt(rtVlr)}</strong><br>
+      Alvará: <strong>${fmt(alvV)}</strong> · Placa: <strong>${fmt(plcV)}</strong><br>
+      <span style="color:var(--gold); font-size:14px;">VALOR TOTAL: <strong>${fmt(subtotal)}</strong></span><br>
+      <span style="color:var(--text-muted); font-size:11px;">+ Hora Técnica condicional ${fmt(tx)} (não somada)</span>
+    `;
+  }
+  ['peArea','peVm2','peRtTipo','peRtVlr','peAlvI','peAlvV','pePlcI','pePlcV','peTax'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', recalcResumo);
+    if (el && el.type === 'checkbox') el.addEventListener('change', recalcResumo);
+  });
+  document.getElementById('peRtAuto').addEventListener('change', recalcResumo);
+  recalcResumo();
+
+  document.getElementById('peCalcular').onclick = async () => {
+    const btn = document.getElementById('peCalcular');
+    const cliId = document.getElementById('peCli').value;
+    if (!cliId) return alert('Selecione um cliente.');
+    const enderecoTxt = document.getElementById('peEnd').value.trim();
+    if (!enderecoTxt) return alert('Endereço da obra é obrigatório.');
+    const area = Number(document.getElementById('peArea').value);
+    if (!area || area <= 0) return alert('Área a construir deve ser maior que zero.');
+    const vm2 = Number(document.getElementById('peVm2').value);
+    if (!vm2 || vm2 <= 0) return alert('Valor R$/m² deve ser maior que zero.');
+
+    // Coleta projetos
+    const projetos_selecionados = projetosState.map((p, idx) => ({
+      codigo: p.codigo,
+      nome: p.nome,
+      ordem: idx + 1,
+      selecionado: document.querySelector(`[data-pe-proj="${idx}"]`).checked,
+      detalhamento_entrega: document.querySelector(`[data-pe-detail="${idx}"]`).value.trim(),
+    }));
+
+    const dados_imovel = {
+      endereco_obra: enderecoTxt,
+      cidade_obra: document.getElementById('peCidade').value.trim() || 'Açailândia',
+      uf_obra: document.getElementById('peUf').value.trim().toUpperCase() || 'MA',
+      tipo_edificacao: document.getElementById('peTipo').value,
+      area_construir: area,
+      valor_m2: vm2,
+      responsabilidade_auto: document.getElementById('peRtAuto').checked,
+      responsabilidade_tipo: document.getElementById('peRtTipo').value,
+      responsabilidade_valor: Number(document.getElementById('peRtVlr').value) || 0,
+      alvara_incluir: document.getElementById('peAlvI').checked,
+      alvara_valor: Number(document.getElementById('peAlvV').value) || 0,
+      placa_incluir: document.getElementById('pePlcI').checked,
+      placa_valor: Number(document.getElementById('pePlcV').value) || 0,
+      taxa_esboco: Number(document.getElementById('peTax').value) || 750,
+      prazo_entrega_dias: Number(document.getElementById('pePrazo').value) || 30,
+      forma_pagamento: document.getElementById('pePag').value.trim(),
+      observacoes: document.getElementById('peObs').value.trim(),
+      projetos_selecionados,
+    };
+
     btn.disabled = true; btn.textContent = 'Calculando...';
     try {
       const r = await api('/api/propostas-consultoria/preview', {
