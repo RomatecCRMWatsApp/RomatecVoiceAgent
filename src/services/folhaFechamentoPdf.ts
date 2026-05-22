@@ -367,12 +367,15 @@ export async function gerarPdfFechamento(fechamentoId: number): Promise<Buffer> 
 
     // Faixa verde do header
     doc.save().rect(blocoX, blocoY, blocoW, 22).fillColor(COR.verdeEsc).fill().restore();
-    // v3.16.0: foto do colaborador embed (circular, 40x40) a esquerda do nome se tiver
+    // v3.16.0: foto do colaborador embed (circular, 32x32) a esquerda do nome.
+    // v3.24.4: fallback de iniciais quando NAO tem foto — circulo colorido
+    // (cor deterministica do nome) com letras brancas. Antes pulava direto pro
+    // texto. Agora todo colaborador tem identidade visual no PDF.
+    const cxF = blocoX + 28, cyF = blocoY + 11, rF = 16;
+    const nomeOffsetX = 56;
     const temFoto = !!eq?.foto_b64;
-    const nomeOffsetX = temFoto ? 56 : 8;
     if (temFoto && eq?.foto_b64) {
       try {
-        const cxF = blocoX + 28, cyF = blocoY + 11, rF = 16;
         doc.save();
         doc.circle(cxF, cyF, rF).clip();
         doc.image(eq.foto_b64, cxF - rF, cyF - rF, { fit: [rF * 2, rF * 2] });
@@ -382,6 +385,18 @@ export async function gerarPdfFechamento(fechamentoId: number): Promise<Buffer> 
       } catch (err) {
         console.warn('[folhaFechamentoPdf] embed foto falhou:', (err as Error).message);
       }
+    } else {
+      // Fallback iniciais — usa helpers de src/services/colaborador-avatar-helpers
+      const { gerarIniciais, corDeFundoPorNome } = require('./colaborador-avatar-helpers');
+      const iniciais = gerarIniciais(it.funcionario_nome);
+      const bg = corDeFundoPorNome(it.funcionario_nome);
+      doc.save();
+      doc.circle(cxF, cyF, rF).fillAndStroke(bg, '#fff');
+      doc.restore();
+      doc.save()
+         .font('Helvetica-Bold').fontSize(11).fillColor('#fff')
+         .text(iniciais, cxF - rF, cyF - 6, { width: rF * 2, align: 'center', lineBreak: false });
+      doc.restore();
     }
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#fff')
        .text(it.funcionario_nome, blocoX + nomeOffsetX, blocoY + 6, { width: blocoW - 100 - nomeOffsetX, lineBreak: false });

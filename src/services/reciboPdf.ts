@@ -260,22 +260,39 @@ export async function gerarPdfRecibo(
 
   // ── Bloco PAGADOR ───────────────────────────────────────────────────
   // v3.16.0: se tem foto do colaborador (recibo de funcionario), desenha
-  // thumbnail 60x60 a direita do bloco PAGADOR. Padding garante que texto
-  // do PAGADOR nao colide com a foto.
-  const pagadorWidth = fotoColaborador ? 440 : 515;
-  if (fotoColaborador) {
-    try {
+  // thumbnail 60x60 a direita do bloco PAGADOR.
+  // v3.24.4: SE recibo de funcionario MAS sem foto, desenha fallback iniciais
+  // (circulo colorido). Recibos NAO de funcionario continuam sem avatar.
+  // ehReciboColaborador detecta isso via destinatario_nome + tipo='funcionario'
+  const ehReciboColaborador = recibo.tipo === 'funcionario' && !!recibo.destinatario_nome;
+  const desenharAvatar = !!fotoColaborador || ehReciboColaborador;
+  const pagadorWidth = desenharAvatar ? 440 : 515;
+  if (desenharAvatar) {
+    const cx = 510, cyImg = cy + 4, raio = 28;
+    if (fotoColaborador) {
+      try {
+        doc.save();
+        doc.circle(cx, cyImg + raio, raio).clip();
+        doc.image(fotoColaborador, cx - raio, cyImg, { fit: [raio * 2, raio * 2] });
+        doc.restore();
+        doc.save().strokeColor(corDourada).lineWidth(1.5)
+          .circle(cx, cyImg + raio, raio).stroke().restore();
+      } catch (err) {
+        console.warn('[reciboPdf] embed foto colaborador falhou:', (err as Error).message);
+      }
+    } else {
+      // Fallback iniciais
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { gerarIniciais, corDeFundoPorNome } = require('./colaborador-avatar-helpers');
+      const iniciais = gerarIniciais(recibo.destinatario_nome || '');
+      const bg = corDeFundoPorNome(recibo.destinatario_nome || '');
       doc.save();
-      // Mascara circular (clip)
-      const cx = 510, cyImg = cy + 4, raio = 28;
-      doc.circle(cx, cyImg + raio, raio).clip();
-      doc.image(fotoColaborador, cx - raio, cyImg, { fit: [raio * 2, raio * 2] });
+      doc.circle(cx, cyImg + raio, raio).fillAndStroke(bg, corDourada);
       doc.restore();
-      // Borda circular dourada
-      doc.save().strokeColor(corDourada).lineWidth(1.5)
-        .circle(cx, cyImg + raio, raio).stroke().restore();
-    } catch (err) {
-      console.warn('[reciboPdf] embed foto colaborador falhou:', (err as Error).message);
+      doc.save()
+         .font('Helvetica-Bold').fontSize(22).fillColor('#fff')
+         .text(iniciais, cx - raio, cyImg + raio - 12, { width: raio * 2, align: 'center', lineBreak: false });
+      doc.restore();
     }
   }
   doc.fontSize(9).fillColor(corDourada).font('Helvetica-Bold')
