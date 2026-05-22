@@ -198,6 +198,11 @@ export async function atualizarClienteProposta(input: {
   id: string;
   nome?: string; cpf_cnpj?: string; telefone?: string; email?: string;
   endereco?: string; cidade?: string; estado?: string; cep?: string; observacoes?: string;
+  // v3.24.11: campos novos que o POST ja salvava desde v1.86.0 mas o PUT esqueceu.
+  // CEO reportou que "RG e bairro somem apos editar" — bug confirmado.
+  rg_ie?: string; data_nascimento?: string; estado_civil?: string; profissao?: string;
+  razao_social?: string; nome_fantasia?: string;
+  numero?: string; complemento?: string; bairro?: string;
 }): Promise<MutationResult> {
   const id = Number(input.id);
   if (!id) throw new Error('id inválido');
@@ -207,13 +212,45 @@ export async function atualizarClienteProposta(input: {
   set('nome', input.nome); set('cpf_cnpj', input.cpf_cnpj); set('telefone', input.telefone);
   set('email', input.email); set('endereco', input.endereco); set('cidade', input.cidade);
   set('estado', input.estado); set('cep', input.cep); set('observacoes', input.observacoes);
+  // v3.24.11: todos os campos do form de cadastro
+  set('rg_ie', input.rg_ie);
+  set('data_nascimento', input.data_nascimento);
+  set('estado_civil', input.estado_civil);
+  set('profissao', input.profissao);
+  set('razao_social', input.razao_social);
+  set('nome_fantasia', input.nome_fantasia);
+  set('numero', input.numero);
+  set('complemento', input.complemento);
+  set('bairro', input.bairro);
   if (!fields.length) return { ok: true, affected: 0, message: 'Nada a atualizar.' };
   params.push(id);
-  const [r] = await pool.execute<ResultSetHeader>(
-    `UPDATE propostas_clientes SET ${fields.join(', ')} WHERE id = ? AND deleted_at IS NULL`,
-    params
-  );
-  return { ok: true, affected: r.affectedRows, message: 'Cliente atualizado.' };
+  try {
+    const [r] = await pool.execute<ResultSetHeader>(
+      `UPDATE propostas_clientes SET ${fields.join(', ')} WHERE id = ? AND deleted_at IS NULL`,
+      params
+    );
+    return { ok: true, affected: r.affectedRows, message: 'Cliente atualizado.' };
+  } catch (err) {
+    // v3.24.11: fallback gracioso caso ALTERs nao tenham rodado em prod (rg_ie etc).
+    // Mantem 9 campos legacy + retorna msg amigavel.
+    if (/Unknown column/i.test((err as Error).message)) {
+      // Reconstroi sem os campos novos (refaz o set)
+      const fLegacy: string[] = [];
+      const pLegacy: (string | number | null)[] = [];
+      const setL = (k: string, v: unknown) => { if (v !== undefined) { fLegacy.push(`${k} = ?`); pLegacy.push((v as string) ?? null); } };
+      setL('nome', input.nome); setL('cpf_cnpj', input.cpf_cnpj); setL('telefone', input.telefone);
+      setL('email', input.email); setL('endereco', input.endereco); setL('cidade', input.cidade);
+      setL('estado', input.estado); setL('cep', input.cep); setL('observacoes', input.observacoes);
+      if (!fLegacy.length) return { ok: true, affected: 0, message: 'Nada a atualizar.' };
+      pLegacy.push(id);
+      const [r] = await pool.execute<ResultSetHeader>(
+        `UPDATE propostas_clientes SET ${fLegacy.join(', ')} WHERE id = ? AND deleted_at IS NULL`,
+        pLegacy
+      );
+      return { ok: true, affected: r.affectedRows, message: 'Cliente atualizado (modo legado).' };
+    }
+    throw err;
+  }
 }
 
 export async function apagarClienteProposta(input: { id: string }): Promise<MutationResult> {
