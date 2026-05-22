@@ -1067,16 +1067,29 @@ export async function listarDiasFuncionario(input: {
   if (!input.funcionario_id) throw new Error('funcionario_id obrigatório');
   const params: (string | number)[] = [input.funcionario_id];
   // v3.23.11: LEFT JOIN com folha_fechamento_itens — retorna status do
-  // fechamento pra UI poder colorir dias pagos (azul) vs pendentes (verde/amarelo)
-  // vs cancelados (cinza). O `pago` e' por ITEM de fechamento (a quinzena inteira
-  // do funcionario), nao dia-a-dia. Dia sem fechamento (`fechamento_id IS NULL`)
-  // continua aparecendo como pendente — caso comum da quinzena ativa.
+  // fechamento (sistema NOVO) pra UI colorir dias pagos.
+  //
+  // v3.24.3 FIX: tambem checa sistema LEGADO via recibos_envios. CEO reportou
+  // que so o Leonardo apareceu com dias em azul; os outros tinham sido pagos
+  // pelo sistema antigo (recibos quinzenais com periodo_inicio/fim) e nunca
+  // foram migrados pra fechamento_id. Agora o campo `pago_legado` reflete:
+  // existe ALGUM recibos_envios.status='pago' cujo lote.periodo cobre essa data
+  // E o membro_id bate. Status final: paga > cancelada > pago_legado > aberta.
   let sql = `
     SELECT
       d.id, d.data, d.periodo, d.valor, d.obra_id, d.observacoes,
       d.fechamento_id,
       fi.status_pagamento AS status_fechamento,
-      fi.data_pagamento
+      fi.data_pagamento,
+      (
+        SELECT 1
+          FROM recibos_envios e
+          JOIN recibos_envios_lotes l ON l.id = e.lote_id
+         WHERE e.membro_id = d.funcionario_id
+           AND e.status = 'pago'
+           AND d.data BETWEEN l.periodo_inicio AND l.periodo_fim
+         LIMIT 1
+      ) AS pago_legado
     FROM romatec_obra_funcionario_dias d
     LEFT JOIN folha_fechamento_itens fi
       ON d.fechamento_id IS NOT NULL
@@ -1093,22 +1106,30 @@ export async function listarDiasFuncionario(input: {
     fechamento_id: number | null;
     status_fechamento: 'aberta' | 'paga' | 'cancelada' | null;
     data_pagamento: Date | string | null;
+    pago_legado: number | null;
   };
   const [rows] = await pool.execute<DiaRowExt[]>(sql, params);
-  return rows.map(r => ({
-    id: String(r.id),
-    data: r.data instanceof Date ? r.data.toISOString().slice(0, 10) : String(r.data),
-    periodo: r.periodo,
-    valor: num(r.valor),
-    obra_id: r.obra_id ? String(r.obra_id) : null,
-    observacoes: r.observacoes,
-    // v3.23.11: novos campos pra UI colorir
-    fechamento_id: r.fechamento_id ? Number(r.fechamento_id) : null,
-    status_fechamento: r.status_fechamento ?? null,
-    data_pagamento: r.data_pagamento
-      ? (r.data_pagamento instanceof Date ? r.data_pagamento.toISOString() : String(r.data_pagamento))
-      : null,
-  }));
+  return rows.map(r => {
+    // Status efetivo: prioridade paga (fechamento_itens) > cancelada > pago_legado > null
+    let statusEfetivo: 'aberta' | 'paga' | 'cancelada' | null = r.status_fechamento ?? null;
+    if (!statusEfetivo && Number(r.pago_legado) === 1) {
+      statusEfetivo = 'paga'; // dia coberto por recibo legado pago
+    }
+    return {
+      id: String(r.id),
+      data: r.data instanceof Date ? r.data.toISOString().slice(0, 10) : String(r.data),
+      periodo: r.periodo,
+      valor: num(r.valor),
+      obra_id: r.obra_id ? String(r.obra_id) : null,
+      observacoes: r.observacoes,
+      fechamento_id: r.fechamento_id ? Number(r.fechamento_id) : null,
+      status_fechamento: statusEfetivo,
+      pago_legado: Number(r.pago_legado) === 1, // expoe a fonte pro front decidir tooltip
+      data_pagamento: r.data_pagamento
+        ? (r.data_pagamento instanceof Date ? r.data_pagamento.toISOString() : String(r.data_pagamento))
+        : null,
+    };
+  });
 }
 
 export async function relatorioMensalFuncionario(input: {
