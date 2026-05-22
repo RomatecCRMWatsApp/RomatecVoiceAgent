@@ -8645,13 +8645,34 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
         </label>
       </div>
 
+      <!-- v3.24.8: Parametros do Imovel — area terreno + area construir + taxa ocupacao -->
       <div style="margin-top:12px;">
-        <p style="font-weight:600; color:var(--neon); font-size:13px;">📐 Parâmetros de Cálculo</p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-          <label>Área a construir (m²) <input id="peArea" type="number" step="0.01" min="0" value="${di.area_construir||''}" style="width:100%;"></label>
-          <label>Valor R$/m² <input id="peVm2" type="number" step="0.01" min="0" value="${di.valor_m2||25}" style="width:100%;"></label>
+        <p style="font-weight:600; color:var(--neon); font-size:13px;">📐 Parâmetros do Imóvel</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+          <label>Área do Terreno (m²) <input id="peAreaTer" type="number" step="0.01" min="0" value="${di.area_terreno||''}" placeholder="220,00" style="width:100%;"></label>
+          <label>Área a Construir (m²) * <input id="peArea" type="number" step="0.01" min="0" value="${di.area_construir||''}" placeholder="71,00" style="width:100%;"></label>
+          <div>
+            <label style="font-size:12px; color:var(--text-muted);">Taxa de Ocupação</label>
+            <div id="peTaxaOcupBox" style="padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--bg-elev); min-height:42px; display:flex; flex-direction:column; justify-content:center;">
+              <span id="peTaxaOcupValor" style="font-weight:700; font-size:14px;">—</span>
+              <span id="peTaxaOcupStatus" style="font-size:10px; opacity:0.8;"></span>
+            </div>
+          </div>
         </div>
+        <label style="display:block; margin-top:8px;">Valor R$/m² <input id="peVm2" type="number" step="0.01" min="0" value="${di.valor_m2||25}" style="width:100%;"></label>
         <p id="peValorProjetosLine" style="margin:6px 0 0; font-size:12px; color:var(--text-muted);">Valor dos Projetos: <span id="peValorProjetos">R$ 0,00</span></p>
+      </div>
+
+      <!-- v3.24.8: Programa de Necessidades — comodos da edificacao -->
+      <div style="margin-top:14px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-elev);">
+        <p style="margin:0 0 6px; font-weight:600; color:var(--neon); font-size:13px;">🏗 Programa de Necessidades — Cômodos da Edificação</p>
+        <p style="margin:0 0 8px; font-size:11px; color:var(--text-muted);">Marque os cômodos do projeto e ajuste a quantidade. Os selecionados serão listados como parte do objeto contratual.</p>
+        <div id="peComodosResumo" style="padding:8px 10px; background:rgba(0,255,136,0.08); border-left:3px solid var(--neon); border-radius:4px; margin-bottom:10px; font-size:12px;">
+          <strong>Nenhum cômodo selecionado ainda.</strong>
+        </div>
+        <div id="peComodosCategorias" style="display:flex; flex-direction:column; gap:14px;">
+          <p style="color:var(--text-muted); font-size:11px; font-style:italic;">Carregando catálogo de cômodos…</p>
+        </div>
       </div>
 
       <div style="margin-top:12px;">
@@ -8836,6 +8857,205 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
     }
   }
 
+  // v3.24.8: Taxa de Ocupacao ao vivo + validacao area < terreno
+  function atualizarTaxaOcupacaoPE() {
+    const ac = Number(document.getElementById('peArea').value) || 0;
+    const at = Number(document.getElementById('peAreaTer').value) || 0;
+    const box = document.getElementById('peTaxaOcupBox');
+    const valor = document.getElementById('peTaxaOcupValor');
+    const status = document.getElementById('peTaxaOcupStatus');
+    if (!at || at <= 0) {
+      valor.textContent = '—'; status.textContent = '';
+      box.style.borderColor = 'var(--border)';
+      box.style.background = 'var(--bg-elev)';
+      valor.style.color = 'var(--text)';
+      return;
+    }
+    if (ac > at) {
+      valor.textContent = '⚠ Inválido';
+      status.textContent = 'Construir > terreno';
+      box.style.borderColor = '#f87171';
+      box.style.background = 'rgba(248,113,113,0.10)';
+      valor.style.color = '#fca5a5';
+      return;
+    }
+    const taxa = (ac / at) * 100;
+    valor.textContent = taxa.toFixed(2) + '%';
+    if (taxa <= 50) {
+      status.textContent = 'Ocupação confortável';
+      box.style.borderColor = 'var(--neon)';
+      box.style.background = 'rgba(0,255,136,0.10)';
+      valor.style.color = 'var(--neon)';
+    } else if (taxa <= 70) {
+      status.textContent = 'Dentro do limite usual';
+      box.style.borderColor = 'var(--gold)';
+      box.style.background = 'rgba(212,184,0,0.12)';
+      valor.style.color = 'var(--gold)';
+    } else {
+      status.textContent = '⚠ Verifique o Plano Diretor';
+      box.style.borderColor = '#f87171';
+      box.style.background = 'rgba(248,113,113,0.10)';
+      valor.style.color = '#fca5a5';
+    }
+  }
+
+  // v3.24.8: Programa de Necessidades — carrega catalogo + estado local
+  state.peComodos = new Map(); // Map<codigo, { catalogo, quantidade }>
+  // Reidrata do dados_imovel se editando
+  if (Array.isArray(di.programa_necessidades)) {
+    for (const it of di.programa_necessidades) {
+      state.peComodos.set(it.codigo, {
+        catalogo: it,
+        quantidade: Number(it.quantidade) || 1,
+      });
+    }
+  }
+
+  async function carregarCatalogoComodosPE() {
+    try {
+      const r = await fetch('/api/propostas-consultoria/projeto-executivo/comodos-catalogo', { credentials: 'same-origin' });
+      if (!r.ok) throw new Error('catalogo nao disponivel');
+      const { categorias, comodos, ordem_categorias } = await r.json();
+      renderComodosUI(categorias, comodos, ordem_categorias);
+    } catch (e) {
+      document.getElementById('peComodosCategorias').innerHTML =
+        '<p style="color:var(--danger); font-size:12px;">Erro ao carregar catálogo: ' + escape(e.message) + '</p>';
+    }
+  }
+
+  function renderComodosUI(categorias, comodos, ordemCategorias) {
+    const grupos = {};
+    for (const c of comodos) (grupos[c.categoria] ??= []).push(c);
+    const container = document.getElementById('peComodosCategorias');
+    container.innerHTML = '';
+    for (const catKey of (ordemCategorias || Object.keys(categorias))) {
+      const items = grupos[catKey] || [];
+      if (items.length === 0) continue;
+      const sec = document.createElement('div');
+      sec.innerHTML = `
+        <p style="margin:0 0 6px; color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">${escape(categorias[catKey])}</p>
+        <div data-cat="${catKey}" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+      `;
+      const wrap = sec.querySelector('[data-cat]');
+      for (const c of items) {
+        const tag = document.createElement('div');
+        tag.dataset.codigo = c.codigo;
+        tag.dataset.catalogo = JSON.stringify(c);
+        tag.style.cssText = 'display:flex; align-items:center; gap:2px;';
+        tag.innerHTML = `
+          <button type="button" class="peComBtn" data-codigo="${c.codigo}" style="display:flex; align-items:center; gap:4px; background:var(--bg-elev); color:var(--text); border:2px solid var(--border); border-radius:18px; padding:6px 12px; font-size:12px; cursor:pointer; min-height:36px;">
+            ${c.icone} ${escape(c.nome)}
+          </button>
+          <div class="peComQtd" data-codigo="${c.codigo}" style="display:none; align-items:center; gap:2px; background:rgba(0,255,136,0.10); border:1px solid var(--neon); border-radius:14px; padding:1px 4px;">
+            <button type="button" data-act="dec" data-codigo="${c.codigo}" style="background:transparent; border:0; color:var(--neon); font-size:14px; cursor:pointer; padding:0 6px;">−</button>
+            <input type="number" data-codigo="${c.codigo}" min="1" max="20" value="1" style="width:30px; text-align:center; background:transparent; border:0; color:var(--neon); font-weight:700; font-size:12px;">
+            <button type="button" data-act="inc" data-codigo="${c.codigo}" style="background:transparent; border:0; color:var(--neon); font-size:14px; cursor:pointer; padding:0 6px;">+</button>
+          </div>
+        `;
+        wrap.appendChild(tag);
+      }
+      container.appendChild(sec);
+    }
+    // Bind clicks
+    container.querySelectorAll('.peComBtn').forEach(b => b.onclick = () => {
+      const codigo = b.dataset.codigo;
+      const tag = b.closest('[data-codigo]');
+      const catalogo = JSON.parse(tag.dataset.catalogo);
+      if (state.peComodos.has(codigo)) {
+        state.peComodos.delete(codigo);
+      } else {
+        state.peComodos.set(codigo, { catalogo, quantidade: 1 });
+      }
+      refletirTagComodo(codigo);
+      atualizarResumoComodos();
+    });
+    container.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
+      const codigo = b.dataset.codigo;
+      const entry = state.peComodos.get(codigo);
+      if (!entry) return;
+      const delta = b.dataset.act === 'inc' ? 1 : -1;
+      const nova = Math.max(1, Math.min(20, entry.quantidade + delta));
+      entry.quantidade = nova;
+      refletirTagComodo(codigo);
+      atualizarResumoComodos();
+    });
+    container.querySelectorAll('.peComQtd input').forEach(i => i.onchange = () => {
+      const codigo = i.dataset.codigo;
+      const entry = state.peComodos.get(codigo);
+      if (!entry) return;
+      const n = Math.max(1, Math.min(20, parseInt(i.value, 10) || 1));
+      entry.quantidade = n;
+      refletirTagComodo(codigo);
+      atualizarResumoComodos();
+    });
+    // Re-render estado inicial (caso editando)
+    for (const codigo of state.peComodos.keys()) refletirTagComodo(codigo);
+    atualizarResumoComodos();
+  }
+
+  function refletirTagComodo(codigo) {
+    const btn = document.querySelector(`.peComBtn[data-codigo="${codigo}"]`);
+    const qtdBox = document.querySelector(`.peComQtd[data-codigo="${codigo}"]`);
+    const input = qtdBox ? qtdBox.querySelector('input') : null;
+    const entry = state.peComodos.get(codigo);
+    if (!btn) return;
+    if (entry) {
+      btn.style.background = 'var(--neon)';
+      btn.style.color = '#0a1a0a';
+      btn.style.borderColor = 'var(--neon)';
+      btn.style.fontWeight = '700';
+      qtdBox.style.display = 'flex';
+      if (input) input.value = entry.quantidade;
+    } else {
+      btn.style.background = 'var(--bg-elev)';
+      btn.style.color = 'var(--text)';
+      btn.style.borderColor = 'var(--border)';
+      btn.style.fontWeight = '400';
+      qtdBox.style.display = 'none';
+    }
+  }
+
+  function atualizarResumoComodos() {
+    const resumo = document.getElementById('peComodosResumo');
+    if (state.peComodos.size === 0) {
+      resumo.innerHTML = '<strong>Nenhum cômodo selecionado ainda.</strong>';
+      return;
+    }
+    const arr = Array.from(state.peComodos.values())
+      .sort((a, b) => a.catalogo.ordem_pdf - b.catalogo.ordem_pdf);
+    const total = arr.reduce((s, e) => s + e.quantidade, 0);
+    const pills = arr.map(({ catalogo, quantidade }) => {
+      const nome = quantidade > 1 ? catalogo.nome_plural : catalogo.nome;
+      return `<span style="background:rgba(0,255,136,0.15); color:var(--neon); padding:3px 8px; border-radius:10px; font-size:11px; display:inline-block; margin:2px;">${catalogo.icone} ${quantidade}× ${escape(nome)}</span>`;
+    }).join('');
+    resumo.innerHTML = `
+      <strong>${state.peComodos.size} tipo(s), ${total} cômodo(s):</strong>
+      <div style="margin-top:6px;">${pills}</div>
+    `;
+  }
+
+  function coletarProgramaNecessidades() {
+    return Array.from(state.peComodos.values())
+      .sort((a, b) => a.catalogo.ordem_pdf - b.catalogo.ordem_pdf)
+      .map(({ catalogo, quantidade }) => ({
+        codigo: catalogo.codigo,
+        nome: catalogo.nome,
+        nome_plural: catalogo.nome_plural,
+        categoria: catalogo.categoria,
+        ordem_pdf: catalogo.ordem_pdf,
+        quantidade,
+        observacao: catalogo.observacao_padrao || catalogo.observacao || null,
+      }));
+  }
+
+  // Dispara carregamento + atualiza taxa quando area/terreno mudam
+  carregarCatalogoComodosPE();
+  ['peArea', 'peAreaTer'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', atualizarTaxaOcupacaoPE);
+  });
+  atualizarTaxaOcupacaoPE();
+
   function recalcResumo() {
     const area = Number(document.getElementById('peArea').value) || 0;
     const vm2  = Number(document.getElementById('peVm2').value)  || 0;
@@ -8959,12 +9179,28 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
       detalhamento_entrega: document.querySelector(`[data-pe-detail="${idx}"]`).value.trim(),
     }));
 
+    // v3.24.8: valida area_terreno >= area_construir antes de submeter
+    const areaTer = Number(document.getElementById('peAreaTer').value) || 0;
+    if (areaTer > 0 && area > areaTer) {
+      return alert('Área a construir não pode ser maior que a área do terreno.');
+    }
+    // v3.24.8: alerta se nenhum cômodo selecionado (mas deixa prosseguir)
+    if (state.peComodos.size === 0) {
+      if (!confirm('Nenhum cômodo foi selecionado no Programa de Necessidades. Deseja prosseguir mesmo assim?')) return;
+    }
+    const taxaOcup = areaTer > 0 ? Math.round((area / areaTer) * 10000) / 100 : undefined;
+
     const dados_imovel = {
       endereco_obra: enderecoTxt,
       cidade_obra: document.getElementById('peCidade').value.trim() || 'Açailândia',
       uf_obra: document.getElementById('peUf').value.trim().toUpperCase() || 'MA',
       tipo_edificacao: document.getElementById('peTipo').value,
       area_construir: area,
+      // v3.24.8: terreno + taxa de ocupacao
+      area_terreno: areaTer > 0 ? areaTer : null,
+      taxa_ocupacao_percentual: taxaOcup ?? null,
+      // v3.24.8: programa de necessidades
+      programa_necessidades: coletarProgramaNecessidades(),
       valor_m2: vm2,
       responsabilidade_auto: document.getElementById('peRtAuto').checked,
       responsabilidade_tipo: document.getElementById('peRtTipo').value,

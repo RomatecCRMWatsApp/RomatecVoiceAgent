@@ -374,6 +374,17 @@ export interface DespesaAdmItem {
   valor: number;
 }
 
+// v3.24.8: item do Programa de Necessidades (cada cômodo escolhido)
+export interface ProgramaNecessidadesItem {
+  codigo: string;
+  nome: string;
+  nome_plural: string;
+  categoria: 'social' | 'intimo' | 'servico' | 'externo' | 'comercial' | 'tecnico';
+  ordem_pdf: number;
+  quantidade: number;
+  observacao?: string | null;
+}
+
 export interface InputProjetoExecutivo {
   // Imovel/obra
   endereco_obra: string;
@@ -383,7 +394,14 @@ export interface InputProjetoExecutivo {
 
   // Calculo principal (HONORARIOS)
   area_construir: number;       // m²
+  // v3.24.8: area do terreno (opcional). Quando informada, engine calcula
+  // taxa_ocupacao_percentual = area_construir / area_terreno * 100.
+  // Tambem valida: area_construir <= area_terreno (senao throw).
+  area_terreno?: number;        // m²
   valor_m2: number;             // R$/m² (default 25)
+
+  // v3.24.8: Programa de Necessidades — cômodos da edificação
+  programa_necessidades?: ProgramaNecessidadesItem[];
 
   // ART/TRT — auto por area (>80m² ART) com override manual
   responsabilidade_auto?: boolean;       // default true

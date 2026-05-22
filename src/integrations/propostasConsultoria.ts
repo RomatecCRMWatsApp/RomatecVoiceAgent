@@ -531,25 +531,45 @@ export function renderProjetoExecutivoBody(
   const ufObra = (di.uf_obra as string) || 'MA';
   const tipoEdif = ((di.tipo_edificacao as string) || 'residencial').toUpperCase();
   const area = Number(di.area_construir) || 0;
+  // v3.24.8: area do terreno + taxa de ocupacao (opcional)
+  const areaTerreno = Number(di.area_terreno) || 0;
+  const taxaOcup = (di.taxa_ocupacao_percentual != null && areaTerreno > 0)
+    ? Number(di.taxa_ocupacao_percentual)
+    : (areaTerreno > 0 ? Math.round((area / areaTerreno) * 10000) / 100 : 0);
   const valorM2 = Number(di.valor_m2) || 25;
   const taxaEsboco = Number(di.taxa_esboco) || 750;
   const projetosLista = Array.isArray(di.projetos_selecionados)
     ? (di.projetos_selecionados as Array<{ codigo: string; nome: string; selecionado: boolean; detalhamento_entrega: string }>).filter(x => x.selecionado)
     : [];
+  // v3.24.8: Programa de Necessidades — comodos selecionados
+  const programaNecessidades = Array.isArray(di.programa_necessidades)
+    ? (di.programa_necessidades as Array<{ codigo: string; nome: string; nome_plural: string; categoria: string; ordem_pdf: number; quantidade: number; observacao?: string | null }>)
+    : [];
 
   // ── 1. OBJETO ─────────────────────────────────────────────────────────
+  // v3.24.8: texto inclui terreno + taxa de ocupacao + referencia ao programa
+  // quando esses dados estao disponiveis.
+  const partesObj: string[] = [];
+  partesObj.push(`area total a construir de ${area.toFixed(2)} m²`);
+  if (areaTerreno > 0) {
+    partesObj.push(`implantada em terreno de ${areaTerreno.toFixed(2)} m² (taxa de ocupacao de ${taxaOcup.toFixed(2)}%)`);
+  }
+  const partePrograma = programaNecessidades.length > 0
+    ? ', contemplando o PROGRAMA DE NECESSIDADES descrito a seguir,'
+    : ',';
   doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold')
      .text('1. Objeto', COL_X_INI, doc.y, { width: COL_W });
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.3);
   doc.fontSize(10).fillColor('#222').font('Helvetica')
      .text(
-       `A presente proposta tem por objeto a prestacao de servicos tecnicos especializados para a CONFECCAO DOS PROJETOS EXECUTIVOS DE ARQUITETURA E COMPLEMENTARES da edificacao abaixo identificada, com area total de ${area.toFixed(2)} m², a serem desenvolvidos em conformidade com as Normas Brasileiras (ABNT), legislacao municipal de ${cidadeObra}/${ufObra} e Codigo de Obras vigente, sob responsabilidade tecnica do profissional habilitado.`,
+       `A presente proposta tem por objeto a prestacao de servicos tecnicos especializados para a CONFECCAO DOS PROJETOS EXECUTIVOS DE ARQUITETURA E COMPLEMENTARES da edificacao abaixo identificada, com ${partesObj.join(', ')}${partePrograma} a serem desenvolvidos em conformidade com as Normas Brasileiras (ABNT), legislacao municipal de ${cidadeObra}/${ufObra} e Codigo de Obras vigente, sob responsabilidade tecnica do profissional habilitado.`,
        COL_X_INI, doc.y, { width: COL_W, align: 'justify' },
      );
   doc.moveDown(0.6);
 
   // ── 2. IMOVEL ─────────────────────────────────────────────────────────
+  // v3.24.8: adiciona Area do Terreno e Taxa de Ocupacao quando informadas
   doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold').text('2. Imovel / Obra');
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.3);
@@ -557,8 +577,72 @@ export function renderProjetoExecutivoBody(
   doc.text(`Endereco: ${enderecoObra}`, COL_X_INI, doc.y, { width: COL_W, continued: false });
   doc.text(`Cidade/UF: ${cidadeObra}/${ufObra}`, COL_X_INI, doc.y, { width: COL_W });
   doc.text(`Tipo de edificacao: ${tipoEdif}`, COL_X_INI, doc.y, { width: COL_W });
+  if (areaTerreno > 0) {
+    doc.text(`Area do terreno: ${areaTerreno.toFixed(2)} m²`, COL_X_INI, doc.y, { width: COL_W });
+  }
   doc.text(`Area a construir: ${area.toFixed(2)} m²`, COL_X_INI, doc.y, { width: COL_W });
+  if (areaTerreno > 0) {
+    doc.text(`Taxa de ocupacao: ${taxaOcup.toFixed(2)}%`, COL_X_INI, doc.y, { width: COL_W });
+    if (taxaOcup > 70) {
+      doc.fontSize(8.5).fillColor('#92400e').font('Helvetica-Oblique')
+         .text(
+           '* A taxa de ocupacao informada devera ser validada conforme o Plano Diretor do Municipio de ' +
+           `${cidadeObra}/${ufObra} e a Lei de Uso e Ocupacao do Solo vigente antes da aprovacao do projeto.`,
+           COL_X_INI, doc.y, { width: COL_W, align: 'justify' },
+         );
+      doc.fillColor('#222').font('Helvetica').fontSize(10);
+    }
+  }
   doc.moveDown(0.6);
+
+  // v3.24.8: Programa de Necessidades — listagem de comodos agrupados por categoria
+  if (programaNecessidades.length > 0) {
+    if (doc.y > 620) doc.addPage();
+    doc.x = COL_X_INI;
+    doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold').text('3. Programa de Necessidades');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.3);
+    doc.fontSize(10).fillColor('#222').font('Helvetica')
+       .text('O presente projeto contempla o programa de necessidades abaixo discriminado, composto pelos seguintes comodos:',
+         COL_X_INI, doc.y, { width: COL_W, align: 'justify' });
+    doc.moveDown(0.3);
+
+    // Agrupa por categoria, mantem ordem_pdf interno
+    const CAT_LABEL: Record<string, string> = {
+      social: 'Area Social', intimo: 'Area Intima', servico: 'Area de Servico',
+      externo: 'Area Externa', comercial: 'Area Comercial', tecnico: 'Areas Tecnicas',
+    };
+    const CAT_ORDER = ['social', 'intimo', 'servico', 'externo', 'comercial', 'tecnico'];
+    const grupos: Record<string, typeof programaNecessidades> = {};
+    for (const item of [...programaNecessidades].sort((a, b) => a.ordem_pdf - b.ordem_pdf)) {
+      (grupos[item.categoria] ??= []).push(item);
+    }
+    for (const cat of CAT_ORDER) {
+      const items = grupos[cat];
+      if (!items || items.length === 0) continue;
+      if (doc.y > 720) doc.addPage();
+      doc.x = COL_X_INI;
+      doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+         .text(CAT_LABEL[cat], COL_X_INI, doc.y, { width: COL_W });
+      doc.font('Helvetica').fillColor('#222');
+      for (const it of items) {
+        const nome = it.quantidade > 1 ? it.nome_plural : it.nome;
+        const linha = `  • ${String(it.quantidade).padStart(2, '0')} × ${nome}` +
+                      (it.observacao ? ` — ${it.observacao}` : '');
+        doc.x = COL_X_INI;
+        doc.fontSize(9.5).fillColor('#222')
+           .text(linha, COL_X_INI + 8, doc.y, { width: COL_W - 16, continued: false });
+      }
+      doc.moveDown(0.2);
+    }
+    const totalTipos = programaNecessidades.length;
+    const totalComodos = programaNecessidades.reduce((s, p) => s + p.quantidade, 0);
+    doc.moveDown(0.2);
+    doc.fontSize(9).fillColor('#666').font('Helvetica-Oblique')
+       .text(`Total: ${totalTipos} tipo(s) de comodo, ${totalComodos} ambiente(s) projetado(s).`,
+         COL_X_INI, doc.y, { width: COL_W, align: 'right' });
+    doc.moveDown(0.4);
+  }
 
   // ── 3. ETAPA PRELIMINAR (box amarelo da TAXA DE R$ 750) ───────────────
   if (doc.y > 600) doc.addPage();
