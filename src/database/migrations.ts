@@ -815,6 +815,9 @@ export async function runMigrations(): Promise<void> {
     `ALTER TABLE romatec_obra_equipe ADD COLUMN endereco_estado   VARCHAR(2)   NULL`,
     `ALTER TABLE romatec_obra_equipe ADD COLUMN endereco_cep      VARCHAR(10)  NULL`,
     `ALTER TABLE romatec_obra_equipe ADD COLUMN foto_url          VARCHAR(500) NULL`,
+    // v3.24.7: cadastro completo de colaborador — data de nascimento (DOB)
+    // separada de data_admissao. CEO reportou que faltava no form.
+    `ALTER TABLE romatec_obra_equipe ADD COLUMN data_nascimento   DATE         NULL`,
     // v1.65.10 — PR A: sync Equipe ↔ contacts ↔ memória ZAYRA
     // contacts ganha tratamento (Eng./Sr./Sra./Dr./...) + tom (formal/informal)
     // + tipo (cliente/colaborador/fornecedor/...) + tags (JSON array de strings)

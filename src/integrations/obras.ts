@@ -539,6 +539,7 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
   // O front consome /api/equipe/:id/foto pra ler o binario quando precisar.
   let sql = `SELECT id, nome, funcao, tipo_contrato, cpf, rg, telefone, email,
                     valor_dia, especialidade, observacoes, data_admissao,
+                    data_nascimento,
                     endereco_rua, endereco_numero, endereco_bairro,
                     endereco_cidade, endereco_estado, endereco_cep,
                     foto_url, ativo, obras_ids, obra_id, status,
@@ -573,6 +574,10 @@ export async function listarEquipe(input: { obra_id?: string; somente_geral?: bo
     rg: r.rg,
     email: r.email,
     data_admissao: r.data_admissao ? String(r.data_admissao).slice(0, 10) : null,
+    // v3.24.7: data de nascimento (separada de data_admissao)
+    data_nascimento: (r as unknown as { data_nascimento?: Date | string | null }).data_nascimento
+      ? String((r as unknown as { data_nascimento?: Date | string | null }).data_nascimento).slice(0, 10)
+      : null,
     observacoes: r.observacoes,
     ativo: !!r.ativo,
     endereco_rua: r.endereco_rua,
@@ -596,6 +601,7 @@ export async function atualizarMembroEquipe(input: {
   valor_dia?: number;
   especialidade?: string; observacoes?: string;
   data_admissao?: string;
+  data_nascimento?: string; // v3.24.7
   endereco_rua?: string; endereco_numero?: string; endereco_bairro?: string;
   endereco_cidade?: string; endereco_estado?: string; endereco_cep?: string;
   foto_url?: string;
@@ -609,12 +615,14 @@ export async function atualizarMembroEquipe(input: {
   if (!input.id) throw new Error('id obrigatório');
   const fields: string[] = []; const params: (string | number | null)[] = [];
   // v1.63.0: aceita 9 colunas novas (RG, email, data_admissao, endereço, foto)
+  // v3.24.7: + data_nascimento
   const map: Record<string, string> = {
     nome: 'nome', funcao: 'funcao', tipo_contrato: 'tipo_contrato',
     cpf: 'cpf', rg: 'rg', telefone: 'telefone', email: 'email',
     valor_dia: 'valor_dia',
     especialidade: 'especialidade', observacoes: 'observacoes',
     data_admissao: 'data_admissao',
+    data_nascimento: 'data_nascimento', // v3.24.7
     endereco_rua: 'endereco_rua', endereco_numero: 'endereco_numero',
     endereco_bairro: 'endereco_bairro', endereco_cidade: 'endereco_cidade',
     endereco_estado: 'endereco_estado', endereco_cep: 'endereco_cep',
@@ -782,6 +790,7 @@ export async function criarMembroEquipe(input: {
   valor_dia?: number;
   especialidade?: string; observacoes?: string;
   data_admissao?: string;
+  data_nascimento?: string; // v3.24.7
   endereco_rua?: string; endereco_numero?: string; endereco_bairro?: string;
   endereco_cidade?: string; endereco_estado?: string; endereco_cep?: string;
   foto_url?: string;
@@ -798,20 +807,22 @@ export async function criarMembroEquipe(input: {
     return { preview: true, message: `[PREVIEW] Criar ${input.nome} na equipe${input.obra_id ? ` (obra ${input.obra_id})` : ' (geral)'}. Reenvie com confirm:true.` };
   }
   // v1.65.55: insert com 19 colunas (+ status). Default 'ativo'.
+  // v3.24.7: + data_nascimento
   const [r] = await pool.execute<ResultSetHeader>(
     `INSERT INTO romatec_obra_equipe
       (nome, funcao, tipo_contrato, cpf, rg, telefone, email, valor_dia,
-       especialidade, observacoes, data_admissao,
+       especialidade, observacoes, data_admissao, data_nascimento,
        endereco_rua, endereco_numero, endereco_bairro, endereco_cidade,
        endereco_estado, endereco_cep, foto_url, obras_ids, obra_id, status,
        chave_pix, tipo_chave_pix, chave_pix_atualizada_em)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       input.nome, input.funcao ?? null, input.tipo_contrato ?? 'diarista',
       input.cpf ?? null, input.rg ?? null,
       input.telefone ?? null, input.email ?? null,
       input.valor_dia ?? null, input.especialidade ?? null,
       input.observacoes ?? null, input.data_admissao ?? null,
+      input.data_nascimento ?? null,
       input.endereco_rua ?? null, input.endereco_numero ?? null,
       input.endereco_bairro ?? null, input.endereco_cidade ?? null,
       input.endereco_estado ?? null, input.endereco_cep ?? null,

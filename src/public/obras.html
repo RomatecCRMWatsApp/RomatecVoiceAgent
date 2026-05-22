@@ -3966,7 +3966,8 @@ function renderEquipe() {
         <input id="pRG" placeholder="RG">
         <input id="pTel" placeholder="Telefone">
         <input id="pEmail" type="email" placeholder="E-mail">
-        <input id="pDtAdm" type="date" placeholder="Data admissão">
+        <input id="pDtNasc" type="date" placeholder="Data nascimento" title="Data de nascimento">
+        <input id="pDtAdm" type="date" placeholder="Data admissão" title="Data de admissão">
         <input id="pVal" type="number" step="0.01" placeholder="Valor diária (R$) *" required>
         <input id="pEsp" placeholder="Especialidade">
       </div>
@@ -3979,8 +3980,22 @@ function renderEquipe() {
         <select id="pEndUf"><option value="">UF</option>${['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(u=>`<option>${u}</option>`).join('')}</select>
         <input id="pEndCep" placeholder="CEP">
       </div>
-      <div style="margin-top:8px;">
-        <input id="pFoto" placeholder="Foto (URL — opcional)" style="width:100%;">
+      <!-- v3.24.7: upload de foto DIRETO no cadastro inicial (antes era so URL).
+           Foto fica pendente em state.novoMembroFotoFile e e' enviada apos o INSERT
+           via POST /api/equipe/:id/foto, igual ao padrao de anexos da proposta. -->
+      <div style="margin-top:14px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--bg-elev);">
+        <p style="margin:0 0 6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">📷 Foto do colaborador</p>
+        <div style="display:flex; gap:12px; align-items:center;">
+          <div id="pFotoPreview" style="width:72px; height:72px; border-radius:50%; background:#1a2920 center/cover no-repeat; border:1px solid var(--border); flex-shrink:0;"></div>
+          <div style="flex:1; display:flex; flex-direction:column; gap:6px;">
+            <button type="button" id="pFotoBtn" style="padding:8px 14px; background:#1e40af; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:12px; min-height:44px;">📷 Anexar foto agora</button>
+            <input type="file" id="pFotoFile" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none;">
+            <small style="color:var(--text-muted); font-size:10px;">JPG/PNG/WEBP/GIF até 5MB · Sobe após salvar o cadastro.</small>
+            <small id="pFotoNome" style="color:var(--neon); font-size:11px; display:none;"></small>
+          </div>
+        </div>
+        <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; margin-top:10px; display:block;">Ou URL externa (fallback se não anexar)</label>
+        <input id="pFoto" placeholder="https://..." style="width:100%; margin-top:4px;">
       </div>
       <p style="margin:14px 0 6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Dados de pagamento (PIX)</p>
       <div class="form-grid">
@@ -4043,13 +4058,38 @@ function renderEquipe() {
   };
 
   attachSel();
+
+  // v3.24.7: handler do botao de foto no CADASTRO INICIAL
+  // Foto fica pendente em state.novoMembroFotoFile pra subir apos o INSERT.
+  state.novoMembroFotoFile = null;
+  const pFotoBtn = document.getElementById('pFotoBtn');
+  const pFotoFile = document.getElementById('pFotoFile');
+  const pFotoPreview = document.getElementById('pFotoPreview');
+  const pFotoNome = document.getElementById('pFotoNome');
+  if (pFotoBtn && pFotoFile) {
+    pFotoBtn.onclick = () => pFotoFile.click();
+    pFotoFile.onchange = () => {
+      const f = pFotoFile.files?.[0];
+      if (!f) return;
+      if (f.size > 5 * 1024 * 1024) { alert('Foto maior que 5MB'); pFotoFile.value = ''; return; }
+      state.novoMembroFotoFile = f;
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (pFotoPreview) pFotoPreview.style.backgroundImage = `url('${reader.result}')`;
+      };
+      reader.readAsDataURL(f);
+      if (pFotoNome) { pFotoNome.textContent = '✓ ' + f.name + ' (sera enviada apos salvar)'; pFotoNome.style.display = 'block'; }
+      pFotoBtn.textContent = '📷 Trocar foto';
+    };
+  }
+
   document.getElementById('addEq').onclick = async () => {
     const nome = document.getElementById('pNome').value.trim();
     if (!nome) return alert('Informe o nome');
     const valorDia = parseFloat(document.getElementById('pVal').value);
     if (!valorDia || valorDia <= 0) return alert('Informe o valor da diária (obrigatório pra calcular folha e recibos).');
     try {
-      await api('/api/equipe', {
+      const r = await api('/api/equipe', {
         method: 'POST',
         body: JSON.stringify({
           nome,
@@ -4059,6 +4099,7 @@ function renderEquipe() {
           rg:              document.getElementById('pRG').value.trim() || null,
           telefone:        document.getElementById('pTel').value.trim() || null,
           email:           document.getElementById('pEmail').value.trim() || null,
+          data_nascimento: document.getElementById('pDtNasc').value || null,
           data_admissao:   document.getElementById('pDtAdm').value || null,
           valor_dia:       valorDia,
           especialidade:   document.getElementById('pEsp').value.trim() || null,
@@ -4078,6 +4119,21 @@ function renderEquipe() {
           confirm:         true,
         }),
       });
+
+      // v3.24.7: upload de foto se houver arquivo pendente
+      if (state.novoMembroFotoFile && r && (r.insertId || r.id)) {
+        const novoId = r.insertId || r.id;
+        try {
+          const fd = new FormData();
+          fd.append('arquivo', state.novoMembroFotoFile);
+          await fetch('/api/equipe/' + novoId + '/foto', { method: 'POST', body: fd });
+        } catch (uErr) {
+          console.warn('Falha upload foto colaborador:', uErr);
+          alert('Cadastro salvo, mas falha ao subir foto: ' + uErr.message);
+        }
+        state.novoMembroFotoFile = null;
+      }
+
       render();
     } catch (e) { alert('Erro: ' + e.message); }
   };
@@ -10725,8 +10781,11 @@ function abrirEditarMembro(m) {
   const ufs = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
   const ufOpts = '<option value="">UF</option>' + ufs.map(u => `<option ${u===m.endereco_estado?'selected':''}>${u}</option>`).join('');
   const dtAdm = m.data_admissao ? String(m.data_admissao).slice(0, 10) : '';
+  // v3.24.7: data de nascimento
+  const dtNasc = m.data_nascimento ? String(m.data_nascimento).slice(0, 10) : '';
 
   // v1.63.0: modal espelho do form de cadastro — 15 campos completos
+  // v3.24.7: + data_nascimento (eDtNasc)
   const body = `
     <div class="form-grid">
       <input id="eNome" placeholder="Nome completo *" value="${escape(m.nome||'')}">
@@ -10736,7 +10795,8 @@ function abrirEditarMembro(m) {
       <input id="eRg" placeholder="RG" value="${escape(m.rg||'')}">
       <input id="eTel" placeholder="Telefone" value="${escape(m.telefone||'')}">
       <input id="eEmail" type="email" placeholder="E-mail" value="${escape(m.email||'')}">
-      <input id="eDtAdm" type="date" placeholder="Data admissão" value="${dtAdm}">
+      <input id="eDtNasc" type="date" placeholder="Data nascimento" title="Data de nascimento" value="${dtNasc}">
+      <input id="eDtAdm" type="date" placeholder="Data admissão" title="Data de admissão" value="${dtAdm}">
       <input id="eVal" type="number" step="0.01" placeholder="Valor diária / salário (R$)" value="${m.valor_dia||''}">
       <input id="eEsp" placeholder="Especialidade" value="${escape(m.especialidade||'')}">
     </div>
@@ -10815,6 +10875,7 @@ function abrirEditarMembro(m) {
         rg:              document.getElementById('eRg').value.trim() || null,
         telefone:        document.getElementById('eTel').value.trim() || null,
         email:           email || null,
+        data_nascimento: document.getElementById('eDtNasc').value || null,
         data_admissao:   document.getElementById('eDtAdm').value || null,
         valor_dia:       parseFloat(document.getElementById('eVal').value) || null,
         especialidade:   document.getElementById('eEsp').value.trim() || null,
