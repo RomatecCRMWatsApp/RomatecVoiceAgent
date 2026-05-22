@@ -1127,8 +1127,12 @@ app.get   ('/api/sinapi-categorias',     apiHandle(() => propostas.listarCategor
 
 app.get   ('/api/propostas-clientes',    apiHandle(args => propostas.listarClientesProposta(args as Parameters<typeof propostas.listarClientesProposta>[0])));
 app.post  ('/api/propostas-clientes',    apiHandle(args => propostas.criarClienteProposta(args as Parameters<typeof propostas.criarClienteProposta>[0])));
-app.put   ('/api/propostas-clientes/:id', requireCeoToken, apiHandle(args => propostas.atualizarClienteProposta(args as Parameters<typeof propostas.atualizarClienteProposta>[0])));
-app.delete('/api/propostas-clientes/:id', requireCeoToken, apiHandle(args => propostas.apagarClienteProposta(args as { id: string })));
+// v3.24.13 FIX: removido requireCeoToken de PUT/DELETE — cadastro de cliente
+// nao e' admin sensivel. CEO reportou que "nao salva dados do cliente" porque
+// o middleware retornava 403 quando CEO_API_TOKEN nao estava setado.
+// Rotas destrutivas/financeiras (transacoes, propostas) continuam protegidas.
+app.put   ('/api/propostas-clientes/:id', apiHandle(args => propostas.atualizarClienteProposta(args as Parameters<typeof propostas.atualizarClienteProposta>[0])));
+app.delete('/api/propostas-clientes/:id', apiHandle(args => propostas.apagarClienteProposta(args as { id: string })));
 
 app.get   ('/api/propostas',             apiHandle(args => propostas.listarPropostas(args as Parameters<typeof propostas.listarPropostas>[0])));
 app.get   ('/api/propostas/:id',         apiHandle(args => propostas.buscarProposta((args as { id: string }).id)));
@@ -3529,15 +3533,46 @@ app.get('/api/propostas-consultoria/:id/pdf-assinado', async (req: Request, res:
 });
 
 // v1.66.9: anexos da proposta (Planta Arquitetonica/Mapa — PDF/PNG/JPEG)
+// v3.24.13 FIX: o front manda multipart/form-data com `arquivo` (FormData), mas
+// o endpoint antigo so aceitava JSON body com `conteudo_b64`. Como o Express
+// body-parser nao parsea FormData como JSON, os anexos NUNCA chegavam ao banco.
+// Agora aceita 2 caminhos:
+//   1. multipart/form-data + field 'arquivo' (preferido pelo front)
+//   2. JSON body { filename, mimetype, conteudo_b64 } (legacy, retrocompat)
 app.get   ('/api/propostas-consultoria/:id/anexos',
   apiHandle(args => propostasConsultoria.listarAnexosProposta({ proposta_id: (args as { id: string }).id })));
 app.post  ('/api/propostas-consultoria/:id/anexos',
-  apiHandle(args => propostasConsultoria.criarAnexoProposta({
-    proposta_id: (args as { id: string }).id,
-    filename: (args as { filename: string }).filename,
-    mimetype: (args as { mimetype: string }).mimetype,
-    conteudo_b64: (args as { conteudo_b64: string }).conteudo_b64,
-  })));
+  upload.single('arquivo'),
+  async (req: Request, res: Response) => {
+    try {
+      const propId = String(req.params.id);
+      let filename: string;
+      let mimetype: string;
+      let conteudo_b64: string;
+      if (req.file) {
+        // Multipart: file vem em memoria via multer.memoryStorage
+        filename = req.file.originalname;
+        mimetype = req.file.mimetype;
+        conteudo_b64 = req.file.buffer.toString('base64');
+      } else {
+        // JSON legacy
+        const b = (req.body || {}) as { filename?: string; mimetype?: string; conteudo_b64?: string };
+        if (!b.filename || !b.mimetype || !b.conteudo_b64) {
+          res.status(400).json({ error: 'Envie arquivo via multipart (campo "arquivo") OU JSON {filename, mimetype, conteudo_b64}.' });
+          return;
+        }
+        filename = b.filename;
+        mimetype = b.mimetype;
+        conteudo_b64 = b.conteudo_b64;
+      }
+      const r = await propostasConsultoria.criarAnexoProposta({
+        proposta_id: propId, filename, mimetype, conteudo_b64,
+      });
+      res.json(r);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
 app.delete('/api/propostas-consultoria/anexos/:id',
   apiHandle(args => propostasConsultoria.removerAnexoProposta(args as { id: string })));
 app.post  ('/api/propostas-consultoria/:id/enviar-whatsapp',
