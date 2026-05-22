@@ -32,27 +32,59 @@ export interface UserAdminRow extends RowDataPacket {
 /**
  * Lista todos os users com role do tenant_users + nome do colaborador vinculado.
  * Inclui inativos pra admin poder reativar.
+ *
+ * v3.25.1: query defensiva — descobre quais colunas opcionais existem no schema
+ * (created_at, last_login_at, active, permissions) e monta SELECT dinamico.
+ * Necessario porque schema legacy nao tem todas as colunas SaaS.
  */
+async function colunaExiste(tabela: string, coluna: string): Promise<boolean> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1`,
+    [tabela, coluna],
+  );
+  return rows.length > 0;
+}
+
 export async function listarUsuariosAdmin() {
-  const [rows] = await pool.execute<UserAdminRow[]>(`
+  // Detecta colunas opcionais
+  const [hasCreated, hasLastLogin, hasActive, hasPerms, hasDeleted] = await Promise.all([
+    colunaExiste('users', 'created_at'),
+    colunaExiste('users', 'last_login_at'),
+    colunaExiste('users', 'active'),
+    colunaExiste('users', 'permissions'),
+    colunaExiste('users', 'deleted_at'),
+  ]);
+
+  // Monta SELECT dinamico — campos faltantes viram NULL
+  const colCreatedAt   = hasCreated   ? 'u.created_at'    : 'NULL AS created_at';
+  const colLastLogin   = hasLastLogin ? 'u.last_login_at' : 'NULL AS last_login_at';
+  const colActive      = hasActive    ? 'u.active'        : '1 AS active'; // legacy = sempre ativo
+  const colPermissions = hasPerms     ? 'u.permissions'   : 'NULL AS permissions';
+  const whereDeleted   = hasDeleted   ? 'WHERE u.deleted_at IS NULL' : '';
+  const orderBy        = hasCreated   ? 'ORDER BY ' + colActive + ' DESC, u.created_at DESC'
+                                       : 'ORDER BY u.id DESC';
+
+  const sql = `
     SELECT u.id, u.email, u.name, u.phone,
            COALESCE(u.role, tu.role) AS role,
-           u.active, u.permissions, u.last_login_at, u.created_at,
+           ${colActive}, ${colPermissions}, ${colLastLogin}, ${colCreatedAt},
            tu.role AS tenant_role, tu.equipe_id,
            e.nome AS equipe_nome
       FROM users u
       LEFT JOIN tenant_users tu ON tu.user_id = u.id AND tu.tenant_id = 1
       LEFT JOIN romatec_obra_equipe e ON e.id = tu.equipe_id
-     WHERE u.deleted_at IS NULL
-     ORDER BY u.active DESC, u.created_at DESC
-  `);
+     ${whereDeleted}
+     ${orderBy}
+  `;
+  const [rows] = await pool.execute<UserAdminRow[]>(sql);
   return rows.map(r => ({
     id: r.id,
     email: r.email,
     name: r.name,
     phone: r.phone,
     role: r.role || 'colaborador',
-    active: !!r.active,
+    active: r.active == null ? true : !!r.active,
     permissions: r.permissions ? safeJsonParse(r.permissions) : null,
     last_login_at: r.last_login_at,
     created_at: r.created_at,
