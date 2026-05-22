@@ -2022,6 +2022,7 @@ function renderDashboard() {
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
           <p class="section-title" style="margin:0;">👥 Colaboradores da Obra <span style="color:var(--text-muted); font-weight:400; font-size:13px;">(${ativos} ativo${ativos===1?'':'s'} de ${state.equipe.length})</span></p>
           <button id="goEquipe" style="font-size:11px; padding:6px 12px;">Gerenciar equipe →</button>
+          <button id="btnGerenciarAcessos" style="font-size:11px; padding:6px 12px;">🔐 Acessos</button>
         </div>
         ${linhas}
       </div>`;
@@ -2092,6 +2093,10 @@ function renderDashboard() {
   attachSel();
   const goEq = document.getElementById('goEquipe');
   if (goEq) goEq.onclick = () => { state.currentTab = 'equipe'; render(); };
+
+  // v3.24.2: PR C — gestao de acessos do CEO/gestor
+  const btnAcessos = document.getElementById('btnGerenciarAcessos');
+  if (btnAcessos) btnAcessos.onclick = abrirModalAcessos;
 
   const qBtn = document.getElementById('qSave');
   if (qBtn) qBtn.onclick = async () => {
@@ -6173,6 +6178,162 @@ function abrirModal(htmlContent, opts = {}) {
 }
 function fecharModal() {
   document.getElementById('consOverlay').classList.remove('open');
+}
+
+// v3.24.2: PR C — modal admin de gestao de acessos dos colaboradores.
+// Lista equipe via GET /api/admin/colaboradores e renderiza cada linha com
+// status do acesso (sem acesso / ativo / desativado) + botoes contextuais:
+//   sem acesso  → 🔓 Criar acesso
+//   ativo       → 🔄 Resetar senha · 📲 Enviar WhatsApp · ⛔ Desativar
+//   desativado  → 🔓 Reativar (via resetar-senha que zera deleted_at)
+async function abrirModalAcessos() {
+  let lista = [];
+  try {
+    const r = await api('/api/admin/colaboradores');
+    lista = r.itens || [];
+  } catch (e) {
+    alert('Erro ao buscar colaboradores: ' + e.message);
+    return;
+  }
+  if (lista.length === 0) {
+    alert('Nenhum colaborador cadastrado em romatec_obra_equipe. Cadastre primeiro na aba Equipe.');
+    return;
+  }
+
+  const fmtTel = (t) => {
+    if (!t) return '<span style="color:var(--text-muted); font-style:italic;">sem telefone</span>';
+    const d = String(t).replace(/\D/g,'');
+    if (d.length >= 11) return d.replace(/^(\d{2})(\d{2})(\d{5})(\d{4})$/, '+$1 ($2) $3-$4');
+    return t;
+  };
+  const linhaHtml = (c) => {
+    const acesso = c.acesso;
+    let badge, botoes;
+    if (!acesso) {
+      badge = '<span style="font-size:11px; color:var(--text-muted); background:rgba(107,114,128,0.15); padding:2px 8px; border-radius:10px;">sem acesso</span>';
+      botoes = `<button class="btn-primary btn-acesso-criar" data-eqid="${c.equipe_id}" style="font-size:12px; padding:6px 10px;">🔓 Criar acesso</button>`;
+    } else if (acesso.status === 'desativado') {
+      badge = '<span style="font-size:11px; color:#f87171; background:rgba(248,113,113,0.12); padding:2px 8px; border-radius:10px;">desativado</span>';
+      botoes = `<button class="btn-primary btn-acesso-reativar" data-eqid="${c.equipe_id}" style="font-size:12px; padding:6px 10px;">🔓 Reativar (nova senha)</button>`;
+    } else {
+      badge = '<span style="font-size:11px; color:var(--neon); background:rgba(0,255,136,0.12); padding:2px 8px; border-radius:10px;">ativo</span>';
+      botoes = `
+        <button class="btn-acesso-reset" data-eqid="${c.equipe_id}" style="font-size:11px; padding:5px 8px;">🔄 Resetar</button>
+        <button class="btn-acesso-zapi" data-eqid="${c.equipe_id}" data-tel="${c.telefone||''}" style="font-size:11px; padding:5px 8px;">📲 Enviar</button>
+        <button class="btn-danger btn-acesso-desativar" data-eqid="${c.equipe_id}" style="font-size:11px; padding:5px 8px;">⛔ Desativar</button>`;
+    }
+    return `
+      <div style="padding:10px 12px; border:1px solid var(--border); border-radius:6px; margin-bottom:8px; background:var(--bg-elev);">
+        <div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; align-items:center;">
+          <div style="flex:1; min-width:200px;">
+            <div style="font-size:14px; font-weight:600;">${escape(c.nome)}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+              ${c.funcao ? escape(c.funcao) : '—'} · ${fmtTel(c.telefone)}
+              ${acesso ? ' · <code style="font-size:10px;">' + escape(acesso.email) + '</code>' : ''}
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            ${badge}
+            ${botoes}
+          </div>
+        </div>
+      </div>`;
+  };
+
+  const html = `
+    <div style="margin-bottom:10px; font-size:12px; color:var(--text-muted);">
+      ${lista.length} colaborador(es) em romatec_obra_equipe. Crie acesso pra liberar o login no celular.
+    </div>
+    ${lista.map(linhaHtml).join('')}
+    <div style="padding:10px; background:rgba(59,130,246,0.08); border-left:3px solid #3b82f6; border-radius:4px; font-size:12px; color:var(--text-muted); margin-top:8px;">
+      ℹ️ Acessos sao por colaborador (1 user em <code>users</code> + vinculo em <code>tenant_users</code> com role=colaborador). Apos criar, a senha temporaria e' exibida UMA VEZ — anote ou envie via WhatsApp logo.
+    </div>`;
+
+  abrirModal(html, { title: '🔐 Gestao de Acessos · Colaboradores', width: '720px' });
+
+  // Bind handlers
+  document.querySelectorAll('.btn-acesso-criar').forEach(b => b.onclick = () => acessoCriar(b.dataset.eqid, b));
+  document.querySelectorAll('.btn-acesso-reset, .btn-acesso-reativar').forEach(b => b.onclick = () => acessoResetar(b.dataset.eqid, b));
+  document.querySelectorAll('.btn-acesso-zapi').forEach(b => b.onclick = () => acessoEnviarZapi(b.dataset.eqid, b.dataset.tel, b));
+  document.querySelectorAll('.btn-acesso-desativar').forEach(b => b.onclick = () => acessoDesativar(b.dataset.eqid, b));
+}
+
+async function acessoCriar(equipeId, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    const r = await api('/api/admin/colaboradores/' + equipeId + '/criar-acesso', {
+      method: 'POST', body: '{}',
+    });
+    alert(
+      '✅ ACESSO CRIADO — ' + r.nome + '\n\n' +
+      'LOGIN: ' + r.login + '\n' +
+      'SENHA TEMPORARIA: ' + r.senha_temporaria + '\n\n' +
+      'URL: ' + r.url_login + '\n\n' +
+      '⚠️ ANOTE A SENHA AGORA. Nao sera reimpressa.\n\n' +
+      'Clique OK e use o botao 📲 Enviar pra mandar via WhatsApp.'
+    );
+    abrirModalAcessos(); // recarrega lista
+  } catch (e) {
+    alert('Erro: ' + e.message);
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+async function acessoResetar(equipeId, btn) {
+  if (!confirm('Resetar senha vai INVALIDAR a senha atual. Continuar?')) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    const r = await api('/api/admin/colaboradores/' + equipeId + '/resetar-senha', {
+      method: 'POST', body: '{}',
+    });
+    alert(
+      '✅ SENHA RESETADA — ' + r.nome + '\n\n' +
+      'NOVA SENHA TEMPORARIA: ' + r.senha_temporaria + '\n\n' +
+      '⚠️ ANOTE AGORA ou use 📲 Enviar pra mandar via WhatsApp.'
+    );
+    abrirModalAcessos();
+  } catch (e) {
+    alert('Erro: ' + e.message);
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+async function acessoEnviarZapi(equipeId, telefone, btn) {
+  if (!telefone) {
+    alert('Colaborador sem telefone cadastrado em romatec_obra_equipe. Cadastre o telefone antes de enviar.');
+    return;
+  }
+  if (!confirm('Vou GERAR uma nova senha e enviar via WhatsApp pra ' + telefone + '. Continuar?')) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Enviando…';
+  try {
+    const r = await api('/api/admin/colaboradores/' + equipeId + '/enviar-credenciais-whatsapp', {
+      method: 'POST', body: JSON.stringify({ resetar: true }),
+    });
+    alert('✅ Mensagem enviada para ' + r.enviado_para + ' (msgId ' + (r.message_id || '?') + ')');
+    btn.disabled = false; btn.textContent = orig;
+  } catch (e) {
+    alert('Erro: ' + e.message);
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+async function acessoDesativar(equipeId, btn) {
+  if (!confirm('Desativar acesso vai impedir o login deste colaborador. Continuar?')) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    await api('/api/admin/colaboradores/' + equipeId + '/desativar-acesso', {
+      method: 'POST', body: '{}',
+    });
+    alert('✅ Acesso desativado.');
+    abrirModalAcessos();
+  } catch (e) {
+    alert('Erro: ' + e.message);
+    btn.disabled = false; btn.textContent = orig;
+  }
 }
 
 // v3.23.9: modal seletor PJ/PF para assinatura digital. Lista os certs ATIVOS
