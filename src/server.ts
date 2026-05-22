@@ -98,11 +98,21 @@ bootValidateAuthEnv();
 import authRoutes from './routes/auth';
 app.use('/api/auth', authRoutes);
 
+// v3.24.1: rotas /api/minha-quinzena/* — colaborador self-service.
+import minhaQuinzenaRoutes from './routes/minhaQuinzena';
+app.use('/api/minha-quinzena', minhaQuinzenaRoutes);
+
 // v3.24.0: tela /login (HTML mobile-first dark theme). Cache no-store pra
 // nao servir versao antiga apos deploy. /login.html tambem funciona via static.
 app.get('/login', (_req: Request, res: Response) => {
   res.set('Cache-Control', 'no-store, must-revalidate');
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// v3.24.1: tela /minha-quinzena (mobile-first dark theme) — view do colaborador.
+app.get('/minha-quinzena', (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'minha-quinzena.html'));
 });
 
 // v1.99.18: error handler explicito pra payload demasiado grande.
