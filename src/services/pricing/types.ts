@@ -8,7 +8,8 @@ export type SubtipoConsultoria =
   | 'desmembramento'
   | 'remembramento'
   | 'retificacao_area'
-  | 'avaliacao_ptam';
+  | 'avaliacao_ptam'
+  | 'projeto_executivo';
 
 export type PadraoConstrutivo = 'popular' | 'normal' | 'alto';
 export type ResponsavelObra = 'PF' | 'PJ_com_contabilidade' | 'PJ_sem_contabilidade';
@@ -326,4 +327,71 @@ export interface InputAvaliacaoPTAM {
 export interface ResultadoCalculo {
   custos: CustosCalculados;
   fontes: FontesConsulta;
+}
+
+// v3.24.5: subtipo Projeto Executivo. Confeccao de projetos arquitetonicos
+// + complementares (hidraulico, sanitario, eletrico, estrutural, PCI, mapa
+// de situacao). Calculo simples: area × R$/m² + ART/TRT auto por area
+// + alvara opcional + placa opcional. Taxa esboco (R$750) e' INFORMATIVA —
+// nao soma ao total (so cobrada se cliente desistir apos esboco).
+
+export type CodigoProjetoExecutivo =
+  | 'mapa_situacao'
+  | 'arquitetonico'
+  | 'hidraulico'
+  | 'sanitario'
+  | 'eletrico'
+  | 'estrutural'
+  | 'pci';
+
+export type TipoEdificacao =
+  | 'residencial'
+  | 'comercial'
+  | 'misto'
+  | 'industrial'
+  | 'institucional';
+
+export interface ProjetoSelecionado {
+  codigo: CodigoProjetoExecutivo;
+  nome: string;
+  ordem: number;
+  selecionado: boolean;
+  detalhamento_entrega: string;
+}
+
+export interface InputProjetoExecutivo {
+  // Imovel/obra
+  endereco_obra: string;
+  cidade_obra?: string;        // default Acailandia
+  uf_obra?: string;            // default MA
+  tipo_edificacao: TipoEdificacao;
+
+  // Calculo principal
+  area_construir: number;       // m²
+  valor_m2: number;             // R$/m² (default 25)
+
+  // ART/TRT — auto por area (>80m² ART) com override manual
+  responsabilidade_auto?: boolean;       // default true
+  responsabilidade_tipo?: 'ART' | 'TRT'; // so usado se auto=false
+  responsabilidade_valor?: number;       // override do default da config
+
+  // Itens opcionais (cada um pode ser desligado)
+  alvara_incluir: boolean;
+  alvara_valor: number;
+  placa_incluir: boolean;
+  placa_valor: number;
+
+  // Taxa de esboco (R$750 default) — INFORMATIVA, fora do total
+  taxa_esboco?: number;
+
+  // Descontos/desbloqueios manuais
+  desconto?: number;
+
+  // Projetos selecionados (lista vinda do front; defaults aplicados quando vazio)
+  projetos_selecionados?: ProjetoSelecionado[];
+
+  // Cliente — usado so na preview/rendering, nao no calculo
+  prazo_entrega_dias?: number;
+  forma_pagamento?: string;
+  observacoes?: string;
 }

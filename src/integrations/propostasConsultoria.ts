@@ -148,6 +148,12 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
       subtipo,
       dados: input.dados_imovel as unknown as InputAvaliacaoPTAM,
     });
+  } else if (subtipo === 'projeto_executivo') {
+    // v3.24.5: Projeto Executivo ativo (arquitetonico + complementares)
+    const m = await import('../services/pricing/projetoExecutivo');
+    resultado = await m.calcularProjetoExecutivo(
+      input.dados_imovel as unknown as Parameters<typeof m.calcularProjetoExecutivo>[0],
+    );
   } else {
     throw new Error(`Subtipo ${subtipo} desconhecido.`);
   }
@@ -385,6 +391,22 @@ export async function previewCustoConsultoria(input: {
       fontes: resultado.fontes,
     };
   }
+  // v3.24.5: Projeto Executivo
+  if (subtipo === 'projeto_executivo') {
+    const m = await import('../services/pricing/projetoExecutivo');
+    const resultado = await m.calcularProjetoExecutivo(
+      dados_imovel as unknown as Parameters<typeof m.calcularProjetoExecutivo>[0],
+    );
+    return {
+      ok: true as const,
+      subtipo,
+      valor_total: resultado.custos.secao_5_total,
+      custos: resultado.custos,
+      fontes: resultado.fontes,
+      // Extra (so projeto_executivo): expone area/m2/ART-TRT/totais
+      projeto_executivo: resultado.projeto_executivo,
+    };
+  }
   throw new Error(`Subtipo ${subtipo} desconhecido.`);
 }
 
@@ -473,6 +495,257 @@ const SUBTIPO_LABEL: Record<string, string> = {
 //   - 7. AVISOS E CONDICOES TECNICAS
 // O caller continua com Data/Validade, Responsavel Tecnico, Signature, QR, Footer.
 // v3.23.7: exportada pra ser testavel diretamente via smoke test (pdf-parse).
+// v3.24.5: helper de render do corpo da Proposta de Projeto Executivo.
+// Layout: Identificacao da Obra + Objeto + Etapa Preliminar (box taxa R$750)
+// + Projetos a Entregar (listagem) + Orcamento (tabela com SUBTOTAL/Desconto/
+// VALOR TOTAL) + Condicoes + Documentos do Cliente + Avisos (CNO, ART/TRT).
+export function renderProjetoExecutivoBody(
+  doc: PDFKit.PDFDocument,
+  p: Awaited<ReturnType<typeof buscarPropostaConsultoria>>,
+  dadosImovel: Record<string, unknown>,
+  custos: CustosCalculados,
+  corHex: string,
+): void {
+  const COL_X_INI = 48;
+  const COL_X_FIM = 547;
+  const COL_W = COL_X_FIM - COL_X_INI;
+
+  const COR_DOURADO_BG = '#fef3c7';
+  const COR_DOURADO_BORDA = '#d97706';
+  const COR_CREME_BG = '#fef9c3';
+  const COR_CREME_BORDA = '#ca8a04';
+  const COR_VERDE_BG = '#dcfce7';
+  const COR_VERDE_BORDA = '#16a34a';
+
+  const di = dadosImovel as Record<string, unknown>;
+  const enderecoObra = (di.endereco_obra as string) || (di.endereco as string) || '—';
+  const cidadeObra = (di.cidade_obra as string) || 'Acailandia';
+  const ufObra = (di.uf_obra as string) || 'MA';
+  const tipoEdif = ((di.tipo_edificacao as string) || 'residencial').toUpperCase();
+  const area = Number(di.area_construir) || 0;
+  const valorM2 = Number(di.valor_m2) || 25;
+  const taxaEsboco = Number(di.taxa_esboco) || 750;
+  const projetosLista = Array.isArray(di.projetos_selecionados)
+    ? (di.projetos_selecionados as Array<{ codigo: string; nome: string; selecionado: boolean; detalhamento_entrega: string }>).filter(x => x.selecionado)
+    : [];
+
+  // ── 1. OBJETO ─────────────────────────────────────────────────────────
+  doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold')
+     .text('1. Objeto', COL_X_INI, doc.y, { width: COL_W });
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.3);
+  doc.fontSize(10).fillColor('#222').font('Helvetica')
+     .text(
+       `A presente proposta tem por objeto a prestacao de servicos tecnicos especializados para a CONFECCAO DOS PROJETOS EXECUTIVOS DE ARQUITETURA E COMPLEMENTARES da edificacao abaixo identificada, com area total de ${area.toFixed(2)} m², a serem desenvolvidos em conformidade com as Normas Brasileiras (ABNT), legislacao municipal de ${cidadeObra}/${ufObra} e Codigo de Obras vigente, sob responsabilidade tecnica do profissional habilitado.`,
+       COL_X_INI, doc.y, { width: COL_W, align: 'justify' },
+     );
+  doc.moveDown(0.6);
+
+  // ── 2. IMOVEL ─────────────────────────────────────────────────────────
+  doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold').text('2. Imovel / Obra');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.3);
+  doc.fontSize(10).fillColor('#222').font('Helvetica');
+  doc.text(`Endereco: ${enderecoObra}`, COL_X_INI, doc.y, { width: COL_W, continued: false });
+  doc.text(`Cidade/UF: ${cidadeObra}/${ufObra}`, COL_X_INI, doc.y, { width: COL_W });
+  doc.text(`Tipo de edificacao: ${tipoEdif}`, COL_X_INI, doc.y, { width: COL_W });
+  doc.text(`Area a construir: ${area.toFixed(2)} m²`, COL_X_INI, doc.y, { width: COL_W });
+  doc.moveDown(0.6);
+
+  // ── 3. ETAPA PRELIMINAR (box amarelo da TAXA DE R$ 750) ───────────────
+  if (doc.y > 600) doc.addPage();
+  const textoTaxa =
+    `ETAPA PRELIMINAR — HORA TECNICA DE ANTEPROJETO E CROQUI\n\n` +
+    `Valor: R$ ${taxaEsboco.toFixed(2).replace('.', ',')} (informativo, NAO incluido no VALOR TOTAL)\n\n` +
+    `A etapa preliminar consiste no desenvolvimento do ESBOCO ARQUITETONICO (anteprojeto) e do CROQUI DE ESTUDO, atividade tecnica que precede e fundamenta toda a documentacao executiva subsequente. Compreende:\n\n` +
+    `  a) Analise tecnica do terreno e levantamento das condicionantes legais (Plano Diretor, Lei de Uso e Ocupacao do Solo, recuos obrigatorios, taxa de ocupacao e coeficiente de aproveitamento);\n` +
+    `  b) Reunioes de briefing com o CONTRATANTE para captacao do programa de necessidades e setorizacao funcional dos ambientes;\n` +
+    `  c) Elaboracao do partido arquitetonico e estudos volumetricos preliminares;\n` +
+    `  d) Confeccao do CROQUI ARQUITETONICO em planta baixa, com layout, areas aproximadas e implantacao no lote, observando insolacao e ventilacao;\n` +
+    `  e) Apresentacao e ajustes do anteprojeto ate a aprovacao do CONTRATANTE para deflagrar a fase executiva.\n\n` +
+    `CONDICAO ESPECIAL DE COBRANCA\n` +
+    `► Caso o CONTRATANTE, apos a entrega e aprovacao do esboco, PROSSIGA com a contratacao integral dos projetos executivos descritos nesta proposta, o valor de R$ ${taxaEsboco.toFixed(2).replace('.', ',')} NAO SERA COBRADO, sendo absorvido pelo valor global do contrato.\n` +
+    `► Caso o CONTRATANTE OPTE POR NAO PROSSEGUIR com a fase executiva apos a entrega do anteprojeto, fica acordado o pagamento da Hora Tecnica de R$ ${taxaEsboco.toFixed(2).replace('.', ',')}, que remunera exclusivamente o tempo tecnico empregado na elaboracao do croqui e estudos preliminares.\n\n` +
+    `Este valor NAO esta incluido no VALOR TOTAL desta proposta (Secao 5), sendo mencionado apenas para clareza contratual.`;
+  const boxY = doc.y;
+  const boxH = doc.heightOfString(textoTaxa, { width: COL_W - 24 }) + 20;
+  doc.rect(COL_X_INI, boxY, COL_W, boxH).fillAndStroke(COR_DOURADO_BG, COR_DOURADO_BORDA);
+  doc.fontSize(9).fillColor('#713f12').font('Helvetica')
+     .text(textoTaxa, COL_X_INI + 12, boxY + 10, { width: COL_W - 24, align: 'justify' });
+  doc.y = boxY + boxH + 8;
+  doc.x = COL_X_INI;
+
+  // ── 4. PROJETOS A ENTREGAR ────────────────────────────────────────────
+  if (doc.y > 600) doc.addPage();
+  doc.x = COL_X_INI;
+  doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold')
+     .text('4. Projetos a Entregar', COL_X_INI, doc.y, { width: COL_W });
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.3);
+  projetosLista.forEach((proj, idx) => {
+    doc.x = COL_X_INI;
+    if (doc.y > 720) doc.addPage();
+    doc.fontSize(10).fillColor('#111').font('Helvetica-Bold')
+       .text(`4.${idx + 1} ${proj.nome}`, COL_X_INI, doc.y, { width: COL_W });
+    doc.fontSize(9).fillColor('#444').font('Helvetica')
+       .text(`Conteudo da prancha: ${proj.detalhamento_entrega}`, COL_X_INI + 8, doc.y, {
+         width: COL_W - 16, align: 'justify',
+       });
+    doc.moveDown(0.3);
+  });
+  doc.moveDown(0.4);
+
+  // ── 5. ORCAMENTO (tabela) ─────────────────────────────────────────────
+  if (doc.y > 600) doc.addPage();
+  doc.x = COL_X_INI;
+  doc.fontSize(12).fillColor(corHex).font('Helvetica-Bold').text('5. Orcamento');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.3);
+
+  const allItens: Array<{ desc: string; valor: number; tipo: 'honorario' | 'taxa' | 'total' | 'subtotal' | 'desconto' }> = [];
+  custos.secao_3_honorarios.forEach(h => allItens.push({ desc: h.descricao, valor: h.valor, tipo: 'honorario' }));
+  custos.secao_2_taxas.forEach(t => allItens.push({ desc: t.descricao, valor: t.valor, tipo: 'taxa' }));
+  const subtotal = allItens.reduce((s, x) => s + x.valor, 0);
+  const desconto = (custos as unknown as { desconto?: number }).desconto ?? 0;
+
+  // Headers
+  const colDesc = COL_X_INI + 8;
+  const colValor = COL_X_FIM - 90;
+  doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold');
+  const headerY = doc.y;
+  doc.text('Descricao', colDesc, headerY, { width: colValor - colDesc - 8 });
+  doc.text('Valor', colValor, headerY, { width: 80, align: 'right' });
+  doc.moveDown(0.5);
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ddd').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+
+  allItens.forEach((it) => {
+    const y0 = doc.y;
+    doc.font('Helvetica').fontSize(9.5).fillColor('#222')
+       .text(it.desc, colDesc, y0, { width: colValor - colDesc - 8 });
+    doc.font('Helvetica-Bold').fillColor(corHex)
+       .text(formatBRL(it.valor), colValor, y0, { width: 80, align: 'right' });
+    doc.moveDown(0.15);
+  });
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#888').lineWidth(0.6).stroke();
+  doc.moveDown(0.2);
+
+  // SUBTOTAL
+  const subY = doc.y;
+  doc.fontSize(10).fillColor('#111').font('Helvetica-Bold')
+     .text('SUBTOTAL', colDesc, subY, { width: colValor - colDesc - 8 });
+  doc.fillColor('#111').text(formatBRL(subtotal), colValor, subY, { width: 80, align: 'right' });
+  doc.moveDown(0.2);
+
+  if (desconto > 0) {
+    const dY = doc.y;
+    doc.fontSize(9.5).fillColor('#444').font('Helvetica')
+       .text('Desconto', colDesc, dY, { width: colValor - colDesc - 8 });
+    doc.text('- ' + formatBRL(desconto), colValor, dY, { width: 80, align: 'right' });
+    doc.moveDown(0.2);
+  }
+
+  // VALOR TOTAL (box verde)
+  const totalBoxY = doc.y + 4;
+  const totalBoxH = 26;
+  doc.rect(COL_X_INI, totalBoxY, COL_W, totalBoxH).fillAndStroke(COR_VERDE_BG, COR_VERDE_BORDA);
+  doc.fontSize(11).fillColor('#14532d').font('Helvetica-Bold')
+     .text('VALOR TOTAL', colDesc, totalBoxY + 8, { width: colValor - colDesc - 8 });
+  doc.text(formatBRL(custos.secao_5_total), colValor, totalBoxY + 8, { width: 80, align: 'right' });
+  doc.y = totalBoxY + totalBoxH + 6;
+
+  doc.fontSize(8.5).fillColor('#666').font('Helvetica-Oblique')
+     .text(
+       `* A Hora Tecnica de Anteprojeto (R$ ${taxaEsboco.toFixed(2).replace('.', ',')}) descrita na Secao 3 NAO esta incluida neste total e somente sera cobrada na hipotese descrita naquela secao.`,
+       COL_X_INI, doc.y, { width: COL_W, align: 'justify' },
+     );
+  doc.moveDown(0.6);
+
+  // ── 6. CONDICOES DE PAGAMENTO ─────────────────────────────────────────
+  if (custos.condicoes_pagamento && custos.condicoes_pagamento.length > 0) {
+    if (doc.y > 660) doc.addPage();
+    doc.x = COL_X_INI;
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('6. Condicoes de Pagamento');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.3);
+    custos.condicoes_pagamento.forEach((cp) => {
+      const y0 = doc.y;
+      doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+         .text(cp.rotulo, COL_X_INI + 8, y0, { width: COL_W - 100 });
+      doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+         .text(formatBRL(cp.valor), COL_X_FIM - 90, y0, { width: 80, align: 'right' });
+      if (cp.descricao) {
+        doc.fontSize(8.5).fillColor('#666').font('Helvetica')
+           .text(cp.descricao, COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+      }
+      doc.font('Helvetica').fillColor('#111');
+      doc.moveDown(0.2);
+    });
+    doc.moveDown(0.4);
+  }
+
+  // ── 7. DOCUMENTOS DO CLIENTE ──────────────────────────────────────────
+  if (doc.y > 660) doc.addPage();
+  doc.x = COL_X_INI;
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold')
+     .text('7. Documentos a Serem Fornecidos pelo Cliente', COL_X_INI, doc.y, { width: COL_W });
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+  doc.fontSize(9.5).fillColor('#111');
+  custos.secao_4_checklist.forEach((d) => {
+    doc.x = COL_X_INI;
+    if (d.imprescindivel) {
+      doc.fillColor('#dc2626').font('Helvetica-Bold')
+         .text(`☐ [IMPRESCINDIVEL] ${d.texto}`, COL_X_INI + 8, doc.y, {
+           width: COL_W - 16, continued: false,
+         });
+      doc.font('Helvetica').fillColor('#111');
+    } else {
+      doc.text(`☐ ${d.texto}${d.obrigatorio ? '' : '  (opcional)'}`, COL_X_INI + 8, doc.y, {
+        width: COL_W - 16, continued: false,
+      });
+    }
+  });
+  doc.moveDown(0.5);
+
+  // ── 8. AVISOS E CONDICOES TECNICAS ────────────────────────────────────
+  if (custos.avisos && custos.avisos.length > 0) {
+    if (doc.y > 660) doc.addPage();
+    doc.x = COL_X_INI;
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold')
+       .text('8. Avisos e Condicoes Tecnicas', COL_X_INI, doc.y, { width: COL_W });
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    doc.fontSize(8.5).fillColor('#444');
+    custos.avisos.forEach((a) => {
+      doc.x = COL_X_INI;
+      doc.text(`• ${a}`, COL_X_INI + 8, doc.y, {
+        width: COL_W - 16, align: 'justify', continued: false,
+      });
+      doc.moveDown(0.15);
+    });
+    doc.fillColor('#111');
+    doc.moveDown(0.3);
+  }
+
+  // ── 9. FORO E VALIDADE ────────────────────────────────────────────────
+  if (doc.y > 660) doc.addPage();
+  doc.x = COL_X_INI;
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('9. Foro e Validade');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.3);
+  doc.fontSize(9.5).fillColor('#222').font('Helvetica')
+     .text(
+       `Fica eleito o Foro da Comarca de ${cidadeObra}/${ufObra} para dirimir quaisquer questoes oriundas desta proposta, com renuncia expressa a qualquer outro, por mais privilegiado que seja. Esta proposta tem validade de ${p.validade_dias || 30} (${(p.validade_dias || 30) === 1 ? 'um' : (p.validade_dias || 30).toString()}) dia(s) a contar da data de emissao.`,
+       COL_X_INI, doc.y, { width: COL_W, align: 'justify' },
+     );
+  doc.moveDown(0.6);
+  // Suprime aviso unused vars
+  void COR_CREME_BG; void COR_CREME_BORDA;
+}
+
 export function renderGeorrefRuralBody(
   doc: PDFKit.PDFDocument,
   p: Awaited<ReturnType<typeof buscarPropostaConsultoria>>,
@@ -894,6 +1167,9 @@ export async function gerarPdfPropostaConsultoria(
   // do final da funcao continua valendo pros dois caminhos.
   if (p.subtipo === 'georreferenciamento_rural') {
     renderGeorrefRuralBody(doc, p, dadosImovel, custos, corHex);
+  } else if (p.subtipo === 'projeto_executivo') {
+    // v3.24.5: Projeto Executivo — layout dedicado.
+    renderProjetoExecutivoBody(doc, p, dadosImovel, custos, corHex);
   } else {
 
   // v1.99.16: Remembramento detalhado — tabela de imóveis + área total destacada
