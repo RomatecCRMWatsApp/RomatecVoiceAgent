@@ -288,8 +288,12 @@ export async function resetarSenhaUsuario(id: number, novaSenha?: string) {
   };
 }
 
-// Lista os 100 logs mais recentes pra aba Auditoria
+// Lista os 100 logs mais recentes pra aba Auditoria.
+// v3.25.2 FIX: mysql2.execute() (prepared statement) NAO aceita LIMIT como
+// placeholder — retorna "Incorrect arguments to mysqld_stmt_execute". Solucao:
+// interpolar Number(limite) direto no SQL (seguro porque Number() garante int).
 export async function listarAuditoriaRecente(limite = 100) {
+  const lim = Math.max(1, Math.min(1000, Number(limite) || 100));
   const [rows] = await pool.execute<RowDataPacket[]>(`
     SELECT al.id, al.user_id, al.login_attempt, al.ip,
            al.sucesso, al.motivo_falha, al.created_at,
@@ -297,7 +301,7 @@ export async function listarAuditoriaRecente(limite = 100) {
       FROM auth_logs al
       LEFT JOIN users u ON u.id = al.user_id
      ORDER BY al.created_at DESC
-     LIMIT ?
-  `, [Number(limite)]);
+     LIMIT ${lim}
+  `);
   return rows;
 }
