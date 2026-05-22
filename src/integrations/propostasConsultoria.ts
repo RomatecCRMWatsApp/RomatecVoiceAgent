@@ -1670,12 +1670,42 @@ export async function gerarPdfPropostaConsultoria(
   doc.moveDown(0.4);
 
   // v1.66.11: Condicoes de Pagamento (logo abaixo dos Honorarios)
+  // v3.24.16 FIX: defesa em profundidade — se todas as parcelas tem valor 0
+  // (proposta antiga salva antes do fix do atualizarPropostaConsultoria),
+  // RECALCULA proporcionalmente baseado no totalSecao3 dividido pelas N
+  // parcelas existentes mantendo as descricoes. Caso atipico tratado: somente
+  // entra se todas zeradas; se 1+ tem valor, mantem como esta.
   if (custos.condicoes_pagamento && custos.condicoes_pagamento.length > 0) {
     if (doc.y > 700) doc.addPage();
+    const cps = custos.condicoes_pagamento;
+    const totalCp = cps.reduce((s, cp) => s + (Number(cp.valor) || 0), 0);
+    if (totalCp === 0) {
+      // Todas zeradas — reconstroi a partir de secao_3_honorarios (totalRomatec)
+      const totalRom = (custos.secao_3_honorarios || []).reduce((s, h) => s + (Number(h.valor) || 0), 0);
+      if (totalRom > 0 && cps.length > 0) {
+        const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+        if (cps.length === 1) {
+          cps[0] = { ...cps[0], valor: round2(totalRom) };
+        } else if (cps.length === 2) {
+          const v1 = round2(totalRom * 0.5);
+          cps[0] = { ...cps[0], valor: v1 };
+          cps[1] = { ...cps[1], valor: round2(totalRom - v1) };
+        } else {
+          // N parcelas iguais (com ajuste de centavo na ultima)
+          const v = round2(totalRom / cps.length);
+          let restante = totalRom;
+          for (let i = 0; i < cps.length - 1; i++) {
+            cps[i] = { ...cps[i], valor: v };
+            restante = round2(restante - v);
+          }
+          cps[cps.length - 1] = { ...cps[cps.length - 1], valor: round2(restante) };
+        }
+      }
+    }
     doc.fontSize(10.5).fillColor(corHex).text('Condicoes de Pagamento dos Honorarios');
     doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
     doc.moveDown(0.2);
-    custos.condicoes_pagamento.forEach((cp, i) => {
+    cps.forEach((cp, i) => {
       doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold').text(`${i + 1}. ${cp.rotulo}`, { indent: 8 });
       doc.font('Helvetica').fontSize(8.5).fillColor('#444').text(cp.descricao, { indent: 16, width: 480 });
       doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold').text(`Valor: ${formatBRL(cp.valor)}`, { indent: 16 });
@@ -2182,15 +2212,33 @@ export async function atualizarPropostaConsultoria(input: {
     });
     const tot = taxasComOriginal.reduce((s, i) => s + Number(i.valor || 0), 0)
               + honComOriginal.reduce((s, i) => s + Number(i.valor || 0), 0);
+    // v3.24.16 FIX: preservar TODOS os campos derivados do custos atual quando
+    // o override (ov) nao trouxer. CEO mostrou PROP-23 (remembramento) com
+    // parcelas "Valor: R$ 0,00" — bug identico ao da v3.23.8 mas no PUT em vez
+    // do POST. O front nao envia condicoes_pagamento / honorarios_romatec /
+    // base_calculo no override, e o spread `...ov` apagava esses campos do
+    // custos_calculados salvo. Render do PDF entao lia cp.valor=undefined
+    // -> formatBRL(undefined) = "R$ 0,00".
+    const atualCalc = atual.custos_calculados as CustosCalculados | null;
     custosFinal = {
       ...ov,
       secao_2_taxas: taxasComOriginal,
       secao_3_honorarios: honComOriginal,
       secao_5_total: tot,
+      // Preserva campos derivados (todos com ?? fallback pra atualCalc)
+      condicoes_pagamento: ov.condicoes_pagamento ?? atualCalc?.condicoes_pagamento,
+      honorarios_romatec: ov.honorarios_romatec ?? atualCalc?.honorarios_romatec,
+      base_calculo: ov.base_calculo ?? atualCalc?.base_calculo,
+      avisos: ov.avisos ?? atualCalc?.avisos ?? [],
+      secao_1_projetos: ov.secao_1_projetos ?? atualCalc?.secao_1_projetos ?? [],
+      secao_4_checklist: ov.secao_4_checklist ?? atualCalc?.secao_4_checklist ?? [],
+      secao_opcionais_georref: ov.secao_opcionais_georref ?? atualCalc?.secao_opcionais_georref,
+      despesas_administrativas: ov.despesas_administrativas ?? atualCalc?.despesas_administrativas,
+      historico_revisoes: ov.historico_revisoes ?? atualCalc?.historico_revisoes,
     };
     // v3.24.14: preserva projeto_executivo do custos atual se override nao trouxe
     if (subtipo === 'projeto_executivo' && !(ov as unknown as { projeto_executivo?: unknown }).projeto_executivo) {
-      const atualPE = (atual.custos_calculados as unknown as { projeto_executivo?: unknown })?.projeto_executivo;
+      const atualPE = (atualCalc as unknown as { projeto_executivo?: unknown })?.projeto_executivo;
       if (atualPE) {
         (custosFinal as unknown as { projeto_executivo: unknown }).projeto_executivo = atualPE;
       }
