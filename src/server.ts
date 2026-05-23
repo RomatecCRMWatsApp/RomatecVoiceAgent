@@ -146,6 +146,11 @@ app.use('/api/gnss', gnssRouter);
 app.use('/api/cartorios', cartoriosRouter);
 app.use('/api/explicativo', explicativoRouter); // v3.23.0 — texto explicativo de serviço
 
+// v1.99.15: Live Feed Universal — feed animado no topo de toda aba.
+// GET /api/live-feed/:tab → cards passando em loop com os registros da aba.
+import { createLiveFeedRouter } from './components/liveFeed/liveFeedRouter';
+app.use('/api/live-feed', createLiveFeedRouter(pool));
+
 // v3.23.2: /sw.js servido com injecao de versao em runtime.
 // Fonte unica da verdade e' package.json (via AGENT_IDENTITY.version).
 // O arquivo em disco contem o placeholder __APP_VERSION__ no const CACHE;

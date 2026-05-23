@@ -1,0 +1,33 @@
+<%#
+  Live Feed Universal · ZAYRA v1.99.15
+  Uso (EJS): <%- include('partials/_live_feed', { tab: 'folha', obraId: 1, ano: 2026, mes: 5 }) %>
+  Uso (HTML estatico): copie a div abaixo trocando data-* manualmente.
+  Requer: /css/live-feed.css e /js/live-feed.js no layout.
+%>
+<div
+  class="zayra-live-feed"
+  data-tab="<%= tab %>"
+  data-obra-id="<%= typeof obraId !== 'undefined' && obraId !== null ? obraId : '' %>"
+  data-ano="<%= typeof ano !== 'undefined' && ano !== null ? ano : '' %>"
+  data-mes="<%= typeof mes !== 'undefined' && mes !== null ? mes : '' %>"
+  data-refresh-ms="<%= typeof refreshMs !== 'undefined' ? refreshMs : 60000 %>"
+>
+  <div class="zlf-header">
+    <h3 class="zlf-title">
+      <span class="zlf-live-dot"></span>
+      <span class="zlf-title-text">Carregando…</span>
+    </h3>
+    <div class="zlf-counter">
+      <span class="zlf-counter-num">0</span>
+      <span class="zlf-counter-label">REGISTROS</span>
+    </div>
+  </div>
+
+  <div class="zlf-viewport">
+    <div class="zlf-track"></div>
+  </div>
+
+  <div class="zlf-empty" hidden>
+    <span>Nenhum registro nesta seção.</span>
+  </div>
+</div>
