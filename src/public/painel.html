@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ZAYRA — Painel Romatec</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/css/live-feed.css">
   <style>
     :root {
       --bg: #0b0f17;
@@ -144,6 +145,22 @@
     </div>
     <div class="pill" id="version-pill">v1.47.0</div>
   </header>
+
+  <!-- v1.99.15: Live Feed Universal -->
+  <div class="zayra-live-feed" data-tab="painel" data-refresh-ms="60000">
+    <div class="zlf-header">
+      <h3 class="zlf-title">
+        <span class="zlf-live-dot"></span>
+        <span class="zlf-title-text">Carregando…</span>
+      </h3>
+      <div class="zlf-counter">
+        <span class="zlf-counter-num">0</span>
+        <span class="zlf-counter-label">REGISTROS</span>
+      </div>
+    </div>
+    <div class="zlf-viewport"><div class="zlf-track"></div></div>
+    <div class="zlf-empty" hidden><span>Nenhum registro nesta seção.</span></div>
+  </div>
 
   <div id="error-zone"></div>
 
@@ -385,5 +402,6 @@
     carregar();
     setInterval(carregar, 60_000);
   </script>
+  <script src="/js/live-feed.js"></script>
 </body>
 </html>
