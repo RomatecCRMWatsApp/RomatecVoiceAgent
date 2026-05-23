@@ -1008,6 +1008,7 @@ async function nukeReload() {
 // Expõe pra debug manual no console
 window.forcarUpdateApp = forcarUpdate;
 </script>
+<link rel="stylesheet" href="/css/live-feed.css">
 </head>
 <body>
 <div class="container">
@@ -1047,6 +1048,22 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="proposta">Proposta</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
     <button class="tab" data-tab="config">⚙️ Configurações</button>
+  </div>
+
+  <!-- v1.99.15: Live Feed Universal — atualizado dinamicamente conforme tab ativa -->
+  <div class="zayra-live-feed" id="zayraLiveFeed" data-tab="painel" data-refresh-ms="60000">
+    <div class="zlf-header">
+      <h3 class="zlf-title">
+        <span class="zlf-live-dot"></span>
+        <span class="zlf-title-text">Carregando…</span>
+      </h3>
+      <div class="zlf-counter">
+        <span class="zlf-counter-num">0</span>
+        <span class="zlf-counter-label">REGISTROS</span>
+      </div>
+    </div>
+    <div class="zlf-viewport"><div class="zlf-track"></div></div>
+    <div class="zlf-empty" hidden><span>Nenhum registro nesta seção.</span></div>
   </div>
 
   <div id="view-dashboard" class="view active"></div>
@@ -15998,7 +16015,39 @@ function renderCobDet() {
   `;
 }
 
-document.querySelectorAll('.tab').forEach(t => t.onclick = () => { state.currentTab = t.dataset.tab; render(); });
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => { state.currentTab = t.dataset.tab; render(); atualizarLiveFeed(); });
+
+// v1.99.15: Live Feed sincronizado com a aba ativa.
+// Mapa obras.html tab -> liveFeed tab. Tabs sem mapeamento escondem o feed.
+const ZLF_TAB_MAP = {
+  dashboard: 'painel', obras: 'obras', despesas: 'despesas',
+  materiais: 'materiais', financeiro: 'financeiro', recibos: 'vales',
+  equipe: 'colaboradores', marcar: 'diarias', folha: 'folha',
+  laudos: 'laudos', proposta: 'contratos',
+};
+function atualizarLiveFeed() {
+  const el = document.getElementById('zayraLiveFeed');
+  if (!el || !window.ZayraLiveFeed) return;
+  const tab = ZLF_TAB_MAP[state.currentTab];
+  if (!tab) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.dataset.tab = tab;
+  // obraId para folha/despesas/financeiro/diarias/materiais
+  const needsObra = ['folha','despesas','financeiro','diarias','materiais'];
+  if (needsObra.includes(tab) && state.currentObra?.id) {
+    el.dataset.obraId = state.currentObra.id;
+  } else {
+    el.dataset.obraId = '';
+  }
+  if (tab === 'folha') {
+    const now = new Date();
+    el.dataset.ano = String(now.getFullYear());
+    el.dataset.mes = String(now.getMonth() + 1);
+    // folha exige obraId — se não houver, esconde
+    if (!el.dataset.obraId) { el.style.display = 'none'; return; }
+  }
+  window.ZayraLiveFeed.reload(el);
+}
 document.getElementById('zayraFab').onclick = () => {
   const m = document.getElementById('zayraModal');
   m.classList.toggle('open');
@@ -21774,5 +21823,14 @@ async function renderCfgAuditoria() {
 <script src="/relatorio-demarcacao.js"></script>
 <!-- v3.18.0: Processamento GNSS (RINEX -> IBGE-PPP) -->
 <script src="/laudo-gnss.js"></script>
+<!-- v1.99.15: Live Feed Universal — auto-bootstrap + ZayraLiveFeed.* API -->
+<script src="/js/live-feed.js"></script>
+<script>
+  // Aciona uma atualizacao inicial assim que o live-feed.js esta carregado
+  // e depois quando state.currentObra muda (selecao de obra dispara render()).
+  window.addEventListener('load', () => {
+    if (typeof atualizarLiveFeed === 'function') atualizarLiveFeed();
+  });
+</script>
 </body>
 </html>
