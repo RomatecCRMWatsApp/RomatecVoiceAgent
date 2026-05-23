@@ -1,0 +1,34 @@
+<!--
+  Live Feed Universal · ZAYRA v1.99.15 — snippet HTML standalone.
+  Copie/cole em qualquer pagina .html do projeto. Ajuste data-tab e
+  os filtros (data-obra-id, data-ano, data-mes) conforme a aba.
+  Requer no <head>:
+    <link rel="stylesheet" href="/css/live-feed.css">
+  E antes do </body>:
+    <script src="/js/live-feed.js"></script>
+-->
+<div
+  class="zayra-live-feed"
+  data-tab="painel"
+  data-obra-id=""
+  data-ano=""
+  data-mes=""
+  data-refresh-ms="60000"
+>
+  <div class="zlf-header">
+    <h3 class="zlf-title">
+      <span class="zlf-live-dot"></span>
+      <span class="zlf-title-text">Carregando…</span>
+    </h3>
+    <div class="zlf-counter">
+      <span class="zlf-counter-num">0</span>
+      <span class="zlf-counter-label">REGISTROS</span>
+    </div>
+  </div>
+  <div class="zlf-viewport">
+    <div class="zlf-track"></div>
+  </div>
+  <div class="zlf-empty" hidden>
+    <span>Nenhum registro nesta seção.</span>
+  </div>
+</div>
