@@ -4100,6 +4100,21 @@ app.put   ('/api/propostas-consultoria/:id',
 app.post  ('/api/propostas-consultoria/preview',
   apiHandle(args => propostasConsultoria.previewCustoConsultoria(args as Parameters<typeof propostasConsultoria.previewCustoConsultoria>[0])));
 
+// v3.45.0: preview ao vivo via PDF binario em iframe (mesmo padrao do recibo).
+// Body: { subtipo, dados_imovel, cliente?, endereco_imovel?, validade_dias?, adicional_campo?, ... }
+// Retorna application/pdf. Tolera campos parciais (placeholders).
+app.post('/api/propostas-consultoria/preview-pdf', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const buf = await propostasConsultoria.gerarPdfPropostaConsultoriaPreview(req.body || {});
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buf);
+  } catch (err) {
+    console.error('[preview-pdf-proposta]', (err as Error).message);
+    res.status(500).json({ error: 'Falha gerar preview', detail: (err as Error).message });
+  }
+});
+
 // v3.24.8: Catalogo de comodos do Programa de Necessidades (Projeto Executivo).
 // Publico (so leitura de constante TS), serve pro front montar tags clicaveis.
 app.get('/api/propostas-consultoria/projeto-executivo/comodos-catalogo', (_req: Request, res: Response) => {

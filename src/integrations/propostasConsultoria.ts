@@ -2460,11 +2460,20 @@ function renderDemarcacaoLotesBody(
 export async function gerarPdfPropostaConsultoria(
   id: string,
   signatureMeta?: SignatureVisualMeta,
+  options?: {
+    // v3.45.0: bypass da busca em DB pro preview ao vivo. Quando setado,
+    // a funcao usa o objeto fornecido em vez de buscar pelo id.
+    propostaOverride?: Awaited<ReturnType<typeof buscarPropostaConsultoria>>;
+    // v3.45.0: pula QR + persistencia de hash (preview nao tem id real).
+    // Tambem suprime warnings de "falha gerar hash" quando o id e' 0.
+    isPreview?: boolean;
+  },
 ): Promise<Buffer> {
-  const p = await buscarPropostaConsultoria(id);
+  const p = options?.propostaOverride ?? await buscarPropostaConsultoria(id);
   if (p.tipo !== 'consultoria') throw new Error('Proposta nao e de consultoria');
   const custos = p.custos_calculados;
   if (!custos) throw new Error('Custos nao calculados');
+  const isPreview = options?.isPreview === true;
 
   const t = await getTenantSettings(1).catch(() => null);
   const brand = t?.brand_name || 'Romatec Consultoria Imobiliaria';
@@ -3098,23 +3107,34 @@ export async function gerarPdfPropostaConsultoria(
   // que cabem inteiros na pagina atual (~120px). Se nao couber, addPage primeiro.
   // Antes eram coords fixas y=720 e o footer em y=800 — se o conteudo passava de 720,
   // o QR sobrepunha conteudo OU caia numa "pagina 4 quase vazia" + footer em "pagina 5".
-  try {
-    const hashValidacao = await gerarOuBuscarHashProposta(Number(p.id));
-    const baseUrl = getValidacaoBaseUrl();
-    const ALTURA_QR_BLOCO = 100; // QR (80) + label embaixo + margem inferior
-    const espacoRestante = doc.page.height - doc.page.margins.bottom - 50 /* footer reservado */ - doc.y;
-    if (espacoRestante < ALTURA_QR_BLOCO) {
-      doc.addPage();
+  // v3.45.0: pula QR/hash em preview (id e' 0/PREVIEW, hash nao faz sentido).
+  if (isPreview) {
+    // Mostra placeholder textual no lugar do QR
+    const espacoRestante = doc.page.height - doc.page.margins.bottom - 50 - doc.y;
+    if (espacoRestante < 60) doc.addPage();
+    doc.fontSize(8).fillColor('#999').font('Helvetica-Oblique')
+      .text('[PREVIEW] QR Code e hash de validacao serao gerados ao salvar a proposta.',
+        48, doc.y + 10, { width: 499, align: 'center' });
+    doc.font('Helvetica').fillColor('#111');
+  } else {
+    try {
+      const hashValidacao = await gerarOuBuscarHashProposta(Number(p.id));
+      const baseUrl = getValidacaoBaseUrl();
+      const ALTURA_QR_BLOCO = 100; // QR (80) + label embaixo + margem inferior
+      const espacoRestante = doc.page.height - doc.page.margins.bottom - 50 /* footer reservado */ - doc.y;
+      if (espacoRestante < ALTURA_QR_BLOCO) {
+        doc.addPage();
+      }
+      const qrY = doc.y;
+      const validUrl = await renderQRValidacao(doc, hashValidacao, baseUrl, 460, qrY, {
+        size: 80,
+        corHex,
+        comLabel: true,
+      });
+      renderHashFooter(doc, hashValidacao, validUrl, 48, qrY + 10, 380);
+    } catch (err) {
+      console.warn(`[propostas-consultoria-pdf] falha QR/hash: ${(err as Error).message}`);
     }
-    const qrY = doc.y;
-    const validUrl = await renderQRValidacao(doc, hashValidacao, baseUrl, 460, qrY, {
-      size: 80,
-      corHex,
-      comLabel: true,
-    });
-    renderHashFooter(doc, hashValidacao, validUrl, 48, qrY + 10, 380);
-  } catch (err) {
-    console.warn(`[propostas-consultoria-pdf] falha QR/hash: ${(err as Error).message}`);
   }
 
   // v3.23.7: Footer global emitido em TODAS as paginas via bufferedPageRange.
@@ -3682,6 +3702,95 @@ export async function removerAnexoProposta(input: { id: string }) {
     `DELETE FROM proposta_anexos WHERE id = ?`, [id]
   );
   return { ok: true as const, affected: r.affectedRows, message: 'Anexo removido.' };
+}
+
+/**
+ * v3.45.0: gera PDF de preview "ao vivo" — sem persistir nada, tolera campos
+ * parciais. Mesmo builder (gerarPdfPropostaConsultoria) que o PDF final, so' que:
+ *   - propostaOverride com placeholders quando faltar campo
+ *   - isPreview=true pula QR/hash de validacao (mostra textual em vez disso)
+ *
+ * Pattern espelho do Recibo (reciboPdf.gerarPdfReciboPreview), pra browser
+ * renderizar PDF em iframe enquanto o user preenche.
+ */
+export async function gerarPdfPropostaConsultoriaPreview(input: {
+  subtipo: SubtipoConsultoria;
+  dados_imovel: Record<string, unknown>;
+  cliente?: { nome?: string; cpf_cnpj?: string; telefone?: string; email?: string };
+  endereco_imovel?: string;
+  validade_dias?: number;
+  adicional_campo?: {
+    ativo?: boolean;
+    cenario?: 'mata_densa_animais' | 'rodovia_faixa_dominio' | 'eletricidade_alta_tensao' | 'pedreira_explosivos' | 'produtos_quimicos';
+    tipo?: 'insalubridade' | 'periculosidade';
+    grau?: 'minimo' | 'medio' | 'maximo' | 'unico';
+  };
+  data_proposta?: string;
+  numero?: string;
+  observacoes?: string;
+  gestor_cargo?: string;
+  gestor_nome?: string;
+  gestor_telefone?: string;
+}): Promise<Buffer> {
+  // 1. Calcula custos via previewCustoConsultoria (reuso 100%)
+  let custos: CustosCalculados;
+  try {
+    const previewResult = await previewCustoConsultoria({
+      subtipo: input.subtipo,
+      dados_imovel: input.dados_imovel,
+      adicional_campo: input.adicional_campo,
+    });
+    custos = previewResult.custos;
+  } catch (err) {
+    // Preview NAO pode quebrar — devolve custos "vazios" pra render parcial
+    console.warn(`[preview-pdf] custos falharam: ${(err as Error).message}`);
+    custos = {
+      secao_1_projetos: [],
+      secao_2_taxas: [],
+      secao_3_honorarios: [],
+      condicoes_pagamento: [],
+      secao_4_checklist: [],
+      secao_5_total: 0,
+      avisos: [],
+    } as unknown as CustosCalculados;
+  }
+
+  // 2. Monta proposta "fake" com mesma shape do retorno de buscarPropostaConsultoria.
+  //    Placeholders pros campos vazios — render-side ja tolera (mostra "-").
+  const ano = new Date().getFullYear();
+  const propostaOverride = {
+    id: '0',
+    numero: input.numero || `PROP-${ano}-PREVIEW`,
+    tipo: 'consultoria' as const,
+    subtipo: input.subtipo,
+    cliente: {
+      id: 0,
+      nome: input.cliente?.nome || '— Cliente (preencher) —',
+      cpf_cnpj: input.cliente?.cpf_cnpj || undefined,
+      telefone: input.cliente?.telefone || undefined,
+      email: input.cliente?.email || undefined,
+      endereco: undefined,
+      cidade: undefined,
+      estado: undefined,
+    },
+    endereco_imovel: input.endereco_imovel || '',
+    data_proposta: input.data_proposta || new Date().toISOString().slice(0, 10),
+    validade_dias: Number(input.validade_dias) > 0 ? Number(input.validade_dias) : 15,
+    valor_total: Number(custos.secao_5_total) || 0,
+    status: 'RASCUNHO',
+    observacoes: input.observacoes,
+    gestor_cargo: input.gestor_cargo,
+    gestor_nome: input.gestor_nome,
+    gestor_telefone: input.gestor_telefone,
+    dados_imovel: input.dados_imovel,
+    custos_calculados: custos,
+    fontes_consulta: null,
+  } as unknown as Awaited<ReturnType<typeof buscarPropostaConsultoria>>;
+
+  return gerarPdfPropostaConsultoria('0', undefined, {
+    propostaOverride,
+    isPreview: true,
+  });
 }
 
 async function carregarAnexosProposta(propId: number): Promise<Array<{ filename: string; mimetype: string; buffer: Buffer }>> {

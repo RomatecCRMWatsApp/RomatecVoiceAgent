@@ -9174,6 +9174,62 @@ const PROJETOS_PE_DEFAULT_FRONT = [
   { codigo: 'pci',            nome: 'Projeto de Prevencao e Combate a Incendio (PCI)',      selecionado: false, detalhamento: 'Planta baixa de PCI com rotas de fuga, localizacao de extintores, hidrantes, iluminacao de emergencia e sinalizacao, memorial descritivo conforme Normas Tecnicas do CBMMA e NBR 9077, para protocolo junto ao Corpo de Bombeiros Militar do Maranhao.' },
 ];
 
+// v3.45.0: helper compacto de live preview (PDF inline) pra forms de Proposta de Consultoria.
+// Pattern espelho do Recibo: debounce + fetch /preview-pdf + blob URL + iframe.
+//   opts = {
+//     boxId: string,            // id do <div> container do preview (criado pelo HTML do form)
+//     getDados: () => object,   // retorna body do POST (subtipo, dados_imovel, cliente, etc.)
+//     debounceMs?: number,      // default 600
+//   }
+// Retorna { agendar, atualizar } — chame agendar() em qualquer 'input'/'change' relevante.
+function __criarLivePreviewProposta(opts) {
+  let timer = null;
+  let blobUrl = null;
+  let inflight = false;
+  const debounce = opts.debounceMs ?? 600;
+  const boxId = opts.boxId;
+
+  async function atualizar() {
+    if (inflight) return;
+    const box = document.getElementById(boxId);
+    if (!box) return;
+    inflight = true;
+    const orig = box.innerHTML;
+    if (!box.querySelector('iframe')) {
+      box.innerHTML = '<span style="color:#888; font-size:13px;">⏳ Gerando preview...</span>';
+    }
+    try {
+      const body = opts.getDados();
+      const resp = await fetch('/api/propostas-consultoria/preview-pdf', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (resp.status === 401) {
+        box.innerHTML = '<span style="color:#888; font-size:12px;">🔒 Faça login pra ver o preview.</span>';
+        return;
+      }
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const blob = await resp.blob();
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      blobUrl = URL.createObjectURL(blob);
+      box.innerHTML = `<iframe src="${blobUrl}#toolbar=0&navpanes=0" style="width:100%; height:100%; border:0;"></iframe>`;
+    } catch (err) {
+      box.innerHTML = `<span style="color:#dc2626; font-size:11px; padding:12px; text-align:center;">Preview indisponível: ${escape(err.message || String(err))}<br><small>Tente o 🔄 manual</small></span>`;
+    } finally {
+      inflight = false;
+    }
+  }
+
+  function agendar() {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(atualizar, debounce);
+  }
+
+  return { agendar, atualizar };
+}
+
 // v3.27.0: form de Demarcação de Lotes (Urbana e Rural). Espelha o padrão
 // do Georref Rural com 2 secoes extras: marcos discriminados + preview FQNS.
 async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
@@ -9191,7 +9247,11 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
     ? state.consultoriaFormCache
     : null;
 
+  // v3.45.0: wrapper grid 2-cols (form + live preview sticky). Em telas
+  // <1100px o painel cai pra baixo do form (responsive @media abaixo).
   v.innerHTML = `
+    <div id="dmSplitGrid" style="display:grid; grid-template-columns: minmax(0, 1fr) 480px; gap:12px; align-items:start;">
+    <div>
     ${toggleHTML}
     <div class="card" role="region" aria-label="Cabeçalho do formulário">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -9330,7 +9390,23 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
           <button class="btn-secondary" id="dmCancelar">Cancelar</button>
         </div>
       </div>
-    </div>`;
+    </div>
+    </div>
+    <!-- v3.45.0: painel preview ao vivo (PDF em iframe). Sticky pra acompanhar scroll. -->
+    <div class="card" style="position:sticky; top:10px; min-width:0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">📄 Preview da proposta</p>
+        <button type="button" id="dmRefreshPreview" style="background:transparent; font-size:11px;" title="Atualizar agora">🔄</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin:6px 0 8px;">
+        Atualiza automaticamente enquanto você preenche. É exatamente o PDF que será gerado.
+      </p>
+      <div id="dmPreviewBox" style="background:#FAF7EE; border-radius:8px; min-height:520px; height:75vh; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+        <span style="color:#888; font-size:13px;">⏳ Preencha os campos pra ver o preview</span>
+      </div>
+    </div>
+    </div>
+    <style>@media (max-width: 1100px) { #dmSplitGrid { grid-template-columns: 1fr !important; } }</style>`;
 
   // Handlers
   document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
@@ -9385,6 +9461,48 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
     document.getElementById(id).addEventListener('change', recalcMarcosCheck);
   });
   recalcMarcosCheck();
+
+  // v3.45.0: live preview do PDF — debounce 600ms, atualiza a cada input.
+  // Mesmo padrao do Recibo: fetch /preview-pdf -> blob -> iframe.
+  const __dmPreview = __criarLivePreviewProposta({
+    boxId: 'dmPreviewBox',
+    getDados: () => {
+      try {
+        const dadosImovel = montarDadosImovel();
+        const cliId = document.getElementById('dmCliente')?.value;
+        const cliObj = state.propostasClientes?.find(c => String(c.id) === String(cliId));
+        const adicional = (typeof lerAdicionalCampoFormV2 === 'function')
+          ? lerAdicionalCampoFormV2('dmAditivoContainer')
+          : undefined;
+        return {
+          subtipo,
+          dados_imovel: dadosImovel,
+          cliente: cliObj ? {
+            nome: cliObj.nome,
+            cpf_cnpj: cliObj.cpf_cnpj,
+            telefone: cliObj.telefone,
+            email: cliObj.email,
+          } : undefined,
+          endereco_imovel: document.getElementById('dmEndereco')?.value?.trim() || '',
+          validade_dias: parseInt(document.getElementById('dmValidade')?.value, 10) || 15,
+          adicional_campo: adicional || undefined,
+        };
+      } catch (_err) {
+        // montarDadosImovel pode lancar se campos estranhos — devolve minimo
+        return { subtipo, dados_imovel: {} };
+      }
+    },
+  });
+  // Bind nos campos do form (input + change). NAO usa eventos sinteticos
+  // (preserva o fix do RangeError v3.39.0).
+  document.querySelectorAll('#dmSplitGrid input, #dmSplitGrid select, #dmSplitGrid textarea').forEach(el => {
+    if (el.id === 'dmRefreshPreview') return; // botao manual, nao input
+    el.addEventListener('input', __dmPreview.agendar);
+    el.addEventListener('change', __dmPreview.agendar);
+  });
+  document.getElementById('dmRefreshPreview')?.addEventListener('click', () => __dmPreview.atualizar());
+  // Primeira renderizacao depois do form estar montado (campos default + cache)
+  setTimeout(() => __dmPreview.atualizar(), 100);
 
   // v3.29.0: aditivo de campo — base estimada inicial = diarias × ~SM × 0.42
   // (espelho do calculo de tecnicos_campo em demarcacaoLotes.ts). Sera
