@@ -9,7 +9,9 @@ export type SubtipoConsultoria =
   | 'remembramento'
   | 'retificacao_area'
   | 'avaliacao_ptam'
-  | 'projeto_executivo';
+  | 'projeto_executivo'
+  | 'demarcacao_urbana'
+  | 'demarcacao_rural';
 
 export type PadraoConstrutivo = 'popular' | 'normal' | 'alto';
 export type ResponsavelObra = 'PF' | 'PJ_com_contabilidade' | 'PJ_sem_contabilidade';
@@ -441,4 +443,103 @@ export interface InputProjetoExecutivo {
   // DEPRECATED v3.24.6 — usar forma_pagamento_tag
   forma_pagamento?: string;
   observacoes?: string;
+}
+
+// ============================================================
+// DEMARCACAO DE LOTES (v3.27.0)
+// ============================================================
+
+export type SubtipoDemarcacao = 'demarcacao_urbana' | 'demarcacao_rural';
+
+export type MaterialMarco = 'concreto' | 'madeira' | 'tubo_galvanizado';
+
+export type FinalidadeDemarcacao =
+  | 'demarcacao_inicial'
+  | 'redemarcacao'
+  | 'subdivisao_lote'
+  | 'piqueteamento_apenas';
+
+export interface MarcoDiscriminado {
+  tipo: MaterialMarco;
+  quantidade: number;
+  valor_unitario_congelado: number;
+}
+
+export interface OpcionaisDemarcacao {
+  laudo_tecnico?: { contratado: boolean; valor_unitario_sm_multiplicador: number };
+  alinhamento_cerca?: { contratado: boolean; metros: number; valor_unitario: number };
+  croqui_assinado?: { contratado: boolean; valor_unitario: number };
+  acompanhamento_obra?: { contratado: boolean; diarias: number; valor_unitario: number };
+  consultoria_juridica?: { contratado: boolean; valor: 'sob_orcamento' };
+}
+
+export interface InputDemarcacaoLotes {
+  subtipo: SubtipoDemarcacao;
+  finalidade: FinalidadeDemarcacao;
+
+  municipio: string;
+  uf: string;
+  matricula?: string;
+  cri?: string;
+
+  loteamento_nome?: string;
+  quadra?: string;
+  lote?: string;
+  area_m2?: number;
+
+  denominacao_imovel?: string;
+  ccir?: string;
+  area_hectares?: number;
+
+  perimetro_m?: number;
+
+  num_vertices: number;
+  servico_piqueteamento: boolean;
+  marcos: MarcoDiscriminado[];
+
+  diarias_equipe: number;
+  km_deslocamento: number;
+  complexidade: 'simples' | 'media' | 'alta';
+
+  valor_unitario_area?: number;
+  desconto_pct?: number;
+  validade_dias?: number;
+
+  opcionais?: OpcionaisDemarcacao;
+}
+
+export interface CodigosMintadosFQNS {
+  prefixo: string;
+  mintado_em: string;
+  vertices: string[];
+  marcos_por_tipo: {
+    concreto: string[];
+    tubo_galvanizado: string[];
+    madeira: string[];
+  };
+}
+
+export interface DemarcacaoLotesOutput {
+  honorarios_romatec: {
+    trt_cft: number;
+    tecnicos_campo: number;
+    marcos_discriminados: { tipo: MaterialMarco; qtd: number; subtotal: number }[];
+    marcos_subtotal: number;
+    deslocamento: number;
+    area_servico: number;
+    complexidade_multiplicador: number;
+    subtotal_apos_complexidade: number;
+    assessoria: number;
+    desconto_valor: number;
+    total: number;
+  };
+  secao_opcionais_demarcacao: {
+    linhas: { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean }[];
+    subtotal: number;
+  };
+  parcelas: { numero: 1 | 2 | 3; rotulo: string; valor: number; percentual: number }[];
+  validade_dias: number;
+  salario_minimo_usado: number;
+  codigos_mintados?: CodigosMintadosFQNS;
+  historico_revisoes?: { revisao: string; timestamp: string; autor: string; motivo?: string }[];
 }

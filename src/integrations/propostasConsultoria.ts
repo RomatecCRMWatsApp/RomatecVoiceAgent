@@ -28,6 +28,7 @@ import type {
   SubtipoConsultoria, CustosCalculados, FontesConsulta, InputAverbacao, ItemCusto,
   InputGeorreferenciamento, InputDesmembramento, InputRetificacao, InputAvaliacaoPTAM,
   FinalidadeGeorref,
+  InputDemarcacaoLotes, DemarcacaoLotesOutput, MaterialMarco, FinalidadeDemarcacao,
 } from '../services/pricing/types';
 // v3.23.5: aviso DRL extraido pra modulo standalone (testavel sem arrastar
 // voyageai/mysql/pdfkit). Importamos aqui apenas pra reuso no renderAvisoDRL.
@@ -154,6 +155,14 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     resultado = await m.calcularProjetoExecutivo(
       input.dados_imovel as unknown as Parameters<typeof m.calcularProjetoExecutivo>[0],
     );
+  } else if (subtipo === 'demarcacao_urbana' || subtipo === 'demarcacao_rural') {
+    // v3.27.0: Demarcacao de Lotes (Urbana e Rural)
+    const m = await import('../services/pricing/demarcacaoLotes');
+    const out = m.calcularDemarcacaoLotes(input.dados_imovel as unknown as InputDemarcacaoLotes);
+    resultado = {
+      custos: adaptarDemarcacaoParaCustosCalculados(out),
+      fontes: {} as FontesConsulta,
+    };
   } else {
     throw new Error(`Subtipo ${subtipo} desconhecido.`);
   }
@@ -415,6 +424,19 @@ export async function previewCustoConsultoria(input: {
       projeto_executivo: resultado.projeto_executivo,
     };
   }
+  // v3.27.0: Demarcacao de Lotes (Urbana e Rural)
+  if (subtipo === 'demarcacao_urbana' || subtipo === 'demarcacao_rural') {
+    const m = await import('../services/pricing/demarcacaoLotes');
+    const out = m.calcularDemarcacaoLotes(dados_imovel as unknown as InputDemarcacaoLotes);
+    const custos = adaptarDemarcacaoParaCustosCalculados(out);
+    return {
+      ok: true as const,
+      subtipo,
+      valor_total: custos.secao_5_total,
+      custos,
+      fontes: {} as FontesConsulta,
+    };
+  }
   throw new Error(`Subtipo ${subtipo} desconhecido.`);
 }
 
@@ -478,6 +500,56 @@ function parseJsonCol<T = unknown>(v: unknown): T | null {
   return null;
 }
 
+// v3.27.0: adapter para encaixar DemarcacaoLotesOutput no shape CustosCalculados
+// (que e' o que vai pra coluna custos_calculados do DB e pro PDF generico).
+function adaptarDemarcacaoParaCustosCalculados(out: DemarcacaoLotesOutput): CustosCalculados {
+  // Linhas de honorarios "viraveis" no PDF generico — mas o render real do
+  // Demarcacao usa honorarios_romatec_demarcacao diretamente.
+  const secao_3_honorarios: ItemCusto[] = [
+    { ordem: 1, descricao: 'TRT/CFT — Termo de Responsabilidade Tecnica', valor: out.honorarios_romatec.trt_cft },
+    { ordem: 2, descricao: 'Tecnicos de campo + Marcos + Deslocamento + Area (com complexidade e assessoria)',
+      valor: round2Lib(out.honorarios_romatec.total - out.honorarios_romatec.trt_cft + out.honorarios_romatec.desconto_valor) },
+  ];
+  if (out.honorarios_romatec.desconto_valor > 0) {
+    secao_3_honorarios.push({ ordem: 3, descricao: 'Desconto aplicado', valor: -out.honorarios_romatec.desconto_valor });
+  }
+  const custos: CustosCalculados = {
+    secao_1_projetos: [], // o render dedicado usa lista fixa ESCOPO_DEMARCACAO
+    secao_2_taxas: [],
+    secao_3_honorarios,
+    condicoes_pagamento: out.parcelas.map((p) => ({
+      rotulo: `${p.numero}a parcela — ${p.rotulo}`,
+      descricao: `${p.percentual}% do total`,
+      valor: p.valor,
+    })),
+    secao_4_checklist: [],
+    secao_5_total: out.honorarios_romatec.total,
+    avisos: [],
+    honorarios_romatec: {
+      trt: out.honorarios_romatec.trt_cft,
+      tecnicos: round2Lib(
+        out.honorarios_romatec.tecnicos_campo +
+        out.honorarios_romatec.marcos_subtotal +
+        out.honorarios_romatec.deslocamento +
+        out.honorarios_romatec.area_servico,
+      ),
+      assessoria: out.honorarios_romatec.assessoria,
+      total: out.honorarios_romatec.total,
+    },
+  };
+  // Campos extras (acessados via cast no renderDemarcacaoLotesBody)
+  (custos as unknown as { honorarios_romatec_demarcacao: DemarcacaoLotesOutput['honorarios_romatec'] }).honorarios_romatec_demarcacao = out.honorarios_romatec;
+  (custos as unknown as { secao_opcionais_demarcacao: DemarcacaoLotesOutput['secao_opcionais_demarcacao'] }).secao_opcionais_demarcacao = out.secao_opcionais_demarcacao;
+  if (out.codigos_mintados) {
+    (custos as unknown as { codigos_mintados: NonNullable<DemarcacaoLotesOutput['codigos_mintados']> }).codigos_mintados = out.codigos_mintados;
+  }
+  return custos;
+}
+
+function round2Lib(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
 // ── PDF de 5 secoes ────────────────────────────────────────────────────────
 
 const SUBTIPO_LABEL: Record<string, string> = {
@@ -488,6 +560,8 @@ const SUBTIPO_LABEL: Record<string, string> = {
   remembramento: 'REMEMBRAMENTO',
   retificacao_area: 'RETIFICACAO DE AREA',
   avaliacao_ptam: 'AVALIACAO DE IMOVEIS (PTAM)',
+  demarcacao_urbana: 'DEMARCACAO DE LOTE URBANO',
+  demarcacao_rural: 'DEMARCACAO DE IMOVEL RURAL',
 };
 
 // v3.23.5: render do corpo do PDF de Georreferenciamento Rural conforme modelo
@@ -1243,7 +1317,9 @@ export function renderGeorrefRuralBody(
 // NAO pode partir entre paginas — se nao couber inteiro, addPage antes.
 function renderAvisoDRL(
   doc: PDFKit.PDFDocument,
-  finalidade: 'CERTIFICACAO' | 'DESMEMBRAMENTO' | 'REMEMBRAMENTO' | 'RETIFICACAO',
+  finalidade:
+    | 'CERTIFICACAO' | 'DESMEMBRAMENTO' | 'REMEMBRAMENTO' | 'RETIFICACAO'
+    | 'demarcacao_inicial' | 'redemarcacao' | 'subdivisao_lote' | 'piqueteamento_apenas',
   colXIni: number,
   colW: number,
 ): void {
@@ -1313,6 +1389,430 @@ function renderAvisoDRL(
   doc.y = startY + alturaTotal + 10;
   doc.x = colXIni;
   doc.font('Helvetica').fillColor('#111');
+}
+
+// v3.27.0: render do corpo do PDF de Demarcacao de Lotes (Urbana e Rural).
+// Espelha o layout aprovado da v3.23.5 (Georref Rural), com 2 secoes extras:
+//   - 4-bis: Marcos Discriminados (tabela tipo x qtd x valor unit x subtotal)
+//   - 4-ter: Identificacao dos Marcos FQNS (codigos vitalicios INCRA)
+// Total: 11 secoes. Invocada SO para subtipo ∈ {demarcacao_urbana, demarcacao_rural}.
+const FINALIDADE_DEMARCACAO_TEXTOS: Record<FinalidadeDemarcacao, string> = {
+  demarcacao_inicial: 'Levantamento topografico de campo para implantacao fisica dos vertices definidos em projeto e materializacao da poligonal do imovel no terreno.',
+  redemarcacao: 'Repiqueteamento de vertices perdidos/deteriorados, restabelecendo a poligonal original conforme matricula e levantamento anterior.',
+  subdivisao_lote: 'Demarcacao fisica das fracoes resultantes de desmembramento/remembramento aprovado, com implantacao de marcos nas novas divisas.',
+  piqueteamento_apenas: 'Implantacao de marcos fisicos em vertices previamente calculados em escritorio (sem novo levantamento de campo).',
+};
+
+const ESCOPO_DEMARCACAO = [
+  'Levantamento topografico georreferenciado com GNSS RTK / Estacao Total nas divisas existentes',
+  'Implantacao fisica dos marcos nas vertices da poligonal conforme NTGIR/INCRA',
+  'Codificacao dos marcos com credencial INCRA do tecnico responsavel (rastreabilidade vitalicia)',
+  'Croqui ilustrativo da poligonal com identificacao dos marcos',
+  'Memorial Descritivo da demarcacao com coordenadas WGS84/SIRGAS2000',
+  'TRT/CFT — Termo de Responsabilidade Tecnica (CFT/MA)',
+  'Acompanhamento tecnico durante a instalacao dos marcos em campo',
+  'Orientacao ao proprietario sobre coleta de DRLs e averbacao em cartorio',
+];
+
+const MATERIAL_LABEL: Record<MaterialMarco, string> = {
+  concreto: 'Marco de Concreto Padrao INCRA',
+  tubo_galvanizado: 'Marco em Tubo Galvanizado',
+  madeira: 'Marco de Madeira de Lei (Piquete)',
+};
+
+function docsImprescindiveisDemarcacao(
+  subtipo: 'demarcacao_urbana' | 'demarcacao_rural',
+  finalidade: FinalidadeDemarcacao,
+): { texto: string; imprescindivel: boolean }[] {
+  const baseImpresc = [
+    { texto: 'RG/CPF do proprietario', imprescindivel: true },
+    { texto: 'Comprovante de residencia do proprietario', imprescindivel: false },
+  ];
+  if (finalidade === 'redemarcacao') {
+    return [
+      { texto: 'Levantamento topografico anterior OU matricula com descritivo de divisas', imprescindivel: true },
+      ...baseImpresc,
+    ];
+  }
+  if (finalidade === 'piqueteamento_apenas') {
+    return [
+      { texto: 'Coordenadas dos vertices em arquivo .csv ou .kml (georreferenciado)', imprescindivel: true },
+      { texto: 'Matricula atual', imprescindivel: true },
+      ...baseImpresc,
+    ];
+  }
+  if (subtipo === 'demarcacao_urbana') {
+    if (finalidade === 'subdivisao_lote') {
+      return [
+        { texto: 'Escritura ou matricula atual', imprescindivel: true },
+        { texto: 'Memorial do desmembramento aprovado', imprescindivel: true },
+        { texto: 'Planta carimbada pela Prefeitura', imprescindivel: true },
+        ...baseImpresc,
+      ];
+    }
+    // demarcacao_inicial urbana
+    return [
+      { texto: 'Escritura ou matricula atual', imprescindivel: true },
+      { texto: 'IPTU em dia (ultimo exercicio)', imprescindivel: true },
+      { texto: 'Projeto aprovado pela Prefeitura (quando houver)', imprescindivel: false },
+      ...baseImpresc,
+    ];
+  }
+  // demarcacao_rural
+  if (finalidade === 'subdivisao_lote') {
+    return [
+      { texto: 'Matricula atual', imprescindivel: true },
+      { texto: 'Georreferenciamento de origem certificado pelo INCRA', imprescindivel: true },
+      { texto: 'Memorial das fracoes resultantes', imprescindivel: true },
+      ...baseImpresc,
+    ];
+  }
+  return [
+    { texto: 'Matricula atual', imprescindivel: true },
+    { texto: 'CCIR vigente (INCRA)', imprescindivel: true },
+    { texto: 'ITR pago — ultimo exercicio', imprescindivel: false },
+    ...baseImpresc,
+  ];
+}
+
+function renderDemarcacaoLotesBody(
+  doc: PDFKit.PDFDocument,
+  p: Awaited<ReturnType<typeof buscarPropostaConsultoria>>,
+  dadosImovel: Record<string, unknown>,
+  custos: CustosCalculados,
+  corHex: string,
+): void {
+  const COL_X_INI = 48;
+  const COL_X_FIM = 547;
+  const COL_W = COL_X_FIM - COL_X_INI;
+
+  const COR_DOURADO_BG = '#fef3c7';
+  const COR_DOURADO_BORDA = '#d97706';
+  const COR_VERDE_BG = '#dcfce7';
+  const COR_VERDE_BORDA = '#16a34a';
+  const COR_CREME_BG = '#fef9c3';
+  const COR_CREME_BORDA = '#ca8a04';
+
+  const subtipo = p.subtipo as 'demarcacao_urbana' | 'demarcacao_rural';
+  const isUrbana = subtipo === 'demarcacao_urbana';
+
+  // Input persistido em dados_imovel
+  const di = dadosImovel as Partial<InputDemarcacaoLotes>;
+  const finalidade = (di.finalidade || 'demarcacao_inicial') as FinalidadeDemarcacao;
+  const codigos = (custos as unknown as { codigos_mintados?: DemarcacaoLotesOutput['codigos_mintados'] }).codigos_mintados;
+  const hr = (custos as unknown as { honorarios_romatec_demarcacao?: DemarcacaoLotesOutput['honorarios_romatec'] }).honorarios_romatec_demarcacao;
+
+  // ── 1. IDENTIFICACAO DO IMOVEL ────────────────────────────────────────
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('1. Identificacao do Imovel');
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+  doc.fontSize(9.5).fillColor('#111');
+
+  const municipio = di.municipio || '-';
+  const uf = di.uf || '';
+  const matricula = di.matricula || '-';
+  const cri = di.cri || `CRI de ${municipio}/${uf}`;
+  const perimetro = Number(di.perimetro_m || 0);
+  const vertices = Number(di.num_vertices || 0);
+
+  doc.text(`Municipio/UF:  ${municipio}${uf ? '/' + uf : ''}`);
+  doc.text(`Matricula:  ${matricula}    ·    Cartorio:  ${cri}`);
+  if (isUrbana) {
+    const lot = di.loteamento_nome ? `Loteamento ${di.loteamento_nome}` : '';
+    const qd = di.quadra ? `Quadra ${di.quadra}` : '';
+    const lt = di.lote ? `Lote ${di.lote}` : '';
+    const linha = [lot, qd, lt].filter(Boolean).join('    ·    ');
+    if (linha) doc.text(linha);
+    if (di.area_m2) {
+      doc.text(`Area:  ${Number(di.area_m2).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} m²    ·    Vertices:  ${vertices}${perimetro > 0 ? '    ·    Perimetro:  ' + perimetro.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + ' m' : ''}`);
+    }
+  } else {
+    if (di.denominacao_imovel) doc.text(`Denominacao:  ${di.denominacao_imovel}${di.ccir ? '    ·    CCIR:  ' + di.ccir : ''}`);
+    if (di.area_hectares) {
+      doc.text(`Area:  ${Number(di.area_hectares).toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ha    ·    Vertices:  ${vertices}${perimetro > 0 ? '    ·    Perimetro:  ' + perimetro.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + ' m' : ''}`);
+    }
+  }
+  doc.moveDown(0.6);
+
+  // ── 2. BOX DOURADO — FINALIDADE ───────────────────────────────────────
+  const textoFinal = FINALIDADE_DEMARCACAO_TEXTOS[finalidade];
+  const boxAltFin = doc.heightOfString(textoFinal, { width: COL_W - 28 }) + 28;
+  const boxYFin = doc.y;
+  doc.rect(COL_X_INI, boxYFin, COL_W, boxAltFin).fillAndStroke(COR_DOURADO_BG, COR_DOURADO_BORDA);
+  doc.fontSize(8.5).fillColor(COR_DOURADO_BORDA).font('Helvetica-Bold')
+    .text('FINALIDADE', COL_X_INI + 12, boxYFin + 8, { width: COL_W - 24 });
+  doc.fontSize(9.5).fillColor('#111').font('Helvetica')
+    .text(textoFinal, COL_X_INI + 12, boxYFin + 22, { width: COL_W - 24, align: 'justify' });
+  doc.y = boxYFin + boxAltFin + 8;
+  doc.x = COL_X_INI;
+
+  // ── 3. ESCOPO DO SERVICO ──────────────────────────────────────────────
+  if (doc.y > 700) doc.addPage();
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('3. Escopo do Servico');
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+  doc.fontSize(9.5).fillColor('#111');
+  ESCOPO_DEMARCACAO.forEach((item, i) => {
+    doc.text(`${i + 1}. ${item}`, { indent: 8, width: COL_W - 8 });
+  });
+  doc.moveDown(0.5);
+
+  // ── 4. HONORARIOS ROMATEC ─────────────────────────────────────────────
+  if (doc.y > 640) doc.addPage();
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4. Honorarios — Romatec Consultoria Total');
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+
+  const linhasHon: Array<{ label: string; valor: number; obs?: string }> = hr
+    ? [
+        { label: 'TRT/CFT — Termo de Responsabilidade Tecnica (CFT/MA)', valor: hr.trt_cft, obs: 'Tec. em Agrimensura CFT/MA n. 01209185369' },
+        { label: 'Tecnicos de campo', valor: hr.tecnicos_campo, obs: `${di.diarias_equipe || 0} diaria(s) x SM x fator CFT-MA 0,42 (Res. 12/2025)` },
+        { label: `Area do servico (${isUrbana ? 'm²' : 'hectare'})`, valor: hr.area_servico, obs: isUrbana ? `${di.area_m2 || 0} m² x valor unitario` : `${di.area_hectares || 0} ha x valor unitario` },
+        { label: 'Deslocamento', valor: hr.deslocamento, obs: `${di.km_deslocamento || 0} km x R$ 3,50/km` },
+        { label: `Multiplicador de complexidade (${di.complexidade || 'media'})`, valor: hr.subtotal_apos_complexidade - (hr.trt_cft + hr.tecnicos_campo + hr.marcos_subtotal + hr.deslocamento + hr.area_servico), obs: `x ${hr.complexidade_multiplicador}` },
+        { label: 'Assessoria (5%)', valor: hr.assessoria },
+      ]
+    : (custos.secao_3_honorarios || []).map((h) => ({ label: h.descricao, valor: Number(h.valor), obs: h.observacao }));
+
+  linhasHon.forEach((h) => {
+    const itemY0 = doc.y;
+    doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+      .text(h.label, COL_X_INI + 8, itemY0, { width: COL_W - 100 });
+    const itemY1 = doc.y;
+    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+      .text(formatBRL(h.valor), COL_X_FIM - 80, itemY0, { width: 80, align: 'right' });
+    doc.y = itemY1;
+    if (h.obs) {
+      doc.font('Helvetica').fontSize(8).fillColor('#555')
+        .text(h.obs, COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+    }
+    doc.font('Helvetica').fillColor('#111');
+    doc.moveDown(0.3);
+  });
+
+  if (hr && hr.desconto_valor > 0) {
+    doc.fontSize(9.5).fillColor('#dc2626').font('Helvetica-Bold')
+      .text(`Desconto aplicado: -${formatBRL(hr.desconto_valor)}`, { align: 'right', width: COL_W - 16 });
+    doc.font('Helvetica').fillColor('#111');
+  }
+  doc.moveDown(0.2);
+
+  // ── 4-bis. MARCOS DISCRIMINADOS ──────────────────────────────────────
+  if (hr && hr.marcos_discriminados.length > 0) {
+    if (doc.y > 650) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.2 Marcos Discriminados');
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+
+    hr.marcos_discriminados.forEach((md) => {
+      const y0 = doc.y;
+      const vu = md.qtd > 0 ? md.subtotal / md.qtd : 0;
+      doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+        .text(`${MATERIAL_LABEL[md.tipo]}  ·  ${md.qtd} un × ${formatBRL(vu)}`, COL_X_INI + 8, y0, { width: COL_W - 100 });
+      doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+        .text(formatBRL(md.subtotal), COL_X_FIM - 80, y0, { width: 80, align: 'right' });
+      doc.font('Helvetica').fillColor('#111');
+      doc.moveDown(0.2);
+    });
+    doc.moveDown(0.1);
+    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+      .text(`Total dos marcos: ${formatBRL(hr.marcos_subtotal)}`, { align: 'right', width: COL_W - 16 });
+    doc.font('Helvetica').fillColor('#111');
+    doc.moveDown(0.4);
+  }
+
+  // ── 4-ter. IDENTIFICACAO DOS MARCOS (FQNS) ───────────────────────────
+  if (doc.y > 600) doc.addPage();
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.3 Identificacao dos Marcos (Codificacao INCRA)');
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+
+  if (codigos) {
+    doc.fontSize(9).fillColor('#111')
+      .text('Os marcos a serem implantados em campo recebem codificacao INCRA padrao do tecnico responsavel, conforme NTGIR 3a Edicao:', { width: COL_W - 8, indent: 8, align: 'justify' });
+    doc.moveDown(0.3);
+    const linhasFQNS: Array<[string, string[]]> = [
+      [`▸ Vertices da poligonal (${codigos.vertices.length}):`, codigos.vertices],
+      [`▸ Marcos de concreto (${codigos.marcos_por_tipo.concreto.length}):`, codigos.marcos_por_tipo.concreto],
+      [`▸ Marcos de tubo galvanizado (${codigos.marcos_por_tipo.tubo_galvanizado.length}):`, codigos.marcos_por_tipo.tubo_galvanizado],
+      [`▸ Piquetes de madeira (${codigos.marcos_por_tipo.madeira.length}):`, codigos.marcos_por_tipo.madeira],
+    ];
+    for (const [label, lista] of linhasFQNS) {
+      doc.fontSize(8.5).fillColor('#444').font('Helvetica-Bold').text(label, { indent: 8, width: COL_W - 16 });
+      doc.font('Helvetica').fillColor('#111');
+      if (lista.length === 0) {
+        doc.text('  —', { indent: 16, width: COL_W - 24 });
+      } else if (lista.length <= 6) {
+        doc.text('  ' + lista.join(', '), { indent: 16, width: COL_W - 24 });
+      } else {
+        doc.text(`  ${lista[0]} a ${lista[lista.length - 1]}`, { indent: 16, width: COL_W - 24 });
+      }
+      doc.moveDown(0.1);
+    }
+    doc.moveDown(0.2);
+    doc.fontSize(8).fillColor('#555').font('Helvetica-Oblique')
+      .text('Cada marco e gravado/etiquetado fisicamente com seu codigo unico para rastreabilidade e responsabilidade tecnica perante INCRA/MPF.', { width: COL_W - 8, indent: 8, align: 'justify' });
+    doc.font('Helvetica').fillColor('#111');
+  } else {
+    doc.fontSize(9).fillColor('#555').font('Helvetica-Oblique')
+      .text('Os codigos definitivos dos marcos (formato FQNS-V-XXX, FQNS-M-XXXX-CC, etc.) serao atribuidos quando esta proposta for enviada ao cliente. Em rascunho, os codigos ainda nao foram reservados nos contadores INCRA do tecnico responsavel.', { width: COL_W - 8, indent: 8, align: 'justify' });
+    doc.font('Helvetica').fillColor('#111');
+  }
+  doc.moveDown(0.5);
+
+  // ── 5. BOX VERDE — VALOR TOTAL ────────────────────────────────────────
+  const totalRomatec = hr?.total ?? custos.honorarios_romatec?.total ?? custos.secao_5_total;
+  if (doc.y > 700) doc.addPage();
+  const txtTotalNota = 'Soma de TRT/CFT + Tecnicos de campo + Marcos + Deslocamento + Area, com complexidade e assessoria. Eventuais custos de cartorio para averbacao da demarcacao NAO estao inclusos.';
+  const boxYT = doc.y;
+  const boxAlturaT = doc.heightOfString(txtTotalNota, { width: COL_W - 24 }) + 38;
+  doc.rect(COL_X_INI, boxYT, COL_W, boxAlturaT).fillAndStroke(COR_VERDE_BG, COR_VERDE_BORDA);
+  doc.fontSize(10).fillColor(COR_VERDE_BORDA).font('Helvetica-Bold')
+    .text('VALOR TOTAL DA PROPOSTA (Romatec):', COL_X_INI + 12, boxYT + 8, { width: COL_W - 120 });
+  doc.fontSize(14).fillColor('#065f46').font('Helvetica-Bold')
+    .text(formatBRL(totalRomatec), COL_X_FIM - 130, boxYT + 8, { width: 118, align: 'right' });
+  doc.fontSize(8).fillColor('#166534').font('Helvetica')
+    .text(txtTotalNota, COL_X_INI + 12, boxYT + 26, { width: COL_W - 24, align: 'justify' });
+  doc.y = boxYT + boxAlturaT + 10;
+  doc.x = COL_X_INI;
+
+  // ── 6. CONDICOES DE PAGAMENTO ─────────────────────────────────────────
+  if (custos.condicoes_pagamento && custos.condicoes_pagamento.length > 0) {
+    if (doc.y > 680) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('6. Condicoes de Pagamento');
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    custos.condicoes_pagamento.forEach((cp) => {
+      const y0 = doc.y;
+      doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+        .text(cp.rotulo, COL_X_INI + 8, y0, { width: COL_W - 100 });
+      doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+        .text(formatBRL(cp.valor), COL_X_FIM - 80, y0, { width: 80, align: 'right' });
+      doc.font('Helvetica').fontSize(8.5).fillColor('#444')
+        .text(cp.descricao, COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+      doc.font('Helvetica').fillColor('#111');
+      doc.moveDown(0.2);
+    });
+    doc.moveDown(0.3);
+  }
+
+  // ── 7. CUSTOS DE TERCEIROS — SO renderiza se houver linhas ────────────
+  if (custos.secao_2_taxas && custos.secao_2_taxas.length > 0) {
+    if (doc.y > 660) doc.addPage();
+    const txtAv = isUrbana
+      ? 'Emolumentos do CRI competente para averbacao da demarcacao. Pagos diretamente pelo cliente no cartorio.'
+      : 'Eventuais custos de SIGEF/INCRA, CCIR ou cartorio quando aplicaveis. Pagos diretamente pelo cliente.';
+    const boxYCT = doc.y;
+    const boxAlturaCT = doc.heightOfString(txtAv, { width: COL_W - 24 }) + 26;
+    doc.rect(COL_X_INI, boxYCT, COL_W, boxAlturaCT).fillAndStroke(COR_CREME_BG, COR_CREME_BORDA);
+    doc.fontSize(10).fillColor(COR_CREME_BORDA).font('Helvetica-Bold')
+      .text('7. CUSTOS DE TERCEIROS (INFORMATIVO — A CARGO DO CLIENTE)', COL_X_INI + 12, boxYCT + 6, { width: COL_W - 24 });
+    doc.fontSize(8).fillColor('#713f12').font('Helvetica')
+      .text(txtAv, COL_X_INI + 12, boxYCT + 20, { width: COL_W - 24, align: 'justify' });
+    doc.y = boxYCT + boxAlturaCT + 6;
+    doc.x = COL_X_INI;
+
+    custos.secao_2_taxas.forEach((t) => {
+      const y0 = doc.y;
+      doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+        .text(t.descricao, COL_X_INI + 8, y0, { width: COL_W - 100 });
+      const valorTxt = t.pendente ? 'A apurar' : (t.valor === 0 ? 'Gratuito' : formatBRL(t.valor));
+      doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+        .text(valorTxt, COL_X_FIM - 90, y0, { width: 90, align: 'right' });
+      if (t.observacao) {
+        doc.font('Helvetica').fontSize(8).fillColor('#666')
+          .text(t.observacao, COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+      }
+      doc.font('Helvetica').fillColor('#111');
+      doc.moveDown(0.2);
+    });
+    doc.moveDown(0.4);
+  }
+
+  // ── 8. SERVICOS ADICIONAIS OPCIONAIS ──────────────────────────────────
+  const opcSec = (custos as unknown as { secao_opcionais_demarcacao?: DemarcacaoLotesOutput['secao_opcionais_demarcacao'] }).secao_opcionais_demarcacao;
+  if (opcSec && opcSec.linhas.length > 0) {
+    if (doc.y > 660) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('8. Servicos Adicionais Opcionais');
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    doc.fontSize(8).fillColor('#666').font('Helvetica-Oblique')
+      .text('NAO somam ao total da proposta. Marcados se contratados.', { indent: 8, width: COL_W - 8 });
+    doc.font('Helvetica').fillColor('#111');
+    doc.moveDown(0.2);
+    opcSec.linhas.forEach((l) => {
+      const y0 = doc.y;
+      const check = l.contratado ? '☑' : '☐';
+      doc.fontSize(9.5).fillColor('#111').font(l.contratado ? 'Helvetica-Bold' : 'Helvetica')
+        .text(`${check} ${l.rotulo}`, COL_X_INI + 8, y0, { width: COL_W - 100 });
+      const valorTxt = l.valor === 'sob_orcamento' ? 'Sob orcamento' : (l.contratado ? formatBRL(l.valor as number) : '—');
+      doc.fontSize(9.5).fillColor(l.contratado ? corHex : '#666').font(l.contratado ? 'Helvetica-Bold' : 'Helvetica')
+        .text(valorTxt, COL_X_FIM - 100, y0, { width: 100, align: 'right' });
+      doc.font('Helvetica').fillColor('#111');
+      doc.moveDown(0.1);
+    });
+    if (opcSec.subtotal > 0) {
+      doc.moveDown(0.2);
+      doc.fontSize(9.5).fillColor('#666').font('Helvetica-Bold')
+        .text(`Subtotal opcionais contratados: ${formatBRL(opcSec.subtotal)}  (cobrado a parte)`, { indent: 8, align: 'right', width: COL_W - 16 });
+      doc.font('Helvetica');
+    }
+    doc.moveDown(0.4);
+  }
+
+  // ── 9. DOCUMENTOS A SEREM FORNECIDOS ─────────────────────────────────
+  if (doc.y > 660) doc.addPage();
+  doc.x = COL_X_INI;
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold')
+    .text('9. Documentos a Serem Fornecidos pelo Cliente', COL_X_INI, doc.y, { width: COL_W });
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+  doc.fontSize(9.5).fillColor('#111');
+  const docsList = docsImprescindiveisDemarcacao(subtipo, finalidade);
+  docsList.forEach((d) => {
+    doc.x = COL_X_INI;
+    if (d.imprescindivel) {
+      doc.fillColor('#dc2626').font('Helvetica-Bold')
+        .text(`☐ [IMPRESCINDIVEL] ${d.texto}`, COL_X_INI + 8, doc.y, { width: COL_W - 16, continued: false });
+      doc.font('Helvetica').fillColor('#111');
+    } else {
+      doc.text(`☐ ${d.texto}`, COL_X_INI + 8, doc.y, { width: COL_W - 16, continued: false });
+    }
+  });
+  doc.moveDown(0.5);
+
+  // ── 10. AVISOS ────────────────────────────────────────────────────────
+  if (doc.y > 660) doc.addPage();
+  doc.x = COL_X_INI;
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold')
+    .text('10. Avisos e Condicoes Tecnicas', COL_X_INI, doc.y, { width: COL_W });
+  doc.font('Helvetica');
+  doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.2);
+  doc.fontSize(8.5).fillColor('#444');
+  const avisosDem = [
+    'A demarcacao consiste na materializacao fisica das divisas. O servico nao constitui regularizacao fundiaria isolada — para averbacao no cartorio sao necessarios os documentos imprescindiveis acima.',
+    'O cliente deve coletar Declaracoes de Respeito de Limite (DRLs) com firma reconhecida em cartorio (ver box vermelho abaixo).',
+    'Os codigos INCRA dos marcos sao vitalicios e atrelados ao tecnico responsavel. Apos atribuidos no envio da proposta, nao podem ser realocados a outra obra.',
+  ];
+  avisosDem.forEach((a) => {
+    doc.x = COL_X_INI;
+    doc.text(`• ${a}`, COL_X_INI + 8, doc.y, { width: COL_W - 16, align: 'justify', continued: false });
+    doc.moveDown(0.15);
+  });
+  doc.fillColor('#111');
+  doc.moveDown(0.3);
+
+  // ── 10-bis. BOX VERMELHO — AVISO DRL ──────────────────────────────────
+  renderAvisoDRL(doc, finalidade, COL_X_INI, COL_W);
 }
 
 export async function gerarPdfPropostaConsultoria(
@@ -1390,6 +1890,10 @@ export async function gerarPdfPropostaConsultoria(
   } else if (p.subtipo === 'projeto_executivo') {
     // v3.24.5: Projeto Executivo — layout dedicado.
     renderProjetoExecutivoBody(doc, p, dadosImovel, custos, corHex);
+  } else if (p.subtipo === 'demarcacao_urbana' || p.subtipo === 'demarcacao_rural') {
+    // v3.27.0: Demarcacao de Lotes (Urbana/Rural) — layout dedicado com
+    // 11 secoes (10 do Georref + Marcos Discriminados + Identificacao FQNS).
+    renderDemarcacaoLotesBody(doc, p, dadosImovel, custos, corHex);
   } else {
 
   // v1.99.16: Remembramento detalhado — tabela de imóveis + área total destacada
@@ -2075,12 +2579,76 @@ function formatDataBR(d: Date | string): string {
 //   return new Promise((r) => setTimeout(r, ms));
 // }
 
+// v3.27.0: garante que a proposta de Demarcacao tenha codigos FQNS mintados
+// (idempotente — so minta uma vez por proposta; anti-replay via dados_imovel.codigos_mintados).
+// Invocado pelos senders WhatsApp/Telegram antes da transicao RASCUNHO->ENVIADA.
+export async function garantirCodigosMintadosDemarcacao(propostaId: number): Promise<void> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT subtipo_consultoria, status, dados_imovel, custos_calculados
+       FROM propostas WHERE id = ? AND deleted_at IS NULL`,
+    [propostaId],
+  );
+  if (!rows.length) return;
+  const subtipo = String(rows[0].subtipo_consultoria || '');
+  if (subtipo !== 'demarcacao_urbana' && subtipo !== 'demarcacao_rural') return;
+  if (String(rows[0].status || '').toUpperCase() !== 'RASCUNHO') return; // so minta na primeira transicao
+
+  const dadosImovel = parseJsonCol<Record<string, unknown> & { num_vertices?: number; marcos?: Array<{ tipo: string; quantidade: number }>; codigos_mintados?: unknown }>(rows[0].dados_imovel) || {};
+  if (dadosImovel.codigos_mintados) return; // ja mintado — anti-replay
+
+  // Localiza o tecnico responsavel: primeiro admin com prefixo configurado
+  const [userRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id FROM users
+      WHERE credencial_incra_prefixo IS NOT NULL AND credencial_incra_prefixo <> ''
+      ORDER BY (role = 'admin') DESC, id ASC
+      LIMIT 1`,
+  );
+  if (!userRows.length) {
+    console.warn(`[mint-fqns] proposta ${propostaId}: nenhum usuario com credencial INCRA — pulando mint`);
+    return;
+  }
+  const userId = Number(userRows[0].id);
+
+  const numVertices = Number(dadosImovel.num_vertices || 0);
+  const marcos = Array.isArray(dadosImovel.marcos)
+    ? (dadosImovel.marcos as Array<{ tipo: 'concreto' | 'tubo_galvanizado' | 'madeira'; quantidade: number; valor_unitario_congelado?: number }>)
+        .map((m) => ({ tipo: m.tipo, quantidade: Number(m.quantidade) || 0, valor_unitario_congelado: Number(m.valor_unitario_congelado) || 0 }))
+    : [];
+
+  const conn = await pool.getConnection();
+  try {
+    const m = await import('../services/pricing/mintCodigosDemarcacao');
+    const codigos = await m.mintarCodigosDemarcacao(conn, userId, {
+      num_vertices: numVertices,
+      marcos,
+    });
+    // Persiste em dados_imovel + custos_calculados.codigos_mintados
+    const dadosAtual = { ...dadosImovel, codigos_mintados: codigos };
+    const custosAtual = parseJsonCol<CustosCalculados>(rows[0].custos_calculados) || ({} as CustosCalculados);
+    (custosAtual as unknown as { codigos_mintados: typeof codigos }).codigos_mintados = codigos;
+    await pool.execute(
+      `UPDATE propostas SET dados_imovel = ?, custos_calculados = ? WHERE id = ?`,
+      [JSON.stringify(dadosAtual), JSON.stringify(custosAtual), propostaId],
+    );
+    console.log(`[mint-fqns] proposta ${propostaId}: ${codigos.vertices.length} V + ${codigos.marcos_por_tipo.concreto.length}/${codigos.marcos_por_tipo.tubo_galvanizado.length}/${codigos.marcos_por_tipo.madeira.length} marcos`);
+  } catch (err) {
+    console.error(`[mint-fqns] proposta ${propostaId} FALHOU:`, (err as Error).message);
+    // nao re-throw — envio continua, mint pode ser feito manualmente depois
+  } finally {
+    conn.release();
+  }
+}
+
 export async function enviarPropostaConsultoriaWhatsApp(input: { id: string; telefone?: string }) {
   const idNum = Number(input.id);
   if (!idNum) throw new Error('id obrigatorio');
   const p = await buscarPropostaConsultoria(input.id);
   const tel = (input.telefone?.trim()) || p.cliente?.telefone || '';
   if (!tel) throw new Error('Telefone obrigatorio (informe ou cadastre no cliente).');
+
+  // v3.27.0: minta os codigos FQNS antes de gerar o PDF (so demarcacao + RASCUNHO).
+  // Idempotente — chamadas repetidas nao re-mintam.
+  await garantirCodigosMintadosDemarcacao(idNum);
 
   // v3.23.10: PDF UNIFICADO (proposta + anexos no mesmo arquivo). Antes:
   // - v3.23.7-9: enviava proposta separado + cada anexo em mensagem propria
@@ -2110,6 +2678,8 @@ export async function enviarPropostaConsultoriaWhatsApp(input: { id: string; tel
 
 export async function enviarPropostaConsultoriaTelegram(input: { id: string; chatId?: string }) {
   const idNum = Number(input.id);
+  // v3.27.0: mint antes do envio (idempotente — so demarcacao + RASCUNHO).
+  if (idNum) await garantirCodigosMintadosDemarcacao(idNum);
   if (!idNum) throw new Error('id obrigatorio');
   const p = await buscarPropostaConsultoria(input.id);
 
@@ -2260,6 +2830,11 @@ export async function atualizarPropostaConsultoria(input: {
     } else if (subtipo === 'averbacao_residencial' || subtipo === 'averbacao_comercial') {
       const r = await calcularConsultoria({ subtipo, dados: dadosFinal });
       custosFinal = r.custos;
+    } else if (subtipo === 'demarcacao_urbana' || subtipo === 'demarcacao_rural') {
+      // v3.27.0: Demarcacao de Lotes
+      const m = await import('../services/pricing/demarcacaoLotes');
+      const out = m.calcularDemarcacaoLotes(dadosFinal as unknown as InputDemarcacaoLotes);
+      custosFinal = adaptarDemarcacaoParaCustosCalculados(out);
     } else {
       throw new Error(`Subtipo ${subtipo} nao suportado para edicao nesta fase.`);
     }
