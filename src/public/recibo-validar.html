@@ -123,6 +123,41 @@
     cancelado:'⊘ Cancelado'
   };
 
+  // v3.27.0: aviso DRL adaptado para Demarcacao de Lotes (4 finalidades:
+  // demarcacao_inicial, redemarcacao, subdivisao_lote, piqueteamento_apenas).
+  // Reforco SO em subdivisao_lote.
+  function avisoDRLDemarcacaoHtml(finalidade) {
+    const f = finalidade || 'demarcacao_inicial';
+    const paragrafos = [
+      `Em qualquer trabalho de demarcação física de lote, a coleta de <strong>Declarações de Respeito de Limite</strong> (DRLs) dos confrontantes é <strong>OBRIGAÇÃO LEGAL E EXCLUSIVA</strong> do proprietário, conforme Lei nº 10.267/2001, NTGIR 3ª Ed. (INCRA) e Provimento CNJ nº 65/2017.`,
+      `A Romatec <strong>GERA</strong> os documentos técnicos (planta, memorial, croqui), mas <strong>NÃO COLETA</strong> as DRLs nem reconhece firma — esse é ato pessoal do proprietário perante cartório.`,
+      `Sem DRL com <strong>RECONHECIMENTO DE FIRMA EM CARTÓRIO</strong> de todos os confrontantes, o cartório de imóveis <strong>NÃO AVERBA</strong> a demarcação na matrícula, mesmo após instalação física dos marcos.`,
+    ];
+    let finalP = '';
+    if (f === 'subdivisao_lote') {
+      finalP = `<p class="reforco"><strong>⚠ ATENÇÃO REFORÇADA — SUBDIVISÃO DE LOTE:</strong> ausência de DRL impede a <strong>abertura de novas matrículas</strong> para as frações resultantes, mesmo que o desmembramento tenha sido aprovado pela Prefeitura.</p>`;
+    }
+    return `
+      <div class="aviso-drl">
+        <h3>⚠ Responsabilidade do Proprietário — DRL (Declaração de Respeito de Limite)</h3>
+        ${paragrafos.map(p => `<p>${p}</p>`).join('')}
+        ${finalP}
+      </div>`;
+  }
+
+  const FINALIDADE_DEMARCACAO_TEXTOS = {
+    demarcacao_inicial: 'Demarcação inicial — implantação física dos vértices definidos em projeto.',
+    redemarcacao: 'Redemarcação — repiqueteamento de vértices perdidos/deteriorados.',
+    subdivisao_lote: 'Subdivisão de lote — demarcação das frações resultantes de desmembramento aprovado.',
+    piqueteamento_apenas: 'Piqueteamento — implantação de marcos sem novo levantamento de campo.',
+  };
+
+  const MATERIAL_MARCO_LABEL = {
+    concreto: 'Marco de concreto padrão INCRA',
+    tubo_galvanizado: 'Marco em tubo galvanizado',
+    madeira: 'Piquete de madeira de lei',
+  };
+
   // v3.23.5: monta o HTML do aviso DRL (espelha renderAvisoDRL do PDF).
   // Texto regulamentar fixo — sempre presente em proposta de georref_rural,
   // qualquer finalidade. Reforco adicional para RETIFICACAO; paragrafo extra
@@ -205,9 +240,99 @@
       // v3.23.5: render proposta — especial pro subtipo georreferenciamento_rural
       // (mostra finalidade + opcionais contratados). Outros subtipos mostram
       // resumo basico (numero, cliente, valor, validade).
+      // v3.27.0: render dedicado para demarcacao_urbana / demarcacao_rural.
       const p = payload.proposta;
       const dados = p.dados_imovel || {};
-      const isGeo = (p.subtipo_consultoria || p.subtipo) === 'georreferenciamento_rural';
+      const subtipoEff = p.subtipo_consultoria || p.subtipo;
+      const isGeo = subtipoEff === 'georreferenciamento_rural';
+      const isDemarc = subtipoEff === 'demarcacao_urbana' || subtipoEff === 'demarcacao_rural';
+
+      if (isDemarc) {
+        const statusUpD = String(p.status || '').toUpperCase();
+        const statusClassD =
+          statusUpD === 'APROVADA' ? 'status-ok' :
+          statusUpD === 'EXPIRADA' || statusUpD === 'CANCELADA' ? 'status-no' :
+          'status-pending';
+        const finD = dados.finalidade || 'demarcacao_inicial';
+        const finTexto = FINALIDADE_DEMARCACAO_TEXTOS[finD] || finD;
+        const isUrbana = subtipoEff === 'demarcacao_urbana';
+        const marcos = Array.isArray(dados.marcos) ? dados.marcos : [];
+        const marcosHtml = marcos.length > 0
+          ? `<div class="card">
+               <h2>Marcos a implantar</h2>
+               <ul style="font-size:13px;color:#333;line-height:1.7;margin-left:18px">
+                 ${marcos.map(m => `<li>${m.quantidade}× ${escapeHtml(MATERIAL_MARCO_LABEL[m.tipo] || m.tipo)}</li>`).join('')}
+               </ul>
+             </div>`
+          : '';
+        const cm = dados.codigos_mintados;
+        const codigosHtml = cm
+          ? `<div class="card">
+               <h2>Códigos FQNS atribuídos (rastreabilidade INCRA)</h2>
+               <dl>
+                 <dt>Prefixo</dt><dd><strong>${escapeHtml(cm.prefixo || 'FQNS')}</strong></dd>
+                 <dt>Vértices</dt><dd>${(cm.vertices||[]).length} (${(cm.vertices||[])[0] || '-'} ${cm.vertices && cm.vertices.length>1 ? 'a ' + cm.vertices[cm.vertices.length-1] : ''})</dd>
+                 <dt>Concreto</dt><dd>${(cm.marcos_por_tipo?.concreto||[]).length}</dd>
+                 <dt>Tubo galv.</dt><dd>${(cm.marcos_por_tipo?.tubo_galvanizado||[]).length}</dd>
+                 <dt>Madeira</dt><dd>${(cm.marcos_por_tipo?.madeira||[]).length}</dd>
+                 <dt>Atribuído em</dt><dd>${escapeHtml(fmtData(cm.mintado_em))}</dd>
+               </dl>
+             </div>`
+          : '';
+        const opc = dados.opcionais || {};
+        const opcContratados = [];
+        if (opc.laudo_tecnico?.contratado) opcContratados.push('<li>Laudo Técnico de Demarcação</li>');
+        if (opc.alinhamento_cerca?.contratado) opcContratados.push(`<li>Alinhamento de Cerca — ${opc.alinhamento_cerca.metros||0} m × ${fmtBRL(opc.alinhamento_cerca.valor_unitario||0)}</li>`);
+        if (opc.croqui_assinado?.contratado) opcContratados.push(`<li>Croqui Assinado em Cartório — ${fmtBRL(opc.croqui_assinado.valor_unitario||0)}</li>`);
+        if (opc.acompanhamento_obra?.contratado) opcContratados.push(`<li>Acompanhamento de Obra — ${opc.acompanhamento_obra.diarias||0} diária(s) × ${fmtBRL(opc.acompanhamento_obra.valor_unitario||0)}</li>`);
+        if (opc.consultoria_juridica?.contratado) opcContratados.push('<li>Consultoria Jurídica — <em>Sob orçamento</em></li>');
+        const opcHtml = opcContratados.length > 0
+          ? `<div class="card"><h2>Serviços adicionais opcionais</h2><ul style="font-size:13px;color:#333;line-height:1.7;margin-left:18px">${opcContratados.join('')}</ul></div>`
+          : '';
+
+        root.innerHTML = `
+          ${headerHtml}
+          <div class="stamp">
+            <div class="check">✓</div>
+            <h1>Proposta autenticada</h1>
+            <p>Documento emitido oficialmente pelo sistema</p>
+          </div>
+          <div class="card">
+            <h2>Detalhes da proposta</h2>
+            <dl>
+              <dt>Número</dt><dd>${escapeHtml(p.numero || '-')}</dd>
+              <dt>Status</dt><dd><span class="status ${statusClassD}">${escapeHtml(statusUpD || 'RASCUNHO')}</span></dd>
+              <dt>Cliente</dt><dd>${escapeHtml(p.cliente?.nome || '-')}</dd>
+              ${p.cliente?.cpf_cnpj ? `<dt>Documento</dt><dd>${escapeHtml(p.cliente.cpf_cnpj)}</dd>` : ''}
+              <dt>Município</dt><dd>${escapeHtml(dados.municipio || '-')}${dados.uf ? '/'+escapeHtml(dados.uf) : ''}</dd>
+              ${dados.matricula ? `<dt>Matrícula</dt><dd>${escapeHtml(dados.matricula)}</dd>` : ''}
+              ${isUrbana && dados.area_m2 ? `<dt>Área</dt><dd>${Number(dados.area_m2).toLocaleString('pt-BR',{minimumFractionDigits:2})} m²</dd>` : ''}
+              ${!isUrbana && dados.area_hectares ? `<dt>Área</dt><dd>${Number(dados.area_hectares).toLocaleString('pt-BR',{minimumFractionDigits:4})} ha</dd>` : ''}
+              <dt>Vértices</dt><dd>${dados.num_vertices || '-'}</dd>
+              <dt>Valor total</dt><dd><strong>${escapeHtml(fmtBRL(p.valor_total))}</strong></dd>
+              <dt>Emitida em</dt><dd>${escapeHtml(fmtData(p.data_proposta || p.criado_em))}</dd>
+              <dt>Validade</dt><dd>${p.validade_dias || 15} dias</dd>
+            </dl>
+            <a href="/v/${encodeURIComponent(hash)}/pdf" class="pdf-link">📄 Abrir PDF original</a>
+          </div>
+          <div class="card" style="background:#fef3c7;border:1px solid #d97706">
+            <h2 style="color:#92400e">Finalidade</h2>
+            <p style="font-size:13px;color:#111;font-weight:600">${escapeHtml(finTexto)}</p>
+          </div>
+          ${marcosHtml}
+          ${codigosHtml}
+          ${opcHtml}
+          ${avisoDRLDemarcacaoHtml(finD)}
+          <div class="card">
+            <h2>Hash de autenticidade</h2>
+            <div class="hash-box">${escapeHtml(p.hash_validacao || hash)}</div>
+            <p style="font-size:11px;color:#9ca3af;margin-top:8px">
+              Este hash é único e imutável. Vinculado ao conteúdo do PDF no momento da emissão.
+            </p>
+          </div>`;
+        return;
+      }
+
       const statusUp = String(p.status || '').toUpperCase();
       const statusClass =
         statusUp === 'APROVADA' ? 'status-ok' :

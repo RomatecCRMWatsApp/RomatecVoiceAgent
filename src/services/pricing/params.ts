@@ -68,6 +68,33 @@ interface PricingParams {
     anuencia:    { rotulo: string; valor_unitario: number; unidade?: string; editavel?: boolean };
     retificacao: { rotulo: string; valor: 'sob_orcamento' };
   };
+  // v3.27.0: Demarcacao de Lotes (Urbana e Rural)
+  demarcacao_lotes_2026?: {
+    valor_m2_urbano_default: number;
+    valor_hectare_rural_default: number;
+    fator_diaria_tecnico: number;
+    fator_diaria_tecnico_fonte?: string;
+    valor_km_deslocamento: number;
+    marcos: {
+      concreto:         { valor_unitario: number; rotulo: string; codigo_funcao: string; codigo_material: string; largura_numero: number };
+      madeira:          { valor_unitario: number; rotulo: string; codigo_funcao: string; codigo_material: string; largura_numero: number };
+      tubo_galvanizado: { valor_unitario: number; rotulo: string; codigo_funcao: string; codigo_material: string; largura_numero: number };
+    };
+    vertices: { codigo_funcao: string; largura_numero: number };
+    opcionais: {
+      laudo_tecnico:        { rotulo: string; valor_unitario_sm_multiplicador: number };
+      alinhamento_cerca:    { rotulo: string; valor_unitario: number; unidade?: string };
+      croqui_assinado:      { rotulo: string; valor_unitario: number };
+      acompanhamento_obra:  { rotulo: string; valor_unitario: number; unidade?: string };
+      consultoria_juridica: { rotulo: string; valor: 'sob_orcamento' };
+    };
+    minimo_garantido_sm: number;
+    complexidade_multiplicadores: { simples: number; media: number; alta: number };
+    assessoria_pct: number;
+    desconto_max_pct: number;
+    parcelas: Array<{ numero: number; rotulo: string; percentual: number }>;
+    validade_dias_default: number;
+  };
   _meta?: { ultima_atualizacao: string; atualizado_por: string; versao: string };
 }
 
