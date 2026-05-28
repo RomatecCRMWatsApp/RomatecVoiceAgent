@@ -152,6 +152,8 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
 
   const subtipo = input.subtipo;
   let resultado;
+  // v3.43.0: helper movido pra topo de criarPropostaConsultoria por uso interno.
+  // Definido como function declaration fora pra reuso em preview + edit (ver fim do arquivo).
   if (subtipo === 'averbacao_residencial' || subtipo === 'averbacao_comercial') {
     resultado = await calcularConsultoria({
       subtipo,
@@ -192,19 +194,27 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     // v3.38.0: se adicional_campo (insal/peric) foi solicitado, deriva o pct
     // e INJETA em dados_imovel antes do engine — assim o adicional entra na
     // BASE (antes da complexidade) conforme PROP-2026-0028-R1.
+    // v3.43.0: para demarcacao_rural, adicional de campo e' OBRIGATORIO. Se nao
+    // veio do front, aplica default mata_densa_animais + insalubridade Grau Medio
+    // (CLT 192/II / NR-15 Anexo 14). Trabalho em mata rural SEMPRE expoe a
+    // riscos biologicos — adicional nao e' discricionario, e' exigencia legal.
+    const adicionalEfetivo = aplicarAdicionalObrigatorioDemarcacao(subtipo, input.adicional_campo);
     const dadosInjetados: Record<string, unknown> = { ...input.dados_imovel };
-    if (input.adicional_campo?.ativo && input.adicional_campo.cenario) {
+    if (adicionalEfetivo?.ativo && adicionalEfetivo.cenario) {
       try {
         const modAd = await import('../services/pricing/adicionalCampo');
         const r2 = modAd.calcularAdicionalCampo({
           ativo: true,
-          cenario: input.adicional_campo.cenario,
-          tipo: input.adicional_campo.tipo,
-          grau: input.adicional_campo.grau,
+          cenario: adicionalEfetivo.cenario as Parameters<typeof modAd.calcularAdicionalCampo>[0]['cenario'],
+          tipo: adicionalEfetivo.tipo as Parameters<typeof modAd.calcularAdicionalCampo>[0]['tipo'],
+          grau: adicionalEfetivo.grau as Parameters<typeof modAd.calcularAdicionalCampo>[0]['grau'],
         });
         dadosInjetados.adicional_campo_pct = r2.percentual;
+        // Side-effect: garante que o post-hoc block veja o adicional efetivo
+        // (mesmo que o caller nao tenha enviado).
+        (input as { adicional_campo?: typeof adicionalEfetivo }).adicional_campo = adicionalEfetivo;
       } catch (err) {
-        console.warn(`[demarcacao+adicional v3.38.0] falha derivar pct: ${(err as Error).message}`);
+        console.warn(`[demarcacao+adicional v3.43.0] falha derivar pct: ${(err as Error).message}`);
       }
     }
     const m = await import('../services/pricing/demarcacaoLotes');
@@ -652,20 +662,23 @@ export async function previewCustoConsultoria(input: {
   }
   // v3.27.0: Demarcacao de Lotes (Urbana e Rural)
   if (subtipo === 'demarcacao_urbana' || subtipo === 'demarcacao_rural') {
-    // v3.38.0: derivar adicional_campo_pct se presente, antes do engine
+    // v3.38.0/v3.43.0: derivar adicional_campo_pct antes do engine. Para
+    // demarcacao_rural, e' OBRIGATORIO — se o caller nao mandou, aplica default
+    // mata_densa_animais + insalubridade Grau Medio (20%).
+    const adicionalEfetivo = aplicarAdicionalObrigatorioDemarcacao(subtipo, input.adicional_campo);
     const dadosInjetados: Record<string, unknown> = { ...dados_imovel };
-    if (input.adicional_campo?.ativo && input.adicional_campo.cenario) {
+    if (adicionalEfetivo?.ativo && adicionalEfetivo.cenario) {
       try {
         const modAd = await import('../services/pricing/adicionalCampo');
         const r2 = modAd.calcularAdicionalCampo({
           ativo: true,
-          cenario: input.adicional_campo.cenario as Parameters<typeof modAd.calcularAdicionalCampo>[0]['cenario'],
-          tipo: input.adicional_campo.tipo as Parameters<typeof modAd.calcularAdicionalCampo>[0]['tipo'],
-          grau: input.adicional_campo.grau as Parameters<typeof modAd.calcularAdicionalCampo>[0]['grau'],
+          cenario: adicionalEfetivo.cenario as Parameters<typeof modAd.calcularAdicionalCampo>[0]['cenario'],
+          tipo: adicionalEfetivo.tipo as Parameters<typeof modAd.calcularAdicionalCampo>[0]['tipo'],
+          grau: adicionalEfetivo.grau as Parameters<typeof modAd.calcularAdicionalCampo>[0]['grau'],
         });
         dadosInjetados.adicional_campo_pct = r2.percentual;
       } catch (err) {
-        console.warn(`[preview demarcacao+adicional v3.38.0] falha: ${(err as Error).message}`);
+        console.warn(`[preview demarcacao+adicional v3.43.0] falha: ${(err as Error).message}`);
       }
     }
     const m = await import('../services/pricing/demarcacaoLotes');
@@ -791,6 +804,11 @@ function adaptarDemarcacaoParaCustosCalculados(out: DemarcacaoLotesOutput): Cust
 function round2Lib(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
+
+// v3.43.0: helper extraido pra src/services/pdf/adicionalObrigatorio.ts
+// (testavel sem arrastar voyageai). Re-export pra compat retro de quem
+// importar daqui.
+export { aplicarAdicionalObrigatorioDemarcacao } from '../services/pdf/adicionalObrigatorio';
 
 // ── PDF de 5 secoes ────────────────────────────────────────────────────────
 
@@ -1875,6 +1893,8 @@ function renderAditivoCampoBody(
 // src/services/pdf/demarcacaoFinalidade.ts (testavel standalone, sem
 // arrastar voyageai/mysql/pdfkit nos imports do test runner).
 import { montarFinalidadeDemarcacao, formatarPerimetroBr } from '../services/pdf/demarcacaoFinalidade';
+// v3.43.0: helper de adicional obrigatorio (idem extraido pra ser standalone).
+import { aplicarAdicionalObrigatorioDemarcacao } from '../services/pdf/adicionalObrigatorio';
 
 const ESCOPO_DEMARCACAO = [
   'Levantamento topografico georreferenciado com GNSS RTK / Estacao Total nas divisas existentes',
@@ -3468,21 +3488,55 @@ export async function atualizarPropostaConsultoria(input: {
       const r = await calcularConsultoria({ subtipo, dados: dadosFinal });
       custosFinal = r.custos;
     } else if (subtipo === 'demarcacao_urbana' || subtipo === 'demarcacao_rural') {
-      // v3.27.0/v3.42.0: Demarcacao de Lotes.
-      // Preserva adicional_campo do snapshot atual injetando pct em dados_imovel
-      // antes do engine — assim o adicional re-entra na base (antes da complexidade).
+      // v3.27.0/v3.42.0/v3.43.0: Demarcacao de Lotes.
+      // Preserva adicional_campo do snapshot atual. Para demarcacao_rural, se o
+      // snapshot estiver vazio/inativo, FORCA o default obrigatorio (mata_densa_animais
+      // + insal Grau Medio) — assim ate propostas legadas criadas sem adicional
+      // ganham o box ao serem editadas/re-salvadas.
       const dadosInjetados: Record<string, unknown> = { ...(dadosFinal as unknown as Record<string, unknown>) };
       const atualCalc = atual.custos_calculados as CustosCalculados | null;
-      const adicionalSnap = (atualCalc as unknown as { adicional_campo?: { ativo?: boolean; percentual?: number } } | null)?.adicional_campo;
-      if (adicionalSnap?.ativo && typeof adicionalSnap.percentual === 'number') {
-        dadosInjetados.adicional_campo_pct = adicionalSnap.percentual;
+      const adicionalSnap = (atualCalc as unknown as { adicional_campo?: { ativo?: boolean; percentual?: number; cenario?: string; tipo?: string; grau?: string } } | null)?.adicional_campo;
+      // Aplica o force-default rural se nao tem snapshot ativo
+      const adicionalEfetivo = aplicarAdicionalObrigatorioDemarcacao(subtipo, adicionalSnap);
+      if (adicionalEfetivo?.ativo && adicionalEfetivo.cenario) {
+        try {
+          const modAd = await import('../services/pricing/adicionalCampo');
+          const r2 = modAd.calcularAdicionalCampo({
+            ativo: true,
+            cenario: adicionalEfetivo.cenario as Parameters<typeof modAd.calcularAdicionalCampo>[0]['cenario'],
+            tipo: adicionalEfetivo.tipo as Parameters<typeof modAd.calcularAdicionalCampo>[0]['tipo'],
+            grau: adicionalEfetivo.grau as Parameters<typeof modAd.calcularAdicionalCampo>[0]['grau'],
+          });
+          dadosInjetados.adicional_campo_pct = r2.percentual;
+        } catch (err) {
+          console.warn(`[atualizar demarcacao+adicional v3.43.0] falha: ${(err as Error).message}`);
+        }
       }
       const m = await import('../services/pricing/demarcacaoLotes');
       const out = m.calcularDemarcacaoLotes(dadosInjetados as unknown as InputDemarcacaoLotes);
       custosFinal = adaptarDemarcacaoParaCustosCalculados(out);
-      // Preserva snapshot do adicional_campo no custos atualizado (pro PDF render)
-      if (adicionalSnap) {
+      // Preserva/regenera snapshot do adicional_campo no custos atualizado (pro PDF render)
+      // v3.43.0: se o snapshot original existia, preserva. Senao, cria a partir do
+      // efetivo (rural force-default) chamando o engine pra ter blocos juridicos completos.
+      if (adicionalSnap && adicionalSnap.ativo) {
         (custosFinal as unknown as { adicional_campo: typeof adicionalSnap }).adicional_campo = adicionalSnap;
+      } else if (adicionalEfetivo?.ativo) {
+        try {
+          const modAd = await import('../services/pricing/adicionalCampo');
+          const r2 = modAd.calcularAdicionalCampo({
+            ativo: true,
+            cenario: adicionalEfetivo.cenario as Parameters<typeof modAd.calcularAdicionalCampo>[0]['cenario'],
+            tipo: adicionalEfetivo.tipo as Parameters<typeof modAd.calcularAdicionalCampo>[0]['tipo'],
+            grau: adicionalEfetivo.grau as Parameters<typeof modAd.calcularAdicionalCampo>[0]['grau'],
+          });
+          (custosFinal as unknown as { adicional_campo: typeof r2 & { valor_aplicado: number; subtotal_base: number } }).adicional_campo = {
+            ...r2,
+            valor_aplicado: round2Lib((custosFinal as unknown as { honorarios_romatec_demarcacao?: { adicional_campo: { valor: number } } }).honorarios_romatec_demarcacao?.adicional_campo.valor || 0),
+            subtotal_base: round2Lib((custosFinal as unknown as { honorarios_romatec_demarcacao?: { tecnicos_campo: number } }).honorarios_romatec_demarcacao?.tecnicos_campo || 0),
+          };
+        } catch (err) {
+          console.warn(`[atualizar demarcacao snapshot v3.43.0] falha: ${(err as Error).message}`);
+        }
       }
     } else {
       throw new Error(`Subtipo ${subtipo} nao suportado para edicao nesta fase.`);
