@@ -421,8 +421,11 @@ export async function criarProposta(input: {
   gestor_nome?: string;
   gestor_telefone?: string;
 }): Promise<MutationResult> {
+  // v3.30.0 HOTFIX: mensagem PT-BR amigavel + validacao positiva (cliente_id > 0).
   const cliId = Number(input.cliente_id);
-  if (!cliId) throw new Error('cliente_id obrigatório');
+  if (!Number.isFinite(cliId) || cliId <= 0) {
+    throw new Error('Selecione um cliente para a proposta');
+  }
   const numero = await gerarNumeroProposta();
   const data = input.data_proposta && /^\d{4}-\d{2}-\d{2}$/.test(input.data_proposta)
     ? input.data_proposta
