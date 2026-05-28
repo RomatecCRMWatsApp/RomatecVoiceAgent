@@ -14564,9 +14564,21 @@ function abrirModalNovoCliente(clienteEditar = null) {
       }
       else status.textContent = '';
     };
-    inpTel.oninput = () => { inpTel.value = mascararTelefone(inpTel.value); };
+    // v3.39.0: guarda de reentrancia nas mascaras (BUG 2 hotfix)
+    inpTel.oninput = () => {
+      if (inpTel.dataset.reentrante === '1') return;
+      const formatado = mascararTelefone(inpTel.value);
+      if (formatado === inpTel.value) return;
+      inpTel.dataset.reentrante = '1';
+      try { inpTel.value = formatado; } finally { inpTel.dataset.reentrante = '0'; }
+    };
     inpCep.oninput = () => {
-      inpCep.value = mascararCEP(inpCep.value);
+      if (inpCep.dataset.reentrante === '1') return;
+      const formatado = mascararCEP(inpCep.value);
+      if (formatado !== inpCep.value) {
+        inpCep.dataset.reentrante = '1';
+        try { inpCep.value = formatado; } finally { inpCep.dataset.reentrante = '0'; }
+      }
       const cep = inpCep.value.replace(/\D/g, '');
       const status = document.getElementById('cli_cep_status');
       if (cep.length !== 8) { status.textContent = ''; return; }
@@ -17346,15 +17358,28 @@ function aplicarMascaraTel(v) {
   return d.replace(/^(\d{2})(\d)/, '($1) $2').replace(/(\d{5})(\d)/, '$1-$2');
 }
 function aplicarMascarasLn() {
-  // v2.1.6: inputmode="numeric" abre teclado numerico no mobile
+  // v2.1.6: inputmode="numeric" abre teclado numerico no mobile.
+  // v3.39.0: guarda de reentrancia (BUG 2 hotfix) — se algum bridge sintetico
+  // (ex.: shim de polyfill, extensao Chrome) refizesse o input event apos
+  // .value = ..., entrava em recursao infinita (RangeError em obras:23019).
+  // dataset.reentrante='1' impede o handler de processar o proprio efeito.
   document.querySelectorAll('[data-mask="cpfcnpj"]').forEach(el => {
     el.setAttribute('inputmode', 'numeric');
     el.setAttribute('autocomplete', 'off');
     el.value = aplicarMascaraCpfCnpj(el.value);
     el.oninput = e => {
-      const cur = e.target.selectionStart;
-      e.target.value = aplicarMascaraCpfCnpj(e.target.value);
-      try { e.target.setSelectionRange(cur+1, cur+1); } catch(_) {}
+      const target = e.target;
+      if (target.dataset.reentrante === '1') return;
+      const cur = target.selectionStart;
+      const formatado = aplicarMascaraCpfCnpj(target.value);
+      if (formatado === target.value) return; // nao reescreve se nao mudou
+      target.dataset.reentrante = '1';
+      try {
+        target.value = formatado;
+        try { target.setSelectionRange(cur+1, cur+1); } catch(_) {}
+      } finally {
+        target.dataset.reentrante = '0';
+      }
     };
   });
   document.querySelectorAll('[data-mask="tel"]').forEach(el => {
@@ -17362,7 +17387,14 @@ function aplicarMascarasLn() {
     el.setAttribute('autocomplete', 'tel');
     el.type = 'tel';
     el.value = aplicarMascaraTel(el.value);
-    el.oninput = e => { e.target.value = aplicarMascaraTel(e.target.value); };
+    el.oninput = e => {
+      const target = e.target;
+      if (target.dataset.reentrante === '1') return;
+      const formatado = aplicarMascaraTel(target.value);
+      if (formatado === target.value) return;
+      target.dataset.reentrante = '1';
+      try { target.value = formatado; } finally { target.dataset.reentrante = '0'; }
+    };
   });
 }
 
@@ -22878,6 +22910,31 @@ function fmtDataBRT(d) {
   return parsed.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
+// v3.39.0: helper centralizado pras chamadas de /api/memoriais/*.
+// Garante credentials: 'include' + redirect idempotente ao /login em 401.
+// Sentinela global pra evitar redirect em loop (multiplos fetchs paralelos
+// recebendo 401 dispararam window.location.assign('/login') varias vezes).
+let _memAuthRedirecting = false;
+async function memFetch(url, init = {}) {
+  const opts = { ...init };
+  opts.credentials = 'include';
+  opts.headers = { 'Accept': 'application/json', ...(init.headers || {}) };
+  const resp = await fetch(url, opts);
+  if (resp.status === 401) {
+    if (!_memAuthRedirecting) {
+      _memAuthRedirecting = true;
+      try { alert('Sessão expirada. Faça login novamente.'); } catch (_) {}
+      // assign (nao replace) — preserva historico; nao recarrega em loop
+      try { window.location.assign('/login?next=/obras'); } catch (_) {}
+    }
+    const err = new Error('NAO_AUTENTICADO');
+    err.code = 'NAO_AUTENTICADO';
+    err.status = 401;
+    throw err;
+  }
+  return resp;
+}
+
 // v3.35.0: aba Memoriais & Quantitativos — POC Fase 1 (Hidraulico).
 // Outras disciplinas ficam como cards "Em breve" ate Fases 2/3.
 async function renderMemoriaisQuantitativos() {
@@ -22889,13 +22946,16 @@ async function renderMemoriaisQuantitativos() {
   let historico = [];
   let historicoUnauthorized = false;
   try {
+    // v3.39.0: /disciplinas e' publico (nao precisa auth). /api/memoriais (lista) e' protegido —
+    // 401 cai no UX fallback (sem redirect). Demais endpoints (criar, upload-pdf) usam memFetch
+    // que redireciona pra /login em 401.
     const [dResp, hResp] = await Promise.all([
       fetch('/api/memoriais/disciplinas', { credentials: 'include' }),
       fetch('/api/memoriais?limite=50', { credentials: 'include' }),
     ]);
     if (dResp.ok) disciplinas = (await dResp.json()).disciplinas || [];
     if (hResp.ok) historico = (await hResp.json()).items || [];
-    else if (hResp.status === 401) historicoUnauthorized = true; // v3.37.0: UX clara
+    else if (hResp.status === 401) historicoUnauthorized = true; // v3.37.0/v3.39.0: UX clara
   } catch (err) {
     v.innerHTML = `<div class="card empty">Erro ao carregar: ${escape(err.message || err)}</div>`;
     return;
@@ -23057,8 +23117,9 @@ async function abrirWizardHidraulico() {
     const buf = await file.arrayBuffer();
     const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
     try {
-      const r = await fetch('/api/memoriais/upload-pdf', {
-        method: 'POST', credentials: 'include',
+      // v3.39.0: memFetch — redireciona pra /login em 401 (UX padronizada)
+      const r = await memFetch('/api/memoriais/upload-pdf', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pdf_b64: b64 }),
       });
@@ -23079,6 +23140,8 @@ async function abrirWizardHidraulico() {
         ✅ ${j.tabelas?.length || 0} tabela(s) detectadas, confiança ${conf}%${piCount > 0 ? ` · ⚠ ${piCount} "Produto Inexistente"` : ''}
       `;
     } catch (err) {
+      // v3.39.0: NAO_AUTENTICADO ja' disparou redirect — silenciar mensagem confusa
+      if (err && err.code === 'NAO_AUTENTICADO') return;
       document.getElementById('memPdfFeedback').textContent = '⚠️ Erro: ' + (err.message || err);
     }
   });
@@ -23161,8 +23224,9 @@ async function abrirWizardHidraulico() {
       return;
     }
     try {
-      const r = await fetch('/api/memoriais/hidraulico/criar', {
-        method: 'POST', credentials: 'include',
+      // v3.39.0: memFetch — redireciona pra /login em 401 (resolve "Falha: Nao autenticado" repetido)
+      const r = await memFetch('/api/memoriais/hidraulico/criar', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
@@ -23174,6 +23238,8 @@ async function abrirWizardHidraulico() {
         alert('Falha: ' + (j.error || r.status));
       }
     } catch (err) {
+      // v3.39.0: NAO_AUTENTICADO ja' disparou redirect
+      if (err && err.code === 'NAO_AUTENTICADO') return;
       alert('Erro: ' + (err.message || err));
     }
   };
