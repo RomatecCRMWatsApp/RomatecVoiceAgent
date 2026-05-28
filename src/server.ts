@@ -865,7 +865,7 @@ app.delete('/api/etapas/:id', apiHandle(args => obras.apagarEtapa(args as { id: 
 // deixando todas as rotas admin abertas. Agora checa X-CEO-Token contra env real
 // e FALHA FECHADO se CEO_API_TOKEN nao estiver setada (antes falhava aberto).
 // Implementacao moveu pra src/middleware/auth.ts pra ficar perto do requireAuth.
-import { requireCeoToken } from './middleware/auth';
+import { requireCeoToken, requireAuth, type AuthedRequest } from './middleware/auth';
 
 // v1.64.0: tenant settings (white-label estrutural). GET é público, PUT só CEO.
 app.get('/api/tenant-settings', async (_req: Request, res: Response) => {
@@ -2402,6 +2402,214 @@ app.post('/api/galeria/:id/enviar', requireCeoToken, async (req: Request, res: R
       return;
     }
     res.status(400).json({ error: `canal inválido: ${canal} (esperado 'whatsapp' ou 'telegram')` });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// v3.28.0: Galeria Pos-Captura — compartilhamento multi-canal + download +
+// preferences. Reusa servicos existentes (whatsapp/telegram) via injecao.
+// Validacao manual (padrao do repo — Zod nao e' usado em nenhum outro lugar).
+type CanalCompart = 'celular_download' | 'whatsapp' | 'telegram';
+const CANAIS_VALIDOS: CanalCompart[] = ['celular_download', 'whatsapp', 'telegram'];
+
+interface ParsedCompart {
+  canais: CanalCompart[];
+  destinatario_whatsapp?: string;
+  destinatario_telegram?: string;
+  legenda?: string;
+}
+
+function validarCompartilharBody(body: unknown): { ok: true; data: ParsedCompart } | { ok: false; error: string } {
+  if (!body || typeof body !== 'object') return { ok: false, error: 'body invalido' };
+  const b = body as Record<string, unknown>;
+  if (!Array.isArray(b.canais) || b.canais.length === 0) {
+    return { ok: false, error: 'canais (array nao vazio) obrigatorio' };
+  }
+  const canais: CanalCompart[] = [];
+  for (const c of b.canais) {
+    if (typeof c !== 'string' || !(CANAIS_VALIDOS as readonly string[]).includes(c)) {
+      return { ok: false, error: `canal invalido: ${String(c)}` };
+    }
+    canais.push(c as CanalCompart);
+  }
+  const dwa = typeof b.destinatario_whatsapp === 'string' ? b.destinatario_whatsapp : undefined;
+  const dtg = typeof b.destinatario_telegram === 'string' ? b.destinatario_telegram : undefined;
+  if (dwa != null && !/^\d{10,15}$/.test(dwa)) {
+    return { ok: false, error: 'destinatario_whatsapp deve ter 10-15 digitos' };
+  }
+  if (dtg != null && !/^(@\w+|-?\d+)$/.test(dtg)) {
+    return { ok: false, error: 'destinatario_telegram deve ser @username ou chat_id numerico' };
+  }
+  if (canais.includes('whatsapp') && !dwa) return { ok: false, error: 'WhatsApp requer destinatario_whatsapp' };
+  if (canais.includes('telegram') && !dtg) return { ok: false, error: 'Telegram requer destinatario_telegram' };
+  const legenda = typeof b.legenda === 'string' ? b.legenda.slice(0, 1024) : undefined;
+  return { ok: true, data: { canais, destinatario_whatsapp: dwa, destinatario_telegram: dtg, legenda } };
+}
+
+async function buscarFotoArquivoCarregada(id: number) {
+  const g = await import('./integrations/galeria');
+  const foto = await g.buscarFotoComB64(id);
+  if (!foto) return null;
+  return {
+    id: foto.id,
+    mime: foto.mime,
+    buffer: Buffer.from(foto.arquivo_b64, 'base64'),
+    lat: foto.lat,
+    lng: foto.lng,
+    capturada_em: foto.capturada_em,
+  };
+}
+
+// POST /api/galeria/fotos/:id/compartilhar — multi-canal
+app.post('/api/galeria/fotos/:id/compartilhar', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    if (!user) { res.status(401).json({ error: 'nao autenticado' }); return; }
+    const parsed = validarCompartilharBody(req.body || {});
+    if (!parsed.ok) {
+      res.status(422).json({ error: 'validacao', detail: parsed.error });
+      return;
+    }
+    const fotoId = Number(req.params.id);
+    if (!Number.isFinite(fotoId) || fotoId <= 0) { res.status(404).json({ error: 'foto invalida' }); return; }
+    const arq = await buscarFotoArquivoCarregada(fotoId);
+    if (!arq) { res.status(404).json({ error: 'foto nao encontrada' }); return; }
+
+    const fc = await import('./integrations/fotoCompartilhamento');
+    const repo = await import('./repositories/fotosEnviosLogRepo');
+    const wa = await import('./integrations/whatsapp');
+    const tg = await import('./integrations/telegram');
+
+    const idemKey = String(req.headers['idempotency-key'] || '').trim() || undefined;
+
+    const resultados = await fc.compartilharFoto({
+      foto_id: fotoId,
+      user_id: Number(user.sub),
+      canais: parsed.data.canais,
+      destinatario_whatsapp: parsed.data.destinatario_whatsapp,
+      destinatario_telegram: parsed.data.destinatario_telegram,
+      legenda: parsed.data.legenda,
+      idempotency_key: idemKey,
+    }, arq, {
+      log: repo.fotosEnviosLogRepo,
+      senders: {
+        whatsapp: async (to, buffer, mime, caption) => {
+          const dataUri = `data:${mime};base64,${buffer.toString('base64')}`;
+          const r = await wa.sendImage(to, dataUri, caption);
+          return { messageId: r.messageId };
+        },
+        telegram: async (to, buffer, mime, caption) => {
+          // Telegram aceita Buffer direto via FormData (existe em sendDocument; sendPhoto
+          // segue mesmo pattern via raw axios — fallback usando o codigo de /enviar)
+          const FormData = (await import('form-data')).default;
+          const axios = (await import('axios')).default;
+          const fd = new FormData();
+          fd.append('chat_id', to);
+          if (caption) fd.append('caption', caption);
+          fd.append('photo', buffer, { filename: `foto-${fotoId}.jpg`, contentType: mime });
+          const token = process.env.TELEGRAM_BOT_TOKEN;
+          if (!token) throw new Error('TELEGRAM_BOT_TOKEN nao configurado');
+          const resp = await axios.post(
+            `https://api.telegram.org/bot${token}/sendPhoto`,
+            fd,
+            { headers: fd.getHeaders(), timeout: 30000 },
+          );
+          const msgId = resp.data?.result?.message_id;
+          return { messageId: typeof msgId === 'number' ? msgId : undefined };
+        },
+      },
+      baseUrlDownload: (fid) => `/api/galeria/fotos/${fid}/download`,
+    });
+
+    res.json({ ok: true, resultados });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /api/galeria/fotos/:id/download — stream com Content-Disposition: attachment
+app.get('/api/galeria/fotos/:id/download', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    const foto = await m.buscarFotoComB64(Number(req.params.id));
+    if (!foto) { res.status(404).json({ error: 'foto nao encontrada' }); return; }
+    const buf = Buffer.from(foto.arquivo_b64, 'base64');
+    const ext = (foto.mime.split('/')[1] || 'jpg').replace(/[^a-z0-9]/gi, '');
+    const fname = `romatec-foto-${foto.id}.${ext}`;
+    res.setHeader('Content-Type', foto.mime);
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+    res.setHeader('Content-Length', String(buf.length));
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /api/users/me/preferences/galeria — retorna preferences.galeria_pos_captura ou defaults
+const DEFAULT_PREFS_GALERIA = {
+  salvar_celular: false,
+  whatsapp: false,
+  telegram: false,
+  destinatario_whatsapp_default: '',
+  destinatario_telegram_default: '',
+  lembrar_escolha: false,
+  mostrar_modal: true,
+};
+
+app.get('/api/users/me/preferences/galeria', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    if (!user) { res.status(401).json({ error: 'nao autenticado' }); return; }
+    const m = await import('./repositories/userPreferencesRepo');
+    const prefs = await m.userPreferencesRepo.get(Number(user.sub));
+    const galeria = (prefs?.galeria_pos_captura as Record<string, unknown> | undefined) || {};
+    res.json({ galeria_pos_captura: { ...DEFAULT_PREFS_GALERIA, ...galeria } });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// PUT /api/users/me/preferences/galeria — persiste
+function validarPrefsGaleria(body: unknown): { ok: true; data: Record<string, unknown> } | { ok: false; error: string } {
+  if (!body || typeof body !== 'object') return { ok: false, error: 'body invalido' };
+  const b = body as Record<string, unknown>;
+  const g = b.galeria_pos_captura;
+  if (!g || typeof g !== 'object') return { ok: false, error: 'galeria_pos_captura obrigatorio' };
+  const obj = g as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of ['salvar_celular', 'whatsapp', 'telegram', 'lembrar_escolha', 'mostrar_modal']) {
+    if (k in obj && typeof obj[k] !== 'boolean') return { ok: false, error: `${k} deve ser boolean` };
+    if (k in obj) out[k] = obj[k];
+  }
+  for (const k of ['destinatario_whatsapp_default', 'destinatario_telegram_default']) {
+    if (k in obj && typeof obj[k] !== 'string') return { ok: false, error: `${k} deve ser string` };
+    if (k in obj) out[k] = obj[k];
+  }
+  return { ok: true, data: out };
+}
+
+app.put('/api/users/me/preferences/galeria', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    if (!user) { res.status(401).json({ error: 'nao autenticado' }); return; }
+    const parsed = validarPrefsGaleria(req.body || {});
+    if (!parsed.ok) {
+      res.status(422).json({ error: 'validacao', detail: parsed.error });
+      return;
+    }
+    const m = await import('./repositories/userPreferencesRepo');
+    const atual = await m.userPreferencesRepo.get(Number(user.sub));
+    const merged = {
+      ...(atual || {}),
+      galeria_pos_captura: {
+        ...DEFAULT_PREFS_GALERIA,
+        ...((atual?.galeria_pos_captura as Record<string, unknown> | undefined) || {}),
+        ...parsed.data,
+      },
+    };
+    await m.userPreferencesRepo.upsert(Number(user.sub), merged);
+    res.json({ ok: true, galeria_pos_captura: merged.galeria_pos_captura });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -4150,6 +4358,26 @@ app.listen(PORT, () => {
       await m.runMigrationsUsuariosCredencialIncra();
     } catch (err) {
       console.error('[MigrationUsuariosCredencial] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.28.0: log de auditoria de envios da galeria (fotos_envios_log).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-fotos-envios-log');
+      await m.runMigrationsFotosEnviosLog();
+    } catch (err) {
+      console.error('[fotos-envios-log-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.28.0: preferencias por usuario (kv JSON).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-user-preferences');
+      await m.runMigrationsUserPreferences();
+    } catch (err) {
+      console.error('[user-preferences-migrations] FALHA fatal:', err);
     }
   })();
 
