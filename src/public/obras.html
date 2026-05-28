@@ -7489,8 +7489,11 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
     ? `Editando ${state.consultoriaPropostaOriginal?.numero || ''}`
     : 'Nova Proposta de Consultoria';
 
+  // v3.46.0: wrapper grid 2-cols (form + live preview sticky)
   v.innerHTML = `
     ${toggleHTML}
+    <div id="cnsSplitGrid" style="display:grid; grid-template-columns: minmax(0, 1fr) 480px; gap:12px; align-items:start;">
+    <div>
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
         <div>
@@ -7599,7 +7602,23 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
          <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
        </div>
       </div>
-    </div>`;
+    </div>
+    </div>
+    <!-- v3.46.0: painel preview ao vivo -->
+    <div class="card" style="position:sticky; top:10px; min-width:0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">📄 Preview da proposta</p>
+        <button type="button" id="cnsRefreshPreview" style="background:transparent; font-size:11px;" title="Atualizar agora">🔄</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin:6px 0 8px;">
+        Atualiza automaticamente enquanto você preenche. É exatamente o PDF que será gerado.
+      </p>
+      <div id="cnsPreviewBox" style="background:#FAF7EE; border-radius:8px; min-height:520px; height:75vh; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+        <span style="color:#888; font-size:13px;">⏳ Preencha os campos pra ver o preview</span>
+      </div>
+    </div>
+    </div>
+    <style>@media (max-width: 1100px) { #cnsSplitGrid { grid-template-columns: 1fr !important; } }</style>`;
 
   // Handlers
   document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
@@ -7686,6 +7705,48 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
     if (d.valor_venal_imovel) valorVenalEditadoManualmente = true;
   }
 
+  // v3.46.0: helper que monta dados_imovel da averbacao — reusado por live preview e calcular
+  function __cnsMontarDadosImovel() {
+    return {
+      area_construida: Number(document.getElementById('cnsArea')?.value) || 0,
+      valor_venal_imovel: Number(document.getElementById('cnsValorVenal')?.value) || 0,
+      padrao_construtivo: document.getElementById('cnsPadrao')?.value || 'normal',
+      responsavel: document.getElementById('cnsResponsavel')?.value || 'PF',
+      municipio: 'Açailândia-MA',
+      apresentar_projetos_complementares: isResid ? !!document.getElementById('cnsComplementares')?.checked : false,
+      tem_alvara_construcao: !!document.getElementById('cnsAlvara')?.checked,
+      tem_habite_se: !!document.getElementById('cnsHabite')?.checked,
+      iptu_em_dia: !!document.getElementById('cnsIptu')?.checked,
+      cnd_receita_emitida: !!document.getElementById('cnsCnd')?.checked,
+      certidao_inteiro_teor_atualizada: !!document.getElementById('cnsCertidao')?.checked,
+      anotacao_tecnica: document.getElementById('cnsAnotacao')?.value || 'art_crea',
+      parcelar_inss: !!document.getElementById('cnsParcelarInss')?.checked,
+      numero_parcelas_inss: Number(document.getElementById('cnsNumeroParcelasInss')?.value) || 12,
+    };
+  }
+
+  // v3.46.0: live preview do PDF (mesmo padrao da Demarcacao v3.45.0)
+  const __cnsPreview = __criarLivePreviewProposta({
+    boxId: 'cnsPreviewBox',
+    getDados: () => {
+      const cliId = document.getElementById('cnsCliente')?.value;
+      const cliObj = state.propostasClientes?.find(c => String(c.id) === String(cliId));
+      return {
+        subtipo,
+        dados_imovel: __cnsMontarDadosImovel(),
+        cliente: cliObj ? { nome: cliObj.nome, cpf_cnpj: cliObj.cpf_cnpj, telefone: cliObj.telefone, email: cliObj.email } : undefined,
+        endereco_imovel: document.getElementById('cnsEndereco')?.value?.trim() || '',
+      };
+    },
+  });
+  document.querySelectorAll('#cnsSplitGrid input, #cnsSplitGrid select, #cnsSplitGrid textarea').forEach(el => {
+    if (el.id === 'cnsRefreshPreview' || el.id === 'cnsAnexoInput') return;
+    el.addEventListener('input', __cnsPreview.agendar);
+    el.addEventListener('change', __cnsPreview.agendar);
+  });
+  document.getElementById('cnsRefreshPreview')?.addEventListener('click', () => __cnsPreview.atualizar());
+  setTimeout(() => __cnsPreview.atualizar(), 100);
+
   document.getElementById('cnsPreview').onclick = async () => {
     const cliId = document.getElementById('cnsCliente').value;
     const area = Number(document.getElementById('cnsArea').value);
@@ -7694,22 +7755,7 @@ async function renderConsultoriaFormInline(v, toggleHTML, subtipo) {
     if (!area || area <= 0) return alert('Informe área construída.');
     if (!valorVenal || valorVenal <= 0) return alert('Informe valor venal.');
 
-    const dados_imovel = {
-      area_construida: area,
-      valor_venal_imovel: valorVenal,
-      padrao_construtivo: document.getElementById('cnsPadrao').value,
-      responsavel: document.getElementById('cnsResponsavel').value,
-      municipio: 'Açailândia-MA',
-      apresentar_projetos_complementares: isResid ? document.getElementById('cnsComplementares').checked : false,
-      tem_alvara_construcao: document.getElementById('cnsAlvara').checked,
-      tem_habite_se: document.getElementById('cnsHabite').checked,
-      iptu_em_dia: document.getElementById('cnsIptu').checked,
-      cnd_receita_emitida: document.getElementById('cnsCnd').checked,
-      certidao_inteiro_teor_atualizada: document.getElementById('cnsCertidao').checked,
-      anotacao_tecnica: document.getElementById('cnsAnotacao')?.value || 'art_crea',
-      parcelar_inss: document.getElementById('cnsParcelarInss')?.checked || false,
-      numero_parcelas_inss: Number(document.getElementById('cnsNumeroParcelasInss')?.value) || 12,
-    };
+    const dados_imovel = __cnsMontarDadosImovel();
     const enderecoTxt = document.getElementById('cnsEndereco').value.trim();
 
     const btn = document.getElementById('cnsPreview');
@@ -7742,6 +7788,9 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
 
   v.innerHTML = `
     ${toggleHTML}
+    <!-- v3.46.0: wrapper grid 2-cols (form + live preview sticky) -->
+    <div id="geoSplitGrid" style="display:grid; grid-template-columns: minmax(0, 1fr) 480px; gap:12px; align-items:start;">
+    <div>
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
         <div>
@@ -7969,7 +8018,23 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
          <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
        </aside>
       </div>
-    </div>`;
+    </div>
+    </div>
+    <!-- v3.46.0: painel preview ao vivo -->
+    <div class="card" style="position:sticky; top:10px; min-width:0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">📄 Preview da proposta</p>
+        <button type="button" id="geoRefreshPreview" style="background:transparent; font-size:11px;" title="Atualizar agora">🔄</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin:6px 0 8px;">
+        Atualiza automaticamente enquanto você preenche. É exatamente o PDF que será gerado.
+      </p>
+      <div id="geoPreviewBox" style="background:#FAF7EE; border-radius:8px; min-height:520px; height:75vh; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+        <span style="color:#888; font-size:13px;">⏳ Preencha os campos pra ver o preview</span>
+      </div>
+    </div>
+    </div>
+    <style>@media (max-width: 1100px) { #geoSplitGrid { grid-template-columns: 1fr !important; } }</style>`;
 
   // ── Handlers ──────────────────────────────────────────────────────────
   document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
@@ -8087,6 +8152,62 @@ async function renderConsultoriaFormGeoRural(v, toggleHTML) {
     if (typeof _recalcularOpcionaisTotal === 'function') _recalcularOpcionaisTotal();
   }
 
+  // v3.46.0: helper que monta dados_imovel do Georref — reusado por preview ao vivo + calcular
+  function __geoMontarDadosImovel() {
+    const _municipio = document.getElementById('geoMunicipio')?.value?.trim() || 'Açailândia';
+    const _estado = document.getElementById('geoEstado')?.value?.trim()?.toUpperCase() || 'MA';
+    const _criInput = document.getElementById('geoCri')?.value?.trim() || '';
+    return {
+      area_hectares: Number(document.getElementById('geoArea')?.value) || 0,
+      numero_vertices: Number(document.getElementById('geoVertices')?.value) || 0,
+      distancia_km: Number(document.getElementById('geoDistKm')?.value) || 0,
+      numero_diarias: Number(document.getElementById('geoDiarias')?.value) || 0,
+      valor_por_hectare: Number(document.getElementById('geoValHa')?.value) || 0,
+      valor_por_vertice: Number(document.getElementById('geoValVert')?.value) || 0,
+      valor_diaria_campo: Number(document.getElementById('geoValDia')?.value) || 0,
+      valor_km_deslocamento: Number(document.getElementById('geoValKm')?.value) || 0,
+      valor_outros_servicos: Number(document.getElementById('geoOutros')?.value) || 0,
+      municipio: _municipio,
+      estado: _estado,
+      tem_matricula: !!document.getElementById('geoTemMatricula')?.checked,
+      complexidade: document.getElementById('geoComplexidade')?.value || 'simples',
+      finalidade: document.getElementById('geoFinalidade')?.value || 'CERTIFICACAO',
+      matricula: document.getElementById('geoMatricula')?.value?.trim() || undefined,
+      cri: _criInput || `CRI de ${_municipio}/${_estado}`,
+      perimetro_m: Number(document.getElementById('geoPerimetro')?.value) || undefined,
+      validade_dias: Number(document.getElementById('geoValidadeDias')?.value) || 15,
+      opcionais: {
+        ccir:        { contratado: !!document.getElementById('geoOpcCcir')?.checked, valor_unitario: Number(document.getElementById('geoOpcCcirValor')?.value) || 1621.00 },
+        car:         { contratado: !!document.getElementById('geoOpcCar')?.checked,  valor_unitario: Number(document.getElementById('geoOpcCarValor')?.value)  || 1621.00 },
+        itr:         { contratado: !!document.getElementById('geoOpcItr')?.checked,  quantidade: Number(document.getElementById('geoOpcItrQty')?.value) || 0, valor_unitario: Number(document.getElementById('geoOpcItrValor')?.value) || 300.00 },
+        anuencia:    { contratado: !!document.getElementById('geoOpcAnuencia')?.checked, quantidade: Number(document.getElementById('geoOpcAnuenciaQty')?.value) || 0, valor_unitario: Number(document.getElementById('geoOpcAnuenciaValor')?.value) || 150.00 },
+        retificacao: { contratado: !!document.getElementById('geoOpcRetificacao')?.checked, valor: 'sob_orcamento' },
+      },
+    };
+  }
+
+  // v3.46.0: live preview do PDF
+  const __geoPreview = __criarLivePreviewProposta({
+    boxId: 'geoPreviewBox',
+    getDados: () => {
+      const cliId = document.getElementById('geoCliente')?.value;
+      const cliObj = state.propostasClientes?.find(c => String(c.id) === String(cliId));
+      return {
+        subtipo,
+        dados_imovel: __geoMontarDadosImovel(),
+        cliente: cliObj ? { nome: cliObj.nome, cpf_cnpj: cliObj.cpf_cnpj, telefone: cliObj.telefone, email: cliObj.email } : undefined,
+        endereco_imovel: document.getElementById('geoEndereco')?.value?.trim() || '',
+      };
+    },
+  });
+  document.querySelectorAll('#geoSplitGrid input, #geoSplitGrid select, #geoSplitGrid textarea').forEach(el => {
+    if (el.id === 'geoRefreshPreview' || el.id === 'cnsAnexoInput') return;
+    el.addEventListener('input', __geoPreview.agendar);
+    el.addEventListener('change', __geoPreview.agendar);
+  });
+  document.getElementById('geoRefreshPreview')?.addEventListener('click', () => __geoPreview.atualizar());
+  setTimeout(() => __geoPreview.atualizar(), 100);
+
   document.getElementById('geoPreview').onclick = async () => {
     const cliId = document.getElementById('geoCliente').value;
     const area = Number(document.getElementById('geoArea').value);
@@ -8186,8 +8307,11 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
     ? 'Lei 6.766/79 · Aprovação Prefeitura · Vários lotes resultantes'
     : 'Lei 6.015/73 art. 234 · Unificação de matrículas contíguas do mesmo proprietário';
 
+  // v3.46.0: wrapper grid 2-cols (form + live preview sticky)
   v.innerHTML = `
     ${toggleHTML}
+    <div id="dxSplitGrid" style="display:grid; grid-template-columns: minmax(0, 1fr) 480px; gap:12px; align-items:start;">
+    <div>
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
         <div>
@@ -8422,7 +8546,23 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
          <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
        </div>
       </div>
-    </div>`;
+    </div>
+    </div>
+    <!-- v3.46.0: painel preview ao vivo -->
+    <div class="card" style="position:sticky; top:10px; min-width:0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">📄 Preview da proposta</p>
+        <button type="button" id="dxRefreshPreview" style="background:transparent; font-size:11px;" title="Atualizar agora">🔄</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin:6px 0 8px;">
+        Atualiza automaticamente enquanto você preenche. É exatamente o PDF que será gerado.
+      </p>
+      <div id="dxPreviewBox" style="background:#FAF7EE; border-radius:8px; min-height:520px; height:75vh; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+        <span style="color:#888; font-size:13px;">⏳ Preencha os campos pra ver o preview</span>
+      </div>
+    </div>
+    </div>
+    <style>@media (max-width: 1100px) { #dxSplitGrid { grid-template-columns: 1fr !important; } }</style>`;
 
   // ── Handlers ──────────────────────────────────────────────────────────
   document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
@@ -8866,6 +9006,55 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
     } catch (_) { /* mantém defaults */ }
   })();
 
+  // v3.46.0: monta dados parciais para live preview (sem validacao — engine tolera)
+  function __dxMontarDadosPreview() {
+    const dados = {
+      area_total_m2: Number(document.getElementById('dxArea')?.value) || 0,
+      valor_venal_total: Number(document.getElementById('dxValorVenal')?.value) || 0,
+      tipo_zona: document.getElementById('dxZona')?.value || 'residencial',
+      iptu_em_dia: !!document.getElementById('dxIptu')?.checked,
+      honorario_projeto_sm: 1.0,
+    };
+    if (isDesm) {
+      dados.numero_lotes_resultantes = Number(document.getElementById('dxNumLotes')?.value) || 2;
+      dados.modalidade = _modalidadeDesm;
+      dados.unidade_area = _modalidadeDesm === 'rural' ? 'ha' : 'm2';
+    } else {
+      dados.numero_lotes_origem = Number(document.getElementById('dxNumLotes')?.value) || 2;
+    }
+    // Modo de precificacao basico
+    if (!document.getElementById('dxModoManual')?.checked) {
+      const modoPrec = document.querySelector('input[name="dxModoPrec"]:checked')?.value || 'por_imovel';
+      dados.modo_precificacao = modoPrec;
+      if (modoPrec === 'por_imovel') {
+        dados.valor_por_imovel = Number(document.getElementById('dxValorPorImovel')?.value) || 0;
+      }
+    }
+    return dados;
+  }
+
+  // v3.46.0: live preview do PDF
+  const __dxPreview = __criarLivePreviewProposta({
+    boxId: 'dxPreviewBox',
+    getDados: () => {
+      const cliId = document.getElementById('dxCliente')?.value;
+      const cliObj = state.propostasClientes?.find(c => String(c.id) === String(cliId));
+      return {
+        subtipo,
+        dados_imovel: __dxMontarDadosPreview(),
+        cliente: cliObj ? { nome: cliObj.nome, cpf_cnpj: cliObj.cpf_cnpj, telefone: cliObj.telefone, email: cliObj.email } : undefined,
+        endereco_imovel: document.getElementById('dxEndereco')?.value?.trim() || '',
+      };
+    },
+  });
+  document.querySelectorAll('#dxSplitGrid input, #dxSplitGrid select, #dxSplitGrid textarea').forEach(el => {
+    if (el.id === 'dxRefreshPreview' || el.id === 'cnsAnexoInput') return;
+    el.addEventListener('input', __dxPreview.agendar);
+    el.addEventListener('change', __dxPreview.agendar);
+  });
+  document.getElementById('dxRefreshPreview')?.addEventListener('click', () => __dxPreview.atualizar());
+  setTimeout(() => __dxPreview.atualizar(), 100);
+
   document.getElementById('dxPreview').onclick = async () => {
     const cliId = document.getElementById('dxCliente').value;
     const area = Number(document.getElementById('dxArea').value);
@@ -9004,8 +9193,11 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
     ? `Editando ${state.consultoriaPropostaOriginal?.numero || ''}`
     : 'Nova Proposta — Retificação de Área';
 
+  // v3.46.0: wrapper grid 2-cols (form + live preview sticky)
   v.innerHTML = `
     ${toggleHTML}
+    <div id="rxSplitGrid" style="display:grid; grid-template-columns: minmax(0, 1fr) 480px; gap:12px; align-items:start;">
+    <div>
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
         <div>
@@ -9083,7 +9275,23 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
          <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
        </div>
       </div>
-    </div>`;
+    </div>
+    </div>
+    <!-- v3.46.0: painel preview ao vivo -->
+    <div class="card" style="position:sticky; top:10px; min-width:0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">📄 Preview da proposta</p>
+        <button type="button" id="rxRefreshPreview" style="background:transparent; font-size:11px;" title="Atualizar agora">🔄</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin:6px 0 8px;">
+        Atualiza automaticamente enquanto você preenche. É exatamente o PDF que será gerado.
+      </p>
+      <div id="rxPreviewBox" style="background:#FAF7EE; border-radius:8px; min-height:520px; height:75vh; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+        <span style="color:#888; font-size:13px;">⏳ Preencha os campos pra ver o preview</span>
+      </div>
+    </div>
+    </div>
+    <style>@media (max-width: 1100px) { #rxSplitGrid { grid-template-columns: 1fr !important; } }</style>`;
 
   document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
     state.tipoPropostaAtivo = b.dataset.toggleTipo;
@@ -9123,6 +9331,40 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
     setVal('rxHonorarioSM',   d.honorario_projeto_sm);
   }
 
+  // v3.46.0: helper que monta dados_imovel da retificacao — reusado por preview ao vivo + calcular
+  function __rxMontarDadosImovel() {
+    return {
+      area_atual_matricula: Number(document.getElementById('rxAreaAtual')?.value) || 0,
+      area_real_levantada: Number(document.getElementById('rxAreaReal')?.value) || 0,
+      valor_venal: Number(document.getElementById('rxValorVenal')?.value) || 0,
+      tipo_retificacao: document.getElementById('rxTipo')?.value || 'administrativa',
+      tem_anuencia_confrontantes: !!document.getElementById('rxAnuencia')?.checked,
+      honorario_projeto_sm: Number(document.getElementById('rxHonorarioSM')?.value) || 1.0,
+    };
+  }
+
+  // v3.46.0: live preview do PDF
+  const __rxPreview = __criarLivePreviewProposta({
+    boxId: 'rxPreviewBox',
+    getDados: () => {
+      const cliId = document.getElementById('rxCliente')?.value;
+      const cliObj = state.propostasClientes?.find(c => String(c.id) === String(cliId));
+      return {
+        subtipo,
+        dados_imovel: __rxMontarDadosImovel(),
+        cliente: cliObj ? { nome: cliObj.nome, cpf_cnpj: cliObj.cpf_cnpj, telefone: cliObj.telefone, email: cliObj.email } : undefined,
+        endereco_imovel: document.getElementById('rxEndereco')?.value?.trim() || '',
+      };
+    },
+  });
+  document.querySelectorAll('#rxSplitGrid input, #rxSplitGrid select, #rxSplitGrid textarea').forEach(el => {
+    if (el.id === 'rxRefreshPreview' || el.id === 'cnsAnexoInput') return;
+    el.addEventListener('input', __rxPreview.agendar);
+    el.addEventListener('change', __rxPreview.agendar);
+  });
+  document.getElementById('rxRefreshPreview')?.addEventListener('click', () => __rxPreview.atualizar());
+  setTimeout(() => __rxPreview.atualizar(), 100);
+
   document.getElementById('rxPreview').onclick = async () => {
     const cliId = document.getElementById('rxCliente').value;
     const areaAtual = Number(document.getElementById('rxAreaAtual').value);
@@ -9133,14 +9375,7 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
     if (!areaReal || areaReal <= 0) return alert('Informe a área real levantada.');
     if (!valorVenal || valorVenal < 0) return alert('Informe o valor venal.');
 
-    const dados_imovel = {
-      area_atual_matricula: areaAtual,
-      area_real_levantada: areaReal,
-      valor_venal: valorVenal,
-      tipo_retificacao: document.getElementById('rxTipo').value,
-      tem_anuencia_confrontantes: document.getElementById('rxAnuencia').checked,
-      honorario_projeto_sm: Number(document.getElementById('rxHonorarioSM').value) || 1.0,
-    };
+    const dados_imovel = __rxMontarDadosImovel();
     const enderecoTxt = document.getElementById('rxEndereco').value.trim();
 
     const btn = document.getElementById('rxPreview');
@@ -9681,7 +9916,9 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
     </div>
   `).join('');
 
+  // v3.46.0: wrapper grid 2-cols (form + live preview sticky)
   v.innerHTML = `
+    <div id="peSplitGrid" style="display:grid; grid-template-columns: minmax(0, 1fr) 480px; gap:12px; align-items:start;">
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
         <p class="section-title" style="margin:0;">📐 ${escape(tituloHeader)}</p>
@@ -9881,6 +10118,21 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
         <button id="peCalcular" class="btn-primary" style="width:100%;">🧮 Calcular preview</button>
       </div>
     </div>
+    <!-- v3.46.0: painel preview ao vivo -->
+    <div class="card" style="position:sticky; top:10px; min-width:0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">📄 Preview da proposta</p>
+        <button type="button" id="peRefreshPreview" style="background:transparent; font-size:11px;" title="Atualizar agora">🔄</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin:6px 0 8px;">
+        Atualiza automaticamente enquanto você preenche. É exatamente o PDF que será gerado.
+      </p>
+      <div id="pePreviewBox" style="background:#FAF7EE; border-radius:8px; min-height:520px; height:75vh; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+        <span style="color:#888; font-size:13px;">⏳ Preencha os campos pra ver o preview</span>
+      </div>
+    </div>
+    </div>
+    <style>@media (max-width: 1100px) { #peSplitGrid { grid-template-columns: 1fr !important; } }</style>
   `;
 
   // Handlers
@@ -10297,6 +10549,65 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
   dz.addEventListener('drop', e => { if (e.dataTransfer?.files) adicionarAnexosPE(e.dataTransfer.files); });
   renderAnexosLista();
 
+  // v3.46.0: helper que monta dados_imovel do Projeto Executivo
+  function __peMontarDadosImovel() {
+    const projetos_selecionados = projetosState.map((p, idx) => ({
+      codigo: p.codigo,
+      nome: p.nome,
+      ordem: idx + 1,
+      selecionado: !!document.querySelector(`[data-pe-proj="${idx}"]`)?.checked,
+      detalhamento_entrega: document.querySelector(`[data-pe-detail="${idx}"]`)?.value?.trim() || '',
+    }));
+    const area = Number(document.getElementById('peArea')?.value) || 0;
+    const areaTer = Number(document.getElementById('peAreaTer')?.value) || 0;
+    const taxaOcup = areaTer > 0 ? Math.round((area / areaTer) * 10000) / 100 : null;
+    return {
+      endereco_obra: document.getElementById('peEnd')?.value?.trim() || '',
+      cidade_obra: document.getElementById('peCidade')?.value?.trim() || 'Açailândia',
+      uf_obra: document.getElementById('peUf')?.value?.trim()?.toUpperCase() || 'MA',
+      tipo_edificacao: document.getElementById('peTipo')?.value || 'residencial',
+      area_construir: area,
+      area_terreno: areaTer > 0 ? areaTer : null,
+      taxa_ocupacao_percentual: taxaOcup,
+      programa_necessidades: (typeof coletarProgramaNecessidades === 'function') ? coletarProgramaNecessidades() : null,
+      valor_m2: Number(document.getElementById('peVm2')?.value) || 0,
+      responsabilidade_auto: !!document.getElementById('peRtAuto')?.checked,
+      responsabilidade_tipo: document.getElementById('peRtTipo')?.value || 'art_crea',
+      responsabilidade_valor: Number(document.getElementById('peRtVlr')?.value) || 0,
+      diligencia_secretaria: { incluir: !!document.getElementById('peDilI')?.checked, valor: Number(document.getElementById('peDilV')?.value) || 0 },
+      taxa_alvara_municipio: { incluir: !!document.getElementById('peAlvI')?.checked, valor: Number(document.getElementById('peAlvV')?.value) || 0 },
+      placa_obra: { incluir: !!document.getElementById('pePlcI')?.checked, valor: Number(document.getElementById('pePlcV')?.value) || 0 },
+      taxa_esboco: Number(document.getElementById('peTax')?.value) || 750,
+      forma_pagamento_tag: pePagTag,
+      forma_pagamento_custom: document.getElementById('peFormaCustom')?.value?.trim() || '',
+      prazo_entrega_dias: Number(document.getElementById('pePrazo')?.value) || 30,
+      observacoes: document.getElementById('peObs')?.value?.trim() || '',
+      projetos_selecionados,
+    };
+  }
+
+  // v3.46.0: live preview do PDF
+  const __pePreview = __criarLivePreviewProposta({
+    boxId: 'pePreviewBox',
+    getDados: () => {
+      const cliId = document.getElementById('peCli')?.value;
+      const cliObj = state.propostasClientes?.find(c => String(c.id) === String(cliId));
+      return {
+        subtipo: 'projeto_executivo',
+        dados_imovel: __peMontarDadosImovel(),
+        cliente: cliObj ? { nome: cliObj.nome, cpf_cnpj: cliObj.cpf_cnpj, telefone: cliObj.telefone, email: cliObj.email } : undefined,
+        endereco_imovel: document.getElementById('peEnd')?.value?.trim() || '',
+      };
+    },
+  });
+  document.querySelectorAll('#peSplitGrid input, #peSplitGrid select, #peSplitGrid textarea').forEach(el => {
+    if (el.id === 'peRefreshPreview' || el.id === 'peAnexosInput') return;
+    el.addEventListener('input', __pePreview.agendar);
+    el.addEventListener('change', __pePreview.agendar);
+  });
+  document.getElementById('peRefreshPreview')?.addEventListener('click', () => __pePreview.atualizar());
+  setTimeout(() => __pePreview.atualizar(), 100);
+
   document.getElementById('peCalcular').onclick = async () => {
     const btn = document.getElementById('peCalcular');
     const cliId = document.getElementById('peCli').value;
@@ -10393,8 +10704,11 @@ async function renderConsultoriaFormPTAM(v, toggleHTML) {
     ? `Editando ${state.consultoriaPropostaOriginal?.numero || ''}`
     : 'Nova Proposta — Avaliação PTAM';
 
+  // v3.46.0: wrapper grid 2-cols (form + live preview sticky)
   v.innerHTML = `
     ${toggleHTML}
+    <div id="ptSplitGrid" style="display:grid; grid-template-columns: minmax(0, 1fr) 480px; gap:12px; align-items:start;">
+    <div>
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
         <div>
@@ -10498,7 +10812,23 @@ async function renderConsultoriaFormPTAM(v, toggleHTML) {
          <div id="cnsAnexosLista" style="display:flex; flex-direction:column; gap:6px;"></div>
        </div>
       </div>
-    </div>`;
+    </div>
+    </div>
+    <!-- v3.46.0: painel preview ao vivo -->
+    <div class="card" style="position:sticky; top:10px; min-width:0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <p class="section-title" style="margin:0;">📄 Preview da proposta</p>
+        <button type="button" id="ptRefreshPreview" style="background:transparent; font-size:11px;" title="Atualizar agora">🔄</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin:6px 0 8px;">
+        Atualiza automaticamente enquanto você preenche. É exatamente o PDF que será gerado.
+      </p>
+      <div id="ptPreviewBox" style="background:#FAF7EE; border-radius:8px; min-height:520px; height:75vh; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+        <span style="color:#888; font-size:13px;">⏳ Preencha os campos pra ver o preview</span>
+      </div>
+    </div>
+    </div>
+    <style>@media (max-width: 1100px) { #ptSplitGrid { grid-template-columns: 1fr !important; } }</style>`;
 
   document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
     state.tipoPropostaAtivo = b.dataset.toggleTipo;
@@ -10546,6 +10876,49 @@ async function renderConsultoriaFormPTAM(v, toggleHTML) {
     if (d.faixa_honorario === 'outro') boxOutro.style.display = 'block';
   }
 
+  // v3.46.0: helper que monta dados_imovel do PTAM
+  function __ptMontarDadosImovel() {
+    const faixa = document.getElementById('ptFaixa')?.value || 'media';
+    const d = {
+      tipo_imovel: document.getElementById('ptTipoImovel')?.value || 'residencial',
+      area_terreno: Number(document.getElementById('ptAreaTerreno')?.value) || 0,
+      area_construida: Number(document.getElementById('ptAreaConstruida')?.value) || 0,
+      localizacao: {
+        municipio: document.getElementById('ptMunicipio')?.value?.trim() || 'Açailândia',
+        bairro: document.getElementById('ptBairro')?.value?.trim() || undefined,
+      },
+      finalidade: document.getElementById('ptFinalidade')?.value || 'venda',
+      nivel_precisao: document.getElementById('ptPrecisao')?.value || 'expedito',
+      faixa_honorario: faixa,
+    };
+    if (faixa === 'outro') {
+      d.valor_outro = Number(document.getElementById('ptValorOutro')?.value) || 0;
+    }
+    return d;
+  }
+
+  // v3.46.0: live preview do PDF
+  const __ptPreview = __criarLivePreviewProposta({
+    boxId: 'ptPreviewBox',
+    getDados: () => {
+      const cliId = document.getElementById('ptCliente')?.value;
+      const cliObj = state.propostasClientes?.find(c => String(c.id) === String(cliId));
+      return {
+        subtipo,
+        dados_imovel: __ptMontarDadosImovel(),
+        cliente: cliObj ? { nome: cliObj.nome, cpf_cnpj: cliObj.cpf_cnpj, telefone: cliObj.telefone, email: cliObj.email } : undefined,
+        endereco_imovel: document.getElementById('ptEndereco')?.value?.trim() || '',
+      };
+    },
+  });
+  document.querySelectorAll('#ptSplitGrid input, #ptSplitGrid select, #ptSplitGrid textarea').forEach(el => {
+    if (el.id === 'ptRefreshPreview' || el.id === 'cnsAnexoInput') return;
+    el.addEventListener('input', __ptPreview.agendar);
+    el.addEventListener('change', __ptPreview.agendar);
+  });
+  document.getElementById('ptRefreshPreview')?.addEventListener('click', () => __ptPreview.atualizar());
+  setTimeout(() => __ptPreview.atualizar(), 100);
+
   document.getElementById('ptPreview').onclick = async () => {
     const cliId = document.getElementById('ptCliente').value;
     const faixa = document.getElementById('ptFaixa').value;
@@ -10556,19 +10929,7 @@ async function renderConsultoriaFormPTAM(v, toggleHTML) {
       return alert('Faixa "Outro" exige valor customizado > 0.');
     }
 
-    const dados_imovel = {
-      tipo_imovel: document.getElementById('ptTipoImovel').value,
-      area_terreno: Number(document.getElementById('ptAreaTerreno').value) || 0,
-      area_construida: Number(document.getElementById('ptAreaConstruida').value) || 0,
-      localizacao: {
-        municipio: document.getElementById('ptMunicipio').value.trim() || 'Açailândia',
-        bairro: document.getElementById('ptBairro').value.trim() || undefined,
-      },
-      finalidade: document.getElementById('ptFinalidade').value,
-      nivel_precisao: document.getElementById('ptPrecisao').value,
-      faixa_honorario: faixa,
-    };
-    if (faixa === 'outro') dados_imovel.valor_outro = valorOutro;
+    const dados_imovel = __ptMontarDadosImovel();
 
     const enderecoTxt = document.getElementById('ptEndereco').value.trim();
 
