@@ -129,8 +129,14 @@ export interface PropostaConsultoriaRow extends RowDataPacket {
 // ── CRUD ──────────────────────────────────────────────────────────────────
 
 export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaInput) {
+  // v3.30.0 HOTFIX: validacao com mensagem PT-BR amigavel + accept de
+  // string numerica ("123" -> 123). Cobre Hipotese A (camelCase) + Hipotese B
+  // (autocomplete sem ID) + Hipotese D (Zod permitindo null). Defesa em
+  // profundidade — frontend ainda deve marcar <select required>.
   const cliId = Number(input.cliente_id);
-  if (!cliId) throw new Error('cliente_id obrigatorio');
+  if (!Number.isFinite(cliId) || cliId <= 0) {
+    throw new Error('Selecione um cliente para a proposta');
+  }
   if (!input.subtipo) throw new Error('subtipo obrigatorio');
 
   const subtipo = input.subtipo;

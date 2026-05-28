@@ -6669,6 +6669,22 @@ function renderAditivoCampoForm(subtipo, baseCalculoSugerida, containerId, cache
   if (habilitado) recalc();
 }
 
+// v3.30.0 HOTFIX: toast vermelho ARIA-live para erros de validacao do form.
+// UX > alert() nativo (que e' modal, blocking, e nao localiza o campo problematico).
+function mostrarErroForm(mensagem) {
+  // Remove toast anterior se houver
+  const existente = document.getElementById('form-erro-toast');
+  if (existente) existente.remove();
+  const el = document.createElement('div');
+  el.id = 'form-erro-toast';
+  el.setAttribute('role', 'alert');
+  el.setAttribute('aria-live', 'assertive');
+  el.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#dc2626;color:#fff;padding:12px 20px;border-radius:8px;font-weight:600;font-size:14px;z-index:99999;box-shadow:0 8px 24px rgba(220,38,38,.3);max-width:480px;text-align:center;';
+  el.textContent = '⚠️ ' + mensagem;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 5000);
+}
+
 function lerAditivoCampoForm() {
   const habCk = document.getElementById('adcHabilitado');
   if (!habCk || !habCk.checked) return null;
@@ -8752,7 +8768,7 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
       <div style="display:grid; gap:10px; font-size:13px;">
         <label>Cliente
           <div style="display:flex; gap:6px;">
-            <select id="dmCliente" style="flex:1;"><option value="">— escolher —</option>${cliOpts}</select>
+            <select id="dmCliente" required aria-required="true" style="flex:1;"><option value="" disabled selected>— Selecione um cliente —</option>${cliOpts}</select>
             <button type="button" id="dmNovoCliente" style="white-space:nowrap; background:var(--success); color:#fff; border-color:var(--success);">+ Novo cliente</button>
           </div>
         </label>
@@ -8991,7 +9007,16 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
 
   document.getElementById('dmPreview').onclick = async () => {
     const cli = document.getElementById('dmCliente').value;
-    if (!cli) { alert('Selecione um cliente'); return; }
+    // v3.30.0 HOTFIX: validacao client-side com toast (UX > alert nativo) +
+    // foco no campo problematico + role=alert (aria-live).
+    if (!cli || Number(cli) <= 0) {
+      const el = document.getElementById('dmCliente');
+      el?.focus();
+      el?.setAttribute('aria-invalid', 'true');
+      mostrarErroForm('Selecione um cliente para a proposta');
+      return;
+    }
+    document.getElementById('dmCliente')?.removeAttribute('aria-invalid');
     const dados = montarDadosImovel();
     // v3.29.0: ler estado do aditivo de campo
     const aditivo = lerAditivoCampoForm();
@@ -9011,12 +9036,16 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subtipo, dados_imovel: dados }),
       });
+      // v3.30.0 HOTFIX: shape do ctx alinhado com os outros 6 forms (cliId,
+      // nao cliente_id) — o submit handler comum em cnsSalvar.onclick le
+      // ctx.cliId. Antes, este form gravava cliente_id e o submit pegava
+      // undefined -> backend throw "cliente_id obrigatorio".
       state.consultoriaPreviewData = {
         ctx: {
           subtipo,
-          cliente_id: cli,
-          endereco_imovel: document.getElementById('dmEndereco').value,
+          cliId: cli,
           dados_imovel: dados,
+          endereco: document.getElementById('dmEndereco').value,
           validade_dias: dados.validade_dias,
           aditivo_campo: aditivo,
         },
