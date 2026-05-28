@@ -84,6 +84,43 @@ describe('HOTFIX v3.42.0 — BUG D: defesa runtime parcelas R$ 0,00', () => {
   });
 });
 
+describe('HOTFIX v3.42.0 — BUG B+: fluxo de edicao end-to-end', () => {
+  it('B1. Edit carrega cache com dados_imovel ACHATADO (forms leem cache.municipio direto)', () => {
+    // Sem o flatten, edicao abria com campos vazios — o cache antes era
+    // { subtipo, cliId, endereco, dados_imovel: {...} } e os forms liam cache.municipio.
+    expect(OBRAS_HTML).toMatch(/v3\.42\.0: ACHATA dados_imovel no cache/);
+    // Pattern de spread { ...di, ...derivadosDemarc, subtipo, cliId, ... }
+    expect(OBRAS_HTML).toMatch(/\.\.\.di,\s*\n?\s*\.\.\.derivadosDemarc,/);
+  });
+
+  it('B2. Edit deriva counts por tipo de marco (marcos[] -> marcos_concreto/tubo/madeira)', () => {
+    expect(OBRAS_HTML).toMatch(/derivadosDemarc\.marcos_concreto = marcos\.filter\(m => m && m\.tipo === 'concreto'\)/);
+    expect(OBRAS_HTML).toMatch(/derivadosDemarc\.marcos_madeira/);
+    expect(OBRAS_HTML).toMatch(/derivadosDemarc\.marcos_tubo/);
+  });
+
+  it('B3. Edit deriva qtd/diaria do locacao_kit_gnss aninhado', () => {
+    expect(OBRAS_HTML).toMatch(/derivadosDemarc\.locacao_kit_gnss_qtd = di\.locacao_kit_gnss\.qtd_diarias/);
+    expect(OBRAS_HTML).toMatch(/derivadosDemarc\.locacao_kit_gnss_diaria = di\.locacao_kit_gnss\.diaria/);
+  });
+
+  it('B4. Edit deriva flag de laudo + metros do alinhamento de cerca', () => {
+    expect(OBRAS_HTML).toMatch(/derivadosDemarc\.laudo_tecnico_direto_contratado = !!di\.laudo_tecnico_direto\.contratado/);
+    expect(OBRAS_HTML).toMatch(/derivadosDemarc\.alinhamento_metros = di\.opcionais\.alinhamento_cerca\.metros/);
+  });
+
+  it('B5. cnsSalvar faz PUT quando consultoriaEditandoId set (NAO POST)', () => {
+    // Antes, sempre POST -> criava nova proposta em vez de atualizar.
+    expect(OBRAS_HTML).toMatch(/const editandoId = state\.consultoriaEditandoId/);
+    expect(OBRAS_HTML).toMatch(/editandoId\s*\n?\s*\?\s*await api\('\/api\/propostas-consultoria\/' \+ editandoId,\s*\{\s*\n?\s*method: 'PUT'/);
+  });
+
+  it('B6. cnsSalvar limpa state de edicao apos save (consultoriaEditandoId = null)', () => {
+    expect(OBRAS_HTML).toMatch(/state\.consultoriaEditandoId = null;\s*\n?\s*state\.consultoriaPropostaOriginal = null/);
+    expect(OBRAS_HTML).toMatch(/state\.consultoriaFormCache = null/);
+  });
+});
+
 describe('HOTFIX v3.42.0 — BUG D: defesa runtime opcionais valor=0', () => {
   it('10. Engine expoe metros e valor_unitario na linha de alinhamento (forward compat)', () => {
     const r = calcularDemarcacaoLotes({
