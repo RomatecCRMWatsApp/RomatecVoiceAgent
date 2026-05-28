@@ -23106,23 +23106,54 @@ async function abrirWizardHidraulico() {
 
   document.querySelector('[data-mem-voltar]').onclick = () => renderMemoriaisQuantitativos();
 
+  // v3.41.0: helper FileReader-based, chunked-safe pra arquivos grandes.
+  // ROOT CAUSE do RangeError em obras:23115:
+  //   `btoa(String.fromCharCode(...new Uint8Array(buf)))` usa SPREAD em um Uint8Array
+  //   gigante (PDFs costumam ter > 64KB). O V8 limita o numero de argumentos passados
+  //   a uma funcao a ~64-100k; arquivos maiores estouravam com
+  //   "RangeError: Maximum call stack size exceeded".
+  // FIX: FileReader.readAsDataURL gera 'data:application/pdf;base64,XXX' sem
+  // tocar na stack JS (encoding e' nativo do browser). Strip do prefixo e pronto.
+  function arquivoParaBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result !== 'string') return reject(new Error('FileReader retornou nao-string'));
+        const idx = result.indexOf(',');
+        resolve(idx >= 0 ? result.slice(idx + 1) : result);
+      };
+      reader.onerror = () => reject(reader.error || new Error('FileReader falhou'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // v3.41.0: defesa em profundidade — guarda de reentrancia no handler de upload.
+  // Mesmo apos o fix da causa raiz, evita que cliques rapidos / dispatch sintetico
+  // (extensoes Chrome) reentrem no handler durante upload em progresso.
+  let _memUploadEmProgresso = false;
+
   // Upload PDF (extrai metadados pra prefill)
   document.getElementById('memPdfUpload').addEventListener('change', async (ev) => {
+    if (_memUploadEmProgresso) return;
     const file = ev.target.files?.[0];
     if (!file) return;
-    document.getElementById('memPdfFeedback').textContent = '⏳ Extraindo metadados...';
-    const buf = await file.arrayBuffer();
-    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const feedback = document.getElementById('memPdfFeedback');
+    feedback.textContent = '⏳ Extraindo metadados...';
+    _memUploadEmProgresso = true;
     try {
+      const b64 = await arquivoParaBase64(file);
       // v3.39.0: memFetch — redireciona pra /login em 401 (UX padronizada)
       const r = await memFetch('/api/memoriais/upload-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pdf_b64: b64 }),
       });
-      if (!r.ok) { document.getElementById('memPdfFeedback').textContent = '⚠️ Falha ao extrair PDF'; return; }
+      if (!r.ok) { feedback.textContent = '⚠️ Falha ao extrair PDF'; return; }
       const j = await r.json();
-      // Auto-preenche campos quando possivel
+      // Auto-preenche campos. NAO dispara input/change sintetico — escreve direto em .value
+      // (esses campos nao tem listener de input que recalcule, mas mantemos a regra de
+      // ouro: nunca disparar evento sintetico em campo de input apos set value).
       const m = j.metadados || {};
       if (m.proprietario) document.getElementById('memProprietario').value = m.proprietario;
       if (m.cpf_cnpj) document.getElementById('memCpfCnpj').value = m.cpf_cnpj;
@@ -23133,13 +23164,15 @@ async function abrirWizardHidraulico() {
       if (m.uf) document.getElementById('memObraUf').value = m.uf;
       const conf = Math.round((j.confianca || 0) * 100);
       const piCount = (j.produtos_inexistentes || []).length;
-      document.getElementById('memPdfFeedback').innerHTML = `
+      feedback.innerHTML = `
         ✅ ${j.tabelas?.length || 0} tabela(s) detectadas, confiança ${conf}%${piCount > 0 ? ` · ⚠ ${piCount} "Produto Inexistente"` : ''}
       `;
     } catch (err) {
       // v3.39.0: NAO_AUTENTICADO ja' disparou redirect — silenciar mensagem confusa
       if (err && err.code === 'NAO_AUTENTICADO') return;
-      document.getElementById('memPdfFeedback').textContent = '⚠️ Erro: ' + (err.message || err);
+      feedback.textContent = '⚠️ Erro: ' + (err.message || err);
+    } finally {
+      _memUploadEmProgresso = false;
     }
   });
 
