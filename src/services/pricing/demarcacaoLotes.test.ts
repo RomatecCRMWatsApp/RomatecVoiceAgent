@@ -152,7 +152,28 @@ describe('calcularDemarcacaoLotes — calculo principal', () => {
     }
   });
 
-  it('13. Minimo garantido (2 SM) aplicado quando calculo fica abaixo', () => {
+  it('13. Minimo garantido (2 SM) aplicado sobre CORE quando calculo fica abaixo (extras somam por cima)', () => {
+    // v3.40.0: kit GNSS e' fixo (default 1 diaria=250). Minimo aplica sobre core,
+    // depois kit (e laudo se contratado) somam.
+    const r = calcularDemarcacaoLotes({
+      subtipo: 'demarcacao_urbana',
+      finalidade: 'piqueteamento_apenas',
+      municipio: 'X',
+      uf: 'MA',
+      area_m2: 0.01,
+      num_vertices: 3,
+      servico_piqueteamento: false,
+      marcos: [],
+      diarias_equipe: 1,
+      km_deslocamento: 0,
+      complexidade: 'simples',
+      locacao_kit_gnss: { qtd_diarias: 0 }, // edge: sem kit pra reproduzir comportamento original
+    });
+    const minimo = 2 * SM_2026;
+    expect(r.honorarios_romatec.total).toBe(Math.round(minimo * 100) / 100);
+  });
+
+  it('13b. Minimo + kit fixo (default qtd=1): total = minimo + 250', () => {
     const r = calcularDemarcacaoLotes({
       subtipo: 'demarcacao_urbana',
       finalidade: 'piqueteamento_apenas',
@@ -167,7 +188,7 @@ describe('calcularDemarcacaoLotes — calculo principal', () => {
       complexidade: 'simples',
     });
     const minimo = 2 * SM_2026;
-    expect(r.honorarios_romatec.total).toBe(Math.round(minimo * 100) / 100);
+    expect(r.honorarios_romatec.total).toBe(Math.round((minimo + 250) * 100) / 100);
   });
 
   it('14. Desconto 0% nao altera valor', () => {
@@ -319,15 +340,25 @@ describe('v3.38.0 — Laudo Tecnico de Demarcacao (item direto)', () => {
   });
 });
 
-describe('v3.38.0 — Locacao Kit GNSS (item direto)', () => {
-  it('30. qtd_diarias=0 (default) -> contratado=false, valor=0', () => {
+describe('v3.40.0 — Locacao Kit GNSS (item FIXO — sempre presente)', () => {
+  // v3.40.0: kit deixa de ser opcional. Default qtd_diarias=1, diaria=250.
+  // User pode passar qtd_diarias=0 explicitamente pra desativar (edge case).
+  it('30. input sem locacao_kit_gnss -> default qtd=1, contratado=true, valor=250 (gold standard)', () => {
     const r = calcularDemarcacaoLotes(baseUrbana);
+    expect(r.honorarios_romatec.locacao_kit_gnss.contratado).toBe(true);
+    expect(r.honorarios_romatec.locacao_kit_gnss.qtd_diarias).toBe(1);
+    expect(r.honorarios_romatec.locacao_kit_gnss.diaria).toBeCloseTo(250, 2);
+    expect(r.honorarios_romatec.locacao_kit_gnss.valor).toBeCloseTo(250, 2);
+  });
+
+  it('30b. qtd_diarias=0 explicito -> contratado=false, valor=0 (edge case: projeto sem campo)', () => {
+    const r = calcularDemarcacaoLotes({ ...baseUrbana, locacao_kit_gnss: { qtd_diarias: 0 } });
     expect(r.honorarios_romatec.locacao_kit_gnss.contratado).toBe(false);
     expect(r.honorarios_romatec.locacao_kit_gnss.valor).toBe(0);
   });
 
-  it('31. qtd_diarias=1, diaria default (250) -> valor=250 somado ao total', () => {
-    const sem = calcularDemarcacaoLotes(baseUrbana);
+  it('31. qtd_diarias=1, diaria default (250) -> valor=250 (diferenca vs qtd=0)', () => {
+    const sem = calcularDemarcacaoLotes({ ...baseUrbana, locacao_kit_gnss: { qtd_diarias: 0 } });
     const com = calcularDemarcacaoLotes({ ...baseUrbana, locacao_kit_gnss: { qtd_diarias: 1 } });
     expect(com.honorarios_romatec.locacao_kit_gnss.contratado).toBe(true);
     expect(com.honorarios_romatec.locacao_kit_gnss.qtd_diarias).toBe(1);

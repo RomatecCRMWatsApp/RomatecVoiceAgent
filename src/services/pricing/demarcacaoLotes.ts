@@ -213,12 +213,16 @@ export function calcularDemarcacaoLotes(
     return { contratado: false, valor: 0 };
   })();
 
+  // v3.40.0: Kit GNSS e' ITEM FIXO dos honorarios (nao opcional) — gold standard
+  // PROP-2026-0028-R1. Default qtd=1 (1 diaria), diaria R$ 250,00. User pode
+  // explicitamente passar qtd=0 pra desativar (edge case — projeto sem campo).
   const kitGnss = (() => {
     const kit = input.locacao_kit_gnss;
     const cfgKit = cfg.locacao_kit_gnss;
     const diariaDefault = cfgKit?.valor_unitario_diaria_default ?? 250.00;
     const descritivo = cfgKit?.descritivo ?? '';
-    const qtd = Number(kit?.qtd_diarias ?? 0);
+    // qtd default = 1 (v3.40.0); antes era 0
+    const qtd = Number(kit?.qtd_diarias ?? 1);
     if (!Number.isFinite(qtd) || qtd < 0) {
       throw new Error(`locacao_kit_gnss.qtd_diarias invalido: ${qtd} (esperado >= 0)`);
     }
@@ -251,7 +255,8 @@ export function calcularDemarcacaoLotes(
   }
 
   // ── Opcionais (4 linhas — laudo foi promovido a direto) ──────────────
-  const linhasOpcionais = montarLinhasOpcionais(opcionaisRaw, cfg.opcionais);
+  // v3.40.0: passa perimetro_m pra gerar a regra de calculo do alinhamento.
+  const linhasOpcionais = montarLinhasOpcionais(opcionaisRaw, cfg.opcionais, Number(input.perimetro_m ?? 0));
   const subtotalOpcionais = round2(
     linhasOpcionais
       .filter((l) => l.contratado && typeof l.valor === 'number')
@@ -317,21 +322,30 @@ export function calcularDemarcacaoLotes(
 function montarLinhasOpcionais(
   opcionais: OpcionaisDemarcacao,
   cfgOpc: NonNullable<ReturnType<typeof getParams>['demarcacao_lotes_2026']>['opcionais'],
-): { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean }[] {
-  // v3.38.0: 4 linhas SEMPRE renderizadas (laudo_tecnico foi promovido a item
-  // direto em honorarios_romatec).
-  const linhas: { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean }[] = [];
+  perimetroM: number,
+): { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean; detalhe?: string }[] {
+  // v3.38.0: 4 linhas SEMPRE renderizadas (laudo_tecnico foi promovido a item direto).
+  // v3.40.0: linhas ganham campo `detalhe` opcional — regra de calculo visivel no PDF.
+  const linhas: { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean; detalhe?: string }[] = [];
 
-  // 1. Alinhamento de cerca
+  // 1. Alinhamento de cerca — detalhe com a regra (Extensao × R$/m · default perimetro)
   {
     const it = opcionais.alinhamento_cerca;
     const contratado = !!it?.contratado;
     const metros = Number(it?.metros ?? 0);
     const vUnit = Number(it?.valor_unitario ?? cfgOpc.alinhamento_cerca.valor_unitario);
+    const vUnitTxt = vUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const perimTxt = perimetroM > 0
+      ? perimetroM.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : null;
+    const detalhe = perimTxt
+      ? `Extensao × R$ ${vUnitTxt}/m · default perimetro ${perimTxt} m (editavel p/ alinhamento parcial)`
+      : `Extensao × R$ ${vUnitTxt}/m (editavel p/ alinhamento parcial)`;
     linhas.push({
       rotulo: cfgOpc.alinhamento_cerca.rotulo,
       contratado,
       valor: contratado ? round2(metros * vUnit) : 0,
+      detalhe,
     });
   }
   // 2. Croqui assinado

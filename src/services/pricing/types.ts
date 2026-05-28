@@ -555,7 +555,9 @@ export interface DemarcacaoLotesOutput {
     total: number;
   };
   secao_opcionais_demarcacao: {
-    linhas: { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean }[];
+    // v3.40.0: linhas ganham `detalhe` opcional — regra de calculo / memoria descritiva
+    // exibida abaixo do rotulo no PDF (ex.: alinhamento de cerca: "Extensao X m × R$ 0,42/m · default perimetro 2.190,78 m (editavel)").
+    linhas: { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean; detalhe?: string }[];
     subtotal: number;
   };
   parcelas: { numero: 1 | 2 | 3; rotulo: string; valor: number; percentual: number }[];

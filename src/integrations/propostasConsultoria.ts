@@ -1871,12 +1871,10 @@ function renderAditivoCampoBody(
 //   - 4-bis: Marcos Discriminados (tabela tipo x qtd x valor unit x subtotal)
 //   - 4-ter: Identificacao dos Marcos FQNS (codigos vitalicios INCRA)
 // Total: 11 secoes. Invocada SO para subtipo ∈ {demarcacao_urbana, demarcacao_rural}.
-const FINALIDADE_DEMARCACAO_TEXTOS: Record<FinalidadeDemarcacao, string> = {
-  demarcacao_inicial: 'Levantamento topografico de campo para implantacao fisica dos vertices definidos em projeto e materializacao da poligonal do imovel no terreno.',
-  redemarcacao: 'Repiqueteamento de vertices perdidos/deteriorados, restabelecendo a poligonal original conforme matricula e levantamento anterior.',
-  subdivisao_lote: 'Demarcacao fisica das fracoes resultantes de desmembramento/remembramento aprovado, com implantacao de marcos nas novas divisas.',
-  piqueteamento_apenas: 'Implantacao de marcos fisicos em vertices previamente calculados em escritorio (sem novo levantamento de campo).',
-};
+// v3.40.0: finalidade dinamica + formatador de perimetro extraidos para
+// src/services/pdf/demarcacaoFinalidade.ts (testavel standalone, sem
+// arrastar voyageai/mysql/pdfkit nos imports do test runner).
+import { montarFinalidadeDemarcacao, formatarPerimetroBr } from '../services/pdf/demarcacaoFinalidade';
 
 const ESCOPO_DEMARCACAO = [
   'Levantamento topografico georreferenciado com GNSS RTK / Estacao Total nas divisas existentes',
@@ -1993,6 +1991,7 @@ function renderDemarcacaoLotesBody(
 
   doc.text(`Municipio/UF:  ${municipio}${uf ? '/' + uf : ''}`);
   doc.text(`Matricula:  ${matricula}    ·    Cartorio:  ${cri}`);
+  // v3.40.0: perimetro com formatacao unica via formatarPerimetroBr (fixed 2 dec)
   if (isUrbana) {
     const lot = di.loteamento_nome ? `Loteamento ${di.loteamento_nome}` : '';
     const qd = di.quadra ? `Quadra ${di.quadra}` : '';
@@ -2000,18 +1999,25 @@ function renderDemarcacaoLotesBody(
     const linha = [lot, qd, lt].filter(Boolean).join('    ·    ');
     if (linha) doc.text(linha);
     if (di.area_m2) {
-      doc.text(`Area:  ${Number(di.area_m2).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} m²    ·    Vertices:  ${vertices}${perimetro > 0 ? '    ·    Perimetro:  ' + perimetro.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + ' m' : ''}`);
+      doc.text(`Area:  ${Number(di.area_m2).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m²    ·    Vertices:  ${vertices}${perimetro > 0 ? '    ·    Perimetro:  ' + formatarPerimetroBr(perimetro) + ' m' : ''}`);
     }
   } else {
     if (di.denominacao_imovel) doc.text(`Denominacao:  ${di.denominacao_imovel}${di.ccir ? '    ·    CCIR:  ' + di.ccir : ''}`);
     if (di.area_hectares) {
-      doc.text(`Area:  ${Number(di.area_hectares).toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ha    ·    Vertices:  ${vertices}${perimetro > 0 ? '    ·    Perimetro:  ' + perimetro.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + ' m' : ''}`);
+      doc.text(`Area:  ${Number(di.area_hectares).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ha    ·    Vertices:  ${vertices}${perimetro > 0 ? '    ·    Perimetro:  ' + formatarPerimetroBr(perimetro) + ' m' : ''}`);
     }
   }
   doc.moveDown(0.6);
 
   // ── 2. BOX DOURADO — FINALIDADE ───────────────────────────────────────
-  const textoFinal = FINALIDADE_DEMARCACAO_TEXTOS[finalidade];
+  // v3.40.0: texto dinamico (rural/urbana) com denominacao/loteamento — alinha
+  // a PROP-2026-0028-R1. Antes usava Record hardcoded de rascunho.
+  const textoFinal = montarFinalidadeDemarcacao(finalidade, subtipo, {
+    denominacao_imovel: di.denominacao_imovel,
+    loteamento_nome: di.loteamento_nome,
+    quadra: di.quadra,
+    lote: di.lote,
+  });
   const boxAltFin = doc.heightOfString(textoFinal, { width: COL_W - 28 }) + 28;
   const boxYFin = doc.y;
   doc.rect(COL_X_INI, boxYFin, COL_W, boxAltFin).fillAndStroke(COR_DOURADO_BG, COR_DOURADO_BORDA);
@@ -2041,9 +2047,11 @@ function renderDemarcacaoLotesBody(
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.2);
 
-  // v3.38.0: alinhamento a PROP-2026-0028-R1 (gold standard)
+  // v3.38.0–v3.40.0: alinhamento a PROP-2026-0028-R1 (gold standard).
   //   - Adicional de insal/peric incide sobre tecnicos_campo, integrado na base
-  //   - Kit GNSS e Laudo Tecnico aparecem como itens DIRETOS (fora da complexidade)
+  //   - Section 4 lista APENAS os itens BASE (TRT, Tec, Adicional, Area, Desloc, Complex, Assessoria).
+  //   - Marcos viram subsection 4.2; Kit GNSS subsection 4.3; Laudo 4.4; FQNS 4.5.
+  //   - Kit GNSS e' item FIXO (sempre renderizado quando output tem); Laudo e' condicional.
   const linhasHon: Array<{ label: string; valor: number; obs?: string }> = hr
     ? (() => {
         const arr: Array<{ label: string; valor: number; obs?: string }> = [
@@ -2072,24 +2080,7 @@ function renderDemarcacaoLotesBody(
           { label: `Multiplicador de complexidade (${di.complexidade || 'media'})`, valor: hr.subtotal_apos_complexidade - (hr.trt_cft + hr.tecnicos_campo + (hr.adicional_campo?.valor || 0) + hr.marcos_subtotal + hr.deslocamento + hr.area_servico), obs: `x ${hr.complexidade_multiplicador}` },
           { label: 'Assessoria (5%)', valor: hr.assessoria },
         );
-        // v3.38.0: Kit GNSS (item direto)
-        if (hr.locacao_kit_gnss?.contratado && hr.locacao_kit_gnss.valor > 0) {
-          const qtd = hr.locacao_kit_gnss.qtd_diarias;
-          const diaria = hr.locacao_kit_gnss.diaria;
-          arr.push({
-            label: 'Locacao de equipamentos — Kit GNSS',
-            valor: hr.locacao_kit_gnss.valor,
-            obs: `${qtd} diaria(s) x R$ ${diaria.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${hr.locacao_kit_gnss.descritivo ? ' — ' + hr.locacao_kit_gnss.descritivo : ''}`,
-          });
-        }
-        // v3.38.0: Laudo Tecnico (item direto)
-        if (hr.laudo_tecnico_direto?.contratado && hr.laudo_tecnico_direto.valor > 0) {
-          arr.push({
-            label: 'Laudo Tecnico de Demarcacao',
-            valor: hr.laudo_tecnico_direto.valor,
-            obs: 'valor fechado (1 SM 2026)',
-          });
-        }
+        // Kit GNSS e Laudo Tecnico foram MOVIDOS para subseccoes proprias (v3.40.0).
         return arr;
       })()
     : (custos.secao_3_honorarios || []).map((h) => ({ label: h.descricao, valor: Number(h.valor), obs: h.observacao }));
@@ -2142,9 +2133,62 @@ function renderDemarcacaoLotesBody(
     doc.moveDown(0.4);
   }
 
-  // ── 4-ter. IDENTIFICACAO DOS MARCOS (FQNS) ───────────────────────────
+  // ── 4.3. LOCACAO DE EQUIPAMENTOS — KIT GNSS (v3.40.0 — item FIXO) ────
+  // Sempre renderiza quando o output tem o campo (propostas pre-v3.38.0
+  // sem o campo continuam funcionando — fallback silencioso). Inclui
+  // discriminacao dos equipamentos abaixo da linha.
+  if (hr && hr.locacao_kit_gnss && hr.locacao_kit_gnss.valor > 0) {
+    if (doc.y > 660) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.3 Locacao de Equipamentos — Kit GNSS');
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+
+    const kg = hr.locacao_kit_gnss;
+    const qtdTxt = kg.qtd_diarias === 1
+      ? '1 diaria'
+      : `${kg.qtd_diarias.toLocaleString('pt-BR', { minimumFractionDigits: kg.qtd_diarias % 1 === 0 ? 0 : 1, maximumFractionDigits: 2 })} diaria(s)`;
+    const diariaTxt = kg.diaria.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const y0 = doc.y;
+    doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+      .text(`Kit GNSS — ${qtdTxt} x R$ ${diariaTxt}`, COL_X_INI + 8, y0, { width: COL_W - 100 });
+    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+      .text(formatBRL(kg.valor), COL_X_FIM - 80, y0, { width: 80, align: 'right' });
+    doc.font('Helvetica').fillColor('#111');
+    // v3.40.0 BUG 4: detalhe MULTILINHA renderiza como bloco (regra de calculo + discriminacao).
+    doc.fontSize(8).fillColor('#555').font('Helvetica-Oblique')
+      .text('Diaria editavel; admite meia ou multiplas diarias.', COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+    if (kg.descritivo) {
+      doc.fontSize(8).fillColor('#555').font('Helvetica')
+        .text(kg.descritivo, COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+    }
+    doc.font('Helvetica').fillColor('#111');
+    doc.moveDown(0.4);
+  }
+
+  // ── 4.4. LAUDO TECNICO DE DEMARCACAO (item DIRETO, condicional) ──────
+  if (hr && hr.laudo_tecnico_direto && hr.laudo_tecnico_direto.contratado && hr.laudo_tecnico_direto.valor > 0) {
+    if (doc.y > 680) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.4 Laudo Tecnico de Demarcacao');
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    const y0 = doc.y;
+    doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+      .text('Laudo Tecnico de Demarcacao', COL_X_INI + 8, y0, { width: COL_W - 100 });
+    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+      .text(formatBRL(hr.laudo_tecnico_direto.valor), COL_X_FIM - 80, y0, { width: 80, align: 'right' });
+    doc.font('Helvetica').fillColor('#111');
+    doc.fontSize(8).fillColor('#555').font('Helvetica-Oblique')
+      .text('valor fechado (1 SM 2026)', COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+    doc.font('Helvetica').fillColor('#111');
+    doc.moveDown(0.4);
+  }
+
+  // ── 4.5. IDENTIFICACAO DOS MARCOS (FQNS) ─────────────────────────────
   if (doc.y > 600) doc.addPage();
-  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.3 Identificacao dos Marcos (Codificacao INCRA)');
+  doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.5 Identificacao dos Marcos (Codificacao INCRA)');
   doc.font('Helvetica');
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.2);
@@ -2185,7 +2229,8 @@ function renderDemarcacaoLotesBody(
   // ── 5. BOX VERDE — VALOR TOTAL ────────────────────────────────────────
   const totalRomatec = hr?.total ?? custos.honorarios_romatec?.total ?? custos.secao_5_total;
   if (doc.y > 700) doc.addPage();
-  const txtTotalNota = 'Soma de TRT/CFT + Tecnicos de campo (com adicional de insal/peric quando aplicavel) + Marcos + Deslocamento + Area, com complexidade e assessoria, mais Locacao de Kit GNSS e Laudo Tecnico de Demarcacao (itens diretos, quando contratados). Eventuais custos de cartorio para averbacao da demarcacao NAO estao inclusos.';
+  // v3.40.0: texto coerente — locacao Kit GNSS e' FIXA (sempre soma), Laudo e' condicional.
+  const txtTotalNota = 'Soma de TRT/CFT + Tecnicos de campo (com adicional de insal/peric quando aplicavel) + Marcos + Deslocamento + Area, com complexidade (x1,3 padrao media) e assessoria (5%), acrescida de Locacao de Kit GNSS (item fixo) e Laudo Tecnico de Demarcacao (quando contratado). Eventuais custos de cartorio para averbacao da demarcacao NAO estao inclusos.';
   const boxYT = doc.y;
   const boxAlturaT = doc.heightOfString(txtTotalNota, { width: COL_W - 24 }) + 38;
   doc.rect(COL_X_INI, boxYT, COL_W, boxAlturaT).fillAndStroke(COR_VERDE_BG, COR_VERDE_BORDA);
@@ -2273,6 +2318,13 @@ function renderDemarcacaoLotesBody(
       doc.fontSize(9.5).fillColor(l.contratado ? corHex : '#666').font(l.contratado ? 'Helvetica-Bold' : 'Helvetica')
         .text(valorTxt, COL_X_FIM - 100, y0, { width: 100, align: 'right' });
       doc.font('Helvetica').fillColor('#111');
+      // v3.40.0: detalhe (regra de calculo / memoria descritiva) abaixo do rotulo
+      const det = (l as { detalhe?: string }).detalhe;
+      if (det) {
+        doc.fontSize(8).fillColor('#555').font('Helvetica-Oblique')
+          .text(det, COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+        doc.font('Helvetica').fillColor('#111');
+      }
       doc.moveDown(0.1);
     });
     if (opcSec.subtotal > 0) {
