@@ -58,9 +58,12 @@ describe('HOTFIX v3.42.0 — BUG B: Edicao habilitada pra demarcação', () => {
 });
 
 describe('HOTFIX v3.42.0 — BUG C: Edicao preserva adicional_campo via injecao do pct', () => {
-  it('5. atualizarPropostaConsultoria injeta adicional_campo_pct quando snapshot existe', () => {
-    // Pattern matches the local block where we inject pct, no need to span from function declaration
-    expect(PROPOSTAS_CONS_TS).toMatch(/dadosInjetados\.adicional_campo_pct = adicionalSnap\.percentual/);
+  it('5. atualizarPropostaConsultoria injeta adicional_campo_pct (via helper v3.43.0 — substitui pattern v3.42.0)', () => {
+    // v3.43.0 refatorou para chamar aplicarAdicionalObrigatorioDemarcacao + calcularAdicionalCampo
+    // (mais robusto que ler .percentual direto do snapshot — o snapshot pode estar
+    // incompleto e o force-default de rural assume).
+    expect(PROPOSTAS_CONS_TS).toMatch(/aplicarAdicionalObrigatorioDemarcacao\(subtipo, adicionalSnap\)/);
+    expect(PROPOSTAS_CONS_TS).toMatch(/dadosInjetados\.adicional_campo_pct = r2\.percentual/);
   });
 
   it('6. atualizarPropostaConsultoria preserva snapshot adicional_campo no custos atualizado', () => {
