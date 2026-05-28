@@ -21222,9 +21222,9 @@ function renderGaleriaCard(f) {
                <button onclick="baixarPendente(${localId})" style="font-size:11px;padding:4px 8px;">💾 Baixar</button>
                <button onclick="removerPendente(${localId})" style="font-size:11px;padding:4px 8px;color:#ff5577;">🗑</button>`
             : `<button onclick="verFotoServer(${f.id})" style="font-size:11px;padding:4px 8px;">👁 Ver</button>
-               <button onclick="enviarFotoGaleria(${f.id}, 'whatsapp')" style="font-size:11px;padding:4px 8px;">📱 WA</button>
-               <button onclick="enviarFotoGaleria(${f.id}, 'telegram')" style="font-size:11px;padding:4px 8px;">✈️ TG</button>
-               <button onclick="baixarFotoServer(${f.id})" style="font-size:11px;padding:4px 8px;">💾</button>
+               <button onclick="reabrirModalCanal(${f.id}, 'whatsapp')" style="font-size:11px;padding:4px 8px;" title="Compartilhar via WhatsApp">📱 WA</button>
+               <button onclick="reabrirModalCanal(${f.id}, 'telegram')" style="font-size:11px;padding:4px 8px;" title="Compartilhar via Telegram">✈️ TG</button>
+               <button onclick="salvarNoCelular(${f.id})" style="font-size:11px;padding:4px 8px;" title="Salvar no celular (Web Share)">💾</button>
                <button onclick="apagarFotoGaleria(${f.id})" style="font-size:11px;padding:4px 8px;color:#ff5577;">🗑</button>`
           }
         </div>
@@ -21309,6 +21309,20 @@ async function removerPendente(localId) {
   if (!confirm('Apagar essa foto pendente do dispositivo? (Ela ainda não foi enviada ao servidor)')) return;
   await removerPendenteLocal(localId);
   recarregarGaleria();
+}
+
+// v3.28.0: reabre o modal pos-captura mas com apenas 1 canal pre-marcado.
+async function reabrirModalCanal(fotoId, canalUnico) {
+  // Carrega metadados rapidos da foto (sem b64) pra preview/thumb
+  let meta = {};
+  try {
+    const r = await fetch('/api/galeria?limit=200');
+    const data = await r.json();
+    const f = (data.fotos || []).find((x) => x.id === fotoId);
+    if (f) meta = { lat: f.lat, lng: f.lng, capturada_em: f.capturada_em || f.criada_em };
+  } catch (_) {}
+  // Pre-marca o canal solicitado via override de prefs
+  await modalPosCaptura(fotoId, meta, { forceShow: true, override: { [canalUnico]: true } });
 }
 
 async function enviarFotoGaleria(id, canal) {
@@ -21455,11 +21469,223 @@ async function onGaleriaFileSelected(ev) {
     setStatus('⚠️ Server rejeitou. Salva local pra tentar de novo: ' + result.error);
   } else if (result.ok) {
     setStatus('✅ Foto enviada!');
+    // v3.28.0: abre modal pos-captura quando upload sucesso + online
+    if (result.id) {
+      try {
+        await modalPosCaptura(result.id, { lat, lng, capturada_em: payload.capturada_em, dataUrlPreview: dataUrl });
+      } catch (e) { console.warn('[modal-pos-captura]', e); }
+    }
   } else {
     setStatus('❌ Falha desconhecida');
   }
   setTimeout(() => setStatus(''), 4000);
   recarregarGaleria();
+}
+
+// v3.28.0: modal pos-captura — multi-canal (Salvar/WhatsApp/Telegram).
+// Pre-marca conforme preferences.galeria_pos_captura. ARIA + Esc + Web Share.
+async function modalPosCaptura(fotoId, meta, opts = {}) {
+  // Carrega preferences (defaults se sem auth ou erro)
+  let prefs = {
+    salvar_celular: false, whatsapp: false, telegram: false,
+    destinatario_whatsapp_default: '', destinatario_telegram_default: '',
+    lembrar_escolha: false, mostrar_modal: true,
+  };
+  try {
+    const r = await fetch('/api/users/me/preferences/galeria', { credentials: 'include' });
+    if (r.ok) {
+      const j = await r.json();
+      prefs = Object.assign(prefs, j.galeria_pos_captura || {});
+    }
+  } catch (_) {}
+  // forceShow ignora flag de "nao mostrar modal"; override sobrescreve canais pre-marcados
+  if (prefs.mostrar_modal === false && !opts.forceShow) return;
+  if (opts.override) {
+    prefs.salvar_celular = !!opts.override.salvar_celular;
+    prefs.whatsapp = !!opts.override.whatsapp;
+    prefs.telegram = !!opts.override.telegram;
+  }
+
+  // Remove modal anterior (caso ja exista)
+  const exist = document.getElementById('galeria-pos-captura-modal');
+  if (exist) exist.remove();
+
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const overlay = document.createElement('div');
+  overlay.id = 'galeria-pos-captura-modal';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-labelledby', 'gpcm-title');
+  overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99998;display:flex;align-items:center;justify-content:center;padding:16px;${reduced ? '' : 'animation:fadeIn .2s ease-out;'}`;
+
+  const coordTxt = (meta && meta.lat != null && meta.lng != null)
+    ? `📍 ${Number(meta.lat).toFixed(5)}, ${Number(meta.lng).toFixed(5)}` : '';
+  const dataTxt = meta && meta.capturada_em
+    ? `🕒 ${new Date(meta.capturada_em.replace(' ', 'T')).toLocaleString('pt-BR')}` : '';
+  const thumbSrc = opts.dataUrlPreview || `/api/galeria/${fotoId}/arquivo`;
+
+  overlay.innerHTML = `
+    <div style="background:#1a1a1a;border:1px solid #333;border-radius:12px;max-width:480px;width:100%;color:#fff;padding:20px;${reduced ? '' : 'animation:slideUp .25s ease-out;'}">
+      <h2 id="gpcm-title" style="margin:0 0 6px;font-size:17px;">📤 Foto capturada</h2>
+      <p style="margin:0 0 14px;font-size:12px;opacity:.7;">Para onde enviar?</p>
+      <div style="display:flex;gap:12px;margin-bottom:14px;align-items:flex-start;">
+        <img src="${thumbSrc}" style="width:120px;height:120px;object-fit:cover;border-radius:8px;background:#000;flex-shrink:0;" alt="thumbnail">
+        <div style="font-size:11px;opacity:.75;line-height:1.5;">
+          ${coordTxt ? `<div>${coordTxt}</div>` : ''}
+          ${dataTxt ? `<div>${dataTxt}</div>` : ''}
+          <div style="margin-top:6px;color:#22c55e;">✓ Já salva no sistema</div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:12px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+          <input type="checkbox" id="gpcm-salvar" ${prefs.salvar_celular ? 'checked' : ''}>
+          📥 Salvar no celular
+        </label>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+            <input type="checkbox" id="gpcm-wa" ${prefs.whatsapp ? 'checked' : ''}>
+            🟢 WhatsApp
+          </label>
+          <input type="tel" id="gpcm-wa-dest" placeholder="5598999999999" value="${prefs.destinatario_whatsapp_default || ''}"
+                 style="background:#0a0a0a;border:1px solid #333;border-radius:6px;padding:6px 10px;color:#fff;font-size:12px;">
+        </div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+            <input type="checkbox" id="gpcm-tg" ${prefs.telegram ? 'checked' : ''}>
+            ✈️ Telegram
+          </label>
+          <input type="text" id="gpcm-tg-dest" placeholder="@romatec_obras ou chat_id" value="${prefs.destinatario_telegram_default || ''}"
+                 style="background:#0a0a0a;border:1px solid #333;border-radius:6px;padding:6px 10px;color:#fff;font-size:12px;">
+        </div>
+      </div>
+
+      <label style="display:block;font-size:12px;margin-bottom:6px;color:#ddd;">Legenda (opcional)</label>
+      <input type="text" id="gpcm-legenda" maxlength="1024" placeholder="ex: Vistoria - Obra Colina Park"
+             style="width:100%;background:#0a0a0a;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#fff;font-size:13px;margin-bottom:14px;">
+
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-bottom:14px;">
+        <input type="checkbox" id="gpcm-lembrar" ${prefs.lembrar_escolha ? 'checked' : ''}>
+        Lembrar minha escolha
+      </label>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="gpcm-pular" style="padding:8px 16px;background:transparent;border:1px solid #333;color:#bbb;border-radius:6px;cursor:pointer;font-size:13px;">Pular</button>
+        <button id="gpcm-enviar" style="padding:8px 18px;background:#22c55e;border:none;color:#000;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">✅ Enviar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Focus trap minimo: foca primeiro checkbox
+  const primeiro = document.getElementById('gpcm-salvar');
+  primeiro?.focus();
+
+  const fechar = () => { overlay.remove(); document.removeEventListener('keydown', escListener); };
+  const escListener = (ev) => { if (ev.key === 'Escape') fechar(); };
+  document.addEventListener('keydown', escListener);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) fechar(); });
+  document.getElementById('gpcm-pular').onclick = fechar;
+
+  document.getElementById('gpcm-enviar').onclick = async () => {
+    const salvar = document.getElementById('gpcm-salvar').checked;
+    const wa = document.getElementById('gpcm-wa').checked;
+    const tg = document.getElementById('gpcm-tg').checked;
+    const lembrar = document.getElementById('gpcm-lembrar').checked;
+    const waDest = document.getElementById('gpcm-wa-dest').value.trim();
+    const tgDest = document.getElementById('gpcm-tg-dest').value.trim();
+    const legenda = document.getElementById('gpcm-legenda').value.trim();
+
+    // Persistir preferences se "Lembrar"
+    if (lembrar) {
+      try {
+        await fetch('/api/users/me/preferences/galeria', {
+          method: 'PUT', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ galeria_pos_captura: {
+            salvar_celular: salvar, whatsapp: wa, telegram: tg,
+            destinatario_whatsapp_default: waDest,
+            destinatario_telegram_default: tgDest,
+            lembrar_escolha: true,
+          } }),
+        });
+      } catch (_) {}
+    }
+
+    // Web Share API direto (sem passar pelo backend)
+    if (salvar) await salvarNoCelular(fotoId);
+
+    // Canais backend
+    const canais = [];
+    if (wa) canais.push('whatsapp');
+    if (tg) canais.push('telegram');
+    if (canais.length > 0) {
+      try {
+        const r = await fetch(`/api/galeria/fotos/${fotoId}/compartilhar`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `gpc-${fotoId}-${Date.now()}` },
+          body: JSON.stringify({
+            canais,
+            destinatario_whatsapp: wa ? waDest : undefined,
+            destinatario_telegram: tg ? tgDest : undefined,
+            legenda: legenda || undefined,
+          }),
+        });
+        const j = await r.json();
+        if (r.ok) {
+          for (const res of (j.resultados || [])) toastGalCanal(res);
+        } else {
+          toastGalErr(`Falha: ${j.error || r.status}`);
+        }
+      } catch (err) {
+        toastGalErr(`Erro de rede: ${err.message || err}`);
+      }
+    } else if (salvar) {
+      toastGalOk('Foto salva no celular');
+    }
+    fechar();
+  };
+}
+
+function toastGalCanal(res) {
+  const truncar = (d) => !d ? '' : d.startsWith('@') ? (d.slice(0,4) + '****') : `+${d.slice(0,2)}****${d.slice(-4)}`;
+  if (res.status === 'sucesso') {
+    if (res.canal === 'whatsapp') toastGalOk('Enviado via WhatsApp');
+    else if (res.canal === 'telegram') toastGalOk('Enviado via Telegram');
+    else if (res.canal === 'celular_download') toastGalOk('Disponível para download');
+  } else {
+    toastGalErr(`Falha no ${res.canal}: ${res.erro || 'erro'}`);
+  }
+  void truncar; // helper exposto se quisermos usar futuramente
+}
+function toastGalOk(msg) { _toastGal(msg, '#22c55e'); }
+function toastGalErr(msg) { _toastGal(msg, '#ef4444'); }
+function _toastGal(msg, cor) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:${cor};color:#000;padding:10px 18px;border-radius:8px;font-weight:600;font-size:13px;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,.3);`;
+  el.textContent = (cor === '#22c55e' ? '✅ ' : '❌ ') + msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// v3.28.0: Salvar no celular via Web Share API com fallback de download direto.
+async function salvarNoCelular(fotoId) {
+  const downloadUrl = `/api/galeria/fotos/${fotoId}/download`;
+  if (navigator.share && navigator.canShare) {
+    try {
+      const blob = await fetch(downloadUrl, { credentials: 'include' }).then(r => r.blob());
+      const file = new File([blob], `romatec-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Foto Romatec' });
+        return { sucesso: true };
+      }
+    } catch (_) { /* cai pro fallback */ }
+  }
+  const link = document.createElement('a');
+  link.href = downloadUrl;
+  link.download = `romatec-${Date.now()}.jpg`;
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  return { sucesso: true };
 }
 
 function readImageFile(file) {
@@ -21511,6 +21737,7 @@ async function renderConfiguracoes() {
       <div style="display:flex; gap:6px; margin-bottom:14px; border-bottom:1px solid var(--border);">
         <button class="cfg-tab" data-sub="usuarios"  style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">👥 Usuários</button>
         <button class="cfg-tab" data-sub="auditoria" style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">📋 Auditoria</button>
+        <button class="cfg-tab" data-sub="galeria"   style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">📷 Galeria</button>
       </div>
       <div id="cfg-body">Carregando…</div>
     </div>
@@ -21525,9 +21752,128 @@ async function renderConfiguracoes() {
   try {
     if (state.configSub === 'usuarios') await renderCfgUsuarios();
     else if (state.configSub === 'auditoria') await renderCfgAuditoria();
+    else if (state.configSub === 'galeria') await renderCfgGaleria();
   } catch (e) {
     document.getElementById('cfg-body').innerHTML = `<div class="card empty">Erro: ${escape(e.message)}</div>`;
   }
+}
+
+// v3.28.0: configuracoes de Galeria — pos-captura (defaults + reset).
+async function renderCfgGaleria() {
+  const body = document.getElementById('cfg-body');
+  body.innerHTML = '<div style="opacity:.6;">Carregando preferências…</div>';
+  let p = {
+    salvar_celular: false, whatsapp: false, telegram: false,
+    destinatario_whatsapp_default: '', destinatario_telegram_default: '',
+    lembrar_escolha: false, mostrar_modal: true,
+  };
+  try {
+    const r = await fetch('/api/users/me/preferences/galeria', { credentials: 'include' });
+    if (r.ok) {
+      const j = await r.json();
+      p = Object.assign(p, j.galeria_pos_captura || {});
+    }
+  } catch (_) {}
+
+  body.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:14px;max-width:520px;">
+      <div>
+        <p style="margin:0 0 6px;font-weight:600;">📷 Pós-captura</p>
+        <p style="margin:0;font-size:12px;color:var(--text-muted);">Controla o modal que aparece após cada foto tirada na aba Galeria.</p>
+      </div>
+
+      <label style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;cursor:pointer;">
+        <input type="checkbox" id="cfgGal-mostrar" ${p.mostrar_modal !== false ? 'checked' : ''}>
+        <div>
+          <div style="font-weight:600;font-size:13px;">Mostrar modal após cada foto</div>
+          <div style="font-size:11px;color:var(--text-muted);">Quando desligado, a foto é apenas salva no sistema sem perguntar.</div>
+        </div>
+      </label>
+
+      <div style="border:1px solid var(--border);border-radius:6px;padding:14px;background:var(--bg-elev);">
+        <p style="margin:0 0 10px;font-weight:600;font-size:13px;">Pré-marcação de canais</p>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+            <input type="checkbox" id="cfgGal-salvar" ${p.salvar_celular ? 'checked' : ''}>
+            📥 Salvar no celular (Web Share)
+          </label>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+              <input type="checkbox" id="cfgGal-wa" ${p.whatsapp ? 'checked' : ''}>
+              🟢 WhatsApp
+            </label>
+            <input type="tel" id="cfgGal-wa-dest" value="${escape(p.destinatario_whatsapp_default || '')}"
+                   placeholder="5598999999999" style="padding:6px 10px;font-size:12px;">
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+              <input type="checkbox" id="cfgGal-tg" ${p.telegram ? 'checked' : ''}>
+              ✈️ Telegram
+            </label>
+            <input type="text" id="cfgGal-tg-dest" value="${escape(p.destinatario_telegram_default || '')}"
+                   placeholder="@romatec_obras ou chat_id" style="padding:6px 10px;font-size:12px;">
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;">
+        <button id="cfgGal-salvarBtn" style="flex:1;background:var(--success);color:#000;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-weight:600;">💾 Salvar preferências</button>
+        <button id="cfgGal-resetBtn" style="background:transparent;border:1px solid #f87171;color:#f87171;padding:10px 16px;border-radius:6px;cursor:pointer;">↩ Resetar</button>
+      </div>
+      <div id="cfgGal-feedback" style="font-size:12px;color:var(--text-muted);min-height:18px;"></div>
+    </div>
+  `;
+
+  const feedback = (msg, cor) => {
+    const el = document.getElementById('cfgGal-feedback');
+    el.textContent = msg;
+    el.style.color = cor || 'var(--text-muted)';
+    setTimeout(() => { el.textContent = ''; }, 4000);
+  };
+
+  document.getElementById('cfgGal-salvarBtn').onclick = async () => {
+    const body = {
+      mostrar_modal: document.getElementById('cfgGal-mostrar').checked,
+      salvar_celular: document.getElementById('cfgGal-salvar').checked,
+      whatsapp: document.getElementById('cfgGal-wa').checked,
+      telegram: document.getElementById('cfgGal-tg').checked,
+      destinatario_whatsapp_default: document.getElementById('cfgGal-wa-dest').value.trim(),
+      destinatario_telegram_default: document.getElementById('cfgGal-tg-dest').value.trim(),
+    };
+    try {
+      const r = await fetch('/api/users/me/preferences/galeria', {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ galeria_pos_captura: body }),
+      });
+      if (r.ok) feedback('✅ Preferências salvas', '#22c55e');
+      else feedback('❌ Falha ao salvar', '#ef4444');
+    } catch (err) {
+      feedback('❌ Erro: ' + (err.message || err), '#ef4444');
+    }
+  };
+
+  document.getElementById('cfgGal-resetBtn').onclick = async () => {
+    if (!confirm('Resetar preferências de Galeria pós-captura ao padrão?')) return;
+    try {
+      const r = await fetch('/api/users/me/preferences/galeria', {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ galeria_pos_captura: {
+          mostrar_modal: true, salvar_celular: false, whatsapp: false, telegram: false,
+          destinatario_whatsapp_default: '', destinatario_telegram_default: '', lembrar_escolha: false,
+        } }),
+      });
+      if (r.ok) {
+        feedback('↩ Resetado', '#22c55e');
+        renderCfgGaleria();
+      } else {
+        feedback('❌ Falha ao resetar', '#ef4444');
+      }
+    } catch (err) {
+      feedback('❌ Erro: ' + (err.message || err), '#ef4444');
+    }
+  };
 }
 
 async function renderCfgUsuarios() {
