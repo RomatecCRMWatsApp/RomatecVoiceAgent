@@ -22848,6 +22848,7 @@ async function renderMemoriaisQuantitativos() {
 
   let disciplinas = [];
   let historico = [];
+  let historicoUnauthorized = false;
   try {
     const [dResp, hResp] = await Promise.all([
       fetch('/api/memoriais/disciplinas', { credentials: 'include' }),
@@ -22855,6 +22856,7 @@ async function renderMemoriaisQuantitativos() {
     ]);
     if (dResp.ok) disciplinas = (await dResp.json()).disciplinas || [];
     if (hResp.ok) historico = (await hResp.json()).items || [];
+    else if (hResp.status === 401) historicoUnauthorized = true; // v3.37.0: UX clara
   } catch (err) {
     v.innerHTML = `<div class="card empty">Erro ao carregar: ${escape(err.message || err)}</div>`;
     return;
@@ -22880,7 +22882,9 @@ async function renderMemoriaisQuantitativos() {
     </button>`;
   }).join('');
 
-  const linhasHist = historico.length === 0
+  const linhasHist = historicoUnauthorized
+    ? '<div class="card empty">🔒 Sessão expirada ou não autenticada. Faça login pra ver seu histórico de memoriais.</div>'
+    : historico.length === 0
     ? '<div class="card empty">Nenhum memorial gerado ainda. Comece selecionando uma disciplina acima.</div>'
     : historico.map(h => `<div class="card">
         <p style="margin:0; font-weight:600;">${escapeHtml(h.codigo)} · ${escapeHtml(h.obra_titulo)}</p>

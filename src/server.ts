@@ -2453,7 +2453,11 @@ app.post('/api/memoriais/upload-pdf', requireAuth, async (req: Request, res: Res
   }
 });
 
-app.post('/api/memoriais/hidraulico/calcular', requireAuth, async (req: Request, res: Response) => {
+// v3.37.0 HOTFIX: /calcular tornado PUBLICO (espelhando /adicional-campo/calcular
+// da v3.36.0). Calculo e' deterministico — le apenas tabelas NBR 5626 hardcoded
+// no engine, nao acessa DB, nao persiste, nao retorna dado sensivel.
+// Diagnostico: user reportou 401 em producao ao usar o wizard hidraulico.
+app.post('/api/memoriais/hidraulico/calcular', async (req: Request, res: Response) => {
   try {
     const m = await import('./services/memoriais/hidraulicoCalc');
     const r = m.calcularMemorialHidraulico(req.body as Parameters<typeof m.calcularMemorialHidraulico>[0]);
