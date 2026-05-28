@@ -7261,12 +7261,39 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
       }
       // v1.66.15: tambem carrega anexos existentes da proposta
       const anexosExistentes = await api('/api/propostas-consultoria/' + id + '/anexos').catch(() => ({ items: [] }));
-      // Popula cache do form com dados da proposta
+      // Popula cache do form com dados da proposta.
+      // v3.42.0: ACHATA dados_imovel no cache (os forms leem cache?.municipio,
+      // cache?.area_m2, etc — direto, sem aninhamento). Sem isso, edicao abre
+      // com campos vazios. Mantemos dados_imovel TAMBEM aninhado pra retrocompat
+      // com forms que possam ler dele dessa forma.
+      const di = p.dados_imovel || {};
+      // v3.42.0: para demarcacao, deriva campos especificos do form (marcos[] -> counts
+      // por tipo, locacao_kit_gnss aninhado -> qtd/diaria, laudo/alinhamento -> flags).
+      const derivadosDemarc = {};
+      if (subtipo === 'demarcacao_urbana' || subtipo === 'demarcacao_rural') {
+        const marcos = Array.isArray(di.marcos) ? di.marcos : [];
+        derivadosDemarc.marcos_concreto = marcos.filter(m => m && m.tipo === 'concreto').reduce((s, m) => s + (Number(m.quantidade) || 0), 0);
+        derivadosDemarc.marcos_tubo = marcos.filter(m => m && m.tipo === 'tubo_galvanizado').reduce((s, m) => s + (Number(m.quantidade) || 0), 0);
+        derivadosDemarc.marcos_madeira = marcos.filter(m => m && m.tipo === 'madeira').reduce((s, m) => s + (Number(m.quantidade) || 0), 0);
+        if (di.locacao_kit_gnss && typeof di.locacao_kit_gnss === 'object') {
+          derivadosDemarc.locacao_kit_gnss_qtd = di.locacao_kit_gnss.qtd_diarias ?? 1;
+          derivadosDemarc.locacao_kit_gnss_diaria = di.locacao_kit_gnss.diaria ?? 250;
+        }
+        if (di.laudo_tecnico_direto && typeof di.laudo_tecnico_direto === 'object') {
+          derivadosDemarc.laudo_tecnico_direto_contratado = !!di.laudo_tecnico_direto.contratado;
+        }
+        if (di.opcionais && di.opcionais.alinhamento_cerca) {
+          derivadosDemarc.alinhamento_metros = di.opcionais.alinhamento_cerca.metros ?? '';
+        }
+      }
       state.consultoriaFormCache = {
+        ...di,
+        ...derivadosDemarc,
         subtipo,
         cliId: String(p.cliente.id),
+        cliente_id: String(p.cliente.id), // alias usado pelo form de demarcacao
         endereco: p.endereco_imovel || '',
-        dados_imovel: p.dados_imovel || {},
+        dados_imovel: di,
       };
       state.consultoriaEditandoId = id;
       state.consultoriaPropostaOriginal = p;
@@ -11140,17 +11167,32 @@ function renderPreviewConsultoria(r, ctx) {
       const aditivoCampoLegado = !adicionalCampo
         ? (ctx.aditivo_campo || state.consultoriaPreviewData?.ctx?.aditivo_campo || null)
         : null;
-      const r2 = await api('/api/propostas-consultoria', {
-        method: 'POST',
-        body: JSON.stringify({
-          subtipo: ctx.subtipo,
-          cliente_id: ctx.cliId,
-          endereco_imovel: endereco || null,
-          dados_imovel: ctx.dados_imovel,
-          adicional_campo: adicionalCampo || undefined,
-          aditivo_campo: aditivoCampoLegado || undefined,
-        }),
-      });
+      // v3.42.0: se estamos editando uma proposta (consultoriaEditandoId set), faz
+      // PUT em vez de POST. Antes, mesmo em "editar" o handler fazia POST e criava
+      // uma proposta NOVA — bug que afetava TODOS os subtipos editaveis, nao so'
+      // demarcacao. PUT chama atualizarPropostaConsultoria (linha ~3334 do backend),
+      // que recalcula com dados_imovel novo + preserva adicional_campo via snapshot
+      // existente (v3.42.0 backend fix).
+      const editandoId = state.consultoriaEditandoId;
+      const r2 = editandoId
+        ? await api('/api/propostas-consultoria/' + editandoId, {
+            method: 'PUT',
+            body: JSON.stringify({
+              endereco_imovel: endereco || null,
+              dados_imovel: ctx.dados_imovel,
+            }),
+          })
+        : await api('/api/propostas-consultoria', {
+            method: 'POST',
+            body: JSON.stringify({
+              subtipo: ctx.subtipo,
+              cliente_id: ctx.cliId,
+              endereco_imovel: endereco || null,
+              dados_imovel: ctx.dados_imovel,
+              adicional_campo: adicionalCampo || undefined,
+              aditivo_campo: aditivoCampoLegado || undefined,
+            }),
+          });
 
       // v3.24.6: Upload de anexos pendentes (Projeto Executivo, mas funciona pra qualquer subtipo)
       const anexosPendentes = state.peAnexosPendentes || [];
@@ -11175,6 +11217,15 @@ function renderPreviewConsultoria(r, ctx) {
       } else {
         alert('✅ ' + r2.message);
       }
+
+      // v3.42.0: reseta state de edicao APOS save (qualquer subtipo). Antes
+      // ficava grudado e a proxima "Nova proposta" tambem fazia PUT na proposta
+      // editada anteriormente — comportamento absurdo, mas o bug do POST-sempre
+      // mascarava isso ate v3.42.0.
+      state.consultoriaEditandoId = null;
+      state.consultoriaPropostaOriginal = null;
+      state.consultoriaFormCache = null;
+      state.consultoriaPreviewData = null;
 
       fecharModal();
       await loadPropostasConsultoria();
