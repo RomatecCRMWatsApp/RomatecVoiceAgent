@@ -2407,6 +2407,132 @@ app.post('/api/galeria/:id/enviar', requireCeoToken, async (req: Request, res: R
   }
 });
 
+// v3.35.0: memoriais de calculo (Fase 1 — Hidraulico NBR 5626).
+// Endpoints core: catalogo de disciplinas + wizard + upload-pdf + criar + get + listar.
+app.get('/api/memoriais/disciplinas', async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./services/memoriais/wizardEngine');
+    res.json({ disciplinas: m.listarDisciplinasDisponiveis() });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/memoriais/:disciplina/wizard', async (req: Request, res: Response) => {
+  try {
+    const disc = String(req.params.disciplina);
+    const validos = ['arquitetonico', 'eletrico', 'hidraulico', 'sanitario', 'estrutural', 'pci'];
+    if (!validos.includes(disc)) { res.status(404).json({ error: 'disciplina invalida' }); return; }
+    const m = await import('./services/memoriais/wizardEngine');
+    res.json(m.obterWizardDisciplina(disc as 'hidraulico'));
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/memoriais/upload-pdf', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const b = (req.body || {}) as { pdf_b64?: string };
+    if (!b.pdf_b64) { res.status(422).json({ error: 'pdf_b64 obrigatorio' }); return; }
+    const buf = Buffer.from(b.pdf_b64, 'base64');
+    if (buf.length === 0 || buf.length > 30 * 1024 * 1024) {
+      res.status(413).json({ error: 'PDF deve ter ate 30 MB' });
+      return;
+    }
+    const parser = await import('./services/memoriais/memorialPdfParser');
+    const r = await parser.parsePlantaPdf(buf);
+    res.json({
+      metadados: r.metadados,
+      tabelas: r.tabelas,
+      produtos_inexistentes: r.produtos_inexistentes,
+      confianca: r.confianca,
+      observacoes: r.observacoes_extracao,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/memoriais/hidraulico/calcular', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/memoriais/hidraulicoCalc');
+    const r = m.calcularMemorialHidraulico(req.body as Parameters<typeof m.calcularMemorialHidraulico>[0]);
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/memoriais/:disciplina/criar', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const disc = String(req.params.disciplina);
+    if (disc !== 'hidraulico') {
+      res.status(422).json({ error: 'Fase 1 cobre apenas Hidraulico. Outras disciplinas em desenvolvimento.' });
+      return;
+    }
+    const user = (req as AuthedRequest).user;
+    const b = (req.body || {}) as Record<string, unknown>;
+    if (!b.obra_titulo || !b.obra_endereco || !b.proprietario_nome || !b.area_construida_m2) {
+      res.status(422).json({ error: 'obra_titulo, obra_endereco, proprietario_nome e area_construida_m2 sao obrigatorios' });
+      return;
+    }
+    const repo = await import('./repositories/memoriaisRepo');
+    const r = await repo.memoriaisRepo.criar({
+      disciplina: 'hidraulico',
+      obra_id: typeof b.obra_id === 'number' ? b.obra_id : null,
+      cliente_id: typeof b.cliente_id === 'number' ? b.cliente_id : null,
+      user_id: user?.sub ? Number(user.sub) : null,
+      obra_titulo: String(b.obra_titulo),
+      obra_uso: typeof b.obra_uso === 'string' ? b.obra_uso : undefined,
+      obra_endereco: String(b.obra_endereco),
+      obra_municipio: typeof b.obra_municipio === 'string' ? b.obra_municipio : undefined,
+      obra_uf: typeof b.obra_uf === 'string' ? b.obra_uf : undefined,
+      obra_cep: typeof b.obra_cep === 'string' ? b.obra_cep : null,
+      proprietario_nome: String(b.proprietario_nome),
+      proprietario_cpf_cnpj: typeof b.proprietario_cpf_cnpj === 'string' ? b.proprietario_cpf_cnpj : null,
+      area_lote_m2: typeof b.area_lote_m2 === 'number' ? b.area_lote_m2 : null,
+      area_construida_m2: Number(b.area_construida_m2),
+      num_pavimentos: typeof b.num_pavimentos === 'number' ? b.num_pavimentos : 1,
+      wizard_responses: b.wizard_responses,
+      pdf_extracted_data: b.pdf_extracted_data,
+      pdf_filename: typeof b.pdf_filename === 'string' ? b.pdf_filename : null,
+      prancha_codigo: typeof b.prancha_codigo === 'string' ? b.prancha_codigo : null,
+      trt_numero: typeof b.trt_numero === 'string' ? b.trt_numero : null,
+      trt_data: typeof b.trt_data === 'string' ? b.trt_data : null,
+    });
+    res.json({ ok: true, id: r.id, codigo: r.codigo });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/memoriais/:id(\\d+)', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const repo = await import('./repositories/memoriaisRepo');
+    const row = await repo.memoriaisRepo.buscarPorId(id);
+    if (!row) { res.status(404).json({ error: 'memorial nao encontrado' }); return; }
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/memoriais', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const repo = await import('./repositories/memoriaisRepo');
+    const items = await repo.memoriaisRepo.listar({
+      disciplina: typeof req.query.disciplina === 'string' ? req.query.disciplina as 'hidraulico' : undefined,
+      status: typeof req.query.status === 'string' ? req.query.status as 'finalizado' : undefined,
+      obra_id: typeof req.query.obra_id === 'string' ? Number(req.query.obra_id) : undefined,
+      limite: typeof req.query.limite === 'string' ? Number(req.query.limite) : undefined,
+    });
+    res.json({ items });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // v3.31.0: planta individual por quadra (DXF/DWG/PDF) — upload/download/parse.
 // Reusa /api/loteamentos/* (sem prefixo novo). Multer + magic bytes + parser DXF lazy.
 app.post(
@@ -4676,6 +4802,16 @@ app.listen(PORT, () => {
       await m.runMigrationsQuadrasPlantas();
     } catch (err) {
       console.error('[quadras-plantas-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.35.0: memoriais de calculo (memoriais_calculo + sinapi_indices seed).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-memoriais');
+      await m.runMigrationsMemoriais();
+    } catch (err) {
+      console.error('[memoriais-migrations] FALHA fatal:', err);
     }
   })();
 
