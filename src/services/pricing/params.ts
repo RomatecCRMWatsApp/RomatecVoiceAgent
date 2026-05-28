@@ -58,6 +58,34 @@ interface PricingParams {
     AVISO: string;
   };
   tjma_emolumentos_2026: { fonte: string; limite_maximo_total: number };
+  // v3.33.0: adicional de campo (insalubridade/periculosidade) — refactor com
+  // 5 cenarios fechados + 3 blocos de texto congelaveis. Substitui o wizard
+  // livre da v3.29.0.
+  adicional_campo_2026?: {
+    norma_vigente: {
+      ultima_revisao: string;
+      versao_referencia_geral: string;
+      data_snapshot: string;
+    };
+    percentuais: {
+      insalubridade: { minimo: number; medio: number; maximo: number };
+      periculosidade: { unico: number };
+    };
+    fonte_juridica_validacao?: string;
+    limite_observacao_adicional_chars?: number;
+    cenarios: Record<string, {
+      rotulo: string;
+      tipo_padrao: 'insalubridade' | 'periculosidade';
+      grau_padrao: 'minimo' | 'medio' | 'maximo' | 'unico';
+      percentual_padrao: number;
+      icone: string;
+      graus_disponiveis?: Array<'minimo' | 'medio' | 'maximo'>;
+      bloco_fundamento_legal: string;
+      bloco_enquadramento_tecnico: string;
+      bloco_enquadramento_tecnico_por_grau?: Record<string, string>;
+      bloco_justificativa_cliente: string;
+    }>;
+  };
   // v3.23.5: servicos adicionais opcionais de Georreferenciamento Rural.
   // v3.23.6: `editavel` indica que o valor_unitario pode ser editado pelo
   // usuario na UI no momento da proposta (sem afetar o default global).

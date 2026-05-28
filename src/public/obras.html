@@ -6753,6 +6753,227 @@ function lerAditivoCampoForm() {
   };
 }
 
+// v3.33.0 (= v3.27.1 do prompt): NOVO wizard estruturado de cenario.
+// Substitui o textarea livre + select(tipo, grau) por:
+//   - Select de cenario (5 opcoes fechadas)
+//   - 3 blocos: Fundamento Legal (locked) + Enquadramento + Justificativa (editaveis)
+//   - Botao "Restaurar texto padrao" por bloco
+//   - Snapshot da norma vigente exibido (auditoria)
+//
+// Bug "Falha ao calcular previa" da v3.29.0 eliminado por construcao: cenario
+// fixo nao permite combinacao invalida tipo×grau.
+async function renderAdicionalCampoFormV2(containerId, cache = null) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+  let cenarios = [];
+  try {
+    const r = await fetch('/api/adicional-campo/cenarios', { credentials: 'include' });
+    if (r.ok) { const j = await r.json(); cenarios = j.cenarios || []; }
+  } catch (_) {}
+
+  const ativo = !!cache?.ativo;
+  const cenarioSel = cache?.cenario || '';
+  const grauSel = cache?.grau || '';
+  const obsSel = cache?.observacao_adicional || '';
+
+  el.innerHTML = `
+    <fieldset class="adicional-campo-v2" role="region" aria-labelledby="adic2-titulo" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin:14px 0; background:rgba(180,83,9,0.04);">
+      <legend id="adic2-titulo" style="padding:0 8px; font-weight:600; color:#B45309; font-size:13px;">⚠️ Adicional de Insalubridade / Periculosidade (estruturado)</legend>
+
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:10px;">
+        <input type="checkbox" id="adic2Ativo" ${ativo ? 'checked' : ''}>
+        <span style="font-size:13px;">Aplicar adicional de campo (CLT art. 192-193 / NR-15 / NR-16)</span>
+      </label>
+
+      <div id="adic2Corpo" style="${ativo ? '' : 'display:none;'}">
+        <label style="display:block; font-size:12px; margin-bottom:10px;">
+          Cenário de exposição:
+          <select id="adic2Cenario" required aria-required="true" style="width:100%; margin-top:4px; padding:8px;">
+            <option value="" disabled ${!cenarioSel ? 'selected' : ''}>— Selecione o cenário —</option>
+            ${cenarios.map(c => `<option value="${esc(c.slug)}" ${c.slug === cenarioSel ? 'selected' : ''}>${c.icone} ${esc(c.rotulo)}</option>`).join('')}
+          </select>
+        </label>
+
+        <div id="adic2GrauWrap" style="display:none; margin-bottom:10px;">
+          <label style="display:block; font-size:12px;">
+            Grau (apenas Insalubridade):
+            <select id="adic2Grau" style="width:200px; margin-top:4px; padding:6px;">
+              <option value="minimo" ${grauSel === 'minimo' ? 'selected' : ''}>Mínimo (10%)</option>
+              <option value="medio"  ${grauSel === 'medio'  ? 'selected' : ''}>Médio (20%)</option>
+              <option value="maximo" ${grauSel === 'maximo' ? 'selected' : ''}>Máximo (40%)</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="adic2Percentual" aria-live="polite" style="font-size:13px; font-weight:600; color:#92400E; margin-bottom:10px;">+0%</div>
+
+        <details open style="margin-bottom:8px; border:1px solid var(--border); border-radius:4px; padding:6px;">
+          <summary style="cursor:pointer; font-size:12px; font-weight:600; color:#92400E;">📜 Fundamento Legal <span style="background:#444; color:#fff; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:600;">não-editável</span></summary>
+          <p id="adic2Bloco1" aria-readonly="true" style="font-size:12px; margin:6px 0 0; padding:6px; background:rgba(255,255,255,.04); border-radius:3px; line-height:1.5; color:var(--text);"></p>
+        </details>
+
+        <details open style="margin-bottom:8px; border:1px solid var(--border); border-radius:4px; padding:6px;">
+          <summary style="cursor:pointer; font-size:12px; font-weight:600; color:#92400E;">🔍 Enquadramento Técnico <span style="background:#0ea5e9; color:#fff; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:600;">editável</span>
+            <button type="button" id="adic2Restaurar2" hidden style="float:right; background:transparent; border:1px solid var(--border); color:var(--text-muted); padding:2px 8px; border-radius:4px; cursor:pointer; font-size:11px;">↺ Restaurar</button>
+          </summary>
+          <textarea id="adic2Bloco2" rows="6" aria-label="Bloco Enquadramento Tecnico — editavel" style="width:100%; padding:8px; font-size:12px; line-height:1.5; margin-top:6px;"></textarea>
+        </details>
+
+        <details open style="margin-bottom:8px; border:1px solid var(--border); border-radius:4px; padding:6px;">
+          <summary style="cursor:pointer; font-size:12px; font-weight:600; color:#92400E;">💬 Justificativa ao Cliente <span style="background:#0ea5e9; color:#fff; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:600;">editável</span>
+            <button type="button" id="adic2Restaurar3" hidden style="float:right; background:transparent; border:1px solid var(--border); color:var(--text-muted); padding:2px 8px; border-radius:4px; cursor:pointer; font-size:11px;">↺ Restaurar</button>
+          </summary>
+          <textarea id="adic2Bloco3" rows="5" aria-label="Bloco Justificativa Cliente — editavel" style="width:100%; padding:8px; font-size:12px; line-height:1.5; margin-top:6px;"></textarea>
+        </details>
+
+        <label style="display:block; font-size:12px; margin-bottom:8px;">
+          Observação adicional (opcional, até 500 caracteres):
+          <textarea id="adic2Obs" maxlength="500" rows="2" style="width:100%; padding:6px 8px; font-size:12px; margin-top:4px;" placeholder="Detalhes específicos do imóvel/serviço, se houver">${esc(obsSel)}</textarea>
+        </label>
+
+        <p id="adic2Norma" aria-live="polite" style="font-size:10px; color:var(--text-muted); margin:0 0 6px;">
+          Norma vigente: <span id="adic2NormaVersao">—</span> · snapshot: <span id="adic2NormaData">—</span>
+        </p>
+
+        <button type="button" id="adic2Info" style="background:transparent; border:1px solid #FCD34D; color:#92400E; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:11px;">📖 Por que isso é cobrado?</button>
+      </div>
+    </fieldset>
+  `;
+
+  // Estado interno — armazena padrao de cada bloco pra detectar customizacao + restaurar
+  el._adic2 = { padroes: { bloco2: '', bloco3: '' } };
+
+  const ativoCk = document.getElementById('adic2Ativo');
+  const corpo = document.getElementById('adic2Corpo');
+  const cenarioElSel = document.getElementById('adic2Cenario');
+  const grauWrap = document.getElementById('adic2GrauWrap');
+  const grauElSel = document.getElementById('adic2Grau');
+  const pctEl = document.getElementById('adic2Percentual');
+  const bloco1 = document.getElementById('adic2Bloco1');
+  const bloco2 = document.getElementById('adic2Bloco2');
+  const bloco3 = document.getElementById('adic2Bloco3');
+  const restaurar2 = document.getElementById('adic2Restaurar2');
+  const restaurar3 = document.getElementById('adic2Restaurar3');
+  const normaVersao = document.getElementById('adic2NormaVersao');
+  const normaData = document.getElementById('adic2NormaData');
+
+  ativoCk.addEventListener('change', () => { corpo.style.display = ativoCk.checked ? '' : 'none'; });
+
+  async function recalcular() {
+    if (!ativoCk.checked || !cenarioElSel.value) return;
+    const cenarioInfo = cenarios.find(c => c.slug === cenarioElSel.value);
+    if (!cenarioInfo) return;
+    // Mostra grau apenas se cenario aceita variacao (produtos_quimicos)
+    const aceitaGrau = Array.isArray(cenarioInfo.graus_disponiveis) && cenarioInfo.graus_disponiveis.length > 0;
+    grauWrap.style.display = aceitaGrau ? '' : 'none';
+    if (!aceitaGrau) grauElSel.value = cenarioInfo.grau_padrao;
+
+    const body = {
+      ativo: true,
+      cenario: cenarioElSel.value,
+      grau: aceitaGrau ? grauElSel.value : cenarioInfo.grau_padrao,
+    };
+    try {
+      const r = await fetch('/api/adicional-campo/calcular', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        pctEl.textContent = '⚠️ Erro ao carregar cenário';
+        pctEl.style.color = '#dc2626';
+        return;
+      }
+      const j = await r.json();
+      pctEl.textContent = `+${Number(j.percentual).toFixed(0)}%  ·  ${j.tipo === 'periculosidade' ? 'Periculosidade' : 'Insalubridade (Grau ' + j.grau + ')'}`;
+      pctEl.style.color = '#92400E';
+      bloco1.textContent = j.bloco_fundamento_legal;
+      // So sobrescreve bloco 2/3 se nao foi editado
+      const bloco2Customizado = bloco2.value.trim() && bloco2.value.trim() !== (el._adic2.padroes.bloco2 || '').trim();
+      const bloco3Customizado = bloco3.value.trim() && bloco3.value.trim() !== (el._adic2.padroes.bloco3 || '').trim();
+      if (!bloco2Customizado) bloco2.value = j.bloco_enquadramento_tecnico;
+      if (!bloco3Customizado) bloco3.value = j.bloco_justificativa_cliente;
+      el._adic2.padroes.bloco2 = j.bloco_enquadramento_tecnico;
+      el._adic2.padroes.bloco3 = j.bloco_justificativa_cliente;
+      normaVersao.textContent = j.norma_vigente_congelada.versao_referencia;
+      normaData.textContent = j.norma_vigente_congelada.data_snapshot;
+      // Botoes restaurar so aparecem quando ha customizacao
+      restaurar2.hidden = !bloco2Customizado;
+      restaurar3.hidden = !bloco3Customizado;
+    } catch (err) {
+      pctEl.textContent = '⚠️ Erro de rede';
+      pctEl.style.color = '#dc2626';
+    }
+  }
+
+  cenarioElSel.addEventListener('change', recalcular);
+  grauElSel.addEventListener('change', recalcular);
+
+  bloco2.addEventListener('input', () => {
+    const cust = bloco2.value.trim() !== (el._adic2.padroes.bloco2 || '').trim();
+    restaurar2.hidden = !cust;
+  });
+  bloco3.addEventListener('input', () => {
+    const cust = bloco3.value.trim() !== (el._adic2.padroes.bloco3 || '').trim();
+    restaurar3.hidden = !cust;
+  });
+
+  restaurar2.addEventListener('click', () => {
+    if (!confirm('Restaurar o texto padrão e perder edições atuais?')) return;
+    bloco2.value = el._adic2.padroes.bloco2;
+    restaurar2.hidden = true;
+  });
+  restaurar3.addEventListener('click', () => {
+    if (!confirm('Restaurar o texto padrão e perder edições atuais?')) return;
+    bloco3.value = el._adic2.padroes.bloco3;
+    restaurar3.hidden = true;
+  });
+
+  document.getElementById('adic2Info').addEventListener('click', () => {
+    alert('O adicional de Insalubridade ou Periculosidade NÃO é cobrança discricionária — é determinação da CLT (arts. 192-193) e das NR-15/NR-16 do MTE.\n\nA Romatec é obrigada por lei a remunerar a equipe técnica pelos riscos a que ela se expõe em campo. Esse valor é repassado ao cliente porque integra o custo legal do serviço.\n\nA não-aplicação configura infração trabalhista e expõe contratante e contratado a passivos legais.\n\nFontes: CLT art. 192-193, NR-15, NR-16, Lei 12.997/2014, Súmulas TST 47/80/364/448.');
+  });
+
+  // Restaurar do cache
+  if (ativo && cenarioSel) {
+    cenarioElSel.value = cenarioSel;
+    if (grauSel) grauElSel.value = grauSel;
+    await recalcular();
+    // Aplicar edicoes do cache APOS recalcular (que sobrescreveu com padrao)
+    if (cache?.bloco_enquadramento_tecnico_editado) {
+      bloco2.value = cache.bloco_enquadramento_tecnico_editado;
+      restaurar2.hidden = false;
+    }
+    if (cache?.bloco_justificativa_cliente_editado) {
+      bloco3.value = cache.bloco_justificativa_cliente_editado;
+      restaurar3.hidden = false;
+    }
+  }
+}
+
+// v3.33.0: leitor do estado do form v2. Retorna `null` quando inativo.
+function lerAdicionalCampoFormV2(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return null;
+  const ativo = document.getElementById('adic2Ativo')?.checked;
+  if (!ativo) return { ativo: false };
+  const cenario = document.getElementById('adic2Cenario')?.value;
+  const grau = document.getElementById('adic2Grau')?.value;
+  const bloco2 = document.getElementById('adic2Bloco2')?.value?.trim() || '';
+  const bloco3 = document.getElementById('adic2Bloco3')?.value?.trim() || '';
+  const obs = document.getElementById('adic2Obs')?.value?.trim() || '';
+  const padroes = el._adic2?.padroes || {};
+  return {
+    ativo: true,
+    cenario: cenario || undefined,
+    grau: grau || undefined,
+    // Envia editado apenas se diferente do padrao (caller decide)
+    bloco_enquadramento_tecnico_editado: (bloco2 && bloco2 !== (padroes.bloco2 || '').trim()) ? bloco2 : undefined,
+    bloco_justificativa_cliente_editado: (bloco3 && bloco3 !== (padroes.bloco3 || '').trim()) ? bloco3 : undefined,
+    observacao_adicional: obs || undefined,
+  };
+}
+
 async function loadPropostasConsultoria() {
   try {
     const r = await api('/api/propostas-consultoria?limite=200');
@@ -9107,16 +9328,12 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
     const diarias = parseInt(document.getElementById('dmDiarias').value, 10) || 1;
     return Math.round(diarias * SM_ESTIMADO * 0.42 * 100) / 100;
   }
-  renderAditivoCampoForm(subtipo, baseAditivoEstimada(), 'dmAditivoContainer', cache?.aditivo_campo);
-  // Atualiza base quando diarias muda
-  document.getElementById('dmDiarias').addEventListener('input', () => {
-    const cont = document.getElementById('dmAditivoContainer');
-    if (cont?._aditivoState) {
-      cont._aditivoState.base_calculo_sugerida = baseAditivoEstimada();
-      const habCk = document.getElementById('adcHabilitado');
-      if (habCk?.checked) habCk.dispatchEvent(new Event('change'));
-    }
-  });
+  // v3.33.0 (= v3.27.1 do prompt): novo wizard estruturado de cenario.
+  // Substituiu renderAditivoCampoForm (legado) — bug "Falha ao calcular prévia"
+  // eliminado por construcao (cenarios fixos nao geram combinacao invalida).
+  renderAdicionalCampoFormV2('dmAditivoContainer', cache?.adicional_campo);
+  // Nota: base de calculo nao depende mais de diarias — o backend aplica o
+  // percentual sobre secao_5_total. Listener de diarias NAO precisa atualizar nada aqui.
 
   function montarDadosImovel() {
     const finalidade = document.getElementById('dmFinalidade').value;
@@ -9188,8 +9405,8 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
     }
     document.getElementById('dmCliente')?.removeAttribute('aria-invalid');
     const dados = montarDadosImovel();
-    // v3.29.0: ler estado do aditivo de campo
-    const aditivo = lerAditivoCampoForm();
+    // v3.33.0 (= v3.27.1 do prompt): ler novo wizard de cenario.
+    const adicionalCampo = lerAdicionalCampoFormV2('dmAditivoContainer');
     // Cache do form pra restaurar ao voltar
     state.consultoriaFormCache = {
       subtipo, cliente_id: cli,
@@ -9198,7 +9415,7 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
       marcos_concreto: parseInt(document.getElementById('dmMarcoConcreto').value, 10) || 0,
       marcos_tubo: parseInt(document.getElementById('dmMarcoTubo').value, 10) || 0,
       marcos_madeira: parseInt(document.getElementById('dmMarcoMadeira').value, 10) || 0,
-      aditivo_campo: aditivo,
+      adicional_campo: adicionalCampo,
     };
     try {
       const r = await api('/api/propostas-consultoria/preview', {
@@ -9217,7 +9434,7 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
           dados_imovel: dados,
           endereco: document.getElementById('dmEndereco').value,
           validade_dias: dados.validade_dias,
-          aditivo_campo: aditivo,
+          adicional_campo: adicionalCampo,
         },
         resultado: {
           custos: r.custos,
@@ -10770,10 +10987,13 @@ function renderPreviewConsultoria(r, ctx) {
     btn.disabled = true; btn.textContent = 'Salvando...';
     try {
       const endereco = document.getElementById('cnsEndereco').value.trim();
-      // v3.29.0: passa aditivo_campo se o form do subtipo capturou
-      const aditivoCampo = ctx.aditivo_campo
-        || (state.consultoriaPreviewData?.ctx?.aditivo_campo)
+      // v3.33.0 (= v3.27.1): preferir adicional_campo (novo) sobre aditivo_campo (legado).
+      const adicionalCampo = ctx.adicional_campo
+        || (state.consultoriaPreviewData?.ctx?.adicional_campo)
         || null;
+      const aditivoCampoLegado = !adicionalCampo
+        ? (ctx.aditivo_campo || state.consultoriaPreviewData?.ctx?.aditivo_campo || null)
+        : null;
       const r2 = await api('/api/propostas-consultoria', {
         method: 'POST',
         body: JSON.stringify({
@@ -10781,7 +11001,8 @@ function renderPreviewConsultoria(r, ctx) {
           cliente_id: ctx.cliId,
           endereco_imovel: endereco || null,
           dados_imovel: ctx.dados_imovel,
-          aditivo_campo: aditivoCampo || undefined,
+          adicional_campo: adicionalCampo || undefined,
+          aditivo_campo: aditivoCampoLegado || undefined,
         }),
       });
 
