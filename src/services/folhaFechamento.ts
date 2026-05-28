@@ -266,6 +266,123 @@ export async function reverterPagamento(itemId: number, usuario?: string, motivo
   }
 }
 
+// ===== AUDITORIA v3.47.0 — detecta dias inconsistentes =====
+//
+// Cenario: CEO reportou que ao pagar uma quinzena nova, dias de outra
+// quinzena aparecem como pagos visualmente. Apos auditoria do backend
+// (marcarItemPago opera por WHERE id=? em folha_fechamento_itens), o
+// UPDATE de pagamento NAO pode vazar — afeta 1 item especifico.
+//
+// Esta funcao detecta dois tipos de inconsistencia:
+//
+// 1. DIAS FORA DO PERIODO: existe romatec_obra_funcionario_dias.fechamento_id=X
+//    apontando pra folha_fechamentos.id=X mas d.data esta FORA de
+//    [f.data_inicio, f.data_fim]. Indica corrupcao na criacao do fechamento.
+//
+// 2. PAGO LEGADO SOBREPONDO NOVO: dia com fechamento_id mas tambem um lote
+//    legado pago cobrindo a data. Em v3.47.0 o pago_legado foi CASE-bypassed
+//    pra dias com fechamento_id, mas auditoria mostra historico.
+//
+// Endpoint: GET /api/folha/auditar-inconsistencias?obraId=N (CEO-only)
+export interface DiaInconsistente {
+  dia_id: number;
+  data: string;
+  funcionario_id: number;
+  funcionario_nome: string | null;
+  status_pagamento: string;
+  fechamento_id: number;
+  fechamento_data_inicio: string;
+  fechamento_data_fim: string;
+  tipo_inconsistencia: 'data_fora_do_periodo' | 'lote_legado_sobreposto';
+  detalhe: string;
+}
+
+export async function auditarInconsistenciasPagamento(obraId: number): Promise<{
+  total: number;
+  dias_fora_do_periodo: DiaInconsistente[];
+  lotes_legados_sobrepostos: DiaInconsistente[];
+}> {
+  // Tipo 1: dia.data esta fora do [fechamento.data_inicio, fechamento.data_fim]
+  const [forarows] = await pool.query<RowDataPacket[]>(
+    `SELECT d.id AS dia_id, d.data, d.funcionario_id,
+            e.nome AS funcionario_nome,
+            fi.status_pagamento, d.fechamento_id,
+            f.data_inicio AS fechamento_data_inicio,
+            f.data_fim AS fechamento_data_fim
+       FROM romatec_obra_funcionario_dias d
+       JOIN folha_fechamentos f ON f.id = d.fechamento_id
+       LEFT JOIN folha_fechamento_itens fi
+         ON fi.fechamento_id = d.fechamento_id
+        AND fi.funcionario_id = d.funcionario_id
+       LEFT JOIN romatec_obra_equipe e ON e.id = d.funcionario_id
+      WHERE d.obra_id = ?
+        AND d.fechamento_id IS NOT NULL
+        AND (d.data < f.data_inicio OR d.data > f.data_fim)
+      ORDER BY d.data, d.funcionario_id`,
+    [obraId]
+  );
+
+  // Tipo 2: dia com fechamento_id E lote legado pago cobrindo a data
+  const [legadoRows] = await pool.query<RowDataPacket[]>(
+    `SELECT d.id AS dia_id, d.data, d.funcionario_id,
+            e.nome AS funcionario_nome,
+            fi.status_pagamento, d.fechamento_id,
+            f.data_inicio AS fechamento_data_inicio,
+            f.data_fim AS fechamento_data_fim,
+            l.id AS lote_id, l.periodo, l.periodo_inicio, l.periodo_fim
+       FROM romatec_obra_funcionario_dias d
+       JOIN folha_fechamentos f ON f.id = d.fechamento_id
+       LEFT JOIN folha_fechamento_itens fi
+         ON fi.fechamento_id = d.fechamento_id
+        AND fi.funcionario_id = d.funcionario_id
+       LEFT JOIN romatec_obra_equipe e ON e.id = d.funcionario_id
+       JOIN recibos_envios re ON re.membro_id = d.funcionario_id
+            AND re.status = 'pago'
+       JOIN recibos_envios_lotes l ON l.id = re.lote_id
+            AND d.data BETWEEN l.periodo_inicio AND l.periodo_fim
+      WHERE d.obra_id = ?
+        AND d.fechamento_id IS NOT NULL
+      GROUP BY d.id
+      ORDER BY d.data, d.funcionario_id`,
+    [obraId]
+  );
+
+  const mapFora = (r: Record<string, unknown>): DiaInconsistente => ({
+    dia_id: Number(r.dia_id),
+    data: String(r.data instanceof Date ? r.data.toISOString().slice(0, 10) : r.data),
+    funcionario_id: Number(r.funcionario_id),
+    funcionario_nome: r.funcionario_nome ? String(r.funcionario_nome) : null,
+    status_pagamento: String(r.status_pagamento || 'aberta'),
+    fechamento_id: Number(r.fechamento_id),
+    fechamento_data_inicio: String(r.fechamento_data_inicio instanceof Date ? r.fechamento_data_inicio.toISOString().slice(0, 10) : r.fechamento_data_inicio),
+    fechamento_data_fim: String(r.fechamento_data_fim instanceof Date ? r.fechamento_data_fim.toISOString().slice(0, 10) : r.fechamento_data_fim),
+    tipo_inconsistencia: 'data_fora_do_periodo',
+    detalhe: `Dia ${r.data} aponta pra fechamento ${r.fechamento_id} (${r.fechamento_data_inicio}-${r.fechamento_data_fim})`,
+  });
+
+  const mapLegado = (r: Record<string, unknown>): DiaInconsistente => ({
+    dia_id: Number(r.dia_id),
+    data: String(r.data instanceof Date ? r.data.toISOString().slice(0, 10) : r.data),
+    funcionario_id: Number(r.funcionario_id),
+    funcionario_nome: r.funcionario_nome ? String(r.funcionario_nome) : null,
+    status_pagamento: String(r.status_pagamento || 'aberta'),
+    fechamento_id: Number(r.fechamento_id),
+    fechamento_data_inicio: String(r.fechamento_data_inicio instanceof Date ? r.fechamento_data_inicio.toISOString().slice(0, 10) : r.fechamento_data_inicio),
+    fechamento_data_fim: String(r.fechamento_data_fim instanceof Date ? r.fechamento_data_fim.toISOString().slice(0, 10) : r.fechamento_data_fim),
+    tipo_inconsistencia: 'lote_legado_sobreposto',
+    detalhe: `Lote legado ${r.lote_id} (${r.periodo}, ${r.periodo_inicio}-${r.periodo_fim}) cobre dia com fechamento novo ${r.fechamento_id}`,
+  });
+
+  const dias_fora_do_periodo = (forarows as unknown as Array<Record<string, unknown>>).map(mapFora);
+  const lotes_legados_sobrepostos = (legadoRows as unknown as Array<Record<string, unknown>>).map(mapLegado);
+
+  return {
+    total: dias_fora_do_periodo.length + lotes_legados_sobrepostos.length,
+    dias_fora_do_periodo,
+    lotes_legados_sobrepostos,
+  };
+}
+
 // ===== LISTAGENS =====
 export async function listarPorObra(obraId: number, status?: string) {
   const params: (string | number)[] = [obraId];

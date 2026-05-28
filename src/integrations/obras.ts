@@ -1075,13 +1075,19 @@ export async function listarDiasFuncionario(input: {
   // foram migrados pra fechamento_id. Agora o campo `pago_legado` reflete:
   // existe ALGUM recibos_envios.status='pago' cujo lote.periodo cobre essa data
   // E o membro_id bate. Status final: paga > cancelada > pago_legado > aberta.
+  //
+  // v3.47.0 HARDENING: o subselect `pago_legado` agora SO' roda quando o dia
+  // NAO tem fechamento_id (sistema novo). Antes, mesmo dias com fechamento
+  // calculavam o subselect e descartavam o resultado em TS — sem efeito mas
+  // gastando CPU. Mais importante: torna EXPLICITO que sistema novo ganha
+  // SEMPRE sobre legado, prevenindo regressao se a logica de TS for refatorada.
   let sql = `
     SELECT
       d.id, d.data, d.periodo, d.valor, d.obra_id, d.observacoes,
       d.fechamento_id,
       fi.status_pagamento AS status_fechamento,
       fi.data_pagamento,
-      (
+      CASE WHEN d.fechamento_id IS NOT NULL THEN 0 ELSE (
         SELECT 1
           FROM recibos_envios e
           JOIN recibos_envios_lotes l ON l.id = e.lote_id
@@ -1089,7 +1095,7 @@ export async function listarDiasFuncionario(input: {
            AND e.status = 'pago'
            AND d.data BETWEEN l.periodo_inicio AND l.periodo_fim
          LIMIT 1
-      ) AS pago_legado
+      ) END AS pago_legado
     FROM romatec_obra_funcionario_dias d
     LEFT JOIN folha_fechamento_itens fi
       ON d.fechamento_id IS NOT NULL
