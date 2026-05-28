@@ -1047,6 +1047,7 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="galeria">📷 Galeria</button>
     <button class="tab" data-tab="proposta">Proposta</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
+    <button class="tab" data-tab="memoriais">📐 Memoriais & Quantitativos</button>
     <button class="tab" data-tab="config">⚙️ Configurações</button>
   </div>
 
@@ -1067,6 +1068,7 @@ window.forcarUpdateApp = forcarUpdate;
   </div>
 
   <div id="view-dashboard" class="view active"></div>
+  <div id="view-memoriais" class="view"></div>
   <div id="view-config" class="view"></div>
   <div id="view-obras" class="view"></div>
   <div id="view-cronograma" class="view"></div>
@@ -1649,6 +1651,8 @@ async function render() {
       laudos:  async () => { await loadLaudos(); renderLaudos(); },
       loteamentos: async () => { await loadLoteamentos(); renderLoteamentos(); },
       galeria: async () => { await renderGaleria(); },
+      // v3.35.0: Memoriais & Quantitativos (Fase 1 — Hidraulico)
+      memoriais: async () => { await renderMemoriaisQuantitativos(); },
       // v3.25.0: Configuracoes > Usuarios + Permissoes + Auditoria
       config: async () => { await renderConfiguracoes(); },
     };
@@ -22833,6 +22837,303 @@ function fmtDataBRT(d) {
   }
   if (isNaN(parsed.getTime())) return '—';
   return parsed.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+}
+
+// v3.35.0: aba Memoriais & Quantitativos — POC Fase 1 (Hidraulico).
+// Outras disciplinas ficam como cards "Em breve" ate Fases 2/3.
+async function renderMemoriaisQuantitativos() {
+  const v = document.getElementById('view-memoriais');
+  if (!v) return;
+  v.innerHTML = '<div class="card empty">Carregando…</div>';
+
+  let disciplinas = [];
+  let historico = [];
+  try {
+    const [dResp, hResp] = await Promise.all([
+      fetch('/api/memoriais/disciplinas', { credentials: 'include' }),
+      fetch('/api/memoriais?limite=50', { credentials: 'include' }),
+    ]);
+    if (dResp.ok) disciplinas = (await dResp.json()).disciplinas || [];
+    if (hResp.ok) historico = (await hResp.json()).items || [];
+  } catch (err) {
+    v.innerHTML = `<div class="card empty">Erro ao carregar: ${escape(err.message || err)}</div>`;
+    return;
+  }
+
+  const escapeHtml = (s) => String(s == null ? '' : s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+
+  const cards = disciplinas.map((d) => {
+    const corStatus = d.disponivel ? '#10b981' : '#666';
+    const fundo = d.disponivel ? 'var(--bg-elev)' : '#1a1a1a';
+    const cursor = d.disponivel ? 'pointer' : 'not-allowed';
+    const opacidade = d.disponivel ? '1' : '0.55';
+    return `<button data-mem-disc="${escapeHtml(d.slug)}" ${d.disponivel ? '' : 'disabled'}
+            aria-label="${escapeHtml(d.icone + ' ' + d.rotulo + ' — ' + d.norma + (d.disponivel ? '' : ' (em breve)'))}"
+            style="padding:18px; text-align:left; border:1px solid var(--border); border-radius:10px;
+                   background:${fundo}; opacity:${opacidade}; cursor:${cursor}; color:var(--text); min-height:120px;">
+      <div style="font-size:32px; margin-bottom:6px;">${d.icone}</div>
+      <div style="font-size:15px; font-weight:600;">${escapeHtml(d.rotulo)}</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${escapeHtml(d.norma)}</div>
+      <div style="font-size:11px; color:${corStatus}; margin-top:6px; font-weight:600;">
+        ${d.disponivel ? '● Disponível' : '◌ Em breve'}
+      </div>
+    </button>`;
+  }).join('');
+
+  const linhasHist = historico.length === 0
+    ? '<div class="card empty">Nenhum memorial gerado ainda. Comece selecionando uma disciplina acima.</div>'
+    : historico.map(h => `<div class="card">
+        <p style="margin:0; font-weight:600;">${escapeHtml(h.codigo)} · ${escapeHtml(h.obra_titulo)}</p>
+        <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">
+          📐 ${escapeHtml(h.disciplina)} · ${escapeHtml(h.proprietario_nome)} · ${escapeHtml(h.status)} · ${escapeHtml((h.created_at || '').slice(0,10))}
+        </p>
+      </div>`).join('');
+
+  v.innerHTML = `
+    <div class="card">
+      <h2 style="margin:0;">📐 Memoriais & Quantitativos</h2>
+      <p style="margin:6px 0 0; font-size:12px; color:var(--text-muted);">
+        Gere Memoriais de Cálculo + Listas de Materiais a partir de PDFs do Revit.
+        <strong>Fase 1 (v3.35.0)</strong>: Hidráulico (NBR 5626) ativo. Outras disciplinas em desenvolvimento.
+      </p>
+    </div>
+    <div class="card">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+        ${cards}
+      </div>
+    </div>
+    <div class="card">
+      <p class="section-title" style="margin:0 0 8px;">Histórico de memoriais gerados</p>
+    </div>
+    ${linhasHist}
+  `;
+
+  v.querySelectorAll('[data-mem-disc]:not([disabled])').forEach(b => b.onclick = async () => {
+    const disc = b.getAttribute('data-mem-disc');
+    if (disc !== 'hidraulico') return;
+    await abrirWizardHidraulico();
+  });
+  v.querySelectorAll('[data-mem-disc][disabled]').forEach(b => b.onclick = (e) => {
+    e.preventDefault();
+    alert('Disciplina em desenvolvimento — disponível em release futura (Fases 2 e 3).');
+  });
+}
+
+async function abrirWizardHidraulico() {
+  const v = document.getElementById('view-memoriais');
+  if (!v) return;
+  v.innerHTML = '<div class="card empty">Carregando wizard hidráulico…</div>';
+  let wizard = null;
+  try {
+    const r = await fetch('/api/memoriais/hidraulico/wizard', { credentials: 'include' });
+    if (r.ok) wizard = await r.json();
+  } catch (_) {}
+
+  v.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2 style="margin:0;">💧 Memorial Hidráulico (NBR 5626)</h2>
+        <button data-mem-voltar style="background:transparent;">← Voltar</button>
+      </div>
+      <p style="margin:6px 0 0; font-size:12px; color:var(--text-muted);">
+        Wizard estruturado pra calcular consumo diário, dimensionar reservatório e barrilete.
+      </p>
+    </div>
+    <div class="card">
+      <p style="margin:0 0 8px; font-size:13px;">📤 <strong>Passo 1 — Upload PDF da planta</strong> (opcional — extrai metadados do projeto Revit)</p>
+      <input type="file" id="memPdfUpload" accept=".pdf" style="font-size:12px;">
+      <div id="memPdfFeedback" style="margin-top:6px; font-size:11px; color:var(--text-muted);"></div>
+    </div>
+    <div class="card">
+      <p style="margin:0 0 12px; font-size:13px;">📝 <strong>Passo 2 — Dados da obra</strong></p>
+      <div style="display:grid; gap:10px;">
+        <label>Título da obra <input id="memObraTitulo" placeholder="Residência Unifamiliar Térrea" style="width:100%;"></label>
+        <label>Endereço <input id="memObraEndereco" placeholder="Loteamento ..., Quadra X, Lote Y, Açailândia/MA" style="width:100%;"></label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>Município <input id="memObraMunicipio" value="Açailândia" style="width:100%;"></label>
+          <label>UF <input id="memObraUf" value="MA" maxlength="2" style="width:100%;"></label>
+        </div>
+        <label>Proprietário <input id="memProprietario" placeholder="Nome completo" style="width:100%;"></label>
+        <label>CPF/CNPJ <input id="memCpfCnpj" placeholder="123.456.789-00" style="width:100%;"></label>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+          <label>Área construída (m²) <input id="memAreaConstr" type="number" step="0.01" style="width:100%;"></label>
+          <label>Nº pavimentos <input id="memPavimentos" type="number" min="1" value="1" style="width:100%;"></label>
+          <label>Prancha <input id="memPrancha" placeholder="PH-03" style="width:100%;"></label>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <p style="margin:0 0 12px; font-size:13px;">💧 <strong>Passo 3 — Dados hidráulicos</strong></p>
+      <div style="display:grid; gap:10px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label>Nº de pessoas <input id="memPessoas" type="number" min="1" value="4" style="width:100%;"></label>
+          <label>Fonte de alimentação
+            <select id="memFonte" style="width:100%;">
+              <option value="rede_publica">Rede pública (SAAE)</option>
+              <option value="poco_artesiano">Poço artesiano</option>
+              <option value="cisterna_bomba">Cisterna + bomba</option>
+              <option value="mista">Mista</option>
+            </select>
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <label><input id="memMaqLavar" type="checkbox" checked> Possui máquina de lavar</label>
+          <label><input id="memLimpeza" type="checkbox" checked> Possui ponto de limpeza externa</label>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <p style="margin:0 0 12px; font-size:13px;">🚿 <strong>Passo 4 — Aparelhos hidráulicos</strong> (pesos NBR 5626)</p>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px;">
+        <label>Bacia caixa acoplada <input id="ap_bacia" type="number" min="0" value="1" style="width:60px;"></label>
+        <label>Lavatório <input id="ap_lavatorio" type="number" min="0" value="2" style="width:60px;"></label>
+        <label>Chuveiro <input id="ap_chuveiro" type="number" min="0" value="1" style="width:60px;"></label>
+        <label>Ducha higiênica <input id="ap_ducha" type="number" min="0" value="1" style="width:60px;"></label>
+        <label>Pia cozinha <input id="ap_pia" type="number" min="0" value="1" style="width:60px;"></label>
+        <label>Tanque <input id="ap_tanque" type="number" min="0" value="1" style="width:60px;"></label>
+        <label>Máquina de lavar <input id="ap_maq" type="number" min="0" value="1" style="width:60px;"></label>
+        <label>Torneira geral <input id="ap_torneira" type="number" min="0" value="1" style="width:60px;"></label>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex; gap:8px;">
+        <button id="memCalcular" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
+        <button id="memSalvar" disabled>💾 Salvar memorial</button>
+      </div>
+      <div id="memResultado" style="margin-top:12px;"></div>
+    </div>
+  `;
+
+  document.querySelector('[data-mem-voltar]').onclick = () => renderMemoriaisQuantitativos();
+
+  // Upload PDF (extrai metadados pra prefill)
+  document.getElementById('memPdfUpload').addEventListener('change', async (ev) => {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    document.getElementById('memPdfFeedback').textContent = '⏳ Extraindo metadados...';
+    const buf = await file.arrayBuffer();
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    try {
+      const r = await fetch('/api/memoriais/upload-pdf', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf_b64: b64 }),
+      });
+      if (!r.ok) { document.getElementById('memPdfFeedback').textContent = '⚠️ Falha ao extrair PDF'; return; }
+      const j = await r.json();
+      // Auto-preenche campos quando possivel
+      const m = j.metadados || {};
+      if (m.proprietario) document.getElementById('memProprietario').value = m.proprietario;
+      if (m.cpf_cnpj) document.getElementById('memCpfCnpj').value = m.cpf_cnpj;
+      if (m.area_construida_m2) document.getElementById('memAreaConstr').value = m.area_construida_m2;
+      if (m.num_pavimentos) document.getElementById('memPavimentos').value = m.num_pavimentos;
+      if (m.prancha_codigo) document.getElementById('memPrancha').value = m.prancha_codigo;
+      if (m.municipio) document.getElementById('memObraMunicipio').value = m.municipio;
+      if (m.uf) document.getElementById('memObraUf').value = m.uf;
+      const conf = Math.round((j.confianca || 0) * 100);
+      const piCount = (j.produtos_inexistentes || []).length;
+      document.getElementById('memPdfFeedback').innerHTML = `
+        ✅ ${j.tabelas?.length || 0} tabela(s) detectadas, confiança ${conf}%${piCount > 0 ? ` · ⚠ ${piCount} "Produto Inexistente"` : ''}
+      `;
+    } catch (err) {
+      document.getElementById('memPdfFeedback').textContent = '⚠️ Erro: ' + (err.message || err);
+    }
+  });
+
+  let ultimoCalc = null;
+
+  document.getElementById('memCalcular').onclick = async () => {
+    const aparelhos = [
+      { tipo: 'bacia_caixa_acoplada', quantidade: parseInt(document.getElementById('ap_bacia').value) || 0 },
+      { tipo: 'lavatorio',            quantidade: parseInt(document.getElementById('ap_lavatorio').value) || 0 },
+      { tipo: 'chuveiro',             quantidade: parseInt(document.getElementById('ap_chuveiro').value) || 0 },
+      { tipo: 'ducha_higienica',      quantidade: parseInt(document.getElementById('ap_ducha').value) || 0 },
+      { tipo: 'pia_cozinha',          quantidade: parseInt(document.getElementById('ap_pia').value) || 0 },
+      { tipo: 'tanque',               quantidade: parseInt(document.getElementById('ap_tanque').value) || 0 },
+      { tipo: 'maquina_lavar',        quantidade: parseInt(document.getElementById('ap_maq').value) || 0 },
+      { tipo: 'torneira_geral',       quantidade: parseInt(document.getElementById('ap_torneira').value) || 0 },
+    ];
+    const wizard = {
+      uso_edificacao: 'Residencial unifamiliar',
+      num_pessoas: parseInt(document.getElementById('memPessoas').value) || 4,
+      num_pavimentos: parseInt(document.getElementById('memPavimentos').value) || 1,
+      area_construida_m2: parseFloat(document.getElementById('memAreaConstr').value) || 0,
+      fonte_alimentacao: document.getElementById('memFonte').value,
+      tem_aquecimento: 'eletrico',
+      tem_maquina_lavar: document.getElementById('memMaqLavar').checked,
+      tem_limpeza_externa: document.getElementById('memLimpeza').checked,
+      aparelhos,
+    };
+    try {
+      const r = await fetch('/api/memoriais/hidraulico/calcular', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(wizard),
+      });
+      if (!r.ok) { document.getElementById('memResultado').innerHTML = '<div style="color:#dc2626;">Erro ao calcular</div>'; return; }
+      const j = await r.json();
+      ultimoCalc = { wizard, output: j };
+      document.getElementById('memSalvar').disabled = false;
+      const detalhamento = j.pesos.detalhamento.map(d => `<tr><td>${d.tipo}</td><td>${d.qtd}</td><td>${d.peso_unit}</td><td>${d.peso_total}</td></tr>`).join('');
+      document.getElementById('memResultado').innerHTML = `
+        <div style="background:rgba(16,185,129,.06); border-left:3px solid #10b981; padding:12px; border-radius:6px;">
+          <p style="margin:0; font-weight:600; color:#10b981;">✅ Resultado NBR 5626</p>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-top:10px;">
+            <div><strong>Consumo diário</strong><div style="font-size:18px; color:#10b981;">${j.consumo_diario_L} L/dia</div></div>
+            <div><strong>Reservatório</strong><div style="font-size:18px; color:#10b981;">${j.reservatorio.volume_recomendado_L} L</div></div>
+            <div><strong>Σ Pesos</strong><div style="font-size:18px; color:#10b981;">${j.pesos.soma_pesos}</div></div>
+            <div><strong>Q de projeto</strong><div style="font-size:18px; color:#10b981;">${j.pesos.vazao_total_Ls} L/s</div></div>
+            <div><strong>Barrilete</strong><div style="font-size:18px; color:#10b981;">DN ${j.dimensionamento_barrilete?.DN_mm} (${j.dimensionamento_barrilete?.velocidade_ms} m/s)</div></div>
+          </div>
+          <details style="margin-top:10px;">
+            <summary style="cursor:pointer; font-size:12px;">Ver detalhamento dos pesos</summary>
+            <table style="font-size:11px; margin-top:8px; width:100%;">
+              <thead><tr><th>Aparelho</th><th>Qtd</th><th>Peso unit.</th><th>Peso total</th></tr></thead>
+              <tbody>${detalhamento}</tbody>
+            </table>
+          </details>
+        </div>
+      `;
+    } catch (err) {
+      document.getElementById('memResultado').innerHTML = '<div style="color:#dc2626;">Erro: ' + escape(err.message || err) + '</div>';
+    }
+  };
+
+  document.getElementById('memSalvar').onclick = async () => {
+    if (!ultimoCalc) return;
+    const body = {
+      obra_titulo: document.getElementById('memObraTitulo').value.trim(),
+      obra_endereco: document.getElementById('memObraEndereco').value.trim(),
+      obra_municipio: document.getElementById('memObraMunicipio').value.trim() || 'Açailândia',
+      obra_uf: document.getElementById('memObraUf').value.trim() || 'MA',
+      proprietario_nome: document.getElementById('memProprietario').value.trim(),
+      proprietario_cpf_cnpj: document.getElementById('memCpfCnpj').value.trim() || null,
+      area_construida_m2: parseFloat(document.getElementById('memAreaConstr').value) || 0,
+      num_pavimentos: parseInt(document.getElementById('memPavimentos').value) || 1,
+      prancha_codigo: document.getElementById('memPrancha').value.trim() || null,
+      wizard_responses: ultimoCalc.wizard,
+    };
+    if (!body.obra_titulo || !body.obra_endereco || !body.proprietario_nome || !body.area_construida_m2) {
+      alert('Preencha: título, endereço, proprietário e área construída');
+      return;
+    }
+    try {
+      const r = await fetch('/api/memoriais/hidraulico/criar', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (r.ok) {
+        alert(`✅ Memorial criado: ${j.codigo}\n\nPDF generator (Romatec template) será adicionado em release futura (Fase 1b).`);
+        renderMemoriaisQuantitativos();
+      } else {
+        alert('Falha: ' + (j.error || r.status));
+      }
+    } catch (err) {
+      alert('Erro: ' + (err.message || err));
+    }
+  };
 }
 
 async function renderConfiguracoes() {
