@@ -181,10 +181,16 @@
     },
     "opcionais": {
       "laudo_tecnico":        { "rotulo": "Laudo Tecnico de Demarcacao", "valor_unitario_sm_multiplicador": 1.0 },
-      "alinhamento_cerca":    { "rotulo": "Alinhamento de Cerca", "valor_unitario": 4.50, "unidade": "metro" },
+      "alinhamento_cerca":    { "rotulo": "Alinhamento de Cerca", "valor_unitario": 0.42, "unidade": "metro" },
       "croqui_assinado":      { "rotulo": "Croqui Assinado em Cartorio", "valor_unitario": 180.00 },
       "acompanhamento_obra":  { "rotulo": "Acompanhamento de Obra", "valor_unitario": 350.00, "unidade": "diaria" },
       "consultoria_juridica": { "rotulo": "Consultoria Juridica", "valor": "sob_orcamento" }
+    },
+    "laudo_tecnico_direto":   { "rotulo": "Laudo Tecnico de Demarcacao", "valor_unitario_sm_multiplicador": 1.0 },
+    "locacao_kit_gnss":       {
+      "rotulo": "Locacao de equipamentos — Kit GNSS",
+      "valor_unitario_diaria_default": 250.00,
+      "descritivo": "Receptor ComNav S6 (base); Receptor T30 Plus com laser (rover); tripe; base niveladora; bastao/bipe; coletora R80."
     },
     "minimo_garantido_sm": 2,
     "complexidade_multiplicadores": { "simples": 1.0, "media": 1.3, "alta": 1.6 },
@@ -194,6 +200,10 @@
       { "numero": 1, "rotulo": "Assinatura do contrato",      "percentual": 40 },
       { "numero": 2, "rotulo": "Entrega do trabalho de campo", "percentual": 30 },
       { "numero": 3, "rotulo": "Entrega final + TRT/CFT",      "percentual": 30 }
+    ],
+    "parcelas_2x": [
+      { "numero": 1, "rotulo": "Assinatura do contrato (sinal)", "percentual": 50 },
+      { "numero": 2, "rotulo": "Entrega final + TRT/CFT",        "percentual": 50 }
     ],
     "validade_dias_default": 15
   },

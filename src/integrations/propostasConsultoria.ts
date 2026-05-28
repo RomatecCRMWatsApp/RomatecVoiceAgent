@@ -189,8 +189,26 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     );
   } else if (subtipo === 'demarcacao_urbana' || subtipo === 'demarcacao_rural') {
     // v3.27.0: Demarcacao de Lotes (Urbana e Rural)
+    // v3.38.0: se adicional_campo (insal/peric) foi solicitado, deriva o pct
+    // e INJETA em dados_imovel antes do engine — assim o adicional entra na
+    // BASE (antes da complexidade) conforme PROP-2026-0028-R1.
+    const dadosInjetados: Record<string, unknown> = { ...input.dados_imovel };
+    if (input.adicional_campo?.ativo && input.adicional_campo.cenario) {
+      try {
+        const modAd = await import('../services/pricing/adicionalCampo');
+        const r2 = modAd.calcularAdicionalCampo({
+          ativo: true,
+          cenario: input.adicional_campo.cenario,
+          tipo: input.adicional_campo.tipo,
+          grau: input.adicional_campo.grau,
+        });
+        dadosInjetados.adicional_campo_pct = r2.percentual;
+      } catch (err) {
+        console.warn(`[demarcacao+adicional v3.38.0] falha derivar pct: ${(err as Error).message}`);
+      }
+    }
     const m = await import('../services/pricing/demarcacaoLotes');
-    const out = m.calcularDemarcacaoLotes(input.dados_imovel as unknown as InputDemarcacaoLotes);
+    const out = m.calcularDemarcacaoLotes(dadosInjetados as unknown as InputDemarcacaoLotes);
     resultado = {
       custos: adaptarDemarcacaoParaCustosCalculados(out),
       fontes: {} as FontesConsulta,
@@ -355,6 +373,10 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
   // v3.33.0 (= v3.27.1 do prompt): adicional REFACTORED com wizard de cenario.
   // Se o caller envia `adicional_campo` (novo), usa o engine v3.33.0; senao,
   // cai no fallback aditivo_campo v3.29.0 (compat retro).
+  //
+  // v3.38.0: para demarcacao_urbana/demarcacao_rural o engine ja' integrou o
+  // adicional na BASE (antes da complexidade) — nao multiplicar o total
+  // novamente aqui. Persiste apenas o snapshot (blocos juridicos / dados pro PDF).
   if (input.adicional_campo?.ativo && input.adicional_campo.cenario) {
     try {
       const mod = await import('../services/pricing/adicionalCampo');
@@ -367,15 +389,28 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
         bloco_justificativa_cliente_editado: input.adicional_campo.bloco_justificativa_cliente_editado,
         observacao_adicional: input.adicional_campo.observacao_adicional,
       });
-      // Calcula o valor monetario: percentual sobre o secao_5_total ANTES de
-      // qualquer adicional/desconto extra (snapshot do subtotal de campo).
-      const subtotalBase = round2Lib(resultado.custos.secao_5_total);
-      const valorAdicional = round2Lib(subtotalBase * r2.percentual / 100);
-      const novoTotal = round2Lib(subtotalBase + valorAdicional);
-      const custosAtualizados = {
-        ...resultado.custos,
-        secao_5_total: novoTotal,
-      };
+      const isDemarcacao = subtipo === 'demarcacao_urbana' || subtipo === 'demarcacao_rural';
+      let novoTotal: number;
+      let custosAtualizados: typeof resultado.custos;
+      let subtotalBase: number;
+      let valorAdicional: number;
+      if (isDemarcacao) {
+        // v3.38.0: engine ja integrou. Snapshot reflete os valores ja calculados.
+        novoTotal = round2Lib(resultado.custos.secao_5_total);
+        const hr = (resultado.custos as unknown as { honorarios_romatec_demarcacao?: { tecnicos_campo: number; adicional_campo: { valor: number } } }).honorarios_romatec_demarcacao;
+        subtotalBase = hr ? round2Lib(hr.tecnicos_campo) : 0;
+        valorAdicional = hr ? round2Lib(hr.adicional_campo.valor) : 0;
+        custosAtualizados = { ...resultado.custos };
+      } else {
+        // Comportamento legado: multiplica secao_5_total pelo percentual.
+        subtotalBase = round2Lib(resultado.custos.secao_5_total);
+        valorAdicional = round2Lib(subtotalBase * r2.percentual / 100);
+        novoTotal = round2Lib(subtotalBase + valorAdicional);
+        custosAtualizados = {
+          ...resultado.custos,
+          secao_5_total: novoTotal,
+        };
+      }
       (custosAtualizados as unknown as { adicional_campo: typeof r2 & { valor_aplicado: number; subtotal_base: number } }).adicional_campo = {
         ...r2,
         valor_aplicado: valorAdicional,
@@ -520,6 +555,14 @@ async function aplicarAditivoCampo(args: {
 export async function previewCustoConsultoria(input: {
   subtipo: SubtipoConsultoria;
   dados_imovel: Record<string, unknown>;
+  // v3.38.0: preview de demarcacao aceita adicional_campo para refletir
+  // o gold standard (adicional integrado na base ANTES da complexidade).
+  adicional_campo?: {
+    ativo?: boolean;
+    cenario?: string;
+    tipo?: string;
+    grau?: string;
+  };
 }) {
   const { subtipo, dados_imovel } = input;
   if (subtipo === 'averbacao_residencial' || subtipo === 'averbacao_comercial') {
@@ -609,8 +652,24 @@ export async function previewCustoConsultoria(input: {
   }
   // v3.27.0: Demarcacao de Lotes (Urbana e Rural)
   if (subtipo === 'demarcacao_urbana' || subtipo === 'demarcacao_rural') {
+    // v3.38.0: derivar adicional_campo_pct se presente, antes do engine
+    const dadosInjetados: Record<string, unknown> = { ...dados_imovel };
+    if (input.adicional_campo?.ativo && input.adicional_campo.cenario) {
+      try {
+        const modAd = await import('../services/pricing/adicionalCampo');
+        const r2 = modAd.calcularAdicionalCampo({
+          ativo: true,
+          cenario: input.adicional_campo.cenario as Parameters<typeof modAd.calcularAdicionalCampo>[0]['cenario'],
+          tipo: input.adicional_campo.tipo as Parameters<typeof modAd.calcularAdicionalCampo>[0]['tipo'],
+          grau: input.adicional_campo.grau as Parameters<typeof modAd.calcularAdicionalCampo>[0]['grau'],
+        });
+        dadosInjetados.adicional_campo_pct = r2.percentual;
+      } catch (err) {
+        console.warn(`[preview demarcacao+adicional v3.38.0] falha: ${(err as Error).message}`);
+      }
+    }
     const m = await import('../services/pricing/demarcacaoLotes');
-    const out = m.calcularDemarcacaoLotes(dados_imovel as unknown as InputDemarcacaoLotes);
+    const out = m.calcularDemarcacaoLotes(dadosInjetados as unknown as InputDemarcacaoLotes);
     const custos = adaptarDemarcacaoParaCustosCalculados(out);
     return {
       ok: true as const,
@@ -1982,15 +2041,57 @@ function renderDemarcacaoLotesBody(
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.2);
 
+  // v3.38.0: alinhamento a PROP-2026-0028-R1 (gold standard)
+  //   - Adicional de insal/peric incide sobre tecnicos_campo, integrado na base
+  //   - Kit GNSS e Laudo Tecnico aparecem como itens DIRETOS (fora da complexidade)
   const linhasHon: Array<{ label: string; valor: number; obs?: string }> = hr
-    ? [
-        { label: 'TRT/CFT — Termo de Responsabilidade Tecnica (CFT/MA)', valor: hr.trt_cft, obs: 'Tec. em Agrimensura CFT/MA n. 01209185369' },
-        { label: 'Tecnicos de campo', valor: hr.tecnicos_campo, obs: `${di.diarias_equipe || 0} diaria(s) x SM x fator CFT-MA 0,42 (Res. 12/2025)` },
-        { label: `Area do servico (${isUrbana ? 'm²' : 'hectare'})`, valor: hr.area_servico, obs: isUrbana ? `${di.area_m2 || 0} m² x valor unitario` : `${di.area_hectares || 0} ha x valor unitario` },
-        { label: 'Deslocamento', valor: hr.deslocamento, obs: `${di.km_deslocamento || 0} km x R$ 3,50/km` },
-        { label: `Multiplicador de complexidade (${di.complexidade || 'media'})`, valor: hr.subtotal_apos_complexidade - (hr.trt_cft + hr.tecnicos_campo + hr.marcos_subtotal + hr.deslocamento + hr.area_servico), obs: `x ${hr.complexidade_multiplicador}` },
-        { label: 'Assessoria (5%)', valor: hr.assessoria },
-      ]
+    ? (() => {
+        const arr: Array<{ label: string; valor: number; obs?: string }> = [
+          { label: 'TRT/CFT — Termo de Responsabilidade Tecnica (CFT/MA)', valor: hr.trt_cft, obs: 'Tec. em Agrimensura CFT/MA n. 01209185369' },
+          { label: 'Tecnicos de campo', valor: hr.tecnicos_campo, obs: `${di.diarias_equipe || 0} diaria(s) x SM x fator CFT-MA 0,42 (Res. 12/2025)` },
+        ];
+        // v3.38.0: adicional de campo (se aplicavel)
+        if (hr.adicional_campo?.aplicavel && hr.adicional_campo.valor > 0) {
+          const tipoLabel = hr.adicional_campo.pct === 30 ? 'Periculosidade' : 'Insalubridade';
+          const grauLabel = hr.adicional_campo.pct === 10 ? ' (Grau Minimo)'
+            : hr.adicional_campo.pct === 20 ? ' (Grau Medio)'
+            : hr.adicional_campo.pct === 40 ? ' (Grau Maximo)'
+            : '';
+          const norma = hr.adicional_campo.pct === 30
+            ? 'CLT art. 193 / NR-16'
+            : 'CLT art. 192 / NR-15';
+          arr.push({
+            label: `Adicional de ${tipoLabel}${grauLabel}`,
+            valor: hr.adicional_campo.valor,
+            obs: `${hr.adicional_campo.pct}% x Tecnicos de campo (${norma})`,
+          });
+        }
+        arr.push(
+          { label: `Area do servico (${isUrbana ? 'm²' : 'hectare'})`, valor: hr.area_servico, obs: isUrbana ? `${di.area_m2 || 0} m² x valor unitario` : `${di.area_hectares || 0} ha x valor unitario` },
+          { label: 'Deslocamento', valor: hr.deslocamento, obs: `${di.km_deslocamento || 0} km x R$ 3,50/km` },
+          { label: `Multiplicador de complexidade (${di.complexidade || 'media'})`, valor: hr.subtotal_apos_complexidade - (hr.trt_cft + hr.tecnicos_campo + (hr.adicional_campo?.valor || 0) + hr.marcos_subtotal + hr.deslocamento + hr.area_servico), obs: `x ${hr.complexidade_multiplicador}` },
+          { label: 'Assessoria (5%)', valor: hr.assessoria },
+        );
+        // v3.38.0: Kit GNSS (item direto)
+        if (hr.locacao_kit_gnss?.contratado && hr.locacao_kit_gnss.valor > 0) {
+          const qtd = hr.locacao_kit_gnss.qtd_diarias;
+          const diaria = hr.locacao_kit_gnss.diaria;
+          arr.push({
+            label: 'Locacao de equipamentos — Kit GNSS',
+            valor: hr.locacao_kit_gnss.valor,
+            obs: `${qtd} diaria(s) x R$ ${diaria.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${hr.locacao_kit_gnss.descritivo ? ' — ' + hr.locacao_kit_gnss.descritivo : ''}`,
+          });
+        }
+        // v3.38.0: Laudo Tecnico (item direto)
+        if (hr.laudo_tecnico_direto?.contratado && hr.laudo_tecnico_direto.valor > 0) {
+          arr.push({
+            label: 'Laudo Tecnico de Demarcacao',
+            valor: hr.laudo_tecnico_direto.valor,
+            obs: 'valor fechado (1 SM 2026)',
+          });
+        }
+        return arr;
+      })()
     : (custos.secao_3_honorarios || []).map((h) => ({ label: h.descricao, valor: Number(h.valor), obs: h.observacao }));
 
   linhasHon.forEach((h) => {
@@ -2084,7 +2185,7 @@ function renderDemarcacaoLotesBody(
   // ── 5. BOX VERDE — VALOR TOTAL ────────────────────────────────────────
   const totalRomatec = hr?.total ?? custos.honorarios_romatec?.total ?? custos.secao_5_total;
   if (doc.y > 700) doc.addPage();
-  const txtTotalNota = 'Soma de TRT/CFT + Tecnicos de campo + Marcos + Deslocamento + Area, com complexidade e assessoria. Eventuais custos de cartorio para averbacao da demarcacao NAO estao inclusos.';
+  const txtTotalNota = 'Soma de TRT/CFT + Tecnicos de campo (com adicional de insal/peric quando aplicavel) + Marcos + Deslocamento + Area, com complexidade e assessoria, mais Locacao de Kit GNSS e Laudo Tecnico de Demarcacao (itens diretos, quando contratados). Eventuais custos de cartorio para averbacao da demarcacao NAO estao inclusos.';
   const boxYT = doc.y;
   const boxAlturaT = doc.heightOfString(txtTotalNota, { width: COL_W - 24 }) + 38;
   doc.rect(COL_X_INI, boxYT, COL_W, boxAlturaT).fillAndStroke(COR_VERDE_BG, COR_VERDE_BORDA);

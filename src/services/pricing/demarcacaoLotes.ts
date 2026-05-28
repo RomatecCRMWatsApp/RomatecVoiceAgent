@@ -1,4 +1,14 @@
 // v3.27.0: motor de calculo de Demarcacao de Lotes (Urbana e Rural).
+// v3.38.0: alinha a PROP-2026-0028-R1 (gold standard aprovado pelo CEO em 2026-05-28).
+//   - Adicional de campo (insal/peric) incide APENAS sobre tecnicos_campo,
+//     integrado a base ANTES da complexidade e da assessoria (CLT 192-193/NR-15/16).
+//   - Laudo Tecnico de Demarcacao promovido a item DIRETO em honorarios
+//     (fora da complexidade/assessoria/desconto). Default 1 SM.
+//   - Locacao de Kit GNSS NOVO item direto (diaria editavel × qtd_diarias).
+//   - Suporte a 2 parcelas (50/50 — sinal + entrega final) alem do 3x (40/30/30).
+//   - Alinhamento de cerca: valor unitario default reduzido para R$ 0,42/m
+//     (config) — auto-fill = perimetro_m no frontend.
+//
 // Espelha 1:1 o padrao da v3.23.5 (Georref Rural PROP-2026-0011-R1):
 //   - TRT/CFT em linha propria (R$ 93,40 tabela CFT 2026)
 //   - Tecnicos de campo: diarias * SM * fator_diaria_tecnico (CFT-MA Res. 12/2025)
@@ -8,8 +18,7 @@
 //   - Multiplicador de complexidade (simples 1.0 / media 1.3 / alta 1.6)
 //   - Assessoria 5% sobre subtotal apos complexidade
 //   - Desconto sobre (subtotal + assessoria)
-//   - Minimo garantido 2 SM
-//   - 3 parcelas 40/30/30
+//   - Minimo garantido 2 SM (sobre core, antes dos extras diretos)
 //   - Opcionais NAO somam (secao informativa propria)
 //
 // Modulo standalone (zero deps de mysql/pdfkit/voyageai) — testavel sem arrastar
@@ -21,6 +30,7 @@
 //   - NTGIR 3a Edicao (INCRA) — codificacao de marcos com credencial do tecnico
 //   - Lei 6.766/79 (parcelamento de solo urbano) + Lei 5.868/72 (CNIR rural)
 //   - Tabela CFT 2026 — Tec. em Agrimensura CFT/MA no 01209185369
+//   - CLT (Decreto-Lei 5.452/43) art. 192 e 193 + NR-15/NR-16 do MTE
 
 import type {
   InputDemarcacaoLotes,
@@ -111,6 +121,20 @@ export function calcularDemarcacaoLotes(
   // ── 2. Tecnicos de campo ─────────────────────────────────────────────
   const tecnicos_campo = round2(input.diarias_equipe * SM * cfg.fator_diaria_tecnico);
 
+  // ── 2-bis. Adicional de campo (insal/peric) — v3.38.0 ────────────────
+  // Incide APENAS sobre tecnicos_campo, integrado a base ANTES da complexidade.
+  // CLT art. 192 (insal 10/20/40) e 193 (peric 30) — valor obrigatorio.
+  const adicional_pct = Number(input.adicional_campo_pct ?? 0);
+  if (!Number.isFinite(adicional_pct) || adicional_pct < 0 || adicional_pct > 40) {
+    throw new Error(`adicional_campo_pct invalido: ${adicional_pct} (esperado [0, 40])`);
+  }
+  const adicional_valor = round2((tecnicos_campo * adicional_pct) / 100);
+  const adicional_campo = {
+    aplicavel: adicional_pct > 0,
+    pct: adicional_pct,
+    valor: adicional_valor,
+  };
+
   // ── 3. Marcos discriminados ──────────────────────────────────────────
   const marcosOrdem: MaterialMarco[] = ['concreto', 'tubo_galvanizado', 'madeira'];
   const marcos_discriminados: { tipo: MaterialMarco; qtd: number; subtotal: number }[] = [];
@@ -144,8 +168,8 @@ export function calcularDemarcacaoLotes(
     area_servico = round2((input.area_hectares as number) * vUnit);
   }
 
-  // ── 6. Subtotal bruto ────────────────────────────────────────────────
-  const subtotal_bruto = round2(trt_cft + tecnicos_campo + marcos_subtotal + deslocamento + area_servico);
+  // ── 6. Subtotal bruto (com adicional integrado na base) ──────────────
+  const subtotal_bruto = round2(trt_cft + tecnicos_campo + adicional_valor + marcos_subtotal + deslocamento + area_servico);
 
   // ── 7. Complexidade ──────────────────────────────────────────────────
   const complexidade_multiplicador = cfg.complexidade_multiplicadores[input.complexidade];
@@ -158,42 +182,90 @@ export function calcularDemarcacaoLotes(
   const base_desconto = round2(subtotal_apos_complexidade + assessoria);
   const desconto_valor = round2((base_desconto * desconto_pct) / 100);
 
-  // ── 10. Total Romatec ────────────────────────────────────────────────
-  let total = round2(base_desconto - desconto_valor);
-
-  // ── 11. Minimo garantido ─────────────────────────────────────────────
+  // ── 10. Core Romatec (sujeito a minimo garantido) ────────────────────
+  let core = round2(base_desconto - desconto_valor);
   const minimo = round2(cfg.minimo_garantido_sm * SM);
-  const aplicouMinimo = total < minimo;
+  const aplicouMinimo = core < minimo;
   if (aplicouMinimo) {
-    total = minimo;
+    core = minimo;
   }
 
-  // Guard de fechamento (defensivo — catch bug cedo)
-  const guardSubBruto = round2(trt_cft + tecnicos_campo + marcos_subtotal + deslocamento + area_servico);
+  // ── 11. Itens diretos (fora da complexidade/assessoria/desconto) ─────
+  // v3.38.0 — laudo tecnico + locacao kit GNSS.
+  // Retrocompat: se opcionais.laudo_tecnico.contratado=true (propostas antigas)
+  // E input.laudo_tecnico_direto NAO foi passado, migra automaticamente.
+  const opcionaisRaw = input.opcionais ?? {};
+  const laudoDireto = (() => {
+    const direto = input.laudo_tecnico_direto;
+    const optLegacy = opcionaisRaw.laudo_tecnico;
+    if (direto?.contratado) {
+      const mult = direto.valor_unitario_sm_multiplicador
+        ?? cfg.laudo_tecnico_direto?.valor_unitario_sm_multiplicador
+        ?? 1.0;
+      return { contratado: true, valor: round2(mult * SM) };
+    }
+    if (optLegacy?.contratado) {
+      const mult = optLegacy.valor_unitario_sm_multiplicador
+        ?? cfg.laudo_tecnico_direto?.valor_unitario_sm_multiplicador
+        ?? 1.0;
+      return { contratado: true, valor: round2(mult * SM) };
+    }
+    return { contratado: false, valor: 0 };
+  })();
+
+  const kitGnss = (() => {
+    const kit = input.locacao_kit_gnss;
+    const cfgKit = cfg.locacao_kit_gnss;
+    const diariaDefault = cfgKit?.valor_unitario_diaria_default ?? 250.00;
+    const descritivo = cfgKit?.descritivo ?? '';
+    const qtd = Number(kit?.qtd_diarias ?? 0);
+    if (!Number.isFinite(qtd) || qtd < 0) {
+      throw new Error(`locacao_kit_gnss.qtd_diarias invalido: ${qtd} (esperado >= 0)`);
+    }
+    const diaria = Number(kit?.diaria ?? diariaDefault);
+    if (!Number.isFinite(diaria) || diaria < 0) {
+      throw new Error(`locacao_kit_gnss.diaria invalido: ${diaria} (esperado >= 0)`);
+    }
+    const contratado = qtd > 0;
+    return {
+      contratado,
+      qtd_diarias: qtd,
+      diaria: round2(diaria),
+      valor: contratado ? round2(qtd * diaria) : 0,
+      descritivo,
+    };
+  })();
+
+  // ── 12. Total = core + extras diretos ────────────────────────────────
+  const extrasDiretos = round2(laudoDireto.valor + kitGnss.valor);
+  const total = round2(core + extrasDiretos);
+
+  // Guard de fechamento
+  const guardSubBruto = round2(trt_cft + tecnicos_campo + adicional_valor + marcos_subtotal + deslocamento + area_servico);
   const guardApos = round2(guardSubBruto * complexidade_multiplicador);
   const guardComAssess = round2(guardApos + assessoria);
-  const guardFinal = round2(guardComAssess - desconto_valor);
-  if (aplicouMinimo) {
-    if (round2(total) !== round2(minimo)) {
-      throw new Error(`Guard minimo: esperado ${minimo}, obtido ${total}`);
-    }
-  } else {
-    if (round2(guardFinal) !== round2(total)) {
-      throw new Error(`Guard fechamento: esperado ${guardFinal}, obtido ${total}`);
-    }
+  const guardCore = aplicouMinimo ? minimo : round2(guardComAssess - desconto_valor);
+  const guardTotal = round2(guardCore + extrasDiretos);
+  if (round2(total) !== round2(guardTotal)) {
+    throw new Error(`Guard fechamento: esperado ${guardTotal}, obtido ${total}`);
   }
 
-  // ── Opcionais (5 linhas sempre, NAO somam ao total) ──────────────────
-  const opcionais = input.opcionais ?? {};
-  const linhasOpcionais = montarLinhasOpcionais(opcionais, SM, cfg.opcionais);
+  // ── Opcionais (4 linhas — laudo foi promovido a direto) ──────────────
+  const linhasOpcionais = montarLinhasOpcionais(opcionaisRaw, cfg.opcionais);
   const subtotalOpcionais = round2(
     linhasOpcionais
       .filter((l) => l.contratado && typeof l.valor === 'number')
       .reduce((s, l) => s + (l.valor as number), 0),
   );
 
-  // ── Parcelas 40/30/30 ────────────────────────────────────────────────
-  const parcelasCfg = cfg.parcelas;
+  // ── Parcelas (3x default ou 2x se input.num_parcelas === 2) ──────────
+  const numParcelas = input.num_parcelas === 2 ? 2 : 3;
+  const parcelasCfg = numParcelas === 2
+    ? (cfg.parcelas_2x ?? [
+        { numero: 1, rotulo: 'Assinatura do contrato (sinal)', percentual: 50 },
+        { numero: 2, rotulo: 'Entrega final + TRT/CFT',        percentual: 50 },
+      ])
+    : cfg.parcelas;
   const parcelasOut: { numero: 1 | 2 | 3; rotulo: string; valor: number; percentual: number }[] = parcelasCfg.map(
     (p, i, arr) => {
       const numero = (i + 1) as 1 | 2 | 3;
@@ -219,6 +291,7 @@ export function calcularDemarcacaoLotes(
     honorarios_romatec: {
       trt_cft,
       tecnicos_campo,
+      adicional_campo,
       marcos_discriminados,
       marcos_subtotal,
       deslocamento,
@@ -227,6 +300,8 @@ export function calcularDemarcacaoLotes(
       subtotal_apos_complexidade,
       assessoria,
       desconto_valor,
+      laudo_tecnico_direto: laudoDireto,
+      locacao_kit_gnss: kitGnss,
       total,
     },
     secao_opcionais_demarcacao: {
@@ -241,24 +316,13 @@ export function calcularDemarcacaoLotes(
 
 function montarLinhasOpcionais(
   opcionais: OpcionaisDemarcacao,
-  SM: number,
   cfgOpc: NonNullable<ReturnType<typeof getParams>['demarcacao_lotes_2026']>['opcionais'],
 ): { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean }[] {
-  // 5 linhas SEMPRE renderizadas, na ordem fixa abaixo.
+  // v3.38.0: 4 linhas SEMPRE renderizadas (laudo_tecnico foi promovido a item
+  // direto em honorarios_romatec).
   const linhas: { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean }[] = [];
 
-  // 1. Laudo Tecnico
-  {
-    const it = opcionais.laudo_tecnico;
-    const contratado = !!it?.contratado;
-    const mult = it?.valor_unitario_sm_multiplicador ?? cfgOpc.laudo_tecnico.valor_unitario_sm_multiplicador;
-    linhas.push({
-      rotulo: cfgOpc.laudo_tecnico.rotulo,
-      contratado,
-      valor: contratado ? round2(mult * SM) : 0,
-    });
-  }
-  // 2. Alinhamento de cerca
+  // 1. Alinhamento de cerca
   {
     const it = opcionais.alinhamento_cerca;
     const contratado = !!it?.contratado;
@@ -270,7 +334,7 @@ function montarLinhasOpcionais(
       valor: contratado ? round2(metros * vUnit) : 0,
     });
   }
-  // 3. Croqui assinado
+  // 2. Croqui assinado
   {
     const it = opcionais.croqui_assinado;
     const contratado = !!it?.contratado;
@@ -281,7 +345,7 @@ function montarLinhasOpcionais(
       valor: contratado ? round2(vUnit) : 0,
     });
   }
-  // 4. Acompanhamento de obra
+  // 3. Acompanhamento de obra
   {
     const it = opcionais.acompanhamento_obra;
     const contratado = !!it?.contratado;
@@ -293,7 +357,7 @@ function montarLinhasOpcionais(
       valor: contratado ? round2(diarias * vUnit) : 0,
     });
   }
-  // 5. Consultoria juridica (literal 'sob_orcamento' — NUNCA numero)
+  // 4. Consultoria juridica (literal 'sob_orcamento' — NUNCA numero)
   {
     const it = opcionais.consultoria_juridica;
     const contratado = !!it?.contratado;
