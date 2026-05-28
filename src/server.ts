@@ -2407,6 +2407,174 @@ app.post('/api/galeria/:id/enviar', requireCeoToken, async (req: Request, res: R
   }
 });
 
+// v3.31.0: planta individual por quadra (DXF/DWG/PDF) — upload/download/parse.
+// Reusa /api/loteamentos/* (sem prefixo novo). Multer + magic bytes + parser DXF lazy.
+app.post(
+  '/api/loteamentos/:lotId/quadras/:quadraId/planta/upload',
+  requireAuth,
+  (req: Request, res: Response, next: () => void) => {
+    void (async () => {
+      const m = await import('./middleware/uploadPlantaMulter');
+      m.uploadPlantaMulter(req, res, (err) => {
+        if (err) { res.status(422).json({ error: 'upload', detail: (err as Error).message }); return; }
+        next();
+      });
+    })();
+  },
+  async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthedRequest).user;
+      const lotId = Number(req.params.lotId);
+      const quadraId = Number(req.params.quadraId);
+      if (!Number.isFinite(lotId) || !Number.isFinite(quadraId)) {
+        res.status(404).json({ error: 'lotId/quadraId invalido' }); return;
+      }
+      const filesRaw = (req as Request & { files?: Record<string, Express.Multer.File[]> | Express.Multer.File[] }).files;
+      const files: Record<string, Express.Multer.File[]> = Array.isArray(filesRaw) ? {} : (filesRaw || {});
+      const formatos: Array<'dxf' | 'dwg' | 'pdf'> = ['dxf', 'dwg', 'pdf'];
+      const storage = await import('./services/quadraPlantaStorage');
+      const repo = await import('./repositories/quadrasPlantasRepo');
+      const resultados: Array<{ formato: string; status: 'ok' | 'erro'; detalhe?: string; size_bytes?: number; hash?: string }> = [];
+      let teveSucesso = false;
+
+      for (const f of formatos) {
+        const arr = files[f];
+        if (!arr || arr.length === 0) continue;
+        const file = arr[0];
+        try {
+          const r = await storage.salvarPlanta(lotId, quadraId, f, file.buffer);
+          await repo.quadrasPlantasRepo.upsertFormato({
+            loteamento_id: lotId,
+            quadra_id: quadraId,
+            formato: f,
+            snapshot: {
+              filename: file.originalname.slice(0, 240),
+              path: r.caminho_relativo,
+              size_bytes: r.size_bytes,
+              hash_sha256: r.hash_sha256,
+              uploaded_at: new Date(),
+            },
+            uploaded_by_user_id: user?.sub ? Number(user.sub) : null,
+          });
+          resultados.push({ formato: f, status: 'ok', size_bytes: r.size_bytes, hash: r.hash_sha256 });
+          teveSucesso = true;
+        } catch (err) {
+          resultados.push({ formato: f, status: 'erro', detalhe: (err as Error).message });
+        }
+      }
+
+      if (teveSucesso) await repo.quadrasPlantasRepo.marcarFlagQuadra(quadraId, true);
+
+      // Background parse do DXF (nao bloqueia resposta)
+      const dxfOk = resultados.find((r) => r.formato === 'dxf' && r.status === 'ok');
+      if (dxfOk) {
+        void (async () => {
+          try {
+            const buf = await storage.lerPlanta(lotId, quadraId, 'dxf');
+            const parser = await import('./services/quadraPlantaDxfParser');
+            const out = await parser.parsearDxfBuffer(buf);
+            await repo.quadrasPlantasRepo.atualizarParse(quadraId, {
+              parse_status: out.status,
+              num_lotes_detectados: out.num_lotes_detectados,
+              perimetro_quadra_m: out.perimetro_total_m,
+              area_total_quadra_m2: out.area_total_m2,
+              lotes_extraidos_json: out.lotes.length > 0 ? JSON.stringify(out.lotes) : null,
+              parse_error: out.mensagem ?? null,
+            });
+            console.log(`[planta-quadra] parse DXF quadra=${quadraId} status=${out.status} lotes=${out.num_lotes_detectados}`);
+          } catch (err) {
+            console.error(`[planta-quadra] parse DXF FALHOU quadra=${quadraId}:`, (err as Error).message);
+            await repo.quadrasPlantasRepo.atualizarParse(quadraId, { parse_status: 'erro', parse_error: (err as Error).message });
+          }
+        })();
+      }
+
+      res.json({ ok: teveSucesso, resultados });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  },
+);
+
+app.get('/api/loteamentos/:lotId/quadras/:quadraId/planta', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const quadraId = Number(req.params.quadraId);
+    const repo = await import('./repositories/quadrasPlantasRepo');
+    const row = await repo.quadrasPlantasRepo.findByQuadraId(quadraId);
+    if (!row) { res.status(404).json({ error: 'planta nao encontrada' }); return; }
+    res.json(row);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/loteamentos/:lotId/quadras/:quadraId/planta/:formato/download', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const lotId = Number(req.params.lotId);
+    const quadraId = Number(req.params.quadraId);
+    const formato = String(req.params.formato).toLowerCase();
+    if (!['dxf', 'dwg', 'pdf'].includes(formato)) { res.status(400).json({ error: 'formato invalido' }); return; }
+    const storage = await import('./services/quadraPlantaStorage');
+    const repo = await import('./repositories/quadrasPlantasRepo');
+    const row = await repo.quadrasPlantasRepo.findByQuadraId(quadraId);
+    if (!row) { res.status(404).json({ error: 'planta nao encontrada' }); return; }
+    const filenameCol = (row as unknown as Record<string, unknown>)[`${formato}_filename`] as string | null;
+    if (!filenameCol) { res.status(404).json({ error: `formato ${formato} nao disponivel` }); return; }
+    const buf = await storage.lerPlanta(lotId, quadraId, formato as 'dxf' | 'dwg' | 'pdf');
+    const mime = formato === 'pdf' ? 'application/pdf' : (formato === 'dxf' ? 'application/dxf' : 'application/acad');
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Disposition', `attachment; filename="${filenameCol.replace(/[^a-z0-9._-]/gi, '_')}"`);
+    res.send(buf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.delete('/api/loteamentos/:lotId/quadras/:quadraId/planta/:formato', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const lotId = Number(req.params.lotId);
+    const quadraId = Number(req.params.quadraId);
+    const formato = String(req.params.formato).toLowerCase() as 'dxf' | 'dwg' | 'pdf';
+    if (!['dxf', 'dwg', 'pdf'].includes(formato)) { res.status(400).json({ error: 'formato invalido' }); return; }
+    const storage = await import('./services/quadraPlantaStorage');
+    const repo = await import('./repositories/quadrasPlantasRepo');
+    const removed = await storage.removerPlanta(lotId, quadraId, formato);
+    await repo.quadrasPlantasRepo.limparFormato(quadraId, formato);
+    const row = await repo.quadrasPlantasRepo.findByQuadraId(quadraId);
+    const restantes = ['dxf_filename', 'dwg_filename', 'pdf_filename'].some((c) => (row as unknown as Record<string, unknown>)?.[c]);
+    if (!restantes) await repo.quadrasPlantasRepo.marcarFlagQuadra(quadraId, false);
+    res.json({ ok: true, removed });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.post('/api/loteamentos/:lotId/quadras/:quadraId/planta/parse', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const lotId = Number(req.params.lotId);
+    const quadraId = Number(req.params.quadraId);
+    const storage = await import('./services/quadraPlantaStorage');
+    const repo = await import('./repositories/quadrasPlantasRepo');
+    const parser = await import('./services/quadraPlantaDxfParser');
+    const buf = await storage.lerPlanta(lotId, quadraId, 'dxf');
+    const out = await parser.parsearDxfBuffer(buf);
+    await repo.quadrasPlantasRepo.atualizarParse(quadraId, {
+      parse_status: out.status,
+      num_lotes_detectados: out.num_lotes_detectados,
+      perimetro_quadra_m: out.perimetro_total_m,
+      area_total_quadra_m2: out.area_total_m2,
+      lotes_extraidos_json: out.lotes.length > 0 ? JSON.stringify(out.lotes) : null,
+      parse_error: out.mensagem ?? null,
+    });
+    res.json(out);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+app.get('/api/loteamentos/:lotId/quadras/:quadraId/planta/lotes-extraidos', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const quadraId = Number(req.params.quadraId);
+    const repo = await import('./repositories/quadrasPlantasRepo');
+    const row = await repo.quadrasPlantasRepo.findByQuadraId(quadraId);
+    if (!row) { res.status(404).json({ error: 'planta nao encontrada' }); return; }
+    const lotes = row.lotes_extraidos_json ? JSON.parse(row.lotes_extraidos_json) : [];
+    res.json({ parse_status: row.parse_status, num_lotes: row.num_lotes_detectados, lotes });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // v3.29.0: aditivo de campo (insalubridade/periculosidade) — endpoints de
 // catalogo + calculo. CRUD admin dos templates fica como follow-up.
 app.get('/api/aditivos-campo/configs', requireAuth, async (_req: Request, res: Response) => {
@@ -4451,6 +4619,16 @@ app.listen(PORT, () => {
       await m.runMigrationsAditivoCampo();
     } catch (err) {
       console.error('[aditivo-campo-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.31.0: planta individual por quadra (DXF/DWG/PDF).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-quadras-plantas');
+      await m.runMigrationsQuadrasPlantas();
+    } catch (err) {
+      console.error('[quadras-plantas-migrations] FALHA fatal:', err);
     }
   })();
 
