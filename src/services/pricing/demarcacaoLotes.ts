@@ -323,10 +323,11 @@ function montarLinhasOpcionais(
   opcionais: OpcionaisDemarcacao,
   cfgOpc: NonNullable<ReturnType<typeof getParams>['demarcacao_lotes_2026']>['opcionais'],
   perimetroM: number,
-): { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean; detalhe?: string }[] {
+): { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean; detalhe?: string; metros?: number; valor_unitario?: number }[] {
   // v3.38.0: 4 linhas SEMPRE renderizadas (laudo_tecnico foi promovido a item direto).
   // v3.40.0: linhas ganham campo `detalhe` opcional — regra de calculo visivel no PDF.
-  const linhas: { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean; detalhe?: string }[] = [];
+  // v3.42.0: linhas ganham metros/valor_unitario opcionais — PDF recomputa se valor=0.
+  const linhas: { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean; detalhe?: string; metros?: number; valor_unitario?: number }[] = [];
 
   // 1. Alinhamento de cerca — detalhe com a regra (Extensao × R$/m · default perimetro)
   {
@@ -346,6 +347,10 @@ function montarLinhasOpcionais(
       contratado,
       valor: contratado ? round2(metros * vUnit) : 0,
       detalhe,
+      // v3.42.0: expoe metros e valor_unitario para o PDF render conseguir
+      // recomputar caso o valor venha zerado em propostas legadas.
+      metros: contratado ? metros : 0,
+      valor_unitario: vUnit,
     });
   }
   // 2. Croqui assinado
