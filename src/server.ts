@@ -2407,6 +2407,68 @@ app.post('/api/galeria/:id/enviar', requireCeoToken, async (req: Request, res: R
   }
 });
 
+// v3.29.0: aditivo de campo (insalubridade/periculosidade) — endpoints de
+// catalogo + calculo. CRUD admin dos templates fica como follow-up.
+app.get('/api/aditivos-campo/configs', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./repositories/aditivoCampoRepo');
+    const items = await m.aditivoCampoConfigRepo.listarAtivos();
+    res.json({ items });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/aditivos-campo/configs/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) { res.status(404).json({ error: 'id invalido' }); return; }
+    const m = await import('./repositories/aditivoCampoRepo');
+    const c = await m.aditivoCampoConfigRepo.buscarPorId(id);
+    if (!c) { res.status(404).json({ error: 'config nao encontrada' }); return; }
+    res.json(c);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/aditivos-campo/calcular', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const b = (req.body || {}) as Record<string, unknown>;
+    const tipo = String(b.tipo || '');
+    const grau = String(b.grau || '');
+    if (tipo !== 'insalubridade' && tipo !== 'periculosidade') {
+      res.status(422).json({ error: 'tipo invalido' }); return;
+    }
+    if (!['minimo', 'medio', 'maximo', 'unico'].includes(grau)) {
+      res.status(422).json({ error: 'grau invalido' }); return;
+    }
+    const bc = b.base_calculo as Record<string, unknown> | undefined;
+    // Aceita tanto { base_calculo: { diarias_tecnico_valor, diarias_equipamento_valor } }
+    // quanto shortcut { base_calculo_valor } (split 50/50 — uso so pra preview rapido)
+    let dtec = 0, deq = 0;
+    if (bc && typeof bc === 'object') {
+      dtec = Number(bc.diarias_tecnico_valor) || 0;
+      deq = Number(bc.diarias_equipamento_valor) || 0;
+    } else if (typeof b.base_calculo_valor === 'number') {
+      const tot = Number(b.base_calculo_valor) || 0;
+      dtec = tot / 2;
+      deq = tot / 2;
+    }
+    const fc = await import('./services/aditivoCampoCalculator');
+    const repo = await import('./repositories/aditivoCampoRepo');
+    const r = await fc.calcularAditivoCampo({
+      tipo: tipo as 'insalubridade' | 'periculosidade',
+      grau: grau as 'minimo' | 'medio' | 'maximo' | 'unico',
+      base_calculo: { diarias_tecnico_valor: dtec, diarias_equipamento_valor: deq },
+      observacao_tecnica: typeof b.observacao_tecnica === 'string' ? b.observacao_tecnica : undefined,
+    }, repo.aditivoCampoConfigRepo);
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
 // v3.28.0: Galeria Pos-Captura — compartilhamento multi-canal + download +
 // preferences. Reusa servicos existentes (whatsapp/telegram) via injecao.
 // Validacao manual (padrao do repo — Zod nao e' usado em nenhum outro lugar).
@@ -4378,6 +4440,17 @@ app.listen(PORT, () => {
       await m.runMigrationsUserPreferences();
     } catch (err) {
       console.error('[user-preferences-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.29.0: aditivo de campo (insalubridade/periculosidade) — config + seed
+  // dos 4 templates + tabela polimorfica de vinculo com propostas.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-aditivo-campo');
+      await m.runMigrationsAditivoCampo();
+    } catch (err) {
+      console.error('[aditivo-campo-migrations] FALHA fatal:', err);
     }
   })();
 

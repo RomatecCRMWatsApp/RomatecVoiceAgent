@@ -89,6 +89,21 @@ export interface CriarPropostaConsultoriaInput {
   custos_override?: CustosCalculados;
   // v1.66.9: anexos enviados junto na criacao (Planta/Mapa em PDF/PNG/JPEG)
   anexos?: Array<{ filename: string; mimetype: string; conteudo_b64: string }>;
+  // v3.29.0: aditivo de campo (insalubridade/periculosidade) — opcional.
+  // Quando habilitado, o calculator e' chamado apos a criacao e o snapshot
+  // vai pra propostas_aditivos_campo. O valor entra na composicao no PDF.
+  aditivo_campo?: {
+    habilitado: boolean;
+    tipo: 'insalubridade' | 'periculosidade';
+    grau: 'minimo' | 'medio' | 'maximo' | 'unico';
+    observacao_tecnica?: string;
+    // Base de calculo opcional — se nao fornecida, o caller monta a partir
+    // do custos_calculados (50/50 default entre tecnico e equipamento).
+    base_calculo?: {
+      diarias_tecnico_valor: number;
+      diarias_equipamento_valor: number;
+    };
+  };
 }
 
 export interface PropostaConsultoriaRow extends RowDataPacket {
@@ -320,6 +335,36 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     console.warn(`[propostas-consultoria] falha gerar hash da #${r.insertId}: ${(err as Error).message}`);
   }
 
+  // v3.29.0: aplica aditivo de campo (insalubridade/periculosidade) se solicitado.
+  // Snapshot persistido em propostas_aditivos_campo e secao_5_total atualizado
+  // no UPDATE do custos_calculados.
+  let aditivoSnapshot: AditivoSnapshotComputado | null = null;
+  if (input.aditivo_campo?.habilitado) {
+    try {
+      aditivoSnapshot = await aplicarAditivoCampo({
+        proposta_id: r.insertId,
+        subtipo,
+        custos: resultado.custos,
+        input: input.aditivo_campo,
+      });
+      if (aditivoSnapshot) {
+        // Persiste novo total + aditivo em custos_calculados.aditivo_campo
+        const custosAtualizados = {
+          ...resultado.custos,
+          secao_5_total: round2Lib(resultado.custos.secao_5_total + aditivoSnapshot.valor_aditivo),
+        };
+        (custosAtualizados as unknown as { aditivo_campo: AditivoSnapshotComputado }).aditivo_campo = aditivoSnapshot;
+        await pool.execute(
+          `UPDATE propostas SET custos_calculados = ?, valor_total = ? WHERE id = ?`,
+          [JSON.stringify(custosAtualizados), custosAtualizados.secao_5_total, r.insertId],
+        );
+        resultado.custos = custosAtualizados;
+      }
+    } catch (err) {
+      console.warn(`[aditivo-campo] proposta ${r.insertId} FALHOU: ${(err as Error).message}`);
+    }
+  }
+
   return {
     ok: true as const,
     insertId: r.insertId,
@@ -330,7 +375,88 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     fontes_consulta: resultado.fontes,
     anexos_criados: anexosCriados,
     hash_validacao: hashValidacao,
-    message: `Proposta de Consultoria ${numero} (${subtipo}) criada. Valor R$ ${resultado.custos.secao_5_total.toFixed(2)}.${anexosCriados > 0 ? ` ${anexosCriados} anexo(s) salvos.` : ''}`,
+    aditivo_campo: aditivoSnapshot,
+    message: `Proposta de Consultoria ${numero} (${subtipo}) criada. Valor R$ ${resultado.custos.secao_5_total.toFixed(2)}.${anexosCriados > 0 ? ` ${anexosCriados} anexo(s) salvos.` : ''}${aditivoSnapshot ? ` Aditivo: +R$ ${aditivoSnapshot.valor_aditivo.toFixed(2)}.` : ''}`,
+  };
+}
+
+// v3.29.0: aditivo de campo — calcula, persiste snapshot, retorna objeto pronto
+// pro PDF. Caller atualiza secao_5_total na coluna custos_calculados.
+interface AditivoSnapshotComputado {
+  config_id: number;
+  tipo: 'insalubridade' | 'periculosidade';
+  grau: 'minimo' | 'medio' | 'maximo' | 'unico';
+  percentual: number;
+  base_calculo_descricao: string;
+  base_calculo_valor: number;
+  valor_aditivo: number;
+  descricao_curta: string;
+  fundamentacao_legal: string;
+  texto_pdf_md: string;
+  observacao_tecnica?: string;
+}
+
+async function aplicarAditivoCampo(args: {
+  proposta_id: number;
+  subtipo: SubtipoConsultoria;
+  custos: CustosCalculados;
+  input: NonNullable<CriarPropostaConsultoriaInput['aditivo_campo']>;
+}): Promise<AditivoSnapshotComputado | null> {
+  const fc = await import('../services/aditivoCampoCalculator');
+  const repoMod = await import('../repositories/aditivoCampoRepo');
+
+  // Base de calculo: se o caller forneceu, usa; senao, deriva do custos
+  // (procura linha tipo "tecnicos" no secao_3_honorarios).
+  let dtec = args.input.base_calculo?.diarias_tecnico_valor ?? 0;
+  let deq = args.input.base_calculo?.diarias_equipamento_valor ?? 0;
+  if (dtec === 0 && deq === 0) {
+    const linhasHon = args.custos.secao_3_honorarios || [];
+    const linhaTec = linhasHon.find((h) =>
+      /tecnico|tecnicos\s+de\s+campo|campo|levantamento|honorarios\s+tecnicos/i.test(h.descricao),
+    );
+    if (linhaTec) {
+      dtec = Number(linhaTec.valor) || 0;
+    }
+    // Sem linha de equipamento explicita; assume 0 (ou usar 50/50 split — opcao do caller)
+  }
+  if (dtec === 0 && deq === 0) {
+    console.warn(`[aditivo-campo] proposta ${args.proposta_id}: base de calculo zerada, pulando`);
+    return null;
+  }
+
+  const r = await fc.calcularAditivoCampo({
+    tipo: args.input.tipo,
+    grau: args.input.grau,
+    base_calculo: { diarias_tecnico_valor: dtec, diarias_equipamento_valor: deq },
+    observacao_tecnica: args.input.observacao_tecnica,
+  }, repoMod.aditivoCampoConfigRepo);
+
+  await repoMod.propostasAditivosCampoRepo.upsert({
+    proposta_tipo: args.subtipo,
+    proposta_id: args.proposta_id,
+    aditivo_config_id: r.config_id,
+    tipo: r.tipo,
+    grau: r.grau,
+    percentual_aplicado: r.percentual,
+    base_calculo_descricao: r.base_calculo_descricao,
+    base_calculo_valor: r.base_calculo_valor,
+    valor_aditivo: r.valor_aditivo,
+    texto_pdf_md: r.texto_pdf_md,
+    observacao_tecnica: args.input.observacao_tecnica?.trim() || null,
+  });
+
+  return {
+    config_id: r.config_id,
+    tipo: r.tipo,
+    grau: r.grau,
+    percentual: r.percentual,
+    base_calculo_descricao: r.base_calculo_descricao,
+    base_calculo_valor: r.base_calculo_valor,
+    valor_aditivo: r.valor_aditivo,
+    descricao_curta: r.descricao_curta,
+    fundamentacao_legal: r.fundamentacao_legal,
+    texto_pdf_md: r.texto_pdf_md,
+    observacao_tecnica: args.input.observacao_tecnica?.trim() || undefined,
   };
 }
 
@@ -1391,6 +1517,117 @@ function renderAvisoDRL(
   doc.font('Helvetica').fillColor('#111');
 }
 
+// v3.29.0: bloco amber com aviso de aditivo de campo (insalubridade/periculosidade).
+// Renderizado no fim do body, ANTES do QR + hash, em todos os subtipos.
+// Markdown parser minimalista (sem dep externa): parser linha-a-linha cobrindo
+// `## titulo`, `**negrito**`, `- bullet` e paragrafos.
+function renderAditivoCampoBody(
+  doc: PDFKit.PDFDocument,
+  snap: AditivoSnapshotComputado,
+  colX: number,
+  colW: number,
+): void {
+  const COR_AMBER_BORDA = '#B45309';     // amber-700
+  const COR_AMBER_BG = '#FEF3C7';        // amber-100
+  const COR_AMBER_TITULO = '#92400E';    // amber-900
+  const PADDING = 12;
+
+  // Pre-render: calcula altura aproximada (linhas + paragrafos)
+  // Como o markdown e' arbitrario, estima por chars/linha + bullets.
+  const linhas = snap.texto_pdf_md.split('\n');
+  doc.fontSize(9).font('Helvetica');
+  let alturaEstimada = 60; // titulo + padding + rodape legal
+  for (const ln of linhas) {
+    if (!ln.trim()) { alturaEstimada += 4; continue; }
+    const limpo = ln
+      .replace(/^##\s+/, '')
+      .replace(/^[-*]\s+/, '• ')
+      .replace(/\*\*(.+?)\*\*/g, '$1');
+    alturaEstimada += doc.heightOfString(limpo, { width: colW - 2 * PADDING }) + 2;
+  }
+
+  if (doc.y + alturaEstimada + 16 > doc.page.height - doc.page.margins.bottom - 80) {
+    doc.addPage();
+  }
+
+  const startY = doc.y;
+  // Box amber
+  doc.save()
+     .roundedRect(colX, startY, colW, alturaEstimada, 6)
+     .lineWidth(1.2)
+     .fillAndStroke(COR_AMBER_BG, COR_AMBER_BORDA);
+  doc.restore();
+
+  doc.x = colX + PADDING;
+  doc.y = startY + PADDING;
+
+  // Titulo
+  doc.fontSize(11).fillColor(COR_AMBER_TITULO).font('Helvetica-Bold');
+  doc.text(`⚠ ${snap.descricao_curta.toUpperCase()}`, { width: colW - 2 * PADDING, lineBreak: true });
+  doc.moveDown(0.3);
+
+  // Linha do valor
+  doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold');
+  doc.text(
+    `Valor aplicado: R$ ${snap.valor_aditivo.toFixed(2)}  ·  ${snap.percentual.toFixed(0)}% sobre R$ ${snap.base_calculo_valor.toFixed(2)}  (${snap.base_calculo_descricao})`,
+    { width: colW - 2 * PADDING },
+  );
+  doc.moveDown(0.4);
+
+  // Render markdown linha a linha
+  doc.fontSize(8.5).fillColor('#111').font('Helvetica');
+  for (const ln of linhas) {
+    if (!ln.trim()) { doc.moveDown(0.25); continue; }
+    let texto = ln;
+    let estilo: 'titulo' | 'bullet' | 'paragrafo' = 'paragrafo';
+    if (/^##\s+/.test(texto)) {
+      texto = texto.replace(/^##\s+/, '');
+      estilo = 'titulo';
+    } else if (/^[-*]\s+/.test(texto)) {
+      texto = '  • ' + texto.replace(/^[-*]\s+/, '');
+      estilo = 'bullet';
+    }
+
+    if (estilo === 'titulo') {
+      // ja temos titulo principal — usa subtitulo
+      doc.fontSize(9.5).fillColor(COR_AMBER_TITULO).font('Helvetica-Bold');
+      const plain = texto.replace(/\*\*(.+?)\*\*/g, '$1');
+      doc.text(plain, { width: colW - 2 * PADDING });
+      doc.fontSize(8.5).fillColor('#111').font('Helvetica');
+      doc.moveDown(0.2);
+      continue;
+    }
+
+    // Tokenize bold inline: split por `**...**`
+    const tokens = texto.split(/(\*\*[^*]+\*\*)/);
+    doc.x = colX + PADDING;
+    const segmentos = tokens.filter((t) => t.length > 0);
+    segmentos.forEach((seg, i) => {
+      const isLast = i === segmentos.length - 1;
+      const bold = /^\*\*[^*]+\*\*$/.test(seg);
+      const limpo = bold ? seg.slice(2, -2) : seg;
+      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica');
+      doc.text(limpo, {
+        continued: !isLast,
+        width: colW - 2 * PADDING,
+      });
+    });
+    doc.font('Helvetica');
+    doc.moveDown(0.15);
+  }
+
+  // Rodape legal
+  doc.moveDown(0.3);
+  doc.fontSize(7.5).fillColor('#6B7280').font('Helvetica-Oblique');
+  doc.text(`Fundamentação legal: ${snap.fundamentacao_legal}`, {
+    width: colW - 2 * PADDING, align: 'left',
+  });
+
+  doc.font('Helvetica').fillColor('#111');
+  doc.y = startY + alturaEstimada + 12;
+  doc.x = colX;
+}
+
 // v3.27.0: render do corpo do PDF de Demarcacao de Lotes (Urbana e Rural).
 // Espelha o layout aprovado da v3.23.5 (Georref Rural), com 2 secoes extras:
 //   - 4-bis: Marcos Discriminados (tabela tipo x qtd x valor unit x subtotal)
@@ -2428,6 +2665,19 @@ export async function gerarPdfPropostaConsultoria(
     doc.fontSize(6.5).fillColor('#666').font('Helvetica')
        .text(`Cert: ${signatureMeta.issuer_cn || '—'} · Válido até ${validadeFmt} · Validar em validar.iti.gov.br`,
              boxX + 6, cy + 42, { width: boxW - 12, align: 'center', lineBreak: false });
+  }
+
+  // v3.29.0: aditivo de campo (insalubridade/periculosidade) — bloco amber
+  // com texto explicativo. Renderizado SO se houver snapshot no custos_calculados.
+  // Caller responsavel por garantir que `aditivo_campo` esta presente quando
+  // habilitado (criarPropostaConsultoria escreve em custos_calculados.aditivo_campo).
+  try {
+    const aditivoSnap = (custos as unknown as { aditivo_campo?: AditivoSnapshotComputado }).aditivo_campo;
+    if (aditivoSnap) {
+      renderAditivoCampoBody(doc, aditivoSnap, 48, 499);
+    }
+  } catch (err) {
+    console.warn(`[propostas-consultoria-pdf] falha aditivo: ${(err as Error).message}`);
   }
 
   // v3.23.7: QR Code + hash de autenticidade renderizados RELATIVO a doc.y, garantindo

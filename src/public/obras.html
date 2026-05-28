@@ -6565,6 +6565,126 @@ const SUBTIPOS_CONSULTORIA = [
 
 const SUBTIPO_LABEL_FRONT = Object.fromEntries(SUBTIPOS_CONSULTORIA.map(s => [s.slug, s.nome]));
 
+// v3.29.0: defaults sugeridos do aditivo de campo por subtipo (espelha
+// src/services/aditivoCampoDefaults.ts no backend).
+const ADITIVO_DEFAULTS_FRONT = {
+  demarcacao_rural:          { habilitado: true,  tipo: 'insalubridade', grau: 'medio' },
+  georreferenciamento_rural: { habilitado: true,  tipo: 'insalubridade', grau: 'medio' },
+  demarcacao_urbana:         { habilitado: true,  tipo: 'insalubridade', grau: 'minimo' },
+  averbacao_residencial:     { habilitado: true,  tipo: 'insalubridade', grau: 'minimo' },
+  averbacao_comercial:       { habilitado: true,  tipo: 'insalubridade', grau: 'minimo' },
+  desmembramento:            { habilitado: true,  tipo: 'insalubridade', grau: 'minimo' },
+  remembramento:             { habilitado: true,  tipo: 'insalubridade', grau: 'minimo' },
+  retificacao_area:          { habilitado: true,  tipo: 'insalubridade', grau: 'minimo' },
+  avaliacao_ptam:            { habilitado: false, tipo: 'insalubridade', grau: 'minimo' },
+  projeto_executivo:         { habilitado: false, tipo: 'insalubridade', grau: 'minimo' },
+};
+
+// v3.29.0: renderiza bloco de aditivo de campo dentro de QUALQUER form de
+// proposta. O estado e' lido depois via lerAditivoCampoForm(containerId).
+function renderAditivoCampoForm(subtipo, baseCalculoSugerida, containerId, cache = null) {
+  const def = ADITIVO_DEFAULTS_FRONT[subtipo] || { habilitado: false, tipo: 'insalubridade', grau: 'minimo' };
+  const cur = cache || def;
+  const habilitado = !!cur.habilitado;
+  const tipo = cur.tipo || 'insalubridade';
+  const grau = cur.grau || 'minimo';
+  const obs = cur.observacao_tecnica || '';
+  const esc = (s) => String(s == null ? '' : s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `
+    <fieldset class="aditivo-campo" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin:14px 0; background:rgba(180,83,9,0.04);">
+      <legend style="padding:0 8px; font-weight:600; color:#B45309; font-size:13px;">⚠️ Adicional de Insalubridade / Periculosidade</legend>
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:8px;">
+        <input type="checkbox" id="adcHabilitado" ${habilitado ? 'checked' : ''}>
+        <span style="font-size:13px;">Aplicar adicional de campo (CLT art. 192-193 / NR-15 / NR-16)</span>
+      </label>
+      <div id="adcCorpo" style="${habilitado ? '' : 'display:none;'}">
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+          <label style="font-size:13px;">Tipo:
+            <select id="adcTipo" style="margin-left:4px;">
+              <option value="insalubridade" ${tipo==='insalubridade'?'selected':''}>Insalubridade</option>
+              <option value="periculosidade" ${tipo==='periculosidade'?'selected':''}>Periculosidade</option>
+            </select>
+          </label>
+          <label id="adcGrauLabel" style="font-size:13px;${tipo==='periculosidade'?'display:none;':''}">Grau:
+            <select id="adcGrau" style="margin-left:4px;">
+              <option value="minimo" ${grau==='minimo'?'selected':''}>Mínimo (10%)</option>
+              <option value="medio"  ${grau==='medio'?'selected':''}>Médio (20%) — recomendado p/ mata</option>
+              <option value="maximo" ${grau==='maximo'?'selected':''}>Máximo (40%)</option>
+            </select>
+          </label>
+        </div>
+        <div id="adcPrevia" style="font-size:12px; background:#FEF3C7; border:1px solid #FCD34D; padding:8px 10px; border-radius:6px; color:#92400E; margin-bottom:8px;">Calculando...</div>
+        <label style="display:block; font-size:12px; margin-bottom:8px;">
+          Observação técnica (opcional, até 500 caracteres):
+          <textarea id="adcObs" maxlength="500" rows="2" style="width:100%; padding:6px 8px; font-size:12px; margin-top:4px;" placeholder="Ex: Imóvel com 60% de mata nativa, presença documentada de animais peçonhentos">${esc(obs)}</textarea>
+        </label>
+        <button type="button" id="adcVerTexto" style="background:transparent; border:1px solid #FCD34D; color:#92400E; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:11px;">ℹ️ Por que isso é cobrado?</button>
+        <div id="adcTextoExpandido" style="display:none; margin-top:8px; padding:10px; background:#FFF7ED; border-left:3px solid #B45309; font-size:11px; line-height:1.5; color:#451A03; max-height:300px; overflow-y:auto; white-space:pre-wrap;"></div>
+      </div>
+    </fieldset>
+  `;
+
+  const tipoSel = document.getElementById('adcTipo');
+  const grauSel = document.getElementById('adcGrau');
+  const grauLabel = document.getElementById('adcGrauLabel');
+  const habCk = document.getElementById('adcHabilitado');
+  const corpo = document.getElementById('adcCorpo');
+  const previaEl = document.getElementById('adcPrevia');
+  const verTextoBtn = document.getElementById('adcVerTexto');
+  const textoEl = document.getElementById('adcTextoExpandido');
+  el._aditivoState = { base_calculo_sugerida: Number(baseCalculoSugerida) || 0 };
+
+  async function recalc() {
+    if (!habCk.checked) { previaEl.textContent = 'Adicional desligado.'; return; }
+    const tp = tipoSel.value;
+    let gr = grauSel.value;
+    if (tp === 'periculosidade') gr = 'unico';
+    try {
+      const r = await fetch('/api/aditivos-campo/calcular', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: tp, grau: gr, base_calculo_valor: el._aditivoState.base_calculo_sugerida }),
+      });
+      if (!r.ok) { previaEl.textContent = 'Falha ao calcular prévia.'; previaEl.style.color = '#991B1B'; return; }
+      const j = await r.json();
+      previaEl.style.color = '#92400E';
+      previaEl.innerHTML = `<strong>Valor do adicional: R$ ${Number(j.valor_aditivo).toFixed(2)}</strong> <span style="opacity:.7;">(${Number(j.percentual).toFixed(0)}% sobre R$ ${Number(j.base_calculo_valor).toFixed(2)} — ${j.base_calculo_descricao})</span>`;
+      textoEl.textContent = j.texto_pdf_md;
+    } catch (err) {
+      previaEl.textContent = 'Erro de rede ao calcular prévia.'; previaEl.style.color = '#991B1B';
+    }
+  }
+  habCk.addEventListener('change', () => { corpo.style.display = habCk.checked ? '' : 'none'; if (habCk.checked) recalc(); });
+  tipoSel.addEventListener('change', () => {
+    grauLabel.style.display = tipoSel.value === 'periculosidade' ? 'none' : '';
+    if (tipoSel.value === 'periculosidade') grauSel.value = 'unico';
+    else if (grauSel.value === 'unico') grauSel.value = 'medio';
+    recalc();
+  });
+  grauSel.addEventListener('change', recalc);
+  verTextoBtn.addEventListener('click', () => { textoEl.style.display = textoEl.style.display === 'none' ? 'block' : 'none'; });
+  if (habilitado) recalc();
+}
+
+function lerAditivoCampoForm() {
+  const habCk = document.getElementById('adcHabilitado');
+  if (!habCk || !habCk.checked) return null;
+  const tipoSel = document.getElementById('adcTipo');
+  const grauSel = document.getElementById('adcGrau');
+  const obsEl = document.getElementById('adcObs');
+  let grau = grauSel?.value || 'minimo';
+  if (tipoSel?.value === 'periculosidade') grau = 'unico';
+  return {
+    habilitado: true,
+    tipo: tipoSel?.value || 'insalubridade',
+    grau,
+    observacao_tecnica: (obsEl?.value || '').trim() || undefined,
+  };
+}
+
 async function loadPropostasConsultoria() {
   try {
     const r = await api('/api/propostas-consultoria?limite=200');
@@ -8729,6 +8849,9 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
           Esta proposta receberá códigos FQNS-V (vértices), FQNS-M-CC (concreto), FQNS-M-TG (tubo) e FQNS-P-MD (madeira) ao ser enviada. Códigos definitivos aparecerão no PDF após envio.
         </div>
 
+        <!-- v3.29.0: aditivo de campo (insalubridade/periculosidade) -->
+        <div id="dmAditivoContainer"></div>
+
         <div style="display:flex; gap:6px; margin-top:12px;">
           <button id="dmPreview" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
           <button class="btn-secondary" id="dmCancelar">Cancelar</button>
@@ -8789,6 +8912,25 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
     document.getElementById(id).addEventListener('change', recalcMarcosCheck);
   });
   recalcMarcosCheck();
+
+  // v3.29.0: aditivo de campo — base estimada inicial = diarias × ~SM × 0.42
+  // (espelho do calculo de tecnicos_campo em demarcacaoLotes.ts). Sera
+  // recalculada no submit pelo backend a partir do custos final.
+  const SM_ESTIMADO = 1621; // SM 2026 — mesmo valor do pricing-params
+  function baseAditivoEstimada() {
+    const diarias = parseInt(document.getElementById('dmDiarias').value, 10) || 1;
+    return Math.round(diarias * SM_ESTIMADO * 0.42 * 100) / 100;
+  }
+  renderAditivoCampoForm(subtipo, baseAditivoEstimada(), 'dmAditivoContainer', cache?.aditivo_campo);
+  // Atualiza base quando diarias muda
+  document.getElementById('dmDiarias').addEventListener('input', () => {
+    const cont = document.getElementById('dmAditivoContainer');
+    if (cont?._aditivoState) {
+      cont._aditivoState.base_calculo_sugerida = baseAditivoEstimada();
+      const habCk = document.getElementById('adcHabilitado');
+      if (habCk?.checked) habCk.dispatchEvent(new Event('change'));
+    }
+  });
 
   function montarDadosImovel() {
     const finalidade = document.getElementById('dmFinalidade').value;
@@ -8851,6 +8993,8 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
     const cli = document.getElementById('dmCliente').value;
     if (!cli) { alert('Selecione um cliente'); return; }
     const dados = montarDadosImovel();
+    // v3.29.0: ler estado do aditivo de campo
+    const aditivo = lerAditivoCampoForm();
     // Cache do form pra restaurar ao voltar
     state.consultoriaFormCache = {
       subtipo, cliente_id: cli,
@@ -8859,6 +9003,7 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
       marcos_concreto: parseInt(document.getElementById('dmMarcoConcreto').value, 10) || 0,
       marcos_tubo: parseInt(document.getElementById('dmMarcoTubo').value, 10) || 0,
       marcos_madeira: parseInt(document.getElementById('dmMarcoMadeira').value, 10) || 0,
+      aditivo_campo: aditivo,
     };
     try {
       const r = await api('/api/propostas-consultoria/preview', {
@@ -8873,6 +9018,7 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
           endereco_imovel: document.getElementById('dmEndereco').value,
           dados_imovel: dados,
           validade_dias: dados.validade_dias,
+          aditivo_campo: aditivo,
         },
         resultado: {
           custos: r.custos,
@@ -10425,6 +10571,10 @@ function renderPreviewConsultoria(r, ctx) {
     btn.disabled = true; btn.textContent = 'Salvando...';
     try {
       const endereco = document.getElementById('cnsEndereco').value.trim();
+      // v3.29.0: passa aditivo_campo se o form do subtipo capturou
+      const aditivoCampo = ctx.aditivo_campo
+        || (state.consultoriaPreviewData?.ctx?.aditivo_campo)
+        || null;
       const r2 = await api('/api/propostas-consultoria', {
         method: 'POST',
         body: JSON.stringify({
@@ -10432,6 +10582,7 @@ function renderPreviewConsultoria(r, ctx) {
           cliente_id: ctx.cliId,
           endereco_imovel: endereco || null,
           dados_imovel: ctx.dados_imovel,
+          aditivo_campo: aditivoCampo || undefined,
         }),
       });
 
