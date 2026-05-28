@@ -4142,6 +4142,17 @@ app.listen(PORT, () => {
     }
   })();
 
+  // v3.27.0: credencial INCRA do tecnico (FQNS prefixo + contadores vitalicios).
+  // Migration idempotente em users (auth SaaS) — ZERO ALTER em propostas.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-usuarios-credencial-incra');
+      await m.runMigrationsUsuariosCredencialIncra();
+    } catch (err) {
+      console.error('[MigrationUsuariosCredencial] FALHA fatal:', err);
+    }
+  })();
+
   // v3.17.0: tabela laudos_demarcacao_arquivos (anexos vetoriais DXF/DWG/KML)
   // + seeds de configurações de upload/download em `configuracoes`.
   void (async () => {

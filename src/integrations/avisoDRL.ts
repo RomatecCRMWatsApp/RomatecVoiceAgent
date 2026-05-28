@@ -15,6 +15,24 @@ export type FinalidadeGeorrefDRL =
   | 'REMEMBRAMENTO'
   | 'RETIFICACAO';
 
+// v3.27.0: finalidades de Demarcacao de Lotes (Urbana e Rural)
+export type FinalidadeDemarcacaoDRL =
+  | 'demarcacao_inicial'
+  | 'redemarcacao'
+  | 'subdivisao_lote'
+  | 'piqueteamento_apenas';
+
+export type FinalidadeAvisoDRL = FinalidadeGeorrefDRL | FinalidadeDemarcacaoDRL;
+
+function isFinalidadeDemarcacao(f: FinalidadeAvisoDRL): f is FinalidadeDemarcacaoDRL {
+  return (
+    f === 'demarcacao_inicial' ||
+    f === 'redemarcacao' ||
+    f === 'subdivisao_lote' ||
+    f === 'piqueteamento_apenas'
+  );
+}
+
 export type AvisoDRLFragmento = {
   text: string;
   bold?: boolean;
@@ -32,7 +50,12 @@ export type AvisoDRLBloco = {
   paragrafos: AvisoDRLParagrafo[];
 };
 
-export function montarAvisoDRL(finalidade: FinalidadeGeorrefDRL): AvisoDRLBloco {
+export function montarAvisoDRL(finalidade: FinalidadeAvisoDRL): AvisoDRLBloco {
+  // v3.27.0: ramo separado para finalidades de Demarcacao de Lotes
+  if (isFinalidadeDemarcacao(finalidade)) {
+    return montarAvisoDRLDemarcacao(finalidade);
+  }
+
   const paragrafos: AvisoDRLParagrafo[] = [
     {
       fragmentos: [
@@ -85,6 +108,56 @@ export function montarAvisoDRL(finalidade: FinalidadeGeorrefDRL): AvisoDRLBloco 
     paragrafos.push({
       fragmentos: [
         { text: 'Caso o proprietario deseje contratar a coleta das anuencias como servico adicional, consultar o item 6.4 desta proposta (Coleta de anuencia dos confrontantes — R$ 150,00 por confrontante).' },
+      ],
+    });
+  }
+
+  return {
+    titulo: 'RESPONSABILIDADE DO PROPRIETARIO — DRL (DECLARACAO DE RESPEITO DE LIMITE)',
+    paragrafos,
+  };
+}
+
+// v3.27.0: aviso DRL adaptado para servico de Demarcacao de Lotes (Urbana e Rural).
+// Texto base de 3 paragrafos para todas as finalidades. Reforco SO em
+// subdivisao_lote (impacto critico: sem DRL nao abre matriculas das fracoes).
+function montarAvisoDRLDemarcacao(finalidade: FinalidadeDemarcacaoDRL): AvisoDRLBloco {
+  const paragrafos: AvisoDRLParagrafo[] = [
+    {
+      fragmentos: [
+        { text: 'Em qualquer trabalho de demarcacao fisica de lote, a coleta de Declaracoes de Respeito de Limite (DRLs) dos confrontantes e ' },
+        { text: 'OBRIGACAO LEGAL E EXCLUSIVA', bold: true, destaque: true },
+        { text: ' do proprietario, conforme Lei no 10.267/2001, NTGIR 3a Ed. (INCRA) e Provimento CNJ no 65/2017.' },
+      ],
+    },
+    {
+      fragmentos: [
+        { text: 'A Romatec ' },
+        { text: 'GERA', bold: true },
+        { text: ' os documentos tecnicos (planta, memorial, croqui), mas ' },
+        { text: 'NAO COLETA', bold: true, destaque: true },
+        { text: ' as DRLs nem reconhece firma — esse e ato pessoal do proprietario perante cartorio.' },
+      ],
+    },
+    {
+      fragmentos: [
+        { text: 'Sem DRL com ' },
+        { text: 'RECONHECIMENTO DE FIRMA EM CARTORIO', bold: true, destaque: true },
+        { text: ' de todos os confrontantes, o cartorio de imoveis ' },
+        { text: 'NAO AVERBA', bold: true, destaque: true },
+        { text: ' a demarcacao na matricula, mesmo apos instalacao fisica dos marcos.' },
+      ],
+    },
+  ];
+
+  if (finalidade === 'subdivisao_lote') {
+    paragrafos.push({
+      reforco: true,
+      fragmentos: [
+        { text: 'ATENCAO REFORCADA — SUBDIVISAO DE LOTE:', bold: true, destaque: true },
+        { text: ' ausencia de DRL impede a ' },
+        { text: 'abertura de novas matriculas', bold: true },
+        { text: ' para as fracoes resultantes, mesmo que o desmembramento tenha sido aprovado pela Prefeitura.' },
       ],
     });
   }
