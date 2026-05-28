@@ -7243,6 +7243,7 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
         return alert('Subtipo da proposta ausente — não é possível editar.');
       }
       // v3.23.0: Editar habilitado para todos os subtipos com form implementado.
+      // v3.42.0: + demarcacao_urbana e demarcacao_rural (form ativo desde v3.27.0).
       const SUBTIPOS_EDITAVEIS = new Set([
         'averbacao_residencial',
         'averbacao_comercial',
@@ -7252,6 +7253,8 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
         'retificacao_area',
         'avaliacao_ptam',
         'projeto_executivo', // v3.24.5
+        'demarcacao_urbana', // v3.42.0
+        'demarcacao_rural',  // v3.42.0
       ]);
       if (!SUBTIPOS_EDITAVEIS.has(subtipo)) {
         return alert(`Edição não disponível para subtipo "${subtipo}".`);

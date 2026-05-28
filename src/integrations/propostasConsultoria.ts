@@ -2250,7 +2250,37 @@ function renderDemarcacaoLotesBody(
     doc.font('Helvetica');
     doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
     doc.moveDown(0.2);
-    custos.condicoes_pagamento.forEach((cp) => {
+    // v3.42.0 DEFESA: recompute parcelas em runtime se vieram com valor 0/undefined
+    // mas o total esta > 0 (corrupcao de dados em propostas antigas — bug v3.23.8
+    // ressuscitado em algum subtipo). Le percentual da descricao se preciso.
+    const totalReal = custos.secao_5_total
+      ?? (custos as unknown as { honorarios_romatec_demarcacao?: { total: number } }).honorarios_romatec_demarcacao?.total
+      ?? 0;
+    const parcelas = custos.condicoes_pagamento;
+    const algumZero = parcelas.some((cp) => !Number.isFinite(Number(cp.valor)) || Number(cp.valor) === 0);
+    let parcelasRender = parcelas;
+    if (algumZero && totalReal > 0) {
+      // Tenta extrair percentual da descricao "X% do total"
+      const pcts = parcelas.map((cp) => {
+        const m = String(cp.descricao || '').match(/(\d+(?:[.,]\d+)?)\s*%/);
+        return m ? Number(m[1].replace(',', '.')) / 100 : null;
+      });
+      const todosPct = pcts.every((p) => p != null && p > 0);
+      if (todosPct) {
+        // Ultima parcela absorve residuo
+        parcelasRender = parcelas.map((cp, i, arr) => {
+          let valor: number;
+          if (i === arr.length - 1) {
+            const soma = arr.slice(0, -1).reduce((s, _, j) => s + Math.round((totalReal * (pcts[j] as number)) * 100) / 100, 0);
+            valor = Math.round((totalReal - soma) * 100) / 100;
+          } else {
+            valor = Math.round((totalReal * (pcts[i] as number)) * 100) / 100;
+          }
+          return { ...cp, valor };
+        });
+      }
+    }
+    parcelasRender.forEach((cp) => {
       const y0 = doc.y;
       doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
         .text(cp.rotulo, COL_X_INI + 8, y0, { width: COL_W - 100 });
@@ -2314,7 +2344,17 @@ function renderDemarcacaoLotesBody(
       const check = l.contratado ? '☑' : '☐';
       doc.fontSize(9.5).fillColor('#111').font(l.contratado ? 'Helvetica-Bold' : 'Helvetica')
         .text(`${check} ${l.rotulo}`, COL_X_INI + 8, y0, { width: COL_W - 100 });
-      const valorTxt = l.valor === 'sob_orcamento' ? 'Sob orcamento' : (l.contratado ? formatBRL(l.valor as number) : '—');
+      // v3.42.0 DEFESA: se contratado mas valor=0 e temos metros×valor_unitario,
+      // recompute em runtime (preserva propostas legadas sem persistir esses campos).
+      let valorRender: number | 'sob_orcamento' | undefined = l.valor;
+      const lExt = l as { metros?: number; valor_unitario?: number };
+      if (l.contratado && valorRender !== 'sob_orcamento'
+          && (!Number.isFinite(Number(valorRender)) || Number(valorRender) === 0)
+          && typeof lExt.metros === 'number' && typeof lExt.valor_unitario === 'number'
+          && lExt.metros > 0 && lExt.valor_unitario > 0) {
+        valorRender = Math.round(lExt.metros * lExt.valor_unitario * 100) / 100;
+      }
+      const valorTxt = valorRender === 'sob_orcamento' ? 'Sob orcamento' : (l.contratado ? formatBRL(Number(valorRender)) : '—');
       doc.fontSize(9.5).fillColor(l.contratado ? corHex : '#666').font(l.contratado ? 'Helvetica-Bold' : 'Helvetica')
         .text(valorTxt, COL_X_FIM - 100, y0, { width: 100, align: 'right' });
       doc.font('Helvetica').fillColor('#111');
@@ -2367,9 +2407,14 @@ function renderDemarcacaoLotesBody(
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.2);
   doc.fontSize(8.5).fillColor('#444');
+  // v3.42.0: DRL removido da demarcacao (gold standard PROP-2026-0028-R1 nao tem).
+  //   DRL (Declaracao de Respeito de Limite) e' obrigacao do proprietario apenas
+  //   no fluxo de Georreferenciamento Rural (regularizacao fundiaria via SIGEF
+  //   conforme Lei 10.267/2001 + NTGIR 3a Ed.). Demarcacao simples e' apenas
+  //   materializacao fisica das divisas — nao gera averbacao automatica e nao
+  //   exige DRL no escopo do servico.
   const avisosDem = [
     'A demarcacao consiste na materializacao fisica das divisas. O servico nao constitui regularizacao fundiaria isolada — para averbacao no cartorio sao necessarios os documentos imprescindiveis acima.',
-    'O cliente deve coletar Declaracoes de Respeito de Limite (DRLs) com firma reconhecida em cartorio (ver box vermelho abaixo).',
     'Os codigos INCRA dos marcos sao vitalicios e atrelados ao tecnico responsavel. Apos atribuidos no envio da proposta, nao podem ser realocados a outra obra.',
   ];
   avisosDem.forEach((a) => {
@@ -2380,8 +2425,10 @@ function renderDemarcacaoLotesBody(
   doc.fillColor('#111');
   doc.moveDown(0.3);
 
-  // ── 10-bis. BOX VERMELHO — AVISO DRL ──────────────────────────────────
-  renderAvisoDRL(doc, finalidade, COL_X_INI, COL_W);
+  // v3.42.0: renderAvisoDRL REMOVIDO. DRL e' especifico do fluxo de Georref Rural
+  // (Lei 10.267/2001 / NTGIR). Para Demarcacao de Lotes nao se aplica — proposta
+  // PROP-2026-0028-R1 (gold standard) nao tem o box. Render do DRL preservado
+  // em Georref Rural (linhas ~1554 deste arquivo).
 }
 
 export async function gerarPdfPropostaConsultoria(
@@ -3421,10 +3468,22 @@ export async function atualizarPropostaConsultoria(input: {
       const r = await calcularConsultoria({ subtipo, dados: dadosFinal });
       custosFinal = r.custos;
     } else if (subtipo === 'demarcacao_urbana' || subtipo === 'demarcacao_rural') {
-      // v3.27.0: Demarcacao de Lotes
+      // v3.27.0/v3.42.0: Demarcacao de Lotes.
+      // Preserva adicional_campo do snapshot atual injetando pct em dados_imovel
+      // antes do engine — assim o adicional re-entra na base (antes da complexidade).
+      const dadosInjetados: Record<string, unknown> = { ...(dadosFinal as unknown as Record<string, unknown>) };
+      const atualCalc = atual.custos_calculados as CustosCalculados | null;
+      const adicionalSnap = (atualCalc as unknown as { adicional_campo?: { ativo?: boolean; percentual?: number } } | null)?.adicional_campo;
+      if (adicionalSnap?.ativo && typeof adicionalSnap.percentual === 'number') {
+        dadosInjetados.adicional_campo_pct = adicionalSnap.percentual;
+      }
       const m = await import('../services/pricing/demarcacaoLotes');
-      const out = m.calcularDemarcacaoLotes(dadosFinal as unknown as InputDemarcacaoLotes);
+      const out = m.calcularDemarcacaoLotes(dadosInjetados as unknown as InputDemarcacaoLotes);
       custosFinal = adaptarDemarcacaoParaCustosCalculados(out);
+      // Preserva snapshot do adicional_campo no custos atualizado (pro PDF render)
+      if (adicionalSnap) {
+        (custosFinal as unknown as { adicional_campo: typeof adicionalSnap }).adicional_campo = adicionalSnap;
+      }
     } else {
       throw new Error(`Subtipo ${subtipo} nao suportado para edicao nesta fase.`);
     }
