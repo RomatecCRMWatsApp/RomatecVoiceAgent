@@ -21183,13 +21183,151 @@ function renderLoteamentoDetalhe(v) {
     const qId = Number(d.dataset.ltQ);
     const cont = d.querySelector(`[data-lt-q-content="${qId}"]`);
     if (state.loteamentoLotesDoQuadra[qId]) {
-      // Re-render apenas (cache)
-      cont.innerHTML = renderLotesQuadra(state.loteamentoLotesDoQuadra[qId]);
+      cont.innerHTML = renderLotesQuadra(state.loteamentoLotesDoQuadra[qId]) + await renderPlantaQuadraSection(lt.id, qId);
+      wireUpPlantaQuadraButtons(lt.id, qId);
       return;
     }
     await loadLotesDeQuadra(qId);
-    cont.innerHTML = renderLotesQuadra(state.loteamentoLotesDoQuadra[qId] || []);
+    cont.innerHTML = renderLotesQuadra(state.loteamentoLotesDoQuadra[qId] || []) + await renderPlantaQuadraSection(lt.id, qId);
+    wireUpPlantaQuadraButtons(lt.id, qId);
   }));
+}
+
+// v3.31.0: bloco de planta individual da quadra (DXF/DWG/PDF).
+// Mostra chips de status + botao "📎 Anexar planta" + lista de acoes.
+async function renderPlantaQuadraSection(loteamentoId, quadraId) {
+  let planta = null;
+  try {
+    const r = await fetch(`/api/loteamentos/${loteamentoId}/quadras/${quadraId}/planta`, { credentials: 'include' });
+    if (r.ok) planta = await r.json();
+  } catch (_) {}
+
+  const chip = (formato, presente, filename) => {
+    const cor = presente ? '#10b981' : '#666';
+    const fundo = presente ? 'rgba(16,185,129,.12)' : 'rgba(102,102,102,.08)';
+    const titulo = filename ? ` (${filename})` : '';
+    const status = presente ? '✅' : '☐';
+    return `<span data-planta-chip="${formato}" style="display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border:1px solid ${cor}; background:${fundo}; color:${cor}; border-radius:12px; font-size:11px; font-weight:600;" title="${formato.toUpperCase()}${titulo}">${status} ${formato.toUpperCase()}</span>`;
+  };
+
+  const parseStatusBadge = () => {
+    if (!planta) return '';
+    if (planta.parse_status === 'sucesso') {
+      return `<span style="font-size:11px; color:#10b981;">✓ ${planta.num_lotes_detectados || 0} lotes lidos do DXF (${planta.area_total_quadra_m2 || 0} m²)</span>`;
+    }
+    if (planta.parse_status === 'erro') {
+      return `<span style="font-size:11px; color:#ef4444;">⚠ Erro ao ler DXF: ${escape((planta.parse_error || '').slice(0, 60))}</span>`;
+    }
+    if (planta.parse_status === 'pendente') {
+      return `<span style="font-size:11px; color:#f59e0b;">⏳ Processando DXF…</span>`;
+    }
+    if (planta.parse_status === 'manual') {
+      return `<span style="font-size:11px; color:var(--text-muted);">📝 Parse manual (dxf-parser nao instalado)</span>`;
+    }
+    return '';
+  };
+
+  return `
+    <div style="margin-top:10px; padding-top:8px; border-top:1px dashed var(--border);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+        <div style="display:flex; gap:4px; flex-wrap:wrap;">
+          ${chip('dxf', !!planta?.dxf_filename, planta?.dxf_filename)}
+          ${chip('dwg', !!planta?.dwg_filename, planta?.dwg_filename)}
+          ${chip('pdf', !!planta?.pdf_filename, planta?.pdf_filename)}
+        </div>
+        <button data-planta-upload="${quadraId}" style="font-size:11px; padding:4px 10px; background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955;">📎 Anexar planta</button>
+      </div>
+      ${parseStatusBadge()}
+    </div>
+  `;
+}
+
+function wireUpPlantaQuadraButtons(loteamentoId, quadraId) {
+  const btn = document.querySelector(`[data-planta-upload="${quadraId}"]`);
+  if (btn) btn.onclick = () => abrirModalPlantaQuadra(loteamentoId, quadraId);
+  // Chips clicaveis pra download (so se presente)
+  document.querySelectorAll('[data-planta-chip]').forEach((c) => {
+    c.style.cursor = c.textContent.includes('✅') ? 'pointer' : 'default';
+    if (c.textContent.includes('✅')) {
+      c.onclick = () => {
+        const formato = c.getAttribute('data-planta-chip');
+        window.location.href = `/api/loteamentos/${loteamentoId}/quadras/${quadraId}/planta/${formato}/download`;
+      };
+    }
+  });
+}
+
+function abrirModalPlantaQuadra(loteamentoId, quadraId) {
+  const exist = document.getElementById('planta-quadra-modal');
+  if (exist) exist.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'planta-quadra-modal';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99998;display:flex;align-items:center;justify-content:center;padding:16px;';
+  overlay.innerHTML = `
+    <div style="background:#1a1a1a;border:1px solid #333;border-radius:12px;max-width:480px;width:100%;color:#fff;padding:20px;">
+      <h2 style="margin:0 0 4px; font-size:17px;">📎 Planta da Quadra</h2>
+      <p style="margin:0 0 14px; font-size:12px; opacity:.7;">Aceita DXF (recomendado), DWG (arquivamento) e PDF (preview). Pode enviar 1, 2 ou os 3.</p>
+      <form id="planta-form" enctype="multipart/form-data">
+        <label style="display:block; font-size:12px; margin-bottom:8px;">📄 DXF (até 50 MB · auto-parse de lotes)
+          <input type="file" name="dxf" accept=".dxf" style="width:100%; margin-top:4px; font-size:11px;">
+        </label>
+        <label style="display:block; font-size:12px; margin-bottom:8px;">📐 DWG (até 80 MB · download apenas)
+          <input type="file" name="dwg" accept=".dwg" style="width:100%; margin-top:4px; font-size:11px;">
+        </label>
+        <label style="display:block; font-size:12px; margin-bottom:14px;">📕 PDF (até 30 MB · visualização)
+          <input type="file" name="pdf" accept=".pdf" style="width:100%; margin-top:4px; font-size:11px;">
+        </label>
+        <div id="planta-progress" style="display:none; font-size:11px; color:#0ea5e9; margin-bottom:8px;">⏳ Enviando…</div>
+        <div id="planta-result" style="display:none; margin-bottom:8px;"></div>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button type="button" id="planta-cancelar" style="padding:8px 16px; background:transparent; border:1px solid #333; color:#bbb; border-radius:6px; cursor:pointer;">Cancelar</button>
+          <button type="submit" id="planta-enviar" style="padding:8px 18px; background:#0ea5e9; border:none; color:#fff; border-radius:6px; cursor:pointer; font-weight:600;">⬆ Enviar</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const fechar = () => overlay.remove();
+  document.getElementById('planta-cancelar').onclick = fechar;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) fechar(); });
+
+  document.getElementById('planta-form').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    // Remove fields vazios pra evitar mandar input vazio pro multer
+    for (const k of ['dxf', 'dwg', 'pdf']) {
+      const f = fd.get(k);
+      if (!f || (f instanceof File && f.size === 0)) fd.delete(k);
+    }
+    if (!fd.has('dxf') && !fd.has('dwg') && !fd.has('pdf')) {
+      alert('Selecione pelo menos 1 arquivo (DXF, DWG ou PDF)');
+      return;
+    }
+    document.getElementById('planta-progress').style.display = '';
+    document.getElementById('planta-enviar').disabled = true;
+    try {
+      const r = await fetch(`/api/loteamentos/${loteamentoId}/quadras/${quadraId}/planta/upload`, {
+        method: 'POST', credentials: 'include', body: fd,
+      });
+      const j = await r.json();
+      document.getElementById('planta-progress').style.display = 'none';
+      const resEl = document.getElementById('planta-result');
+      resEl.style.display = '';
+      if (r.ok) {
+        resEl.innerHTML = `<div style="background:rgba(16,185,129,.12); color:#10b981; padding:8px 12px; border-radius:6px; font-size:12px;">✅ Upload realizado: ${(j.resultados || []).filter(x => x.status === 'ok').length} arquivo(s) salvo(s).</div>`;
+        setTimeout(() => { fechar(); /* refresh */ const d = document.querySelector(`[data-lt-q="${quadraId}"]`); if (d) { d.open = false; setTimeout(() => { d.open = true; }, 100); } }, 1200);
+      } else {
+        resEl.innerHTML = `<div style="background:rgba(239,68,68,.12); color:#ef4444; padding:8px 12px; border-radius:6px; font-size:12px;">❌ Falha: ${escape(j.error || 'desconhecida')}</div>`;
+        document.getElementById('planta-enviar').disabled = false;
+      }
+    } catch (err) {
+      document.getElementById('planta-progress').style.display = 'none';
+      alert('Erro de rede: ' + (err.message || err));
+      document.getElementById('planta-enviar').disabled = false;
+    }
+  };
 }
 
 function renderLotesQuadra(lotes) {
