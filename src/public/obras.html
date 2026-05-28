@@ -6096,13 +6096,17 @@ function renderPropostasLista() {
   const v = document.getElementById('view-proposta');
   if (!state.tipoPropostaAtivo) state.tipoPropostaAtivo = 'mao_de_obra';
 
-  // Toggle no topo (sempre presente)
+  // Toggle no topo (sempre presente). v3.32.0: aria-current pra a11y.
+  const ativoMo = state.tipoPropostaAtivo === 'mao_de_obra';
+  const ativoCons = state.tipoPropostaAtivo === 'consultoria';
   const toggleHTML = `
-    <div class="card" style="display:flex; gap:8px; padding:8px; align-items:center;">
+    <div class="card" role="tablist" aria-label="Tipo de proposta" style="display:flex; gap:8px; padding:8px; align-items:center;">
       <span style="font-size:12px; color:var(--text-muted);">Tipo:</span>
-      <button class="${state.tipoPropostaAtivo === 'mao_de_obra' ? '' : 'btn-secondary'}"
+      <button class="${ativoMo ? '' : 'btn-secondary'}"
+              role="tab" aria-current="${ativoMo ? 'page' : 'false'}" aria-selected="${ativoMo}"
               data-toggle-tipo="mao_de_obra" style="flex:1;">🔨 Mão de Obra</button>
-      <button class="${state.tipoPropostaAtivo === 'consultoria' ? '' : 'btn-secondary'}"
+      <button class="${ativoCons ? '' : 'btn-secondary'}"
+              role="tab" aria-current="${ativoCons ? 'page' : 'false'}" aria-selected="${ativoCons}"
               data-toggle-tipo="consultoria" style="flex:1;">📋 Consultoria</button>
     </div>`;
 
@@ -6159,21 +6163,69 @@ function renderPropostasLista() {
     </div>`;
   }).join('') || '<div class="card empty">Nenhuma proposta ainda.</div>';
 
+  // v3.32.0 UX: cards de Mão de Obra direto na aba (2 niveis).
+  // Nivel 1: card grande "Obras"
+  // Nivel 2: 8 sub-tipos (todos "Em breve" — forms ficam pra release futura)
+  if (!state.maoObraNivel) state.maoObraNivel = 1;
+  const cardsMoHtml = renderCardsMaoObraInline();
+  const contadorMo = state.propostas?.length || 0;
+
   v.innerHTML = `
   ${_toggleHTML_para_injetar}
+  <div class="card" role="region" aria-labelledby="propostas-mo-titulo">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; flex-wrap:wrap;">
+      <p id="propostas-mo-titulo" class="section-title" style="margin:0;">Nova Proposta de Mão de Obra</p>
+      <span style="font-size:11px; color:var(--text-muted);">${state.maoObraNivel === 1 ? 'Categoria' : 'Sub-tipo'}</span>
+    </div>
+    <div data-cards-mo aria-live="polite" style="margin-top:10px;">
+      ${cardsMoHtml}
+    </div>
+  </div>
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-      <p class="section-title" style="margin:0;">Propostas de Mão de Obra</p>
-      <button data-nova-prop>+ Nova proposta</button>
+      <p class="section-title" style="margin:0;">Propostas de Mão de Obra existentes</p>
+      <span style="font-size:11px; color:var(--text-muted);">${contadorMo} proposta${contadorMo === 1 ? '' : 's'}</span>
     </div>
   </div>
   ${linhas}`;
 
   document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    if (state.tipoPropostaAtivo === b.dataset.toggleTipo) return;
     state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    state.maoObraNivel = 1;
+    state.consultoriaView = 'lista';
     render();
+    setTimeout(() => {
+      const primeiroCard = document.querySelector('[data-mo-card], [data-pick-subtipo-inline]:not([disabled])');
+      if (primeiroCard) primeiroCard.focus();
+    }, 30);
   });
-  document.querySelector('[data-nova-prop]').onclick = abrirNovaProposta;
+
+  // Nivel 1 -> 2
+  document.querySelectorAll('[data-mo-card]').forEach(b => {
+    b.onclick = () => { state.maoObraNivel = 2; render(); };
+  });
+  // Nivel 2 -> 1 (voltar)
+  const voltarBtn = document.querySelector('[data-mo-voltar]');
+  if (voltarBtn) voltarBtn.onclick = () => { state.maoObraNivel = 1; render(); };
+  // Nivel 2 -> Esc volta
+  if (state.maoObraNivel === 2) {
+    const escHandler = (ev) => {
+      if (ev.key === 'Escape') {
+        state.maoObraNivel = 1;
+        render();
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+  }
+  // Sub-tipos "Em breve" -> toast
+  document.querySelectorAll('[data-mo-subtipo]').forEach(b => {
+    b.onclick = () => {
+      const nome = b.dataset.moSubtipoNome || 'Mão de Obra';
+      mostrarToastUX(`${nome}: form em desenvolvimento — previsto para v3.30.0. Por enquanto, registre via Consultoria > Projeto Executivo.`);
+    };
+  });
   document.querySelectorAll('[data-edit-prop]').forEach(b => b.onclick = async () => {
     try {
       await loadProposta(b.dataset.editProp);
@@ -6719,10 +6771,92 @@ function setConsultoriaView(view) {
   render();
 }
 
+// v3.32.0 UX: catalogo de sub-tipos de Mao de Obra (todos "Em breve" — forms
+// reais ficam pra v3.30.0+ conforme prompt v3.29.1).
+const SUBTIPOS_MAO_OBRA = [
+  { slug: 'construcao_nova',         icone: '🏗️', nome: 'Construção nova (residencial/comercial)' },
+  { slug: 'reforma_ampliacao',       icone: '🔧', nome: 'Reforma / ampliação' },
+  { slug: 'alvenaria_pura',          icone: '🧱', nome: 'Alvenaria pura' },
+  { slug: 'vistoria_periodica',      icone: '🔍', nome: 'Vistoria técnica periódica' },
+  { slug: 'acompanhamento_diaria',   icone: '👷', nome: 'Acompanhamento de obra (diária)' },
+  { slug: 'fundacao_sapatas',        icone: '🏗️', nome: 'Fundação / sapatas' },
+  { slug: 'cobertura_telhado',       icone: '🏠', nome: 'Cobertura / telhado' },
+  { slug: 'servicos_complementares', icone: '🎨', nome: 'Serviços complementares (forro/piso/pintura)' },
+];
+
+function renderCardsMaoObraInline() {
+  const reduced = (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  if (state.maoObraNivel === 2) {
+    const cards = SUBTIPOS_MAO_OBRA.map(s => `
+      <button data-mo-subtipo="${s.slug}" data-mo-subtipo-nome="${escape(s.nome)}"
+              aria-label="${escape(s.icone + ' ' + s.nome + ' (em breve)')}"
+              style="padding:14px; text-align:left; border:1px solid var(--border); border-radius:8px;
+                     background:#1a1a1a; opacity:0.7; cursor:pointer; color:var(--text);">
+        <div style="font-size:15px; font-weight:600;">${s.icone} ${escape(s.nome)}</div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">◌ Em breve (v3.30.0)</div>
+      </button>`).join('');
+    return `
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+        <button data-mo-voltar style="background:transparent; border:1px solid var(--border); padding:4px 10px; cursor:pointer;">← Voltar</button>
+        <span style="font-size:12px; color:var(--text-muted);">Selecione o sub-tipo (Esc volta)</span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:8px; ${reduced ? '' : 'animation:fadeIn .15s ease-out;'}">${cards}</div>`;
+  }
+  // Nivel 1: 1 card grande
+  return `
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:8px;">
+      <button data-mo-card="obras"
+              aria-label="🔨 Obras — Propostas de mão de obra para construção, reforma e serviços"
+              style="padding:24px; text-align:center; border:2px solid var(--border); border-radius:12px;
+                     background:var(--bg-elev); cursor:pointer; color:var(--text);">
+        <div style="font-size:48px; margin-bottom:8px;">🔨</div>
+        <div style="font-size:18px; font-weight:700;">Obras</div>
+        <div style="font-size:12px; color:var(--text-muted); margin:6px 0 10px;">Propostas de mão de obra para construção, reforma e serviços</div>
+        <span style="display:inline-block; padding:6px 14px; background:var(--success); color:#000; border-radius:6px; font-size:12px; font-weight:600;">Selecionar tipo →</span>
+      </button>
+    </div>`;
+}
+
+// v3.32.0 UX: helper compartilhado pra renderizar os 11 cards de subtipos
+// de Consultoria. Aceitavel chamar SEM clear do container (caller cuida).
+function renderCardsConsultoriaInline() {
+  return SUBTIPOS_CONSULTORIA.map(s => {
+    const label = `${s.icone} ${s.nome}${s.disponivel ? '' : ' (em breve)'}`;
+    return `<button data-pick-subtipo-inline="${s.slug}"
+            aria-label="${label}"
+            style="padding:14px; text-align:left; border:1px solid var(--border); border-radius:8px;
+                   background:${s.disponivel ? 'var(--bg-elev)' : '#1a1a1a'};
+                   opacity:${s.disponivel ? '1' : '0.65'}; cursor:pointer;
+                   color:var(--text);">
+      <div style="font-size:16px; font-weight:600;">${s.icone} ${escape(s.nome)}</div>
+      <div style="font-size:11px; color:${s.disponivel ? 'var(--success)' : 'var(--text-muted)'}; margin-top:4px;">
+        ${s.disponivel ? '● Disponível' : '◌ Em breve'}
+      </div>
+    </button>`;
+  }).join('');
+}
+
+// v3.32.0 UX: toast informativo (ARIA-live polite). Substituido por
+// alert nativo. Usado em "Em breve" cards.
+function mostrarToastUX(mensagem) {
+  const existente = document.getElementById('toast-ux');
+  if (existente) existente.remove();
+  const el = document.createElement('div');
+  el.id = 'toast-ux';
+  el.setAttribute('role', 'status');
+  el.setAttribute('aria-live', 'polite');
+  el.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#0ea5e9;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;font-size:13px;z-index:99999;box-shadow:0 6px 20px rgba(14,165,233,.3);max-width:540px;text-align:center;';
+  el.textContent = mensagem;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
 async function renderPropostasConsultoriaLista(v, toggleHTML) {
-  // Roteia conforme estado inline atual
-  const view = state.consultoriaView || 'lista';
-  if (view === 'escolha') return renderConsultoriaEscolhaInline(v, toggleHTML);
+  // Roteia conforme estado inline atual.
+  // v3.32.0 UX: removida a rota 'escolha' (cards agora aparecem direto na lista).
+  // Compat: setConsultoriaView('escolha') continua funcionando — mapeia pra 'lista'.
+  const viewRaw = state.consultoriaView || 'lista';
+  const view = viewRaw === 'escolha' ? 'lista' : viewRaw;
   if (view.startsWith('form_')) return renderConsultoriaFormInline(v, toggleHTML, view.slice(5));
   if (view === 'preview' && state.consultoriaPreviewData) return renderConsultoriaPreviewInline(v, toggleHTML);
 
@@ -6779,21 +6913,57 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
     </div>`;
   }).join('') || '<div class="card empty">Nenhuma proposta de consultoria ainda.</div>';
 
+  // v3.32.0 UX: cards de tipo aparecem direto na aba (sem botao "+ Nova proposta").
+  // Reusa SUBTIPOS_CONSULTORIA pra gerar 11 cards. "Em breve" abre toast.
+  const cardsHtml = renderCardsConsultoriaInline();
+  const contador = state.propostasConsultoria?.length || 0;
+
   v.innerHTML = `
   ${toggleHTML}
+  <div class="card" role="region" aria-labelledby="propostas-cons-titulo">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; flex-wrap:wrap;">
+      <p id="propostas-cons-titulo" class="section-title" style="margin:0;">Nova Proposta de Consultoria</p>
+      <span style="font-size:11px; color:var(--text-muted);">Selecione o tipo</span>
+    </div>
+    <div data-cards-cons aria-live="polite" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px; margin-top:10px;">
+      ${cardsHtml}
+    </div>
+  </div>
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-      <p class="section-title" style="margin:0;">Propostas de Consultoria</p>
-      <button data-nova-cons>+ Nova proposta</button>
+      <p class="section-title" style="margin:0;">Propostas de Consultoria existentes</p>
+      <span style="font-size:11px; color:var(--text-muted);">${contador} proposta${contador === 1 ? '' : 's'}</span>
     </div>
   </div>
   ${linhas}`;
 
   document.querySelectorAll('[data-toggle-tipo]').forEach(b => b.onclick = () => {
+    if (state.tipoPropostaAtivo === b.dataset.toggleTipo) return; // idempotente
     state.tipoPropostaAtivo = b.dataset.toggleTipo;
+    state.consultoriaView = 'lista';
+    state.maoObraNivel = 1;
     render();
+    // Foco programatico no 1o card visivel (a11y)
+    setTimeout(() => {
+      const primeiroCard = document.querySelector('[data-pick-subtipo-inline]:not([disabled]), [data-mo-card]');
+      if (primeiroCard) primeiroCard.focus();
+    }, 30);
   });
-  document.querySelector('[data-nova-cons]').onclick = () => setConsultoriaView('escolha');
+
+  // v3.32.0: clique direto em qualquer card (com ou sem disponivel).
+  // Disponivel -> abre form; "em breve" -> toast.
+  document.querySelectorAll('[data-pick-subtipo-inline]').forEach(b => {
+    b.onclick = () => {
+      const slug = b.dataset.pickSubtipoInline;
+      const sub = SUBTIPOS_CONSULTORIA.find(s => s.slug === slug);
+      if (!sub) return;
+      if (!sub.disponivel) {
+        mostrarToastUX(`${sub.icone} ${sub.nome}: em desenvolvimento — previsto para versão futura.`);
+        return;
+      }
+      setConsultoriaView('form_' + slug);
+    };
+  });
 
   document.querySelectorAll('[data-view-cons]').forEach(b => b.onclick = () => {
     window.open('/api/propostas-consultoria/' + b.dataset.viewCons + '/pdf', '_blank');
