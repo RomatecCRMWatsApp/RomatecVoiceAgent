@@ -9256,18 +9256,15 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
         </div>
         <label>Validade (dias) <input id="dmValidade" type="number" min="1" step="1" value="${cache?.validade_dias ?? 15}" style="width:100%;"></label>
 
-        <!-- v3.38.0: itens diretos (Kit GNSS + Laudo) — alinhamento a PROP-2026-0028-R1 -->
-        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">🛰️ Itens Diretos (somam ao total)</p>
-        <div class="lp-grid-2">
-          <label style="display:flex; gap:6px; align-items:center;"><input id="dmKitGnss" type="checkbox" ${cache?.locacao_kit_gnss_contratado ? 'checked' : ''}> Locação Kit GNSS</label>
-          <div></div>
-        </div>
+        <!-- v3.38.0–v3.40.0: itens diretos (Kit GNSS é FIXO; Laudo condicional) — gold standard PROP-2026-0028-R1 -->
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">🛰️ Locação Kit GNSS (item fixo — sempre soma)</p>
         <div class="lp-grid-2">
           <label>Diárias (admite 0,5) <input id="dmKitGnssQtd" type="number" min="0" step="0.5" value="${cache?.locacao_kit_gnss_qtd ?? 1}" style="width:100%;"></label>
           <label>R$/diária <input id="dmKitGnssDiaria" type="number" min="0" step="0.01" value="${cache?.locacao_kit_gnss_diaria ?? 250}" style="width:100%;"></label>
         </div>
-        <div style="font-size:11px; color:var(--text-muted); margin:-4px 0 6px 4px;">
-          ComNav S6 (base) · T30 Plus c/ laser (rover) · tripé · base niveladora · bastão/bipé · coletora R80
+        <div style="font-size:11px; color:var(--text-muted); margin:-4px 0 8px 4px;">
+          Discriminação: ComNav S6 (base) · T30 Plus c/ laser (rover) · tripé · base niveladora · bastão/bipé · coletora R80.
+          Para projetos sem campo, ajuste diárias a 0.
         </div>
         <label style="display:flex; gap:6px; align-items:center;"><input id="dmLaudoDireto" type="checkbox" ${cache?.laudo_tecnico_direto_contratado ? 'checked' : ''}> Laudo Técnico de Demarcação (R$ 1.621 — 1 SM 2026)</label>
 
@@ -9403,8 +9400,8 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
     if (document.getElementById('dmOpcJurid').checked)
       opcionais.consultoria_juridica = { contratado: true, valor: 'sob_orcamento' };
 
-    // v3.38.0: itens diretos (Kit GNSS + Laudo Tecnico)
-    const kitContratado = document.getElementById('dmKitGnss').checked;
+    // v3.38.0–v3.40.0: itens diretos. Kit GNSS e' FIXO (sempre passa qtd/diaria),
+    // Laudo Tecnico continua condicional ao checkbox.
     const laudoContratado = document.getElementById('dmLaudoDireto').checked;
     const numParcelas = parseInt(document.getElementById('dmNumParcelas').value, 10) === 3 ? 3 : 2;
 
@@ -9425,12 +9422,12 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
       desconto_pct: parseFloat(document.getElementById('dmDesc').value) || 0,
       validade_dias: parseInt(document.getElementById('dmValidade').value, 10) || 15,
       opcionais,
-      // v3.38.0
+      // v3.38.0–v3.40.0: laudo opcional (checkbox); Kit GNSS sempre passa qtd/diaria
       laudo_tecnico_direto: laudoContratado ? { contratado: true, valor_unitario_sm_multiplicador: 1.0 } : undefined,
-      locacao_kit_gnss: kitContratado ? {
-        qtd_diarias: parseFloat(document.getElementById('dmKitGnssQtd').value) || 1,
+      locacao_kit_gnss: {
+        qtd_diarias: parseFloat(document.getElementById('dmKitGnssQtd').value) || 0,
         diaria: parseFloat(document.getElementById('dmKitGnssDiaria').value) || 250,
-      } : undefined,
+      },
       num_parcelas: numParcelas,
     };
     if (isUrbana) {
