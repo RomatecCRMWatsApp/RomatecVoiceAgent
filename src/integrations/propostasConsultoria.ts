@@ -89,6 +89,17 @@ export interface CriarPropostaConsultoriaInput {
   custos_override?: CustosCalculados;
   // v1.66.9: anexos enviados junto na criacao (Planta/Mapa em PDF/PNG/JPEG)
   anexos?: Array<{ filename: string; mimetype: string; conteudo_b64: string }>;
+  // v3.33.0 (= v3.27.1 do prompt): adicional REFACTORED com wizard de cenario.
+  // Substitui aditivo_campo v3.29.0 (mantido por compat retro).
+  adicional_campo?: {
+    ativo: boolean;
+    cenario?: 'mata_densa_animais' | 'rodovia_faixa_dominio' | 'eletricidade_alta_tensao' | 'pedreira_explosivos' | 'produtos_quimicos';
+    tipo?: 'insalubridade' | 'periculosidade';
+    grau?: 'minimo' | 'medio' | 'maximo' | 'unico';
+    bloco_enquadramento_tecnico_editado?: string;
+    bloco_justificativa_cliente_editado?: string;
+    observacao_adicional?: string;
+  };
   // v3.29.0: aditivo de campo (insalubridade/periculosidade) — opcional.
   // Quando habilitado, o calculator e' chamado apos a criacao e o snapshot
   // vai pra propostas_aditivos_campo. O valor entra na composicao no PDF.
@@ -341,11 +352,51 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     console.warn(`[propostas-consultoria] falha gerar hash da #${r.insertId}: ${(err as Error).message}`);
   }
 
-  // v3.29.0: aplica aditivo de campo (insalubridade/periculosidade) se solicitado.
-  // Snapshot persistido em propostas_aditivos_campo e secao_5_total atualizado
-  // no UPDATE do custos_calculados.
+  // v3.33.0 (= v3.27.1 do prompt): adicional REFACTORED com wizard de cenario.
+  // Se o caller envia `adicional_campo` (novo), usa o engine v3.33.0; senao,
+  // cai no fallback aditivo_campo v3.29.0 (compat retro).
+  if (input.adicional_campo?.ativo && input.adicional_campo.cenario) {
+    try {
+      const mod = await import('../services/pricing/adicionalCampo');
+      const r2 = mod.calcularAdicionalCampo({
+        ativo: true,
+        cenario: input.adicional_campo.cenario,
+        tipo: input.adicional_campo.tipo,
+        grau: input.adicional_campo.grau,
+        bloco_enquadramento_tecnico_editado: input.adicional_campo.bloco_enquadramento_tecnico_editado,
+        bloco_justificativa_cliente_editado: input.adicional_campo.bloco_justificativa_cliente_editado,
+        observacao_adicional: input.adicional_campo.observacao_adicional,
+      });
+      // Calcula o valor monetario: percentual sobre o secao_5_total ANTES de
+      // qualquer adicional/desconto extra (snapshot do subtotal de campo).
+      const subtotalBase = round2Lib(resultado.custos.secao_5_total);
+      const valorAdicional = round2Lib(subtotalBase * r2.percentual / 100);
+      const novoTotal = round2Lib(subtotalBase + valorAdicional);
+      const custosAtualizados = {
+        ...resultado.custos,
+        secao_5_total: novoTotal,
+      };
+      (custosAtualizados as unknown as { adicional_campo: typeof r2 & { valor_aplicado: number; subtotal_base: number } }).adicional_campo = {
+        ...r2,
+        valor_aplicado: valorAdicional,
+        subtotal_base: subtotalBase,
+      };
+      await pool.execute(
+        `UPDATE propostas SET custos_calculados = ?, valor_total = ? WHERE id = ?`,
+        [JSON.stringify(custosAtualizados), novoTotal, r.insertId],
+      );
+      resultado.custos = custosAtualizados;
+    } catch (err) {
+      console.warn(`[adicional-campo v3.33.0] proposta ${r.insertId} FALHOU: ${(err as Error).message}`);
+    }
+  }
+
+  // v3.29.0 LEGACY: aplica aditivo de campo (insalubridade/periculosidade) se solicitado.
+  // Mantido por compat retro com clientes em transito. Quando adicional_campo (novo)
+  // estiver presente, o caller NAO deve enviar aditivo_campo (legado) — defesa em
+  // profundidade: se enviar ambos, novo tem precedencia (acima).
   let aditivoSnapshot: AditivoSnapshotComputado | null = null;
-  if (input.aditivo_campo?.habilitado) {
+  if (input.aditivo_campo?.habilitado && !input.adicional_campo?.ativo) {
     try {
       aditivoSnapshot = await aplicarAditivoCampo({
         proposta_id: r.insertId,
@@ -1523,6 +1574,128 @@ function renderAvisoDRL(
   doc.font('Helvetica').fillColor('#111');
 }
 
+// v3.33.0: snapshot v2 do adicional (3 blocos congelados + norma vigente).
+// Gravado em custos_calculados.adicional_campo na criacao da proposta.
+interface AdicionalCampoSnapshotPdf {
+  ativo: boolean;
+  percentual: number;
+  cenario: string;
+  tipo: 'insalubridade' | 'periculosidade';
+  grau: 'minimo' | 'medio' | 'maximo' | 'unico';
+  bloco_fundamento_legal: string;
+  bloco_enquadramento_tecnico: string;
+  bloco_justificativa_cliente: string;
+  observacao_adicional?: string;
+  norma_vigente_congelada: {
+    fonte: string;
+    versao_referencia: string;
+    data_snapshot: string;
+  };
+}
+
+// v3.33.0 (= v3.27.1 do prompt): render do bloco de adicional REFACTORED.
+// Box dourado p/ Insalubridade, vermelho p/ Periculosidade. 3 blocos
+// juridicos congelados + observacao opcional + selo da norma vigente
+// (proteção forense).
+function renderAdicionalCampoBody(
+  doc: PDFKit.PDFDocument,
+  snap: AdicionalCampoSnapshotPdf,
+  colX: number,
+  colW: number,
+): void {
+  const isPeric = snap.tipo === 'periculosidade';
+  const COR_BORDA = isPeric ? '#922b21' : '#B45309';     // red-800 / amber-700
+  const COR_BG = isPeric ? '#FEE2E2' : '#FEF3C7';         // red-100 / amber-100
+  const COR_TITULO = isPeric ? '#7f1d1d' : '#92400E';     // red-900 / amber-900
+  const PADDING = 12;
+  const colXIni = colX;
+
+  // Pre-calcula altura — 3 blocos + cabecalho + rodape
+  doc.fontSize(9);
+  const altBloco1 = doc.heightOfString(snap.bloco_fundamento_legal, { width: colW - 2 * PADDING - 16 });
+  const altBloco2 = doc.heightOfString(snap.bloco_enquadramento_tecnico, { width: colW - 2 * PADDING - 16 });
+  const altBloco3 = doc.heightOfString(snap.bloco_justificativa_cliente, { width: colW - 2 * PADDING - 16 });
+  const altObs = snap.observacao_adicional ? doc.heightOfString(snap.observacao_adicional, { width: colW - 2 * PADDING - 16 }) + 14 : 0;
+  const altTotal = PADDING + 26 /* cabecalho */ + 24 /* linha cenario */
+    + 22 + altBloco1 /* bloco 1 */
+    + 22 + altBloco2 /* bloco 2 */
+    + 22 + altBloco3 /* bloco 3 */
+    + altObs + 18 /* rodape norma */ + PADDING;
+
+  if (doc.y + altTotal + 12 > doc.page.height - doc.page.margins.bottom - 80) {
+    doc.addPage();
+  }
+
+  const startY = doc.y;
+  doc.save()
+    .roundedRect(colXIni, startY, colW, altTotal, 6)
+    .lineWidth(1.3)
+    .fillAndStroke(COR_BG, COR_BORDA);
+  doc.restore();
+
+  doc.x = colXIni + PADDING;
+  doc.y = startY + PADDING;
+
+  // Cabecalho
+  doc.fontSize(11).fillColor(COR_TITULO).font('Helvetica-Bold');
+  const titulo = isPeric
+    ? '⚠ ADICIONAL DE PERICULOSIDADE'
+    : '⚠ ADICIONAL DE INSALUBRIDADE';
+  doc.text(`${titulo}  ·  +${snap.percentual.toFixed(0)}%`, { width: colW - 2 * PADDING });
+  doc.moveDown(0.3);
+
+  // Linha de cenario + grau
+  doc.fontSize(9.5).fillColor('#111').font('Helvetica');
+  const grauTexto = snap.grau === 'unico' ? '' : `, Grau ${snap.grau.charAt(0).toUpperCase() + snap.grau.slice(1)}`;
+  doc.text(`Cenário: ${snap.cenario.replace(/_/g, ' ')}${grauTexto}`, { width: colW - 2 * PADDING });
+  doc.moveDown(0.4);
+
+  // Bloco 1 — Fundamento Legal (locked)
+  doc.fontSize(9.5).fillColor(COR_TITULO).font('Helvetica-Bold')
+    .text('📜 FUNDAMENTO LEGAL', { width: colW - 2 * PADDING });
+  doc.fontSize(8.5).fillColor('#111').font('Helvetica')
+    .text(snap.bloco_fundamento_legal, colX + PADDING + 8, doc.y, {
+      width: colW - 2 * PADDING - 8, align: 'justify',
+    });
+  doc.moveDown(0.4);
+
+  // Bloco 2 — Enquadramento Tecnico
+  doc.fontSize(9.5).fillColor(COR_TITULO).font('Helvetica-Bold')
+    .text('🔍 ENQUADRAMENTO TÉCNICO', colX + PADDING, doc.y, { width: colW - 2 * PADDING });
+  doc.fontSize(8.5).fillColor('#111').font('Helvetica')
+    .text(snap.bloco_enquadramento_tecnico, colX + PADDING + 8, doc.y, {
+      width: colW - 2 * PADDING - 8, align: 'justify',
+    });
+  doc.moveDown(0.4);
+
+  // Bloco 3 — Justificativa ao Cliente
+  doc.fontSize(9.5).fillColor(COR_TITULO).font('Helvetica-Bold')
+    .text('💬 JUSTIFICATIVA AO CLIENTE', colX + PADDING, doc.y, { width: colW - 2 * PADDING });
+  doc.fontSize(8.5).fillColor('#111').font('Helvetica')
+    .text(snap.bloco_justificativa_cliente, colX + PADDING + 8, doc.y, {
+      width: colW - 2 * PADDING - 8, align: 'justify',
+    });
+  doc.moveDown(0.3);
+
+  // Observacao adicional (opcional)
+  if (snap.observacao_adicional) {
+    doc.fontSize(8.5).fillColor('#555').font('Helvetica-Oblique')
+      .text(`Observação técnica: ${snap.observacao_adicional}`, colX + PADDING, doc.y, {
+        width: colW - 2 * PADDING, align: 'justify',
+      });
+    doc.moveDown(0.2);
+  }
+
+  // Selo da norma (rodape)
+  doc.fontSize(7.5).fillColor('#6B7280').font('Helvetica-Oblique')
+    .text(`Norma vigente: ${snap.norma_vigente_congelada.versao_referencia} · Snapshot: ${snap.norma_vigente_congelada.data_snapshot}`,
+      colX + PADDING, doc.y, { width: colW - 2 * PADDING });
+
+  doc.font('Helvetica').fillColor('#111');
+  doc.y = startY + altTotal + 12;
+  doc.x = colXIni;
+}
+
 // v3.29.0: bloco amber com aviso de aditivo de campo (insalubridade/periculosidade).
 // Renderizado no fim do body, ANTES do QR + hash, em todos os subtipos.
 // Markdown parser minimalista (sem dep externa): parser linha-a-linha cobrindo
@@ -2673,17 +2846,25 @@ export async function gerarPdfPropostaConsultoria(
              boxX + 6, cy + 42, { width: boxW - 12, align: 'center', lineBreak: false });
   }
 
-  // v3.29.0: aditivo de campo (insalubridade/periculosidade) — bloco amber
-  // com texto explicativo. Renderizado SO se houver snapshot no custos_calculados.
-  // Caller responsavel por garantir que `aditivo_campo` esta presente quando
-  // habilitado (criarPropostaConsultoria escreve em custos_calculados.aditivo_campo).
+  // v3.33.0 (= v3.27.1 do prompt): adicional de campo REFACTORED — bloco
+  // dourado (Insalubridade) ou vermelho (Periculosidade) com 3 blocos
+  // jurídicos (Fundamento Legal, Enquadramento Tecnico, Justificativa
+  // Cliente) + snapshot da norma vigente. Renderizado entre seção 8 (Avisos)
+  // e 9 (Documentos) — mas como o body genérico não tem essa numeração
+  // estrita, aparece antes do QR/hash.
+  //
+  // Fallback v3.29.0: se houver `aditivo_campo` (snapshot antigo) mas não
+  // `adicional_campo` (snapshot novo), usa o renderer legado.
   try {
-    const aditivoSnap = (custos as unknown as { aditivo_campo?: AditivoSnapshotComputado }).aditivo_campo;
-    if (aditivoSnap) {
-      renderAditivoCampoBody(doc, aditivoSnap, 48, 499);
+    const novoSnap = (custos as unknown as { adicional_campo?: AdicionalCampoSnapshotPdf }).adicional_campo;
+    if (novoSnap && novoSnap.ativo) {
+      renderAdicionalCampoBody(doc, novoSnap, 48, 499);
+    } else {
+      const legadoSnap = (custos as unknown as { aditivo_campo?: AditivoSnapshotComputado }).aditivo_campo;
+      if (legadoSnap) renderAditivoCampoBody(doc, legadoSnap, 48, 499);
     }
   } catch (err) {
-    console.warn(`[propostas-consultoria-pdf] falha aditivo: ${(err as Error).message}`);
+    console.warn(`[propostas-consultoria-pdf] falha adicional: ${(err as Error).message}`);
   }
 
   // v3.23.7: QR Code + hash de autenticidade renderizados RELATIVO a doc.y, garantindo

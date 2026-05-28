@@ -2575,6 +2575,53 @@ app.get('/api/loteamentos/:lotId/quadras/:quadraId/planta/lotes-extraidos', requ
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v3.33.0 (= v3.27.1 do prompt): adicional de campo REFACTORED.
+// Substitui o select(tipo, grau) livre por wizard estruturado de cenario.
+// Endpoint /api/adicional-campo/* (singular, novo). O legacy /aditivos-campo
+// continua existindo por compat retro.
+app.get('/api/adicional-campo/cenarios', async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./services/pricing/adicionalCampo');
+    res.json({ cenarios: m.listarCenarios() });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/adicional-campo/calcular', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const b = (req.body || {}) as Record<string, unknown>;
+    const ativo = !!b.ativo;
+    const m = await import('./services/pricing/adicionalCampo');
+    if (!ativo) {
+      res.json(m.calcularAdicionalCampo({ ativo: false }));
+      return;
+    }
+    const cenario = String(b.cenario || '');
+    const validos = ['mata_densa_animais', 'rodovia_faixa_dominio', 'eletricidade_alta_tensao', 'pedreira_explosivos', 'produtos_quimicos'];
+    if (!validos.includes(cenario)) {
+      res.status(422).json({ error: 'cenario invalido', detail: 'esperado: ' + validos.join('|') });
+      return;
+    }
+    try {
+      const r = m.calcularAdicionalCampo({
+        ativo: true,
+        cenario: cenario as 'mata_densa_animais' | 'rodovia_faixa_dominio' | 'eletricidade_alta_tensao' | 'pedreira_explosivos' | 'produtos_quimicos',
+        tipo: (typeof b.tipo === 'string' ? b.tipo : undefined) as 'insalubridade' | 'periculosidade' | undefined,
+        grau: (typeof b.grau === 'string' ? b.grau : undefined) as 'minimo' | 'medio' | 'maximo' | 'unico' | undefined,
+        bloco_enquadramento_tecnico_editado: typeof b.bloco_enquadramento_tecnico_editado === 'string' ? b.bloco_enquadramento_tecnico_editado : undefined,
+        bloco_justificativa_cliente_editado: typeof b.bloco_justificativa_cliente_editado === 'string' ? b.bloco_justificativa_cliente_editado : undefined,
+        observacao_adicional: typeof b.observacao_adicional === 'string' ? b.observacao_adicional : undefined,
+      });
+      res.json(r);
+    } catch (err) {
+      res.status(422).json({ error: 'combinacao invalida', detail: (err as Error).message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // v3.29.0: aditivo de campo (insalubridade/periculosidade) — endpoints de
 // catalogo + calculo. CRUD admin dos templates fica como follow-up.
 app.get('/api/aditivos-campo/configs', requireAuth, async (_req: Request, res: Response) => {

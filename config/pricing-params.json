@@ -6,6 +6,77 @@
     "fonte_tjma": "Resolucao GP 143/2025 TJMA - vigente desde 01/01/2026"
   },
   "salario_minimo_2026": 1621.00,
+  "adicional_campo_2026": {
+    "_AVISO_JURIDICO": "Textos VALIDADOS pelo CEO em 2026-05-27. Snapshot congelado na criacao de cada proposta. Sensibilidade alta — qualquer alteracao gera nova versao automaticamente para propostas futuras; propostas antigas mantem a redacao da epoca.",
+    "norma_vigente": {
+      "ultima_revisao": "2023-12-15",
+      "versao_referencia_geral": "CLT (Decreto-Lei 5.452/43) + NR-15 e NR-16 do MTE (Portaria 3.214/78 com revisoes ate MTE Portaria 1.359/2023)",
+      "data_snapshot": "2026-01-15"
+    },
+    "percentuais": {
+      "insalubridade": { "minimo": 10, "medio": 20, "maximo": 40 },
+      "periculosidade": { "unico": 30 }
+    },
+    "fonte_juridica_validacao": "Textos revisados em 2026-01-15. Fontes: CLT (Decreto-Lei 5.452/43), NR-15 e NR-16 do MTE, Lei 12.997/2014, jurisprudencia consolidada do TST (Sumula 47, 80, 364, 448).",
+    "limite_observacao_adicional_chars": 500,
+    "cenarios": {
+      "mata_densa_animais": {
+        "rotulo": "Servicos em area rural com mata densa, animais peconhentos ou agentes biologicos",
+        "tipo_padrao": "insalubridade",
+        "grau_padrao": "medio",
+        "percentual_padrao": 20,
+        "icone": "🌲",
+        "bloco_fundamento_legal": "CLT, art. 192, inciso II — Adicional de Insalubridade de Grau Medio (20%). NR-15 do MTE (Portaria MTb 3.214/78, com revisoes), Anexo 14 — Agentes Biologicos. Aplicacao a trabalhos com contato permanente com animais infectados ou em areas com risco biologico equivalente.",
+        "bloco_enquadramento_tecnico": "Os servicos de georreferenciamento, demarcacao e levantamento topografico em area rural com vegetacao nativa densa expoem a equipe tecnica a agentes biologicos previstos no Anexo 14 da NR-15: contato com animais peconhentos (cobras, aranhas, escorpioes, abelhas africanizadas), vetores de doencas tropicais (Aedes, barbeiros, carrapatos), e microrganismos presentes em mata fechada. O enquadramento como Grau Medio (20%) e consistente com a jurisprudencia consolidada do TST para atividades de campo em ambiente rural nao urbanizado.",
+        "bloco_justificativa_cliente": "Este adicional remunera a exposicao da equipe tecnica aos riscos biologicos inerentes ao trabalho de campo em sua propriedade, conforme determinacao legal. O valor nao e discricionario da Romatec — e exigencia da legislacao trabalhista brasileira (CLT art. 192) e da norma regulamentadora NR-15 do Ministerio do Trabalho. A nao-aplicacao caracterizaria infracao trabalhista e expoe contratante e contratado a passivos legais."
+      },
+      "rodovia_faixa_dominio": {
+        "rotulo": "Servicos em rodovia ou faixa de dominio — risco de atropelamento",
+        "tipo_padrao": "periculosidade",
+        "grau_padrao": "unico",
+        "percentual_padrao": 30,
+        "icone": "🛣️",
+        "bloco_fundamento_legal": "CLT, art. 193 — Adicional de Periculosidade (30%). NR-16 do MTE, Anexo 4 — Atividades e operacoes com energia eletrica e atividades equiparadas. Lei 12.997/2014 — equiparacao de atividades em rodovias e vias publicas com risco acentuado.",
+        "bloco_enquadramento_tecnico": "Levantamentos topograficos e demarcacoes realizadas em faixa de dominio de rodovia federal, estadual ou municipal, ou em vias urbanas com trafego intenso, expoem a equipe a risco acentuado de atropelamento, conforme jurisprudencia do TST e enquadramento da Lei 12.997/2014. O percentual de 30% e unico na CLT — nao ha graus em periculosidade.",
+        "bloco_justificativa_cliente": "Os servicos contratados serao executados em local com trafego de veiculos, configurando risco de vida a equipe tecnica. A legislacao brasileira (CLT art. 193 c/c Lei 12.997/2014) obriga o pagamento de 30% sobre o valor base como compensacao a esse risco. Esse adicional nao tem natureza discricionaria — e direito do trabalhador e obrigacao do contratante."
+      },
+      "eletricidade_alta_tensao": {
+        "rotulo": "Servicos proximos a redes eletricas energizadas — alta tensao / SEP",
+        "tipo_padrao": "periculosidade",
+        "grau_padrao": "unico",
+        "percentual_padrao": 30,
+        "icone": "⚡",
+        "bloco_fundamento_legal": "CLT, art. 193, inciso I — Adicional de Periculosidade (30%). NR-16, Anexo 4 — Atividades e operacoes com energia eletrica. Decreto 93.412/86. Aplicavel a servicos em ou proximos a Sistema Eletrico de Potencia (SEP).",
+        "bloco_enquadramento_tecnico": "Quando o levantamento topografico ou a demarcacao ocorrer em local com presenca de redes eletricas energizadas — particularmente linhas de alta tensao (≥ 1 kV), zonas controladas de subestacoes ou faixas de servidao de transmissao — caracteriza-se o enquadramento da NR-16, Anexo 4. A area de risco se estende ao raio determinado pela ABNT NBR 5460 para a tensao da rede.",
+        "bloco_justificativa_cliente": "O servico sera executado em proximidade de redes eletricas energizadas, situacao que a legislacao brasileira classifica como atividade de risco acentuado. O adicional de 30% (CLT art. 193) e obrigatorio e remunera o risco de choque eletrico, arco voltaico e queda de altura associados a essas redes."
+      },
+      "pedreira_explosivos": {
+        "rotulo": "Servicos em pedreira ou area com explosivos",
+        "tipo_padrao": "periculosidade",
+        "grau_padrao": "unico",
+        "percentual_padrao": 30,
+        "icone": "💥",
+        "bloco_fundamento_legal": "CLT, art. 193, inciso I — Adicional de Periculosidade (30%). NR-16, Anexo 1 — Atividades e operacoes perigosas com explosivos. NR-19 — Explosivos. Aplicavel a servicos em raio de risco de detonacoes.",
+        "bloco_enquadramento_tecnico": "Levantamentos topograficos, marcacao de pontos e mapeamento de frentes de lavra em pedreiras ativas, ou em qualquer area com armazenamento ou utilizacao de explosivos, configuram exposicao a risco acentuado conforme NR-16 Anexo 1 e NR-19. O enquadramento independe da participacao direta no manuseio — basta a presenca na area de risco.",
+        "bloco_justificativa_cliente": "Os servicos serao executados em area com utilizacao ou armazenamento de explosivos. A legislacao brasileira (CLT art. 193, NR-16 Anexo 1 e NR-19) obriga o pagamento de 30% como adicional de periculosidade nesse cenario. Nao ha graus — o percentual e fixo."
+      },
+      "produtos_quimicos": {
+        "rotulo": "Servicos com exposicao a produtos quimicos",
+        "tipo_padrao": "insalubridade",
+        "grau_padrao": "medio",
+        "percentual_padrao": 20,
+        "icone": "⚗️",
+        "graus_disponiveis": ["minimo", "medio", "maximo"],
+        "bloco_fundamento_legal": "CLT, art. 192 — Adicional de Insalubridade. NR-15 do MTE, Anexo 11 (Agentes Quimicos) e Anexo 13 (Insalubridade — Caracterizacao). Grau aplicavel depende do agente e do tempo de exposicao.",
+        "bloco_enquadramento_tecnico_por_grau": {
+          "minimo": "Exposicao esporadica e intermitente a agentes quimicos diluidos (ex.: aplicacao de defensivos em campo aberto, contato esporadico com solventes em quantidade reduzida). Enquadramento como Grau Minimo (10%) conforme NR-15 Anexo 11.",
+          "medio": "Exposicao habitual a agentes quimicos previstos no Anexo 13 da NR-15 (poeiras minerais, silica em concentracao intermediaria, agrotoxicos de classe toxicologica III/IV). Enquadramento como Grau Medio (20%).",
+          "maximo": "Exposicao habitual a agentes do Anexo 13 da NR-15 classificados em Grau Maximo: hidrocarbonetos aromaticos (benzeno, tolueno), asbesto/amianto, agrotoxicos classe I/II em alta concentracao. Enquadramento como Grau Maximo (40%)."
+        },
+        "bloco_justificativa_cliente": "Os servicos envolvem exposicao a produtos quimicos cuja natureza e concentracao caracterizam atividade insalubre conforme NR-15 do Ministerio do Trabalho. O percentual aplicado reflete o grau de risco do agente envolvido (10% minimo / 20% medio / 40% maximo), e o pagamento e obrigatorio por forca do art. 192 da CLT."
+      }
+    }
+  },
   "cub_ma": {
     "base_r8n": 1814.39,
     "ultima_atualizacao": "2025-12",
