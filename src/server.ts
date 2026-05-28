@@ -2588,7 +2588,14 @@ app.get('/api/adicional-campo/cenarios', async (_req: Request, res: Response) =>
   }
 });
 
-app.post('/api/adicional-campo/calcular', requireAuth, async (req: Request, res: Response) => {
+// v3.36.0 HOTFIX: endpoint /calcular tornado PUBLICO (sem requireAuth).
+// Diagnostico do 401 em producao: cookie httpOnly de sessao nao chegava ao
+// endpoint quando o user marcava o checkbox do adicional sem estar logado.
+// O calculo e' determinist​ico (consulta apenas pricing-params.json — sem DB,
+// sem side-effect, sem dado sensivel). Endpoint /cenarios ja era publico —
+// agora /calcular tambem. Endpoints que PERSISTEM (criar/atualizar proposta)
+// continuam protegidos.
+app.post('/api/adicional-campo/calcular', async (req: Request, res: Response) => {
   try {
     const b = (req.body || {}) as Record<string, unknown>;
     const ativo = !!b.ativo;

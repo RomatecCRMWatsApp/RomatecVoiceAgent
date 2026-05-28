@@ -1250,6 +1250,16 @@ function atualizarBotaoCeo() {
   btn.style.color = tem ? 'var(--neon)' : 'var(--text-muted)';
 }
 document.addEventListener('DOMContentLoaded', () => {
+  // v3.36.0: delegate global pra botao "📇 Gerenciar Clientes" que aparece
+  // no toggle da aba Proposta. Evita duplicar handler em 10+ renderers.
+  document.body.addEventListener('click', (ev) => {
+    const target = ev.target;
+    if (target instanceof HTMLElement && target.closest('[data-gerenciar-clientes]')) {
+      ev.preventDefault();
+      if (typeof abrirGerenciarClientes === 'function') abrirGerenciarClientes();
+    }
+  });
+
   atualizarBotaoCeo();
   const btn = document.getElementById('btnCeoToken');
   if (!btn) return;
@@ -6100,14 +6110,17 @@ function renderPropostasLista() {
   const ativoMo = state.tipoPropostaAtivo === 'mao_de_obra';
   const ativoCons = state.tipoPropostaAtivo === 'consultoria';
   const toggleHTML = `
-    <div class="card" role="tablist" aria-label="Tipo de proposta" style="display:flex; gap:8px; padding:8px; align-items:center;">
+    <div class="card" role="tablist" aria-label="Tipo de proposta" style="display:flex; gap:8px; padding:8px; align-items:center; flex-wrap:wrap;">
       <span style="font-size:12px; color:var(--text-muted);">Tipo:</span>
       <button class="${ativoMo ? '' : 'btn-secondary'}"
               role="tab" aria-current="${ativoMo ? 'page' : 'false'}" aria-selected="${ativoMo}"
-              data-toggle-tipo="mao_de_obra" style="flex:1;">🔨 Mão de Obra</button>
+              data-toggle-tipo="mao_de_obra" style="flex:1; min-width:140px;">🔨 Mão de Obra</button>
       <button class="${ativoCons ? '' : 'btn-secondary'}"
               role="tab" aria-current="${ativoCons ? 'page' : 'false'}" aria-selected="${ativoCons}"
-              data-toggle-tipo="consultoria" style="flex:1;">📋 Consultoria</button>
+              data-toggle-tipo="consultoria" style="flex:1; min-width:140px;">📋 Consultoria</button>
+      <button class="btn-secondary" data-gerenciar-clientes
+              title="Editar ou excluir clientes cadastrados"
+              style="white-space:nowrap;">📇 Gerenciar Clientes</button>
     </div>`;
 
   if (state.tipoPropostaAtivo === 'consultoria') {
@@ -10722,84 +10735,174 @@ function abrirHelpPadraoConstrutivo() {
 // v1.66.0: cadastro inline de cliente (chamado pelo botao "+ Novo cliente"
 // dentro do form de Nova Consultoria). Apos salvar, retorna pro form com
 // o novo cliente ja selecionado.
-async function abrirCadastroClienteModal(subtipoParaVoltar) {
+// v3.36.0: cadastro/edicao de cliente. Quando `clienteExistente` e' passado,
+// abre em modo EDICAO (PUT em vez de POST) + preenche os campos.
+async function abrirCadastroClienteModal(subtipoParaVoltar, clienteExistente = null) {
+  const isEdit = !!clienteExistente;
+  const c = clienteExistente || {};
+  const esc = (s) => String(s == null ? '' : s).replace(/"/g, '&quot;');
   const html = `
     <div style="display:grid; gap:8px; font-size:13px;">
       <label>Nome completo / Razão Social *
-        <input id="novCliNome" placeholder="Maria Ester R. Sampaio" style="width:100%;" autofocus>
+        <input id="novCliNome" placeholder="Maria Ester R. Sampaio" style="width:100%;" value="${esc(c.nome)}" autofocus>
       </label>
       <div class="lp-grid-2">
         <label>CPF / CNPJ
-          <input id="novCliCpf" placeholder="000.000.000-00" style="width:100%;">
+          <input id="novCliCpf" placeholder="000.000.000-00" style="width:100%;" value="${esc(c.cpf_cnpj)}">
         </label>
         <label>Telefone (WhatsApp)
-          <input id="novCliTel" placeholder="55 98 99168-2644" style="width:100%;">
+          <input id="novCliTel" placeholder="55 98 99168-2644" style="width:100%;" value="${esc(c.telefone)}">
         </label>
       </div>
       <label>E-mail
-        <input id="novCliEmail" type="email" placeholder="cliente@email.com" style="width:100%;">
+        <input id="novCliEmail" type="email" placeholder="cliente@email.com" style="width:100%;" value="${esc(c.email)}">
       </label>
       <label>Endereço completo
-        <input id="novCliEnd" placeholder="Rua Bom Jesus, 236, Centro" style="width:100%;">
+        <input id="novCliEnd" placeholder="Rua Bom Jesus, 236, Centro" style="width:100%;" value="${esc(c.endereco)}">
       </label>
       <div class="lp-grid-auto">
         <label>Cidade
-          <input id="novCliCidade" placeholder="Açailândia" style="width:100%;" value="Açailândia">
+          <input id="novCliCidade" placeholder="Açailândia" style="width:100%;" value="${esc(c.cidade || 'Açailândia')}">
         </label>
         <label>UF
-          <input id="novCliEstado" placeholder="MA" maxlength="2" style="width:100%; text-transform:uppercase;" value="MA">
+          <input id="novCliEstado" placeholder="MA" maxlength="2" style="width:100%; text-transform:uppercase;" value="${esc(c.estado || 'MA')}">
         </label>
         <label>CEP
-          <input id="novCliCep" placeholder="65930-000" style="width:100%;">
+          <input id="novCliCep" placeholder="65930-000" style="width:100%;" value="${esc(c.cep)}">
         </label>
       </div>
       <label>Observações
-        <textarea id="novCliObs" rows="2" placeholder="Notas internas (opcional)" style="width:100%; resize:vertical;"></textarea>
+        <textarea id="novCliObs" rows="2" placeholder="Notas internas (opcional)" style="width:100%; resize:vertical;">${esc(c.observacoes)}</textarea>
       </label>
       <div style="display:flex; gap:6px; margin-top:8px;">
-        <button id="novCliSalvar" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">💾 Salvar e voltar</button>
+        <button id="novCliSalvar" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">${isEdit ? '💾 Salvar alterações' : '💾 Salvar e voltar'}</button>
         <button class="btn-secondary" id="novCliCancelar">Cancelar</button>
       </div>
     </div>`;
-  const body = abrirModal(html, { width: '640px', title: '+ Novo Cliente', subtitle: 'Cadastro completo' });
+  abrirModal(html, {
+    width: '640px',
+    title: isEdit ? '✏️ Editar Cliente' : '+ Novo Cliente',
+    subtitle: isEdit ? `ID ${c.id}` : 'Cadastro completo',
+  });
 
-  document.getElementById('novCliCancelar').onclick = () => {
+  const voltarOuFechar = () => {
     fecharModal();
-    abrirNovaConsultoriaPasso2(subtipoParaVoltar);
+    if (subtipoParaVoltar === '__gerenciar__') {
+      abrirGerenciarClientes();
+    } else if (subtipoParaVoltar) {
+      abrirNovaConsultoriaPasso2(subtipoParaVoltar);
+    }
   };
+
+  document.getElementById('novCliCancelar').onclick = voltarOuFechar;
 
   document.getElementById('novCliSalvar').onclick = async () => {
     const nome = document.getElementById('novCliNome').value.trim();
     if (!nome) return alert('Nome é obrigatório.');
     const btn = document.getElementById('novCliSalvar');
     btn.disabled = true; btn.textContent = 'Salvando...';
+    const payload = {
+      nome,
+      cpf_cnpj: document.getElementById('novCliCpf').value.trim() || null,
+      telefone: document.getElementById('novCliTel').value.trim() || null,
+      email: document.getElementById('novCliEmail').value.trim() || null,
+      endereco: document.getElementById('novCliEnd').value.trim() || null,
+      cidade: document.getElementById('novCliCidade').value.trim() || null,
+      estado: (document.getElementById('novCliEstado').value.trim() || null)?.toUpperCase(),
+      cep: document.getElementById('novCliCep').value.trim() || null,
+      observacoes: document.getElementById('novCliObs').value.trim() || null,
+    };
     try {
-      const r = await api('/api/propostas-clientes', {
-        method: 'POST',
-        body: JSON.stringify({
-          nome,
-          cpf_cnpj: document.getElementById('novCliCpf').value.trim() || null,
-          telefone: document.getElementById('novCliTel').value.trim() || null,
-          email: document.getElementById('novCliEmail').value.trim() || null,
-          endereco: document.getElementById('novCliEnd').value.trim() || null,
-          cidade: document.getElementById('novCliCidade').value.trim() || null,
-          estado: (document.getElementById('novCliEstado').value.trim() || null)?.toUpperCase(),
-          cep: document.getElementById('novCliCep').value.trim() || null,
-          observacoes: document.getElementById('novCliObs').value.trim() || null,
-        }),
-      });
-      // Recarrega lista e volta pro form, ja selecionando o novo cliente
+      let r;
+      if (isEdit) {
+        r = await api(`/api/propostas-clientes/${c.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      } else {
+        r = await api('/api/propostas-clientes', { method: 'POST', body: JSON.stringify(payload) });
+      }
       await loadPropostasClientes();
       fecharModal();
-      await abrirNovaConsultoriaPasso2(subtipoParaVoltar);
-      const sel = document.getElementById('cnsCliente');
-      if (sel && r.insertId) sel.value = String(r.insertId);
+      if (subtipoParaVoltar === '__gerenciar__') {
+        abrirGerenciarClientes();
+      } else if (subtipoParaVoltar) {
+        await abrirNovaConsultoriaPasso2(subtipoParaVoltar);
+        const sel = document.getElementById('cnsCliente');
+        if (sel && r?.insertId) sel.value = String(r.insertId);
+      }
     } catch (e) {
-      alert('Erro: ' + e.message);
+      alert('Erro: ' + (e?.message || e));
       btn.disabled = false;
-      btn.textContent = '💾 Salvar e voltar';
+      btn.textContent = isEdit ? '💾 Salvar alterações' : '💾 Salvar e voltar';
     }
   };
+}
+
+// v3.36.0: modal de gerenciamento de clientes — listar + editar + excluir.
+// Reusa os endpoints PUT/DELETE ja existentes em propostas.ts (linhas 197/256).
+async function abrirGerenciarClientes() {
+  await loadPropostasClientes();
+  const clientes = state.propostasClientes || [];
+  const esc = (s) => String(s == null ? '' : s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+
+  const linhas = clientes.length === 0
+    ? '<div class="card empty">Nenhum cliente cadastrado.</div>'
+    : clientes.map(c => `
+      <div class="card" style="display:flex; gap:8px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+          <p style="margin:0; font-weight:600;">${esc(c.nome)}</p>
+          <p style="margin:4px 0 0; font-size:11px; color:var(--text-muted);">
+            ${c.cpf_cnpj ? '📄 ' + esc(c.cpf_cnpj) : ''}${c.telefone ? ' · 📱 ' + esc(c.telefone) : ''}${c.cidade ? ' · ' + esc(c.cidade) + (c.estado ? '/' + esc(c.estado) : '') : ''}
+          </p>
+        </div>
+        <div style="display:flex; gap:4px;">
+          <button data-cli-edit="${c.id}" style="font-size:11px; padding:6px 12px; background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e955;">✏️ Editar</button>
+          <button data-cli-del="${c.id}" data-cli-nome="${esc(c.nome)}" class="btn-danger" style="font-size:11px; padding:6px 12px;">🗑️ Excluir</button>
+        </div>
+      </div>`).join('');
+
+  const html = `
+    <div style="display:grid; gap:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <p style="margin:0; font-size:12px; color:var(--text-muted);">${clientes.length} cliente(s) cadastrado(s)</p>
+        <button id="gerCliNovo" style="background:var(--success); color:#fff; border-color:var(--success); font-size:12px;">+ Novo cliente</button>
+      </div>
+      <div id="gerCliLista" style="max-height:60vh; overflow-y:auto; display:grid; gap:6px;">
+        ${linhas}
+      </div>
+      <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+        <button class="btn-secondary" id="gerCliFechar">Fechar</button>
+      </div>
+    </div>`;
+  abrirModal(html, { width: '720px', title: '📇 Gerenciar Clientes', subtitle: 'Editar ou excluir cadastros existentes' });
+
+  document.getElementById('gerCliFechar').onclick = fecharModal;
+  document.getElementById('gerCliNovo').onclick = () => {
+    fecharModal();
+    abrirCadastroClienteModal('__gerenciar__', null);
+  };
+
+  document.querySelectorAll('[data-cli-edit]').forEach(b => b.onclick = async () => {
+    const id = Number(b.dataset.cliEdit);
+    const cli = clientes.find(c => Number(c.id) === id);
+    if (!cli) return;
+    fecharModal();
+    abrirCadastroClienteModal('__gerenciar__', cli);
+  });
+
+  document.querySelectorAll('[data-cli-del]').forEach(b => b.onclick = async () => {
+    const id = Number(b.dataset.cliDel);
+    const nome = b.dataset.cliNome || 'este cliente';
+    if (!confirm(`Excluir "${nome}"?\n\nO cliente será removido da lista (soft-delete). Propostas existentes desse cliente continuam visíveis.`)) return;
+    b.disabled = true; b.textContent = 'Excluindo...';
+    try {
+      await api(`/api/propostas-clientes/${id}`, { method: 'DELETE' });
+      await loadPropostasClientes();
+      abrirGerenciarClientes(); // re-render
+    } catch (err) {
+      alert('Erro: ' + (err.message || err));
+      b.disabled = false;
+      b.textContent = '🗑️ Excluir';
+    }
+  });
 }
 
 async function abrirNovaConsultoriaPasso2(subtipo) {
