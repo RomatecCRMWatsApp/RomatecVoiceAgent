@@ -1714,10 +1714,15 @@ function renderAdicionalCampoBody(
   doc.y = startY + PADDING;
 
   // Cabecalho
+  // v3.44.0: REMOVIDOS emojis (⚠📜🔍💬) — Helvetica embedded so' suporta Latin-1.
+  // Os emojis (U+26A0, U+1F4DC, U+1F50D, U+1F4AC) saiam corrompidos no PDF
+  // como "Ø=ÜÜ" / "Ø=Ý" / "Ø=Ü¬" / "&". Substituidos por "!" (ASCII, sinaliza
+  // atencao no titulo) e labels textuais limpos nos sub-headers — a hierarquia
+  // visual e' preservada pela cor (COR_TITULO amber/red), bold e estrutura.
   doc.fontSize(11).fillColor(COR_TITULO).font('Helvetica-Bold');
   const titulo = isPeric
-    ? '⚠ ADICIONAL DE PERICULOSIDADE'
-    : '⚠ ADICIONAL DE INSALUBRIDADE';
+    ? '! ADICIONAL DE PERICULOSIDADE'
+    : '! ADICIONAL DE INSALUBRIDADE';
   doc.text(`${titulo}  ·  +${snap.percentual.toFixed(0)}%`, { width: colW - 2 * PADDING });
   doc.moveDown(0.3);
 
@@ -1729,7 +1734,7 @@ function renderAdicionalCampoBody(
 
   // Bloco 1 — Fundamento Legal (locked)
   doc.fontSize(9.5).fillColor(COR_TITULO).font('Helvetica-Bold')
-    .text('📜 FUNDAMENTO LEGAL', { width: colW - 2 * PADDING });
+    .text('FUNDAMENTO LEGAL', { width: colW - 2 * PADDING });
   doc.fontSize(8.5).fillColor('#111').font('Helvetica')
     .text(snap.bloco_fundamento_legal, colX + PADDING + 8, doc.y, {
       width: colW - 2 * PADDING - 8, align: 'justify',
@@ -1738,7 +1743,7 @@ function renderAdicionalCampoBody(
 
   // Bloco 2 — Enquadramento Tecnico
   doc.fontSize(9.5).fillColor(COR_TITULO).font('Helvetica-Bold')
-    .text('🔍 ENQUADRAMENTO TÉCNICO', colX + PADDING, doc.y, { width: colW - 2 * PADDING });
+    .text('ENQUADRAMENTO TECNICO', colX + PADDING, doc.y, { width: colW - 2 * PADDING });
   doc.fontSize(8.5).fillColor('#111').font('Helvetica')
     .text(snap.bloco_enquadramento_tecnico, colX + PADDING + 8, doc.y, {
       width: colW - 2 * PADDING - 8, align: 'justify',
@@ -1747,7 +1752,7 @@ function renderAdicionalCampoBody(
 
   // Bloco 3 — Justificativa ao Cliente
   doc.fontSize(9.5).fillColor(COR_TITULO).font('Helvetica-Bold')
-    .text('💬 JUSTIFICATIVA AO CLIENTE', colX + PADDING, doc.y, { width: colW - 2 * PADDING });
+    .text('JUSTIFICATIVA AO CLIENTE', colX + PADDING, doc.y, { width: colW - 2 * PADDING });
   doc.fontSize(8.5).fillColor('#111').font('Helvetica')
     .text(snap.bloco_justificativa_cliente, colX + PADDING + 8, doc.y, {
       width: colW - 2 * PADDING - 8, align: 'justify',
@@ -1819,7 +1824,8 @@ function renderAditivoCampoBody(
 
   // Titulo
   doc.fontSize(11).fillColor(COR_AMBER_TITULO).font('Helvetica-Bold');
-  doc.text(`⚠ ${snap.descricao_curta.toUpperCase()}`, { width: colW - 2 * PADDING, lineBreak: true });
+  // v3.44.0: ⚠ -> ! (Helvetica embedded nao suporta U+26A0)
+  doc.text(`! ${snap.descricao_curta.toUpperCase()}`, { width: colW - 2 * PADDING, lineBreak: true });
   doc.moveDown(0.3);
 
   // Linha do valor
@@ -2991,7 +2997,8 @@ export async function gerarPdfPropostaConsultoria(
     } else {
       // v3.23.0: Assessoria NÃO contratada — aviso explícito
       doc.font('Helvetica-Bold').fontSize(10).fillColor('#b91c1c');
-      doc.text('⚠ SERVIÇO NÃO CONTRATADO');
+      // v3.44.0: ⚠ -> ! (corrompe em Helvetica)
+      doc.text('! SERVIÇO NÃO CONTRATADO');
       doc.moveDown(0.2);
       doc.font('Helvetica').fontSize(9).fillColor('#222');
       doc.text('A presente proposta contempla exclusivamente a elaboração das peças técnicas descritas no item anterior. As diligências administrativas (Superintendência de Habitação e Regularização Fundiária e Cartório de Registro de Imóveis), recolhimento de assinaturas e demais providências correrão por conta do contratante ou de procurador por ele constituído.', { align: 'justify' });
@@ -3177,10 +3184,12 @@ function desenharTabelaCustos(doc: PDFKit.PDFDocument, items: CustosCalculados['
       const diff = it.valor - it.valor_original;
       const pct = (Math.abs(diff) / it.valor_original) * 100;
       if (diff < 0) {
-        avisoDesconto = `\n   ⚠ Desconto concedido: ${formatBRL(Math.abs(diff))} (-${pct.toFixed(1)}%)`;
+        // v3.44.0: ⚠ -> ! (corrompe em Helvetica embedded)
+        avisoDesconto = `\n   ! Desconto concedido: ${formatBRL(Math.abs(diff))} (-${pct.toFixed(1)}%)`;
         corAviso = '#dc2626';
       } else {
-        avisoDesconto = `\n   ⬆ Acrescimo: ${formatBRL(diff)} (+${pct.toFixed(1)}%)`;
+        // v3.44.0: ⬆ (U+2B06) -> + (corrompe em Helvetica embedded)
+        avisoDesconto = `\n   + Acrescimo: ${formatBRL(diff)} (+${pct.toFixed(1)}%)`;
         corAviso = '#fb923c';
       }
     } else if ((!it.valor_original || it.valor_original === 0) && it.valor > 0 && it.pendente === false && (it as { _eraOriginalmenteZero?: boolean })._eraOriginalmenteZero) {
