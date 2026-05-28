@@ -116,11 +116,19 @@ interface PricingParams {
       acompanhamento_obra:  { rotulo: string; valor_unitario: number; unidade?: string };
       consultoria_juridica: { rotulo: string; valor: 'sob_orcamento' };
     };
+    // v3.38.0 — itens diretos (fora da complexidade/assessoria)
+    laudo_tecnico_direto?: { rotulo: string; valor_unitario_sm_multiplicador: number };
+    locacao_kit_gnss?: {
+      rotulo: string;
+      valor_unitario_diaria_default: number;
+      descritivo: string;
+    };
     minimo_garantido_sm: number;
     complexidade_multiplicadores: { simples: number; media: number; alta: number };
     assessoria_pct: number;
     desconto_max_pct: number;
     parcelas: Array<{ numero: number; rotulo: string; percentual: number }>;
+    parcelas_2x?: Array<{ numero: number; rotulo: string; percentual: number }>;
     validade_dias_default: number;
   };
   _meta?: { ultima_atualizacao: string; atualizado_por: string; versao: string };

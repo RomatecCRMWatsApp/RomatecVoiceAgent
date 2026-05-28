@@ -9256,11 +9256,33 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
         </div>
         <label>Validade (dias) <input id="dmValidade" type="number" min="1" step="1" value="${cache?.validade_dias ?? 15}" style="width:100%;"></label>
 
-        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">➕ Opcionais (não somam ao total)</p>
-        <label style="display:flex; gap:6px; align-items:center;"><input id="dmOpcLaudo" type="checkbox"> Laudo Técnico (1 SM)</label>
+        <!-- v3.38.0: itens diretos (Kit GNSS + Laudo) — alinhamento a PROP-2026-0028-R1 -->
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">🛰️ Itens Diretos (somam ao total)</p>
         <div class="lp-grid-2">
-          <label style="display:flex; gap:6px; align-items:center;"><input id="dmOpcAlinh" type="checkbox"> Alinhamento de Cerca</label>
-          <label>Metros <input id="dmOpcAlinhM" type="number" min="0" step="1" value="0" style="width:100%;"></label>
+          <label style="display:flex; gap:6px; align-items:center;"><input id="dmKitGnss" type="checkbox" ${cache?.locacao_kit_gnss_contratado ? 'checked' : ''}> Locação Kit GNSS</label>
+          <div></div>
+        </div>
+        <div class="lp-grid-2">
+          <label>Diárias (admite 0,5) <input id="dmKitGnssQtd" type="number" min="0" step="0.5" value="${cache?.locacao_kit_gnss_qtd ?? 1}" style="width:100%;"></label>
+          <label>R$/diária <input id="dmKitGnssDiaria" type="number" min="0" step="0.01" value="${cache?.locacao_kit_gnss_diaria ?? 250}" style="width:100%;"></label>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin:-4px 0 6px 4px;">
+          ComNav S6 (base) · T30 Plus c/ laser (rover) · tripé · base niveladora · bastão/bipé · coletora R80
+        </div>
+        <label style="display:flex; gap:6px; align-items:center;"><input id="dmLaudoDireto" type="checkbox" ${cache?.laudo_tecnico_direto_contratado ? 'checked' : ''}> Laudo Técnico de Demarcação (R$ 1.621 — 1 SM 2026)</label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">💳 Parcelamento</p>
+        <label>Nº de parcelas
+          <select id="dmNumParcelas" style="width:100%;">
+            <option value="2"${(cache?.num_parcelas ?? 2) === 2 ? ' selected' : ''}>2× (50% sinal · 50% entrega do laudo)</option>
+            <option value="3"${(cache?.num_parcelas ?? 2) === 3 ? ' selected' : ''}>3× (40/30/30 — assinatura · campo · entrega final)</option>
+          </select>
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">➕ Opcionais (não somam ao total)</p>
+        <div class="lp-grid-2">
+          <label style="display:flex; gap:6px; align-items:center;"><input id="dmOpcAlinh" type="checkbox"> Alinhamento de Cerca (R$ 0,42/m)</label>
+          <label>Metros (default = perímetro) <input id="dmOpcAlinhM" type="number" min="0" step="0.01" value="${cache?.alinhamento_metros ?? ''}" style="width:100%;"></label>
         </div>
         <label style="display:flex; gap:6px; align-items:center;"><input id="dmOpcCroqui" type="checkbox"> Croqui Assinado em Cartório (R$ 180)</label>
         <div class="lp-grid-2">
@@ -9367,10 +9389,13 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
     if (m > 0) marcos.push({ tipo: 'madeira',          quantidade: m, valor_unitario_congelado: VU.madeira });
 
     const opcionais = {};
-    if (document.getElementById('dmOpcLaudo').checked)
-      opcionais.laudo_tecnico = { contratado: true, valor_unitario_sm_multiplicador: 1.0 };
-    if (document.getElementById('dmOpcAlinh').checked)
-      opcionais.alinhamento_cerca = { contratado: true, metros: parseFloat(document.getElementById('dmOpcAlinhM').value) || 0, valor_unitario: 4.5 };
+    // v3.38.0: alinhamento de cerca — default = perimetro_m; R$ 0,42/m (gold standard)
+    const perimetroM = parseFloat(document.getElementById('dmPerimetro').value) || 0;
+    if (document.getElementById('dmOpcAlinh').checked) {
+      const metrosInput = parseFloat(document.getElementById('dmOpcAlinhM').value);
+      const metros = Number.isFinite(metrosInput) && metrosInput > 0 ? metrosInput : perimetroM;
+      opcionais.alinhamento_cerca = { contratado: true, metros, valor_unitario: 0.42 };
+    }
     if (document.getElementById('dmOpcCroqui').checked)
       opcionais.croqui_assinado = { contratado: true, valor_unitario: 180 };
     if (document.getElementById('dmOpcAcomp').checked)
@@ -9378,13 +9403,18 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
     if (document.getElementById('dmOpcJurid').checked)
       opcionais.consultoria_juridica = { contratado: true, valor: 'sob_orcamento' };
 
+    // v3.38.0: itens diretos (Kit GNSS + Laudo Tecnico)
+    const kitContratado = document.getElementById('dmKitGnss').checked;
+    const laudoContratado = document.getElementById('dmLaudoDireto').checked;
+    const numParcelas = parseInt(document.getElementById('dmNumParcelas').value, 10) === 3 ? 3 : 2;
+
     const dados = {
       subtipo, finalidade,
       municipio: document.getElementById('dmMunicipio').value.trim(),
       uf: document.getElementById('dmUf').value.trim(),
       matricula: document.getElementById('dmMatricula').value.trim() || undefined,
       cri: document.getElementById('dmCri').value.trim() || undefined,
-      perimetro_m: parseFloat(document.getElementById('dmPerimetro').value) || undefined,
+      perimetro_m: perimetroM || undefined,
       num_vertices,
       servico_piqueteamento: piquet,
       marcos,
@@ -9395,6 +9425,13 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
       desconto_pct: parseFloat(document.getElementById('dmDesc').value) || 0,
       validade_dias: parseInt(document.getElementById('dmValidade').value, 10) || 15,
       opcionais,
+      // v3.38.0
+      laudo_tecnico_direto: laudoContratado ? { contratado: true, valor_unitario_sm_multiplicador: 1.0 } : undefined,
+      locacao_kit_gnss: kitContratado ? {
+        qtd_diarias: parseFloat(document.getElementById('dmKitGnssQtd').value) || 1,
+        diaria: parseFloat(document.getElementById('dmKitGnssDiaria').value) || 250,
+      } : undefined,
+      num_parcelas: numParcelas,
     };
     if (isUrbana) {
       dados.loteamento_nome = document.getElementById('dmLoteamento').value.trim() || undefined;
@@ -9438,7 +9475,9 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
       const r = await api('/api/propostas-consultoria/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subtipo, dados_imovel: dados }),
+        // v3.38.0: envia adicional_campo no preview pra refletir gold standard
+        // (adicional integrado na base, antes da complexidade) ja na pre-visualizacao.
+        body: JSON.stringify({ subtipo, dados_imovel: dados, adicional_campo: adicionalCampo || undefined }),
       });
       // v3.30.0 HOTFIX: shape do ctx alinhado com os outros 6 forms (cliId,
       // nao cliente_id) — o submit handler comum em cnsSalvar.onclick le

@@ -195,13 +195,19 @@ describe('calcularDemarcacaoLotes — calculo principal', () => {
 });
 
 describe('calcularDemarcacaoLotes — opcionais', () => {
-  it('18. Opcionais: 5 linhas sempre, mesmo com nenhum contratado', () => {
+  it('18. Opcionais: 4 linhas sempre (v3.38.0 — laudo virou item direto)', () => {
     const r = calcularDemarcacaoLotes(baseUrbana);
-    expect(r.secao_opcionais_demarcacao.linhas).toHaveLength(5);
+    expect(r.secao_opcionais_demarcacao.linhas).toHaveLength(4);
     expect(r.secao_opcionais_demarcacao.subtotal).toBe(0);
+    const rotulos = r.secao_opcionais_demarcacao.linhas.map((l) => l.rotulo).join(' | ');
+    expect(rotulos).not.toMatch(/Laudo/i);
+    expect(rotulos).toMatch(/Alinhamento/i);
+    expect(rotulos).toMatch(/Croqui/i);
+    expect(rotulos).toMatch(/Acompanhamento/i);
+    expect(rotulos).toMatch(/Juridica/i);
   });
 
-  it('19. alinhamento_cerca com metros=120 -> subtotal = 120 × 4.50', () => {
+  it('19. alinhamento_cerca com metros=120 -> subtotal = 120 × valor_unitario (override)', () => {
     const r = calcularDemarcacaoLotes({
       ...baseUrbana,
       opcionais: { alinhamento_cerca: { contratado: true, metros: 120, valor_unitario: 4.5 } },
@@ -221,13 +227,12 @@ describe('calcularDemarcacaoLotes — opcionais', () => {
     expect(linha?.contratado).toBe(true);
   });
 
-  it('21. Opcionais NAO somam ao total Romatec', () => {
+  it('21. Opcionais (sem laudo) NAO somam ao total Romatec', () => {
     const semOpc = calcularDemarcacaoLotes(baseUrbana);
     const comOpc = calcularDemarcacaoLotes({
       ...baseUrbana,
       opcionais: {
-        laudo_tecnico: { contratado: true, valor_unitario_sm_multiplicador: 1.0 },
-        alinhamento_cerca: { contratado: true, metros: 100, valor_unitario: 4.5 },
+        alinhamento_cerca: { contratado: true, metros: 100, valor_unitario: 0.42 },
         croqui_assinado: { contratado: true, valor_unitario: 180 },
       },
     });
@@ -243,5 +248,229 @@ describe('calcularDemarcacaoLotes — opcionais', () => {
     expect(r2.honorarios_romatec.tecnicos_campo).toBeGreaterThan(r1.honorarios_romatec.tecnicos_campo);
     expect(r1.salario_minimo_usado).toBe(1500);
     expect(r2.salario_minimo_usado).toBe(2000);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// v3.38.0 — alinhamento a PROP-2026-0028-R1 (gold standard aprovado pelo CEO)
+// ────────────────────────────────────────────────────────────────────────
+
+describe('v3.38.0 — adicional de campo (insal/peric) na base', () => {
+  it('23. adicional_campo_pct=0 (default) — output zerado, total nao muda', () => {
+    const semAd = calcularDemarcacaoLotes(baseUrbana);
+    const comAd = calcularDemarcacaoLotes({ ...baseUrbana, adicional_campo_pct: 0 });
+    expect(comAd.honorarios_romatec.adicional_campo.aplicavel).toBe(false);
+    expect(comAd.honorarios_romatec.adicional_campo.valor).toBe(0);
+    expect(comAd.honorarios_romatec.total).toBe(semAd.honorarios_romatec.total);
+  });
+
+  it('24. adicional=20% incide SOMENTE sobre tecnicos_campo (CLT 192/II)', () => {
+    const r = calcularDemarcacaoLotes({ ...baseUrbana, adicional_campo_pct: 20 });
+    const ad = r.honorarios_romatec.adicional_campo;
+    const expectado = r.honorarios_romatec.tecnicos_campo * 0.20;
+    expect(ad.aplicavel).toBe(true);
+    expect(ad.pct).toBe(20);
+    expect(ad.valor).toBeCloseTo(expectado, 2);
+  });
+
+  it('25. adicional entra na base ANTES da complexidade (multiplicado por x1.3 etc)', () => {
+    const r0 = calcularDemarcacaoLotes({ ...baseUrbana, adicional_campo_pct: 0 });
+    const r20 = calcularDemarcacaoLotes({ ...baseUrbana, adicional_campo_pct: 20 });
+    const delta = r20.honorarios_romatec.subtotal_apos_complexidade - r0.honorarios_romatec.subtotal_apos_complexidade;
+    const tec = r20.honorarios_romatec.tecnicos_campo;
+    // delta = adicional × complexidade (= 20% × tec × 1.3 para 'media')
+    expect(delta).toBeCloseTo(tec * 0.20 * 1.3, 1);
+  });
+
+  it('26. adicional_campo_pct invalido (-1 ou 41) -> throw', () => {
+    expect(() => calcularDemarcacaoLotes({ ...baseUrbana, adicional_campo_pct: -1 }))
+      .toThrow(/adicional_campo_pct/);
+    expect(() => calcularDemarcacaoLotes({ ...baseUrbana, adicional_campo_pct: 41 }))
+      .toThrow(/adicional_campo_pct/);
+  });
+});
+
+describe('v3.38.0 — Laudo Tecnico de Demarcacao (item direto)', () => {
+  it('27. laudo_tecnico_direto.contratado=true -> soma 1 SM ao total, fora da complexidade', () => {
+    const sem = calcularDemarcacaoLotes(baseUrbana);
+    const com = calcularDemarcacaoLotes({
+      ...baseUrbana,
+      laudo_tecnico_direto: { contratado: true },
+    });
+    expect(com.honorarios_romatec.laudo_tecnico_direto.contratado).toBe(true);
+    expect(com.honorarios_romatec.laudo_tecnico_direto.valor).toBeCloseTo(SM_2026 * 1.0, 2);
+    // Diferenca exata = laudo (sem complexidade nem assessoria nem desconto)
+    expect(com.honorarios_romatec.total - sem.honorarios_romatec.total).toBeCloseTo(SM_2026, 2);
+  });
+
+  it('28. Retrocompat: opcionais.laudo_tecnico.contratado=true migra pra item direto', () => {
+    const r = calcularDemarcacaoLotes({
+      ...baseUrbana,
+      opcionais: { laudo_tecnico: { contratado: true, valor_unitario_sm_multiplicador: 1.0 } },
+    });
+    expect(r.honorarios_romatec.laudo_tecnico_direto.contratado).toBe(true);
+    expect(r.honorarios_romatec.laudo_tecnico_direto.valor).toBeCloseTo(SM_2026, 2);
+  });
+
+  it('29. Sem contratacao -> laudo_tecnico_direto.contratado=false, valor=0', () => {
+    const r = calcularDemarcacaoLotes(baseUrbana);
+    expect(r.honorarios_romatec.laudo_tecnico_direto.contratado).toBe(false);
+    expect(r.honorarios_romatec.laudo_tecnico_direto.valor).toBe(0);
+  });
+});
+
+describe('v3.38.0 — Locacao Kit GNSS (item direto)', () => {
+  it('30. qtd_diarias=0 (default) -> contratado=false, valor=0', () => {
+    const r = calcularDemarcacaoLotes(baseUrbana);
+    expect(r.honorarios_romatec.locacao_kit_gnss.contratado).toBe(false);
+    expect(r.honorarios_romatec.locacao_kit_gnss.valor).toBe(0);
+  });
+
+  it('31. qtd_diarias=1, diaria default (250) -> valor=250 somado ao total', () => {
+    const sem = calcularDemarcacaoLotes(baseUrbana);
+    const com = calcularDemarcacaoLotes({ ...baseUrbana, locacao_kit_gnss: { qtd_diarias: 1 } });
+    expect(com.honorarios_romatec.locacao_kit_gnss.contratado).toBe(true);
+    expect(com.honorarios_romatec.locacao_kit_gnss.qtd_diarias).toBe(1);
+    expect(com.honorarios_romatec.locacao_kit_gnss.diaria).toBeCloseTo(250, 2);
+    expect(com.honorarios_romatec.locacao_kit_gnss.valor).toBeCloseTo(250, 2);
+    expect(com.honorarios_romatec.total - sem.honorarios_romatec.total).toBeCloseTo(250, 2);
+  });
+
+  it('32. Meia diaria (0.5) e multiplas (3) aceitas — fora da complexidade', () => {
+    const meia = calcularDemarcacaoLotes({ ...baseUrbana, locacao_kit_gnss: { qtd_diarias: 0.5 } });
+    expect(meia.honorarios_romatec.locacao_kit_gnss.valor).toBeCloseTo(125, 2);
+    const tres = calcularDemarcacaoLotes({ ...baseUrbana, locacao_kit_gnss: { qtd_diarias: 3 } });
+    expect(tres.honorarios_romatec.locacao_kit_gnss.valor).toBeCloseTo(750, 2);
+  });
+
+  it('33. Diaria custom override (R$ 300) preserva qtd × diaria', () => {
+    const r = calcularDemarcacaoLotes({
+      ...baseUrbana,
+      locacao_kit_gnss: { qtd_diarias: 2, diaria: 300 },
+    });
+    expect(r.honorarios_romatec.locacao_kit_gnss.diaria).toBe(300);
+    expect(r.honorarios_romatec.locacao_kit_gnss.valor).toBeCloseTo(600, 2);
+  });
+
+  it('34. Descritivo do kit (equipamentos discriminados) presente no output', () => {
+    const r = calcularDemarcacaoLotes({ ...baseUrbana, locacao_kit_gnss: { qtd_diarias: 1 } });
+    expect(r.honorarios_romatec.locacao_kit_gnss.descritivo).toMatch(/ComNav S6/);
+    expect(r.honorarios_romatec.locacao_kit_gnss.descritivo).toMatch(/T30 Plus/);
+    expect(r.honorarios_romatec.locacao_kit_gnss.descritivo).toMatch(/R80/);
+  });
+});
+
+describe('v3.38.0 — Parcelas 2x (50/50) vs 3x (40/30/30)', () => {
+  it('35. num_parcelas omitido -> 3 parcelas (retrocompat)', () => {
+    const r = calcularDemarcacaoLotes(baseUrbana);
+    expect(r.parcelas).toHaveLength(3);
+    expect(r.parcelas[0].percentual).toBe(40);
+  });
+
+  it('36. num_parcelas=2 -> 2 parcelas (50/50: sinal + entrega final)', () => {
+    const r = calcularDemarcacaoLotes({ ...baseUrbana, num_parcelas: 2 });
+    expect(r.parcelas).toHaveLength(2);
+    expect(r.parcelas[0].percentual).toBe(50);
+    expect(r.parcelas[1].percentual).toBe(50);
+    expect(r.parcelas[0].rotulo).toMatch(/[Aa]ssinatura|[Ss]inal/);
+    expect(r.parcelas[1].rotulo).toMatch(/[Ee]ntrega/);
+    // Soma exata
+    const soma = r.parcelas.reduce((s, p) => s + p.valor, 0);
+    expect(Math.abs(soma - r.honorarios_romatec.total)).toBeLessThan(0.02);
+  });
+
+  it('37. num_parcelas=2 com total impar -> ultima parcela absorve residuo', () => {
+    // total propositalmente impar via diarias estranho
+    const r = calcularDemarcacaoLotes({ ...baseRural, num_parcelas: 2 });
+    const t = r.honorarios_romatec.total;
+    const p1 = r.parcelas[0].valor;
+    const p2 = r.parcelas[1].valor;
+    expect(Math.abs(p1 + p2 - t)).toBeLessThan(0.02);
+  });
+});
+
+describe('v3.38.0 — Cenario canonico PROP-2026-0028-R1 (gold standard)', () => {
+  // CONSTRUSUL CONSTRUCOES LTDA — Parte da Fazenda Gloria, Acailandia/MA
+  // Matricula 29.689, CCIR 110.027.001.708-6
+  // 29,04 ha · 4 vertices · perimetro 2.190,78 m
+  // 1 diaria · 30 km · 4 marcos madeira · insal 20% · complexidade media · 2 parcelas
+  // Kit GNSS 1 diaria (R$ 250) + Laudo Tecnico (R$ 1.621) = R$ 6.619,26 esperado
+  const propInput: InputDemarcacaoLotes = {
+    subtipo: 'demarcacao_rural',
+    finalidade: 'demarcacao_inicial',
+    municipio: 'Acailandia',
+    uf: 'MA',
+    matricula: '29.689',
+    cri: 'Cartorio 03.018-9',
+    denominacao_imovel: 'Parte da Fazenda Gloria',
+    ccir: '110.027.001.708-6',
+    area_hectares: 29.04,
+    perimetro_m: 2190.78,
+    num_vertices: 4,
+    servico_piqueteamento: true,
+    marcos: [marcoMadeira(4)],
+    diarias_equipe: 1,
+    km_deslocamento: 30,
+    complexidade: 'media',
+    adicional_campo_pct: 20,
+    laudo_tecnico_direto: { contratado: true },
+    locacao_kit_gnss: { qtd_diarias: 1, diaria: 250 },
+    num_parcelas: 2,
+  };
+
+  it('38. Linhas individuais: TRT 93,40 · Tec 680,82 · Insal 136,16 · Marcos 140 · Desloc 105 · Area 2323,20', () => {
+    const r = calcularDemarcacaoLotes(propInput);
+    const h = r.honorarios_romatec;
+    expect(h.trt_cft).toBeCloseTo(93.40, 2);
+    expect(h.tecnicos_campo).toBeCloseTo(680.82, 2);
+    expect(h.adicional_campo.valor).toBeCloseTo(136.16, 2);
+    expect(h.marcos_subtotal).toBeCloseTo(140.00, 2);
+    expect(h.deslocamento).toBeCloseTo(105.00, 2);
+    expect(h.area_servico).toBeCloseTo(2323.20, 2);
+  });
+
+  it('39. Complexidade (×1,3): subtotal_apos = 4.522,15', () => {
+    const r = calcularDemarcacaoLotes(propInput);
+    const h = r.honorarios_romatec;
+    expect(h.complexidade_multiplicador).toBe(1.3);
+    expect(h.subtotal_apos_complexidade).toBeCloseTo(4522.15, 1);
+  });
+
+  it('40. Assessoria 5%: 226,11', () => {
+    const r = calcularDemarcacaoLotes(propInput);
+    expect(r.honorarios_romatec.assessoria).toBeCloseTo(226.11, 1);
+  });
+
+  it('41. Kit GNSS 1× R$ 250 + Laudo R$ 1.621 (itens diretos)', () => {
+    const r = calcularDemarcacaoLotes(propInput);
+    const h = r.honorarios_romatec;
+    expect(h.locacao_kit_gnss.valor).toBeCloseTo(250.00, 2);
+    expect(h.laudo_tecnico_direto.valor).toBeCloseTo(1621.00, 2);
+  });
+
+  it('42. VALOR TOTAL DA PROPOSTA = R$ 6.619,26', () => {
+    const r = calcularDemarcacaoLotes(propInput);
+    expect(r.honorarios_romatec.total).toBeCloseTo(6619.26, 1);
+  });
+
+  it('43. Parcelas 2× = R$ 3.309,63 cada (50/50)', () => {
+    const r = calcularDemarcacaoLotes(propInput);
+    expect(r.parcelas).toHaveLength(2);
+    expect(r.parcelas[0].valor).toBeCloseTo(3309.63, 1);
+    expect(r.parcelas[1].valor).toBeCloseTo(3309.63, 1);
+  });
+
+  it('44. Alinhamento de cerca default R$ 0,42/m × perimetro 2.190,78 m = R$ 920,13 (opcional)', () => {
+    const r = calcularDemarcacaoLotes({
+      ...propInput,
+      opcionais: {
+        alinhamento_cerca: { contratado: true, metros: 2190.78, valor_unitario: 0.42 },
+      },
+    });
+    const linha = r.secao_opcionais_demarcacao.linhas.find((l) => /Alinhamento/i.test(l.rotulo));
+    expect(linha?.valor).toBeCloseTo(920.13, 1);
+    // Alinhamento e' opcional — NAO soma ao total Romatec
+    const r0 = calcularDemarcacaoLotes(propInput);
+    expect(r.honorarios_romatec.total).toBe(r0.honorarios_romatec.total);
   });
 });

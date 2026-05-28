@@ -466,6 +466,9 @@ export interface MarcoDiscriminado {
 }
 
 export interface OpcionaisDemarcacao {
+  // v3.38.0: laudo_tecnico foi promovido a item direto em honorarios_romatec
+  // (laudo_tecnico_direto). Permanece aqui apenas por retrocompat — propostas
+  // antigas com opcionais.laudo_tecnico.contratado=true sao migradas em runtime.
   laudo_tecnico?: { contratado: boolean; valor_unitario_sm_multiplicador: number };
   alinhamento_cerca?: { contratado: boolean; metros: number; valor_unitario: number };
   croqui_assinado?: { contratado: boolean; valor_unitario: number };
@@ -506,6 +509,19 @@ export interface InputDemarcacaoLotes {
   validade_dias?: number;
 
   opcionais?: OpcionaisDemarcacao;
+
+  // v3.38.0 — alinhamento a PROP-2026-0028-R1 (gold standard)
+  // Adicional de insalubridade/periculosidade. Incide APENAS sobre tecnicos_campo,
+  // integrado a base ANTES da complexidade e da assessoria (CLT art. 192-193 / NR-15/NR-16).
+  adicional_campo_pct?: number; // 0..40 — default 0
+  // Laudo Tecnico de Demarcacao — item direto, fora da complexidade/assessoria.
+  // valor = mult × SM (default 1.0 SM = R$ 1.621,00 em 2026).
+  laudo_tecnico_direto?: { contratado: boolean; valor_unitario_sm_multiplicador?: number };
+  // Locacao de Kit GNSS — item direto, fora da complexidade/assessoria.
+  // valor = diaria × qtd_diarias. Default diaria de pricing-params (R$ 250,00).
+  locacao_kit_gnss?: { qtd_diarias: number; diaria?: number };
+  // Parcelamento — default 3x (40/30/30, retrocompat). 2x = 50/50 (sinal + entrega final).
+  num_parcelas?: 2 | 3;
 }
 
 export interface CodigosMintadosFQNS {
@@ -523,6 +539,8 @@ export interface DemarcacaoLotesOutput {
   honorarios_romatec: {
     trt_cft: number;
     tecnicos_campo: number;
+    // v3.38.0 — adicional de insal/peric sobre tecnicos_campo, integrado a base.
+    adicional_campo: { aplicavel: boolean; pct: number; valor: number };
     marcos_discriminados: { tipo: MaterialMarco; qtd: number; subtotal: number }[];
     marcos_subtotal: number;
     deslocamento: number;
@@ -531,6 +549,9 @@ export interface DemarcacaoLotesOutput {
     subtotal_apos_complexidade: number;
     assessoria: number;
     desconto_valor: number;
+    // v3.38.0 — itens diretos (fora da complexidade/assessoria/desconto).
+    laudo_tecnico_direto: { contratado: boolean; valor: number };
+    locacao_kit_gnss: { contratado: boolean; qtd_diarias: number; diaria: number; valor: number; descritivo: string };
     total: number;
   };
   secao_opcionais_demarcacao: {
