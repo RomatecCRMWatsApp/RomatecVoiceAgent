@@ -2467,11 +2467,46 @@ app.post('/api/memoriais/hidraulico/calcular', async (req: Request, res: Respons
   }
 });
 
+// v3.48.0 — Fase 2 Memoriais: Sanitario / Eletrico / Estrutural
+// Mesmo padrao do hidraulico: calculo deterministico, publico (sem auth),
+// le tabelas NBR hardcoded, nao acessa DB, nao persiste.
+app.post('/api/memoriais/sanitario/calcular', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/memoriais/sanitarioCalc');
+    const r = m.calcularMemorialSanitario(req.body as Parameters<typeof m.calcularMemorialSanitario>[0]);
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/memoriais/eletrico/calcular', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/memoriais/eletricoCalc');
+    const r = m.calcularMemorialEletrico(req.body as Parameters<typeof m.calcularMemorialEletrico>[0]);
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/memoriais/estrutural/calcular', async (req: Request, res: Response) => {
+  try {
+    const m = await import('./services/memoriais/estruturalCalc');
+    const r = m.calcularMemorialEstrutural(req.body as Parameters<typeof m.calcularMemorialEstrutural>[0]);
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
 app.post('/api/memoriais/:disciplina/criar', requireAuth, async (req: Request, res: Response) => {
   try {
     const disc = String(req.params.disciplina);
-    if (disc !== 'hidraulico') {
-      res.status(422).json({ error: 'Fase 1 cobre apenas Hidraulico. Outras disciplinas em desenvolvimento.' });
+    // v3.48.0: Fase 2 ativa Sanitario, Eletrico e Estrutural alem do Hidraulico
+    const DISCIPLINAS_ATIVAS = new Set(['hidraulico', 'sanitario', 'eletrico', 'estrutural']);
+    if (!DISCIPLINAS_ATIVAS.has(disc)) {
+      res.status(422).json({ error: `Disciplina ${disc} ainda nao implementada. Disponiveis: ${[...DISCIPLINAS_ATIVAS].join(', ')}` });
       return;
     }
     const user = (req as AuthedRequest).user;
@@ -2482,7 +2517,7 @@ app.post('/api/memoriais/:disciplina/criar', requireAuth, async (req: Request, r
     }
     const repo = await import('./repositories/memoriaisRepo');
     const r = await repo.memoriaisRepo.criar({
-      disciplina: 'hidraulico',
+      disciplina: disc as 'hidraulico' | 'sanitario' | 'eletrico' | 'estrutural',
       obra_id: typeof b.obra_id === 'number' ? b.obra_id : null,
       cliente_id: typeof b.cliente_id === 'number' ? b.cliente_id : null,
       user_id: user?.sub ? Number(user.sub) : null,
