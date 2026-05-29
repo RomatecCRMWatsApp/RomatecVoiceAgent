@@ -14647,7 +14647,10 @@ function renderReciboForm(v) {
   // Renderiza inicial (mostra existentes que ja foram carregados ou vazio)
   renderAnexosBox();
 
-  // Helper: faz upload dos anexos pendentes pra um recibo ja criado
+  // Helper: faz upload dos anexos pendentes pra um recibo ja criado.
+  // Nao usa api() porque precisa enviar multipart/form-data (api() seta Content-Type JSON).
+  // Envia cookie JWT (credentials: include) + X-CEO-Token (fallback legacy) pra cobrir
+  // tanto admin via /login quanto scripts com token CEO no env.
   async function uploadAnexosPendentes(reciboId) {
     if (!f.anexosPendentes || f.anexosPendentes.length === 0) return { enviados: 0 };
     const fd = new FormData();
@@ -14655,15 +14658,17 @@ function renderReciboForm(v) {
       fd.append('files', a.file, a.file.name);
       fd.append('descricoes', a.descricao || '');
     }
-    const ceoTok = localStorage.getItem('CEO_TOKEN') || '';
+    const ceoTok = (typeof getCeoToken === 'function' ? getCeoToken() : '') || '';
     const resp = await fetch('/api/recibos/' + reciboId + '/anexos', {
       method: 'POST',
-      headers: ceoTok ? { 'x-ceo-token': ceoTok } : {},
+      credentials: 'include',
+      headers: ceoTok ? { 'X-CEO-Token': ceoTok } : {},
       body: fd,
     });
     if (!resp.ok) {
-      const t = await resp.text().catch(() => '');
-      throw new Error('Falha no upload de anexos: ' + (t || resp.status));
+      let detail = '';
+      try { detail = (await resp.json()).error || ''; } catch { detail = await resp.text().catch(() => ''); }
+      throw new Error('Falha no upload de anexos (HTTP ' + resp.status + '): ' + (detail || 'sem detalhe'));
     }
     const j = await resp.json().catch(() => ({ anexos: [] }));
     return { enviados: (j.anexos || []).length };
