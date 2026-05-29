@@ -7,13 +7,29 @@
 import type { PdfExtractionResult, TabelaExtraida, ProdutoInexistente } from './types';
 
 // O wrapper aceita Buffer (servidor) ou string (testes diretos).
+// v3.48.0 BUG-FIX: pdf-parse@2.x mudou de funcao default pra classe PDFParse.
+// Causa 500 em /api/memoriais/upload-pdf quando user envia PDF real.
+// Antes (v1.x): const r = await pdfParse(buffer); r.text;
+// Agora (v2.x): const r = await new PDFParse({data:buffer}).getText(); r.text;
 async function lerTextoPdf(input: Buffer | string): Promise<string> {
   if (typeof input === 'string') return input;
-  // Lazy import para evitar custo no boot e permitir teste sem pdf real
+  // Lazy import — pdf-parse e' ESM-only em v2, precisamos do indirect dynamic
+  // import pra contornar o module type do projeto (CommonJS via tsc).
   const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<unknown>;
-  const mod = await dynamicImport('pdf-parse') as { default: (b: Buffer) => Promise<{ text: string }> };
-  const r = await mod.default(input);
-  return r.text || '';
+  const mod = await dynamicImport('pdf-parse') as {
+    PDFParse: new (opts: { data: Uint8Array | Buffer }) => {
+      getText: (params?: unknown) => Promise<{ text: string }>;
+      destroy: () => Promise<void>;
+    };
+  };
+  const parser = new mod.PDFParse({ data: input });
+  try {
+    const result = await parser.getText();
+    return result?.text || '';
+  } finally {
+    // Libera recursos do pdfjs (worker, doc) — evita leaks em uploads sucessivos.
+    try { await parser.destroy(); } catch { /* opcional */ }
+  }
 }
 
 // Heuristica de metadados — padrao Revit do José Romário (vide PH-03/PS-04/PE-05/PA-02)

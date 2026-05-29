@@ -114,14 +114,111 @@ const PERGUNTAS_HIDRAULICO: WizardCampo[] = [
   },
 ];
 
-// Sanitario / Eletrico / Arquitetonico / Estrutural / PCI ficam pra PRs futuros.
+// v3.48.0 — Fase 2: Sanitario (NBR 8160 + 10844), Eletrico (NBR 5410), Estrutural (NBR 6118)
+const PERGUNTAS_SANITARIO: WizardCampo[] = [
+  ...PERGUNTAS_COMUNS,
+  {
+    id: 'area_cobertura_m2',
+    label: 'Area de cobertura (telhado/laje) contribuinte para aguas pluviais (m²)',
+    tipo: 'number', min: 1, required: true,
+  },
+  {
+    id: 'intensidade_pluv_mmh',
+    label: 'Intensidade pluviometrica (mm/h) — default Acailandia/MA = 150',
+    tipo: 'number', default: 150, min: 50, max: 300,
+  },
+  {
+    id: 'destino_efluente',
+    label: 'Destino do efluente',
+    tipo: 'select',
+    opcoes: ['Rede publica', 'Fossa + sumidouro', 'Fossa + filtro anaerobio', 'ETA compacta'],
+    required: true,
+  },
+  {
+    id: 'tem_caixa_gordura',
+    label: 'Possui caixa de gordura?',
+    tipo: 'boolean', default: true,
+  },
+];
+
+const PERGUNTAS_ELETRICO: WizardCampo[] = [
+  ...PERGUNTAS_COMUNS,
+  {
+    id: 'tensao_nominal_v',
+    label: 'Tensao nominal da entrada (V)',
+    tipo: 'select',
+    opcoes: ['127', '220', '380'],
+    default: '220', required: true,
+  },
+  {
+    id: 'tipo_alimentacao',
+    label: 'Tipo de alimentacao',
+    tipo: 'select',
+    opcoes: ['Monofasico', 'Bifasico', 'Trifasico'],
+    default: 'Bifasico', required: true,
+  },
+  {
+    id: 'comprimento_ramal_m',
+    label: 'Comprimento do ramal de entrada (m) — distancia padrao a' + ' rede',
+    tipo: 'number', min: 1, default: 30, required: true,
+  },
+  {
+    id: 'fator_demanda',
+    label: 'Padrao de demanda',
+    tipo: 'select',
+    opcoes: ['Residencial', 'Comercial'],
+    default: 'Residencial', required: true,
+  },
+];
+
+const PERGUNTAS_ESTRUTURAL: WizardCampo[] = [
+  ...PERGUNTAS_COMUNS,
+  {
+    id: 'vao_medio_pilares_m',
+    label: 'Vao medio entre pilares (m)',
+    tipo: 'number', min: 2, max: 12, default: 4, required: true,
+  },
+  {
+    id: 'classe_concreto',
+    label: 'Classe de concreto',
+    tipo: 'select',
+    opcoes: ['C20', 'C25', 'C30', 'C35'],
+    default: 'C25', required: true,
+  },
+  {
+    id: 'tipo_solo',
+    label: 'Tipo de solo (laudo geotecnico ou estimativa regional)',
+    tipo: 'select',
+    opcoes: ['Argiloso mole', 'Argiloso medio', 'Arenoso compacto', 'Rocha'],
+    default: 'Arenoso compacto', required: true,
+  },
+  {
+    id: 'laje_tipo',
+    label: 'Tipo de laje',
+    tipo: 'select',
+    opcoes: ['Macica', 'Nervurada', 'Pre-moldada'],
+    default: 'Macica', required: true,
+  },
+  {
+    id: 'tem_subsolo',
+    label: 'Tem subsolo?',
+    tipo: 'boolean', default: false,
+  },
+  {
+    id: 'carga_acidental_kn_m2',
+    label: 'Carga acidental (kN/m²) — NBR 6120: residencial 1,5 · comercial 2,5',
+    tipo: 'number', min: 1, max: 10, default: 1.5,
+  },
+];
+
+// Placeholder pra disciplinas ainda nao implementadas
 const PLACEHOLDER_EM_BREVE: WizardCampo[] = [
   ...PERGUNTAS_COMUNS,
   {
     id: '_em_breve',
     label: 'Disciplina em desenvolvimento — disponivel em release futura.',
     tipo: 'text',
-    placeholder: 'Disciplina ainda nao implementada (Fase 1 cobre apenas Hidraulico).',
+    placeholder: 'Disciplina ainda nao implementada.',
   },
 ];
 
@@ -130,19 +227,20 @@ export function obterWizardDisciplina(disciplina: DisciplinaMemorial): {
   campos: WizardCampo[];
   disponivel: boolean;
 } {
-  if (disciplina === 'hidraulico') {
-    return { disciplina, campos: PERGUNTAS_HIDRAULICO, disponivel: true };
-  }
+  if (disciplina === 'hidraulico') return { disciplina, campos: PERGUNTAS_HIDRAULICO, disponivel: true };
+  if (disciplina === 'sanitario') return { disciplina, campos: PERGUNTAS_SANITARIO, disponivel: true };
+  if (disciplina === 'eletrico')  return { disciplina, campos: PERGUNTAS_ELETRICO,  disponivel: true };
+  if (disciplina === 'estrutural') return { disciplina, campos: PERGUNTAS_ESTRUTURAL, disponivel: true };
   return { disciplina, campos: PLACEHOLDER_EM_BREVE, disponivel: false };
 }
 
 export function listarDisciplinasDisponiveis(): Array<{ slug: DisciplinaMemorial; rotulo: string; icone: string; norma: string; disponivel: boolean }> {
   return [
-    { slug: 'arquitetonico', rotulo: 'Arquitetonico', icone: '🏛️', norma: 'NBR/SINAPI',  disponivel: false },
-    { slug: 'eletrico',      rotulo: 'Eletrico',      icone: '⚡', norma: 'NBR 5410',    disponivel: false },
-    { slug: 'hidraulico',    rotulo: 'Hidraulico',    icone: '💧', norma: 'NBR 5626',    disponivel: true  },
-    { slug: 'sanitario',     rotulo: 'Sanitario',     icone: '🚽', norma: 'NBR 8160',    disponivel: false },
-    { slug: 'estrutural',    rotulo: 'Estrutural',    icone: '🏗️', norma: 'NBR 6118',    disponivel: false },
-    { slug: 'pci',           rotulo: 'PCI',           icone: '🔥', norma: 'NBR 9077',    disponivel: false },
+    { slug: 'arquitetonico', rotulo: 'Arquitetonico', icone: '[A]', norma: 'NBR/SINAPI',  disponivel: false },
+    { slug: 'eletrico',      rotulo: 'Eletrico',      icone: '[E]', norma: 'NBR 5410',    disponivel: true  },
+    { slug: 'hidraulico',    rotulo: 'Hidraulico',    icone: '[H]', norma: 'NBR 5626',    disponivel: true  },
+    { slug: 'sanitario',     rotulo: 'Sanitario',     icone: '[S]', norma: 'NBR 8160',    disponivel: true  },
+    { slug: 'estrutural',    rotulo: 'Estrutural',    icone: '[Es]', norma: 'NBR 6118',   disponivel: true  },
+    { slug: 'pci',           rotulo: 'PCI',           icone: '[P]', norma: 'NBR 9077',    disponivel: false },
   ];
 }
