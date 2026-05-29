@@ -4396,6 +4396,26 @@ app.get('/api/folha/detalhe/:id', async (req: Request, res: Response) => {
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
+// v3.47.0: auditoria de inconsistencias de pagamento (CEO reportou bug de
+// "dias de outra quinzena ficam pagos"). Endpoint admin-only retorna 2 tipos:
+//   1. data_fora_do_periodo: dias com fechamento_id apontando pra um fechamento
+//      cujo data_inicio/fim NAO cobre a data do dia (corrupcao)
+//   2. lote_legado_sobreposto: dias com fechamento_id mas tambem com lote
+//      legado pago cobrindo a data (overlap historico — esperado em obras
+//      migradas, mas explica o sintoma visual)
+app.get('/api/folha/auditar-inconsistencias', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const obraId = Number(req.query.obraId);
+    if (!Number.isFinite(obraId) || obraId <= 0) {
+      res.status(400).json({ error: 'obraId obrigatorio (?obraId=N)' });
+      return;
+    }
+    const m = await import('./services/folhaFechamento');
+    const r = await m.auditarInconsistenciasPagamento(obraId);
+    res.json(r);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 app.post('/api/folha/item/:itemId/pagar', async (req: Request, res: Response) => {
   try {
     const { formaPagamento, usuario, observacao } = req.body ?? {};
