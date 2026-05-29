@@ -3982,6 +3982,130 @@ app.get   ('/api/recibos/:id/pdf', async (req: Request, res: Response) => {
   }
 });
 
+// ─── v3.49.0: anexos do recibo (PDF/imagem) ─────────────────────────────────
+// CCIR antigo/atualizado, ITR/NIRF, recibo CAR — documentos complementares
+// enviados junto ao PDF principal via WhatsApp.
+const RECIBO_ANEXO_MAX_BYTES = 10 * 1024 * 1024;
+const RECIBO_ANEXO_MAX_FILES = 5;
+const RECIBO_ANEXO_MIMES = new Set([
+  'application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp',
+]);
+const RECIBO_ANEXO_EXTS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp']);
+
+const uploadReciboAnexoMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: RECIBO_ANEXO_MAX_BYTES,
+    files: RECIBO_ANEXO_MAX_FILES,
+  },
+  fileFilter: (_req, file, cb) => {
+    const mime = (file.mimetype || '').toLowerCase();
+    const ext = (file.originalname.split('.').pop() ?? '').toLowerCase();
+    const extOk = RECIBO_ANEXO_EXTS.has(ext);
+    const mimeOk = RECIBO_ANEXO_MIMES.has(mime) || mime === 'application/octet-stream' || mime === '';
+    if (extOk && mimeOk) return cb(null, true);
+    cb(new Error(`Arquivo invalido: ${file.originalname} (${file.mimetype}). Aceitos: PDF, JPG, PNG, WebP.`));
+  },
+}).array('files', RECIBO_ANEXO_MAX_FILES);
+
+// POST /api/recibos/:id/anexos — upload de 1..5 arquivos via multipart/form-data
+// Campos: files[] (binarios) + descricoes[] (array opcional de labels, mesmo indice)
+app.post('/api/recibos/:id/anexos', requireCeoToken, (req: Request, res: Response) => {
+  uploadReciboAnexoMulter(req, res, async (uploadErr: unknown) => {
+    try {
+      if (uploadErr) {
+        const m = (uploadErr as Error).message || 'Falha no upload';
+        return res.status(400).json({ error: m });
+      }
+      const files = (req.files as Express.Multer.File[] | undefined) || [];
+      if (files.length === 0) {
+        return res.status(400).json({ error: 'Nenhum arquivo enviado (campo "files" obrigatorio)' });
+      }
+      // descricoes pode vir como string (1 item) ou array (N itens)
+      const rawDesc = (req.body?.descricoes ?? req.body?.['descricoes[]']) as string | string[] | undefined;
+      const descricoes: Array<string | null> = Array.isArray(rawDesc)
+        ? rawDesc.map(d => (d ? String(d) : null))
+        : rawDesc ? [String(rawDesc)] : [];
+
+      const reciboAnexos = await import('./integrations/recibosAnexos');
+      const reciboId = Number(req.params.id);
+      const criados: import('./integrations/recibosAnexos').AnexoReciboResumo[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const anexo = await reciboAnexos.criarAnexo({
+          recibo_id: reciboId,
+          nome_original: f.originalname,
+          mime_type: f.mimetype,
+          conteudo: f.buffer,
+          descricao: descricoes[i] ?? null,
+        });
+        criados.push(anexo);
+      }
+      res.json({ ok: true, anexos: criados });
+    } catch (err) {
+      const msg = (err as Error).message || 'Erro ao salvar anexo';
+      const status = /nao encontrado/i.test(msg) ? 404
+                   : /maximo|excede|invalida|invalido/i.test(msg) ? 400
+                   : 500;
+      res.status(status).json({ error: msg });
+    }
+  });
+});
+
+// GET /api/recibos/:id/anexos — lista os anexos ativos do recibo (sem blob)
+app.get('/api/recibos/:id/anexos', async (req: Request, res: Response) => {
+  try {
+    const reciboAnexos = await import('./integrations/recibosAnexos');
+    const anexos = await reciboAnexos.listarAnexos(Number(req.params.id));
+    res.json(anexos);
+  } catch (err) {
+    res.status(404).json({ error: (err as Error).message });
+  }
+});
+
+// GET /api/recibos/anexos/:anexo_id/download — download autenticado (CEO)
+app.get('/api/recibos/anexos/:anexo_id/download', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const reciboAnexos = await import('./integrations/recibosAnexos');
+    const anexo = await reciboAnexos.buscarAnexoParaDownload(Number(req.params.anexo_id));
+    if (!anexo) return res.status(404).json({ error: 'Anexo nao encontrado' });
+    res.setHeader('Content-Type', anexo.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Length', String(anexo.tamanho_bytes));
+    res.setHeader('Content-Disposition',
+      `attachment; filename="${anexo.nome_original.replace(/[^a-zA-Z0-9._-]/g, '_')}"`);
+    res.send(anexo.conteudo_blob);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /a/:token — download publico via token (link compartilhavel)
+app.get('/a/:token', async (req: Request, res: Response) => {
+  try {
+    const reciboAnexos = await import('./integrations/recibosAnexos');
+    const anexo = await reciboAnexos.buscarAnexoPorToken(String(req.params.token));
+    if (!anexo) return res.status(404).send('Anexo nao encontrado ou removido.');
+    res.setHeader('Content-Type', anexo.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Length', String(anexo.tamanho_bytes));
+    res.setHeader('Content-Disposition',
+      `inline; filename="${anexo.nome_original.replace(/[^a-zA-Z0-9._-]/g, '_')}"`);
+    res.send(anexo.conteudo_blob);
+  } catch (err) {
+    res.status(500).send('Erro: ' + (err as Error).message);
+  }
+});
+
+// DELETE /api/recibos/anexos/:anexo_id — soft delete (CEO)
+app.delete('/api/recibos/anexos/:anexo_id', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const reciboAnexos = await import('./integrations/recibosAnexos');
+    const r = await reciboAnexos.removerAnexo(Number(req.params.anexo_id));
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // ── Paginas publicas de resposta (sem auth, token-based) ────────────────
 // /r/:token → form mobile pra destinatario confirmar/contestar
 app.get('/r/:token', (_req: Request, res: Response) => {
@@ -4904,6 +5028,18 @@ app.listen(PORT, () => {
       await m.runLaudosArquivosMigrations();
     } catch (err) {
       console.error('[laudos-arquivos-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.49.0: tabela recibos_anexos (anexos PDF/imagem em recibos universais).
+  // Usada para CCIR/ITR/CAR e outros documentos complementares enviados junto
+  // ao PDF principal via WhatsApp.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-recibos-anexos');
+      await m.runRecibosAnexosMigrations();
+    } catch (err) {
+      console.error('[recibos-anexos-migrations] FALHA fatal:', err);
     }
   })();
 

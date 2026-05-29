@@ -14097,6 +14097,9 @@ function renderRecibos() {
       resource_type: 'manual',
       resource_id: 'manual-' + Date.now(),
       expira_em_dias: 7,
+      // v3.49.0: anexos selecionados localmente, ainda nao enviados
+      anexosPendentes: [], // [{ file: File, descricao: string }]
+      anexosExistentes: [], // populado quando edita recibo existente
     };
     renderRecibos();
   };
@@ -14229,7 +14232,14 @@ function renderRecibos() {
       resource_type: r.resource_type,
       resource_id: r.resource_id,
       expira_em_dias: 7,
+      anexosPendentes: [],
+      anexosExistentes: [],
     };
+    // v3.49.0: ao editar, carrega anexos existentes do recibo
+    api('/api/recibos/' + r.id + '/anexos').then(list => {
+      state.reciboForm.anexosExistentes = Array.isArray(list) ? list : [];
+      if (typeof renderAnexosBox === 'function') renderAnexosBox();
+    }).catch(() => {});
     renderRecibos();
   });
   // 🗑️ Excluir — hard delete (exceto confirmado)
@@ -14379,6 +14389,20 @@ function renderReciboForm(v) {
         <label>Descrição do serviço/motivo (opcional)
           <textarea id="recDesc" rows="2" placeholder="Ex: Mão de obra quinzena 06-20/maio, pagamento PIX" style="width:100%; resize:vertical;">${escape(f.descricao_servico)}</textarea>
         </label>
+        <!-- v3.49.0: documentos anexos (CCIR, ITR, CAR, etc.) -->
+        <div id="recAnexosSection" style="border:1px solid #2a3d2e; border-radius:8px; padding:10px; background:rgba(31,92,58,0.06);">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <strong style="font-size:13px;">📎 Documentos anexos</strong>
+            <span style="font-size:11px; color:var(--text-muted);">Opcional — máximo 5 arquivos, 10 MB cada (PDF/JPG/PNG/WebP)</span>
+            <span id="recAnexosContador" style="font-size:11px; color:var(--text-muted); margin-left:auto;"></span>
+          </div>
+          <p style="font-size:11px; color:var(--text-muted); margin:6px 0;">
+            Anexe documentos complementares (ex: CCIR antigo, CCIR atualizado, comprovante INCRA, declaração ITR, recibo CAR). Serão enviados junto ao PDF principal via WhatsApp.
+          </p>
+          <input type="file" id="recAnexosInput" accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp" multiple style="display:none;">
+          <button type="button" id="recAnexosAddBtn" style="background:transparent; border:1px dashed #4a8c5e; color:#4a8c5e; padding:8px 14px; font-size:12px; width:100%;">+ Adicionar arquivo(s)</button>
+          <div id="recAnexosLista" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+        </div>
         <p style="font-size:11px; color:var(--text-muted); margin:0;">
           O recibo recebe número automático no formato <code>REC-{TIPO}-{ANO}-{seq}</code>.
           Após salvar, você poderá enviar pelo WhatsApp com 1 clique.
@@ -14526,6 +14550,125 @@ function renderReciboForm(v) {
     showToast('✓ Cliente cadastrado e selecionado!', 'success');
   };
 
+  // v3.49.0: gestao dos anexos do recibo (PDF/imagem — CCIR, ITR, CAR, etc.)
+  const ANEXO_MAX_BYTES = 10 * 1024 * 1024;
+  const ANEXO_MAX_FILES = 5;
+  const ANEXO_MIMES_OK = ['application/pdf','image/jpeg','image/jpg','image/png','image/webp'];
+
+  function renderAnexosBox() {
+    if (!f.anexosPendentes) f.anexosPendentes = [];
+    if (!f.anexosExistentes) f.anexosExistentes = [];
+    const lista = document.getElementById('recAnexosLista');
+    const contador = document.getElementById('recAnexosContador');
+    const addBtn = document.getElementById('recAnexosAddBtn');
+    if (!lista || !contador) return;
+    const total = f.anexosPendentes.length + f.anexosExistentes.length;
+    contador.textContent = total + '/' + ANEXO_MAX_FILES + ' arquivo(s)';
+    if (addBtn) {
+      addBtn.disabled = total >= ANEXO_MAX_FILES;
+      addBtn.style.opacity = total >= ANEXO_MAX_FILES ? '0.5' : '1';
+    }
+    const itens = [];
+    // Anexos ja salvos no servidor
+    for (const a of f.anexosExistentes) {
+      const kb = Math.max(1, Math.round(a.tamanho_bytes / 1024));
+      itens.push(`
+        <div data-anexo-existente="${a.id}" style="display:flex; align-items:center; gap:6px; padding:6px 8px; background:rgba(255,255,255,0.03); border-radius:6px; font-size:12px;">
+          <span>📄</span>
+          <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escape(a.nome_original)}">${escape(a.nome_original)} <span style="color:var(--text-muted);">(${kb} KB)</span></span>
+          ${a.descricao ? `<span style="font-size:11px; color:#4a8c5e;">${escape(a.descricao)}</span>` : ''}
+          <a href="/api/recibos/anexos/${a.id}/download" target="_blank" rel="noopener" style="font-size:11px; padding:2px 8px; background:transparent; border:1px solid #444; color:#888; border-radius:4px; text-decoration:none;">⬇ Baixar</a>
+          <button type="button" data-anexo-del-id="${a.id}" style="font-size:11px; padding:2px 8px; background:transparent; border:1px solid #842; color:#a55;">🗑</button>
+        </div>`);
+    }
+    // Anexos selecionados localmente (pendentes de upload)
+    for (let i = 0; i < f.anexosPendentes.length; i++) {
+      const a = f.anexosPendentes[i];
+      const kb = Math.max(1, Math.round(a.file.size / 1024));
+      itens.push(`
+        <div data-anexo-pendente="${i}" style="display:flex; align-items:center; gap:6px; padding:6px 8px; background:rgba(74,140,94,0.08); border-radius:6px; font-size:12px;">
+          <span>📄</span>
+          <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escape(a.file.name)}">${escape(a.file.name)} <span style="color:var(--text-muted);">(${kb} KB)</span></span>
+          <input data-anexo-desc-idx="${i}" type="text" placeholder="Label (ex: CCIR Antigo)" maxlength="80" value="${escape(a.descricao||'')}" style="flex:0 0 180px; font-size:11px; padding:2px 6px;">
+          <button type="button" data-anexo-rm-idx="${i}" style="font-size:11px; padding:2px 8px; background:transparent; border:1px solid #842; color:#a55;">✕</button>
+        </div>`);
+    }
+    lista.innerHTML = itens.join('') || '<span style="font-size:11px; color:var(--text-muted);">Nenhum documento anexo.</span>';
+
+    // Bind: remover pendente
+    lista.querySelectorAll('[data-anexo-rm-idx]').forEach(b => b.onclick = () => {
+      const idx = Number(b.getAttribute('data-anexo-rm-idx'));
+      f.anexosPendentes.splice(idx, 1);
+      renderAnexosBox();
+    });
+    // Bind: label do pendente
+    lista.querySelectorAll('[data-anexo-desc-idx]').forEach(inp => inp.oninput = () => {
+      const idx = Number(inp.getAttribute('data-anexo-desc-idx'));
+      if (f.anexosPendentes[idx]) f.anexosPendentes[idx].descricao = inp.value;
+    });
+    // Bind: deletar anexo existente
+    lista.querySelectorAll('[data-anexo-del-id]').forEach(b => b.onclick = async () => {
+      const id = b.getAttribute('data-anexo-del-id');
+      if (!confirm('Remover este anexo do recibo?')) return;
+      try {
+        await api('/api/recibos/anexos/' + id, { method: 'DELETE' });
+        f.anexosExistentes = f.anexosExistentes.filter(x => String(x.id) !== String(id));
+        renderAnexosBox();
+        showToast('Anexo removido', 'info');
+      } catch (e) { showToast('Erro: ' + e.message, 'error'); }
+    });
+  }
+
+  // Bind do botao + Adicionar arquivo(s)
+  const recAnexosInput = document.getElementById('recAnexosInput');
+  const recAnexosAddBtn = document.getElementById('recAnexosAddBtn');
+  if (recAnexosAddBtn) recAnexosAddBtn.onclick = () => recAnexosInput && recAnexosInput.click();
+  if (recAnexosInput) recAnexosInput.onchange = () => {
+    const files = Array.from(recAnexosInput.files || []);
+    for (const file of files) {
+      const total = (f.anexosPendentes?.length || 0) + (f.anexosExistentes?.length || 0);
+      if (total >= ANEXO_MAX_FILES) { showToast('Maximo ' + ANEXO_MAX_FILES + ' arquivos por recibo', 'error'); break; }
+      if (file.size > ANEXO_MAX_BYTES) { showToast(file.name + ': excede 10 MB', 'error'); continue; }
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      if (!['pdf','jpg','jpeg','png','webp'].includes(ext)) {
+        showToast(file.name + ': extensao nao permitida (PDF/JPG/PNG/WebP)', 'error');
+        continue;
+      }
+      if (file.type && !ANEXO_MIMES_OK.includes(file.type)) {
+        // Tolerancia: alguns navegadores enviam mimes variantes; apenas warning console.
+        console.warn('[recibo-anexos] mime inesperado:', file.name, file.type);
+      }
+      if (!f.anexosPendentes) f.anexosPendentes = [];
+      f.anexosPendentes.push({ file, descricao: '' });
+    }
+    recAnexosInput.value = '';
+    renderAnexosBox();
+  };
+  // Renderiza inicial (mostra existentes que ja foram carregados ou vazio)
+  renderAnexosBox();
+
+  // Helper: faz upload dos anexos pendentes pra um recibo ja criado
+  async function uploadAnexosPendentes(reciboId) {
+    if (!f.anexosPendentes || f.anexosPendentes.length === 0) return { enviados: 0 };
+    const fd = new FormData();
+    for (const a of f.anexosPendentes) {
+      fd.append('files', a.file, a.file.name);
+      fd.append('descricoes', a.descricao || '');
+    }
+    const ceoTok = localStorage.getItem('CEO_TOKEN') || '';
+    const resp = await fetch('/api/recibos/' + reciboId + '/anexos', {
+      method: 'POST',
+      headers: ceoTok ? { 'x-ceo-token': ceoTok } : {},
+      body: fd,
+    });
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => '');
+      throw new Error('Falha no upload de anexos: ' + (t || resp.status));
+    }
+    const j = await resp.json().catch(() => ({ anexos: [] }));
+    return { enviados: (j.anexos || []).length };
+  }
+
   // v1.89.0: 3 ações com validação condicional + modal de confirmação universal
   // acao: 'rascunho' | 'emitir' | 'enviar'
   async function salvar(acao) {
@@ -14573,12 +14716,19 @@ function renderReciboForm(v) {
       if (editandoId) {
         await api('/api/recibos/' + editandoId, { method: 'PUT', body: JSON.stringify(payload) });
         r = (state.recibos || []).find(x => String(x.id) === String(editandoId)) || { id: editandoId, numero: '#' + editandoId };
+        // v3.49.0: upload de anexos pendentes ANTES de enviar (pra ir junto no WhatsApp)
+        let anexosMsg = '';
+        if (f.anexosPendentes && f.anexosPendentes.length > 0) {
+          if (btn) btn.textContent = 'Anexando documentos...';
+          const up = await uploadAnexosPendentes(editandoId);
+          anexosMsg = ' (+' + up.enviados + ' anexo' + (up.enviados !== 1 ? 's' : '') + ')';
+        }
         if (acao === 'enviar') {
           if (btn) btn.textContent = 'Enviando WhatsApp...';
           await api('/api/recibos/' + editandoId + '/enviar', { method: 'POST', body: JSON.stringify({}) });
-          showToast('Recibo ' + r.numero + ' atualizado e enviado', 'success');
+          showToast('Recibo ' + r.numero + ' atualizado e enviado' + anexosMsg, 'success');
         } else {
-          showToast('Recibo ' + r.numero + ' atualizado', 'info');
+          showToast('Recibo ' + r.numero + ' atualizado' + anexosMsg, 'info');
         }
       } else {
         const createPayload = {
@@ -14593,10 +14743,21 @@ function renderReciboForm(v) {
           _rascunho: acao === 'rascunho',
         };
         r = await api('/api/recibos', { method: 'POST', body: JSON.stringify(createPayload) });
+        // v3.49.0: upload de anexos pendentes apos criar o recibo (mesma transacao logica)
+        let anexosMsg = '';
+        if (f.anexosPendentes && f.anexosPendentes.length > 0) {
+          if (btn) btn.textContent = 'Anexando documentos...';
+          try {
+            const up = await uploadAnexosPendentes(r.id);
+            anexosMsg = ' (+' + up.enviados + ' anexo' + (up.enviados !== 1 ? 's' : '') + ')';
+          } catch (anexErr) {
+            showToast('Anexos falharam: ' + anexErr.message, 'error');
+          }
+        }
         if (acao === 'enviar') {
           if (btn) btn.textContent = 'Enviando WhatsApp...';
           await api('/api/recibos/' + r.id + '/enviar', { method: 'POST', body: JSON.stringify({}) });
-          showToast('Recibo ' + r.numero + ' criado e enviado pelo WhatsApp', 'success');
+          showToast('Recibo ' + r.numero + ' criado e enviado pelo WhatsApp' + anexosMsg, 'success');
         } else if (acao === 'emitir') {
           // 'emitir' = salvou sem enviar — atualiza status pra 'aguardando_envio'
           // (que mapeia pra 'emitido' no status_simplificado)
