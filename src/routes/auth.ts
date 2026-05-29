@@ -252,4 +252,83 @@ router.get('/me', requireAuth, (req: Request, res: Response) => {
   });
 });
 
+// ─── PIN secundario (v3.50.0) ─────────────────────────────────────────
+// Roles admin/owner dispensam PIN em qualquer rota (bypass automatico),
+// mas TODOS podem cadastrar PIN se quiserem usar o sistema com outros logins.
+// Mudanca de PIN exige senha atual (confirma identidade).
+
+router.get('/me/pin/status', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthedRequest).user!;
+    const { statusPin } = await import('../services/pinSecundario');
+    const st = await statusPin(Number(user.sub));
+    res.json({ ...st, role: user.role, bypass: user.role === 'admin' || user.role === 'owner' });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+router.post('/me/pin', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthedRequest).user!;
+    const { senha, pin } = (req.body || {}) as { senha?: string; pin?: string };
+    if (!senha || typeof senha !== 'string') {
+      res.status(400).json({ error: 'Senha atual obrigatoria pra cadastrar/trocar PIN' });
+      return;
+    }
+    const { validarFormatoPin, definirPin } = await import('../services/pinSecundario');
+    if (!validarFormatoPin(pin)) {
+      res.status(400).json({ error: 'PIN deve ter exatamente 4 digitos numericos' });
+      return;
+    }
+    // Confirma senha atual
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
+      [Number(user.sub)],
+    );
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Usuario nao encontrado' });
+      return;
+    }
+    const senhaOk = await verifyPassword(senha, String(rows[0].password_hash));
+    if (!senhaOk) {
+      res.status(403).json({ error: 'Senha atual incorreta' });
+      return;
+    }
+    await definirPin(Number(user.sub), pin as string);
+    res.json({ ok: true, message: 'PIN cadastrado/atualizado com sucesso' });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+router.delete('/me/pin', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthedRequest).user!;
+    const { senha } = (req.body || {}) as { senha?: string };
+    if (!senha || typeof senha !== 'string') {
+      res.status(400).json({ error: 'Senha atual obrigatoria pra remover PIN' });
+      return;
+    }
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
+      [Number(user.sub)],
+    );
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Usuario nao encontrado' });
+      return;
+    }
+    const senhaOk = await verifyPassword(senha, String(rows[0].password_hash));
+    if (!senhaOk) {
+      res.status(403).json({ error: 'Senha atual incorreta' });
+      return;
+    }
+    const { removerPin } = await import('../services/pinSecundario');
+    await removerPin(Number(user.sub));
+    res.json({ ok: true, message: 'PIN removido' });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 export default router;
