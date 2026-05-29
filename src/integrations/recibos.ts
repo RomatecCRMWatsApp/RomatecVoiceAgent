@@ -630,6 +630,39 @@ export async function enviarReciboWhatsApp(input: {
     } catch (err) {
       console.warn(`[recibos] falha enviar PDF do recibo #${r.id}:`, (err as Error).message);
     }
+
+    // 3) v3.49.0: anexos do recibo (CCIR, ITR, CAR etc.) — um por um,
+    //    apos o PDF principal, com 1s entre envios pra evitar rate limit Z-API.
+    try {
+      const { listarAnexosComBlob } = await import('./recibosAnexos');
+      const anexos = await listarAnexosComBlob(r.id);
+      for (const anexo of anexos) {
+        try {
+          await sendDocument(
+            telDestino,
+            anexo.conteudo_blob.toString('base64'),
+            anexo.nome_original,
+          );
+        } catch (sendErr) {
+          console.warn(
+            `[recibos] falha enviar anexo #${anexo.id} do recibo #${r.id}:`,
+            (sendErr as Error).message,
+          );
+        }
+        // Pequeno delay pra Z-API nao rate-limitar
+        if (anexos.length > 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      if (anexos.length > 0) {
+        await registrarEvento(r.id, 'attachments_sent', {
+          total: anexos.length,
+          phone: telDestino,
+        });
+      }
+    } catch (err) {
+      console.warn(`[recibos] falha listar anexos do recibo #${r.id}:`, (err as Error).message);
+    }
   }
 
   // Atualiza status (so se nao for override pra outro num — preserva

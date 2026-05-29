@@ -187,6 +187,35 @@ Finalidade: atualização documental para averbação, transferência ou financi
           descricao: `Serviço de Acompanhamento de Processo Cartorário.\n\nDefinição: protocolo, acompanhamento e cumprimento de exigências em Cartório de Registro de Imóveis ou Tabelionato.\n\nBase legal/normativa: Lei nº 6.015/1973; Lei nº 8.935/1994.\n\nFinalidade: agilizar e dar correção técnica ao processo registral.` + HELPER_TAIL },
         { id: 'imob-acomp-orgaos', nome: 'Acompanhamento de Processo no INCRA / ITERMA / Prefeitura',
           descricao: `Serviço de Acompanhamento de Processo Administrativo.\n\nDefinição: protocolo, acompanhamento e cumprimento de exigências em órgãos públicos (INCRA, ITERMA, SEMA, Prefeitura).\n\nBase legal/normativa: Lei nº 10.267/2001; legislação estadual MA; Lei Orgânica Municipal.\n\nFinalidade: viabilizar processo administrativo de certificação, titulação ou licenciamento.` + HELPER_TAIL },
+        // v3.49.0: 3 serviços de atualização cadastral/fiscal/ambiental do imóvel rural.
+        // Casam com o módulo de anexos de recibo (CCIR/ITR/CAR exigem documentos complementares).
+        { id: 'imob-ccir', nome: 'Assessoria em Atualização de CCIR (INCRA)',
+          descricao:
+`Assessoria técnica especializada para atualização do Certificado de Cadastro de Imóvel Rural (CCIR) junto ao Instituto Nacional de Colonização e Reforma Agrária — INCRA, conforme exigido pelo art. 22 da Lei nº 4.947/1966, art. 96 do Estatuto da Terra (Lei nº 4.504/1964) e Norma de Execução INCRA nº 95/2010.
+
+Compreende: levantamento da situação cadastral atual no SNCR (Sistema Nacional de Cadastro Rural); atualização de dados do imóvel, do detentor e da estrutura fundiária; emissão do CCIR quitado para o exercício vigente; orientação quanto à obrigatoriedade de apresentação em atos de transferência, desmembramento, hipoteca e arrendamento, nos termos do art. 22, §1º, da Lei nº 4.947/1966.
+
+Base legal/normativa: Lei nº 4.947/1966 · Lei nº 4.504/1964 (Estatuto da Terra) · IN INCRA nº 95/2010 · Decreto nº 72.106/1973.
+
+Finalidade: regularização cadastral do imóvel rural perante o INCRA, habilitação para atos de registro e transferência cartorária.` + HELPER_TAIL },
+        { id: 'imob-itr-nirf', nome: 'Assessoria em Atualização de ITR / NIRF (Receita Federal)',
+          descricao:
+`Assessoria técnica para atualização do Número do Imóvel na Receita Federal (NIRF) e regularização da declaração do Imposto sobre a Propriedade Territorial Rural (ITR) junto à Secretaria Especial da Receita Federal do Brasil, conforme Lei nº 9.393/1996, Decreto nº 4.382/2002 e Instrução Normativa RFB nº 1.877/2019.
+
+Compreende: verificação da situação do NIRF no sistema CAFIR; atualização de dados cadastrais do imóvel e do declarante; orientação e apoio na elaboração/retificação da DITR (Declaração do ITR); análise da Área Tributável, Área de Preservação Permanente (APP), Reserva Legal e demais isenções previstas em lei; emissão de certidão de regularidade fiscal perante a RFB quando aplicável.
+
+Base legal/normativa: Lei nº 9.393/1996 · Decreto nº 4.382/2002 · IN RFB nº 1.877/2019 · Lei nº 12.651/2012 (Código Florestal — isenções de APP/RL).
+
+Finalidade: regularização fiscal do imóvel rural, habilitação para financiamentos rurais, registros e atos notariais.` + HELPER_TAIL },
+        { id: 'imob-car-sicar', nome: 'Assessoria em Atualização de CAR — SICAR/AMBIS',
+          descricao:
+`Assessoria técnica especializada para inscrição, atualização ou retificação no Cadastro Ambiental Rural (CAR) junto ao SICAR (Sistema Nacional de Cadastro Ambiental Rural) e, quando aplicável, integração com o sistema AMBIS do Estado do Maranhão, conforme Lei nº 12.651/2012 (Código Florestal), Decreto nº 7.830/2012 e IN MMA nº 2/2014.
+
+Compreende: análise georreferenciada do imóvel rural; delimitação e inserção digital das áreas de Reserva Legal (RL), Áreas de Preservação Permanente (APP), Uso Restrito, Servidão Ambiental e Área Consolidada; upload de shapefile ou polígono via plataforma SICAR/AMBIS; acompanhamento da análise pelo órgão ambiental competente (SEMA/MA ou IBAMA); emissão do recibo de inscrição e número de protocolo CAR.
+
+Base legal/normativa: Lei nº 12.651/2012 (Código Florestal) · Decreto nº 7.830/2012 · IN MMA nº 2/2014 · Resolução CONAMA nº 369/2006 · Legislação estadual MA (SEMA).
+
+Finalidade: regularização ambiental do imóvel rural, cumprimento de exigência para financiamento (Pronaf, ABC+), averbação de RL e habilitação para Programas de Regularização Ambiental (PRA).` + HELPER_TAIL },
       ]}],
     },
 
