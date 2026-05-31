@@ -68,6 +68,8 @@ import gnssRouter from './routes/gnss';
 import cartoriosRouter from './routes/cartorios';
 import explicativoRouter from './routes/explicativo';
 import memoriaisHidraulicoRouter from './routes/memoriais'; // v3.49.2 Memorial Hidraulico
+import canvasGraficoRouter from './routes/canvasGrafico';
+import relatorioFotograficoRouter from './routes/relatorioFotografico';
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -147,6 +149,16 @@ app.use('/api/gnss', gnssRouter);
 app.use('/api/cartorios', cartoriosRouter);
 app.use('/api/explicativo', explicativoRouter); // v3.23.0 — texto explicativo de serviço
 app.use('/api/memoriais', memoriaisHidraulicoRouter); // v3.49.2 Memorial Hidraulico NBR 5626
+app.use('/api/canvas', canvasGraficoRouter); // v3.51.0 VTA Canvas
+app.use('/api/relatorio-fotografico', relatorioFotograficoRouter); // v3.51.0 VTA Relatorio Fotografico
+(async () => {
+  try { const m = await import('./database/migrations-canvas-grafico'); await m.runCanvasGraficoMigrations(); }
+  catch (err) { console.error('[canvas-grafico-migrations] FALHA fatal:', err); }
+})();
+(async () => {
+  try { const m = await import('./database/migrations-relatorio-fotografico'); await m.runRelatorioFotograficoMigrations(); }
+  catch (err) { console.error('[relatorio-fotografico-migrations] FALHA fatal:', err); }
+})();
 
 // v1.99.15: Live Feed Universal — feed animado no topo de toda aba.
 // GET /api/live-feed/:tab → cards passando em loop com os registros da aba.
