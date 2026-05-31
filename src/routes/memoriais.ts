@@ -221,4 +221,30 @@ router.post('/hidraulico/:id(\\d+)/enviar-telegram', requireAuth, async (req: Re
   }
 });
 
+// ── Excluir (soft delete) ────────────────────────────────────────────────────
+router.delete('/hidraulico/:id(\\d+)', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { memoriaisRepo } = await getRepos();
+    await memoriaisRepo.softDelete(Number(req.params.id));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Dados de um memorial (para reabrir/editar no wizard) ──────────────────────
+router.get('/hidraulico/:id(\\d+)/dados', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { memoriaisRepo } = await getRepos();
+    const row = await memoriaisRepo.buscarPorId(Number(req.params.id));
+    if (!row) {
+      res.status(404).json({ error: 'memorial nao encontrado' });
+      return;
+    }
+    res.json({ dados: row.wizard_responses ?? null, codigo: row.codigo, status: row.status });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 export default router;

@@ -238,29 +238,80 @@
       .catch(function (e) { if (out) out.innerHTML = '<span style="color:' + COR.erro + ';">' + esc(e.message) + '</span>'; });
   }
 
-  /* AUTO-LAUNCHER: injeta um botao no topo da aba Memoriais (#view-memoriais). */
+  /* ---------- AUTO-LAUNCHER + BOTOES EDITAR/EXCLUIR NO HISTORICO ---------- */
+  var _memLista = null, _memListaT = 0;
+  function listaMemoriais() {
+    var agora = Date.now();
+    if (_memLista && agora - _memListaT < 4000) return Promise.resolve(_memLista);
+    return fetch(API + '/hidraulico?limite=200', { credentials: 'include' })
+      .then(function (r) { return r.ok ? r.json() : { data: [] }; })
+      .then(function (j) { _memLista = j.data || j.items || []; _memListaT = agora; return _memLista; })
+      .catch(function () { return _memLista || []; });
+  }
+  function btnMini(label, cor, onclick) {
+    return h('button', { style: 'padding:4px 10px;border-radius:6px;border:1px solid ' + cor + ';background:transparent;color:' + cor + ';cursor:pointer;font-size:11px;margin-left:6px;', onclick: onclick }, [label]);
+  }
+  function linkMini(label, href) {
+    return h('a', { href: href, target: '_blank', style: 'padding:4px 10px;border-radius:6px;border:1px solid ' + COR.azul + ';background:transparent;color:#7aa7d9;text-decoration:none;font-size:11px;margin-left:6px;' }, [label]);
+  }
+  function excluirMemorial(id, codigo, card) {
+    if (!confirm('Excluir o memorial ' + codigo + '? Some da listagem (soft delete).')) return;
+    fetch(API + '/hidraulico/' + id, { method: 'DELETE', credentials: 'include' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); if (card && card.parentNode) card.parentNode.removeChild(card); _memLista = null; })
+      .catch(function (e) { alert('Falha ao excluir: ' + e.message); });
+  }
+  function editarMemorial(id) {
+    var view = document.getElementById('view-memoriais');
+    fetch(API + '/hidraulico/' + id + '/dados', { credentials: 'include' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { var d = j.dados || {}; view.setAttribute('data-memhid-active', '1'); montar(view, { prefill: { obra: d.dadosObra || {}, uso: d.dadosUso || {} } }); })
+      .catch(function (e) { alert('Falha ao abrir: ' + e.message); });
+  }
+  function injetarBotoesHistorico() {
+    var view = document.getElementById('view-memoriais');
+    if (!view) return;
+    var cards = view.querySelectorAll('.card');
+    if (!cards.length) return;
+    listaMemoriais().then(function (lista) {
+      for (var i = 0; i < cards.length; i++) {
+        var card = cards[i];
+        if (card.getAttribute('data-memhid-btns') === '1') continue;
+        var p = card.querySelector('p');
+        if (!p) continue;
+        var m = (p.textContent || '').match(/MEM-\S+/);
+        if (!m) continue;
+        var reg = lista.filter(function (x) { return x.codigo === m[0]; })[0];
+        if (!reg) continue;
+        card.setAttribute('data-memhid-btns', '1');
+        var bar = h('div', { style: 'margin-top:8px;display:flex;flex-wrap:wrap;gap:0;align-items:center;' });
+        bar.appendChild(linkMini('Memorial PDF', API + '/hidraulico/' + reg.id + '/memorial.pdf'));
+        bar.appendChild(linkMini('Lista PDF', API + '/hidraulico/' + reg.id + '/quantitativo.pdf'));
+        (function (id, cod, cardEl) {
+          bar.appendChild(btnMini('Editar', COR.verde, function () { editarMemorial(id); }));
+          bar.appendChild(btnMini('Excluir', COR.erro, function () { excluirMemorial(id, cod, cardEl); }));
+        })(reg.id, m[0], card);
+        card.appendChild(bar);
+      }
+    });
+  }
   function montarLauncher() {
     var view = document.getElementById('view-memoriais');
     if (!view) return;
-    if (document.getElementById('memhid-launch')) return;
-    if (view.getAttribute('data-memhid-active') === '1') return;
-    var btn = h('button', { id: 'memhid-launch', style: BTN_OK + 'margin:0 0 14px;', onclick: function () {
-      view.setAttribute('data-memhid-active', '1');
-      var prefill = {};
-      try {
-        var gv = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
-        prefill.obra = {
-          titulo: gv('memObraTitulo') || 'Residencia Unifamiliar', endereco: gv('memObraEndereco'),
-          municipio: gv('memObraMunicipio') || 'Acailandia', uf: gv('memObraUf') || 'MA',
-          proprietario: gv('memProprietario'), cpfCnpj: gv('memCpfCnpj'),
-          areaM2: num(gv('memAreaConstr')), nPavimentos: num(gv('memPavimentos'), 1), prancha: gv('memPrancha') || 'PH-03',
-        };
-      } catch (e) { /* sem Passos 1-2: usa defaults */ }
-      montar(view, { prefill: prefill });
-    } }, ['📐 Abrir Wizard NBR 5626 (Passos 3-5)']);
-    view.insertBefore(btn, view.firstChild);
+    if (view.getAttribute('data-memhid-active') !== '1' && !document.getElementById('memhid-launch')) {
+      var btn = h('button', { id: 'memhid-launch', style: BTN_OK + 'margin:0 0 14px;', onclick: function () {
+        view.setAttribute('data-memhid-active', '1');
+        var prefill = {};
+        try {
+          var gv = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
+          prefill.obra = { titulo: gv('memObraTitulo') || 'Residencia Unifamiliar', endereco: gv('memObraEndereco'), municipio: gv('memObraMunicipio') || 'Acailandia', uf: gv('memObraUf') || 'MA', proprietario: gv('memProprietario'), cpfCnpj: gv('memCpfCnpj'), areaM2: num(gv('memAreaConstr')), nPavimentos: num(gv('memPavimentos'), 1), prancha: gv('memPrancha') || 'PH-03' };
+        } catch (e) {}
+        montar(view, { prefill: prefill });
+      } }, ['\U0001F4D0 Abrir Wizard NBR 5626 (Passos 3-5)']);
+      view.insertBefore(btn, view.firstChild);
+    }
+    if (view.getAttribute('data-memhid-active') !== '1') injetarBotoesHistorico();
   }
-  setInterval(montarLauncher, 1000);
+  setInterval(montarLauncher, 1200);
   if (document.readyState !== 'loading') montarLauncher();
   else document.addEventListener('DOMContentLoaded', montarLauncher);
 
