@@ -18556,6 +18556,10 @@ function renderLaudosLista(v) {
             <button data-laudo-clonar="${l.id}" title="Criar uma cópia editável deste laudo (zera pontos, fotos e número do lote)" style="flex:1; background:transparent; color:var(--gold); border:1px dashed var(--gold);">📋 Clonar</button>
           </div>
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-laudo-croqui="${l.id}" title="Abrir o Canvas/Croqui As-Built vinculado a este laudo (cria ou edita)" style="flex:1; background:#1f4e7922; color:#7aa7d9; border:1px solid #1f4e7955;">📐 Croqui As-Built</button>
+            <button data-laudo-relfoto="${l.id}" title="Abrir o Relatório Fotográfico georreferenciado vinculado a este laudo" style="flex:1; background:#1a5c2a22; color:#10b981; border:1px solid #1a5c2a55;">📷 Relatório Fotográfico</button>
+          </div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
             ${l.assinado_em
               ? `<button data-laudo-pdf-sig="${l.id}" title="Baixar PDF assinado digitalmente" style="flex:1; background:#1F5C3A22; color:#1F5C3A; border:1px solid #1F5C3A55;">🔏 Assinado</button>
                  <button data-laudo-sig="${l.id}" data-laudo-resign="1" title="Re-assinar — sobrescreve o PDF atual com a versão atualizada do laudo" style="flex:1; background:transparent; color:var(--text-muted); border:1px dashed var(--border); font-size:12px;">🔁 Re-assinar</button>`
@@ -18654,6 +18658,13 @@ function renderLaudosLista(v) {
   });
   v.querySelectorAll('[data-laudo-pdf]').forEach(b => b.onclick = () => {
     window.open('/api/laudos-demarcacao/' + b.dataset.laudoPdf + '/pdf', '_blank');
+  });
+  // v3.52.0: abre Canvas/Croqui e Relatório Fotográfico VINCULADOS ao laudo
+  v.querySelectorAll('[data-laudo-croqui]').forEach(b => b.onclick = () => {
+    window.open('/vta-canvas.html?laudo_id=' + b.dataset.laudoCroqui, '_blank');
+  });
+  v.querySelectorAll('[data-laudo-relfoto]').forEach(b => b.onclick = () => {
+    window.open('/vta-relatorio-fotografico.html?laudo_id=' + b.dataset.laudoRelfoto, '_blank');
   });
   v.querySelectorAll('[data-laudo-clonar]').forEach(b => b.onclick = async () => {
     if (!confirm('Clonar este laudo?\n\n✓ Cliente, loteamento, equipamentos, técnico copiados\n✗ Número do lote ficará vazio (preencher do novo lote)\n✗ Pontos GNSS zerados (rastrear novamente)\n⚠️ Tempo da base virá copiado — confirme em campo se é a mesma sessão')) return;

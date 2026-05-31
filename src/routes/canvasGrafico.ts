@@ -32,6 +32,31 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v3.52.0 — GET /por-laudo/:laudoId e /por-proposta/:propostaId — canvas mais
+// recente vinculado ao registro (permite editar em vez de duplicar). 404 se nenhum.
+async function buscarCanvasPorVinculo(
+  campo: 'laudo_id' | 'proposta_id', valor: string, res: Response,
+): Promise<void> {
+  const pool = await db();
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, tipo, titulo, dados_svg, dados_json, largura_virtual, altura_virtual, escala_grafica
+       FROM canvas_graficos WHERE ${campo} = ? ORDER BY id DESC LIMIT 1`,
+    [valor],
+  );
+  if (!rows.length) { res.status(404).json({ error: 'nenhum canvas vinculado' }); return; }
+  res.json({ canvas: rows[0] });
+}
+
+router.get('/por-laudo/:laudoId(\\d+)', requireAuth, async (req: Request, res: Response) => {
+  try { await buscarCanvasPorVinculo('laudo_id', req.params.laudoId, res); }
+  catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+router.get('/por-proposta/:propostaId(\\d+)', requireAuth, async (req: Request, res: Response) => {
+  try { await buscarCanvasPorVinculo('proposta_id', req.params.propostaId, res); }
+  catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // GET /:id — canvas + elementos
 router.get('/:id(\\d+)', requireAuth, async (req: Request, res: Response) => {
   try {

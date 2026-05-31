@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>VTA — Canvas Gráfico | Romatec</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/konva/9.3.16/konva.min.js"></script>
+<script src="/js/vtaVinculo.js"></script>
 <style>
   :root{--bg:#0f1115;--elev:#171a21;--border:#2a2f3a;--text:#e8eaed;--muted:#8a93a6;--gold:#c8a84b;--green:#1a5c2a;--ok:#10b981}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -33,6 +34,7 @@
 <div id="top">
   <div class="logo">R</div><b>VTA — Canvas Gráfico</b>
   <span class="esc" id="escala">1:500 · As-Built</span>
+  <span class="esc" id="vinculoBadge" style="display:none"></span>
 </div>
 <div id="stageWrap"></div>
 <div id="tools">
@@ -76,6 +78,14 @@
 (function(){
   'use strict';
   var API='/api/canvas';
+  // v3.52.0: vinculo a Laudo/Proposta via ?laudo_id= / ?proposta_id=
+  var VINCULO = (window.VtaVinculo ? VtaVinculo.lerVinculo(location.search) : {laudo_id:null,proposta_id:null});
+  (function(){
+    var b=document.getElementById('vinculoBadge');
+    if(b && window.VtaVinculo && VtaVinculo.temVinculo(VINCULO)){
+      b.textContent='🔗 '+VtaVinculo.textoBadge(VINCULO); b.style.display='';
+    }
+  })();
   var canvasId=null, tool='select', undoStack=[];
   var VW=2000, VH=2000;
   function api(path,opts){opts=opts||{};opts.credentials='include';return fetch(API+path,opts).then(function(r){if(r.status===401){location.href='/login';throw new Error('nao autenticado');}return r.json().then(function(j){if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;});});}
@@ -186,9 +196,41 @@
     return '<image href="'+png+'" x="0" y="0" width="'+VW+'" height="'+VH+'" preserveAspectRatio="xMidYMid meet"/>';
   }
 
+  // v3.52.0: se aberto vinculado a um Laudo/Proposta, carrega o croqui existente
+  // (modo edicao) em vez de comecar em branco e duplicar a cada save.
+  function carregarVinculado(){
+    var rota=null;
+    if(VINCULO.laudo_id!=null)rota='/por-laudo/'+VINCULO.laudo_id;
+    else if(VINCULO.proposta_id!=null)rota='/por-proposta/'+VINCULO.proposta_id;
+    if(!rota)return Promise.resolve();
+    return api(rota).then(function(j){
+      if(!j||!j.canvas)return;
+      var c=j.canvas;
+      canvasId=c.id;
+      if(c.largura_virtual)VW=Number(c.largura_virtual)||VW;
+      if(c.altura_virtual)VH=Number(c.altura_virtual)||VH;
+      var dj=c.dados_json;
+      if(typeof dj==='string'){try{dj=JSON.parse(dj);}catch(e){dj=null;}}
+      if(dj&&dj.children){
+        var layers=dj.children.filter(function(x){return x.className==='Layer';});
+        var src=layers[layers.length-1]; // ultimo Layer = camada de desenho do usuario
+        if(src&&src.children){
+          src.children.forEach(function(nj){
+            try{var node=Konva.Node.create(JSON.stringify(nj));node.draggable(tool==='select');layer.add(node);pushUndo(node);}catch(e){}
+          });
+          layer.draw();
+        }
+      }
+      var b=document.getElementById('vinculoBadge');
+      if(b)b.textContent='🔗 Editando croqui #'+c.id+(VINCULO.laudo_id!=null?' · Laudo #'+VINCULO.laudo_id:'');
+    }).catch(function(){/* 404 = ainda sem croqui p/ este vinculo → modo criacao */});
+  }
+
   function garantirCanvas(){
     if(canvasId)return Promise.resolve(canvasId);
-    return api('',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tipo:'croqui',titulo:'Croqui VTA',largura_virtual:VW,altura_virtual:VH})}).then(function(j){canvasId=j.id;return canvasId;});
+    var body={tipo:'croqui',titulo:'Croqui VTA',largura_virtual:VW,altura_virtual:VH};
+    if(window.VtaVinculo) body=VtaVinculo.aplicarVinculo(body,VINCULO);
+    return api('',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(j){canvasId=j.id;return canvasId;});
   }
 
   document.getElementById('aSalvar').onclick=function(){
@@ -231,6 +273,7 @@
   // centraliza origem
   stage.position({x:wrap.clientWidth/2,y:wrap.clientHeight/2});
   drawGrid();updZoom();
+  carregarVinculado(); // v3.52.0: carrega croqui existente se vinculado
 })();
 </script>
 </body>
