@@ -20,6 +20,18 @@ import {
 } from '../services/memoriais/hidraulicoCalculo';
 import { gerarPdfMemorialHidraulico } from '../services/memoriais/hidraulicoPdfMemorial';
 import { gerarPdfQuantitativoHidraulico, type ConexaoItem } from '../services/memoriais/hidraulicoPdfQuantitativo';
+import { calcularResumoEletrico } from '../services/memoriais/eletricoCalculo';
+import { gerarPdfMemorialEletrico } from '../services/memoriais/eletricoPdfMemorial';
+import { gerarPdfQuantitativoEletrico } from '../services/memoriais/eletricoPdfQuantitativo';
+import { calcularResumoSanitario } from '../services/memoriais/sanitarioCalculo';
+import { gerarPdfMemorialSanitario } from '../services/memoriais/sanitarioPdfMemorial';
+import { gerarPdfQuantitativoSanitario } from '../services/memoriais/sanitarioPdfQuantitativo';
+import { calcularResumoEstrutural } from '../services/memoriais/estruturalCalculo';
+import { gerarPdfMemorialEstrutural } from '../services/memoriais/estruturalPdfMemorial';
+import { gerarPdfQuantitativoEstrutural } from '../services/memoriais/estruturalPdfQuantitativo';
+import { calcularResumoArquitetonico } from '../services/memoriais/arquitetonicoCalculo';
+import { gerarPdfMemorialArquitetonico } from '../services/memoriais/arquitetonicoPdfMemorial';
+import { gerarPdfQuantitativoArquitetonico } from '../services/memoriais/arquitetonicoPdfQuantitativo';
 
 const router = Router();
 
@@ -245,6 +257,143 @@ router.get('/hidraulico/:id(\\d+)/dados', requireAuth, async (req: Request, res:
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
+});
+
+
+// ── Dispatch generico por disciplina (eletrico, sanitario, estrutural, ...) ──
+interface ResultadoComum {
+  dadosObra: { titulo: string; endereco: string; municipio: string; uf: string; proprietario: string; cpfCnpj: string; areaM2: number; areaLoteM2?: number; nPavimentos: number; prancha: string; trtNumero?: string };
+  dadosUso?: { tipoUso?: string };
+  statusNormativo?: unknown;
+  alertas?: string[];
+}
+type GenPdf = (r: ResultadoComum, o?: { data?: Date }) => Promise<{ buffer: Buffer; filename: string }>;
+interface DiscReg { calc: (e: unknown) => ResultadoComum; pdfMem: GenPdf; pdfQua: GenPdf; }
+
+const REGISTRY: Record<string, DiscReg> = {
+  eletrico: {
+    calc: calcularResumoEletrico as unknown as DiscReg['calc'],
+    pdfMem: gerarPdfMemorialEletrico as unknown as GenPdf,
+    pdfQua: gerarPdfQuantitativoEletrico as unknown as GenPdf,
+  },
+  sanitario: {
+    calc: calcularResumoSanitario as unknown as DiscReg['calc'],
+    pdfMem: gerarPdfMemorialSanitario as unknown as GenPdf,
+    pdfQua: gerarPdfQuantitativoSanitario as unknown as GenPdf,
+  },
+  estrutural: {
+    calc: calcularResumoEstrutural as unknown as DiscReg['calc'],
+    pdfMem: gerarPdfMemorialEstrutural as unknown as GenPdf,
+    pdfQua: gerarPdfQuantitativoEstrutural as unknown as GenPdf,
+  },
+  arquitetonico: {
+    calc: calcularResumoArquitetonico as unknown as DiscReg['calc'],
+    pdfMem: gerarPdfMemorialArquitetonico as unknown as GenPdf,
+    pdfQua: gerarPdfQuantitativoArquitetonico as unknown as GenPdf,
+  },
+};
+const DISC = '(eletrico|sanitario|estrutural|arquitetonico)';
+
+router.post('/:disc' + DISC + '/calcular-resumo', requireAuth, (req: Request, res: Response) => {
+  try {
+    const reg = REGISTRY[String(req.params.disc)];
+    if (!reg) { res.status(501).json({ error: 'disciplina nao disponivel: ' + req.params.disc }); return; }
+    res.json(reg.calc(req.body));
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+router.post('/:disc' + DISC + '/gerar', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const disc = String(req.params.disc);
+    const reg = REGISTRY[disc];
+    if (!reg) { res.status(501).json({ error: 'disciplina nao disponivel: ' + disc }); return; }
+    const r = reg.calc(req.body);
+    const data = new Date();
+    const pdfA = await reg.pdfMem(r, { data });
+    const pdfB = await reg.pdfQua(r, { data });
+    const { memoriaisRepo, memoriaisArtefatosRepo } = await getRepos();
+    const o = r.dadosObra;
+    const tipoUso = r.dadosUso?.tipoUso;
+    const { id, codigo } = await memoriaisRepo.criar({
+      disciplina: disc as 'eletrico' | 'sanitario' | 'estrutural' | 'arquitetonico',
+      user_id: userId(req),
+      obra_titulo: o.titulo,
+      obra_uso: tipoUso === 'comercial' ? 'Comercial' : 'Residencial unifamiliar',
+      obra_endereco: o.endereco, obra_municipio: o.municipio, obra_uf: o.uf,
+      proprietario_nome: o.proprietario, proprietario_cpf_cnpj: o.cpfCnpj,
+      area_lote_m2: o.areaLoteM2 ?? null, area_construida_m2: o.areaM2, num_pavimentos: o.nPavimentos,
+      wizard_responses: r, prancha_codigo: o.prancha, trt_numero: o.trtNumero ?? null,
+    });
+    await memoriaisArtefatosRepo.salvar(id, {
+      memorialBuf: pdfA.buffer, memorialNome: pdfA.filename, memorialHash: sha256(pdfA.buffer),
+      quantBuf: pdfB.buffer, quantNome: pdfB.filename, quantHash: sha256(pdfB.buffer), dadosCalculo: r,
+    });
+    await memoriaisRepo.atualizarStatus(id, 'finalizado');
+    res.json({ id, codigo, urlMemorial: `/api/memoriais/${disc}/${id}/memorial.pdf`, urlQuantitativo: `/api/memoriais/${disc}/${id}/quantitativo.pdf`, statusNormativo: r.statusNormativo, alertas: r.alertas });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+router.get('/:disc' + DISC, requireAuth, async (req: Request, res: Response) => {
+  try {
+    const limite = Math.min(Number(req.query.limite) || 50, 500);
+    const { memoriaisRepo } = await getRepos();
+    const items = await memoriaisRepo.listar({ disciplina: String(req.params.disc) as 'eletrico' | 'sanitario' | 'estrutural' | 'arquitetonico', limite });
+    res.json({ data: items, total: items.length });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+router.get('/:disc' + DISC + '/:id(\\d+)/memorial.pdf', requireAuth, (req, res) => servirPdf(req, res, 'memorial'));
+router.get('/:disc' + DISC + '/:id(\\d+)/quantitativo.pdf', requireAuth, (req, res) => servirPdf(req, res, 'quantitativo'));
+
+router.get('/:disc' + DISC + '/:id(\\d+)/dados', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { memoriaisRepo } = await getRepos();
+    const row = await memoriaisRepo.buscarPorId(Number(req.params.id));
+    if (!row) { res.status(404).json({ error: 'memorial nao encontrado' }); return; }
+    res.json({ dados: row.wizard_responses ?? null, codigo: row.codigo, status: row.status });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+router.delete('/:disc' + DISC + '/:id(\\d+)', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { memoriaisRepo } = await getRepos();
+    await memoriaisRepo.softDelete(Number(req.params.id));
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+router.post('/:disc' + DISC + '/:id(\\d+)/enviar-whatsapp', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const telefone = String(req.body?.telefone || '').trim();
+    if (!telefone) { res.status(400).json({ error: 'telefone obrigatorio' }); return; }
+    const { memoriaisRepo, memoriaisArtefatosRepo } = await getRepos();
+    const mem = await memoriaisArtefatosRepo.ler(id, 'memorial');
+    const qnt = await memoriaisArtefatosRepo.ler(id, 'quantitativo');
+    if (!mem || !qnt) { res.status(404).json({ error: 'PDFs nao encontrados' }); return; }
+    const { sendDocument } = await import('../integrations/whatsapp');
+    await sendDocument(telefone, mem.buffer.toString('base64'), mem.filename);
+    await sendDocument(telefone, qnt.buffer.toString('base64'), qnt.filename);
+    await memoriaisRepo.atualizarStatus(id, 'enviado');
+    res.json({ ok: true, enviados: 2, telefone });
+  } catch (err) { res.status(502).json({ error: (err as Error).message }); }
+});
+
+router.post('/:disc' + DISC + '/:id(\\d+)/enviar-telegram', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const chatId = String(req.body?.chatId || process.env.TELEGRAM_CHAT_ID || '').trim();
+    if (!chatId) { res.status(400).json({ error: 'chatId obrigatorio' }); return; }
+    const { memoriaisRepo, memoriaisArtefatosRepo } = await getRepos();
+    const mem = await memoriaisArtefatosRepo.ler(id, 'memorial');
+    const qnt = await memoriaisArtefatosRepo.ler(id, 'quantitativo');
+    if (!mem || !qnt) { res.status(404).json({ error: 'PDFs nao encontrados' }); return; }
+    const { sendDocument } = await import('../integrations/telegram');
+    await sendDocument(chatId, mem.buffer, mem.filename);
+    await sendDocument(chatId, qnt.buffer, qnt.filename);
+    await memoriaisRepo.atualizarStatus(id, 'enviado');
+    res.json({ ok: true, enviados: 2, chatId });
+  } catch (err) { res.status(502).json({ error: (err as Error).message }); }
 });
 
 export default router;
