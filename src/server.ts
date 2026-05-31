@@ -67,6 +67,7 @@ import painelRoutes from './routes/painel';
 import gnssRouter from './routes/gnss';
 import cartoriosRouter from './routes/cartorios';
 import explicativoRouter from './routes/explicativo';
+import memoriaisHidraulicoRouter from './routes/memoriais'; // v3.49.2 Memorial Hidraulico
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -145,6 +146,7 @@ app.use('/api/gnss', gnssRouter);
 // v3.22.0: autocomplete de cartórios (CNJ) p/ wizard de Proposta de Remembramento
 app.use('/api/cartorios', cartoriosRouter);
 app.use('/api/explicativo', explicativoRouter); // v3.23.0 — texto explicativo de serviço
+app.use('/api/memoriais', memoriaisHidraulicoRouter); // v3.49.2 Memorial Hidraulico NBR 5626
 
 // v1.99.15: Live Feed Universal — feed animado no topo de toda aba.
 // GET /api/live-feed/:tab → cards passando em loop com os registros da aba.
@@ -5022,6 +5024,15 @@ app.listen(PORT, () => {
       await m.runMigrationsMemoriais();
     } catch (err) {
       console.error('[memoriais-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-memoriais-pdf');
+      await m.runMigrationsMemoriaisPdf();
+    } catch (err) {
+      console.error('[memoriais-pdf-migrations] FALHA fatal:', err);
     }
   })();
 
