@@ -70,9 +70,16 @@
     }));
   }
 
+  function fecharWizard() {
+    var view = document.getElementById('view-memoriais');
+    if (view) view.removeAttribute('data-memhid-active');
+    if (typeof window.renderMemoriaisQuantitativos === 'function') window.renderMemoriaisQuantitativos();
+    else if (view) view.innerHTML = '';
+  }
+
   function navBtns() {
     var box = h('div', { style: 'display:flex;justify-content:space-between;margin-top:16px;' });
-    box.appendChild(h('button', { style: BTN, onclick: function () { if (state.passo > 3) { state.passo--; render(); } } }, [state.passo > 3 ? '< Voltar' : 'Fechar']));
+    box.appendChild(h('button', { style: BTN, onclick: function () { if (state.passo > 3) { state.passo--; render(); } else { fecharWizard(); } } }, [state.passo > 3 ? '< Voltar' : 'Fechar']));
     box.appendChild(state.passo < 5 ? h('button', { style: BTN_OK, onclick: function () { state.passo++; render(); if (state.passo === 5) recalcResumo(); } }, ['Avancar >']) : h('span', {}, ['']));
     return box;
   }
@@ -243,7 +250,7 @@
   function listaMemoriais() {
     var agora = Date.now();
     if (_memLista && agora - _memListaT < 4000) return Promise.resolve(_memLista);
-    return fetch(API + '/hidraulico?limite=200', { credentials: 'include' })
+    return fetch(API + '?limite=200', { credentials: 'include' })
       .then(function (r) { return r.ok ? r.json() : { data: [] }; })
       .then(function (j) { _memLista = j.data || j.items || []; _memListaT = agora; return _memLista; })
       .catch(function () { return _memLista || []; });
@@ -256,13 +263,13 @@
   }
   function excluirMemorial(id, codigo, card) {
     if (!confirm('Excluir o memorial ' + codigo + '? Some da listagem (soft delete).')) return;
-    fetch(API + '/hidraulico/' + id, { method: 'DELETE', credentials: 'include' })
+    fetch(API + '/' + id, { method: 'DELETE', credentials: 'include' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); if (card && card.parentNode) card.parentNode.removeChild(card); _memLista = null; })
       .catch(function (e) { alert('Falha ao excluir: ' + e.message); });
   }
   function editarMemorial(id) {
     var view = document.getElementById('view-memoriais');
-    fetch(API + '/hidraulico/' + id + '/dados', { credentials: 'include' })
+    fetch(API + '/' + id + '/dados', { credentials: 'include' })
       .then(function (r) { return r.json(); })
       .then(function (j) { var d = j.dados || {}; view.setAttribute('data-memhid-active', '1'); montar(view, { prefill: { obra: d.dadosObra || {}, uso: d.dadosUso || {} } }); })
       .catch(function (e) { alert('Falha ao abrir: ' + e.message); });
@@ -284,8 +291,8 @@
         if (!reg) continue;
         card.setAttribute('data-memhid-btns', '1');
         var bar = h('div', { style: 'margin-top:8px;display:flex;flex-wrap:wrap;gap:0;align-items:center;' });
-        bar.appendChild(linkMini('Memorial PDF', API + '/hidraulico/' + reg.id + '/memorial.pdf'));
-        bar.appendChild(linkMini('Lista PDF', API + '/hidraulico/' + reg.id + '/quantitativo.pdf'));
+        bar.appendChild(linkMini('Memorial PDF', API + '/' + reg.id + '/memorial.pdf'));
+        bar.appendChild(linkMini('Lista PDF', API + '/' + reg.id + '/quantitativo.pdf'));
         (function (id, cod, cardEl) {
           bar.appendChild(btnMini('Editar', COR.verde, function () { editarMemorial(id); }));
           bar.appendChild(btnMini('Excluir', COR.erro, function () { excluirMemorial(id, cod, cardEl); }));
@@ -306,7 +313,7 @@
           prefill.obra = { titulo: gv('memObraTitulo') || 'Residencia Unifamiliar', endereco: gv('memObraEndereco'), municipio: gv('memObraMunicipio') || 'Acailandia', uf: gv('memObraUf') || 'MA', proprietario: gv('memProprietario'), cpfCnpj: gv('memCpfCnpj'), areaM2: num(gv('memAreaConstr')), nPavimentos: num(gv('memPavimentos'), 1), prancha: gv('memPrancha') || 'PH-03' };
         } catch (e) {}
         montar(view, { prefill: prefill });
-      } }, ['\U0001F4D0 Abrir Wizard NBR 5626 (Passos 3-5)']);
+      } }, ['📐 Abrir Wizard NBR 5626 (Passos 3-5)']);
       view.insertBefore(btn, view.firstChild);
     }
     if (view.getAttribute('data-memhid-active') !== '1') injetarBotoesHistorico();
