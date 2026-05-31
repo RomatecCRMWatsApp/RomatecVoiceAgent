@@ -44,7 +44,7 @@
   <button class="tool" data-t="retangulo" title="Retângulo">▭</button>
   <button class="tool" data-t="circulo" title="Círculo">◯</button>
   <button class="tool" data-t="texto" title="Texto">T</button>
-  <button class="tool" data-t="norte" title="Norte">🧭</button>
+  <button class="tool" data-t="norte" title="Norte">N↑</button>
   <button class="tool" data-t="undo" title="Desfazer">↩</button>
 </div>
 <div id="actions">
@@ -93,11 +93,11 @@
     if(step<8)step*=5; // evita grid denso demais
     var w=stage.width(), h=stage.height();
     var startX=((pos.x%step)+step)%step, startY=((pos.y%step)+step)%step;
-    for(var x=startX;x<w;x+=step){gridLayer.add(new Konva.Line({points:[x,0,x,h],stroke:'#1b2030',strokeWidth:1}));}
-    for(var y=startY;y<h;y+=step){gridLayer.add(new Konva.Line({points:[0,y,w,y],stroke:'#1b2030',strokeWidth:1}));}
+    for(var x=startX;x<w;x+=step){gridLayer.add(new Konva.Line({points:[x,0,x,h],stroke:'#2c3650',strokeWidth:1}));}
+    for(var y=startY;y<h;y+=step){gridLayer.add(new Konva.Line({points:[0,y,w,y],stroke:'#2c3650',strokeWidth:1}));}
     // eixos principais (origem virtual)
-    gridLayer.add(new Konva.Line({points:[pos.x,0,pos.x,h],stroke:'#33405c',strokeWidth:1.5}));
-    gridLayer.add(new Konva.Line({points:[0,pos.y,w,pos.y],stroke:'#33405c',strokeWidth:1.5}));
+    gridLayer.add(new Konva.Line({points:[pos.x,0,pos.x,h],stroke:'#46557a',strokeWidth:1.5}));
+    gridLayer.add(new Konva.Line({points:[0,pos.y,w,pos.y],stroke:'#46557a',strokeWidth:1.5}));
     gridLayer.batchDraw();
   }
   function updZoom(){document.getElementById('zoom').textContent=Math.round(stage.scaleX()*100)+'%';}
