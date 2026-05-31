@@ -236,11 +236,11 @@ export function obterWizardDisciplina(disciplina: DisciplinaMemorial): {
 
 export function listarDisciplinasDisponiveis(): Array<{ slug: DisciplinaMemorial; rotulo: string; icone: string; norma: string; disponivel: boolean }> {
   return [
-    { slug: 'arquitetonico', rotulo: 'Arquitetonico', icone: '[A]', norma: 'NBR/SINAPI',  disponivel: false },
-    { slug: 'eletrico',      rotulo: 'Eletrico',      icone: '[E]', norma: 'NBR 5410',    disponivel: true  },
-    { slug: 'hidraulico',    rotulo: 'Hidraulico',    icone: '[H]', norma: 'NBR 5626',    disponivel: true  },
-    { slug: 'sanitario',     rotulo: 'Sanitario',     icone: '[S]', norma: 'NBR 8160',    disponivel: true  },
-    { slug: 'estrutural',    rotulo: 'Estrutural',    icone: '[Es]', norma: 'NBR 6118',   disponivel: true  },
-    { slug: 'pci',           rotulo: 'PCI',           icone: '[P]', norma: 'NBR 9077',    disponivel: false },
+    { slug: 'arquitetonico', rotulo: 'Arquitetonico', icone: '🏛️', norma: 'NBR/SINAPI',  disponivel: false },
+    { slug: 'eletrico',      rotulo: 'Eletrico',      icone: '⚡', norma: 'NBR 5410',    disponivel: true  },
+    { slug: 'hidraulico',    rotulo: 'Hidraulico',    icone: '💧', norma: 'NBR 5626',    disponivel: true  },
+    { slug: 'sanitario',     rotulo: 'Sanitario',     icone: '🚽', norma: 'NBR 8160',    disponivel: true  },
+    { slug: 'estrutural',    rotulo: 'Estrutural',    icone: '🏗️', norma: 'NBR 6118',   disponivel: true  },
+    { slug: 'pci',           rotulo: 'PCI',           icone: '🧯', norma: 'NBR 9077',    disponivel: false },
   ];
 }
