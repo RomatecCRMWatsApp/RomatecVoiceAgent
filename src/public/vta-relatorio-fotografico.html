@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>VTA — Relatório Fotográfico | Romatec</title>
+<style>
+  :root{--bg:#0f1115;--elev:#171a21;--border:#2a2f3a;--text:#e8eaed;--muted:#8a93a6;--gold:#c8a84b;--green:#1a5c2a;--ok:#10b981;--err:#dc2626}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:15px}
+  header{background:var(--green);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+  header .logo{width:34px;height:34px;border-radius:50%;background:var(--green);border:2px solid var(--gold);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700}
+  header h1{font-size:15px;margin:0}
+  header small{display:block;color:#d9e8dd;font-size:11px}
+  .wrap{max-width:760px;margin:0 auto;padding:14px}
+  .card{background:var(--elev);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:9px}
+  input,textarea,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:#0c0e12;color:var(--text);font-size:15px}
+  .destaque{border:2px solid #2f6df6;border-radius:10px;padding:10px;background:rgba(47,109,246,.06)}
+  .destaque label{color:#7aa7ff;font-weight:600}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  button{cursor:pointer;border:none;border-radius:9px;font-size:15px;padding:11px 16px}
+  .btn{background:var(--elev);border:1px solid var(--border);color:var(--text)}
+  .btn-ok{background:var(--gold);color:#3a2c00;font-weight:700}
+  .btn-green{background:var(--ok);color:#04241a;font-weight:700}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:560px){.grid{grid-template-columns:1fr 1fr}}
+  .foto{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#0c0e12}
+  .foto img{width:100%;display:block}
+  .foto .meta{padding:8px}
+  .badge{font-size:11px;padding:2px 8px;border-radius:20px;display:inline-block}
+  .b-ok{background:rgba(16,185,129,.15);color:var(--ok)}
+  .b-proc{background:rgba(200,168,75,.15);color:var(--gold)}
+  .b-err{background:rgba(220,38,38,.15);color:var(--err)}
+  .hint{font-size:11px;color:var(--muted);margin-top:6px}
+  .gps{font-size:12px;color:var(--muted);margin-top:8px}
+  dialog{background:var(--elev);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:18px;max-width:340px}
+  dialog::backdrop{background:rgba(0,0,0,.6)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">R</div>
+  <div><h1>VTA — Relatório Fotográfico</h1><small>Romatec Consultoria Total · As-Built / Regularização</small></div>
+</header>
+<div class="wrap">
+  <div class="card" id="cardDados">
+    <p style="margin:0 0 12px;font-weight:600">Dados do levantamento</p>
+    <label>Título do relatório *<input id="titulo" placeholder="As-Built Residência — Quadra X, Lote Y"></label>
+    <div class="destaque" style="margin-bottom:12px">
+      <label>Nome do colaborador que executou o levantamento *
+        <input id="colaborador" placeholder="Nome completo">
+      </label>
+      <div class="hint">Aparece em todas as fotos como "Romatec · {colaborador}".</div>
+    </div>
+    <div class="row">
+      <label>Município<input id="municipio" value="Açailândia, MA"></label>
+      <label>Data do levantamento<input id="data" type="date"></label>
+    </div>
+    <button class="btn-ok" style="width:100%;margin-top:6px" id="btnCriar">Iniciar relatório</button>
+  </div>
+
+  <div class="card" id="cardCaptura" style="display:none">
+    <p style="margin:0 0 6px;font-weight:600">Captura de fotos</p>
+    <div class="gps" id="gpsStatus">GPS: aguardando…</div>
+    <label style="margin-top:10px">Adicionar fotos (abre a câmera no celular)
+      <input id="fileInput" type="file" accept="image/*" multiple capture="environment">
+    </label>
+    <div class="hint">Cada foto recebe o overlay técnico (GPS, UTM, data, colaborador, rosa dos ventos, logo) automaticamente.</div>
+    <div class="grid" id="galeria" style="margin-top:14px"></div>
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn" id="btnSalvar" style="flex:1">Salvar relatório</button>
+      <button class="btn-green" id="btnWhats" style="flex:1">Enviar WhatsApp</button>
+    </div>
+  </div>
+</div>
+
+<dialog id="dlgWhats">
+  <p style="margin:0 0 10px;font-weight:600">Enviar fotos por WhatsApp</p>
+  <label>Telefone (DDD + número)<input id="telWhats" placeholder="5599..."></label>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button class="btn" id="dlgCancel" style="flex:1">Cancelar</button>
+    <button class="btn-green" id="dlgEnviar" style="flex:1">Enviar</button>
+  </div>
+  <div id="whatsMsg" style="font-size:12px;margin-top:8px"></div>
+</dialog>
+
+<script>
+(function(){
+  'use strict';
+  var API='/api/relatorio-fotografico';
+  var relatorioId=null, gps={lat:null,lon:null,alt:null}, fotos=[];
+  function $(id){return document.getElementById(id);}
+  function api(path,opts){opts=opts||{};opts.credentials='include';return fetch(API+path,opts).then(function(r){if(r.status===401){location.href='/login';throw new Error('nao autenticado');}return r.json().then(function(j){if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;});});}
+
+  // WGS84/SIRGAS2000 lat,lon -> UTM. Retorna {zona,e,n}.
+  function latLonParaUTM(lat,lon){
+    var a=6378137.0,f=1/298.257223563,k0=0.9996;
+    var e2=f*(2-f), ep2=e2/(1-e2);
+    var zona=Math.floor((lon+180)/6)+1;
+    var lon0=(zona*6-183)*Math.PI/180;
+    var rlat=lat*Math.PI/180, rlon=lon*Math.PI/180;
+    var N=a/Math.sqrt(1-e2*Math.sin(rlat)*Math.sin(rlat));
+    var T=Math.tan(rlat)*Math.tan(rlat);
+    var C=ep2*Math.cos(rlat)*Math.cos(rlat);
+    var A=Math.cos(rlat)*(rlon-lon0);
+    var M=a*((1-e2/4-3*e2*e2/64-5*e2*e2*e2/256)*rlat
+      -(3*e2/8+3*e2*e2/32+45*e2*e2*e2/1024)*Math.sin(2*rlat)
+      +(15*e2*e2/256+45*e2*e2*e2/1024)*Math.sin(4*rlat)
+      -(35*e2*e2*e2/3072)*Math.sin(6*rlat));
+    var easting=k0*N*(A+(1-T+C)*A*A*A/6+(5-18*T+T*T+72*C-58*ep2)*Math.pow(A,5)/120)+500000;
+    var northing=k0*(M+N*Math.tan(rlat)*(A*A/2+(5-T+9*C+4*C*C)*Math.pow(A,4)/24+(61-58*T+T*T+600*C-330*ep2)*Math.pow(A,6)/720));
+    if(lat<0)northing+=10000000;
+    return {zona:zona+(lat>=0?'N':'S'),e:Math.round(easting*1000)/1000,n:Math.round(northing*1000)/1000};
+  }
+
+  function pedirGps(){
+    if(!navigator.geolocation){$('gpsStatus').textContent='GPS: indisponível neste dispositivo';return;}
+    navigator.geolocation.watchPosition(function(p){
+      gps.lat=p.coords.latitude;gps.lon=p.coords.longitude;gps.alt=p.coords.altitude;
+      var u=latLonParaUTM(gps.lat,gps.lon);
+      $('gpsStatus').innerHTML='GPS: <span style="color:#10b981">'+gps.lat.toFixed(6)+', '+gps.lon.toFixed(6)+'</span> · UTM '+u.zona+' E='+Math.round(u.e).toLocaleString('pt-BR');
+    },function(){$('gpsStatus').textContent='GPS: permissão negada (fotos saem sem coordenadas)';},{enableHighAccuracy:true,maximumAge:5000});
+  }
+
+  $('btnCriar').onclick=function(){
+    var titulo=$('titulo').value.trim(), colaborador=$('colaborador').value.trim();
+    if(!titulo){alert('Informe o título do relatório.');return;}
+    if(!colaborador){alert('Informe o nome do colaborador.');return;}
+    $('btnCriar').disabled=true;$('btnCriar').textContent='Criando…';
+    api('',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      titulo:titulo,colaborador:colaborador,municipio:$('municipio').value.trim(),data_vistoria:$('data').value||null
+    })}).then(function(j){
+      relatorioId=j.id;$('cardDados').style.display='none';$('cardCaptura').style.display='block';pedirGps();
+    }).catch(function(e){alert('Falha: '+e.message);$('btnCriar').disabled=false;$('btnCriar').textContent='Iniciar relatório';});
+  };
+
+  $('fileInput').onchange=function(){
+    var files=Array.prototype.slice.call(this.files||[]);
+    this.value='';
+    files.forEach(enviarFoto);
+  };
+
+  function enviarFoto(file){
+    var card=document.createElement('div');card.className='foto';
+    card.innerHTML='<div class="meta"><span class="badge b-proc">Processando overlay…</span></div>';
+    $('galeria').appendChild(card);
+    var fd=new FormData();
+    fd.append('foto',file);
+    fd.append('colaborador',$('colaborador').value.trim());
+    fd.append('municipio',$('municipio').value.trim());
+    fd.append('horario_captura',new Date().toISOString());
+    if(gps.lat!=null&&gps.lon!=null){
+      fd.append('latitude',gps.lat);fd.append('longitude',gps.lon);
+      if(gps.alt!=null)fd.append('altitude_m',gps.alt);
+      var u=latLonParaUTM(gps.lat,gps.lon);
+      fd.append('utm_zona',u.zona);fd.append('utm_e',u.e);fd.append('utm_n',u.n);fd.append('datum','SIRGAS 2000');
+    }
+    fetch(API+'/'+relatorioId+'/fotos',{method:'POST',credentials:'include',body:fd})
+      .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;});})
+      .then(function(j){
+        fotos.push(j.id);
+        card.innerHTML='<img src="'+j.base64_overlay+'" alt="foto"><div class="meta">'
+          +'<span class="badge b-ok">✓ Overlay aplicado</span>'
+          +'<input data-fid="'+j.id+'" placeholder="Descrição (opcional)" style="margin-top:8px">'
+          +'</div>';
+        card.querySelector('input').addEventListener('change',function(){
+          api('/'+relatorioId+'/fotos/'+j.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({descricao:this.value})}).catch(function(){});
+        });
+      })
+      .catch(function(e){card.innerHTML='<div class="meta"><span class="badge b-err">Falha: '+e.message+'</span></div>';});
+  }
+
+  $('btnSalvar').onclick=function(){
+    if(!relatorioId)return;
+    api('/'+relatorioId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'finalizado'})})
+      .then(function(){alert('Relatório salvo ('+fotos.length+' fotos).');}).catch(function(e){alert(e.message);});
+  };
+
+  $('btnWhats').onclick=function(){if(!fotos.length){alert('Nenhuma foto ainda.');return;}$('dlgWhats').showModal();};
+  $('dlgCancel').onclick=function(){$('dlgWhats').close();};
+  $('dlgEnviar').onclick=function(){
+    var tel=$('telWhats').value.trim();if(!tel){$('whatsMsg').innerHTML='<span style="color:#dc2626">Informe o telefone.</span>';return;}
+    $('whatsMsg').textContent='Enviando…';
+    api('/'+relatorioId+'/enviar-whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefone:tel})})
+      .then(function(j){$('whatsMsg').innerHTML='<span style="color:#10b981">✓ '+j.enviados+' foto(s) enviada(s).</span>';})
+      .catch(function(e){$('whatsMsg').innerHTML='<span style="color:#dc2626">'+e.message+'</span>';});
+  };
+})();
+</script>
+</body>
+</html>
