@@ -107,6 +107,7 @@ function desenharLogoRomatec(ctx: any, cx: number, cy: number, size: number): vo
 
 export async function aplicarOverlayFoto(params: OverlayParams): Promise<OverlayResult> {
   // import lazy — nunca quebra o boot se a lib nativa faltar
+  // @ts-ignore -- 'canvas' e dependencia nativa opcional, resolvida em runtime (nao no build)
   const mod: any = await import('canvas');
   const { createCanvas, loadImage } = mod.default || mod;
   const img = await loadImage(params.imageBuffer);
