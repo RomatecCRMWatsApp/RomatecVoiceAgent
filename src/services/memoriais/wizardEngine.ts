@@ -231,12 +231,13 @@ export function obterWizardDisciplina(disciplina: DisciplinaMemorial): {
   if (disciplina === 'sanitario') return { disciplina, campos: PERGUNTAS_SANITARIO, disponivel: true };
   if (disciplina === 'eletrico')  return { disciplina, campos: PERGUNTAS_ELETRICO,  disponivel: true };
   if (disciplina === 'estrutural') return { disciplina, campos: PERGUNTAS_ESTRUTURAL, disponivel: true };
+  if (disciplina === 'arquitetonico') return { disciplina, campos: PLACEHOLDER_EM_BREVE, disponivel: true };
   return { disciplina, campos: PLACEHOLDER_EM_BREVE, disponivel: false };
 }
 
 export function listarDisciplinasDisponiveis(): Array<{ slug: DisciplinaMemorial; rotulo: string; icone: string; norma: string; disponivel: boolean }> {
   return [
-    { slug: 'arquitetonico', rotulo: 'Arquitetonico', icone: '🏛️', norma: 'NBR/SINAPI',  disponivel: false },
+    { slug: 'arquitetonico', rotulo: 'Arquitetonico', icone: '🏛️', norma: 'NBR/SINAPI',  disponivel: true  },
     { slug: 'eletrico',      rotulo: 'Eletrico',      icone: '⚡', norma: 'NBR 5410',    disponivel: true  },
     { slug: 'hidraulico',    rotulo: 'Hidraulico',    icone: '💧', norma: 'NBR 5626',    disponivel: true  },
     { slug: 'sanitario',     rotulo: 'Sanitario',     icone: '🚽', norma: 'NBR 8160',    disponivel: true  },
