@@ -5049,5 +5049,140 @@ app.listen(PORT, () => {
 
   // v3.49.0: tabela recibos_anexos (anexos PDF/imagem em recibos universais).
   // Usada para CCIR/ITR/CAR e outros documentos complementares enviados junto
-  // ao PDF princi
-  
+  // ao PDF principal via WhatsApp.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-recibos-anexos');
+      await m.runRecibosAnexosMigrations();
+    } catch (err) {
+      console.error('[recibos-anexos-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.50.0: PIN secundario — colunas pin_hash, pin_set_at, pin_failed_attempts,
+  // pin_locked_until em users. Admin/owner bypassam, outros roles digitam PIN
+  // pra acoes destrutivas (deletar recibo, fechar folha, cancelar NF, etc.).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-pin-secundario');
+      await m.runPinSecundarioMigrations();
+    } catch (err) {
+      console.error('[pin-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.18.0: tabelas processamentos_gnss + processamentos_gnss_arquivos (RINEX/PPP)
+  // + seeds de configuracoes (URL portal IBGE, tamanhos maximos, duracoes minimas).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-gnss');
+      await m.runGnssMigrations();
+    } catch (err) {
+      console.error('[gnss-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.10.0: tabelas de Fechamento de Folha (folha_fechamentos + itens + log)
+  // + ALTERs em romatec_obras (ciclo_pagamento, dia_corte_padrao, ultima_data_fechada)
+  // + ALTERs em romatec_obra_funcionario_dias (fechamento_id, bloqueado_em).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-folha-fechamento');
+      await m.runFolhaFechamentoMigrations();
+    } catch (err) {
+      console.error('[folha-fechamento-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.10.2: tipo_chave_pix em romatec_obra_equipe (pra cadastro PIX por tipo).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-folha-fechamento');
+      await m.runEquipePixMigrations();
+    } catch (err) {
+      console.error('[equipe-pix-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.16.0: foto do colaborador como BLOB pra aparecer em recibos e relatorios.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-folha-fechamento');
+      await m.runEquipeFotoMigrations();
+    } catch (err) {
+      console.error('[equipe-foto-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.11.0: colunas de comprovante em folha_fechamento_itens.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-folha-fechamento');
+      await m.runComprovanteMigrations();
+    } catch (err) {
+      console.error('[comprovante-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.12.0: colunas de cobranca em romatec_obra_parcelas.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-cobranca-parcelas');
+      await m.runCobrancaParcelasMigrations();
+    } catch (err) {
+      console.error('[cobranca-parcelas-migrations] FALHA fatal:', err);
+    }
+    // v3.14.0
+    try {
+      const m = await import('./database/migrations-relatorio-demarcacao');
+      await m.runRelatorioDemarcacaoMigrations();
+    } catch (err) {
+      console.error('[relatorio-demarcacao-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // texto-explicativo: tabelas textos_explicativos + envios + coluna
+  // enviar_explicativo_junto em propostas + seed dos 2 templates.
+  void (async () => {
+    try {
+      await runMigrationsExplicativo();
+    } catch (err) {
+      console.error('[explicativo-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  void initDb()
+    .then(() => loadSessionFromDb())
+    .then(() => import('./services/whatsappDrafts'))
+    .then(m => m.startDraftCleanup())
+    .then(() => import('./services/recibosQuinzena'))
+    .then(m => m.startExpiracaoRecibosTicker()) // v1.65.16: expira recibos sem resposta há mais de 48h (ticker a cada 6h)
+    .then(() => import('./services/reciboLembretes'))
+    .then(m => m.iniciarLembretesCron()) // v1.72.0: lembretes universais + auto-expirar
+    .then(() => import('./services/cobrancaParcelas'))
+    .then(m => m.iniciarTickerCobrancaParcelas()) // v3.12.0: cobranca automatica de parcelas (6h cron)
+    .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));
+
+  // v1.39.1: sync contatos CRM → memória ZAYRA (1x ao boot + 1x/dia 04:00 BRT)
+  void import('./services/syncContatosCRM').then(({ sincronizarContatosCRM }) => {
+    // Boot: aguarda 60s (DB conectar) e roda
+    setTimeout(() => {
+      void sincronizarContatosCRM().catch(err =>
+        console.warn('[syncContatos boot]', (err as Error).message),
+      );
+    }, 60_000);
+    // Daily: roda às 04h BRT (07h UTC)
+    setInterval(() => {
+      const now = new Date();
+      const brtHour = (now.getUTCHours() + 21) % 24;  // BRT = UTC-3
+      const brtMin  = now.getUTCMinutes();
+      if (brtHour === 4 && brtMin === 0) {
+        void sincronizarContatosCRM().catch(err =>
+          console.warn('[syncContatos daily]', (err as Error).message),
+        );
+      }
+    }, 60_000);
+  }).catch(() => {});
+});
+
+export default app;
