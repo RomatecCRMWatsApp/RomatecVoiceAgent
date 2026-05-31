@@ -6257,7 +6257,9 @@ function renderPropostasLista() {
       textoConfirmar: 'Excluir', perigoso: true,
     });
     if (!ok) return;
-    try { await api('/api/propostas/' + b.dataset.delProp, { method: 'DELETE' }); render(); }
+    const pin = await pinConfirmar('Excluir proposta', 'Esta ação remove a proposta. Confirme com seu PIN.');
+    if (pin === null) return;
+    try { await api('/api/propostas/' + b.dataset.delProp, { method: 'DELETE', headers: pin ? { 'X-Pin': pin } : {} }); render(); }
     catch (e) { alert('Erro: ' + e.message + (e.message.includes('Forbidden') ? '\n\nConfigure o token CEO no botão Admin.' : '')); }
   });
 
@@ -14242,12 +14244,17 @@ function renderRecibos() {
     }).catch(() => {});
     renderRecibos();
   });
-  // 🗑️ Excluir — hard delete (exceto confirmado)
+  // 🗑️ Excluir — hard delete (exceto confirmado). v3.50.0: exige PIN (admin bypass).
   document.querySelectorAll('[data-rec-del]').forEach(b => b.onclick = async () => {
     const id = b.dataset.recDel;
     if (!confirm('Excluir DEFINITIVAMENTE este recibo? Não pode desfazer.')) return;
+    const pin = await pinConfirmar('Excluir recibo', 'Esta ação é irreversível. Confirme com seu PIN.');
+    if (pin === null) return; // cancelou
     try {
-      await api('/api/recibos/' + id, { method: 'DELETE' });
+      await api('/api/recibos/' + id, {
+        method: 'DELETE',
+        headers: pin ? { 'X-Pin': pin } : {},
+      });
       await loadRecibos(); renderRecibos();
     } catch (e) { alert('Erro: ' + e.message); }
   });
@@ -15777,9 +15784,13 @@ function renderNotas() {
     const id = b.dataset.nfCancelar;
     const motivo = prompt('Motivo do cancelamento (obrigatório):', '');
     if (!motivo?.trim()) return alert('Motivo obrigatório.');
+    const pin = await pinConfirmar('Cancelar NF emitida', 'Cancelamento de NF é definitivo. Confirme com seu PIN.');
+    if (pin === null) return;
     try {
       await api('/api/notas-fiscais/' + id + '/cancelar', {
-        method:'POST', body: JSON.stringify({ motivo })
+        method:'POST',
+        body: JSON.stringify({ motivo }),
+        headers: pin ? { 'X-Pin': pin } : {},
       });
       alert('✓ Solicitação de cancelamento enviada.');
       await loadNotas(); renderNotas();
@@ -18762,8 +18773,13 @@ function renderLaudosLista(v) {
   });
   v.querySelectorAll('[data-laudo-del]').forEach(b => b.onclick = async () => {
     if (!confirm('Desativar este laudo? (soft delete — pode ser recuperado pelo banco)')) return;
+    const pin = await pinConfirmar('Excluir laudo', 'Esta ação desativa o laudo. Confirme com seu PIN.');
+    if (pin === null) return;
     try {
-      await api('/api/laudos-demarcacao/' + b.dataset.laudoDel, { method: 'DELETE' });
+      await api('/api/laudos-demarcacao/' + b.dataset.laudoDel, {
+        method: 'DELETE',
+        headers: pin ? { 'X-Pin': pin } : {},
+      });
       await render();
     } catch (err) { alert('Erro: '+err.message); }
   });
@@ -23979,8 +23995,9 @@ async function renderConfiguracoes() {
   v.innerHTML = `
     <div class="card">
       <p class="section-title">⚙️ Configurações</p>
-      <div style="display:flex; gap:6px; margin-bottom:14px; border-bottom:1px solid var(--border);">
+      <div style="display:flex; gap:6px; margin-bottom:14px; border-bottom:1px solid var(--border); flex-wrap:wrap;">
         <button class="cfg-tab" data-sub="usuarios"  style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">👥 Usuários</button>
+        <button class="cfg-tab" data-sub="seguranca" style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">🔐 Segurança</button>
         <button class="cfg-tab" data-sub="auditoria" style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">📋 Auditoria</button>
         <button class="cfg-tab" data-sub="galeria"   style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">📷 Galeria</button>
       </div>
@@ -23996,12 +24013,128 @@ async function renderConfiguracoes() {
   });
   try {
     if (state.configSub === 'usuarios') await renderCfgUsuarios();
+    else if (state.configSub === 'seguranca') await renderCfgSeguranca();
     else if (state.configSub === 'auditoria') await renderCfgAuditoria();
     else if (state.configSub === 'galeria') await renderCfgGaleria();
   } catch (e) {
     document.getElementById('cfg-body').innerHTML = `<div class="card empty">Erro: ${escape(e.message)}</div>`;
   }
 }
+
+// v3.50.0: aba Seguranca — cadastra/troca/remove PIN secundario (4 digitos).
+// Admin/owner veem aviso de bypass mas podem cadastrar mesmo assim.
+async function renderCfgSeguranca() {
+  const body = document.getElementById('cfg-body');
+  body.innerHTML = '<div style="opacity:.6;">Carregando status do PIN…</div>';
+  let st;
+  try {
+    st = await api('/api/auth/me/pin/status');
+  } catch (e) {
+    body.innerHTML = `<div class="card empty">Erro: ${escape(e.message)}</div>`;
+    return;
+  }
+  const bypassNote = st.bypass
+    ? `<div style="background:rgba(74,140,94,0.12); border:1px solid #4a8c5e; border-radius:6px; padding:10px; margin-bottom:14px; font-size:12px;">
+         ℹ️ Seu papel <b>${escape(st.role)}</b> dispensa PIN em todas as rotas. Você pode cadastrar mesmo assim para usar em logins futuros com outros papéis.
+       </div>`
+    : '';
+  const lockNote = st.is_locked
+    ? `<div style="background:rgba(220,38,38,0.12); border:1px solid #dc2626; border-radius:6px; padding:10px; margin-bottom:14px; font-size:12px;">
+         🔒 PIN travado por tentativas erradas. Libera em ${new Date(st.locked_until).toLocaleString('pt-BR')}.
+       </div>`
+    : '';
+  body.innerHTML = `
+    <div style="max-width:480px;">
+      ${bypassNote}
+      ${lockNote}
+      <p style="margin:0 0 14px; font-size:13px;">
+        ${st.has_pin
+          ? `✅ PIN cadastrado em ${new Date(st.set_at).toLocaleString('pt-BR')}.`
+          : '⚠️ Você ainda não cadastrou um PIN secundário.'}
+      </p>
+      <div style="display:flex; flex-direction:column; gap:10px; padding:14px; border:1px solid var(--border); border-radius:8px;">
+        <p style="margin:0; font-weight:600;">${st.has_pin ? 'Trocar PIN' : 'Cadastrar PIN'}</p>
+        <label style="font-size:12px;">Senha atual *
+          <input id="pinFormSenha" type="password" autocomplete="current-password" style="width:100%; margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">Novo PIN (4 dígitos numéricos) *
+          <input id="pinFormPin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" style="width:100%; margin-top:4px; font-family:monospace; letter-spacing:8px; text-align:center; font-size:18px;">
+        </label>
+        <button id="pinFormSalvar" style="background:#1F5C3A; color:#fff; border-color:#1F5C3A; font-weight:600;">💾 ${st.has_pin ? 'Trocar PIN' : 'Cadastrar PIN'}</button>
+      </div>
+      ${st.has_pin ? `
+        <div style="margin-top:14px; padding:14px; border:1px solid #842; border-radius:8px;">
+          <p style="margin:0 0 8px; font-weight:600; color:#dc2626;">⚠️ Remover PIN</p>
+          <p style="margin:0 0 10px; font-size:11px; color:var(--text-muted);">Sem PIN, você não conseguirá executar ações sensíveis (exclusões, fechar folha, cancelar NF). Admin/owner não precisam.</p>
+          <label style="font-size:12px;">Senha atual *
+            <input id="pinRmSenha" type="password" autocomplete="current-password" style="width:100%; margin-top:4px;">
+          </label>
+          <button id="pinRmBtn" style="margin-top:10px; background:transparent; border:1px solid #842; color:#a55;">🗑 Remover PIN</button>
+        </div>` : ''}
+    </div>
+  `;
+  document.getElementById('pinFormSalvar').onclick = async () => {
+    const senha = document.getElementById('pinFormSenha').value;
+    const pin = document.getElementById('pinFormPin').value;
+    if (!senha) { showToast('Senha atual obrigatória', 'error'); return; }
+    if (!/^\d{4}$/.test(pin)) { showToast('PIN deve ter exatamente 4 dígitos numéricos', 'error'); return; }
+    try {
+      await api('/api/auth/me/pin', { method: 'POST', body: JSON.stringify({ senha, pin }) });
+      showToast('✅ PIN ' + (st.has_pin ? 'trocado' : 'cadastrado') + ' com sucesso', 'success');
+      renderCfgSeguranca();
+    } catch (e) { showToast('Erro: ' + e.message, 'error'); }
+  };
+  const rmBtn = document.getElementById('pinRmBtn');
+  if (rmBtn) rmBtn.onclick = async () => {
+    const senha = document.getElementById('pinRmSenha').value;
+    if (!senha) { showToast('Senha atual obrigatória', 'error'); return; }
+    if (!confirm('Remover seu PIN? Você não conseguirá fazer ações sensíveis até cadastrar de novo.')) return;
+    try {
+      await api('/api/auth/me/pin', { method: 'DELETE', body: JSON.stringify({ senha }) });
+      showToast('PIN removido', 'info');
+      renderCfgSeguranca();
+    } catch (e) { showToast('Erro: ' + e.message, 'error'); }
+  };
+}
+
+// v3.50.0: modal reutilizavel pra confirmar acao sensivel com PIN.
+// Retorna Promise<string|null> — string com PIN se confirmou, null se cancelou.
+// Admin/owner: pula o modal e retorna ''.
+async function pinConfirmar(titulo, descricao) {
+  // Checa status pra ver se eh admin bypass
+  let st = null;
+  try { st = await api('/api/auth/me/pin/status'); } catch {}
+  if (st && st.bypass) return ''; // admin/owner — passa direto
+  // Mostra modal
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elev,#1a1f1a); border:1px solid var(--border,#333); border-radius:10px; padding:20px; max-width:380px; width:100%;">
+        <p style="margin:0 0 8px; font-weight:700; font-size:15px;">🔐 ${escape(titulo || 'Confirme com seu PIN')}</p>
+        <p style="margin:0 0 14px; font-size:12px; color:var(--text-muted,#888);">${escape(descricao || 'Esta ação é sensível. Digite seu PIN de 4 dígitos para confirmar.')}</p>
+        <input id="pinModalInput" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" autofocus style="width:100%; font-family:monospace; letter-spacing:12px; text-align:center; font-size:24px; padding:10px;">
+        <div id="pinModalErro" style="font-size:11px; color:#dc2626; min-height:14px; margin-top:6px;"></div>
+        <div style="display:flex; gap:8px; margin-top:14px;">
+          <button id="pinModalCancel" style="flex:1; background:transparent; border:1px solid #444; color:#888;">Cancelar</button>
+          <button id="pinModalOk" style="flex:1; background:#1F5C3A; color:#fff; border-color:#1F5C3A; font-weight:600;">Confirmar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const inp = document.getElementById('pinModalInput');
+    const erro = document.getElementById('pinModalErro');
+    const fechar = (val) => { overlay.remove(); resolve(val); };
+    document.getElementById('pinModalCancel').onclick = () => fechar(null);
+    const ok = () => {
+      const v = inp.value;
+      if (!/^\d{4}$/.test(v)) { erro.textContent = 'PIN deve ter 4 dígitos numéricos'; inp.focus(); return; }
+      fechar(v);
+    };
+    document.getElementById('pinModalOk').onclick = ok;
+    inp.onkeydown = (e) => { if (e.key === 'Enter') ok(); if (e.key === 'Escape') fechar(null); };
+  });
+}
+window.pinConfirmar = pinConfirmar;
 
 // v3.28.0: configuracoes de Galeria — pos-captura (defaults + reset).
 async function renderCfgGaleria() {

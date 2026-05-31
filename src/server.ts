@@ -866,6 +866,7 @@ app.delete('/api/etapas/:id', apiHandle(args => obras.apagarEtapa(args as { id: 
 // e FALHA FECHADO se CEO_API_TOKEN nao estiver setada (antes falhava aberto).
 // Implementacao moveu pra src/middleware/auth.ts pra ficar perto do requireAuth.
 import { requireCeoToken, requireAuth, type AuthedRequest } from './middleware/auth';
+import { requirePin } from './middleware/requirePin'; // v3.50.0
 
 // v1.64.0: tenant settings (white-label estrutural). GET é público, PUT só CEO.
 app.get('/api/tenant-settings', async (_req: Request, res: Response) => {
@@ -978,7 +979,7 @@ app.post('/api/recibos/preview-lote', requireCeoToken, apiHandle(async (args) =>
   const m = await import('./services/recibosQuinzena');
   return m.previewLoteQuinzena(args as { periodo?: string });
 }));
-app.post('/api/recibos/disparar', requireCeoToken, async (req: Request, res: Response) => {
+app.post('/api/recibos/disparar', requireCeoToken, requirePin, async (req: Request, res: Response) => {
   try {
     const m = await import('./services/recibosQuinzena');
     const proto = (req.get('x-forwarded-proto') as string | undefined)?.split(',')[0]?.trim() || 'https';
@@ -1147,7 +1148,7 @@ app.get   ('/api/propostas',             apiHandle(args => propostas.listarPropo
 app.get   ('/api/propostas/:id',         apiHandle(args => propostas.buscarProposta((args as { id: string }).id)));
 app.post  ('/api/propostas',             apiHandle(args => propostas.criarProposta(args as Parameters<typeof propostas.criarProposta>[0])));
 app.put   ('/api/propostas/:id',         apiHandle(args => propostas.atualizarProposta(args as Parameters<typeof propostas.atualizarProposta>[0])));
-app.delete('/api/propostas/:id',         requireCeoToken, apiHandle(args => propostas.apagarProposta(args as { id: string })));
+app.delete('/api/propostas/:id',         requireCeoToken, requirePin, apiHandle(args => propostas.apagarProposta(args as { id: string })));
 
 app.post  ('/api/propostas/:proposta_id/itens',         apiHandle(args => propostas.adicionarItemProposta(args as Parameters<typeof propostas.adicionarItemProposta>[0])));
 app.put   ('/api/proposta-itens/:id',                   apiHandle(args => propostas.atualizarItemProposta(args as Parameters<typeof propostas.atualizarItemProposta>[0])));
@@ -1715,7 +1716,7 @@ app.post('/api/laudos-demarcacao', requireCeoToken, async (req: Request, res: Re
     res.status(201).json(l);
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
-app.delete('/api/laudos-demarcacao/:id', requireCeoToken, async (req: Request, res: Response) => {
+app.delete('/api/laudos-demarcacao/:id', requireCeoToken, requirePin, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/laudos');
     const id = await m.resolverLaudoId(String(req.params.id));
@@ -3758,7 +3759,8 @@ app.post('/api/notas-fiscais',
   apiHandle(args => notasFiscais.criarRascunhoNF(args as Parameters<typeof notasFiscais.criarRascunhoNF>[0])));
 app.post('/api/notas-fiscais/:id/emitir',
   apiHandle(async args => notasFiscais.enviarNFParaProvider((args as { id: string }).id)));
-app.post('/api/notas-fiscais/:id/cancelar',
+// v3.50.0: cancelar NF emitida requer PIN (admin/owner bypass)
+app.post('/api/notas-fiscais/:id/cancelar', requireAuth, requirePin,
   apiHandle(async args => {
     const a = args as { id: string; motivo?: string };
     if (!a.motivo?.trim()) throw new Error('motivo obrigatorio pra cancelar');
@@ -3876,7 +3878,8 @@ app.post  ('/api/recibos/:id/reenviar',
     await recibos.reenviarRecibo((args as { id: string }).id);
     return { ok: true };
   }));
-app.post  ('/api/recibos/:id/cancelar',
+// v3.50.0: cancelar recibo (incluindo confirmado/NF emitida) — requer PIN
+app.post  ('/api/recibos/:id/cancelar', requireAuth, requirePin,
   apiHandle(async args => {
     const a = args as { id: string; motivo?: string };
     await recibos.cancelarRecibo(a.id, a.motivo);
@@ -3901,7 +3904,8 @@ app.post('/api/recibos/:id/enviar-telegram', async (req: Request, res: Response)
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
-app.delete('/api/recibos/:id', async (req: Request, res: Response) => {
+// v3.50.0: exclusao de recibo requer PIN (admin/owner bypass)
+app.delete('/api/recibos/:id', requireAuth, requirePin, async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
     const r = await recibos.buscarReciboPorId(id);
@@ -4518,7 +4522,8 @@ app.post('/api/folha/preview', async (req: Request, res: Response) => {
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
-app.post('/api/folha/fechar', async (req: Request, res: Response) => {
+// v3.50.0: fechar folha requer PIN (admin/owner bypass)
+app.post('/api/folha/fechar', requireAuth, requirePin, async (req: Request, res: Response) => {
   try {
     const body = req.body ?? {};
     if (!body.obraId || !body.dataInicio || !body.dataFim) {
@@ -5040,6 +5045,18 @@ app.listen(PORT, () => {
       await m.runRecibosAnexosMigrations();
     } catch (err) {
       console.error('[recibos-anexos-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.50.0: PIN secundario — colunas pin_hash, pin_set_at, pin_failed_attempts,
+  // pin_locked_until em users. Admin/owner bypassam, outros roles digitam PIN
+  // pra acoes destrutivas (deletar recibo, fechar folha, cancelar NF, etc.).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-pin-secundario');
+      await m.runPinSecundarioMigrations();
+    } catch (err) {
+      console.error('[pin-migrations] FALHA fatal:', err);
     }
   })();
 
