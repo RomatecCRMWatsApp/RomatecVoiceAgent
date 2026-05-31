@@ -754,7 +754,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
       const bigW = 400;
       const bigH = 290;
       if (cy + bigH + 22 > 800) { doc.addPage(); cy = 60; }
-      const conteudo = await input.fotoBase64Loader(fotoBase.id);
+      const conteudo = await input.fotoBase64Loader?.(fotoBase.id);
       if (conteudo && conteudo.mime.startsWith('image/')) {
         try {
           const buf = Buffer.from(conteudo.base64, 'base64');
@@ -780,7 +780,7 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
       let col = 0;
       for (const f of fotosOutras) {
         if (cy + fotoH + 20 > 800) { doc.addPage(); cy = 60; col = 0; }
-        const conteudo = await input.fotoBase64Loader(f.id);
+        const conteudo = await input.fotoBase64Loader?.(f.id);
         if (conteudo && conteudo.mime.startsWith('image/')) {
           try {
             const buf = Buffer.from(conteudo.base64, 'base64');
