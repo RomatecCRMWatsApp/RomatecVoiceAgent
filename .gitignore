@@ -10,3 +10,5 @@ data/loteamentos/
 __pycache__/
 *.bak
 *.pyc
+# artefato do smoke test do laudo (npm run validar:laudo)
+_validacao-laudo-asbuilt.pdf
