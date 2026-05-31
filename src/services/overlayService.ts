@@ -1,6 +1,6 @@
-// v3.51.0 — VTA Overlay tecnico nas fotos de vistoria (node-canvas).
-// node-canvas e importado de forma LAZY: se a lib nativa faltar, so o overlay
-// falha (erro tratado), nunca derruba o boot do servidor.
+// v3.51.1 — VTA Overlay tecnico nas fotos de vistoria (node-canvas).
+// node-canvas e importado de forma LAZY (resolvido em runtime, nao no build).
+// Cores por linha conforme padrao Romatec: branco/ciano/cinza.
 
 export interface OverlayParams {
   imageBuffer: Buffer;
@@ -18,9 +18,13 @@ export interface OverlayParams {
 }
 
 export interface OverlayResult { buffer: Buffer; base64: string; largura: number; altura: number; }
+export interface LinhaOverlay { text: string; cor: string; bold: boolean; escala: number; }
 
 const COR_DOURADO = '#c8a84b';
 const COR_VERDE = '#1a5c2a';
+const COR_CIANO = '#00d4ff';
+const COR_CINZA = '#cccccc';
+const COR_BRANCO = '#ffffff';
 const TARGET_W = Number(process.env.OVERLAY_TARGET_WIDTH || 1080);
 const JPEG_Q = Number(process.env.OVERLAY_JPEG_QUALITY || 92) / 100;
 
@@ -36,22 +40,30 @@ export function formatarDataHora(iso: string): string {
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}, ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-export function montarLinhasOverlay(p: OverlayParams): string[] {
-  const linhas: string[] = [];
+// Linhas com estilo (cor/bold/escala) — base do desenho e do texto puro.
+export function linhasEstilizadas(p: OverlayParams): LinhaOverlay[] {
+  const out: LinhaOverlay[] = [];
   if (p.latitude != null && p.longitude != null) {
     const alt = p.altitude_m != null ? `  alt ${Math.round(p.altitude_m)}m` : '';
-    linhas.push(`GPS  ${p.latitude.toFixed(6)}, ${p.longitude.toFixed(6)}${alt}`);
+    out.push({ text: `${p.latitude.toFixed(6)}, ${p.longitude.toFixed(6)}${alt}`, cor: COR_BRANCO, bold: true, escala: 1.0 });
   } else {
-    linhas.push('GPS  Coordenadas nao disponiveis');
+    out.push({ text: 'Coordenadas nao disponiveis', cor: COR_BRANCO, bold: true, escala: 1.0 });
   }
   if (p.utm_e != null && p.utm_n != null) {
-    linhas.push(`UTM ${p.utm_zona || ''} - E=${formatarUTM(p.utm_e)} - N=${formatarUTM(p.utm_n)} (${p.datum || 'SIRGAS 2000'})`);
+    out.push({ text: `UTM ${p.utm_zona || ''} · E=${formatarUTM(p.utm_e)} · N=${formatarUTM(p.utm_n)} (${p.datum || 'SIRGAS 2000'})`, cor: COR_CIANO, bold: false, escala: 0.95 });
+  } else if (p.utm_zona) {
+    out.push({ text: `UTM ${p.utm_zona} (${p.datum || 'SIRGAS 2000'})`, cor: COR_CIANO, bold: false, escala: 0.95 });
   }
   const local = [p.logradouro, p.municipio].filter((s) => s && String(s).trim()).join(', ');
-  if (local) linhas.push(local);
-  linhas.push(formatarDataHora(p.horario_captura));
-  linhas.push(`Romatec - ${p.colaborador || ''}`);
-  return linhas;
+  out.push({ text: local || '—', cor: COR_CINZA, bold: false, escala: 0.85 });
+  out.push({ text: formatarDataHora(p.horario_captura), cor: COR_BRANCO, bold: false, escala: 0.95 });
+  out.push({ text: `Romatec · ${p.colaborador || ''}`, cor: COR_BRANCO, bold: false, escala: 0.95 });
+  return out;
+}
+
+// Compat: texto puro das linhas (usado em testes e fallback).
+export function montarLinhasOverlay(p: OverlayParams): string[] {
+  return linhasEstilizadas(p).map((l) => l.text);
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -91,7 +103,6 @@ function desenharLogoRomatec(ctx: any, cx: number, cy: number, size: number): vo
   ctx.lineWidth = Math.max(1.5, size * 0.04); ctx.strokeStyle = COR_DOURADO; ctx.stroke();
   ctx.beginPath(); ctx.arc(cx, cy, r * 0.82, 0, Math.PI * 2);
   ctx.lineWidth = Math.max(1, size * 0.02); ctx.strokeStyle = 'rgba(200,168,75,0.5)'; ctx.stroke();
-  // lupa
   const lr = r * 0.34, lx = cx - r * 0.12, ly = cy - r * 0.12;
   ctx.beginPath(); ctx.arc(lx, ly, lr, 0, Math.PI * 2);
   ctx.lineWidth = Math.max(2, size * 0.05); ctx.strokeStyle = COR_DOURADO; ctx.stroke();
@@ -106,7 +117,6 @@ function desenharLogoRomatec(ctx: any, cx: number, cy: number, size: number): vo
 }
 
 export async function aplicarOverlayFoto(params: OverlayParams): Promise<OverlayResult> {
-  // import lazy — nunca quebra o boot se a lib nativa faltar
   // @ts-ignore -- 'canvas' e dependencia nativa opcional, resolvida em runtime (nao no build)
   const mod: any = await import('canvas');
   const { createCanvas, loadImage } = mod.default || mod;
@@ -119,7 +129,6 @@ export async function aplicarOverlayFoto(params: OverlayParams): Promise<Overlay
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, W, H);
 
-  // Faixa inferior (18% da altura), com minimo p/ caber o texto
   const faixaH = Math.max(Math.round(H * 0.18), 150);
   const faixaY = H - faixaH;
   ctx.fillStyle = 'rgba(0,0,0,0.72)';
@@ -127,22 +136,18 @@ export async function aplicarOverlayFoto(params: OverlayParams): Promise<Overlay
   ctx.fillStyle = COR_DOURADO;
   ctx.fillRect(0, faixaY, W, Math.max(2, Math.round(H * 0.004)));
 
-  // Textos
-  const linhas = montarLinhasOverlay(params);
-  const fs = Math.max(13, Math.round(faixaH * 0.13));
+  const linhas = linhasEstilizadas(params);
+  const fsBase = Math.max(13, Math.round(faixaH * 0.13));
   const lh = Math.round(faixaH / (linhas.length + 1));
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `${fs}px Arial, sans-serif`;
   linhas.forEach((linha, i) => {
-    if (i === linhas.length - 1) { ctx.font = `bold ${fs}px Arial, sans-serif`; ctx.fillStyle = COR_DOURADO; }
-    ctx.fillText(linha, Math.round(W * 0.025), faixaY + lh * (i + 0.8), W * 0.78);
+    ctx.font = `${linha.bold ? 'bold ' : ''}${Math.round(fsBase * linha.escala)}px Arial, sans-serif`;
+    ctx.fillStyle = linha.cor;
+    ctx.fillText(linha.text, Math.round(W * 0.025), faixaY + lh * (i + 0.8), W * 0.78);
   });
 
-  // Rosa dos ventos (acima da faixa, canto direito)
   const rosaSize = Math.round(W * 0.10);
   desenharRosaDosVentos(ctx, W - rosaSize * 0.75, faixaY - rosaSize * 0.7, rosaSize);
-  // Logo Romatec (dentro da faixa, canto direito)
   const logoSize = Math.round(faixaH * 0.55);
   desenharLogoRomatec(ctx, W - logoSize * 0.7, faixaY + faixaH * 0.5, logoSize);
 

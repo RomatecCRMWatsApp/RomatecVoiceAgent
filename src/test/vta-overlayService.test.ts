@@ -56,7 +56,7 @@ describe('montarLinhasOverlay', () => {
     expect(L[1]).toContain('N=9.454.477');
     expect(L[1]).toContain('SIRGAS 2000');
     expect(L).toContain('Piquia da Conquista, Acailandia, MA');
-    expect(L[L.length - 1]).toBe('Romatec - Fulano');
+    expect(L[L.length - 1]).toBe('Romatec · Fulano');
   });
   it('sem GPS mostra "nao disponiveis"', () => {
     const L = montarLinhasOverlay({ ...base, latitude: null, longitude: null });
