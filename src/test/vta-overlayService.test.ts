@@ -62,8 +62,14 @@ describe('montarLinhasOverlay', () => {
     const L = montarLinhasOverlay({ ...base, latitude: null, longitude: null });
     expect(L[0]).toContain('nao disponiveis');
   });
-  it('sem UTM omite a linha UTM', () => {
+  it('sem E/N do UTM mostra so a zona (sem E=/N=)', () => {
     const L = montarLinhasOverlay({ ...base, utm_e: null, utm_n: null });
+    const utm = L.find((l) => l.includes('UTM'));
+    expect(utm).toBe('UTM 23S (SIRGAS 2000)');
+    expect(utm).not.toContain('E=');
+  });
+  it('sem UTM nem zona omite a linha UTM', () => {
+    const L = montarLinhasOverlay({ ...base, utm_e: null, utm_n: null, utm_zona: '' });
     expect(L.some((l) => l.includes('UTM'))).toBe(false);
   });
 });
