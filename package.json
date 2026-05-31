@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "rag:ingest-folder": "tsx src/scripts/ragIngestFolder.ts",
     "rag:ingest-obsidian": "tsx src/scripts/ragIngestObsidian.ts",
-    "contracts:ingest": "tsx src/scripts/contractsIngestFile.ts"
+    "contracts:ingest": "tsx src/scripts/contractsIngestFile.ts",
+    "validar:laudo": "tsx src/scripts/validarLaudoAsBuilt.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
