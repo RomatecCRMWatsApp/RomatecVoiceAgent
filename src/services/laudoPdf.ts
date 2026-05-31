@@ -37,6 +37,8 @@ import type { Executante } from '../integrations/executantes';
 import { azimuteParaDMS } from './geometria';
 import { CRITERIOS_INCRA } from './pricing/incra';
 import { calcularCentroide, formatarAreaParaCentro, calcularMC } from './croquiHelpers';
+// v3.51.1: integracao Croqui As-Built (Canvas) + Relatorio Fotografico.
+import { montarNotaAsBuilt, type FotoAnexo, type CroquiCanvasInfo } from './laudoAnexos';
 import { secaoPlantaQuadra } from './plantaQuadraPdfSection';
 
 const fmtBRL = (n: number) =>
@@ -151,6 +153,13 @@ export interface LaudoPdfInput {
   fotoBase64Loader?: (fotoId: number) => Promise<{ base64: string; mime: string } | null>;
   croquiUpload?: { mime: string; base64: string } | null;
   croquiSvg?: string | null;
+  // v3.51.1: croqui As-Built rasterizado do modulo Canvas (Modulo A). Quando
+  // presente, tem PRECEDENCIA sobre o upload e o poligono vetorial nativo.
+  croquiCanvasPng?: Buffer | null;
+  croquiCanvasInfo?: CroquiCanvasInfo | null;
+  // v3.51.1: fotos do Relatorio Fotografico georreferenciado (Modulo B), ja com
+  // overlay tecnico. base64 PURO (sem prefixo data:).
+  fotosRelatorio?: FotoAnexo[];
   // v2.11.0: bloco visual ICP-Brasil renderizado quando o laudo e assinado
   // digitalmente. Mesmo padrao do reciboPdf.ts (caixa verde com signatario,
   // CN, doc, data e validade). Quando undefined, NAO renderiza o bloco —
@@ -530,9 +539,21 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   // v2.10.1: quando nao ha upload de imagem, desenhamos o poligono INLINE
   // direto no PDFKit (PDFKit nao tem SVG nativo, mas paths simples bastam).
   if (cy > 540) { doc.addPage(); cy = 60; }
-  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('10. CROQUI DO LEVANTAMENTO', 40, cy);
+  const tituloCroqui = input.croquiCanvasPng ? '10. CROQUI AS-BUILT (REGULARIZAÇÃO)' : '10. CROQUI DO LEVANTAMENTO';
+  doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text(tituloCroqui, 40, cy);
   cy += 14;
-  if (input.croquiUpload && input.croquiUpload.mime.startsWith('image/')) {
+  if (input.croquiCanvasPng) {
+    // v3.51.1: croqui As-Built rasterizado do Canvas (prancha tecnica c/ carimbo).
+    try {
+      const maxH = 300;
+      doc.image(input.croquiCanvasPng, 40, cy, { width: 515, fit: [515, maxH], align: 'center' });
+      cy += maxH + 6;
+      const esc = input.croquiCanvasInfo?.escala ? ` · Escala ${input.croquiCanvasInfo.escala}` : '';
+      doc.fontSize(7).fillColor('#666').font('Helvetica-Oblique')
+         .text(`Croqui As-Built — prancha técnica georreferenciada${esc}`, 40, cy, { width: 515, align: 'center' });
+      cy += 12;
+    } catch { /* PNG ruim → ignora (sem fallback vetorial pra nao duplicar) */ }
+  } else if (input.croquiUpload && input.croquiUpload.mime.startsWith('image/')) {
     try {
       const buf = Buffer.from(input.croquiUpload.base64, 'base64');
       const maxH = 250;
@@ -687,6 +708,19 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
     cy += 12;
   }
 
+  // v3.51.1: nota tecnica As-Built / regularizacao (NBR 13133 / NTGIR-INCRA).
+  {
+    const temCroquiNota = !!(input.croquiCanvasPng || input.croquiUpload || pontos.length >= 3);
+    const temFotosRelNota = !!(input.fotosRelatorio && input.fotosRelatorio.length);
+    if (temCroquiNota || temFotosRelNota) {
+      if (cy > 720) { doc.addPage(); cy = 60; }
+      const nota = montarNotaAsBuilt({ temCroqui: temCroquiNota, temFotos: temFotosRelNota });
+      doc.fontSize(7.5).fillColor('#555').font('Helvetica-Oblique')
+         .text(nota, 40, cy, { width: 515, align: 'justify' });
+      cy = doc.y + 8;
+    }
+  }
+
   // ── 10.1 Planta da Quadra (v3.6.0+) ────────────────────────────────
   // Só renderiza se laudo.tipo_imovel === 'URBANO' E lote_loteamento_id != null
   // E o loteamento já tem geometria mapeada. Falha → omite silenciosamente.
@@ -701,7 +735,9 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
   // ── 11. Fotos ──────────────────────────────────────────────────────
   // v2.4.5: foto da Base ganha subseção dedicada (11.1, foto grande centralizada).
   // Demais fotos (piquetes + gerais) na 11.2 com grid 2 colunas como antes.
-  if (input.fotos.length > 0 && input.fotoBase64Loader) {
+  const temFotosLaudo = input.fotos.length > 0 && !!input.fotoBase64Loader;
+  const temFotosRel = !!(input.fotosRelatorio && input.fotosRelatorio.length);
+  if (temFotosLaudo || temFotosRel) {
     if (cy > 600) { doc.addPage(); cy = 60; }
     doc.fontSize(10).fillColor('#888').font('Helvetica-Bold').text('11. RELATÓRIO FOTOGRÁFICO', 40, cy);
     cy += 14;
@@ -762,6 +798,29 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
         }
       }
       if (col === 1) cy += fotoH + 18; // fecha linha incompleta
+    }
+
+    // 11.3 — Relatorio Fotografico georreferenciado (As-Built, Modulo B)
+    if (temFotosRel && input.fotosRelatorio) {
+      if (cy > 700) { doc.addPage(); cy = 60; }
+      doc.fontSize(9).fillColor('#444').font('Helvetica-Bold')
+         .text('11.3 Relatório fotográfico georreferenciado (As-Built)', 40, cy);
+      cy += 14;
+      const fW = 250;
+      const fH = 188; // +8 vs vertices: cabe a faixa de legenda georref maior
+      let colR = 0;
+      for (const f of input.fotosRelatorio) {
+        if (cy + fH + 28 > 800) { doc.addPage(); cy = 60; colR = 0; }
+        try {
+          const buf = Buffer.from(f.base64, 'base64');
+          const x = colR === 0 ? 40 : 305;
+          doc.image(buf, x, cy, { width: fW, height: fH, fit: [fW, fH] });
+          doc.fontSize(7).fillColor('#444').font('Helvetica')
+             .text(f.legenda, x, cy + fH + 2, { width: fW, align: 'center' });
+        } catch { /* ignora foto ruim */ }
+        if (colR === 1) { cy += fH + 30; colR = 0; } else { colR = 1; }
+      }
+      if (colR === 1) cy += fH + 30;
     }
     cy += 10;
   }

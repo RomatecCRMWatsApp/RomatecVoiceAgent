@@ -3324,11 +3324,13 @@ app.post('/api/laudos-demarcacao/:id/assinar', requireCeoToken, async (req: Requ
     const contratante = await contratantesMod.buscarContratante(laudo.contratante_id);
     const executante = await executantesMod.buscarExecutante(laudo.executante_id);
     if (!contratante || !executante) { res.status(500).json({ error: 'Contratante/Executante associado nao encontrado' }); return; }
-    const [pontos, lados, fotos, croquiUpload] = await Promise.all([
+    const { carregarAnexosLaudo } = await import('./services/laudoAnexos');
+    const [pontos, lados, fotos, croquiUpload, anexos] = await Promise.all([
       laudosMod.listarPontosDoLaudo(id),
       laudosMod.listarLadosDoLaudo(id),
       laudosMod.listarFotosDoLaudo(id),
       laudosMod.getCroquiUpload(id),
+      carregarAnexosLaudo(id),
     ]);
 
     // v2.11.0: monta meta da assinatura digital ANTES de gerar o PDF, pra que
@@ -3352,6 +3354,9 @@ app.post('/api/laudos-demarcacao/:id/assinar', requireCeoToken, async (req: Requ
         return f ? { base64: f.base64, mime: f.mime } : null;
       },
       croquiUpload: croquiUpload ?? null,
+      croquiCanvasPng: anexos.croquiCanvasPng,
+      croquiCanvasInfo: anexos.croquiCanvasInfo,
+      fotosRelatorio: anexos.fotosRelatorio,
       signatureMeta: signatureVisualMeta,
     });
 
@@ -3660,11 +3665,13 @@ app.get('/api/laudos-demarcacao/:id/pdf', async (req: Request, res: Response) =>
     const executante = await executantesMod.buscarExecutante(laudo.executante_id);
     if (!executante) { res.status(500).json({ error: 'Executante associado nao encontrado' }); return; }
 
-    const [pontos, lados, fotos, croquiUpload] = await Promise.all([
+    const { carregarAnexosLaudo } = await import('./services/laudoAnexos');
+    const [pontos, lados, fotos, croquiUpload, anexos] = await Promise.all([
       laudosMod.listarPontosDoLaudo(id),
       laudosMod.listarLadosDoLaudo(id),
       laudosMod.listarFotosDoLaudo(id),
       laudosMod.getCroquiUpload(id),
+      carregarAnexosLaudo(id),
     ]);
 
     const pdf = await gerarPdfLaudo({
@@ -3676,6 +3683,9 @@ app.get('/api/laudos-demarcacao/:id/pdf', async (req: Request, res: Response) =>
         return { base64: f.base64, mime: f.mime };
       },
       croquiUpload: croquiUpload ?? null,
+      croquiCanvasPng: anexos.croquiCanvasPng,
+      croquiCanvasInfo: anexos.croquiCanvasInfo,
+      fotosRelatorio: anexos.fotosRelatorio,
     });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="Laudo-${laudo.numero_laudo}.pdf"`);
