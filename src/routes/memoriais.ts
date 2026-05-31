@@ -2,16 +2,11 @@
 // Quantitativos. Montado em /api/memoriais (coexiste com as rotas inline
 // legadas do server.ts; os paths /hidraulico/* abaixo sao novos, sem colisao).
 //
-// Endpoints:
-//   POST /hidraulico/calcular-consumo   (puro)
-//   POST /hidraulico/calcular-resumo    (puro)
-//   POST /hidraulico/identificar-item   (heuristica de transicao PVC)
-//   POST /hidraulico/gerar              (calcula + gera 2 PDFs + persiste)
-//   GET  /hidraulico                    (listagem disciplina=hidraulico)
-//   GET  /hidraulico/:id/memorial.pdf
-//   GET  /hidraulico/:id/quantitativo.pdf
-//   POST /hidraulico/:id/enviar-whatsapp
-//   POST /hidraulico/:id/enviar-telegram
+// IMPORTANTE (boot-safe): os repositorios que tocam o MySQL sao carregados via
+// import() dinamico DENTRO dos handlers — mesmo padrao das demais rotas de
+// memoriais no server.ts. Assim o import deste router NAO inicializa a conexao
+// no boot (database/connection lanca se DATABASE_URL faltar). Calc e PDF sao
+// modulos puros (sem DB), entao ficam em import estatico.
 
 import { Router, type Request, type Response } from 'express';
 import crypto from 'crypto';
@@ -25,8 +20,6 @@ import {
 } from '../services/memoriais/hidraulicoCalculo';
 import { gerarPdfMemorialHidraulico } from '../services/memoriais/hidraulicoPdfMemorial';
 import { gerarPdfQuantitativoHidraulico, type ConexaoItem } from '../services/memoriais/hidraulicoPdfQuantitativo';
-import { memoriaisRepo } from '../repositories/memoriaisRepo';
-import { memoriaisArtefatosRepo } from '../repositories/memoriaisArtefatosRepo';
 
 const router = Router();
 
@@ -35,6 +28,15 @@ const userId = (req: Request): number | null => {
   const u = (req as Request & { user?: { id?: number } }).user;
   return typeof u?.id === 'number' ? u.id : null;
 };
+
+// Carrega os repositorios sob demanda (boot-safe — nao inicializa DB no import).
+async function getRepos() {
+  const [{ memoriaisRepo }, { memoriaisArtefatosRepo }] = await Promise.all([
+    import('../repositories/memoriaisRepo'),
+    import('../repositories/memoriaisArtefatosRepo'),
+  ]);
+  return { memoriaisRepo, memoriaisArtefatosRepo };
+}
 
 // ── Passo 3: consumo em tempo real ──────────────────────────────────────────
 router.post('/hidraulico/calcular-consumo', requireAuth, (req: Request, res: Response) => {
@@ -92,6 +94,7 @@ router.post('/hidraulico/gerar', requireAuth, async (req: Request, res: Response
     }));
     const pdfB = await gerarPdfQuantitativoHidraulico(r, { data, conexoes });
 
+    const { memoriaisRepo, memoriaisArtefatosRepo } = await getRepos();
     const o = r.dadosObra;
     const { id, codigo } = await memoriaisRepo.criar({
       disciplina: 'hidraulico',
@@ -139,6 +142,7 @@ router.post('/hidraulico/gerar', requireAuth, async (req: Request, res: Response
 router.get('/hidraulico', requireAuth, async (req: Request, res: Response) => {
   try {
     const limite = Math.min(Number(req.query.limite) || 50, 500);
+    const { memoriaisRepo } = await getRepos();
     const items = await memoriaisRepo.listar({ disciplina: 'hidraulico', limite });
     res.json({ data: items, total: items.length });
   } catch (err) {
@@ -149,6 +153,7 @@ router.get('/hidraulico', requireAuth, async (req: Request, res: Response) => {
 // ── Download dos PDFs ───────────────────────────────────────────────────────
 async function servirPdf(req: Request, res: Response, tipo: 'memorial' | 'quantitativo') {
   try {
+    const { memoriaisArtefatosRepo } = await getRepos();
     const art = await memoriaisArtefatosRepo.ler(Number(req.params.id), tipo);
     if (!art) {
       res.status(404).json({ error: 'PDF nao encontrado' });
@@ -173,6 +178,7 @@ router.post('/hidraulico/:id(\\d+)/enviar-whatsapp', requireAuth, async (req: Re
       res.status(400).json({ error: 'telefone obrigatorio' });
       return;
     }
+    const { memoriaisRepo, memoriaisArtefatosRepo } = await getRepos();
     const mem = await memoriaisArtefatosRepo.ler(id, 'memorial');
     const qnt = await memoriaisArtefatosRepo.ler(id, 'quantitativo');
     if (!mem || !qnt) {
@@ -198,6 +204,7 @@ router.post('/hidraulico/:id(\\d+)/enviar-telegram', requireAuth, async (req: Re
       res.status(400).json({ error: 'chatId obrigatorio (ou defina TELEGRAM_CHAT_ID)' });
       return;
     }
+    const { memoriaisRepo, memoriaisArtefatosRepo } = await getRepos();
     const mem = await memoriaisArtefatosRepo.ler(id, 'memorial');
     const qnt = await memoriaisArtefatosRepo.ler(id, 'quantitativo');
     if (!mem || !qnt) {
