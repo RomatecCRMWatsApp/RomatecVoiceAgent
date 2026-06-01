@@ -6239,6 +6239,12 @@ function renderPropostasLista() {
   // Sub-tipos "Em breve" -> toast
   document.querySelectorAll('[data-mo-subtipo]').forEach(b => {
     b.onclick = () => {
+      // v3.53.0: subtipos disponíveis abrem o form real de Mão de Obra.
+      if (b.dataset.moDisponivel === '1') {
+        state.maoObraSubtipo = b.dataset.moSubtipo;
+        setMaoObraView('novo');
+        return;
+      }
       const nome = b.dataset.moSubtipoNome || 'Mão de Obra';
       mostrarToastUX(`${nome}: form em desenvolvimento — previsto para v3.30.0. Por enquanto, registre via Consultoria > Projeto Executivo.`);
     };
@@ -7014,7 +7020,7 @@ function setConsultoriaView(view) {
 // v3.32.0 UX: catalogo de sub-tipos de Mao de Obra (todos "Em breve" — forms
 // reais ficam pra v3.30.0+ conforme prompt v3.29.1).
 const SUBTIPOS_MAO_OBRA = [
-  { slug: 'construcao_nova',         icone: '🏗️', nome: 'Construção nova (residencial/comercial)' },
+  { slug: 'construcao_nova',         icone: '🏗️', nome: 'Construção nova (residencial/comercial)', disponivel: true }, // v3.53.0: ATIVADO
   { slug: 'reforma_ampliacao',       icone: '🔧', nome: 'Reforma / ampliação' },
   { slug: 'alvenaria_pura',          icone: '🧱', nome: 'Alvenaria pura' },
   { slug: 'vistoria_periodica',      icone: '🔍', nome: 'Vistoria técnica periódica' },
@@ -7028,12 +7034,12 @@ function renderCardsMaoObraInline() {
   const reduced = (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   if (state.maoObraNivel === 2) {
     const cards = SUBTIPOS_MAO_OBRA.map(s => `
-      <button data-mo-subtipo="${s.slug}" data-mo-subtipo-nome="${escape(s.nome)}"
-              aria-label="${escape(s.icone + ' ' + s.nome + ' (em breve)')}"
-              style="padding:14px; text-align:left; border:1px solid var(--border); border-radius:8px;
-                     background:#1a1a1a; opacity:0.7; cursor:pointer; color:var(--text);">
+      <button data-mo-subtipo="${s.slug}" data-mo-subtipo-nome="${escape(s.nome)}" data-mo-disponivel="${s.disponivel ? '1' : ''}"
+              aria-label="${escape(s.icone + ' ' + s.nome + (s.disponivel ? ' (disponível)' : ' (em breve)'))}"
+              style="padding:14px; text-align:left; border:1px solid ${s.disponivel ? 'var(--success)' : 'var(--border)'}; border-radius:8px;
+                     background:#1a1a1a; opacity:${s.disponivel ? '1' : '0.7'}; cursor:pointer; color:var(--text);">
         <div style="font-size:15px; font-weight:600;">${s.icone} ${escape(s.nome)}</div>
-        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">◌ Em breve (v3.30.0)</div>
+        <div style="font-size:11px; color:${s.disponivel ? 'var(--success)' : 'var(--text-muted)'}; margin-top:4px;">${s.disponivel ? '● Disponível' : '◌ Em breve (v3.30.0)'}</div>
       </button>`).join('');
     return `
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
