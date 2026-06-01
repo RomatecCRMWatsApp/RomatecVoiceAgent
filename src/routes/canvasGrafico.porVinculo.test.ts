@@ -10,6 +10,10 @@ vi.mock('../database/connection', () => ({
   default: { execute: vi.fn() },
 }));
 
+// canvasGrafico importa integrations/whatsapp, que arrasta ragIngest/think →
+// voyageai (directory import ESM que quebra sob vitest). Mock corta a cadeia.
+vi.mock('../integrations/whatsapp', () => ({ sendImage: vi.fn() }));
+
 function getHandler(pathInclui: string) {
   const layer = (canvasRouter as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: unknown }> } }> })
     .stack.find((l) => !!l.route && l.route.path.includes(pathInclui));

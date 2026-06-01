@@ -48,12 +48,12 @@ async function buscarCanvasPorVinculo(
 }
 
 router.get('/por-laudo/:laudoId(\\d+)', requireAuth, async (req: Request, res: Response) => {
-  try { await buscarCanvasPorVinculo('laudo_id', req.params.laudoId, res); }
+  try { await buscarCanvasPorVinculo('laudo_id', String(req.params.laudoId), res); }
   catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
 router.get('/por-proposta/:propostaId(\\d+)', requireAuth, async (req: Request, res: Response) => {
-  try { await buscarCanvasPorVinculo('proposta_id', req.params.propostaId, res); }
+  try { await buscarCanvasPorVinculo('proposta_id', String(req.params.propostaId), res); }
   catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
