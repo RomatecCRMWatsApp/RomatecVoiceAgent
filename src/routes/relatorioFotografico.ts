@@ -3,8 +3,9 @@
 import { Router, type Request, type Response } from 'express';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import multer from 'multer';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireCeoToken } from '../middleware/auth';
 import { sendImage } from '../integrations/whatsapp';
+import type { RelatorioFotograficoMeta, FotoVistoriaPdf } from '../services/relatorioFotograficoPdf';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -158,6 +159,89 @@ router.post('/:id(\\d+)/enviar-whatsapp', requireAuth, async (req: Request, res:
     await pool.execute('UPDATE relatorios_fotograficos SET status = ? WHERE id = ?', ['enviado', req.params.id]);
     res.json({ ok: true, enviados });
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// ── v3.53.0 (Task 2): PDF técnico + assinatura ICP-Brasil ───────────────────
+async function carregarRelatorioEFotos(id: string) {
+  const pool = await db();
+  const [rel] = await pool.execute<RowDataPacket[]>('SELECT * FROM relatorios_fotograficos WHERE id = ?', [id]);
+  if (!rel.length) return null;
+  const [fotos] = await pool.execute<RowDataPacket[]>(
+    'SELECT * FROM fotos_vistoria WHERE relatorio_id = ? ORDER BY ordem, id', [id]);
+  return { relatorio: rel[0], fotos };
+}
+
+// GET /:id/pdf — gera o PDF técnico do relatório (sem assinatura)
+router.get('/:id(\\d+)/pdf', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const dados = await carregarRelatorioEFotos(String(req.params.id));
+    if (!dados) { res.status(404).json({ error: 'relatorio nao encontrado' }); return; }
+    const { gerarPdfRelatorioFotografico } = await import('../services/relatorioFotograficoPdf');
+    const pdf = await gerarPdfRelatorioFotografico({
+      relatorio: dados.relatorio as unknown as RelatorioFotograficoMeta,
+      fotos: dados.fotos as unknown as FotoVistoriaPdf[],
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="RelatorioFotografico-${req.params.id}.pdf"`);
+    res.send(pdf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// POST /:id/assinar — assina o PDF com PAdES ICP-Brasil e persiste
+router.post('/:id(\\d+)/assinar', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const dados = await carregarRelatorioEFotos(String(req.params.id));
+    if (!dados) { res.status(404).json({ error: 'relatorio nao encontrado' }); return; }
+    const perfil = (req.body?.perfil === 'pf' ? 'pf' : 'pj') as 'pj' | 'pf';
+    const certsMod = await import('../services/signingCertificates');
+    const cert = await certsMod.getCertForSigning(perfil);
+    if (!cert) { res.status(400).json({ error: `Certificado ${perfil.toUpperCase()} nao cadastrado em /obras → Certs` }); return; }
+
+    const agora = new Date();
+    const signatureMeta = {
+      signer_cn: cert.meta.subject_cn ?? 'Romatec',
+      signer_doc: cert.meta.subject_doc,
+      issuer_cn: cert.meta.issuer_cn,
+      validade_ate: cert.meta.validade_ate == null ? null : String(cert.meta.validade_ate),
+      data_assinatura: agora,
+      thumbprint: cert.meta.thumbprint,
+    };
+    const { gerarPdfRelatorioFotografico } = await import('../services/relatorioFotograficoPdf');
+    const pdfBase = await gerarPdfRelatorioFotografico({
+      relatorio: dados.relatorio as unknown as RelatorioFotograficoMeta,
+      fotos: dados.fotos as unknown as FotoVistoriaPdf[],
+      signatureMeta,
+    });
+    const pdfSignerMod = await import('../services/pdfSigner');
+    const pdfAssinado = await pdfSignerMod.signPdfBuffer(pdfBase, cert.pfx, cert.senha, {
+      name: cert.meta.subject_cn || 'Romatec',
+      reason: `Relatorio Fotografico #${req.params.id}`,
+      location: `${dados.relatorio.municipio || 'Açailândia'}/MA`,
+      contactInfo: cert.meta.subject_doc || '',
+    });
+    const pool = await db();
+    await pool.execute<ResultSetHeader>(
+      'UPDATE relatorios_fotograficos SET pdf_assinado = ?, assinado_em = ?, status = ? WHERE id = ?',
+      [pdfAssinado, agora, 'finalizado', req.params.id]);
+    res.json({
+      ok: true, assinado_por: cert.meta.subject_cn,
+      cert_validade: cert.meta.validade_ate, pdf_size_bytes: pdfAssinado.length,
+    });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// GET /:id/pdf-assinado — serve o PDF assinado salvo (404 se ainda não assinado)
+router.get('/:id(\\d+)/pdf-assinado', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const pool = await db();
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      'SELECT pdf_assinado FROM relatorios_fotograficos WHERE id = ?', [req.params.id]);
+    const buf = rows.length ? (rows[0].pdf_assinado as Buffer | null) : null;
+    if (!buf) { res.status(404).json({ error: 'relatorio nao assinado ainda' }); return; }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="RelatorioFotografico-${req.params.id}-assinado.pdf"`);
+    res.send(buf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
 export default router;

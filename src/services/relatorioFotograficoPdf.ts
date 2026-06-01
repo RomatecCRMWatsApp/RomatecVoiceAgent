@@ -227,6 +227,24 @@ export async function gerarPdfRelatorioFotografico(input: RelFotoPdfInput): Prom
     cy += 16;
   }
 
+  // ── Bloco visual da assinatura digital ICP-Brasil (quando assinado) ──
+  if (input.signatureMeta) {
+    const m = input.signatureMeta;
+    if (cy + 92 > 800) { doc.addPage(); cy = 60; }
+    const boxY = cy, boxH = 78;
+    doc.save().rect(40, boxY, 515, boxH).fillColor('#eafaf1').fill().restore();
+    doc.rect(40, boxY, 515, boxH).strokeColor('#1F5C3A').lineWidth(1).stroke();
+    doc.fontSize(10).fillColor('#1F5C3A').font('Helvetica-Bold')
+       .text('ASSINADO DIGITALMENTE — ICP-Brasil (PAdES)', 50, boxY + 8, { width: 495 });
+    doc.fontSize(8).fillColor('#222').font('Helvetica');
+    const cn = (m.signer_cn || '').replace(/:\d+$/, '');
+    doc.text(`Signatário: ${cn}${m.signer_doc ? ' · ' + m.signer_doc : ''}`, 50, boxY + 26, { width: 495 });
+    if (m.issuer_cn) doc.text(`AC emitente: ${m.issuer_cn}`, 50, doc.y, { width: 495 });
+    doc.text(`Data: ${fmtDataHora(m.data_assinatura)}${m.validade_ate ? ' · Validade do certificado: ' + fmtData(m.validade_ate) : ''}`, 50, doc.y, { width: 495 });
+    if (m.thumbprint) doc.fontSize(7).fillColor('#555').text(`Thumbprint: ${m.thumbprint}`, 50, doc.y, { width: 495 });
+    cy = boxY + boxH + 10;
+  }
+
   // ── Assinatura tecnica ──
   if (cy + 120 > 800) { doc.addPage(); cy = 60; }
   cy += 10;

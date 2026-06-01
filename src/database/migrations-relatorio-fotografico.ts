@@ -62,4 +62,15 @@ export async function runRelatorioFotograficoMigrations(): Promise<void> {
       CONSTRAINT fk_foto_relatorio FOREIGN KEY (relatorio_id) REFERENCES relatorios_fotograficos(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `, 'CREATE fotos_vistoria');
+
+  // v3.53.0 — PDF assinado (PAdES ICP-Brasil) do relatorio. Idempotente
+  // (exec engole ER_DUP_FIELDNAME se a coluna ja existir).
+  await exec(
+    `ALTER TABLE relatorios_fotograficos ADD COLUMN pdf_assinado LONGBLOB NULL`,
+    'ADD pdf_assinado',
+  );
+  await exec(
+    `ALTER TABLE relatorios_fotograficos ADD COLUMN assinado_em DATETIME NULL`,
+    'ADD assinado_em',
+  );
 }
