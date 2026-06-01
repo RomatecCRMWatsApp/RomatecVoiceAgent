@@ -1,0 +1,12 @@
+# v3.51.0 — libs nativas do cairo p/ compilar o node-canvas (overlay das fotos VTA).
+# Sem isso, o `npm install` quebra no Railway com node-gyp ERR! em node_modules/canvas.
+[phases.setup]
+aptPkgs = [
+  "build-essential",
+  "pkg-config",
+  "libcairo2-dev",
+  "libpango1.0-dev",
+  "libjpeg-dev",
+  "libgif-dev",
+  "librsvg2-dev"
+]
