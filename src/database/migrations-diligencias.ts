@@ -6,8 +6,8 @@ import pool from './connection';
 export async function runDiligenciasMigrations(): Promise<void> {
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS diligencias (
-      id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-      proposta_id      INT UNSIGNED NOT NULL,
+      id               INT AUTO_INCREMENT PRIMARY KEY,
+      proposta_id      INT NOT NULL,
       finalidade       ENUM('avaliacao','georreferenciamento','desmembramento',
                             'remembramento','averbacao','vistoria','demarcacao') NOT NULL,
       telefone         VARCHAR(20) NOT NULL,
@@ -31,8 +31,8 @@ export async function runDiligenciasMigrations(): Promise<void> {
 
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS diligencias_mensagens (
-      id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-      diligencia_id   INT UNSIGNED NOT NULL,
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      diligencia_id   INT NOT NULL,
       tipo            ENUM('confirmacao','lembrete','remarcacao') NOT NULL,
       telefone        VARCHAR(20) NOT NULL,
       mensagem        TEXT NOT NULL,
