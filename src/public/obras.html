@@ -7145,6 +7145,11 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
             <button data-pdf-cons="${p.id}"  title="Baixar PDF"       style="flex:1; min-width:70px;">📄 PDF</button>
             <button data-wapp-cons="${p.id}" title="Enviar WhatsApp"  style="flex:1; min-width:80px; background:var(--success); color:#fff; border-color:var(--success);">📱 Enviar</button>
           </div>
+          <!-- v1.99.16: export PDF templates Prime I (dark) / Prime II (clean) -->
+          <div style="display:flex; gap:4px;">
+            <button data-prime1-cons="${p.id}" title="Exportar PDF — Prime I (dark premium)" style="flex:1; background:#0a0a0a; color:#f0c040; border:1px solid #B8860B; font-size:12px;">✦ Prime I</button>
+            <button data-prime2-cons="${p.id}" title="Exportar PDF — Prime II (clean editorial)" style="flex:1; background:#fafaf8; color:#0B6E4F; border:1px solid #0B6E4F; font-size:12px;">✦ Prime II</button>
+          </div>
           <div style="display:flex; gap:4px;">
             <button data-tele-cons="${p.id}" style="flex:1;">✈️ Telegram</button>
             <button data-edit-cons="${p.id}" style="flex:1;">✏️ Editar</button>
@@ -7213,6 +7218,13 @@ async function renderPropostasConsultoriaLista(v, toggleHTML) {
 
   document.querySelectorAll('[data-view-cons]').forEach(b => b.onclick = () => {
     window.open('/api/propostas-consultoria/' + b.dataset.viewCons + '/pdf', '_blank');
+  });
+  // v1.99.16: export nos templates Prime I (dark) e Prime II (clean)
+  document.querySelectorAll('[data-prime1-cons]').forEach(b => b.onclick = () => {
+    window.open('/api/pdf-prime/proposta/' + b.dataset.prime1Cons + '?template=prime1', '_blank');
+  });
+  document.querySelectorAll('[data-prime2-cons]').forEach(b => b.onclick = () => {
+    window.open('/api/pdf-prime/proposta/' + b.dataset.prime2Cons + '?template=prime2', '_blank');
   });
   document.querySelectorAll('[data-pdf-cons]').forEach(b => b.onclick = () => {
     window.open('/api/propostas-consultoria/' + b.dataset.pdfCons + '/pdf', '_blank');
@@ -13958,6 +13970,11 @@ function renderRecibos() {
             <button data-rec-ver="${r.token}" title="Visualizar página pública" style="flex:1;">👁 Ver</button>
             <button data-rec-pdf="${r.id}" title="Baixar PDF" style="flex:1;">📄 PDF</button>
           </div>
+          <!-- v1.99.16: export PDF templates Prime I (dark) / Prime II (clean) -->
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-prime1-rec="${r.id}" title="Exportar PDF — Prime I (dark premium)" style="flex:1; background:#0a0a0a; color:#f0c040; border:1px solid #B8860B; font-size:12px;">✦ Prime I</button>
+            <button data-prime2-rec="${r.id}" title="Exportar PDF — Prime II (clean editorial)" style="flex:1; background:#fafaf8; color:#0B6E4F; border:1px solid #0B6E4F; font-size:12px;">✦ Prime II</button>
+          </div>
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
             <button data-rec-wapp="${r.id}" title="Enviar/Reenviar WhatsApp" style="flex:1; background:#25d36622; color:#25d366; border-color:#25d36655;">📱 WhatsApp</button>
             <button data-rec-tg="${r.id}" title="Enviar pro Telegram do CEO" style="flex:1; background:#0088cc22; color:#0088cc; border-color:#0088cc55;">✈️ Telegram</button>
@@ -14118,6 +14135,13 @@ function renderRecibos() {
   });
   document.querySelectorAll('[data-rec-pdf]').forEach(b => b.onclick = () => {
     window.open('/api/recibos/' + b.dataset.recPdf + '/pdf', '_blank');
+  });
+  // v1.99.16: export nos templates Prime I (dark) e Prime II (clean)
+  document.querySelectorAll('[data-prime1-rec]').forEach(b => b.onclick = () => {
+    window.open('/api/pdf-prime/recibo/' + b.dataset.prime1Rec + '?template=prime1', '_blank');
+  });
+  document.querySelectorAll('[data-prime2-rec]').forEach(b => b.onclick = () => {
+    window.open('/api/pdf-prime/recibo/' + b.dataset.prime2Rec + '?template=prime2', '_blank');
   });
   // v1.99.3: assinar digitalmente (PAdES ICP-Brasil)
   document.querySelectorAll('[data-rec-sig]').forEach(b => b.onclick = async () => {
