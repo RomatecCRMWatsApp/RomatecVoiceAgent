@@ -34,7 +34,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 // GET /api/diligencias/:id
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    const d = await buscarDiligencia(req.params.id);
+    const d = await buscarDiligencia(String(req.params.id));
     if (!d) { res.status(404).json({ error: 'diligência não encontrada' }); return; }
     res.json(d);
   } catch (err) { fail(res, err); }
@@ -51,7 +51,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 // PUT /api/diligencias/:id
 router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    const d = await atualizarDiligencia(req.params.id, req.body);
+    const d = await atualizarDiligencia(String(req.params.id), req.body);
     res.json({ success: true, diligencia: d });
   } catch (err) { fail(res, err); }
 });
@@ -59,7 +59,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 // DELETE /api/diligencias/:id  → soft (status = cancelado)
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    const d = await cancelarDiligencia(req.params.id);
+    const d = await cancelarDiligencia(String(req.params.id));
     res.json({ success: true, diligencia: d });
   } catch (err) { fail(res, err); }
 });
@@ -67,7 +67,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
 // POST /api/diligencias/:id/reenviar
 router.post('/:id/reenviar', requireAuth, async (req: Request, res: Response) => {
   try {
-    const r = await reenviarConfirmacao(req.params.id);
+    const r = await reenviarConfirmacao(String(req.params.id));
     res.json({ success: r.ok, ...(r.aviso ? { aviso: r.aviso } : {}) });
   } catch (err) { fail(res, err); }
 });
