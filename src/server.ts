@@ -71,6 +71,7 @@ import memoriaisHidraulicoRouter from './routes/memoriais'; // v3.49.2 Memorial 
 import canvasGraficoRouter from './routes/canvasGrafico';
 import relatorioFotograficoRouter from './routes/relatorioFotografico';
 import pdfPrimeRouter from './routes/pdfPrime'; // v1.99.16 — export PDF templates Prime I/II
+import diligenciasRouter from './routes/diligencias'; // v3.54.0 — Diligências de Campo
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -153,6 +154,7 @@ app.use('/api/memoriais', memoriaisHidraulicoRouter); // v3.49.2 Memorial Hidrau
 app.use('/api/canvas', canvasGraficoRouter); // v3.51.0 VTA Canvas
 app.use('/api/relatorio-fotografico', relatorioFotograficoRouter); // v3.51.0 VTA Relatorio Fotografico
 app.use('/api/pdf-prime', pdfPrimeRouter); // v1.99.16 — export PDF templates Prime I/II (proposta/recibo)
+app.use('/api/diligencias', diligenciasRouter); // v3.54.0 — Diligências de Campo
 (async () => {
   try { const m = await import('./database/migrations-canvas-grafico'); await m.runCanvasGraficoMigrations(); }
   catch (err) { console.error('[canvas-grafico-migrations] FALHA fatal:', err); }
@@ -586,6 +588,21 @@ function handleWhatsAppWebhook(req: Request, res: Response) {
                        : msg.type === 'audio' ? '[áudio]'
                        : `[PDF: ${msg.document.filename}]`;
         void logInbound(msg.from, userText, msg.id).catch(() => {});
+
+        // v3.54.0 — resposta de DILIGÊNCIA (SIM/REMARCAR/NÃO). Vem ANTES dos
+        // demais roteamentos; se reconhecida, atualiza status e silencia ZAYRA.
+        try {
+          if (msg.type === 'text') {
+            const dilMod = await import('./integrations/diligencias');
+            const dil = await dilMod.processarRespostaDiligencia(msg.from, msg.text.body);
+            if (dil.handled) {
+              console.log(`[diligencias] resposta phone=${msg.from} dil=${dil.diligencia_id} -> ${dil.acao}. ZAYRA silenciada.`);
+              continue;
+            }
+          }
+        } catch (err) {
+          console.warn('[diligencias] routing falhou:', (err as Error).message);
+        }
 
         // v3.12.0 — roteamento de resposta de cliente cobrado por parcela vencida.
         // Se o phone bate com cliente de obra com parcela em status_cobranca msg_enviada/vencido,
@@ -4893,6 +4910,16 @@ app.listen(PORT, () => {
     }
   })();
 
+  // v3.54.0: migrations do módulo Diligências de Campo — independente.
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-diligencias');
+      await m.runDiligenciasMigrations();
+    } catch (err) {
+      console.error('[diligencias-migrations] FALHA:', err);
+    }
+  })();
+
   // v1.99.25: migrations do modulo Laudo de Demarcacao — independente.
   void (async () => {
     try {
@@ -5189,6 +5216,8 @@ app.listen(PORT, () => {
     .then(m => m.iniciarLembretesCron()) // v1.72.0: lembretes universais + auto-expirar
     .then(() => import('./services/cobrancaParcelas'))
     .then(m => m.iniciarTickerCobrancaParcelas()) // v3.12.0: cobranca automatica de parcelas (6h cron)
+    .then(() => import('./jobs/lembretesDiligencias'))
+    .then(m => m.iniciarJobLembretesDiligencias()) // v3.54.0: lembrete D-1 das diligências (08:00 BRT)
     .catch(err => console.warn('[Memory] Init failed (continuing without DB):', err));
 
   // v1.39.1: sync contatos CRM → memória ZAYRA (1x ao boot + 1x/dia 04:00 BRT)

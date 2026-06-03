@@ -1046,6 +1046,7 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="loteamentos">🏘️ Loteamentos</button>
     <button class="tab" data-tab="galeria">📷 Galeria</button>
     <button class="tab" data-tab="proposta">Proposta</button>
+    <button class="tab" data-tab="diligencias">📅 Diligências</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
     <button class="tab" data-tab="memoriais">📐 Memoriais & Quantitativos</button>
     <button class="tab" data-tab="config">⚙️ Configurações</button>
@@ -1081,6 +1082,7 @@ window.forcarUpdateApp = forcarUpdate;
   <div id="view-folha" class="view"></div>
   <div id="view-vto" class="view"></div>
   <div id="view-proposta" class="view"></div>
+  <div id="view-diligencias" class="view"></div>
   <div id="view-recibos" class="view"></div>
   <div id="view-notas" class="view"></div>
   <div id="view-laudos" class="view"></div>
@@ -1647,6 +1649,7 @@ async function render() {
       },
       calculos: async () => { renderCalculos(); },
       recibos: async () => { await Promise.all([loadObras(), loadRecibos()]); renderRecibos(); },
+      diligencias: async () => { if (window.DiligenciasUI) await window.DiligenciasUI.render(); },
       notas:   async () => { await Promise.all([loadNotas(), loadFiscalConfig()]); renderNotas(); },
       laudos:  async () => { await loadLaudos(); renderLaudos(); },
       loteamentos: async () => { await loadLoteamentos(); renderLoteamentos(); },
@@ -24601,5 +24604,6 @@ async function renderCfgAuditoria() {
 <script src="/js/memoriais-eletrico-wizard.js"></script>
 <script src="/js/memoriais-sanitario-wizard.js"></script>
 <script src="/js/memoriais-estrutural-wizard.js"></script>
-<script src="/js/memoriais-arquitetonico-wizard.js"></script></body>
+<script src="/js/memoriais-arquitetonico-wizard.js"></script>
+<script src="/js/diligencias.js"></script></body>
 </html>
