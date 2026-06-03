@@ -9,6 +9,10 @@ import {
 } from '../pdf/mappers';
 import type { InputAvaliacaoPTAM } from '../services/pricing/types';
 
+// toLocaleString pt-BR usa espaço NÃO-quebrável (U+00A0/U+202F) entre "R$" e o
+// número. Normalizamos para espaço comum antes de comparar com literais.
+const norm = (s: string) => s.replace(/[\u00a0\u202f]/g, ' ');
+
 const inputPTAM: InputAvaliacaoPTAM = {
   tipo_imovel: 'rural',
   area_terreno: 726,
@@ -35,7 +39,6 @@ describe('PTAM — engine de parcelas', () => {
     const { custos } = await calcularAvaliacaoPTAM(inputPTAM);
     const cps = custos.condicoes_pagamento ?? [];
     const soma = cps.reduce((s, cp) => s + Number(cp.valor), 0);
-    // secao_5_total = taxas + honorarios; as 2 parcelas são 50/50 do total.
     expect(soma).toBeCloseTo(custos.secao_5_total, 2);
   });
 });
@@ -73,8 +76,8 @@ describe('Mapper — guard de defesa das parcelas', () => {
     );
     expect(dados.parcelas).toHaveLength(2);
     for (const p of dados.parcelas) {
-      expect(p.descricao).not.toContain('R$ 0,00');
-      expect(p.descricao).toContain('R$ 5.000,00'); // 10000 / 2
+      expect(norm(p.descricao)).not.toContain('R$ 0,00');
+      expect(norm(p.descricao)).toContain('R$ 5.000,00'); // 10000 / 2
     }
   });
 
@@ -85,8 +88,8 @@ describe('Mapper — guard de defesa das parcelas', () => {
         { rotulo: 'P2 – 60%', descricao: 'na entrega', valor: 0 },
       ]),
     );
-    expect(dados.parcelas[0].descricao).toContain('R$ 4.000,00'); // 40%
-    expect(dados.parcelas[1].descricao).toContain('R$ 6.000,00'); // 60%
+    expect(norm(dados.parcelas[0].descricao)).toContain('R$ 4.000,00'); // 40%
+    expect(norm(dados.parcelas[1].descricao)).toContain('R$ 6.000,00'); // 60%
   });
 
   it('não altera parcelas quando os valores já são válidos', () => {
@@ -96,8 +99,8 @@ describe('Mapper — guard de defesa das parcelas', () => {
         { rotulo: '2a parcela', descricao: 'na entrega', valor: 7000 },
       ]),
     );
-    expect(dados.parcelas[0].descricao).toContain('R$ 3.000,00');
-    expect(dados.parcelas[1].descricao).toContain('R$ 7.000,00');
+    expect(norm(dados.parcelas[0].descricao)).toContain('R$ 3.000,00');
+    expect(norm(dados.parcelas[1].descricao)).toContain('R$ 7.000,00');
   });
 
   it('valor undefined não vira TypeError nem "R$ 0,00" silencioso', () => {
@@ -107,6 +110,6 @@ describe('Mapper — guard de defesa das parcelas', () => {
         { rotulo: '2a parcela – 50%', descricao: 'na entrega', valor: undefined as unknown as number },
       ]),
     );
-    expect(dados.parcelas[0].descricao).toContain('R$ 5.000,00');
+    expect(norm(dados.parcelas[0].descricao)).toContain('R$ 5.000,00');
   });
 });
