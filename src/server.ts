@@ -1192,6 +1192,10 @@ app.get('/api/propostas/:id/pdf', async (req: Request, res: Response) => {
     res.status(404).json({ error: (err as Error).message });
   }
 });
+// v1.99.15: transição de status rascunho/enviada → assinada (mão de obra)
+app.post('/api/propostas/:id/assinar', apiHandle(async (args) => {
+  return propostas.assinarProposta(Number((args as { id: string }).id));
+}));
 app.post('/api/propostas/:id/enviar-whatsapp', apiHandle(args => propostas.enviarPropostaWhatsApp(args as Parameters<typeof propostas.enviarPropostaWhatsApp>[0])));
 // v1.66.19: envio Telegram + anexos pra Mao de Obra (paridade com Consultoria)
 app.post('/api/propostas/:id/enviar-telegram',

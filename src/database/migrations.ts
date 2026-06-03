@@ -1293,6 +1293,19 @@ export async function runMigrations(): Promise<void> {
     }
   }
 
+  // v1.99.15 — adiciona 'assinada' ao ENUM status de propostas (transição de
+  // assinatura). MODIFY COLUMN é idempotente: re-aplicar o mesmo ENUM é no-op.
+  // A coluna `assinado_em` já é criada por migrations-signing.ts (v1.99.11).
+  try {
+    await pool.execute(
+      `ALTER TABLE propostas MODIFY COLUMN status
+        ENUM('rascunho','enviada','aceita','recusada','expirada','assinada')
+        NOT NULL DEFAULT 'rascunho'`,
+    );
+  } catch (err) {
+    console.warn('[migrations] modify propostas.status enum falhou (não-bloqueante):', (err as Error).message.slice(0, 100));
+  }
+
   // v1.65.13 — PR B.2: lotes de envio quinzenal (estado de cada disparo +
   // trilha de auditoria de toda mensagem trocada). PR B.3 adicionará handler
   // de respostas (1/2/PIX) que vai mutar status pra confirmado_aguardando_pix

@@ -184,11 +184,33 @@ export function propostaConsultoriaToPropostaDados(
     servicos.push(...custos.secao_2_taxas.map(itemCustoToServico));
   }
 
+  // Total do documento (várias fontes possíveis, na ordem de confiança).
+  const valorTotal = Number(
+    p.valor_total ?? custos?.secao_5_total ?? custos?.honorarios_romatec?.total ?? 0,
+  );
+
   // Parcelas a partir das condicoes de pagamento.
-  const parcelas = (custos?.condicoes_pagamento ?? []).map((c) => ({
-    label: c.rotulo,
-    descricao: `${c.descricao} — ${c.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
-  }));
+  // v1.99.15 GUARD (mesmo espírito da v3.23.8/v3.24.16 do POST/PUT): se alguma
+  // parcela vier com valor 0/inválido e houver total > 0, recomputa o valor —
+  // por percentual extraído do rótulo/descrição quando possível, senão em
+  // partes iguais. Também protege o toLocaleString contra valor undefined
+  // (que antes virava "R$ 0,00" silenciosamente ou lançava TypeError).
+  const fmtMoeda = (v: number) =>
+    (Number.isFinite(v) ? v : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const cps = custos?.condicoes_pagamento ?? [];
+  const algumZero = cps.some((cp) => !Number.isFinite(Number(cp.valor)) || Number(cp.valor) === 0);
+  const precisaRecompor = algumZero && valorTotal > 0 && cps.length > 0;
+  const parcelas = cps.map((c) => {
+    let valor = Number(c.valor);
+    if (precisaRecompor && (!Number.isFinite(valor) || valor === 0)) {
+      const m = /(\d{1,3})\s*%/.exec(`${c.rotulo} ${c.descricao}`);
+      valor = m ? (valorTotal * Number(m[1])) / 100 : valorTotal / cps.length;
+    }
+    return {
+      label: c.rotulo,
+      descricao: `${c.descricao} — ${fmtMoeda(valor)}`,
+    };
+  });
 
   // Etapas (metodologia) derivadas do escopo (secao_1_projetos).
   const etapas = (custos?.secao_1_projetos ?? []).map((titulo, idx) => ({
@@ -196,8 +218,6 @@ export function propostaConsultoriaToPropostaDados(
     titulo: titulo.length > 60 ? `${titulo.slice(0, 57)}...` : titulo,
     texto: titulo,
   }));
-
-  const valorTotal = Number(p.valor_total ?? custos?.secao_5_total ?? 0);
 
   const enderecoCliente =
     str(p.cliente.endereco) ||

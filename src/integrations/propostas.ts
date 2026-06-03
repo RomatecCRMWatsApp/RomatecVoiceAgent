@@ -39,7 +39,7 @@ type PropostaRow = RowDataPacket & {
   data_proposta: Date; validade_dias: number;
   valor_total: string;
   observacoes: string | null;
-  status: 'rascunho' | 'enviada' | 'aceita' | 'recusada' | 'expirada';
+  status: 'rascunho' | 'enviada' | 'aceita' | 'recusada' | 'expirada' | 'assinada';
   pdf_path: string | null;
   enviada_whatsapp: number; enviada_em: Date | null;
   criada_por: string | null;
@@ -457,7 +457,7 @@ export async function atualizarProposta(input: {
   data_proposta?: string;
   validade_dias?: number;
   observacoes?: string;
-  status?: 'rascunho' | 'enviada' | 'aceita' | 'recusada' | 'expirada';
+  status?: 'rascunho' | 'enviada' | 'aceita' | 'recusada' | 'expirada' | 'assinada';
   gestor_cargo?: string;
   gestor_nome?: string;
   gestor_telefone?: string;
@@ -500,6 +500,42 @@ export async function apagarProposta(input: { id: string }): Promise<MutationRes
     [id]
   );
   return { ok: true, affected: r.affectedRows, message: 'Proposta removida.' };
+}
+
+// v1.99.15: rótulos humanizados do status da proposta (UI/relatórios).
+// 'assinada' adicionado junto com a transição de assinatura abaixo.
+export const PROPOSTA_STATUS_LABEL: Record<string, string> = {
+  rascunho: 'Rascunho',
+  enviada: 'Enviada',
+  aceita: 'Aceita',
+  recusada: 'Recusada',
+  expirada: 'Expirada',
+  assinada: 'Assinada',
+};
+
+/**
+ * v1.99.15 — Marca a proposta como ASSINADA (transição de status).
+ * Reutiliza a coluna `assinado_em` (já criada pela migration de assinatura
+ * digital ICP-Brasil em migrations-signing.ts) — não há coluna `assinada_em`.
+ *
+ * Só transita a partir de 'rascunho' ou 'enviada' (idempotência defensiva:
+ * proposta já finalizada/assinada não é re-marcada).
+ *
+ * @throws Error('Proposta não encontrada ou já finalizada') quando affected = 0.
+ */
+export async function assinarProposta(id: number): Promise<{ ok: boolean; status: string }> {
+  const idNum = Number(id);
+  if (!idNum) throw new Error('id inválido');
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE propostas
+        SET status = 'assinada', assinado_em = NOW()
+      WHERE id = ? AND deleted_at IS NULL AND status IN ('rascunho','enviada')`,
+    [idNum],
+  );
+  if (r.affectedRows === 0) {
+    throw new Error('Proposta não encontrada ou já finalizada');
+  }
+  return { ok: true, status: 'assinada' };
 }
 
 // ── Itens ────────────────────────────────────────────────────────────────────
