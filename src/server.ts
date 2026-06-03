@@ -70,6 +70,7 @@ import explicativoRouter from './routes/explicativo';
 import memoriaisHidraulicoRouter from './routes/memoriais'; // v3.49.2 Memorial Hidraulico
 import canvasGraficoRouter from './routes/canvasGrafico';
 import relatorioFotograficoRouter from './routes/relatorioFotografico';
+import pdfPrimeRouter from './routes/pdfPrime'; // v1.99.16 — export PDF templates Prime I/II
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -151,6 +152,7 @@ app.use('/api/explicativo', explicativoRouter); // v3.23.0 — texto explicativo
 app.use('/api/memoriais', memoriaisHidraulicoRouter); // v3.49.2 Memorial Hidraulico NBR 5626
 app.use('/api/canvas', canvasGraficoRouter); // v3.51.0 VTA Canvas
 app.use('/api/relatorio-fotografico', relatorioFotograficoRouter); // v3.51.0 VTA Relatorio Fotografico
+app.use('/api/pdf-prime', pdfPrimeRouter); // v1.99.16 — export PDF templates Prime I/II (proposta/recibo)
 (async () => {
   try { const m = await import('./database/migrations-canvas-grafico'); await m.runCanvasGraficoMigrations(); }
   catch (err) { console.error('[canvas-grafico-migrations] FALHA fatal:', err); }

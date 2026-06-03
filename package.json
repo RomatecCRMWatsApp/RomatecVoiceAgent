@@ -51,6 +51,7 @@
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.18.0",
     "proj4": "^2.20.8",
+    "puppeteer": "^23.11.1",
     "qrcode": "^1.5.4",
     "shapefile": "^0.6.6",
     "voyageai": "^0.2.1",

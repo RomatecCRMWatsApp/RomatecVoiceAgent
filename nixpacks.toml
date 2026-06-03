@@ -8,5 +8,14 @@ aptPkgs = [
   "libpango1.0-dev",
   "libjpeg-dev",
   "libgif-dev",
-  "librsvg2-dev"
+  "librsvg2-dev",
+  # v1.99.16 — Chromium do sistema p/ os templates Prime (puppeteer). Em base
+  # Debian usamos o chromium do apt e pulamos o download do bundle do puppeteer.
+  "chromium",
+  "fonts-noto"
 ]
+
+# v1.99.16 — usa o Chromium do sistema; nao baixa o bundle do puppeteer.
+[variables]
+PUPPETEER_SKIP_DOWNLOAD = "true"
+PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
