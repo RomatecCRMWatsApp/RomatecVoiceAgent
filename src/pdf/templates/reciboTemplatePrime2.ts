@@ -39,7 +39,11 @@ ${FONTS_PRIME2}
 @page { size: A4; margin: 0; }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#fafaf8; color:#2a2620; font-family:'DM Sans',sans-serif; font-size:11pt; line-height:1.55; }
-.page { width:210mm; min-height:297mm; position:relative; overflow:hidden; }
+.page { width:210mm; min-height:297mm; position:relative; }
+/* v1.99.16: blocos atomicos nao quebram no meio entre paginas (recibo longo flui em vez de cortar) */
+.valor-card, .dado, .servico-box, .validacao-bloco, .assina, table.itens tr {
+  break-inside:avoid; page-break-inside:avoid;
+}
 .label { font-family:'Space Mono',monospace; letter-spacing:2px; text-transform:uppercase; font-size:.68rem; color:#8a857a; }
 .bloco { padding:36px 60px; }
 

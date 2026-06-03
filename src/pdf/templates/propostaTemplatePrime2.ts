@@ -80,8 +80,17 @@ ${FONTS_PRIME2}
 @page { size: A4; margin: 0; }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#fafaf8; color:#2a2620; font-family:'DM Sans',sans-serif; font-size:11pt; line-height:1.55; }
-.page { width:210mm; min-height:297mm; position:relative; overflow:hidden; page-break-after:always; }
-.page:last-child { page-break-after:auto; }
+/* v1.99.16: paginacao FLUIDA — so a capa e' folha fixa; o resto flui e enche
+   cada A4. Blocos atomicos nunca quebram no meio (corrige card cortado) e nao
+   sobram folhas em branco. */
+.page { width:210mm; position:relative; }
+.capa { page-break-after:always; }
+.serv-card, .etapa, .invest-total-card, .parcela, .prazo-box, .drl-warning,
+.assina, .card-imovel, .cli-strip, table.invest tr {
+  break-inside:avoid; page-break-inside:avoid;
+}
+.invest-total-card, .parcelas, .assinaturas, .faixa-dourada { break-before:avoid; }
+h2.secao, .secao-n { break-after:avoid; page-break-after:avoid; }
 .bloco { padding:46px 60px; position:relative; }
 .secao-n { font-family:'DM Serif Display',serif; font-size:5rem; color:#e0ddd5; line-height:1; position:absolute; top:28px; right:48px; }
 h2.secao { font-family:'DM Serif Display',serif; font-size:2rem; color:#2a2620; }
