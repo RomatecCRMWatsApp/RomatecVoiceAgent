@@ -1,6 +1,5 @@
 // v3.54.0 — Rotas HTTP do módulo Diligências de Campo.
 import { Router, type Request, type Response } from 'express';
-import { requireAuth } from '../middleware/auth';
 import {
   listarDiligencias,
   buscarDiligencia,
@@ -20,7 +19,7 @@ function fail(res: Response, err: unknown) {
 }
 
 // GET /api/diligencias?status=&proposta_id=&page=&limit=
-router.get('/', requireAuth, async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const out = await listarDiligencias({
       status: req.query.status as string | undefined,
@@ -34,7 +33,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
 // GET /api/diligencias/resolver-proposta/:ref → {id, numero, cliente_nome}
 // Aceita id interno OU número da proposta (preview do cliente no formulário).
-router.get('/resolver-proposta/:ref', requireAuth, async (req: Request, res: Response) => {
+router.get('/resolver-proposta/:ref', async (req: Request, res: Response) => {
   try {
     const info = await resolverPropostaInfo(String(req.params.ref));
     if (!info) { res.status(404).json({ error: 'proposta não encontrada' }); return; }
@@ -43,7 +42,7 @@ router.get('/resolver-proposta/:ref', requireAuth, async (req: Request, res: Res
 });
 
 // GET /api/diligencias/:id
-router.get('/:id', requireAuth, async (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const d = await buscarDiligencia(String(req.params.id));
     if (!d) { res.status(404).json({ error: 'diligência não encontrada' }); return; }
@@ -52,7 +51,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 });
 
 // POST /api/diligencias  → cria + dispara WhatsApp
-router.post('/', requireAuth, async (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   try {
     const r = await criarDiligencia(req.body);
     res.status(201).json({ success: true, diligencia: r.diligencia, ...(r.aviso ? { aviso: r.aviso } : {}) });
@@ -60,7 +59,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 });
 
 // PUT /api/diligencias/:id
-router.put('/:id', requireAuth, async (req: Request, res: Response) => {
+router.put('/:id', async (req: Request, res: Response) => {
   try {
     const d = await atualizarDiligencia(String(req.params.id), req.body);
     res.json({ success: true, diligencia: d });
@@ -68,7 +67,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 });
 
 // DELETE /api/diligencias/:id  → soft (status = cancelado)
-router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
+router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const d = await cancelarDiligencia(String(req.params.id));
     res.json({ success: true, diligencia: d });
@@ -76,7 +75,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
 });
 
 // POST /api/diligencias/:id/reenviar
-router.post('/:id/reenviar', requireAuth, async (req: Request, res: Response) => {
+router.post('/:id/reenviar', async (req: Request, res: Response) => {
   try {
     const r = await reenviarConfirmacao(String(req.params.id));
     res.json({ success: r.ok, ...(r.aviso ? { aviso: r.aviso } : {}) });
