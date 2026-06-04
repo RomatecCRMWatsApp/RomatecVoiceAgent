@@ -92,12 +92,30 @@ export async function buscarDiligencia(id: number | string): Promise<DiligenciaC
   return rows.length ? mapRow(rows[0]) : null;
 }
 
+/** Resolve id interno OU número da proposta ("PROP-...", "2026-00361") → id. */
+export async function resolverPropostaId(ref: number | string): Promise<number> {
+  const s = String(ref ?? '').trim();
+  if (!s) throw new DiligenciaError(400, 'proposta_id obrigatório');
+  if (/^\d+$/.test(s)) {
+    const [byId] = await pool.query<RowDataPacket[]>(
+      `SELECT id FROM propostas WHERE id = ? AND deleted_at IS NULL LIMIT 1`, [Number(s)],
+    );
+    if (byId.length) return Number(byId[0].id);
+  }
+  const [byNum] = await pool.query<RowDataPacket[]>(
+    `SELECT id FROM propostas WHERE numero = ? AND deleted_at IS NULL LIMIT 1`, [s],
+  );
+  if (byNum.length) return Number(byNum[0].id);
+  throw new DiligenciaError(404, 'proposta não encontrada');
+}
+
 // ── Criação (+ disparo de confirmação) ──────────────────────────────────────
 export async function criarDiligencia(
   dto: CreateDiligenciaDto,
 ): Promise<{ diligencia: DiligenciaComProposta; aviso?: string }> {
-  const propostaId = Number(dto.proposta_id);
-  if (!propostaId) throw new DiligenciaError(400, 'proposta_id obrigatório');
+  if (dto.proposta_id == null || String(dto.proposta_id).trim() === '') {
+    throw new DiligenciaError(400, 'proposta_id obrigatório');
+  }
   if (!DILIGENCIA_FINALIDADES.includes(dto.finalidade)) {
     throw new DiligenciaError(400, `finalidade inválida: ${dto.finalidade}`);
   }
@@ -108,11 +126,8 @@ export async function criarDiligencia(
   if (isNaN(data.getTime())) throw new DiligenciaError(422, 'data_sugerida inválida');
   if (data.getTime() < Date.now()) throw new DiligenciaError(422, 'data_sugerida não pode ser no passado');
 
-  // Proposta precisa existir
-  const [pr] = await pool.query<RowDataPacket[]>(
-    `SELECT id FROM propostas WHERE id = ? AND deleted_at IS NULL LIMIT 1`, [propostaId],
-  );
-  if (!pr.length) throw new DiligenciaError(404, 'proposta não encontrada');
+  // Resolve id interno OU número da proposta → id; 404 se não existir.
+  const propostaId = await resolverPropostaId(dto.proposta_id);
 
   const telefone = normalizarTelefone(dto.telefone);
   const [ins] = await pool.execute<ResultSetHeader>(

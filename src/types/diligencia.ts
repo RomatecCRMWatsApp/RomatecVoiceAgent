@@ -38,7 +38,8 @@ export interface DiligenciaComProposta extends DiligenciaRow {
 }
 
 export interface CreateDiligenciaDto {
-  proposta_id: number;
+  /** id interno (16, 34...) OU o número da proposta ("PROP-2026-0034", "2026-00361"). */
+  proposta_id: number | string;
   finalidade: DiligenciaFinalidade;
   telefone: string;
   email?: string;

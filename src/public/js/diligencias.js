@@ -112,8 +112,8 @@
     wrap.innerHTML = `
       <div style="background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:24px;width:min(440px,92vw);">
         <h3 style="margin:0 0 16px;">➕ Nova Diligência</h3>
-        <label style="display:block;font-size:13px;margin-bottom:8px;">Nº da Proposta *
-          <input id="dnProp" type="number" required style="width:100%;padding:8px;margin-top:4px;"></label>
+        <label style="display:block;font-size:13px;margin-bottom:8px;">Nº ou ID da Proposta *
+          <input id="dnProp" type="text" placeholder="Ex.: 34 ou PROP-2026-0034" required style="width:100%;padding:8px;margin-top:4px;"></label>
         <div id="dnCliente" style="font-size:12px;color:#0B6E4F;margin-bottom:8px;min-height:16px;"></div>
         <label style="display:block;font-size:13px;margin-bottom:8px;">Finalidade *
           <select id="dnFin" style="width:100%;padding:8px;margin-top:4px;">${finOpts}</select></label>
@@ -145,7 +145,7 @@
     });
     wrap.querySelector('#dnEnviar').onclick = async () => {
       const erro = wrap.querySelector('#dnErro'); erro.textContent = '';
-      const proposta_id = Number(wrap.querySelector('#dnProp').value);
+      const proposta_id = wrap.querySelector('#dnProp').value.trim();
       const finalidade = wrap.querySelector('#dnFin').value;
       const telefone = wrap.querySelector('#dnTel').value;
       const email = wrap.querySelector('#dnEmail').value.trim();
