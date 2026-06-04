@@ -18523,6 +18523,16 @@ function renderLaudos() {
   return renderLaudosLista(v);
 }
 
+// v3.55.0: exporta o PDF do laudo no template escolhido.
+// padrao  → rota PDFKit existente (retrocompatível, intocada)
+// prime1/2 → módulo paralelo puppeteer /api/pdf-prime/laudo/:id?template=
+function exportarLaudoPdf(laudoId, template) {
+  const url = template === 'padrao'
+    ? '/api/laudos-demarcacao/' + laudoId + '/pdf'
+    : '/api/pdf-prime/laudo/' + laudoId + '?template=' + encodeURIComponent(template);
+  window.open(url, '_blank');
+}
+
 function renderLaudosLista(v) {
   if (!state.laudosFiltro) state.laudosFiltro = { status:'', q:'' };
   const f = state.laudosFiltro;
@@ -18585,7 +18595,14 @@ function renderLaudosLista(v) {
         <div style="display:flex; flex-direction:column; gap:6px; min-width:240px;">
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
             <button data-laudo-edit="${l.id}" style="flex:1; background:var(--gold); color:#06120a; border-color:var(--gold);">✏️ Abrir</button>
-            <button data-laudo-pdf="${l.id}" title="Baixar PDF" style="flex:1;">📄 PDF</button>
+            <details class="dd-pdf" style="flex:1; position:relative;">
+              <summary title="Exportar PDF" style="list-style:none; cursor:pointer; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg-elev); color:var(--text); font-size:13px; text-align:center;">📄 PDF ▾</summary>
+              <div style="position:absolute; top:100%; left:0; right:0; margin-top:2px; background:#0f1720; border:1px solid var(--border); border-radius:6px; z-index:30; overflow:hidden; box-shadow:0 6px 18px rgba(0,0,0,.45);">
+                <button data-laudo-pdfx="${l.id}" data-tpl="padrao" style="display:block; width:100%; text-align:left; background:transparent; border:none; color:var(--text); padding:8px 10px; font-size:13px; cursor:pointer;">📋 Padrão</button>
+                <button data-laudo-pdfx="${l.id}" data-tpl="prime1" style="display:block; width:100%; text-align:left; background:transparent; border:none; color:#d4af37; padding:8px 10px; font-size:13px; cursor:pointer;">✨ Prime I</button>
+                <button data-laudo-pdfx="${l.id}" data-tpl="prime2" style="display:block; width:100%; text-align:left; background:transparent; border:none; color:#00cc6a; padding:8px 10px; font-size:13px; cursor:pointer;">💎 Prime II</button>
+              </div>
+            </details>
             <button data-laudo-clonar="${l.id}" title="Criar uma cópia editável deste laudo (zera pontos, fotos e número do lote)" style="flex:1; background:transparent; color:var(--gold); border:1px dashed var(--gold);">📋 Clonar</button>
           </div>
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
@@ -18689,8 +18706,11 @@ function renderLaudosLista(v) {
       renderLaudos();
     } catch (err) { alert('Erro: '+err.message); }
   });
-  v.querySelectorAll('[data-laudo-pdf]').forEach(b => b.onclick = () => {
-    window.open('/api/laudos-demarcacao/' + b.dataset.laudoPdf + '/pdf', '_blank');
+  // v3.55.0: dropdown de export PDF — Padrão (rota PDFKit atual) ou Prime I/II
+  // (rota paralela /api/pdf-prime/laudo, puppeteer). Padrão = retrocompatível.
+  v.querySelectorAll('[data-laudo-pdfx]').forEach(b => b.onclick = () => {
+    exportarLaudoPdf(b.dataset.laudoPdfx, b.dataset.tpl);
+    const dd = b.closest('details'); if (dd) dd.open = false;
   });
   // v3.52.0: abre Canvas/Croqui e Relatório Fotográfico VINCULADOS ao laudo
   v.querySelectorAll('[data-laudo-croqui]').forEach(b => b.onclick = () => {

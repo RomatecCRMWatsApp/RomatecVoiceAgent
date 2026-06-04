@@ -1,4 +1,4 @@
-// v1.99.16 — Tipos e enum dos templates de exportacao PDF (Proposta / Recibo).
+// v1.99.16 — Tipos e enum dos templates de exportacao PDF (Proposta / Recibo / Laudo).
 //
 // Tres opcoes de layout, selecionaveis via query param `?template=`:
 //   - PADRAO  : pipeline pdfkit atual (intocado) — fallback default
@@ -142,4 +142,69 @@ export interface ReciboDados {
   assinaturaDigital?: string;
   tecnico: ReciboTecnico;
   observacoes?: string;
+}
+
+// ── Laudos de Demarcacao (Prime I / Prime II) ───────────────────────────────
+
+export interface LaudoVertice {
+  ordem: number;
+  rotulo: string;
+  tipoMarco?: string;
+  utmE: string;
+  utmN: string;
+  lat?: string;
+  long?: string;
+}
+
+export interface LaudoLado {
+  lado: string;
+  azimute: string;
+  distancia: string;
+}
+
+export interface LaudoTecnico {
+  nome: string;
+  cargo: string;
+  credenciais: string[];
+  empresa: string;
+  municipio: string;
+}
+
+export interface LaudoDados {
+  numero: string;
+  dataEmissao: string;
+  tipoImovel: string; // 'RURAL' | 'URBANO'
+  finalidade: string;
+  contratante: {
+    nome: string;
+    cpfCnpj: string;
+    telefone?: string;
+    email?: string;
+  };
+  imovel: {
+    denominacao?: string;
+    matricula?: string;
+    municipio?: string;
+    uf?: string;
+    localizacao?: string;
+  };
+  vertices: LaudoVertice[];
+  lados: LaudoLado[];
+  area: {
+    m2: string;
+    ha?: string;
+    alqueires?: string;
+    perimetro?: string;
+  };
+  /** SVG inline do croqui (preferencial) */
+  croquiSvg?: string;
+  /** fallback: data-uri de imagem do croqui */
+  croquiImgBase64?: string;
+  art?: string;
+  trt?: string;
+  /** base64 puro da assinatura, se houver */
+  assinaturaDigitalBase64?: string;
+  hashValidacao: string;
+  urlVerificacao: string;
+  tecnico: LaudoTecnico;
 }

@@ -1,5 +1,5 @@
 // v1.99.16 — Fixtures de teste para os templates Prime (nao e' suite *.test.ts).
-import type { PropostaDados, ReciboDados } from '../types/templateTypes';
+import type { PropostaDados, ReciboDados, LaudoDados } from '../types/templateTypes';
 
 export const dadosMockProposta: PropostaDados = {
   numero: 'PROP-2025-TEST-001',
@@ -94,4 +94,76 @@ export const dadosMinimosRecibo: ReciboDados = {
   valorTotal: 0,
   valorTotalExtenso: 'zero reais',
   tecnico: { nome: 'Jose Romario', cargo: 'Tecnico', credenciais: [] },
+};
+
+export const dadosMockLaudo: LaudoDados = {
+  numero: 'LAUDO-2025-0042',
+  dataEmissao: '02 de junho de 2025',
+  tipoImovel: 'RURAL',
+  finalidade:
+    'Demarcação e materialização de vértices da poligonal do imóvel para fins de ' +
+    'regularização fundiária, conforme NBR 13133 e sistemática INCRA/NTGIR.',
+  contratante: {
+    nome: 'Cliente Teste Silva',
+    cpfCnpj: '000.000.000-00',
+    telefone: '99999-0000',
+    email: 'cliente@example.com',
+  },
+  imovel: {
+    denominacao: 'Fazenda Teste',
+    matricula: 'M-1234',
+    municipio: 'Acailandia',
+    uf: 'MA',
+    localizacao: 'Zona Rural · Acailandia · MA',
+  },
+  vertices: [
+    { ordem: 1, rotulo: 'P1', tipoMarco: 'Marco de concreto', utmE: '200.000,000', utmN: '9.500.000,000', lat: '04°30\'00"S', long: '47°30\'00"W' },
+    { ordem: 2, rotulo: 'P2', tipoMarco: 'Marco de concreto', utmE: '200.100,000', utmN: '9.500.000,000', lat: '04°30\'00"S', long: '47°29\'56"W' },
+    { ordem: 3, rotulo: 'P3', tipoMarco: 'Marco de concreto', utmE: '200.100,000', utmN: '9.500.100,000', lat: '04°29\'56"S', long: '47°29\'56"W' },
+  ],
+  lados: [
+    { lado: 'P1-P2', azimute: '90,0000°', distancia: '100,000 m' },
+    { lado: 'P2-P3', azimute: '0,0000°', distancia: '100,000 m' },
+    { lado: 'P3-P1', azimute: '225,0000°', distancia: '141,421 m' },
+  ],
+  area: {
+    m2: '10.000,00 m²',
+    ha: '1,0000 ha',
+    alqueires: '0,2066 alq. (norte/MA)',
+    perimetro: '341,421 m',
+  },
+  croquiSvg: '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="#0B6E4F"/></svg>',
+  art: 'ART-12345',
+  trt: 'TRT-67890',
+  hashValidacao: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+  urlVerificacao: 'https://romatec.example/v/laudo/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+  tecnico: {
+    nome: 'José Romário Pinto Bezerra',
+    cargo: 'Técnico em Agrimensura · Avaliador CNAI',
+    credenciais: ['CFT/MA 01209185369', 'CNAI 031161', 'CRECI/MA 4.705', 'INCRA: FQNS'],
+    empresa: 'Romatec Consultoria Total',
+    municipio: 'Açailândia/MA',
+  },
+};
+
+/** So o essencial — valida que o builder nao quebra sem croqui/art/trt. */
+export const dadosMinimosLaudo: LaudoDados = {
+  numero: 'LAUDO-MIN-001',
+  dataEmissao: '03 de junho de 2026',
+  tipoImovel: 'URBANO',
+  finalidade: 'Demarcação de lote urbano.',
+  contratante: { nome: 'Fulano', cpfCnpj: '—' },
+  imovel: {},
+  vertices: [],
+  lados: [],
+  area: { m2: '—' },
+  hashValidacao: 'deadbeef',
+  urlVerificacao: 'https://romatec.example/v/laudo/deadbeef',
+  tecnico: {
+    nome: 'José Romário',
+    cargo: 'Técnico',
+    credenciais: [],
+    empresa: 'Romatec',
+    municipio: 'Açailândia/MA',
+  },
 };

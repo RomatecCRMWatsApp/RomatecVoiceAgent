@@ -7,12 +7,19 @@
 
 import type { Recibo, StatusRecibo } from '../integrations/recibos';
 import type { CustosCalculados, ItemCusto } from '../services/pricing/types';
+import type { Laudo, PontoLaudo, LadoLaudo } from '../integrations/laudos';
+import type { Contratante } from '../integrations/contratantes';
+import type { Executante } from '../integrations/executantes';
 import {
   type PropostaDados,
   type ReciboDados,
   type PropostaServicoItem,
   type PropostaTecnico,
   type ReciboTecnico,
+  type LaudoDados,
+  type LaudoTecnico,
+  type LaudoVertice,
+  type LaudoLado,
 } from '../types/templateTypes';
 import { valorPorExtenso } from './sharedHtml';
 
@@ -33,6 +40,14 @@ export const TECNICO_ROMATEC_RECIBO: ReciboTecnico = {
   nome: TECNICO_ROMATEC_PROPOSTA.nome,
   cargo: TECNICO_ROMATEC_PROPOSTA.cargo,
   credenciais: TECNICO_ROMATEC_PROPOSTA.credenciais,
+};
+
+export const TECNICO_ROMATEC_LAUDO: LaudoTecnico = {
+  nome: 'José Romário Pinto Bezerra',
+  cargo: 'Técnico em Agrimensura · Avaliador CNAI',
+  credenciais: ['CFT/MA 01209185369', 'CNAI 031161', 'CRECI/MA 4.705', 'INCRA: FQNS'],
+  empresa: 'Romatec Consultoria Total',
+  municipio: 'Açailândia/MA',
 };
 
 const SUBTIPO_LABEL: Record<string, string> = {
@@ -256,5 +271,137 @@ export function propostaConsultoriaToPropostaDados(
       nome: str(p.gestor_nome) ?? tecnico.nome,
       cargo: str(p.gestor_cargo) ?? tecnico.cargo,
     },
+  };
+}
+
+// ── Mapper: Laudo (+ entidades) → LaudoDados ────────────────────────────────
+
+/** Texto padrao da finalidade quando o laudo nao tem campo proprio. */
+const FINALIDADE_PADRAO_LAUDO =
+  'Demarcação e materialização de vértices da poligonal do imóvel para fins de ' +
+  'regularização fundiária, conforme NBR 13133 e sistemática INCRA/NTGIR.';
+
+/** Formata um numero em pt-BR com `casas` decimais; null/invalido → '—'. */
+function fmtNum(v: number | null | undefined, casas: number): string {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  return Number(v).toLocaleString('pt-BR', {
+    minimumFractionDigits: casas,
+    maximumFractionDigits: casas,
+  });
+}
+
+/** Formata o azimute do lado (graus decimais) em pt-BR; aceita string crua. */
+function fmtAzimute(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  return `${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}°`;
+}
+
+/**
+ * Converte um Laudo + entidades relacionadas em LaudoDados para os templates Prime.
+ * @param laudo registro do laudo (integrations/laudos.buscarLaudo)
+ * @param contratante contratante associado (pode ser null → fallback '—')
+ * @param executante responsavel tecnico (pode ser null → fallback Romatec)
+ * @param pontos vertices do laudo
+ * @param lados lados calculados
+ * @param baseUrl base publica para a URL de verificacao (ex: getBaseUrl())
+ * @param croquiSvg SVG do croqui ja gerado (opcional)
+ */
+export function laudoToLaudoDados(
+  laudo: Laudo,
+  contratante: Contratante | null,
+  executante: Executante | null,
+  pontos: PontoLaudo[],
+  lados: LadoLaudo[],
+  baseUrl: string,
+  croquiSvg?: string,
+): LaudoDados {
+  const base = baseUrl.replace(/\/$/, '');
+  const isRural = laudo.tipo_imovel === 'RURAL';
+
+  // Vertices
+  const vertices: LaudoVertice[] = pontos.map((p) => ({
+    ordem: p.ordem,
+    rotulo: p.rotulo,
+    tipoMarco: p.descricao_marco ?? undefined,
+    utmE: p.utm_e != null ? fmtNum(p.utm_e, 3) : '—',
+    utmN: p.utm_n != null ? fmtNum(p.utm_n, 3) : '—',
+    lat: p.lat_gms ?? (p.lat_decimal != null ? fmtNum(p.lat_decimal, 6) : undefined),
+    long: p.long_gms ?? (p.long_decimal != null ? fmtNum(p.long_decimal, 6) : undefined),
+  }));
+
+  // Lados
+  const ladosDados: LaudoLado[] = lados.map((l) => {
+    const dist = l.medida_manual_m ?? l.distancia_m;
+    return {
+      lado: l.rotulo ?? `L${l.ordem}`,
+      azimute: fmtAzimute(l.azimute),
+      distancia: dist != null ? `${fmtNum(dist, 3)} m` : '—',
+    };
+  });
+
+  // Area + conversoes. Alqueire do norte/MA (Maranhao) = 4,84 ha.
+  const ALQUEIRE_NORTE_HA = 4.84;
+  const areaM2 = laudo.area_total_m2;
+  const haNum = areaM2 != null ? areaM2 / 10000 : null;
+  const area = {
+    m2: areaM2 != null ? `${fmtNum(areaM2, 2)} m²` : '—',
+    ha: isRural && haNum != null ? `${fmtNum(haNum, 4)} ha` : undefined,
+    alqueires:
+      isRural && haNum != null
+        ? `${fmtNum(haNum / ALQUEIRE_NORTE_HA, 4)} alq. (norte/MA)`
+        : undefined,
+    perimetro: laudo.perimetro_m != null ? `${fmtNum(laudo.perimetro_m, 3)} m` : undefined,
+  };
+
+  // Localizacao do imovel (logradouro/municipio compostos)
+  const localizacao =
+    [laudo.endereco_imovel, laudo.municipio, laudo.uf_imovel]
+      .map((s) => (s ? String(s).trim() : ''))
+      .filter(Boolean)
+      .join(' · ') || undefined;
+
+  // Tecnico: monta a partir do executante, com fallback Romatec quando faltar.
+  const credenciaisExec = [
+    executante?.registro_cft ? `CFT/MA ${executante.registro_cft}` : null,
+    executante?.registro_crea ? `CREA ${executante.registro_crea}` : null,
+    executante?.cadastro_incra ? `INCRA: ${executante.cadastro_incra}` : null,
+  ].filter((c): c is string => Boolean(c));
+  const tecnico: LaudoTecnico = {
+    nome: executante?.nome?.trim() || TECNICO_ROMATEC_LAUDO.nome,
+    cargo: executante?.qualificacao?.trim() || TECNICO_ROMATEC_LAUDO.cargo,
+    credenciais: credenciaisExec.length ? credenciaisExec : TECNICO_ROMATEC_LAUDO.credenciais,
+    empresa: TECNICO_ROMATEC_LAUDO.empresa,
+    municipio: TECNICO_ROMATEC_LAUDO.municipio,
+  };
+
+  const hash = laudo.hash_validacao ?? '';
+
+  return {
+    numero: laudo.numero_laudo,
+    dataEmissao: fmtDataExtenso(laudo.assinado_em ?? laudo.created_at ?? new Date()),
+    tipoImovel: laudo.tipo_imovel,
+    finalidade: FINALIDADE_PADRAO_LAUDO,
+    contratante: {
+      nome: contratante?.nome?.trim() || '—',
+      cpfCnpj: contratante?.cpf_cnpj?.trim() || '—',
+      telefone: contratante?.telefone ?? undefined,
+      email: contratante?.email ?? undefined,
+    },
+    imovel: {
+      denominacao: laudo.denominacao_imovel ?? undefined,
+      matricula: laudo.matricula ?? undefined,
+      municipio: laudo.municipio ?? undefined,
+      uf: laudo.uf_imovel ?? undefined,
+      localizacao,
+    },
+    vertices,
+    lados: ladosDados,
+    area,
+    croquiSvg,
+    art: laudo.usa_art ? laudo.numero_art ?? undefined : undefined,
+    trt: laudo.usa_trt ? laudo.numero_trt ?? undefined : undefined,
+    hashValidacao: hash,
+    urlVerificacao: `${base}/v/laudo/${hash}`,
+    tecnico,
   };
 }
