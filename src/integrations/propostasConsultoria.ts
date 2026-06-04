@@ -3156,19 +3156,23 @@ export async function gerarPdfPropostaConsultoria(
       const pageNum = i - range.start + 1;
       const footerY = doc.page.height - 30;
       const footerW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      // v3.54.1 HOTFIX: institucional e numero da pagina EMPILHADOS (2 linhas
+      // centralizadas). Antes ambos ficavam na MESMA linha Y e o texto
+      // institucional longo transbordava (lineBreak:false) sobre o "Pagina X de Y".
       doc.fontSize(7).fillColor('#777').font('Helvetica-Oblique')
          .text(
            `${brand} — Acailandia/MA · Proposta ${p.numero} · Emitida ${formatDataBR(p.data_proposta)} · Validade ${p.validade_dias} dia${p.validade_dias === 1 ? '' : 's'}`,
            doc.page.margins.left,
-           footerY,
-           { width: footerW - 80, align: 'left', lineBreak: false },
+           footerY - 4,
+           { width: footerW, align: 'center', lineBreak: false },
          );
-      doc.text(
-        `Pagina ${pageNum} de ${range.count}`,
-        doc.page.margins.left,
-        footerY,
-        { width: footerW, align: 'right', lineBreak: false },
-      );
+      doc.fillColor('#999').font('Helvetica')
+         .text(
+           `Pagina ${pageNum} de ${range.count}`,
+           doc.page.margins.left,
+           footerY + 6,
+           { width: footerW, align: 'center', lineBreak: false },
+         );
     } finally {
       doc.page.margins.bottom = origBottom;
     }
