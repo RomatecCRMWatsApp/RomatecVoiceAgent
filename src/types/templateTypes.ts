@@ -154,10 +154,13 @@ export interface LaudoVertice {
   utmN: string;
   lat?: string;
   long?: string;
+  /** Altitude formatada (ex: "245,300 m") ou '—' quando ausente. */
+  alt?: string;
 }
 
 export interface LaudoLado {
   lado: string;
+  /** Azimute em DMS (graus, minutos, segundos), ex: "90°13'52\"". */
   azimute: string;
   distancia: string;
 }
@@ -175,11 +178,16 @@ export interface LaudoDados {
   dataEmissao: string;
   tipoImovel: string; // 'RURAL' | 'URBANO'
   finalidade: string;
+  /** Texto do objeto da demarcacao (caracterizacao geometrica do imovel). */
+  objeto?: string;
   contratante: {
     nome: string;
     cpfCnpj: string;
     telefone?: string;
     email?: string;
+    rg?: string;
+    estadoCivil?: string;
+    nacionalidade?: string;
   };
   imovel: {
     denominacao?: string;
@@ -196,6 +204,32 @@ export interface LaudoDados {
     alqueires?: string;
     perimetro?: string;
   };
+  /** Etapas da metodologia tecnica aplicada (6 itens). */
+  metodologia: string[];
+  /** Equipamentos utilizados (base/rover/coletor + acessorios + software). */
+  equipamentos: {
+    base: string;
+    rover: string;
+    coletor: string;
+    acessorios: string;
+    software: string;
+  };
+  /** Paragrafo do memorial descritivo (vazio => secao omitida). */
+  memorialTexto: string;
+  /** Dados para pagamento PIX (so renderiza quando presente). */
+  pagamento?: {
+    titular?: string;
+    documento?: string;
+    pix: string;
+    banco?: string;
+    agencia?: string;
+    conta?: string;
+    valorFormatado?: string;
+    brCode: string;
+    qrDataUrl: string;
+  };
+  /** Fotos do relatorio fotografico (dataUri = data:<mime>;base64,<base64>). */
+  fotos: Array<{ dataUri: string; legenda: string }>;
   /** SVG inline do croqui (preferencial) */
   croquiSvg?: string;
   /** fallback: data-uri de imagem do croqui */

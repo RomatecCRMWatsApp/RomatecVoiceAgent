@@ -26,11 +26,22 @@ import {
   buscarLaudo,
   listarPontosDoLaudo,
   listarLadosDoLaudo,
+  listarFotosDoLaudo,
+  getFotoConteudo,
 } from '../integrations/laudos';
 import { buscarContratante } from '../integrations/contratantes';
 import { buscarExecutante } from '../integrations/executantes';
 import { gerarCroquiSvg } from '../services/croquiSvg';
 import { getBaseUrl } from '../services/reciboPdf';
+import { gerarMemorialDescritivo } from '../services/memorialDescritivo';
+import { gerarPixBrCode } from '../services/pixBrCode';
+import { gerarQrCodeBase64 } from '../pdf/sharedHtml';
+import type { LaudoDados } from '../types/templateTypes';
+import type { RowDataPacket } from 'mysql2';
+import pool from '../database/connection';
+
+/** Limite de fotos embarcadas no relatorio fotografico Prime. */
+const MAX_FOTOS_PRIME = 12;
 
 export const pdfPrimeRouter = Router();
 
@@ -139,6 +150,85 @@ pdfPrimeRouter.get('/laudo/:id', async (req: Request, res: Response) => {
       croquiSvg = undefined;
     }
 
+    // Memorial descritivo (best-effort) — paragrafo narrativo da poligonal.
+    let memorialTexto = '';
+    try {
+      memorialTexto =
+        gerarMemorialDescritivo({ laudo, pontos, lados, contratante }).descricao || '';
+    } catch (memErr) {
+      console.warn('[pdf-prime:laudo] memorial pulado:', (memErr as Error).message);
+      memorialTexto = '';
+    }
+
+    // Fotos do relatorio fotografico (best-effort, limitadas).
+    let fotos: LaudoDados['fotos'] = [];
+    try {
+      const metaFotos = await listarFotosDoLaudo(id);
+      const selecionadas = metaFotos.slice(0, MAX_FOTOS_PRIME);
+      const carregadas = await Promise.all(
+        selecionadas.map(async (f) => {
+          const c = await getFotoConteudo(f.id);
+          if (!c || !c.base64) return null;
+          const dataUri = c.base64.startsWith('data:')
+            ? c.base64
+            : `data:${c.mime};base64,${c.base64}`;
+          return { dataUri, legenda: f.legenda || '' };
+        }),
+      );
+      fotos = carregadas.filter((f): f is { dataUri: string; legenda: string } => f !== null);
+    } catch (fotoErr) {
+      console.warn('[pdf-prime:laudo] fotos puladas:', (fotoErr as Error).message);
+      fotos = [];
+    }
+
+    // Pagamento PIX (best-effort) — emissor ativo + BR Code "copia e cola".
+    let pagamento: LaudoDados['pagamento'];
+    try {
+      const [rows] = await pool.execute<RowDataPacket[]>(
+        `SELECT pix, banco, agencia, conta, tipo_conta, titular, documento
+           FROM dados_pagamento_emissor
+          WHERE ativo = 1
+          ORDER BY id DESC
+          LIMIT 1`,
+      );
+      const emissor = rows[0];
+      if (emissor && emissor.pix) {
+        const valorRaw = laudo.valor_final ?? laudo.valor_demarcacao;
+        const valor = valorRaw != null ? Number(valorRaw) : 0;
+        const titular = String(emissor.titular || 'ROMATEC');
+        const txid = (laudo.numero_laudo || `LAUDO${laudo.id}`)
+          .replace(/[^a-zA-Z0-9]/g, '')
+          .slice(0, 25);
+        const brCode = gerarPixBrCode({
+          chave: String(emissor.pix),
+          nome: titular,
+          cidade: 'ACAILANDIA',
+          valor: valor > 0 ? valor : null,
+          txid,
+          descricao: `Laudo ${laudo.numero_laudo || laudo.id}`,
+        });
+        const qrDataUrl = await gerarQrCodeBase64(brCode);
+        const valorFormatado =
+          valor > 0
+            ? valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+            : undefined;
+        pagamento = {
+          titular,
+          documento: emissor.documento != null ? String(emissor.documento) : undefined,
+          pix: String(emissor.pix),
+          banco: emissor.banco != null ? String(emissor.banco) : undefined,
+          agencia: emissor.agencia != null ? String(emissor.agencia) : undefined,
+          conta: emissor.conta != null ? String(emissor.conta) : undefined,
+          valorFormatado,
+          brCode,
+          qrDataUrl,
+        };
+      }
+    } catch (pixErr) {
+      console.warn('[pdf-prime:laudo] pagamento pulado:', (pixErr as Error).message);
+      pagamento = undefined;
+    }
+
     const dados = laudoToLaudoDados(
       laudo,
       contratante,
@@ -146,7 +236,7 @@ pdfPrimeRouter.get('/laudo/:id', async (req: Request, res: Response) => {
       pontos,
       lados,
       getBaseUrl(),
-      croquiSvg,
+      { croquiSvg, memorialTexto, pagamento, fotos },
     );
     const buffer = await gerarLaudoPdf(dados, templateId);
     res.setHeader('Content-Type', 'application/pdf');

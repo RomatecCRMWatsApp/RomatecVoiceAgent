@@ -45,4 +45,42 @@ describe('Laudo Template Prime I — HTML (puro)', () => {
   it('nao quebra com dados minimos', () => {
     expect(() => buildLaudoPrime1Html(dadosMinimosLaudo, QR_FAKE)).not.toThrow();
   });
+  it('contem a secao de Objeto da Demarcacao', () => {
+    expect(buildLaudoPrime1Html(dadosMockLaudo, QR_FAKE)).toContain('Objeto');
+  });
+  it('contem a secao de Metodologia', () => {
+    expect(buildLaudoPrime1Html(dadosMockLaudo, QR_FAKE)).toContain('Metodologia');
+  });
+  it('contem a secao de Equipamentos', () => {
+    expect(buildLaudoPrime1Html(dadosMockLaudo, QR_FAKE)).toContain('Equipamentos');
+  });
+  it('contem a secao de Memorial', () => {
+    expect(buildLaudoPrime1Html(dadosMockLaudo, QR_FAKE)).toContain('Memorial');
+  });
+  it('contem a coluna Alt. na tabela de vertices', () => {
+    expect(buildLaudoPrime1Html(dadosMockLaudo, QR_FAKE)).toContain('Alt.');
+  });
+  it('contem azimute em formato DMS', () => {
+    // azimute em DMS; escapeHtml converte ' e " para &#39; e &quot; no HTML
+    expect(buildLaudoPrime1Html(dadosMockLaudo, QR_FAKE)).toMatch(/\d+°\d+&#39;\d+&quot;/);
+  });
+  it('contem a secao de Pagamento e o brCode PIX', () => {
+    const html = buildLaudoPrime1Html(dadosMockLaudo, QR_FAKE);
+    expect(html).toContain('Pagamento');
+    expect(html).toContain(dadosMockLaudo.pagamento!.brCode);
+  });
+  it('contem o Relatorio Fotografico', () => {
+    expect(buildLaudoPrime1Html(dadosMockLaudo, QR_FAKE)).toContain('Fotográfico');
+  });
+  it('contem o CPF com mascara', () => {
+    expect(buildLaudoPrime1Html(dadosMockLaudo, QR_FAKE)).toContain('000.516.313-77');
+  });
+  it('omite Memorial quando memorialTexto vazio', () => {
+    const html = buildLaudoPrime1Html(dadosMinimosLaudo, QR_FAKE);
+    expect(html).not.toContain('Memorial Descritivo');
+  });
+  it('omite Pagamento quando sem dados de pagamento', () => {
+    const html = buildLaudoPrime1Html(dadosMinimosLaudo, QR_FAKE);
+    expect(html).not.toContain('Dados para Pagamento');
+  });
 });

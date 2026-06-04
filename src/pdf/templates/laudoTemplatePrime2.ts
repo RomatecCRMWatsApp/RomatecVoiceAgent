@@ -33,6 +33,7 @@ function linhaVertice(v: LaudoDados['vertices'][number]): string {
     <td class="mono">${escapeHtml(v.utmN)}</td>
     <td class="mono">${v.lat ? escapeHtml(v.lat) : '—'}</td>
     <td class="mono">${v.long ? escapeHtml(v.long) : '—'}</td>
+    <td class="mono">${v.alt ? escapeHtml(v.alt) : '—'}</td>
   </tr>`;
 }
 
@@ -42,6 +43,101 @@ function linhaLado(l: LaudoDados['lados'][number]): string {
     <td class="mono">${escapeHtml(l.azimute)}</td>
     <td class="mono">${escapeHtml(l.distancia)}</td>
   </tr>`;
+}
+
+function metodologiaHtml(dados: LaudoDados, numero: string): string {
+  if (!dados.metodologia?.length) return '';
+  const itens = dados.metodologia
+    .map(
+      (etapa, i) =>
+        `<div class="metodo-etapa">
+          <span class="metodo-num">${i + 1}</span>
+          <span class="metodo-texto">${escapeHtml(etapa)}</span>
+        </div>`,
+    )
+    .join('');
+  return `<!-- METODOLOGIA -->
+<div class="bloco">
+  <h2 class="secao">${escapeHtml(numero)} Metodologia Técnica Aplicada</h2>
+  <div class="metodo-lista">${itens}</div>
+</div>`;
+}
+
+function equipamentosHtml(dados: LaudoDados, numero: string): string {
+  const e = dados.equipamentos;
+  const linha = (k: string, v: string) =>
+    `<div class="equip-item"><span class="equip-k">${escapeHtml(k)}</span><span class="equip-v">${escapeHtml(v)}</span></div>`;
+  return `<!-- EQUIPAMENTOS -->
+<div class="bloco">
+  <h2 class="secao">${escapeHtml(numero)} Equipamentos Utilizados</h2>
+  <div class="equip-lista">
+    ${linha('Base GNSS', e.base)}
+    ${linha('Rover GNSS', e.rover)}
+    ${linha('Coletor', e.coletor)}
+    ${linha('Acessórios', e.acessorios)}
+    ${linha('Software', e.software)}
+  </div>
+</div>`;
+}
+
+function memorialHtml(dados: LaudoDados, numero: string): string {
+  const texto = (dados.memorialTexto ?? '').trim();
+  if (!texto) return '';
+  return `<!-- MEMORIAL -->
+<div class="bloco">
+  <h2 class="secao">${escapeHtml(numero)} Memorial Descritivo</h2>
+  <p class="texto memorial-texto">${escapeHtml(texto)}</p>
+</div>`;
+}
+
+function pagamentoHtml(dados: LaudoDados, numero: string): string {
+  const pg = dados.pagamento;
+  if (!pg) return '';
+  const kv = (k: string, v?: string) =>
+    v ? `<div class="kv"><span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(v)}</span></div>` : '';
+  const contaInfo = [
+    pg.banco ? `Banco ${pg.banco}` : '',
+    pg.agencia ? `Ag. ${pg.agencia}` : '',
+    pg.conta ? `Conta ${pg.conta}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return `<!-- PAGAMENTO -->
+<div class="bloco">
+  <h2 class="secao">${escapeHtml(numero)} Dados para Pagamento</h2>
+  <div class="pgto-wrap">
+    <div class="pgto-info">
+      ${kv('Titular', pg.titular)}
+      ${kv('Documento', pg.documento)}
+      ${kv('Chave PIX', pg.pix)}
+      ${contaInfo ? kv('Conta', contaInfo) : ''}
+      ${kv('Valor', pg.valorFormatado)}
+      <div class="pgto-copia">
+        <span class="pgto-copia-label">PIX Copia e Cola</span>
+        <code class="pgto-brcode">${escapeHtml(pg.brCode)}</code>
+      </div>
+    </div>
+    <div class="pgto-qr"><img src="${escapeHtml(pg.qrDataUrl)}" alt="QR Code PIX"/></div>
+  </div>
+</div>`;
+}
+
+function fotosHtml(dados: LaudoDados, numero: string): string {
+  if (!dados.fotos?.length) return '';
+  const cards = dados.fotos
+    .map(
+      (f) =>
+        `<div class="foto-card">
+          <img class="foto-img" src="${escapeHtml(f.dataUri)}" alt="Foto do laudo"/>
+          ${f.legenda ? `<div class="foto-legenda">${escapeHtml(f.legenda)}</div>` : ''}
+        </div>`,
+    )
+    .join('');
+  return `<!-- RELATORIO FOTOGRAFICO -->
+<div class="bloco">
+  <h2 class="secao">${escapeHtml(numero)} Relatório Fotográfico</h2>
+  <div class="foto-grid">${cards}</div>
+</div>`;
 }
 
 function croquiHtml(dados: LaudoDados): string {
@@ -77,6 +173,19 @@ export function buildLaudoPrime2Html(dados: LaudoDados, qrDataUrl: string): stri
   const contatoCliente = [dados.contratante.telefone, dados.contratante.email]
     .filter(Boolean)
     .map((c) => escapeHtml(c!))
+    .join(' · ');
+
+  // Dados pessoais extra (CPF formatado, RG, nacionalidade, estado civil).
+  const dadosPessoais = [
+    dados.contratante.cpfCnpj && dados.contratante.cpfCnpj !== '—'
+      ? `CPF/CNPJ: ${dados.contratante.cpfCnpj}`
+      : '',
+    dados.contratante.rg ? `RG: ${dados.contratante.rg}` : '',
+    dados.contratante.nacionalidade || '',
+    dados.contratante.estadoCivil || '',
+  ]
+    .filter(Boolean)
+    .map((c) => escapeHtml(c))
     .join(' · ');
 
   const rt =
@@ -167,6 +276,37 @@ table.tabela td { padding:7px 10px; border-bottom:1px solid #e4e4e4; font-size:9
 .val-label { color:#1A1A2E; font-family:Helvetica,Arial,sans-serif; font-weight:700; letter-spacing:1px; text-transform:uppercase; font-size:8pt; }
 .val-hash { font-family:'Courier New',monospace; color:#444; font-size:8pt; word-break:break-all; margin-top:6px; }
 .val-url { color:#00aa66; font-size:.78rem; margin-top:6px; word-break:break-all; }
+
+/* metodologia */
+.metodo-lista { margin-top:6px; }
+.metodo-etapa { display:flex; gap:12px; align-items:flex-start; padding:8px 0; border-bottom:1px solid #ececec; break-inside:avoid; page-break-inside:avoid; }
+.metodo-etapa:last-child { border-bottom:none; }
+.metodo-num { flex:none; width:24px; height:24px; border-radius:4px; background:#1A1A2E; color:#00ff88; font-weight:700; font-size:.8rem; font-family:Helvetica,Arial,sans-serif; display:flex; align-items:center; justify-content:center; }
+.metodo-texto { color:#333; }
+
+/* equipamentos */
+.equip-lista { margin-top:6px; }
+.equip-item { padding:8px 0; border-bottom:1px solid #ececec; break-inside:avoid; page-break-inside:avoid; }
+.equip-item:last-child { border-bottom:none; }
+.equip-k { display:block; color:#1A1A2E; font-family:Helvetica,Arial,sans-serif; font-size:7.5pt; letter-spacing:1px; text-transform:uppercase; font-weight:700; margin-bottom:2px; }
+.equip-v { color:#333; }
+
+/* memorial */
+.memorial-texto { text-align:justify; }
+
+/* pagamento */
+.pgto-wrap { display:flex; gap:20px; align-items:flex-start; background:#F5F5F5; border-left:4px solid #00ff88; border-radius:6px; padding:16px 20px; margin-top:6px; break-inside:avoid; page-break-inside:avoid; }
+.pgto-info { flex:1; }
+.pgto-qr img { display:block; width:118px; height:118px; background:#fff; padding:5px; border-radius:4px; }
+.pgto-copia { margin-top:10px; }
+.pgto-copia-label { display:block; color:#1A1A2E; font-family:Helvetica,Arial,sans-serif; font-size:7.5pt; letter-spacing:1px; text-transform:uppercase; font-weight:700; margin-bottom:4px; }
+.pgto-brcode { display:block; font-family:'Courier New',monospace; font-size:7.5pt; color:#444; background:#fff; border:1px solid #ddd; border-radius:4px; padding:8px; word-break:break-all; white-space:pre-wrap; }
+
+/* relatorio fotografico */
+.foto-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-top:6px; }
+.foto-card { border:1px solid #ddd; border-radius:6px; padding:8px; background:#fff; break-inside:avoid; page-break-inside:avoid; }
+.foto-img { width:100%; max-height:220px; object-fit:cover; border-radius:4px; }
+.foto-legenda { color:#555; font-size:.74rem; margin-top:6px; text-align:center; font-family:Helvetica,Arial,sans-serif; }
 </style></head><body>
 
 <!-- 1 CABECALHO SPLIT -->
@@ -198,6 +338,7 @@ table.tabela td { padding:7px 10px; border-bottom:1px solid #e4e4e4; font-size:9
   <h2 class="secao">2. Contratante</h2>
   <div class="kv"><span class="k">Nome</span><span class="v">${escapeHtml(dados.contratante.nome)}</span></div>
   <div class="kv"><span class="k">CPF/CNPJ</span><span class="v">${escapeHtml(dados.contratante.cpfCnpj)}</span></div>
+  ${dadosPessoais ? `<div class="kv"><span class="k">Qualificação</span><span class="v">${dadosPessoais}</span></div>` : ''}
   ${contatoCliente ? `<div class="kv"><span class="k">Contato</span><span class="v">${contatoCliente}</span></div>` : ''}
 </div>
 
@@ -207,33 +348,43 @@ table.tabela td { padding:7px 10px; border-bottom:1px solid #e4e4e4; font-size:9
   ${imovelKv || '<p class="texto">Dados do imóvel não informados.</p>'}
 </div>
 
+${dados.objeto ? `<!-- OBJETO DA DEMARCACAO -->
+<div class="bloco">
+  <h2 class="secao">4. Objeto da Demarcação</h2>
+  <p class="texto">${escapeHtml(dados.objeto)}</p>
+</div>` : ''}
+
 <!-- 5 FINALIDADE -->
 <div class="bloco">
-  <h2 class="secao">4. Finalidade</h2>
+  <h2 class="secao">5. Finalidade</h2>
   <p class="texto">${escapeHtml(dados.finalidade)}</p>
 </div>
 
-<!-- 6 VERTICES -->
+${metodologiaHtml(dados, '6.')}
+
+${equipamentosHtml(dados, '7.')}
+
+<!-- 8 VERTICES -->
 <div class="bloco">
-  <h2 class="secao">5. Tabela de Vértices</h2>
+  <h2 class="secao">8. Tabela de Vértices</h2>
   <table class="tabela">
-    <thead class="vertice-cab"><tr><th>Nº</th><th>Marco</th><th>UTM E</th><th>UTM N</th><th>Latitude</th><th>Longitude</th></tr></thead>
-    <tbody>${vertices || '<tr><td colspan="6">Nenhum vértice cadastrado.</td></tr>'}</tbody>
+    <thead class="vertice-cab"><tr><th>Nº</th><th>Marco</th><th>UTM E</th><th>UTM N</th><th>Latitude</th><th>Longitude</th><th>Alt.</th></tr></thead>
+    <tbody>${vertices || '<tr><td colspan="7">Nenhum vértice cadastrado.</td></tr>'}</tbody>
   </table>
 </div>
 
-<!-- 7 LADOS -->
+<!-- 9 LADOS -->
 <div class="bloco">
-  <h2 class="secao">6. Tabela de Lados</h2>
+  <h2 class="secao">9. Tabela de Lados</h2>
   <table class="tabela">
     <thead><tr><th>Lado</th><th>Azimute</th><th>Distância</th></tr></thead>
     <tbody>${lados || '<tr><td colspan="3">Nenhum lado calculado.</td></tr>'}</tbody>
   </table>
 </div>
 
-<!-- 8 AREA -->
+<!-- 10 AREA -->
 <div class="bloco">
-  <h2 class="secao">7. Área e Perímetro</h2>
+  <h2 class="secao">10. Área e Perímetro</h2>
   <div class="area-box">
     <div class="area-valor">${escapeHtml(dados.area.m2)}</div>
     <div class="area-unidade">Área total</div>
@@ -241,21 +392,25 @@ table.tabela td { padding:7px 10px; border-bottom:1px solid #e4e4e4; font-size:9
   </div>
 </div>
 
-<!-- 9 CROQUI -->
+${memorialHtml(dados, '11.')}
+
+<!-- 12 CROQUI -->
 <div class="bloco">
-  <h2 class="secao">8. Croqui da Poligonal</h2>
+  <h2 class="secao">12. Croqui da Poligonal</h2>
   ${croquiHtml(dados)}
 </div>
 
-<!-- 10 RESPONSABILIDADE TECNICA -->
+${pagamentoHtml(dados, '13.')}
+
+<!-- 14 RESPONSABILIDADE TECNICA -->
 <div class="bloco">
-  <h2 class="secao">9. Responsabilidade Técnica</h2>
+  <h2 class="secao">14. Responsabilidade Técnica</h2>
   ${rt}
 </div>
 
-<!-- 11 ASSINATURA -->
+<!-- 15 ASSINATURA -->
 <div class="bloco">
-  <h2 class="secao">10. Assinatura do Responsável Técnico</h2>
+  <h2 class="secao">15. Assinatura do Responsável Técnico</h2>
   <div class="assina-wrap">
     <div class="assina-img-area">${blocoAssinaturaHtml(dados.assinaturaDigitalBase64, '#1A1A2E')}</div>
     <div class="assina-linha"></div>
@@ -265,9 +420,11 @@ table.tabela td { padding:7px 10px; border-bottom:1px solid #e4e4e4; font-size:9
   </div>
 </div>
 
-<!-- 12 VALIDACAO -->
+${fotosHtml(dados, '16.')}
+
+<!-- 17 VALIDACAO -->
 <div class="bloco">
-  <h2 class="secao">11. Validação de Autenticidade</h2>
+  <h2 class="secao">17. Validação de Autenticidade</h2>
   <div class="validacao-bloco">
     <div class="val-qr"><img src="${escapeHtml(qrDataUrl)}" alt="QR de validação"/></div>
     <div class="val-info">

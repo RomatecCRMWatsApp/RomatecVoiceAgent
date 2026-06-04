@@ -22,6 +22,7 @@ import {
   type LaudoLado,
 } from '../types/templateTypes';
 import { valorPorExtenso } from './sharedHtml';
+import { azimuteParaDMS } from '../services/geometria';
 
 // ── Constantes da identidade tecnica Romatec ────────────────────────────────
 export const TECNICO_ROMATEC_PROPOSTA: PropostaTecnico = {
@@ -281,6 +282,45 @@ const FINALIDADE_PADRAO_LAUDO =
   'Demarcação e materialização de vértices da poligonal do imóvel para fins de ' +
   'regularização fundiária, conforme NBR 13133 e sistemática INCRA/NTGIR.';
 
+/**
+ * Formata CPF/CNPJ com mascara a partir dos digitos.
+ * - 11 digitos → CPF (000.000.000-00)
+ * - 14 digitos → CNPJ (00.000.000/0000-00)
+ * - qualquer outro tamanho → retorna o valor original (sem mascara)
+ */
+export function formatarCpfCnpj(v: string): string {
+  const original = String(v ?? '');
+  const d = original.replace(/\D/g, '');
+  if (d.length === 11) {
+    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9, 11)}`;
+  }
+  if (d.length === 14) {
+    return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12, 14)}`;
+  }
+  return original;
+}
+
+/** 6 etapas EXATAS da metodologia tecnica aplicada (NTGIR/INCRA). */
+const METODOLOGIA_PADRAO_LAUDO: string[] = [
+  'PLANEJAMENTO E RECONHECIMENTO DE CAMPO — vistoria preliminar do imóvel para identificação dos limites, confrontantes e melhor estratégia de implantação dos marcos.',
+  'MATERIALIZAÇÃO DOS VÉRTICES — implantação física dos marcos (piquetes) em todos os vértices da poligonal, com identificação sequencial (P1, P2, …) e registro fotográfico individual de cada vértice no local.',
+  'RASTREAMENTO GNSS EM MODO RTK — coleta das coordenadas geodésicas de cada vértice por meio de receptor GNSS de dupla frequência operando em modo Real-Time Kinematic (RTK), com tempo mínimo de fixação até obtenção de solução fixa centimétrica. Sistema geodésico de referência: SIRGAS 2000 (oficial Brasil — IBGE/INCRA), projeção UTM, zona 23 Sul, meridiano central -45°.',
+  'CAMINHAMENTO DA POLIGONAL — coleta sequencial dos vértices percorrendo o perímetro do imóvel no sentido horário, com fechamento angular e linear sobre o vértice inicial (P1) para verificação de consistência.',
+  'PROCESSAMENTO E DESENHO TÉCNICO — pós-processamento dos dados brutos em escritório utilizando os softwares Topcon Tools e MetricaTOPO, geração da poligonal final, cálculo de área pelo método de Gauss (Shoelace), perímetro pelo somatório das distâncias planas e azimutes calculados segmento a segmento em DMS (graus, minutos e segundos).',
+  'EMISSÃO DAS PEÇAS TÉCNICAS — produção do memorial descritivo conforme Norma Técnica de Georreferenciamento (NTGIR/INCRA), planilha de coordenadas, croqui georreferenciado e o presente laudo técnico.',
+];
+
+/** Descricoes padrao dos equipamentos (usadas quando o laudo nao informa). */
+const EQUIP_BASE_PADRAO =
+  'Receptor GNSS RTK S6 ComNAV — estação de referência fixa montada sobre tripé com base niveladora.';
+const EQUIP_ROVER_PADRAO =
+  'Receptor GNSS RTK T30 Laser Plus (SinoGNSS) — receptor móvel multibanda com rastreio simultâneo das constelações ativas (GPS, BeiDou, GLONASS, Galileo).';
+const EQUIP_COLETOR_PADRAO =
+  'Coletor de dados R60 (SinoGNSS) — controlador robusto e ergonômico para o levantamento topográfico em campo.';
+const EQUIP_ACESSORIOS_PADRAO =
+  'Tripé robusto para a base, bastão telescópico de 2 m para o rover, bipé estabilizador, base niveladora ótica, trena de aferição.';
+const EQUIP_SOFTWARE_PADRAO = 'Topcon Tools + MetricaTOPO.';
+
 /** Formata um numero em pt-BR com `casas` decimais; null/invalido → '—'. */
 function fmtNum(v: number | null | undefined, casas: number): string {
   if (v == null || !Number.isFinite(Number(v))) return '—';
@@ -288,12 +328,6 @@ function fmtNum(v: number | null | undefined, casas: number): string {
     minimumFractionDigits: casas,
     maximumFractionDigits: casas,
   });
-}
-
-/** Formata o azimute do lado (graus decimais) em pt-BR; aceita string crua. */
-function fmtAzimute(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(Number(v))) return '—';
-  return `${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}°`;
 }
 
 /**
@@ -304,7 +338,7 @@ function fmtAzimute(v: number | null | undefined): string {
  * @param pontos vertices do laudo
  * @param lados lados calculados
  * @param baseUrl base publica para a URL de verificacao (ex: getBaseUrl())
- * @param croquiSvg SVG do croqui ja gerado (opcional)
+ * @param opts dados pre-computados pela rota (croqui, memorial, pagamento, fotos)
  */
 export function laudoToLaudoDados(
   laudo: Laudo,
@@ -313,10 +347,16 @@ export function laudoToLaudoDados(
   pontos: PontoLaudo[],
   lados: LadoLaudo[],
   baseUrl: string,
-  croquiSvg?: string,
+  opts?: {
+    croquiSvg?: string;
+    memorialTexto?: string;
+    pagamento?: LaudoDados['pagamento'];
+    fotos?: LaudoDados['fotos'];
+  },
 ): LaudoDados {
   const base = baseUrl.replace(/\/$/, '');
   const isRural = laudo.tipo_imovel === 'RURAL';
+  const croquiSvg = opts?.croquiSvg;
 
   // Vertices
   const vertices: LaudoVertice[] = pontos.map((p) => ({
@@ -327,14 +367,15 @@ export function laudoToLaudoDados(
     utmN: p.utm_n != null ? fmtNum(p.utm_n, 3) : '—',
     lat: p.lat_gms ?? (p.lat_decimal != null ? fmtNum(p.lat_decimal, 6) : undefined),
     long: p.long_gms ?? (p.long_decimal != null ? fmtNum(p.long_decimal, 6) : undefined),
+    alt: p.altitude != null ? `${fmtNum(p.altitude, 3)} m` : '—',
   }));
 
-  // Lados
+  // Lados — azimute em DMS (graus, minutos, segundos)
   const ladosDados: LaudoLado[] = lados.map((l) => {
     const dist = l.medida_manual_m ?? l.distancia_m;
     return {
       lado: l.rotulo ?? `L${l.ordem}`,
-      azimute: fmtAzimute(l.azimute),
+      azimute: l.azimute != null ? azimuteParaDMS(Number(l.azimute)) : '—',
       distancia: dist != null ? `${fmtNum(dist, 3)} m` : '—',
     };
   });
@@ -376,16 +417,45 @@ export function laudoToLaudoDados(
 
   const hash = laudo.hash_validacao ?? '';
 
+  // CPF/CNPJ com mascara (so quando ha valor).
+  const cpfRaw = contratante?.cpf_cnpj?.trim() || '';
+  const cpfCnpj = cpfRaw ? formatarCpfCnpj(cpfRaw) : '—';
+
+  // Objeto da demarcacao — caracterizacao geometrica do imovel.
+  const denominacaoObjeto =
+    laudo.denominacao_imovel?.trim() ||
+    [laudo.loteamento, laudo.quadra, laudo.numero_lote].filter(Boolean).join(' · ') ||
+    'identificado neste laudo';
+  const munUfObjeto =
+    [laudo.municipio, laudo.uf_imovel].filter(Boolean).join('/') || 'município não informado';
+  const objeto =
+    `Constitui objeto do presente laudo a demarcação e materialização dos vértices ` +
+    `definidores da poligonal do imóvel ${denominacaoObjeto}, situado em ${munUfObjeto}, ` +
+    `com vistas à sua caracterização geométrica para fins de regularização.`;
+
+  // Equipamentos — dinamicos a partir do laudo, com fallback padrao.
+  const equipamentos: LaudoDados['equipamentos'] = {
+    base: laudo.base_nome?.trim() || EQUIP_BASE_PADRAO,
+    rover: laudo.rover_nome?.trim() || EQUIP_ROVER_PADRAO,
+    coletor: laudo.coletor_nome?.trim() || EQUIP_COLETOR_PADRAO,
+    acessorios: EQUIP_ACESSORIOS_PADRAO,
+    software: EQUIP_SOFTWARE_PADRAO,
+  };
+
   return {
     numero: laudo.numero_laudo,
     dataEmissao: fmtDataExtenso(laudo.assinado_em ?? laudo.created_at ?? new Date()),
     tipoImovel: laudo.tipo_imovel,
     finalidade: FINALIDADE_PADRAO_LAUDO,
+    objeto,
     contratante: {
       nome: contratante?.nome?.trim() || '—',
-      cpfCnpj: contratante?.cpf_cnpj?.trim() || '—',
+      cpfCnpj,
       telefone: contratante?.telefone ?? undefined,
       email: contratante?.email ?? undefined,
+      rg: contratante?.rg_ie ?? undefined,
+      estadoCivil: contratante?.estado_civil ?? undefined,
+      nacionalidade: contratante?.nacionalidade ?? undefined,
     },
     imovel: {
       denominacao: laudo.denominacao_imovel ?? undefined,
@@ -397,6 +467,11 @@ export function laudoToLaudoDados(
     vertices,
     lados: ladosDados,
     area,
+    metodologia: METODOLOGIA_PADRAO_LAUDO.slice(),
+    equipamentos,
+    memorialTexto: opts?.memorialTexto ?? '',
+    pagamento: opts?.pagamento,
+    fotos: opts?.fotos ?? [],
     croquiSvg,
     art: laudo.usa_art ? laudo.numero_art ?? undefined : undefined,
     trt: laudo.usa_trt ? laudo.numero_trt ?? undefined : undefined,
