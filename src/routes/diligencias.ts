@@ -8,6 +8,7 @@ import {
   atualizarDiligencia,
   cancelarDiligencia,
   reenviarConfirmacao,
+  resolverPropostaInfo,
   DiligenciaError,
 } from '../integrations/diligencias';
 
@@ -28,6 +29,16 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       limit: Number(req.query.limit) || 20,
     });
     res.json(out);
+  } catch (err) { fail(res, err); }
+});
+
+// GET /api/diligencias/resolver-proposta/:ref → {id, numero, cliente_nome}
+// Aceita id interno OU número da proposta (preview do cliente no formulário).
+router.get('/resolver-proposta/:ref', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const info = await resolverPropostaInfo(String(req.params.ref));
+    if (!info) { res.status(404).json({ error: 'proposta não encontrada' }); return; }
+    res.json(info);
   } catch (err) { fail(res, err); }
 });
 

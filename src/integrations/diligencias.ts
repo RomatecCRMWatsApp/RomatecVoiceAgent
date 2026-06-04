@@ -109,6 +109,27 @@ export async function resolverPropostaId(ref: number | string): Promise<number> 
   throw new DiligenciaError(404, 'proposta não encontrada');
 }
 
+/** Resolve id/número → {id, numero, cliente_nome} para preview no formulário. */
+export async function resolverPropostaInfo(
+  ref: number | string,
+): Promise<{ id: number; numero: string; cliente_nome: string } | null> {
+  const s = String(ref ?? '').trim();
+  if (!s) return null;
+  const sql = (col: string) =>
+    `SELECT p.id, p.numero, c.nome AS cliente_nome
+       FROM propostas p LEFT JOIN propostas_clientes c ON c.id = p.cliente_id
+      WHERE p.${col} = ? AND p.deleted_at IS NULL LIMIT 1`;
+  const pick = (r: RowDataPacket) => ({
+    id: Number(r.id), numero: String(r.numero ?? ''), cliente_nome: String(r.cliente_nome ?? 'Cliente'),
+  });
+  if (/^\d+$/.test(s)) {
+    const [byId] = await pool.query<RowDataPacket[]>(sql('id'), [Number(s)]);
+    if (byId.length) return pick(byId[0]);
+  }
+  const [byNum] = await pool.query<RowDataPacket[]>(sql('numero'), [s]);
+  return byNum.length ? pick(byNum[0]) : null;
+}
+
 // ── Criação (+ disparo de confirmação) ──────────────────────────────────────
 export async function criarDiligencia(
   dto: CreateDiligenciaDto,

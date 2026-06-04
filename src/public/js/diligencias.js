@@ -135,13 +135,19 @@
     const close = () => wrap.remove();
     wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
     wrap.querySelector('#dnCancelar').onclick = close;
-    // busca nome do cliente ao sair do campo proposta
+    // busca nome do cliente ao sair do campo proposta (aceita id OU número)
     wrap.querySelector('#dnProp').addEventListener('blur', async (e) => {
-      const id = e.target.value.replace(/\D+/g, '');
+      const ref = e.target.value.trim();
       const box = wrap.querySelector('#dnCliente');
-      if (!id) { box.textContent = ''; return; }
-      try { const p = await api('/api/propostas/' + id); box.textContent = p && p.cliente_nome ? '👤 ' + p.cliente_nome : ''; }
-      catch { box.textContent = ''; }
+      if (!ref) { box.textContent = ''; box.style.color = '#0B6E4F'; return; }
+      try {
+        const p = await api('/api/diligencias/resolver-proposta/' + encodeURIComponent(ref));
+        box.style.color = '#0B6E4F';
+        box.textContent = `👤 ${p.cliente_nome} · proposta ${p.numero} (id ${p.id})`;
+      } catch {
+        box.style.color = '#ff9500';
+        box.textContent = '⚠️ proposta não encontrada';
+      }
     });
     wrap.querySelector('#dnEnviar').onclick = async () => {
       const erro = wrap.querySelector('#dnErro'); erro.textContent = '';
