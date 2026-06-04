@@ -67,8 +67,8 @@ export function buildPropostaPrime2Html(dados: PropostaDados): string {
     .join('');
   const drl = dados.drlIncluida
     ? `<div class="drl-warning">
-         <div class="drl-titulo">DRL — Declaracao de Respeito de Limite</div>
-         <div class="drl-texto">A coleta das DRLs junto aos confrontantes e' obrigacao do proprietario. A Romatec orienta o procedimento e a averbacao em cartorio conforme exigencia do INCRA (Lei 10.267/2001).</div>
+         <div class="drl-titulo">DRL — Declaração de Respeito de Limite</div>
+         <div class="drl-texto">A coleta das DRLs junto aos confrontantes é obrigação do proprietário. A Romatec orienta o procedimento e a averbação em cartório conforme exigência do INCRA (Lei 10.267/2001).</div>
        </div>`
     : '';
   const cred = dados.tecnico.credenciais.map((c) => escapeHtml(c)).join(' · ');
@@ -135,7 +135,7 @@ h2.secao em { font-style:italic; color:${CORES.verde}; }
 
 /* etapas 2x2 */
 .etapa-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:24px; margin-top:18px; }
-.etapa { position:relative; padding:20px 22px; background:#fff; border-radius:6px; box-shadow:0 1px 6px rgba(0,0,0,.04); overflow:hidden; }
+.etapa { position:relative; padding:20px 22px; background:#fff; border-radius:6px; box-shadow:0 1px 6px rgba(0,0,0,.04); overflow:visible; }
 .etapa-num { font-family:'DM Serif Display',serif; font-size:3.4rem; color:#eceae2; position:absolute; top:6px; right:16px; line-height:1; }
 .etapa-titulo { font-weight:700; position:relative; }
 .etapa-texto { color:#6a655c; font-size:.86rem; margin-top:6px; position:relative; }
@@ -189,9 +189,9 @@ table.invest td.val { text-align:right; color:${CORES.douradoBrilho}; font-weigh
   </div>
   <div class="capa-body">
     <div class="badge"></div>
-    <div class="label">Proposta tecnica e comercial</div>
+    <div class="label">Proposta técnica e comercial</div>
     <h1 class="capa-h1">${escapeHtml(dados.tipoServico)}</h1>
-    <div class="capa-sub">Elaborada conforme as normas tecnicas vigentes (NBR 13133 / NBR 14653) e legislacao aplicavel ao objeto.</div>
+    <div class="capa-sub">Elaborada conforme as normas técnicas vigentes (NBR 13133 / NBR 14653) e legislação aplicável ao objeto.</div>
     <div class="cli-strip">
       <div class="label" style="color:#cfe5db">Contratante</div>
       <div class="nome">${escapeHtml(dados.cliente.nome)}</div>
@@ -200,7 +200,7 @@ table.invest td.val { text-align:right; color:${CORES.douradoBrilho}; font-weigh
   </div>
   <div class="capa-footer">
     <div>Romatec Consultoria Total · ${escapeHtml(dados.tecnico.municipio)} · romateccrm@gmail.com</div>
-    <div>Emissao ${escapeHtml(dados.dataEmissao)} · Validade ${escapeHtml(dados.validade)}</div>
+    <div>Emissão ${escapeHtml(dados.dataEmissao)} · Validade ${escapeHtml(dados.validade)}</div>
   </div>
 </div>
 
@@ -212,13 +212,13 @@ table.invest td.val { text-align:right; color:${CORES.douradoBrilho}; font-weigh
     <div class="secao-n">01</div>
     <h2 class="secao">Objeto da <em>Proposta</em></h2>
     <div class="obj-wrap">
-      <p class="obj-texto">A presente proposta tem por objeto a execucao dos servicos de <strong>${escapeHtml(dados.tipoServico)}</strong>, abrangendo as atividades tecnicas descritas a seguir, com a respectiva responsabilidade tecnica registrada no conselho competente (CFT/CREA).</p>
+      <p class="obj-texto">A presente proposta tem por objeto a execução dos serviços de <strong>${escapeHtml(dados.tipoServico)}</strong>, abrangendo as atividades técnicas descritas a seguir, com a respectiva responsabilidade técnica registrada no conselho competente (CFT/CREA).</p>
       ${cardImovel(dados)}
     </div>
   </div>
   <div class="bloco cinza">
     <div class="secao-n" style="color:#e0ddd5">02</div>
-    <h2 class="secao">Servicos <em>Inclusos</em></h2>
+    <h2 class="secao">Serviços <em>Inclusos</em></h2>
     <div class="serv-grid">${cards}</div>
   </div>
 </div>
@@ -236,7 +236,7 @@ table.invest td.val { text-align:right; color:${CORES.douradoBrilho}; font-weigh
     <h2 class="secao">Investimento</h2>
     <table class="invest">${servicos}</table>
     <div class="invest-total-card">
-      <div class="label" style="color:rgba(255,255,255,.85)">Valor total dos servicos</div>
+      <div class="label" style="color:rgba(255,255,255,.85)">Valor total dos serviços</div>
       <div class="total">${fmtBRL(dados.valorTotal)}</div>
       <div class="extenso">(${escapeHtml(dados.valorTotalExtenso)})</div>
     </div>

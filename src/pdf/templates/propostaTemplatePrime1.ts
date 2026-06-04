@@ -69,8 +69,8 @@ export function buildPropostaPrime1Html(dados: PropostaDados): string {
     .join('');
   const drl = dados.drlIncluida
     ? `<div class="drl-warning">
-         <div class="drl-titulo">⚠ DRL — Declaracao de Respeito de Limite</div>
-         <div class="drl-texto">A coleta das DRLs junto aos confrontantes e' obrigacao do proprietario. A Romatec orienta o procedimento e averbacao em cartorio conforme exigencia do INCRA (Lei 10.267/2001 e NBR 14166).</div>
+         <div class="drl-titulo">⚠ DRL — Declaração de Respeito de Limite</div>
+         <div class="drl-texto">A coleta das DRLs junto aos confrontantes é obrigação do proprietário. A Romatec orienta o procedimento e averbação em cartório conforme exigência do INCRA (Lei 10.267/2001 e NBR 14166).</div>
        </div>`
     : '';
   const cred = dados.tecnico.credenciais.map((c) => escapeHtml(c)).join(' · ');
@@ -184,11 +184,11 @@ table.invest td.val { text-align:right; color:${CORES.douradoClaro}; font-weight
   <div class="capa-esq">
     <div class="logo">Romatec <span>Consultoria Total</span></div>
     <div>
-      <div class="capa-tipo">PROPOSTA TECNICA E COMERCIAL</div>
+      <div class="capa-tipo">PROPOSTA TÉCNICA E COMERCIAL</div>
       <div class="capa-titulo">${escapeHtml(dados.tipoServico)}</div>
-      <div class="capa-sub">Documento elaborado conforme normas tecnicas vigentes (NBR 13133 / NBR 14653) e legislacao aplicavel.</div>
+      <div class="capa-sub">Documento elaborado conforme normas técnicas vigentes (NBR 13133 / NBR 14653) e legislação aplicável.</div>
     </div>
-    <div class="capa-rodape">Romatec Consultoria Total · ${escapeHtml(dados.tecnico.municipio)}<br/>Emissao: ${escapeHtml(dados.dataEmissao)} · Validade: ${escapeHtml(dados.validade)}</div>
+    <div class="capa-rodape">Romatec Consultoria Total · ${escapeHtml(dados.tecnico.municipio)}<br/>Emissão: ${escapeHtml(dados.dataEmissao)} · Validade: ${escapeHtml(dados.validade)}</div>
   </div>
   <div class="capa-dir">
     <div class="numero-proposta">
@@ -207,14 +207,14 @@ table.invest td.val { text-align:right; color:${CORES.douradoClaro}; font-weight
 <!-- 01 OBJETO + 02 SERVICOS -->
 <div class="page">
   <div class="bloco">
-    <div class="secao-n">Secao 01</div>
+    <div class="secao-n">Seção 01</div>
     <h2 class="secao">Objeto da Proposta</h2>
-    <p class="texto-obj">A presente proposta tem por objeto a execucao dos servicos de <strong>${escapeHtml(dados.tipoServico)}</strong>, abrangendo as atividades tecnicas descritas nas secoes seguintes, com a respectiva responsabilidade tecnica (TRT/ART) registrada no conselho competente.</p>
+    <p class="texto-obj">A presente proposta tem por objeto a execução dos serviços de <strong>${escapeHtml(dados.tipoServico)}</strong>, abrangendo as atividades técnicas descritas nas seções seguintes, com a respectiva responsabilidade técnica (TRT/ART) registrada no conselho competente.</p>
     ${cardImovel(dados)}
   </div>
   <div class="bloco" style="padding-top:0;">
-    <div class="secao-n">Secao 02</div>
-    <h2 class="secao">Servicos Inclusos</h2>
+    <div class="secao-n">Seção 02</div>
+    <h2 class="secao">Serviços Inclusos</h2>
     <div class="serv-grid">${cards}</div>
   </div>
 </div>
@@ -222,16 +222,16 @@ table.invest td.val { text-align:right; color:${CORES.douradoClaro}; font-weight
 <!-- 03 METODOLOGIA + 04 INVESTIMENTO -->
 <div class="page">
   <div class="bloco">
-    <div class="secao-n">Secao 03</div>
+    <div class="secao-n">Seção 03</div>
     <h2 class="secao">Metodologia e Etapas</h2>
     <div class="timeline">${timeline}</div>
   </div>
   <div class="bloco" style="padding-top:0;">
-    <div class="secao-n">Secao 04</div>
+    <div class="secao-n">Seção 04</div>
     <h2 class="secao">Investimento</h2>
     <table class="invest">${servicos}</table>
     <div class="invest-total-card">
-      <div class="label">Valor total dos servicos</div>
+      <div class="label">Valor total dos serviços</div>
       <div class="total">${fmtBRL(dados.valorTotal)}</div>
       <div class="extenso">(${escapeHtml(dados.valorTotalExtenso)})</div>
     </div>
@@ -243,12 +243,12 @@ table.invest td.val { text-align:right; color:${CORES.douradoClaro}; font-weight
 <!-- 05 PRAZO + 06 ASSINATURAS -->
 <div class="page">
   <div class="bloco">
-    <div class="secao-n">Secao 05</div>
+    <div class="secao-n">Seção 05</div>
     <h2 class="secao">Prazo e Cronograma</h2>
     <div class="prazo-grid">${prazos}</div>
   </div>
   <div class="bloco" style="padding-top:0;">
-    <div class="secao-n">Secao 06</div>
+    <div class="secao-n">Seção 06</div>
     <h2 class="secao">Assinaturas</h2>
     <div class="assinaturas">
       <div class="assina">

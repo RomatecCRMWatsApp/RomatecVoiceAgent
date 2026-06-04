@@ -17,10 +17,10 @@ describe('Proposta Template Prime I — HTML (puro)', () => {
   });
   it('exibe bloco DRL quando drlIncluida=true', () => {
     const html = buildPropostaPrime1Html({ ...dadosMockProposta, drlIncluida: true });
-    expect(html).toContain('Declaracao de Respeito de Limite');
+    expect(html).toContain('Declaração de Respeito de Limite');
   });
   it('NAO exibe bloco DRL quando drlIncluida=false', () => {
-    expect(buildPropostaPrime1Html({ ...dadosMockProposta, drlIncluida: false })).not.toContain('Declaracao de Respeito de Limite');
+    expect(buildPropostaPrime1Html({ ...dadosMockProposta, drlIncluida: false })).not.toContain('Declaração de Respeito de Limite');
   });
   it('renderiza fundo dark (#0a0a0a)', () => {
     expect(buildPropostaPrime1Html(dadosMockProposta)).toContain('#0a0a0a');
