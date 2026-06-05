@@ -212,7 +212,10 @@ export function buildLaudoPrime1Html(dados: LaudoDados, qrDataUrl: string): stri
 <html lang="pt-BR"><head><meta charset="utf-8"/>
 <style>
 ${FONTS_PRIME1}
-@page { size: A4; margin: 0; }
+/* v3.56.2: sem 'margin:0' aqui — as margens do PDFOptions (bottom 24mm) devem
+   reservar o espaco do footerTemplate. @page margin:0 zerava o layout e o
+   conteudo pintava por cima do rodape. preferCSSPageSize:false ja controla o size. */
+@page { size: A4; }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#ffffff; color:#1c1c1c; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:10pt; line-height:1.5; padding:0 12mm 8mm; }
 .bloco { padding:14px 0; }

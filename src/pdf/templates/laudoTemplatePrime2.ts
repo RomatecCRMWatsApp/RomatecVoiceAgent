@@ -206,7 +206,9 @@ export function buildLaudoPrime2Html(dados: LaudoDados, qrDataUrl: string): stri
 <html lang="pt-BR"><head><meta charset="utf-8"/>
 <style>
 ${FONTS_PRIME2}
-@page { size: A4; margin: 0; }
+/* v3.56.2: sem 'margin:0' aqui — as margens do PDFOptions (bottom 24mm) reservam
+   o espaco do footerTemplate; @page margin:0 fazia o conteudo pintar sobre o rodape. */
+@page { size: A4; }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#ffffff; color:#222; font-family:Georgia,'Times New Roman',serif; font-size:10pt; line-height:1.55; padding:0 12mm 8mm; }
 .bloco { padding:14px 0; }
