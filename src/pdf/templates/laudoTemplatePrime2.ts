@@ -15,7 +15,7 @@ import { FONTS_PRIME2, escapeHtml, gerarQrCodeBase64, blocoAssinaturaHtml } from
 const OPCOES_FOOTER_PRIME2: Partial<PDFOptions> = {
   displayHeaderFooter: true,
   headerTemplate: '<div></div>',
-  margin: { top: '0', right: '0', bottom: '22mm', left: '0' },
+  margin: { top: '0', right: '0', bottom: '24mm', left: '0' },
   preferCSSPageSize: false,
   footerTemplate:
     '<div style="width:100%;font-size:7pt;font-family:Arial,sans-serif;color:#fff;' +
