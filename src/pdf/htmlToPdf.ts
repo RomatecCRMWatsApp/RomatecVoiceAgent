@@ -78,7 +78,20 @@ export async function htmlToPdf(html: string, options?: Partial<PDFOptions>): Pr
   const page = await browser.newPage();
   try {
     await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 }); // A4 @96dpi
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+    // v3.56.1: 'domcontentloaded' (nao 'networkidle0') — fontes externas
+    // (Google Fonts @import) NAO podem travar a geracao. Em servidor sem
+    // acesso ao googleapis, 'networkidle0' nunca resolvia e estourava o
+    // timeout de 30s ("Tempo limite de navegacao excedido").
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    // Da' uma janela CURTA pras fontes carregarem quando ha internet, mas com
+    // teto de 2,5s: sem internet, cai no fallback de fonte do sistema
+    // (Helvetica/Georgia/Arial/Courier) e a geracao segue normalmente.
+    await Promise.race([
+      page
+        .evaluate(() => (document as unknown as { fonts?: { ready?: Promise<unknown> } }).fonts?.ready)
+        .catch(() => undefined),
+      new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+    ]);
     const pdf = await page.pdf({ ...PDF_DEFAULTS, ...options });
     return Buffer.from(pdf);
   } finally {
