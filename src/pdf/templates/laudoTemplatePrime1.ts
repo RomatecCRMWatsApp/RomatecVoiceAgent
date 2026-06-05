@@ -16,11 +16,12 @@ import {
 } from '../sharedHtml';
 
 // FOOTER FIX — header/footer nativo do puppeteer, margem lateral 0 (o body tem
-// padding proprio de 12mm), margem inferior 18mm pra nao sobrepor o conteudo.
+// padding proprio de 12mm), margem inferior 22mm (v3.56.1) pra reservar espaco
+// do footerTemplate e o conteudo NUNCA sobrepor a paginacao.
 const OPCOES_FOOTER_PRIME1: Partial<PDFOptions> = {
   displayHeaderFooter: true,
   headerTemplate: '<div></div>',
-  margin: { top: '0', right: '0', bottom: '18mm', left: '0' },
+  margin: { top: '0', right: '0', bottom: '22mm', left: '0' },
   preferCSSPageSize: false,
   footerTemplate:
     '<div style="width:100%;font-size:7pt;font-family:Arial,sans-serif;color:#555;' +
@@ -213,9 +214,10 @@ export function buildLaudoPrime1Html(dados: LaudoDados, qrDataUrl: string): stri
 ${FONTS_PRIME1}
 @page { size: A4; margin: 0; }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:#ffffff; color:#1c1c1c; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:10pt; line-height:1.5; padding:0 12mm; }
+body { background:#ffffff; color:#1c1c1c; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:10pt; line-height:1.5; padding:0 12mm 8mm; }
 .bloco { padding:14px 0; }
-.tabela tr, .area-box, .croqui-wrap, .rt-box, .assina-wrap, .validacao-bloco, .kv, .vertice-cab { break-inside:avoid; page-break-inside:avoid; }
+/* v3.56.1: quebra de pagina — linhas/blocos atomicos nunca cortam */
+.tabela tr, tr, .area-box, .croqui-wrap, .rt-box, .assina-wrap, .validacao-bloco, .kv, .vertice-cab, .metodo-etapa, .equip-item, .pgto-wrap, .foto-card { break-inside:avoid; page-break-inside:avoid; }
 
 /* cabecalho institucional */
 .header { background:linear-gradient(135deg,#0B6E4F 0%,#1F4E2E 100%); color:#fff; padding:22px 24px; border-radius:6px; margin-top:14px; display:flex; justify-content:space-between; align-items:center; }
@@ -228,7 +230,7 @@ body { background:#ffffff; color:#1c1c1c; font-family:'Helvetica Neue',Helvetica
 .laudo-badge-label { color:#dfe9e3; font-size:.66rem; letter-spacing:2px; text-transform:uppercase; margin-bottom:6px; }
 
 /* titulos de secao */
-h2.secao { color:#0B6E4F; font-size:10pt; font-weight:700; text-transform:uppercase; letter-spacing:1px; border-left:4px solid #0B6E4F; padding-left:10px; margin:8px 0; }
+h2.secao { color:#0B6E4F; font-size:10pt; font-weight:700; text-transform:uppercase; letter-spacing:1px; border-left:4px solid #0B6E4F; padding-left:10px; margin:8px 0; break-after:avoid; page-break-after:avoid; }
 .texto { color:#333; }
 
 /* identificacao + grids */

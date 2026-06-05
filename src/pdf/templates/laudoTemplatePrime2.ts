@@ -10,11 +10,12 @@ import { htmlToPdf } from '../htmlToPdf';
 import { FONTS_PRIME2, escapeHtml, gerarQrCodeBase64, blocoAssinaturaHtml } from '../sharedHtml';
 
 // FOOTER FIX — rodape escuro com paginacao em verde-zayra, margem lateral 0
-// (body com padding 12mm), margem inferior 18mm.
+// (body com padding 12mm), margem inferior 22mm (v3.56.1) pra reservar o footer
+// e o conteudo nunca sobrepor a paginacao.
 const OPCOES_FOOTER_PRIME2: Partial<PDFOptions> = {
   displayHeaderFooter: true,
   headerTemplate: '<div></div>',
-  margin: { top: '0', right: '0', bottom: '18mm', left: '0' },
+  margin: { top: '0', right: '0', bottom: '22mm', left: '0' },
   preferCSSPageSize: false,
   footerTemplate:
     '<div style="width:100%;font-size:7pt;font-family:Arial,sans-serif;color:#fff;' +
@@ -207,9 +208,10 @@ export function buildLaudoPrime2Html(dados: LaudoDados, qrDataUrl: string): stri
 ${FONTS_PRIME2}
 @page { size: A4; margin: 0; }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:#ffffff; color:#222; font-family:Georgia,'Times New Roman',serif; font-size:10pt; line-height:1.55; padding:0 12mm; }
+body { background:#ffffff; color:#222; font-family:Georgia,'Times New Roman',serif; font-size:10pt; line-height:1.55; padding:0 12mm 8mm; }
 .bloco { padding:14px 0; }
-.tabela tr, .area-box, .croqui-wrap, .rt-box, .assina-wrap, .validacao-bloco, .kv, .vertice-cab { break-inside:avoid; page-break-inside:avoid; }
+/* v3.56.1: quebra de pagina — linhas/blocos atomicos nunca cortam */
+.tabela tr, tr, .area-box, .croqui-wrap, .rt-box, .assina-wrap, .validacao-bloco, .kv, .vertice-cab, .metodo-etapa, .equip-item, .pgto-wrap, .foto-card { break-inside:avoid; page-break-inside:avoid; }
 
 /* cabecalho split */
 .header { display:flex; justify-content:space-between; align-items:stretch; margin-top:14px; gap:18px; }
@@ -224,7 +226,7 @@ body { background:#ffffff; color:#222; font-family:Georgia,'Times New Roman',ser
 .header-right .laudo-data { color:#aaa; font-size:8pt; margin-top:3px; }
 
 /* titulos numerados */
-h2.secao { font-family:Helvetica,Arial,sans-serif; font-weight:700; font-size:10.5pt; color:#1A1A2E; background:#F5F5F5; padding:8px 12px; border-bottom:2px solid #00ff88; margin:8px 0; }
+h2.secao { font-family:Helvetica,Arial,sans-serif; font-weight:700; font-size:10.5pt; color:#1A1A2E; background:#F5F5F5; padding:8px 12px; border-bottom:2px solid #00ff88; margin:8px 0; break-after:avoid; page-break-after:avoid; }
 .texto { color:#333; }
 
 /* identificacao + grids */
