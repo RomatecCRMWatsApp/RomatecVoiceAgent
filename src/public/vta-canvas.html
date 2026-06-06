@@ -1,280 +1,156 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>VTA — Canvas Gráfico | Romatec</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/konva/9.3.16/konva.min.js"></script>
-<script src="/js/vtaVinculo.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>VTA — Canvas Gráfico | ZAYRA</title>
 <style>
-  :root{--bg:#0f1115;--elev:#171a21;--border:#2a2f3a;--text:#e8eaed;--muted:#8a93a6;--gold:#c8a84b;--green:#1a5c2a;--ok:#10b981}
-  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
-  #top{position:fixed;top:0;left:0;right:0;height:48px;background:var(--green);display:flex;align-items:center;gap:8px;padding:0 12px;z-index:10}
-  #top .logo{width:30px;height:30px;border-radius:50%;background:var(--green);border:2px solid var(--gold);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}
-  #top b{font-size:14px}
-  #top .esc{margin-left:auto;font-size:12px;color:#d9e8dd}
-  #stageWrap{position:fixed;top:48px;bottom:0;left:0;right:0;background:#0c0e12}
-  #tools{position:fixed;left:8px;top:56px;display:flex;flex-direction:column;gap:6px;z-index:9}
-  .tool{width:42px;height:42px;border-radius:10px;border:1px solid var(--border);background:var(--elev);color:var(--text);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
-  .tool.on{background:var(--gold);color:#3a2c00;border-color:var(--gold)}
-  #actions{position:fixed;right:8px;top:56px;display:flex;flex-direction:column;gap:6px;z-index:9}
-  .act{padding:8px 10px;border-radius:9px;border:1px solid var(--border);background:var(--elev);color:var(--text);font-size:12px;cursor:pointer;white-space:nowrap}
-  .act.ok{background:var(--ok);color:#04241a;font-weight:700;border:none}
-  .act.gold{background:var(--gold);color:#3a2c00;font-weight:700;border:none}
-  #zoom{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.5);color:var(--muted);font-size:11px;padding:4px 8px;border-radius:6px;z-index:9}
-  dialog{background:var(--elev);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:18px;max-width:360px;width:92%}
-  dialog::backdrop{background:rgba(0,0,0,.6)}
-  dialog label{display:block;font-size:12px;color:var(--muted);margin-bottom:9px}
-  dialog input{width:100%;padding:9px;border-radius:8px;border:1px solid var(--border);background:#0c0e12;color:var(--text);font-size:14px}
-  .row2{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#0a0a0a; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  /* TOPBAR */
+  #topbar { position:fixed; top:0; left:0; right:0; z-index:100; height:52px; background:linear-gradient(135deg,#1a2e1a,#0d1f0d); border-bottom:1px solid #2d5a2d; display:flex; align-items:center; gap:8px; padding:0 10px; }
+  #btn-voltar { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15); color:#fff; padding:6px 12px; border-radius:8px; font-size:14px; cursor:pointer; touch-action:manipulation; }
+  #btn-voltar:active { background:rgba(255,255,255,.18); }
+  #topbar-title { flex:1; color:#a0c8a0; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #vinculo-badge { font-size:11px; color:#90ee90; background:rgba(26,77,26,.6); border:1px solid #2d5a2d; padding:2px 8px; border-radius:6px; }
+  #topbar-escala { background:rgba(184,134,11,.2); border:1px solid #b8860b; color:#f0c040; padding:3px 9px; border-radius:6px; font-size:12px; font-weight:700; }
+  #action-btns { display:flex; gap:5px; }
+  .action-btn { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15); color:#fff; padding:5px 9px; border-radius:7px; font-size:12px; cursor:pointer; touch-action:manipulation; white-space:nowrap; }
+  .action-btn.primary { background:#1a5c1a; border-color:#2d8c2d; color:#90ee90; }
+  .action-btn.ok { background:#0b4a0b; border-color:#1a7a1a; color:#98fb98; }
+  .action-btn.png { background:#b8860b; border-color:#d4a017; color:#fff8dc; }
+  .action-btn:active { opacity:.75; }
+  /* TOOLBAR */
+  #toolbar { position:fixed; left:0; top:52px; bottom:0; z-index:90; width:60px; background:rgba(10,20,10,.95); border-right:1px solid #1a3a1a; display:flex; flex-direction:column; padding:8px 6px; gap:4px; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .tool-btn { width:48px; height:48px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); border-radius:10px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; color:#aaa; font-size:19px; touch-action:manipulation; flex-shrink:0; user-select:none; -webkit-user-select:none; }
+  .tool-btn span.label { font-size:8px; line-height:1; margin-top:2px; color:#888; }
+  .tool-btn.active { background:#1a4d1a; border-color:#3a8c3a; color:#90ee90; }
+  .tool-btn.active span.label { color:#90ee90; }
+  .tool-btn:active { opacity:.7; }
+  .tool-sep { height:1px; background:rgba(255,255,255,.08); margin:4px 0; flex-shrink:0; }
+  /* CANVAS */
+  #canvas-wrap { position:fixed; top:52px; left:60px; right:0; bottom:0; overflow:hidden; background:#111; touch-action:none; cursor:crosshair; }
+  #main-canvas { position:absolute; top:0; left:0; touch-action:none; }
+  #canvas-wrap.tool-pan { cursor:grab; } #canvas-wrap.tool-pan.panning { cursor:grabbing; }
+  #canvas-wrap.tool-select { cursor:default; } #canvas-wrap.tool-text { cursor:text; } #canvas-wrap.tool-eraser { cursor:cell; }
+  #zoom { position:fixed; left:68px; bottom:8px; background:rgba(0,0,0,.5); color:#8a93a6; font-size:11px; padding:4px 8px; border-radius:6px; z-index:80; }
+  /* PROPS */
+  #props-panel { display:none; position:fixed; bottom:18px; left:70px; background:rgba(10,20,10,.95); border:1px solid #2d5a2d; border-radius:12px; padding:10px 14px; z-index:200; gap:10px; align-items:center; flex-wrap:wrap; max-width:calc(100vw - 80px); }
+  #props-panel.visible { display:flex; }
+  .prop-group { display:flex; align-items:center; gap:6px; }
+  .prop-label { color:#888; font-size:11px; }
+  .prop-color { width:28px; height:28px; border-radius:6px; border:2px solid rgba(255,255,255,.2); cursor:pointer; -webkit-appearance:none; padding:0; }
+  .prop-range { width:80px; accent-color:#3a8c3a; }
+  .prop-select { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15); color:#ddd; border-radius:6px; padding:3px 6px; font-size:12px; }
+  /* TEXTO FLUTUANTE */
+  #text-input-overlay { display:none; position:fixed; z-index:300; background:#1a2e1a; border:2px solid #3a8c3a; border-radius:8px; padding:6px 10px; color:#90ee90; font-size:14px; outline:none; min-width:120px; }
+  /* TOAST / LOADING */
+  #toast { display:none; position:fixed; bottom:70px; left:50%; transform:translateX(-50%); background:rgba(10,50,10,.95); border:1px solid #3a8c3a; color:#98fb98; padding:8px 18px; border-radius:20px; font-size:13px; z-index:999; white-space:nowrap; }
+  #loading { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1000; align-items:center; justify-content:center; color:#90ee90; font-size:15px; flex-direction:column; gap:12px; }
+  #loading.visible { display:flex; }
+  .spinner { width:32px; height:32px; border:3px solid rgba(90,180,90,.2); border-top-color:#3a8c3a; border-radius:50%; animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  /* DIALOGS */
+  dialog { background:#171a21; color:#e8eaed; border:1px solid #2d5a2d; border-radius:12px; padding:18px; max-width:380px; width:92%; }
+  dialog::backdrop { background:rgba(0,0,0,.6); }
+  dialog p.t { margin:0 0 10px; font-weight:600; color:#90ee90; }
+  dialog label { display:block; font-size:12px; color:#8a93a6; margin-bottom:9px; }
+  dialog input { width:100%; padding:9px; border-radius:8px; border:1px solid #2a2f3a; background:#0c0e12; color:#e8eaed; font-size:14px; margin-top:3px; }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
+  .dlg-actions { display:flex; gap:8px; margin-top:10px; }
+  .dlg-actions button { flex:1; padding:9px; border-radius:8px; border:1px solid #2a2f3a; background:#1f2430; color:#e8eaed; font-size:13px; cursor:pointer; }
+  .dlg-actions button.go { background:#1a5c1a; border-color:#2d8c2d; color:#90ee90; font-weight:700; }
+  .dlg-msg { font-size:12px; margin-top:8px; }
 </style>
 </head>
 <body>
-<div id="top">
-  <div class="logo">R</div><b>VTA — Canvas Gráfico</b>
-  <span class="esc" id="escala">1:500 · As-Built</span>
-  <span class="esc" id="vinculoBadge" style="display:none"></span>
+<!-- TOPBAR -->
+<div id="topbar">
+  <button id="btn-voltar" title="Voltar">← Voltar</button>
+  <div id="topbar-title">🏗️ <span id="title-text">Croqui As-Built</span></div>
+  <span id="vinculo-badge" style="display:none"></span>
+  <div id="topbar-escala"><span id="escala-text">1:500</span></div>
+  <div id="action-btns">
+    <button class="action-btn" id="act-undo" title="Desfazer">↩</button>
+    <button class="action-btn" id="act-clear" title="Limpar">🗑</button>
+    <button class="action-btn png" id="act-png" title="Exportar PNG">📷 PNG</button>
+    <button class="action-btn ok" id="act-whats" title="WhatsApp">WhatsApp</button>
+    <button class="action-btn primary" id="act-save" title="Salvar">💾 Salvar</button>
+    <button class="action-btn" id="act-prancha" title="Prancha A3">📐 Prancha</button>
+  </div>
 </div>
-<div id="stageWrap"></div>
-<div id="tools">
-  <button class="tool on" data-t="select" title="Selecionar/mover">⬚</button>
-  <button class="tool" data-t="pan" title="Mover tela">✋</button>
-  <button class="tool" data-t="linha" title="Linha">╱</button>
-  <button class="tool" data-t="seta" title="Seta de caimento d'água">➜</button>
-  <button class="tool" data-t="cota" title="Cota">↔</button>
-  <button class="tool" data-t="retangulo" title="Retângulo">▭</button>
-  <button class="tool" data-t="circulo" title="Círculo">◯</button>
-  <button class="tool" data-t="texto" title="Texto">T</button>
-  <button class="tool" data-t="norte" title="Norte">N↑</button>
-  <button class="tool" data-t="undo" title="Desfazer">↩</button>
+<!-- TOOLBAR -->
+<div id="toolbar">
+  <button class="tool-btn" data-tool="select" title="Selecionar">▢<span class="label">SELECT</span></button>
+  <button class="tool-btn active" data-tool="pan" title="Mover tela">✋<span class="label">PAN</span></button>
+  <div class="tool-sep"></div>
+  <button class="tool-btn" data-tool="line" title="Linha">╱<span class="label">LINHA</span></button>
+  <button class="tool-btn" data-tool="wall" title="Parede">▬<span class="label">PAREDE</span></button>
+  <button class="tool-btn" data-tool="arrow" title="Seta">→<span class="label">SETA</span></button>
+  <button class="tool-btn" data-tool="dbl-arrow" title="Cota (seta dupla)">↔<span class="label">COTA</span></button>
+  <button class="tool-btn" data-tool="rect" title="Cômodo">▭<span class="label">CÔMODO</span></button>
+  <button class="tool-btn" data-tool="circle" title="Círculo">○<span class="label">CIRC.</span></button>
+  <button class="tool-btn" data-tool="polyline" title="Polígono">⬡<span class="label">POLY</span></button>
+  <button class="tool-btn" data-tool="door" title="Porta">🚪<span class="label">PORTA</span></button>
+  <button class="tool-btn" data-tool="window" title="Janela">⊞<span class="label">JANELA</span></button>
+  <div class="tool-sep"></div>
+  <button class="tool-btn" data-tool="text" title="Texto">T<span class="label">TEXTO</span></button>
+  <button class="tool-btn" data-tool="measure" title="Cota automática">📏<span class="label">MEDIDA</span></button>
+  <button class="tool-btn" data-tool="north" title="Norte">N↑<span class="label">NORTE</span></button>
+  <div class="tool-sep"></div>
+  <button class="tool-btn" data-tool="eraser" title="Apagador">⌫<span class="label">APAGAR</span></button>
+  <button class="tool-btn" id="btn-undo" title="Desfazer">↩<span class="label">UNDO</span></button>
+  <button class="tool-btn" id="btn-zoom-in" title="Zoom +">＋<span class="label">ZOOM+</span></button>
+  <button class="tool-btn" id="btn-zoom-out" title="Zoom -">－<span class="label">ZOOM-</span></button>
+  <button class="tool-btn" id="btn-fit" title="Encaixar tudo">⊡<span class="label">FIT</span></button>
 </div>
-<div id="actions">
-  <button class="act" id="aSalvar">💾 Salvar</button>
-  <button class="act gold" id="aPng">🖼 PNG</button>
-  <button class="act ok" id="aWhats">WhatsApp</button>
-  <button class="act" id="aPrancha">📐 Prancha</button>
+<!-- PROPS -->
+<div id="props-panel">
+  <div class="prop-group"><label class="prop-label">Cor</label><input type="color" class="prop-color" id="prop-color" value="#ffffff"></div>
+  <div class="prop-group"><label class="prop-label">Esp.</label><input type="range" class="prop-range" id="prop-width" min="1" max="20" value="2"><span id="prop-width-val" style="color:#aaa;font-size:11px">2px</span></div>
+  <div class="prop-group"><label class="prop-label">Estilo</label><select class="prop-select" id="prop-dash"><option value="">Sólido</option><option value="5,5">Tracejado</option><option value="2,4">Pontilhado</option><option value="10,5,2,5">Traço-Ponto</option></select></div>
+  <div class="prop-group" id="prop-fill-group"><label class="prop-label">Fill</label><input type="color" class="prop-color" id="prop-fill" value="#1a3a1a"><input type="range" class="prop-range" id="prop-fill-alpha" min="0" max="100" value="30"></div>
 </div>
+<input type="text" id="text-input-overlay" placeholder="Digite o texto...">
+<div id="canvas-wrap" class="tool-pan"><canvas id="main-canvas"></canvas></div>
 <div id="zoom">100%</div>
-
-<dialog id="dlgPrancha">
-  <p style="margin:0 0 10px;font-weight:600">Gerar prancha técnica (carimbo automático)</p>
-  <label>Título da obra<input id="pTitulo" placeholder="As-Built Residência"></label>
-  <label>Proprietário<input id="pProp" placeholder="Nome completo"></label>
-  <label>Endereço<input id="pEnd" placeholder="Quadra X, Lote Y"></label>
-  <div class="row2"><label>Município<input id="pMun" value="Açailândia, MA"></label><label>Tipo de obra<input id="pTipo" placeholder="Residencial"></label></div>
-  <div class="row2"><label>Prancha nº<input id="pNum" value="PR-001"></label><label>Revisão<input id="pRev" value="R00"></label></div>
-  <div style="display:flex;gap:8px;margin-top:10px"><button class="act" id="pCancel" style="flex:1">Cancelar</button><button class="act gold" id="pGerar" style="flex:1">Gerar</button></div>
-  <div id="pMsg" style="font-size:12px;margin-top:8px"></div>
+<div id="toast"></div>
+<div id="loading"><div class="spinner"></div><span>Aguarde...</span></div>
+<!-- DIALOG PRANCHA -->
+<dialog id="dlg-prancha">
+  <p class="t">📐 Gerar prancha técnica (carimbo Romatec)</p>
+  <label>Título da obra<input id="p-titulo" placeholder="As-Built Residência"></label>
+  <label>Proprietário<input id="p-prop" placeholder="Nome completo"></label>
+  <label>Endereço<input id="p-end" placeholder="Quadra X, Lote Y"></label>
+  <div class="row2"><label>Município<input id="p-mun" value="Açailândia, MA"></label><label>Tipo de obra<input id="p-tipo" placeholder="Residencial"></label></div>
+  <div class="row2"><label>Prancha nº<input id="p-num" value="PR-001"></label><label>Revisão<input id="p-rev" value="R00"></label></div>
+  <div class="dlg-actions"><button id="p-cancel">Cancelar</button><button class="go" id="p-gerar">Gerar</button></div>
 </dialog>
-<dialog id="dlgWhats">
-  <p style="margin:0 0 10px;font-weight:600">Enviar croqui por WhatsApp</p>
-  <label>Telefone (DDD+número)<input id="wTel" placeholder="5599..."></label>
-  <div style="display:flex;gap:8px;margin-top:10px"><button class="act" id="wCancel" style="flex:1">Cancelar</button><button class="act ok" id="wEnviar" style="flex:1">Enviar</button></div>
-  <div id="wMsg" style="font-size:12px;margin-top:8px"></div>
+<!-- DIALOG WHATSAPP -->
+<dialog id="dlg-whats">
+  <p class="t">Enviar croqui por WhatsApp</p>
+  <label>Telefone (DDD+número)<input id="w-tel" placeholder="5599..."></label>
+  <div class="dlg-actions"><button id="w-cancel">Cancelar</button><button class="go" id="w-enviar">Enviar</button></div>
 </dialog>
-
+<!-- CONFIG (lê da URL; sem EJS) -->
+<script src="/js/vtaVinculo.js"></script>
 <script>
-(function(){
-  'use strict';
-  var API='/api/canvas';
-  // v3.52.0: vinculo a Laudo/Proposta via ?laudo_id= / ?proposta_id=
-  var VINCULO = (window.VtaVinculo ? VtaVinculo.lerVinculo(location.search) : {laudo_id:null,proposta_id:null});
-  (function(){
-    var b=document.getElementById('vinculoBadge');
-    if(b && window.VtaVinculo && VtaVinculo.temVinculo(VINCULO)){
-      b.textContent='🔗 '+VtaVinculo.textoBadge(VINCULO); b.style.display='';
-    }
-  })();
-  var canvasId=null, tool='select', undoStack=[];
-  var VW=2000, VH=2000;
-  function api(path,opts){opts=opts||{};opts.credentials='include';return fetch(API+path,opts).then(function(r){if(r.status===401){location.href='/login';throw new Error('nao autenticado');}return r.json().then(function(j){if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;});});}
-
-  var wrap=document.getElementById('stageWrap');
-  var stage=new Konva.Stage({container:'stageWrap',width:wrap.clientWidth,height:wrap.clientHeight,draggable:false});
-  var gridLayer=new Konva.Layer({listening:false});
-  var layer=new Konva.Layer();
-  stage.add(gridLayer);stage.add(layer);
-
-  function drawGrid(){
-    gridLayer.destroyChildren();
-    var s=stage.scaleX(), pos=stage.position();
-    var step=50*s;
-    if(step<8)step*=5; // evita grid denso demais
-    var w=stage.width(), h=stage.height();
-    var startX=((pos.x%step)+step)%step, startY=((pos.y%step)+step)%step;
-    for(var x=startX;x<w;x+=step){gridLayer.add(new Konva.Line({points:[x,0,x,h],stroke:'#2c3650',strokeWidth:1}));}
-    for(var y=startY;y<h;y+=step){gridLayer.add(new Konva.Line({points:[0,y,w,y],stroke:'#2c3650',strokeWidth:1}));}
-    // eixos principais (origem virtual)
-    gridLayer.add(new Konva.Line({points:[pos.x,0,pos.x,h],stroke:'#46557a',strokeWidth:1.5}));
-    gridLayer.add(new Konva.Line({points:[0,pos.y,w,pos.y],stroke:'#46557a',strokeWidth:1.5}));
-    gridLayer.batchDraw();
-  }
-  function updZoom(){document.getElementById('zoom').textContent=Math.round(stage.scaleX()*100)+'%';}
-
-  // ZOOM
-  stage.on('wheel',function(e){
-    e.evt.preventDefault();
-    var old=stage.scaleX(), pointer=stage.getPointerPosition();
-    var mp={x:(pointer.x-stage.x())/old,y:(pointer.y-stage.y())/old};
-    var dir=e.evt.deltaY>0?-1:1;
-    var ns=dir>0?old*1.1:old/1.1;
-    ns=Math.max(0.05,Math.min(20,ns));
-    stage.scale({x:ns,y:ns});
-    stage.position({x:pointer.x-mp.x*ns,y:pointer.y-mp.y*ns});
-    drawGrid();updZoom();
-  });
-  stage.on('dragmove',drawGrid);
-
-  function relPos(){return stage.getRelativePointerPosition();}
-  function pushUndo(node){undoStack.push(node);}
-
-  var drawing=null, startP=null;
-  stage.on('mousedown touchstart',function(e){
-    if(tool==='select'||tool==='pan')return;
-    if(tool==='undo')return;
-    var p=relPos();startP=p;
-    if(tool==='linha'){drawing=new Konva.Line({points:[p.x,p.y,p.x,p.y],stroke:'#e8eaed',strokeWidth:2/stage.scaleX()});layer.add(drawing);}
-    else if(tool==='seta'){drawing=new Konva.Arrow({points:[p.x,p.y,p.x,p.y],stroke:'#4aa3ff',fill:'#4aa3ff',strokeWidth:2.5/stage.scaleX(),pointerLength:12/stage.scaleX(),pointerWidth:10/stage.scaleX()});layer.add(drawing);}
-    else if(tool==='cota'){drawing=new Konva.Line({points:[p.x,p.y,p.x,p.y],stroke:'#c8a84b',strokeWidth:1.5/stage.scaleX(),dash:[6,4]});layer.add(drawing);}
-    else if(tool==='retangulo'){drawing=new Konva.Rect({x:p.x,y:p.y,width:0,height:0,stroke:'#e8eaed',strokeWidth:2/stage.scaleX()});layer.add(drawing);}
-    else if(tool==='circulo'){drawing=new Konva.Circle({x:p.x,y:p.y,radius:0,stroke:'#e8eaed',strokeWidth:2/stage.scaleX()});layer.add(drawing);}
-    else if(tool==='texto'){var t=prompt('Texto / nome de rua:');if(t){var tx=new Konva.Text({x:p.x,y:p.y,text:t,fontSize:18/stage.scaleX(),fill:'#e8eaed',draggable:true});layer.add(tx);pushUndo(tx);layer.draw();}startP=null;}
-    else if(tool==='norte'){var g=desenharNorte(p.x,p.y,60/stage.scaleX());layer.add(g);pushUndo(g);layer.draw();startP=null;}
-  });
-  stage.on('mousemove touchmove',function(){
-    if(!drawing||!startP)return;
-    var p=relPos();
-    if(tool==='linha'||tool==='seta'||tool==='cota'){drawing.points([startP.x,startP.y,p.x,p.y]);
-      if(tool==='cota'){atualizarCota(drawing,startP,p);}}
-    else if(tool==='retangulo'){drawing.width(p.x-startP.x);drawing.height(p.y-startP.y);}
-    else if(tool==='circulo'){drawing.radius(Math.hypot(p.x-startP.x,p.y-startP.y));}
-    layer.batchDraw();
-  });
-  stage.on('mouseup touchend',function(){
-    if(drawing){pushUndo(drawing);drawing=null;startP=null;}
-  });
-
-  var cotaLabels={};
-  function atualizarCota(line,a,b){
-    var d=Math.hypot(b.x-a.x,b.y-a.y);
-    var id=line._id;
-    if(!cotaLabels[id]){cotaLabels[id]=new Konva.Text({fill:'#c8a84b',fontSize:14/stage.scaleX(),fontStyle:'bold'});layer.add(cotaLabels[id]);line.cotaLabelId=id;}
-    var lbl=cotaLabels[id];
-    lbl.fontSize(14/stage.scaleX());
-    lbl.text((d/100).toFixed(2)+' m'); // 100 px virtuais = 1 m (ajustável)
-    lbl.position({x:(a.x+b.x)/2,y:(a.y+b.y)/2-18/stage.scaleX()});
-  }
-  function desenharNorte(x,y,s){
-    var g=new Konva.Group({x:x,y:y,draggable:true});
-    g.add(new Konva.Circle({radius:s/2,stroke:'#c8a84b',strokeWidth:1.5/stage.scaleX()}));
-    g.add(new Konva.Arrow({points:[0,s/2,0,-s/2],stroke:'#c8a84b',fill:'#c8a84b',strokeWidth:2/stage.scaleX(),pointerLength:s*0.22,pointerWidth:s*0.18}));
-    g.add(new Konva.Text({x:-s*0.12,y:-s*0.78,text:'N',fontSize:s*0.4,fontStyle:'bold',fill:'#c8a84b'}));
-    return g;
-  }
-
-  // TOOLBAR
-  document.querySelectorAll('.tool').forEach(function(b){
-    b.onclick=function(){
-      var t=b.getAttribute('data-t');
-      if(t==='undo'){var n=undoStack.pop();if(n){if(n.cotaLabelId&&cotaLabels[n.cotaLabelId]){cotaLabels[n.cotaLabelId].destroy();delete cotaLabels[n.cotaLabelId];}n.destroy();layer.draw();}return;}
-      tool=t;
-      document.querySelectorAll('.tool').forEach(function(x){x.classList.remove('on');});
-      b.classList.add('on');
-      stage.draggable(t==='pan');
-      layer.getChildren().forEach(function(node){node.draggable(t==='select');});
+  (function () {
+    var q = new URLSearchParams(location.search);
+    var vinc = (window.VtaVinculo ? VtaVinculo.lerVinculo(location.search) : { laudo_id: null, proposta_id: null });
+    var titulo = q.get('titulo'); var escala = q.get('escala') || '1:500';
+    if (titulo) { document.getElementById('title-text').textContent = titulo; }
+    document.getElementById('escala-text').textContent = escala;
+    window.VTA_INIT = {
+      canvasId: q.get('id') ? Number(q.get('id')) : null,
+      laudoId: vinc.laudo_id, propostaId: vinc.proposta_id,
+      titulo: titulo || 'Croqui As-Built', escala: escala,
+      tipoPlanta: q.get('tipo_planta') || 'croqui',
+      apiBase: '/api/canvas',
+      voltarUrl: document.referrer || '/',
     };
-  });
-
-  function exportarPNG(){
-    var prev=stage.scaleX(), prevPos=stage.position();
-    // exporta em pixelRatio bom
-    return stage.toDataURL({pixelRatio:Math.max(2,1240/stage.width()),mimeType:'image/png'});
-  }
-  function conteudoSvgImagem(){
-    var png=exportarPNG();
-    return '<image href="'+png+'" x="0" y="0" width="'+VW+'" height="'+VH+'" preserveAspectRatio="xMidYMid meet"/>';
-  }
-
-  // v3.52.0: se aberto vinculado a um Laudo/Proposta, carrega o croqui existente
-  // (modo edicao) em vez de comecar em branco e duplicar a cada save.
-  function carregarVinculado(){
-    var rota=null;
-    if(VINCULO.laudo_id!=null)rota='/por-laudo/'+VINCULO.laudo_id;
-    else if(VINCULO.proposta_id!=null)rota='/por-proposta/'+VINCULO.proposta_id;
-    if(!rota)return Promise.resolve();
-    return api(rota).then(function(j){
-      if(!j||!j.canvas)return;
-      var c=j.canvas;
-      canvasId=c.id;
-      if(c.largura_virtual)VW=Number(c.largura_virtual)||VW;
-      if(c.altura_virtual)VH=Number(c.altura_virtual)||VH;
-      var dj=c.dados_json;
-      if(typeof dj==='string'){try{dj=JSON.parse(dj);}catch(e){dj=null;}}
-      if(dj&&dj.children){
-        var layers=dj.children.filter(function(x){return x.className==='Layer';});
-        var src=layers[layers.length-1]; // ultimo Layer = camada de desenho do usuario
-        if(src&&src.children){
-          src.children.forEach(function(nj){
-            try{var node=Konva.Node.create(JSON.stringify(nj));node.draggable(tool==='select');layer.add(node);pushUndo(node);}catch(e){}
-          });
-          layer.draw();
-        }
-      }
-      var b=document.getElementById('vinculoBadge');
-      if(b)b.textContent='🔗 Editando croqui #'+c.id+(VINCULO.laudo_id!=null?' · Laudo #'+VINCULO.laudo_id:'');
-    }).catch(function(){/* 404 = ainda sem croqui p/ este vinculo → modo criacao */});
-  }
-
-  function garantirCanvas(){
-    if(canvasId)return Promise.resolve(canvasId);
-    var body={tipo:'croqui',titulo:'Croqui VTA',largura_virtual:VW,altura_virtual:VH};
-    if(window.VtaVinculo) body=VtaVinculo.aplicarVinculo(body,VINCULO);
-    return api('',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(j){canvasId=j.id;return canvasId;});
-  }
-
-  document.getElementById('aSalvar').onclick=function(){
-    garantirCanvas().then(function(id){
-      return api('/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({dados_svg:conteudoSvgImagem(),dados_json:JSON.parse(stage.toJSON())})});
-    }).then(function(){alert('Croqui salvo.');}).catch(function(e){alert('Falha: '+e.message);});
-  };
-  document.getElementById('aPng').onclick=function(){
-    var a=document.createElement('a');a.href=exportarPNG();a.download='croqui-romatec.png';a.click();
-  };
-  document.getElementById('aWhats').onclick=function(){document.getElementById('dlgWhats').showModal();};
-  document.getElementById('wCancel').onclick=function(){document.getElementById('dlgWhats').close();};
-  document.getElementById('wEnviar').onclick=function(){
-    var tel=document.getElementById('wTel').value.trim();if(!tel){document.getElementById('wMsg').textContent='Informe o telefone.';return;}
-    document.getElementById('wMsg').textContent='Enviando...';
-    garantirCanvas().then(function(id){
-      return api('/'+id+'/exportar-whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefone:tel,imagemBase64:exportarPNG(),legenda:'Croqui - Romatec Consultoria Total'})});
-    }).then(function(){document.getElementById('wMsg').innerHTML='<span style="color:#10b981">✓ Enviado.</span>';}).catch(function(e){document.getElementById('wMsg').innerHTML='<span style="color:#dc2626">'+e.message+'</span>';});
-  };
-  document.getElementById('aPrancha').onclick=function(){document.getElementById('dlgPrancha').showModal();};
-  document.getElementById('pCancel').onclick=function(){document.getElementById('dlgPrancha').close();};
-  document.getElementById('pGerar').onclick=function(){
-    document.getElementById('pMsg').textContent='Gerando...';
-    garantirCanvas().then(function(id){
-      // salva o conteudo antes de gerar a prancha
-      return api('/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({dados_svg:conteudoSvgImagem()})}).then(function(){
-        return api('/'+id+'/prancha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-          tituloObra:document.getElementById('pTitulo').value,proprietario:document.getElementById('pProp').value,
-          endereco:document.getElementById('pEnd').value,municipio:document.getElementById('pMun').value,
-          tipoObra:document.getElementById('pTipo').value,numeroPrancha:document.getElementById('pNum').value,
-          revisao:document.getElementById('pRev').value,escala:'1:500'})});
-      });
-    }).then(function(j){
-      var w=window.open('','_blank');w.document.write(j.svg);w.document.close();
-      document.getElementById('pMsg').innerHTML='<span style="color:#10b981">✓ Prancha #'+j.pranchaId+' gerada (abriu em nova aba).</span>';
-    }).catch(function(e){document.getElementById('pMsg').innerHTML='<span style="color:#dc2626">'+e.message+'</span>';});
-  };
-
-  window.addEventListener('resize',function(){stage.width(wrap.clientWidth);stage.height(wrap.clientHeight);drawGrid();});
-  // centraliza origem
-  stage.position({x:wrap.clientWidth/2,y:wrap.clientHeight/2});
-  drawGrid();updZoom();
-  carregarVinculado(); // v3.52.0: carrega croqui existente se vinculado
-})();
+  })();
 </script>
+<script src="/js/vtaCanvas.js"></script>
 </body>
 </html>
