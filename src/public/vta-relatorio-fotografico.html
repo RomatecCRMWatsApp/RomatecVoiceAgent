@@ -74,6 +74,11 @@
       <button class="btn" id="btnSalvar" style="flex:1">Salvar relatório</button>
       <button class="btn-green" id="btnWhats" style="flex:1">Enviar WhatsApp</button>
     </div>
+    <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap">
+      <button class="btn" id="btnPdf" style="flex:1">📄 PDF</button>
+      <button class="btn" id="btnAssinar" style="flex:1">🔏 Assinar</button>
+      <button class="btn" id="btnTelegram" style="flex:1">✈️ Telegram</button>
+    </div>
   </div>
 </div>
 
@@ -85,6 +90,16 @@
     <button class="btn-green" id="dlgEnviar" style="flex:1">Enviar</button>
   </div>
   <div id="whatsMsg" style="font-size:12px;margin-top:8px"></div>
+</dialog>
+
+<dialog id="dlgTelegram">
+  <p style="margin:0 0 10px;font-weight:600">Enviar PDF por Telegram</p>
+  <label>Chat ID (numérico ou @usuario)<input id="tgChat" placeholder="Ex: 123456789"></label>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button class="btn" id="tgCancel" style="flex:1">Cancelar</button>
+    <button class="btn-green" id="tgEnviar" style="flex:1">Enviar</button>
+  </div>
+  <div id="tgMsg" style="font-size:12px;margin-top:8px"></div>
 </dialog>
 
 <script src="/js/vtaVinculo.js"></script>
@@ -186,6 +201,33 @@
     if(!relatorioId)return;
     api('/'+relatorioId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'finalizado'})})
       .then(function(){alert('Relatório salvo ('+fotos.length+' fotos).');}).catch(function(e){alert(e.message);});
+  };
+
+  // v3.53.0 (Task 3): PDF técnico / assinatura ICP / Telegram
+  $('btnPdf').onclick=function(){
+    if(!relatorioId){alert('Crie o relatório primeiro.');return;}
+    window.open(API+'/'+relatorioId+'/pdf','_blank');
+  };
+  $('btnAssinar').onclick=function(){
+    if(!relatorioId)return;
+    if(!confirm('Assinar o PDF do relatório digitalmente (PAdES ICP-Brasil)?'))return;
+    $('btnAssinar').disabled=true;$('btnAssinar').textContent='Assinando…';
+    api('/'+relatorioId+'/assinar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({perfil:'pj'})})
+      .then(function(j){
+        alert('Assinado por '+(j.assinado_por||'-')+'. Abrindo PDF assinado…');
+        window.open(API+'/'+relatorioId+'/pdf-assinado','_blank');
+      }).catch(function(e){alert('Falha: '+e.message);})
+      .then(function(){$('btnAssinar').disabled=false;$('btnAssinar').textContent='🔏 Assinar';});
+  };
+  $('btnTelegram').onclick=function(){ if(relatorioId)$('dlgTelegram').showModal(); };
+  $('tgCancel').onclick=function(){$('dlgTelegram').close();};
+  $('tgEnviar').onclick=function(){
+    var chat=$('tgChat').value.trim();
+    if(!chat){$('tgMsg').textContent='Informe o Chat ID.';return;}
+    $('tgMsg').textContent='Enviando…';
+    api('/'+relatorioId+'/enviar-telegram',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chat})})
+      .then(function(){$('tgMsg').innerHTML='<span style="color:#10b981">✓ Enviado.</span>';})
+      .catch(function(e){$('tgMsg').innerHTML='<span style="color:#dc2626">'+e.message+'</span>';});
   };
 
   $('btnWhats').onclick=function(){if(!fotos.length){alert('Nenhuma foto ainda.');return;}$('dlgWhats').showModal();};

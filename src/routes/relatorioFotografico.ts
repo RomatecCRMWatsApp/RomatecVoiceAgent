@@ -161,6 +161,26 @@ router.post('/:id(\\d+)/enviar-whatsapp', requireAuth, async (req: Request, res:
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v3.53.0 (Task 3): POST /:id/enviar-telegram — manda o PDF técnico como documento
+router.post('/:id(\\d+)/enviar-telegram', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    if (!b.chat_id || !String(b.chat_id).trim()) { res.status(400).json({ error: 'chat_id obrigatorio' }); return; }
+    const dados = await carregarRelatorioEFotos(String(req.params.id));
+    if (!dados) { res.status(404).json({ error: 'relatorio nao encontrado' }); return; }
+    const { gerarPdfRelatorioFotografico } = await import('../services/relatorioFotograficoPdf');
+    const pdf = await gerarPdfRelatorioFotografico({
+      relatorio: dados.relatorio as unknown as RelatorioFotograficoMeta,
+      fotos: dados.fotos as unknown as FotoVistoriaPdf[],
+    });
+    const { sendDocument } = await import('../integrations/telegram');
+    await sendDocument(
+      String(b.chat_id).trim(), pdf, `RelatorioFotografico-${req.params.id}.pdf`,
+      dados.relatorio.titulo || 'Relatório Fotográfico — Romatec Consultoria Total');
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // ── v3.53.0 (Task 2): PDF técnico + assinatura ICP-Brasil ───────────────────
 async function carregarRelatorioEFotos(id: string) {
   const pool = await db();
