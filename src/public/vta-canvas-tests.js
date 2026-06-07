@@ -4,7 +4,7 @@
 (function (root) {
   'use strict';
   var E = (typeof CanvasEngine !== 'undefined') ? CanvasEngine
-        : (typeof require !== 'undefined' ? require('./js/vtaCanvasV3.js').CanvasEngine : null);
+        : (typeof require !== 'undefined' ? require('./js/vtaCanvasV4.js').CanvasEngine : null);
   if (!E) { console.error('CanvasEngine não encontrado'); return; }
 
   var tests = [
@@ -59,6 +59,24 @@
       var dpr = window.devicePixelRatio || 1;
       var wrap = document.getElementById('canvas-wrap');
       return E._canvas.width === Math.round(wrap.clientWidth * dpr);
+    }],
+    // ── correções v4 ──
+    ['applyOrtho desligado devolve ponto cru', function () {
+      E._ortho = false; var r = E.applyOrtho({ x: 0, y: 0 }, { x: 300, y: 40 });
+      return r.x === 300 && r.y === 40;
+    }],
+    ['applyOrtho trava em 90°', function () {
+      E._ortho = true; var r = E.applyOrtho({ x: 0, y: 0 }, { x: 30, y: 300 }); E._ortho = false;
+      return Math.abs(r.x) < 0.01 && Math.abs(r.y - Math.hypot(30, 300)) < 0.01;
+    }],
+    ['wallLength 3-4-5 = 500', function () {
+      return Math.abs(E.wallLength({ x1: 0, y1: 0, x2: 300, y2: 400 }) - 500) < 0.01;
+    }],
+    ['wallAngleDeg vertical = 90', function () {
+      return Math.abs(E.wallAngleDeg({ x1: 0, y1: 0, x2: 0, y2: 100 }) - 90) < 0.01;
+    }],
+    ['rotate90 horário', function () {
+      var p = E.rotate90(10, 0, 0, 0); return Math.abs(p[0]) < 0.01 && Math.abs(p[1] + 10) < 0.01;
     }],
   ];
 

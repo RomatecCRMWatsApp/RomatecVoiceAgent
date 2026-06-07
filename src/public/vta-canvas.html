@@ -28,6 +28,19 @@
   #topbar .lab{ font-size:11px; opacity:.6; flex:0 0 auto; }
   #topbar .wa{ background:#1f7a46; border-color:#2aa45e; }
   #topbar .save{ background:var(--accent); border-color:#4a8f40; }
+  #btn-ortho.on{ background:#1f7a46; border-color:#2aa45e; color:#aef5c8; font-weight:700; }
+  #distInput{ display:none; position:fixed; background:#1e2d3d; border:1px solid #f0c040; border-radius:4px;
+    padding:4px 8px; font:14px ui-monospace,monospace; color:#f0c040; z-index:200; pointer-events:none; }
+  #wallEditPanel{ display:none; position:absolute; right:8px; top:8px; width:208px; background:#1e2d3d;
+    border:1px solid #2d4a5a; border-radius:8px; padding:12px; z-index:150; color:#fff; font:13px sans-serif; box-shadow:0 8px 28px rgba(0,0,0,.5); }
+  #wallEditPanel h4{ font-weight:bold; margin-bottom:10px; color:#4a8f40; font-size:13px; }
+  #wallEditPanel label{ display:block; font-size:11px; opacity:.8; margin:6px 0 2px; }
+  #wallEditPanel input, #wallEditPanel select{ width:100%; height:30px; background:#0f1923; border:1px solid #2d4a5a; color:#fff; padding:0 6px; border-radius:4px; font-size:13px; }
+  #wallEditPanel .ln{ display:flex; gap:4px; } #wallEditPanel .ln input{ flex:1; }
+  #wallEditPanel .ln button{ width:34px; background:#3a7d44; border:none; color:#fff; border-radius:4px; cursor:pointer; }
+  #wallEditPanel .act{ display:flex; flex-direction:column; gap:6px; margin-top:10px; }
+  #wallEditPanel .act button{ height:32px; border:none; border-radius:4px; cursor:pointer; color:#fff; font-size:12.5px; }
+  #wallEditPanel .act .b1{ background:#2d4a5a; } #wallEditPanel .act .bd{ background:#5a2d2d; } #wallEditPanel .act .bc{ background:transparent; border:1px solid #2d4a5a; color:#aaa; }
 
   /* WORKSPACE */
   #workspace{ display:flex; flex:1; overflow:hidden; }
@@ -102,6 +115,7 @@
   <!-- TOPBAR -->
   <div id="topbar">
     <button id="btn-voltar" title="Voltar">← Voltar</button>
+    <button id="btn-edit" title="Editar" style="display:none">✎ Editar</button>
     <span id="title-text">Croqui As-Built</span>
     <span id="vinculo-badge" style="display:none"></span>
     <span class="sep"></span>
@@ -117,6 +131,7 @@
     </select>
     <button id="btn-zoom-out" title="Zoom -">🔍−</button>
     <button id="btn-zoom-in" title="Zoom +">🔍+</button>
+    <button id="btn-ortho" title="Modo ortogonal (F8)">⊢ Orto</button>
     <span class="sep"></span>
     <button id="act-undo" title="Desfazer (Ctrl+Z)">↩</button>
     <button id="act-redo" title="Refazer (Ctrl+Shift+Z)">↪</button>
@@ -162,6 +177,26 @@
         <div id="op-swing-wrap"><label>Sentido</label><select id="op-swing"><option value="left">Esquerda</option><option value="right">Direita</option></select></div>
         <div class="mini"><button id="op-rotate" title="Rotacionar 180°">⟳ 180°</button><button id="op-flip" title="Espelhar">⇄ Espelhar</button></div>
         <div class="btns"><button class="cancel" id="op-cancel">Cancelar</button><button class="ok" id="op-ok">Inserir</button></div>
+      </div>
+
+      <!-- INPUT DE DISTÂNCIA (correção 2) -->
+      <div id="distInput"><span id="distInputValue">0</span> cm</div>
+
+      <!-- PAINEL DE EDIÇÃO DE PAREDE (correção 3) -->
+      <div id="wallEditPanel">
+        <h4>✎ Editar Parede</h4>
+        <label>Comprimento (cm)</label>
+        <div class="ln"><input id="wallLenInput" type="number" step="1" min="1"><button id="we-len-ok" title="Aplicar">✓</button></div>
+        <label>Espessura (cm)</label>
+        <select id="wallThickInput"><option>10</option><option>12</option><option selected>15</option><option>20</option><option>25</option></select>
+        <label>Ângulo (°)</label>
+        <div class="ln"><input id="wallAngleInput" type="number" step="0.1"><button id="we-angle-ok" title="Aplicar">✓</button></div>
+        <div class="act">
+          <button class="b1" id="we-rot">↻ Rotacionar 90°</button>
+          <button class="b1" id="we-flip">⇄ Espelhar</button>
+          <button class="bd" id="we-del">🗑 Excluir</button>
+          <button class="bc" id="we-close">Fechar</button>
+        </div>
       </div>
     </div>
   </div>
@@ -226,6 +261,6 @@
     if (q.has('debug')) { var s = document.createElement('script'); s.src = '/vta-canvas-tests.js'; document.body.appendChild(s); }
   })();
 </script>
-<script src="/js/vtaCanvasV3.js"></script>
+<script src="/js/vtaCanvasV4.js"></script>
 </body>
 </html>
