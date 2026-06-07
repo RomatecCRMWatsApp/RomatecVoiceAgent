@@ -81,17 +81,17 @@ const CanvasEngine = (() => {
   function applyOrtho(startPt, rawPt) {
     if (!orthoMode) return rawPt;
     const dx = rawPt.x - startPt.x, dy = rawPt.y - startPt.y;
-    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-    const d = Math.sqrt(dx * dx + dy * dy);
-    const snappedAngle = Math.round(angle / 90) * 90;  // 0/90/180/270 (sem 45°)
-    const rad = snappedAngle * Math.PI / 180;
-    return { x: startPt.x + d * Math.cos(rad), y: startPt.y + d * Math.sin(rad) };
+    // trava H/V por comparação de deltas absolutos (projeta no eixo; não usa atan2)
+    if (Math.abs(dx) >= Math.abs(dy)) return { x: rawPt.x, y: startPt.y };
+    return { x: startPt.x, y: rawPt.y };
   }
-  // ponto efetivo da parede em desenho: snap vence; senão ortho; senão raw
+  // ponto efetivo da parede em desenho: ORTO primeiro; snap só se estiver sobre a linha ortogonal
   function wallPlacePoint(wx, wy, snap) {
-    if (snap) return { x: snap.x, y: snap.y };
-    if (orthoMode && wallChain && wallChain.pts.length) return applyOrtho(wallChain.pts[wallChain.pts.length - 1], { x: wx, y: wy });
-    return { x: wx, y: wy };
+    if (!orthoMode || !wallChain || !wallChain.pts.length) return snap ? { x: snap.x, y: snap.y } : { x: wx, y: wy };
+    const start = wallChain.pts[wallChain.pts.length - 1];
+    const ortho = applyOrtho(start, { x: wx, y: wy });
+    if (snap) { const so = applyOrtho(start, { x: snap.x, y: snap.y }); const a = worldToScreen(snap.x, snap.y), b = worldToScreen(so.x, so.y); if (Math.hypot(a.x - b.x, a.y - b.y) < 18) return { x: snap.x, y: snap.y }; }
+    return ortho;
   }
   function toggleOrtho() {
     orthoMode = !orthoMode;
@@ -549,10 +549,17 @@ const CanvasEngine = (() => {
     const tx = snap ? snap.x : wx, ty = snap ? snap.y : wy;
     switch (activeTool) {
       case 'wall': {
+        // 2 cliques = 1 parede (estilo Revit). Cada clique cria a parede imediatamente e encadeia.
         if (!wallChain) { wallChain = { pts: [place], thickness: state.wallThickness }; break; }
-        const p0 = wallChain.pts[0]; const sp = worldToScreen(p0.x, p0.y), scn = worldToScreen(place.x, place.y);
+        const start = wallChain.pts[0], last = wallChain.pts[wallChain.pts.length - 1];
+        const sp = worldToScreen(start.x, start.y), scn = worldToScreen(place.x, place.y);
         const closing = wallChain.pts.length >= 3 && Math.hypot(sp.x - scn.x, sp.y - scn.y) <= SNAP_RADIUS_PX;
-        if (closing) { finishWall(true); } else wallChain.pts.push(place);
+        const endPt = closing ? start : place;
+        pushHistory();
+        state.walls.push({ id: uid('w'), x1: last.x, y1: last.y, x2: endPt.x, y2: endPt.y, thickness: wallChain.thickness });
+        if (closing) { makeRoomFromChain(wallChain.pts.concat([start])); wallChain = null; }
+        else wallChain.pts.push(endPt);
+        redraw();
         break;
       }
       case 'door': case 'window': {
@@ -601,13 +608,8 @@ const CanvasEngine = (() => {
       }
     }
   }
-  function finishWall(closed) {
-    if (!wallChain || wallChain.pts.length < 2) { wallChain = null; return; }
-    pushHistory();
-    const pts = wallChain.pts.slice(); const th = wallChain.thickness;
-    const n = closed ? pts.length : pts.length - 1;
-    for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; state.walls.push({ id: uid('w'), x1: a.x, y1: a.y, x2: b.x, y2: b.y, thickness: th }); }
-    if (closed) makeRoomFromChain(pts.concat([pts[0]]));
+  function finishWall() {
+    // paredes já são criadas a cada clique; aqui só encerra a cadeia (ESC / duplo clique)
     wallChain = null; redraw();
   }
   function bbox() {
@@ -681,7 +683,10 @@ const CanvasEngine = (() => {
     if (orthoMode) { const o = applyOrtho(last, { x: pointer.wx, y: pointer.wy }); dir = { x: o.x - last.x, y: o.y - last.y }; }
     const L = Math.hypot(dir.x, dir.y); if (L < 0.01) return cancelDist();
     dir = { x: dir.x / L, y: dir.y / L };
-    wallChain.pts.push({ x: last.x + dir.x * cm, y: last.y + dir.y * cm });
+    const endPt = { x: last.x + dir.x * cm, y: last.y + dir.y * cm };
+    pushHistory();
+    state.walls.push({ id: uid('w'), x1: last.x, y1: last.y, x2: endPt.x, y2: endPt.y, thickness: wallChain.thickness });
+    wallChain.pts.push(endPt);
     cancelDist(); redraw();
   }
   function onKey(e) {

@@ -65,9 +65,9 @@
       E._ortho = false; var r = E.applyOrtho({ x: 0, y: 0 }, { x: 300, y: 40 });
       return r.x === 300 && r.y === 40;
     }],
-    ['applyOrtho trava em 90°', function () {
+    ['applyOrtho trava na vertical (|dy|>|dx|)', function () {
       E._ortho = true; var r = E.applyOrtho({ x: 0, y: 0 }, { x: 30, y: 300 }); E._ortho = false;
-      return Math.abs(r.x) < 0.01 && Math.abs(r.y - Math.hypot(30, 300)) < 0.01;
+      return Math.abs(r.x) < 0.01 && Math.abs(r.y - 300) < 0.01;
     }],
     ['wallLength 3-4-5 = 500', function () {
       return Math.abs(E.wallLength({ x1: 0, y1: 0, x2: 300, y2: 400 }) - 500) < 0.01;
