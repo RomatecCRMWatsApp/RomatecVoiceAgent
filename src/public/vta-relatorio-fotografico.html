@@ -12,6 +12,8 @@
   header .logo{width:34px;height:34px;border-radius:50%;background:var(--green);border:2px solid var(--gold);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700}
   header h1{font-size:15px;margin:0}
   header small{display:block;color:#d9e8dd;font-size:11px}
+  header #btnVoltar{margin-left:auto;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:8px;background:rgba(255,255,255,.12);border:1px solid var(--gold);color:#fff;font-size:14px;font-weight:600;text-decoration:none;white-space:nowrap;transition:background .15s}
+  header #btnVoltar:hover{background:rgba(255,255,255,.22)}
   .wrap{max-width:760px;margin:0 auto;padding:14px}
   .card{background:var(--elev);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:9px}
@@ -44,6 +46,8 @@
   <div><h1>VTA — Relatório Fotográfico</h1><small>Romatec Consultoria Total · As-Built / Regularização</small>
     <span id="vinculoBadge" style="display:none;font-size:11px;background:#10b98122;color:#10b981;border:1px solid #10b98155;border-radius:4px;padding:2px 6px;margin-left:6px"></span>
   </div>
+  <!-- Botão Voltar -> hub VTA -->
+  <a href="/vta" id="btnVoltar" title="Voltar">← Voltar</a>
 </header>
 <div class="wrap">
   <div class="card" id="cardDados">
