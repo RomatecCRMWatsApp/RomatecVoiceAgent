@@ -3,119 +3,191 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>VTA — Canvas Gráfico | ZAYRA</title>
+<title>VTA — Canvas As-Built | ZAYRA</title>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html, body { width:100%; height:100%; overflow:hidden; background:#0a0a0a; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-  /* TOPBAR */
-  #topbar { position:fixed; top:0; left:0; right:0; z-index:100; height:52px; background:linear-gradient(135deg,#1a2e1a,#0d1f0d); border-bottom:1px solid #2d5a2d; display:flex; align-items:center; gap:8px; padding:0 10px; }
-  #btn-voltar { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15); color:#fff; padding:6px 12px; border-radius:8px; font-size:14px; cursor:pointer; touch-action:manipulation; }
-  #btn-voltar:active { background:rgba(255,255,255,.18); }
-  #topbar-title { flex:1; color:#a0c8a0; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #vinculo-badge { font-size:11px; color:#90ee90; background:rgba(26,77,26,.6); border:1px solid #2d5a2d; padding:2px 8px; border-radius:6px; }
-  #topbar-escala { background:rgba(184,134,11,.2); border:1px solid #b8860b; color:#f0c040; padding:3px 9px; border-radius:6px; font-size:12px; font-weight:700; }
-  #action-btns { display:flex; gap:5px; }
-  .action-btn { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15); color:#fff; padding:5px 9px; border-radius:7px; font-size:12px; cursor:pointer; touch-action:manipulation; white-space:nowrap; }
-  .action-btn.primary { background:#1a5c1a; border-color:#2d8c2d; color:#90ee90; }
-  .action-btn.ok { background:#0b4a0b; border-color:#1a7a1a; color:#98fb98; }
-  .action-btn.png { background:#b8860b; border-color:#d4a017; color:#fff8dc; }
-  .action-btn:active { opacity:.75; }
-  /* TOOLBAR */
-  #toolbar { position:fixed; left:0; top:52px; bottom:0; z-index:90; width:60px; background:rgba(10,20,10,.95); border-right:1px solid #1a3a1a; display:flex; flex-direction:column; padding:8px 6px; gap:4px; overflow-y:auto; -webkit-overflow-scrolling:touch; }
-  .tool-btn { width:48px; height:48px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); border-radius:10px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; color:#aaa; font-size:19px; touch-action:manipulation; flex-shrink:0; user-select:none; -webkit-user-select:none; }
-  .tool-btn span.label { font-size:8px; line-height:1; margin-top:2px; color:#888; }
-  .tool-btn.active { background:#1a4d1a; border-color:#3a8c3a; color:#90ee90; }
-  .tool-btn.active span.label { color:#90ee90; }
-  .tool-btn:active { opacity:.7; }
-  .tool-sep { height:1px; background:rgba(255,255,255,.08); margin:4px 0; flex-shrink:0; }
-  /* CANVAS */
-  #canvas-wrap { position:fixed; top:52px; left:60px; right:0; bottom:0; overflow:hidden; background:#111; touch-action:none; cursor:crosshair; }
-  #main-canvas { position:absolute; top:0; left:0; touch-action:none; }
-  #canvas-wrap.tool-pan { cursor:grab; } #canvas-wrap.tool-pan.panning { cursor:grabbing; }
-  #canvas-wrap.tool-select { cursor:default; } #canvas-wrap.tool-text { cursor:text; } #canvas-wrap.tool-eraser { cursor:cell; }
-  #zoom { position:fixed; left:68px; bottom:8px; background:rgba(0,0,0,.5); color:#8a93a6; font-size:11px; padding:4px 8px; border-radius:6px; z-index:80; }
-  /* PROPS */
-  #props-panel { display:none; position:fixed; bottom:18px; left:70px; background:rgba(10,20,10,.95); border:1px solid #2d5a2d; border-radius:12px; padding:10px 14px; z-index:200; gap:10px; align-items:center; flex-wrap:wrap; max-width:calc(100vw - 80px); }
-  #props-panel.visible { display:flex; }
-  .prop-group { display:flex; align-items:center; gap:6px; }
-  .prop-label { color:#888; font-size:11px; }
-  .prop-color { width:28px; height:28px; border-radius:6px; border:2px solid rgba(255,255,255,.2); cursor:pointer; -webkit-appearance:none; padding:0; }
-  .prop-range { width:80px; accent-color:#3a8c3a; }
-  .prop-select { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15); color:#ddd; border-radius:6px; padding:3px 6px; font-size:12px; }
-  /* TEXTO FLUTUANTE */
-  #text-input-overlay { display:none; position:fixed; z-index:300; background:#1a2e1a; border:2px solid #3a8c3a; border-radius:8px; padding:6px 10px; color:#90ee90; font-size:14px; outline:none; min-width:120px; }
+  :root{
+    --bg:#1a2332; --wall-fill:#2d5a27; --wall-stroke:#4a8f40; --door:#e8b84b; --window:#5ba4cf;
+    --dim:#f0c040; --snap:#00ff88; --text:#fff; --sidebar:#0f1923; --topbar:#162030;
+    --accent:#3a7d44; --panel-bg:#1e2d3d; --panel-border:#2d4a5a;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ width:100%; height:100%; overflow:hidden; background:var(--bg);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:var(--text); }
+  #app{ display:flex; flex-direction:column; height:100vh; }
+
+  /* TOPBAR (48px) */
+  #topbar{ height:48px; flex-shrink:0; display:flex; align-items:center; gap:6px; padding:0 8px;
+    background:var(--topbar); border-bottom:1px solid rgba(255,255,255,.08); overflow-x:auto; white-space:nowrap; }
+  #topbar button, #topbar select{ height:34px; border:1px solid rgba(255,255,255,.14); background:#1f2c3e; color:#fff;
+    border-radius:7px; padding:0 9px; font-size:12.5px; cursor:pointer; flex:0 0 auto; }
+  #topbar button:active{ transform:translateY(1px); }
+  #topbar .grow{ flex:1 1 auto; min-width:6px; }
+  #title-text{ font-size:13px; color:#a0c8a0; font-weight:600; flex:0 0 auto; }
+  #vinculo-badge{ font-size:11px; color:#90ee90; background:rgba(26,77,26,.6); border:1px solid #2d5a2d; padding:2px 7px; border-radius:6px; flex:0 0 auto; }
+  #topbar .sep{ width:1px; height:24px; background:rgba(255,255,255,.12); flex:0 0 auto; }
+  #topbar .lab{ font-size:11px; opacity:.6; flex:0 0 auto; }
+  #topbar .wa{ background:#1f7a46; border-color:#2aa45e; }
+  #topbar .save{ background:var(--accent); border-color:#4a8f40; }
+
+  /* WORKSPACE */
+  #workspace{ display:flex; flex:1; overflow:hidden; }
+  #toolbar{ width:72px; flex-shrink:0; background:var(--sidebar); display:flex; flex-direction:column;
+    align-items:stretch; padding:6px 0; gap:3px; overflow-y:auto; }
+  .tool-btn{ height:52px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+    cursor:pointer; color:#cdd6e0; border-left:3px solid transparent; background:none; user-select:none; font-size:18px; }
+  .tool-btn .label{ font-size:8.5px; letter-spacing:.3px; }
+  .tool-btn:hover{ background:rgba(255,255,255,.05); }
+  .tool-btn.active{ background:var(--accent); border-left-color:#fff; color:#fff; }
+  .tool-sep{ height:1px; background:rgba(255,255,255,.08); margin:3px 8px; }
+
+  #canvas-wrap{ flex:1; position:relative; overflow:hidden; background:var(--bg); touch-action:none; cursor:crosshair; }
+  #canvas-wrap.tool-pan{ cursor:grab; } #canvas-wrap.tool-pan.panning{ cursor:grabbing; }
+  #canvas-wrap.tool-select{ cursor:default; } #canvas-wrap.tool-text{ cursor:text; } #canvas-wrap.tool-erase{ cursor:cell; }
+  #main-canvas{ position:absolute; top:0; left:0; display:block; touch-action:none; }
+  #zoom{ position:absolute; left:8px; bottom:8px; background:rgba(0,0,0,.5); color:#bcd; font-size:11px;
+    padding:4px 8px; border-radius:6px; pointer-events:none; }
+
   /* TOAST / LOADING */
-  #toast { display:none; position:fixed; bottom:70px; left:50%; transform:translateX(-50%); background:rgba(10,50,10,.95); border:1px solid #3a8c3a; color:#98fb98; padding:8px 18px; border-radius:20px; font-size:13px; z-index:999; white-space:nowrap; }
-  #loading { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1000; align-items:center; justify-content:center; color:#90ee90; font-size:15px; flex-direction:column; gap:12px; }
-  #loading.visible { display:flex; }
-  .spinner { width:32px; height:32px; border:3px solid rgba(90,180,90,.2); border-top-color:#3a8c3a; border-radius:50%; animation:spin .8s linear infinite; }
-  @keyframes spin { to { transform:rotate(360deg); } }
+  #toast{ display:none; position:fixed; bottom:64px; left:50%; transform:translateX(-50%);
+    background:rgba(10,50,10,.95); border:1px solid #3a8c3a; color:#98fb98; padding:8px 16px; border-radius:18px; font-size:12.5px; z-index:999; }
+  #loading{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1000; align-items:center; justify-content:center;
+    color:#90ee90; flex-direction:column; gap:12px; }
+  #loading.visible{ display:flex; }
+  .spinner{ width:32px; height:32px; border:3px solid rgba(90,180,90,.2); border-top-color:#3a8c3a; border-radius:50%; animation:spin .8s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* PAINEL DE ABERTURA */
+  #openingPanel{ display:none; position:absolute; z-index:200; background:var(--panel-bg); border:1px solid var(--panel-border);
+    border-radius:8px; padding:12px; min-width:208px; box-shadow:0 8px 28px rgba(0,0,0,.5); }
+  #openingPanel h4{ font-size:13px; color:var(--door); margin-bottom:8px; }
+  #openingPanel label{ display:block; font-size:11px; opacity:.8; margin:7px 0 2px; }
+  #openingPanel input, #openingPanel select{ width:100%; height:30px; background:#0e1a28; border:1px solid rgba(255,255,255,.15);
+    color:#fff; border-radius:6px; padding:0 7px; font-size:13px; }
+  #openingPanel .row{ display:flex; gap:8px; } #openingPanel .row>div{ flex:1; }
+  #openingPanel .mini{ display:flex; gap:8px; margin-top:8px; }
+  #openingPanel .mini button{ flex:1; height:30px; border:1px solid var(--panel-border); background:#16263a; color:#fff; border-radius:6px; cursor:pointer; font-size:12px; }
+  #openingPanel .btns{ display:flex; gap:8px; margin-top:11px; }
+  #openingPanel .btns button{ flex:1; height:32px; border:none; border-radius:7px; cursor:pointer; font-size:13px; color:#fff; }
+  #openingPanel .ok{ background:var(--accent); } #openingPanel .cancel{ background:#3a4757; }
+
+  /* TABELAS */
+  #tablesOverlay{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.8); z-index:1000; align-items:center; justify-content:center; padding:16px; }
+  #tablesBox{ background:#162030; border:1px solid rgba(255,255,255,.14); border-radius:12px; width:min(700px,100%); max-height:86vh; overflow:auto; padding:18px; }
+  #tablesBox h3{ font-size:16px; margin-bottom:12px; }
+  .ttabs{ display:flex; gap:6px; margin-bottom:10px; }
+  .ttab{ height:32px; padding:0 12px; border:1px solid rgba(255,255,255,.16); background:#22344a; color:#fff; border-radius:7px; cursor:pointer; font-size:12.5px; }
+  .ttab.active{ background:var(--accent); border-color:#4a8f40; }
+  #tablesBody table{ width:100%; border-collapse:collapse; font-size:13px; }
+  #tablesBody th, #tablesBody td{ border:1px solid rgba(255,255,255,.12); padding:6px 9px; text-align:left; }
+  #tablesBody th{ background:#1f3148; } #tablesBody td.num{ text-align:center; }
+  .tbl-actions{ display:flex; gap:8px; margin-top:12px; }
+  .tbl-actions button{ height:32px; padding:0 12px; border:1px solid rgba(255,255,255,.16); background:#22344a; color:#fff; border-radius:7px; cursor:pointer; font-size:12.5px; }
+
   /* DIALOGS */
-  dialog { background:#171a21; color:#e8eaed; border:1px solid #2d5a2d; border-radius:12px; padding:18px; max-width:380px; width:92%; }
-  dialog::backdrop { background:rgba(0,0,0,.6); }
-  dialog p.t { margin:0 0 10px; font-weight:600; color:#90ee90; }
-  dialog label { display:block; font-size:12px; color:#8a93a6; margin-bottom:9px; }
-  dialog input { width:100%; padding:9px; border-radius:8px; border:1px solid #2a2f3a; background:#0c0e12; color:#e8eaed; font-size:14px; margin-top:3px; }
-  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
-  .dlg-actions { display:flex; gap:8px; margin-top:10px; }
-  .dlg-actions button { flex:1; padding:9px; border-radius:8px; border:1px solid #2a2f3a; background:#1f2430; color:#e8eaed; font-size:13px; cursor:pointer; }
-  .dlg-actions button.go { background:#1a5c1a; border-color:#2d8c2d; color:#90ee90; font-weight:700; }
-  .dlg-msg { font-size:12px; margin-top:8px; }
+  dialog{ background:#171a21; color:#e8eaed; border:1px solid #2d5a2d; border-radius:12px; padding:18px; max-width:380px; width:92%; }
+  dialog::backdrop{ background:rgba(0,0,0,.6); }
+  dialog p.t{ margin:0 0 10px; font-weight:600; color:#90ee90; }
+  dialog label{ display:block; font-size:12px; color:#8a93a6; margin-bottom:9px; }
+  dialog input{ width:100%; padding:9px; border-radius:8px; border:1px solid #2a2f3a; background:#0c0e12; color:#e8eaed; font-size:14px; margin-top:3px; }
+  .row2{ display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
+  .dlg-actions{ display:flex; gap:8px; margin-top:10px; }
+  .dlg-actions button{ flex:1; padding:9px; border-radius:8px; border:1px solid #2a2f3a; background:#1f2430; color:#e8eaed; font-size:13px; cursor:pointer; }
+  .dlg-actions button.go{ background:#1a5c1a; border-color:#2d8c2d; color:#90ee90; font-weight:700; }
+
+  @media (max-width:1023px){ #toolbar{ width:58px; } .tool-btn .label{ display:none; } #topbar{ gap:4px; } }
 </style>
 </head>
 <body>
-<!-- TOPBAR -->
-<div id="topbar">
-  <button id="btn-voltar" title="Voltar">← Voltar</button>
-  <div id="topbar-title">🏗️ <span id="title-text">Croqui As-Built</span></div>
-  <span id="vinculo-badge" style="display:none"></span>
-  <div id="topbar-escala"><span id="escala-text">1:500</span></div>
-  <div id="action-btns">
-    <button class="action-btn" id="act-undo" title="Desfazer">↩</button>
-    <button class="action-btn" id="act-clear" title="Limpar">🗑</button>
-    <button class="action-btn png" id="act-png" title="Exportar PNG">📷 PNG</button>
-    <button class="action-btn ok" id="act-whats" title="WhatsApp">WhatsApp</button>
-    <button class="action-btn primary" id="act-save" title="Salvar">💾 Salvar</button>
-    <button class="action-btn" id="act-prancha" title="Prancha A3">📐 Prancha</button>
+<div id="app">
+  <!-- TOPBAR -->
+  <div id="topbar">
+    <button id="btn-voltar" title="Voltar">← Voltar</button>
+    <span id="title-text">Croqui As-Built</span>
+    <span id="vinculo-badge" style="display:none"></span>
+    <span class="sep"></span>
+    <span class="lab">Esp.</span>
+    <select id="sel-espessura" title="Espessura da parede (cm)">
+      <option value="10">10</option><option value="12">12</option>
+      <option value="15" selected>15</option><option value="20">20</option><option value="25">25</option>
+    </select>
+    <span class="lab">Escala</span>
+    <select id="sel-escala" title="Escala">
+      <option value="1:50">1:50</option><option value="1:100" selected>1:100</option>
+      <option value="1:200">1:200</option><option value="1:500">1:500</option>
+    </select>
+    <button id="btn-zoom-out" title="Zoom -">🔍−</button>
+    <button id="btn-zoom-in" title="Zoom +">🔍+</button>
+    <span class="sep"></span>
+    <button id="act-undo" title="Desfazer (Ctrl+Z)">↩</button>
+    <button id="act-redo" title="Refazer (Ctrl+Shift+Z)">↪</button>
+    <button id="act-clear" title="Limpar">🗑</button>
+    <button id="act-png" title="Exportar PNG">📷 PNG</button>
+    <button id="act-whats" class="wa" title="WhatsApp">WhatsApp</button>
+    <button id="act-save" class="save" title="Salvar">💾 Salvar</button>
+    <button id="act-prancha" title="Prancha A3">📐 Prancha</button>
+    <button id="act-tables" title="Tabelas">📊 Tabelas</button>
+    <span class="grow"></span>
+  </div>
+
+  <!-- WORKSPACE -->
+  <div id="workspace">
+    <div id="toolbar">
+      <button class="tool-btn" data-tool="select" title="Selecionar">▢<span class="label">SELECT</span></button>
+      <button class="tool-btn" data-tool="pan" title="Mover tela">✋<span class="label">PAN</span></button>
+      <div class="tool-sep"></div>
+      <button class="tool-btn active" data-tool="wall" title="Parede">▬<span class="label">PAREDE</span></button>
+      <button class="tool-btn" data-tool="door" title="Porta">🚪<span class="label">PORTA</span></button>
+      <button class="tool-btn" data-tool="window" title="Janela">⊞<span class="label">JANELA</span></button>
+      <button class="tool-btn" data-tool="dim" title="Cota">↔<span class="label">COTA</span></button>
+      <button class="tool-btn" data-tool="text" title="Texto">T<span class="label">TEXTO</span></button>
+      <button class="tool-btn" data-tool="measure" title="Medir">📏<span class="label">MEDIDA</span></button>
+      <button class="tool-btn" data-tool="north" title="Norte">N↑<span class="label">NORTE</span></button>
+      <div class="tool-sep"></div>
+      <button class="tool-btn" data-tool="erase" title="Apagar">⌫<span class="label">APAGAR</span></button>
+    </div>
+
+    <div id="canvas-wrap" class="tool-wall">
+      <canvas id="main-canvas"></canvas>
+      <div id="zoom">100%</div>
+
+      <!-- PAINEL DE ABERTURA (porta/janela) -->
+      <div id="openingPanel">
+        <h4 id="op-title">Inserir Porta</h4>
+        <label>Código</label><input id="op-code" type="text" autocomplete="off">
+        <div class="row">
+          <div><label>Largura (cm)</label><input id="op-w" type="number" value="80"></div>
+          <div><label>Altura (cm)</label><input id="op-h" type="number" value="210"></div>
+        </div>
+        <label>Tipo</label><select id="op-type"></select>
+        <div id="op-swing-wrap"><label>Sentido</label><select id="op-swing"><option value="left">Esquerda</option><option value="right">Direita</option></select></div>
+        <div class="mini"><button id="op-rotate" title="Rotacionar 180°">⟳ 180°</button><button id="op-flip" title="Espelhar">⇄ Espelhar</button></div>
+        <div class="btns"><button class="cancel" id="op-cancel">Cancelar</button><button class="ok" id="op-ok">Inserir</button></div>
+      </div>
+    </div>
   </div>
 </div>
-<!-- TOOLBAR -->
-<div id="toolbar">
-  <button class="tool-btn" data-tool="select" title="Selecionar">▢<span class="label">SELECT</span></button>
-  <button class="tool-btn active" data-tool="pan" title="Mover tela">✋<span class="label">PAN</span></button>
-  <div class="tool-sep"></div>
-  <button class="tool-btn" data-tool="line" title="Linha">╱<span class="label">LINHA</span></button>
-  <button class="tool-btn" data-tool="wall" title="Parede">▬<span class="label">PAREDE</span></button>
-  <button class="tool-btn" data-tool="arrow" title="Seta">→<span class="label">SETA</span></button>
-  <button class="tool-btn" data-tool="dbl-arrow" title="Cota (seta dupla)">↔<span class="label">COTA</span></button>
-  <button class="tool-btn" data-tool="rect" title="Cômodo">▭<span class="label">CÔMODO</span></button>
-  <button class="tool-btn" data-tool="circle" title="Círculo">○<span class="label">CIRC.</span></button>
-  <button class="tool-btn" data-tool="polyline" title="Polígono">⬡<span class="label">POLY</span></button>
-  <button class="tool-btn" data-tool="door" title="Porta">🚪<span class="label">PORTA</span></button>
-  <button class="tool-btn" data-tool="window" title="Janela">⊞<span class="label">JANELA</span></button>
-  <div class="tool-sep"></div>
-  <button class="tool-btn" data-tool="text" title="Texto">T<span class="label">TEXTO</span></button>
-  <button class="tool-btn" data-tool="measure" title="Cota automática">📏<span class="label">MEDIDA</span></button>
-  <button class="tool-btn" data-tool="north" title="Norte">N↑<span class="label">NORTE</span></button>
-  <div class="tool-sep"></div>
-  <button class="tool-btn" data-tool="eraser" title="Apagador">⌫<span class="label">APAGAR</span></button>
-  <button class="tool-btn" id="btn-undo" title="Desfazer">↩<span class="label">UNDO</span></button>
-  <button class="tool-btn" id="btn-zoom-in" title="Zoom +">＋<span class="label">ZOOM+</span></button>
-  <button class="tool-btn" id="btn-zoom-out" title="Zoom -">－<span class="label">ZOOM-</span></button>
-  <button class="tool-btn" id="btn-fit" title="Encaixar tudo">⊡<span class="label">FIT</span></button>
-</div>
-<!-- PROPS -->
-<div id="props-panel">
-  <div class="prop-group"><label class="prop-label">Cor</label><input type="color" class="prop-color" id="prop-color" value="#ffffff"></div>
-  <div class="prop-group"><label class="prop-label">Esp.</label><input type="range" class="prop-range" id="prop-width" min="1" max="20" value="2"><span id="prop-width-val" style="color:#aaa;font-size:11px">2px</span></div>
-  <div class="prop-group"><label class="prop-label">Estilo</label><select class="prop-select" id="prop-dash"><option value="">Sólido</option><option value="5,5">Tracejado</option><option value="2,4">Pontilhado</option><option value="10,5,2,5">Traço-Ponto</option></select></div>
-  <div class="prop-group" id="prop-fill-group"><label class="prop-label">Fill</label><input type="color" class="prop-color" id="prop-fill" value="#1a3a1a"><input type="range" class="prop-range" id="prop-fill-alpha" min="0" max="100" value="30"></div>
-</div>
-<input type="text" id="text-input-overlay" placeholder="Digite o texto...">
-<div id="canvas-wrap" class="tool-pan"><canvas id="main-canvas"></canvas></div>
-<div id="zoom">100%</div>
+
 <div id="toast"></div>
 <div id="loading"><div class="spinner"></div><span>Aguarde...</span></div>
+
+<!-- TABELAS -->
+<div id="tablesOverlay">
+  <div id="tablesBox">
+    <h3>📊 Quadros — As-Built</h3>
+    <div class="ttabs">
+      <button class="ttab active" data-ttab="doors">Portas</button>
+      <button class="ttab" data-ttab="windows">Janelas</button>
+      <button class="ttab" data-ttab="rooms">Ambientes</button>
+    </div>
+    <div id="tablesBody"></div>
+    <div class="tbl-actions">
+      <button id="tbl-csv">Copiar CSV</button>
+      <button id="tbl-tsv">Copiar TSV</button>
+      <button id="tbl-close" style="margin-left:auto">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <!-- DIALOG PRANCHA -->
 <dialog id="dlg-prancha">
   <p class="t">📐 Gerar prancha técnica (carimbo Romatec)</p>
@@ -126,31 +198,34 @@
   <div class="row2"><label>Prancha nº<input id="p-num" value="PR-001"></label><label>Revisão<input id="p-rev" value="R00"></label></div>
   <div class="dlg-actions"><button id="p-cancel">Cancelar</button><button class="go" id="p-gerar">Gerar</button></div>
 </dialog>
+
 <!-- DIALOG WHATSAPP -->
 <dialog id="dlg-whats">
   <p class="t">Enviar croqui por WhatsApp</p>
   <label>Telefone (DDD+número)<input id="w-tel" placeholder="5599..."></label>
   <div class="dlg-actions"><button id="w-cancel">Cancelar</button><button class="go" id="w-enviar">Enviar</button></div>
 </dialog>
+
 <!-- CONFIG (lê da URL; sem EJS) -->
 <script src="/js/vtaVinculo.js"></script>
 <script>
   (function () {
     var q = new URLSearchParams(location.search);
     var vinc = (window.VtaVinculo ? VtaVinculo.lerVinculo(location.search) : { laudo_id: null, proposta_id: null });
-    var titulo = q.get('titulo'); var escala = q.get('escala') || '1:500';
-    if (titulo) { document.getElementById('title-text').textContent = titulo; }
-    document.getElementById('escala-text').textContent = escala;
+    var titulo = q.get('titulo'); var escala = q.get('escala') || '1:100';
+    if (titulo) document.getElementById('title-text').textContent = titulo;
+    var selE = document.getElementById('sel-escala'); if (selE && ['1:50','1:100','1:200','1:500'].indexOf(escala) >= 0) selE.value = escala;
     window.VTA_INIT = {
       canvasId: q.get('id') ? Number(q.get('id')) : null,
       laudoId: vinc.laudo_id, propostaId: vinc.proposta_id,
       titulo: titulo || 'Croqui As-Built', escala: escala,
       tipoPlanta: q.get('tipo_planta') || 'croqui',
       apiBase: '/api/canvas',
-      voltarUrl: document.referrer || '/',
     };
+    // testes só com ?debug=1
+    if (q.has('debug')) { var s = document.createElement('script'); s.src = '/vta-canvas-tests.js'; document.body.appendChild(s); }
   })();
 </script>
-<script src="/js/vtaCanvas.js"></script>
+<script src="/js/vtaCanvasV3.js"></script>
 </body>
 </html>
