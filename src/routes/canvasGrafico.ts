@@ -57,6 +57,42 @@ router.get('/por-proposta/:propostaId(\\d+)', requireAuth, async (req: Request, 
   catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v3.60.0 — listar TODOS os croquis vinculados (multi-croqui por laudo/proposta).
+// Reaproveita canvas_graficos; NAO cria tabela nova. Usado pela aba VTA do /obras.
+async function listarCanvasPorVinculo(
+  campo: 'laudo_id' | 'proposta_id', valor: string, res: Response,
+): Promise<void> {
+  const pool = await db();
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, tipo, titulo, escala_grafica, criado_em, atualizado_em
+       FROM canvas_graficos WHERE ${campo} = ? ORDER BY atualizado_em DESC, id DESC`,
+    [valor],
+  );
+  res.json({ croquis: rows });
+}
+
+router.get('/lista/por-laudo/:laudoId(\\d+)', requireAuth, async (req: Request, res: Response) => {
+  try { await listarCanvasPorVinculo('laudo_id', String(req.params.laudoId), res); }
+  catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+router.get('/lista/por-proposta/:propostaId(\\d+)', requireAuth, async (req: Request, res: Response) => {
+  try { await listarCanvasPorVinculo('proposta_id', String(req.params.propostaId), res); }
+  catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// v3.60.0 — croquis recentes (hub VTA do /obras nao e escopado a um laudo).
+router.get('/lista/recentes', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const pool = await db();
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT id, tipo, titulo, escala_grafica, criado_em, atualizado_em
+         FROM canvas_graficos WHERE tipo = 'croqui' ORDER BY atualizado_em DESC, id DESC LIMIT 50`,
+    );
+    res.json({ croquis: rows });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // GET /:id — canvas + elementos
 router.get('/:id(\\d+)', requireAuth, async (req: Request, res: Response) => {
   try {

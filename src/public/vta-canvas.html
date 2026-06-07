@@ -55,7 +55,7 @@
 
   #canvas-wrap{ flex:1; position:relative; overflow:hidden; background:var(--bg); touch-action:none; cursor:crosshair; }
   #canvas-wrap.tool-pan{ cursor:grab; } #canvas-wrap.tool-pan.panning{ cursor:grabbing; }
-  #canvas-wrap.tool-select{ cursor:default; } #canvas-wrap.tool-text{ cursor:text; } #canvas-wrap.tool-erase{ cursor:cell; }
+  #canvas-wrap.tool-select{ cursor:default; } #canvas-wrap.tool-text{ cursor:text; } #canvas-wrap.tool-erase{ cursor:cell; } #canvas-wrap.tool-modify{ cursor:crosshair; }
   #main-canvas{ position:absolute; top:0; left:0; display:block; touch-action:none; }
   #zoom{ position:absolute; left:8px; bottom:8px; background:rgba(0,0,0,.5); color:#bcd; font-size:11px;
     padding:4px 8px; border-radius:6px; pointer-events:none; }
@@ -116,7 +116,7 @@
   <div id="topbar">
     <button id="btn-voltar" title="Voltar">← Voltar</button>
     <button id="btn-edit" title="Editar" style="display:none">✎ Editar</button>
-    <span id="title-text">Croqui As-Built</span>
+    <span id="title-text" contenteditable="true" title="Clique para nomear o croqui" style="outline:none;cursor:text;border-bottom:1px dashed rgba(255,255,255,.2)">Croqui As-Built</span>
     <span id="vinculo-badge" style="display:none"></span>
     <span class="sep"></span>
     <span class="lab">Esp.</span>
@@ -159,6 +159,14 @@
       <button class="tool-btn" data-tool="north" title="Norte">N↑<span class="label">NORTE</span></button>
       <div class="tool-sep"></div>
       <button class="tool-btn" data-tool="erase" title="Apagar">⌫<span class="label">APAGAR</span></button>
+      <div class="tool-sep"></div>
+      <div style="font:9px sans-serif;color:#5a7a8a;text-align:center;letter-spacing:1px;padding:2px 0">MODIFICAR</div>
+      <button class="tool-btn" data-tool="move" title="Mover">✥<span class="label">MOVER</span></button>
+      <button class="tool-btn" data-tool="rotate" title="Rotacionar">↻<span class="label">ROTAR</span></button>
+      <button class="tool-btn" data-tool="mirror" title="Espelhar">⇄<span class="label">ESPELHAR</span></button>
+      <button class="tool-btn" data-tool="trim" title="Cortar">✂<span class="label">CORTAR</span></button>
+      <button class="tool-btn" data-tool="extend" title="Unir/Estender">⊢<span class="label">UNIR</span></button>
+      <button class="tool-btn" data-tool="fillet" title="Chanfro/Canto">⌐<span class="label">CHANFRO</span></button>
     </div>
 
     <div id="canvas-wrap" class="tool-wall">
@@ -261,6 +269,6 @@
     if (q.has('debug')) { var s = document.createElement('script'); s.src = '/vta-canvas-tests.js'; document.body.appendChild(s); }
   })();
 </script>
-<script src="/js/vtaCanvasV4.js"></script>
+<script src="/js/vtaCanvasV5.js"></script>
 </body>
 </html>
