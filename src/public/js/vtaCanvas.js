@@ -535,7 +535,7 @@ const CanvasEngine = (() => {
   // ─── AÇÕES (topbar + dialogs) ────────────────────────────────────────────────
   function bindActions() {
     const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
-    on('btn-voltar', () => { location.href = '/vta'; }); // sempre volta ao hub VTA (sem history.back)
+    on('btn-voltar', () => { location.href = '/obras?vta=1'; }); // volta ao /obras e reabre o painel VTA
     on('act-undo', undo);
     on('act-clear', clearAll);
     on('act-png', exportPNG);

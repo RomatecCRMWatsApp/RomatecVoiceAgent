@@ -65,6 +65,22 @@
       if (t && t !== btn) { var ov = document.getElementById('vta-overlay'); if (ov) ov.style.display = 'none'; btn.classList.remove('active'); }
     });
   }
+  // v3.57.1: deep-link — ao voltar das ferramentas VTA (/obras?vta=1 ou #vta),
+  // reabre o painel automaticamente e marca a aba VTA como ativa.
+  function autoAbrir() {
+    var p = new URLSearchParams(location.search);
+    if (p.get('vta') !== '1' && location.hash !== '#vta') return;
+    ligar(); // garante o botao VTA injetado
+    var btn = document.querySelector('.tabs [data-tab="vta"]');
+    if (btn) {
+      var tabs = document.querySelector('.tabs');
+      if (tabs) tabs.querySelectorAll('.tab.active').forEach(function (x) { x.classList.remove('active'); });
+      btn.classList.add('active');
+    }
+    abrirPainel();
+  }
+
   setInterval(ligar, 1200);
-  if (document.readyState !== 'loading') ligar(); else document.addEventListener('DOMContentLoaded', ligar);
+  if (document.readyState !== 'loading') { ligar(); autoAbrir(); }
+  else document.addEventListener('DOMContentLoaded', function () { ligar(); autoAbrir(); });
 })();
