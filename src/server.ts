@@ -137,11 +137,19 @@ app.get(['/wifi', '/wifi/'], (_req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, 'public', 'captive', 'index.html'));
 });
 
-// Logo da marca em /brand/romatec-logo.png (referenciada no portal). Reusa o
-// asset existente do projeto — alias precisa vir ANTES do express.static.
+// Logo da marca em /brand/romatec-logo.png (referenciada no portal). Serve o
+// logo da bussola "R" em public/brand/ (png OU jpg — sendFile ajusta o
+// Content-Type pela extensao real do arquivo). Fallback pro asset horizontal
+// existente caso nada tenha sido colocado. Alias vem ANTES do express.static.
 app.get('/brand/romatec-logo.png', (_req: Request, res: Response) => {
   res.set('Cache-Control', 'public, max-age=86400');
-  res.sendFile(path.join(__dirname, 'public', 'romatec-logo-removebg-preview.png'));
+  const candidates = [
+    path.join(__dirname, 'public', 'brand', 'romatec-logo.png'),
+    path.join(__dirname, 'public', 'brand', 'romatec-logo.jpg'),
+    path.join(__dirname, 'public', 'romatec-logo-removebg-preview.png'),
+  ];
+  const file = candidates.find((f) => fs.existsSync(f)) ?? candidates[2];
+  res.sendFile(file);
 });
 
 // v3.61.0: dashboard interno de leads Wi-Fi (protegido — a pagina checa o JWT
