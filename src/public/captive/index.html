@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wi-Fi Romatec — Acesso Gratuito</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&family=Space+Mono:wght@400;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #080f0a;
+    --surface:   #0d1710;
+    --surface2:  #111f14;
+    --border:    rgba(138,180,100,0.14);
+    --border-hi: rgba(192,160,60,0.45);
+    --green:     #6aab4a;
+    --green-dim: rgba(106,171,74,0.08);
+    --gold:      #c8a030;
+    --gold-dim:  rgba(200,160,48,0.10);
+    --gold-hi:   #e2b840;
+    --text:      #d6e8c8;
+    --muted:     #3d5435;
+    --faint:     #1e2d1a;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    min-height: 100%;
+    background: var(--bg);
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow-x: hidden;
+  }
+  .bg-layer { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+  .bg-layer::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    opacity: 0.35;
+    mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 100%);
+  }
+  .glow-green {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 700px; height: 700px;
+    background: radial-gradient(circle, rgba(60,110,40,0.18) 0%, transparent 65%);
+    animation: breathe 6s ease-in-out infinite;
+  }
+  .glow-gold {
+    position: absolute; bottom: -120px; right: -80px;
+    width: 520px; height: 520px;
+    background: radial-gradient(circle, rgba(200,160,48,0.12) 0%, transparent 65%);
+    animation: breathe 8s ease-in-out infinite reverse;
+  }
+  .glow-gold2 {
+    position: absolute; top: -100px; left: -60px;
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(200,160,48,0.07) 0%, transparent 65%);
+  }
+  @keyframes breathe {
+    0%,100% { transform: translate(-50%,-50%) scale(1); opacity: 0.7; }
+    50%      { transform: translate(-50%,-50%) scale(1.12); opacity: 1; }
+  }
+  .wrapper {
+    position: relative; z-index: 1;
+    padding: 20px 16px calc(48px + env(safe-area-inset-bottom));
+    width: 100%;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .topbar {
+    display: flex; align-items: center; gap: 14px; margin-bottom: 36px;
+    animation: fadeDown 0.7s cubic-bezier(0.16,1,0.3,1) both;
+  }
+  @keyframes fadeDown {
+    from { opacity: 0; transform: translateY(-14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .logo-icon {
+    width: 64px; height: 64px;
+    border-radius: 16px;
+    overflow: hidden;
+    flex-shrink: 0;
+    box-shadow: 0 0 28px rgba(200,160,48,0.25), 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .logo-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .logo-text {
+    font-family: 'Syne', sans-serif; font-size: 19px; font-weight: 800;
+    color: #fff; letter-spacing: -0.3px; line-height: 1;
+  }
+  .logo-sub {
+    font-family: 'Space Mono', monospace; font-size: 9px;
+    color: var(--muted); letter-spacing: 2.5px; text-transform: uppercase; margin-top: 4px;
+  }
+  .card {
+    width: 420px; max-width: calc(100vw - 32px);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 24px; overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(138,180,100,0.04), 0 24px 80px rgba(0,0,0,0.6),
+                inset 0 1px 0 rgba(255,255,255,0.04);
+    animation: riseCard 0.9s cubic-bezier(0.16,1,0.3,1) 0.1s both;
+  }
+  @keyframes riseCard {
+    from { opacity: 0; transform: translateY(28px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .card-header {
+    background: linear-gradient(135deg, #0f1f10 0%, #131e0e 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 28px 36px 26px;
+    position: relative; overflow: hidden;
+  }
+  .card-header::after {
+    content: ''; position: absolute; top: 0; right: 0;
+    width: 140px; height: 140px;
+    background: radial-gradient(circle at 100% 0%, rgba(200,160,48,0.12), transparent 70%);
+  }
+  .signal-row { display: flex; align-items: flex-end; gap: 4px; margin-bottom: 14px; }
+  .bar { width: 5px; background: var(--green); border-radius: 2px; animation: barPulse 2s ease-in-out infinite; }
+  .bar:nth-child(1) { height: 8px;  animation-delay: 0s;    opacity: 0.9; }
+  .bar:nth-child(2) { height: 14px; animation-delay: 0.15s; opacity: 0.85; }
+  .bar:nth-child(3) { height: 20px; animation-delay: 0.3s;  opacity: 0.9; }
+  .bar:nth-child(4) { height: 26px; animation-delay: 0.45s; opacity: 0.7; }
+  .bar:nth-child(5) { height: 32px; animation-delay: 0.6s;  opacity: 0.4; }
+  @keyframes barPulse {
+    0%,100% { filter: brightness(1); }
+    50%      { filter: brightness(1.4) drop-shadow(0 0 4px var(--green)); }
+  }
+  .ssid {
+    font-family: 'Space Mono', monospace; font-size: 10px;
+    color: var(--green); letter-spacing: 2px; text-transform: uppercase;
+    margin-left: 10px; opacity: 0.7;
+  }
+  .card-title {
+    font-family: 'Syne', sans-serif; font-size: 27px; font-weight: 800;
+    color: #fff; line-height: 1.15; margin-bottom: 6px;
+  }
+  .card-title span { color: var(--gold); }
+  .card-desc { font-size: 13px; color: var(--muted); font-weight: 300; line-height: 1.6; }
+  .status-pill {
+    position: absolute; top: 28px; right: 36px;
+    display: flex; align-items: center; gap: 6px;
+    background: var(--green-dim); border: 1px solid rgba(106,171,74,0.25);
+    border-radius: 20px; padding: 5px 12px;
+    font-family: 'Space Mono', monospace; font-size: 9px;
+    color: var(--green); letter-spacing: 1.5px; text-transform: uppercase;
+  }
+  .status-dot {
+    width: 6px; height: 6px; background: var(--green); border-radius: 50%;
+    box-shadow: 0 0 6px var(--green); animation: blink 1.8s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+  .card-body { padding: 32px 36px 36px; }
+  .field { margin-bottom: 20px; animation: fieldIn 0.6s cubic-bezier(0.16,1,0.3,1) both; }
+  .field:nth-child(1) { animation-delay: 0.25s; }
+  .field:nth-child(2) { animation-delay: 0.35s; }
+  .field:nth-child(3) { animation-delay: 0.45s; }
+  @keyframes fieldIn {
+    from { opacity: 0; transform: translateX(-8px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  .field-label {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: 'Space Mono', monospace; font-size: 9.5px;
+    letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin-bottom: 9px;
+  }
+  .field-label .opt {
+    font-style: italic; font-size: 9px; color: var(--faint);
+    letter-spacing: 0; text-transform: none; font-family: 'DM Sans', sans-serif;
+    border: 1px solid var(--faint); border-radius: 4px; padding: 1px 6px;
+  }
+  .input-wrap { position: relative; }
+  .input-wrap .icon {
+    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+    font-size: 15px; opacity: 0.35; pointer-events: none;
+  }
+  .field input {
+    width: 100%; background: var(--surface2);
+    border: 1px solid rgba(138,180,100,0.1); border-radius: 11px;
+    padding: 13px 14px 13px 40px; color: var(--text);
+    font-family: 'DM Sans', sans-serif; font-size: 15px;
+    outline: none; caret-color: var(--gold);
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  }
+  .field input::placeholder { color: var(--faint); font-weight: 300; }
+  .field input:focus {
+    border-color: var(--border-hi); background: rgba(200,160,48,0.04);
+    box-shadow: 0 0 0 3px rgba(200,160,48,0.07);
+  }
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 4px 0 24px;
+  }
+  .btn-wrap { animation: fieldIn 0.6s cubic-bezier(0.16,1,0.3,1) 0.55s both; }
+  .btn {
+    width: 100%; padding: 15px 24px;
+    background: linear-gradient(135deg, #8a6010 0%, var(--gold) 50%, #a87818 100%);
+    background-size: 200% 100%; background-position: 100% 0;
+    color: #0d0a00; border: none; border-radius: 12px;
+    font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 800;
+    letter-spacing: 0.5px; cursor: pointer; position: relative; overflow: hidden;
+    transition: background-position 0.4s, transform 0.15s, box-shadow 0.2s;
+  }
+  .btn::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.18) 0%, transparent 60%);
+  }
+  .btn:hover {
+    background-position: 0 0; transform: translateY(-2px);
+    box-shadow: 0 10px 32px rgba(200,160,48,0.35), 0 0 0 1px rgba(200,160,48,0.4);
+  }
+  .btn:active { transform: translateY(0); }
+  .btn-inner { display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .btn-arrow { font-size: 18px; transition: transform 0.2s; }
+  .btn:hover .btn-arrow { transform: translateX(4px); }
+  .card-footer {
+    padding: 0 36px 32px;
+    display: flex; align-items: center; justify-content: space-between;
+    animation: fieldIn 0.6s cubic-bezier(0.16,1,0.3,1) 0.65s both;
+  }
+  .footer-left {
+    font-family: 'Space Mono', monospace; font-size: 9px;
+    color: var(--muted); letter-spacing: 1px; line-height: 1.7;
+  }
+  .footer-left a { color: var(--gold); text-decoration: none; opacity: 0.7; }
+  .footer-tag {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--gold-dim); border: 1px solid rgba(200,160,48,0.15);
+    border-radius: 8px; padding: 6px 10px;
+    font-family: 'Space Mono', monospace; font-size: 8px;
+    color: rgba(200,160,48,0.55); letter-spacing: 1.5px; text-transform: uppercase;
+  }
+  .success-screen {
+    display: none; flex-direction: column; align-items: center;
+    text-align: center; padding: 52px 36px 48px;
+    animation: successIn 0.6s cubic-bezier(0.16,1,0.3,1) both;
+  }
+  @keyframes successIn {
+    from { opacity: 0; transform: scale(0.92); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  .success-icon {
+    width: 72px; height: 72px; background: var(--green-dim);
+    border: 1.5px solid rgba(106,171,74,0.3); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 32px; margin-bottom: 24px;
+    box-shadow: 0 0 40px rgba(106,171,74,0.15);
+    animation: popIn 0.5s cubic-bezier(0.34,1.56,0.64,1) both;
+  }
+  @keyframes popIn {
+    from { transform: scale(0.5); opacity: 0; }
+    to   { transform: scale(1); opacity: 1; }
+  }
+  .success-title {
+    font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800;
+    color: #fff; margin-bottom: 8px;
+  }
+  .success-name { color: var(--gold); }
+  .success-desc {
+    font-size: 14px; color: var(--muted); line-height: 1.7;
+    font-weight: 300; max-width: 280px;
+  }
+  .success-bar-wrap {
+    width: 100%; height: 3px; background: var(--faint);
+    border-radius: 2px; margin-top: 32px; overflow: hidden;
+  }
+  .success-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green), var(--gold));
+    border-radius: 2px; animation: loadBar 4s linear forwards;
+  }
+  @keyframes loadBar { from { width: 0; } to { width: 100%; } }
+  .success-redirect {
+    margin-top: 12px; font-family: 'Space Mono', monospace; font-size: 9px;
+    color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase;
+  }
+  @media (max-width: 440px) {
+    .wrapper { padding: 14px 12px 24px; }
+    .topbar { margin-bottom: 14px; gap: 10px; }
+    .logo-icon { width: 44px; height: 44px; border-radius: 11px; }
+    .logo-text { font-size: 16px; }
+    .logo-sub { font-size: 7.5px; letter-spacing: 1.5px; margin-top: 2px; }
+    .card-header { padding: 18px 20px 16px; }
+    .card-title { font-size: 21px; margin-bottom: 4px; }
+    .card-desc { font-size: 12px; }
+    .signal-row { margin-bottom: 10px; }
+    .status-pill { display: none; }
+    .bar:nth-child(5) { height: 26px; }
+    .card-body { padding: 20px 20px 20px; }
+    .field { margin-bottom: 12px; }
+    .field-label { margin-bottom: 6px; font-size: 9px; }
+    .field input { padding: 11px 12px 11px 36px; font-size: 14px; border-radius: 9px; }
+    .input-wrap .icon { left: 11px; font-size: 13px; }
+    .divider { margin: 2px 0 16px; }
+    .btn { padding: 13px 20px; font-size: 14px; border-radius: 10px; }
+    .card-footer { padding: 0 20px 20px; }
+    .footer-left { font-size: 8px; line-height: 1.6; }
+    .footer-tag { padding: 5px 8px; font-size: 7.5px; }
+  }
+</style>
+</head>
+<body>
+<div class="bg-layer">
+  <div class="glow-green"></div>
+  <div class="glow-gold"></div>
+  <div class="glow-gold2"></div>
+</div>
+<div class="wrapper">
+  <div class="topbar">
+    <div class="logo-icon">
+      <img src="/brand/romatec-logo.png" alt="Romatec CRM">
+    </div>
+    <div>
+      <div class="logo-text">Romatec</div>
+      <div class="logo-sub">Consultoria Total · Açailândia/MA</div>
+    </div>
+  </div>
+  <div class="card" id="card">
+    <div class="card-header">
+      <div class="status-pill">
+        <span class="status-dot"></span>
+        Online
+      </div>
+      <div class="signal-row">
+        <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+        <div class="bar"></div><div class="bar"></div>
+        <span class="ssid">ROMATEC-FREE</span>
+      </div>
+      <div class="card-title">Wi-Fi <span>Gratuito</span><br>para você.</div>
+      <div class="card-desc">Preencha os dados abaixo e conecte-se<br>em segundos. Sem senha, sem complicação.</div>
+    </div>
+    <div class="card-body" id="formArea">
+      <div class="field">
+        <div class="field-label">Nome completo</div>
+        <div class="input-wrap">
+          <span class="icon">👤</span>
+          <input type="text" id="nome" placeholder="Como prefere ser chamado?" autocomplete="name">
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">WhatsApp</div>
+        <div class="input-wrap">
+          <span class="icon">📱</span>
+          <input type="tel" id="wpp" placeholder="(99) 99999-9999" autocomplete="tel">
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">E-mail <span class="opt">opcional</span></div>
+        <div class="input-wrap">
+          <span class="icon">✉️</span>
+          <input type="email" id="email" placeholder="seu@email.com" autocomplete="email">
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div class="btn-wrap">
+        <button class="btn" id="btnConectar" onclick="conectar()">
+          <div class="btn-inner">
+            <span>Conectar ao Wi-Fi</span>
+            <span class="btn-arrow">→</span>
+          </div>
+        </button>
+      </div>
+    </div>
+    <div class="success-screen" id="successArea">
+      <div class="success-icon">✓</div>
+      <div class="success-title">Conectado, <span class="success-name" id="successNome">visitante</span>!</div>
+      <div class="success-desc">
+        Você já tem acesso à internet.<br>
+        Enviamos uma mensagem de boas-vindas no seu WhatsApp. 🎉
+      </div>
+      <div class="success-bar-wrap"><div class="success-bar"></div></div>
+      <div class="success-redirect">Redirecionando em 4 segundos…</div>
+    </div>
+    <div class="card-footer" id="cardFooter">
+      <div class="footer-left">
+        📍 Açailândia, MA<br>
+        <a href="https://www.romatecavalieimob.com.br" target="_blank">romatecavalieimob.com.br</a>
+      </div>
+      <div class="footer-tag"><span>🔒</span> SEGURO</div>
+    </div>
+  </div>
+</div>
+<script>
+  document.getElementById('wpp').addEventListener('input', function () {
+    let v = this.value.replace(/\D/g, '');
+    if (v.length > 11) v = v.slice(0, 11);
+    if (v.length > 6)      v = '(' + v.slice(0,2) + ') ' + v.slice(2,7) + '-' + v.slice(7);
+    else if (v.length > 2) v = '(' + v.slice(0,2) + ') ' + v.slice(2);
+    else if (v.length > 0) v = '(' + v;
+    this.value = v;
+  });
+  function conectar() {
+    const nome  = document.getElementById('nome').value.trim();
+    const wpp   = document.getElementById('wpp').value.trim();
+    const email = document.getElementById('email').value.trim();
+    if (!nome) { shake('nome'); return; }
+    if (wpp.replace(/\D/g,'').length < 10) { shake('wpp'); return; }
+    const btn = document.getElementById('btnConectar');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="btn-inner"><span>Conectando…</span></div>';
+    const params = new URLSearchParams(window.location.search);
+    const origem = params.get('local') || 'outro';
+    const mac    = params.get('mac')   || '';
+    fetch('/api/wifi/lead', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome, whatsapp: wpp, email, origem, mac_address: mac })
+    })
+    .then(r => r.json())
+    .then(() => mostrarSucesso(nome))
+    .catch(() => mostrarSucesso(nome));
+  }
+  function mostrarSucesso(nome) {
+    document.getElementById('formArea').style.display   = 'none';
+    document.getElementById('cardFooter').style.display = 'none';
+    document.getElementById('successNome').textContent  = nome.split(' ')[0];
+    const s = document.getElementById('successArea');
+    s.style.display = 'flex';
+    setTimeout(() => { window.location.href = 'https://www.romatecavalieimob.com.br'; }, 4200);
+  }
+  function shake(id) {
+    const el = document.getElementById(id);
+    el.style.animation = 'none';
+    el.offsetHeight;
+    el.style.animation = 'shakeInput 0.4s ease';
+    el.focus();
+  }
+  const s = document.createElement('style');
+  s.textContent = `@keyframes shakeInput{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}`;
+  document.head.appendChild(s);
+</script>
+</body>
+</html>

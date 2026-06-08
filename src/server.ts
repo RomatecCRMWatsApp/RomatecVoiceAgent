@@ -72,6 +72,7 @@ import canvasGraficoRouter from './routes/canvasGrafico';
 import relatorioFotograficoRouter from './routes/relatorioFotografico';
 import pdfPrimeRouter from './routes/pdfPrime'; // v1.99.16 — export PDF templates Prime I/II
 import diligenciasRouter from './routes/diligencias'; // v3.54.0 — Diligências de Campo
+import wifiLeadRoutes from './routes/wifiLeadRoutes'; // v3.61.0 — Captive Portal / Leads Wi-Fi
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -128,6 +129,28 @@ app.get('/minha-quinzena', (_req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, 'public', 'minha-quinzena.html'));
 });
 
+// v3.61.0: Captive Portal Wi-Fi. Roteadores (Mikrotik/TP-Link/Starlink+hAP)
+// abrem /wifi/?local=escritorio. Atende com e sem barra final — a query string
+// nao afeta o match de path e o browser a mantem na URL (lida pelo JS do portal).
+app.get(['/wifi', '/wifi/'], (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'captive', 'index.html'));
+});
+
+// Logo da marca em /brand/romatec-logo.png (referenciada no portal). Reusa o
+// asset existente do projeto — alias precisa vir ANTES do express.static.
+app.get('/brand/romatec-logo.png', (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.sendFile(path.join(__dirname, 'public', 'romatec-logo-removebg-preview.png'));
+});
+
+// v3.61.0: dashboard interno de leads Wi-Fi (protegido — a pagina checa o JWT
+// via fetch /api/wifi/leads e redireciona pro /login se 401).
+app.get('/admin/wifi-leads', (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'admin', 'wifi-leads.html'));
+});
+
 // v1.99.18: error handler explicito pra payload demasiado grande.
 // Sem isso, Express retorna HTML padrao 413 e o JSON.parse no client falha
 // com SyntaxError enganador. Aqui forcamos resposta JSON sempre.
@@ -155,6 +178,11 @@ app.use('/api/canvas', canvasGraficoRouter); // v3.51.0 VTA Canvas
 app.use('/api/relatorio-fotografico', relatorioFotograficoRouter); // v3.51.0 VTA Relatorio Fotografico
 app.use('/api/pdf-prime', pdfPrimeRouter); // v1.99.16 — export PDF templates Prime I/II (proposta/recibo)
 app.use('/api/diligencias', diligenciasRouter); // v3.54.0 — Diligências de Campo
+app.use('/api/wifi', wifiLeadRoutes); // v3.61.0 — Captive Portal / Captação de Leads Wi-Fi
+(async () => {
+  try { const m = await import('./database/migrations-wifi-leads'); await m.runMigrationsWifiLeads(); }
+  catch (err) { console.error('[wifi-leads-migrations] FALHA fatal:', err); }
+})();
 (async () => {
   try { const m = await import('./database/migrations-canvas-grafico'); await m.runCanvasGraficoMigrations(); }
   catch (err) { console.error('[canvas-grafico-migrations] FALHA fatal:', err); }

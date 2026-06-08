@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leads Wi-Fi · ZAYRA</title>
+<style>
+  :root {
+    --bg:#080f0a; --surface:#0d1710; --surface2:#111f14;
+    --border:rgba(138,180,100,0.14); --green:#6aab4a; --green-dim:rgba(106,171,74,0.10);
+    --gold:#c8a030; --gold-hi:#e2b840; --text:#d6e8c8; --muted:#6a7d5f; --faint:#2a3a24;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    min-height:100vh; padding:20px 16px 60px;
+  }
+  .wrap { max-width:1080px; margin:0 auto; }
+  header.top { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:24px; flex-wrap:wrap; }
+  .title h1 { font-size:22px; font-weight:800; color:#fff; letter-spacing:-0.3px; }
+  .title p { font-size:12px; color:var(--muted); margin-top:3px; letter-spacing:1px; text-transform:uppercase; }
+  .stat { font-size:12px; color:var(--green); }
+  .btn-export {
+    background:linear-gradient(135deg,#8a6010,var(--gold) 55%,#a87818);
+    color:#0d0a00; border:none; border-radius:10px; padding:11px 18px;
+    font-weight:700; font-size:13px; cursor:pointer; text-decoration:none; display:inline-block;
+    transition:transform .15s, box-shadow .2s;
+  }
+  .btn-export:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(200,160,48,.3); }
+  .filters {
+    display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px;
+    background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px;
+  }
+  .filters label { display:flex; flex-direction:column; gap:5px; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); }
+  .filters input, .filters select {
+    background:var(--surface2); border:1px solid var(--border); border-radius:9px;
+    padding:9px 11px; color:var(--text); font-size:14px; outline:none; min-width:140px;
+  }
+  .filters input:focus, .filters select:focus { border-color:var(--gold); }
+  .filters .grow { flex:1; min-width:200px; }
+  .filters .grow input { width:100%; }
+  .filter-actions { display:flex; align-items:flex-end; gap:8px; }
+  .btn-apply, .btn-clear {
+    border:1px solid var(--border); background:var(--surface2); color:var(--text);
+    border-radius:9px; padding:9px 14px; font-size:13px; cursor:pointer; font-weight:600;
+  }
+  .btn-apply { background:var(--green-dim); border-color:rgba(106,171,74,.4); color:var(--green); }
+  .table-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  thead th {
+    text-align:left; padding:13px 14px; font-size:10px; letter-spacing:1.5px; text-transform:uppercase;
+    color:var(--muted); background:var(--surface2); border-bottom:1px solid var(--border); white-space:nowrap;
+  }
+  tbody td { padding:12px 14px; border-bottom:1px solid rgba(138,180,100,0.06); vertical-align:top; }
+  tbody tr:hover { background:rgba(106,171,74,0.04); }
+  tbody tr:last-child td { border-bottom:none; }
+  .pill { display:inline-block; padding:3px 9px; border-radius:20px; font-size:10px; letter-spacing:1px; text-transform:uppercase; font-weight:700; }
+  .pill.escritorio { background:rgba(106,171,74,.14); color:var(--green); }
+  .pill.carro      { background:rgba(200,160,48,.14); color:var(--gold-hi); }
+  .pill.starlink   { background:rgba(90,150,220,.14); color:#7ab4e8; }
+  .pill.outro      { background:rgba(150,150,150,.12); color:#9aa897; }
+  .yes { color:var(--green); font-weight:700; }
+  .no  { color:var(--muted); }
+  .empty, .loading { text-align:center; padding:46px 20px; color:var(--muted); font-size:14px; }
+  .pager { display:flex; align-items:center; justify-content:center; gap:14px; margin-top:18px; }
+  .pager button {
+    background:var(--surface2); border:1px solid var(--border); color:var(--text);
+    border-radius:9px; padding:8px 14px; font-size:13px; cursor:pointer;
+  }
+  .pager button:disabled { opacity:.35; cursor:not-allowed; }
+  .pager span { font-size:13px; color:var(--muted); }
+  a.wpp { color:var(--green); text-decoration:none; }
+  a.wpp:hover { text-decoration:underline; }
+  .muted-cell { color:var(--muted); }
+  @media (max-width:640px) {
+    thead { display:none; }
+    table, tbody, tr, td { display:block; width:100%; }
+    tbody tr { border-bottom:1px solid var(--border); padding:8px 0; }
+    tbody td { padding:6px 14px; border:none; }
+    tbody td::before { content:attr(data-label); display:block; font-size:9px; letter-spacing:1px; text-transform:uppercase; color:var(--muted); margin-bottom:2px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="title">
+      <h1>📶 Leads Wi-Fi</h1>
+      <p>Captive Portal · Romatec Consultoria Total</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;">
+      <div class="stat" id="stat">—</div>
+      <a class="btn-export" id="btnExport" href="#">⬇ Exportar CSV</a>
+    </div>
+  </header>
+
+  <div class="filters">
+    <label>Origem
+      <select id="fOrigem">
+        <option value="">Todas</option>
+        <option value="escritorio">Escritório</option>
+        <option value="carro">Carro</option>
+        <option value="starlink">Starlink</option>
+        <option value="outro">Outro</option>
+      </select>
+    </label>
+    <label class="grow">Buscar (nome ou número)
+      <input type="text" id="fSearch" placeholder="Ex: João ou 99999">
+    </label>
+    <label>De
+      <input type="date" id="fDe">
+    </label>
+    <label>Até
+      <input type="date" id="fAte">
+    </label>
+    <div class="filter-actions">
+      <button class="btn-apply" id="btnApply">Filtrar</button>
+      <button class="btn-clear" id="btnClear">Limpar</button>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>Nome</th><th>WhatsApp</th><th>E-mail</th><th>Origem</th><th>Data/Hora</th><th>Boas-vindas</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr><td colspan="6" class="loading">Carregando…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager">
+    <button id="prev" disabled>← Anterior</button>
+    <span id="pageInfo">Página 1</span>
+    <button id="next" disabled>Próxima →</button>
+  </div>
+</div>
+
+<script>
+  let page = 1;
+  let pages = 1;
+
+  const $ = (id) => document.getElementById(id);
+
+  function buildQuery(extra = {}) {
+    const q = new URLSearchParams();
+    const origem = $('fOrigem').value;
+    const search = $('fSearch').value.trim();
+    const de = $('fDe').value;
+    const ate = $('fAte').value;
+    if (origem) q.set('origem', origem);
+    if (search) q.set('search', search);
+    if (de) q.set('de', de);
+    if (ate) q.set('ate', ate);
+    for (const [k, v] of Object.entries(extra)) q.set(k, v);
+    return q;
+  }
+
+  async function api(path) {
+    const r = await fetch(path, { credentials: 'same-origin' });
+    if (r.status === 401) { window.location.href = '/login'; throw new Error('401'); }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }
+
+  function origemPill(o) {
+    const map = { escritorio:'Escritório', carro:'Carro', starlink:'Starlink', outro:'Outro' };
+    return `<span class="pill ${o}">${map[o] || o}</span>`;
+  }
+
+  function fmtData(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return iso || '—';
+    return d.toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function render(leads) {
+    const tb = $('tbody');
+    if (!leads.length) {
+      tb.innerHTML = '<tr><td colspan="6" class="empty">Nenhum lead encontrado.</td></tr>';
+      return;
+    }
+    tb.innerHTML = leads.map(l => `
+      <tr>
+        <td data-label="Nome">${esc(l.nome)}</td>
+        <td data-label="WhatsApp"><a class="wpp" href="https://wa.me/${esc(l.whatsapp)}" target="_blank">${esc(l.whatsapp)}</a></td>
+        <td data-label="E-mail" class="${l.email ? '' : 'muted-cell'}">${esc(l.email || '—')}</td>
+        <td data-label="Origem">${origemPill(l.origem)}</td>
+        <td data-label="Data/Hora">${esc(fmtData(l.criado_em))}</td>
+        <td data-label="Boas-vindas">${l.boas_vindas ? '<span class="yes">✓ Enviada</span>' : '<span class="no">— Não</span>'}</td>
+      </tr>`).join('');
+  }
+
+  async function carregar() {
+    $('tbody').innerHTML = '<tr><td colspan="6" class="loading">Carregando…</td></tr>';
+    try {
+      const q = buildQuery({ page: String(page), limit: '50' });
+      const data = await api('/api/wifi/leads?' + q.toString());
+      pages = data.pages || 1;
+      render(data.leads || []);
+      $('stat').textContent = (data.total || 0) + ' lead(s)';
+      $('pageInfo').textContent = `Página ${data.page || 1} de ${pages}`;
+      $('prev').disabled = (data.page || 1) <= 1;
+      $('next').disabled = (data.page || 1) >= pages;
+    } catch (err) {
+      if (err.message !== '401') {
+        $('tbody').innerHTML = '<tr><td colspan="6" class="empty">Erro ao carregar leads.</td></tr>';
+      }
+    }
+  }
+
+  function atualizarExport() {
+    $('btnExport').href = '/api/wifi/leads/export?' + buildQuery().toString();
+  }
+
+  $('btnApply').addEventListener('click', () => { page = 1; atualizarExport(); carregar(); });
+  $('btnClear').addEventListener('click', () => {
+    $('fOrigem').value = ''; $('fSearch').value = ''; $('fDe').value = ''; $('fAte').value = '';
+    page = 1; atualizarExport(); carregar();
+  });
+  $('fSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') { page = 1; atualizarExport(); carregar(); } });
+  $('prev').addEventListener('click', () => { if (page > 1) { page--; carregar(); } });
+  $('next').addEventListener('click', () => { if (page < pages) { page++; carregar(); } });
+
+  atualizarExport();
+  carregar();
+</script>
+</body>
+</html>
