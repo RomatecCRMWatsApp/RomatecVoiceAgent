@@ -36,12 +36,17 @@ router.get('/export', requireApiKey, async (req: Request, res: Response) => {
     const offset = Math.max(parseInt(req.query.offset as string, 10) || 0, 0);
     const desde = (req.query.desde as string | undefined)?.trim();
 
-    const where: string[] = [];
-    const params: unknown[] = [];
-    if (colaborador) {
-      where.push('f.colaborador LIKE ?');
-      params.push(`%${colaborador}%`);
+    // PRIVACIDADE: colaborador é OBRIGATÓRIO. Sem ele, não devolve nada — evita
+    // que um chamador liste fotos de todos os avaliadores.
+    if (!colaborador) {
+      res.json({ fotos: [], total: 0, limit, offset });
+      return;
     }
+
+    // Match EXATO (collation utf8mb4 já ignora acento/maiúscula) — evita que o
+    // nome de um avaliador como substring vaze fotos de outro.
+    const where: string[] = ['f.colaborador = ?'];
+    const params: unknown[] = [colaborador];
     if (desde) {
       where.push('(f.horario_captura >= ? OR f.criado_em >= ?)');
       params.push(desde, desde);
@@ -89,10 +94,18 @@ router.get('/export', requireApiKey, async (req: Request, res: Response) => {
  */
 router.get('/foto/:id(\\d+)', requireApiKey, async (req: Request, res: Response) => {
   try {
+    // PRIVACIDADE: a foto só é servida se o `colaborador` informado for o dono.
+    // O AvalieImob injeta SEMPRE o nome do avaliador logado (derivado no servidor),
+    // então um usuário nunca alcança a foto de outro mesmo adivinhando o id.
+    const colaborador = ((req.query.colaborador as string) || '').trim();
+    if (!colaborador) {
+      res.status(400).json({ error: 'colaborador obrigatório' });
+      return;
+    }
     const pool = await db();
     const [rows] = await pool.query<RowDataPacket[]>(
-      'SELECT base64_overlay FROM fotos_vistoria WHERE id = ? LIMIT 1',
-      [req.params.id],
+      'SELECT base64_overlay FROM fotos_vistoria WHERE id = ? AND colaborador = ? LIMIT 1',
+      [req.params.id, colaborador],
     );
     const raw = rows.length ? (rows[0].base64_overlay as string | null) : null;
     if (!raw) {
