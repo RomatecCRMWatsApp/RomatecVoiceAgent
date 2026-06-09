@@ -70,6 +70,7 @@ import explicativoRouter from './routes/explicativo';
 import memoriaisHidraulicoRouter from './routes/memoriais'; // v3.49.2 Memorial Hidraulico
 import canvasGraficoRouter from './routes/canvasGrafico';
 import relatorioFotograficoRouter from './routes/relatorioFotografico';
+import galeriaExportRouter from './routes/galeriaExport'; // Feature 04 — export Galeria p/ AvalieImob (X-API-Key)
 import pdfPrimeRouter from './routes/pdfPrime'; // v1.99.16 — export PDF templates Prime I/II
 import diligenciasRouter from './routes/diligencias'; // v3.54.0 — Diligências de Campo
 import wifiLeadRoutes from './routes/wifiLeadRoutes'; // v3.61.0 — Captive Portal / Leads Wi-Fi
@@ -184,6 +185,7 @@ app.use('/api/explicativo', explicativoRouter); // v3.23.0 — texto explicativo
 app.use('/api/memoriais', memoriaisHidraulicoRouter); // v3.49.2 Memorial Hidraulico NBR 5626
 app.use('/api/canvas', canvasGraficoRouter); // v3.51.0 VTA Canvas
 app.use('/api/relatorio-fotografico', relatorioFotograficoRouter); // v3.51.0 VTA Relatorio Fotografico
+app.use('/api/galeria', galeriaExportRouter); // Feature 04 — export Galeria p/ AvalieImob (X-API-Key)
 app.use('/api/pdf-prime', pdfPrimeRouter); // v1.99.16 — export PDF templates Prime I/II (proposta/recibo)
 app.use('/api/diligencias', diligenciasRouter); // v3.54.0 — Diligências de Campo
 app.use('/api/wifi', wifiLeadRoutes); // v3.61.0 — Captive Portal / Captação de Leads Wi-Fi
