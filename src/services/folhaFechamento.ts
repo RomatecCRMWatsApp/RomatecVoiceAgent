@@ -289,7 +289,7 @@ export async function editarValorItem(
   novoValorTotal: number,
   usuario?: string,
   motivo?: string,
-): Promise<{ valor_total: number; valor_vales: number; valor_liquido: number; diaria: number | null }> {
+): Promise<{ valor_total: number; valor_vales: number; valor_liquido: number; diaria: number | null; recibos_atualizados: number }> {
   if (!Number.isFinite(novoValorTotal) || novoValorTotal < 0) {
     throw new Error('Valor bruto inválido (precisa ser número >= 0).');
   }
@@ -345,8 +345,27 @@ export async function editarValorItem(
       [Number(agg[0].tv), Number(agg[0].tva), Number(agg[0].tl), fechamentoId]
     );
 
+    // v3.62.7: propaga o novo valor pro(s) recibo(s) vinculado(s) — o recibo é
+    // um registro separado em `recibos` (resource_type='folha_fechamento_item'),
+    // e o PDF/página de confirmação lê o `valor` dele. Sem isso, a edição muda a
+    // gestão mas o recibo continua com o valor antigo. Não toca em cancelados.
+    const [recUpd] = await conn.execute<ResultSetHeader>(
+      `UPDATE recibos
+          SET valor = ?
+        WHERE resource_type = 'folha_fechamento_item'
+          AND resource_id = ?
+          AND (status IS NULL OR status <> 'cancelado')`,
+      [novoLiquido, String(itemId)]
+    );
+
     await conn.commit();
-    return { valor_total: novoTotal, valor_vales: vales, valor_liquido: novoLiquido, diaria: novaDiaria };
+    return {
+      valor_total: novoTotal,
+      valor_vales: vales,
+      valor_liquido: novoLiquido,
+      diaria: novaDiaria,
+      recibos_atualizados: recUpd.affectedRows ?? 0,
+    };
   } catch (e) {
     await conn.rollback();
     throw e;

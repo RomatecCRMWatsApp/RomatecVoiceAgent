@@ -511,7 +511,8 @@
     s = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s;
     const novo = Number(s);
     if (!isFinite(novo) || novo < 0) { alert('Valor inválido.'); return; }
-    if (novo === atual) return; // nada mudou
+    // v3.62.7: NÃO retorna cedo se igual — reaplicar o mesmo valor re-sincroniza
+    // o recibo vinculado (caso ele tenha ficado com valor antigo).
     try {
       const r = await apiFetch(`${API}/api/folha/item/${itemId}/editar-valor`, {
         method: 'POST',
@@ -520,10 +521,14 @@
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Erro ao editar');
+      const recMsg = Number(data.recibos_atualizados) > 0
+        ? `\n\n📄 Recibo atualizado (${data.recibos_atualizados}) — PDF e link de confirmação já refletem o novo valor.`
+        : '\n\n(nenhum recibo vinculado a atualizar)';
       alert(
         `✓ Valor atualizado.\nBruto: R$ ${Number(data.valor_total).toFixed(2).replace('.', ',')}` +
         `\nVales: R$ ${Number(data.valor_vales).toFixed(2).replace('.', ',')}` +
-        `\nLíquido: R$ ${Number(data.valor_liquido).toFixed(2).replace('.', ',')}`
+        `\nLíquido: R$ ${Number(data.valor_liquido).toFixed(2).replace('.', ',')}` +
+        recMsg
       );
       if (typeof window.recarregarSaldoAberto === 'function') window.recarregarSaldoAberto();
       if (typeof window.recarregarFolhaMensal === 'function') window.recarregarFolhaMensal();
