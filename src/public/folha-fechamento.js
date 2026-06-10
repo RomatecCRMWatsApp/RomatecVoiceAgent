@@ -7,6 +7,26 @@
 
   const API = ''; // mesma origin
 
+  // v3.50.1 FIX: este arquivo era o unico do front que nao mandava
+  // `credentials` em nenhum fetch. Sem isso, o cookie httpOnly `zayra_auth`
+  // (SameSite=strict, secure) nao chegava nas rotas com requireAuth — por
+  // isso /preview (publica) funcionava mas /fechar dava 401 "Nao autenticado".
+  // apiFetch injeta credentials:'include' em todas as chamadas e centraliza o
+  // tratamento de 401 (redireciona pro /login, preservando a origem).
+  function apiFetch(url, opts) {
+    const o = Object.assign({ credentials: 'include' }, opts || {});
+    return window.fetch(url, o).then(function (resp) {
+      if (resp.status === 401) {
+        const voltar = encodeURIComponent(location.pathname + location.search);
+        location.href = '/login?next=' + voltar;
+        // promise pendente: interrompe o fluxo do chamador sem disparar os
+        // catch/alert — a pagina ja esta navegando pro /login.
+        return new Promise(function () {});
+      }
+      return resp;
+    });
+  }
+
   // ============== MODAL DE FECHAMENTO ==============
   function montarModalFechamento() {
     const modal = document.createElement('div');
@@ -97,7 +117,7 @@
 
     // Busca período sugerido
     try {
-      const r = await fetch(`${API}/api/folha/periodo-sugerido/${obraId}`);
+      const r = await apiFetch(`${API}/api/folha/periodo-sugerido/${obraId}`);
       const periodo = await r.json();
       if (!r.ok) throw new Error(periodo.error || 'Erro ao buscar período');
 
@@ -125,7 +145,7 @@
     if (dataFim < dataInicio) return alert('Data fim anterior à data início.');
 
     try {
-      const r = await fetch(`${API}/api/folha/preview`, {
+      const r = await apiFetch(`${API}/api/folha/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ obraId: Number(obraId), dataInicio, dataFim }),
@@ -194,7 +214,7 @@
     if (!confirm(`Confirmar fechamento de ${body.dataInicio} a ${body.dataFim}?\nEssa ação BLOQUEIA os dias marcados nesse período.`)) return;
 
     try {
-      const r = await fetch(`${API}/api/folha/fechar`, {
+      const r = await apiFetch(`${API}/api/folha/fechar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -234,11 +254,11 @@
       const asArray = (v) => Array.isArray(v) ? v : [];
       let lista;
       if (abaAtual === 'quitadas') {
-        const r = await fetch(`${API}/api/folha/listar/${obraId}?status=quitada`);
+        const r = await apiFetch(`${API}/api/folha/listar/${obraId}?status=quitada`);
         lista = asArray(await r.json());
       } else {
-        const r = await fetch(`${API}/api/folha/listar/${obraId}?status=aberta`);
-        const rAlt = await fetch(`${API}/api/folha/listar/${obraId}?status=parcialmente_paga`);
+        const r = await apiFetch(`${API}/api/folha/listar/${obraId}?status=aberta`);
+        const rAlt = await apiFetch(`${API}/api/folha/listar/${obraId}?status=parcialmente_paga`);
         lista = [...asArray(await r.json()), ...asArray(await rAlt.json())];
       }
 
@@ -253,7 +273,7 @@
       const cards = await Promise.all(lista.map(async f => {
         let det;
         try {
-          const r = await fetch(`${API}/api/folha/detalhe/${f.id}`);
+          const r = await apiFetch(`${API}/api/folha/detalhe/${f.id}`);
           det = await r.json();
         } catch (e) {
           det = { error: e.message };
@@ -335,7 +355,7 @@
   window.pagarItem = async function (itemId) {
     let dados;
     try {
-      const r = await fetch(`${API}/api/folha/item/${itemId}/dados-pagamento`);
+      const r = await apiFetch(`${API}/api/folha/item/${itemId}/dados-pagamento`);
       dados = await r.json();
       if (!r.ok) throw new Error(dados.error || 'Erro ao carregar dados');
     } catch (err) { return alert('Erro ao carregar dados do colaborador: ' + err.message); }
@@ -424,7 +444,7 @@
       try {
         // 1. Salva PIX no cadastro se requisitado
         if (salvarPix && pix) {
-          await fetch(`${API}/api/folha/funcionario/${dados.funcionario_id}/pix`, {
+          await apiFetch(`${API}/api/folha/funcionario/${dados.funcionario_id}/pix`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chave_pix: pix }),
@@ -432,7 +452,7 @@
         }
 
         // 2. Marca pago
-        const r = await fetch(`${API}/api/folha/item/${itemId}/pagar`, {
+        const r = await apiFetch(`${API}/api/folha/item/${itemId}/pagar`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -457,7 +477,7 @@
     const motivo = prompt('Motivo da reversão:');
     if (!motivo) return;
     try {
-      const r = await fetch(`${API}/api/folha/item/${itemId}/reverter`, {
+      const r = await apiFetch(`${API}/api/folha/item/${itemId}/reverter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ usuario: window.USUARIO_ATUAL || 'José Romário', motivo }),
@@ -515,7 +535,7 @@
       form.append('arquivo', file);
 
       try {
-        const r = await fetch(`${API}/api/folha/item/${itemId}/upload-comprovante`, {
+        const r = await apiFetch(`${API}/api/folha/item/${itemId}/upload-comprovante`, {
           method: 'POST', body: form,
         });
         const data = await r.json();
@@ -694,7 +714,7 @@
     if (!confirm('Reenviar comprovante e recibo Romatec via WhatsApp pra esse colaborador?')) return;
     mostrarToastComprovante('⏳ Reenviando comprovante e recibo...', 'info', 0);
     try {
-      const r = await fetch(`${API}/api/folha/item/${itemId}/reenviar`, { method: 'POST' });
+      const r = await apiFetch(`${API}/api/folha/item/${itemId}/reenviar`, { method: 'POST' });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Erro no reenvio');
       mostrarToastComprovante('', 'success', 0, true);
@@ -713,7 +733,7 @@
     if (!confirm('Reenviar comprovante + recibo de TODOS os itens pagos desse fechamento? Vai mandar 1 documento + 1 mensagem por colaborador via WhatsApp.')) return;
     mostrarToastComprovante('⏳ Enviando em lote, aguarde...', 'info', 0);
     try {
-      const r = await fetch(`${API}/api/folha/fechamento/${fechamentoId}/enviar-tudo`, { method: 'POST' });
+      const r = await apiFetch(`${API}/api/folha/fechamento/${fechamentoId}/enviar-tudo`, { method: 'POST' });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Erro no envio em lote');
       mostrarToastComprovante('', 'success', 0, true);

@@ -300,10 +300,14 @@ form.addEventListener('submit', async (e) => {
     // colaborador -> /minha-quinzena (implementado em PR B; por enquanto fallback /obras)
     // demais     -> /obras (painel admin existente)
     const role = data.user && data.user.role;
+    // v3.50.1: honra ?next= (apenas caminho interno same-origin, evita
+    // open-redirect). Colaborador sempre vai pra /minha-quinzena.
+    let next = new URLSearchParams(location.search).get('next') || '';
+    if (next && !(next.charAt(0) === '/' && next.charAt(1) !== '/')) next = '';
     if (role === 'colaborador') {
       window.location.href = '/minha-quinzena';
     } else {
-      window.location.href = '/obras';
+      window.location.href = next || '/obras';
     }
   } catch (err) {
     mostrarErro('Erro de conexão. Verifique sua internet.');
