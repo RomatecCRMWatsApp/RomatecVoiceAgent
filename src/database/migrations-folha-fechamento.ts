@@ -113,8 +113,8 @@ const ALTERS_RECIBOS_AJUSTES: Array<{ label: string; sql: string }> = [
     sql: `ALTER TABLE recibos_ajustes ADD INDEX idx_ajustes_fechamento (fechamento_id)`,
   },
   {
-    label: 'INDEX idx_ajustes_membro_periodo',
-    sql: `ALTER TABLE recibos_ajustes ADD INDEX idx_ajustes_membro_periodo (membro_id, periodo, tipo)`,
+    label: 'INDEX idx_ajustes_membro_tipo_criado',
+    sql: `ALTER TABLE recibos_ajustes ADD INDEX idx_ajustes_membro_tipo_criado (membro_id, tipo, criado_em)`,
   },
 ];
 

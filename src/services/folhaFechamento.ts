@@ -10,32 +10,21 @@
 //
 // v3.62.0: vales/adiantamentos agora SÃO computados. Os vales passados pelo CEO
 // (POST /api/recibos/vale/criar-e-enviar) gravam em `recibos_ajustes`
-// (membro_id, periodo 'YYYY-MM-Q', tipo='adiantamento', valor). No fechamento:
-//   - valor_vales = SUM dos adiantamentos ABERTOS (fechamento_id IS NULL) cujo
-//     `periodo` cai dentro do range [dataInicio, dataFim] do fechamento.
+// (membro_id, tipo='adiantamento', valor, criado_em). No fechamento:
+//   - valor_vales = SUM dos adiantamentos ABERTOS (fechamento_id IS NULL)
+//     PASSADOS dentro do range [dataInicio, dataFim] — usa a DATA em que o vale
+//     foi dado (criado_em), NÃO o rótulo `periodo`.
 //   - ao fechar, esses adiantamentos recebem o fechamento_id (ficam "quitados"),
 //     evitando dupla dedução — mesmo padrão de romatec_obra_funcionario_dias.
+//
+// v3.62.2 FIX: antes casava por código de quinzena de calendário ('YYYY-MM-Q'),
+// mas o ciclo real da obra (ex: 23/05 → 06/06) não bate com a quinzena de
+// calendário (16–31 / 1–15). Resultado: um vale da quinzena ANTERIOR (passado
+// dia ~23, código 'YYYY-05-2') vazava pro fechamento seguinte que também começa
+// dentro de 'YYYY-05-2'. A data real do vale (criado_em) resolve sem ambiguidade.
 
 import type { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import pool from '../database/connection';
-
-// v3.62.0: códigos de quinzena ('YYYY-MM-Q', Q=1 se dia<=15 senão 2) que o range
-// [dataInicio, dataFim] toca. Mesma regra de calcularPeriodoAtual/periodo_corrente.
-export function quinzenaCodesDoRange(dataInicio: string, dataFim: string): string[] {
-  const codes = new Set<string>();
-  const d = new Date(dataInicio + 'T00:00:00');
-  const fim = new Date(dataFim + 'T00:00:00');
-  let guard = 0;
-  while (d <= fim && guard < 800) {
-    const ano = d.getFullYear();
-    const mes = String(d.getMonth() + 1).padStart(2, '0');
-    const q = d.getDate() <= 15 ? 1 : 2;
-    codes.add(`${ano}-${mes}-${q}`);
-    d.setDate(d.getDate() + 1);
-    guard++;
-  }
-  return [...codes];
-}
 
 export interface FecharFolhaInput {
   obraId: number;
@@ -166,23 +155,21 @@ export async function fecharFolha(input: FecharFolhaInput): Promise<{
       [fechamentoId, input.obraId, input.dataInicio, input.dataFim]
     );
 
-    // 5b. v3.62.0: quita os vales (adiantamentos) descontados — marca com o
-    // fechamento_id pra não serem deduzidos de novo. Mesmo predicado do SUM em
-    // calcularItens (membros do fechamento + período + abertos), garantindo que
-    // o total quitado bata com o total_vales do snapshot.
+    // 5b. v3.62.0/v3.62.2: quita os vales (adiantamentos) descontados — marca com
+    // o fechamento_id pra não serem deduzidos de novo. Mesmo predicado do SUM em
+    // calcularItens (membros do fechamento + criado_em no range + abertos),
+    // garantindo que o total quitado bata com o total_vales do snapshot.
     if (totalVales > 0) {
-      const codes = quinzenaCodesDoRange(input.dataInicio, input.dataFim);
       const membroIds = itens.map(i => i.funcionario_id);
       const membroPh = membroIds.map(() => '?').join(', ');
-      const codesPh = codes.map(() => '?').join(', ');
       await conn.execute(
         `UPDATE recibos_ajustes
             SET fechamento_id = ?
           WHERE tipo = 'adiantamento'
             AND fechamento_id IS NULL
             AND membro_id IN (${membroPh})
-            AND periodo IN (${codesPh})`,
-        [fechamentoId, ...membroIds, ...codes]
+            AND DATE(criado_em) BETWEEN ? AND ?`,
+        [fechamentoId, ...membroIds, input.dataInicio, input.dataFim]
       );
     }
 
@@ -513,12 +500,9 @@ export async function obterDetalhe(fechamentoId: number) {
 
 // ===== CÁLCULO INTERNO =====
 async function calcularItens(exec: Executor, obraId: number, dataInicio: string, dataFim: string): Promise<PreviewItem[]> {
-  // v3.62.0: códigos de quinzena do período pra somar os vales (adiantamentos)
-  // abertos. Sempre tem >=1 (callers validam dataFim>=dataInicio).
-  const codes = quinzenaCodesDoRange(dataInicio, dataFim);
-  const codesPh = codes.map(() => '?').join(', ');
-
   // Subquery posicional: os placeholders do SELECT vêm ANTES dos do WHERE.
+  // Vales = adiantamentos abertos PASSADOS dentro do range (pela data real
+  // criado_em — ver cabeçalho do arquivo, v3.62.2).
   const [linhas] = await exec.query<RowDataPacket[]>(
     `SELECT
         e.id AS funcionario_id,
@@ -534,7 +518,7 @@ async function calcularItens(exec: Executor, obraId: number, dataInicio: string,
            WHERE a.membro_id = e.id
              AND a.tipo = 'adiantamento'
              AND a.fechamento_id IS NULL
-             AND a.periodo IN (${codesPh})
+             AND DATE(a.criado_em) BETWEEN ? AND ?
         ), 0) AS soma_vales
       FROM romatec_obra_equipe e
       INNER JOIN romatec_obra_funcionario_dias d ON d.funcionario_id = e.id
@@ -544,7 +528,7 @@ async function calcularItens(exec: Executor, obraId: number, dataInicio: string,
      GROUP BY e.id, e.nome, e.funcao, e.valor_dia
     HAVING (dias_integral + dias_manha + dias_tarde) > 0
      ORDER BY e.nome`,
-    [...codes, obraId, dataInicio, dataFim]
+    [dataInicio, dataFim, obraId, dataInicio, dataFim]
   );
   if (linhas.length === 0) return [];
 
