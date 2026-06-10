@@ -104,6 +104,20 @@
     padding: 4px 10px; border-radius: 999px; white-space: nowrap;
   }
   .sb-pill.ver { color: var(--gold); cursor: default; }
+  /* v3.62.0: indicador de nova versao disponivel (clica pra atualizar) */
+  .sb-update {
+    display: none; align-items: center; gap: 5px;
+    font-size: 12px; font-weight: 600; color: #06120a;
+    background: var(--warning); border: 1px solid var(--warning);
+    padding: 4px 11px; border-radius: 999px; cursor: pointer;
+    white-space: nowrap; animation: sbPulse 1.6s ease-in-out infinite;
+  }
+  .sb-update.show { display: inline-flex; }
+  .sb-update:hover { filter: brightness(1.08); }
+  @keyframes sbPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,170,51,0.45); }
+    50%      { box-shadow: 0 0 0 5px rgba(255,170,51,0); }
+  }
   .sb-bell {
     position: relative; display: inline-flex; align-items: center; justify-content: center;
     width: 32px; height: 32px; border-radius: 50%;
@@ -1080,6 +1094,7 @@ window.forcarUpdateApp = forcarUpdate;
     </div>
     <div class="sb-group">
       <span class="sb-pill ver" id="sbVersion" title="Versão e data do build em produção">v…</span>
+      <button class="sb-update" id="sbUpdate" title="Há uma versão mais nova no servidor — toque para atualizar">⬆ Atualizar</button>
       <button class="sb-bell" id="sbBell" title="Notificações" aria-label="Notificações">🔔<span class="dot" id="sbBellDot">0</span></button>
       <div class="sb-user" id="sbUser" title="Sessão atual">
         <span class="sb-avatar" id="sbAvatar">··</span>
@@ -1320,23 +1335,74 @@ fetch(API + '/health')
   tick();
   setInterval(tick, 1000);
 
-  // ----- Versao + data do build -----
-  fetch(API + '/api/version', { cache: 'no-store' })
-    .then(r => r.json())
-    .then(v => {
-      const el = document.getElementById('sbVersion');
-      if (!el || !v) return;
-      let txt = 'v' + (v.version || '?');
-      if (v.buildTime) {
-        const b = new Date(v.buildTime);
-        if (!isNaN(b)) {
-          txt += ' · ' + z(b.getDate()) + '/' + z(b.getMonth() + 1) + '/' + b.getFullYear() +
-                 ' ' + z(b.getHours()) + ':' + z(b.getMinutes());
-        }
+  // ----- Versao + data do build + deteccao de nova versao -----
+  let primeiroBuildTime = null; // buildTime visto no 1o load (detecta redeploy com aba aberta)
+
+  function fmtVersao(v) {
+    let txt = 'v' + (v.version || '?');
+    if (v.buildTime) {
+      const b = new Date(v.buildTime);
+      if (!isNaN(b)) {
+        txt += ' · ' + z(b.getDate()) + '/' + z(b.getMonth() + 1) + '/' + b.getFullYear() +
+               ' ' + z(b.getHours()) + ':' + z(b.getMinutes());
       }
-      el.textContent = txt;
-    })
-    .catch(() => { const el = document.getElementById('sbVersion'); if (el) el.textContent = 'offline'; });
+    }
+    return txt;
+  }
+
+  function mostrarUpdateBar(novaVersao) {
+    const btn = document.getElementById('sbUpdate');
+    if (!btn) return;
+    btn.classList.add('show');
+    if (novaVersao) btn.textContent = '⬆ Atualizar v' + novaVersao;
+    btn.onclick = () => {
+      btn.textContent = '⏳ Atualizando...';
+      btn.disabled = true;
+      if (typeof window.forcarUpdate === 'function') window.forcarUpdate();
+      else location.reload();
+    };
+  }
+
+  // Compara a versao cacheada pelo Service Worker com a do servidor. Se diferem,
+  // o shell carregado esta velho -> oferece atualizar. (Mesmo sinal do banner
+  // de topo, mas surgindo discreto na barra de status.)
+  async function checarShellDesatualizado(serverVersion) {
+    try {
+      if (!('serviceWorker' in navigator)) return;
+      const swResp = await fetch('/sw.js?_=' + Date.now(), { cache: 'no-store' }).catch(() => null);
+      if (!swResp || !swResp.ok) return;
+      const txt = await swResp.text();
+      const m = txt.match(/CACHE\s*=\s*'zayra-(v?[\d.]+)'/);
+      const swVersion = m ? m[1].replace(/^v/, '') : null;
+      if (swVersion && serverVersion && swVersion !== serverVersion) {
+        mostrarUpdateBar(serverVersion);
+      }
+    } catch (_) { /* silent */ }
+  }
+
+  async function lerVersao(primeira) {
+    try {
+      const r = await fetch(API + '/api/version', { cache: 'no-store' });
+      const v = await r.json();
+      const el = document.getElementById('sbVersion');
+      if (el && v) el.textContent = fmtVersao(v);
+      if (!v) return;
+      if (primeira) {
+        primeiroBuildTime = v.buildTime || null;
+        checarShellDesatualizado(v.version);
+      } else if (primeiroBuildTime && v.buildTime && v.buildTime !== primeiroBuildTime) {
+        // Servidor subiu um deploy novo enquanto a aba estava aberta.
+        mostrarUpdateBar(v.version);
+      }
+    } catch (_) {
+      const el = document.getElementById('sbVersion');
+      if (el && el.textContent === 'v…') el.textContent = 'offline';
+    }
+  }
+
+  lerVersao(true);
+  // Revalida a cada 3min: pega redeploy com a aba aberta sem precisar recarregar.
+  setInterval(() => lerVersao(false), 3 * 60 * 1000);
 
   // ----- Usuario logado (avatar + nome) -----
   fetch(API + '/api/auth/me', { credentials: 'include' })
