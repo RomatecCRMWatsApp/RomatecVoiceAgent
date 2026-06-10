@@ -154,8 +154,17 @@ export async function runFolhaFechamentoMigrations(): Promise<void> {
     }
   }
 
+  // v3.62.4: adiciona 'editou_valor' ao enum de acao do log (auditoria de edicao
+  // manual de valor). MODIFY é seguro de re-rodar (idempotente na prática).
+  const ALTERS_PAG_LOG: Array<{ label: string; sql: string }> = [
+    {
+      label: "ALTER folha_pagamentos_log acao +editou_valor",
+      sql: `ALTER TABLE folha_pagamentos_log MODIFY COLUMN acao ENUM('marcou_pago','reverteu','cancelou','emitiu_recibo','editou_valor') NOT NULL`,
+    },
+  ];
+
   // ALTERs idempotentes (rodam separados pra cada um sobreviver a 'Duplicate column')
-  const alters = [...ALTERS_OBRAS, ...ALTERS_FUNCIONARIO_DIAS, ...ALTERS_RECIBOS_AJUSTES];
+  const alters = [...ALTERS_OBRAS, ...ALTERS_FUNCIONARIO_DIAS, ...ALTERS_RECIBOS_AJUSTES, ...ALTERS_PAG_LOG];
   for (const { label, sql } of alters) {
     try {
       await pool.execute(sql);

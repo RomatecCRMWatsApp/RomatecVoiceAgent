@@ -279,6 +279,82 @@ export async function marcarItemPago(input: MarcarPagoInput): Promise<{ fechamen
   }
 }
 
+// ===== EDITAR VALOR DO ITEM (v3.62.4) =====
+// Corrige manualmente o valor BRUTO de um item já snapshotado (ex: diária
+// cadastrada errada na época do fechamento). Recalcula o líquido (= bruto −
+// vales), reajusta a diária implícita (bruto / dias_equivalente) e atualiza os
+// totais do cabeçalho do fechamento. Não altera status de pagamento.
+export async function editarValorItem(
+  itemId: number,
+  novoValorTotal: number,
+  usuario?: string,
+  motivo?: string,
+): Promise<{ valor_total: number; valor_vales: number; valor_liquido: number; diaria: number | null }> {
+  if (!Number.isFinite(novoValorTotal) || novoValorTotal < 0) {
+    throw new Error('Valor bruto inválido (precisa ser número >= 0).');
+  }
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query<RowDataPacket[]>(
+      `SELECT id, fechamento_id, valor_vales, dias_equivalente, valor_total
+         FROM folha_fechamento_itens WHERE id = ? FOR UPDATE`,
+      [itemId]
+    );
+    if (rows.length === 0) throw new Error('Item não encontrado.');
+    const it = rows[0];
+    const fechamentoId = Number(it.fechamento_id);
+    const vales = Number(it.valor_vales) || 0;
+    const equiv = Number(it.dias_equivalente) || 0;
+    const valorAntigo = Number(it.valor_total) || 0;
+
+    const novoTotal = +Number(novoValorTotal).toFixed(2);
+    const novoLiquido = +(novoTotal - vales).toFixed(2);
+    const novaDiaria = equiv > 0 ? +(novoTotal / equiv).toFixed(2) : null;
+
+    await conn.execute(
+      novaDiaria != null
+        ? `UPDATE folha_fechamento_itens SET valor_total = ?, valor_liquido = ?, diaria = ? WHERE id = ?`
+        : `UPDATE folha_fechamento_itens SET valor_total = ?, valor_liquido = ? WHERE id = ?`,
+      novaDiaria != null
+        ? [novoTotal, novoLiquido, novaDiaria, itemId]
+        : [novoTotal, novoLiquido, itemId]
+    );
+
+    await conn.execute(
+      `INSERT INTO folha_pagamentos_log
+         (fechamento_item_id, acao, valor, usuario, observacao)
+       VALUES (?, 'editou_valor', ?, ?, ?)`,
+      [itemId, novoTotal, usuario ?? 'Sistema',
+       motivo ?? `bruto ${valorAntigo.toFixed(2)} -> ${novoTotal.toFixed(2)}`]
+    );
+
+    // Recalcula os totais do cabeçalho a partir dos itens (ignora cancelados).
+    const [agg] = await conn.query<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(valor_total),0)   AS tv,
+              COALESCE(SUM(valor_vales),0)   AS tva,
+              COALESCE(SUM(valor_liquido),0) AS tl
+         FROM folha_fechamento_itens
+        WHERE fechamento_id = ? AND status_pagamento <> 'cancelada'`,
+      [fechamentoId]
+    );
+    await conn.execute(
+      `UPDATE folha_fechamentos
+          SET total_valor = ?, total_vales = ?, total_liquido = ?
+        WHERE id = ?`,
+      [Number(agg[0].tv), Number(agg[0].tva), Number(agg[0].tl), fechamentoId]
+    );
+
+    await conn.commit();
+    return { valor_total: novoTotal, valor_vales: vales, valor_liquido: novoLiquido, diaria: novaDiaria };
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
 // ===== REVERTER PAGAMENTO =====
 export async function reverterPagamento(itemId: number, usuario?: string, motivo?: string): Promise<void> {
   const conn = await pool.getConnection();

@@ -305,10 +305,12 @@
           const reenviarBtn = it.status_pagamento === 'paga'
             ? `<button onclick="window.reenviarItem(${it.id})" style="margin-left:4px; padding:4px 8px; background:#7c3aed; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;" title="Reenviar comprovante e recibo via WhatsApp">📤 Reenviar</button>`
             : '';
+          // v3.62.4: botao editar valor BRUTO (corrige diaria errada na epoca)
+          const editarBtn = `<button onclick="window.editarValorItem(${it.id}, ${Number(it.valor_total)})" title="Editar valor bruto (corrige diária/valor errado)" style="margin-left:6px; padding:2px 6px; background:#374151; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;">✏️ Editar</button>`;
           return `
           <tr style="border-bottom:1px solid #2d4a3a;">
             <td style="padding:6px 8px;">${escapeHtml(it.funcionario_nome)}</td>
-            <td style="padding:6px 8px; text-align:right;">R$ ${Number(it.valor_liquido).toFixed(2).replace('.', ',')}</td>
+            <td style="padding:6px 8px; text-align:right; white-space:nowrap;">R$ ${Number(it.valor_liquido).toFixed(2).replace('.', ',')}${editarBtn}</td>
             <td style="padding:6px 8px; white-space:nowrap;">${acoes}</td>
             <td style="padding:6px 8px; white-space:nowrap;">${compBtn}${reenviarBtn}</td>
           </tr>`;
@@ -486,6 +488,40 @@
       if (!r.ok) throw new Error(data.error);
       if (typeof window.recarregarSaldoAberto === 'function') window.recarregarSaldoAberto();
     } catch (err) { alert('Erro: ' + err.message); }
+  };
+
+  // v3.62.4: editar valor BRUTO do item (corrige diária errada na época do
+  // fechamento). Recalcula líquido e totais no backend.
+  window.editarValorItem = async function (itemId, valorTotalAtual) {
+    const atual = Number(valorTotalAtual) || 0;
+    const atualFmt = atual.toFixed(2).replace('.', ',');
+    const entrada = prompt(
+      `Corrigir valor BRUTO deste item.\nAtual: R$ ${atualFmt}\n\nDigite o novo valor bruto (ex: 1020 ou 1.020,00):`,
+      atualFmt
+    );
+    if (entrada == null) return; // cancelou
+    let s = String(entrada).trim();
+    // BR: se tem vírgula, ponto é separador de milhar; senão ponto é decimal.
+    s = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s;
+    const novo = Number(s);
+    if (!isFinite(novo) || novo < 0) { alert('Valor inválido.'); return; }
+    if (novo === atual) return; // nada mudou
+    try {
+      const r = await apiFetch(`${API}/api/folha/item/${itemId}/editar-valor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valorTotal: novo, usuario: window.USUARIO_ATUAL || 'José Romário' }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Erro ao editar');
+      alert(
+        `✓ Valor atualizado.\nBruto: R$ ${Number(data.valor_total).toFixed(2).replace('.', ',')}` +
+        `\nVales: R$ ${Number(data.valor_vales).toFixed(2).replace('.', ',')}` +
+        `\nLíquido: R$ ${Number(data.valor_liquido).toFixed(2).replace('.', ',')}`
+      );
+      if (typeof window.recarregarSaldoAberto === 'function') window.recarregarSaldoAberto();
+      if (typeof window.recarregarFolhaMensal === 'function') window.recarregarFolhaMensal();
+    } catch (err) { alert('Erro ao editar valor: ' + err.message); }
   };
 
   // v3.11.0: upload de comprovante de pagamento (JPG/PNG/PDF). Cria <input file>

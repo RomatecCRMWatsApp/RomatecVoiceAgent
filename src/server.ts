@@ -4691,6 +4691,19 @@ app.post('/api/folha/item/:itemId/reverter', async (req: Request, res: Response)
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v3.62.4: editar valor BRUTO de um item do fechamento (correcao manual —
+// ex: diaria errada na epoca). Recalcula liquido + totais do cabecalho.
+app.post('/api/folha/item/:itemId/editar-valor', async (req: Request, res: Response) => {
+  try {
+    const { valorTotal, usuario, motivo } = req.body ?? {};
+    const v = Number(valorTotal);
+    if (!Number.isFinite(v) || v < 0) { res.status(400).json({ error: 'valorTotal inválido' }); return; }
+    const m = await import('./services/folhaFechamento');
+    const r = await m.editarValorItem(Number(req.params.itemId), v, usuario, motivo);
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
 // v3.10.1: PDF detalhado do fechamento
 app.get('/api/folha/fechamento/:id/pdf-relatorio', async (req: Request, res: Response) => {
   try {
