@@ -99,6 +99,25 @@ const ALTERS_FUNCIONARIO_DIAS: Array<{ label: string; sql: string }> = [
   },
 ];
 
+// 4b) v3.62.0 — Vincula vales/adiantamentos (recibos_ajustes) ao fechamento.
+// Antes valor_vales era SEMPRE 0 no fechamento (TODO histórico). Agora os
+// adiantamentos abertos (fechamento_id IS NULL) do período são descontados e,
+// ao fechar, marcados com o fechamento_id — mesmo padrão dos dias trabalhados.
+const ALTERS_RECIBOS_AJUSTES: Array<{ label: string; sql: string }> = [
+  {
+    label: 'ALTER recibos_ajustes fechamento_id',
+    sql: `ALTER TABLE recibos_ajustes ADD COLUMN fechamento_id INT NULL`,
+  },
+  {
+    label: 'INDEX idx_ajustes_fechamento',
+    sql: `ALTER TABLE recibos_ajustes ADD INDEX idx_ajustes_fechamento (fechamento_id)`,
+  },
+  {
+    label: 'INDEX idx_ajustes_membro_periodo',
+    sql: `ALTER TABLE recibos_ajustes ADD INDEX idx_ajustes_membro_periodo (membro_id, periodo, tipo)`,
+  },
+];
+
 // 5) Auditoria de pagamentos
 const CREATE_PAGAMENTOS_LOG = `
   CREATE TABLE IF NOT EXISTS folha_pagamentos_log (
@@ -136,7 +155,7 @@ export async function runFolhaFechamentoMigrations(): Promise<void> {
   }
 
   // ALTERs idempotentes (rodam separados pra cada um sobreviver a 'Duplicate column')
-  const alters = [...ALTERS_OBRAS, ...ALTERS_FUNCIONARIO_DIAS];
+  const alters = [...ALTERS_OBRAS, ...ALTERS_FUNCIONARIO_DIAS, ...ALTERS_RECIBOS_AJUSTES];
   for (const { label, sql } of alters) {
     try {
       await pool.execute(sql);
