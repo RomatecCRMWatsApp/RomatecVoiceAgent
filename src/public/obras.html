@@ -76,6 +76,65 @@
     font-size: 11px; color: var(--gold);
     text-transform: uppercase; letter-spacing: 1px;
   }
+  /* v3.62.0: barra de status (relogio + data + local + versao + alertas + user) */
+  .statusbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 8px 14px; margin-bottom: 12px;
+  }
+  .sb-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .sb-clock {
+    display: inline-flex; align-items: baseline; gap: 1px;
+    font-family: 'SFMono-Regular', ui-monospace, 'Cascadia Code', Consolas, monospace;
+    font-size: 18px; font-weight: 600; letter-spacing: 1px;
+    color: var(--neon); text-shadow: 0 0 8px rgba(0,255,136,0.35);
+    background: var(--bg-elev); border: 1px solid var(--border-strong);
+    padding: 4px 12px; border-radius: var(--radius);
+  }
+  .sb-clock .sec { font-size: 12px; color: var(--neon-dim); opacity: .8; }
+  .sb-date {
+    font-size: 12px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .5px; font-weight: 500;
+  }
+  .sb-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; color: var(--gold); font-weight: 500;
+    background: rgba(201,168,76,0.10); border: 1px solid var(--gold-dim);
+    padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+  }
+  .sb-pill.ver { color: var(--gold); cursor: default; }
+  .sb-bell {
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1;
+    transition: border-color .15s, color .15s;
+  }
+  .sb-bell:hover { border-color: var(--border-strong); color: var(--text); }
+  .sb-bell .dot {
+    position: absolute; top: -2px; right: -2px; min-width: 15px; height: 15px;
+    padding: 0 3px; border-radius: 999px; background: var(--danger);
+    color: #fff; font-size: 9px; font-weight: 700; line-height: 15px;
+    text-align: center; display: none;
+  }
+  .sb-user {
+    display: inline-flex; align-items: center; gap: 8px;
+    cursor: pointer; padding: 3px 8px 3px 3px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--bg-elev);
+  }
+  .sb-user:hover { border-color: var(--border-strong); }
+  .sb-avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #06140d;
+    background: linear-gradient(135deg, var(--neon), var(--gold));
+  }
+  .sb-uname { font-size: 13px; color: var(--text); font-weight: 500; }
+  @media (max-width: 640px) {
+    .sb-date { display: none; }
+    .sb-uname { display: none; }
+  }
   .tabs {
     display: flex; gap: 4px; flex-wrap: wrap;
     border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 16px;
@@ -1012,6 +1071,23 @@ window.forcarUpdateApp = forcarUpdate;
 </head>
 <body>
 <div class="container">
+  <!-- v3.62.0: barra de status (relogio ao vivo · data · local · versao · alertas · usuario) -->
+  <div class="statusbar" id="statusbar">
+    <div class="sb-group">
+      <span class="sb-clock" id="sbClock"><span class="hms">--:--</span><span class="sec">:--</span></span>
+      <span class="sb-date" id="sbDate">—</span>
+      <span class="sb-pill" id="sbLocal">📍 Açailândia, MA</span>
+    </div>
+    <div class="sb-group">
+      <span class="sb-pill ver" id="sbVersion" title="Versão e data do build em produção">v…</span>
+      <button class="sb-bell" id="sbBell" title="Notificações" aria-label="Notificações">🔔<span class="dot" id="sbBellDot">0</span></button>
+      <div class="sb-user" id="sbUser" title="Sessão atual">
+        <span class="sb-avatar" id="sbAvatar">··</span>
+        <span class="sb-uname" id="sbUname">—</span>
+      </div>
+    </div>
+  </div>
+
   <div class="header">
     <div style="display:flex; align-items:center; gap:14px;">
       <img id="brandLogo" src="" alt="" style="display:none; max-height:42px; max-width:80px; border-radius:6px;">
@@ -1021,7 +1097,6 @@ window.forcarUpdateApp = forcarUpdate;
       </div>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
-      <span class="badge-zayra" id="versionBadge">v...</span>
       <button id="btnCeoToken" title="Login admin/CEO" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); cursor:pointer; padding:6px 10px; border-radius:var(--radius); font-size:12px;">🔒 Admin</button>
       <button id="btnCertsDigitais" title="Certificados digitais ICP-Brasil pra assinatura de recibos" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); cursor:pointer; padding:6px 10px; border-radius:var(--radius); font-size:12px;">🔏 Certs</button>
       <!-- v3.24.17: botao Sair (logout JWT + redirect /login) -->
@@ -1218,6 +1293,81 @@ fetch(API + '/health')
     if (el && d.version) el.textContent = 'v' + d.version;
   })
   .catch(() => {});
+
+// ============================================================
+// v3.62.0: BARRA DE STATUS (relogio · data · local · versao · sino · usuario)
+// ============================================================
+(function () {
+  'use strict';
+  const DIAS = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'];
+  const MESES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+  const z = n => String(n).padStart(2, '0');
+
+  // ----- Relogio ao vivo + data -----
+  const elClock = document.getElementById('sbClock');
+  const elDate = document.getElementById('sbDate');
+  function tick() {
+    const d = new Date();
+    if (elClock) {
+      elClock.innerHTML =
+        '<span class="hms">' + z(d.getHours()) + ':' + z(d.getMinutes()) + '</span>' +
+        '<span class="sec">:' + z(d.getSeconds()) + '</span>';
+    }
+    if (elDate) {
+      elDate.textContent = DIAS[d.getDay()] + ', ' + d.getDate() + ' ' + MESES[d.getMonth()] + ' ' + d.getFullYear();
+    }
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  // ----- Versao + data do build -----
+  fetch(API + '/api/version', { cache: 'no-store' })
+    .then(r => r.json())
+    .then(v => {
+      const el = document.getElementById('sbVersion');
+      if (!el || !v) return;
+      let txt = 'v' + (v.version || '?');
+      if (v.buildTime) {
+        const b = new Date(v.buildTime);
+        if (!isNaN(b)) {
+          txt += ' · ' + z(b.getDate()) + '/' + z(b.getMonth() + 1) + '/' + b.getFullYear() +
+                 ' ' + z(b.getHours()) + ':' + z(b.getMinutes());
+        }
+      }
+      el.textContent = txt;
+    })
+    .catch(() => { const el = document.getElementById('sbVersion'); if (el) el.textContent = 'offline'; });
+
+  // ----- Usuario logado (avatar + nome) -----
+  fetch(API + '/api/auth/me', { credentials: 'include' })
+    .then(r => r.ok ? r.json() : null)
+    .then(u => {
+      const av = document.getElementById('sbAvatar');
+      const nm = document.getElementById('sbUname');
+      if (!u || !u.name) {
+        if (av) av.textContent = '··';
+        if (nm) nm.textContent = 'Entrar';
+        const box = document.getElementById('sbUser');
+        if (box) box.onclick = () => { location.href = '/login?next=' + encodeURIComponent(location.pathname); };
+        return;
+      }
+      window.USUARIO_ATUAL = u.name;
+      const partes = String(u.name).trim().split(/\s+/);
+      const ini = (partes[0][0] + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase();
+      if (av) av.textContent = ini;
+      if (nm) nm.textContent = partes[0];
+      const box = document.getElementById('sbUser');
+      if (box) box.title = u.name + ' · ' + (u.role || '');
+    })
+    .catch(() => {});
+
+  // ----- Sino de notificacoes -----
+  const bell = document.getElementById('sbBell');
+  if (bell) bell.onclick = () => {
+    if (typeof window.abrirNotificacoes === 'function') return window.abrirNotificacoes();
+    alert('Sem novas notificações.');
+  };
+})();
 
 // v1.64.0: tenant_settings (white-label estrutural).
 // Busca logo + brand_name dinamicamente. Default Romatec se API offline.

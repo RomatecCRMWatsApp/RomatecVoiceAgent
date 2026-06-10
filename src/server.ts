@@ -260,15 +260,19 @@ app.get('/ping', (_req: Request, res: Response) => {
   res.send('OK');
 });
 
+// v3.62.0: timestamp do boot do processo == momento do deploy atual.
+// Exposto como buildTime pra barra de status do front (ex: "v3.61.1 · 10/06 17:56").
+const BOOT_TIME = new Date().toISOString();
+
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({ agent: AGENT_IDENTITY.name, version: AGENT_IDENTITY.version, status: 'online', timestamp: new Date().toISOString() });
+  res.json({ agent: AGENT_IDENTITY.name, version: AGENT_IDENTITY.version, status: 'online', timestamp: new Date().toISOString(), buildTime: BOOT_TIME });
 });
 
 // v1.93.0: rota leve so com versao — usada pelo client pra detectar
 // quando ha versao nova do app E o SW antigo ainda esta cached.
 app.get('/api/version', (_req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ version: AGENT_IDENTITY.version, name: AGENT_IDENTITY.name });
+  res.json({ version: AGENT_IDENTITY.version, name: AGENT_IDENTITY.name, buildTime: BOOT_TIME });
 });
 
 // v1.65.23: diagnostico do MySQL — lista todas as tabelas + valida criticas.
