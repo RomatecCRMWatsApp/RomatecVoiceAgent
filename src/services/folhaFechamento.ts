@@ -539,8 +539,10 @@ export async function obterDetalhe(fechamentoId: number) {
            fi.observacoes, fi.created_at, fi.updated_at,
            fi.comprovante_mime, fi.comprovante_filename,
            fi.comprovante_extraido, fi.comprovante_uploaded_em,
-           fi.comprovante_enviado_whatsapp
+           fi.comprovante_enviado_whatsapp,
+           e.telefone
       FROM folha_fechamento_itens fi
+      LEFT JOIN romatec_obra_equipe e ON e.id = fi.funcionario_id
      WHERE fi.fechamento_id = ?
      ORDER BY fi.funcionario_nome`;
 

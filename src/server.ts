@@ -4733,8 +4733,9 @@ app.get('/api/folha/fechamento/:id/pdf-completo', async (req: Request, res: Resp
 // v3.15.17: reenviar comprovante + recibo de UM item ja pago.
 app.post('/api/folha/item/:itemId/reenviar', async (req: Request, res: Response) => {
   try {
+    const phone = typeof req.body?.phone === 'string' ? req.body.phone : undefined; // v3.62.5: override de numero
     const m = await import('./services/folhaFechamentoComprovante');
-    const r = await m.reenviarComprovanteRecibo(Number(req.params.itemId));
+    const r = await m.reenviarComprovanteRecibo(Number(req.params.itemId), phone);
     res.json(r);
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });

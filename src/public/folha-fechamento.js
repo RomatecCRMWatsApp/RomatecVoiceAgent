@@ -302,8 +302,14 @@
                <button onclick="window.uploadComprovante(${it.id})" style="margin-left:4px; padding:4px 8px; background:#1e40af; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;" title="Substituir comprovante">📎 Trocar</button>`
             : `<button onclick="window.uploadComprovante(${it.id})" style="padding:4px 10px; background:#1e40af; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:12px;" title="Anexar comprovante (JPG/PNG/PDF) — extrai dados, marca pago e envia via WhatsApp">📎 Comprovante</button>`;
           // v3.15.17: botao reenviar comprovante+recibo via WhatsApp (so faz sentido em item pago)
+          // v3.62.5: campo de numero editavel ao lado — pre-preenchido com o telefone
+          // do colaborador; pode trocar pra mandar pra outro WhatsApp ou deixar o mesmo.
+          const telDigits = String(it.telefone || '').replace(/\D/g, '');
           const reenviarBtn = it.status_pagamento === 'paga'
-            ? `<button onclick="window.reenviarItem(${it.id})" style="margin-left:4px; padding:4px 8px; background:#7c3aed; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;" title="Reenviar comprovante e recibo via WhatsApp">📤 Reenviar</button>`
+            ? `<input id="reenviar-phone-${it.id}" value="${escapeHtml(telDigits)}" placeholder="WhatsApp destino"
+                 title="Número que vai receber o reenvio — troque se quiser, ou deixe o mesmo (formato 55 + DDD + número)"
+                 style="width:135px; margin-left:6px; padding:3px 7px; font-size:11px; background:#0f1a14; color:#e8f0eb; border:1px solid #2d4a3a; border-radius:4px; vertical-align:middle;">
+               <button onclick="window.reenviarItem(${it.id})" style="margin-left:4px; padding:4px 8px; background:#7c3aed; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; vertical-align:middle;" title="Reenviar comprovante e recibo via WhatsApp pro número ao lado">📤 Reenviar</button>`
             : '';
           // v3.62.4: botao editar valor BRUTO (corrige diaria errada na epoca)
           const editarBtn = `<button onclick="window.editarValorItem(${it.id}, ${Number(it.valor_total)})" title="Editar valor bruto (corrige diária/valor errado)" style="margin-left:6px; padding:2px 6px; background:#374151; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;">✏️ Editar</button>`;
@@ -747,10 +753,19 @@
 
   // ============== v3.15.17: Reenvio individual de comprovante+recibo ==============
   window.reenviarItem = async function (itemId) {
-    if (!confirm('Reenviar comprovante e recibo Romatec via WhatsApp pra esse colaborador?')) return;
+    // v3.62.5: lê o número do campo editável ao lado (override de destino).
+    const inp = document.getElementById('reenviar-phone-' + itemId);
+    const phone = inp ? String(inp.value || '').replace(/\D/g, '') : '';
+    if (phone && phone.length < 10) { alert('Número inválido. Use 55 + DDD + número.'); return; }
+    const destinoTxt = phone ? `pro número ${phone}` : 'pro número cadastrado';
+    if (!confirm(`Reenviar comprovante e recibo Romatec via WhatsApp ${destinoTxt}?`)) return;
     mostrarToastComprovante('⏳ Reenviando comprovante e recibo...', 'info', 0);
     try {
-      const r = await apiFetch(`${API}/api/folha/item/${itemId}/reenviar`, { method: 'POST' });
+      const r = await apiFetch(`${API}/api/folha/item/${itemId}/reenviar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phone || undefined }),
+      });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Erro no reenvio');
       mostrarToastComprovante('', 'success', 0, true);

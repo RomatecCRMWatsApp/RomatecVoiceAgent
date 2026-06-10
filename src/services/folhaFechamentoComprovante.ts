@@ -247,7 +247,7 @@ export interface ReenviarItemResult {
   recibo_erro?: string;
 }
 
-export async function reenviarComprovanteRecibo(itemId: number): Promise<ReenviarItemResult> {
+export async function reenviarComprovanteRecibo(itemId: number, phoneOverride?: string): Promise<ReenviarItemResult> {
   // 1) Item + telefone do colaborador
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT fi.id, fi.funcionario_nome,
@@ -261,9 +261,12 @@ export async function reenviarComprovanteRecibo(itemId: number): Promise<Reenvia
   );
   if (rows.length === 0) throw new Error('Item nao encontrado.');
   const it = rows[0];
-  const telefone = String(it.telefone || '').replace(/\D/g, '');
+  // v3.62.5: aceita override de numero (campo editavel no front). Se vier um
+  // numero valido, manda pra ele; senao usa o telefone cadastrado do colaborador.
+  const override = String(phoneOverride || '').replace(/\D/g, '');
+  const telefone = override.length >= 10 ? override : String(it.telefone || '').replace(/\D/g, '');
   if (!telefone || telefone.length < 10) {
-    throw new Error('Colaborador sem telefone valido cadastrado.');
+    throw new Error('Sem telefone valido — informe um numero no campo de envio ou cadastre no colaborador.');
   }
 
   const out: ReenviarItemResult = {
@@ -306,7 +309,7 @@ export async function reenviarComprovanteRecibo(itemId: number): Promise<Reenvia
   } else {
     try {
       const { enviarReciboWhatsApp } = await import('../integrations/recibos');
-      const r = await enviarReciboWhatsApp({ id: Number(rec[0].id), enviar_pdf: false, forcar: true });
+      const r = await enviarReciboWhatsApp({ id: Number(rec[0].id), enviar_pdf: false, forcar: true, phone_override: telefone });
       out.recibo_enviado = true;
       out.recibo_numero = r.numero;
     } catch (err) {
