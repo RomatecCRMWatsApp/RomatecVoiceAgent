@@ -308,6 +308,24 @@ export async function editarValorItem(
     const equiv = Number(it.dias_equivalente) || 0;
     const valorAntigo = Number(it.valor_total) || 0;
 
+    // v3.62.8: trava — não permite editar valor se o colaborador JÁ CONFIRMOU o
+    // recibo (confirmação tem valor jurídico de quitação). Pra corrigir, é
+    // preciso reverter o pagamento / cancelar o recibo antes.
+    const [recConf] = await conn.query<RowDataPacket[]>(
+      `SELECT numero FROM recibos
+        WHERE resource_type = 'folha_fechamento_item'
+          AND resource_id = ?
+          AND (status = 'confirmado' OR resposta_acao = 'confirma' OR respondido_em IS NOT NULL)
+        LIMIT 1`,
+      [String(itemId)]
+    );
+    if (recConf.length > 0) {
+      throw new Error(
+        `Recibo ${recConf[0].numero || ''} já foi confirmado pelo colaborador — ` +
+        `não dá pra editar o valor. Reverta o pagamento / cancele o recibo antes de corrigir.`
+      );
+    }
+
     const novoTotal = +Number(novoValorTotal).toFixed(2);
     const novoLiquido = +(novoTotal - vales).toFixed(2);
     const novaDiaria = equiv > 0 ? +(novoTotal / equiv).toFixed(2) : null;
