@@ -69,7 +69,9 @@ const CanvasEngine = (() => {
     canvas.style.height = H + 'px';
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
-  window.addEventListener('resize', () => { resize(); });
+  // v3.62.6: guard — sem isso, carregar a engine fora do browser (ex: teste com
+  // window=undefined) quebra em `undefined.addEventListener` no top-level do IIFE.
+  if (typeof window !== 'undefined') window.addEventListener('resize', () => { resize(); });
 
   // ─── RENDER LOOP ──────────────────────────────────────────────────────────────
   function render() {
