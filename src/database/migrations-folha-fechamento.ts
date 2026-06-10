@@ -113,8 +113,8 @@ const ALTERS_RECIBOS_AJUSTES: Array<{ label: string; sql: string }> = [
     sql: `ALTER TABLE recibos_ajustes ADD INDEX idx_ajustes_fechamento (fechamento_id)`,
   },
   {
-    label: 'INDEX idx_ajustes_membro_tipo_criado',
-    sql: `ALTER TABLE recibos_ajustes ADD INDEX idx_ajustes_membro_tipo_criado (membro_id, tipo, criado_em)`,
+    label: 'INDEX idx_ajustes_membro_tipo_periodo',
+    sql: `ALTER TABLE recibos_ajustes ADD INDEX idx_ajustes_membro_tipo_periodo (membro_id, tipo, periodo)`,
   },
 ];
 
@@ -164,6 +164,48 @@ export async function runFolhaFechamentoMigrations(): Promise<void> {
       const msg = (err as Error).message || '';
       if (/Duplicate (column|key)|already exists/i.test(msg)) logExists(label);
       else logFail(label, msg);
+    }
+  }
+
+  // Backfill de conciliação dos vales legados (depende da coluna fechamento_id já existir)
+  await conciliarValesLegado();
+}
+
+// v3.62.3 — Backfill one-time, IDEMPOTENTE e SEGURO: marca como conciliados
+// (sentinel fechamento_id = 0) os adiantamentos abertos que pertencem a períodos
+// JÁ FECHADOS — ou seja, cuja data (criado_em) é <= o último fechamento da obra
+// do colaborador (romatec_obras.ultima_data_fechada). Assim:
+//   - vales de quinzenas passadas (pré-feature) param de aparecer/vazar;
+//   - vales do PERÍODO CORRENTE (passados depois do último fechamento) são
+//     PRESERVADOS e descontados normalmente no próximo fechamento.
+// fechamento_id = 0 = "legado conciliado" (não aponta pra fechamento real; o
+// gate de "vale aberto" em todo o sistema é `fechamento_id IS NULL`).
+// Idempotente: só toca linhas ainda NULL; re-rodar no boot não causa efeito.
+export async function conciliarValesLegado(): Promise<void> {
+  try {
+    const [res] = await pool.execute(
+      `UPDATE recibos_ajustes a
+         JOIN (
+           SELECT d.funcionario_id AS membro_id, MAX(o.ultima_data_fechada) AS limite
+             FROM romatec_obra_funcionario_dias d
+             JOIN romatec_obras o ON o.id = d.obra_id
+            WHERE o.ultima_data_fechada IS NOT NULL
+            GROUP BY d.funcionario_id
+         ) lim ON lim.membro_id = a.membro_id
+          SET a.fechamento_id = 0
+        WHERE a.tipo = 'adiantamento'
+          AND a.fechamento_id IS NULL
+          AND DATE(a.criado_em) <= lim.limite`
+    );
+    const n = (res as { affectedRows?: number }).affectedRows ?? 0;
+    console.log(`[conciliar-vales-legado] OK: ${n} vale(s) legado(s) marcado(s) como conciliado(s).`);
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    // Se recibos_ajustes/coluna ainda não existir nesse ambiente, ignora.
+    if (/doesn't exist|Unknown column/i.test(msg)) {
+      console.log('[conciliar-vales-legado] pulado (tabela/coluna ausente):', msg.slice(0, 120));
+    } else {
+      console.error('[conciliar-vales-legado] FALHA:', msg.slice(0, 200));
     }
   }
 }

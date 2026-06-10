@@ -1,64 +1,42 @@
-// v3.62.2: regra de quais vales (adiantamentos) entram num fechamento.
-// O fechamento desconta os vales ABERTOS passados DENTRO do range [dataInicio,
-// dataFim], pela DATA REAL do vale (recibos_ajustes.criado_em) — NÃO pelo rótulo
-// de quinzena de calendário. Isso evita o bug do print: um vale da quinzena
-// anterior (passado ~23/05) vazava pro fechamento de 25/05→06/06 porque ambos
-// caíam no código 'YYYY-05-2'. Este teste trava a regra com um espelho puro do
-// predicado SQL (membro + tipo='adiantamento' + fechamento_id IS NULL +
-// DATE(criado_em) BETWEEN dataInicio AND dataFim).
+// v3.62.3: vales no fechamento.
+//
+// Regra final:
+//  - Matching por `periodo` ('YYYY-MM-Q'): o CEO escolhe o periodo ao passar o
+//    vale; é o vínculo autoritativo. quinzenaCodesDoRange deriva os códigos que
+//    o range [dataInicio, dataFim] toca.
+//  - Gate `fechamento_id IS NULL`: só conta vale ainda aberto. Ao fechar, os
+//    vales descontados recebem o fechamento_id (não deduz 2x).
+//  - Backfill conciliarValesLegado(): marca como quitados (fechamento_id=0) os
+//    vales antigos (criado_em <= último fechamento da obra), pré-feature, que
+//    nunca foram amarrados — assim quinzenas passadas param de vazar.
 
 import { describe, it, expect } from 'vitest';
+import { quinzenaCodesDoRange } from '../services/folhaFechamento';
 
-type Ajuste = { tipo: string; valor: number; fechamento_id: number | null; criado_em: string };
-
-// Espelha o WHERE da subquery de soma_vales / do UPDATE de quitação.
-function valeEntraNoFechamento(a: Ajuste, dataInicio: string, dataFim: string): boolean {
-  if (a.tipo !== 'adiantamento') return false;
-  if (a.fechamento_id != null) return false;
-  const dia = a.criado_em.slice(0, 10); // DATE(criado_em) -> 'YYYY-MM-DD'
-  return dia >= dataInicio && dia <= dataFim;
-}
-
-function somaVales(ajustes: Ajuste[], dataInicio: string, dataFim: string): number {
-  return +ajustes
-    .filter(a => valeEntraNoFechamento(a, dataInicio, dataFim))
-    .reduce((s, a) => s + a.valor, 0)
-    .toFixed(2);
-}
-
-describe('vales no fechamento por criado_em (v3.62.2)', () => {
-  const DI = '2026-05-25';
-  const DF = '2026-06-06';
-
-  it('caso do print: 700 desta quinzena entram, 500 da anterior NÃO', () => {
-    const ajustes: Ajuste[] = [
-      { tipo: 'adiantamento', valor: 500, fechamento_id: null, criado_em: '2026-05-23 10:00:00' }, // quinzena passada
-      { tipo: 'adiantamento', valor: 700, fechamento_id: null, criado_em: '2026-05-28 14:30:00' }, // esta quinzena
-    ];
-    expect(somaVales(ajustes, DI, DF)).toBe(700);
+describe('quinzenaCodesDoRange (v3.62.3)', () => {
+  it('range dentro da 1a quinzena -> só -1', () => {
+    expect(quinzenaCodesDoRange('2026-06-01', '2026-06-10')).toEqual(['2026-06-1']);
   });
 
-  it('vale já quitado (fechamento_id setado) não é deduzido de novo', () => {
-    const ajustes: Ajuste[] = [
-      { tipo: 'adiantamento', valor: 300, fechamento_id: 12, criado_em: '2026-05-28 09:00:00' },
-    ];
-    expect(somaVales(ajustes, DI, DF)).toBe(0);
+  it('range dentro da 2a quinzena -> só -2', () => {
+    expect(quinzenaCodesDoRange('2026-06-16', '2026-06-30')).toEqual(['2026-06-2']);
   });
 
-  it('só conta tipo adiantamento (desconto/bonus ficam de fora)', () => {
-    const ajustes: Ajuste[] = [
-      { tipo: 'adiantamento', valor: 200, fechamento_id: null, criado_em: '2026-06-01 08:00:00' },
-      { tipo: 'desconto',     valor: 999, fechamento_id: null, criado_em: '2026-06-01 08:00:00' },
-      { tipo: 'bonus',        valor: 999, fechamento_id: null, criado_em: '2026-06-01 08:00:00' },
-    ];
-    expect(somaVales(ajustes, DI, DF)).toBe(200);
+  it('cruza o dia 15 no mesmo mês -> -1 e -2', () => {
+    expect(quinzenaCodesDoRange('2026-06-10', '2026-06-20')).toEqual(['2026-06-1', '2026-06-2']);
   });
 
-  it('inclui os extremos do range (dataInicio e dataFim)', () => {
-    const ajustes: Ajuste[] = [
-      { tipo: 'adiantamento', valor: 100, fechamento_id: null, criado_em: '2026-05-25 23:59:00' },
-      { tipo: 'adiantamento', valor: 150, fechamento_id: null, criado_em: '2026-06-06 00:01:00' },
-    ];
-    expect(somaVales(ajustes, DI, DF)).toBe(250);
+  it('caso do print (25/05 a 06/06) -> 05-2 e 06-1', () => {
+    expect(quinzenaCodesDoRange('2026-05-25', '2026-06-06')).toEqual(['2026-05-2', '2026-06-1']);
+  });
+
+  it('dia 15 = 1a quinzena; dia 16 = 2a', () => {
+    expect(quinzenaCodesDoRange('2026-03-15', '2026-03-15')).toEqual(['2026-03-1']);
+    expect(quinzenaCodesDoRange('2026-03-16', '2026-03-16')).toEqual(['2026-03-2']);
+  });
+
+  it('mês com zero-padding e range de 1 dia', () => {
+    expect(quinzenaCodesDoRange('2026-01-05', '2026-01-05')).toEqual(['2026-01-1']);
+    expect(quinzenaCodesDoRange('2026-12-31', '2026-12-31')).toEqual(['2026-12-2']);
   });
 });
