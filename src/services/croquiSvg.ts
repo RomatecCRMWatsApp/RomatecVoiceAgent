@@ -40,6 +40,17 @@ export interface CroquiOpcoes {
   utmZona?: number;
   /** v3.1.0: hemisferio UTM ('S' ou 'N'). Default 'S' (Brasil). */
   utmHemisferio?: string;
+  /**
+   * v3.63.0: ordens (1-based, posicao no array `lados`) dos lados a DESTACAR —
+   * usado no croqui de Alinhamento de Cerca. Os destacados saem em dourado
+   * tracejado (#C9A84C, espessura 4, dash 8 4), cota em negrito dourado com
+   * sufixo "(ALINHAR)", e ganha legenda no rodape com a extensao total. Os
+   * demais lados ficam cinza fino pra o destaque saltar. Quando vazio/ausente,
+   * o comportamento e' IDENTICO ao croqui normal (laudo nao quebra).
+   */
+  destacarLados?: number[];
+  /** v3.63.0: titulo do croqui de destaque (ex: "CERCA A SER ALINHADA"). */
+  tituloDestaque?: string;
 }
 
 /**
@@ -92,6 +103,13 @@ export function gerarCroquiSvg(
 
   const svgPontos = pontos.map(p => toSvg(p.e, p.n));
 
+  // v3.63.0: conjunto de lados destacados (1-based → 0-based). Vazio = sem destaque.
+  const hiSet = new Set((opts.destacarLados ?? []).map(o => o - 1).filter(i => i >= 0));
+  const destacando = hiSet.size > 0;
+  // Quando destacando, a poligonal base fica cinza fina pra o dourado saltar.
+  const corBase = destacando ? '#6e7681' : cor;
+  const wBase = destacando ? 1.5 : 2;
+
   // Poligonal fechada (path)
   const pathD = svgPontos.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ') + ' Z';
 
@@ -142,7 +160,26 @@ export function gerarCroquiSvg(
       // Rotacao do texto baseada no angulo do lado (mantem legivel)
       const ang = Math.atan2(dy, dx) * (180 / Math.PI);
       const angTxt = ang > 90 || ang < -90 ? ang + 180 : ang;
-      return `<text x="${tx.toFixed(2)}" y="${ty.toFixed(2)}" font-family="Helvetica" font-size="14" font-weight="bold" fill="#222" text-anchor="middle" dominant-baseline="middle" transform="rotate(${angTxt.toFixed(1)} ${tx.toFixed(2)} ${ty.toFixed(2)})">${l.distancia_m.toFixed(2)}m</text>`;
+      // v3.63.0: cota dourada + "(ALINHAR)" quando o lado esta destacado.
+      const idx = lados.indexOf(l);
+      const isHi = hiSet.has(idx);
+      const fillCota = isHi ? '#C9A84C' : '#222';
+      const sufixo = isHi ? ' (ALINHAR)' : '';
+      return `<text x="${tx.toFixed(2)}" y="${ty.toFixed(2)}" font-family="Helvetica" font-size="14" font-weight="bold" fill="${fillCota}" text-anchor="middle" dominant-baseline="middle" transform="rotate(${angTxt.toFixed(1)} ${tx.toFixed(2)} ${ty.toFixed(2)})">${l.distancia_m.toFixed(2)}m${sufixo}</text>`;
+    }).join('');
+  }
+
+  // v3.63.0: segmentos destacados (dourado tracejado) por cima da poligonal.
+  let destaqueSegsSvg = '';
+  let extensaoDestaque = 0;
+  if (destacando) {
+    destaqueSegsSvg = lados.map((l, idx) => {
+      if (!hiSet.has(idx)) return '';
+      const p1 = svgPontos[l.i_idx];
+      const p2 = svgPontos[l.f_idx];
+      if (!p1 || !p2) return '';
+      extensaoDestaque += Number(l.distancia_m) || 0;
+      return `<line x1="${p1.x.toFixed(2)}" y1="${p1.y.toFixed(2)}" x2="${p2.x.toFixed(2)}" y2="${p2.y.toFixed(2)}" stroke="#C9A84C" stroke-width="4" stroke-dasharray="8 4" stroke-linecap="round"/>`;
     }).join('');
   }
 
@@ -189,15 +226,43 @@ export function gerarCroquiSvg(
   </g>`;
   }
 
+  // v3.63.0: titulo do croqui de destaque (topo-centro).
+  let tituloSvg = '';
+  if (destacando && opts.tituloDestaque) {
+    tituloSvg = `
+  <text x="${(W / 2).toFixed(1)}" y="26" text-anchor="middle" font-family="Helvetica" font-size="15" font-weight="bold" fill="#C9A84C">${escapeXml(opts.tituloDestaque)}</text>`;
+  }
+
+  // v3.63.0: legenda do destaque (rodape-esquerda) com a extensao total.
+  let legendaSvg = '';
+  if (destacando) {
+    const ly = H - 30;
+    legendaSvg = `
+  <g>
+    <rect x="10" y="${ly - 9}" width="14" height="14" fill="none" stroke="#C9A84C" stroke-width="2" stroke-dasharray="4 2"/>
+    <text x="30" y="${ly + 2}" font-family="Helvetica" font-size="11" font-weight="bold" fill="#C9A84C">Cerca a ser alinhada — total: ${formatarMetrosBR(extensaoDestaque)} m</text>
+  </g>`;
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <rect width="${W}" height="${H}" fill="#fff"/>
-  <path d="${pathD}" fill="${cor}22" stroke="${cor}" stroke-width="2" stroke-linejoin="round"/>
+  <path d="${pathD}" fill="${cor}22" stroke="${corBase}" stroke-width="${wBase}" stroke-linejoin="round"/>
+  ${destaqueSegsSvg}
   ${distanciasSvg}
   ${rotulosSvg}
-  ${norteSvg}${areaSvg}${tarjetaSvg}
+  ${norteSvg}${areaSvg}${tarjetaSvg}${tituloSvg}${legendaSvg}
   <text x="10" y="${H - 10}" font-family="Helvetica" font-size="11" fill="#666">Escala aprox.: ${escapeXml(escalaTexto)} (UTM)</text>
 </svg>`;
+}
+
+// v3.63.0: formata metros no padrao BR (1.234,56) pra legenda do croqui.
+// Manual (sem Intl/ICU) pra ser deterministico em qualquer build de Node.
+function formatarMetrosBR(m: number): string {
+  const fixed = (Number(m) || 0).toFixed(2);          // "1234.56"
+  const [int, dec] = fixed.split('.');
+  const intMil = int.replace(/\B(?=(\d{3})+(?!\d))/g, '.'); // "1.234"
+  return `${intMil},${dec}`;
 }
 
 function escapeXml(s: string): string {

@@ -4352,6 +4352,57 @@ app.put   ('/api/propostas-consultoria/:id',
 app.post  ('/api/propostas-consultoria/preview',
   apiHandle(args => propostasConsultoria.previewCustoConsultoria(args as Parameters<typeof propostasConsultoria.previewCustoConsultoria>[0])));
 
+// v3.63.0: Pontos / Croqui da Proposta de Demarcação (Fase 1c).
+// Mesmo padrão aberto das demais rotas de proposta (apiHandle não exige auth).
+app.put('/api/propostas-consultoria/:id/pontos', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) { res.status(400).json({ ok: false, error: 'id inválido' }); return; }
+    const m = await import('./services/propostaCroqui');
+    const r = await m.salvarPontos(id, (req.body?.pontos ?? []) as Parameters<typeof m.salvarPontos>[1]);
+    res.json({ ok: true, ...r });
+  } catch (err) { res.status(400).json({ ok: false, error: (err as Error).message }); }
+});
+
+app.get('/api/propostas-consultoria/:id/pontos', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) { res.status(400).json({ ok: false, error: 'id inválido' }); return; }
+    const m = await import('./services/propostaCroqui');
+    const r = await m.obterPontos(id);
+    res.json({ ok: true, ...r });
+  } catch (err) { res.status(500).json({ ok: false, error: (err as Error).message }); }
+});
+
+app.put('/api/propostas-consultoria/:id/alinhamento', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) { res.status(400).json({ ok: false, error: 'id inválido' }); return; }
+    const ladosOrdem = Array.isArray(req.body?.ladosOrdem) ? req.body.ladosOrdem.map(Number) : [];
+    const m = await import('./services/propostaCroqui');
+    const r = await m.definirAlinhamento(id, ladosOrdem);
+    res.json({ ok: true, ...r });
+  } catch (err) { res.status(400).json({ ok: false, error: (err as Error).message }); }
+});
+
+// §4.4: importar pontos+lados (com flag alinhar) da proposta pro laudo.
+app.post('/api/laudos-demarcacao/:laudoId/importar-proposta/:propostaId', async (req: Request, res: Response) => {
+  try {
+    const laudoId = Number(req.params.laudoId);
+    const propostaId = Number(req.params.propostaId);
+    if (!Number.isFinite(laudoId) || !Number.isFinite(propostaId)) {
+      res.status(400).json({ ok: false, error: 'ids inválidos' }); return;
+    }
+    const sobrescrever = String(req.query.sobrescrever || '') === '1';
+    const m = await import('./services/propostaCroqui');
+    const r = await m.importarPontosParaLaudo(laudoId, propostaId, sobrescrever);
+    res.json({ ok: true, ...r });
+  } catch (err) {
+    const code = (err as { code?: number }).code === 409 ? 409 : 400;
+    res.status(code).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 // v3.45.0: preview ao vivo via PDF binario em iframe (mesmo padrao do recibo).
 // Body: { subtipo, dados_imovel, cliente?, endereco_imovel?, validade_dias?, adicional_campo?, ... }
 // Retorna application/pdf. Tolera campos parciais (placeholders).
@@ -5212,6 +5263,18 @@ app.listen(PORT, () => {
       await m.runEquipePixMigrations();
     } catch (err) {
       console.error('[equipe-pix-migrations] FALHA fatal:', err);
+    }
+  })();
+
+  // v3.63.0: Croqui de Pontos na Proposta de Demarcação — tabelas
+  // propostas_demarcacao_pontos/lados (FK propostas) + colunas calculadas em
+  // propostas + flag alinhar em laudos_demarcacao_lados (import Proposta→Laudo).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-proposta-croqui');
+      await m.runPropostaCroquiMigrations();
+    } catch (err) {
+      console.error('[proposta-croqui-migrations] FALHA fatal:', err);
     }
   })();
 
