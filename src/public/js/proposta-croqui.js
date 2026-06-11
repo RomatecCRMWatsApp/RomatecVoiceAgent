@@ -13,7 +13,9 @@
   const API = '';
   const f2 = n => Number(n || 0).toFixed(2).replace('.', ',');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const fetchApi = (url, opts) => (typeof window.api === 'function' ? window.api(url, opts) : fetch(url, Object.assign({ credentials: 'include' }, opts)));
+  // v3.63.1 FIX: usa fetch PURO (Response real com .json()/.text()). O window.api
+  // do offline-engine devolve JSON já parseado — por isso .json() quebrava.
+  const fetchApi = (url, opts) => fetch(url, Object.assign({ credentials: 'include' }, opts || {}));
 
   const S = { pontos: [], alinhar: new Set(), propostaId: null, subtipo: '', alinhamentoAtivo: false, areaM2: 0, areaHa: 0, perimetroM: 0 };
   window.__dmCroquiPontos = () => S.pontos.map(p => ({ ordem: p.ordem, vertice: p.vertice, utmE: p.utmE, utmN: p.utmN, lat: p.lat, lng: p.lng }));
