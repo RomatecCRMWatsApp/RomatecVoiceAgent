@@ -188,12 +188,33 @@
     } catch (e) { alert('Erro ao importar: ' + e.message); }
   }
 
+  function setCampo(id, v) {
+    const i = el(id);
+    if (!i) return;
+    i.value = String(v);
+    i.dispatchEvent(new Event('input', { bubbles: true }));
+    i.dispatchEvent(new Event('change', { bubbles: true }));
+  }
   function usarArea() {
     recalcResumo();
-    if (S.subtipo === 'demarcacao_urbana') { const i = el('dmAreaM2'); if (i) i.value = S.areaM2.toFixed(2); }
-    else { const i = el('dmAreaHa'); if (i) i.value = S.areaHa.toFixed(4); }
-    const pe = el('dmPerimetro'); if (pe && S.perimetroM) pe.value = S.perimetroM.toFixed(2);
-    const ve = el('dmVertices'); if (ve) ve.value = String(S.pontos.length);
+    const nv = S.pontos.length;
+    if (S.subtipo === 'demarcacao_urbana') setCampo('dmAreaM2', S.areaM2.toFixed(2));
+    else setCampo('dmAreaHa', S.areaHa.toFixed(4));
+    if (S.perimetroM) setCampo('dmPerimetro', S.perimetroM.toFixed(2));
+    setCampo('dmVertices', nv);
+    // v3.63.2: piqueteamento exige Σ marcos === nº de vértices. Auto-ajusta pra
+    // não travar o preview: 1 marco de concreto por vértice (redistribuível).
+    const piq = el('dmPiquet');
+    if (piq && piq.checked && nv >= 3) {
+      const soma = ['dmMarcoConcreto', 'dmMarcoTubo', 'dmMarcoMadeira']
+        .reduce((a, id) => a + (parseInt(el(id)?.value, 10) || 0), 0);
+      if (soma !== nv) {
+        setCampo('dmMarcoConcreto', nv);
+        setCampo('dmMarcoTubo', 0);
+        setCampo('dmMarcoMadeira', 0);
+        alert(`Piqueteamento ligado: ajustei pra ${nv} marcos de concreto (1 por vértice).\nSe quiser outro material, redistribua mantendo o total em ${nv}.`);
+      }
+    }
     if (window.__dmPreview) window.__dmPreview.agendar();
   }
 
