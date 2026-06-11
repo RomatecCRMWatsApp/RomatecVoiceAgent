@@ -253,11 +253,24 @@
 
   // ── Init (chamado pelo form de demarcação após montar) ───────────────────
   window.PropostaCroqui = {
-    init(propostaId, subtipo, alinhamentoAtivo) {
+    init(propostaId, subtipo, alinhamentoAtivo, pontosIniciais, alinharIniciais) {
       S.pontos = []; S.alinhar = new Set();
       S.propostaId = propostaId || null;
       S.subtipo = subtipo || '';
       S.alinhamentoAtivo = !!alinhamentoAtivo;
+      // v3.63.7: carrega pontos do dados_imovel do cache (edição) — fallback
+      // imediato; o carregarExistente() depois refina pelas tabelas filhas.
+      if (Array.isArray(pontosIniciais) && pontosIniciais.length) {
+        S.pontos = pontosIniciais.map((p, i) => ({
+          ordem: i + 1,
+          vertice: p.vertice || ('M-' + (i + 1)),
+          utmE: p.utmE != null ? Number(p.utmE) : (p.utm_e != null ? Number(p.utm_e) : null),
+          utmN: p.utmN != null ? Number(p.utmN) : (p.utm_n != null ? Number(p.utm_n) : null),
+          lat: p.lat != null ? Number(p.lat) : null,
+          lng: p.lng != null ? Number(p.lng) : null,
+        }));
+        if (Array.isArray(alinharIniciais)) S.alinhar = new Set(alinharIniciais.map(Number));
+      }
       const imp = el('dmcImportarBtn'); if (imp) imp.onclick = importar;
       const ua = el('dmcUsarAreaBtn'); if (ua) ua.onclick = usarArea;
       const sv = el('dmcSalvarBtn'); if (sv) sv.onclick = salvar;

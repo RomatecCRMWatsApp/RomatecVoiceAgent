@@ -10000,10 +10000,15 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
   setTimeout(() => __dmPreview.atualizar(), 100);
 
   // v3.63.0: Pontos & Croqui — init + hook do checkbox Alinhamento de Cerca.
+  // v3.63.7: id da proposta em edição vem de state.consultoriaEditandoId (o cache
+  // NÃO tem id) + carrega pontos do dados_imovel do cache (fallback imediato).
   try {
-    const __pid = (cache && (cache.proposta_id || cache.id)) || window.__dmPropostaId || null;
+    const __pid = (typeof state !== 'undefined' && state.consultoriaEditandoId)
+      || (cache && (cache.proposta_id || cache.id)) || window.__dmPropostaId || null;
+    const __pontosCache = (cache && Array.isArray(cache.pontos)) ? cache.pontos : [];
+    const __alinhCache = (cache && Array.isArray(cache.alinhamento_lados)) ? cache.alinhamento_lados : [];
     const __alinhAtivo = !!document.getElementById('dmOpcAlinh')?.checked;
-    if (window.PropostaCroqui) window.PropostaCroqui.init(__pid, subtipo, __alinhAtivo);
+    if (window.PropostaCroqui) window.PropostaCroqui.init(__pid, subtipo, __alinhAtivo, __pontosCache, __alinhCache);
     document.getElementById('dmOpcAlinh')?.addEventListener('change', (e) => {
       if (window.PropostaCroqui) window.PropostaCroqui.setAlinhamentoAtivo(e.target.checked);
     });
