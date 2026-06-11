@@ -332,7 +332,7 @@ export async function gerarHtmlRelatorio(vistoriaId: string): Promise<string> {
     <div class="meta-item"><div class="l">Data da Vistoria</div><div class="v">${escapeHtml(v.data)}</div></div>
     <div class="meta-item"><div class="l">Cliente</div><div class="v">${escapeHtml(obra.cliente as string) || '—'}</div></div>
     <div class="meta-item"><div class="l">Endereço</div><div class="v">${escapeHtml(obra.endereco as string) || '—'}, ${escapeHtml(obra.cidade as string) || ''}</div></div>
-    <div class="meta-item"><div class="l">Vistoriador</div><div class="v">${escapeHtml(v.vistoriador) || escapeHtml(obra.responsavel_tecnico as string) || '—'}</div></div>
+    <div class="meta-item"><div class="l">Vistoriador</div><div class="v">${escapeHtml(String(v.vistoriador || '').split(' — ')[0]) || escapeHtml(obra.responsavel_tecnico as string) || '—'}</div></div>
     <div class="meta-item"><div class="l">Status da Obra</div><div class="v"><span class="status-pill">${statusLabel}</span></div></div>
   </div>
 
@@ -345,6 +345,18 @@ export async function gerarHtmlRelatorio(vistoriaId: string): Promise<string> {
   ${v.pendencias ? `<h2>Pendências / Não-conformidades</h2><div class="pendencias">${escapeHtml(v.pendencias)}</div>` : ''}
 
   ${fotos.length > 0 ? `<h2>Relatório Fotográfico (${fotos.length})</h2><div class="fotos-grid">${fotosHtml}</div>` : ''}
+
+  ${v.vistoriador ? (() => {
+    const vp = String(v.vistoriador).split(' — ').map(s => s.trim());
+    return `<div style="margin-top:54px; text-align:center; page-break-inside:avoid;">
+      <div style="width:300px; border-top:1px solid #333; margin:0 auto; padding-top:6px;">
+        <div style="font-weight:600; font-size:14px;">${escapeHtml(vp[0] || '')}</div>
+        ${vp[1] ? `<div style="font-size:12px; color:#555;">${escapeHtml(vp[1])}</div>` : ''}
+        ${vp[2] ? `<div style="font-size:12px; color:#555;">${escapeHtml(vp[2])}</div>` : ''}
+        <div style="font-size:11px; color:#888; margin-top:3px;">Responsável Técnico pela Vistoria</div>
+      </div>
+    </div>`;
+  })() : ''}
 
   <div class="footer">
     Documento gerado eletronicamente pela ZAYRA — Assistente Executiva da Romatec.
@@ -433,7 +445,7 @@ export async function gerarPdfVistoria(
 
   doc.text(`Obra: ${obra.nome}${obra.cliente ? ' — ' + obra.cliente : ''}`);
   if (obra.endereco) doc.text(`Endereco: ${obra.endereco}`);
-  if (v.vistoriador) doc.text(`Vistoriador: ${v.vistoriador}`);
+  if (v.vistoriador) doc.text(`Vistoriador: ${String(v.vistoriador).split(' — ')[0]}`);
   doc.text(`Status: ${v.status_obra.toUpperCase()}`);
   doc.moveDown(0.6);
 
@@ -455,6 +467,23 @@ export async function gerarPdfVistoria(
     doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
     doc.moveDown(0.2);
     doc.fontSize(10).fillColor('#111').text(v.pendencias, { width: 499 });
+    doc.moveDown(0.6);
+  }
+
+  // v3.63.12: bloco de assinatura do vistoriador (destacado) — nome + qualificação
+  // + conselho (CFT/CREA). O vistoriador é salvo como "Nome — Qualificação — Conselho".
+  if (v.vistoriador) {
+    if (doc.y > 650) doc.addPage(); else doc.moveDown(1.5);
+    const vp = String(v.vistoriador).split(' — ').map(s => s.trim());
+    const cx = 297.5; // centro do conteúdo A4 (48..547)
+    doc.moveTo(cx - 120, doc.y).lineTo(cx + 120, doc.y).strokeColor('#333').lineWidth(0.8).stroke();
+    doc.moveDown(0.25);
+    doc.fontSize(11).fillColor('#111').font('Helvetica-Bold').text(vp[0] || '', { align: 'center' });
+    doc.font('Helvetica').fontSize(9.5).fillColor('#444');
+    if (vp[1]) doc.text(vp[1], { align: 'center' });
+    if (vp[2]) doc.text(vp[2], { align: 'center' });
+    doc.fontSize(8.5).fillColor('#888').text('Responsável Técnico pela Vistoria', { align: 'center' });
+    doc.font('Helvetica').fillColor('#111');
     doc.moveDown(0.6);
   }
 
