@@ -5998,6 +5998,22 @@ function renderVto() {
   const editandoData = state.vistoriaEditandoData; // dados carregados
   const draft = !editandoId ? vtoCarregarRascunho() : null; // v3.63.8: rascunho da nova
   const titulo = editandoId ? `Editando Vistoria #${editandoId}` : 'Nova vistoria';
+
+  // v3.63.9: opções predefinidas pra preencher rápido em campo (datalist — aceita
+  // selecionar OU digitar). Título = tipos/períodos de vistoria; Vistoriador =
+  // cadastro derivado das vistorias já feitas + o técnico responsável.
+  const nProx = (state.vistorias?.length || 0) + 1;
+  const TITULOS_VISTORIA = [
+    `${nProx}ª Vistoria`,
+    'Vistoria Inicial', 'Vistoria de Fundação', 'Vistoria de Estrutura',
+    'Vistoria de Alvenaria', 'Vistoria de Cobertura', 'Vistoria de Instalações',
+    'Vistoria de Acabamento', 'Vistoria de Medição', 'Vistoria Final / Entrega',
+    'Vistoria Semanal', 'Vistoria Quinzenal', 'Vistoria Mensal', 'Vistoria Periódica',
+  ];
+  const vistoriadoresUsados = [...new Set((state.vistorias || []).map(x => x.vistoriador).filter(Boolean))];
+  const VISTORIADORES = [...new Set(['José Romário', ...vistoriadoresUsados])];
+  const dlTitulos = `<datalist id="vTituloOpts">${TITULOS_VISTORIA.map(t => `<option value="${escape(t)}">`).join('')}</datalist>`;
+  const dlVistoriadores = `<datalist id="vVistoriadorOpts">${VISTORIADORES.map(t => `<option value="${escape(t)}">`).join('')}</datalist>`;
   const labelBtn = editandoId ? '💾 Salvar alterações' : 'Salvar vistoria';
   v.innerHTML = `${obraSelector()}
   <div class="card">
@@ -6009,8 +6025,9 @@ function renderVto() {
     <div class="form-grid">
       <input id="vData" type="date" value="${editandoData ? (editandoData.data instanceof Date ? editandoData.data.toISOString().slice(0,10) : String(editandoData.data).slice(0,10)) : ''}">
       <input id="vHora" type="time" value="${editandoData?.hora ? String(editandoData.hora).slice(0,5) : ''}" title="Horário da vistoria (auto-preenchido)">
-      <input id="vTitulo" placeholder="Título (opcional)" value="${escape(editandoData?.titulo || draft?.titulo || '')}">
-      <input id="vVistoriador" placeholder="Vistoriador (engenheiro/arquiteto)" value="${escape(editandoData?.vistoriador || draft?.vistoriador || '')}">
+      <input id="vTitulo" list="vTituloOpts" autocomplete="off" placeholder="Título (toque pra escolher o tipo)" value="${escape(editandoData?.titulo || draft?.titulo || '')}">
+      <input id="vVistoriador" list="vVistoriadorOpts" autocomplete="off" placeholder="Vistoriador (toque pra escolher)" value="${escape(editandoData?.vistoriador || draft?.vistoriador || '')}">
+      ${dlTitulos}${dlVistoriadores}
       <select id="vStatus">
         <option value="regular" ${(editandoData?.status_obra || draft?.status) === 'regular' ? 'selected' : ''}>Status: Regular</option>
         <option value="atencao" ${(editandoData?.status_obra || draft?.status) === 'atencao' ? 'selected' : ''}>Status: Atenção</option>
