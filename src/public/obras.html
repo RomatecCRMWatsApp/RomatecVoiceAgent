@@ -1777,6 +1777,14 @@ async function loadCatalogo() {
 async function loadVistorias() {
   if (!state.currentObra) return state.vistorias = [];
   state.vistorias = await api('/api/vistorias?obra_id=' + state.currentObra);
+  // v3.63.10: carrega config das listas do VTO (tipos + vistoriadores) uma vez
+  if (!state.vtoConfig) {
+    try {
+      const r = await fetch('/api/vto/config', { credentials: 'include' });
+      const d = await r.json();
+      state.vtoConfig = (d && d.ok) ? { titulos: d.titulos || [], vistoriadores: d.vistoriadores || [] } : { titulos: [], vistoriadores: [] };
+    } catch (_) { state.vtoConfig = { titulos: [], vistoriadores: [] }; }
+  }
 }
 
 async function loadFolha() {
@@ -6003,15 +6011,18 @@ function renderVto() {
   // selecionar OU digitar). Título = tipos/períodos de vistoria; Vistoriador =
   // cadastro derivado das vistorias já feitas + o técnico responsável.
   const nProx = (state.vistorias?.length || 0) + 1;
-  const TITULOS_VISTORIA = [
-    `${nProx}ª Vistoria`,
+  const TITULOS_DEFAULT = [
     'Vistoria Inicial', 'Vistoria de Fundação', 'Vistoria de Estrutura',
     'Vistoria de Alvenaria', 'Vistoria de Cobertura', 'Vistoria de Instalações',
     'Vistoria de Acabamento', 'Vistoria de Medição', 'Vistoria Final / Entrega',
     'Vistoria Semanal', 'Vistoria Quinzenal', 'Vistoria Mensal', 'Vistoria Periódica',
   ];
+  // v3.63.10: tipos configuráveis (Configurações) com fallback nos defaults.
+  const titulosCfg = (state.vtoConfig?.titulos?.length ? state.vtoConfig.titulos : TITULOS_DEFAULT);
+  const TITULOS_VISTORIA = [`${nProx}ª Vistoria`, ...titulosCfg];
   const vistoriadoresUsados = [...new Set((state.vistorias || []).map(x => x.vistoriador).filter(Boolean))];
-  const VISTORIADORES = [...new Set(['José Romário', ...vistoriadoresUsados])];
+  const vistoriadoresCfg = (state.vtoConfig?.vistoriadores?.length ? state.vtoConfig.vistoriadores : ['José Romário']);
+  const VISTORIADORES = [...new Set([...vistoriadoresCfg, ...vistoriadoresUsados])];
   const dlTitulos = `<datalist id="vTituloOpts">${TITULOS_VISTORIA.map(t => `<option value="${escape(t)}">`).join('')}</datalist>`;
   const dlVistoriadores = `<datalist id="vVistoriadorOpts">${VISTORIADORES.map(t => `<option value="${escape(t)}">`).join('')}</datalist>`;
   const labelBtn = editandoId ? '💾 Salvar alterações' : 'Salvar vistoria';
@@ -24416,6 +24427,7 @@ async function renderConfiguracoes() {
         <button class="cfg-tab" data-sub="seguranca" style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">🔐 Segurança</button>
         <button class="cfg-tab" data-sub="auditoria" style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">📋 Auditoria</button>
         <button class="cfg-tab" data-sub="galeria"   style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">📷 Galeria</button>
+        <button class="cfg-tab" data-sub="vto"       style="padding:8px 14px; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer;">🔍 Vistoria (VTO)</button>
       </div>
       <div id="cfg-body">Carregando…</div>
     </div>
@@ -24432,9 +24444,50 @@ async function renderConfiguracoes() {
     else if (state.configSub === 'seguranca') await renderCfgSeguranca();
     else if (state.configSub === 'auditoria') await renderCfgAuditoria();
     else if (state.configSub === 'galeria') await renderCfgGaleria();
+    else if (state.configSub === 'vto') await renderCfgVto();
   } catch (e) {
     document.getElementById('cfg-body').innerHTML = `<div class="card empty">Erro: ${escape(e.message)}</div>`;
   }
+}
+
+// v3.63.10: aba VTO — edita tipos de vistoria + vistoriadores (datalists do form).
+async function renderCfgVto() {
+  const body = document.getElementById('cfg-body');
+  body.innerHTML = '<div style="opacity:.6;">Carregando…</div>';
+  let cfg = { titulos: [], vistoriadores: [] };
+  try {
+    const r = await fetch('/api/vto/config', { credentials: 'include' });
+    const d = await r.json();
+    if (d && d.ok) cfg = { titulos: d.titulos || [], vistoriadores: d.vistoriadores || [] };
+  } catch (_) {}
+  const TIT_DEF = ['Vistoria Inicial','Vistoria de Fundação','Vistoria de Estrutura','Vistoria de Alvenaria','Vistoria de Cobertura','Vistoria de Instalações','Vistoria de Acabamento','Vistoria de Medição','Vistoria Final / Entrega','Vistoria Semanal','Vistoria Quinzenal','Vistoria Mensal','Vistoria Periódica'];
+  const titVal = (cfg.titulos.length ? cfg.titulos : TIT_DEF).join('\n');
+  const visVal = (cfg.vistoriadores.length ? cfg.vistoriadores : ['José Romário']).join('\n');
+  body.innerHTML = `
+    <div style="max-width:560px;">
+      <p style="font-size:13px; color:var(--text-muted); margin:0 0 12px;">Listas que aparecem ao tocar nos campos da vistoria (um item por linha). O campo continua aceitando digitação livre.</p>
+      <label style="font-weight:600; font-size:13px; display:block; margin-bottom:4px;">📋 Tipos de Vistoria (campo Título)</label>
+      <textarea id="cfgVtoTitulos" rows="8" style="width:100%; font-size:13px; font-family:monospace; margin-bottom:14px;">${escape(titVal)}</textarea>
+      <label style="font-weight:600; font-size:13px; display:block; margin-bottom:4px;">👷 Vistoriadores (campo Vistoriador)</label>
+      <textarea id="cfgVtoVist" rows="5" style="width:100%; font-size:13px; font-family:monospace; margin-bottom:14px;">${escape(visVal)}</textarea>
+      <button id="cfgVtoSalvar" class="btn-primary" style="padding:8px 16px;">💾 Salvar listas</button>
+      <span id="cfgVtoMsg" style="margin-left:10px; font-size:12px; color:var(--text-muted);"></span>
+    </div>`;
+  document.getElementById('cfgVtoSalvar').onclick = async () => {
+    const linhas = id => (document.getElementById(id).value || '').split('\n').map(s => s.trim()).filter(Boolean);
+    const msg = document.getElementById('cfgVtoMsg');
+    msg.textContent = 'Salvando…';
+    try {
+      const r = await fetch('/api/vto/config', {
+        method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ titulos: linhas('cfgVtoTitulos'), vistoriadores: linhas('cfgVtoVist') }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'falha');
+      state.vtoConfig = null; // invalida cache local → recarrega no próximo VTO
+      msg.textContent = '✓ Salvo';
+    } catch (e) { msg.textContent = '✗ ' + e.message; }
+  };
 }
 
 // v3.50.0: aba Seguranca — cadastra/troca/remove PIN secundario (4 digitos).

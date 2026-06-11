@@ -962,6 +962,31 @@ app.put('/api/tenant-settings', requireCeoToken, async (req: Request, res: Respo
   }
 });
 
+// v3.63.10: config das listas do VTO (tipos de vistoria + vistoriadores) —
+// editavel em Configuracoes. GET aberto (so nomes); PUT exige login.
+app.get('/api/vto/config', async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./services/configuracoes');
+    const parse = (s: string): string[] => {
+      try { const a = JSON.parse(s); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; }
+      catch { return []; }
+    };
+    const [tit, vis] = await Promise.all([m.getConfig('VTO_TITULOS'), m.getConfig('VTO_VISTORIADORES')]);
+    res.json({ ok: true, titulos: parse(tit), vistoriadores: parse(vis) });
+  } catch (err) { res.status(500).json({ ok: false, error: (err as Error).message }); }
+});
+app.put('/api/vto/config', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const b = req.body ?? {};
+    const clean = (arr: unknown): string[] => Array.isArray(arr)
+      ? [...new Set(arr.map(x => String(x).trim()).filter(Boolean))].slice(0, 100) : [];
+    const m = await import('./services/configuracoes');
+    if (Array.isArray(b.titulos)) await m.setConfig('VTO_TITULOS', JSON.stringify(clean(b.titulos)), 'Tipos de vistoria (VTO)');
+    if (Array.isArray(b.vistoriadores)) await m.setConfig('VTO_VISTORIADORES', JSON.stringify(clean(b.vistoriadores)), 'Vistoriadores cadastrados (VTO)');
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ ok: false, error: (err as Error).message }); }
+});
+
 // Transações
 app.get ('/api/transacoes', apiHandle(args => obras.listarTransacoesObra(args as Parameters<typeof obras.listarTransacoesObra>[0])));
 app.post('/api/transacoes', apiHandle(args => obras.criarTransacaoObra(args as Parameters<typeof obras.criarTransacaoObra>[0])));
