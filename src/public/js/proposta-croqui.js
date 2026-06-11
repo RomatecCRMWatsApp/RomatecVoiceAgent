@@ -92,22 +92,23 @@
     const box = el('dmcLadosBox'); if (!box) return;
     const ls = lados();
     if (!ls.length) { box.innerHTML = ''; return; }
-    const colAlinhar = S.alinhamentoAtivo;
+    // v3.63.3: coluna "Alinhar cerca?" SEMPRE visível (não depende mais do
+    // serviço estar marcado). Selecionar lados já gera o croqui de alinhamento.
     const rows = ls.map(l => `
       <tr>
         <td style="padding:3px 5px; color:var(--text-muted);">${l.ordem}</td>
         <td style="padding:3px 5px;">${esc(l.de)} → ${esc(l.para)}</td>
         <td style="padding:3px 5px; text-align:right;">${f2(l.distancia_m)} m</td>
-        ${colAlinhar ? `<td style="padding:3px 5px; text-align:center;"><input type="checkbox" data-alinhar="${l.ordem}" ${S.alinhar.has(l.ordem) ? 'checked' : ''}></td>` : ''}
+        <td style="padding:3px 5px; text-align:center;"><input type="checkbox" data-alinhar="${l.ordem}" ${S.alinhar.has(l.ordem) ? 'checked' : ''}></td>
       </tr>`).join('');
     box.innerHTML = `
       <table style="width:100%; border-collapse:collapse; font-size:11px;">
         <thead><tr style="color:var(--text-muted); text-align:left;">
-          <th style="padding:3px 5px;">Lado</th><th style="padding:3px 5px;">De → Para</th><th style="padding:3px 5px; text-align:right;">Extensão</th>${colAlinhar ? '<th style="padding:3px 5px; text-align:center;">Alinhar cerca?</th>' : ''}
+          <th style="padding:3px 5px;">Lado</th><th style="padding:3px 5px;">De → Para</th><th style="padding:3px 5px; text-align:right;">Extensão</th><th style="padding:3px 5px; text-align:center;">Alinhar cerca?</th>
         </tr></thead><tbody>${rows}</tbody>
       </table>
-      ${colAlinhar ? '' : '<div style="font-size:11px; color:var(--text-muted); padding:4px;">Marque o serviço <b>Alinhamento de Cerca</b> para selecionar os lados.</div>'}`;
-    if (colAlinhar) box.querySelectorAll('input[data-alinhar]').forEach(c => c.addEventListener('change', () => {
+      ${S.alinhamentoAtivo ? '' : '<div style="font-size:11px; color:var(--text-muted); padding:4px;">💡 Selecione os lados da cerca. Para <b>cobrar</b> e sair no PDF, marque também o serviço <b>Alinhamento de Cerca</b> abaixo.</div>'}`;
+    box.querySelectorAll('input[data-alinhar]').forEach(c => c.addEventListener('change', () => {
       const o = Number(c.dataset.alinhar);
       if (c.checked) S.alinhar.add(o); else S.alinhar.delete(o);
       renderCroqui(); renderListaAlinhamento();
@@ -133,7 +134,7 @@
 
     // Croqui de alinhamento (se há lados marcados)
     const boxA = el('dmcCroquiAlinhBox'); if (!boxA) return;
-    if (S.alinhamentoAtivo && S.alinhar.size > 0) {
+    if (S.alinhar.size > 0) {
       try {
         const r = await fetchApi(`${API}/api/propostas-consultoria/croqui-svg`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -146,7 +147,7 @@
 
   function renderListaAlinhamento() {
     const box = el('dmcAlinhLista'); if (!box) return;
-    if (!S.alinhamentoAtivo || S.alinhar.size === 0) { box.innerHTML = ''; return; }
+    if (S.alinhar.size === 0) { box.innerHTML = ''; return; }
     const ls = lados().filter(l => S.alinhar.has(l.ordem));
     const total = ls.reduce((a, l) => a + l.distancia_m, 0);
     box.innerHTML = `
