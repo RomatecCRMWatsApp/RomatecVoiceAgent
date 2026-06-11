@@ -354,6 +354,18 @@ export async function criarPropostaConsultoria(input: CriarPropostaConsultoriaIn
     ]
   );
 
+  // v3.63.2: persiste pontos/croqui nas tabelas filhas (se vieram no dados_imovel)
+  // — assim o PDF acha o croqui mesmo sem re-clicar "Salvar pontos".
+  try {
+    const pts = (input.dados_imovel as { pontos?: unknown[] }).pontos;
+    if (Array.isArray(pts) && pts.length >= 3) {
+      const pc = await import('../services/propostaCroqui');
+      await pc.salvarPontos(r.insertId, pts as Parameters<typeof pc.salvarPontos>[1]);
+      const al = (input.dados_imovel as { alinhamento_lados?: number[] }).alinhamento_lados;
+      if (Array.isArray(al) && al.length) await pc.definirAlinhamento(r.insertId, al.map(Number));
+    }
+  } catch (e) { console.warn('[proposta-croqui] persist pontos (criar) falhou:', (e as Error).message); }
+
   // v1.66.9: persiste anexos enviados junto (se houver)
   let anexosCriados = 0;
   if (input.anexos && input.anexos.length > 0) {
@@ -2256,8 +2268,26 @@ async function renderDemarcacaoLotesBody(
   // Defensivo: qualquer falha (rasterizador ausente, SVG ruim) é ignorada e o
   // PDF segue idêntico ao de hoje (sem croqui).
   try {
-    const pontosRaw = Array.isArray((di as { pontos?: unknown[] }).pontos)
+    let pontosRaw: Array<Record<string, unknown>> = Array.isArray((di as { pontos?: unknown[] }).pontos)
       ? ((di as { pontos: Array<Record<string, unknown>> }).pontos) : [];
+    let alinhar: number[] = Array.isArray((di as { alinhamento_lados?: unknown[] }).alinhamento_lados)
+      ? ((di as { alinhamento_lados: number[] }).alinhamento_lados).map(Number) : [];
+    // v3.63.2: fallback — proposta salva carrega pontos/alinhamento das tabelas
+    // filhas (onde "Salvar pontos + croqui" grava), caso o dados_imovel não os tenha.
+    const pid = Number((p as { id?: number | string }).id);
+    if (pontosRaw.length < 3 && Number.isFinite(pid) && pid > 0) {
+      try {
+        const { obterPontos } = await import('../services/propostaCroqui');
+        const dd = await obterPontos(pid);
+        if (dd.pontos.length >= 3) {
+          pontosRaw = dd.pontos.map((pp: Record<string, unknown>) => ({
+            ordem: pp.ordem, vertice: pp.vertice,
+            utmE: pp.utm_e, utmN: pp.utm_n, lat: pp.lat, lng: pp.lng,
+          }));
+          alinhar = dd.alinhamento.lados;
+        }
+      } catch { /* segue sem croqui */ }
+    }
     if (pontosRaw.length >= 3) {
       const { gerarSvgProposta } = await import('../services/propostaCroqui');
       const { rasterizarSvg } = await import('../services/laudoAnexos');
@@ -2286,8 +2316,6 @@ async function renderDemarcacaoLotesBody(
       }
 
       // 4.7 — Croqui de Alinhamento de Cerca (condicional)
-      const alinhar = Array.isArray((di as { alinhamento_lados?: unknown[] }).alinhamento_lados)
-        ? ((di as { alinhamento_lados: number[] }).alinhamento_lados).map(Number) : [];
       const alinhContratado = !!((di.opcionais as { alinhamento_cerca?: { contratado?: boolean } } | undefined)?.alinhamento_cerca?.contratado);
       if (alinhContratado && alinhar.length > 0) {
         const svgAlin = gerarSvgProposta(pontosCk, { tipoImovel, destacarLados: alinhar, tituloDestaque: 'CERCA A SER ALINHADA', larguraPx: 1100, alturaPx: 640 });
@@ -3700,6 +3728,17 @@ export async function atualizarPropostaConsultoria(input: {
       id,
     ]
   );
+
+  // v3.63.2: persiste pontos/croqui nas tabelas filhas (se vieram no dados_imovel).
+  try {
+    const pts = (dadosFinal as unknown as { pontos?: unknown[] }).pontos;
+    if (Array.isArray(pts) && pts.length >= 3) {
+      const pc = await import('../services/propostaCroqui');
+      await pc.salvarPontos(id, pts as Parameters<typeof pc.salvarPontos>[1]);
+      const al = (dadosFinal as unknown as { alinhamento_lados?: number[] }).alinhamento_lados;
+      if (Array.isArray(al) && al.length) await pc.definirAlinhamento(id, al.map(Number));
+    }
+  } catch (e) { console.warn('[proposta-croqui] persist pontos (atualizar) falhou:', (e as Error).message); }
 
   return {
     ok: true as const,
