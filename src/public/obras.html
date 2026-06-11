@@ -5886,6 +5886,45 @@ function exportarFolhaPdf(monthLabel) {
 }
 
 // ── VTO (Vistoria Técnica de Obra) ──
+// v3.63.8: rascunho persistente — campos + fotos não se perdem ao trocar de aba
+// nem ao fechar a página (memória + localStorage). Só pra vistoria NOVA.
+function vtoDraftKey() { return 'vtoDraft_' + (state.currentObra || '0'); }
+function vtoSalvarRascunho() {
+  if (state.vistoriaEditandoId) return; // edição carrega do servidor, não rascunha
+  const g = id => document.getElementById(id);
+  if (!g('vDesc')) return; // form não montado
+  const campos = {
+    data: g('vData')?.value || '', hora: g('vHora')?.value || '',
+    titulo: g('vTitulo')?.value || '', vistoriador: g('vVistoriador')?.value || '',
+    status: g('vStatus')?.value || 'regular', descricao: g('vDesc')?.value || '',
+    observacoes: g('vObs')?.value || '', pendencias: g('vPend')?.value || '',
+  };
+  state.vtoDraft = campos;
+  try {
+    localStorage.setItem(vtoDraftKey(), JSON.stringify({ campos, fotos: state.vtoFotos }));
+  } catch (e) {
+    // quota estourou (fotos grandes) — salva só os campos; fotos seguem em memória.
+    try { localStorage.setItem(vtoDraftKey(), JSON.stringify({ campos, fotos: [] })); } catch (_) {}
+  }
+}
+function vtoCarregarRascunho() {
+  if (state.vtoDraft) return state.vtoDraft;
+  try {
+    const raw = localStorage.getItem(vtoDraftKey());
+    if (raw) {
+      const p = JSON.parse(raw);
+      state.vtoDraft = p.campos || null;
+      if (Array.isArray(p.fotos) && p.fotos.length && state.vtoFotos.length === 0) state.vtoFotos = p.fotos;
+      return state.vtoDraft;
+    }
+  } catch (_) {}
+  return null;
+}
+function vtoLimparRascunho() {
+  state.vtoDraft = null;
+  try { localStorage.removeItem(vtoDraftKey()); } catch (_) {}
+}
+
 function renderVto() {
   const v = document.getElementById('view-vto');
   if (state.obras.length === 0) {
@@ -5957,6 +5996,7 @@ function renderVto() {
   // v1.67.9: modo edicao
   const editandoId = state.vistoriaEditandoId;
   const editandoData = state.vistoriaEditandoData; // dados carregados
+  const draft = !editandoId ? vtoCarregarRascunho() : null; // v3.63.8: rascunho da nova
   const titulo = editandoId ? `Editando Vistoria #${editandoId}` : 'Nova vistoria';
   const labelBtn = editandoId ? '💾 Salvar alterações' : 'Salvar vistoria';
   v.innerHTML = `${obraSelector()}
@@ -5964,21 +6004,22 @@ function renderVto() {
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
       <p class="section-title" style="margin:0;">${escape(titulo)}</p>
       ${editandoId ? '<button data-vto-cancel-edit style="background:transparent;">← Cancelar edição</button>' : ''}
+      ${(!editandoId && (draft || state.vtoFotos.length > 0)) ? '<button data-vto-clear-draft style="background:transparent; color:var(--text-muted); font-size:12px;" title="Apaga o rascunho salvo e começa do zero">🗑️ Descartar rascunho</button>' : ''}
     </div>
     <div class="form-grid">
       <input id="vData" type="date" value="${editandoData ? (editandoData.data instanceof Date ? editandoData.data.toISOString().slice(0,10) : String(editandoData.data).slice(0,10)) : ''}">
       <input id="vHora" type="time" value="${editandoData?.hora ? String(editandoData.hora).slice(0,5) : ''}" title="Horário da vistoria (auto-preenchido)">
-      <input id="vTitulo" placeholder="Título (opcional)" value="${escape(editandoData?.titulo || '')}">
-      <input id="vVistoriador" placeholder="Vistoriador (engenheiro/arquiteto)" value="${escape(editandoData?.vistoriador || '')}">
+      <input id="vTitulo" placeholder="Título (opcional)" value="${escape(editandoData?.titulo || draft?.titulo || '')}">
+      <input id="vVistoriador" placeholder="Vistoriador (engenheiro/arquiteto)" value="${escape(editandoData?.vistoriador || draft?.vistoriador || '')}">
       <select id="vStatus">
-        <option value="regular" ${editandoData?.status_obra === 'regular' ? 'selected' : ''}>Status: Regular</option>
-        <option value="atencao" ${editandoData?.status_obra === 'atencao' ? 'selected' : ''}>Status: Atenção</option>
-        <option value="critica" ${editandoData?.status_obra === 'critica' ? 'selected' : ''}>Status: Crítica</option>
+        <option value="regular" ${(editandoData?.status_obra || draft?.status) === 'regular' ? 'selected' : ''}>Status: Regular</option>
+        <option value="atencao" ${(editandoData?.status_obra || draft?.status) === 'atencao' ? 'selected' : ''}>Status: Atenção</option>
+        <option value="critica" ${(editandoData?.status_obra || draft?.status) === 'critica' ? 'selected' : ''}>Status: Crítica</option>
       </select>
     </div>
-    <textarea id="vDesc" placeholder="Descrição da vistoria — o que foi visto, etapas em execução, qualidade do serviço *" rows="4" style="margin-bottom:8px;">${escape(editandoData?.descricao || '')}</textarea>
-    <textarea id="vObs" placeholder="Observações" rows="2" style="margin-bottom:8px;">${escape(editandoData?.observacoes || '')}</textarea>
-    <textarea id="vPend" placeholder="Pendências / Não-conformidades" rows="2" style="margin-bottom:8px;">${escape(editandoData?.pendencias || '')}</textarea>
+    <textarea id="vDesc" placeholder="Descrição da vistoria — o que foi visto, etapas em execução, qualidade do serviço *" rows="4" style="margin-bottom:8px;">${escape(editandoData?.descricao || draft?.descricao || '')}</textarea>
+    <textarea id="vObs" placeholder="Observações" rows="2" style="margin-bottom:8px;">${escape(editandoData?.observacoes || draft?.observacoes || '')}</textarea>
+    <textarea id="vPend" placeholder="Pendências / Não-conformidades" rows="2" style="margin-bottom:8px;">${escape(editandoData?.pendencias || draft?.pendencias || '')}</textarea>
 
     <div style="margin: 12px 0;">
       <label class="btn-gold" style="display:inline-block;">
@@ -6012,14 +6053,36 @@ function renderVto() {
   // v1.67.9: nao sobrescreve a data se estiver editando
   // v3.4.0: auto-preenche hora tambem
   if (!editandoId) {
-    document.getElementById('vData').value = today();
     const agora = new Date();
-    document.getElementById('vHora').value =
-      String(agora.getHours()).padStart(2,'0') + ':' + String(agora.getMinutes()).padStart(2,'0');
+    document.getElementById('vData').value = draft?.data || today();
+    document.getElementById('vHora').value = draft?.hora ||
+      (String(agora.getHours()).padStart(2,'0') + ':' + String(agora.getMinutes()).padStart(2,'0'));
+    // v3.63.8: salva rascunho a cada digitação (sobrevive a trocar de aba / fechar)
+    ['vData','vHora','vTitulo','vVistoriador','vStatus','vDesc','vObs','vPend'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.addEventListener('input', vtoSalvarRascunho); el.addEventListener('change', vtoSalvarRascunho); }
+    });
   } else if (editandoData?.data) {
     const d = editandoData.data;
     const dStr = d instanceof Date ? d.toISOString().slice(0,10) : String(d).slice(0,10);
     document.getElementById('vData').value = dStr;
+  }
+
+  // v3.63.8: ao EDITAR, sincroniza alterações em state.vistoriaEditandoData
+  // (sobrevive a trocar de aba — antes o form re-renderizava do dado original).
+  if (editandoId) {
+    const syncEd = () => {
+      const g = id => document.getElementById(id);
+      const d = state.vistoriaEditandoData || (state.vistoriaEditandoData = {});
+      d.data = g('vData')?.value || d.data; d.hora = g('vHora')?.value || '';
+      d.titulo = g('vTitulo')?.value || ''; d.vistoriador = g('vVistoriador')?.value || '';
+      d.status_obra = g('vStatus')?.value || 'regular'; d.descricao = g('vDesc')?.value || '';
+      d.observacoes = g('vObs')?.value || ''; d.pendencias = g('vPend')?.value || '';
+    };
+    ['vData','vHora','vTitulo','vVistoriador','vStatus','vDesc','vObs','vPend'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.addEventListener('input', syncEd); el.addEventListener('change', syncEd); }
+    });
   }
 
   document.getElementById('vFotos').onchange = async (e) => {
@@ -6093,11 +6156,12 @@ function renderVto() {
     }
     if (ignoradas > 0) console.warn(`[vto:foto] ${ignoradas} foto(s) ignoradas`);
 
+    vtoSalvarRascunho(); // v3.63.8: persiste fotos no rascunho
     renderVto();
   };
 
   document.querySelectorAll('[data-rm-foto]').forEach(b => b.onclick = () => {
-    state.vtoFotos.splice(parseInt(b.dataset.rmFoto), 1); renderVto();
+    state.vtoFotos.splice(parseInt(b.dataset.rmFoto), 1); vtoSalvarRascunho(); renderVto();
   });
 
   // v3.4.0: Lightbox handlers — click no thumbnail abre modal com foto em tamanho real
@@ -6144,6 +6208,7 @@ function renderVto() {
 
   document.querySelectorAll('[data-leg]').forEach(i => i.oninput = e => {
     state.vtoFotos[parseInt(i.dataset.leg)].legenda = e.target.value;
+    if (!state.vistoriaEditandoId) vtoSalvarRascunho();
   });
 
   // v1.67.9: cancelar edicao volta pra modo Nova
@@ -6153,6 +6218,15 @@ function renderVto() {
     state.vistoriaEditandoData = null;
     state.vtoFotos = [];
     render();
+  };
+
+  // v3.63.8: descartar rascunho (campos + fotos) e começar do zero
+  const clearDraft = document.querySelector('[data-vto-clear-draft]');
+  if (clearDraft) clearDraft.onclick = () => {
+    if (!confirm('Descartar o rascunho (campos e fotos não salvos)?')) return;
+    vtoLimparRascunho();
+    state.vtoFotos = [];
+    renderVto();
   };
 
   document.getElementById('addVto').onclick = async () => {
@@ -6217,6 +6291,7 @@ function renderVto() {
       }
       alert('✅ Vistoria salva' + (fotosCount > 0 ? ` com ${fotosCount} foto(s).` : '.'));
       state.vtoFotos = [];
+      vtoLimparRascunho(); // v3.63.8: salvou -> descarta o rascunho
       render();
     } catch (e) {
       // v1.99.2: diagnóstico expandido — mostra name + message + 1ª linha do
