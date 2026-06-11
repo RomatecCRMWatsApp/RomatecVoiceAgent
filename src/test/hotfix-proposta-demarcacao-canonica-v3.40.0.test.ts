@@ -159,10 +159,10 @@ describe('v3.40.0 — BUG 2: Kit GNSS sempre presente nos honorarios', () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe('v3.40.0 — BUG 3: Alinhamento cerca com regra de calculo', () => {
-  it('13. Engine inclui `detalhe` na linha de alinhamento com vUnit + perimetro default', () => {
-    const r = calcularDemarcacaoLotes({
-      subtipo: 'demarcacao_rural',
-      finalidade: 'demarcacao_inicial',
+  it('13. v3.63.5: alinhamento contratado entra em honorarios e SOMA no total (rural)', () => {
+    const base = {
+      subtipo: 'demarcacao_rural' as const,
+      finalidade: 'demarcacao_inicial' as const,
       municipio: 'X', uf: 'MA',
       area_hectares: 29.04,
       perimetro_m: 2190.78,
@@ -170,17 +170,17 @@ describe('v3.40.0 — BUG 3: Alinhamento cerca com regra de calculo', () => {
       servico_piqueteamento: false,
       marcos: [],
       diarias_equipe: 1, km_deslocamento: 0,
-      complexidade: 'media',
-      opcionais: { alinhamento_cerca: { contratado: true, metros: 2190.78, valor_unitario: 0.42 } },
-    });
-    const linha = r.secao_opcionais_demarcacao.linhas.find(l => /Alinhamento/i.test(l.rotulo));
-    expect(linha?.detalhe).toBeDefined();
-    expect(linha!.detalhe).toMatch(/R\$ 0,42\/m/);
-    expect(linha!.detalhe).toMatch(/2\.190,78 m/);
-    expect(linha!.detalhe).toMatch(/editavel p\/ alinhamento parcial/i);
+      complexidade: 'media' as const,
+    };
+    const r0 = calcularDemarcacaoLotes(base);
+    const r = calcularDemarcacaoLotes({ ...base, opcionais: { alinhamento_cerca: { contratado: true, metros: 2190.78, valor_unitario: 0.42 } } });
+    expect(r.honorarios_romatec.alinhamento_cerca.contratado).toBe(true);
+    expect(r.honorarios_romatec.alinhamento_cerca.valor).toBeCloseTo(920.13, 1);
+    expect(r.honorarios_romatec.total).toBeCloseTo(r0.honorarios_romatec.total + 920.13, 1);
+    expect(r.secao_opcionais_demarcacao.linhas.find(l => /Alinhamento/i.test(l.rotulo))).toBeUndefined();
   });
 
-  it('14. Engine sem perimetro_m -> detalhe ainda renderiza (sem citar default)', () => {
+  it('14. v3.63.5: alinhamento urbano metros=100 -> valor 42 em honorarios', () => {
     const r = calcularDemarcacaoLotes({
       subtipo: 'demarcacao_urbana',
       finalidade: 'demarcacao_inicial',
@@ -193,14 +193,7 @@ describe('v3.40.0 — BUG 3: Alinhamento cerca com regra de calculo', () => {
       complexidade: 'simples',
       opcionais: { alinhamento_cerca: { contratado: true, metros: 100, valor_unitario: 0.42 } },
     });
-    const linha = r.secao_opcionais_demarcacao.linhas.find(l => /Alinhamento/i.test(l.rotulo));
-    expect(linha?.detalhe).toMatch(/R\$ 0,42\/m/);
-    expect(linha?.detalhe).not.toMatch(/default perimetro/);
-  });
-
-  it('15. PDF render exibe `detalhe` abaixo do rotulo (Helvetica-Oblique, cor #555)', () => {
-    expect(PROPOSTAS_CONS_TS).toMatch(/const det = \(l as \{ detalhe\?: string \}\)\.detalhe/);
-    expect(PROPOSTAS_CONS_TS).toMatch(/if \(det\)\s*\{[\s\S]{0,200}?fontSize\(8\)[\s\S]{0,100}?Helvetica-Oblique/);
+    expect(r.honorarios_romatec.alinhamento_cerca.valor).toBeCloseTo(42, 2);
   });
 });
 
@@ -266,8 +259,8 @@ describe('v3.40.0 — Texto do total coerente com soma real', () => {
     expect(PROPOSTAS_CONS_TS).toMatch(/Locacao de Kit GNSS \(item fixo\)/);
   });
 
-  it('22. Laudo continua marcado como "(quando contratado)"', () => {
-    expect(PROPOSTAS_CONS_TS).toMatch(/Laudo Tecnico de Demarcacao \(quando contratado\)/);
+  it('22. Laudo + Alinhamento marcados como "(quando contratados)" (v3.63.5)', () => {
+    expect(PROPOSTAS_CONS_TS).toMatch(/Laudo Tecnico de Demarcacao e Alinhamento de Cerca \(quando contratados\)/);
   });
 
   it('23. NAO contem mais o texto antigo "Kit GNSS e Laudo ... (itens diretos, quando contratados)"', () => {

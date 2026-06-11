@@ -552,6 +552,9 @@ export interface DemarcacaoLotesOutput {
     // v3.38.0 — itens diretos (fora da complexidade/assessoria/desconto).
     laudo_tecnico_direto: { contratado: boolean; valor: number };
     locacao_kit_gnss: { contratado: boolean; qtd_diarias: number; diaria: number; valor: number; descritivo: string };
+    // v3.63.5 — alinhamento de cerca virou item DIRETO (soma no total da proposta),
+    // não mais opcional que não soma. Quando contratado, entra nos honorarios.
+    alinhamento_cerca: { contratado: boolean; metros: number; valor_unitario: number; valor: number };
     total: number;
   };
   secao_opcionais_demarcacao: {

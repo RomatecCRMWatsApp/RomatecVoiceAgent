@@ -240,8 +240,23 @@ export function calcularDemarcacaoLotes(
     };
   })();
 
+  // v3.63.5: Alinhamento de cerca virou ITEM DIRETO (soma no total), não mais
+  // opcional que não soma. Quando contratado: metros × R$/m entra nos honorarios.
+  const alinhamentoCerca = (() => {
+    const it = opcionaisRaw.alinhamento_cerca;
+    const contratado = !!it?.contratado;
+    const metros = Number(it?.metros ?? 0);
+    const vUnit = Number(it?.valor_unitario ?? cfg.opcionais.alinhamento_cerca.valor_unitario);
+    return {
+      contratado,
+      metros: contratado ? metros : 0,
+      valor_unitario: vUnit,
+      valor: contratado ? round2(metros * vUnit) : 0,
+    };
+  })();
+
   // ── 12. Total = core + extras diretos ────────────────────────────────
-  const extrasDiretos = round2(laudoDireto.valor + kitGnss.valor);
+  const extrasDiretos = round2(laudoDireto.valor + kitGnss.valor + alinhamentoCerca.valor);
   const total = round2(core + extrasDiretos);
 
   // Guard de fechamento
@@ -307,6 +322,7 @@ export function calcularDemarcacaoLotes(
       desconto_valor,
       laudo_tecnico_direto: laudoDireto,
       locacao_kit_gnss: kitGnss,
+      alinhamento_cerca: alinhamentoCerca,
       total,
     },
     secao_opcionais_demarcacao: {
@@ -322,37 +338,15 @@ export function calcularDemarcacaoLotes(
 function montarLinhasOpcionais(
   opcionais: OpcionaisDemarcacao,
   cfgOpc: NonNullable<ReturnType<typeof getParams>['demarcacao_lotes_2026']>['opcionais'],
-  perimetroM: number,
+  _perimetroM: number,
 ): { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean; detalhe?: string; metros?: number; valor_unitario?: number }[] {
   // v3.38.0: 4 linhas SEMPRE renderizadas (laudo_tecnico foi promovido a item direto).
   // v3.40.0: linhas ganham campo `detalhe` opcional — regra de calculo visivel no PDF.
   // v3.42.0: linhas ganham metros/valor_unitario opcionais — PDF recomputa se valor=0.
   const linhas: { rotulo: string; valor: number | 'sob_orcamento'; contratado: boolean; detalhe?: string; metros?: number; valor_unitario?: number }[] = [];
 
-  // 1. Alinhamento de cerca — detalhe com a regra (Extensao × R$/m · default perimetro)
-  {
-    const it = opcionais.alinhamento_cerca;
-    const contratado = !!it?.contratado;
-    const metros = Number(it?.metros ?? 0);
-    const vUnit = Number(it?.valor_unitario ?? cfgOpc.alinhamento_cerca.valor_unitario);
-    const vUnitTxt = vUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const perimTxt = perimetroM > 0
-      ? perimetroM.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      : null;
-    const detalhe = perimTxt
-      ? `Extensao × R$ ${vUnitTxt}/m · default perimetro ${perimTxt} m (editavel p/ alinhamento parcial)`
-      : `Extensao × R$ ${vUnitTxt}/m (editavel p/ alinhamento parcial)`;
-    linhas.push({
-      rotulo: cfgOpc.alinhamento_cerca.rotulo,
-      contratado,
-      valor: contratado ? round2(metros * vUnit) : 0,
-      detalhe,
-      // v3.42.0: expoe metros e valor_unitario para o PDF render conseguir
-      // recomputar caso o valor venha zerado em propostas legadas.
-      metros: contratado ? metros : 0,
-      valor_unitario: vUnit,
-    });
-  }
+  // v3.63.5: Alinhamento de cerca SAIU dos opcionais — agora é item DIRETO que
+  // soma no total (ver honorarios_romatec.alinhamento_cerca). Não listar aqui.
   // 2. Croqui assinado
   {
     const it = opcionais.croqui_assinado;

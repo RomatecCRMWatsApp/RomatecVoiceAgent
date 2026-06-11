@@ -216,26 +216,28 @@ describe('calcularDemarcacaoLotes — calculo principal', () => {
 });
 
 describe('calcularDemarcacaoLotes — opcionais', () => {
-  it('18. Opcionais: 4 linhas sempre (v3.38.0 — laudo virou item direto)', () => {
+  it('18. Opcionais: 3 linhas (v3.63.5 — alinhamento virou item direto)', () => {
     const r = calcularDemarcacaoLotes(baseUrbana);
-    expect(r.secao_opcionais_demarcacao.linhas).toHaveLength(4);
+    expect(r.secao_opcionais_demarcacao.linhas).toHaveLength(3);
     expect(r.secao_opcionais_demarcacao.subtotal).toBe(0);
     const rotulos = r.secao_opcionais_demarcacao.linhas.map((l) => l.rotulo).join(' | ');
     expect(rotulos).not.toMatch(/Laudo/i);
-    expect(rotulos).toMatch(/Alinhamento/i);
+    expect(rotulos).not.toMatch(/Alinhamento/i); // saiu dos opcionais (vira item direto)
     expect(rotulos).toMatch(/Croqui/i);
     expect(rotulos).toMatch(/Acompanhamento/i);
     expect(rotulos).toMatch(/Juridica/i);
   });
 
-  it('19. alinhamento_cerca com metros=120 -> subtotal = 120 × valor_unitario (override)', () => {
+  it('19. alinhamento_cerca metros=120 × 4.5 -> entra em honorarios e SOMA no total (v3.63.5)', () => {
+    const sem = calcularDemarcacaoLotes(baseUrbana);
     const r = calcularDemarcacaoLotes({
       ...baseUrbana,
       opcionais: { alinhamento_cerca: { contratado: true, metros: 120, valor_unitario: 4.5 } },
     });
-    const linha = r.secao_opcionais_demarcacao.linhas.find((l) => /Alinhamento/i.test(l.rotulo));
-    expect(linha?.valor).toBeCloseTo(120 * 4.5, 2);
-    expect(linha?.contratado).toBe(true);
+    expect(r.honorarios_romatec.alinhamento_cerca.contratado).toBe(true);
+    expect(r.honorarios_romatec.alinhamento_cerca.valor).toBeCloseTo(120 * 4.5, 2);
+    expect(r.honorarios_romatec.total).toBeCloseTo(sem.honorarios_romatec.total + 120 * 4.5, 2);
+    expect(r.secao_opcionais_demarcacao.linhas.find((l) => /Alinhamento/i.test(l.rotulo))).toBeUndefined();
   });
 
   it('20. consultoria_juridica = "sob_orcamento" (string literal)', () => {
@@ -248,17 +250,20 @@ describe('calcularDemarcacaoLotes — opcionais', () => {
     expect(linha?.contratado).toBe(true);
   });
 
-  it('21. Opcionais (sem laudo) NAO somam ao total Romatec', () => {
+  it('21. Croqui/acomp/juridica NAO somam; alinhamento SOMA no total (v3.63.5)', () => {
     const semOpc = calcularDemarcacaoLotes(baseUrbana);
-    const comOpc = calcularDemarcacaoLotes({
+    const comCroqui = calcularDemarcacaoLotes({
       ...baseUrbana,
-      opcionais: {
-        alinhamento_cerca: { contratado: true, metros: 100, valor_unitario: 0.42 },
-        croqui_assinado: { contratado: true, valor_unitario: 180 },
-      },
+      opcionais: { croqui_assinado: { contratado: true, valor_unitario: 180 } },
     });
-    expect(comOpc.honorarios_romatec.total).toBe(semOpc.honorarios_romatec.total);
-    expect(comOpc.secao_opcionais_demarcacao.subtotal).toBeGreaterThan(0);
+    expect(comCroqui.honorarios_romatec.total).toBe(semOpc.honorarios_romatec.total);
+    expect(comCroqui.secao_opcionais_demarcacao.subtotal).toBeGreaterThan(0);
+
+    const comAlinh = calcularDemarcacaoLotes({
+      ...baseUrbana,
+      opcionais: { alinhamento_cerca: { contratado: true, metros: 100, valor_unitario: 0.42 } },
+    });
+    expect(comAlinh.honorarios_romatec.total).toBeCloseTo(semOpc.honorarios_romatec.total + 100 * 0.42, 2);
   });
 
   it('22. SALARIO_MINIMO_VIGENTE mudado em runtime -> novo calculo reflete', () => {
@@ -491,17 +496,16 @@ describe('v3.38.0 — Cenario canonico PROP-2026-0028-R1 (gold standard)', () =>
     expect(r.parcelas[1].valor).toBeCloseTo(3309.63, 1);
   });
 
-  it('44. Alinhamento de cerca default R$ 0,42/m × perimetro 2.190,78 m = R$ 920,13 (opcional)', () => {
+  it('44. Alinhamento R$ 0,42/m × 2.190,78 m = R$ 920,13 — SOMA no total (v3.63.5)', () => {
     const r = calcularDemarcacaoLotes({
       ...propInput,
       opcionais: {
         alinhamento_cerca: { contratado: true, metros: 2190.78, valor_unitario: 0.42 },
       },
     });
-    const linha = r.secao_opcionais_demarcacao.linhas.find((l) => /Alinhamento/i.test(l.rotulo));
-    expect(linha?.valor).toBeCloseTo(920.13, 1);
-    // Alinhamento e' opcional — NAO soma ao total Romatec
+    expect(r.honorarios_romatec.alinhamento_cerca.valor).toBeCloseTo(920.13, 1);
+    // v3.63.5: Alinhamento agora SOMA ao total Romatec (era opcional que nao somava).
     const r0 = calcularDemarcacaoLotes(propInput);
-    expect(r.honorarios_romatec.total).toBe(r0.honorarios_romatec.total);
+    expect(r.honorarios_romatec.total).toBeCloseTo(r0.honorarios_romatec.total + 920.13, 1);
   });
 });

@@ -2224,6 +2224,28 @@ async function renderDemarcacaoLotesBody(
     doc.moveDown(0.4);
   }
 
+  // v3.63.5: 4.4b — Alinhamento de Cerca (item DIRETO, soma no total).
+  const alinhHr = (hr as { alinhamento_cerca?: { contratado: boolean; metros: number; valor_unitario: number; valor: number } } | undefined)?.alinhamento_cerca;
+  if (alinhHr && alinhHr.contratado && alinhHr.valor > 0) {
+    if (doc.y > 660) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.4b Alinhamento de Cerca');
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    const yA = doc.y;
+    const mTxt = Number(alinhHr.metros).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const uTxt = Number(alinhHr.valor_unitario).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+      .text('Alinhamento de Cerca', COL_X_INI + 8, yA, { width: COL_W - 100 });
+    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+      .text(formatBRL(alinhHr.valor), COL_X_FIM - 80, yA, { width: 80, align: 'right' });
+    doc.font('Helvetica').fillColor('#111');
+    doc.fontSize(8).fillColor('#555').font('Helvetica-Oblique')
+      .text(`${mTxt} m × R$ ${uTxt}/m · incluso no valor total da proposta (ver croqui 4.7)`, COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+    doc.font('Helvetica').fillColor('#111');
+    doc.moveDown(0.4);
+  }
+
   // ── 4.5. IDENTIFICACAO DOS MARCOS (FQNS) ─────────────────────────────
   if (doc.y > 600) doc.addPage();
   doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.5 Identificacao dos Marcos (Codificacao INCRA)');
@@ -2359,7 +2381,7 @@ async function renderDemarcacaoLotesBody(
           doc.fontSize(8.5).fillColor('#111').font('Helvetica-Bold')
             .text(`Total a alinhar: ${total.toFixed(2).replace('.', ',')} m`, COL_X_INI + 8, doc.y + 2, { width: COL_W - 16 });
           doc.font('Helvetica').fillColor('#555').fontSize(8).font('Helvetica-Oblique')
-            .text('Os trechos acima indicados serao objeto de alinhamento de cerca, compreendendo a materializacao do alinhamento entre os marcos correspondentes, conforme item 8 — Servicos Adicionais desta proposta.', COL_X_INI + 8, doc.y + 2, { width: COL_W - 16, align: 'justify' });
+            .text('Os trechos acima indicados serao objeto de alinhamento de cerca, compreendendo a materializacao do alinhamento entre os marcos correspondentes, conforme item 4.4b — incluso no valor total desta proposta.', COL_X_INI + 8, doc.y + 2, { width: COL_W - 16, align: 'justify' });
           doc.font('Helvetica').fillColor('#111');
           doc.moveDown(0.5);
         }
@@ -2373,7 +2395,7 @@ async function renderDemarcacaoLotesBody(
   const totalRomatec = hr?.total ?? custos.honorarios_romatec?.total ?? custos.secao_5_total;
   if (doc.y > 700) doc.addPage();
   // v3.40.0: texto coerente — locacao Kit GNSS e' FIXA (sempre soma), Laudo e' condicional.
-  const txtTotalNota = 'Soma de TRT/CFT + Tecnicos de campo (com adicional de insal/peric quando aplicavel) + Marcos + Deslocamento + Area, com complexidade (x1,3 padrao media) e assessoria (5%), acrescida de Locacao de Kit GNSS (item fixo) e Laudo Tecnico de Demarcacao (quando contratado). Eventuais custos de cartorio para averbacao da demarcacao NAO estao inclusos.';
+  const txtTotalNota = 'Soma de TRT/CFT + Tecnicos de campo (com adicional de insal/peric quando aplicavel) + Marcos + Deslocamento + Area, com complexidade (x1,3 padrao media) e assessoria (5%), acrescida de Locacao de Kit GNSS (item fixo), Laudo Tecnico de Demarcacao e Alinhamento de Cerca (quando contratados). Eventuais custos de cartorio para averbacao da demarcacao NAO estao inclusos.';
   const boxYT = doc.y;
   const boxAlturaT = doc.heightOfString(txtTotalNota, { width: COL_W - 24 }) + 38;
   doc.rect(COL_X_INI, boxYT, COL_W, boxAlturaT).fillAndStroke(COR_VERDE_BG, COR_VERDE_BORDA);
@@ -2632,7 +2654,14 @@ export async function gerarPdfPropostaConsultoria(
   doc.moveDown(0.8);
 
   doc.fontSize(15).fillColor('#111').text(`PROPOSTA DE CONSULTORIA — ${subtipoLabel}`, { align: 'center', characterSpacing: 0.5 });
-  doc.fontSize(10).fillColor('#444').text(`No ${p.numero}  ·  ${String(p.status).toUpperCase()}`, { align: 'center' });
+  // v3.63.5: "RASCUNHO" só na prévia. Proposta salva mostra só o número
+  // (ou o status real quando enviada/aceita). Não estampa RASCUNHO no PDF salvo.
+  {
+    const statusUp = String(p.status || '').toUpperCase();
+    const headerStatus = isPreview ? 'PRÉVIA' : (statusUp && statusUp !== 'RASCUNHO' ? statusUp : '');
+    doc.fontSize(10).fillColor('#444')
+      .text(`No ${p.numero}${headerStatus ? '  ·  ' + headerStatus : ''}`, { align: 'center' });
+  }
   doc.moveDown(0.8);
 
   // Cliente

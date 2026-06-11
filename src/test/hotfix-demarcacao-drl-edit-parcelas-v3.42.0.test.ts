@@ -125,7 +125,7 @@ describe('HOTFIX v3.42.0 — BUG B+: fluxo de edicao end-to-end', () => {
 });
 
 describe('HOTFIX v3.42.0 — BUG D: defesa runtime opcionais valor=0', () => {
-  it('10. Engine expoe metros e valor_unitario na linha de alinhamento (forward compat)', () => {
+  it('10. v3.63.5: alinhamento expoe metros/valor_unitario/valor em honorarios_romatec', () => {
     const r = calcularDemarcacaoLotes({
       subtipo: 'demarcacao_rural',
       finalidade: 'demarcacao_inicial',
@@ -139,12 +139,10 @@ describe('HOTFIX v3.42.0 — BUG D: defesa runtime opcionais valor=0', () => {
       complexidade: 'media',
       opcionais: { alinhamento_cerca: { contratado: true, metros: 2190.78, valor_unitario: 0.42 } },
     } as InputDemarcacaoLotes);
-    const linha = r.secao_opcionais_demarcacao.linhas.find(l => /Alinhamento/i.test(l.rotulo));
-    expect(linha).toBeDefined();
-    const lExt = linha as { metros?: number; valor_unitario?: number };
-    expect(lExt.metros).toBe(2190.78);
-    expect(lExt.valor_unitario).toBe(0.42);
-    expect(linha!.valor).toBeCloseTo(920.13, 1);
+    const a = r.honorarios_romatec.alinhamento_cerca;
+    expect(a.metros).toBe(2190.78);
+    expect(a.valor_unitario).toBe(0.42);
+    expect(a.valor).toBeCloseTo(920.13, 1);
   });
 
   it('11. PDF render recompute opcional se contratado=true mas valor=0 e tem metros×vUnit', () => {
