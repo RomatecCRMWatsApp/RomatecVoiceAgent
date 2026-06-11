@@ -38,13 +38,25 @@ export function tarifaAlinhamento(): number {
 
 // Deriva {e,n} UTM de um ponto (usa UTM direto, ou converte de lat/lng).
 function coordUtm(p: PontoPropostaIn): { e: number; n: number } | null {
-  if (p.utmE != null && p.utmN != null) return { e: Number(p.utmE), n: Number(p.utmN) };
-  if (p.lat != null && p.lng != null) {
+  // v3.63.5: aceita número OU string BR ("225196,33"); valida finitude (sem NaN).
+  const num = (v: unknown): number => {
+    if (typeof v === 'number') return v;
+    if (v == null) return NaN;
+    return Number(String(v).trim().replace(',', '.'));
+  };
+  const e0 = num(p.utmE);
+  const n0 = num(p.utmN);
+  if (p.utmE != null && p.utmN != null && Number.isFinite(e0) && Number.isFinite(n0)) {
+    return { e: e0, n: n0 };
+  }
+  const lat0 = num(p.lat);
+  const lng0 = num(p.lng);
+  if (p.lat != null && p.lng != null && Number.isFinite(lat0) && Number.isFinite(lng0)) {
     try {
-      const zona = detectarZonaUtm(Number(p.lng));
-      const hem = Number(p.lat) >= 0 ? 'N' : 'S';
-      const u = geoParaUtm({ lat: Number(p.lat), lng: Number(p.lng), zona, hemisferio: hem });
-      return { e: u.e, n: u.n };
+      const zona = detectarZonaUtm(lng0);
+      const hem = lat0 >= 0 ? 'N' : 'S';
+      const u = geoParaUtm({ lat: lat0, lng: lng0, zona, hemisferio: hem });
+      if (Number.isFinite(u.e) && Number.isFinite(u.n)) return { e: u.e, n: u.n };
     } catch { return null; }
   }
   return null;

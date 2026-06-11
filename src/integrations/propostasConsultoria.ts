@@ -2296,18 +2296,30 @@ async function renderDemarcacaoLotesBody(
       const areaTotalM2 = isUrbana ? Number(di.area_m2 || 0) : Number((di as { area_hectares?: number }).area_hectares || 0) * 10000;
       const pontosCk = pontosRaw as unknown as Parameters<typeof gerarSvgProposta>[0];
 
+      // v3.63.5: dimensões EXPLÍCITAS (não deixa o pdfkit ler do PNG — evita
+      // "unsupported number: NaN" quando o rasterizador devolve dimensão ruim).
+      const SVG_W = 1100;
+      const imgDims = (svgH: number, maxH: number) => {
+        const scale = Math.min(COL_W / SVG_W, maxH / svgH);
+        const w = +(SVG_W * scale).toFixed(1);
+        const h = +(svgH * scale).toFixed(1);
+        return { w, h, x: +(COL_X_INI + (COL_W - w) / 2).toFixed(1) };
+      };
+      const isPng = (b: Buffer | null): b is Buffer =>
+        !!b && b.length > 24 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+
       // 4.6 — Croqui geral
-      const svgGeral = gerarSvgProposta(pontosCk, { tipoImovel, areaTotalM2: areaTotalM2 || undefined, larguraPx: 1100, alturaPx: 760 });
-      const pngGeral = await rasterizarSvg(svgGeral, 1100);
-      if (pngGeral) {
+      const svgGeral = gerarSvgProposta(pontosCk, { tipoImovel, areaTotalM2: areaTotalM2 || undefined, larguraPx: SVG_W, alturaPx: 760 });
+      const pngGeral = await rasterizarSvg(svgGeral, SVG_W);
+      if (isPng(pngGeral)) {
         if (doc.y > 470) doc.addPage();
         doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.6 Croqui do Imovel');
         doc.font('Helvetica');
         doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
         doc.moveDown(0.2);
-        const maxH = 280;
-        doc.image(pngGeral, COL_X_INI, doc.y, { width: COL_W, fit: [COL_W, maxH], align: 'center' });
-        doc.y += maxH + 6;
+        const d = imgDims(760, 280);
+        doc.image(pngGeral, d.x, doc.y, { width: d.w, height: d.h });
+        doc.y += d.h + 6;
         const areaTxt = isUrbana ? `${formatBRL(areaTotalM2).replace('R$', '').trim()} m²` : `${(areaTotalM2 / 10000).toFixed(4)} ha`;
         doc.fontSize(7.5).fillColor('#666').font('Helvetica-Oblique')
           .text(`${pontosRaw.length} vertices · Area: ${areaTxt} · SIRGAS 2000 / UTM Zona 23S`, COL_X_INI, doc.y, { width: COL_W, align: 'center' });
@@ -2318,17 +2330,17 @@ async function renderDemarcacaoLotesBody(
       // 4.7 — Croqui de Alinhamento de Cerca (condicional)
       const alinhContratado = !!((di.opcionais as { alinhamento_cerca?: { contratado?: boolean } } | undefined)?.alinhamento_cerca?.contratado);
       if (alinhContratado && alinhar.length > 0) {
-        const svgAlin = gerarSvgProposta(pontosCk, { tipoImovel, destacarLados: alinhar, tituloDestaque: 'CERCA A SER ALINHADA', larguraPx: 1100, alturaPx: 640 });
-        const pngAlin = await rasterizarSvg(svgAlin, 1100);
-        if (pngAlin) {
+        const svgAlin = gerarSvgProposta(pontosCk, { tipoImovel, destacarLados: alinhar, tituloDestaque: 'CERCA A SER ALINHADA', larguraPx: SVG_W, alturaPx: 640 });
+        const pngAlin = await rasterizarSvg(svgAlin, SVG_W);
+        if (isPng(pngAlin)) {
           if (doc.y > 460) doc.addPage();
           doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.7 Croqui de Alinhamento de Cerca');
           doc.font('Helvetica');
           doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
           doc.moveDown(0.2);
-          const maxH = 240;
-          doc.image(pngAlin, COL_X_INI, doc.y, { width: COL_W, fit: [COL_W, maxH], align: 'center' });
-          doc.y += maxH + 6;
+          const d = imgDims(640, 240);
+          doc.image(pngAlin, d.x, doc.y, { width: d.w, height: d.h });
+          doc.y += d.h + 6;
           // Tabela dos trechos
           const utm = pontosCk.map(pp => ({ e: Number(pp.utmE) || 0, n: Number(pp.utmN) || 0 }));
           const lados = calcularLados(utm);
