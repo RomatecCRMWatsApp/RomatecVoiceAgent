@@ -1782,8 +1782,10 @@ async function loadVistorias() {
     try {
       const r = await fetch('/api/vto/config', { credentials: 'include' });
       const d = await r.json();
-      state.vtoConfig = (d && d.ok) ? { titulos: d.titulos || [], vistoriadores: d.vistoriadores || [] } : { titulos: [], vistoriadores: [] };
-    } catch (_) { state.vtoConfig = { titulos: [], vistoriadores: [] }; }
+      state.vtoConfig = (d && d.ok)
+        ? { titulos: d.titulos || [], vistoriadores: d.vistoriadores || [], qualificacoes: d.qualificacoes || [], conselhos: d.conselhos || [] }
+        : { titulos: [], vistoriadores: [], qualificacoes: [], conselhos: [] };
+    } catch (_) { state.vtoConfig = { titulos: [], vistoriadores: [], qualificacoes: [], conselhos: [] }; }
   }
 }
 
@@ -5904,6 +5906,7 @@ function vtoSalvarRascunho() {
   const campos = {
     data: g('vData')?.value || '', hora: g('vHora')?.value || '',
     titulo: g('vTitulo')?.value || '', vistoriador: g('vVistoriador')?.value || '',
+    qualificacao: g('vQualificacao')?.value || '', conselho: g('vConselho')?.value || '',
     status: g('vStatus')?.value || 'regular', descricao: g('vDesc')?.value || '',
     observacoes: g('vObs')?.value || '', pendencias: g('vPend')?.value || '',
   };
@@ -5931,6 +5934,12 @@ function vtoCarregarRascunho() {
 function vtoLimparRascunho() {
   state.vtoDraft = null;
   try { localStorage.removeItem(vtoDraftKey()); } catch (_) {}
+}
+// v3.63.11: combina "Nome — Qualificação — Conselho" num único vistoriador.
+function vtoCombinarVistoriador() {
+  const g = id => (document.getElementById(id)?.value || '').trim();
+  const partes = [g('vVistoriador'), g('vQualificacao'), g('vConselho')].filter(Boolean);
+  return partes.length ? partes.join(' — ') : null;
 }
 
 function renderVto() {
@@ -6020,11 +6029,23 @@ function renderVto() {
   // v3.63.10: tipos configuráveis (Configurações) com fallback nos defaults.
   const titulosCfg = (state.vtoConfig?.titulos?.length ? state.vtoConfig.titulos : TITULOS_DEFAULT);
   const TITULOS_VISTORIA = [`${nProx}ª Vistoria`, ...titulosCfg];
-  const vistoriadoresUsados = [...new Set((state.vistorias || []).map(x => x.vistoriador).filter(Boolean))];
+  const vistoriadoresUsados = [...new Set((state.vistorias || []).map(x => x.vistoriador_nome || (x.vistoriador||'').split(' — ')[0]).filter(Boolean))];
   const vistoriadoresCfg = (state.vtoConfig?.vistoriadores?.length ? state.vtoConfig.vistoriadores : ['José Romário']);
   const VISTORIADORES = [...new Set([...vistoriadoresCfg, ...vistoriadoresUsados])];
+  // v3.63.11: qualificação + conselho (CFT/CREA) — listas configuráveis.
+  const QUALIF_DEFAULT = ['Técnico em Edificações','Técnico em Agrimensura','Técnico em Topografia','Engenheiro Civil','Engenheiro Agrimensor','Arquiteto e Urbanista'];
+  const CONSELHO_DEFAULT = ['CFT/MA','CREA/MA','CAU/MA'];
+  const qualifCfg = (state.vtoConfig?.qualificacoes?.length ? state.vtoConfig.qualificacoes : QUALIF_DEFAULT);
+  const conselhoCfg = (state.vtoConfig?.conselhos?.length ? state.vtoConfig.conselhos : CONSELHO_DEFAULT);
+  // parse do vistoriador salvo (formato "Nome — Qualificação — Conselho")
+  const vistParts = (editandoData?.vistoriador || '').split(' — ');
+  const vistNome = (editandoData ? (vistParts[0] || '') : '') || (draft?.vistoriador || '');
+  const vistQualif = (editandoData ? (vistParts[1] || '') : '') || (draft?.qualificacao || '');
+  const vistConselho = (editandoData ? (vistParts[2] || '') : '') || (draft?.conselho || '');
   const dlTitulos = `<datalist id="vTituloOpts">${TITULOS_VISTORIA.map(t => `<option value="${escape(t)}">`).join('')}</datalist>`;
   const dlVistoriadores = `<datalist id="vVistoriadorOpts">${VISTORIADORES.map(t => `<option value="${escape(t)}">`).join('')}</datalist>`;
+  const dlQualif = `<datalist id="vQualifOpts">${qualifCfg.map(t => `<option value="${escape(t)}">`).join('')}</datalist>`;
+  const dlConselho = `<datalist id="vConselhoOpts">${conselhoCfg.map(t => `<option value="${escape(t)}">`).join('')}</datalist>`;
   const labelBtn = editandoId ? '💾 Salvar alterações' : 'Salvar vistoria';
   v.innerHTML = `${obraSelector()}
   <div class="card">
@@ -6037,8 +6058,12 @@ function renderVto() {
       <input id="vData" type="date" value="${editandoData ? (editandoData.data instanceof Date ? editandoData.data.toISOString().slice(0,10) : String(editandoData.data).slice(0,10)) : ''}">
       <input id="vHora" type="time" value="${editandoData?.hora ? String(editandoData.hora).slice(0,5) : ''}" title="Horário da vistoria (auto-preenchido)">
       <input id="vTitulo" list="vTituloOpts" autocomplete="off" placeholder="Título (toque pra escolher o tipo)" value="${escape(editandoData?.titulo || draft?.titulo || '')}">
-      <input id="vVistoriador" list="vVistoriadorOpts" autocomplete="off" placeholder="Vistoriador (toque pra escolher)" value="${escape(editandoData?.vistoriador || draft?.vistoriador || '')}">
-      ${dlTitulos}${dlVistoriadores}
+      <input id="vVistoriador" list="vVistoriadorOpts" autocomplete="off" placeholder="Vistoriador (nome)" value="${escape(vistNome)}">
+      ${dlTitulos}${dlVistoriadores}${dlQualif}${dlConselho}
+    </div>
+    <div class="form-grid">
+      <input id="vQualificacao" list="vQualifOpts" autocomplete="off" placeholder="Qualificação (ex: Técnico em Edificações)" value="${escape(vistQualif)}">
+      <input id="vConselho" list="vConselhoOpts" autocomplete="off" placeholder="Conselho / Registro (CFT/CREA)" value="${escape(vistConselho)}">
       <select id="vStatus">
         <option value="regular" ${(editandoData?.status_obra || draft?.status) === 'regular' ? 'selected' : ''}>Status: Regular</option>
         <option value="atencao" ${(editandoData?.status_obra || draft?.status) === 'atencao' ? 'selected' : ''}>Status: Atenção</option>
@@ -6086,7 +6111,7 @@ function renderVto() {
     document.getElementById('vHora').value = draft?.hora ||
       (String(agora.getHours()).padStart(2,'0') + ':' + String(agora.getMinutes()).padStart(2,'0'));
     // v3.63.8: salva rascunho a cada digitação (sobrevive a trocar de aba / fechar)
-    ['vData','vHora','vTitulo','vVistoriador','vStatus','vDesc','vObs','vPend'].forEach(id => {
+    ['vData','vHora','vTitulo','vVistoriador','vQualificacao','vConselho','vStatus','vDesc','vObs','vPend'].forEach(id => {
       const el = document.getElementById(id);
       if (el) { el.addEventListener('input', vtoSalvarRascunho); el.addEventListener('change', vtoSalvarRascunho); }
     });
@@ -6103,11 +6128,12 @@ function renderVto() {
       const g = id => document.getElementById(id);
       const d = state.vistoriaEditandoData || (state.vistoriaEditandoData = {});
       d.data = g('vData')?.value || d.data; d.hora = g('vHora')?.value || '';
-      d.titulo = g('vTitulo')?.value || ''; d.vistoriador = g('vVistoriador')?.value || '';
+      d.titulo = g('vTitulo')?.value || '';
+      d.vistoriador = vtoCombinarVistoriador(); // nome — qualif — conselho
       d.status_obra = g('vStatus')?.value || 'regular'; d.descricao = g('vDesc')?.value || '';
       d.observacoes = g('vObs')?.value || ''; d.pendencias = g('vPend')?.value || '';
     };
-    ['vData','vHora','vTitulo','vVistoriador','vStatus','vDesc','vObs','vPend'].forEach(id => {
+    ['vData','vHora','vTitulo','vVistoriador','vQualificacao','vConselho','vStatus','vDesc','vObs','vPend'].forEach(id => {
       const el = document.getElementById(id);
       if (el) { el.addEventListener('input', syncEd); el.addEventListener('change', syncEd); }
     });
@@ -6270,7 +6296,7 @@ function renderVto() {
         data: document.getElementById('vData').value || today(),
         hora: document.getElementById('vHora').value || null,  // v3.4.0
         titulo: document.getElementById('vTitulo').value.trim() || null,
-        vistoriador: document.getElementById('vVistoriador').value.trim() || null,
+        vistoriador: vtoCombinarVistoriador(),
         descricao: desc,
         observacoes: document.getElementById('vObs').value.trim() || null,
         pendencias: document.getElementById('vPend').value.trim() || null,
@@ -6303,7 +6329,7 @@ function renderVto() {
           data: document.getElementById('vData').value || today(),
           hora: document.getElementById('vHora').value || null,  // v3.4.0
           titulo: document.getElementById('vTitulo').value.trim() || null,
-          vistoriador: document.getElementById('vVistoriador').value.trim() || null,
+          vistoriador: vtoCombinarVistoriador(),
           descricao: desc,
           observacoes: document.getElementById('vObs').value.trim() || null,
           pendencias: document.getElementById('vPend').value.trim() || null,
@@ -24461,15 +24487,23 @@ async function renderCfgVto() {
     if (d && d.ok) cfg = { titulos: d.titulos || [], vistoriadores: d.vistoriadores || [] };
   } catch (_) {}
   const TIT_DEF = ['Vistoria Inicial','Vistoria de Fundação','Vistoria de Estrutura','Vistoria de Alvenaria','Vistoria de Cobertura','Vistoria de Instalações','Vistoria de Acabamento','Vistoria de Medição','Vistoria Final / Entrega','Vistoria Semanal','Vistoria Quinzenal','Vistoria Mensal','Vistoria Periódica'];
+  const QUA_DEF = ['Técnico em Edificações','Técnico em Agrimensura','Técnico em Topografia','Engenheiro Civil','Engenheiro Agrimensor','Arquiteto e Urbanista'];
+  const CON_DEF = ['CFT/MA','CREA/MA','CAU/MA'];
   const titVal = (cfg.titulos.length ? cfg.titulos : TIT_DEF).join('\n');
   const visVal = (cfg.vistoriadores.length ? cfg.vistoriadores : ['José Romário']).join('\n');
+  const quaVal = (cfg.qualificacoes?.length ? cfg.qualificacoes : QUA_DEF).join('\n');
+  const conVal = (cfg.conselhos?.length ? cfg.conselhos : CON_DEF).join('\n');
   body.innerHTML = `
     <div style="max-width:560px;">
       <p style="font-size:13px; color:var(--text-muted); margin:0 0 12px;">Listas que aparecem ao tocar nos campos da vistoria (um item por linha). O campo continua aceitando digitação livre.</p>
       <label style="font-weight:600; font-size:13px; display:block; margin-bottom:4px;">📋 Tipos de Vistoria (campo Título)</label>
-      <textarea id="cfgVtoTitulos" rows="8" style="width:100%; font-size:13px; font-family:monospace; margin-bottom:14px;">${escape(titVal)}</textarea>
-      <label style="font-weight:600; font-size:13px; display:block; margin-bottom:4px;">👷 Vistoriadores (campo Vistoriador)</label>
-      <textarea id="cfgVtoVist" rows="5" style="width:100%; font-size:13px; font-family:monospace; margin-bottom:14px;">${escape(visVal)}</textarea>
+      <textarea id="cfgVtoTitulos" rows="7" style="width:100%; font-size:13px; font-family:monospace; margin-bottom:14px;">${escape(titVal)}</textarea>
+      <label style="font-weight:600; font-size:13px; display:block; margin-bottom:4px;">👷 Vistoriadores (nome)</label>
+      <textarea id="cfgVtoVist" rows="4" style="width:100%; font-size:13px; font-family:monospace; margin-bottom:14px;">${escape(visVal)}</textarea>
+      <label style="font-weight:600; font-size:13px; display:block; margin-bottom:4px;">🎓 Qualificações (ex: Técnico em Edificações)</label>
+      <textarea id="cfgVtoQua" rows="4" style="width:100%; font-size:13px; font-family:monospace; margin-bottom:14px;">${escape(quaVal)}</textarea>
+      <label style="font-weight:600; font-size:13px; display:block; margin-bottom:4px;">🏛️ Conselhos / Registros (CFT/CREA/CAU)</label>
+      <textarea id="cfgVtoCon" rows="3" style="width:100%; font-size:13px; font-family:monospace; margin-bottom:14px;">${escape(conVal)}</textarea>
       <button id="cfgVtoSalvar" class="btn-primary" style="padding:8px 16px;">💾 Salvar listas</button>
       <span id="cfgVtoMsg" style="margin-left:10px; font-size:12px; color:var(--text-muted);"></span>
     </div>`;
@@ -24480,7 +24514,7 @@ async function renderCfgVto() {
     try {
       const r = await fetch('/api/vto/config', {
         method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ titulos: linhas('cfgVtoTitulos'), vistoriadores: linhas('cfgVtoVist') }),
+        body: JSON.stringify({ titulos: linhas('cfgVtoTitulos'), vistoriadores: linhas('cfgVtoVist'), qualificacoes: linhas('cfgVtoQua'), conselhos: linhas('cfgVtoCon') }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'falha');

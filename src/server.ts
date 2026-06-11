@@ -971,8 +971,11 @@ app.get('/api/vto/config', async (_req: Request, res: Response) => {
       try { const a = JSON.parse(s); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; }
       catch { return []; }
     };
-    const [tit, vis] = await Promise.all([m.getConfig('VTO_TITULOS'), m.getConfig('VTO_VISTORIADORES')]);
-    res.json({ ok: true, titulos: parse(tit), vistoriadores: parse(vis) });
+    const [tit, vis, qua, con] = await Promise.all([
+      m.getConfig('VTO_TITULOS'), m.getConfig('VTO_VISTORIADORES'),
+      m.getConfig('VTO_QUALIFICACOES'), m.getConfig('VTO_CONSELHOS'),
+    ]);
+    res.json({ ok: true, titulos: parse(tit), vistoriadores: parse(vis), qualificacoes: parse(qua), conselhos: parse(con) });
   } catch (err) { res.status(500).json({ ok: false, error: (err as Error).message }); }
 });
 app.put('/api/vto/config', requireAuth, async (req: Request, res: Response) => {
@@ -983,6 +986,8 @@ app.put('/api/vto/config', requireAuth, async (req: Request, res: Response) => {
     const m = await import('./services/configuracoes');
     if (Array.isArray(b.titulos)) await m.setConfig('VTO_TITULOS', JSON.stringify(clean(b.titulos)), 'Tipos de vistoria (VTO)');
     if (Array.isArray(b.vistoriadores)) await m.setConfig('VTO_VISTORIADORES', JSON.stringify(clean(b.vistoriadores)), 'Vistoriadores cadastrados (VTO)');
+    if (Array.isArray(b.qualificacoes)) await m.setConfig('VTO_QUALIFICACOES', JSON.stringify(clean(b.qualificacoes)), 'Qualificações do vistoriador (VTO)');
+    if (Array.isArray(b.conselhos)) await m.setConfig('VTO_CONSELHOS', JSON.stringify(clean(b.conselhos)), 'Conselhos/registros CFT-CREA (VTO)');
     res.json({ ok: true });
   } catch (err) { res.status(400).json({ ok: false, error: (err as Error).message }); }
 });
