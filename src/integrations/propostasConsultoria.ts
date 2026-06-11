@@ -1974,13 +1974,13 @@ function docsImprescindiveisDemarcacao(
   ];
 }
 
-function renderDemarcacaoLotesBody(
+async function renderDemarcacaoLotesBody(
   doc: PDFKit.PDFDocument,
   p: Awaited<ReturnType<typeof buscarPropostaConsultoria>>,
   dadosImovel: Record<string, unknown>,
   custos: CustosCalculados,
   corHex: string,
-): void {
+): Promise<void> {
   const COL_X_INI = 48;
   const COL_X_FIM = 547;
   const COL_W = COL_X_FIM - COL_X_INI;
@@ -2251,6 +2251,83 @@ function renderDemarcacaoLotesBody(
     doc.font('Helvetica').fillColor('#111');
   }
   doc.moveDown(0.5);
+
+  // ── 4.6 / 4.7 CROQUI (v3.63.0) — só quando há pontos no dados_imovel ───
+  // Defensivo: qualquer falha (rasterizador ausente, SVG ruim) é ignorada e o
+  // PDF segue idêntico ao de hoje (sem croqui).
+  try {
+    const pontosRaw = Array.isArray((di as { pontos?: unknown[] }).pontos)
+      ? ((di as { pontos: Array<Record<string, unknown>> }).pontos) : [];
+    if (pontosRaw.length >= 3) {
+      const { gerarSvgProposta } = await import('../services/propostaCroqui');
+      const { rasterizarSvg } = await import('../services/laudoAnexos');
+      const { calcularLados } = await import('../services/geometria');
+      const tipoImovel = isUrbana ? 'URBANO' : 'RURAL';
+      const areaTotalM2 = isUrbana ? Number(di.area_m2 || 0) : Number((di as { area_hectares?: number }).area_hectares || 0) * 10000;
+      const pontosCk = pontosRaw as unknown as Parameters<typeof gerarSvgProposta>[0];
+
+      // 4.6 — Croqui geral
+      const svgGeral = gerarSvgProposta(pontosCk, { tipoImovel, areaTotalM2: areaTotalM2 || undefined, larguraPx: 1100, alturaPx: 760 });
+      const pngGeral = await rasterizarSvg(svgGeral, 1100);
+      if (pngGeral) {
+        if (doc.y > 470) doc.addPage();
+        doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.6 Croqui do Imovel');
+        doc.font('Helvetica');
+        doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+        doc.moveDown(0.2);
+        const maxH = 280;
+        doc.image(pngGeral, COL_X_INI, doc.y, { width: COL_W, fit: [COL_W, maxH], align: 'center' });
+        doc.y += maxH + 6;
+        const areaTxt = isUrbana ? `${formatBRL(areaTotalM2).replace('R$', '').trim()} m²` : `${(areaTotalM2 / 10000).toFixed(4)} ha`;
+        doc.fontSize(7.5).fillColor('#666').font('Helvetica-Oblique')
+          .text(`${pontosRaw.length} vertices · Area: ${areaTxt} · SIRGAS 2000 / UTM Zona 23S`, COL_X_INI, doc.y, { width: COL_W, align: 'center' });
+        doc.font('Helvetica').fillColor('#111');
+        doc.moveDown(0.5);
+      }
+
+      // 4.7 — Croqui de Alinhamento de Cerca (condicional)
+      const alinhar = Array.isArray((di as { alinhamento_lados?: unknown[] }).alinhamento_lados)
+        ? ((di as { alinhamento_lados: number[] }).alinhamento_lados).map(Number) : [];
+      const alinhContratado = !!((di.opcionais as { alinhamento_cerca?: { contratado?: boolean } } | undefined)?.alinhamento_cerca?.contratado);
+      if (alinhContratado && alinhar.length > 0) {
+        const svgAlin = gerarSvgProposta(pontosCk, { tipoImovel, destacarLados: alinhar, tituloDestaque: 'CERCA A SER ALINHADA', larguraPx: 1100, alturaPx: 640 });
+        const pngAlin = await rasterizarSvg(svgAlin, 1100);
+        if (pngAlin) {
+          if (doc.y > 460) doc.addPage();
+          doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.7 Croqui de Alinhamento de Cerca');
+          doc.font('Helvetica');
+          doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+          doc.moveDown(0.2);
+          const maxH = 240;
+          doc.image(pngAlin, COL_X_INI, doc.y, { width: COL_W, fit: [COL_W, maxH], align: 'center' });
+          doc.y += maxH + 6;
+          // Tabela dos trechos
+          const utm = pontosCk.map(pp => ({ e: Number(pp.utmE) || 0, n: Number(pp.utmN) || 0 }));
+          const lados = calcularLados(utm);
+          const sel = new Set(alinhar);
+          let total = 0;
+          doc.fontSize(8.5).fillColor('#111').font('Helvetica-Bold')
+            .text('Trecho   De → Para                          Extensao (m)', COL_X_INI + 8, doc.y, { width: COL_W - 16 });
+          doc.font('Helvetica');
+          lados.filter(l => sel.has(l.ordem)).forEach(l => {
+            total += l.distancia_m;
+            const de = pontosCk[l.i_idx]?.vertice ?? '';
+            const para = pontosCk[l.f_idx]?.vertice ?? '';
+            doc.fontSize(8.5).fillColor('#333')
+              .text(`${l.ordem}        ${de} → ${para}            ${l.distancia_m.toFixed(2).replace('.', ',')}`, COL_X_INI + 8, doc.y, { width: COL_W - 16 });
+          });
+          doc.fontSize(8.5).fillColor('#111').font('Helvetica-Bold')
+            .text(`Total a alinhar: ${total.toFixed(2).replace('.', ',')} m`, COL_X_INI + 8, doc.y + 2, { width: COL_W - 16 });
+          doc.font('Helvetica').fillColor('#555').fontSize(8).font('Helvetica-Oblique')
+            .text('Os trechos acima indicados serao objeto de alinhamento de cerca, compreendendo a materializacao do alinhamento entre os marcos correspondentes, conforme item 8 — Servicos Adicionais desta proposta.', COL_X_INI + 8, doc.y + 2, { width: COL_W - 16, align: 'justify' });
+          doc.font('Helvetica').fillColor('#111');
+          doc.moveDown(0.5);
+        }
+      }
+    }
+  } catch (errCroqui) {
+    console.warn('[proposta-croqui-pdf] ignorado:', (errCroqui as Error).message);
+  }
 
   // ── 5. BOX VERDE — VALOR TOTAL ────────────────────────────────────────
   const totalRomatec = hr?.total ?? custos.honorarios_romatec?.total ?? custos.secao_5_total;
@@ -2544,7 +2621,8 @@ export async function gerarPdfPropostaConsultoria(
   } else if (p.subtipo === 'demarcacao_urbana' || p.subtipo === 'demarcacao_rural') {
     // v3.27.0: Demarcacao de Lotes (Urbana/Rural) — layout dedicado com
     // 11 secoes (10 do Georref + Marcos Discriminados + Identificacao FQNS).
-    renderDemarcacaoLotesBody(doc, p, dadosImovel, custos, corHex);
+    // v3.63.0: async por causa da rasterizacao do croqui (secoes 4.6/4.7).
+    await renderDemarcacaoLotesBody(doc, p, dadosImovel, custos, corHex);
   } else {
 
   // v1.99.16: Remembramento detalhado — tabela de imóveis + área total destacada

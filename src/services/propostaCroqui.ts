@@ -7,7 +7,11 @@
 
 import type { RowDataPacket } from 'mysql2/promise';
 import pool from '../database/connection';
-import { calcularLados, areaGauss, perimetro, geoParaUtm, detectarZonaUtm } from './geometria';
+import {
+  calcularLados, areaGauss, perimetro, geoParaUtm, detectarZonaUtm,
+  importarRTK, importarKML, importarGPX, detectarFormatoArquivo,
+} from './geometria';
+import { gerarCroquiSvg, type PontoSvg, type LadoSvg } from './croquiSvg';
 import { getParams } from './pricing/params';
 
 export interface PontoPropostaIn {
@@ -60,6 +64,62 @@ function calcularResumo(pontos: PontoPropostaIn[]): ResumoGeometria {
     perimetroM: +perimetro(pts).toFixed(2),
     numVertices: pontos.length,
   };
+}
+
+// ── Parse da coletora (reusa o motor do laudo: CSV/TXT/KML/GPX) ─────────────
+export function parseColetora(texto: string, formato?: string): PontoPropostaIn[] {
+  const fmt = String(formato || '').toLowerCase();
+  let pts;
+  if (fmt === 'kml') pts = importarKML(texto).pontos;
+  else if (fmt === 'gpx') pts = importarGPX(texto).pontos;
+  else if (fmt === 'csv' || fmt === 'txt') pts = importarRTK(texto).pontos;
+  else {
+    const det = detectarFormatoArquivo(texto);
+    pts = det === 'KML' ? importarKML(texto).pontos
+        : det === 'GPX' ? importarGPX(texto).pontos
+        : importarRTK(texto).pontos;
+  }
+  return pts.map((p, i) => ({
+    ordem: i + 1,
+    vertice: p.rotulo || `M-${i + 1}`,
+    utmE: p.e ?? null,
+    utmN: p.n ?? null,
+    lat: p.lat ?? null,
+    lng: p.lng ?? null,
+  }));
+}
+
+// ── Gera o SVG do croqui a partir dos pontos (stateless — pro preview/PDF) ───
+export interface SvgPropostaOpts {
+  larguraPx?: number;
+  alturaPx?: number;
+  tipoImovel?: 'URBANO' | 'RURAL';
+  areaTotalM2?: number;
+  utmZona?: number;
+  destacarLados?: number[];
+  tituloDestaque?: string;
+}
+export function gerarSvgProposta(pontosIn: PontoPropostaIn[], opts: SvgPropostaOpts = {}): string {
+  const utm = pontosIn.map(coordUtm);
+  const validos = utm.every(u => u !== null) && pontosIn.length >= 2;
+  const pontosSvg: PontoSvg[] = pontosIn.map((p, i) => ({
+    rotulo: p.vertice, e: utm[i]?.e ?? 0, n: utm[i]?.n ?? 0,
+  }));
+  const ladosSvg: LadoSvg[] = validos
+    ? calcularLados(utm as Array<{ e: number; n: number }>).map(l => ({
+        i_idx: l.i_idx, f_idx: l.f_idx, distancia_m: l.distancia_m,
+      }))
+    : [];
+  return gerarCroquiSvg(pontosSvg, ladosSvg, {
+    larguraPx: opts.larguraPx ?? 700,
+    alturaPx: opts.alturaPx ?? 520,
+    tipoImovel: opts.tipoImovel,
+    areaTotalM2: opts.areaTotalM2,
+    utmZona: opts.utmZona ?? 23,
+    utmHemisferio: 'S',
+    destacarLados: opts.destacarLados,
+    tituloDestaque: opts.tituloDestaque,
+  });
 }
 
 // ── PUT /pontos ────────────────────────────────────────────────────────────

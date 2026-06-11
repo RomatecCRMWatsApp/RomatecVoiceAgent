@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { importarRTK, calcularLados, areaGauss, perimetro } from '../services/geometria';
+import { parseColetora, gerarSvgProposta } from '../services/propostaCroqui';
 
 // 13 vértices reais (vertice, UTM_E, UTM_N) — Recanto Verde.
 const VERTICES: Array<[string, number, number]> = [
@@ -60,5 +61,31 @@ describe('coletora Recanto Verde — formato real é lido pelo importarRTK', () 
     const perim = perimetro(utm);
     expect(perim).toBeGreaterThan(1000);  // perímetro na casa dos km
     expect(perim).toBeLessThan(6000);
+  });
+});
+
+describe('parseColetora + gerarSvgProposta (helpers do front)', () => {
+  it('parseColetora extrai 13 pontos no formato PontoPropostaIn', () => {
+    const pontos = parseColetora(TXT);
+    expect(pontos).toHaveLength(13);
+    expect(pontos[0].ordem).toBe(1);
+    expect(pontos[0].vertice).toBe('FQNS-P-6004');
+    expect(pontos[0].utmE).toBeCloseTo(225196.33, 2);
+    expect(pontos[0].utmN).toBeCloseTo(9450011.51, 2);
+  });
+
+  it('gerarSvgProposta produz SVG com a poligonal e os rótulos', () => {
+    const pontos = parseColetora(TXT);
+    const svg = gerarSvgProposta(pontos, { tipoImovel: 'RURAL' });
+    expect(svg).toContain('<svg');
+    expect(svg).toContain('FQNS-P-6004');
+    expect(svg).toContain('</svg>');
+  });
+
+  it('gerarSvgProposta com destacarLados marca a cerca em dourado', () => {
+    const pontos = parseColetora(TXT);
+    const svg = gerarSvgProposta(pontos, { destacarLados: [1, 2], tituloDestaque: 'CERCA A SER ALINHADA' });
+    expect(svg).toContain('#C9A84C');
+    expect(svg).toContain('CERCA A SER ALINHADA');
   });
 });

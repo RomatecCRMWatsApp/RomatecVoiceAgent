@@ -4385,6 +4385,34 @@ app.put('/api/propostas-consultoria/:id/alinhamento', async (req: Request, res: 
   } catch (err) { res.status(400).json({ ok: false, error: (err as Error).message }); }
 });
 
+// v3.63.0: parse da coletora (CSV/TXT/KML/GPX) — reusa o motor do laudo.
+// Stateless: front manda o texto, recebe os pontos pra tabela.
+app.post('/api/propostas-consultoria/coletora/parse', async (req: Request, res: Response) => {
+  try {
+    const texto = String(req.body?.texto ?? '');
+    if (!texto.trim()) { res.status(400).json({ ok: false, error: 'texto vazio' }); return; }
+    const m = await import('./services/propostaCroqui');
+    const pontos = m.parseColetora(texto, req.body?.formato);
+    res.json({ ok: true, pontos });
+  } catch (err) { res.status(400).json({ ok: false, error: (err as Error).message }); }
+});
+
+// v3.63.0: gera o SVG do croqui a partir dos pontos (preview ao vivo no front).
+app.post('/api/propostas-consultoria/croqui-svg', async (req: Request, res: Response) => {
+  try {
+    const b = req.body ?? {};
+    const pontos = Array.isArray(b.pontos) ? b.pontos : [];
+    const m = await import('./services/propostaCroqui');
+    const svg = m.gerarSvgProposta(pontos as Parameters<typeof m.gerarSvgProposta>[0], {
+      larguraPx: b.larguraPx, alturaPx: b.alturaPx,
+      tipoImovel: b.tipoImovel, areaTotalM2: b.areaTotalM2,
+      destacarLados: Array.isArray(b.destacarLados) ? b.destacarLados.map(Number) : undefined,
+      tituloDestaque: b.tituloDestaque,
+    });
+    res.type('image/svg+xml').send(svg);
+  } catch (err) { res.status(400).json({ ok: false, error: (err as Error).message }); }
+});
+
 // §4.4: importar pontos+lados (com flag alinhar) da proposta pro laudo.
 app.post('/api/laudos-demarcacao/:laudoId/importar-proposta/:propostaId', async (req: Request, res: Response) => {
   try {

@@ -938,6 +938,8 @@
 <script src="/js/catalogo-servicos.js"></script>
 <!-- v3.0.0: cálculo de precificação INCRA (Portaria 12/2025) -->
 <script src="/js/incraCalc.js" defer></script>
+<!-- v3.63.0: UI de Pontos & Croqui da Proposta de Demarcação -->
+<script src="/js/proposta-croqui.js" defer></script>
 <!-- v3.16.0: offline-first engine (api(), fila IndexedDB, sync). CARREGA ANTES do <script> inline porque expoe window.api usado em centenas de chamadas -->
 <script src="/offline-engine.js"></script>
 <!-- v1.99.2: auto-update SILENCIOSO via SKIP_WAITING + controllerchange.
@@ -9793,6 +9795,25 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
           </select>
         </label>
 
+        <!-- v3.63.0: Pontos & Croqui (Fase 2) — UI em /js/proposta-croqui.js -->
+        <details id="dmcDetails" style="margin:12px 0; border:1px solid var(--border); border-radius:8px; padding:8px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--neon); font-size:13px;">📐 Pontos e Croqui (opcional)</summary>
+          <div style="margin-top:8px; display:grid; gap:8px;">
+            <div style="font-size:11px; color:var(--text-muted);">Importe a coletora (CSV / TXT / KML / GPX) ou cole o conteúdo:</div>
+            <input id="dmcColetoraFile" type="file" accept=".csv,.txt,.kml,.gpx" style="font-size:11px;">
+            <textarea id="dmcColetoraTexto" placeholder="Cole aqui o conteúdo da coletora..." style="width:100%; height:60px; font-size:11px; font-family:monospace;"></textarea>
+            <button id="dmcImportarBtn" type="button" class="btn-primary" style="padding:6px 12px; font-size:12px;">📥 Importar pontos</button>
+            <div id="dmcPontosBox"></div>
+            <div id="dmcLadosBox"></div>
+            <div id="dmcResumo" style="font-size:12px; color:var(--text);"></div>
+            <button id="dmcUsarAreaBtn" type="button" style="padding:6px 12px; font-size:12px; background:transparent; border:1px solid var(--neon); color:var(--neon); border-radius:6px; cursor:pointer;">Usar área calculada</button>
+            <div id="dmcCroquiBox" style="background:#fff; border-radius:6px; overflow:hidden;"></div>
+            <div id="dmcAlinhLista"></div>
+            <div id="dmcCroquiAlinhBox" style="background:#fff; border-radius:6px; overflow:hidden;"></div>
+            <button id="dmcSalvarBtn" type="button" style="padding:8px 14px; font-size:12px; background:var(--gold); color:#06120a; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💾 Salvar pontos + croqui</button>
+          </div>
+        </details>
+
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📌 Marcos</p>
         <label style="display:flex; gap:6px; align-items:center;">
           <input id="dmPiquet" type="checkbox" ${cache?.servico_piqueteamento ? 'checked' : ''}>
@@ -9978,6 +9999,16 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
   // Primeira renderizacao depois do form estar montado (campos default + cache)
   setTimeout(() => __dmPreview.atualizar(), 100);
 
+  // v3.63.0: Pontos & Croqui — init + hook do checkbox Alinhamento de Cerca.
+  try {
+    const __pid = (cache && (cache.proposta_id || cache.id)) || window.__dmPropostaId || null;
+    const __alinhAtivo = !!document.getElementById('dmOpcAlinh')?.checked;
+    if (window.PropostaCroqui) window.PropostaCroqui.init(__pid, subtipo, __alinhAtivo);
+    document.getElementById('dmOpcAlinh')?.addEventListener('change', (e) => {
+      if (window.PropostaCroqui) window.PropostaCroqui.setAlinhamentoAtivo(e.target.checked);
+    });
+  } catch (_e) { /* nao bloqueia o form */ }
+
   // v3.29.0: aditivo de campo — base estimada inicial = diarias × ~SM × 0.42
   // (espelho do calculo de tecnicos_campo em demarcacaoLotes.ts). Sera
   // recalculada no submit pelo backend a partir do custos final.
@@ -10062,6 +10093,14 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
       dados.ccir = document.getElementById('dmCcir').value.trim() || undefined;
       dados.area_hectares = parseFloat(document.getElementById('dmAreaHa').value) || undefined;
     }
+    // v3.63.0: pontos do croqui viajam no dados_imovel (preview + persistência).
+    try {
+      const pts = (typeof window.__dmCroquiPontos === 'function') ? window.__dmCroquiPontos() : [];
+      if (pts.length) {
+        dados.pontos = pts;
+        dados.alinhamento_lados = (typeof window.__dmCroquiAlinhamento === 'function') ? window.__dmCroquiAlinhamento() : [];
+      }
+    } catch (_e) { /* nao bloqueia */ }
     return dados;
   }
 
