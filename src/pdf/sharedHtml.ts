@@ -152,9 +152,12 @@ export function assinaturaIcpHtml(meta?: IcpBoxMeta): string {
     meta.issuerCn ? `Cert.: ${escapeHtml(meta.issuerCn)}` : '',
     meta.validadeAte ? `válido até ${escapeHtml(meta.validadeAte)}` : '',
   ].filter(Boolean).join(' · ');
+  // Selo em SVG inline (não usa emoji: o Chromium do servidor não tem fonte de
+  // emoji e o 🔏 virava glyph quebrado/tofu no PDF).
+  const selo = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" style="flex:none;margin-top:1px;" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#1F5C3A"/><path d="M7 12.4l3.3 3.3L17 9.2" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   return `
   <div style="margin-top:14px;border:1.5px solid #1F5C3A;background:#eafff3;border-radius:8px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start;text-align:left;break-inside:avoid;">
-    <div style="font-size:1.3rem;line-height:1;">🔏</div>
+    ${selo}
     <div style="flex:1;min-width:0;">
       <div style="font-weight:700;color:#1F5C3A;font-size:.8rem;letter-spacing:.4px;">ASSINADO DIGITALMENTE — ICP-Brasil (PAdES)</div>
       <div style="color:#0B6E4F;font-size:.78rem;margin-top:3px;">${escapeHtml(meta.signerCn)}${docLinha}</div>
