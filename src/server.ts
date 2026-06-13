@@ -3427,50 +3427,64 @@ app.post('/api/laudos-demarcacao/:id/assinar', requireCeoToken, async (req: Requ
       return;
     }
 
-    // Gera PDF base do laudo (chama o gerador da Fase 4)
+    // Gera PDF base do laudo
     const laudo = await laudosMod.buscarLaudo(id);
     if (!laudo) { res.status(404).json({ error: 'Laudo nao encontrado' }); return; }
     const contratantesMod = await import('./integrations/contratantes');
     const executantesMod = await import('./integrations/executantes');
-    const { gerarPdfLaudo } = await import('./services/laudoPdf');
     const contratante = await contratantesMod.buscarContratante(laudo.contratante_id);
     const executante = await executantesMod.buscarExecutante(laudo.executante_id);
     if (!contratante || !executante) { res.status(500).json({ error: 'Contratante/Executante associado nao encontrado' }); return; }
-    const { carregarAnexosLaudo } = await import('./services/laudoAnexos');
-    const [pontos, lados, fotos, croquiUpload, anexos] = await Promise.all([
-      laudosMod.listarPontosDoLaudo(id),
-      laudosMod.listarLadosDoLaudo(id),
-      laudosMod.listarFotosDoLaudo(id),
-      laudosMod.getCroquiUpload(id),
-      carregarAnexosLaudo(id),
-    ]);
 
-    // v2.11.0: monta meta da assinatura digital ANTES de gerar o PDF, pra que
-    // a caixa verde "ASSINADO DIGITALMENTE - ICP-Brasil (PAdES)" seja desenhada
-    // no miolo do documento (mesmo padrao usado em recibos).
+    // v3.65.0: layout que sera OFICIALMENTE assinado (PAdES). O usuario escolhe
+    // no front: padrao (PDFKit) | prime1 | prime2 (puppeteer). O layout escolhido
+    // e gerado JA com a marca da assinatura e PAdES-assinado de verdade.
+    const tplReq = String(req.body?.template || 'padrao').toLowerCase();
+    const template = (['padrao', 'prime1', 'prime2'].includes(tplReq) ? tplReq : 'padrao') as 'padrao' | 'prime1' | 'prime2';
     const agoraAssin = new Date();
-    const signatureVisualMeta = {
-      signer_cn: cert.meta.subject_cn ?? executante.nome,
-      signer_doc: cert.meta.subject_doc,
-      issuer_cn: cert.meta.issuer_cn,
-      validade_ate: cert.meta.validade_ate,
-      data_assinatura: agoraAssin,
-      thumbprint: cert.meta.thumbprint,
-    };
 
-    const pdfBase = await gerarPdfLaudo({
-      laudo, contratante, executante, pontos, lados,
-      fotos: fotos.map(f => ({ id: f.id, mime: f.mime, legenda: f.legenda })),
-      fotoBase64Loader: async (fotoId) => {
-        const f = await laudosMod.getFotoConteudo(fotoId);
-        return f ? { base64: f.base64, mime: f.mime } : null;
-      },
-      croquiUpload: croquiUpload ?? null,
-      croquiCanvasPng: anexos.croquiCanvasPng,
-      croquiCanvasInfo: anexos.croquiCanvasInfo,
-      fotosRelatorio: anexos.fotosRelatorio,
-      signatureMeta: signatureVisualMeta,
-    });
+    let pdfBase: Buffer;
+    if (template === 'prime1' || template === 'prime2') {
+      // Prime: monta a caixa ICP e gera o template puppeteer escolhido.
+      const { construirLaudoDadosPrime, montarAssinaturaIcp } = await import('./services/laudoPrimeDados');
+      const { gerarLaudoPdf } = await import('./pdf/laudoPdfRouter');
+      const { TemplateId } = await import('./types/templateTypes');
+      const assinaturaIcp = montarAssinaturaIcp(cert.meta, agoraAssin, executante.nome);
+      const dados = await construirLaudoDadosPrime(id, { assinaturaIcp });
+      pdfBase = await gerarLaudoPdf(dados, template === 'prime1' ? TemplateId.PRIME_I : TemplateId.PRIME_II);
+    } else {
+      // Padrao (PDFKit): caixa verde ICP desenhada no miolo via signatureMeta.
+      const { gerarPdfLaudo } = await import('./services/laudoPdf');
+      const { carregarAnexosLaudo } = await import('./services/laudoAnexos');
+      const [pontos, lados, fotos, croquiUpload, anexos] = await Promise.all([
+        laudosMod.listarPontosDoLaudo(id),
+        laudosMod.listarLadosDoLaudo(id),
+        laudosMod.listarFotosDoLaudo(id),
+        laudosMod.getCroquiUpload(id),
+        carregarAnexosLaudo(id),
+      ]);
+      const signatureVisualMeta = {
+        signer_cn: cert.meta.subject_cn ?? executante.nome,
+        signer_doc: cert.meta.subject_doc,
+        issuer_cn: cert.meta.issuer_cn,
+        validade_ate: cert.meta.validade_ate,
+        data_assinatura: agoraAssin,
+        thumbprint: cert.meta.thumbprint,
+      };
+      pdfBase = await gerarPdfLaudo({
+        laudo, contratante, executante, pontos, lados,
+        fotos: fotos.map(f => ({ id: f.id, mime: f.mime, legenda: f.legenda })),
+        fotoBase64Loader: async (fotoId) => {
+          const f = await laudosMod.getFotoConteudo(fotoId);
+          return f ? { base64: f.base64, mime: f.mime } : null;
+        },
+        croquiUpload: croquiUpload ?? null,
+        croquiCanvasPng: anexos.croquiCanvasPng,
+        croquiCanvasInfo: anexos.croquiCanvasInfo,
+        fotosRelatorio: anexos.fotosRelatorio,
+        signatureMeta: signatureVisualMeta,
+      });
+    }
 
     // Aplica PAdES (PKCS#7 detached, ICP-Brasil)
     const pdfAssinado = await pdfSignerMod.signPdfBuffer(pdfBase, cert.pfx, cert.senha, {
