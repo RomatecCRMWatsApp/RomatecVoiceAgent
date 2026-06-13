@@ -352,6 +352,8 @@ export function laudoToLaudoDados(
     memorialTexto?: string;
     pagamento?: LaudoDados['pagamento'];
     fotos?: LaudoDados['fotos'];
+    assinaturaIcp?: LaudoDados['assinaturaIcp'];
+    arquivos?: LaudoDados['arquivos'];
   },
 ): LaudoDados {
   const base = baseUrl.replace(/\/$/, '');
@@ -472,6 +474,8 @@ export function laudoToLaudoDados(
     memorialTexto: opts?.memorialTexto ?? '',
     pagamento: opts?.pagamento,
     fotos: opts?.fotos ?? [],
+    assinaturaIcp: opts?.assinaturaIcp,
+    arquivos: opts?.arquivos,
     croquiSvg,
     art: laudo.usa_art ? laudo.numero_art ?? undefined : undefined,
     trt: laudo.usa_trt ? laudo.numero_trt ?? undefined : undefined,

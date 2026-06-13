@@ -43,6 +43,26 @@ import pool from '../database/connection';
 /** Limite de fotos embarcadas no relatorio fotografico Prime. */
 const MAX_FOTOS_PRIME = 12;
 
+// v3.65.0 — helpers de formatação para a seção de arquivos anexos e a caixa ICP.
+function fmtTamanhoBytes(bytes: number | null | undefined): string {
+  const n = Number(bytes) || 0;
+  if (!n) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0, v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v < 10 && i > 0 ? 2 : i > 0 ? 1 : 0)} ${u[i]}`;
+}
+function fmtDataCurta(v: unknown): string | undefined {
+  if (v == null || v === '') return undefined;
+  const d = v instanceof Date ? v : new Date(String(v));
+  return Number.isNaN(d.getTime()) ? undefined : d.toLocaleDateString('pt-BR');
+}
+function fmtDataHora(v: unknown): string {
+  const d = v instanceof Date ? v : new Date(String(v));
+  if (Number.isNaN(d.getTime())) return String(v ?? '');
+  return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+}
+
 export const pdfPrimeRouter = Router();
 
 /** GET /proposta/:id?template=prime1|prime2 */
@@ -229,6 +249,52 @@ pdfPrimeRouter.get('/laudo/:id', async (req: Request, res: Response) => {
       pagamento = undefined;
     }
 
+    // v3.65.0 — Arquivos técnicos anexos (DXF/DWG/KML/PDF) com link + QR Code.
+    // Espelha a seção do PDF padrão (laudoPdf.ts). Best-effort: falha não derruba o PDF.
+    let arquivos: LaudoDados['arquivos'];
+    try {
+      const av = await import('../services/arquivosVetoriaisService');
+      const rows = await av.listarArquivosVetoriais(Number(laudo.id));
+      const base = getBaseUrl().replace(/\/$/, '');
+      arquivos = await Promise.all(
+        rows.map(async (a) => {
+          const url = `${base}/d/${a.download_token}`;
+          return {
+            nome: a.nome_original,
+            tipoLabel: `ARQUIVO ${String(a.tipo).toUpperCase()}`,
+            tamanho: fmtTamanhoBytes(a.tamanho_bytes),
+            url,
+            validade: fmtDataCurta(a.download_expira_em),
+            qrDataUrl: await gerarQrCodeBase64(url),
+          };
+        }),
+      );
+      if (arquivos.length === 0) arquivos = undefined;
+    } catch (anexoErr) {
+      console.warn('[pdf-prime:laudo] arquivos anexos pulados:', (anexoErr as Error).message);
+      arquivos = undefined;
+    }
+
+    // v3.65.0 — Caixa ICP-Brasil quando o laudo está assinado. Reconstrói a meta
+    // a partir do certificado PJ (mesma fonte usada no /assinar). Best-effort.
+    let assinaturaIcp: LaudoDados['assinaturaIcp'];
+    if (laudo.assinado_em) {
+      try {
+        const certsMod = await import('../services/signingCertificates');
+        const cert = await certsMod.getCertForSigning('pj');
+        assinaturaIcp = {
+          signerCn: cert?.meta.subject_cn || executante.nome,
+          signerDoc: cert?.meta.subject_doc ?? undefined,
+          issuerCn: cert?.meta.issuer_cn ?? undefined,
+          validadeAte: fmtDataCurta(cert?.meta.validade_ate),
+          dataAssinatura: fmtDataHora(laudo.assinado_em),
+        };
+      } catch (sigErr) {
+        console.warn('[pdf-prime:laudo] assinatura ICP best-effort:', (sigErr as Error).message);
+        assinaturaIcp = { signerCn: executante.nome, dataAssinatura: fmtDataHora(laudo.assinado_em) };
+      }
+    }
+
     const dados = laudoToLaudoDados(
       laudo,
       contratante,
@@ -236,7 +302,7 @@ pdfPrimeRouter.get('/laudo/:id', async (req: Request, res: Response) => {
       pontos,
       lados,
       getBaseUrl(),
-      { croquiSvg, memorialTexto, pagamento, fotos },
+      { croquiSvg, memorialTexto, pagamento, fotos, assinaturaIcp, arquivos },
     );
     const buffer = await gerarLaudoPdf(dados, templateId);
     res.setHeader('Content-Type', 'application/pdf');

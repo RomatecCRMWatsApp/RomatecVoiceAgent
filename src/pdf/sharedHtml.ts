@@ -129,3 +129,73 @@ export function blocoAssinaturaHtml(assinaturaBase64: string | undefined, cor: s
     <div style="border-bottom:1px dashed ${cor};width:220px;height:50px;"></div>
     <div style="font-size:0.7rem;color:${cor};text-align:center;margin-top:4px;letter-spacing:1px;">Assinatura</div>`;
 }
+
+// ── v3.65.0 — Caixa ICP-Brasil (compartilhada Prime I/II) ───────────────────
+/** Tipo da meta da assinatura digital (espelha LaudoDados['assinaturaIcp']). */
+export interface IcpBoxMeta {
+  signerCn: string;
+  signerDoc?: string;
+  issuerCn?: string;
+  validadeAte?: string;
+  dataAssinatura: string;
+}
+
+/**
+ * Caixa verde "ASSINADO DIGITALMENTE — ICP-Brasil (PAdES)". Auto-contida
+ * (fundo/borda próprios) pra ler bem tanto no tema dark (Prime I) quanto no
+ * clean (Prime II). Retorna '' quando não há assinatura.
+ */
+export function assinaturaIcpHtml(meta?: IcpBoxMeta): string {
+  if (!meta) return '';
+  const docLinha = meta.signerDoc ? ` · ${escapeHtml(meta.signerDoc)}` : '';
+  const certLinha = [
+    meta.issuerCn ? `Cert.: ${escapeHtml(meta.issuerCn)}` : '',
+    meta.validadeAte ? `válido até ${escapeHtml(meta.validadeAte)}` : '',
+  ].filter(Boolean).join(' · ');
+  return `
+  <div style="margin-top:14px;border:1.5px solid #1F5C3A;background:#eafff3;border-radius:8px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start;text-align:left;break-inside:avoid;">
+    <div style="font-size:1.3rem;line-height:1;">🔏</div>
+    <div style="flex:1;min-width:0;">
+      <div style="font-weight:700;color:#1F5C3A;font-size:.8rem;letter-spacing:.4px;">ASSINADO DIGITALMENTE — ICP-Brasil (PAdES)</div>
+      <div style="color:#0B6E4F;font-size:.78rem;margin-top:3px;">${escapeHtml(meta.signerCn)}${docLinha}</div>
+      <div style="color:#0B6E4F;font-size:.72rem;margin-top:2px;">Assinado em ${escapeHtml(meta.dataAssinatura)}</div>
+      ${certLinha ? `<div style="color:#3a7a5a;font-size:.67rem;margin-top:2px;">${certLinha} · validar em validar.iti.gov.br</div>` : ''}
+    </div>
+  </div>`;
+}
+
+// ── v3.65.0 — Seção "Arquivos Técnicos Anexos" (compartilhada Prime I/II) ────
+export interface AnexoTecnicoView {
+  nome: string;
+  tipoLabel: string;
+  tamanho: string;
+  url: string;
+  validade?: string;
+  qrDataUrl: string;
+}
+
+/**
+ * Renderiza a seção de arquivos técnicos vetoriais (DXF/DWG/KML/PDF) com cards
+ * brancos auto-contidos + QR Code, espelhando o PDF padrão. Usa as classes
+ * `bloco`/`secao` (presentes em ambos os templates) pro título. Retorna '' se
+ * não houver arquivos. `secaoLabel` permite numerar (Prime II usa "N. Título").
+ */
+export function arquivosAnexosHtml(arquivos: AnexoTecnicoView[] | undefined, secaoLabel: string): string {
+  if (!arquivos || arquivos.length === 0) return '';
+  const cards = arquivos.map((a) => `
+    <div style="border:1px solid rgba(31,92,58,.35);border-radius:8px;padding:10px 12px;display:flex;gap:12px;align-items:center;background:#ffffff;margin-bottom:8px;break-inside:avoid;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:700;color:#0B6E4F;font-size:.7rem;letter-spacing:.5px;text-transform:uppercase;">${escapeHtml(a.tipoLabel)} <span style="color:#999;font-weight:400;text-transform:none;">(${escapeHtml(a.tamanho)})</span></div>
+        <div style="font-weight:600;color:#1A1A2E;font-size:.82rem;margin:3px 0;word-break:break-word;">${escapeHtml(a.nome)}</div>
+        <div style="font-size:.68rem;color:#555;">Link de download:<br><span style="color:#0B6E4F;word-break:break-all;">${escapeHtml(a.url)}</span></div>
+        ${a.validade ? `<div style="font-size:.64rem;color:#999;font-style:italic;margin-top:2px;">Validade do link: ${escapeHtml(a.validade)}</div>` : ''}
+      </div>
+      <img src="${escapeHtml(a.qrDataUrl)}" alt="QR Code" style="width:86px;height:86px;flex:none;background:#fff;border:1px solid #eee;border-radius:4px;" />
+    </div>`).join('');
+  return `
+<div class="bloco">
+  <h2 class="secao">${escapeHtml(secaoLabel)}</h2>
+  <p style="font-size:.74rem;color:#666;margin:0 0 10px;">Os arquivos técnicos vetoriais a seguir compõem o presente laudo e estão disponíveis para download através dos links e QR Codes abaixo. Os links são individuais — podem ser acessados via navegador no computador ou escaneados pelo dispositivo móvel.</p>
+  ${cards}
+</div>`;
+}

@@ -7,7 +7,7 @@
 import type { PDFOptions } from 'puppeteer';
 import { LaudoDados } from '../../types/templateTypes';
 import { htmlToPdf } from '../htmlToPdf';
-import { FONTS_PRIME2, escapeHtml, gerarQrCodeBase64, blocoAssinaturaHtml } from '../sharedHtml';
+import { FONTS_PRIME2, escapeHtml, gerarQrCodeBase64, blocoAssinaturaHtml, assinaturaIcpHtml, arquivosAnexosHtml } from '../sharedHtml';
 
 // FOOTER FIX — rodape escuro com paginacao em verde-zayra, margem lateral 0
 // (body com padding 12mm), margem inferior 22mm (v3.56.1) pra reservar o footer
@@ -422,13 +422,16 @@ ${pagamentoHtml(dados, '13.')}
     <div class="assina-cargo">${escapeHtml(dados.tecnico.cargo)} · ${escapeHtml(dados.tecnico.empresa)}</div>
     <div class="assina-cred">${cred}</div>
   </div>
+  ${assinaturaIcpHtml(dados.assinaturaIcp)}
 </div>
 
 ${fotosHtml(dados, '16.')}
 
-<!-- 17 VALIDACAO -->
+${arquivosAnexosHtml(dados.arquivos, '17. Arquivos Técnicos Anexos')}
+
+<!-- 18 VALIDACAO -->
 <div class="bloco">
-  <h2 class="secao">17. Validação de Autenticidade</h2>
+  <h2 class="secao">18. Validação de Autenticidade</h2>
   <div class="validacao-bloco">
     <div class="val-qr"><img src="${escapeHtml(qrDataUrl)}" alt="QR de validação"/></div>
     <div class="val-info">

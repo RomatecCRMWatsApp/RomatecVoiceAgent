@@ -85,4 +85,41 @@ describe('Laudo Template Prime II — HTML (puro)', () => {
     const html = buildLaudoPrime2Html(dadosMinimosLaudo, QR_FAKE);
     expect(html).not.toContain('Dados para Pagamento');
   });
+
+  // v3.65.0 — caixa ICP-Brasil + arquivos técnicos anexos
+  it('renderiza a caixa ICP-Brasil quando o laudo está assinado', () => {
+    const html = buildLaudoPrime2Html({
+      ...dadosMockLaudo,
+      assinaturaIcp: {
+        signerCn: 'ROMATEC CONSULTORIA LTDA',
+        signerDoc: '12.345.678/0001-90',
+        issuerCn: 'AC SOLUTI',
+        validadeAte: '31/12/2027',
+        dataAssinatura: '13/06/2026 14:30',
+      },
+    }, QR_FAKE);
+    expect(html).toContain('ASSINADO DIGITALMENTE');
+    expect(html).toContain('ROMATEC CONSULTORIA LTDA');
+    expect(html).toContain('13/06/2026 14:30');
+  });
+  it('omite a caixa ICP quando não há assinatura', () => {
+    expect(buildLaudoPrime2Html(dadosMockLaudo, QR_FAKE)).not.toContain('ASSINADO DIGITALMENTE');
+  });
+  it('renderiza a seção de Arquivos Técnicos Anexos com link + QR', () => {
+    const html = buildLaudoPrime2Html({
+      ...dadosMockLaudo,
+      arquivos: [{
+        nome: 'planta.dxf', tipoLabel: 'ARQUIVO DXF', tamanho: '57.8 KB',
+        url: 'https://app.romatec/d/abc123', validade: '13/06/2027',
+        qrDataUrl: 'data:image/png;base64,QRARQ',
+      }],
+    }, QR_FAKE);
+    expect(html).toContain('Arquivos Técnicos Anexos');
+    expect(html).toContain('planta.dxf');
+    expect(html).toContain('https://app.romatec/d/abc123');
+    expect(html).toContain('data:image/png;base64,QRARQ');
+  });
+  it('omite a seção de anexos quando não há arquivos', () => {
+    expect(buildLaudoPrime2Html(dadosMockLaudo, QR_FAKE)).not.toContain('Arquivos Técnicos Anexos');
+  });
 });

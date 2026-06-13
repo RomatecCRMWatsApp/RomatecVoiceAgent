@@ -13,6 +13,8 @@ import {
   escapeHtml,
   gerarQrCodeBase64,
   blocoAssinaturaHtml,
+  assinaturaIcpHtml,
+  arquivosAnexosHtml,
 } from '../sharedHtml';
 
 // FOOTER FIX — header/footer nativo do puppeteer, margem lateral 0 (o body tem
@@ -424,9 +426,12 @@ ${pagamentoHtml(dados)}
     <div class="assina-cargo">${escapeHtml(dados.tecnico.cargo)} · ${escapeHtml(dados.tecnico.empresa)}</div>
     <div class="assina-cred">${cred}</div>
   </div>
+  ${assinaturaIcpHtml(dados.assinaturaIcp)}
 </div>
 
 ${fotosHtml(dados)}
+
+${arquivosAnexosHtml(dados.arquivos, 'Arquivos Técnicos Anexos')}
 
 <!-- 12 VALIDACAO -->
 <div class="bloco">

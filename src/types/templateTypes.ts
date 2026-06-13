@@ -238,6 +238,29 @@ export interface LaudoDados {
   trt?: string;
   /** base64 puro da assinatura, se houver */
   assinaturaDigitalBase64?: string;
+  /**
+   * v3.65.0 — Caixa verde "ASSINADO DIGITALMENTE — ICP-Brasil (PAdES)".
+   * Presente só quando o laudo está assinado; espelha o que o PDF padrão mostra.
+   */
+  assinaturaIcp?: {
+    signerCn: string;
+    signerDoc?: string;
+    issuerCn?: string;
+    validadeAte?: string;   // dd/mm/aaaa
+    dataAssinatura: string; // dd/mm/aaaa HH:mm
+  };
+  /**
+   * v3.65.0 — Arquivos técnicos anexos (DXF/DWG/KML/PDF) com link + QR Code,
+   * mesma seção do PDF padrão. Vazio/undefined => seção omitida.
+   */
+  arquivos?: Array<{
+    nome: string;
+    tipoLabel: string;  // ex.: "ARQUIVO DXF"
+    tamanho: string;    // ex.: "12.60 MB"
+    url: string;        // link público /d/:token
+    validade?: string;  // dd/mm/aaaa
+    qrDataUrl: string;  // data:image/png;base64,...
+  }>;
   hashValidacao: string;
   urlVerificacao: string;
   tecnico: LaudoTecnico;
