@@ -18984,15 +18984,13 @@ function renderLaudosLista(v) {
         <div style="display:flex; flex-direction:column; gap:6px; min-width:240px;">
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
             <button data-laudo-edit="${l.id}" style="flex:1; background:var(--gold); color:#06120a; border-color:var(--gold);">✏️ Abrir</button>
-            <details class="dd-pdf" style="flex:1; position:relative;">
-              <summary title="Exportar PDF" style="list-style:none; cursor:pointer; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg-elev); color:var(--text); font-size:13px; text-align:center;">📄 PDF ▾</summary>
-              <div style="position:absolute; top:100%; left:0; right:0; margin-top:2px; background:#0f1720; border:1px solid var(--border); border-radius:6px; z-index:30; overflow:hidden; box-shadow:0 6px 18px rgba(0,0,0,.45);">
-                <button data-laudo-pdfx="${l.id}" data-tpl="padrao" style="display:block; width:100%; text-align:left; background:transparent; border:none; color:var(--text); padding:8px 10px; font-size:13px; cursor:pointer;">📋 Padrão</button>
-                <button data-laudo-pdfx="${l.id}" data-tpl="prime1" style="display:block; width:100%; text-align:left; background:transparent; border:none; color:#d4af37; padding:8px 10px; font-size:13px; cursor:pointer;">✨ Prime I</button>
-                <button data-laudo-pdfx="${l.id}" data-tpl="prime2" style="display:block; width:100%; text-align:left; background:transparent; border:none; color:#00cc6a; padding:8px 10px; font-size:13px; cursor:pointer;">💎 Prime II</button>
-              </div>
-            </details>
+            <button data-laudo-pdfx="${l.id}" data-tpl="padrao" title="Exportar PDF — modelo padrão" style="flex:1; background:var(--bg-elev); color:var(--text); border:1px solid var(--border);">📄 PDF</button>
             <button data-laudo-clonar="${l.id}" title="Criar uma cópia editável deste laudo (zera pontos, fotos e número do lote)" style="flex:1; background:transparent; color:var(--gold); border:1px dashed var(--gold);">📋 Clonar</button>
+          </div>
+          <!-- v3.65.0: export PDF templates Prime I (dark) / Prime II (clean) — mesmo padrão/layout da Proposta -->
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button data-laudo-prime1="${l.id}" title="Exportar PDF — Prime I (dark premium)" style="flex:1; background:#0a0a0a; color:#f0c040; border:1px solid #B8860B; font-size:12px;">✦ Prime I</button>
+            <button data-laudo-prime2="${l.id}" title="Exportar PDF — Prime II (clean editorial)" style="flex:1; background:#fafaf8; color:#0B6E4F; border:1px solid #0B6E4F; font-size:12px;">✦ Prime II</button>
           </div>
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
             <button data-laudo-croqui="${l.id}" title="Abrir o Canvas/Croqui As-Built vinculado a este laudo (cria ou edita)" style="flex:1; background:#1f4e7922; color:#7aa7d9; border:1px solid #1f4e7955;">📐 Croqui As-Built</button>
@@ -19105,6 +19103,9 @@ function renderLaudosLista(v) {
     exportarLaudoPdf(b.dataset.laudoPdfx, b.dataset.tpl);
     const dd = b.closest('details'); if (dd) dd.open = false;
   });
+  // v3.65.0: botões dedicados Prime I / Prime II (mesmo padrão da Proposta)
+  v.querySelectorAll('[data-laudo-prime1]').forEach(b => b.onclick = () => exportarLaudoPdf(b.dataset.laudoPrime1, 'prime1'));
+  v.querySelectorAll('[data-laudo-prime2]').forEach(b => b.onclick = () => exportarLaudoPdf(b.dataset.laudoPrime2, 'prime2'));
   // v3.52.0: abre Canvas/Croqui e Relatório Fotográfico VINCULADOS ao laudo
   v.querySelectorAll('[data-laudo-croqui]').forEach(b => b.onclick = () => {
     window.open('/vta-canvas.html?laudo_id=' + b.dataset.laudoCroqui, '_blank');
