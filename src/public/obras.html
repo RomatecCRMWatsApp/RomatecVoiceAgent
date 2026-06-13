@@ -19014,6 +19014,10 @@ function renderLaudosLista(v) {
           <button data-laudo-del="${l.id}" class="btn-danger" style="font-size:11px; padding:4px;" title="Desativar laudo">🗑️ Excluir</button>
         </div>
       </div>
+      <div class="lda-anexos" data-laudo-id="${l.id}" style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
+        <button type="button" data-anexos-toggle="${l.id}" style="background:#0B6E4F; color:#fff; border:1px solid var(--gold); border-radius:8px; padding:6px 12px; cursor:pointer; font-weight:600; font-size:12px;">📎 Anexos <span data-anexos-count style="background:var(--gold); color:#06120a; border-radius:999px; padding:1px 8px; font-size:11px; margin-left:6px;">…</span></button>
+        <ul data-anexos-lista hidden style="list-style:none; margin:10px 0 0; padding:0; display:grid; gap:6px;"></ul>
+      </div>
     </div>`;
   }).join('');
 
@@ -19236,6 +19240,81 @@ function renderLaudosLista(v) {
       await render();
     } catch (err) { alert('Erro: '+err.message); }
   });
+
+  // v3.64.0: painel "Anexos (N)" agregado no card — carrega sob demanda ao abrir.
+  v.querySelectorAll('[data-anexos-toggle]').forEach(b => b.onclick = () => toggleAnexosLaudo(b));
+}
+
+// v3.64.0 — painel de anexos agregados do laudo (PDF, croqui, recibo, rel.
+// fotográfico, fotos, arquivos avulsos). Read-only; Excluir só em avulsos.
+const ICONES_ANEXO = {
+  pdf_laudo: '📄', croqui: '📐', recibo: '🧾', relatorio_fotografico: '🖼️',
+  foto: '📷', dxf: '📐', dwg: '📐', kml: '🌎', documento: '📁', outro: '📎',
+};
+
+function formatarTamanhoAnexo(bytes) {
+  if (!bytes) return '';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0, n = bytes;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
+}
+
+async function toggleAnexosLaudo(btn) {
+  const container = btn.closest('.lda-anexos');
+  const lista = container.querySelector('[data-anexos-lista]');
+  const abrindo = lista.hidden;
+  lista.hidden = !abrindo;
+  if (abrindo) await carregarAnexosLaudo(container);
+}
+
+async function carregarAnexosLaudo(container) {
+  const laudoId = container.dataset.laudoId;
+  const lista = container.querySelector('[data-anexos-lista]');
+  const count = container.querySelector('[data-anexos-count]');
+  lista.innerHTML = '<li style="color:var(--text-muted); font-size:12px; padding:4px;">Carregando…</li>';
+  try {
+    const data = await api('/api/laudos-demarcacao/' + laudoId + '/anexos');
+    count.textContent = data.total;
+    if (!data.total) {
+      lista.innerHTML = '<li style="color:var(--text-muted); font-size:12px; padding:4px;">Nenhum anexo neste laudo.</li>';
+      return;
+    }
+    lista.innerHTML = (data.anexos || []).map(a => {
+      const icone = ICONES_ANEXO[a.categoria] || ICONES_ANEXO.outro;
+      const tamanho = formatarTamanhoAnexo(a.tamanhoBytes);
+      const dataBR = a.criadoEm ? new Date(a.criadoEm).toLocaleDateString('pt-BR') : '';
+      const meta = [tamanho, dataBR].filter(Boolean).join(' · ');
+      const urlAbs = location.origin + a.url;
+      const urlWa = encodeURIComponent(urlAbs);
+      const btnExcluir = (a.podeExcluir && a.excluirUrl)
+        ? `<button data-anexo-excluir data-url="${escape(a.excluirUrl)}" title="Excluir" style="background:none; border:none; cursor:pointer; font-size:15px;">🗑️</button>`
+        : '';
+      return `
+        <li style="display:flex; align-items:center; gap:10px; background:rgba(12,51,32,.45); border:1px solid rgba(184,134,11,.35); border-radius:8px; padding:8px 10px;">
+          <span style="font-size:18px;">${icone}</span>
+          <span style="display:flex; flex-direction:column; flex:1; min-width:0;">
+            <span style="color:var(--gold); font-weight:600; font-size:13px;">${escape(a.rotulo)}</span>
+            <span style="color:var(--text-muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escape(a.nomeArquivo)}${meta ? ' — ' + escape(meta) : ''}</span>
+          </span>
+          <span style="display:flex; gap:8px;">
+            <a href="${escape(a.url)}" target="_blank" rel="noopener" title="Ver" style="font-size:15px; text-decoration:none;">👁️</a>
+            <a href="${escape(a.url)}" download title="Baixar" style="font-size:15px; text-decoration:none;">⬇️</a>
+            <a href="https://wa.me/?text=${urlWa}" target="_blank" rel="noopener" title="WhatsApp" style="font-size:15px; text-decoration:none;">💬</a>
+            ${btnExcluir}
+          </span>
+        </li>`;
+    }).join('');
+    lista.querySelectorAll('[data-anexo-excluir]').forEach(b => b.onclick = async () => {
+      if (!confirm('Excluir este anexo? (apenas arquivos avulsos podem ser removidos)')) return;
+      try {
+        await api(b.dataset.url, { method: 'DELETE' });
+        await carregarAnexosLaudo(container);
+      } catch (err) { alert('Erro ao excluir: ' + err.message); }
+    });
+  } catch (err) {
+    lista.innerHTML = `<li style="color:#e0726a; font-size:12px; padding:4px;">Erro: ${escape(err.message)}</li>`;
+  }
 }
 
 // v3.5.0: modal fullscreen do PDF Assinado de laudo com botoes Baixar/Telegram/WhatsApp

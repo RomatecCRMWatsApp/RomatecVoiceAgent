@@ -3350,6 +3350,23 @@ app.post('/api/laudos-demarcacao/:id/arquivos/:arquivoId/regenerar-token', requi
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v3.64.0 — Lista AGREGADA de anexos do laudo (read-only): PDF + croqui + recibo
+// + relatórios fotográficos + fotos + arquivos avulsos numa resposta só.
+// Não cria/armazena nada — só compõe as fontes existentes (ver anexosLaudoDemarcacao.ts).
+// O Excluir é exposto só p/ arquivos avulsos, via DELETE /:id/arquivos/:arquivoId (acima).
+app.get('/api/laudos-demarcacao/:id/anexos', async (req: Request, res: Response) => {
+  try {
+    const lm = await import('./integrations/laudos');
+    const id = await lm.resolverLaudoId(String(req.params.id));
+    const mod = await import('./services/anexosLaudoDemarcacao');
+    const anexos = await mod.listarAnexosDoLaudo(id);
+    res.json({ ok: true, total: anexos.length, anexos });
+  } catch (err) {
+    const e = err as { statusCode?: number; message?: string };
+    res.status(e?.statusCode ?? 500).json({ ok: false, error: e?.message ?? 'Erro ao listar anexos' });
+  }
+});
+
 // Rota pública de download — /d/:token (sem auth, token de 64 chars hex = 256 bits)
 app.get('/d/:token', async (req: Request, res: Response) => {
   try {
