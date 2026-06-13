@@ -1126,7 +1126,6 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
 
       const baseUrlAv = getBaseUrl();
       const QRCode = (await import('qrcode')).default;
-      const tipoIcone = (t: string) => t === 'kml' ? '🌍' : (t === 'pdf' ? '📄' : '📐');
       const fmtBytes = (b: number) => {
         if (b < 1024) return `${b} B`;
         if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
@@ -1149,9 +1148,17 @@ export async function gerarPdfLaudo(input: LaudoPdfInput): Promise<Buffer> {
            .stroke()
            .restore();
 
-        // Cabeçalho do card: icone + tipo + nome + tamanho
+        // Cabeçalho do card: badge do tipo + nome + tamanho.
+        // v3.65.2: o emoji (📄/📐/🌍) não renderiza na fonte embarcada do PDFKit
+        // e saía como glyph quebrado ("Ø=ÜÃ ARQUIVO PDF"). Trocado por um badge
+        // vetorial (chip colorido com a extensão), que renderiza em qualquer ambiente.
+        const tipoTxt = a.tipo.toUpperCase();
+        const badgeX = 52, badgeY = cy + 9, badgeW = 38, badgeH = 15;
+        doc.save().roundedRect(badgeX, badgeY, badgeW, badgeH, 3).fill(corHex).restore();
+        doc.fontSize(8).fillColor('#FFFFFF').font('Helvetica-Bold')
+           .text(tipoTxt, badgeX, badgeY + 4, { width: badgeW, align: 'center' });
         doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold')
-           .text(`${tipoIcone(a.tipo)} ARQUIVO ${a.tipo.toUpperCase()}`, 52, cy + 10, { width: 380 });
+           .text(`ARQUIVO ${tipoTxt}`, badgeX + badgeW + 8, cy + 10, { width: 290 });
         doc.fontSize(9).fillColor('#666').font('Helvetica')
            .text(`(${fmtBytes(a.tamanho_bytes)})`, 380, cy + 12, { width: 60, align: 'right' });
 
