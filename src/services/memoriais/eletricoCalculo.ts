@@ -3,10 +3,13 @@
 // monta o ResultadoEletrico que alimenta os PDFs (Memorial + Quantitativo) e
 // as rotas /api/memoriais/eletrico/*. Mesmo desenho do hidraulicoCalculo.ts.
 //
+// v3.66.0: suporte a extracao de circuitos reais (calcularComExtracao).
+//
 // Standalone — sem deps de mysql/pdfkit.
 
 import { calcularMemorialEletrico } from './eletricoCalc';
 import type { WizardEletrico, MemorialEletricoOutput } from './types';
+import type { ExtracaoEletrica, CircuitoEletrico } from './eletricoExtracaoTypes';
 
 export interface DadosObraEle {
   titulo: string;
@@ -48,6 +51,7 @@ export interface ResultadoEletrico {
     pontos: MaterialItem[];
     quadros: MaterialItem[];
     insumos: MaterialItem[];
+    caixas: MaterialItem[];
   };
   totais: {
     pontosLuz: number;
@@ -82,6 +86,7 @@ export function labelCarga(tipo: string): string {
 export interface EntradaResumoEle {
   dadosObra: DadosObraEle;
   dadosUso: DadosUsoEle;
+  extracao?: Pick<ExtracaoEletrica, 'circuitos' | 'pontos' | 'eletrodutos' | 'caixas'>;
 }
 
 const APARELHOS_PADRAO_ELE: DadosUsoEle['cargas'] = [
@@ -92,6 +97,181 @@ const APARELHOS_PADRAO_ELE: DadosUsoEle['cargas'] = [
 ];
 
 function ceilPos(n: number): number { return Math.max(1, Math.ceil(n)); }
+
+// ---------------------------------------------------------------------------
+// Helpers reutilizáveis nos dois caminhos (heurístico + extração)
+// ---------------------------------------------------------------------------
+
+function montarQuadros(totalCircuitos: number, _saida: MemorialEletricoOutput): MaterialItem[] {
+  return [
+    { descricao: `Quadro de distribuicao de embutir ${Math.max(12, totalCircuitos + 4)} disjuntores`, unidade: 'un', qtd: 1 },
+    { descricao: 'Barramento de terra + neutro', unidade: 'cj', qtd: 1 },
+    { descricao: 'Haste de aterramento cobreada 5/8" x 2,4 m', unidade: 'un', qtd: 1 },
+    { descricao: 'Conector de aterramento + cordoalha', unidade: 'cj', qtd: 1 },
+  ];
+}
+
+function montarInsumos(totalCircuitos: number): MaterialItem[] {
+  return [
+    { descricao: 'Fita isolante 19mm x 20m', unidade: 'un', qtd: ceilPos(totalCircuitos / 6) },
+    { descricao: 'Conector de emenda (kit)', unidade: 'cj', qtd: ceilPos(totalCircuitos / 4) },
+    { descricao: 'Abracadeira / fixacao (vb)', unidade: 'vb', qtd: 1 },
+  ];
+}
+
+// Agrupamento de disjuntores a partir de circuitos reais (extração).
+// Para o caminho heurístico os disjuntores são montados inline (mantém valores inalterados).
+function montarProtecaoDeCircuitos(
+  circuitos: CircuitoEletrico[],
+  dadosUso: DadosUsoEle,
+  saida: MemorialEletricoOutput,
+): MaterialItem[] {
+  // Agrupa disjuntores terminais por amperagem
+  const porAmpere: Record<number, number> = {};
+  for (const c of circuitos) {
+    porAmpere[c.disjuntorA] = (porAmpere[c.disjuntorA] || 0) + 1;
+  }
+  const terminais: MaterialItem[] = Object.entries(porAmpere)
+    .map(([amp, qtd]) => ({
+      descricao: `Disjuntor termomagnetico DIN ${amp}A`,
+      unidade: 'un',
+      qtd,
+    }));
+
+  const geral: MaterialItem = {
+    descricao: `Disjuntor geral ${saida.dimensionamento_ramal.disjuntor_geral_A}A`,
+    unidade: 'un',
+    qtd: 1,
+  };
+  const dr: MaterialItem = {
+    descricao: 'Interruptor diferencial residual (DR) 40A 30mA',
+    unidade: 'un',
+    qtd: 1,
+  };
+  const dps: MaterialItem = {
+    descricao: 'DPS Classe II 275V 20kA',
+    unidade: 'un',
+    qtd: dadosUso.tipoAlimentacao === 'trifasico' ? 3 : 2,
+  };
+
+  return [...terminais, geral, dr, dps].filter((x) => x.qtd > 0);
+}
+
+// ---------------------------------------------------------------------------
+// Caminho com extração de circuitos reais
+// ---------------------------------------------------------------------------
+
+function calcularComExtracao(
+  dadosObra: DadosObraEle,
+  dadosUso: DadosUsoEle,
+  ext: Pick<ExtracaoEletrica, 'circuitos' | 'pontos' | 'eletrodutos' | 'caixas'>,
+  saida: MemorialEletricoOutput,
+): ResultadoEletrico {
+  const { circuitos: extCircuitos, pontos, eletrodutos: extEletrodutos, caixas: extCaixas } = ext;
+
+  // Circuitos mapeados
+  const circuitos: ResultadoEletrico['circuitos'] = extCircuitos.map((c) => ({
+    descricao: `${c.id} — ${c.descricao}`,
+    disjuntor_A: c.disjuntorA,
+    secao_mm2: c.condutorFaseMm2,
+  }));
+
+  // Cabos por seção
+  // Fase+Neutro usam condutorFaseMm2; Terra usa condutorProtecaoMm2 (default 2.5)
+  const porSecao: Record<number, number> = {};
+  for (const c of extCircuitos) {
+    const lance = c.lanceMedioM ?? 12;
+    const secFase = c.condutorFaseMm2;
+    const secTerra = c.condutorProtecaoMm2 ?? 2.5;
+    // F+N: lance * 2
+    porSecao[secFase] = (porSecao[secFase] || 0) + lance * 2;
+    // Terra: lance * 1
+    porSecao[secTerra] = (porSecao[secTerra] || 0) + lance * 1;
+  }
+
+  // Ramal de entrada: quantidade de condutores por tipo de alimentação
+  const nCondRamal = dadosUso.tipoAlimentacao === 'trifasico' ? 5
+    : dadosUso.tipoAlimentacao === 'bifasico' ? 4
+    : 3; // monofasico: F+N+T
+  const secRamal = saida.dimensionamento_ramal.secao_condutor_mm2;
+  porSecao[secRamal] = (porSecao[secRamal] || 0) + dadosUso.comprimentoRamalM * nCondRamal;
+
+  // Format section: integers that aren't whole (e.g. 1.5, 2.5) stay as-is;
+  // whole integers like 6 become "6.0" to match test expectations (/6\.0 mm2/).
+  function fmtSec(sec: number): string {
+    return Number.isInteger(sec) ? `${sec}.0` : String(sec);
+  }
+
+  const condutores: MaterialItem[] = Object.keys(porSecao)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map((sec) => ({
+      descricao: `Cabo flexivel cobre 450/750V ${fmtSec(sec)} mm2`,
+      unidade: 'm',
+      qtd: Math.ceil(porSecao[sec] * 1.1),
+    }));
+
+  // Eletrodutos: soma os extraídos ou usa fallback pelo número de circuitos
+  const totalEletrodutoM = extEletrodutos.reduce((s, e) => s + e.comprimentoM, 0);
+  const eletrodutos: MaterialItem[] = totalEletrodutoM > 0
+    ? [{ descricao: 'Eletroduto PVC corrugado antichamas Ø25 (NBR 15465)', unidade: 'm', qtd: Math.ceil(totalEletrodutoM * 1.1) }]
+    : [{ descricao: 'Eletroduto PVC corrugado antichamas Ø25 (NBR 15465)', unidade: 'm', qtd: Math.ceil(extCircuitos.length * 12 * 1.1) }];
+
+  // Pontos de instalação
+  const pontosItems: MaterialItem[] = [
+    { descricao: 'Ponto de luz (plafonier + lampada LED)', unidade: 'un', qtd: pontos.iluminacao },
+    { descricao: 'Tomada de uso geral (TUG) 10A 2P+T', unidade: 'un', qtd: pontos.tug10A },
+    { descricao: 'Tomada de uso especifico (TUE) 20A 2P+T', unidade: 'un', qtd: pontos.tue20A },
+    { descricao: 'Interruptor simples', unidade: 'un', qtd: pontos.interruptorSimples },
+    { descricao: 'Interruptor paralelo (three-way)', unidade: 'un', qtd: pontos.interruptorParalelo },
+  ].filter((x) => x.qtd > 0);
+
+  // Caixas de embutir
+  const caixas: MaterialItem[] = extCaixas.map((c) => ({
+    descricao: `Caixa de embutir ${c.tipo}`,
+    unidade: 'un',
+    qtd: c.qtd,
+  }));
+
+  // Proteção, quadros e insumos
+  const protecao = montarProtecaoDeCircuitos(extCircuitos, dadosUso, saida);
+  const quadros = montarQuadros(extCircuitos.length, saida);
+  const insumos = montarInsumos(extCircuitos.length);
+
+  // Potência instalada real
+  const piVA = extCircuitos.reduce((s, c) => s + c.potenciaVA, 0);
+  const saida2: MemorialEletricoOutput = { ...saida, carga_total_instalada_w: piVA };
+
+  // Totais
+  const totaisCircuitos = extCircuitos.length;
+  const totaisDisjuntores = protecao.reduce((s, x) => s + x.qtd, 0);
+
+  return {
+    dadosObra,
+    dadosUso,
+    saida: saida2,
+    circuitos,
+    materiais: { eletrodutos, condutores, protecao, pontos: pontosItems, quadros, insumos, caixas },
+    totais: {
+      pontosLuz: pontos.iluminacao,
+      tugs: pontos.tug10A,
+      tues: pontos.tue20A,
+      circuitos: totaisCircuitos,
+      disjuntores: totaisDisjuntores,
+    },
+    statusNormativo: {
+      quedaTensaoOK: true,
+      drObrigatorioAtendido: saida.protecao.dr_obrigatorio,
+      dpsObrigatorioAtendido: saida.protecao.dps_obrigatorio,
+      aterramentoDefinido: !!saida.protecao.aterramento_tipo,
+    },
+    alertas: [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Caminho heurístico (área) — retrocompatível
+// ---------------------------------------------------------------------------
 
 export function calcularResumoEletrico(entrada: EntradaResumoEle): ResultadoEletrico {
   const { dadosObra, dadosUso } = entrada;
@@ -110,6 +290,11 @@ export function calcularResumoEletrico(entrada: EntradaResumoEle): ResultadoElet
   };
 
   const saida = calcularMemorialEletrico(wizard);
+
+  // Caminho de extração — usa circuitos reais quando disponíveis
+  if (entrada.extracao && entrada.extracao.circuitos.length > 0) {
+    return calcularComExtracao(dadosObra, dadosUso, entrada.extracao, saida);
+  }
 
   // Estimativa de circuitos terminais (NBR 5410): ilum, TUGs por area, + 1 por TUE.
   const area = dadosObra.areaM2;
@@ -196,7 +381,7 @@ export function calcularResumoEletrico(entrada: EntradaResumoEle): ResultadoElet
     dadosUso,
     saida,
     circuitos,
-    materiais: { eletrodutos, condutores, protecao, pontos, quadros, insumos },
+    materiais: { eletrodutos, condutores, protecao, pontos, quadros, insumos, caixas: [] },
     totais: {
       pontosLuz: nLuz,
       tugs: nTug,
