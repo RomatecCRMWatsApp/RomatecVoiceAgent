@@ -102,7 +102,7 @@ function ceilPos(n: number): number { return Math.max(1, Math.ceil(n)); }
 // Helpers reutilizáveis nos dois caminhos (heurístico + extração)
 // ---------------------------------------------------------------------------
 
-function montarQuadros(totalCircuitos: number, _saida: MemorialEletricoOutput): MaterialItem[] {
+function montarQuadros(totalCircuitos: number): MaterialItem[] {
   return [
     { descricao: `Quadro de distribuicao de embutir ${Math.max(12, totalCircuitos + 4)} disjuntores`, unidade: 'un', qtd: 1 },
     { descricao: 'Barramento de terra + neutro', unidade: 'cj', qtd: 1 },
@@ -235,7 +235,7 @@ function calcularComExtracao(
 
   // Proteção, quadros e insumos
   const protecao = montarProtecaoDeCircuitos(extCircuitos, dadosUso, saida);
-  const quadros = montarQuadros(extCircuitos.length, saida);
+  const quadros = montarQuadros(extCircuitos.length);
   const insumos = montarInsumos(extCircuitos.length);
 
   // Potência instalada real
@@ -245,6 +245,11 @@ function calcularComExtracao(
   // Totais
   const totaisCircuitos = extCircuitos.length;
   const totaisDisjuntores = protecao.reduce((s, x) => s + x.qtd, 0);
+
+  const quedaOK2 = saida.dimensionamento_ramal.queda_tensao_pct <= 4;
+  const alertas2: string[] = [];
+  if (!quedaOK2) alertas2.push(`Queda de tensao ${saida.dimensionamento_ramal.queda_tensao_pct}% acima de 4% — revisar bitola/comprimento do ramal.`);
+  if (saida.dimensionamento_ramal.status === 'AJUSTAR') alertas2.push('Dimensionamento do ramal requer ajuste (status AJUSTAR).');
 
   return {
     dadosObra,
@@ -260,12 +265,12 @@ function calcularComExtracao(
       disjuntores: totaisDisjuntores,
     },
     statusNormativo: {
-      quedaTensaoOK: true,
+      quedaTensaoOK: quedaOK2,
       drObrigatorioAtendido: saida.protecao.dr_obrigatorio,
       dpsObrigatorioAtendido: saida.protecao.dps_obrigatorio,
       aterramentoDefinido: !!saida.protecao.aterramento_tipo,
     },
-    alertas: [],
+    alertas: alertas2,
   };
 }
 
@@ -358,18 +363,8 @@ export function calcularResumoEletrico(entrada: EntradaResumoEle): ResultadoElet
     { descricao: 'Interruptor simples/paralelo', unidade: 'un', qtd: nLuz },
   ];
 
-  const quadros: MaterialItem[] = [
-    { descricao: `Quadro de distribuicao de embutir ${Math.max(12, totalCircuitos + 4)} disjuntores`, unidade: 'un', qtd: 1 },
-    { descricao: 'Barramento de terra + neutro', unidade: 'cj', qtd: 1 },
-    { descricao: 'Haste de aterramento cobreada 5/8" x 2,4 m', unidade: 'un', qtd: 1 },
-    { descricao: 'Conector de aterramento + cordoalha', unidade: 'cj', qtd: 1 },
-  ];
-
-  const insumos: MaterialItem[] = [
-    { descricao: 'Fita isolante 19mm x 20m', unidade: 'un', qtd: ceilPos(totalCircuitos / 6) },
-    { descricao: 'Conector de emenda (kit)', unidade: 'cj', qtd: ceilPos(totalCircuitos / 4) },
-    { descricao: 'Abracadeira / fixacao (vb)', unidade: 'vb', qtd: 1 },
-  ];
+  const quadros = montarQuadros(totalCircuitos);
+  const insumos = montarInsumos(totalCircuitos);
 
   const quedaOK = saida.dimensionamento_ramal.queda_tensao_pct <= 4;
   const alertas: string[] = [];
