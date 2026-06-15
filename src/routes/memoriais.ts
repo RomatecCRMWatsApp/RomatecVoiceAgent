@@ -342,6 +342,7 @@ router.post('/:disc' + DISC + '/gerar', requireAuth, async (req: Request, res: R
       proprietario_nome: o.proprietario, proprietario_cpf_cnpj: o.cpfCnpj,
       area_lote_m2: o.areaLoteM2 ?? null, area_construida_m2: o.areaM2, num_pavimentos: o.nPavimentos,
       wizard_responses: r, prancha_codigo: o.prancha, trt_numero: o.trtNumero ?? null,
+      pdf_extracted_data: (req.body && (req.body as { extracao?: unknown }).extracao) ?? null,
     });
     await memoriaisArtefatosRepo.salvar(id, {
       memorialBuf: pdfA.buffer, memorialNome: pdfA.filename, memorialHash: sha256(pdfA.buffer),

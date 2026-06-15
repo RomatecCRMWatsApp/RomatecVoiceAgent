@@ -5287,16 +5287,6 @@ app.listen(PORT, () => {
     }
   })();
 
-  // v3.66.0: coluna extracao_json em memoriais_calculo (memorial eletrico).
-  void (async () => {
-    try {
-      const m = await import('./database/migrations-memoriais-eletrico-extracao');
-      await m.runMemoriaisEletricoExtracaoMigrations();
-    } catch (err) {
-      console.error('[mem-ele-extracao-migrations] FALHA fatal:', err);
-    }
-  })();
-
   // v3.17.0: tabela laudos_demarcacao_arquivos (anexos vetoriais DXF/DWG/KML)
   // + seeds de configurações de upload/download em `configuracoes`.
   void (async () => {
