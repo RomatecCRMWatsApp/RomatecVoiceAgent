@@ -43,7 +43,12 @@ export interface ResultadoEletrico {
   dadosObra: DadosObraEle;
   dadosUso: DadosUsoEle;
   saida: MemorialEletricoOutput;
-  circuitos: Array<{ descricao: string; disjuntor_A: number; secao_mm2: number }>;
+  circuitos: Array<{
+    descricao: string; disjuntor_A: number; secao_mm2: number;
+    // v3.66.0 — presentes quando vindos de extração:
+    id?: string; tipo?: 'ilum' | 'tug' | 'tue'; potencia_va?: number; ip_a?: number;
+    condutor_protecao_mm2?: number | null; capacidade_cond_a?: number; status_ok?: boolean; polos?: number;
+  }>;
   materiais: {
     eletrodutos: MaterialItem[];
     condutores: MaterialItem[];
@@ -158,6 +163,11 @@ function montarProtecaoDeCircuitos(
 }
 
 // ---------------------------------------------------------------------------
+// Capacidade de condução (NBR 5410 Tabela 36/47, método B1/B2, cobre/PVC)
+// ---------------------------------------------------------------------------
+const CAP_COND_A: Record<number, number> = { 1.5: 15.5, 2.5: 21, 4: 27, 6: 32, 10: 44, 16: 59, 25: 77 };
+
+// ---------------------------------------------------------------------------
 // Caminho com extração de circuitos reais
 // ---------------------------------------------------------------------------
 
@@ -169,12 +179,26 @@ function calcularComExtracao(
 ): ResultadoEletrico {
   const { circuitos: extCircuitos, pontos, eletrodutos: extEletrodutos, caixas: extCaixas } = ext;
 
-  // Circuitos mapeados
-  const circuitos: ResultadoEletrico['circuitos'] = extCircuitos.map((c) => ({
-    descricao: `${c.id} — ${c.descricao}`,
-    disjuntor_A: c.disjuntorA,
-    secao_mm2: c.condutorFaseMm2,
-  }));
+  // Circuitos mapeados com campos enriquecidos (v3.66.0)
+  const V = dadosUso.tensaoNominalV;
+  const circuitos: ResultadoEletrico['circuitos'] = extCircuitos.map((c) => {
+    const ip_a = Math.round((c.potenciaVA / V) * 10) / 10;
+    const capacidade_cond_a = CAP_COND_A[c.condutorFaseMm2] ?? 0;
+    const status_ok = capacidade_cond_a >= ip_a && c.disjuntorA <= capacidade_cond_a;
+    return {
+      descricao: `${c.id} — ${c.descricao}`,
+      disjuntor_A: c.disjuntorA,
+      secao_mm2: c.condutorFaseMm2,
+      id: c.id,
+      tipo: c.tipo,
+      potencia_va: c.potenciaVA,
+      ip_a,
+      condutor_protecao_mm2: c.condutorProtecaoMm2 ?? null,
+      capacidade_cond_a,
+      status_ok,
+      polos: c.polos,
+    };
+  });
 
   // Cabos por seção
   // Fase+Neutro usam condutorFaseMm2; Terra usa condutorProtecaoMm2 (default 2.5)
