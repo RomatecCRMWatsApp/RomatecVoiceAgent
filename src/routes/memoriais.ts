@@ -10,6 +10,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import crypto from 'crypto';
+import multer from 'multer';
 import { requireAuth } from '../middleware/auth';
 import {
   calcularConsumoDiario,
@@ -34,6 +35,9 @@ import { gerarPdfMemorialArquitetonico } from '../services/memoriais/arquitetoni
 import { gerarPdfQuantitativoArquitetonico } from '../services/memoriais/arquitetonicoPdfQuantitativo';
 
 const router = Router();
+
+// v3.66.0: upload do PDF da prancha (PE) para extração elétrica (memória, 25MB).
+const uploadEletrico = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 const sha256 = (buf: Buffer) => crypto.createHash('sha256').update(buf).digest('hex');
 const userId = (req: Request): number | null => {
@@ -259,6 +263,21 @@ router.get('/hidraulico/:id(\\d+)/dados', requireAuth, async (req: Request, res:
   }
 });
 
+
+// v3.66.0: extrai dados elétricos de um PDF de prancha (PE).
+export async function handleExtrairPdfEletrico(req: Request, res: Response): Promise<void> {
+  try {
+    const file = (req as Request & { file?: { buffer: Buffer } }).file;
+    if (!file?.buffer) { res.status(400).json({ error: 'Envie o PDF da prancha no campo "arquivo".' }); return; }
+    const { extrairEletricaCompleta } = await import('../services/memoriais/eletricoExtracao');
+    const extracao = await extrairEletricaCompleta(file.buffer);
+    res.json({ ok: true, extracao });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message || 'Falha na extração do PDF' });
+  }
+}
+
+router.post('/eletrico/extrair-pdf', requireAuth, uploadEletrico.single('arquivo'), handleExtrairPdfEletrico);
 
 // ── Dispatch generico por disciplina (eletrico, sanitario, estrutural, ...) ──
 interface ResultadoComum {
