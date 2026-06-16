@@ -186,8 +186,9 @@ export async function adicionarFotoVistoria(input: {
 }
 
 // v1.67.9: edicao de vistoria (paridade Proposta — modo Editar)
-// Atualiza campos basicos. Fotos: se input.fotos vier, SUBSTITUI as existentes
-// (caso contrario mantem). NAO mexe em obra_id (vistoria nao migra de obra).
+// v3.67.0: Atualiza campos basicos. Fotos novas em input.fotos sao ANEXADAS
+// (as existentes permanecem). Remocao de uma foto especifica = apagarFotoVistoria.
+// NAO mexe em obra_id (vistoria nao migra de obra).
 export async function atualizarVistoria(input: {
   id: string;
   titulo?: string | null;
@@ -222,17 +223,25 @@ export async function atualizarVistoria(input: {
     [titulo, vistoriador, data, hora, descricao, observacoes, pendencias, status_obra, id]
   );
 
-  // Se vier array de fotos, substitui as antigas
-  if (Array.isArray(input.fotos)) {
-    await pool.execute('DELETE FROM romatec_obra_vistoria_fotos WHERE vistoria_id = ?', [id]);
-    for (let i = 0; i < input.fotos.length; i++) {
-      const f = input.fotos[i];
-      // Se a foto vier sem data_base64 (mantida), pula — front so manda novas/mantidas-com-base64
+  // v3.67.0: fotos novas são ANEXADAS (mantêm as existentes). Antes isto fazia
+  // DELETE de todas + reinsert do que viesse, e como o front só manda as fotos
+  // NOVAS na edição, o histórico era apagado. A remoção de uma foto específica
+  // é feita pela rota dedicada (apagarFotoVistoria).
+  if (Array.isArray(input.fotos) && input.fotos.length > 0) {
+    const [c] = await pool.execute<RowDataPacket[]>(
+      'SELECT COALESCE(MAX(ordem), -1) + 1 AS prox FROM romatec_obra_vistoria_fotos WHERE vistoria_id = ?',
+      [id],
+    );
+    let ordem = Number((c[0] as { prox: number }).prox);
+    for (const f of input.fotos) {
+      // Só anexa fotos com conteúdo (base64). Itens sem base64 (ex.: existentes
+      // re-enviados por engano) são ignorados — não duplicam nem apagam.
       if (!f.data_base64) continue;
       await pool.execute(
         `INSERT INTO romatec_obra_vistoria_fotos (vistoria_id, legenda, mime, data_base64, ordem) VALUES (?,?,?,?,?)`,
-        [id, f.legenda ?? null, f.mime, f.data_base64, i]
+        [id, f.legenda ?? null, f.mime, f.data_base64, ordem],
       );
+      ordem++;
     }
   }
 
