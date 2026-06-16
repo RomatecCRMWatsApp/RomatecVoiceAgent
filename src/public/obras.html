@@ -5899,6 +5899,40 @@ function exportarFolhaPdf(monthLabel) {
 // v3.63.8: rascunho persistente — campos + fotos não se perdem ao trocar de aba
 // nem ao fechar a página (memória + localStorage). Só pra vistoria NOVA.
 function vtoDraftKey() { return 'vtoDraft_' + (state.currentObra || '0'); }
+
+// v3.67.0: as fotos do rascunho vão pro IndexedDB (cota grande). Antes iam no
+// localStorage e, como base64 estoura a cota (~5MB), o catch descartava as fotos
+// silenciosamente — daí "perdia tudo ao fechar". Campos seguem no localStorage.
+const VTO_IDB_DB = 'romatec_vto_draft';
+const VTO_IDB_STORE = 'fotos';
+function vtoIdbOpen() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) return reject(new Error('sem IndexedDB'));
+    const req = indexedDB.open(VTO_IDB_DB, 1);
+    req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(VTO_IDB_STORE)) db.createObjectStore(VTO_IDB_STORE); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function vtoIdbSalvarFotos(key, fotos) {
+  try {
+    const db = await vtoIdbOpen();
+    await new Promise((res, rej) => { const tx = db.transaction(VTO_IDB_STORE, 'readwrite'); tx.objectStore(VTO_IDB_STORE).put(fotos, key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+  } catch (e) { console.warn('[vto:idb] salvar fotos:', e.message); }
+}
+async function vtoIdbCarregarFotos(key) {
+  try {
+    const db = await vtoIdbOpen();
+    return await new Promise((res) => { const r = db.transaction(VTO_IDB_STORE, 'readonly').objectStore(VTO_IDB_STORE).get(key); r.onsuccess = () => res(Array.isArray(r.result) ? r.result : []); r.onerror = () => res([]); });
+  } catch { return []; }
+}
+async function vtoIdbLimparFotos(key) {
+  try {
+    const db = await vtoIdbOpen();
+    await new Promise((res) => { const tx = db.transaction(VTO_IDB_STORE, 'readwrite'); tx.objectStore(VTO_IDB_STORE).delete(key); tx.oncomplete = () => res(); tx.onerror = () => res(); });
+  } catch { /* ok */ }
+}
+
 function vtoSalvarRascunho() {
   if (state.vistoriaEditandoId) return; // edição carrega do servidor, não rascunha
   const g = id => document.getElementById(id);
@@ -5911,12 +5945,8 @@ function vtoSalvarRascunho() {
     observacoes: g('vObs')?.value || '', pendencias: g('vPend')?.value || '',
   };
   state.vtoDraft = campos;
-  try {
-    localStorage.setItem(vtoDraftKey(), JSON.stringify({ campos, fotos: state.vtoFotos }));
-  } catch (e) {
-    // quota estourou (fotos grandes) — salva só os campos; fotos seguem em memória.
-    try { localStorage.setItem(vtoDraftKey(), JSON.stringify({ campos, fotos: [] })); } catch (_) {}
-  }
+  try { localStorage.setItem(vtoDraftKey(), JSON.stringify({ campos })); } catch (_) {}
+  vtoIdbSalvarFotos(vtoDraftKey(), state.vtoFotos); // fotos no IndexedDB (durável)
 }
 function vtoCarregarRascunho() {
   if (state.vtoDraft) return state.vtoDraft;
@@ -5925,6 +5955,7 @@ function vtoCarregarRascunho() {
     if (raw) {
       const p = JSON.parse(raw);
       state.vtoDraft = p.campos || null;
+      // compat: rascunhos antigos guardavam fotos no localStorage
       if (Array.isArray(p.fotos) && p.fotos.length && state.vtoFotos.length === 0) state.vtoFotos = p.fotos;
       return state.vtoDraft;
     }
@@ -5934,6 +5965,8 @@ function vtoCarregarRascunho() {
 function vtoLimparRascunho() {
   state.vtoDraft = null;
   try { localStorage.removeItem(vtoDraftKey()); } catch (_) {}
+  vtoIdbLimparFotos(vtoDraftKey());
+  state._vtoFotosHidratadasObra = null; // permite re-hidratar se voltar a coletar
 }
 // v3.63.11: combina "Nome — Qualificação — Conselho" num único vistoriador.
 function vtoCombinarVistoriador() {
@@ -6047,6 +6080,20 @@ function renderVto() {
   const dlQualif = `<datalist id="vQualifOpts">${qualifCfg.map(t => `<option value="${escape(t)}">`).join('')}</datalist>`;
   const dlConselho = `<datalist id="vConselhoOpts">${conselhoCfg.map(t => `<option value="${escape(t)}">`).join('')}</datalist>`;
   const labelBtn = editandoId ? '💾 Salvar alterações' : 'Salvar vistoria';
+  // v3.67.0: fotos JÁ SALVAS (modo edição) — permanecem ao salvar; o X remove uma a uma.
+  const fotosExistentes = editandoId && Array.isArray(editandoData?.fotos) ? editandoData.fotos : [];
+  const fotosExistentesHtml = fotosExistentes.length ? `
+    <div style="margin: 8px 0 12px;">
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">📁 Fotos já salvas (${fotosExistentes.length}) — permanecem ao salvar. Use o × para remover uma específica.</div>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px;">
+        ${fotosExistentes.map(f => `
+          <div style="position:relative;">
+            <img src="${escape(f.url)}" loading="lazy" style="width:100%; height:160px; object-fit:cover; border-radius:6px; border:1px solid var(--border-strong);">
+            ${f.legenda ? `<div style="font-size:11px; color:var(--text-muted); margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escape(f.legenda)}">${escape(f.legenda)}</div>` : ''}
+            <button data-rm-foto-existente="${f.id}" title="Remover esta foto salva" style="position:absolute; top:6px; right:6px; width:28px; height:28px; padding:0; border-radius:50%; background:var(--danger); color:white; border:none; cursor:pointer; font-size:16px; line-height:1; box-shadow:0 2px 6px rgba(0,0,0,0.4);">×</button>
+          </div>`).join('')}
+      </div>
+    </div>` : '';
   v.innerHTML = `${obraSelector()}
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -6079,8 +6126,9 @@ function renderVto() {
         📷 Adicionar fotos
         <input type="file" id="vFotos" accept="image/*" multiple style="display:none;">
       </label>
-      <span style="margin-left:8px; font-size:12px; color:var(--text-muted);">${state.vtoFotos.length} foto(s) selecionada(s)${editandoId ? ' (substituirão as atuais ao salvar)' : ''}</span>
+      <span style="margin-left:8px; font-size:12px; color:var(--text-muted);">${state.vtoFotos.length} foto(s) ${editandoId ? 'nova(s) — serão ADICIONADAS às já salvas' : 'selecionada(s)'}</span>
     </div>
+    ${fotosExistentesHtml}
     ${state.vtoFotos.length > 0 ? `<div style="margin-bottom:12px; display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">${fotosPreview}</div>` : ''}
 
     <button class="btn-primary" id="addVto">${labelBtn}</button>
@@ -6119,6 +6167,18 @@ function renderVto() {
     const d = editandoData.data;
     const dStr = d instanceof Date ? d.toISOString().slice(0,10) : String(d).slice(0,10);
     document.getElementById('vData').value = dStr;
+  }
+
+  // v3.67.0: hidrata as fotos do rascunho (IndexedDB) na criação de vistoria nova —
+  // sobrevive a fechar/recarregar a página. Uma vez por obra (flag).
+  if (!editandoId && state.vtoFotos.length === 0 && state._vtoFotosHidratadasObra !== state.currentObra) {
+    state._vtoFotosHidratadasObra = state.currentObra;
+    vtoIdbCarregarFotos(vtoDraftKey()).then(fotos => {
+      if (fotos && fotos.length && state.vtoFotos.length === 0 && !state.vistoriaEditandoId && document.getElementById('vDesc')) {
+        state.vtoFotos = fotos;
+        renderVto();
+      }
+    });
   }
 
   // v3.63.8: ao EDITAR, sincroniza alterações em state.vistoriaEditandoData
@@ -6216,6 +6276,24 @@ function renderVto() {
 
   document.querySelectorAll('[data-rm-foto]').forEach(b => b.onclick = () => {
     state.vtoFotos.splice(parseInt(b.dataset.rmFoto), 1); vtoSalvarRascunho(); renderVto();
+  });
+
+  // v3.67.0: remover uma foto JÁ SALVA durante a edição (rota dedicada — não apaga as outras)
+  document.querySelectorAll('[data-rm-foto-existente]').forEach(b => b.onclick = async () => {
+    const fid = b.dataset.rmFotoExistente;
+    if (!confirm('Remover esta foto já salva da vistoria? Não pode desfazer.')) return;
+    b.disabled = true;
+    try {
+      await api('/api/vistorias/fotos/' + fid, {
+        method: 'DELETE',
+        body: JSON.stringify({ confirm: true }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (state.vistoriaEditandoData?.fotos) {
+        state.vistoriaEditandoData.fotos = state.vistoriaEditandoData.fotos.filter(f => String(f.id) !== String(fid));
+      }
+      renderVto();
+    } catch (e) { alert('Erro ao remover foto: ' + e.message); b.disabled = false; }
   });
 
   // v3.4.0: Lightbox handlers — click no thumbnail abre modal com foto em tamanho real
