@@ -6670,6 +6670,14 @@ function renderPropostasLista() {
   // Sub-tipos "Em breve" -> toast
   document.querySelectorAll('[data-mo-subtipo]').forEach(b => {
     b.onclick = () => {
+      // v3.69.0: Reforma / ampliação abre o módulo dedicado de Reforma de Piso.
+      if (b.dataset.moSubtipo === 'reforma_ampliacao') {
+        state.reformaView = 'nova';
+        state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }];
+        state.currentTab = 'reforma';
+        render();
+        return;
+      }
       // v3.53.0: subtipos disponíveis abrem o form real de Mão de Obra.
       if (b.dataset.moDisponivel === '1') {
         state.maoObraSubtipo = b.dataset.moSubtipo;
@@ -7452,7 +7460,7 @@ function setConsultoriaView(view) {
 // reais ficam pra v3.30.0+ conforme prompt v3.29.1).
 const SUBTIPOS_MAO_OBRA = [
   { slug: 'construcao_nova',         icone: '🏗️', nome: 'Construção nova (residencial/comercial)', disponivel: true }, // v3.53.0: ATIVADO
-  { slug: 'reforma_ampliacao',       icone: '🔧', nome: 'Reforma / ampliação' },
+  { slug: 'reforma_ampliacao',       icone: '🔧', nome: 'Reforma / ampliação', disponivel: true }, // v3.69.0: abre o módulo Reforma de Piso
   { slug: 'alvenaria_pura',          icone: '🧱', nome: 'Alvenaria pura' },
   { slug: 'vistoria_periodica',      icone: '🔍', nome: 'Vistoria técnica periódica' },
   { slug: 'acompanhamento_diaria',   icone: '👷', nome: 'Acompanhamento de obra (diária)' },
