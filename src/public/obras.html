@@ -19000,7 +19000,7 @@ function brlRef(n) { return Number(n || 0).toLocaleString('pt-BR', { style: 'cur
 async function renderReformaPiso() {
   const v = document.getElementById('view-reforma');
   if (!state.reformaView) state.reformaView = 'lista';
-  if (state.reformaView === 'nova') return renderReformaForm(v);
+  if (state.reformaView === 'nova') { try { await loadPropostasClientes(); } catch (_) {} return renderReformaForm(v); }
   if (state.reformaView === 'detalhe' && state.reformaAtualId) return renderReformaDetalhe(v);
   let props = [];
   try { const d = await api('/api/propostas/reforma-piso?limite=100'); props = d.propostas || []; } catch (_) { props = []; }
@@ -19059,6 +19059,13 @@ function renderReformaForm(v) {
     </div>
     <div class="card">
       <p class="section-title" style="margin-top:0;">Contratante</p>
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+        <select id="ref-cliente" style="flex:1; min-width:220px;">
+          <option value="">— Selecionar cliente cadastrado —</option>
+          ${(state.propostasClientes || []).map(c => `<option value="${c.id}">${escape(c.nome)}${c.cpf_cnpj ? ' · ' + escape(c.cpf_cnpj) : ''}</option>`).join('')}
+        </select>
+        <button type="button" data-gerenciar-clientes style="white-space:nowrap;">📇 Gerenciar Clientes</button>
+      </div>
       <div class="form-grid">
         <input id="ref-nome" placeholder="Contratante *">
         <input id="ref-doc" placeholder="CNPJ/CPF">
@@ -19094,6 +19101,14 @@ function renderReformaForm(v) {
     });
   };
   v.querySelector('[data-ref-cancel]').onclick = () => { state.reformaView = 'lista'; renderReformaPiso(); };
+  const selCli = document.getElementById('ref-cliente');
+  if (selCli) selCli.onchange = () => {
+    const c = (state.propostasClientes || []).find(x => String(x.id) === String(selCli.value));
+    if (!c) return;
+    document.getElementById('ref-nome').value = c.nome || '';
+    document.getElementById('ref-doc').value = c.cpf_cnpj || '';
+    document.getElementById('ref-fone').value = c.telefone || '';
+  };
   document.getElementById('ref-amb-add').onclick = () => { sincAmb(); state.reformaAmbientes.push({ descricao: '', comprimentoM: '', larguraM: '' }); renderReformaForm(v); };
   v.querySelectorAll('[data-amb-rm]').forEach(b => b.onclick = () => { sincAmb(); state.reformaAmbientes.splice(parseInt(b.dataset.ambRm), 1); if (!state.reformaAmbientes.length) state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }]; renderReformaForm(v); });
 
