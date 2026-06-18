@@ -81,6 +81,17 @@ export async function salvar(
   }
 }
 
+export async function listar(limite = 100): Promise<RowDataPacket[]> {
+  const lim = Math.min(Math.max(Number(limite) || 100, 1), 500);
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT id, numero, contratante_nome, contratante_fone, cidade, uf,
+            area_total_m2, valor_final, valor_m2_final, prazo_dias_uteis,
+            tema, status, criado_em
+       FROM propostas_reforma_piso ORDER BY id DESC LIMIT ${lim}`,
+  );
+  return rows;
+}
+
 export async function buscarPorId(id: number) {
   const [head] = await pool.query<RowDataPacket[]>(
     `SELECT * FROM propostas_reforma_piso WHERE id = ?`, [id],

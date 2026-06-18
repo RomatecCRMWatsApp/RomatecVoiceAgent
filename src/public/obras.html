@@ -1138,6 +1138,7 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="loteamentos">🏘️ Loteamentos</button>
     <button class="tab" data-tab="galeria">📷 Galeria</button>
     <button class="tab" data-tab="proposta">Proposta</button>
+    <button class="tab" data-tab="reforma">🧱 Reforma de Piso</button>
     <button class="tab" data-tab="diligencias">📅 Diligências</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
     <button class="tab" data-tab="memoriais">📐 Memoriais & Quantitativos</button>
@@ -1174,6 +1175,7 @@ window.forcarUpdateApp = forcarUpdate;
   <div id="view-folha" class="view"></div>
   <div id="view-vto" class="view"></div>
   <div id="view-proposta" class="view"></div>
+  <div id="view-reforma" class="view"></div>
   <div id="view-diligencias" class="view"></div>
   <div id="view-recibos" class="view"></div>
   <div id="view-notas" class="view"></div>
@@ -1880,6 +1882,7 @@ async function render() {
       diligencias: async () => { if (window.DiligenciasUI) await window.DiligenciasUI.render(); },
       notas:   async () => { await Promise.all([loadNotas(), loadFiscalConfig()]); renderNotas(); },
       laudos:  async () => { await loadLaudos(); renderLaudos(); },
+      reforma: async () => { await renderReformaPiso(); },
       loteamentos: async () => { await loadLoteamentos(); renderLoteamentos(); },
       galeria: async () => { await renderGaleria(); },
       // v3.35.0: Memoriais & Quantitativos (Fase 1 — Hidraulico)
@@ -18980,6 +18983,239 @@ async function loadLaudoDetalhe(id) {
       if (r?.lote) state.laudoLoteVinculado = r.lote;
     } catch (_) { /* lote pode ter sido deletado */ }
   }
+}
+
+// ===== v3.68.0: Proposta de Reforma — Piso Sobreposto =====
+const REFORMA_TEMAS = [['tradicional', 'Tradicional'], ['prime1', 'Prime I'], ['prime2', 'Prime II']];
+function brlRef(n) { return Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+
+async function renderReformaPiso() {
+  const v = document.getElementById('view-reforma');
+  if (!state.reformaView) state.reformaView = 'lista';
+  if (state.reformaView === 'nova') return renderReformaForm(v);
+  if (state.reformaView === 'detalhe' && state.reformaAtualId) return renderReformaDetalhe(v);
+  let props = [];
+  try { const d = await api('/api/propostas/reforma-piso?limite=100'); props = d.propostas || []; } catch (_) { props = []; }
+  const cards = props.map(p => `
+    <div class="card" style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; align-items:center;">
+      <div style="min-width:220px;">
+        <p style="margin:0; font-weight:600;">🧱 ${escape(p.numero)}</p>
+        <p style="margin:2px 0; font-size:12px;">${escape(p.contratante_nome || '')} · ${escape(p.cidade || '')}/${escape(p.uf || '')}</p>
+        <p style="margin:2px 0; font-size:12px; color:var(--text-muted);">${Number(p.area_total_m2).toFixed(2)} m² · ${brlRef(p.valor_final)} · <span class="badge">${escape(p.status)}</span></p>
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+        <select data-ref-tema="${p.id}" style="min-width:104px;">${REFORMA_TEMAS.map(t => `<option value="${t[0]}" ${p.tema === t[0] ? 'selected' : ''}>${t[1]}</option>`).join('')}</select>
+        <button data-ref-pdf="${p.id}">📄 PDF</button>
+        <button data-ref-abrir="${p.id}">📷 Fotos/Plantas</button>
+        <input data-ref-tel="${p.id}" placeholder="WhatsApp" value="${escape(p.contratante_fone || '')}" style="width:120px;">
+        <button data-ref-enviar="${p.id}" style="background:#25d36622; color:#25d366; border:1px solid #25d36655;">📱 Enviar</button>
+      </div>
+    </div>`).join('');
+  v.innerHTML = `
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <strong>🧱 Propostas de Reforma — Piso Sobreposto</strong>
+      <button id="ref-nova" style="background:var(--gold); color:#06120a; border-color:var(--gold);">➕ Nova proposta</button>
+    </div>
+    ${cards || '<div class="card empty">Nenhuma proposta de reforma ainda. Clique em ➕ Nova proposta.</div>'}`;
+  document.getElementById('ref-nova').onclick = () => { state.reformaView = 'nova'; state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }]; renderReformaPiso(); };
+  v.querySelectorAll('[data-ref-pdf]').forEach(b => b.onclick = () => {
+    const id = b.dataset.refPdf; const tema = v.querySelector(`[data-ref-tema="${id}"]`).value;
+    window.open('/api/propostas/reforma-piso/' + id + '/pdf?tema=' + tema, '_blank');
+  });
+  v.querySelectorAll('[data-ref-abrir]').forEach(b => b.onclick = () => { state.reformaAtualId = b.dataset.refAbrir; state.reformaView = 'detalhe'; renderReformaPiso(); });
+  v.querySelectorAll('[data-ref-enviar]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.refEnviar; const tel = (v.querySelector(`[data-ref-tel="${id}"]`)?.value || '').trim();
+    if (!confirm('Enviar a proposta por WhatsApp' + (tel ? ' para ' + tel : '') + '?')) return;
+    b.disabled = true;
+    try {
+      const r = await api('/api/propostas/reforma-piso/' + id + '/enviar', { method: 'POST', body: JSON.stringify({ telefone: tel }), headers: { 'Content-Type': 'application/json' } });
+      alert('✅ Enviada' + (r.plantasEnviadas && r.plantasEnviadas.length ? ' (+' + r.plantasEnviadas.length + ' planta(s))' : '.'));
+      renderReformaPiso();
+    } catch (e) { alert('Erro ao enviar: ' + e.message); } finally { b.disabled = false; }
+  });
+}
+
+function renderReformaForm(v) {
+  if (!state.reformaAmbientes || !state.reformaAmbientes.length) state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }];
+  const ambRows = state.reformaAmbientes.map((a, i) => `
+    <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
+      <input data-amb-desc="${i}" placeholder="Ambiente (ex: Sala 01)" value="${escape(a.descricao || '')}" style="flex:2;">
+      <input data-amb-c="${i}" type="number" step="0.01" placeholder="Compr. (m)" value="${a.comprimentoM ?? ''}" style="flex:1;">
+      <input data-amb-l="${i}" type="number" step="0.01" placeholder="Larg. (m)" value="${a.larguraM ?? ''}" style="flex:1;">
+      <button data-amb-rm="${i}" class="btn-danger" style="padding:4px 8px;" title="Remover">×</button>
+    </div>`).join('');
+  v.innerHTML = `
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+      <strong>🧱 Nova proposta — Reforma de Piso</strong>
+      <button data-ref-cancel style="background:transparent;">← Voltar</button>
+    </div>
+    <div class="card">
+      <p class="section-title" style="margin-top:0;">Contratante</p>
+      <div class="form-grid">
+        <input id="ref-nome" placeholder="Contratante *">
+        <input id="ref-doc" placeholder="CNPJ/CPF">
+        <input id="ref-fone" placeholder="WhatsApp">
+        <input id="ref-end" placeholder="Endereço da obra">
+        <input id="ref-cidade" placeholder="Cidade" value="Açailândia">
+        <input id="ref-uf" placeholder="UF" value="MA" maxlength="2">
+      </div>
+      <p class="section-title">Ambientes</p>
+      <div id="ref-ambientes">${ambRows}</div>
+      <button id="ref-amb-add" style="font-size:12px;">➕ Adicionar ambiente</button>
+      <p class="section-title">Parâmetros</p>
+      <div class="form-grid">
+        <select id="ref-tema">${REFORMA_TEMAS.map(t => `<option value="${t[0]}">${t[1]}</option>`).join('')}</select>
+        <input id="ref-validade" type="number" placeholder="Validade (dias)" value="15">
+        <input id="ref-bdi" type="number" step="0.5" placeholder="BDI %" value="20">
+        <input id="ref-preco-piso" type="number" step="0.01" placeholder="Preço piso R$/m²" value="45">
+        <input id="ref-mo" type="number" step="0.01" placeholder="Mão de obra R$/m²" value="40">
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px;"><input type="checkbox" id="ref-remocao"> Com remoção do piso existente</label>
+      </div>
+      <div id="ref-preview" style="margin:10px 0; font-size:13px; color:var(--text-muted);"></div>
+      <div style="display:flex; gap:8px;">
+        <button id="ref-calcular">🧮 Calcular</button>
+        <button id="ref-salvar" class="btn-primary">💾 Salvar proposta</button>
+      </div>
+    </div>`;
+
+  const sincAmb = () => {
+    state.reformaAmbientes.forEach((a, i) => {
+      a.descricao = (document.querySelector(`[data-amb-desc="${i}"]`)?.value) || '';
+      a.comprimentoM = document.querySelector(`[data-amb-c="${i}"]`)?.value || '';
+      a.larguraM = document.querySelector(`[data-amb-l="${i}"]`)?.value || '';
+    });
+  };
+  v.querySelector('[data-ref-cancel]').onclick = () => { state.reformaView = 'lista'; renderReformaPiso(); };
+  document.getElementById('ref-amb-add').onclick = () => { sincAmb(); state.reformaAmbientes.push({ descricao: '', comprimentoM: '', larguraM: '' }); renderReformaForm(v); };
+  v.querySelectorAll('[data-amb-rm]').forEach(b => b.onclick = () => { sincAmb(); state.reformaAmbientes.splice(parseInt(b.dataset.ambRm), 1); if (!state.reformaAmbientes.length) state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }]; renderReformaForm(v); });
+
+  const montarBody = () => {
+    sincAmb();
+    return {
+      contratanteNome: document.getElementById('ref-nome').value.trim(),
+      contratanteDoc: document.getElementById('ref-doc').value.trim() || undefined,
+      contratanteFone: document.getElementById('ref-fone').value.trim() || undefined,
+      obraEndereco: document.getElementById('ref-end').value.trim() || undefined,
+      cidade: document.getElementById('ref-cidade').value.trim() || 'Açailândia',
+      uf: document.getElementById('ref-uf').value.trim() || 'MA',
+      comRemocao: document.getElementById('ref-remocao').checked,
+      tema: document.getElementById('ref-tema').value,
+      validadeDias: Number(document.getElementById('ref-validade').value) || 15,
+      ambientes: state.reformaAmbientes
+        .filter(a => a.descricao && a.comprimentoM && a.larguraM)
+        .map(a => ({ descricao: a.descricao, comprimentoM: Number(a.comprimentoM), larguraM: Number(a.larguraM) })),
+      config: {
+        bdiPct: Number(document.getElementById('ref-bdi').value) || 20,
+        precoPisoM2: Number(document.getElementById('ref-preco-piso').value) || 45,
+        maoObraM2: Number(document.getElementById('ref-mo').value) || 40,
+      },
+    };
+  };
+
+  document.getElementById('ref-calcular').onclick = async () => {
+    const body = montarBody();
+    if (!body.ambientes.length) return alert('Preencha ao menos 1 ambiente (descrição + comprimento + largura).');
+    try {
+      const r = await api('/api/propostas/reforma-piso/calcular', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+      const res = r.resultado;
+      document.getElementById('ref-preview').innerHTML =
+        `Área total: <strong>${res.areaTotalM2.toFixed(2)} m²</strong> (c/ perda ${res.areaComPerdaM2.toFixed(2)}) · Materiais: ${brlRef(res.valorMateriais)} · Mão de obra: ${brlRef(res.valorMaoObra)} · BDI: ${brlRef(res.valorBdi)} · <strong>Total: ${brlRef(res.valorFinal)}</strong> (${brlRef(res.valorM2Final)}/m²) · Prazo: ${res.prazoDiasUteis} dias úteis`;
+    } catch (e) { alert('Erro ao calcular: ' + e.message); }
+  };
+  document.getElementById('ref-salvar').onclick = async () => {
+    const body = montarBody();
+    if (!body.contratanteNome) return alert('Informe o contratante.');
+    if (!body.ambientes.length) return alert('Preencha ao menos 1 ambiente.');
+    const btn = document.getElementById('ref-salvar'); btn.disabled = true; btn.textContent = 'Salvando...';
+    try {
+      const r = await api('/api/propostas/reforma-piso', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+      state.reformaAtualId = String(r.id); state.reformaView = 'detalhe';
+      alert('✅ Proposta ' + r.numero + ' criada (' + brlRef(r.resultado.valorFinal) + ').');
+      renderReformaPiso();
+    } catch (e) { alert('Erro ao salvar: ' + e.message); btn.disabled = false; btn.textContent = '💾 Salvar proposta'; }
+  };
+}
+
+async function renderReformaDetalhe(v) {
+  const id = state.reformaAtualId;
+  v.innerHTML = '<div class="card">Carregando…</div>';
+  let prop = null, fotos = [], plantas = [];
+  try {
+    const [dp, df, dpl] = await Promise.all([
+      api('/api/propostas/reforma-piso/' + id),
+      api('/api/propostas/reforma-piso/' + id + '/fotos').catch(() => ({ fotos: [] })),
+      api('/api/propostas/reforma-piso/' + id + '/plantas').catch(() => ({ anexos: [] })),
+    ]);
+    prop = dp.proposta; fotos = df.fotos || []; plantas = dpl.anexos || [];
+  } catch (e) { v.innerHTML = '<div class="card empty">Erro: ' + escape(e.message) + '</div>'; return; }
+
+  const fotosHtml = fotos.map(f => `
+    <div style="position:relative;">
+      <img src="/api/propostas/reforma-piso/${id}/fotos/${f.id}/raw" style="width:100%; height:130px; object-fit:cover; border-radius:6px; border:1px solid var(--border);">
+      <button data-ref-rmfoto="${f.id}" class="btn-danger" style="position:absolute; top:4px; right:4px; width:24px; height:24px; padding:0; border-radius:50%; font-size:14px;">×</button>
+    </div>`).join('');
+  const plantasHtml = plantas.map(a => `
+    <li style="display:flex; gap:8px; align-items:center; margin-bottom:4px;">
+      <span style="flex:1; font-size:12px;">${a.is_imagem ? '🖼️' : '📐'} ${escape(a.nome_original)} <span style="color:var(--text-muted);">(${(a.tamanho_bytes / 1024).toFixed(0)} KB)</span></span>
+      <a href="/api/propostas/reforma-piso/${id}/plantas/${a.id}/download" target="_blank" style="font-size:13px;">⬇️</a>
+      <button data-ref-rmplanta="${a.id}" class="btn-danger" style="padding:2px 8px;">×</button>
+    </li>`).join('');
+
+  v.innerHTML = `
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <strong>🧱 ${escape(prop.numero)} · ${escape(prop.contratante_nome || '')}</strong>
+      <button data-ref-voltar style="background:transparent;">← Voltar</button>
+    </div>
+    <div class="card">
+      <p style="margin:0 0 8px;">${Number(prop.area_total_m2).toFixed(2)} m² · ${brlRef(prop.valor_final)} · status <span class="badge">${escape(prop.status)}</span></p>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+        <select id="ref-det-tema">${REFORMA_TEMAS.map(t => `<option value="${t[0]}" ${prop.tema === t[0] ? 'selected' : ''}>${t[1]}</option>`).join('')}</select>
+        <button id="ref-det-pdf">📄 Ver PDF</button>
+      </div>
+    </div>
+    <div class="card">
+      <p class="section-title" style="margin-top:0;">📷 Relatório fotográfico (${fotos.length})</p>
+      <label class="btn-gold" style="display:inline-block;">📷 Adicionar fotos<input type="file" id="ref-foto-input" accept="image/*" multiple style="display:none;"></label>
+      <div style="margin-top:10px; display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px;">${fotosHtml}</div>
+    </div>
+    <div class="card">
+      <p class="section-title" style="margin-top:0;">📐 Plantas anexas (${plantas.length})</p>
+      <label class="btn-gold" style="display:inline-block;">📎 Adicionar plantas<input type="file" id="ref-planta-input" accept=".pdf,.dwg,.dxf,image/*" multiple style="display:none;"></label>
+      <ul style="list-style:none; padding:0; margin-top:10px;">${plantasHtml}</ul>
+      <p style="font-size:11px; color:var(--text-muted);">Plantas-imagem entram no PDF da proposta; PDF/DWG/DXF vão como anexo no envio.</p>
+    </div>`;
+
+  v.querySelector('[data-ref-voltar]').onclick = () => { state.reformaView = 'lista'; renderReformaPiso(); };
+  document.getElementById('ref-det-pdf').onclick = () => {
+    const tema = document.getElementById('ref-det-tema').value;
+    window.open('/api/propostas/reforma-piso/' + id + '/pdf?tema=' + tema, '_blank');
+  };
+  const upload = async (inputId, campo, rota) => {
+    const inp = document.getElementById(inputId);
+    const files = Array.from(inp.files || []);
+    if (!files.length) return;
+    const fd = new FormData();
+    files.forEach(f => fd.append(campo, f));
+    try {
+      const resp = await fetch('/api/propostas/reforma-piso/' + id + '/' + rota, { method: 'POST', body: fd, credentials: 'include' });
+      if (resp.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.pathname); return; }
+      const d = await resp.json();
+      if (!d.ok) throw new Error(d.erro || 'Falha no upload');
+      renderReformaPiso();
+    } catch (e) { alert('Erro no upload: ' + e.message); }
+  };
+  document.getElementById('ref-foto-input').onchange = () => upload('ref-foto-input', 'fotos', 'fotos');
+  document.getElementById('ref-planta-input').onchange = () => upload('ref-planta-input', 'plantas', 'plantas');
+  v.querySelectorAll('[data-ref-rmfoto]').forEach(b => b.onclick = async () => {
+    if (!confirm('Remover esta foto?')) return;
+    try { await api('/api/propostas/reforma-piso/' + id + '/fotos/' + b.dataset.refRmfoto, { method: 'DELETE' }); renderReformaPiso(); }
+    catch (e) { alert('Erro: ' + e.message); }
+  });
+  v.querySelectorAll('[data-ref-rmplanta]').forEach(b => b.onclick = async () => {
+    if (!confirm('Remover esta planta?')) return;
+    try { await api('/api/propostas/reforma-piso/' + id + '/plantas/' + b.dataset.refRmplanta, { method: 'DELETE' }); renderReformaPiso(); }
+    catch (e) { alert('Erro: ' + e.message); }
+  });
 }
 
 function renderLaudos() {

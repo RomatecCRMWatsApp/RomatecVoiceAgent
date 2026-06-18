@@ -6,7 +6,7 @@ import { requireAuth } from '../middleware/auth';
 import { calcular, mesclarConfig } from '../services/reformaPiso/reformaPisoCalc';
 import { gerarPdf, type ExtrasPdf } from '../services/reformaPiso/reformaPisoPdf';
 import {
-  salvar, buscarPorId, marcarEnviada,
+  salvar, listar, buscarPorId, marcarEnviada,
   adicionarFoto, listarFotos, fotoRaw, removerFoto, carregarFotosBase64,
   adicionarAnexoPlanta, listarAnexos, anexoRaw, removerAnexo, carregarPlantasImagens,
 } from '../services/reformaPiso/reformaPisoRepo';
@@ -41,6 +41,27 @@ function validar(body: unknown): DadosProposta {
   }
   return b as unknown as DadosProposta;
 }
+
+/** GET /api/propostas/reforma-piso  → lista as propostas */
+router.get('/', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rows = await listar(Number(req.query.limite) || 100);
+    return res.json({ ok: true, total: rows.length, propostas: rows });
+  } catch (err) {
+    return res.status(400).json({ ok: false, erro: (err as Error).message });
+  }
+});
+
+/** GET /api/propostas/reforma-piso/:id  → detalhe (sem blobs) */
+router.get('/:id(\\d+)', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const p = await buscarPorId(Number(req.params.id));
+    if (!p) return res.status(404).json({ ok: false, erro: 'Proposta não encontrada.' });
+    return res.json({ ok: true, proposta: p });
+  } catch (err) {
+    return res.status(400).json({ ok: false, erro: (err as Error).message });
+  }
+});
 
 /** POST /api/propostas/reforma-piso/calcular  → preview (não persiste) */
 router.post('/calcular', requireAuth, (req: Request, res: Response) => {
@@ -111,7 +132,8 @@ router.post('/:id/enviar', requireAuth, async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const p = await buscarPorId(id) as Record<string, unknown> | null;
     if (!p) return res.status(404).json({ ok: false, erro: 'Proposta não encontrada.' });
-    if (!p.contratante_fone) throw new Error('Contratante sem telefone cadastrado.');
+    const fone = String((req.body as { telefone?: string } | undefined)?.telefone || p.contratante_fone || '').trim();
+    if (!fone) throw new Error('Telefone não informado (cadastre no contratante ou envie no corpo).');
 
     const resultado = typeof p.resultado_json === 'string'
       ? JSON.parse(p.resultado_json) : p.resultado_json;
@@ -125,7 +147,6 @@ router.post('/:id/enviar', requireAuth, async (req: Request, res: Response) => {
     }, resultado, extras);
 
     const { sendDocument } = await import('../integrations/whatsapp');
-    const fone = String(p.contratante_fone);
     const env = await sendDocument(fone, buffer.toString('base64'), `${String(p.numero)}.pdf`);
 
     // v3.68.0: envia também as plantas NÃO-imagem (DWG/DXF/PDF) como documentos à parte
