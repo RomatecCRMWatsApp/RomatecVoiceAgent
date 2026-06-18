@@ -114,7 +114,7 @@ export function gerarPdf(
         doc.fillColor(t.texto).font(FONT_TXT).fontSize(10);
       };
       const linha = (txt: string) => {
-        doc.font(FONT_TXT).fontSize(10).fillColor(t.texto).text(txt, M, y, { width: innerW });
+        doc.font(FONT_TXT).fontSize(10).fillColor(t.texto).text(txt, M, y, { width: innerW, align: 'justify' });
         y = doc.y + 3;
       };
 
@@ -166,7 +166,7 @@ export function gerarPdf(
       titulo('4. QUANTITATIVO DE MATERIAIS (informativo)');
       doc.font(FONT_TXT).fontSize(8).fillColor('#555').text(
         'Quantitativo para aquisição pelo CONTRATANTE. Os preços unitários são de referência (SINAPI/cotação), meramente informativos, e NÃO compõem o valor desta proposta — que é de MÃO DE OBRA.',
-        M, y, { width: innerW });
+        M, y, { width: innerW, align: 'justify' });
       y = doc.y + 6;
       const cI = innerW * 0.42, cU = innerW * 0.12, cQ = innerW * 0.14, cP = innerW * 0.16, cT = innerW * 0.16;
       doc.rect(M, y, innerW, 18).fill(t.corHeaderTabela);
@@ -247,7 +247,7 @@ export function gerarPdf(
         'o quantitativo de materiais (seção 4) é meramente INFORMATIVO, com preços de referência (tabela SINAPI/cotação) ' +
         'que NÃO refletem necessariamente o preço de mercado praticado no momento da compra. O valor desta proposta ' +
         'corresponde exclusivamente à execução dos serviços (mão de obra), acrescido de BDI e impostos/NF quando aplicável.',
-        M, y, { width: innerW });
+        M, y, { width: innerW, align: 'justify' });
       y = doc.y + 8;
 
       // -------- Relatório Fotográfico (se houver fotos) --------
@@ -308,7 +308,7 @@ export function gerarPdf(
       doc.font(FONT_TXT).fontSize(8).fillColor('#444');
       doc.text('ABNT NBR 13753 (assentamento c/ argamassa colante) • NBR 14081 (argamassa colante) • ' +
         'NBR 14992 (rejuntamento) • NBR 9050 (acessibilidade em soleiras/transições, quando aplicável).',
-        M, y, { width: innerW });
+        M, y, { width: innerW, align: 'justify' });
       y = doc.y + 24;
 
       doc.moveTo(M + 120, y).lineTo(W - M - 120, y).strokeColor('#888').lineWidth(0.8).stroke();
