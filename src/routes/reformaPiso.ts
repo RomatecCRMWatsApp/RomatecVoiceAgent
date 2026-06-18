@@ -68,7 +68,7 @@ router.post('/calcular', requireAuth, (req: Request, res: Response) => {
   try {
     const dados = validar(req.body);
     const cfg = mesclarConfig(dados.config);
-    const resultado = calcular(dados.ambientes, dados.config);
+    const resultado = calcular(dados.ambientes, dados.config, dados.comRemocao);
     return res.json({ ok: true, config: cfg, resultado });
   } catch (err) {
     return res.status(400).json({ ok: false, erro: (err as Error).message });
@@ -80,7 +80,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const dados = validar(req.body);
     const cfg = mesclarConfig(dados.config);
-    const resultado = calcular(dados.ambientes, dados.config);
+    const resultado = calcular(dados.ambientes, dados.config, dados.comRemocao);
     const tema = (dados.tema ?? 'tradicional') as TemaProposta;
     const salva = await salvar(dados, cfg, resultado, tema);
     return res.status(201).json({ ok: true, id: salva.id, numero: salva.numero, resultado });

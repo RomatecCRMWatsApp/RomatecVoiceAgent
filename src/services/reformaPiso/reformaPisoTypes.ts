@@ -33,6 +33,12 @@ export interface ConfigCalculo {
   niveladorClipsPacote: number;  // unidades por pacote
   niveladorCunhasPacote: number; // cunhas (reutilizáveis) por pacote
 
+  // v3.70.0: piso sobre piso (sem remoção) usa AC-III + dupla colagem (consumo maior);
+  // com remoção (assenta sobre contrapiso) usa AC-II com o consumo padrão (argamassaKgM2).
+  argamassaKgM2SemRemocao: number;
+  // v3.70.0: disco de corte diamantado — porcelanato desgasta o disco; rendimento em m²/disco.
+  discoCorteRendimentoM2: number;
+
   produtividadeM2DiaEquipe: number; // m²/dia por equipe (assentamento)
   diasRejuntamento: number;         // dias dedicados ao rejunte
   diasCuraLiberacao: number;        // dias de cura/liberação ao tráfego
@@ -46,6 +52,7 @@ export interface ConfigCalculo {
   precoEspacadorPacote: number;
   precoNiveladorClipsPacote: number;
   precoNiveladorCunhasPacote: number;
+  precoDiscoCorte: number;          // R$ por disco de corte diamantado
   maoObraM2: number;                // R$/m² de mão de obra
 }
 
@@ -104,7 +111,9 @@ export const CONFIG_PADRAO: ConfigCalculo = {
   peca: { ladoAmm: 600, ladoBmm: 600, espessuraMm: 9, juntaMm: 3, m2PorCaixa: 1.44 },
 
   perdaPisoPct: 10,
-  argamassaKgM2: 5,        // desempenadeira dente 8mm, simples colagem
+  argamassaKgM2: 5,            // com remoção: AC-II, desempenadeira dente 8mm, simples colagem
+  argamassaKgM2SemRemocao: 8,  // piso sobre piso: AC-III + dupla colagem (consumo maior)
+  discoCorteRendimentoM2: 30,  // ~30 m²/disco (porcelanato)
   argamassaSacoKg: 20,
   rejunteDensidade: 1.6,   // kg/dm³ (NBR 14992)
   rejunteEmbalagemKg: 1,
@@ -126,5 +135,6 @@ export const CONFIG_PADRAO: ConfigCalculo = {
   precoEspacadorPacote: 8.0,
   precoNiveladorClipsPacote: 25.0,
   precoNiveladorCunhasPacote: 30.0,
+  precoDiscoCorte: 15.0,
   maoObraM2: 40.0,
 };

@@ -45,11 +45,18 @@ export function consumoRejunteKgM2(
   return ((ladoAmm + ladoBmm) / (ladoAmm * ladoBmm)) * juntaMm * espessuraMm * densidade;
 }
 
-export function calcular(ambientes: Ambiente[], cfgParcial?: Partial<ConfigCalculo>): ResultadoCalculo {
+export function calcular(
+  ambientes: Ambiente[],
+  cfgParcial?: Partial<ConfigCalculo>,
+  comRemocao = false,
+): ResultadoCalculo {
   if (!Array.isArray(ambientes) || ambientes.length === 0) {
     throw new Error('Informe ao menos um ambiente.');
   }
   const cfg = mesclarConfig(cfgParcial);
+  // v3.70.0: piso sobre piso (sem remoção) exige AC-III + dupla colagem (consumo maior);
+  // com remoção assenta sobre contrapiso absorvente → AC-II no consumo padrão.
+  const semRemocao = !comRemocao;
 
   // 1) Áreas
   const ambientesCalc: AmbienteCalculado[] = ambientes.map((a) => {
@@ -68,9 +75,17 @@ export function calcular(ambientes: Ambiente[], cfgParcial?: Partial<ConfigCalcu
   const caixas = Math.ceil(areaComPerdaM2 / peca.m2PorCaixa);
   const pisoM2Comprado = arred(caixas * peca.m2PorCaixa, 4);
 
-  // Argamassa colante (AC) — consumo sobre área real
-  const argamassaKg = arred(areaTotalM2 * cfg.argamassaKgM2, 2);
+  // Argamassa colante (AC) — classe e consumo dependem de haver remoção do piso.
+  const argamassaKgM2Aplic = semRemocao ? cfg.argamassaKgM2SemRemocao : cfg.argamassaKgM2;
+  const argamassaClasse = semRemocao ? 'AC-III' : 'AC-II';
+  const argamassaObs = semRemocao
+    ? `Piso sobre piso: ${argamassaClasse} + dupla colagem, consumo ${argamassaKgM2Aplic} kg/m² — NBR 14081 (saco ${cfg.argamassaSacoKg} kg)`
+    : `${argamassaClasse}, consumo ${argamassaKgM2Aplic} kg/m² — NBR 14081 (saco ${cfg.argamassaSacoKg} kg)`;
+  const argamassaKg = arred(areaTotalM2 * argamassaKgM2Aplic, 2);
   const sacosArgamassa = Math.ceil(argamassaKg / cfg.argamassaSacoKg);
+
+  // Disco de corte diamantado — porcelanato desgasta o disco.
+  const discosCorte = Math.max(1, Math.ceil(areaTotalM2 / cfg.discoCorteRendimentoM2));
 
   // Rejunte
   const rejunteKgM2 = consumoRejunteKgM2(
@@ -99,8 +114,9 @@ export function calcular(ambientes: Ambiente[], cfgParcial?: Partial<ConfigCalcu
   const insumos: ItemInsumo[] = [
     novoItem('Piso (porcelanato/cerâmica)', 'm²', pisoM2Comprado, cfg.precoPisoM2,
       `${caixas} cx de ${peca.m2PorCaixa} m² — perda ${cfg.perdaPisoPct}% (NBR 13753)`),
-    novoItem('Argamassa colante (AC-II)', 'saco', sacosArgamassa, cfg.precoArgamassaSaco,
-      `Consumo ${cfg.argamassaKgM2} kg/m² — NBR 14081 (saco ${cfg.argamassaSacoKg} kg)`),
+    novoItem(`Argamassa colante ${argamassaClasse}`, 'saco', sacosArgamassa, cfg.precoArgamassaSaco, argamassaObs),
+    novoItem('Disco de corte diamantado', 'un', discosCorte, cfg.precoDiscoCorte,
+      `1 disco p/ ~${cfg.discoCorteRendimentoM2} m² (porcelanato)`),
     novoItem('Rejunte', 'emb.', embalagensRejunte, cfg.precoRejunteEmbalagem,
       `Consumo ${arred(rejunteKgM2, 3)} kg/m² — NBR 14992 (junta ${peca.juntaMm} mm)`),
     novoItem('Espaçadores (cruzeta)', 'pacote', pacotesEspacador, cfg.precoEspacadorPacote,

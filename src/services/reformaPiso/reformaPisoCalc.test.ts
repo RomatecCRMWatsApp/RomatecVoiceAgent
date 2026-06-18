@@ -47,4 +47,31 @@ describe('reformaPisoCalc', () => {
   it('rejeita ambiente com dimensão inválida', () => {
     expect(() => calcular([{ descricao: 'X', comprimentoM: 0, larguraM: 3 }])).toThrow();
   });
+
+  // v3.70.0: disco de corte + argamassa por remoção
+  it('inclui disco de corte diamantado no quantitativo', () => {
+    const r = calcular(salas);
+    const disco = r.insumos.find(i => /disco de corte/i.test(i.item));
+    expect(disco).toBeDefined();
+    // 51 m² / 30 m² por disco = ceil(1.7) = 2
+    expect(disco!.quantidade).toBe(2);
+  });
+
+  it('sem remoção (piso sobre piso) usa AC-III + consumo maior', () => {
+    const r = calcular(salas, undefined, false); // sem remoção (default do módulo)
+    const arg = r.insumos.find(i => /argamassa colante/i.test(i.item));
+    expect(arg!.item).toContain('AC-III');
+    expect(arg!.obs).toMatch(/dupla colagem/i);
+    // 51 m² * 8 kg/m² / 20 kg/saco = ceil(20.4) = 21 sacos
+    expect(arg!.quantidade).toBe(21);
+  });
+
+  it('com remoção usa AC-II + consumo padrão', () => {
+    const r = calcular(salas, undefined, true); // com remoção
+    const arg = r.insumos.find(i => /argamassa colante/i.test(i.item));
+    expect(arg!.item).toContain('AC-II');
+    expect(arg!.item).not.toContain('AC-III');
+    // 51 m² * 5 kg/m² / 20 kg/saco = ceil(12.75) = 13 sacos
+    expect(arg!.quantidade).toBe(13);
+  });
 });
