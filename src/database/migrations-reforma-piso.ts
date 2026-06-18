@@ -53,10 +53,49 @@ const CREATE_AMBIENTES = `
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 `;
 
+// v3.68.0: fotos do relatório fotográfico (base64 no banco — Railway é efêmero).
+const CREATE_FOTOS = `
+  CREATE TABLE IF NOT EXISTS propostas_reforma_piso_fotos (
+    id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    proposta_id  BIGINT UNSIGNED NOT NULL,
+    legenda      VARCHAR(255)    NULL,
+    mime         VARCHAR(120)    NOT NULL DEFAULT 'image/jpeg',
+    data_base64  LONGTEXT        NOT NULL,
+    ordem        INT UNSIGNED    NOT NULL DEFAULT 0,
+    created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_rpf_proposta (proposta_id),
+    CONSTRAINT fk_rpf_proposta FOREIGN KEY (proposta_id)
+      REFERENCES propostas_reforma_piso (id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`;
+
+// v3.68.0: anexos de plantas (PDF/DWG/DXF/imagem) — LONGBLOB + token de download.
+const CREATE_ANEXOS = `
+  CREATE TABLE IF NOT EXISTS propostas_reforma_piso_anexos (
+    id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    proposta_id     BIGINT UNSIGNED NOT NULL,
+    nome_original   VARCHAR(255)    NOT NULL,
+    mime_type       VARCHAR(120)    NOT NULL,
+    tamanho_bytes   BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    is_imagem       TINYINT(1)      NOT NULL DEFAULT 0,
+    conteudo_blob   LONGBLOB        NOT NULL,
+    download_token  VARCHAR(64)     NOT NULL,
+    created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_rpa_token (download_token),
+    KEY idx_rpa_proposta (proposta_id),
+    CONSTRAINT fk_rpa_proposta FOREIGN KEY (proposta_id)
+      REFERENCES propostas_reforma_piso (id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`;
+
 export async function runReformaPisoMigrations(): Promise<void> {
   const ops: Array<{ label: string; sql: string }> = [
     { label: 'propostas_reforma_piso', sql: CREATE_PROPOSTAS },
     { label: 'propostas_reforma_piso_ambientes', sql: CREATE_AMBIENTES },
+    { label: 'propostas_reforma_piso_fotos', sql: CREATE_FOTOS },
+    { label: 'propostas_reforma_piso_anexos', sql: CREATE_ANEXOS },
   ];
   for (const { label, sql } of ops) {
     try {

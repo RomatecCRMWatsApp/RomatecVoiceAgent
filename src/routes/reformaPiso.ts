@@ -1,13 +1,31 @@
 // src/routes/reformaPiso.ts
 // v3.67.0: rotas da Proposta de Reforma — Piso Sobreposto.
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
 import { requireAuth } from '../middleware/auth';
 import { calcular, mesclarConfig } from '../services/reformaPiso/reformaPisoCalc';
-import { gerarPdf } from '../services/reformaPiso/reformaPisoPdf';
-import { salvar, buscarPorId, marcarEnviada } from '../services/reformaPiso/reformaPisoRepo';
+import { gerarPdf, type ExtrasPdf } from '../services/reformaPiso/reformaPisoPdf';
+import {
+  salvar, buscarPorId, marcarEnviada,
+  adicionarFoto, listarFotos, fotoRaw, removerFoto, carregarFotosBase64,
+  adicionarAnexoPlanta, listarAnexos, anexoRaw, removerAnexo, carregarPlantasImagens,
+} from '../services/reformaPiso/reformaPisoRepo';
 import { DadosProposta, TemaProposta } from '../services/reformaPiso/reformaPisoTypes';
 
 const router = Router();
+// v3.68.0: uploads em memória (base64/BLOB no banco — Railway é efêmero). 25MB/arquivo.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+/** Carrega fotos + plantas de uma proposta no formato de extras do PDF. */
+async function montarExtras(propostaId: number): Promise<ExtrasPdf> {
+  const [fotos, plantasImagens, anexos] = await Promise.all([
+    carregarFotosBase64(propostaId),
+    carregarPlantasImagens(propostaId),
+    listarAnexos(propostaId),
+  ]);
+  const plantasArquivos = anexos.filter((a) => !a.is_imagem).map((a) => ({ nome: a.nome_original }));
+  return { fotos, plantasImagens, plantasArquivos };
+}
 
 const TEMAS_VALIDOS: TemaProposta[] = ['tradicional', 'prime1', 'prime2'];
 
@@ -64,6 +82,7 @@ router.get('/:id/pdf', requireAuth, async (req: Request, res: Response) => {
     const resultado = typeof p.resultado_json === 'string'
       ? JSON.parse(p.resultado_json) : p.resultado_json;
 
+    const extras = await montarExtras(id);
     const buffer = await gerarPdf(tema, {
       numero: String(p.numero),
       contratanteNome: String(p.contratante_nome),
@@ -73,7 +92,7 @@ router.get('/:id/pdf', requireAuth, async (req: Request, res: Response) => {
       uf: String(p.uf),
       validadeDias: Number(p.validade_dias),
       comRemocao: !!p.com_remocao,
-    }, resultado);
+    }, resultado, extras);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${String(p.numero)}-${tema}.pdf"`);
@@ -96,23 +115,131 @@ router.post('/:id/enviar', requireAuth, async (req: Request, res: Response) => {
 
     const resultado = typeof p.resultado_json === 'string'
       ? JSON.parse(p.resultado_json) : p.resultado_json;
+    const extras = await montarExtras(id);
     const buffer = await gerarPdf(p.tema as TemaProposta, {
       numero: String(p.numero), contratanteNome: String(p.contratante_nome),
       contratanteDoc: (p.contratante_doc as string) ?? undefined,
       obraEndereco: (p.obra_endereco as string) ?? undefined,
       cidade: String(p.cidade), uf: String(p.uf),
       validadeDias: Number(p.validade_dias), comRemocao: !!p.com_remocao,
-    }, resultado);
+    }, resultado, extras);
 
     const { sendDocument } = await import('../integrations/whatsapp');
-    const fileName = `${String(p.numero)}.pdf`;
-    const env = await sendDocument(String(p.contratante_fone), buffer.toString('base64'), fileName);
+    const fone = String(p.contratante_fone);
+    const env = await sendDocument(fone, buffer.toString('base64'), `${String(p.numero)}.pdf`);
+
+    // v3.68.0: envia também as plantas NÃO-imagem (DWG/DXF/PDF) como documentos à parte
+    // (as plantas-imagem já vão embutidas no PDF da proposta).
+    const anexos = await listarAnexos(id);
+    const enviadosExtra: string[] = [];
+    for (const a of anexos.filter((x) => !x.is_imagem)) {
+      const raw = await anexoRaw(a.id);
+      if (!raw) continue;
+      try {
+        await sendDocument(fone, raw.buffer.toString('base64'), raw.nome);
+        enviadosExtra.push(raw.nome);
+      } catch (e) { console.warn('[reforma-piso] envio planta falhou:', (e as Error).message); }
+    }
 
     await marcarEnviada(id);
-    return res.json({ ok: true, numero: p.numero, bytes: buffer.length, status: 'enviada', messageId: env.messageId, phone: env.phone });
+    return res.json({ ok: true, numero: p.numero, bytes: buffer.length, status: 'enviada', messageId: env.messageId, phone: env.phone, plantasEnviadas: enviadosExtra });
   } catch (err) {
     return res.status(400).json({ ok: false, erro: (err as Error).message });
   }
+});
+
+// ── v3.68.0: Relatório fotográfico ──────────────────────────────────────────
+/** POST /:id/fotos  (multipart, campo "fotos" — 1..N imagens) */
+router.post('/:id/fotos', requireAuth, upload.array('fotos', 30), async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const p = await buscarPorId(id);
+    if (!p) return res.status(404).json({ ok: false, erro: 'Proposta não encontrada.' });
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (!files.length) throw new Error('Envie ao menos 1 imagem no campo "fotos".');
+    const criadas: number[] = [];
+    for (const f of files) {
+      if (!/^image\//i.test(f.mimetype)) continue;
+      const r = await adicionarFoto(id, f.mimetype, f.buffer.toString('base64'), null);
+      criadas.push(r.id);
+    }
+    return res.status(201).json({ ok: true, adicionadas: criadas.length, ids: criadas });
+  } catch (err) {
+    return res.status(400).json({ ok: false, erro: (err as Error).message });
+  }
+});
+
+/** GET /:id/fotos  (metadados) */
+router.get('/:id/fotos', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const fotos = await listarFotos(Number(req.params.id));
+    return res.json({ ok: true, total: fotos.length, fotos });
+  } catch (err) { return res.status(400).json({ ok: false, erro: (err as Error).message }); }
+});
+
+/** GET /:id/fotos/:fotoId/raw  (imagem) */
+router.get('/:id/fotos/:fotoId/raw', async (req: Request, res: Response) => {
+  try {
+    const f = await fotoRaw(Number(req.params.fotoId));
+    if (!f) return res.status(404).end();
+    res.setHeader('Content-Type', f.mime);
+    return res.end(f.buffer);
+  } catch (err) { return res.status(400).json({ ok: false, erro: (err as Error).message }); }
+});
+
+/** DELETE /:id/fotos/:fotoId */
+router.delete('/:id/fotos/:fotoId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const n = await removerFoto(Number(req.params.id), Number(req.params.fotoId));
+    return res.json({ ok: n > 0 });
+  } catch (err) { return res.status(400).json({ ok: false, erro: (err as Error).message }); }
+});
+
+// ── v3.68.0: Anexos de plantas ──────────────────────────────────────────────
+/** POST /:id/plantas  (multipart, campo "plantas" — PDF/DWG/DXF/imagem) */
+router.post('/:id/plantas', requireAuth, upload.array('plantas', 10), async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const p = await buscarPorId(id);
+    if (!p) return res.status(404).json({ ok: false, erro: 'Proposta não encontrada.' });
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (!files.length) throw new Error('Envie ao menos 1 arquivo no campo "plantas".');
+    const criados: Array<{ id: number; nome: string }> = [];
+    for (const f of files) {
+      const r = await adicionarAnexoPlanta(id, f.originalname, f.mimetype || 'application/octet-stream', f.buffer);
+      criados.push({ id: r.id, nome: f.originalname });
+    }
+    return res.status(201).json({ ok: true, adicionados: criados.length, anexos: criados });
+  } catch (err) {
+    return res.status(400).json({ ok: false, erro: (err as Error).message });
+  }
+});
+
+/** GET /:id/plantas  (metadados) */
+router.get('/:id/plantas', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const anexos = await listarAnexos(Number(req.params.id));
+    return res.json({ ok: true, total: anexos.length, anexos });
+  } catch (err) { return res.status(400).json({ ok: false, erro: (err as Error).message }); }
+});
+
+/** GET /:id/plantas/:anexoId/download */
+router.get('/:id/plantas/:anexoId/download', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const a = await anexoRaw(Number(req.params.anexoId));
+    if (!a) return res.status(404).end();
+    res.setHeader('Content-Type', a.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${a.nome.replace(/"/g, '')}"`);
+    return res.end(a.buffer);
+  } catch (err) { return res.status(400).json({ ok: false, erro: (err as Error).message }); }
+});
+
+/** DELETE /:id/plantas/:anexoId */
+router.delete('/:id/plantas/:anexoId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const n = await removerAnexo(Number(req.params.id), Number(req.params.anexoId));
+    return res.json({ ok: n > 0 });
+  } catch (err) { return res.status(400).json({ ok: false, erro: (err as Error).message }); }
 });
 
 export default router;

@@ -38,11 +38,19 @@ const TEMAS: Record<TemaProposta, TemaCfg> = {
 const brl = (n: number) =>
   n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+/** Extras opcionais embutidos no PDF (relatório fotográfico + plantas). */
+export interface ExtrasPdf {
+  fotos?: Array<{ mime: string; dataBase64: string; legenda: string | null }>;
+  plantasImagens?: Array<{ nome: string; buffer: Buffer }>;
+  plantasArquivos?: Array<{ nome: string }>;
+}
+
 /** Gera o PDF e devolve um Buffer. */
 export function gerarPdf(
   tema: TemaProposta,
   cab: CabecalhoPdf,
   r: ResultadoCalculo,
+  extras?: ExtrasPdf,
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     try {
@@ -173,6 +181,58 @@ export function gerarPdf(
       doc.font(FONT_TXT).fontSize(9).fillColor('#FFFFFF')
         .text(`Equivalente a ${brl(r.valorM2Final)}/m²`, M + 12, y + 30);
       y += 60;
+
+      // -------- Relatório Fotográfico (se houver fotos) --------
+      const fotos = extras?.fotos ?? [];
+      if (fotos.length) {
+        doc.addPage(); y = 60;
+        titulo('RELATÓRIO FOTOGRÁFICO');
+        for (let i = 0; i < fotos.length; i++) {
+          if (y > 600) { doc.addPage(); y = 60; }
+          const f = fotos[i];
+          doc.font(FONT_TITULO).fontSize(9).fillColor(t.destaque)
+            .text(`Foto ${i + 1}${f.legenda ? ' — ' + f.legenda : ''}`, M, y, { width: innerW });
+          y = doc.y + 4;
+          try {
+            doc.image(Buffer.from(f.dataBase64, 'base64'), M, y, { fit: [innerW, 300], align: 'center' });
+            y += 308;
+          } catch {
+            doc.font(FONT_TXT).fontSize(8).fillColor('#999').text('(falha ao renderizar foto)', M, y);
+            y += 14;
+          }
+        }
+      }
+
+      // -------- Plantas anexas (imagens embutidas + lista de arquivos) --------
+      const plImgs = extras?.plantasImagens ?? [];
+      const plArqs = extras?.plantasArquivos ?? [];
+      if (plImgs.length || plArqs.length) {
+        doc.addPage(); y = 60;
+        titulo('PLANTAS ANEXAS');
+        for (const pl of plImgs) {
+          if (y > 540) { doc.addPage(); y = 60; }
+          doc.font(FONT_TITULO).fontSize(9).fillColor(t.destaque).text(pl.nome, M, y, { width: innerW });
+          y = doc.y + 4;
+          try {
+            doc.image(pl.buffer, M, y, { fit: [innerW, 360], align: 'center' });
+            y += 368;
+          } catch {
+            doc.font(FONT_TXT).fontSize(8).fillColor('#999').text('(falha ao renderizar planta)', M, y);
+            y += 14;
+          }
+        }
+        if (plArqs.length) {
+          if (y > 680) { doc.addPage(); y = 60; }
+          doc.font(FONT_TXT).fontSize(9).fillColor(t.texto)
+            .text('Arquivos de planta disponíveis para download (enviados à parte):', M, y, { width: innerW });
+          y = doc.y + 3;
+          for (const a of plArqs) {
+            doc.font(FONT_TXT).fontSize(9).fillColor(t.texto).text(`•  ${a.nome}`, M + 8, y, { width: innerW - 8 });
+            y = doc.y + 2;
+          }
+          y += 6;
+        }
+      }
 
       // -------- 6. Base normativa + assinatura --------
       if (y > 660) { doc.addPage(); y = 60; }
