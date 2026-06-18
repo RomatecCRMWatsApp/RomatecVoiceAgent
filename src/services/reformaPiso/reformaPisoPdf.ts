@@ -12,10 +12,12 @@ import { ResultadoCalculo, TemaProposta } from './reformaPisoTypes';
 export async function mesclarPlantasPdf(base: Buffer, plantasPdf: Buffer[]): Promise<Buffer> {
   if (!plantasPdf || plantasPdf.length === 0) return base;
   try {
-    const out = await PdfLibDocument.load(base);
+    const out = await PdfLibDocument.load(base, { ignoreEncryption: true });
     for (const buf of plantasPdf) {
       try {
-        const src = await PdfLibDocument.load(buf);
+        // ignoreEncryption: muitos PDFs trazem flag de permissões (sem senha) e o
+        // pdf-lib recusa por padrão — daí a planta não era anexada.
+        const src = await PdfLibDocument.load(buf, { ignoreEncryption: true });
         const pages = await out.copyPages(src, src.getPageIndices());
         pages.forEach((p) => out.addPage(p));
       } catch (e) {

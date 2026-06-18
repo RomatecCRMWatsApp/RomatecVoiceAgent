@@ -130,7 +130,7 @@ router.get('/:id/pdf', requireAuth, async (req: Request, res: Response) => {
       ? JSON.parse(p.resultado_json) : p.resultado_json;
 
     const { extras, plantasPdfBuffers } = await montarExtras(id);
-    let buffer = await gerarPdf(tema, {
+    const baseBuffer = await gerarPdf(tema, {
       numero: String(p.numero),
       contratanteNome: String(p.contratante_nome),
       contratanteDoc: (p.contratante_doc as string) ?? undefined,
@@ -140,7 +140,19 @@ router.get('/:id/pdf', requireAuth, async (req: Request, res: Response) => {
       validadeDias: Number(p.validade_dias),
       comRemocao: !!p.com_remocao,
     }, resultado, extras);
-    buffer = await mesclarPlantasPdf(buffer, plantasPdfBuffers);
+    const buffer = await mesclarPlantasPdf(baseBuffer, plantasPdfBuffers);
+
+    // v3.75.2: diagnóstico de mesclagem da planta — ?debug=1 retorna JSON.
+    if (req.query.debug) {
+      return res.json({
+        ok: true,
+        plantasPdfCount: plantasPdfBuffers.length,
+        plantaSizes: plantasPdfBuffers.map((b) => b.length),
+        baseBytes: baseBuffer.length,
+        mergedBytes: buffer.length,
+        cresceu: buffer.length > baseBuffer.length,
+      });
+    }
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${String(p.numero)}-${tema}.pdf"`);
