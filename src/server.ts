@@ -70,6 +70,7 @@ import explicativoRouter from './routes/explicativo';
 import memoriaisHidraulicoRouter from './routes/memoriais'; // v3.49.2 Memorial Hidraulico
 import canvasGraficoRouter from './routes/canvasGrafico';
 import relatorioFotograficoRouter from './routes/relatorioFotografico';
+import reformaPisoRouter from './routes/reformaPiso'; // v3.67.0
 import galeriaExportRouter from './routes/galeriaExport'; // Feature 04 — export Galeria p/ AvalieImob (X-API-Key)
 import pdfPrimeRouter from './routes/pdfPrime'; // v1.99.16 — export PDF templates Prime I/II
 import diligenciasRouter from './routes/diligencias'; // v3.54.0 — Diligências de Campo
@@ -189,6 +190,7 @@ app.use('/api/galeria', galeriaExportRouter); // Feature 04 — export Galeria p
 app.use('/api/pdf-prime', pdfPrimeRouter); // v1.99.16 — export PDF templates Prime I/II (proposta/recibo)
 app.use('/api/diligencias', diligenciasRouter); // v3.54.0 — Diligências de Campo
 app.use('/api/wifi', wifiLeadRoutes); // v3.61.0 — Captive Portal / Captação de Leads Wi-Fi
+app.use('/api/propostas/reforma-piso', reformaPisoRouter); // v3.67.0 — Proposta de Reforma (Piso Sobreposto)
 (async () => {
   try { const m = await import('./database/migrations-wifi-leads'); await m.runMigrationsWifiLeads(); }
   catch (err) { console.error('[wifi-leads-migrations] FALHA fatal:', err); }
@@ -200,6 +202,11 @@ app.use('/api/wifi', wifiLeadRoutes); // v3.61.0 — Captive Portal / Captação
 (async () => {
   try { const m = await import('./database/migrations-relatorio-fotografico'); await m.runRelatorioFotograficoMigrations(); }
   catch (err) { console.error('[relatorio-fotografico-migrations] FALHA fatal:', err); }
+})();
+// v3.67.0: Proposta de Reforma — Piso Sobreposto
+void (async () => {
+  try { const m = await import('./database/migrations-reforma-piso'); await m.runReformaPisoMigrations(); }
+  catch (err) { console.error('[reforma-piso-migrations] FALHA fatal:', err); }
 })();
 
 // v1.99.15: Live Feed Universal — feed animado no topo de toda aba.
