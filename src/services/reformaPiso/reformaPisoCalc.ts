@@ -132,11 +132,13 @@ export function calcular(
 
   const valorMateriais = arred(insumos.reduce((s, i) => s + i.total, 0), 2);
 
-  // 3) Mão de obra (sobre área real)
+  // 3) Mão de obra (sobre área real) — ESTE é o objeto desta proposta.
   const valorMaoObra = arred(areaTotalM2 * cfg.maoObraM2, 2);
 
-  // 4) Subtotal + BDI
-  const subtotal = arred(valorMateriais + valorMaoObra, 2);
+  // 4) Subtotal + BDI — incidem APENAS sobre a mão de obra. O quantitativo de
+  // materiais é informativo (referência SINAPI/cotação) e fica por conta do
+  // contratante, NÃO compondo o valor da proposta. (v3.73.0)
+  const subtotal = valorMaoObra;
   const valorBdi = arred(subtotal * (cfg.bdiPct / 100), 2);
   const valorFinal = arred(subtotal + valorBdi, 2);
   const valorM2Final = areaTotalM2 > 0 ? arred(valorFinal / areaTotalM2, 2) : 0;

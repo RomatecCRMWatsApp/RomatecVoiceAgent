@@ -1,7 +1,33 @@
 // src/services/reformaPiso/reformaPisoPdf.ts
 // v3.67.0: PDF dos 3 temas (Tradicional / Prime I / Prime II) via PDFKit (puro Node).
 import PDFDocument from 'pdfkit';
+import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import { ResultadoCalculo, TemaProposta } from './reformaPisoTypes';
+
+/**
+ * v3.73.0: mescla as páginas de plantas em PDF ao final do documento da proposta.
+ * Imagens já são embutidas pelo gerarPdf; aqui anexamos arquivos PDF (prancha/planta).
+ * Best-effort: planta inválida é ignorada (não derruba a geração).
+ */
+export async function mesclarPlantasPdf(base: Buffer, plantasPdf: Buffer[]): Promise<Buffer> {
+  if (!plantasPdf || plantasPdf.length === 0) return base;
+  try {
+    const out = await PdfLibDocument.load(base);
+    for (const buf of plantasPdf) {
+      try {
+        const src = await PdfLibDocument.load(buf);
+        const pages = await out.copyPages(src, src.getPageIndices());
+        pages.forEach((p) => out.addPage(p));
+      } catch (e) {
+        console.warn('[reformaPisoPdf] planta PDF ignorada na mesclagem:', (e as Error).message);
+      }
+    }
+    return Buffer.from(await out.save());
+  } catch (e) {
+    console.warn('[reformaPisoPdf] mesclagem de plantas falhou, retornando proposta sem anexo:', (e as Error).message);
+    return base;
+  }
+}
 
 // Paleta da marca Romatec
 const VERDE = '#0C3320';
@@ -42,7 +68,8 @@ const brl = (n: number) =>
 export interface ExtrasPdf {
   fotos?: Array<{ mime: string; dataBase64: string; legenda: string | null }>;
   plantasImagens?: Array<{ nome: string; buffer: Buffer }>;
-  plantasArquivos?: Array<{ nome: string }>;
+  // anexado=true → o PDF da planta é mesclado ao final do documento; senão vai à parte.
+  plantasArquivos?: Array<{ nome: string; anexado?: boolean }>;
 }
 
 /** Gera o PDF e devolve um Buffer. */
@@ -133,7 +160,11 @@ export function gerarPdf(
 
       // -------- 4. Quantitativo de materiais --------
       if (y > 640) { doc.addPage(); y = 60; }
-      titulo('4. QUANTITATIVO DE MATERIAIS');
+      titulo('4. QUANTITATIVO DE MATERIAIS (informativo)');
+      doc.font(FONT_TXT).fontSize(8).fillColor('#555').text(
+        'Quantitativo para aquisição pelo CONTRATANTE. Os preços unitários são de referência (SINAPI/cotação), meramente informativos, e NÃO compõem o valor desta proposta — que é de MÃO DE OBRA.',
+        M, y, { width: innerW });
+      y = doc.y + 6;
       const cI = innerW * 0.42, cU = innerW * 0.12, cQ = innerW * 0.14, cP = innerW * 0.16, cT = innerW * 0.16;
       doc.rect(M, y, innerW, 18).fill(t.corHeaderTabela);
       doc.fillColor('#FFFFFF').font(FONT_TITULO).fontSize(9);
@@ -159,7 +190,7 @@ export function gerarPdf(
         y += h;
       });
       doc.font(FONT_TITULO).fontSize(9).fillColor(t.destaque)
-        .text(`Subtotal materiais: ${brl(r.valorMateriais)}`, M, y + 4, { width: innerW, align: 'right' });
+        .text(`Subtotal materiais (referência — não incluso no valor): ${brl(r.valorMateriais)}`, M, y + 4, { width: innerW, align: 'right' });
       y += 26;
 
       // -------- 5. Mão de obra / Prazo / Valor --------
@@ -168,14 +199,14 @@ export function gerarPdf(
       linha(`Mão de obra: ${brl(r.maoObraM2)}/m²  ×  ${r.areaTotalM2.toFixed(4)} m²  =  ${brl(r.valorMaoObra)}`);
       linha(`Prazo de execução: ${r.prazoDiasUteis} dias úteis ` +
         `(assentamento ${r.prazoDetalhe.assentamento} + rejunte ${r.prazoDetalhe.rejuntamento} + cura/liberação ${r.prazoDetalhe.curaLiberacao}).`);
-      linha(`Subtotal (materiais + mão de obra): ${brl(r.subtotal)}`);
-      linha(`BDI (${r.bdiPct.toFixed(2)}%): ${brl(r.valorBdi)}`);
+      linha(`BDI (${r.bdiPct.toFixed(2)}%) sobre a mão de obra: ${brl(r.valorBdi)}`);
+      linha('Materiais por conta do contratante (quantitativo informativo na seção 4).');
       y += 6;
 
-      // Caixa de valor final
+      // Caixa de valor final (apenas mão de obra + BDI)
       doc.rect(M, y, innerW, 46).fill(t.faixa);
       doc.fillColor('#FFFFFF').font(FONT_TITULO).fontSize(13)
-        .text('VALOR FINAL', M + 12, y + 9);
+        .text('VALOR FINAL — MÃO DE OBRA', M + 12, y + 9);
       doc.fontSize(16).fillColor(DOURADO_CLARO)
         .text(brl(r.valorFinal), M, y + 8, { width: innerW - 14, align: 'right' });
       doc.font(FONT_TXT).fontSize(9).fillColor('#FFFFFF')
@@ -223,11 +254,11 @@ export function gerarPdf(
         }
         if (plArqs.length) {
           if (y > 680) { doc.addPage(); y = 60; }
-          doc.font(FONT_TXT).fontSize(9).fillColor(t.texto)
-            .text('Arquivos de planta disponíveis para download (enviados à parte):', M, y, { width: innerW });
+          doc.font(FONT_TXT).fontSize(9).fillColor(t.texto).text('Plantas anexas:', M, y, { width: innerW });
           y = doc.y + 3;
           for (const a of plArqs) {
-            doc.font(FONT_TXT).fontSize(9).fillColor(t.texto).text(`•  ${a.nome}`, M + 8, y, { width: innerW - 8 });
+            const sufixo = a.anexado ? ' (anexada nas páginas a seguir)' : ' (enviada à parte)';
+            doc.font(FONT_TXT).fontSize(9).fillColor(t.texto).text(`•  ${a.nome}${sufixo}`, M + 8, y, { width: innerW - 8 });
             y = doc.y + 2;
           }
           y += 6;

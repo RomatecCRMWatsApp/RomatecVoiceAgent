@@ -1,6 +1,6 @@
 // v3.68.0: garante que o PDF gera com relatório fotográfico + plantas (sem crashar).
 import { describe, it, expect } from 'vitest';
-import { gerarPdf } from './reformaPisoPdf';
+import { gerarPdf, mesclarPlantasPdf } from './reformaPisoPdf';
 import { calcular } from './reformaPisoCalc';
 
 // JPEG 1x1 (sem canal alfa) — PDFKit embute direto (rápido). PNG com alfa cai
@@ -29,5 +29,19 @@ describe('gerarPdf (reforma piso)', () => {
     });
     expect(buf.slice(0, 5).toString()).toBe('%PDF-');
     expect(buf.length).toBeGreaterThan(1000);
+  });
+
+  it('mescla planta-PDF ao final (a planta "vem" no documento)', async () => {
+    const base = await gerarPdf('prime1', cab, r);          // proposta (1+ páginas)
+    const planta = await gerarPdf('prime2', cab, r);          // simula uma planta-PDF
+    const merged = await mesclarPlantasPdf(base, [planta]);
+    expect(merged.slice(0, 5).toString()).toBe('%PDF-');
+    expect(merged.length).toBeGreaterThan(base.length);      // ganhou as páginas da planta
+  });
+
+  it('mesclarPlantasPdf sem plantas retorna o mesmo buffer', async () => {
+    const base = await gerarPdf('prime1', cab, r);
+    const merged = await mesclarPlantasPdf(base, []);
+    expect(merged).toBe(base);
   });
 });

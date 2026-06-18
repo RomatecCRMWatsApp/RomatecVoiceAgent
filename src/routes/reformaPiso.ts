@@ -4,7 +4,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth';
 import { calcular, mesclarConfig } from '../services/reformaPiso/reformaPisoCalc';
-import { gerarPdf, type ExtrasPdf } from '../services/reformaPiso/reformaPisoPdf';
+import { gerarPdf, mesclarPlantasPdf, type ExtrasPdf } from '../services/reformaPiso/reformaPisoPdf';
 import {
   salvar, listar, buscarPorId, marcarEnviada,
   adicionarFoto, listarFotos, fotoRaw, removerFoto, carregarFotosBase64,
@@ -16,15 +16,24 @@ const router = Router();
 // v3.68.0: uploads em memória (base64/BLOB no banco — Railway é efêmero). 25MB/arquivo.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
-/** Carrega fotos + plantas de uma proposta no formato de extras do PDF. */
-async function montarExtras(propostaId: number): Promise<ExtrasPdf> {
+/** Carrega fotos + plantas de uma proposta. Retorna os extras do PDF + os
+ *  buffers das plantas em PDF (para mesclar ao final do documento). */
+async function montarExtras(propostaId: number): Promise<{ extras: ExtrasPdf; plantasPdfBuffers: Buffer[] }> {
   const [fotos, plantasImagens, anexos] = await Promise.all([
     carregarFotosBase64(propostaId),
     carregarPlantasImagens(propostaId),
     listarAnexos(propostaId),
   ]);
-  const plantasArquivos = anexos.filter((a) => !a.is_imagem).map((a) => ({ nome: a.nome_original }));
-  return { fotos, plantasImagens, plantasArquivos };
+  const naoImagem = anexos.filter((a) => !a.is_imagem);
+  const ehPdf = (a: { mime_type: string; nome_original: string }) =>
+    /pdf/i.test(a.mime_type) || /\.pdf$/i.test(a.nome_original);
+  const plantasPdfBuffers: Buffer[] = [];
+  for (const a of naoImagem.filter(ehPdf)) {
+    const raw = await anexoRaw(a.id);
+    if (raw) plantasPdfBuffers.push(raw.buffer);
+  }
+  const plantasArquivos = naoImagem.map((a) => ({ nome: a.nome_original, anexado: ehPdf(a) }));
+  return { extras: { fotos, plantasImagens, plantasArquivos }, plantasPdfBuffers };
 }
 
 const TEMAS_VALIDOS: TemaProposta[] = ['tradicional', 'prime1', 'prime2'];
@@ -103,8 +112,8 @@ router.get('/:id/pdf', requireAuth, async (req: Request, res: Response) => {
     const resultado = typeof p.resultado_json === 'string'
       ? JSON.parse(p.resultado_json) : p.resultado_json;
 
-    const extras = await montarExtras(id);
-    const buffer = await gerarPdf(tema, {
+    const { extras, plantasPdfBuffers } = await montarExtras(id);
+    let buffer = await gerarPdf(tema, {
       numero: String(p.numero),
       contratanteNome: String(p.contratante_nome),
       contratanteDoc: (p.contratante_doc as string) ?? undefined,
@@ -114,6 +123,7 @@ router.get('/:id/pdf', requireAuth, async (req: Request, res: Response) => {
       validadeDias: Number(p.validade_dias),
       comRemocao: !!p.com_remocao,
     }, resultado, extras);
+    buffer = await mesclarPlantasPdf(buffer, plantasPdfBuffers);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${String(p.numero)}-${tema}.pdf"`);
@@ -137,23 +147,26 @@ router.post('/:id/enviar', requireAuth, async (req: Request, res: Response) => {
 
     const resultado = typeof p.resultado_json === 'string'
       ? JSON.parse(p.resultado_json) : p.resultado_json;
-    const extras = await montarExtras(id);
-    const buffer = await gerarPdf(p.tema as TemaProposta, {
+    const { extras, plantasPdfBuffers } = await montarExtras(id);
+    let buffer = await gerarPdf(p.tema as TemaProposta, {
       numero: String(p.numero), contratanteNome: String(p.contratante_nome),
       contratanteDoc: (p.contratante_doc as string) ?? undefined,
       obraEndereco: (p.obra_endereco as string) ?? undefined,
       cidade: String(p.cidade), uf: String(p.uf),
       validadeDias: Number(p.validade_dias), comRemocao: !!p.com_remocao,
     }, resultado, extras);
+    buffer = await mesclarPlantasPdf(buffer, plantasPdfBuffers);
 
     const { sendDocument } = await import('../integrations/whatsapp');
     const env = await sendDocument(fone, buffer.toString('base64'), `${String(p.numero)}.pdf`);
 
-    // v3.68.0: envia também as plantas NÃO-imagem (DWG/DXF/PDF) como documentos à parte
-    // (as plantas-imagem já vão embutidas no PDF da proposta).
+    // v3.73.0: plantas-imagem vão embutidas e plantas-PDF já foram mescladas no
+    // documento; só os demais formatos (DWG/DXF) seguem como documentos à parte.
     const anexos = await listarAnexos(id);
     const enviadosExtra: string[] = [];
-    for (const a of anexos.filter((x) => !x.is_imagem)) {
+    const ehPdf = (x: { mime_type: string; nome_original: string }) =>
+      /pdf/i.test(x.mime_type) || /\.pdf$/i.test(x.nome_original);
+    for (const a of anexos.filter((x) => !x.is_imagem && !ehPdf(x))) {
       const raw = await anexoRaw(a.id);
       if (!raw) continue;
       try {

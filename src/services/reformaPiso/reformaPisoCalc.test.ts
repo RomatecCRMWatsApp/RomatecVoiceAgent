@@ -26,11 +26,12 @@ describe('reformaPisoCalc', () => {
     expect(c).toBeCloseTo(0.144, 4);
   });
 
-  it('valor final = (materiais + mão de obra) * (1 + BDI)', () => {
+  it('valor final = mão de obra * (1 + BDI) — materiais NÃO entram (informativos)', () => {
     const r = calcular(salas, { maoObraM2: 40, bdiPct: 20 });
-    const esperado = Math.round((r.valorMateriais + r.valorMaoObra) * 1.2 * 100) / 100;
-    expect(r.valorFinal).toBe(esperado);
-    expect(r.valorMaoObra).toBe(51 * 40);
+    expect(r.valorMaoObra).toBe(51 * 40);          // 2040
+    expect(r.subtotal).toBe(2040);                 // só mão de obra
+    expect(r.valorFinal).toBe(Math.round(2040 * 1.2 * 100) / 100); // 2448
+    expect(r.valorMateriais).toBeGreaterThan(0);   // computado, mas informativo (fora do valor)
   });
 
   it('valor por m² final é coerente', () => {
