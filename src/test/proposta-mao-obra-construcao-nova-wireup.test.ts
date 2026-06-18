@@ -41,8 +41,9 @@ describe('obras.html — Mão de Obra "Construção nova" ativada (v3.53.0)', ()
   });
 
   it('o handler do subtipo disponível abre o form real (setMaoObraView novo)', () => {
-    // bloco do handler data-mo-subtipo (até o fechamento do forEach)
-    const bloco = obrasHtml.match(/querySelectorAll\('\[data-mo-subtipo\]'\)[\s\S]{0,900}?\}\);/);
+    // bloco do handler data-mo-subtipo (até o fechamento do forEach).
+    // v3.75.1: janela ampliada (o branch de reforma_ampliacao cresceu o handler).
+    const bloco = obrasHtml.match(/querySelectorAll\('\[data-mo-subtipo\]'\)[\s\S]{0,1800}?\}\);/);
     expect(bloco).not.toBeNull();
     expect(bloco![0]).toMatch(/dataset\.moDisponivel\s*===\s*'1'/);
     expect(bloco![0]).toContain("setMaoObraView('novo')");
