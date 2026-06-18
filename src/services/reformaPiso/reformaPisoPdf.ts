@@ -121,8 +121,8 @@ export function gerarPdf(
         if (i % 2 === 1) doc.rect(M, y, innerW, 16).fill('#F3F4F2').fillColor(t.texto);
         doc.fillColor(t.texto);
         doc.text(a.descricao, M + 4, y + 4, { width: colDesc - 8 });
-        doc.text(a.comprimentoM.toFixed(3), M + colDesc, y + 4, { width: colC, align: 'right' });
-        doc.text(a.larguraM.toFixed(3), M + colDesc + colC, y + 4, { width: colL, align: 'right' });
+        doc.text(a.comprimentoM > 0 ? a.comprimentoM.toFixed(3) : '— (polig.)', M + colDesc, y + 4, { width: colC, align: 'right' });
+        doc.text(a.larguraM > 0 ? a.larguraM.toFixed(3) : '—', M + colDesc + colC, y + 4, { width: colL, align: 'right' });
         doc.text(a.areaM2.toFixed(4), M + colDesc + colC + colL, y + 4, { width: colA - 4, align: 'right' });
         y += 16;
       });

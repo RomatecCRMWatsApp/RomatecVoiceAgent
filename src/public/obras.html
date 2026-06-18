@@ -19046,12 +19046,14 @@ async function renderReformaPiso() {
 function renderReformaForm(v) {
   if (!state.reformaAmbientes || !state.reformaAmbientes.length) state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }];
   const ambRows = state.reformaAmbientes.map((a, i) => `
-    <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
-      <input data-amb-desc="${i}" placeholder="Ambiente (ex: Sala 01)" value="${escape(a.descricao || '')}" style="flex:2;">
-      <input data-amb-c="${i}" type="number" step="0.01" placeholder="Compr. (m)" value="${a.comprimentoM ?? ''}" style="flex:1;">
-      <input data-amb-l="${i}" type="number" step="0.01" placeholder="Larg. (m)" value="${a.larguraM ?? ''}" style="flex:1;">
+    <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center; flex-wrap:wrap;">
+      <input data-amb-desc="${i}" placeholder="Ambiente (ex: Sala 01)" value="${escape(a.descricao || '')}" style="flex:2; min-width:160px;">
+      <input data-amb-c="${i}" type="number" step="0.01" placeholder="Compr. (m)" value="${a.comprimentoM ?? ''}" style="flex:1; min-width:90px;">
+      <input data-amb-l="${i}" type="number" step="0.01" placeholder="Larg. (m)" value="${a.larguraM ?? ''}" style="flex:1; min-width:90px;">
+      <input data-amb-area="${i}" type="number" step="0.01" placeholder="Área m² (polígono)" value="${a.areaM2 ?? ''}" title="Para cômodo poligonal: digite a área direta (ignora Compr.×Larg.)" style="flex:1; min-width:110px;">
       <button data-amb-rm="${i}" class="btn-danger" style="padding:4px 8px;" title="Remover">×</button>
-    </div>`).join('');
+    </div>`).join('') +
+    '<p style="font-size:11px; color:var(--text-muted); margin:2px 0 0;">Retangular: preencha Compr.×Larg. · Poligonal/irregular: deixe Compr./Larg. vazios e informe a Área (m²) direta.</p>';
   v.innerHTML = `
     <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
       <strong>🧱 Nova proposta — Reforma de Piso</strong>
@@ -19098,6 +19100,7 @@ function renderReformaForm(v) {
       a.descricao = (document.querySelector(`[data-amb-desc="${i}"]`)?.value) || '';
       a.comprimentoM = document.querySelector(`[data-amb-c="${i}"]`)?.value || '';
       a.larguraM = document.querySelector(`[data-amb-l="${i}"]`)?.value || '';
+      a.areaM2 = document.querySelector(`[data-amb-area="${i}"]`)?.value || '';
     });
   };
   v.querySelector('[data-ref-cancel]').onclick = () => { state.reformaView = 'lista'; renderReformaPiso(); };
@@ -19125,8 +19128,13 @@ function renderReformaForm(v) {
       tema: document.getElementById('ref-tema').value,
       validadeDias: Number(document.getElementById('ref-validade').value) || 15,
       ambientes: state.reformaAmbientes
-        .filter(a => a.descricao && a.comprimentoM && a.larguraM)
-        .map(a => ({ descricao: a.descricao, comprimentoM: Number(a.comprimentoM), larguraM: Number(a.larguraM) })),
+        .filter(a => a.descricao && (Number(a.areaM2) > 0 || (a.comprimentoM && a.larguraM)))
+        .map(a => ({
+          descricao: a.descricao,
+          comprimentoM: Number(a.comprimentoM) || 0,
+          larguraM: Number(a.larguraM) || 0,
+          areaM2: Number(a.areaM2) > 0 ? Number(a.areaM2) : undefined,
+        })),
       config: {
         bdiPct: Number(document.getElementById('ref-bdi').value) || 20,
         precoPisoM2: Number(document.getElementById('ref-preco-piso').value) || 45,
@@ -19137,7 +19145,7 @@ function renderReformaForm(v) {
 
   document.getElementById('ref-calcular').onclick = async () => {
     const body = montarBody();
-    if (!body.ambientes.length) return alert('Preencha ao menos 1 ambiente (descrição + comprimento + largura).');
+    if (!body.ambientes.length) return alert('Preencha ao menos 1 ambiente (descrição + Compr.×Larg. OU Área m²).');
     try {
       const r = await api('/api/propostas/reforma-piso/calcular', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
       const res = r.resultado;

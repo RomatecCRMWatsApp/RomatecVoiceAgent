@@ -44,8 +44,20 @@ describe('reformaPisoCalc', () => {
     expect(r.prazoDiasUteis).toBe(8);
   });
 
-  it('rejeita ambiente com dimensão inválida', () => {
+  it('rejeita ambiente sem C×L e sem área direta', () => {
     expect(() => calcular([{ descricao: 'X', comprimentoM: 0, larguraM: 3 }])).toThrow();
+  });
+
+  // v3.71.0: área informada direto (cômodo poligonal)
+  it('aceita área direta (poligonal) e soma com os retangulares', () => {
+    const r = calcular([
+      { descricao: 'Sala retangular', comprimentoM: 4, larguraM: 3 },          // 12 m²
+      { descricao: 'Hall poligonal', comprimentoM: 0, larguraM: 0, areaM2: 7.5 }, // 7.5 m² direto
+    ]);
+    expect(r.areaTotalM2).toBe(19.5);
+    const polig = r.ambientes.find(a => a.descricao === 'Hall poligonal');
+    expect(polig!.areaM2).toBe(7.5);
+    expect(polig!.comprimentoM).toBe(0); // sem C×L → 0 (PDF mostra "—")
   });
 
   // v3.70.0: disco de corte + argamassa por remoção

@@ -5,8 +5,11 @@ export type TemaProposta = 'tradicional' | 'prime1' | 'prime2';
 
 export interface Ambiente {
   descricao: string;
-  comprimentoM: number; // metros
-  larguraM: number;     // metros
+  comprimentoM: number; // metros (0 quando a área é informada direto)
+  larguraM: number;     // metros (0 quando a área é informada direto)
+  // v3.71.0: área informada DIRETAMENTE (m²) — para cômodos poligonais (mais de
+  // 4 lados) ou quando se quer lançar só a área total. Se > 0, sobrepõe C×L.
+  areaM2?: number;
 }
 
 /** Dimensão de uma peça de piso (mm) e da junta (mm). */

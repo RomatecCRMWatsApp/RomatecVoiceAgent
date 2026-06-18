@@ -58,12 +58,16 @@ export function calcular(
   // com remoção assenta sobre contrapiso absorvente → AC-II no consumo padrão.
   const semRemocao = !comRemocao;
 
-  // 1) Áreas
+  // 1) Áreas — aceita C×L (retangular) OU área informada direto (poligonal/total).
   const ambientesCalc: AmbienteCalculado[] = ambientes.map((a) => {
-    if (a.comprimentoM <= 0 || a.larguraM <= 0) {
-      throw new Error(`Ambiente "${a.descricao}" com dimensão inválida.`);
+    const areaDireta = a.areaM2 != null && a.areaM2 > 0;
+    const c = a.comprimentoM || 0;
+    const l = a.larguraM || 0;
+    if (!areaDireta && (c <= 0 || l <= 0)) {
+      throw new Error(`Ambiente "${a.descricao}": informe Comprimento×Largura OU a Área (m²) direta.`);
     }
-    return { ...a, areaM2: arred(a.comprimentoM * a.larguraM, 4) };
+    const areaM2 = arred(areaDireta ? (a.areaM2 as number) : c * l, 4);
+    return { ...a, comprimentoM: c, larguraM: l, areaM2 };
   });
   const areaTotalM2 = arred(ambientesCalc.reduce((s, a) => s + a.areaM2, 0), 4);
   const areaComPerdaM2 = arred(areaTotalM2 * (1 + cfg.perdaPisoPct / 100), 4);
