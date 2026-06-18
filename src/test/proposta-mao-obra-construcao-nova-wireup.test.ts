@@ -15,12 +15,24 @@ describe('obras.html — Mão de Obra "Construção nova" ativada (v3.53.0)', ()
   });
 
   it('os demais subtipos NÃO estão disponíveis (continuam "Em breve")', () => {
-    for (const slug of ['reforma_ampliacao', 'alvenaria_pura', 'vistoria_periodica',
+    // v3.69.0: reforma_ampliacao saiu desta lista (ativado, abre módulo Reforma de Piso).
+    for (const slug of ['alvenaria_pura', 'vistoria_periodica',
       'acompanhamento_diaria', 'fundacao_sapatas', 'cobertura_telhado', 'servicos_complementares']) {
       const linha = obrasHtml.match(new RegExp(`slug:\\s*'${slug}'[^\\n]*`));
       expect(linha, slug).not.toBeNull();
       expect(linha![0], slug).not.toMatch(/disponivel:\s*true/);
     }
+  });
+
+  // v3.69.0: reforma_ampliacao ativado e roteia para o módulo de Reforma de Piso.
+  it('reforma_ampliacao está disponível e abre o módulo Reforma de Piso', () => {
+    const linha = obrasHtml.match(/slug:\s*'reforma_ampliacao'[^\n]*/);
+    expect(linha).not.toBeNull();
+    expect(linha![0]).toMatch(/disponivel:\s*true/);
+    const bloco = obrasHtml.match(/querySelectorAll\('\[data-mo-subtipo\]'\)[\s\S]{0,1200}?\}\);/);
+    expect(bloco).not.toBeNull();
+    expect(bloco![0]).toContain("moSubtipo === 'reforma_ampliacao'");
+    expect(bloco![0]).toMatch(/state\.currentTab\s*=\s*'reforma'/);
   });
 
   it('o card renderiza estado por s.disponivel (Disponível vs Em breve)', () => {
