@@ -19048,6 +19048,7 @@ async function renderReformaPiso() {
         nome: p.contratante_nome, doc: p.contratante_doc, fone: p.contratante_fone,
         endereco: p.obra_endereco, cidade: p.cidade, uf: p.uf,
         comRemocao: !!p.com_remocao, rodapeEmbutido: !!res.rodapeEmbutido,
+        formaPagamento: p.forma_pagamento,
         tema: p.tema, validade: p.validade_dias,
         bdi: cfg.bdiPct, nf: cfg.nfPct, precoPiso: cfg.precoPisoM2, mo: cfg.maoObraM2, rodapePct: cfg.rodapeEmbutidoPct,
       };
@@ -19129,6 +19130,13 @@ function renderReformaForm(v) {
         </select>
         <input id="ref-rodape-pct" type="number" step="1" placeholder="Adicional rodapé embutido %" value="${ed.rodapePct ?? 0}" title="% adicional na mão de obra quando rodapé embutido">
       </div>
+      <div class="form-grid">
+        <select id="ref-pagamento" title="Condições de pagamento (vai no PDF)">
+          <option value="sinal50" ${(ed.formaPagamento || 'sinal50') === 'sinal50' ? 'selected' : ''}>Pagamento: 50% sinal + 50% entrega</option>
+          <option value="avista" ${ed.formaPagamento === 'avista' ? 'selected' : ''}>Pagamento: à vista (100%)</option>
+          <option value="2x" ${ed.formaPagamento === '2x' ? 'selected' : ''}>Pagamento: 2x (50% + 50%)</option>
+        </select>
+      </div>
       <div id="ref-preview" style="margin:10px 0; font-size:13px; color:var(--text-muted);"></div>
       <div style="display:flex; gap:8px;">
         <button id="ref-calcular">🧮 Calcular</button>
@@ -19167,6 +19175,7 @@ function renderReformaForm(v) {
       uf: document.getElementById('ref-uf').value.trim() || 'MA',
       comRemocao: document.getElementById('ref-remocao').checked,
       rodapeEmbutido: document.getElementById('ref-rodape-tipo').value === 'embutido',
+      formaPagamento: document.getElementById('ref-pagamento').value,
       tema: document.getElementById('ref-tema').value,
       validadeDias: Number(document.getElementById('ref-validade').value) || 15,
       ambientes: state.reformaAmbientes
@@ -19242,7 +19251,10 @@ async function renderReformaDetalhe(v) {
   v.innerHTML = `
     <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
       <strong>🧱 ${escape(prop.numero)} · ${escape(prop.contratante_nome || '')}</strong>
-      <button data-ref-voltar style="background:transparent;">← Voltar</button>
+      <div style="display:flex; gap:8px;">
+        <button data-ref-salvar-det class="btn-primary">💾 Salvar / Concluir</button>
+        <button data-ref-voltar style="background:transparent;">← Voltar</button>
+      </div>
     </div>
     <div class="card">
       <p style="margin:0 0 8px;">${Number(prop.area_total_m2).toFixed(2)} m² · ${brlRef(prop.valor_final)} · status <span class="badge">${escape(prop.status)}</span></p>
@@ -19264,6 +19276,7 @@ async function renderReformaDetalhe(v) {
     </div>`;
 
   v.querySelector('[data-ref-voltar]').onclick = () => { state.reformaView = 'lista'; renderReformaPiso(); };
+  v.querySelector('[data-ref-salvar-det]').onclick = () => { alert('✅ Proposta salva. Fotos e plantas já estão gravadas.'); state.reformaView = 'lista'; renderReformaPiso(); };
   document.getElementById('ref-det-pdf').onclick = () => {
     const tema = document.getElementById('ref-det-tema').value;
     window.open('/api/propostas/reforma-piso/' + id + '/pdf?tema=' + tema, '_blank');

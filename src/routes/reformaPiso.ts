@@ -138,7 +138,7 @@ router.get('/:id/pdf', requireAuth, async (req: Request, res: Response) => {
       cidade: String(p.cidade),
       uf: String(p.uf),
       validadeDias: Number(p.validade_dias),
-      comRemocao: !!p.com_remocao,
+      comRemocao: !!p.com_remocao, formaPagamento: (p.forma_pagamento as string) ?? undefined,
     }, resultado, extras);
     const buffer = await mesclarPlantasPdf(baseBuffer, plantasPdfBuffers);
 

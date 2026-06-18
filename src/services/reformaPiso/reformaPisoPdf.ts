@@ -51,6 +51,7 @@ export interface CabecalhoPdf {
   uf: string;
   validadeDias: number;
   comRemocao: boolean;
+  formaPagamento?: string; // 'avista' | 'sinal50' | '2x'
 }
 
 interface TemaCfg {
@@ -221,6 +222,33 @@ export function gerarPdf(
       doc.font(FONT_TXT).fontSize(9).fillColor('#FFFFFF')
         .text(`Equivalente a ${brl(r.valorM2Final)}/m²`, M + 12, y + 30);
       y += 60;
+
+      // -------- Condições de pagamento --------
+      if (y > 660) { doc.addPage(); y = 60; }
+      titulo('CONDIÇÕES DE PAGAMENTO');
+      const fp = cab.formaPagamento || 'sinal50';
+      const vf = r.valorFinal;
+      if (fp === 'avista') {
+        linha(`À vista: ${brl(vf)} — na assinatura da proposta.`);
+      } else if (fp === '2x') {
+        linha(`Parcela 1 (50%): ${brl(vf / 2)} — na assinatura.`);
+        linha(`Parcela 2 (50%): ${brl(vf / 2)} — na conclusão do serviço.`);
+      } else {
+        linha(`Sinal (50%): ${brl(vf / 2)} — na assinatura da proposta.`);
+        linha(`Entrega (50%): ${brl(vf / 2)} — na conclusão/entrega do serviço.`);
+      }
+      y += 6;
+
+      // -------- Observações (ênfase: mão de obra / materiais informativos) --------
+      if (y > 640) { doc.addPage(); y = 60; }
+      titulo('OBSERVAÇÕES');
+      doc.font(FONT_TXT).fontSize(9).fillColor(t.texto).text(
+        'Esta é uma proposta de MÃO DE OBRA (execução/assentamento). Os materiais são fornecidos pelo CONTRATANTE — ' +
+        'o quantitativo de materiais (seção 4) é meramente INFORMATIVO, com preços de referência (tabela SINAPI/cotação) ' +
+        'que NÃO refletem necessariamente o preço de mercado praticado no momento da compra. O valor desta proposta ' +
+        'corresponde exclusivamente à execução dos serviços (mão de obra), acrescido de BDI e impostos/NF quando aplicável.',
+        M, y, { width: innerW });
+      y = doc.y + 8;
 
       // -------- Relatório Fotográfico (se houver fotos) --------
       const fotos = extras?.fotos ?? [];

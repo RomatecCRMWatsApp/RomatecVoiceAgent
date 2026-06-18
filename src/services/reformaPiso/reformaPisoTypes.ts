@@ -70,6 +70,8 @@ export interface DadosProposta {
   uf?: string;
   comRemocao?: boolean;     // piso sobreposto => false
   rodapeEmbutido?: boolean; // v3.74.0: rodapé embutido (rasgo na parede) => valor maior
+  // v3.76.0: condições de pagamento — 'avista' | 'sinal50' | '2x'
+  formaPagamento?: string;
   validadeDias?: number;
   tema?: TemaProposta;
   ambientes: Ambiente[];

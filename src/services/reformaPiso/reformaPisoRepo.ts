@@ -47,8 +47,8 @@ export async function salvar(
          obra_endereco, cidade, uf, com_remocao, config_json, resultado_json,
          area_total_m2, prazo_dias_uteis, mao_obra_m2, bdi_pct,
          valor_materiais, valor_mao_obra, valor_final, valor_m2_final,
-         validade_dias, tema, status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'calculada')`,
+         validade_dias, tema, forma_pagamento, status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'calculada')`,
       [
         numero, null, dados.contratanteNome, dados.contratanteDoc ?? null,
         dados.contratanteFone ?? null, dados.obraEndereco ?? null,
@@ -56,7 +56,7 @@ export async function salvar(
         dados.comRemocao ? 1 : 0, JSON.stringify(cfg), JSON.stringify(r),
         r.areaTotalM2, r.prazoDiasUteis, r.maoObraM2, r.bdiPct,
         r.valorMateriais, r.valorMaoObra, r.valorFinal, r.valorM2Final,
-        dados.validadeDias ?? 15, tema,
+        dados.validadeDias ?? 15, tema, dados.formaPagamento ?? 'sinal50',
       ],
     );
     const propostaId = head.insertId;
@@ -99,7 +99,7 @@ export async function atualizar(
          cidade=?, uf=?, com_remocao=?, config_json=?, resultado_json=?,
          area_total_m2=?, prazo_dias_uteis=?, mao_obra_m2=?, bdi_pct=?,
          valor_materiais=?, valor_mao_obra=?, valor_final=?, valor_m2_final=?,
-         validade_dias=?, tema=?
+         validade_dias=?, tema=?, forma_pagamento=?
        WHERE id=?`,
       [
         dados.contratanteNome, dados.contratanteDoc ?? null, dados.contratanteFone ?? null,
@@ -107,7 +107,7 @@ export async function atualizar(
         dados.comRemocao ? 1 : 0, JSON.stringify(cfg), JSON.stringify(r),
         r.areaTotalM2, r.prazoDiasUteis, r.maoObraM2, r.bdiPct,
         r.valorMateriais, r.valorMaoObra, r.valorFinal, r.valorM2Final,
-        dados.validadeDias ?? 15, tema, id,
+        dados.validadeDias ?? 15, tema, dados.formaPagamento ?? 'sinal50', id,
       ],
     );
     await conn.query('DELETE FROM propostas_reforma_piso_ambientes WHERE proposta_id=?', [id]);

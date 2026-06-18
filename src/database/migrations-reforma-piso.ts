@@ -96,6 +96,9 @@ export async function runReformaPisoMigrations(): Promise<void> {
     { label: 'propostas_reforma_piso_ambientes', sql: CREATE_AMBIENTES },
     { label: 'propostas_reforma_piso_fotos', sql: CREATE_FOTOS },
     { label: 'propostas_reforma_piso_anexos', sql: CREATE_ANEXOS },
+    // v3.76.0: forma de pagamento da proposta (condições de pagamento no PDF).
+    { label: 'ALTER forma_pagamento',
+      sql: "ALTER TABLE propostas_reforma_piso ADD COLUMN forma_pagamento VARCHAR(40) NULL DEFAULT 'sinal50'" },
   ];
   for (const { label, sql } of ops) {
     try {
@@ -103,7 +106,7 @@ export async function runReformaPisoMigrations(): Promise<void> {
       console.log(`[reforma-piso-migrations] OK: ${label}`);
     } catch (err) {
       const msg = (err as Error).message || '';
-      if (/already exists/i.test(msg)) console.log(`[reforma-piso-migrations] ja existe: ${label}`);
+      if (/already exists|Duplicate column/i.test(msg)) console.log(`[reforma-piso-migrations] ja existe: ${label}`);
       else console.error(`[reforma-piso-migrations] FALHA ${label}:`, msg.slice(0, 200));
     }
   }
