@@ -1138,7 +1138,6 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="loteamentos">🏘️ Loteamentos</button>
     <button class="tab" data-tab="galeria">📷 Galeria</button>
     <button class="tab" data-tab="proposta">Proposta</button>
-    <button class="tab" data-tab="reforma">🧱 Reforma de Piso</button>
     <button class="tab" data-tab="diligencias">📅 Diligências</button>
     <button class="tab" data-tab="calculos">🧮 Cálculos</button>
     <button class="tab" data-tab="memoriais">📐 Memoriais & Quantitativos</button>
@@ -1843,7 +1842,10 @@ async function render() {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('view-' + state.currentTab).classList.add('active');
-  document.querySelector(`.tab[data-tab="${state.currentTab}"]`).classList.add('active');
+  // v3.72.0: 'reforma' não tem aba própria (acesso por Proposta > Mão de Obra);
+  // destaca a aba Proposta. ?. evita crash quando a aba não existe.
+  const tabAtiva = state.currentTab === 'reforma' ? 'proposta' : state.currentTab;
+  document.querySelector(`.tab[data-tab="${tabAtiva}"]`)?.classList.add('active');
 
   try {
     const fns = {
