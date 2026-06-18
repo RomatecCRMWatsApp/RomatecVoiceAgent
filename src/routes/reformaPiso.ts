@@ -6,7 +6,7 @@ import { requireAuth } from '../middleware/auth';
 import { calcular, mesclarConfig } from '../services/reformaPiso/reformaPisoCalc';
 import { gerarPdf, mesclarPlantasPdf, type ExtrasPdf } from '../services/reformaPiso/reformaPisoPdf';
 import {
-  salvar, listar, buscarPorId, marcarEnviada,
+  salvar, listar, buscarPorId, marcarEnviada, atualizar,
   adicionarFoto, listarFotos, fotoRaw, removerFoto, carregarFotosBase64,
   adicionarAnexoPlanta, listarAnexos, anexoRaw, removerAnexo, carregarPlantasImagens,
 } from '../services/reformaPiso/reformaPisoRepo';
@@ -72,12 +72,29 @@ router.get('/:id(\\d+)', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/** PUT /api/propostas/reforma-piso/:id  → edita (recalcula + atualiza) */
+router.put('/:id(\\d+)', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const existente = await buscarPorId(id);
+    if (!existente) return res.status(404).json({ ok: false, erro: 'Proposta não encontrada.' });
+    const dados = validar(req.body);
+    const cfg = mesclarConfig(dados.config);
+    const resultado = calcular(dados.ambientes, dados.config, dados.comRemocao, dados.rodapeEmbutido);
+    const tema = (dados.tema ?? 'tradicional') as TemaProposta;
+    await atualizar(id, dados, cfg, resultado, tema);
+    return res.json({ ok: true, id, numero: (existente as Record<string, unknown>).numero, resultado });
+  } catch (err) {
+    return res.status(400).json({ ok: false, erro: (err as Error).message });
+  }
+});
+
 /** POST /api/propostas/reforma-piso/calcular  → preview (não persiste) */
 router.post('/calcular', requireAuth, (req: Request, res: Response) => {
   try {
     const dados = validar(req.body);
     const cfg = mesclarConfig(dados.config);
-    const resultado = calcular(dados.ambientes, dados.config, dados.comRemocao);
+    const resultado = calcular(dados.ambientes, dados.config, dados.comRemocao, dados.rodapeEmbutido);
     return res.json({ ok: true, config: cfg, resultado });
   } catch (err) {
     return res.status(400).json({ ok: false, erro: (err as Error).message });
@@ -89,7 +106,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const dados = validar(req.body);
     const cfg = mesclarConfig(dados.config);
-    const resultado = calcular(dados.ambientes, dados.config, dados.comRemocao);
+    const resultado = calcular(dados.ambientes, dados.config, dados.comRemocao, dados.rodapeEmbutido);
     const tema = (dados.tema ?? 'tradicional') as TemaProposta;
     const salva = await salvar(dados, cfg, resultado, tema);
     return res.status(201).json({ ok: true, id: salva.id, numero: salva.numero, resultado });

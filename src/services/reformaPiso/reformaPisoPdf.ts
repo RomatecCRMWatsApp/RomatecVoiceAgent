@@ -196,10 +196,17 @@ export function gerarPdf(
       // -------- 5. Mão de obra / Prazo / Valor --------
       if (y > 640) { doc.addPage(); y = 60; }
       titulo('5. MÃO DE OBRA, PRAZO E VALOR');
-      linha(`Mão de obra: ${brl(r.maoObraM2)}/m²  ×  ${r.areaTotalM2.toFixed(4)} m²  =  ${brl(r.valorMaoObra)}`);
+      const moBase = r.valorMaoObra - r.valorRodapeAdicional;
+      linha(`Mão de obra (assentamento): ${brl(r.maoObraM2)}/m²  ×  ${r.areaTotalM2.toFixed(2)} m²  =  ${brl(moBase)}`);
+      if (r.rodapeEmbutido && r.valorRodapeAdicional > 0) {
+        linha(`Rodapé embutido (+${r.rodapeAdicionalPct.toFixed(0)}% mão de obra): ${brl(r.valorRodapeAdicional)}`);
+      } else if (r.rodapeEmbutido) {
+        linha('Rodapé: embutido (sem adicional informado).');
+      }
       linha(`Prazo de execução: ${r.prazoDiasUteis} dias úteis ` +
         `(assentamento ${r.prazoDetalhe.assentamento} + rejunte ${r.prazoDetalhe.rejuntamento} + cura/liberação ${r.prazoDetalhe.curaLiberacao}).`);
       linha(`BDI (${r.bdiPct.toFixed(2)}%) sobre a mão de obra: ${brl(r.valorBdi)}`);
+      if (r.nfPct > 0) linha(`NF / ISS (${r.nfPct.toFixed(2)}%) sobre o serviço: ${brl(r.valorNf)}`);
       linha('Materiais por conta do contratante (quantitativo informativo na seção 4).');
       y += 6;
 

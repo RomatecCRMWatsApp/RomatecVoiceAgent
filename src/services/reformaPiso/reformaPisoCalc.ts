@@ -49,6 +49,7 @@ export function calcular(
   ambientes: Ambiente[],
   cfgParcial?: Partial<ConfigCalculo>,
   comRemocao = false,
+  rodapeEmbutido = false,
 ): ResultadoCalculo {
   if (!Array.isArray(ambientes) || ambientes.length === 0) {
     throw new Error('Informe ao menos um ambiente.');
@@ -133,14 +134,22 @@ export function calcular(
   const valorMateriais = arred(insumos.reduce((s, i) => s + i.total, 0), 2);
 
   // 3) Mão de obra (sobre área real) — ESTE é o objeto desta proposta.
-  const valorMaoObra = arred(areaTotalM2 * cfg.maoObraM2, 2);
+  // v3.74.0: rodapé embutido (rasgo na parede) adiciona % de mão de obra.
+  const valorMaoObraBase = arred(areaTotalM2 * cfg.maoObraM2, 2);
+  const rodapeAdicionalPct = rodapeEmbutido ? cfg.rodapeEmbutidoPct : 0;
+  const valorRodapeAdicional = arred(valorMaoObraBase * (rodapeAdicionalPct / 100), 2);
+  const valorMaoObra = arred(valorMaoObraBase + valorRodapeAdicional, 2);
 
   // 4) Subtotal + BDI — incidem APENAS sobre a mão de obra. O quantitativo de
   // materiais é informativo (referência SINAPI/cotação) e fica por conta do
   // contratante, NÃO compondo o valor da proposta. (v3.73.0)
   const subtotal = valorMaoObra;
   const valorBdi = arred(subtotal * (cfg.bdiPct / 100), 2);
-  const valorFinal = arred(subtotal + valorBdi, 2);
+  const valorComBdi = arred(subtotal + valorBdi, 2);
+
+  // 4.1) NF/ISS sobre o serviço (gross-up) — v3.74.0. Incide sobre (mão de obra + BDI).
+  const valorNf = arred(valorComBdi * (cfg.nfPct / 100), 2);
+  const valorFinal = arred(valorComBdi + valorNf, 2);
   const valorM2Final = areaTotalM2 > 0 ? arred(valorFinal / areaTotalM2, 2) : 0;
 
   // 5) Prazo
@@ -158,6 +167,11 @@ export function calcular(
     subtotal,
     bdiPct: cfg.bdiPct,
     valorBdi,
+    rodapeEmbutido,
+    rodapeAdicionalPct,
+    valorRodapeAdicional,
+    nfPct: cfg.nfPct,
+    valorNf,
     valorFinal,
     valorM2Final,
     prazoDiasUteis,

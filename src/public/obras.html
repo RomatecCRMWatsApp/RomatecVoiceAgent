@@ -19016,6 +19016,7 @@ async function renderReformaPiso() {
       <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
         <select data-ref-tema="${p.id}" style="min-width:104px;">${REFORMA_TEMAS.map(t => `<option value="${t[0]}" ${p.tema === t[0] ? 'selected' : ''}>${t[1]}</option>`).join('')}</select>
         <button data-ref-pdf="${p.id}">📄 PDF</button>
+        <button data-ref-editar="${p.id}">✏️ Editar</button>
         <button data-ref-abrir="${p.id}">📷 Fotos/Plantas</button>
         <input data-ref-tel="${p.id}" placeholder="WhatsApp" value="${escape(p.contratante_fone || '')}" style="width:120px;">
         <button data-ref-enviar="${p.id}" style="background:#25d36622; color:#25d366; border:1px solid #25d36655;">📱 Enviar</button>
@@ -19027,10 +19028,35 @@ async function renderReformaPiso() {
       <button id="ref-nova" style="background:var(--gold); color:#06120a; border-color:var(--gold);">➕ Nova proposta</button>
     </div>
     ${cards || '<div class="card empty">Nenhuma proposta de reforma ainda. Clique em ➕ Nova proposta.</div>'}`;
-  document.getElementById('ref-nova').onclick = () => { state.reformaView = 'nova'; state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }]; renderReformaPiso(); };
+  document.getElementById('ref-nova').onclick = () => { state.reformaEditId = null; state.reformaEdit = null; state.reformaView = 'nova'; state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }]; renderReformaPiso(); };
   v.querySelectorAll('[data-ref-pdf]').forEach(b => b.onclick = () => {
     const id = b.dataset.refPdf; const tema = v.querySelector(`[data-ref-tema="${id}"]`).value;
     window.open('/api/propostas/reforma-piso/' + id + '/pdf?tema=' + tema, '_blank');
+  });
+  v.querySelectorAll('[data-ref-editar]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.refEditar; b.disabled = true;
+    try {
+      const d = await api('/api/propostas/reforma-piso/' + id);
+      const p = d.proposta;
+      const cfg = (typeof p.config_json === 'string' ? JSON.parse(p.config_json) : p.config_json) || {};
+      const res = (typeof p.resultado_json === 'string' ? JSON.parse(p.resultado_json) : p.resultado_json) || {};
+      state.reformaEditId = String(id);
+      state.reformaEdit = {
+        nome: p.contratante_nome, doc: p.contratante_doc, fone: p.contratante_fone,
+        endereco: p.obra_endereco, cidade: p.cidade, uf: p.uf,
+        comRemocao: !!p.com_remocao, rodapeEmbutido: !!res.rodapeEmbutido,
+        tema: p.tema, validade: p.validade_dias,
+        bdi: cfg.bdiPct, nf: cfg.nfPct, precoPiso: cfg.precoPisoM2, mo: cfg.maoObraM2, rodapePct: cfg.rodapeEmbutidoPct,
+      };
+      state.reformaAmbientes = (p.ambientes || []).map(a => {
+        const c = Number(a.comprimento_m), l = Number(a.largura_m);
+        const poligonal = !(c > 0 && l > 0);
+        return { descricao: a.descricao, comprimentoM: poligonal ? '' : c, larguraM: poligonal ? '' : l, areaM2: poligonal ? Number(a.area_m2) : '' };
+      });
+      if (!state.reformaAmbientes.length) state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }];
+      state.reformaView = 'nova';
+      renderReformaPiso();
+    } catch (e) { alert('Erro ao abrir edição: ' + e.message); b.disabled = false; }
   });
   v.querySelectorAll('[data-ref-abrir]').forEach(b => b.onclick = () => { state.reformaAtualId = b.dataset.refAbrir; state.reformaView = 'detalhe'; renderReformaPiso(); });
   v.querySelectorAll('[data-ref-enviar]').forEach(b => b.onclick = async () => {
@@ -19046,6 +19072,8 @@ async function renderReformaPiso() {
 }
 
 function renderReformaForm(v) {
+  const ed = state.reformaEdit || {};
+  const editando = !!state.reformaEditId;
   if (!state.reformaAmbientes || !state.reformaAmbientes.length) state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }];
   const ambRows = state.reformaAmbientes.map((a, i) => `
     <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center; flex-wrap:wrap;">
@@ -19058,7 +19086,7 @@ function renderReformaForm(v) {
     '<p style="font-size:11px; color:var(--text-muted); margin:2px 0 0;">Retangular: preencha Compr.×Larg. · Poligonal/irregular: deixe Compr./Larg. vazios e informe a Área (m²) direta.</p>';
   v.innerHTML = `
     <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
-      <strong>🧱 Nova proposta — Reforma de Piso</strong>
+      <strong>🧱 ${editando ? 'Editar' : 'Nova'} proposta — Reforma de Piso</strong>
       <button data-ref-cancel style="background:transparent;">← Voltar</button>
     </div>
     <div class="card">
@@ -19071,24 +19099,32 @@ function renderReformaForm(v) {
         <button type="button" data-gerenciar-clientes style="white-space:nowrap;">📇 Gerenciar Clientes</button>
       </div>
       <div class="form-grid">
-        <input id="ref-nome" placeholder="Contratante *">
-        <input id="ref-doc" placeholder="CNPJ/CPF">
-        <input id="ref-fone" placeholder="WhatsApp">
-        <input id="ref-end" placeholder="Endereço da obra">
-        <input id="ref-cidade" placeholder="Cidade" value="Açailândia">
-        <input id="ref-uf" placeholder="UF" value="MA" maxlength="2">
+        <input id="ref-nome" placeholder="Contratante *" value="${escape(ed.nome || '')}">
+        <input id="ref-doc" placeholder="CNPJ/CPF" value="${escape(ed.doc || '')}">
+        <input id="ref-fone" placeholder="WhatsApp" value="${escape(ed.fone || '')}">
+        <input id="ref-end" placeholder="Endereço da obra" value="${escape(ed.endereco || '')}">
+        <input id="ref-cidade" placeholder="Cidade" value="${escape(ed.cidade || 'Açailândia')}">
+        <input id="ref-uf" placeholder="UF" maxlength="2" value="${escape(ed.uf || 'MA')}">
       </div>
       <p class="section-title">Ambientes</p>
       <div id="ref-ambientes">${ambRows}</div>
       <button id="ref-amb-add" style="font-size:12px;">➕ Adicionar ambiente</button>
       <p class="section-title">Parâmetros</p>
       <div class="form-grid">
-        <select id="ref-tema">${REFORMA_TEMAS.map(t => `<option value="${t[0]}">${t[1]}</option>`).join('')}</select>
-        <input id="ref-validade" type="number" placeholder="Validade (dias)" value="15">
-        <input id="ref-bdi" type="number" step="0.5" placeholder="BDI %" value="20">
-        <input id="ref-preco-piso" type="number" step="0.01" placeholder="Preço piso R$/m²" value="45">
-        <input id="ref-mo" type="number" step="0.01" placeholder="Mão de obra R$/m²" value="40">
-        <label style="display:flex; align-items:center; gap:6px; font-size:12px;"><input type="checkbox" id="ref-remocao"> Com remoção do piso existente</label>
+        <select id="ref-tema">${REFORMA_TEMAS.map(t => `<option value="${t[0]}" ${ed.tema === t[0] ? 'selected' : ''}>${t[1]}</option>`).join('')}</select>
+        <input id="ref-validade" type="number" placeholder="Validade (dias)" value="${ed.validade ?? 15}">
+        <input id="ref-bdi" type="number" step="0.5" placeholder="BDI %" value="${ed.bdi ?? 20}">
+        <input id="ref-nf" type="number" step="0.5" placeholder="NF/ISS %" value="${ed.nf ?? 5}" title="Imposto/NF sobre o serviço (somado ao valor)">
+        <input id="ref-preco-piso" type="number" step="0.01" placeholder="Preço piso R$/m² (ref.)" value="${ed.precoPiso ?? 45}">
+        <input id="ref-mo" type="number" step="0.01" placeholder="Mão de obra R$/m²" value="${ed.mo ?? 40}">
+      </div>
+      <div class="form-grid">
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px;"><input type="checkbox" id="ref-remocao" ${ed.comRemocao ? 'checked' : ''}> Com remoção do piso existente</label>
+        <select id="ref-rodape-tipo">
+          <option value="sobrepor" ${!ed.rodapeEmbutido ? 'selected' : ''}>Rodapé: sobrepor</option>
+          <option value="embutido" ${ed.rodapeEmbutido ? 'selected' : ''}>Rodapé: embutido (valor maior)</option>
+        </select>
+        <input id="ref-rodape-pct" type="number" step="1" placeholder="Adicional rodapé embutido %" value="${ed.rodapePct ?? 0}" title="% adicional na mão de obra quando rodapé embutido">
       </div>
       <div id="ref-preview" style="margin:10px 0; font-size:13px; color:var(--text-muted);"></div>
       <div style="display:flex; gap:8px;">
@@ -19105,7 +19141,7 @@ function renderReformaForm(v) {
       a.areaM2 = document.querySelector(`[data-amb-area="${i}"]`)?.value || '';
     });
   };
-  v.querySelector('[data-ref-cancel]').onclick = () => { state.reformaView = 'lista'; renderReformaPiso(); };
+  v.querySelector('[data-ref-cancel]').onclick = () => { state.reformaEditId = null; state.reformaEdit = null; state.reformaView = 'lista'; renderReformaPiso(); };
   const selCli = document.getElementById('ref-cliente');
   if (selCli) selCli.onchange = () => {
     const c = (state.propostasClientes || []).find(x => String(x.id) === String(selCli.value));
@@ -19127,6 +19163,7 @@ function renderReformaForm(v) {
       cidade: document.getElementById('ref-cidade').value.trim() || 'Açailândia',
       uf: document.getElementById('ref-uf').value.trim() || 'MA',
       comRemocao: document.getElementById('ref-remocao').checked,
+      rodapeEmbutido: document.getElementById('ref-rodape-tipo').value === 'embutido',
       tema: document.getElementById('ref-tema').value,
       validadeDias: Number(document.getElementById('ref-validade').value) || 15,
       ambientes: state.reformaAmbientes
@@ -19139,6 +19176,8 @@ function renderReformaForm(v) {
         })),
       config: {
         bdiPct: Number(document.getElementById('ref-bdi').value) || 20,
+        nfPct: Number(document.getElementById('ref-nf').value) || 0,
+        rodapeEmbutidoPct: Number(document.getElementById('ref-rodape-pct').value) || 0,
         precoPisoM2: Number(document.getElementById('ref-preco-piso').value) || 45,
         maoObraM2: Number(document.getElementById('ref-mo').value) || 40,
       },
@@ -19161,9 +19200,12 @@ function renderReformaForm(v) {
     if (!body.ambientes.length) return alert('Preencha ao menos 1 ambiente.');
     const btn = document.getElementById('ref-salvar'); btn.disabled = true; btn.textContent = 'Salvando...';
     try {
-      const r = await api('/api/propostas/reforma-piso', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
-      state.reformaAtualId = String(r.id); state.reformaView = 'detalhe';
-      alert('✅ Proposta ' + r.numero + ' criada (' + brlRef(r.resultado.valorFinal) + ').');
+      const url = editando ? '/api/propostas/reforma-piso/' + state.reformaEditId : '/api/propostas/reforma-piso';
+      const r = await api(url, { method: editando ? 'PUT' : 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+      const novoId = editando ? state.reformaEditId : String(r.id);
+      state.reformaEditId = null; state.reformaEdit = null;
+      state.reformaAtualId = novoId; state.reformaView = 'detalhe';
+      alert('✅ Proposta ' + r.numero + (editando ? ' atualizada' : ' criada') + ' (' + brlRef(r.resultado.valorFinal) + ').');
       renderReformaPiso();
     } catch (e) { alert('Erro ao salvar: ' + e.message); btn.disabled = false; btn.textContent = '💾 Salvar proposta'; }
   };

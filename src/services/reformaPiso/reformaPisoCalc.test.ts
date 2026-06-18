@@ -26,12 +26,28 @@ describe('reformaPisoCalc', () => {
     expect(c).toBeCloseTo(0.144, 4);
   });
 
-  it('valor final = mão de obra * (1 + BDI) — materiais NÃO entram (informativos)', () => {
-    const r = calcular(salas, { maoObraM2: 40, bdiPct: 20 });
+  it('valor = mão de obra * (1 + BDI) sem NF — materiais NÃO entram (informativos)', () => {
+    const r = calcular(salas, { maoObraM2: 40, bdiPct: 20, nfPct: 0 });
     expect(r.valorMaoObra).toBe(51 * 40);          // 2040
     expect(r.subtotal).toBe(2040);                 // só mão de obra
-    expect(r.valorFinal).toBe(Math.round(2040 * 1.2 * 100) / 100); // 2448
+    expect(r.valorFinal).toBe(Math.round(2040 * 1.2 * 100) / 100); // 2448 (NF 0)
     expect(r.valorMateriais).toBeGreaterThan(0);   // computado, mas informativo (fora do valor)
+  });
+
+  it('v3.74.0: NF/ISS faz gross-up sobre (mão de obra + BDI)', () => {
+    const r = calcular(salas, { maoObraM2: 40, bdiPct: 20, nfPct: 5 });
+    const comBdi = 2040 * 1.2;                      // 2448
+    expect(r.valorNf).toBe(Math.round(comBdi * 0.05 * 100) / 100); // 122.40
+    expect(r.valorFinal).toBe(Math.round((comBdi + comBdi * 0.05) * 100) / 100); // 2570.40
+  });
+
+  it('v3.74.0: rodapé embutido acrescenta % na mão de obra; sobrepor não', () => {
+    const semRodape = calcular(salas, { maoObraM2: 40, bdiPct: 0, nfPct: 0, rodapeEmbutidoPct: 20 }, false, false);
+    const comEmbutido = calcular(salas, { maoObraM2: 40, bdiPct: 0, nfPct: 0, rodapeEmbutidoPct: 20 }, false, true);
+    expect(semRodape.valorRodapeAdicional).toBe(0);
+    expect(semRodape.valorMaoObra).toBe(2040);
+    expect(comEmbutido.valorRodapeAdicional).toBe(Math.round(2040 * 0.2 * 100) / 100); // 408
+    expect(comEmbutido.valorMaoObra).toBe(2040 + 408); // 2448
   });
 
   it('valor por m² final é coerente', () => {

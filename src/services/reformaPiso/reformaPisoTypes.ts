@@ -47,6 +47,8 @@ export interface ConfigCalculo {
   diasCuraLiberacao: number;        // dias de cura/liberação ao tráfego
 
   bdiPct: number;                   // BDI aplicado sobre o subtotal
+  nfPct: number;                    // v3.74.0: alíquota de NF/ISS sobre o serviço (gross-up no valor)
+  rodapeEmbutidoPct: number;        // v3.74.0: % adicional na mão de obra quando rodapé embutido
 
   // Preços de referência (R$) — ajustar por orçamento de compra
   precoPisoM2: number;
@@ -67,6 +69,7 @@ export interface DadosProposta {
   cidade?: string;
   uf?: string;
   comRemocao?: boolean;     // piso sobreposto => false
+  rodapeEmbutido?: boolean; // v3.74.0: rodapé embutido (rasgo na parede) => valor maior
   validadeDias?: number;
   tema?: TemaProposta;
   ambientes: Ambiente[];
@@ -99,6 +102,12 @@ export interface ResultadoCalculo {
   subtotal: number;
   bdiPct: number;
   valorBdi: number;
+  // v3.74.0: rodapé embutido (adicional na mão de obra) + NF/ISS sobre o serviço
+  rodapeEmbutido: boolean;
+  rodapeAdicionalPct: number;
+  valorRodapeAdicional: number;
+  nfPct: number;
+  valorNf: number;
   valorFinal: number;
   valorM2Final: number;
   prazoDiasUteis: number;
@@ -131,6 +140,8 @@ export const CONFIG_PADRAO: ConfigCalculo = {
   diasCuraLiberacao: 2,
 
   bdiPct: 20,
+  nfPct: 5,              // ISS típico de serviço (editável por proposta)
+  rodapeEmbutidoPct: 0,  // adicional do rodapé embutido (editável por proposta)
 
   precoPisoM2: 45.0,
   precoArgamassaSaco: 32.0,

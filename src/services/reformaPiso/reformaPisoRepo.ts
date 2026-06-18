@@ -81,6 +81,54 @@ export async function salvar(
   }
 }
 
+// v3.74.0: edição de proposta — atualiza cabeçalho + substitui ambientes.
+// Não toca em fotos/plantas (que têm seu próprio CRUD).
+export async function atualizar(
+  id: number,
+  dados: DadosProposta,
+  cfg: ConfigCalculo,
+  r: ResultadoCalculo,
+  tema: TemaProposta,
+): Promise<void> {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(
+      `UPDATE propostas_reforma_piso SET
+         contratante_nome=?, contratante_doc=?, contratante_fone=?, obra_endereco=?,
+         cidade=?, uf=?, com_remocao=?, config_json=?, resultado_json=?,
+         area_total_m2=?, prazo_dias_uteis=?, mao_obra_m2=?, bdi_pct=?,
+         valor_materiais=?, valor_mao_obra=?, valor_final=?, valor_m2_final=?,
+         validade_dias=?, tema=?
+       WHERE id=?`,
+      [
+        dados.contratanteNome, dados.contratanteDoc ?? null, dados.contratanteFone ?? null,
+        dados.obraEndereco ?? null, dados.cidade ?? 'Açailândia', dados.uf ?? 'MA',
+        dados.comRemocao ? 1 : 0, JSON.stringify(cfg), JSON.stringify(r),
+        r.areaTotalM2, r.prazoDiasUteis, r.maoObraM2, r.bdiPct,
+        r.valorMateriais, r.valorMaoObra, r.valorFinal, r.valorM2Final,
+        dados.validadeDias ?? 15, tema, id,
+      ],
+    );
+    await conn.query('DELETE FROM propostas_reforma_piso_ambientes WHERE proposta_id=?', [id]);
+    for (let i = 0; i < r.ambientes.length; i++) {
+      const a = r.ambientes[i];
+      await conn.query<ResultSetHeader>(
+        `INSERT INTO propostas_reforma_piso_ambientes
+          (proposta_id, descricao, comprimento_m, largura_m, area_m2, ordem)
+         VALUES (?,?,?,?,?,?)`,
+        [id, a.descricao, a.comprimentoM, a.larguraM, a.areaM2, i],
+      );
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 export async function listar(limite = 100): Promise<RowDataPacket[]> {
   const lim = Math.min(Math.max(Number(limite) || 100, 1), 500);
   const [rows] = await pool.query<RowDataPacket[]>(
