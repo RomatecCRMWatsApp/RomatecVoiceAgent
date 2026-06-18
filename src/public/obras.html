@@ -6673,9 +6673,12 @@ function renderPropostasLista() {
   document.querySelectorAll('[data-mo-subtipo]').forEach(b => {
     b.onclick = () => {
       // v3.69.0: Reforma / ampliação abre o módulo dedicado de Reforma de Piso.
+      // v3.75.0: abre a LISTA das propostas de reforma (com "Nova proposta"),
+      // não o formulário em branco — assim as propostas já criadas aparecem.
       if (b.dataset.moSubtipo === 'reforma_ampliacao') {
-        state.reformaView = 'nova';
-        state.reformaAmbientes = [{ descricao: '', comprimentoM: '', larguraM: '' }];
+        state.reformaEditId = null;
+        state.reformaEdit = null;
+        state.reformaView = 'lista';
         state.currentTab = 'reforma';
         render();
         return;
