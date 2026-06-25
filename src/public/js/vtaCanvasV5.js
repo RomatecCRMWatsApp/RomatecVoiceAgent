@@ -16,6 +16,7 @@ const CanvasEngine = (() => {
     bg: '#1a2332', gridMinor: 'rgba(255,255,255,0.04)', gridMajor: 'rgba(255,255,255,0.12)',
     wallFill: '#2d5a27', wallStroke: '#4a8f40', door: '#e8b84b', window: '#5ba4cf',
     dim: '#f0c040', snap: '#00ff88', text: '#ffffff', select: '#ffd24a', axis: 'rgba(70,85,122,0.7)',
+    envelope: '#C9A84C', // v3.77.0: retângulo de trabalho (dourado Romatec)
   };
   const state = {
     scale: '1:100', zoom: 1.0, pan: { x: 0, y: 0 }, wallThickness: 15,
@@ -36,6 +37,11 @@ const CanvasEngine = (() => {
   let dragHandle = null, dragLast = null;
   let savedClean = true;
   let modify = null; // {tool, el, phase, base/piv/a, w1, ...}
+  // v3.77.0 — wizard de criação: modo esboço, grade configurável e envelope.
+  let modoEsboco = false;   // 'esboço' = croqui livre (sem grade nem snap-to-grid)
+  let gridCm = 100;         // grade de trabalho (minor) em cm — default 1,0 m
+  let gridMajorCm = 500;    // linha forte da grade (5× a minor)
+  let envelope = null;      // {w,h} em cm — retângulo de trabalho; null = infinito
 
   const cfg = ((typeof window !== 'undefined' && window.VTA_INIT) || {});
   const API = cfg.apiBase || '/api/canvas';
@@ -240,9 +246,11 @@ const CanvasEngine = (() => {
       if (pr.t > 0.05 && pr.t < 0.95) { const s = worldToScreen(pr.x, pr.y); const d = Math.hypot(mousePx.x - s.x, mousePx.y - s.y); if (d < SNAP_RADIUS_PX && d < bestScore) { bestScore = d; best = { x: pr.x, y: pr.y, type: 'wallFace', pr: 2 }; } }
     });
     if (best) return best;
-    const gx = Math.round(mw.x / GRID_CM) * GRID_CM, gy = Math.round(mw.y / GRID_CM) * GRID_CM;
-    const gs = worldToScreen(gx, gy);
-    if (Math.hypot(mousePx.x - gs.x, mousePx.y - gs.y) < SNAP_RADIUS_PX) return { x: gx, y: gy, type: 'gridPoint', pr: 3 };
+    if (!modoEsboco) { // v3.77.0: no esboço livre não há snap-to-grid
+      const gx = Math.round(mw.x / GRID_CM) * GRID_CM, gy = Math.round(mw.y / GRID_CM) * GRID_CM;
+      const gs = worldToScreen(gx, gy);
+      if (Math.hypot(mousePx.x - gs.x, mousePx.y - gs.y) < SNAP_RADIUS_PX) return { x: gx, y: gy, type: 'gridPoint', pr: 3 };
+    }
     return null;
   }
   function drawSnapIndicator() {
@@ -317,14 +325,20 @@ const CanvasEngine = (() => {
   }
 
   function drawGrid() {
-    const minor = 100, major = 500;
+    if (modoEsboco) return; // v3.77.0: esboço livre — sem grade métrica
+    const minor = gridCm, major = gridMajorCm; // v3.77.0: grade configurável
     const tl = screenToWorld(0, 0), br = screenToWorld(W, H);
+    // v3.77.0: com envelope, a grade só pinta DENTRO do retângulo de trabalho.
+    const cx0 = envelope ? Math.max(tl.x, 0) : tl.x, cx1 = envelope ? Math.min(br.x, envelope.w) : br.x;
+    const cy0 = envelope ? Math.max(tl.y, 0) : tl.y, cy1 = envelope ? Math.min(br.y, envelope.h) : br.y;
+    const pTop = worldToScreen(0, cy0).y, pBot = worldToScreen(0, cy1).y;
+    const pLeft = worldToScreen(cx0, 0).x, pRight = worldToScreen(cx1, 0).x;
     const lines = (step, color, lw) => {
       ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath();
-      const x0 = Math.floor(tl.x / step) * step, x1 = Math.ceil(br.x / step) * step;
-      for (let x = x0; x <= x1; x += step) { const s = worldToScreen(x, 0).x; ctx.moveTo(s, 0); ctx.lineTo(s, H); }
-      const y0 = Math.floor(tl.y / step) * step, y1 = Math.ceil(br.y / step) * step;
-      for (let y = y0; y <= y1; y += step) { const s = worldToScreen(0, y).y; ctx.moveTo(0, s); ctx.lineTo(W, s); }
+      const x0 = Math.floor(cx0 / step) * step, x1 = Math.ceil(cx1 / step) * step;
+      for (let x = x0; x <= x1; x += step) { const s = worldToScreen(x, 0).x; ctx.moveTo(s, pTop); ctx.lineTo(s, pBot); }
+      const y0 = Math.floor(cy0 / step) * step, y1 = Math.ceil(cy1 / step) * step;
+      for (let y = y0; y <= y1; y += step) { const s = worldToScreen(0, y).y; ctx.moveTo(pLeft, s); ctx.lineTo(pRight, s); }
       ctx.stroke();
     };
     if (cmToPx(minor) > 6) lines(minor, COL.gridMinor, 1);
@@ -332,13 +346,23 @@ const CanvasEngine = (() => {
     ctx.strokeStyle = COL.axis; ctx.lineWidth = 1; ctx.beginPath();
     const o = worldToScreen(0, 0); ctx.moveTo(o.x, 0); ctx.lineTo(o.x, H); ctx.moveTo(0, o.y); ctx.lineTo(W, o.y); ctx.stroke();
   }
+  // v3.77.0 — envelope (limite de trabalho): traço dourado + leve sombra.
+  function drawEnvelope() {
+    if (!envelope) return;
+    const a = worldToScreen(0, 0), b = worldToScreen(envelope.w, envelope.h);
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 8; ctx.shadowOffsetX = 2; ctx.shadowOffsetY = 2;
+    ctx.strokeStyle = COL.envelope; ctx.lineWidth = 2; ctx.setLineDash([]);
+    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    ctx.restore();
+  }
   function redraw() {
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = COL.bg; ctx.fillRect(0, 0, W, H);
-    drawGrid(); drawRooms(); drawWalls(); drawOpeningsCut(); drawOpenings(); drawDimensions(); drawTexts();
+    drawGrid(); drawEnvelope(); drawRooms(); drawWalls(); drawOpeningsCut(); drawOpenings(); drawDimensions(); drawTexts();
     drawGhost(); drawSelection(); drawSnapIndicator(); updateHud();
     scheduleAutosave();
   }
@@ -801,6 +825,12 @@ const CanvasEngine = (() => {
       let dj = c.dados_json; if (typeof dj === 'string') { try { dj = JSON.parse(dj); } catch { dj = null; } }
       if (dj && dj.engine === 'asbuilt-v3' && dj.state) restoreState(dj.state);
       if (dj && dj.viewport) { state.pan = dj.viewport.pan || state.pan; state.zoom = dj.viewport.zoom || state.zoom; }
+      // v3.77.0: restaura config do wizard (modo/grade/envelope) gravada em meta.
+      if (dj && dj.meta) {
+        if (dj.meta.modo === 'esboco') modoEsboco = true;
+        if (dj.meta.gridCm > 0) { gridCm = dj.meta.gridCm; gridMajorCm = gridCm * 5; }
+        if (dj.meta.envW > 0 && dj.meta.envH > 0) envelope = { w: dj.meta.envW, h: dj.meta.envH };
+      }
       const tt = document.getElementById('title-text'); if (tt && c.titulo) tt.textContent = c.titulo;
       if (c.escala_grafica && BASE_SCALE[c.escala_grafica]) { state.scale = c.escala_grafica; const sel = document.getElementById('sel-escala'); if (sel) sel.value = c.escala_grafica; }
       const vb = document.getElementById('vinculo-badge'); if (vb) { vb.style.display = ''; vb.textContent = '🔗 Editando #' + c.id; }
@@ -811,14 +841,14 @@ const CanvasEngine = (() => {
   }
   function ensureCanvas() {
     if (canvasId) return Promise.resolve(canvasId);
-    const body = { tipo: 'croqui', titulo: titleNow(), escala_grafica: escalaNow(), largura_virtual: 2000, altura_virtual: 2000, laudo_id: cfg.laudoId ?? null, proposta_id: cfg.propostaId ?? null };
+    const body = { tipo: 'croqui', titulo: titleNow(), escala_grafica: escalaNow(), largura_virtual: envelope ? envelope.w : 2000, altura_virtual: envelope ? envelope.h : 2000, laudo_id: cfg.laudoId ?? null, proposta_id: cfg.propostaId ?? null };
     return api('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(j => { canvasId = j.id; return canvasId; });
   }
   function save() {
     setLoading(true);
     return ensureCanvas().then(id => api('/' + id, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ titulo: titleNow(), escala_grafica: escalaNow(), largura_virtual: 2000, altura_virtual: 2000, dados_json: { engine: 'asbuilt-v3', state: serializeState(), viewport: { pan: state.pan, zoom: state.zoom } }, dados_svg: svgConteudo() }),
+      body: JSON.stringify({ titulo: titleNow(), escala_grafica: escalaNow(), largura_virtual: envelope ? envelope.w : 2000, altura_virtual: envelope ? envelope.h : 2000, dados_json: { engine: 'asbuilt-v3', state: serializeState(), viewport: { pan: state.pan, zoom: state.zoom }, meta: { modo: modoEsboco ? 'esboco' : 'escala', uso: cfg.modoUso || 'edificacao', unidade: cfg.unidade || 'm', gridCm: gridCm, envW: envelope ? envelope.w : null, envH: envelope ? envelope.h : null } }, dados_svg: svgConteudo() }),
     })).then(() => { savedClean = true; clearAutosave(); showToast('Salvo com sucesso ✓', 1400); return canvasId; }).catch(e => { showToast('Erro ao salvar: ' + e.message, 2200); throw e; }).finally(() => setLoading(false));
   }
   function gerarPrancha(form) {
@@ -893,13 +923,32 @@ const CanvasEngine = (() => {
     on('tbl-csv', () => copyTable(',')); on('tbl-tsv', () => copyTable('\t')); on('tbl-close', () => { const o = document.getElementById('tablesOverlay'); if (o) o.style.display = 'none'; });
   }
 
+  // v3.77.0 — aplica parâmetros vindos do wizard (?modo=&grid=&w=&h=).
+  function applyWizardCfg() {
+    if (cfg.modoDesenho === 'esboco') modoEsboco = true;
+    if (cfg.gridCm > 0) { gridCm = cfg.gridCm; gridMajorCm = gridCm * 5; }
+    if (cfg.envW > 0 && cfg.envH > 0) envelope = { w: cfg.envW, h: cfg.envH };
+  }
+  // v3.77.0 — enquadra o envelope na viewport (zoom-fit) mantendo proporção.
+  function fitEnvelope() {
+    if (!envelope) return;
+    const pad = 40, k0 = BASE_SCALE[state.scale] || 0.38;
+    const sx = (W - pad * 2) / envelope.w, sy = (H - pad * 2) / envelope.h;
+    const target = Math.min(sx, sy);
+    if (target > 0 && isFinite(target)) state.zoom = Math.max(0.05, target / k0);
+    state.pan = { x: pad, y: pad };
+  }
+
   function init() {
     canvas = document.getElementById('main-canvas'); ctx = canvas.getContext('2d'); wrap = document.getElementById('canvas-wrap');
     canvasId = cfg.canvasId || null;
     if (cfg.escala && BASE_SCALE[cfg.escala]) { state.scale = cfg.escala; const sel = document.getElementById('sel-escala'); if (sel) sel.value = cfg.escala; }
+    applyWizardCfg(); // v3.77.0
     resizeCanvas(); bind(); setTool('wall');
     state.pan = { x: 80, y: 80 };
-    loadExisting().finally(() => { redraw(); offerRecovery(); showToast('Canvas pronto ✓', 1000); });
+    loadExisting().then(existed => {
+      if (!existed && envelope) fitEnvelope(); // v3.77.0: fit só em croqui novo do wizard
+    }).finally(() => { redraw(); offerRecovery(); showToast('Canvas pronto ✓', 1000); });
   }
 
   return {

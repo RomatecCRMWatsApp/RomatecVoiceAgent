@@ -263,6 +263,13 @@
       laudoId: vinc.laudo_id, propostaId: vinc.proposta_id,
       titulo: titulo || 'Croqui As-Built', escala: escala,
       tipoPlanta: q.get('tipo_planta') || 'croqui',
+      // v3.77.0: parâmetros do wizard de criação (tipo + dimensões + grade)
+      modoDesenho: q.get('modo') === 'esboco' ? 'esboco' : 'escala',
+      modoUso: q.get('uso') === 'campo' ? 'campo' : 'edificacao',
+      unidade: q.get('un') === 'cm' ? 'cm' : 'm',
+      gridCm: q.get('grid') ? Number(q.get('grid')) : null,
+      envW: q.get('w') ? Number(q.get('w')) : null,
+      envH: q.get('h') ? Number(q.get('h')) : null,
       apiBase: '/api/canvas',
     };
     // testes só com ?debug=1
