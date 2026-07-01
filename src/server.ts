@@ -71,6 +71,9 @@ import memoriaisHidraulicoRouter from './routes/memoriais'; // v3.49.2 Memorial 
 import canvasGraficoRouter from './routes/canvasGrafico';
 import relatorioFotograficoRouter from './routes/relatorioFotografico';
 import reformaPisoRouter from './routes/reformaPiso'; // v3.67.0
+import vtoChecklistRouter from './routes/vtoChecklist'; // v3.78.0 — VTO Checklist de Atividades
+import { buscarPorHash as buscarChecklistPorHash } from './services/vtoChecklistRepo'; // v3.78.0 — validação pública /v/:hash
+import { gerarChecklistPdf } from './services/vtoChecklistPdf'; // v3.78.0
 import galeriaExportRouter from './routes/galeriaExport'; // Feature 04 — export Galeria p/ AvalieImob (X-API-Key)
 import pdfPrimeRouter from './routes/pdfPrime'; // v1.99.16 — export PDF templates Prime I/II
 import diligenciasRouter from './routes/diligencias'; // v3.54.0 — Diligências de Campo
@@ -191,6 +194,12 @@ app.use('/api/pdf-prime', pdfPrimeRouter); // v1.99.16 — export PDF templates 
 app.use('/api/diligencias', diligenciasRouter); // v3.54.0 — Diligências de Campo
 app.use('/api/wifi', wifiLeadRoutes); // v3.61.0 — Captive Portal / Captação de Leads Wi-Fi
 app.use('/api/propostas/reforma-piso', reformaPisoRouter); // v3.67.0 — Proposta de Reforma (Piso Sobreposto)
+app.use('/api/gestao-obra/vto-checklist', vtoChecklistRouter); // v3.78.0 — VTO Checklist de Atividades
+// v3.78.0: VTO Checklist de Atividades (Gestão de Obra)
+void (async () => {
+  try { const m = await import('./database/migrations-vto-checklist'); await m.runVtoChecklistMigrations(); }
+  catch (err) { console.error('[vto-checklist-migrations] FALHA fatal:', err); }
+})();
 (async () => {
   try { const m = await import('./database/migrations-wifi-leads'); await m.runMigrationsWifiLeads(); }
   catch (err) { console.error('[wifi-leads-migrations] FALHA fatal:', err); }
@@ -4372,6 +4381,22 @@ app.get('/v/:hash/json', async (req: Request, res: Response) => {
         } : null,
       });
     }
+    // v3.78.0: fallback para VTO Checklist de Atividades (Gestão de Obra).
+    const chk = await buscarChecklistPorHash(hash);
+    if (chk) {
+      return res.json({
+        tipo: 'vto_checklist',
+        checklist: {
+          numero_vto: chk.numero_vto,
+          obra_nome: chk.obra_nome,
+          cliente: chk.cliente,
+          cidade_uf: chk.cidade_uf,
+          data_vistoria: chk.data_vistoria,
+          percentual_fisico: chk.percentual_fisico,
+          status: chk.status,
+        },
+      });
+    }
     return res.status(404).json({ error: 'Hash invalido' });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -4397,6 +4422,14 @@ app.get('/v/:hash/pdf', async (req: Request, res: Response) => {
       const buf = await propostasConsultoria.gerarPdfPropostaConsultoriaComAnexos(p.id);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${p.numero}.pdf"`);
+      return res.send(buf);
+    }
+    // v3.78.0: PDF do VTO Checklist pela validação pública.
+    const chk = await buscarChecklistPorHash(hash);
+    if (chk) {
+      const buf = await gerarChecklistPdf(chk);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="VTO-Checklist-${chk.numero_vto || chk.id}.pdf"`);
       return res.send(buf);
     }
     return res.status(404).json({ error: 'Hash invalido' });
