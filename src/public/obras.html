@@ -6100,6 +6100,13 @@ function renderVto() {
       </div>
     </div>` : '';
   v.innerHTML = `${obraSelector()}
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
+    <div style="min-width:200px;">
+      <p class="section-title" style="margin:0;">📋 Checklist de Atividades da Obra</p>
+      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Acompanhamento por disciplina (22 áreas) — % de avanço físico automático, PDF e envio por WhatsApp.</p>
+    </div>
+    <a href="/vto-checklist.html?obra=${escape(state.currentObra||'')}&obra_nome=${encodeURIComponent((state.obras.find(o=>String(o.id)===String(state.currentObra))||{}).nome||'')}" style="background:var(--success); color:#fff; border:1px solid var(--success); border-radius:8px; padding:10px 16px; font-weight:600; font-size:13px; text-decoration:none; white-space:nowrap;">Abrir checklist →</a>
+  </div>
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
       <p class="section-title" style="margin:0;">${escape(titulo)}</p>

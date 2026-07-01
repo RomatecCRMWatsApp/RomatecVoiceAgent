@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VTO — Checklist de Atividades | Romatec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--green:#0C3320;--green-2:#14472B;--gold:#C9A84C;--gold-soft:#E3D19A;--paper:#FBFAF6;--ink:#1C1C18;--muted:#6A6656;--line:#D8D3C4;--line-strong:#B9B39F;--write:#B4AE99;}
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:#E7E4DA;color:var(--ink);font-family:'Inter',system-ui,sans-serif;font-size:12px;line-height:1.35;}
+  .toolbar{position:sticky;top:0;z-index:50;display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--green);color:#fff;padding:10px 18px;box-shadow:0 2px 10px rgba(0,0,0,.25);flex-wrap:wrap;}
+  .toolbar .tb-left{display:flex;align-items:center;gap:12px;font-weight:600;letter-spacing:.02em;}
+  .toolbar .tb-left small{color:var(--gold-soft);font-weight:500;}
+  .toolbar .tb-right{display:flex;gap:8px;flex-wrap:wrap;}
+  .toolbar button{font-family:'Inter',sans-serif;font-weight:600;font-size:12px;background:var(--gold);color:var(--green);border:none;border-radius:6px;padding:9px 16px;cursor:pointer;transition:transform .08s ease,filter .15s ease;}
+  .toolbar button:hover{filter:brightness(1.06);}
+  .toolbar button:active{transform:translateY(1px);}
+  .toolbar button:disabled{opacity:.5;cursor:not-allowed;}
+  .toolbar .ghost{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);}
+  .sheet{width:210mm;max-width:100%;min-height:297mm;margin:16px auto;background:var(--paper);padding:14mm 12mm 16mm;box-shadow:0 6px 30px rgba(0,0,0,.18);}
+  .head{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;border-bottom:3px solid var(--green);padding-bottom:10px;}
+  .mark{width:46px;height:46px;border-radius:10px;background:linear-gradient(140deg,var(--gold) 0%,#B4913A 100%);display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08);}
+  .mark svg{width:26px;height:26px;}
+  .brand h1{font-family:'Playfair Display',serif;font-weight:800;font-size:20px;letter-spacing:.06em;color:var(--green);margin:0;line-height:1;}
+  .brand p{margin:3px 0 0;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);}
+  .doc-tag{text-align:right;}
+  .doc-tag .badge{display:inline-block;background:var(--green);color:#fff;font-weight:700;font-size:11px;letter-spacing:.12em;padding:5px 12px;border-radius:5px;}
+  .doc-tag small{display:block;margin-top:5px;color:var(--muted);font-size:9.5px;letter-spacing:.08em;}
+  .doc-title{font-family:'Playfair Display',serif;font-weight:700;font-size:15px;color:var(--green-2);margin:12px 0 2px;letter-spacing:.01em;}
+  .doc-sub{font-size:10px;color:var(--muted);margin:0 0 12px;letter-spacing:.03em;}
+  .ident{display:grid;grid-template-columns:repeat(12,1fr);gap:8px 14px;margin-bottom:14px;}
+  .fld{grid-column:span 6;}.fld.c3{grid-column:span 3;}.fld.c4{grid-column:span 4;}.fld.c8{grid-column:span 8;}.fld.c12{grid-column:span 12;}
+  .fld label{display:block;font-size:8.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin-bottom:1px;}
+  .fld input{width:100%;border:none;border-bottom:1px solid var(--write);background:transparent;font-family:'Inter';font-size:12px;padding:2px 1px;color:var(--ink);height:20px;}
+  .fld input:focus{outline:none;border-bottom-color:var(--gold);}
+  .legend{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;background:#F1EEE3;border:1px solid var(--line);border-left:4px solid var(--gold);padding:7px 12px;border-radius:4px;margin-bottom:12px;font-size:10px;}
+  .legend b{color:var(--green);letter-spacing:.06em;font-size:9.5px;text-transform:uppercase;}
+  .legend .lg{display:inline-flex;align-items:center;gap:5px;}
+  .legend .box{width:13px;height:13px;border:1.6px solid var(--green);border-radius:3px;display:inline-block;}
+  .legend .box.a{border-color:#B4913A;background:repeating-linear-gradient(45deg,transparent,transparent 2px,var(--gold-soft) 2px,var(--gold-soft) 4px);}
+  .legend .box.c{background:var(--green);}
+  .disc{margin-bottom:10px;}
+  .disc-head{display:flex;align-items:center;gap:10px;background:var(--green);color:#fff;padding:6px 10px;border-radius:5px 5px 0 0;}
+  .disc-head .n{font-family:'Playfair Display',serif;font-weight:700;font-size:14px;color:var(--gold);min-width:26px;text-align:center;border-right:1px solid rgba(255,255,255,.25);padding-right:8px;line-height:1;}
+  .disc-head h3{margin:0;font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;}
+  .disc-head .pct{margin-left:auto;background:var(--gold);color:var(--green);font-weight:700;font-size:11px;letter-spacing:.02em;padding:2px 9px;border-radius:20px;min-width:44px;text-align:center;}
+  .progress{display:flex;align-items:center;gap:12px;background:var(--green);color:#fff;border-radius:5px;padding:8px 14px;margin-bottom:12px;position:sticky;top:52px;z-index:20;}
+  .progress .lbl{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-soft);white-space:nowrap;}
+  .progress .bar{flex:1;height:12px;background:rgba(255,255,255,.15);border-radius:8px;overflow:hidden;}
+  .progress .bar > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--gold),#E3D19A);transition:width .25s ease;}
+  .progress .val{font-family:'Playfair Display',serif;font-weight:800;font-size:18px;color:var(--gold);min-width:52px;text-align:right;}
+  table{width:100%;border-collapse:collapse;}
+  thead th{background:#EDEADE;color:var(--green);font-size:8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 6px;border:1px solid var(--line);text-align:left;}
+  .col-ativ{width:32%;}.col-local{width:17%;}.col-m2{width:9%;}.col-status{width:17%;}.col-obs{width:25%;}
+  tbody td{border:1px solid var(--line);padding:2px 6px;height:32px;vertical-align:middle;}
+  tbody tr:nth-child(even) td{background:#FCFBF7;}
+  tbody tr:nth-child(odd) td{background:#F7F5EC;}
+  .ativ{font-size:11px;font-weight:500;color:var(--ink);}
+  td input.cell{width:100%;border:none;background:transparent;border-bottom:1px dotted var(--write);font-family:'Inter';font-size:11px;padding:2px 1px;color:var(--ink);}
+  td input.cell:focus{outline:none;border-bottom-color:var(--gold);}
+  .status-cell{padding:0 4px;}
+  .tri{display:flex;gap:8px;justify-content:center;align-items:center;}
+  .tri label{display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;}
+  .tri span{font-size:7px;font-weight:700;letter-spacing:.04em;color:var(--muted);text-transform:uppercase;}
+  .tri input{-webkit-appearance:none;appearance:none;width:16px;height:16px;border:1.6px solid var(--line-strong);border-radius:3px;background:var(--paper);cursor:pointer;position:relative;margin:0;}
+  .tri input:checked{border-color:var(--green);background:var(--green);}
+  .tri input:checked::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);}
+  .obs-block{margin-top:16px;}
+  .obs-block h3{font-family:'Playfair Display',serif;font-weight:700;font-size:13px;color:var(--green-2);margin:0 0 6px;padding-bottom:4px;border-bottom:2px solid var(--gold);letter-spacing:.02em;}
+  .obs-block textarea{width:100%;min-height:90px;border:1px solid var(--line);border-radius:4px;background:var(--paper);font-family:'Inter';font-size:12px;padding:8px 10px;color:var(--ink);resize:vertical;}
+  .obs-block textarea:focus{outline:none;border-color:var(--gold);}
+  .sign{display:grid;grid-template-columns:1.4fr 1fr;gap:26px;margin-top:22px;}
+  .sign .art{font-size:9px;color:var(--muted);}
+  .sign .art input{width:100%;border:none;border-bottom:1px solid var(--write);background:transparent;font-size:11px;padding:2px 1px;color:var(--ink);}
+  .sign .art input:focus{outline:none;border-bottom-color:var(--gold);}
+  .sign .line{border-top:1px solid var(--line-strong);padding-top:5px;text-align:center;}
+  .sign .line .who{font-weight:700;font-size:11px;color:var(--green);}
+  .sign .line .role{font-size:9px;color:var(--muted);line-height:1.5;margin-top:2px;}
+  .footer{margin-top:16px;padding-top:8px;border-top:1px solid var(--line);display:flex;justify-content:space-between;font-size:8px;color:var(--muted);letter-spacing:.04em;flex-wrap:wrap;gap:6px;}
+  #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--green);color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.3);display:none;z-index:200;}
+  @media (max-width:640px){.sheet{padding:12px;margin:8px auto;}.ident{grid-template-columns:repeat(6,1fr);}.fld,.fld.c8,.fld.c4,.fld.c6{grid-column:span 6;}}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <div class="tb-left">📋 VTO · Checklist de Atividades <small id="tb-sub">ZAYRA · Gestão de Obra</small></div>
+  <div class="tb-right">
+    <button class="ghost" id="btn-voltar">← Voltar</button>
+    <button id="btn-salvar">💾 Salvar</button>
+    <button id="btn-pdf">📄 Gerar PDF</button>
+    <button id="btn-enviar">📱 WhatsApp</button>
+  </div>
+</div>
+
+<div class="sheet">
+  <div class="head">
+    <div class="mark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2L21 20H15.4L12 12.6L8.6 20H3L12 2ZM12 8.2L10.2 12H13.8L12 8.2Z" fill="#0C3320"/></svg></div>
+    <div class="brand"><h1>ROMATEC</h1><p>Consultoria Total · Engenharia &amp; Agrimensura</p></div>
+    <div class="doc-tag"><span class="badge">VTO</span><small>Vistoria Técnica de Obra</small></div>
+  </div>
+  <div class="doc-title">Checklist de Atividades da Obra</div>
+  <p class="doc-sub">Acompanhamento de execução por disciplina — ABNT NBR 12722 / NBR 6118 / NBR 8160 — Módulo Gestão de Obra</p>
+
+  <div class="ident">
+    <div class="fld c8"><label>Obra / Empreendimento</label><input id="f-obra_nome" type="text"></div>
+    <div class="fld c4"><label>Nº VTO</label><input id="f-numero_vto" type="text" placeholder="(automático)"></div>
+    <div class="fld c6"><label>Cliente / Contratante</label><input id="f-cliente" type="text"></div>
+    <div class="fld c6"><label>Endereço da Obra</label><input id="f-endereco" type="text"></div>
+    <div class="fld c4"><label>Cidade / UF</label><input id="f-cidade_uf" type="text"></div>
+    <div class="fld c4"><label>Data da Vistoria</label><input id="f-data_vistoria" type="date"></div>
+    <div class="fld c4"><label>Etapa / % Físico Estimado</label><input id="f-etapa" type="text"></div>
+    <div class="fld c8"><label>Responsável Técnico</label><input id="f-responsavel_tecnico" type="text" value="José Romário Pinto Bezerra — Téc. Edificações / Agrimensura"></div>
+    <div class="fld c4"><label>ART / TRT nº</label><input id="f-art_trt" type="text"></div>
+  </div>
+
+  <div class="legend">
+    <b>Status:</b>
+    <span class="lg"><span class="box"></span> I — Iniciado</span>
+    <span class="lg"><span class="box a"></span> EA — Em andamento</span>
+    <span class="lg"><span class="box c"></span> C — Concluído</span>
+    <span class="lg" style="margin-left:auto;color:var(--muted);">Marque o status e preencha cômodo/local e m² concluído.</span>
+  </div>
+
+  <div class="progress">
+    <span class="lbl">Avanço Físico Geral · automático</span>
+    <span class="bar"><i id="barGeral"></i></span>
+    <span class="val" id="pctGeral">0%</span>
+  </div>
+
+  <div id="disciplinas"><p class="doc-sub">Carregando catálogo…</p></div>
+
+  <div class="obs-block">
+    <h3>Observações Gerais da Vistoria</h3>
+    <textarea id="f-observacoes_gerais" placeholder="Observações gerais…"></textarea>
+  </div>
+
+  <div class="sign">
+    <div>
+      <div class="art">Pendências / providências solicitadas ao contratante:</div>
+      <div class="art"><input id="f-pendencias" type="text"></div>
+      <div class="art" style="margin-top:8px;">Próxima vistoria prevista para:</div>
+      <div class="art"><input id="f-proxima_vistoria" type="text"></div>
+    </div>
+    <div class="line">
+      <div style="height:34px"></div>
+      <div class="who">José Romário Pinto Bezerra</div>
+      <div class="role">Técnico em Edificações · Técnico em Agrimensura<br>CFT/MA 01209185369 · INCRA FQNS<br>Romatec Consultoria Total — Açailândia/MA</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>Romatec Consultoria Total · J R P Bezerra Ltda · CNPJ 17.261.987/0001-09</span>
+    <span>Documento gerado pelo Sistema ZAYRA — Gestão de Obra</span>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+  var API = '/api/gestao-obra/vto-checklist';
+  var q = new URLSearchParams(location.search);
+  var checklistId = q.get('id') ? Number(q.get('id')) : null;
+  var PESO = { nao_iniciado: 0, iniciado: 0.15, em_andamento: 0.5, concluido: 1 };
+  var VAL_TO_STATUS = { I: 'iniciado', EA: 'em_andamento', C: 'concluido' };
+  var STATUS_TO_VAL = { iniciado: 'I', em_andamento: 'EA', concluido: 'C' };
+  var disciplinas = []; // [{disciplina_ordem, disciplina_nome, atividades:[{atividade, atividade_ordem}]}]
+
+  function $(s) { return document.querySelector(s); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function toast(msg, dur) { var t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(t._t); t._t = setTimeout(function () { t.style.display = 'none'; }, dur || 1800); }
+
+  function api(path, opts) {
+    opts = opts || {}; opts.credentials = 'include';
+    return fetch(API + path, opts).then(function (r) {
+      if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); throw new Error('não autenticado'); }
+      return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; });
+    });
+  }
+
+  function gid(d, i) { return 'd' + d + '_' + i; }
+
+  function renderDisciplinas() {
+    var wrap = $('#disciplinas');
+    wrap.innerHTML = disciplinas.map(function (d) {
+      var rows = d.atividades.map(function (a, i) {
+        var g = gid(d.disciplina_ordem, i);
+        return '<tr data-disc="' + d.disciplina_ordem + '">' +
+          '<td class="ativ">' + esc(a.atividade) + '</td>' +
+          '<td><input class="cell" data-fld="comodo_local" data-g="' + g + '"></td>' +
+          '<td><input class="cell" type="number" min="0" step="0.01" data-fld="metros_quadrados" data-g="' + g + '"></td>' +
+          '<td class="status-cell"><div class="tri">' +
+            '<label><input type="checkbox" data-g="' + g + '" data-disc="' + d.disciplina_ordem + '" value="I"><span>I</span></label>' +
+            '<label><input type="checkbox" data-g="' + g + '" data-disc="' + d.disciplina_ordem + '" value="EA"><span>EA</span></label>' +
+            '<label><input type="checkbox" data-g="' + g + '" data-disc="' + d.disciplina_ordem + '" value="C"><span>C</span></label>' +
+          '</div></td>' +
+          '<td><input class="cell" data-fld="observacao" data-g="' + g + '"></td>' +
+        '</tr>';
+      }).join('');
+      return '<div class="disc">' +
+        '<div class="disc-head"><span class="n">' + String(d.disciplina_ordem).padStart(2, '0') + '</span><h3>' + esc(d.disciplina_nome) + '</h3><span class="pct" data-pct="' + d.disciplina_ordem + '">0%</span></div>' +
+        '<table><thead><tr><th class="col-ativ">Atividade</th><th class="col-local">Cômodo / Local</th><th class="col-m2">m² concl.</th><th class="col-status" style="text-align:center;">Status</th><th class="col-obs">Observação</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table></div>';
+    }).join('');
+  }
+
+  // status exclusivo por linha
+  document.addEventListener('change', function (e) {
+    if (e.target.matches && e.target.matches('input[type="checkbox"][data-g]')) {
+      var g = e.target.dataset.g;
+      if (e.target.checked) {
+        document.querySelectorAll('input[data-g="' + g + '"][type="checkbox"]').forEach(function (cb) { if (cb !== e.target) cb.checked = false; });
+      }
+      recalc();
+    }
+  });
+
+  function statusDaLinha(g) {
+    var m = document.querySelector('input[type="checkbox"][data-g="' + g + '"]:checked');
+    return m ? VAL_TO_STATUS[m.value] : 'nao_iniciado';
+  }
+
+  function recalc() {
+    var somaGeral = 0, totalGeral = 0;
+    disciplinas.forEach(function (d) {
+      var soma = 0, n = d.atividades.length;
+      d.atividades.forEach(function (_, i) { soma += PESO[statusDaLinha(gid(d.disciplina_ordem, i))]; });
+      var pct = n ? Math.round((soma / n) * 100) : 0;
+      var badge = document.querySelector('[data-pct="' + d.disciplina_ordem + '"]');
+      if (badge) badge.textContent = pct + '%';
+      somaGeral += soma; totalGeral += n;
+    });
+    var geral = totalGeral ? Math.round((somaGeral / totalGeral) * 100) : 0;
+    $('#pctGeral').textContent = geral + '%';
+    $('#barGeral').style.width = geral + '%';
+  }
+
+  function coletarItens() {
+    var itens = [];
+    disciplinas.forEach(function (d) {
+      d.atividades.forEach(function (a, i) {
+        var g = gid(d.disciplina_ordem, i);
+        var cl = document.querySelector('input[data-fld="comodo_local"][data-g="' + g + '"]');
+        var m2 = document.querySelector('input[data-fld="metros_quadrados"][data-g="' + g + '"]');
+        var ob = document.querySelector('input[data-fld="observacao"][data-g="' + g + '"]');
+        itens.push({
+          disciplina_ordem: d.disciplina_ordem,
+          disciplina_nome: d.disciplina_nome,
+          atividade: a.atividade,
+          atividade_ordem: a.atividade_ordem,
+          status: statusDaLinha(g),
+          comodo_local: cl && cl.value ? cl.value : null,
+          metros_quadrados: m2 && m2.value !== '' ? Number(m2.value) : null,
+          observacao: ob && ob.value ? ob.value : null,
+        });
+      });
+    });
+    return itens;
+  }
+
+  function coletarPayload() {
+    return {
+      obra_id: q.get('obra') ? Number(q.get('obra')) : null,
+      numero_vto: $('#f-numero_vto').value || null,
+      obra_nome: $('#f-obra_nome').value.trim(),
+      cliente: $('#f-cliente').value || null,
+      endereco: $('#f-endereco').value || null,
+      cidade_uf: $('#f-cidade_uf').value || null,
+      data_vistoria: $('#f-data_vistoria').value || null,
+      etapa: $('#f-etapa').value || null,
+      responsavel_tecnico: $('#f-responsavel_tecnico').value || undefined,
+      art_trt: $('#f-art_trt').value || null,
+      observacoes_gerais: $('#f-observacoes_gerais').value || null,
+      pendencias: $('#f-pendencias').value || null,
+      proxima_vistoria: $('#f-proxima_vistoria').value || null,
+      itens: coletarItens(),
+    };
+  }
+
+  function preencher(doc) {
+    ['obra_nome','numero_vto','cliente','endereco','cidade_uf','data_vistoria','etapa','responsavel_tecnico','art_trt','observacoes_gerais','pendencias','proxima_vistoria'].forEach(function (k) {
+      var el = $('#f-' + k); if (el && doc[k] != null) el.value = k === 'data_vistoria' ? String(doc[k]).slice(0, 10) : doc[k];
+    });
+    // marca status + campos dos itens salvos, casando por disciplina_ordem + atividade
+    (doc.itens || []).forEach(function (it) {
+      var d = disciplinas.find(function (x) { return x.disciplina_ordem === it.disciplina_ordem; });
+      if (!d) return;
+      var i = d.atividades.findIndex(function (a) { return a.atividade === it.atividade; });
+      if (i < 0) return;
+      var g = gid(it.disciplina_ordem, i);
+      var val = STATUS_TO_VAL[it.status];
+      if (val) { var cb = document.querySelector('input[type="checkbox"][data-g="' + g + '"][value="' + val + '"]'); if (cb) cb.checked = true; }
+      var cl = document.querySelector('input[data-fld="comodo_local"][data-g="' + g + '"]'); if (cl && it.comodo_local != null) cl.value = it.comodo_local;
+      var m2 = document.querySelector('input[data-fld="metros_quadrados"][data-g="' + g + '"]'); if (m2 && it.metros_quadrados != null) m2.value = it.metros_quadrados;
+      var ob = document.querySelector('input[data-fld="observacao"][data-g="' + g + '"]'); if (ob && it.observacao != null) ob.value = it.observacao;
+    });
+    recalc();
+  }
+
+  var salvando = false;
+  function salvar() {
+    if (salvando) return Promise.reject(new Error('em andamento'));
+    var payload = coletarPayload();
+    if (!payload.obra_nome) { toast('Informe a obra / empreendimento.'); $('#f-obra_nome').focus(); return Promise.reject(new Error('obra_nome')); }
+    salvando = true;
+    var isNew = !checklistId;
+    var p = isNew
+      ? api('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      : api('/' + checklistId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    return p.then(function (r) {
+      if (isNew && r.id) {
+        checklistId = r.id;
+        if (r.numero_vto && !$('#f-numero_vto').value) $('#f-numero_vto').value = r.numero_vto;
+        history.replaceState(null, '', location.pathname + '?id=' + checklistId);
+      }
+      toast('Salvo ✓ (' + (r.percentual_fisico != null ? r.percentual_fisico : recalcGeral()) + '%)');
+      return checklistId;
+    }).catch(function (err) { toast('Erro ao salvar: ' + err.message, 2600); throw err; })
+      .finally(function () { salvando = false; });
+  }
+
+  function recalcGeral() { return $('#pctGeral').textContent.replace('%', ''); }
+
+  function gerarPdf() {
+    salvar().then(function (id) { window.open(API + '/' + id + '/pdf', '_blank'); }).catch(function () {});
+  }
+
+  function enviar() {
+    var tel = prompt('WhatsApp do cliente (ex: 5599...):', q.get('tel') || '');
+    if (!tel) return;
+    salvar().then(function (id) {
+      toast('Enviando…', 4000);
+      return api('/' + id + '/enviar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telefone: tel }) });
+    }).then(function () { toast('Enviado por WhatsApp ✓'); }).catch(function (err) { if (err && err.message) toast('Envio: ' + err.message, 3000); });
+  }
+
+  function voltar() { location.href = '/obras#vto'; }
+
+  // Boot
+  function boot() {
+    $('#btn-voltar').addEventListener('click', voltar);
+    $('#btn-salvar').addEventListener('click', function () { salvar().catch(function () {}); });
+    $('#btn-pdf').addEventListener('click', gerarPdf);
+    $('#btn-enviar').addEventListener('click', enviar);
+    if (q.get('obra_nome')) $('#f-obra_nome').value = q.get('obra_nome');
+    if (!$('#f-data_vistoria').value) { try { $('#f-data_vistoria').value = new Date().toISOString().slice(0, 10); } catch (e) {} }
+
+    api('/catalogo').then(function (j) {
+      disciplinas = (j && j.disciplinas) || [];
+      renderDisciplinas();
+      recalc();
+      if (checklistId) {
+        $('#tb-sub').textContent = 'Editando #' + checklistId;
+        return api('/' + checklistId).then(function (r) { if (r && r.checklist) preencher(r.checklist); });
+      }
+    }).catch(function (err) {
+      $('#disciplinas').innerHTML = '<p class="doc-sub" style="color:#a33">Falha ao carregar catálogo: ' + esc(err.message) + '</p>';
+    });
+  }
+
+  if (document.readyState !== 'loading') boot();
+  else document.addEventListener('DOMContentLoaded', boot);
+})();
+</script>
+</body>
+</html>
