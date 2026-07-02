@@ -4786,9 +4786,14 @@ app.post('/api/folha/preview', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Parâmetros: obraId, dataInicio, dataFim' }); return;
     }
     const m = await import('./services/folhaFechamento');
-    const data = await m.previewFolha(Number(obraId), String(dataInicio), String(dataFim));
+    // v3.80.0: escopo opcional por funcionário (null = obra inteira).
+    const escopo = m.normalizarEscopoFolha(req.body);
+    const data = await m.previewFolha(Number(obraId), String(dataInicio), String(dataFim), escopo.funcionarioId);
     res.json(data);
-  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+  } catch (err) {
+    const status = (err as { status?: number }).status ?? 400;
+    res.status(status).json({ error: (err as Error).message, detalhe: (err as { payload?: unknown }).payload ?? null });
+  }
 });
 
 // v3.50.0: fechar folha requer PIN (admin/owner bypass)
@@ -4799,6 +4804,8 @@ app.post('/api/folha/fechar', requireAuth, requirePin, async (req: Request, res:
       res.status(400).json({ error: 'obraId, dataInicio e dataFim são obrigatórios' }); return;
     }
     const m = await import('./services/folhaFechamento');
+    // v3.80.0: escopo por funcionário + desvínculo (valida desvincular exige funcionário).
+    const escopo = m.normalizarEscopoFolha(body);
     const result = await m.fecharFolha({
       obraId: Number(body.obraId),
       dataInicio: String(body.dataInicio),
@@ -4807,9 +4814,15 @@ app.post('/api/folha/fechar', requireAuth, requirePin, async (req: Request, res:
       rotulo: body.rotulo,
       fechadoPor: body.fechadoPor ? String(body.fechadoPor) : undefined,
       observacoes: body.observacoes,
+      funcionarioId: escopo.funcionarioId,
+      desvincular: escopo.desvincular,
+      forcarDesvinculo: escopo.forcarDesvinculo,
     });
     res.json(result);
-  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+  } catch (err) {
+    const status = (err as { status?: number }).status ?? 400;
+    res.status(status).json({ error: (err as Error).message, detalhe: (err as { payload?: unknown }).payload ?? null });
+  }
 });
 
 app.get('/api/folha/listar/:obraId', async (req: Request, res: Response) => {

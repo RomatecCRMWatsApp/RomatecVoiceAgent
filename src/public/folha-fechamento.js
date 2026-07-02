@@ -56,6 +56,18 @@
           </div>
         </div>
 
+        <!-- v3.80.0: escopo por funcionário + desvínculo -->
+        <div style="margin-bottom:12px;">
+          <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:4px;">Fechar folha de</label>
+          <select id="ff-funcionario" style="width:100%; padding:8px; background:#1a2920; border:1px solid #2d4a3a; color:#e8f0eb; border-radius:6px;">
+            <option value="">Todos os funcionários</option>
+          </select>
+          <label id="ff-desvincular-wrap" title="Disponível ao escolher um funcionário específico" style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:13px; color:#9ca3af; cursor:pointer;">
+            <input type="checkbox" id="ff-desvincular" disabled> Desvincular da obra após fechar
+            <span style="color:#6b7280;">(transfere — fica livre pra outra obra)</span>
+          </label>
+        </div>
+
         <div id="ff-info-padrao" style="font-size:12px; color:#9ca3af; margin-bottom:12px;"></div>
 
         <div style="display:flex; gap:8px; margin-bottom:16px;">
@@ -71,6 +83,7 @@
           <h4 style="margin:0 0 8px 0; color:#4ade80;">Preview</h4>
           <div id="ff-totais" style="font-size:13px; color:#d1d5db; margin-bottom:8px;"></div>
           <div id="ff-tabela" style="max-height:300px; overflow:auto; border:1px solid #2d4a3a; border-radius:6px;"></div>
+          <div id="ff-orfas" style="display:none; margin-top:10px; padding:10px; background:#3b0d0d; border:1px solid #7f1d1d; border-radius:6px; font-size:12px; color:#fca5a5;"></div>
 
           <div style="margin-top:12px;">
             <label style="display:block; font-size:12px; color:#9ca3af; margin-bottom:4px;">Rótulo (opcional)</label>
@@ -100,8 +113,34 @@
     modal.querySelector('#ff-btn-cancelar').addEventListener('click', () => fecharModal());
     modal.querySelector('#ff-btn-preview').addEventListener('click', preview);
     modal.querySelector('#ff-btn-confirmar').addEventListener('click', confirmar);
+    // v3.80.0: "desvincular" só habilita com funcionário específico.
+    modal.querySelector('#ff-funcionario').addEventListener('change', (e) => {
+      const chk = modal.querySelector('#ff-desvincular');
+      const especifico = e.target.value !== '';
+      chk.disabled = !especifico;
+      if (!especifico) chk.checked = false;
+    });
 
     return modal;
+  }
+
+  // v3.80.0: popula o select com os funcionários do período (preview "Todos").
+  async function popularFuncionarios(modal, obraId, dataInicio, dataFim) {
+    const sel = modal.querySelector('#ff-funcionario');
+    if (!sel || !dataInicio || !dataFim) return;
+    const atual = sel.value;
+    try {
+      const r = await apiFetch(`${API}/api/folha/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ obraId: Number(obraId), dataInicio, dataFim }),
+      });
+      const data = await r.json();
+      const itens = Array.isArray(data.itens) ? data.itens : [];
+      sel.innerHTML = '<option value="">Todos os funcionários</option>' +
+        itens.map(it => `<option value="${it.funcionario_id}">${escapeHtml(it.nome)}${it.funcao ? ' · ' + escapeHtml(it.funcao) : ''}</option>`).join('');
+      if (atual && sel.querySelector(`option[value="${atual}"]`)) sel.value = atual;
+    } catch (e) { /* silencioso — mantém "Todos" */ }
   }
 
   function fecharModal() {
@@ -132,6 +171,12 @@
       alert('Erro ao calcular período sugerido: ' + err.message);
       return;
     }
+    // v3.80.0: reseta escopo e popula funcionários do período sugerido.
+    const selF = modal.querySelector('#ff-funcionario');
+    if (selF) selF.value = '';
+    const chkD = modal.querySelector('#ff-desvincular');
+    if (chkD) { chkD.checked = false; chkD.disabled = true; }
+    await popularFuncionarios(modal, obraId, modal.querySelector('#ff-data-inicio').value, modal.querySelector('#ff-data-fim').value);
     modal.style.display = 'flex';
   }
 
@@ -143,12 +188,16 @@
     const dataFim = modal.querySelector('#ff-data-fim').value;
     if (!dataInicio || !dataFim) return alert('Preencha as duas datas.');
     if (dataFim < dataInicio) return alert('Data fim anterior à data início.');
+    // v3.80.0: escopo por funcionário + desvínculo
+    const funcRaw = modal.querySelector('#ff-funcionario').value;
+    const funcionario_id = funcRaw === '' ? null : Number(funcRaw);
+    const desvincular = modal.querySelector('#ff-desvincular').checked;
 
     try {
       const r = await apiFetch(`${API}/api/folha/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ obraId: Number(obraId), dataInicio, dataFim }),
+        body: JSON.stringify({ obraId: Number(obraId), dataInicio, dataFim, funcionario_id, desvincular }),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Erro no preview');
@@ -194,6 +243,17 @@
           <tbody>${linhas}</tbody>
         </table>
       `;
+      // v3.80.0: aviso de diária órfã (só com desvincular marcado).
+      const orf = modal.querySelector('#ff-orfas');
+      const pend = (desvincular && data.pendencias_fora_intervalo && data.pendencias_fora_intervalo[0])
+        ? data.pendencias_fora_intervalo[0].datas : [];
+      if (orf) {
+        if (pend.length) {
+          orf.style.display = 'block';
+          orf.innerHTML = `⚠ Há diárias pendentes <strong>fora do período</strong> (${pend.join(', ')}). ` +
+            `Se confirmar o desvínculo, será preciso forçar — essas diárias continuam pendentes, sem vínculo ativo.`;
+        } else { orf.style.display = 'none'; orf.innerHTML = ''; }
+      }
       modal.querySelector('#ff-preview-area').style.display = 'block';
     } catch (err) {
       alert('Erro: ' + err.message);
@@ -203,6 +263,11 @@
   // ============== CONFIRMAR ==============
   async function confirmar() {
     const modal = document.getElementById('modal-fechar-folha');
+    // v3.80.0: escopo por funcionário + desvínculo
+    const funcRaw = modal.querySelector('#ff-funcionario').value;
+    const funcionario_id = funcRaw === '' ? null : Number(funcRaw);
+    const desvincular = modal.querySelector('#ff-desvincular').checked;
+    const nomeFunc = funcionario_id != null ? (modal.querySelector('#ff-funcionario').selectedOptions[0]?.textContent || 'funcionário') : null;
     const body = {
       obraId: Number(modal.dataset.obraId),
       dataInicio: modal.querySelector('#ff-data-inicio').value,
@@ -210,18 +275,36 @@
       rotulo: modal.querySelector('#ff-rotulo').value || undefined,
       observacoes: modal.querySelector('#ff-obs').value || undefined,
       fechadoPor: window.USUARIO_ATUAL || 'José Romário',
+      funcionario_id,
+      desvincular,
     };
-    if (!confirm(`Confirmar fechamento de ${body.dataInicio} a ${body.dataFim}?\nEssa ação BLOQUEIA os dias marcados nesse período.`)) return;
+    const escopoTxt = funcionario_id != null ? `a folha de ${nomeFunc}` : 'a folha de TODOS';
+    const desvTxt = desvincular ? '\nE DESVINCULAR o funcionário da obra (transfere).' : '';
+    if (!confirm(`Confirmar ${escopoTxt} de ${body.dataInicio} a ${body.dataFim}?\nEssa ação BLOQUEIA os dias marcados nesse período.${desvTxt}`)) return;
 
-    try {
+    async function postFechar(payload) {
       const r = await apiFetch(`${API}/api/folha/fechar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error);
-      alert(`✓ Fechamento criado (id ${data.fechamentoId})\n${data.totalFuncionarios} funcionários · Líquido R$ ${Number(data.totalLiquido).toFixed(2).replace('.', ',')}`);
+      return { r, data: await r.json() };
+    }
+
+    try {
+      let { r, data } = await postFechar(body);
+      // 409: diária órfã fora do período — oferece forçar o desvínculo.
+      if (r.status === 409 && data.detalhe && data.detalhe.datas_pendentes) {
+        const ok = confirm(
+          `Não dá pra desvincular: há diárias pendentes fora do período (${data.detalhe.datas_pendentes.join(', ')}).\n\n` +
+          `Desvincular mesmo assim? As diárias de fora continuam pendentes, sem vínculo ativo.`
+        );
+        if (!ok) return;
+        ({ r, data } = await postFechar({ ...body, forcar_desvinculo: true }));
+      }
+      if (!r.ok) throw new Error(data.error || 'Erro ao fechar');
+      const extra = data.desvinculado ? '\nFuncionário desvinculado da obra (transferido — livre pra nova obra).' : '';
+      alert(`✓ Fechamento criado (id ${data.fechamentoId})\n${data.totalFuncionarios} funcionário(s) · Líquido R$ ${Number(data.totalLiquido).toFixed(2).replace('.', ',')}${extra}`);
       fecharModal();
       if (typeof window.recarregarFolhaMensal === 'function') window.recarregarFolhaMensal();
       if (typeof window.recarregarSaldoAberto === 'function') window.recarregarSaldoAberto();

@@ -163,8 +163,24 @@ export async function runFolhaFechamentoMigrations(): Promise<void> {
     },
   ];
 
+  // v3.80.0 — Fechamento por funcionário + desvínculo da obra.
+  const ALTERS_ESCOPO_FUNCIONARIO: Array<{ label: string; sql: string }> = [
+    {
+      label: 'ALTER folha_fechamentos funcionario_id',
+      sql: `ALTER TABLE folha_fechamentos ADD COLUMN funcionario_id INT NULL AFTER obra_id`,
+    },
+    {
+      label: 'INDEX idx_ff_funcionario',
+      sql: `ALTER TABLE folha_fechamentos ADD INDEX idx_ff_funcionario (funcionario_id)`,
+    },
+    {
+      label: 'ALTER romatec_obra_equipe data_fim',
+      sql: `ALTER TABLE romatec_obra_equipe ADD COLUMN data_fim DATE NULL`,
+    },
+  ];
+
   // ALTERs idempotentes (rodam separados pra cada um sobreviver a 'Duplicate column')
-  const alters = [...ALTERS_OBRAS, ...ALTERS_FUNCIONARIO_DIAS, ...ALTERS_RECIBOS_AJUSTES, ...ALTERS_PAG_LOG];
+  const alters = [...ALTERS_OBRAS, ...ALTERS_FUNCIONARIO_DIAS, ...ALTERS_RECIBOS_AJUSTES, ...ALTERS_PAG_LOG, ...ALTERS_ESCOPO_FUNCIONARIO];
   for (const { label, sql } of alters) {
     try {
       await pool.execute(sql);

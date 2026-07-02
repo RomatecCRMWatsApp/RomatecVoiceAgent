@@ -47,6 +47,43 @@ export function quinzenaCodesDoRange(dataInicio: string, dataFim: string): strin
   return [...codes];
 }
 
+// v3.80.0 — Fechamento por funcionário + desvínculo da obra.
+// Erro tipado pra propagar status HTTP correto (409 diária órfã, 422 sem dias).
+export class FolhaError extends Error {
+  constructor(public status: number, message: string, public payload?: unknown) {
+    super(message);
+    this.name = 'FolhaError';
+  }
+}
+
+export interface EscopoFolha {
+  funcionarioId: number | null;   // null = obra inteira (comportamento atual)
+  desvincular: boolean;
+  forcarDesvinculo: boolean;
+}
+
+/** Valida escopo por funcionário + desvínculo. Puro (testável sem DB). */
+export function normalizarEscopoFolha(raw: unknown): EscopoFolha {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  let funcionarioId: number | null = null;
+  const f = r.funcionarioId ?? r.funcionario_id;
+  if (f !== undefined && f !== null && f !== '') {
+    funcionarioId = Number(f);
+    if (!Number.isInteger(funcionarioId) || funcionarioId <= 0) {
+      throw new FolhaError(400, 'funcionario_id inválido.');
+    }
+  }
+  const desvincular = Boolean(r.desvincular);
+  if (desvincular && funcionarioId === null) {
+    throw new FolhaError(400, 'Desvincular exige um funcionário específico.');
+  }
+  return {
+    funcionarioId,
+    desvincular,
+    forcarDesvinculo: Boolean(r.forcarDesvinculo ?? r.forcar_desvinculo),
+  };
+}
+
 export interface FecharFolhaInput {
   obraId: number;
   dataInicio: string;        // YYYY-MM-DD
@@ -55,6 +92,24 @@ export interface FecharFolhaInput {
   rotulo?: string;
   fechadoPor?: string;
   observacoes?: string;
+  // v3.80.0 — escopo por funcionário + desvínculo
+  funcionarioId?: number | null;
+  desvincular?: boolean;
+  forcarDesvinculo?: boolean;
+}
+
+/** Diárias pendentes (fechamento_id IS NULL) FORA do intervalo — guarda de órfã. */
+export async function pendenciasForaIntervalo(
+  obraId: number, funcionarioId: number, dataInicio: string, dataFim: string,
+): Promise<string[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT DISTINCT data FROM romatec_obra_funcionario_dias
+      WHERE obra_id = ? AND funcionario_id = ? AND fechamento_id IS NULL
+        AND (data < ? OR data > ?)
+      ORDER BY data`,
+    [obraId, funcionarioId, dataInicio, dataFim],
+  );
+  return rows.map(r => String(r.data instanceof Date ? r.data.toISOString().slice(0, 10) : r.data).slice(0, 10));
 }
 
 export interface MarcarPagoInput {
@@ -81,20 +136,34 @@ export interface PreviewItem {
 type Executor = typeof pool | PoolConnection;
 
 // ===== PREVIEW =====
-export async function previewFolha(obraId: number, dataInicio: string, dataFim: string): Promise<{
+export async function previewFolha(
+  obraId: number, dataInicio: string, dataFim: string, funcionarioId: number | null = null,
+): Promise<{
   itens: PreviewItem[];
   totalValor: number;
   totalVales: number;
   totalLiquido: number;
+  escopo: 'todos' | 'funcionario';
+  pendencias_fora_intervalo: { funcionario_id: number; datas: string[] }[];
 }> {
   if (new Date(dataFim) < new Date(dataInicio)) {
     throw new Error('Data fim anterior à data início.');
   }
-  const itens = await calcularItens(pool, obraId, dataInicio, dataFim);
+  const itens = await calcularItens(pool, obraId, dataInicio, dataFim, funcionarioId);
   const totalValor = +itens.reduce((s, i) => s + i.valor_total, 0).toFixed(2);
   const totalVales = +itens.reduce((s, i) => s + i.valor_vales, 0).toFixed(2);
   const totalLiquido = +(totalValor - totalVales).toFixed(2);
-  return { itens, totalValor, totalVales, totalLiquido };
+  // v3.80.0: só faz sentido avisar de órfã quando o escopo é 1 funcionário.
+  const pendencias_fora_intervalo: { funcionario_id: number; datas: string[] }[] = [];
+  if (funcionarioId !== null) {
+    const datas = await pendenciasForaIntervalo(obraId, funcionarioId, dataInicio, dataFim);
+    if (datas.length) pendencias_fora_intervalo.push({ funcionario_id: funcionarioId, datas });
+  }
+  return {
+    itens, totalValor, totalVales, totalLiquido,
+    escopo: funcionarioId !== null ? 'funcionario' : 'todos',
+    pendencias_fora_intervalo,
+  };
 }
 
 // ===== FECHAR =====
@@ -103,31 +172,55 @@ export async function fecharFolha(input: FecharFolhaInput): Promise<{
   totalFuncionarios: number;
   totalValor: number;
   totalLiquido: number;
+  escopo: 'todos' | 'funcionario';
+  desvinculado: boolean;
 }> {
   if (new Date(input.dataFim) < new Date(input.dataInicio)) {
     throw new Error('Data fim anterior à data início.');
   }
+  const fid = input.funcionarioId ?? null;
+  if (input.desvincular && fid === null) {
+    throw new FolhaError(400, 'Desvincular exige um funcionário específico.');
+  }
+
+  // v3.80.0: guarda de diária órfã ANTES de abrir transação. Se vai desvincular e
+  // há diárias pendentes fora do intervalo, bloqueia (409) — salvo forcarDesvinculo.
+  if (input.desvincular && fid !== null && !input.forcarDesvinculo) {
+    const pend = await pendenciasForaIntervalo(input.obraId, fid, input.dataInicio, input.dataFim);
+    if (pend.length) {
+      throw new FolhaError(409,
+        'O funcionário tem diárias pendentes fora do intervalo. Feche-as ou reenvie com forcar_desvinculo=true.',
+        { datas_pendentes: pend });
+    }
+  }
+
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
-    // 1. Sobreposição com fechamento ativo
+    // 1. Sobreposição com fechamento ativo que REALMENTE conflita:
+    //    - fechamento da obra inteira (funcionario_id NULL — inclui os legados) sempre conflita;
+    //    - fechamento de OUTRO funcionário específico NÃO conflita (dias disjuntos).
+    //    Assim, "Todos" após um fechamento parcial é permitido, e vice-versa.
     const [overlap] = await conn.query<RowDataPacket[]>(
       `SELECT id FROM folha_fechamentos
         WHERE obra_id = ?
           AND status IN ('aberta','parcialmente_paga')
           AND NOT (data_fim < ? OR data_inicio > ?)
+          AND (funcionario_id IS NULL${fid !== null ? ' OR funcionario_id = ?' : ''})
         LIMIT 1`,
-      [input.obraId, input.dataInicio, input.dataFim]
+      fid !== null
+        ? [input.obraId, input.dataInicio, input.dataFim, fid]
+        : [input.obraId, input.dataInicio, input.dataFim]
     );
     if (overlap.length > 0) {
-      throw new Error(`Período sobreposto ao fechamento id=${overlap[0].id}. Quite ou cancele antes.`);
+      throw new FolhaError(409, `Período sobreposto ao fechamento id=${overlap[0].id}. Quite ou cancele antes.`);
     }
 
-    // 2. Itens (já dentro da transação)
-    const itens = await calcularItens(conn, input.obraId, input.dataInicio, input.dataFim);
+    // 2. Itens (já dentro da transação) — escopados ao funcionário quando informado.
+    const itens = await calcularItens(conn, input.obraId, input.dataInicio, input.dataFim, fid);
     if (itens.length === 0) {
-      throw new Error('Nenhum dia lançado nesse período para essa obra.');
+      throw new FolhaError(422, 'Nenhum dia lançado nesse período para o escopo selecionado.');
     }
 
     const totalValor = +itens.reduce((s, i) => s + i.valor_total, 0).toFixed(2);
@@ -137,11 +230,11 @@ export async function fecharFolha(input: FecharFolhaInput): Promise<{
     // 3. Cabeçalho
     const [head] = await conn.execute<ResultSetHeader>(
       `INSERT INTO folha_fechamentos
-         (obra_id, data_inicio, data_fim, data_fim_prevista, rotulo, total_funcionarios,
+         (obra_id, funcionario_id, data_inicio, data_fim, data_fim_prevista, rotulo, total_funcionarios,
           total_valor, total_vales, total_liquido, status, observacoes, fechado_por)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'aberta', ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aberta', ?, ?)`,
       [
-        input.obraId, input.dataInicio, input.dataFim,
+        input.obraId, fid, input.dataInicio, input.dataFim,
         input.dataFimPrevista ?? null,
         input.rotulo ?? null, itens.length,
         totalValor, totalVales, totalLiquido,
@@ -166,14 +259,17 @@ export async function fecharFolha(input: FecharFolhaInput): Promise<{
       );
     }
 
-    // 5. Bloqueia romatec_obra_funcionario_dias do período
+    // 5. Bloqueia romatec_obra_funcionario_dias do período (escopado ao funcionário
+    //    quando informado — as diárias dos demais ficam intocadas).
     await conn.execute(
       `UPDATE romatec_obra_funcionario_dias
           SET fechamento_id = ?, bloqueado_em = NOW()
         WHERE obra_id = ?
           AND data BETWEEN ? AND ?
-          AND fechamento_id IS NULL`,
-      [fechamentoId, input.obraId, input.dataInicio, input.dataFim]
+          AND fechamento_id IS NULL${fid !== null ? '\n          AND funcionario_id = ?' : ''}`,
+      fid !== null
+        ? [fechamentoId, input.obraId, input.dataInicio, input.dataFim, fid]
+        : [fechamentoId, input.obraId, input.dataInicio, input.dataFim]
     );
 
     // 5b. v3.62.0/v3.62.3: quita os vales (adiantamentos) descontados — marca com
@@ -196,14 +292,33 @@ export async function fecharFolha(input: FecharFolhaInput): Promise<{
       );
     }
 
-    // 6. Atualiza ultima_data_fechada da obra (PRÓXIMO ciclo começa em dataFim + 1)
+    // 6. Atualiza ultima_data_fechada da obra (PRÓXIMO ciclo começa em dataFim + 1).
+    //    Decisão do CEO: avançar o ciclo SEMPRE, inclusive em fechamento parcial.
     await conn.execute(
       `UPDATE romatec_obras SET ultima_data_fechada = ? WHERE id = ?`,
       [input.dataFim, input.obraId]
     );
 
+    // 7. v3.80.0 — Desvínculo: transfere o funcionário (livre pra outra obra).
+    //    status='transferido' + solta da obra (obra_id NULL) + data_fim; MANTÉM
+    //    ativo=1 (continua funcionário da Romatec). Histórico preservado.
+    let desvinculado = false;
+    if (input.desvincular && fid !== null) {
+      await conn.execute(
+        `UPDATE romatec_obra_equipe
+            SET status = 'transferido', obra_id = NULL, data_fim = ?
+          WHERE id = ?`,
+        [input.dataFim, fid]
+      );
+      desvinculado = true;
+    }
+
     await conn.commit();
-    return { fechamentoId, totalFuncionarios: itens.length, totalValor, totalLiquido };
+    return {
+      fechamentoId, totalFuncionarios: itens.length, totalValor, totalLiquido,
+      escopo: fid !== null ? 'funcionario' : 'todos',
+      desvinculado,
+    };
   } catch (e) {
     await conn.rollback();
     throw e;
@@ -637,7 +752,7 @@ export async function obterDetalhe(fechamentoId: number) {
 }
 
 // ===== CÁLCULO INTERNO =====
-async function calcularItens(exec: Executor, obraId: number, dataInicio: string, dataFim: string): Promise<PreviewItem[]> {
+async function calcularItens(exec: Executor, obraId: number, dataInicio: string, dataFim: string, funcionarioId: number | null = null): Promise<PreviewItem[]> {
   // v3.62.3: códigos de quinzena do período pra somar os vales (adiantamentos)
   // abertos. Sempre tem >=1 (callers validam dataFim>=dataInicio).
   const codes = quinzenaCodesDoRange(dataInicio, dataFim);
@@ -665,11 +780,13 @@ async function calcularItens(exec: Executor, obraId: number, dataInicio: string,
       INNER JOIN romatec_obra_funcionario_dias d ON d.funcionario_id = e.id
      WHERE d.obra_id = ?
        AND d.data BETWEEN ? AND ?
-       AND d.fechamento_id IS NULL
+       AND d.fechamento_id IS NULL${funcionarioId !== null ? '\n       AND e.id = ?' : ''}
      GROUP BY e.id, e.nome, e.funcao, e.valor_dia
     HAVING (dias_integral + dias_manha + dias_tarde) > 0
      ORDER BY e.nome`,
-    [...codes, obraId, dataInicio, dataFim]
+    funcionarioId !== null
+      ? [...codes, obraId, dataInicio, dataFim, funcionarioId]
+      : [...codes, obraId, dataInicio, dataFim]
   );
   if (linhas.length === 0) return [];
 
