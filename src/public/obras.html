@@ -2472,6 +2472,52 @@ async function abrirCadastroDocVenc() {
 }
 
 // ── OBRAS ──
+// v3.87.0: muda o status de uma obra (encerrar → concluida, reabrir → em_andamento)
+// reusando o PUT completo de /api/obras/:id (monta o body a partir do objeto em
+// state.obras pra não zerar nenhum campo).
+async function mudarStatusObra(oid, novoStatus, opts) {
+  opts = opts || {};
+  const o = state.obras.find(x => String(x.id) === String(oid));
+  if (!o) return alert('Obra não encontrada.');
+  let aviso = '';
+  if (opts.checkPendentes) {
+    try {
+      const parc = await api(`/api/obras/${oid}/parcelas`);
+      const pend = (parc || []).filter(p => !p.pago).reduce((s, p) => s + Number(p.valor || 0), 0);
+      if (pend > 0) aviso = `\n\n⚠️ Ainda há ${fmt(pend)} em parcelas pendentes.`;
+    } catch (e) { /* sem parcelas / offline — segue sem aviso */ }
+  }
+  if (!confirm((opts.msg || 'Confirmar mudança de status?') + aviso)) return;
+  const dOnly = (s) => s ? String(s).slice(0, 10) : null;
+  try {
+    await api('/api/obras/' + oid, {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: String(oid),
+        nome: o.nome,
+        tipo: o.tipo,
+        cliente: o.cliente ?? null,
+        cliente_telefone: o.cliente_telefone ?? null,
+        endereco: o.endereco ?? null,
+        cidade: o.cidade ?? null,
+        area_m2: o.area_m2 ?? null,
+        orcamento: o.orcamento ?? null,
+        valor_contrato: o.valor_contrato ?? null,
+        status: novoStatus,
+        responsavel_tecnico: o.responsavel_tecnico ?? null,
+        data_inicio: dOnly(o.data_inicio),
+        data_previsao: dOnly(o.data_previsao),
+        prazo_dias: o.prazo_dias ?? null,
+        prazo_dias_uteis: o.prazo_dias_uteis ?? null,
+        observacoes: o.observacoes ?? null,
+        confirm: true,
+      }),
+    });
+    await loadObras();
+    renderObras();
+  } catch (e) { alert('Erro: ' + (e?.message || e)); }
+}
+
 function renderObras() {
   const v = document.getElementById('view-obras');
   // v1.65.39: mostra data_inicio + data_previsao + botao Editar
@@ -2499,6 +2545,9 @@ function renderObras() {
           <button data-tg-obra="${o.id}" title="Enviar resumo da obra pro seu Telegram" style="background:#0088cc; color:#fff; border-color:#0088cc;">✈️ Telegram</button>
           <button data-view-obra="${o.id}" title="Visualizar / Imprimir / PDF">👁️ Ver</button>
           <button class="btn-gold" data-edit-obra="${o.id}">✏️ Editar</button>
+          ${o.status !== 'concluida'
+            ? `<button data-encerrar-obra="${o.id}" title="Encerrar obra (marcar como Concluída)" style="background:#16a34a; color:#fff; border-color:#16a34a;">🏁 Encerrar</button>`
+            : `<button data-reabrir-obra="${o.id}" title="Reabrir obra (voltar a Em andamento)" style="background:transparent; color:var(--gold); border:1px solid var(--gold);">↩️ Reabrir</button>`}
           <button class="btn-danger" data-del-obra="${o.id}">Excluir</button>
         </div>
       </div>
@@ -2595,6 +2644,11 @@ function renderObras() {
   });
   // v1.65.39: editar obra completa (todos os campos do form em modal)
   v.querySelectorAll('[data-edit-obra]').forEach(b => b.onclick = () => abrirEditarObra(b.dataset.editObra));
+  // v3.87.0: encerrar / reabrir obra (muda status sem abrir o modal de edição)
+  v.querySelectorAll('[data-encerrar-obra]').forEach(b => b.onclick = () =>
+    mudarStatusObra(b.dataset.encerrarObra, 'concluida', { checkPendentes: true, msg: 'Encerrar esta obra e marcar como Concluída?' }));
+  v.querySelectorAll('[data-reabrir-obra]').forEach(b => b.onclick = () =>
+    mudarStatusObra(b.dataset.reabrirObra, 'em_andamento', { msg: 'Reabrir esta obra (voltar a Em andamento)?' }));
   // v1.65.42: visualizar / imprimir / PDF
   v.querySelectorAll('[data-view-obra]').forEach(b => b.onclick = () => abrirVisualizarObra(b.dataset.viewObra));
 
