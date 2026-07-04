@@ -2522,6 +2522,44 @@ async function mudarStatusObra(oid, novoStatus, opts) {
   } catch (e) { alert('Erro: ' + (e?.message || e)); }
 }
 
+// v3.89.0: lista as VTOs (vistorias técnicas) de uma obra dentro do card (sob
+// demanda). Reusa /api/vistorias?obra_id=. Cada item abre o relatório HTML e o PDF.
+async function montarVtosInline(boxEl, oid) {
+  boxEl.innerHTML = '<p style="font-size:12px; color:var(--text-muted); padding:6px;">⏳ Carregando VTOs…</p>';
+  const fmtData = (s) => {
+    if (!s) return '-';
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s));
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : String(s);
+  };
+  try {
+    const resp = await api('/api/vistorias?obra_id=' + encodeURIComponent(oid));
+    const lista = Array.isArray(resp) ? resp : (resp.items || resp.vistorias || []);
+    if (!lista.length) {
+      boxEl.innerHTML = '<p style="font-size:12px; color:var(--text-muted); padding:6px;">Nenhuma vistoria (VTO) registrada nesta obra. Use a aba <b>Vistoria (VTO)</b> ou o <b>📋 Checklist VTO</b> acima.</p>';
+      return;
+    }
+    boxEl.innerHTML = lista.map(vis => {
+      const cor = vis.status_obra === 'critica' ? 'var(--danger)'
+                : vis.status_obra === 'atencao' ? 'var(--warning)' : 'var(--neon)';
+      return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 8px; border:1px solid var(--border); border-radius:6px; margin-bottom:6px;">
+        <div style="min-width:180px;">
+          <b style="font-size:13px;">${escape(vis.titulo || ('Vistoria #' + vis.id))}</b>
+          ${vis.status_obra ? `<span style="font-size:11px; color:${cor}; margin-left:6px;">● ${escape(vis.status_obra)}</span>` : ''}
+          <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted);">📅 ${fmtData(vis.data)}${vis.vistoriador ? ' · ' + escape(vis.vistoriador) : ''}</p>
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button data-vto-ver="${vis.id}" style="font-size:11px; padding:4px 8px;">👁 Ver</button>
+          <button data-vto-pdf="${vis.id}" style="font-size:11px; padding:4px 8px;">📄 PDF</button>
+        </div>
+      </div>`;
+    }).join('');
+    boxEl.querySelectorAll('[data-vto-ver]').forEach(b => b.onclick = () => window.open('/api/vistorias/' + b.dataset.vtoVer + '/relatorio', '_blank'));
+    boxEl.querySelectorAll('[data-vto-pdf]').forEach(b => b.onclick = () => window.open('/api/vistorias/' + b.dataset.vtoPdf + '/pdf', '_blank'));
+  } catch (e) {
+    boxEl.innerHTML = `<p style="font-size:12px; color:var(--danger); padding:6px;">Erro ao carregar VTOs: ${escape(e?.message || String(e))}</p>`;
+  }
+}
+
 function renderObras() {
   const v = document.getElementById('view-obras');
   // v1.65.39: mostra data_inicio + data_previsao + botao Editar
@@ -2556,12 +2594,24 @@ function renderObras() {
         </div>
       </div>
       <div style="margin-top:10px; border-top:1px dashed var(--border); padding-top:10px;">
-        <button class="btn-toggle-parc-inline" data-obra="${o.id}"
-          style="background:transparent; border:1px solid var(--border); color:var(--gold); font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
-          <span class="caret-parc" style="display:inline-block; transition:transform .2s;">▶</span>
-          💳 Parcelas
-        </button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <button class="btn-toggle-parc-inline" data-obra="${o.id}"
+            style="background:transparent; border:1px solid var(--border); color:var(--gold); font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+            <span class="caret-parc" style="display:inline-block; transition:transform .2s;">▶</span>
+            💳 Parcelas
+          </button>
+          <!-- v3.89.0: VTOs (vistorias técnicas) da obra -->
+          <button class="btn-toggle-vto-inline" data-obra="${o.id}"
+            style="background:transparent; border:1px solid var(--border); color:var(--neon); font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+            <span class="caret-vto" style="display:inline-block; transition:transform .2s;">▶</span>
+            🔍 VTOs
+          </button>
+          <a href="/vto-checklist.html?obra=${o.id}&obra_nome=${encodeURIComponent(o.nome||'')}"
+            title="Abrir o Checklist de Atividades (VTO) desta obra"
+            style="background:transparent; border:1px solid #C9A84C; color:#C9A84C; font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; text-decoration:none;">📋 Checklist VTO →</a>
+        </div>
         <div class="parc-inline-box" data-obra="${o.id}" style="display:none; margin-top:8px;"></div>
+        <div class="vto-inline-box" data-obra="${o.id}" style="display:none; margin-top:8px;"></div>
       </div>
     </div>`;
   }).join('');
@@ -2675,6 +2725,19 @@ function renderObras() {
     let aberto = false;
     try { aberto = localStorage.getItem(`parcInlineOpen_${b.dataset.obra}`) === '1'; } catch {}
     if (aberto) b.click();
+  });
+  // v3.89.0: toggle de VTOs (vistorias técnicas) por card — lista sob demanda.
+  v.querySelectorAll('.btn-toggle-vto-inline').forEach(b => {
+    b.onclick = async () => {
+      const oid = b.dataset.obra;
+      const boxEl = v.querySelector(`.vto-inline-box[data-obra="${oid}"]`);
+      const caret = b.querySelector('.caret-vto');
+      if (!boxEl) return;
+      const ehFechado = boxEl.style.display === 'none';
+      boxEl.style.display = ehFechado ? '' : 'none';
+      if (caret) caret.style.transform = ehFechado ? 'rotate(90deg)' : 'rotate(0deg)';
+      if (ehFechado) await montarVtosInline(boxEl, oid);
+    };
   });
   // SSE: atualiza parcelas inline ao vivo (cobrancas, pagamentos, etc.)
   // Reutiliza conexao global pra nao multiplicar EventSources entre renders.
