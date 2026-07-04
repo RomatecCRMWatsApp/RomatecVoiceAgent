@@ -1239,6 +1239,11 @@ export async function relatorioMensalEquipe(input: {
   // v3.86.0: soma dos vales (adiantamentos) do mês por funcionário — pra Folha
   // Mensal mostrar os vales já passados e o SALDO (total − vales) em cada linha.
   // O vale é registrado em recibos_ajustes por quinzena ('YYYY-MM-1'/'YYYY-MM-2').
+  // v3.87.0 (fix): só conta vales REALMENTE em aberto — `fechamento_id IS NULL`
+  // exclui os já baixados num fechamento de folha (fechamento_id > 0) e os
+  // legados conciliados (sentinela fechamento_id = 0). Mesma regra da aba
+  // "Saldo em Aberto"; sem isso, vale já quitado era descontado de novo e
+  // aparecia em funcionários que não têm vale aberto na quinzena.
   const valesPorMembro = new Map<number, number>();
   const ids = lista.map(l => Number(l.funcionario_id)).filter(n => Number.isFinite(n));
   if (ids.length) {
@@ -1248,7 +1253,10 @@ export async function relatorioMensalEquipe(input: {
     const [vrows] = await pool.execute<RowDataPacket[]>(
       `SELECT membro_id, COALESCE(SUM(ABS(valor)), 0) AS vales
          FROM recibos_ajustes
-        WHERE tipo = 'adiantamento' AND periodo IN (?, ?) AND membro_id IN (${ph})
+        WHERE tipo = 'adiantamento'
+          AND fechamento_id IS NULL
+          AND periodo IN (?, ?)
+          AND membro_id IN (${ph})
         GROUP BY membro_id`,
       [p1, p2, ...ids],
     );
