@@ -1173,8 +1173,17 @@ export async function relatorioMensalEquipe(input: {
    * já pagos e SAEM do contador. Se 'apenas_em_aberto=false' (passar
    * explicitamente), retorna o histórico completo do mês. */
   apenas_em_aberto?: boolean;
+  /** v3.88.0 — Intervalo manual (YYYY-MM-DD). Quando início E fim vierem,
+   * a folha apura os dias e vales DESSE intervalo (BETWEEN), em vez do mês
+   * calendário inteiro. Vazio = mês inteiro (comportamento padrão). */
+  data_inicio?: string;
+  data_fim?: string;
 }) {
   const apenasEmAberto = input.apenas_em_aberto !== false;
+  // v3.88.0: intervalo manual (só vale quando ambos vierem e forem válidos)
+  const di = (input.data_inicio && /^\d{4}-\d{2}-\d{2}$/.test(input.data_inicio)) ? input.data_inicio : null;
+  const df = (input.data_fim && /^\d{4}-\d{2}-\d{2}$/.test(input.data_fim)) ? input.data_fim : null;
+  const usarIntervalo = !!(di && df);
 
   // v3.9.7 — Volta pra NOT EXISTS BETWEEN — confiando que `periodo_fim` do
   // recibo reflete o ÚLTIMO DIA REAL coberto pelo pagamento (não a janela
@@ -1201,7 +1210,11 @@ export async function relatorioMensalEquipe(input: {
        )`
     : '';
 
-  const params: (string | number)[] = [input.ano, input.mes];
+  // v3.88.0: se intervalo manual, filtra por d.data BETWEEN di AND df; senão, mês.
+  const params: (string | number)[] = usarIntervalo ? [di as string, df as string] : [input.ano, input.mes];
+  const filtroPeriodo = usarIntervalo
+    ? 'd.data BETWEEN ? AND ?'
+    : 'YEAR(d.data) = ? AND MONTH(d.data) = ?';
   // v3.10.0: filtra dias já consolidados em fechamentos de folha.
   // (Coluna `fechamento_id` é adicionada pela migration de Fechamento de Folha.)
   let sql = `
@@ -1213,7 +1226,7 @@ export async function relatorioMensalEquipe(input: {
            ${subqueryLimite} AS data_ultimo_recibo_pago
     FROM romatec_obra_funcionario_dias d
     JOIN romatec_obra_equipe e ON e.id = d.funcionario_id
-    WHERE YEAR(d.data) = ? AND MONTH(d.data) = ?
+    WHERE ${filtroPeriodo}
       AND d.fechamento_id IS NULL
     ${filtroEmAberto}`;
   if (input.obra_id) { sql += ' AND d.obra_id = ?'; params.push(input.obra_id); }
@@ -1247,19 +1260,31 @@ export async function relatorioMensalEquipe(input: {
   const valesPorMembro = new Map<number, number>();
   const ids = lista.map(l => Number(l.funcionario_id)).filter(n => Number.isFinite(n));
   if (ids.length) {
-    const p1 = `${input.ano}-${String(input.mes).padStart(2, '0')}-1`;
-    const p2 = `${input.ano}-${String(input.mes).padStart(2, '0')}-2`;
     const ph = ids.map(() => '?').join(',');
-    const [vrows] = await pool.execute<RowDataPacket[]>(
-      `SELECT membro_id, COALESCE(SUM(ABS(valor)), 0) AS vales
-         FROM recibos_ajustes
-        WHERE tipo = 'adiantamento'
-          AND fechamento_id IS NULL
-          AND periodo IN (?, ?)
-          AND membro_id IN (${ph})
-        GROUP BY membro_id`,
-      [p1, p2, ...ids],
-    );
+    // v3.88.0: no intervalo manual, escopa vales por criado_em (mesma lógica da
+    // Saldo em Aberto); senão, pelas quinzenas do mês ('YYYY-MM-1'/'YYYY-MM-2').
+    const [vrows] = usarIntervalo
+      ? await pool.execute<RowDataPacket[]>(
+          `SELECT membro_id, COALESCE(SUM(ABS(valor)), 0) AS vales
+             FROM recibos_ajustes
+            WHERE tipo = 'adiantamento'
+              AND fechamento_id IS NULL
+              AND criado_em >= ?
+              AND criado_em < DATE_ADD(?, INTERVAL 1 DAY)
+              AND membro_id IN (${ph})
+            GROUP BY membro_id`,
+          [di as string, df as string, ...ids],
+        )
+      : await pool.execute<RowDataPacket[]>(
+          `SELECT membro_id, COALESCE(SUM(ABS(valor)), 0) AS vales
+             FROM recibos_ajustes
+            WHERE tipo = 'adiantamento'
+              AND fechamento_id IS NULL
+              AND periodo IN (?, ?)
+              AND membro_id IN (${ph})
+            GROUP BY membro_id`,
+          [`${input.ano}-${String(input.mes).padStart(2, '0')}-1`, `${input.ano}-${String(input.mes).padStart(2, '0')}-2`, ...ids],
+        );
     for (const vr of vrows) valesPorMembro.set(Number(vr.membro_id), num(String(vr.vales ?? '0')));
   }
   const listaComSaldo = lista.map(l => {
@@ -1278,6 +1303,7 @@ export async function relatorioMensalEquipe(input: {
     total_vales,   // v3.86.0
     total_saldo,   // v3.86.0
     apenas_em_aberto: apenasEmAberto,
+    intervalo: usarIntervalo ? { data_inicio: di, data_fim: df } : null, // v3.88.0
     funcionarios: listaComSaldo,
   };
 }

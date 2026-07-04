@@ -1791,7 +1791,11 @@ async function loadVistorias() {
 }
 
 async function loadFolha() {
-  const q = `ano=${state.folhaAno}&mes=${state.folhaMes}` + (state.folhaObraId ? `&obra_id=${state.folhaObraId}` : '');
+  let q = `ano=${state.folhaAno}&mes=${state.folhaMes}` + (state.folhaObraId ? `&obra_id=${state.folhaObraId}` : '');
+  // v3.88.0: intervalo manual da Mensal (só aplica quando ambos definidos)
+  if (state.folhaMensalDataInicio && state.folhaMensalDataFim) {
+    q += `&data_inicio=${state.folhaMensalDataInicio}&data_fim=${state.folhaMensalDataFim}`;
+  }
   state.folha = await api('/api/relatorio-equipe?' + q);
 }
 async function loadMateriais() {
@@ -5536,12 +5540,28 @@ function renderFolha() {
 
   // v1.99.16: sub-aba ativa (mensal vs saldo em aberto)
   const subview = state.folhaSubview || 'mensal';
+  const intervaloMensalAtivo = !!(state.folhaMensalDataInicio && state.folhaMensalDataFim);
   const corpoMensal = `
+    <!-- v3.88.0: filtro de intervalo manual na Mensal (apura só o período definido) -->
+    <div style="display:flex; gap:8px; align-items:end; flex-wrap:wrap; margin-bottom:12px; padding:10px; background:rgba(245,158,11,0.05); border:1px solid rgba(245,158,11,0.2); border-radius:8px;">
+      <label style="font-size:11px; color:var(--text-muted);">
+        📅 Início do intervalo
+        <input id="folhaMensalDi" type="date" value="${escape(state.folhaMensalDataInicio || '')}" style="display:block; width:160px; margin-top:2px;">
+      </label>
+      <label style="font-size:11px; color:var(--text-muted);">
+        📅 Fim do intervalo
+        <input id="folhaMensalDf" type="date" value="${escape(state.folhaMensalDataFim || '')}" style="display:block; width:160px; margin-top:2px;">
+      </label>
+      <button id="folhaMensalLimpar" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); padding:6px 10px; border-radius:6px; cursor:pointer; font-size:11px;">Limpar (mês inteiro)</button>
+      <span style="font-size:11px; color:var(--text-muted); margin-left:auto;">
+        ${intervaloMensalAtivo ? '🔍 apurando intervalo definido' : '📅 mês inteiro (defina início e fim pra apurar um intervalo)'}
+      </span>
+    </div>
     <div class="metrics-grid">
-      <div class="metric-card"><p class="metric-label">Funcionários ativos no mês</p><p class="metric-value">${f.total_funcionarios}</p></div>
+      <div class="metric-card"><p class="metric-label">${intervaloMensalAtivo ? 'Funcionários no intervalo' : 'Funcionários ativos no mês'}</p><p class="metric-value">${f.total_funcionarios}</p></div>
       <div class="metric-card"><p class="metric-label">Total a pagar</p><p class="metric-value" style="color:var(--gold);">${fmt(f.total_geral)}</p></div>
       ${(f.total_vales || 0) > 0 ? `
-      <div class="metric-card"><p class="metric-label">💸 Vales no mês</p><p class="metric-value" style="color:var(--danger);">−${fmt(f.total_vales)}</p></div>
+      <div class="metric-card"><p class="metric-label">💸 ${intervaloMensalAtivo ? 'Vales no intervalo' : 'Vales no mês'}</p><p class="metric-value" style="color:var(--danger);">−${fmt(f.total_vales)}</p></div>
       <div class="metric-card"><p class="metric-label">Saldo a pagar</p><p class="metric-value" style="color:var(--neon);">${fmt(f.total_saldo)}</p></div>
       ` : ''}
     </div>
@@ -5676,6 +5696,32 @@ function renderFolha() {
     }
     render();
   });
+
+  // v3.88.0: filtro de intervalo manual na sub-aba MENSAL — apura a folha só no
+  // período definido (dias + Total a Pagar + vales recalculam). Só dispara quando
+  // AMBAS as datas estão preenchidas; limpar volta pro mês inteiro.
+  const inpMdi = document.getElementById('folhaMensalDi');
+  const inpMdf = document.getElementById('folhaMensalDf');
+  const btnMLimpar = document.getElementById('folhaMensalLimpar');
+  let mensalFiltroTimer = null;
+  function recarregarMensal() {
+    if (mensalFiltroTimer) clearTimeout(mensalFiltroTimer);
+    mensalFiltroTimer = setTimeout(async () => {
+      const view = document.getElementById('view-folha');
+      if (view) { const box = view.querySelector('.metrics-grid'); if (box) box.style.opacity = '0.5'; }
+      try { await loadFolha(); } catch (e) { alert('Erro: ' + (e?.message || e)); }
+      renderFolha();
+    }, 350);
+  }
+  // Sempre recarrega (debounced); loadFolha só aplica o intervalo quando AMBAS
+  // as datas estão preenchidas — com só uma, cai no mês inteiro até completar.
+  if (inpMdi) inpMdi.onchange = (e) => { state.folhaMensalDataInicio = e.target.value || ''; recarregarMensal(); };
+  if (inpMdf) inpMdf.onchange = (e) => { state.folhaMensalDataFim    = e.target.value || ''; recarregarMensal(); };
+  if (btnMLimpar) btnMLimpar.onclick = () => {
+    state.folhaMensalDataInicio = '';
+    state.folhaMensalDataFim = '';
+    recarregarMensal();
+  };
 
   // v1.99.23: filtro de intervalo na sub-aba Saldo em Aberto
   const inpDi = document.getElementById('folhaSaldoDi');

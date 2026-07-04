@@ -37,4 +37,17 @@ describe('relatorioMensalEquipe — vales em aberto (v3.87.0)', () => {
     expect(corpo).toMatch(/total_vales/);
     expect(corpo).toMatch(/total_saldo/);
   });
+
+  // v3.88.0 — filtro de intervalo manual (data_inicio/data_fim)
+  it('aceita intervalo manual e filtra dias por BETWEEN quando definido', () => {
+    expect(corpo).toMatch(/usarIntervalo/);
+    expect(corpo).toMatch(/d\.data BETWEEN \? AND \?/);
+  });
+
+  it('no intervalo, escopa vales por criado_em (mesma lógica da Saldo em Aberto)', () => {
+    const q = corpo.indexOf('usarIntervalo');
+    expect(q).toBeGreaterThan(-1);
+    // A query de vales com intervalo usa criado_em >= ? ... < DATE_ADD(?, INTERVAL 1 DAY)
+    expect(corpo).toMatch(/criado_em\s*>=\s*\?[\s\S]*?criado_em\s*<\s*DATE_ADD\(\?,\s*INTERVAL 1 DAY\)/);
+  });
 });
