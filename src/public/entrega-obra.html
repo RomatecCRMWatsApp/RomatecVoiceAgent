@@ -62,9 +62,12 @@
 </head>
 <body>
 <header>
-  <p class="kick">Romatec — Gestão de Obras</p>
-  <h1>📦 Entrega de Obra</h1>
-  <div class="num" id="hNum"></div>
+  <button id="hBack" title="Voltar" style="position:absolute;left:14px;top:14px;background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:6px 12px;font-size:14px;font-weight:600;cursor:pointer">‹ Voltar</button>
+  <div style="padding-left:64px">
+    <p class="kick">Romatec — Gestão de Obras</p>
+    <h1>📦 Entrega de Obra</h1>
+    <div class="num" id="hNum"></div>
+  </div>
 </header>
 
 <div class="steps" id="steps"></div>
@@ -95,6 +98,54 @@
   function brl(v){ return v==null?'—':Number(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
   function fileToB64(file){ return new Promise(function(res,rej){ var fr=new FileReader(); fr.onload=function(){ var d=String(fr.result); var m=/^data:([^;]+);base64,(.*)$/.exec(d); res({mime:m?m[1]:file.type||'application/octet-stream', base64:m?m[2]:d}); }; fr.onerror=rej; fr.readAsDataURL(file); }); }
 
+  // ---- GPS (mesmo padrão da galeria/relatório fotográfico) ----
+  var gps = { lat:null, lon:null, alt:null };
+  function pedirGps(){
+    if(!navigator.geolocation) return;
+    try{
+      navigator.geolocation.watchPosition(function(p){
+        gps.lat=p.coords.latitude; gps.lon=p.coords.longitude; gps.alt=p.coords.altitude;
+        var el=document.getElementById('gpsStatus');
+        if(el) el.innerHTML='GPS: <span style="color:#10b981">'+gps.lat.toFixed(6)+', '+gps.lon.toFixed(6)+'</span>';
+      }, function(){ var el=document.getElementById('gpsStatus'); if(el) el.textContent='GPS: sem permissão (fotos saem sem coordenadas)'; }, {enableHighAccuracy:true, maximumAge:5000});
+    }catch(e){}
+  }
+  // WGS84/SIRGAS2000 lat,lon -> UTM {zona,e,n}.
+  function latLonParaUTM(lat,lon){
+    var a=6378137.0,f=1/298.257223563,k0=0.9996;
+    var e2=f*(2-f), ep2=e2/(1-e2);
+    var zona=Math.floor((lon+180)/6)+1;
+    var lon0=(zona*6-183)*Math.PI/180;
+    var rlat=lat*Math.PI/180, rlon=lon*Math.PI/180;
+    var N=a/Math.sqrt(1-e2*Math.sin(rlat)*Math.sin(rlat));
+    var T=Math.tan(rlat)*Math.tan(rlat);
+    var C=ep2*Math.cos(rlat)*Math.cos(rlat);
+    var A=Math.cos(rlat)*(rlon-lon0);
+    var M=a*((1-e2/4-3*e2*e2/64-5*e2*e2*e2/256)*rlat-(3*e2/8+3*e2*e2/32+45*e2*e2*e2/1024)*Math.sin(2*rlat)+(15*e2*e2/256+45*e2*e2*e2/1024)*Math.sin(4*rlat)-(35*e2*e2*e2/3072)*Math.sin(6*rlat));
+    var easting=k0*N*(A+(1-T+C)*A*A*A/6+(5-18*T+T*T+72*C-58*ep2)*Math.pow(A,5)/120)+500000;
+    var northing=k0*(M+N*Math.tan(rlat)*(A*A/2+(5-T+9*C+4*C*C)*Math.pow(A,4)/24+(61-58*T+T*T+600*C-330*ep2)*Math.pow(A,6)/720));
+    if(lat<0)northing+=10000000;
+    return {zona:zona+(lat>=0?'N':'S'),e:Math.round(easting*1000)/1000,n:Math.round(northing*1000)/1000};
+  }
+  /** Anexa coordenadas GPS (+UTM) a um FormData, se disponíveis. */
+  function anexarGps(fd){
+    fd.append('horario_captura', new Date().toISOString());
+    if(gps.lat!=null && gps.lon!=null){
+      fd.append('latitude', gps.lat); fd.append('longitude', gps.lon);
+      if(gps.alt!=null) fd.append('altitude_m', gps.alt);
+      var u=latLonParaUTM(gps.lat, gps.lon);
+      fd.append('utm_zona', u.zona); fd.append('utm_e', u.e); fd.append('utm_n', u.n); fd.append('datum','SIRGAS 2000');
+    }
+    return fd;
+  }
+  /** Upload multipart direto (NÃO passa pelo helper JSON — senão FormData vira "[object]"). */
+  function upload(path, fd, method){
+    return fetch(API+path,{method:method||'POST',credentials:'include',body:fd}).then(function(r){
+      if(r.status===401){ location.href='/login?next='+encodeURIComponent(location.pathname+location.search); throw new Error('não autenticado'); }
+      return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||('HTTP '+r.status)); return j; });
+    });
+  }
+
   function renderSteps(){
     var el=document.getElementById('steps'); el.innerHTML='';
     STEPS.forEach(function(name,i){
@@ -119,36 +170,74 @@
     fns[state.step]();
   }
 
-  // Step 1 — proposta
+  // Step 1 — proposta (origem interna do sistema OU externa via PDF)
   function stepProposta(){
     var app=document.getElementById('app');
-    app.innerHTML=''
-      +'<div class="card"><h2>1 · Selecionar proposta de origem</h2>'
-      +'<p class="muted">A entrega puxa cliente, endereço, escopo e valor orçado da proposta.</p>'
-      +'<input id="q" placeholder="Buscar por número ou cliente...">'
-      +'<div id="propList" style="margin-top:12px"></div></div>';
+    // Já vinculada: mostra resumo + continuar (não deixa recriar).
     if(state.doc){
-      app.insertAdjacentHTML('beforeend','<div class="card"><span class="pill">Vinculada</span> <b>'+esc(state.doc.numero)+'</b> — '+esc(state.doc.cliente||'')+'<div class="btn-row"><button class="btn btn-primary" id="next">Continuar →</button></div></div>');
+      var origemLbl = state.doc.proposta_origem==='externa' ? 'Proposta externa (PDF)' : 'Proposta do sistema';
+      app.innerHTML='<div class="card"><h2>1 · Proposta de origem</h2>'
+        +'<span class="pill">'+esc(origemLbl)+'</span> <b>'+esc(state.doc.numero||'')+'</b> — '+esc(state.doc.cliente||state.doc.titulo||'')+''
+        +'<div class="btn-row"><button class="btn btn-primary" id="next">Continuar →</button></div></div>';
       document.getElementById('next').onclick=function(){ go(1); };
+      return;
     }
-    var q=document.getElementById('q');
-    var t; q.oninput=function(){ clearTimeout(t); t=setTimeout(loadProps,300); };
-    loadProps();
-    function loadProps(){
-      api('/propostas?q='+encodeURIComponent(q.value||'')).then(function(j){
-        var l=document.getElementById('propList');
-        if(!j.propostas.length){ l.innerHTML='<p class="muted">Nenhuma proposta encontrada.</p>'; return; }
-        l.innerHTML=j.propostas.map(function(p){
-          return '<div class="prop" data-id="'+p.id+'"><div class="n">'+esc(p.numero||('#'+p.id))+'</div><div class="c">'+esc(p.cliente||'—')+' · '+brl(p.valor_total)+'</div></div>';
-        }).join('');
-        Array.prototype.forEach.call(l.querySelectorAll('.prop'),function(el){
-          el.onclick=function(){ criar(Number(el.getAttribute('data-id'))); };
-        });
-      }).catch(function(e){ toast(e.message); });
+    var origem = state._origem || 'interna';
+    app.innerHTML='<div class="card"><h2>1 · Origem da proposta</h2>'
+      +'<div class="steps" style="position:static;background:transparent;padding:0 0 12px">'
+      +'<button id="tgInterna" class="'+(origem==='interna'?'active':'')+'" style="border:1px solid var(--gold);color:'+(origem==='interna'?'var(--green)':'var(--muted)')+';background:'+(origem==='interna'?'var(--gold)':'#fff')+'">📁 Proposta do sistema</button>'
+      +'<button id="tgExterna" class="'+(origem==='externa'?'active':'')+'" style="border:1px solid var(--gold);color:'+(origem==='externa'?'var(--green)':'var(--muted)')+';background:'+(origem==='externa'?'var(--gold)':'#fff')+'">📄 Proposta externa (PDF)</button>'
+      +'</div><div id="origemBody"></div></div>';
+    document.getElementById('tgInterna').onclick=function(){ state._origem='interna'; render(); };
+    document.getElementById('tgExterna').onclick=function(){ state._origem='externa'; render(); };
+    if(origem==='externa') drawExterna(); else drawInterna();
+
+    function drawInterna(){
+      var body=document.getElementById('origemBody');
+      body.innerHTML='<p class="muted">A entrega puxa cliente, endereço, escopo e valor orçado da proposta.</p>'
+        +'<input id="q" placeholder="Buscar por número ou cliente...">'
+        +'<div id="propList" style="margin-top:12px"></div>';
+      var q=document.getElementById('q');
+      var t; q.oninput=function(){ clearTimeout(t); t=setTimeout(loadProps,300); };
+      loadProps();
+      function loadProps(){
+        api('/propostas?q='+encodeURIComponent(q.value||'')).then(function(j){
+          var l=document.getElementById('propList');
+          if(!j.propostas.length){ l.innerHTML='<p class="muted">Nenhuma proposta encontrada.</p>'; return; }
+          l.innerHTML=j.propostas.map(function(p){
+            return '<div class="prop" data-id="'+p.id+'"><div class="n">'+esc(p.numero||('#'+p.id))+'</div><div class="c">'+esc(p.cliente||'—')+' · '+brl(p.valor_total)+'</div></div>';
+          }).join('');
+          Array.prototype.forEach.call(l.querySelectorAll('.prop'),function(el){
+            el.onclick=function(){ criarInterna(Number(el.getAttribute('data-id'))); };
+          });
+        }).catch(function(e){ toast(e.message); });
+      }
     }
-    function criar(pid){
+
+    function drawExterna(){
+      var body=document.getElementById('origemBody');
+      body.innerHTML='<p class="muted">Proposta feita fora do ZAYRA. Anexe o PDF e preencha os dados manualmente. O PDF original vira apêndice do relatório final.</p>'
+        +'<label>PDF da proposta (obrigatório)</label>'
+        +'<label class="btn btn-gold" style="text-align:center">📄 <span id="pdfLbl">Selecionar PDF</span><input id="pdfInput" type="file" accept="application/pdf" style="display:none"></label>'
+        +'<label>Título / descrição</label><input id="exTitulo" placeholder="Ex: Reforma do galpão — Cliente X">'
+        +'<label>Escopo orçado</label><textarea id="exEscopo" placeholder="Resuma o escopo contratado na proposta externa."></textarea>'
+        +'<div class="row2"><div><label>Valor orçado (R$)</label><input id="exValor" type="number" step="0.01" placeholder="0,00"></div>'
+        +'<div><label>Cliente</label><input id="exCliente" placeholder="Nome do cliente"></div></div>'
+        +'<button class="btn btn-primary" id="criarExt" style="margin-top:12px">Criar entrega externa →</button>';
+      var pdf=null;
+      document.getElementById('pdfInput').onchange=function(e){ var f=e.target.files[0]; if(!f)return; document.getElementById('pdfLbl').textContent=f.name; fileToB64(f).then(function(o){ pdf={nome:f.name,mime:o.mime||'application/pdf',base64:o.base64}; }); };
+      document.getElementById('criarExt').onclick=function(){
+        if(!pdf){ toast('Anexe o PDF da proposta.'); return; }
+        var b=document.getElementById('criarExt'); b.disabled=true; b.textContent='Criando...';
+        api('/',{method:'POST',body:{proposta_origem:'externa',pdf_base64:pdf.base64,pdf_nome:pdf.nome,pdf_mime:pdf.mime,titulo:val('exTitulo'),escopo:val('exEscopo'),valor_orcado:val('exValor')?Number(val('exValor')):null,cliente:val('exCliente')}})
+          .then(function(j){ state.id=j.entrega.id; state.doc=j.entrega; toast('Entrega externa '+j.entrega.numero+' criada.'); go(1); })
+          .catch(function(e){ toast(e.message); b.disabled=false; b.textContent='Criar entrega externa →'; });
+      };
+    }
+
+    function criarInterna(pid){
       toast('Criando entrega...');
-      api('/',{method:'POST',body:{proposta_id:pid}}).then(function(j){
+      api('/',{method:'POST',body:{proposta_origem:'interna',proposta_id:pid}}).then(function(j){
         state.id=j.entrega.id; state.doc=j.entrega; toast('Entrega '+j.entrega.numero+' criada.'); go(1);
       }).catch(function(e){ toast(e.message); });
     }
@@ -175,8 +264,9 @@
 
   // Step 3 — fotos
   function stepFotos(){
+    pedirGps();
     var app=document.getElementById('app');
-    app.innerHTML='<div class="card"><h2>3 · Fotos</h2><p class="muted">Registre antes, execução e depois. As de "antes/depois" aparecem lado a lado no PDF.</p></div>';
+    app.innerHTML='<div class="card"><h2>3 · Fotos</h2><p class="muted">Registre antes, execução e depois. As fotos recebem carimbo técnico com coordenadas GPS (padrão Romatec) e as de "antes/depois" aparecem lado a lado no PDF.</p><div id="gpsStatus" class="muted" style="margin-top:6px">GPS: obtendo localização…</div></div>';
     ['antes','execucao','depois'].forEach(function(tp){
       var titulo={antes:'Antes',execucao:'Execução',depois:'Depois'}[tp];
       var fotos=(state.doc.fotos||[]).filter(function(f){return f.tipo===tp;});
@@ -192,50 +282,80 @@
       inp.onchange=function(){ uploadFotos(inp.getAttribute('data-tp'), inp.files); };
     });
     Array.prototype.forEach.call(app.querySelectorAll('.rm'),bindRm);
-    function fotoCard(f){ return '<div class="thumb"><button class="rm" data-fid="'+f.id+'">×</button><img src="data:'+esc(f.mime)+';base64,'+f.data_base64+'"><div class="cap">'+esc(f.legenda||'')+'</div></div>'; }
+    function fotoCard(f){ var cap=[f.legenda, (f.latitude!=null&&f.longitude!=null)?('📍 '+Number(f.latitude).toFixed(5)+','+Number(f.longitude).toFixed(5)):''].filter(Boolean).join(' · '); return '<div class="thumb"><button class="rm" data-fid="'+f.id+'">×</button><img src="data:'+esc(f.mime)+';base64,'+f.data_base64+'"><div class="cap">'+esc(cap)+'</div></div>'; }
     function bindRm(b){ b.onclick=function(){ var fid=b.getAttribute('data-fid'); api('/'+state.id+'/fotos/'+fid,{method:'DELETE'}).then(reload).then(function(){toast('Foto removida.');render();}).catch(function(e){toast(e.message);}); }; }
+    // Upload multipart (campo "foto") — passa pelo overlay técnico no servidor.
     function uploadFotos(tp,files){
       var arr=Array.prototype.slice.call(files);
-      toast('Enviando '+arr.length+' foto(s)...');
+      if(!arr.length) return;
+      toast('Enviando '+arr.length+' foto(s)…');
       arr.reduce(function(p,file){ return p.then(function(){
-        return fileToB64(file).then(function(o){
-          var legenda=prompt('Legenda da foto ('+tp+') — opcional:')||'';
-          return api('/'+state.id+'/fotos',{method:'POST',body:{tipo:tp,mime:o.mime,data_base64:o.base64,legenda:legenda}});
-        });
+        var fd=new FormData();
+        fd.append('foto', file);
+        fd.append('tipo', tp);
+        if(state.doc && state.doc.responsavel_nome) fd.append('colaborador', state.doc.responsavel_nome);
+        anexarGps(fd);
+        return upload('/'+state.id+'/fotos', fd);
       }); }, Promise.resolve()).then(reload).then(function(){ toast('Fotos salvas.'); render(); }).catch(function(e){toast(e.message);});
     }
   }
 
-  // Step 4 — materiais de sobra
+  // Step 4 — materiais de sobra (CRUD por item; foto via multipart + overlay/GPS)
   function stepMateriais(){
-    var mats=(state.doc.materiais_sobra||[]).slice();
-    if(!mats.length) mats=[{material:'',quantidade:'',unidade:'',observacao:''}];
+    pedirGps();
+    // Cópia editável; guarda os ids originais pra calcular remoções no save.
+    var mats=(state.doc.materiais_sobra||[]).map(function(m){ return {id:m.id,material:m.material,quantidade:(m.quantidade==null?'':m.quantidade),unidade:m.unidade||'',observacao:m.observacao||'',foto_mime:m.foto_mime||null,foto_base64:m.foto_base64||null,_file:null,_preview:null}; });
+    if(!mats.length) mats=[{material:'',quantidade:'',unidade:'',observacao:'',_file:null,_preview:null}];
+    var idsOriginais=(state.doc.materiais_sobra||[]).map(function(m){return m.id;});
     var app=document.getElementById('app');
     function draw(){
-      app.innerHTML='<div class="card"><h2>4 · Materiais que sobraram</h2><p class="muted">Registro documental (não movimenta estoque nesta fase).</p><div id="matList"></div>'
+      app.innerHTML='<div class="card"><h2>4 · Materiais que sobraram</h2><p class="muted">Registro documental (não movimenta estoque nesta fase). A foto do material recebe o mesmo carimbo GPS das demais.</p><div id="gpsStatus" class="muted" style="margin:4px 0"></div><div id="matList"></div>'
         +'<button class="btn btn-ghost" id="add" style="margin-top:8px">+ Adicionar material</button>'
         +'<div class="btn-row"><button class="btn btn-ghost" id="back">← Voltar</button><button class="btn btn-primary" id="save">Salvar e continuar →</button></div></div>';
       var list=document.getElementById('matList');
       list.innerHTML=mats.map(function(m,i){
+        var src=m._preview?m._preview:(m.foto_base64?('data:'+(m.foto_mime||'image/jpeg')+';base64,'+m.foto_base64):null);
+        var thumb=src
+          ? '<div class="thumb" style="width:80px"><img src="'+src+'" style="height:80px"><button class="rm" data-rmfoto="'+i+'" title="Remover foto">×</button></div>'
+          : '';
         return '<div class="mat"><div class="row3">'
           +'<input placeholder="Material" data-i="'+i+'" data-k="material" value="'+esc(m.material)+'">'
           +'<input placeholder="Qtd" type="number" step="0.01" data-i="'+i+'" data-k="quantidade" value="'+esc(m.quantidade)+'">'
           +'<input placeholder="Un." data-i="'+i+'" data-k="unidade" value="'+esc(m.unidade||'')+'"></div>'
           +'<input placeholder="Observação" data-i="'+i+'" data-k="observacao" value="'+esc(m.observacao||'')+'" style="margin-top:6px">'
-          +'<div style="text-align:right;margin-top:6px"><button class="btn btn-danger" data-rm="'+i+'">Remover</button></div></div>';
+          +'<div style="display:flex;align-items:center;gap:10px;margin-top:8px">'+thumb
+          +'<label class="btn btn-ghost" style="flex:1;text-align:center;margin:0">📷 '+(src?'Trocar':'Anexar')+' foto do material<input type="file" accept="image/*" capture="environment" style="display:none" data-fotoi="'+i+'"></label>'
+          +'<button class="btn btn-danger" data-rm="'+i+'">Remover</button></div></div>';
       }).join('');
-      Array.prototype.forEach.call(list.querySelectorAll('input'),function(inp){
+      Array.prototype.forEach.call(list.querySelectorAll('input[type=file]'),function(inp){
+        inp.onchange=function(){ var idx=Number(inp.getAttribute('data-fotoi')); var f=inp.files[0]; if(!f)return; mats[idx]._file=f; fileToB64(f).then(function(o){ mats[idx]._preview='data:'+o.mime+';base64,'+o.base64; draw(); }); };
+      });
+      Array.prototype.forEach.call(list.querySelectorAll('input:not([type=file])'),function(inp){
         inp.oninput=function(){ mats[Number(inp.getAttribute('data-i'))][inp.getAttribute('data-k')]=inp.value; };
       });
-      Array.prototype.forEach.call(list.querySelectorAll('[data-rm]'),function(b){
-        b.onclick=function(){ mats.splice(Number(b.getAttribute('data-rm')),1); if(!mats.length)mats=[{material:'',quantidade:'',unidade:'',observacao:''}]; draw(); };
+      Array.prototype.forEach.call(list.querySelectorAll('[data-rmfoto]'),function(b){
+        b.onclick=function(){ var idx=Number(b.getAttribute('data-rmfoto')); mats[idx]._file=null; mats[idx]._preview=null; mats[idx].foto_base64=null; draw(); };
       });
-      document.getElementById('add').onclick=function(){ mats.push({material:'',quantidade:'',unidade:'',observacao:''}); draw(); };
+      Array.prototype.forEach.call(list.querySelectorAll('[data-rm]'),function(b){
+        b.onclick=function(){ mats.splice(Number(b.getAttribute('data-rm')),1); if(!mats.length)mats=[{material:'',quantidade:'',unidade:'',observacao:'',_file:null,_preview:null}]; draw(); };
+      });
+      document.getElementById('add').onclick=function(){ mats.push({material:'',quantidade:'',unidade:'',observacao:'',_file:null,_preview:null}); draw(); };
       document.getElementById('back').onclick=function(){go(2);};
-      document.getElementById('save').onclick=function(){
-        var payload=mats.filter(function(m){return String(m.material||'').trim();}).map(function(m){return {material:m.material,quantidade:m.quantidade===''?null:Number(m.quantidade),unidade:m.unidade,observacao:m.observacao};});
-        api('/'+state.id+'/materiais',{method:'PUT',body:{materiais:payload}}).then(reload).then(function(){toast('Materiais salvos.');go(4);}).catch(function(e){toast(e.message);});
-      };
+      document.getElementById('save').onclick=salvar;
+    }
+    function campos(m){ var fd=new FormData(); fd.append('material',m.material); fd.append('quantidade',m.quantidade===''||m.quantidade==null?'':m.quantidade); fd.append('unidade',m.unidade||''); fd.append('observacao',m.observacao||''); if(m._file){ fd.append('foto',m._file); anexarGps(fd); } return fd; }
+    function salvar(){
+      var validos=mats.filter(function(m){return String(m.material||'').trim();});
+      var idsAgora=validos.filter(function(m){return m.id;}).map(function(m){return m.id;});
+      var remover=idsOriginais.filter(function(id){return idsAgora.indexOf(id)<0;});
+      toast('Salvando materiais…');
+      var chain=Promise.resolve();
+      remover.forEach(function(id){ chain=chain.then(function(){ return api('/'+state.id+'/materiais/'+id,{method:'DELETE'}); }); });
+      validos.forEach(function(m){ chain=chain.then(function(){
+        return m.id ? upload('/'+state.id+'/materiais/'+m.id, campos(m), 'PUT')
+                    : upload('/'+state.id+'/materiais', campos(m), 'POST');
+      }); });
+      chain.then(reload).then(function(){ toast('Materiais salvos.'); go(4); }).catch(function(e){ toast(e.message); });
     }
     draw();
   }
@@ -333,6 +453,12 @@
     rec.onend=function(){ on=false; btn.textContent='🎙️ Ditar'; };
     btn.onclick=function(){ if(on){rec.stop();return;} try{rec.start();on=true;btn.textContent='⏹️ Parar';}catch(e){} };
   }
+
+  // Botão Voltar do header: recua um passo; no passo 1 sai pra Gestão de Obras.
+  document.getElementById('hBack').onclick=function(){
+    if(state.step>0){ go(state.step-1); return; }
+    if(history.length>1) history.back(); else location.href='/obras.html';
+  };
 
   // ---- boot: query ?id= ou ?proposta= ----
   (function boot(){

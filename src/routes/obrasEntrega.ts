@@ -3,25 +3,83 @@
 // Prefixo: /api/gestao-obra/entrega. Dono = req.user.sub (nunca do body).
 // Submódulo de Gestão de Obras — CRUD + PDF + envio Z-API. Sem tools de agente.
 import { Router, type Request, type Response } from 'express';
+import multer from 'multer';
 import type { RowDataPacket } from 'mysql2/promise';
 import pool from '../database/connection';
 import { requireAuth, type AuthedRequest } from '../middleware/auth';
 import { getBaseUrl } from '../services/reciboPdf';
 import {
-  criarDaProposta, snapshotProposta, buscar, listar, atualizar,
-  adicionarFoto, removerFoto, substituirMateriais, definirNotaFiscal,
+  criarDaProposta, criarExterna, snapshotProposta, buscar, listar, atualizar,
+  adicionarFoto, removerFoto, substituirMateriais, adicionarMaterial,
+  atualizarMaterial, removerMaterial, definirNotaFiscal,
   definirResponsavel, snapshotResponsavelEquipe, definirStatus, marcarEntregue,
 } from '../services/obrasEntregaRepo';
 import { gerarEntregaPdf } from '../services/obrasEntregaPdf';
 import { enviarEntregaWhatsapp } from '../services/obrasEntregaEnvio';
-import { ENTREGA_STATUS, ENTREGA_FOTO_TIPOS } from '../types/obrasEntrega';
-import type { EntregaFotoTipo, EntregaStatus, EntregaMaterialSobra } from '../types/obrasEntrega';
+import { ENTREGA_STATUS, ENTREGA_FOTO_TIPOS, PROPOSTA_ORIGENS } from '../types/obrasEntrega';
+import type { EntregaFotoTipo, EntregaStatus, EntregaMaterialSobra, PropostaOrigem } from '../types/obrasEntrega';
 
 const router = Router();
+// Upload em memória (mesmo padrão da galeria/relatório fotográfico).
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 function donoDe(req: Request): string | null {
   const sub = (req as AuthedRequest).user?.sub;
   return sub ? String(sub) : null;
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = parseFloat(String(v));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Lê o arquivo enviado por multer.single('foto'). */
+function fileDe(req: Request): { buffer: Buffer; originalname: string } | null {
+  const f = (req as Request & { file?: { buffer: Buffer; originalname: string } }).file;
+  return f && f.buffer && f.buffer.length ? f : null;
+}
+
+/** Aplica o overlay técnico (GPS/UTM/carimbo) — mesmo serviço da galeria. */
+async function overlayDe(buffer: Buffer, b: Record<string, unknown>, colaboradorFallback: string) {
+  const { aplicarOverlayFoto } = await import('../services/overlayService');
+  const horario = (b.horario_captura as string) || new Date().toISOString();
+  const colaborador = (b.colaborador ? String(b.colaborador).trim() : '') || colaboradorFallback;
+  const municipio = b.municipio ? String(b.municipio) : '';
+  return aplicarOverlayFoto({
+    imageBuffer: buffer,
+    latitude: numOrNull(b.latitude),
+    longitude: numOrNull(b.longitude),
+    altitude_m: numOrNull(b.altitude_m),
+    utm_zona: (b.utm_zona as string) ?? '',
+    utm_e: numOrNull(b.utm_e),
+    utm_n: numOrNull(b.utm_n),
+    datum: (b.datum as string) ?? 'SIRGAS 2000',
+    municipio,
+    logradouro: (b.logradouro as string) ?? '',
+    horario_captura: horario,
+    colaborador,
+  });
+}
+
+/** Monta os campos de foto de um material (overlay se veio arquivo; base64 se JSON). */
+async function fotoMaterial(req: Request, b: Record<string, unknown>, dono: string): Promise<Partial<EntregaMaterialSobra>> {
+  const file = fileDe(req);
+  if (file) {
+    const overlay = await overlayDe(file.buffer, b, dono);
+    return {
+      foto_mime: 'image/jpeg', foto_base64: overlay.base64,
+      latitude: numOrNull(b.latitude), longitude: numOrNull(b.longitude),
+    };
+  }
+  if (b.foto_base64) {
+    return {
+      foto_mime: b.foto_mime != null ? String(b.foto_mime) : 'image/jpeg',
+      foto_base64: String(b.foto_base64),
+      latitude: numOrNull(b.latitude), longitude: numOrNull(b.longitude),
+    };
+  }
+  return {};
 }
 
 // GET /propostas — lista propostas disponíveis pra vincular a RE (picker do wizard).
@@ -92,20 +150,48 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST / — cria a partir de proposta_id (puxa dados da proposta).
+// POST / — cria a entrega. Duas origens:
+//  - interna (default): body.proposta_id → puxa dados da proposta do sistema.
+//  - externa: body.proposta_origem='externa' + PDF (base64) + campos manuais.
+// PDF/foto trafegam como base64 (padrão do módulo: LONGTEXT, Railway efêmero).
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const dono = donoDe(req);
     if (!dono) return res.status(401).json({ error: 'Não autenticado.' });
-    const propostaId = Number(req.body?.proposta_id);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const origem = (b.proposta_origem != null ? String(b.proposta_origem) : 'interna') as PropostaOrigem;
+    if (!PROPOSTA_ORIGENS.includes(origem)) {
+      return res.status(400).json({ error: 'proposta_origem inválida (use "interna" ou "externa").' });
+    }
+
+    if (origem === 'externa') {
+      const pdfBase64 = String((b.pdf_base64 ?? (b.pdf as Record<string, unknown>)?.base64) ?? '');
+      if (!pdfBase64) return res.status(400).json({ error: 'Proposta externa exige o PDF (campo "pdf_base64").' });
+      const doc = await criarExterna(dono, {
+        titulo: b.titulo != null ? String(b.titulo) : null,
+        escopo: b.escopo != null ? String(b.escopo) : null,
+        valor_orcado: b.valor_orcado != null && b.valor_orcado !== '' ? Number(b.valor_orcado) : null,
+        cliente: b.cliente != null ? String(b.cliente) : null,
+        cliente_telefone: b.cliente_telefone != null ? String(b.cliente_telefone) : null,
+        pdf: {
+          nome: String(b.pdf_nome ?? (b.pdf as Record<string, unknown>)?.nome ?? 'proposta-externa.pdf'),
+          mime: String(b.pdf_mime ?? (b.pdf as Record<string, unknown>)?.mime ?? 'application/pdf'),
+          base64: pdfBase64,
+        },
+      });
+      return res.status(201).json({ entrega: doc });
+    }
+
+    // interna
+    const propostaId = Number(b.proposta_id);
     if (!Number.isFinite(propostaId) || propostaId <= 0) {
-      return res.status(400).json({ error: 'Campo "proposta_id" é obrigatório.' });
+      return res.status(400).json({ error: 'Proposta interna exige "proposta_id".' });
     }
     const doc = await criarDaProposta(dono, propostaId);
     res.status(201).json({ entrega: doc });
   } catch (err) {
     const msg = (err as Error).message;
-    if (/não encontrada/i.test(msg)) return res.status(404).json({ error: msg });
+    if (/não encontrada|obrigatóri/i.test(msg)) return res.status(400).json({ error: msg });
     console.error('[entrega POST /]', err);
     res.status(500).json({ error: 'Falha ao criar entrega.' });
   }
@@ -171,25 +257,49 @@ router.post('/:id(\\d+)/status', requireAuth, async (req: Request, res: Response
   }
 });
 
-// POST /:id/fotos — adiciona foto (base64 JSON). tipo: antes|execucao|depois|sobra_material.
-router.post('/:id(\\d+)/fotos', requireAuth, async (req: Request, res: Response) => {
+// POST /:id/fotos — upload multipart (campo "foto") + overlay técnico com GPS
+// (mesmo padrão da galeria/relatório fotográfico). Também aceita fallback JSON
+// base64 (campo data_base64) pra compatibilidade. tipo: antes|execucao|depois|sobra_material.
+router.post('/:id(\\d+)/fotos', requireAuth, upload.single('foto'), async (req: Request, res: Response) => {
   try {
     const dono = donoDe(req);
     if (!dono) return res.status(401).json({ error: 'Não autenticado.' });
     const b = (req.body ?? {}) as Record<string, unknown>;
     const tipo = String(b.tipo ?? 'execucao') as EntregaFotoTipo;
     if (!ENTREGA_FOTO_TIPOS.includes(tipo)) return res.status(400).json({ error: 'Tipo de foto inválido.' });
-    const data_base64 = String(b.data_base64 ?? '');
-    if (!data_base64) return res.status(400).json({ error: 'Campo "data_base64" é obrigatório.' });
+
+    const file = fileDe(req);
+    let mime = String(b.mime ?? 'image/jpeg');
+    let dataB64: string;
+    const geo: Record<string, unknown> = {};
+
+    if (file) {
+      // Caminho principal: aplica o overlay técnico (resize + carimbo de coordenadas).
+      const overlay = await overlayDe(file.buffer, b, dono);
+      dataB64 = overlay.base64; // "data:image/jpeg;base64,..."; o repo tira o prefixo
+      mime = 'image/jpeg';
+      Object.assign(geo, {
+        latitude: numOrNull(b.latitude), longitude: numOrNull(b.longitude), altitude_m: numOrNull(b.altitude_m),
+        utm_zona: b.utm_zona ?? null, utm_e: numOrNull(b.utm_e), utm_n: numOrNull(b.utm_n),
+        datum: b.datum ?? 'SIRGAS 2000', municipio: b.municipio ?? null, logradouro: b.logradouro ?? null,
+        horario_captura: (b.horario_captura as string) || new Date().toISOString(),
+        colaborador: (b.colaborador && String(b.colaborador).trim()) || null,
+      });
+    } else if (b.data_base64) {
+      // Fallback JSON (sem overlay) — mantém compatibilidade.
+      dataB64 = String(b.data_base64);
+    } else {
+      return res.status(400).json({ error: 'Envie o arquivo "foto" (multipart) ou "data_base64".' });
+    }
+
     const r = await adicionarFoto(Number(req.params.id), dono, {
-      tipo,
-      mime: String(b.mime ?? 'image/jpeg'),
-      data_base64,
+      tipo, mime, data_base64: dataB64,
       legenda: b.legenda != null ? String(b.legenda).slice(0, 255) : null,
       ordem: Number(b.ordem) || 0,
+      ...geo,
     });
     if (!r) return res.status(404).json({ error: 'Entrega não encontrada.' });
-    res.status(201).json({ id: r.id });
+    res.status(201).json({ id: r.id, base64_overlay: file ? dataB64 : undefined });
   } catch (err) {
     console.error('[entrega POST /:id/fotos]', err);
     res.status(500).json({ error: (err as Error).message || 'Falha ao adicionar foto.' });
@@ -222,6 +332,68 @@ router.put('/:id(\\d+)/materiais', requireAuth, async (req: Request, res: Respon
   } catch (err) {
     console.error('[entrega PUT /:id/materiais]', err);
     res.status(500).json({ error: 'Falha ao salvar materiais.' });
+  }
+});
+
+// POST /:id/materiais — adiciona UM material. Foto opcional via multipart (campo
+// "foto"): passa pelo MESMO overlay técnico das fotos (GPS/UTM/carimbo). Também
+// aceita foto_base64 (JSON) como fallback.
+router.post('/:id(\\d+)/materiais', requireAuth, upload.single('foto'), async (req: Request, res: Response) => {
+  try {
+    const dono = donoDe(req);
+    if (!dono) return res.status(401).json({ error: 'Não autenticado.' });
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (!String(b.material ?? '').trim()) return res.status(400).json({ error: 'Campo "material" é obrigatório.' });
+    const foto = await fotoMaterial(req, b, dono);
+    const r = await adicionarMaterial(Number(req.params.id), dono, {
+      material: String(b.material),
+      quantidade: b.quantidade != null && b.quantidade !== '' ? Number(b.quantidade) : null,
+      unidade: b.unidade != null ? String(b.unidade) : null,
+      observacao: b.observacao != null ? String(b.observacao) : null,
+      ...foto,
+      ordem: Number(b.ordem) || 0,
+    });
+    if (!r) return res.status(404).json({ error: 'Entrega não encontrada.' });
+    res.status(201).json({ id: r.id });
+  } catch (err) {
+    console.error('[entrega POST /:id/materiais]', err);
+    res.status(500).json({ error: (err as Error).message || 'Falha ao adicionar material.' });
+  }
+});
+
+// PUT /:id/materiais/:materialId — atualiza UM material (foto opcional substitui, com overlay).
+router.put('/:id(\\d+)/materiais/:materialId(\\d+)', requireAuth, upload.single('foto'), async (req: Request, res: Response) => {
+  try {
+    const dono = donoDe(req);
+    if (!dono) return res.status(401).json({ error: 'Não autenticado.' });
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const foto = await fotoMaterial(req, b, dono);
+    const ok = await atualizarMaterial(Number(req.params.id), dono, Number(req.params.materialId), {
+      material: b.material != null ? String(b.material) : undefined,
+      quantidade: b.quantidade != null && b.quantidade !== '' ? Number(b.quantidade) : null,
+      unidade: b.unidade != null ? String(b.unidade) : null,
+      observacao: b.observacao != null ? String(b.observacao) : null,
+      ...foto,
+    });
+    if (!ok) return res.status(404).json({ error: 'Material não encontrado.' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[entrega PUT /:id/materiais/:materialId]', err);
+    res.status(500).json({ error: 'Falha ao atualizar material.' });
+  }
+});
+
+// DELETE /:id/materiais/:materialId — remove UM material.
+router.delete('/:id(\\d+)/materiais/:materialId(\\d+)', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const dono = donoDe(req);
+    if (!dono) return res.status(401).json({ error: 'Não autenticado.' });
+    const ok = await removerMaterial(Number(req.params.id), dono, Number(req.params.materialId));
+    if (!ok) return res.status(404).json({ error: 'Material não encontrado.' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[entrega DELETE /:id/materiais/:materialId]', err);
+    res.status(500).json({ error: 'Falha ao remover material.' });
   }
 });
 

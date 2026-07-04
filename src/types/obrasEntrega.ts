@@ -8,16 +8,34 @@
 
 export type EntregaStatus = 'rascunho' | 'em_revisao' | 'concluido' | 'entregue';
 export type EntregaFotoTipo = 'antes' | 'execucao' | 'depois' | 'sobra_material';
+export type PropostaOrigem = 'interna' | 'externa';
+
+export const PROPOSTA_ORIGENS: PropostaOrigem[] = ['interna', 'externa'];
 
 export const ENTREGA_STATUS: EntregaStatus[] = ['rascunho', 'em_revisao', 'concluido', 'entregue'];
 export const ENTREGA_FOTO_TIPOS: EntregaFotoTipo[] = ['antes', 'execucao', 'depois', 'sobra_material'];
 
-export interface EntregaFoto {
+/** Coordenadas GPS + local capturadas junto da foto (padrão da galeria). */
+export interface FotoGeo {
+  latitude?: number | null;
+  longitude?: number | null;
+  altitude_m?: number | null;
+  utm_zona?: string | null;
+  utm_e?: number | null;
+  utm_n?: number | null;
+  datum?: string | null;
+  municipio?: string | null;
+  logradouro?: string | null;
+  horario_captura?: string | null;
+  colaborador?: string | null;
+}
+
+export interface EntregaFoto extends FotoGeo {
   id?: number;
   entrega_id?: number;
   tipo: EntregaFotoTipo;
   mime: string;
-  data_base64: string;      // base64 puro (sem prefixo data:)
+  data_base64: string;      // base64 do JPEG já com overlay estampado
   legenda?: string | null;
   ordem?: number;
 }
@@ -32,12 +50,22 @@ export interface EntregaMaterialSobra {
   foto_base64?: string | null;
   observacao?: string | null;
   ordem?: number;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface ObraEntrega {
   id?: number;
   colaborador_id: string;          // = req.user.sub (subject do JWT)
-  proposta_id: number;
+  proposta_id?: number | null;     // null quando proposta_origem = 'externa'
+  proposta_origem?: PropostaOrigem;
+  // Proposta externa (PDF fora do sistema) — preenchidos manualmente:
+  proposta_externa_pdf_nome?: string | null;
+  proposta_externa_pdf_mime?: string | null;
+  proposta_externa_pdf_base64?: string | null;
+  proposta_externa_titulo?: string | null;
+  proposta_externa_escopo?: string | null;
+  proposta_externa_valor_orcado?: number | null;
   obra_id?: number | null;
   numero?: string | null;          // RE-AAAA-NNNN (auto)
   titulo?: string | null;
@@ -74,7 +102,8 @@ export interface ObraEntregaResumo {
   numero: string | null;
   titulo: string | null;
   cliente: string | null;
-  proposta_id: number;
+  proposta_id: number | null;
+  proposta_origem: PropostaOrigem;
   obra_id: number | null;
   status: EntregaStatus;
   valor_receber: number | null;
@@ -85,8 +114,8 @@ export interface ObraEntregaResumo {
   updated_at: string;
 }
 
-/** Snapshot puxado da proposta de origem ao criar a RE. */
-export interface PropostaOrigem {
+/** Snapshot puxado da proposta interna de origem ao criar a RE. */
+export interface PropostaSnapshot {
   proposta_id: number;
   numero: string | null;
   cliente: string | null;

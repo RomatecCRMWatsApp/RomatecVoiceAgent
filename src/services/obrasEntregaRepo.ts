@@ -7,7 +7,7 @@ import type { PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/prom
 import pool from '../database/connection';
 import type {
   ObraEntrega, ObraEntregaResumo, EntregaFoto, EntregaMaterialSobra,
-  PropostaOrigem, EntregaStatus, EntregaFotoTipo,
+  PropostaSnapshot, PropostaOrigem, EntregaStatus, EntregaFotoTipo,
 } from '../types/obrasEntrega';
 import { ENTREGA_STATUS, ENTREGA_FOTO_TIPOS } from '../types/obrasEntrega';
 
@@ -24,15 +24,15 @@ function apenasBase64(s?: string | null): string | null {
   return m ? m[1] : s;
 }
 
-function gerarHash(numero: string, propostaId: number, colaboradorId: string): string {
-  const base = `${numero}|${propostaId}|${Date.now()}|${colaboradorId}`;
+function gerarHash(numero: string, propostaId: number | null | undefined, colaboradorId: string): string {
+  const base = `${numero}|${propostaId ?? 'ext'}|${Date.now()}|${colaboradorId}`;
   return createHash('sha256').update(base).digest('hex');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Snapshot da proposta de origem (propostas genéricas — mão de obra/consultoria).
 // ─────────────────────────────────────────────────────────────────────────────
-export async function snapshotProposta(propostaId: number): Promise<PropostaOrigem | null> {
+export async function snapshotProposta(propostaId: number): Promise<PropostaSnapshot | null> {
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT p.id, p.numero, p.endereco_obra, p.valor_total, p.observacoes,
             c.nome AS cliente_nome, c.telefone AS cliente_telefone,
@@ -105,6 +105,74 @@ export async function criarDaProposta(colaboradorId: string, propostaId: number)
   }
 }
 
+/** Cria RE a partir de proposta EXTERNA (PDF fora do sistema + campos manuais). */
+export async function criarExterna(
+  colaboradorId: string,
+  input: {
+    titulo?: string | null;
+    escopo?: string | null;
+    valor_orcado?: number | null;
+    cliente?: string | null;
+    cliente_telefone?: string | null;
+    pdf: { nome: string; mime: string; base64: string };
+  },
+): Promise<ObraEntrega> {
+  const b64 = apenasBase64(input.pdf?.base64);
+  if (!b64) throw new Error('PDF da proposta externa é obrigatório.');
+  const valor = num(input.valor_orcado);
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [r] = await conn.execute<ResultSetHeader>(
+      `INSERT INTO obras_entregas
+         (colaborador_id, proposta_id, proposta_origem,
+          proposta_externa_pdf_nome, proposta_externa_pdf_mime, proposta_externa_pdf_base64,
+          proposta_externa_titulo, proposta_externa_escopo, proposta_externa_valor_orcado,
+          titulo, cliente, cliente_telefone, resumo_proposta, valor_orcado, valor_receber, status)
+       VALUES (?, NULL, 'externa', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rascunho')`,
+      [
+        colaboradorId,
+        String(input.pdf.nome || 'proposta-externa.pdf').slice(0, 255),
+        String(input.pdf.mime || 'application/pdf').slice(0, 80),
+        b64,
+        input.titulo ? String(input.titulo).slice(0, 255) : null,
+        input.escopo ?? null,
+        valor,
+        input.titulo ? String(input.titulo).slice(0, 255) : null,
+        input.cliente ? String(input.cliente).slice(0, 200) : null,
+        input.cliente_telefone ? String(input.cliente_telefone).slice(0, 30) : null,
+        input.escopo ?? null,
+        valor,
+        valor, // valor_receber pré-preenchido = valor orçado (editável)
+      ],
+    );
+    const id = r.insertId;
+    const ano = new Date().getFullYear();
+    const numero = `RE-${ano}-${String(id).padStart(4, '0')}`;
+    await conn.execute('UPDATE obras_entregas SET numero = ? WHERE id = ?', [numero, id]);
+    await conn.commit();
+    const doc = await buscar(id, colaboradorId);
+    if (!doc) throw new Error('Falha ao recarregar entrega externa recém-criada.');
+    return doc;
+  } catch (err) {
+    await conn.rollback().catch(() => undefined);
+    throw new Error(`[obrasEntregaRepo.criarExterna] ${(err as Error).message}`);
+  } finally {
+    conn.release();
+  }
+}
+
+/** Retorna só o PDF externo (base64) de uma entrega — pra anexar no PDF final. */
+export async function pdfExternoBase64(entregaId: number): Promise<string | null> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    'SELECT proposta_externa_pdf_base64 FROM obras_entregas WHERE id = ? LIMIT 1',
+    [entregaId],
+  );
+  if (!rows.length) return null;
+  return (rows[0].proposta_externa_pdf_base64 as string | null) || null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Leitura
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,6 +181,7 @@ function mapHeader(row: RowDataPacket): ObraEntrega {
     ...(row as unknown as ObraEntrega),
     valor_orcado: num(row.valor_orcado),
     valor_receber: num(row.valor_receber),
+    proposta_externa_valor_orcado: num(row.proposta_externa_valor_orcado),
     fotos: [],
     materiais_sobra: [],
   };
@@ -120,17 +189,23 @@ function mapHeader(row: RowDataPacket): ObraEntrega {
 
 async function carregarFotos(entregaId: number): Promise<EntregaFoto[]> {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, entrega_id, tipo, mime, data_base64, legenda, ordem
+    `SELECT id, entrega_id, tipo, mime, data_base64, legenda, ordem,
+            latitude, longitude, altitude_m, utm_zona, utm_e, utm_n, datum,
+            municipio, logradouro, horario_captura, colaborador
        FROM obras_entregas_fotos WHERE entrega_id = ?
       ORDER BY FIELD(tipo,'antes','execucao','depois','sobra_material'), ordem, id`,
     [entregaId],
   );
-  return rows as unknown as EntregaFoto[];
+  return (rows as unknown as EntregaFoto[]).map((f) => ({
+    ...f,
+    latitude: num(f.latitude), longitude: num(f.longitude), altitude_m: num(f.altitude_m),
+    utm_e: num(f.utm_e), utm_n: num(f.utm_n),
+  }));
 }
 
 async function carregarMateriais(entregaId: number): Promise<EntregaMaterialSobra[]> {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, entrega_id, material, quantidade, unidade, foto_mime, foto_base64, observacao, ordem
+    `SELECT id, entrega_id, material, quantidade, unidade, foto_mime, foto_base64, observacao, ordem, latitude, longitude
        FROM obras_entregas_materiais_sobra WHERE entrega_id = ?
       ORDER BY ordem, id`,
     [entregaId],
@@ -138,6 +213,7 @@ async function carregarMateriais(entregaId: number): Promise<EntregaMaterialSobr
   return (rows as unknown as EntregaMaterialSobra[]).map((m) => ({
     ...m,
     quantidade: m.quantidade == null ? null : Number(m.quantidade),
+    latitude: num(m.latitude), longitude: num(m.longitude),
   }));
 }
 
@@ -174,7 +250,7 @@ export async function listar(
   const lim = Math.max(1, Math.min(200, Math.trunc(Number(limit) || 50)));
   const off = Math.max(0, Math.trunc(Number(offset) || 0));
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, numero, titulo, cliente, proposta_id, obra_id, status, valor_receber,
+    `SELECT id, numero, titulo, cliente, proposta_id, proposta_origem, obra_id, status, valor_receber,
             data_entrega, hash_publico, recebimento_confirmado_em, created_at, updated_at
        FROM obras_entregas WHERE colaborador_id = ?
       ORDER BY created_at DESC, id DESC
@@ -186,7 +262,8 @@ export async function listar(
     numero: r.numero ?? null,
     titulo: r.titulo ?? null,
     cliente: r.cliente ?? null,
-    proposta_id: Number(r.proposta_id),
+    proposta_id: r.proposta_id == null ? null : Number(r.proposta_id),
+    proposta_origem: (r.proposta_origem as PropostaOrigem) ?? 'interna',
     obra_id: r.obra_id == null ? null : Number(r.obra_id),
     status: r.status as EntregaStatus,
     valor_receber: num(r.valor_receber),
@@ -257,9 +334,19 @@ export async function adicionarFoto(
   const b64 = apenasBase64(foto.data_base64);
   if (!b64) throw new Error('Foto sem conteúdo base64.');
   const [r] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO obras_entregas_fotos (entrega_id, tipo, mime, data_base64, legenda, ordem)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [entregaId, tipo, foto.mime || 'image/jpeg', b64, foto.legenda ?? null, foto.ordem ?? 0],
+    `INSERT INTO obras_entregas_fotos
+       (entrega_id, tipo, mime, data_base64, legenda, ordem,
+        latitude, longitude, altitude_m, utm_zona, utm_e, utm_n, datum,
+        municipio, logradouro, horario_captura, colaborador)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      entregaId, tipo, foto.mime || 'image/jpeg', b64, foto.legenda ?? null, foto.ordem ?? 0,
+      num(foto.latitude), num(foto.longitude), num(foto.altitude_m),
+      foto.utm_zona ?? null, num(foto.utm_e), num(foto.utm_n), foto.datum ?? null,
+      foto.municipio ?? null, foto.logradouro ?? null,
+      foto.horario_captura ? new Date(foto.horario_captura) : null,
+      foto.colaborador ?? null,
+    ],
   );
   return { id: r.insertId };
 }
@@ -318,6 +405,75 @@ async function inserirMateriais(conn: PoolConnection, entregaId: number, materia
      VALUES ${ph}`,
     p,
   );
+}
+
+/** Adiciona um único material (com foto opcional em base64). */
+export async function adicionarMaterial(
+  entregaId: number, colaboradorId: string, m: EntregaMaterialSobra,
+): Promise<{ id: number } | null> {
+  if (!(await possui(entregaId, colaboradorId))) return null;
+  if (!String(m.material || '').trim()) throw new Error('Nome do material é obrigatório.');
+  const foto = apenasBase64(m.foto_base64);
+  const [r] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO obras_entregas_materiais_sobra
+       (entrega_id, material, quantidade, unidade, foto_mime, foto_base64, observacao, ordem, latitude, longitude)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      entregaId,
+      String(m.material).slice(0, 255),
+      num(m.quantidade),
+      m.unidade ? String(m.unidade).slice(0, 20) : null,
+      foto ? (m.foto_mime || 'image/jpeg') : null,
+      foto,
+      m.observacao ? String(m.observacao).slice(0, 255) : null,
+      m.ordem ?? 0,
+      num(m.latitude), num(m.longitude),
+    ],
+  );
+  return { id: r.insertId };
+}
+
+/** Atualiza um material; se `foto_base64` vier preenchido, substitui a foto. */
+export async function atualizarMaterial(
+  entregaId: number, colaboradorId: string, materialId: number, m: Partial<EntregaMaterialSobra>,
+): Promise<boolean> {
+  if (!(await possui(entregaId, colaboradorId))) return false;
+  const foto = apenasBase64(m.foto_base64);
+  const trocarFoto = !!foto; // só substitui a foto quando enviada
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE obras_entregas_materiais_sobra SET
+       material = COALESCE(?, material),
+       quantidade = ?,
+       unidade = ?,
+       observacao = ?,
+       foto_mime = CASE WHEN ? THEN ? ELSE foto_mime END,
+       foto_base64 = CASE WHEN ? THEN ? ELSE foto_base64 END,
+       latitude = CASE WHEN ? THEN ? ELSE latitude END,
+       longitude = CASE WHEN ? THEN ? ELSE longitude END
+     WHERE id = ? AND entrega_id = ?`,
+    [
+      m.material != null ? String(m.material).slice(0, 255) : null,
+      num(m.quantidade),
+      m.unidade != null ? String(m.unidade).slice(0, 20) : null,
+      m.observacao != null ? String(m.observacao).slice(0, 255) : null,
+      trocarFoto ? 1 : 0, trocarFoto ? (m.foto_mime || 'image/jpeg') : null,
+      trocarFoto ? 1 : 0, trocarFoto ? foto : null,
+      trocarFoto ? 1 : 0, trocarFoto ? num(m.latitude) : null,
+      trocarFoto ? 1 : 0, trocarFoto ? num(m.longitude) : null,
+      materialId, entregaId,
+    ],
+  );
+  return r.affectedRows > 0;
+}
+
+/** Remove um material da entrega. */
+export async function removerMaterial(entregaId: number, colaboradorId: string, materialId: number): Promise<boolean> {
+  if (!(await possui(entregaId, colaboradorId))) return false;
+  const [r] = await pool.execute<ResultSetHeader>(
+    'DELETE FROM obras_entregas_materiais_sobra WHERE id = ? AND entrega_id = ?',
+    [materialId, entregaId],
+  );
+  return r.affectedRows > 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

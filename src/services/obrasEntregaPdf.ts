@@ -150,15 +150,32 @@ export function renderEntregaHtml(doc: ObraEntrega, opts?: { linkPublico?: strin
     ? `<div class="confirmado">✓ Recebimento confirmado pelo cliente em ${fmtDataHora(doc.recebimento_confirmado_em)}</div>`
     : '';
 
-  const linhasMateriais = materiais.length
-    ? materiais.map((m) => `
-        <tr>
-          <td>${esc(m.material)}</td>
-          <td class="c">${m.quantidade == null ? '—' : Number(m.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td class="c">${esc(m.unidade || '—')}</td>
-          <td>${esc(m.observacao || '')}</td>
-        </tr>`).join('')
-    : `<tr><td colspan="4" class="muted c">Nenhum material de sobra registrado.</td></tr>`;
+  // Materiais em grid 2 colunas, com miniatura da foto ao lado quando houver.
+  const cardsMateriais = materiais.length
+    ? `<div class="mat-grid">${materiais.map((m) => {
+        const qtd = m.quantidade == null ? '' : `${Number(m.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${esc(m.unidade || '')}`.trim();
+        const foto = m.foto_base64
+          ? `<img class="mat-foto" src="data:${esc(m.foto_mime || 'image/jpeg')};base64,${m.foto_base64}" alt="${esc(m.material)}" />`
+          : '';
+        return `
+          <div class="mat-card">
+            ${foto}
+            <div class="mat-info">
+              <b>${esc(m.material)}</b>
+              ${qtd ? `<span class="mat-qtd">${qtd}</span>` : ''}
+              ${m.observacao ? `<small>${esc(m.observacao)}</small>` : ''}
+            </div>
+          </div>`;
+      }).join('')}</div>`
+    : `<p class="muted">Nenhum material de sobra registrado.</p>`;
+
+  // Bloco de resumo da proposta — interna (observações) x externa (campos manuais).
+  const externa = (doc.proposta_origem === 'externa');
+  const resumoBloco = externa
+    ? `${doc.proposta_externa_titulo ? `<h4>${esc(doc.proposta_externa_titulo)}</h4>` : ''}
+       ${doc.proposta_externa_escopo ? `<p>${esc(doc.proposta_externa_escopo).replace(/\n/g, '<br>')}</p>` : '<p class="muted">Sem escopo informado.</p>'}
+       <div class="nf-doc">📎 Proposta original (externa) anexada ao final deste relatório${doc.proposta_externa_pdf_nome ? `: <strong>${esc(doc.proposta_externa_pdf_nome)}</strong>` : ''}.</div>`
+    : `${doc.resumo_proposta ? `<p>${esc(doc.resumo_proposta).replace(/\n/g, '<br>')}</p>` : '<p class="muted">Sem resumo da proposta.</p>'}`;
 
   return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <style>
@@ -204,6 +221,14 @@ export function renderEntregaHtml(doc: ObraEntrega, opts?: { linkPublico?: strin
   th { background: ${GREEN}; color: ${GOLD_SOFT}; text-align: left; padding: 7px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
   td { padding: 7px 10px; border-bottom: 1px solid ${LINE}; }
 
+  .mat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .mat-card { display: flex; gap: 10px; align-items: center; background: #fff; border: 1px solid ${LINE}; border-radius: 10px; padding: 8px 10px; }
+  .mat-foto { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid ${LINE}; flex: 0 0 auto; }
+  .mat-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .mat-info b { color: ${GREEN2}; }
+  .mat-qtd { color: ${GOLD}; font-weight: 700; font-size: 12px; }
+  .mat-info small { color: ${MUTED}; font-size: 10px; }
+
   .valor-box { display: flex; justify-content: space-between; align-items: center; background: ${GREEN}; color: #fff; border-radius: 12px; padding: 18px 24px; margin-top: 12px; }
   .valor-box .lbl { color: ${GOLD_SOFT}; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
   .valor-box .val { color: ${GOLD}; font-size: 26px; font-weight: 800; }
@@ -237,8 +262,8 @@ export function renderEntregaHtml(doc: ObraEntrega, opts?: { linkPublico?: strin
   </div>
 
   <div class="page">
-    <h2><span class="n">1</span>Resumo da proposta original</h2>
-    ${doc.resumo_proposta ? `<p>${esc(doc.resumo_proposta).replace(/\n/g, '<br>')}</p>` : '<p class="muted">Sem resumo da proposta.</p>'}
+    <h2><span class="n">1</span>Resumo da proposta ${externa ? 'externa' : 'original'}</h2>
+    ${resumoBloco}
     ${antes.length ? `<h4>Situação inicial (antes)</h4>${grade(antes)}` : ''}
 
     <h2><span class="n">2</span>Execução dos serviços</h2>
@@ -247,11 +272,8 @@ export function renderEntregaHtml(doc: ObraEntrega, opts?: { linkPublico?: strin
     ${antes.length && depois.length ? `<h4>Comparativo antes → depois</h4>${comparativoAntesDepois(antes, depois)}` : (depois.length ? `<h4>Resultado final (depois)</h4>${grade(depois)}` : '')}
 
     <h2><span class="n">3</span>Materiais que sobraram</h2>
-    <table>
-      <thead><tr><th>Material</th><th class="c">Qtd.</th><th class="c">Un.</th><th>Observação</th></tr></thead>
-      <tbody>${linhasMateriais}</tbody>
-    </table>
-    ${sobraFotos.length ? grade(sobraFotos) : ''}
+    ${cardsMateriais}
+    ${sobraFotos.length ? `<h4>Registro fotográfico adicional</h4>${grade(sobraFotos)}` : ''}
 
     <h2><span class="n">4</span>Valor a receber &amp; Nota Fiscal</h2>
     <div class="valor-box">
@@ -278,7 +300,29 @@ export function renderEntregaHtml(doc: ObraEntrega, opts?: { linkPublico?: strin
 </body></html>`;
 }
 
+/** Concatena o PDF do relatório com o PDF externo (apêndice), via pdf-lib. */
+async function anexarPdfExterno(base: Buffer, externoBase64: string): Promise<Buffer> {
+  try {
+    const { PDFDocument } = await import('pdf-lib');
+    const out = await PDFDocument.load(base);
+    const anexo = await PDFDocument.load(Buffer.from(externoBase64, 'base64'));
+    const pages = await out.copyPages(anexo, anexo.getPageIndices());
+    pages.forEach((p) => out.addPage(p));
+    const bytes = await out.save();
+    return Buffer.from(bytes);
+  } catch (err) {
+    // Se o anexo estiver corrompido/não for PDF, mantém o relatório sem o apêndice.
+    console.warn('[obrasEntregaPdf] falha ao anexar PDF externo (segue sem apêndice):', (err as Error).message.slice(0, 160));
+    return base;
+  }
+}
+
 export async function gerarEntregaPdf(doc: ObraEntrega, opts?: { linkPublico?: string | null }): Promise<Buffer> {
   const html = renderEntregaHtml(doc, opts);
-  return htmlToPdf(html);
+  const base = await htmlToPdf(html);
+  // Proposta externa: anexa o PDF original como apêndice ao final (merge, não re-render).
+  if (doc.proposta_origem === 'externa' && doc.proposta_externa_pdf_base64) {
+    return anexarPdfExterno(base, doc.proposta_externa_pdf_base64);
+  }
+  return base;
 }
