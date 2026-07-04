@@ -1466,7 +1466,9 @@ app.post('/api/recibos/vale/preview-pdf', async (req: Request, res: Response) =>
 // WhatsApp completo) + ajuste em recibos_ajustes (subtrai do quinzenal).
 // Atomicidade via transacao MySQL. Idempotencia via chave natural
 // (membro+periodo+valor) com janela 60s.
-app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Request, res: Response) => {
+// v3.84.0: aceita comprovante de pagamento (PIX/TED) via multipart (campo
+// "comprovante"). docUpload.single é no-op quando o request é JSON (compat).
+app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, docUpload.single('comprovante'), async (req: Request, res: Response) => {
   const b = (req.body || {}) as Record<string, unknown>;
   const membroId = Number(b.membro_id);
   const valor = Number(b.valor);
@@ -1476,8 +1478,9 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
     return;
   }
   const descricao = typeof b.descricao === 'string' ? b.descricao : '';
-  const enviarWa = b.enviar_whatsapp !== false; // default true
-  const enviarTg = !!b.enviar_telegram;
+  // v3.84.0: booleans robustos p/ JSON (boolean) e multipart (string 'true'/'false').
+  const enviarWa = !(b.enviar_whatsapp === false || b.enviar_whatsapp === 'false');
+  const enviarTg = b.enviar_telegram === true || b.enviar_telegram === 'true';
   const saldoAnterior = Number(b.saldo_anterior) || 0;
   const obraNome = typeof b.obra_nome === 'string' ? b.obra_nome : null;
   // v1.99.21: forma de pagamento (PIX | Dinheiro | TED | Transferência)
@@ -1488,11 +1491,17 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
   const phoneOverride = typeof b.phone_override === 'string'
     ? b.phone_override.replace(/\D/g, '')
     : '';
-  const phonesExtras = Array.isArray(b.phones_extras)
+  // phones_extras: array (JSON) ou string (multipart — JSON ou separada por vírgula).
+  const phonesExtrasRaw: unknown[] = Array.isArray(b.phones_extras)
     ? (b.phones_extras as unknown[])
-        .map(p => String(p ?? '').replace(/\D/g, ''))
-        .filter(p => p.length >= 10)
-    : [];
+    : (typeof b.phones_extras === 'string' && b.phones_extras.trim()
+        ? (() => { try { const j = JSON.parse(b.phones_extras as string); return Array.isArray(j) ? j : String(b.phones_extras).split(/[,;\s]+/); } catch { return String(b.phones_extras).split(/[,;\s]+/); } })()
+        : []);
+  const phonesExtras = phonesExtrasRaw
+    .map(p => String(p ?? '').replace(/\D/g, ''))
+    .filter(p => p.length >= 10);
+  // v3.84.0: arquivo do comprovante (opcional) — vem do multer.
+  const comprovanteFile = (req as Request & { file?: { buffer: Buffer; originalname: string; mimetype: string } }).file || null;
 
   const pool = (await import('./database/connection')).default;
   const recibosMod = await import('./integrations/recibos');
@@ -1630,6 +1639,30 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
     recibo: reciboCriado, // v1.99.16: PDF agora inclui QR /v/:hash + hash truncado
   });
 
+  // v3.84.0: comprovante de pagamento (PIX/TED) — persiste como anexo do recibo
+  // (reusa recibos_anexos) e prepara pra enviar junto do recibo.
+  let comprovanteInfo: { base64: string; dataUri: string; fileName: string; isImage: boolean; buffer: Buffer } | null = null;
+  if (comprovanteFile && comprovanteFile.buffer?.length) {
+    try {
+      const { criarAnexo } = await import('./integrations/recibosAnexos');
+      const mime = comprovanteFile.mimetype || 'image/jpeg';
+      const nome = comprovanteFile.originalname
+        || `Comprovante-${reciboCriado.numero}.${mime.includes('pdf') ? 'pdf' : 'jpg'}`;
+      await criarAnexo({
+        recibo_id: reciboCriado.id,
+        nome_original: nome,
+        mime_type: mime,
+        conteudo: comprovanteFile.buffer,
+        descricao: 'Comprovante de pagamento do vale',
+      });
+      const base64 = comprovanteFile.buffer.toString('base64');
+      comprovanteInfo = { base64, dataUri: `data:${mime};base64,${base64}`, fileName: nome, isImage: mime.startsWith('image/'), buffer: comprovanteFile.buffer };
+      console.log(`[vale:comprovante] anexado ao recibo ${reciboCriado.numero} (${mime}, ${comprovanteFile.buffer.length} bytes)`);
+    } catch (err) {
+      console.warn('[vale:comprovante] falha ao anexar (segue sem comprovante):', (err as Error).message);
+    }
+  }
+
   const enviosOk: string[] = [];
   const enviosFalha: string[] = [];
   let zapiMessageId: string | undefined;
@@ -1658,6 +1691,18 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
       try {
         const repRes = await wa.sendReply(dest.phone, caption);
         await wa.sendDocument(dest.phone, pdf.toString('base64'), `Vale-${reciboCriado.numero}.pdf`);
+        // v3.84.0: manda o comprovante logo após o recibo (imagem como foto, PDF como documento).
+        if (comprovanteInfo) {
+          try {
+            if (comprovanteInfo.isImage) {
+              await wa.sendImage(dest.phone, comprovanteInfo.dataUri, `📎 Comprovante do vale ${reciboCriado.numero}`);
+            } else {
+              await wa.sendDocument(dest.phone, comprovanteInfo.base64, comprovanteInfo.fileName);
+            }
+          } catch (cErr) {
+            console.warn(`[vale:comprovante:whatsapp:${dest.rotulo}] falhou pra ${dest.phone}:`, (cErr as Error).message);
+          }
+        }
         enviosOk.push(`whatsapp:${dest.rotulo}:${dest.phone.slice(-4)}`);
         console.log(`[vale:whatsapp:${dest.rotulo}] vale=${reciboCriado.numero} phone=${dest.phone} msgId=${repRes.messageId ?? '?'}`);
         if (!primeiroEnvioOk && repRes.messageId) {
@@ -1689,6 +1734,11 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
         `💸 Vale ${reciboCriado.numero} — ${m.nome} — R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}` +
         `${descricao ? `\n${descricao}` : ''}\n\n🔗 ${getBaseUrl()}/v/${reciboCriado.hash_validacao}`
       );
+      // v3.84.0: cópia do comprovante pro CEO no Telegram.
+      if (comprovanteInfo) {
+        await sendTelegramDocument(chatId, comprovanteInfo.buffer, comprovanteInfo.fileName, `📎 Comprovante — Vale ${reciboCriado.numero}`)
+          .catch(cErr => console.warn('[vale:comprovante:telegram] falhou:', (cErr as Error).message));
+      }
       enviosOk.push('telegram');
     } catch (err) {
       console.error('[vale:telegram] falhou:', (err as Error).message);
@@ -1706,6 +1756,7 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, async (req: Reques
     link_v: `${getBaseUrl()}/v/${reciboCriado.hash_validacao}`,
     valor,
     saldo_apos: saldoAnterior - valor,
+    comprovante_anexado: !!comprovanteInfo,
     envios: { ok: enviosOk, falha: enviosFalha },
   });
 });

@@ -13374,6 +13374,17 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
               <input id="valeDesc" placeholder="ex: Vale combustível 08/05" style="width:100%;">
             </label>
 
+            <!-- v3.84.0: comprovante do PIX/TED — enviado junto do recibo -->
+            <label>
+              <span style="font-size:12px; color:var(--text-muted);">📎 Comprovante do pagamento (opcional — PIX/TED, imagem ou PDF)</span>
+              <input id="valeComprovante" type="file" accept="image/*,application/pdf" style="width:100%; font-size:12px;">
+            </label>
+            <div id="valeComprovantePreview" style="display:none; align-items:center; gap:8px; margin:4px 0; padding:6px 8px; background:var(--surface-2); border-radius:6px; font-size:12px;">
+              <img id="valeComprovanteThumb" alt="comprovante" style="width:44px; height:44px; object-fit:cover; border-radius:4px; display:none;">
+              <span id="valeComprovanteNome" style="flex:1; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+              <button id="valeComprovanteRm" type="button" title="Remover comprovante" style="background:transparent; border:none; color:var(--danger); cursor:pointer; font-size:16px;">✕</button>
+            </div>
+
             <p id="valeSaldoFinal" style="font-size:12px; color:var(--text-muted); margin:6px 0; padding:8px; background:var(--surface-2); border-radius:6px;">
               Saldo após este vale: <strong style="color:var(--gold);">${escape(saldoFmt)}</strong>
             </p>
@@ -13485,6 +13496,28 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
   inpDesc.oninput  = debounce;
   document.getElementById('valeFormaPag').onchange = debounce;
   document.getElementById('valeRefresh').onclick = atualizarPreview;
+  // v3.84.0: preview do comprovante (miniatura p/ imagem, nome p/ PDF) + remover.
+  (() => {
+    const inp = document.getElementById('valeComprovante');
+    const box = document.getElementById('valeComprovantePreview');
+    const thumb = document.getElementById('valeComprovanteThumb');
+    const nome = document.getElementById('valeComprovanteNome');
+    const rm = document.getElementById('valeComprovanteRm');
+    if (!inp || !box) return;
+    inp.onchange = () => {
+      const f = (inp.files || [])[0];
+      if (!f) { box.style.display = 'none'; return; }
+      nome.textContent = f.name;
+      box.style.display = 'flex';
+      if (f.type.startsWith('image/')) {
+        const url = URL.createObjectURL(f);
+        thumb.src = url; thumb.style.display = 'block';
+      } else {
+        thumb.style.display = 'none';
+      }
+    };
+    rm.onclick = () => { inp.value = ''; box.style.display = 'none'; thumb.src = ''; };
+  })();
   setTimeout(() => inpValor.focus(), 80);
 
   document.getElementById('valeConfirm').onclick = async () => {
@@ -13510,25 +13543,45 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
     const btn = document.getElementById('valeConfirm');
     btn.disabled = true; btn.textContent = '⏳ Enviando...';
     try {
-      const r = await api('/api/recibos/vale/criar-e-enviar', {
-        method: 'POST',
-        body: JSON.stringify({
-          membro_id: Number(membroId),
-          valor,
-          descricao: inpDesc.value.trim() || null,
-          periodo,
-          saldo_anterior: totalPagar,
-          enviar_whatsapp: enviarWa,
-          enviar_telegram: enviarTg,
-          forma_pagamento: document.getElementById('valeFormaPag')?.value || 'pix',
-          phone_override: phonePrincipal || null,
-          phones_extras: phonesExtras,
-        }),
-      });
+      // v3.84.0: se houver comprovante, envia multipart (senão, JSON como antes).
+      const compFile = (document.getElementById('valeComprovante')?.files || [])[0] || null;
+      const payload = {
+        membro_id: Number(membroId),
+        valor,
+        descricao: inpDesc.value.trim() || null,
+        periodo,
+        saldo_anterior: totalPagar,
+        enviar_whatsapp: enviarWa,
+        enviar_telegram: enviarTg,
+        forma_pagamento: document.getElementById('valeFormaPag')?.value || 'pix',
+        phone_override: phonePrincipal || null,
+        phones_extras: phonesExtras,
+      };
+      let r;
+      if (compFile) {
+        const fd = new FormData();
+        Object.keys(payload).forEach(k => {
+          const val = payload[k];
+          if (val === null || val === undefined) return;
+          fd.append(k, Array.isArray(val) ? JSON.stringify(val) : String(val));
+        });
+        fd.append('comprovante', compFile);
+        const resp = await fetch('/api/recibos/vale/criar-e-enviar', {
+          method: 'POST',
+          credentials: 'include',
+          headers: getCeoToken() ? { 'X-CEO-Token': getCeoToken() } : {},
+          body: fd,
+        });
+        r = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(r.error || ('HTTP ' + resp.status));
+      } else {
+        r = await api('/api/recibos/vale/criar-e-enviar', { method: 'POST', body: JSON.stringify(payload) });
+      }
       const enviosTxt = r.envios.ok.length
         ? `\n\nEnviado via: ${r.envios.ok.join(', ')}` + (r.envios.falha.length ? `\nFalhou: ${r.envios.falha.join(', ')}` : '')
         : '';
-      alert(`✅ Vale ${r.numero} de R$ ${r.valor.toLocaleString('pt-BR',{minimumFractionDigits:2})} registrado.${enviosTxt}\n\nSaldo após desconto: R$ ${r.saldo_apos.toLocaleString('pt-BR',{minimumFractionDigits:2})}`);
+      const compTxt = r.comprovante_anexado ? '\n📎 Comprovante anexado e enviado junto.' : '';
+      alert(`✅ Vale ${r.numero} de R$ ${r.valor.toLocaleString('pt-BR',{minimumFractionDigits:2})} registrado.${compTxt}${enviosTxt}\n\nSaldo após desconto: R$ ${r.saldo_apos.toLocaleString('pt-BR',{minimumFractionDigits:2})}`);
       close();
       await loadFolha();
       render();
