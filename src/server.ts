@@ -74,6 +74,8 @@ import reformaPisoRouter from './routes/reformaPiso'; // v3.67.0
 import vtoChecklistRouter from './routes/vtoChecklist'; // v3.78.0 — VTO Checklist de Atividades
 import { buscarPorHash as buscarChecklistPorHash } from './services/vtoChecklistRepo'; // v3.78.0 — validação pública /v/:hash
 import { gerarChecklistPdf } from './services/vtoChecklistPdf'; // v3.78.0
+import obrasEntregaRouter from './routes/obrasEntrega'; // v3.81.0 — Entrega de Obra (RE)
+import obrasEntregaPublicaRouter from './routes/obrasEntregaPublica'; // v3.81.0 — página pública /v/entrega/:hash
 import galeriaExportRouter from './routes/galeriaExport'; // Feature 04 — export Galeria p/ AvalieImob (X-API-Key)
 import pdfPrimeRouter from './routes/pdfPrime'; // v1.99.16 — export PDF templates Prime I/II
 import diligenciasRouter from './routes/diligencias'; // v3.54.0 — Diligências de Campo
@@ -195,10 +197,17 @@ app.use('/api/diligencias', diligenciasRouter); // v3.54.0 — Diligências de C
 app.use('/api/wifi', wifiLeadRoutes); // v3.61.0 — Captive Portal / Captação de Leads Wi-Fi
 app.use('/api/propostas/reforma-piso', reformaPisoRouter); // v3.67.0 — Proposta de Reforma (Piso Sobreposto)
 app.use('/api/gestao-obra/vto-checklist', vtoChecklistRouter); // v3.78.0 — VTO Checklist de Atividades
+app.use('/api/gestao-obra/entrega', obrasEntregaRouter); // v3.81.0 — Entrega de Obra (RE)
+app.use('/v/entrega', obrasEntregaPublicaRouter); // v3.81.0 — página pública de entrega (fora da auth)
 // v3.78.0: VTO Checklist de Atividades (Gestão de Obra)
 void (async () => {
   try { const m = await import('./database/migrations-vto-checklist'); await m.runVtoChecklistMigrations(); }
   catch (err) { console.error('[vto-checklist-migrations] FALHA fatal:', err); }
+})();
+// v3.81.0: Entrega de Obra (Relatório de Entrega)
+void (async () => {
+  try { const m = await import('./database/migrations-obras-entregas'); await m.runObrasEntregasMigrations(); }
+  catch (err) { console.error('[obras-entregas-migrations] FALHA fatal:', err); }
 })();
 (async () => {
   try { const m = await import('./database/migrations-wifi-leads'); await m.runMigrationsWifiLeads(); }

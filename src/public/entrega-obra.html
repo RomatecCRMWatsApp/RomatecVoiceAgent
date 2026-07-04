@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Entrega de Obra — Romatec</title>
+<style>
+  :root{
+    --green:#0C3320;--green2:#14472B;--gold:#C9A84C;--gold-soft:#E3D19A;
+    --paper:#f2f0e9;--ink:#1C1C18;--muted:#6A6656;--line:#D8D3C4;--danger:#ef4444;--ok:#10b981;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--paper);color:var(--ink);-webkit-text-size-adjust:100%}
+  header{background:linear-gradient(135deg,var(--green),var(--green2));color:#fff;padding:16px 18px;position:sticky;top:0;z-index:10}
+  header .kick{color:var(--gold-soft);letter-spacing:2px;text-transform:uppercase;font-size:10px;margin:0}
+  header h1{margin:2px 0 0;font-size:19px}
+  header .num{color:var(--gold);font-weight:700;font-size:13px;margin-top:2px}
+  .steps{display:flex;gap:4px;overflow-x:auto;padding:10px 12px;background:var(--green2);position:sticky;top:64px;z-index:9}
+  .steps button{flex:0 0 auto;border:1px solid rgba(255,255,255,.25);background:transparent;color:var(--gold-soft);border-radius:20px;padding:6px 12px;font-size:12px;white-space:nowrap;cursor:pointer}
+  .steps button.active{background:var(--gold);color:var(--green);border-color:var(--gold);font-weight:700}
+  .steps button:disabled{opacity:.4}
+  .wrap{max-width:760px;margin:0 auto;padding:16px}
+  .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,.05)}
+  h2{color:var(--green);font-size:16px;margin:0 0 10px;border-bottom:2px solid var(--gold);padding-bottom:6px}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;font-weight:600}
+  input,textarea,select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:15px;font-family:inherit;background:#fff}
+  textarea{min-height:130px;resize:vertical}
+  .btn{border:0;border-radius:9px;padding:12px 16px;font-size:15px;font-weight:700;cursor:pointer}
+  .btn-primary{background:var(--green);color:#fff;width:100%}
+  .btn-gold{background:var(--gold);color:var(--green);width:100%}
+  .btn-ghost{background:#fff;color:var(--green);border:1px solid var(--gold)}
+  .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger);padding:6px 10px;font-size:12px}
+  .btn-row{display:flex;gap:8px;margin-top:12px}
+  .btn-row .btn{flex:1}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}
+  .thumb{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+  .thumb img{width:100%;height:96px;object-fit:cover;display:block}
+  .thumb .rm{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;border:0;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px}
+  .thumb .cap{font-size:10px;color:var(--muted);padding:3px 5px;background:#faf9f5}
+  .pill{display:inline-block;background:var(--green);color:var(--gold-soft);border-radius:12px;padding:2px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .prop{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;background:#fff}
+  .prop:hover{border-color:var(--gold)}
+  .prop .n{font-weight:700;color:var(--green)}
+  .prop .c{font-size:13px;color:var(--muted)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .row3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px}
+  .mat{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}
+  .muted{color:var(--muted);font-size:13px}
+  .valorBig{font-size:26px;font-weight:800;color:var(--green)}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:50;opacity:0;transition:opacity .2s;max-width:90%}
+  .toast.show{opacity:1}
+  .okbox{background:rgba(16,185,129,.1);border:1px solid var(--ok);color:#0f7a52;border-radius:8px;padding:12px;font-weight:600;margin-top:10px;word-break:break-all}
+  .hidden{display:none}
+  .dictate{float:right;font-weight:600;color:var(--green);cursor:pointer;font-size:12px}
+  .avatars{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .av{border:1px solid var(--line);border-radius:10px;padding:8px 10px;cursor:pointer;text-align:center;min-width:78px}
+  .av.sel{border-color:var(--gold);background:#fbf7ea}
+  .av .ini{width:40px;height:40px;border-radius:50%;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;margin:0 auto 4px}
+  .av img{width:40px;height:40px;border-radius:50%;object-fit:cover;margin:0 auto 4px;display:block}
+  .av small{font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kick">Romatec — Gestão de Obras</p>
+  <h1>📦 Entrega de Obra</h1>
+  <div class="num" id="hNum"></div>
+</header>
+
+<div class="steps" id="steps"></div>
+<div class="wrap" id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  'use strict';
+  var API = '/api/gestao-obra/entrega';
+  var state = { step: 0, id: null, doc: null, equipe: [] };
+  var STEPS = ['Proposta','Execução','Fotos','Materiais','Valor','Nota Fiscal','Responsável','Entregar'];
+
+  // ---- infra ----
+  function api(path, opts){
+    opts = opts || {}; opts.credentials = 'include';
+    opts.headers = opts.headers || {};
+    if(opts.body && typeof opts.body === 'object'){ opts.headers['Content-Type']='application/json'; opts.body = JSON.stringify(opts.body); }
+    return fetch(API + path, opts).then(function(r){
+      if(r.status===401){ location.href='/login?next='+encodeURIComponent(location.pathname+location.search); throw new Error('não autenticado'); }
+      var ct = r.headers.get('content-type')||'';
+      if(ct.indexOf('application/json')<0){ if(!r.ok) throw new Error('HTTP '+r.status); return {}; }
+      return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||('HTTP '+r.status)); return j; });
+    });
+  }
+  function toast(msg){ var t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(function(){t.classList.remove('show');},2200); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function brl(v){ return v==null?'—':Number(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+  function fileToB64(file){ return new Promise(function(res,rej){ var fr=new FileReader(); fr.onload=function(){ var d=String(fr.result); var m=/^data:([^;]+);base64,(.*)$/.exec(d); res({mime:m?m[1]:file.type||'application/octet-stream', base64:m?m[2]:d}); }; fr.onerror=rej; fr.readAsDataURL(file); }); }
+
+  function renderSteps(){
+    var el=document.getElementById('steps'); el.innerHTML='';
+    STEPS.forEach(function(name,i){
+      var b=document.createElement('button');
+      b.textContent=(i+1)+'. '+name;
+      if(i===state.step) b.className='active';
+      if(i>0 && !state.id) b.disabled=true;
+      b.onclick=function(){ if(i>0 && !state.id){toast('Selecione uma proposta primeiro.');return;} state.step=i; render(); };
+      el.appendChild(b);
+    });
+    document.getElementById('hNum').textContent = state.doc && state.doc.numero ? state.doc.numero : '';
+  }
+
+  function go(step){ state.step=step; render(); }
+  function reload(){ return api('/'+state.id).then(function(j){ state.doc=j.entrega; }); }
+
+  // ---- render ----
+  function render(){
+    renderSteps();
+    var fns=[stepProposta,stepExecucao,stepFotos,stepMateriais,stepValor,stepNota,stepResponsavel,stepEntregar];
+    document.getElementById('app').innerHTML='';
+    fns[state.step]();
+  }
+
+  // Step 1 — proposta
+  function stepProposta(){
+    var app=document.getElementById('app');
+    app.innerHTML=''
+      +'<div class="card"><h2>1 · Selecionar proposta de origem</h2>'
+      +'<p class="muted">A entrega puxa cliente, endereço, escopo e valor orçado da proposta.</p>'
+      +'<input id="q" placeholder="Buscar por número ou cliente...">'
+      +'<div id="propList" style="margin-top:12px"></div></div>';
+    if(state.doc){
+      app.insertAdjacentHTML('beforeend','<div class="card"><span class="pill">Vinculada</span> <b>'+esc(state.doc.numero)+'</b> — '+esc(state.doc.cliente||'')+'<div class="btn-row"><button class="btn btn-primary" id="next">Continuar →</button></div></div>');
+      document.getElementById('next').onclick=function(){ go(1); };
+    }
+    var q=document.getElementById('q');
+    var t; q.oninput=function(){ clearTimeout(t); t=setTimeout(loadProps,300); };
+    loadProps();
+    function loadProps(){
+      api('/propostas?q='+encodeURIComponent(q.value||'')).then(function(j){
+        var l=document.getElementById('propList');
+        if(!j.propostas.length){ l.innerHTML='<p class="muted">Nenhuma proposta encontrada.</p>'; return; }
+        l.innerHTML=j.propostas.map(function(p){
+          return '<div class="prop" data-id="'+p.id+'"><div class="n">'+esc(p.numero||('#'+p.id))+'</div><div class="c">'+esc(p.cliente||'—')+' · '+brl(p.valor_total)+'</div></div>';
+        }).join('');
+        Array.prototype.forEach.call(l.querySelectorAll('.prop'),function(el){
+          el.onclick=function(){ criar(Number(el.getAttribute('data-id'))); };
+        });
+      }).catch(function(e){ toast(e.message); });
+    }
+    function criar(pid){
+      toast('Criando entrega...');
+      api('/',{method:'POST',body:{proposta_id:pid}}).then(function(j){
+        state.id=j.entrega.id; state.doc=j.entrega; toast('Entrega '+j.entrega.numero+' criada.'); go(1);
+      }).catch(function(e){ toast(e.message); });
+    }
+  }
+
+  // Step 2 — execução (markdown + ditado)
+  function stepExecucao(){
+    var d=state.doc;
+    document.getElementById('app').innerHTML=''
+      +'<div class="card"><h2>2 · Descrição da execução</h2>'
+      +'<label>Título da entrega</label><input id="titulo" value="'+esc(d.titulo||'')+'">'
+      +'<label>Descrição dos serviços executados (markdown) <span class="dictate" id="dic">🎙️ Ditar</span></label>'
+      +'<textarea id="desc" placeholder="Descreva passo a passo o que foi executado. Use - para listas e **negrito**.">'+esc(d.descricao_execucao||'')+'</textarea>'
+      +'<div class="row2"><div><label>Data de execução</label><input id="dataExec" type="date" value="'+(d.data_execucao?String(d.data_execucao).slice(0,10):'')+'"></div>'
+      +'<div><label>Cidade/UF</label><input id="cidadeUf" value="'+esc(d.cidade_uf||'')+'"></div></div>'
+      +'<div class="btn-row"><button class="btn btn-ghost" id="back">← Voltar</button><button class="btn btn-primary" id="save">Salvar e continuar →</button></div></div>';
+    document.getElementById('back').onclick=function(){ go(0); };
+    setupDitado(document.getElementById('dic'), document.getElementById('desc'));
+    document.getElementById('save').onclick=function(){
+      var body={titulo:val('titulo'),descricao_execucao:val('desc'),data_execucao:val('dataExec')||null,cidade_uf:val('cidadeUf')};
+      api('/'+state.id,{method:'PUT',body:body}).then(reload).then(function(){ toast('Salvo.'); go(2); }).catch(function(e){toast(e.message);});
+    };
+  }
+
+  // Step 3 — fotos
+  function stepFotos(){
+    var app=document.getElementById('app');
+    app.innerHTML='<div class="card"><h2>3 · Fotos</h2><p class="muted">Registre antes, execução e depois. As de "antes/depois" aparecem lado a lado no PDF.</p></div>';
+    ['antes','execucao','depois'].forEach(function(tp){
+      var titulo={antes:'Antes',execucao:'Execução',depois:'Depois'}[tp];
+      var fotos=(state.doc.fotos||[]).filter(function(f){return f.tipo===tp;});
+      var html='<div class="card"><b>'+titulo+'</b>'
+        +'<label class="btn btn-gold" style="text-align:center;margin-top:8px">📷 Adicionar foto ('+titulo+')<input type="file" accept="image/*" capture="environment" multiple style="display:none" data-tp="'+tp+'"></label>'
+        +'<div class="grid" data-grid="'+tp+'">'+fotos.map(fotoCard).join('')+'</div></div>';
+      app.insertAdjacentHTML('beforeend',html);
+    });
+    app.insertAdjacentHTML('beforeend','<div class="card"><div class="btn-row"><button class="btn btn-ghost" id="back">← Voltar</button><button class="btn btn-primary" id="next">Continuar →</button></div></div>');
+    document.getElementById('back').onclick=function(){go(1);};
+    document.getElementById('next').onclick=function(){go(3);};
+    Array.prototype.forEach.call(app.querySelectorAll('input[type=file]'),function(inp){
+      inp.onchange=function(){ uploadFotos(inp.getAttribute('data-tp'), inp.files); };
+    });
+    Array.prototype.forEach.call(app.querySelectorAll('.rm'),bindRm);
+    function fotoCard(f){ return '<div class="thumb"><button class="rm" data-fid="'+f.id+'">×</button><img src="data:'+esc(f.mime)+';base64,'+f.data_base64+'"><div class="cap">'+esc(f.legenda||'')+'</div></div>'; }
+    function bindRm(b){ b.onclick=function(){ var fid=b.getAttribute('data-fid'); api('/'+state.id+'/fotos/'+fid,{method:'DELETE'}).then(reload).then(function(){toast('Foto removida.');render();}).catch(function(e){toast(e.message);}); }; }
+    function uploadFotos(tp,files){
+      var arr=Array.prototype.slice.call(files);
+      toast('Enviando '+arr.length+' foto(s)...');
+      arr.reduce(function(p,file){ return p.then(function(){
+        return fileToB64(file).then(function(o){
+          var legenda=prompt('Legenda da foto ('+tp+') — opcional:')||'';
+          return api('/'+state.id+'/fotos',{method:'POST',body:{tipo:tp,mime:o.mime,data_base64:o.base64,legenda:legenda}});
+        });
+      }); }, Promise.resolve()).then(reload).then(function(){ toast('Fotos salvas.'); render(); }).catch(function(e){toast(e.message);});
+    }
+  }
+
+  // Step 4 — materiais de sobra
+  function stepMateriais(){
+    var mats=(state.doc.materiais_sobra||[]).slice();
+    if(!mats.length) mats=[{material:'',quantidade:'',unidade:'',observacao:''}];
+    var app=document.getElementById('app');
+    function draw(){
+      app.innerHTML='<div class="card"><h2>4 · Materiais que sobraram</h2><p class="muted">Registro documental (não movimenta estoque nesta fase).</p><div id="matList"></div>'
+        +'<button class="btn btn-ghost" id="add" style="margin-top:8px">+ Adicionar material</button>'
+        +'<div class="btn-row"><button class="btn btn-ghost" id="back">← Voltar</button><button class="btn btn-primary" id="save">Salvar e continuar →</button></div></div>';
+      var list=document.getElementById('matList');
+      list.innerHTML=mats.map(function(m,i){
+        return '<div class="mat"><div class="row3">'
+          +'<input placeholder="Material" data-i="'+i+'" data-k="material" value="'+esc(m.material)+'">'
+          +'<input placeholder="Qtd" type="number" step="0.01" data-i="'+i+'" data-k="quantidade" value="'+esc(m.quantidade)+'">'
+          +'<input placeholder="Un." data-i="'+i+'" data-k="unidade" value="'+esc(m.unidade||'')+'"></div>'
+          +'<input placeholder="Observação" data-i="'+i+'" data-k="observacao" value="'+esc(m.observacao||'')+'" style="margin-top:6px">'
+          +'<div style="text-align:right;margin-top:6px"><button class="btn btn-danger" data-rm="'+i+'">Remover</button></div></div>';
+      }).join('');
+      Array.prototype.forEach.call(list.querySelectorAll('input'),function(inp){
+        inp.oninput=function(){ mats[Number(inp.getAttribute('data-i'))][inp.getAttribute('data-k')]=inp.value; };
+      });
+      Array.prototype.forEach.call(list.querySelectorAll('[data-rm]'),function(b){
+        b.onclick=function(){ mats.splice(Number(b.getAttribute('data-rm')),1); if(!mats.length)mats=[{material:'',quantidade:'',unidade:'',observacao:''}]; draw(); };
+      });
+      document.getElementById('add').onclick=function(){ mats.push({material:'',quantidade:'',unidade:'',observacao:''}); draw(); };
+      document.getElementById('back').onclick=function(){go(2);};
+      document.getElementById('save').onclick=function(){
+        var payload=mats.filter(function(m){return String(m.material||'').trim();}).map(function(m){return {material:m.material,quantidade:m.quantidade===''?null:Number(m.quantidade),unidade:m.unidade,observacao:m.observacao};});
+        api('/'+state.id+'/materiais',{method:'PUT',body:{materiais:payload}}).then(reload).then(function(){toast('Materiais salvos.');go(4);}).catch(function(e){toast(e.message);});
+      };
+    }
+    draw();
+  }
+
+  // Step 5 — valor
+  function stepValor(){
+    var d=state.doc;
+    document.getElementById('app').innerHTML='<div class="card"><h2>5 · Valor a receber</h2>'
+      +'<p class="muted">Orçado na proposta: <b>'+brl(d.valor_orcado)+'</b></p>'
+      +'<label>Valor a receber (editável)</label><input id="vr" type="number" step="0.01" value="'+(d.valor_receber==null?'':d.valor_receber)+'">'
+      +'<div class="valorBig" id="prev" style="margin-top:10px">'+brl(d.valor_receber)+'</div>'
+      +'<div class="btn-row"><button class="btn btn-ghost" id="back">← Voltar</button><button class="btn btn-primary" id="save">Salvar e continuar →</button></div></div>';
+    var vr=document.getElementById('vr');
+    vr.oninput=function(){ document.getElementById('prev').textContent=brl(vr.value===''?null:Number(vr.value)); };
+    document.getElementById('back').onclick=function(){go(3);};
+    document.getElementById('save').onclick=function(){
+      api('/'+state.id,{method:'PUT',body:{valor_receber:vr.value===''?null:Number(vr.value)}}).then(reload).then(function(){toast('Valor salvo.');go(5);}).catch(function(e){toast(e.message);});
+    };
+  }
+
+  // Step 6 — nota fiscal
+  function stepNota(){
+    var d=state.doc;
+    var jaTem=!!d.nota_fiscal_nome;
+    document.getElementById('app').innerHTML='<div class="card"><h2>6 · Nota Fiscal</h2>'
+      +(jaTem?'<div class="okbox">📎 Anexada: '+esc(d.nota_fiscal_nome)+'</div>':'<p class="muted">Anexe a NF (PDF ou imagem).</p>')
+      +'<label class="btn btn-gold" style="text-align:center;margin-top:8px">📎 '+(jaTem?'Trocar':'Anexar')+' nota fiscal<input id="nf" type="file" accept="application/pdf,image/*" style="display:none"></label>'
+      +'<div class="btn-row"><button class="btn btn-ghost" id="back">← Voltar</button><button class="btn btn-primary" id="next">Continuar →</button></div></div>';
+    document.getElementById('back').onclick=function(){go(4);};
+    document.getElementById('next').onclick=function(){go(6);};
+    document.getElementById('nf').onchange=function(e){
+      var f=e.target.files[0]; if(!f)return; toast('Enviando NF...');
+      fileToB64(f).then(function(o){ return api('/'+state.id+'/nota-fiscal',{method:'POST',body:{nome:f.name,mime:o.mime,base64:o.base64}}); })
+        .then(reload).then(function(){toast('NF anexada.');render();}).catch(function(err){toast(err.message);});
+    };
+  }
+
+  // Step 7 — responsável
+  function stepResponsavel(){
+    var app=document.getElementById('app');
+    app.innerHTML='<div class="card"><h2>7 · Responsável pela entrega</h2><p class="muted">Assina o relatório (avatar no PDF).</p>'
+      +'<div class="avatars" id="avs"></div>'
+      +'<label>Ou informe manualmente</label><div class="row2"><input id="rNome" placeholder="Nome" value="'+esc(state.doc.responsavel_nome||'')+'"><input id="rCargo" placeholder="Cargo" value="'+esc(state.doc.responsavel_cargo||'')+'"></div>'
+      +'<div class="btn-row"><button class="btn btn-ghost" id="back">← Voltar</button><button class="btn btn-primary" id="save">Salvar e continuar →</button></div></div>';
+    document.getElementById('back').onclick=function(){go(5);};
+    var selEquipe=null;
+    api('/equipe').then(function(j){
+      state.equipe=j.equipe||[];
+      var avs=document.getElementById('avs');
+      avs.innerHTML=state.equipe.map(function(m){
+        var ini=(m.nome||'?').trim().split(/\s+/).map(function(p){return p[0];}).slice(0,2).join('').toUpperCase();
+        var img=m.foto_url?'<img src="'+esc(m.foto_url)+'" onerror="this.outerHTML=\'<div class=ini>'+ini+'</div>\'">':'<div class="ini">'+ini+'</div>';
+        return '<div class="av" data-id="'+m.id+'">'+img+'<small>'+esc((m.nome||'').split(' ')[0])+'</small></div>';
+      }).join('')||'<span class="muted">Sem equipe cadastrada.</span>';
+      Array.prototype.forEach.call(avs.querySelectorAll('.av'),function(el){
+        el.onclick=function(){ selEquipe=Number(el.getAttribute('data-id')); Array.prototype.forEach.call(avs.querySelectorAll('.av'),function(x){x.classList.remove('sel');}); el.classList.add('sel');
+          var m=state.equipe.filter(function(x){return x.id===selEquipe;})[0]; if(m){document.getElementById('rNome').value=m.nome;document.getElementById('rCargo').value=m.funcao||'';} };
+      });
+    });
+    document.getElementById('save').onclick=function(){
+      var body=selEquipe?{equipe_id:selEquipe}:{nome:val('rNome'),cargo:val('rCargo')};
+      api('/'+state.id+'/responsavel',{method:'PUT',body:body}).then(reload).then(function(){toast('Responsável definido.');go(7);}).catch(function(e){toast(e.message);});
+    };
+  }
+
+  // Step 8 — entregar
+  function stepEntregar(){
+    var d=state.doc;
+    var entregue=d.status==='entregue';
+    var link=d.hash_publico?(location.origin+'/v/entrega/'+d.hash_publico):null;
+    document.getElementById('app').innerHTML='<div class="card"><h2>8 · Gerar e entregar</h2>'
+      +'<div class="btn-row"><button class="btn btn-ghost" id="pdf">📄 Ver PDF</button></div>'
+      +'<label style="margin-top:14px">Telefone do cliente (WhatsApp)</label><input id="tel" placeholder="Ex: 5599999999999" value="'+esc(d.cliente_telefone||'')+'">'
+      +'<button class="btn btn-gold" id="enviar" style="margin-top:12px">🚀 '+(entregue?'Reenviar':'Entregar')+' via WhatsApp</button>'
+      +(entregue&&link?'<div class="okbox">✓ Entregue. Link público:<br><a href="'+esc(link)+'" target="_blank">'+esc(link)+'</a>'+(d.recebimento_confirmado_em?'<br>✓ Recebimento confirmado pelo cliente.':'<br>Aguardando confirmação de recebimento.')+'</div>':'')
+      +'<div class="btn-row"><button class="btn btn-ghost" id="back">← Voltar</button></div></div>';
+    document.getElementById('back').onclick=function(){go(6);};
+    document.getElementById('pdf').onclick=function(){ window.open(API+'/'+state.id+'/pdf','_blank'); };
+    document.getElementById('enviar').onclick=function(){
+      var tel=val('tel'); if(!tel){toast('Informe o telefone.');return;}
+      var b=document.getElementById('enviar'); b.disabled=true; b.textContent='Enviando...';
+      api('/'+state.id+'/entregar',{method:'POST',body:{telefone:tel}}).then(function(j){
+        toast('Entregue! Link: '+j.link); return reload();
+      }).then(function(){ render(); }).catch(function(e){ toast(e.message); b.disabled=false; b.textContent='🚀 Entregar via WhatsApp'; });
+    };
+  }
+
+  // ---- helpers ----
+  function val(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
+  function setupDitado(btn, textarea){
+    var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){ btn.style.display='none'; return; }
+    var rec=new SR(); rec.lang='pt-BR'; rec.continuous=true; rec.interimResults=false; var on=false;
+    rec.onresult=function(ev){ for(var i=ev.resultIndex;i<ev.results.length;i++){ if(ev.results[i].isFinal){ textarea.value+=(textarea.value?' ':'')+ev.results[i][0].transcript; } } };
+    rec.onend=function(){ on=false; btn.textContent='🎙️ Ditar'; };
+    btn.onclick=function(){ if(on){rec.stop();return;} try{rec.start();on=true;btn.textContent='⏹️ Parar';}catch(e){} };
+  }
+
+  // ---- boot: query ?id= ou ?proposta= ----
+  (function boot(){
+    var qs=new URLSearchParams(location.search);
+    var id=qs.get('id'), pid=qs.get('proposta');
+    if(id){ state.id=Number(id); reload().then(function(){ state.step=1; render(); }).catch(function(e){ toast(e.message); render(); }); }
+    else if(pid){ api('/',{method:'POST',body:{proposta_id:Number(pid)}}).then(function(j){ state.id=j.entrega.id; state.doc=j.entrega; state.step=1; render(); }).catch(function(e){ toast(e.message); render(); }); }
+    else { render(); }
+  })();
+})();
+</script>
+</body>
+</html>

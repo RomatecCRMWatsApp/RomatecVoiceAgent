@@ -6107,6 +6107,13 @@ function renderVto() {
     </div>
     <a href="/vto-checklist.html?obra=${escape(state.currentObra||'')}&obra_nome=${encodeURIComponent((state.obras.find(o=>String(o.id)===String(state.currentObra))||{}).nome||'')}" style="background:var(--success); color:#fff; border:1px solid var(--success); border-radius:8px; padding:10px 16px; font-weight:600; font-size:13px; text-decoration:none; white-space:nowrap;">Abrir checklist →</a>
   </div>
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
+    <div style="min-width:200px;">
+      <p class="section-title" style="margin:0;">📦 Entrega de Obra</p>
+      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Relatório de Entrega (RE) a partir da proposta — fotos antes/depois, materiais de sobra, valor a receber, NF, PDF e envio por WhatsApp com confirmação de recebimento.</p>
+    </div>
+    <a href="/entrega-obra.html" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Nova entrega →</a>
+  </div>
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
       <p class="section-title" style="margin:0;">${escape(titulo)}</p>
@@ -13310,6 +13317,20 @@ function periodoLabel(codigo) {
 // ── v1.99.15: Painel "Passar Vale" INLINE (abaixo da tabela, não modal flutuante) ──
 async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, periodo }) {
   const periodoLbl = periodoLabel(periodo);
+  // v3.80.1: base do vale = saldo LÍQUIDO acumulado (real até hoje), da mesma
+  // fonte da aba "Saldo em Aberto" — independente da aba/mês de onde foi aberto.
+  // Assim, mesmo virando o mês, o vale reflete o saldo real. Fallback: o valor
+  // recebido (mensal) se a consulta falhar.
+  try {
+    if (state.folhaObraId) {
+      const resp = await fetch('/api/folha/saldo-aberto?obra_id=' + encodeURIComponent(state.folhaObraId), { credentials: 'include' });
+      if (resp.ok) {
+        const s = await resp.json();
+        const f = (s && Array.isArray(s.funcionarios) ? s.funcionarios : []).find(x => String(x.funcionario_id) === String(membroId));
+        if (f) totalPagar = Number(f.saldo_liquido) || 0;
+      }
+    }
+  } catch (e) { /* mantém o totalPagar recebido */ }
   const saldoFmt = (Number(totalPagar) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   // Renderiza dentro do div #valeInlineBox (criado no renderFolha, abaixo da tabela)
