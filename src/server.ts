@@ -52,6 +52,7 @@ import {
   listCerts as listSigningCerts,
   deleteCert as deleteSigningCert,
   setCertAtivo as setSigningCertAtivo,
+  getCertForSigning as getSigningCertForSigning,
 } from './services/signingCertificates';
 import {
   assinarRecibo as assinarReciboPades,
@@ -1622,8 +1623,17 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, docUpload.single('
     return;
   }
 
-  // 3) Gera PDF do vale com QR + hash (Etapa 4 vai usar input.recibo)
+  // 3) Gera PDF do vale com QR + hash + assinatura digital ICP-Brasil (PAdES),
+  //    como os demais recibos do sistema. Busca o e-CNPJ (PJ) ativo ANTES de
+  //    gerar pra estampar o bloco visual "Assinado digitalmente".
   const { gerarPdfVale } = await import('./services/valePdf');
+  let certData: Awaited<ReturnType<typeof getSigningCertForSigning>> = null;
+  try {
+    certData = await getSigningCertForSigning('pj');
+  } catch (err) {
+    console.warn('[vale:assinatura] falha ao obter e-CNPJ PJ ativo:', (err as Error).message);
+  }
+  const agoraAssinatura = new Date();
   const pdf = await gerarPdfVale({
     membro_nome: m.nome,
     membro_funcao: m.funcao,
@@ -1637,7 +1647,48 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, docUpload.single('
     forma_pagamento: formaPag, // v1.99.21
     numero: reciboCriado.numero,
     recibo: reciboCriado, // v1.99.16: PDF agora inclui QR /v/:hash + hash truncado
+    assinaturaDigital: certData ? {
+      subject_cn: certData.meta.subject_cn ?? 'ROMATEC CONSULTORIA TOTAL',
+      subject_doc: certData.meta.subject_doc,
+      data_assinatura: agoraAssinatura,
+    } : null, // v3.85.0
   });
+
+  // 3.1) Assina o PDF (PAdES ICP-Brasil). Best-effort: se não houver e-CNPJ
+  //      ativo ou a assinatura falhar, o vale segue com o PDF não-assinado.
+  let pdfEnvio = pdf;
+  let assinado = false;
+  let assinaturaErro: string | null = certData ? null : 'Nenhum e-CNPJ (PJ) ativo cadastrado — vale enviado sem assinatura';
+  if (certData) {
+    try {
+      const { signPdfBuffer } = await import('./services/pdfSigner');
+      pdfEnvio = await signPdfBuffer(pdf, certData.pfx, certData.senha, {
+        name: certData.meta.subject_cn ?? 'ROMATEC CONSULTORIA TOTAL',
+        reason: `Recibo de Vale ${reciboCriado.numero}`,
+        location: 'Açailândia/MA',
+        contactInfo: certData.meta.subject_doc ?? '',
+      });
+      assinado = true;
+      const metaAss = {
+        perfil: 'pj', cert_id: certData.meta.id, cert_label: certData.meta.label,
+        subject_cn: certData.meta.subject_cn, subject_doc: certData.meta.subject_doc,
+        issuer_cn: certData.meta.issuer_cn, thumbprint: certData.meta.thumbprint,
+        validade_ate: certData.meta.validade_ate, assinado_em: agoraAssinatura.toISOString(),
+        sign_reason: `Recibo de Vale ${reciboCriado.numero}`, sign_location: 'Açailândia/MA',
+      };
+      await pool.execute(
+        `UPDATE recibos SET pdf_assinado = ?, assinado_em = ?, assinado_por_cert_id = ?, assinatura_meta = ? WHERE id = ?`,
+        [pdfEnvio, agoraAssinatura, certData.meta.id, JSON.stringify(metaAss), reciboCriado.id],
+      ).catch(e => console.warn('[vale:assinatura persist]', (e as Error).message));
+      console.log(`[vale:assinado] ${reciboCriado.numero} cert=${certData.meta.id} (${certData.meta.subject_cn ?? '?'})`);
+    } catch (err) {
+      assinaturaErro = (err as Error).message;
+      pdfEnvio = pdf; // fallback pro não-assinado
+      console.error(`[vale:assinatura] falhou (envia sem assinar): ${assinaturaErro}`);
+    }
+  } else {
+    console.warn('[vale:assinatura] sem e-CNPJ ativo — vale enviado SEM assinatura digital');
+  }
 
   // v3.84.0: comprovante de pagamento (PIX/TED) — persiste como anexo do recibo
   // (reusa recibos_anexos) e prepara pra enviar junto do recibo.
@@ -1690,7 +1741,7 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, docUpload.single('
     for (const dest of todosOsPhones) {
       try {
         const repRes = await wa.sendReply(dest.phone, caption);
-        await wa.sendDocument(dest.phone, pdf.toString('base64'), `Vale-${reciboCriado.numero}.pdf`);
+        await wa.sendDocument(dest.phone, pdfEnvio.toString('base64'), `Vale-${reciboCriado.numero}.pdf`);
         // v3.84.0: manda o comprovante logo após o recibo (imagem como foto, PDF como documento).
         if (comprovanteInfo) {
           try {
@@ -1730,7 +1781,7 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, docUpload.single('
         || (process.env.TELEGRAM_AUTHORIZED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
       if (!chatId) throw new Error('Telegram CEO chat_id nao configurado');
       await sendTelegramDocument(
-        chatId, pdf, `Vale-${reciboCriado.numero}.pdf`,
+        chatId, pdfEnvio, `Vale-${reciboCriado.numero}.pdf`,
         `💸 Vale ${reciboCriado.numero} — ${m.nome} — R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}` +
         `${descricao ? `\n${descricao}` : ''}\n\n🔗 ${getBaseUrl()}/v/${reciboCriado.hash_validacao}`
       );
@@ -1757,6 +1808,8 @@ app.post('/api/recibos/vale/criar-e-enviar', requireCeoToken, docUpload.single('
     valor,
     saldo_apos: saldoAnterior - valor,
     comprovante_anexado: !!comprovanteInfo,
+    assinado, // v3.85.0
+    assinatura_erro: assinaturaErro,
     envios: { ok: enviosOk, falha: enviosFalha },
   });
 });

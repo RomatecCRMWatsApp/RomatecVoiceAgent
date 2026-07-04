@@ -111,6 +111,17 @@ export interface ValePdfInput {
    * foi persistido (decisao b da Etapa 5). Nao afeta selo/QR/hash.
    */
   omitirBlocoSaldo?: boolean;
+  /**
+   * v3.85.0: metadados do certificado ICP-Brasil que vai assinar o PDF.
+   * Quando presente, renderiza o bloco visual "Assinado digitalmente" sob a
+   * linha do emitente (a assinatura criptográfica PAdES é aplicada depois,
+   * no endpoint, sobre o buffer gerado).
+   */
+  assinaturaDigital?: {
+    subject_cn: string;
+    subject_doc?: string | null;
+    data_assinatura: Date;
+  } | null;
 }
 
 export async function gerarPdfVale(input: ValePdfInput): Promise<Buffer> {
@@ -273,6 +284,22 @@ export async function gerarPdfVale(input: ValePdfInput): Promise<Buffer> {
      .text('Colaborador (assinatura)', 60, cy, { width: 220, align: 'center' });
   doc.fontSize(7).fillColor('#666').font('Helvetica')
      .text('Emitente (CNPJ 17.261.987/0001-09)', 315, cy, { width: 220, align: 'center' });
+
+  // ── v3.85.0: bloco visual "Assinado digitalmente" (ICP-Brasil / PAdES) ──
+  // A assinatura criptográfica é aplicada sobre este PDF logo após a geração.
+  if (input.assinaturaDigital) {
+    let ay = cy + 12;
+    doc.fontSize(7.5).fillColor(corHex).font('Helvetica-Bold')
+       .text('Assinado digitalmente — ICP-Brasil (PAdES)', 315, ay, { width: 220, align: 'center' });
+    ay += 9;
+    const idDig = [input.assinaturaDigital.subject_cn, input.assinaturaDigital.subject_doc]
+      .filter(Boolean).join(' · ');
+    doc.fontSize(6.5).fillColor('#555').font('Helvetica')
+       .text(idDig, 315, ay, { width: 220, align: 'center' });
+    ay += 8;
+    doc.fontSize(6).fillColor('#888').font('Helvetica')
+       .text(`Válido no Adobe Reader e em gov.br/validar · ${fmtData(input.assinaturaDigital.data_assinatura)}`, 315, ay, { width: 220, align: 'center' });
+  }
 
   // ── v1.99.16: BLOCO DE VALIDACAO DIGITAL (QR + hash) ──────────────────
   // So renderiza quando o vale e um recibo universal persistido.

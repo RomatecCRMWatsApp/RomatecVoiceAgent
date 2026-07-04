@@ -13581,7 +13581,10 @@ async function abrirModalPassarVale({ membroId, nome, telefone, totalPagar, peri
         ? `\n\nEnviado via: ${r.envios.ok.join(', ')}` + (r.envios.falha.length ? `\nFalhou: ${r.envios.falha.join(', ')}` : '')
         : '';
       const compTxt = r.comprovante_anexado ? '\n📎 Comprovante anexado e enviado junto.' : '';
-      alert(`✅ Vale ${r.numero} de R$ ${r.valor.toLocaleString('pt-BR',{minimumFractionDigits:2})} registrado.${compTxt}${enviosTxt}\n\nSaldo após desconto: R$ ${r.saldo_apos.toLocaleString('pt-BR',{minimumFractionDigits:2})}`);
+      const assinTxt = r.assinado
+        ? '\n🔒 Assinado digitalmente (ICP-Brasil).'
+        : (r.assinatura_erro ? `\n⚠️ Enviado SEM assinatura: ${r.assinatura_erro}` : '');
+      alert(`✅ Vale ${r.numero} de R$ ${r.valor.toLocaleString('pt-BR',{minimumFractionDigits:2})} registrado.${assinTxt}${compTxt}${enviosTxt}\n\nSaldo após desconto: R$ ${r.saldo_apos.toLocaleString('pt-BR',{minimumFractionDigits:2})}`);
       close();
       await loadFolha();
       render();
