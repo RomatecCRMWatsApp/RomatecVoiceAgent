@@ -5464,11 +5464,17 @@ function renderFolha() {
       <td style="text-align:center; color:var(--gold);">${p.manha}</td>
       <td style="text-align:center; color:var(--gold);">${p.tarde}</td>
       <td style="text-align:center;">${p.total_dias_equivalente}</td>
-      <td style="text-align:right; color:var(--gold); font-weight:500;">${fmt(p.total_pagar)}</td>
+      <td style="text-align:right; padding:8px;">
+        <div style="color:var(--gold); font-weight:500;">${fmt(p.total_pagar)}</div>
+        ${(p.vales_periodo || 0) > 0 ? `
+          <div style="font-size:10px; color:var(--danger); margin-top:2px;">💸 vales −${fmt(p.vales_periodo)}</div>
+          <div style="font-size:11px; color:var(--neon); font-weight:600;">= saldo ${fmt(p.saldo)}</div>
+        ` : ''}
+      </td>
       <td style="text-align:center; padding:8px; border-bottom:1px solid var(--border); white-space:nowrap;">
         <span data-folha-status="${p.funcionario_id}" style="font-size:11px; color:var(--text-muted); margin-right:6px;">⏳</span>
         <button class="btn-gold" data-recibo="${p.funcionario_id}" data-nome="${escape(p.nome)}" style="font-size:11px; padding:4px 8px;">📄 Recibo</button>
-        <button data-passar-vale="${p.funcionario_id}" data-nome-vale="${escape(p.nome)}" data-tel-vale="${escape(p.telefone || '')}" data-saldo-vale="${p.total_pagar}" title="Passar vale (adiantamento) — desconta do recibo quinzenal" style="font-size:11px; padding:4px 8px; background:transparent; border:1px solid #f59e0b; color:#f59e0b; border-radius:4px; cursor:pointer; margin-left:4px;">💸 Vale</button>
+        <button data-passar-vale="${p.funcionario_id}" data-nome-vale="${escape(p.nome)}" data-tel-vale="${escape(p.telefone || '')}" data-saldo-vale="${p.saldo != null ? p.saldo : p.total_pagar}" title="Passar vale (adiantamento) — desconta do recibo quinzenal" style="font-size:11px; padding:4px 8px; background:transparent; border:1px solid #f59e0b; color:#f59e0b; border-radius:4px; cursor:pointer; margin-left:4px;">💸 Vale</button>
       </td>
     </tr>
   `;
@@ -5480,6 +5486,10 @@ function renderFolha() {
     <div class="metrics-grid">
       <div class="metric-card"><p class="metric-label">Funcionários ativos no mês</p><p class="metric-value">${f.total_funcionarios}</p></div>
       <div class="metric-card"><p class="metric-label">Total a pagar</p><p class="metric-value" style="color:var(--gold);">${fmt(f.total_geral)}</p></div>
+      ${(f.total_vales || 0) > 0 ? `
+      <div class="metric-card"><p class="metric-label">💸 Vales no mês</p><p class="metric-value" style="color:var(--danger);">−${fmt(f.total_vales)}</p></div>
+      <div class="metric-card"><p class="metric-label">Saldo a pagar</p><p class="metric-value" style="color:var(--neon);">${fmt(f.total_saldo)}</p></div>
+      ` : ''}
     </div>
     ${f.funcionarios.length === 0 ? '<div class="empty">Nenhum dia trabalhado registrado neste mês.</div>' : `
     <div style="overflow-x:auto;">

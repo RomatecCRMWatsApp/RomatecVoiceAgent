@@ -1236,14 +1236,41 @@ export async function relatorioMensalEquipe(input: {
       ? String(r.data_ultimo_recibo_pago).slice(0, 10)
       : null,
   }));
-  const total_geral = lista.reduce((s, l) => s + l.total_pagar, 0);
+  // v3.86.0: soma dos vales (adiantamentos) do mês por funcionário — pra Folha
+  // Mensal mostrar os vales já passados e o SALDO (total − vales) em cada linha.
+  // O vale é registrado em recibos_ajustes por quinzena ('YYYY-MM-1'/'YYYY-MM-2').
+  const valesPorMembro = new Map<number, number>();
+  const ids = lista.map(l => Number(l.funcionario_id)).filter(n => Number.isFinite(n));
+  if (ids.length) {
+    const p1 = `${input.ano}-${String(input.mes).padStart(2, '0')}-1`;
+    const p2 = `${input.ano}-${String(input.mes).padStart(2, '0')}-2`;
+    const ph = ids.map(() => '?').join(',');
+    const [vrows] = await pool.execute<RowDataPacket[]>(
+      `SELECT membro_id, COALESCE(SUM(ABS(valor)), 0) AS vales
+         FROM recibos_ajustes
+        WHERE tipo = 'adiantamento' AND periodo IN (?, ?) AND membro_id IN (${ph})
+        GROUP BY membro_id`,
+      [p1, p2, ...ids],
+    );
+    for (const vr of vrows) valesPorMembro.set(Number(vr.membro_id), num(String(vr.vales ?? '0')));
+  }
+  const listaComSaldo = lista.map(l => {
+    const vales = valesPorMembro.get(Number(l.funcionario_id)) || 0;
+    return { ...l, vales_periodo: vales, saldo: Math.max(0, l.total_pagar - vales) };
+  });
+
+  const total_geral = listaComSaldo.reduce((s, l) => s + l.total_pagar, 0);
+  const total_vales = listaComSaldo.reduce((s, l) => s + l.vales_periodo, 0);
+  const total_saldo = listaComSaldo.reduce((s, l) => s + l.saldo, 0);
   return {
     periodo: `${String(input.mes).padStart(2,'0')}/${input.ano}`,
     obra_id: input.obra_id ?? null,
-    total_funcionarios: lista.length,
+    total_funcionarios: listaComSaldo.length,
     total_geral,
+    total_vales,   // v3.86.0
+    total_saldo,   // v3.86.0
     apenas_em_aberto: apenasEmAberto,
-    funcionarios: lista,
+    funcionarios: listaComSaldo,
   };
 }
 
