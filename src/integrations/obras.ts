@@ -1370,13 +1370,18 @@ export async function relatorioSaldoEmAbertoEquipe(input: {
 
     // Dias em aberto entre dataInicioEfetiva (exclusivo) e dataFimEfetiva (inclusivo)
     const [diasRows] = await pool.execute<RowDataPacket[]>(
+      // v3.80.1: só conta dias REALMENTE em aberto — exclui os já bloqueados num
+      // fechamento de folha (fechamento_id setado). Sem isso, dias já pagos via
+      // "Fechar Folha" (que não mexe em recibos_envios/data_limite) apareciam
+      // como em aberto e inflavam o saldo.
       `SELECT
          COALESCE(SUM(CASE WHEN periodo='integral' THEN 1 ELSE 0.5 END), 0) AS dias,
          COALESCE(SUM(valor), 0) AS bruto
          FROM romatec_obra_funcionario_dias
         WHERE funcionario_id = ?
           AND data > ?
-          AND data <= ?`,
+          AND data <= ?
+          AND fechamento_id IS NULL`,
       [membroId, dataInicioEfetiva, dataFimEfetiva]
     );
     const diasEmAberto = Number(diasRows[0]?.dias ?? 0);
@@ -1384,10 +1389,14 @@ export async function relatorioSaldoEmAbertoEquipe(input: {
 
     // Vales em aberto (criados apos data_inicio_efetiva ate data_fim+1d)
     const [valesRows] = await pool.execute<RowDataPacket[]>(
+      // v3.80.1: só vales REALMENTE em aberto (fechamento_id IS NULL) — exclui os
+      // já baixados num fechamento (fechamento_id setado) e os legados conciliados
+      // (sentinela fechamento_id=0). Sem isso, vale já descontado era deduzido de novo.
       `SELECT id, valor, descricao, criado_em
          FROM recibos_ajustes
         WHERE membro_id = ?
           AND tipo = 'adiantamento'
+          AND fechamento_id IS NULL
           AND criado_em > ?
           AND criado_em <= DATE_ADD(?, INTERVAL 1 DAY)
         ORDER BY criado_em DESC`,
