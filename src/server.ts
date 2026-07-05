@@ -2544,6 +2544,25 @@ app.get('/api/galeria/:id/arquivo', async (req: Request, res: Response) => {
   }
 });
 
+// v3.90.0: download em lote (ZIP) das fotos selecionadas na Galeria.
+// Fotos são base64 no banco → montamos o ZIP em memória (archiver). Sem auth
+// especial (mesmo nível dos GET /api/galeria e /:id/arquivo, que já são abertos).
+app.post('/api/galeria/download-zip', async (req: Request, res: Response) => {
+  try {
+    const ids = Array.isArray((req.body as { fotoIds?: unknown[] })?.fotoIds)
+      ? ((req.body as { fotoIds: unknown[] }).fotoIds).map((n) => Number(n)).filter((n) => Number.isFinite(n))
+      : [];
+    const m = await import('./integrations/galeria');
+    const zip = await m.gerarZipFotos(ids);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="galeria-fotos-${Date.now()}.zip"`);
+    res.send(zip);
+  } catch (err) {
+    const status = (err as { status?: number }).status || 500;
+    if (!res.headersSent) res.status(status).json({ error: (err as Error).message });
+  }
+});
+
 app.post('/api/galeria', requireCeoToken, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/galeria');

@@ -9,6 +9,17 @@
 import pool from '../database/connection';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 
+// v3.90.0: o @types/archiver@8 não expõe a assinatura chamável do runtime
+// (archiver v7 = factory `archiver('zip', opts)`). Tipamos o mínimo usado.
+type ArchiverFactory = (format: string, options?: { zlib?: { level?: number } }) => ArchiverLike;
+interface ArchiverLike {
+  on(event: 'data', cb: (chunk: Buffer) => void): ArchiverLike;
+  on(event: 'end', cb: () => void): ArchiverLike;
+  on(event: 'error', cb: (err: Error) => void): ArchiverLike;
+  append(source: Buffer, opts: { name: string }): void;
+  finalize(): Promise<void> | void;
+}
+
 export interface GaleriaFoto {
   id: number;
   tenant_id: number;
@@ -106,6 +117,70 @@ export async function buscarFotoComB64(id: number): Promise<GaleriaFotoComB64 | 
   if (!rows.length) return null;
   const r = rows[0];
   return { ...rowToFoto(r), arquivo_b64: r.arquivo_b64 };
+}
+
+/** Erro de ZIP com status HTTP pra rota mapear (400/404). */
+export class ZipGaleriaError extends Error {
+  status: number;
+  constructor(message: string, status = 400) { super(message); this.status = status; this.name = 'ZipGaleriaError'; }
+}
+
+function sanitizarNomeZip(texto: string): string {
+  const limpo = String(texto || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return limpo || 'foto';
+}
+
+/**
+ * v3.90.0 — Gera um ZIP (Buffer) com as fotos selecionadas. Fotos são base64 no
+ * banco (galeria_fotos.arquivo_b64), então convertemos cada uma pra Buffer e
+ * empacotamos com archiver. Foto ausente/sem base64 é PULADA (não quebra o ZIP).
+ * Lança ZipGaleriaError(400) pra lista vazia / > 200, e (404) se nenhuma válida.
+ */
+export async function gerarZipFotos(ids: number[]): Promise<Buffer> {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new ZipGaleriaError('Nenhuma foto selecionada.', 400);
+  }
+  if (ids.length > 200) {
+    throw new ZipGaleriaError('Limite de 200 fotos por download em lote.', 400);
+  }
+  const archiverMod = await import('archiver');
+  const criarArchive = ((archiverMod as { default?: unknown }).default ?? archiverMod) as unknown as ArchiverFactory;
+  const archive = criarArchive('zip', { zlib: { level: 9 } });
+  const chunks: Buffer[] = [];
+  const finalizado = new Promise<Buffer>((resolve, reject) => {
+    archive.on('data', (c: Buffer) => chunks.push(c));
+    archive.on('end', () => resolve(Buffer.concat(chunks)));
+    archive.on('error', (err: Error) => reject(err));
+  });
+
+  const usados = new Set<string>();
+  let incluidas = 0;
+  for (const rawId of ids) {
+    const id = Number(rawId);
+    let foto: GaleriaFotoComB64 | null = null;
+    try { foto = await buscarFotoComB64(id); } catch { foto = null; }
+    if (!foto || !foto.arquivo_b64) {
+      console.warn(`[galeria/zip] foto ${rawId} ausente/sem imagem — pulada`);
+      continue;
+    }
+    const buf = Buffer.from(foto.arquivo_b64, 'base64');
+    const ext = (foto.mime && foto.mime.split('/')[1]) || 'jpg';
+    let nome = `foto-${foto.id}-${sanitizarNomeZip(foto.endereco_reverso || foto.legenda || '')}.${ext}`;
+    while (usados.has(nome)) nome = nome.replace(/(\.[^.]+)$/, `-${incluidas}$1`);
+    usados.add(nome);
+    archive.append(buf, { name: nome });
+    incluidas++;
+  }
+
+  if (incluidas === 0) {
+    throw new ZipGaleriaError('Nenhuma das fotos selecionadas tem imagem disponível.', 404);
+  }
+  archive.finalize();
+  return finalizado;
 }
 
 /** Cria nova foto. Retorna o id criado. */

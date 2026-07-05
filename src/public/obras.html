@@ -24229,18 +24229,28 @@ async function renderGaleria() {
   const v = document.getElementById('view-galeria');
   if (!v) return;
   v.innerHTML = `
+    ${galeriaCarrosselSelecaoCss()}
     <div style="padding:16px;">
       <h2 style="margin-top:0;">📷 Galeria de Fotos</h2>
-      <p style="opacity:.75;font-size:13px;margin:4px 0 12px;">Fotos com carimbo de GPS + endereço, reutilizáveis em laudos / VTO / propostas. Envio direto via WhatsApp/Telegram.</p>
+      <p style="opacity:.75;font-size:13px;margin:4px 0 12px;">Fotos com carimbo de GPS + endereço, reutilizáveis em laudos / VTO / propostas. Envio direto via WhatsApp/Telegram. Toque numa foto pra abrir o carrossel.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
         <input type="file" id="galeria-input" accept="image/*" capture="environment" style="display:none;">
         <button class="btn-primary" onclick="document.getElementById('galeria-input').click()">📷 Tirar Foto</button>
         <button class="btn-secondary" onclick="recarregarGaleria()">🔄 Recarregar</button>
         <button class="btn-secondary" onclick="syncManual()">☁️ Sincronizar pendentes</button>
+        <button class="btn-secondary" id="galeria-btn-selecionar" onclick="toggleModoSelecaoGaleria()">☑️ Selecionar</button>
         <span id="galeria-net" style="font-size:12px;padding:2px 8px;border-radius:4px;"></span>
       </div>
       <div id="galeria-status" style="font-size:12px;color:#888;margin-bottom:8px;"></div>
       <div id="galeria-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;"></div>
+    </div>
+    <!-- v3.90.0: barra flutuante de seleção em massa -->
+    <div id="galeria-barra-selecao" class="galeria-barra-selecao">
+      <span id="galeria-contador-selecao" style="font-weight:600;"></span>
+      <button onclick="selecionarTodasGaleria()">Selecionar todas</button>
+      <button onclick="limparSelecaoGaleria()">Limpar seleção</button>
+      <button id="galeria-btn-zip" class="galeria-btn-zip" onclick="baixarSelecionadasZip()">⬇️ Baixar selecionadas (.zip)</button>
+      <button onclick="toggleModoSelecaoGaleria()">Cancelar</button>
     </div>
   `;
   document.getElementById('galeria-input').addEventListener('change', onGaleriaFileSelected);
@@ -24285,6 +24295,23 @@ async function recarregarGaleria() {
   })).join('');
   const htmlServer = fotosServer.map(f => renderGaleriaCard(f)).join('');
   grid.innerHTML = htmlPendentes + htmlServer;
+
+  // v3.90.0: lista normalizada (ordem do grid) pro carrossel + seleção.
+  const gpsStr = (f) => (f.lat != null && f.lng != null) ? `${Number(f.lat).toFixed(6)}, ${Number(f.lng).toFixed(6)}` : '(sem GPS)';
+  const tsStr = (f) => f.capturada_em ? new Date(f.capturada_em).toLocaleString('pt-BR') : (f.criada_em ? new Date(f.criada_em).toLocaleString('pt-BR') : '');
+  _galeriaLista = [
+    ...pendentes.map(p => ({ id: 'local-' + p.localId, isPend: true, src: `data:${p.mime || 'image/jpeg'};base64,${p.arquivo_b64}`, numero: '—', legenda: p.legenda || '(pendente)', gps: gpsStr(p), endereco: p.endereco_reverso || '', timestamp: tsStr(p) })),
+    ...fotosServer.map(f => ({ id: f.id, isPend: false, src: `/api/galeria/${f.id}/arquivo`, numero: f.id, legenda: f.legenda || `Foto #${f.id}`, gps: gpsStr(f), endereco: f.endereco_reverso || '', timestamp: tsStr(f) })),
+  ];
+  // Reaplica o modo seleção após re-render (mantém seleção existente e visual).
+  if (modoSelecaoGaleria) {
+    document.querySelectorAll('.galeria-card').forEach(c => {
+      c.classList.add('modo-selecao');
+      const id = Number(c.dataset.fotoId);
+      if (galeriaSelecionadas.has(id)) { c.classList.add('selecionado'); const chk = c.querySelector('.galeria-checkbox'); if (chk) chk.checked = true; }
+    });
+    atualizarBarraSelecaoGaleria();
+  }
 }
 
 async function syncManual() {
@@ -24310,9 +24337,10 @@ function renderGaleriaCard(f) {
     : `/api/galeria/${f.id}/arquivo`;
   const localId = isPend ? f.localId : null;
   return `
-    <div style="border:1px solid ${isPend ? '#f59e0b' : 'var(--border-color,#333)'};border-radius:6px;overflow:hidden;background:var(--bg-secondary,#1a1a1a);position:relative;">
+    <div class="galeria-card" data-foto-id="${isPend ? '' : f.id}" data-is-pend="${isPend}" style="border:1px solid ${isPend ? '#f59e0b' : 'var(--border-color,#333)'};border-radius:6px;overflow:hidden;background:var(--bg-secondary,#1a1a1a);position:relative;">
+      ${!isPend ? `<input type="checkbox" class="galeria-checkbox" onclick="event.stopPropagation(); toggleSelecaoFotoGaleria(${f.id}, this.closest('.galeria-card'))">` : ''}
       ${isPend ? '<div style="position:absolute;top:6px;right:6px;background:#f59e0b;color:#000;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:3px;z-index:1;">📵 PENDENTE</div>' : ''}
-      <img src="${imgSrc}" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#000;" loading="lazy">
+      <img src="${imgSrc}" onclick="galeriaCardClick(event, '${isPend ? ('local-' + f.localId) : f.id}', ${isPend})" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#000;cursor:pointer;" loading="lazy">
       <div style="padding:8px;font-size:12px;">
         <div style="font-weight:bold;margin-bottom:4px;">${esc(f.legenda || (isPend ? '(aguardando sync)' : `Foto #${f.id}`))}</div>
         <div style="opacity:.7;">📍 ${gps}</div>
@@ -24333,6 +24361,195 @@ function renderGaleriaCard(f) {
       </div>
     </div>
   `;
+}
+
+// ===================== v3.90.0: Carrossel + Seleção em massa (Galeria) =====================
+let _galeriaLista = [];          // fotos normalizadas na ordem do grid
+let gcIndex = 0;                 // índice atual no carrossel
+let modoSelecaoGaleria = false;
+let galeriaSelecionadas = new Set(); // ids (server) selecionados
+
+function galeriaCarrosselSelecaoCss() {
+  return `<style>
+    .galeria-checkbox{ display:none; position:absolute; top:8px; left:8px; width:22px; height:22px; accent-color:#C9A84C; z-index:5; cursor:pointer; }
+    .galeria-card.modo-selecao .galeria-checkbox{ display:block; }
+    .galeria-card.selecionado{ outline:3px solid #C9A84C; outline-offset:-3px; }
+    .galeria-barra-selecao{ display:none; position:fixed; bottom:0; left:0; right:0; background:#0C3320; border-top:2px solid #C9A84C; padding:12px 20px; align-items:center; gap:12px; flex-wrap:wrap; z-index:1000; }
+    .galeria-barra-selecao.ativa{ display:flex; }
+    .galeria-barra-selecao button{ background:transparent; border:1px solid #C9A84C; color:#C9A84C; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+    .galeria-barra-selecao .galeria-btn-zip{ background:#C9A84C; color:#0C3320; font-weight:700; border:none; }
+    .galeria-carrossel-overlay{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.95); z-index:100000; align-items:center; justify-content:center; flex-direction:column; }
+    .galeria-carrossel-overlay.ativo{ display:flex; }
+    .galeria-carrossel-img{ max-width:90vw; max-height:70vh; object-fit:contain; border:2px solid #C9A84C; border-radius:4px; background:#000; }
+    .galeria-carrossel-seta{ position:absolute; top:50%; transform:translateY(-50%); background:rgba(12,51,32,.85); color:#C9A84C; border:1px solid #C9A84C; font-size:2.2rem; width:54px; height:54px; border-radius:50%; cursor:pointer; line-height:1; }
+    .gc-esq{ left:14px; } .gc-dir{ right:14px; }
+    .galeria-carrossel-fechar{ position:absolute; top:14px; right:16px; background:transparent; color:#fff; font-size:1.8rem; border:none; cursor:pointer; z-index:2; }
+    .galeria-carrossel-contador{ position:absolute; top:16px; left:16px; color:#C9A84C; font-weight:600; font-size:13px; }
+    .galeria-carrossel-meta{ color:#fff; text-align:center; margin-top:12px; font-size:.9rem; line-height:1.5; max-width:90vw; padding:0 12px; }
+    .galeria-carrossel-acoes{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; justify-content:center; }
+    .galeria-carrossel-acoes button{ background:rgba(255,255,255,.1); color:#fff; border:1px solid rgba(255,255,255,.25); padding:8px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+  </style>`;
+}
+
+// Clique na thumbnail: em modo seleção alterna o checkbox (só server); senão abre carrossel.
+function galeriaCardClick(ev, id, isPend) {
+  if (modoSelecaoGaleria) {
+    if (isPend) return; // pendentes não entram no ZIP
+    ev.stopPropagation();
+    const card = ev.currentTarget.closest('.galeria-card');
+    toggleSelecaoFotoGaleria(Number(id), card);
+    const chk = card && card.querySelector('.galeria-checkbox'); if (chk) chk.checked = galeriaSelecionadas.has(Number(id));
+    return;
+  }
+  abrirCarrosselGaleria(id);
+}
+
+// ---- Carrossel ----
+function garantirCarrosselDom() {
+  let ov = document.getElementById('galeria-carrossel');
+  if (ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'galeria-carrossel';
+  ov.className = 'galeria-carrossel-overlay';
+  ov.innerHTML = `
+    <button class="galeria-carrossel-fechar" onclick="fecharCarrossel()">✕</button>
+    <div id="gc-contador" class="galeria-carrossel-contador"></div>
+    <button class="galeria-carrossel-seta gc-esq" onclick="navegarCarrossel(-1)">‹</button>
+    <img id="gc-img" class="galeria-carrossel-img" alt="Foto da obra">
+    <button class="galeria-carrossel-seta gc-dir" onclick="navegarCarrossel(1)">›</button>
+    <div id="gc-meta" class="galeria-carrossel-meta"></div>
+    <div id="gc-acoes" class="galeria-carrossel-acoes"></div>
+  `;
+  ov.addEventListener('click', (e) => { if (e.target === ov) fecharCarrossel(); });
+  let sx = 0;
+  ov.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; }, { passive: true });
+  ov.addEventListener('touchend', (e) => { const d = e.changedTouches[0].clientX - sx; if (Math.abs(d) > 50) navegarCarrossel(d < 0 ? 1 : -1); });
+  document.body.appendChild(ov);
+  return ov;
+}
+function abrirCarrosselGaleria(id) {
+  if (!_galeriaLista.length) return;
+  const idx = _galeriaLista.findIndex(f => String(f.id) === String(id));
+  gcIndex = idx >= 0 ? idx : 0;
+  garantirCarrosselDom();
+  renderCarrossel();
+  document.getElementById('galeria-carrossel').classList.add('ativo');
+  document.addEventListener('keydown', handleCarrosselKeydown);
+}
+function fecharCarrossel() {
+  const ov = document.getElementById('galeria-carrossel');
+  if (ov) ov.classList.remove('ativo');
+  document.removeEventListener('keydown', handleCarrosselKeydown);
+}
+function handleCarrosselKeydown(e) {
+  if (e.key === 'ArrowRight') navegarCarrossel(1);
+  else if (e.key === 'ArrowLeft') navegarCarrossel(-1);
+  else if (e.key === 'Escape') fecharCarrossel();
+}
+function navegarCarrossel(delta) {
+  const total = _galeriaLista.length; if (!total) return;
+  gcIndex = (gcIndex + delta + total) % total;
+  renderCarrossel();
+}
+function renderCarrossel() {
+  const f = _galeriaLista[gcIndex]; if (!f) return;
+  const esc = (s) => String(s || '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+  document.getElementById('gc-img').src = f.src;
+  document.getElementById('gc-contador').textContent = `Foto #${f.numero} — ${gcIndex + 1} de ${_galeriaLista.length}`;
+  document.getElementById('gc-meta').innerHTML = [
+    f.legenda ? `<strong>${esc(f.legenda)}</strong>` : '',
+    `📍 ${esc(f.gps)}`,
+    esc(f.endereco),
+    `🕒 ${esc(f.timestamp)}`,
+  ].filter(Boolean).join('<br>');
+  document.getElementById('gc-acoes').innerHTML = f.isPend
+    ? `<button onclick="carrosselAcao('baixar')">💾 Baixar</button>
+       <button onclick="carrosselAcao('excluir')" style="color:#ff8a8a;">🗑 Remover</button>`
+    : `<button onclick="carrosselAcao('wa')">📱 WhatsApp</button>
+       <button onclick="carrosselAcao('tg')">✈️ Telegram</button>
+       <button onclick="carrosselAcao('salvar')">💾 Salvar</button>
+       <button onclick="carrosselAcao('excluir')" style="color:#ff8a8a;">🗑 Excluir</button>`;
+  // preload vizinhas
+  const n = _galeriaLista[(gcIndex + 1) % _galeriaLista.length]; if (n) { const im = new Image(); im.src = n.src; }
+  const p = _galeriaLista[(gcIndex - 1 + _galeriaLista.length) % _galeriaLista.length]; if (p) { const im = new Image(); im.src = p.src; }
+}
+async function carrosselAcao(tipo) {
+  const f = _galeriaLista[gcIndex]; if (!f) return;
+  const localId = f.isPend ? Number(String(f.id).replace('local-', '')) : null;
+  if (tipo === 'wa') return reabrirModalCanal(f.id, 'whatsapp');
+  if (tipo === 'tg') return reabrirModalCanal(f.id, 'telegram');
+  if (tipo === 'salvar') return f.isPend ? baixarPendente(localId) : salvarNoCelular(f.id);
+  if (tipo === 'baixar') return baixarPendente(localId);
+  if (tipo === 'excluir') {
+    try { if (f.isPend) await removerPendente(localId); else await apagarFotoGaleria(f.id); } catch (_) {}
+    fecharCarrossel(); recarregarGaleria();
+  }
+}
+
+// ---- Seleção em massa ----
+function toggleModoSelecaoGaleria() {
+  modoSelecaoGaleria = !modoSelecaoGaleria;
+  galeriaSelecionadas.clear();
+  const btn = document.getElementById('galeria-btn-selecionar'); if (btn) btn.textContent = modoSelecaoGaleria ? '✖️ Sair da seleção' : '☑️ Selecionar';
+  document.querySelectorAll('.galeria-card').forEach(c => {
+    c.classList.toggle('modo-selecao', modoSelecaoGaleria);
+    c.classList.remove('selecionado');
+    const chk = c.querySelector('.galeria-checkbox'); if (chk) chk.checked = false;
+  });
+  atualizarBarraSelecaoGaleria();
+}
+function toggleSelecaoFotoGaleria(fotoId, cardEl) {
+  fotoId = Number(fotoId);
+  if (galeriaSelecionadas.has(fotoId)) { galeriaSelecionadas.delete(fotoId); if (cardEl) cardEl.classList.remove('selecionado'); }
+  else { galeriaSelecionadas.add(fotoId); if (cardEl) cardEl.classList.add('selecionado'); }
+  atualizarBarraSelecaoGaleria();
+}
+function selecionarTodasGaleria() {
+  if (!modoSelecaoGaleria) toggleModoSelecaoGaleria();
+  document.querySelectorAll('.galeria-card[data-is-pend="false"]').forEach(c => {
+    const id = Number(c.dataset.fotoId); if (!Number.isFinite(id)) return;
+    galeriaSelecionadas.add(id); c.classList.add('selecionado');
+    const chk = c.querySelector('.galeria-checkbox'); if (chk) chk.checked = true;
+  });
+  atualizarBarraSelecaoGaleria();
+}
+function limparSelecaoGaleria() {
+  galeriaSelecionadas.clear();
+  document.querySelectorAll('.galeria-card').forEach(c => { c.classList.remove('selecionado'); const chk = c.querySelector('.galeria-checkbox'); if (chk) chk.checked = false; });
+  atualizarBarraSelecaoGaleria();
+}
+function atualizarBarraSelecaoGaleria() {
+  const barra = document.getElementById('galeria-barra-selecao'); if (!barra) return;
+  const total = galeriaSelecionadas.size;
+  if (modoSelecaoGaleria && total > 0) barra.classList.add('ativa'); else barra.classList.remove('ativa');
+  const cont = document.getElementById('galeria-contador-selecao');
+  if (cont) cont.textContent = `${total} foto${total !== 1 ? 's' : ''} selecionada${total !== 1 ? 's' : ''}`;
+}
+async function baixarSelecionadasZip() {
+  if (galeriaSelecionadas.size === 0) { alert('Selecione ao menos uma foto.'); return; }
+  const botao = document.getElementById('galeria-btn-zip');
+  const txt = botao ? botao.textContent : '';
+  if (botao) { botao.disabled = true; botao.textContent = '⏳ Gerando ZIP...'; }
+  try {
+    const resp = await fetch('/api/galeria/download-zip', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fotoIds: Array.from(galeriaSelecionadas) }),
+    });
+    if (!resp.ok) { let msg = 'Erro ' + resp.status; try { const j = await resp.json(); msg = j.error || msg; } catch (_) {} throw new Error(msg); }
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const dh = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    a.href = url; a.download = `galeria-fotos-${dh}.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('[galeria] zip:', err);
+    alert('Não foi possível gerar o ZIP: ' + (err.message || err));
+  } finally {
+    if (botao) { botao.disabled = false; botao.textContent = txt || '⬇️ Baixar selecionadas (.zip)'; }
+  }
 }
 
 // v3.9.1 — Lightbox fullscreen pra visualizar foto em tamanho grande.
@@ -24357,25 +24574,9 @@ function abrirLightboxFoto(src, meta) {
   document.addEventListener('keydown', escListener);
 }
 
-async function verFotoServer(id) {
-  // Pega metadados via lista (já em memória) ou refetch
-  let foto = null;
-  try {
-    const r = await fetch('/api/galeria?limit=200');
-    const data = await r.json();
-    foto = (data.fotos || []).find(x => x.id === id);
-  } catch (_) {}
-  const meta = foto ? buildLightboxMeta(foto) : '';
-  abrirLightboxFoto(`/api/galeria/${id}/arquivo`, meta);
-}
-
-async function verFotoPendente(localId) {
-  const pendentes = await listarPendentesLocal();
-  const p = pendentes.find(x => x.localId === localId);
-  if (!p) return;
-  const meta = buildLightboxMeta(p) + ' <span style="background:#f59e0b;color:#000;padding:2px 6px;border-radius:3px;font-weight:bold;">📵 PENDENTE</span>';
-  abrirLightboxFoto(`data:${p.mime || 'image/jpeg'};base64,${p.arquivo_b64}`, meta);
-}
+// v3.90.0: "Ver" agora abre o CARROSSEL (navega entre todas as fotos da galeria).
+function verFotoServer(id) { abrirCarrosselGaleria(id); }
+function verFotoPendente(localId) { abrirCarrosselGaleria('local-' + localId); }
 
 function buildLightboxMeta(f) {
   const esc = (s) => String(s || '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
