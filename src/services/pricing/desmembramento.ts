@@ -48,6 +48,17 @@ const ESCOPO_DESMEMBRAMENTO = [
   'Acompanhamento ate emissao das novas matriculas individualizadas',
 ];
 
+// v3.91.4: escopo do DESMEMBRAMENTO RURAL — INCRA/SIGEF (não Prefeitura/urbanistico).
+const ESCOPO_DESMEMBRAMENTO_RURAL = [
+  'Levantamento topografico georreferenciado do imovel matriz (Lei 10.267/2001)',
+  'Memoriais descritivos individualizados de cada area resultante',
+  'Coordenadas georreferenciadas de cada vertice da poligonal de cada area',
+  'Verificacao da Fracao Minima de Parcelamento (FMP) / modulo rural — nenhuma area abaixo do limite legal',
+  'Certificacao das poligonais no SIGEF/INCRA',
+  'Protocolo no cartorio competente para encerramento da matricula matriz e abertura das novas matriculas',
+  'Acompanhamento ate emissao das novas matriculas individualizadas',
+];
+
 const ESCOPO_REMEMBRAMENTO = [
   'Levantamento topografico das matriculas a serem unificadas',
   'Memorial descritivo unificado (poligonal resultante)',
@@ -195,7 +206,9 @@ export async function calcularDesmembramento(
     : (input.numero_lotes_origem ?? 0) + 1;     // N origem + 1 nova
 
   // ── Secao 1: escopo ──────────────────────────────────────────────────────
-  const secao_1_projetos = isDesm ? [...ESCOPO_DESMEMBRAMENTO] : [...ESCOPO_REMEMBRAMENTO];
+  const secao_1_projetos = !isDesm
+    ? [...ESCOPO_REMEMBRAMENTO]
+    : (isUrbano ? [...ESCOPO_DESMEMBRAMENTO] : [...ESCOPO_DESMEMBRAMENTO_RURAL]);
 
   // ── Secao 2: taxas e emolumentos de terceiros ───────────────────────────
   const secao_2_taxas: ItemCusto[] = [];
@@ -332,7 +345,7 @@ export async function calcularDesmembramento(
       {
         ordem: ordem++,
         descricao: isDesm
-          ? `Honorarios de Projeto Urbanistico de ${termoAto} — levantamento topografico, projeto, memorial descritivo de cada lote, planta, ARTs e responsabilidade tecnica`
+          ? `Honorarios de Projeto ${isUrbano ? 'Urbanistico' : 'Georreferenciado'} de ${termoAto} — levantamento topografico, projeto, memorial descritivo de cada lote, planta, ARTs e responsabilidade tecnica`
           : 'Honorarios de Projeto de Remembramento — levantamento topografico das matriculas, memorial unificado, planta resultante, ARTs e responsabilidade tecnica',
         valor: honorario_projeto,
         observacao: obsHonProjeto,
@@ -460,12 +473,20 @@ export async function calcularDesmembramento(
   // ── Avisos legais ───────────────────────────────────────────────────────
   const avisos: string[] = [];
 
-  if (isDesm) {
+  if (isDesm && isUrbano) {
     avisos.push(
-      `BASE LEGAL ${termoAto.toUpperCase()}: Lei 6.766/1979 (Parcelamento do Solo Urbano) — exige aprovacao previa da Prefeitura, lotes minimos conforme zoneamento (geralmente 125m² em zona urbana de Acailandia), e infraestrutura compativel. Cada lote resultante vira matricula propria no cartorio.`
+      'BASE LEGAL DESDOBRAMENTO: Lei 6.766/1979 (Parcelamento do Solo Urbano) — exige aprovacao previa da Prefeitura, lotes minimos conforme zoneamento (geralmente 125m² em zona urbana de Acailandia), e infraestrutura compativel. Cada lote resultante vira matricula propria no cartorio.'
     );
     avisos.push(
       'PRAZO ESTIMADO: levantamento (5-10 dias), projeto e memoriais (5-10 dias), analise Prefeitura (30-90 dias), protocolo cartorio (15-30 dias). Total tipico: 60-150 dias.'
+    );
+  } else if (isDesm) {
+    // v3.91.4: desmembramento RURAL — Estatuto da Terra + INCRA (não Lei 6.766/Prefeitura).
+    avisos.push(
+      'BASE LEGAL DESMEMBRAMENTO RURAL: Lei 4.504/1964 (Estatuto da Terra) e Lei 5.868/1972 (SNCR) — o parcelamento respeita a Fracao Minima de Parcelamento (FMP) / modulo rural do municipio; nenhuma parcela pode ficar abaixo desse limite. Certificacao no SIGEF/INCRA (Lei 10.267/2001), encerramento da matricula atual e abertura de nova matricula para cada area. NAO ha analise da Prefeitura (ato de competencia do INCRA e do cartorio).'
+    );
+    avisos.push(
+      'PRAZO ESTIMADO: levantamento georreferenciado (5-15 dias), memoriais e peças (5-10 dias), certificacao SIGEF/INCRA (30-90 dias), protocolo cartorio (15-30 dias). Total tipico: 60-150 dias.'
     );
   } else {
     avisos.push(
