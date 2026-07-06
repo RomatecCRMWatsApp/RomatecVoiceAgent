@@ -7,8 +7,9 @@ import { htmlToPdf } from '../htmlToPdf';
 import { CORES, FONTS_PRIME2, fmtBRL, escapeHtml } from '../sharedHtml';
 
 function linhaServico(s: PropostaServicoItem): string {
-  const valor = s.valor == null ? 'Incluso' : fmtBRL(s.valor);
-  return `<tr><td>${escapeHtml(s.descricao)}</td><td class="val">${escapeHtml(valor)}</td></tr>`;
+  const valor = s.pendente ? 'A confirmar' : (s.valor == null ? 'Incluso' : fmtBRL(s.valor));
+  const nota = s.informativo ? ' <em style="opacity:.7;font-size:.85em">(informativo — pago à parte)</em>' : '';
+  return `<tr><td>${escapeHtml(s.descricao)}${nota}</td><td class="val">${escapeHtml(valor)}</td></tr>`;
 }
 
 function cardImovel(dados: PropostaDados): string {
@@ -35,7 +36,7 @@ export function buildPropostaPrime2Html(dados: PropostaDados): string {
       (s) => `
       <div class="serv-card">
         <div class="serv-titulo">${escapeHtml(s.descricao)}</div>
-        <div class="serv-desc">${s.valor == null ? 'Incluso no escopo' : fmtBRL(s.valor)}</div>
+        <div class="serv-desc">${s.pendente ? 'A confirmar' : (s.valor == null ? 'Incluso no escopo' : fmtBRL(s.valor))}${s.informativo ? ' (informativo — pago à parte)' : ''}</div>
       </div>`,
     )
     .join('');

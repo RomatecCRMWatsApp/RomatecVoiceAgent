@@ -90,6 +90,8 @@ describe('propostaConsultoriaToPropostaDados', () => {
     expect(d.servicos).toHaveLength(3);
     const pend = d.servicos.find((s) => s.descricao === 'Taxa pendente');
     expect(pend?.valor).toBeNull();
+    // v3.91.1: item pendente carrega a flag → template mostra "A confirmar", não "Incluso".
+    expect(pend?.pendente).toBe(true);
   });
   it('parcelas e etapas derivadas dos custos', () => {
     const d = propostaConsultoriaToPropostaDados(base);
