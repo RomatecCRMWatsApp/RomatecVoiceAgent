@@ -52,8 +52,7 @@ describe('Remembramento — modo manual', () => {
     expect(r.custos.secao_3_honorarios[2].valor).toBe(800);
     expect(r.custos.condicoes_pagamento).toHaveLength(1);
     expect(r.custos.condicoes_pagamento?.[0].rotulo).toBe('A combinar entre as partes');
-    // v3.91.2: valor a receber = honorários + anotação técnica (secao_5_total).
-    expect(r.custos.condicoes_pagamento?.[0].valor).toBe(r.custos.secao_5_total);
+    expect(r.custos.condicoes_pagamento?.[0].valor).toBe(3500);
   });
 
   it('modo manual sem mapas → erro', async () => {
@@ -196,8 +195,7 @@ describe('Desmembramento/Desdobro — frações resultantes', () => {
     expect(r.custos.secao_3_honorarios[0].descricao).toContain('300');
     expect(r.custos.secao_3_honorarios[0].descricao).toContain('Lote frente Rua A');
     expect(r.custos.secao_3_honorarios.reduce((s, i) => s + i.valor, 0)).toBe(1400);
-    // v3.91.2: parcela = valor a receber (honorários + anotação técnica).
-    expect(r.custos.condicoes_pagamento?.[0].valor).toBe(r.custos.secao_5_total);
+    expect(r.custos.condicoes_pagamento?.[0].valor).toBe(1400);
   });
 
   it('soma das frações ≤ matriz (tolerância 1 m²): aceita 1001 vs 1000', async () => {

@@ -172,7 +172,6 @@ function itemCustoToServico(i: ItemCusto): PropostaServicoItem {
     descricao: i.descricao,
     valor: i.pendente ? null : i.valor,
     pendente: i.pendente || undefined,
-    informativo: i.informativo || undefined,
   };
 }
 

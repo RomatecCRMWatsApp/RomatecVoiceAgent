@@ -56,9 +56,6 @@ export interface PropostaServicoItem {
   /** v3.91.1: taxa a apurar (ex.: aprovação Prefeitura). Renderiza "A confirmar",
    *  nunca "Incluso" — não é gratuito, é custo de terceiro a confirmar. */
   pendente?: boolean;
-  /** v3.91.2: custo de terceiro (cartório/Prefeitura) — mostrado como informativo,
-   *  fora do valor a receber / total. */
-  informativo?: boolean;
 }
 
 export interface PropostaParcela {

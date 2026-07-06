@@ -125,9 +125,7 @@ describe('v3 — despesas_administrativas', () => {
     expect(out.custos.despesas_administrativas?.descritivo).toBe('Taxa parcelamento Açailândia');
     const totalHonorarios = out.custos.secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
     expect(totalHonorarios).toBe(2000); // 1000 × 2
-    // v3.91.2: secao_5_total soma só as taxas FATURÁVEIS (anotação técnica);
-    // emolumentos/taxa Prefeitura são informativos (fora do valor a receber).
-    const totalTaxas = out.custos.secao_2_taxas.filter(i => !i.informativo).reduce((s, i) => s + i.valor, 0);
+    const totalTaxas = out.custos.secao_2_taxas.reduce((s, i) => s + i.valor, 0);
     // CRÍTICO: secao_5_total = taxas + honorarios SEM as despesas administrativas
     expect(out.custos.secao_5_total).toBe(totalTaxas + 2000);
     // Garante que o número 250 não vazou para o total
@@ -152,9 +150,7 @@ describe('v3 — despesas_administrativas', () => {
     // Contrato extra: secao_5_total NÃO contém o valor 250 (não pode vazar).
     // Mesmo padrão do teste habilitada=true: comparar contra taxas+honorarios reais,
     // não contra constantes (taxas variam com valor venal e numero de matrículas).
-    // v3.91.2: secao_5_total soma só as taxas FATURÁVEIS (anotação técnica);
-    // emolumentos/taxa Prefeitura são informativos (fora do valor a receber).
-    const totalTaxas = out.custos.secao_2_taxas.filter(i => !i.informativo).reduce((s, i) => s + i.valor, 0);
+    const totalTaxas = out.custos.secao_2_taxas.reduce((s, i) => s + i.valor, 0);
     expect(out.custos.secao_5_total).toBe(totalTaxas + 2000);
     expect(out.custos.secao_5_total).not.toBe(totalTaxas + 2000 + 250);
   });
@@ -169,7 +165,7 @@ describe('v3 — retrocompat: sem modo_precificacao usa SM legado', () => {
 });
 
 describe('v3 — condicoes_pagamento consistente com secao_3', () => {
-  it('por_imovel: soma das parcelas = valor a receber (secao_5_total = honorários + anotação)', async () => {
+  it('por_imovel: soma das parcelas = total de honorários', async () => {
     const out = await calcularDesmembramento({
       ...baseValid,
       modo_precificacao: 'por_imovel',
@@ -180,11 +176,12 @@ describe('v3 — condicoes_pagamento consistente com secao_3', () => {
         { ordem: 3, area_m2: 200, endereco: 'R', matricula: 'M3' },
       ],
     });
+    const totalHonorarios = out.custos.secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
     const somaParcelas = (out.custos.condicoes_pagamento ?? []).reduce((s, c) => s + c.valor, 0);
-    expect(somaParcelas).toBeCloseTo(out.custos.secao_5_total, 2);
+    expect(somaParcelas).toBeCloseTo(totalHonorarios, 2);
   });
 
-  it('por_lote: soma das parcelas = valor a receber (secao_5_total)', async () => {
+  it('por_lote: soma das parcelas = total de honorários', async () => {
     const out = await calcularDesmembramento({
       ...baseValid,
       modo_precificacao: 'por_lote',
@@ -194,11 +191,12 @@ describe('v3 — condicoes_pagamento consistente com secao_3', () => {
         { ordem: 3, valor: 1500 },
       ],
     });
+    const totalHonorarios = out.custos.secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
     const somaParcelas = (out.custos.condicoes_pagamento ?? []).reduce((s, c) => s + c.valor, 0);
-    expect(somaParcelas).toBeCloseTo(out.custos.secao_5_total, 2);
+    expect(somaParcelas).toBeCloseTo(totalHonorarios, 2);
   });
 
-  it('personalizado: parcela única "A combinar" com valor = valor a receber', async () => {
+  it('personalizado: parcela única "A combinar" com valor = total', async () => {
     const out = await calcularDesmembramento({
       ...baseValid,
       modo_precificacao: 'personalizado',
@@ -206,7 +204,7 @@ describe('v3 — condicoes_pagamento consistente com secao_3', () => {
     });
     expect(out.custos.condicoes_pagamento).toHaveLength(1);
     expect(out.custos.condicoes_pagamento![0].rotulo).toMatch(/a combinar/i);
-    expect(out.custos.condicoes_pagamento![0].valor).toBe(out.custos.secao_5_total);
+    expect(out.custos.condicoes_pagamento![0].valor).toBe(5500);
   });
 });
 

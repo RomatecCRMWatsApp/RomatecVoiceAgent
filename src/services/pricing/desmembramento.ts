@@ -239,7 +239,6 @@ export async function calcularDesmembramento(
       descricao: `Emolumentos cartorarios — ${numeroMatriculasAfetadas} matricula(s) afetada(s)${isDesm ? ' (cancelamento da matriz + abertura das novas)' : ' (cancelamento das origem + abertura da unificada)'}`,
       valor: totalEmol,
       observacao: `R$ ${emol.valor.toFixed(2)} × ${numeroMatriculasAfetadas} matriculas | ${emol.base_calculo}`,
-      informativo: true, // v3.91.2: custo de cartorio (terceiro) — fora do valor a receber
     });
     fontes.tjma = { fonte: emol.fonte, consultadoEm: emol.consultadoEm.toISOString() };
   } catch (err) {
@@ -249,7 +248,6 @@ export async function calcularDesmembramento(
       valor: 0,
       pendente: true,
       observacao: `A confirmar em cartorio. ${(err as Error).message}`,
-      informativo: true,
     });
   }
 
@@ -264,7 +262,6 @@ export async function calcularDesmembramento(
       observacao: taxaPref === null
         ? 'A confirmar com a Secretaria de Obras/Planejamento da Prefeitura. Costuma ser proporcional ao numero de lotes ou area total.'
         : `Conforme taxa vigente em Acailandia/MA`,
-      informativo: true, // v3.91.2: taxa de terceiro (Prefeitura) — fora do valor a receber
     });
   }
 
@@ -452,16 +449,9 @@ export async function calcularDesmembramento(
   );
 
   // ── Secao 5: total ──────────────────────────────────────────────────────
-  // v3.91.2: VALOR A RECEBER (secao_5_total) = honorarios Romatec + taxas
-  // FATURAVEIS (anotacao tecnica ART/TRT). Emolumentos de cartorio e taxa da
-  // Prefeitura sao INFORMATIVOS (custo de terceiro) — aparecem na proposta mas
-  // NAO entram no total nem na base das parcelas.
-  const total_taxas = secao_2_taxas.reduce((s, i) => s + i.valor, 0); // todas (p/ referencia)
-  const total_taxas_faturavel = secao_2_taxas.filter(i => !i.informativo).reduce((s, i) => s + i.valor, 0);
-  const total_taxas_informativo = secao_2_taxas.filter(i => i.informativo).reduce((s, i) => s + i.valor, 0);
-  void total_taxas; void total_taxas_informativo; // mantidos p/ clareza/telemetria
+  const total_taxas = secao_2_taxas.reduce((s, i) => s + i.valor, 0);
   const total_honorarios = secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
-  const secao_5_total = total_taxas_faturavel + total_honorarios;
+  const secao_5_total = total_taxas + total_honorarios;
 
   // ── Avisos legais ───────────────────────────────────────────────────────
   const avisos: string[] = [];
@@ -511,29 +501,28 @@ export async function calcularDesmembramento(
   // Desm: 50% Projeto + 50% Assessoria na assinatura | restante na aprovacao Prefeitura
   // Rem: 100% Projeto + 50% Assessoria na assinatura | 50% Assessoria no protocolo cartorio
   // v1.99.16: Modo manual — forma de pagamento a combinar entre as partes
-  // v3.23.0: modo_precificacao define parcelas a partir do total real.
-  // v3.91.2: base = secao_5_total (VALOR A RECEBER = honorarios + anotacao tecnica
-  // faturavel), NAO mais so os honorarios — o TRT/ART entra no valor a receber.
-  // Emolumentos e taxa da Prefeitura (informativos) ficam de fora.
+  // v3.23.0: modo_precificacao define parcelas a partir do total real de secao_3, não da fórmula SM legada.
+  const totalSecao3 = secao_3_honorarios.reduce((s, i) => s + i.valor, 0);
   let condicoes_pagamento: CondicaoPagamento[];
   if (isManual || input.modo_precificacao === 'personalizado') {
     // Modo manual ou personalizado → "A combinar" entre as partes
     condicoes_pagamento = [{
       rotulo: 'A combinar entre as partes',
       descricao: 'Forma e cronograma de pagamento dos honorários a serem definidos em comum acordo entre Contratante e Contratado, registrados em recibo próprio.',
-      valor: secao_5_total,
+      valor: totalSecao3,
     }];
   } else if (input.modo_precificacao === 'por_imovel' || input.modo_precificacao === 'por_lote') {
+    // v3.23.0: parcelas calculadas sobre o secao_3 total (não sobre formula SM)
     condicoes_pagamento = [
       {
         rotulo: '1a parcela — na assinatura da proposta',
-        descricao: '50% do valor a receber (honorários + anotação técnica)',
-        valor: secao_5_total * 0.5,
+        descricao: '50% dos Honorários técnicos',
+        valor: totalSecao3 * 0.5,
       },
       {
         rotulo: '2a parcela — no protocolo final em cartório',
-        descricao: '50% restante do valor a receber',
-        valor: secao_5_total * 0.5,
+        descricao: '50% restante dos Honorários técnicos',
+        valor: totalSecao3 * 0.5,
       },
     ];
   } else if (isDesm) {
@@ -615,7 +604,7 @@ export async function calcularDesmembramento(
           : input.modo_precificacao === 'por_lote'
             ? 'Soma dos lotes'
             : 'Pacote fechado',
-        valor_resultado: secao_3_honorarios.reduce((s, i) => s + i.valor, 0),
+        valor_resultado: totalSecao3,
       },
     ];
   } else if (isManual) {

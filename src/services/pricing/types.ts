@@ -26,10 +26,6 @@ export interface ItemCusto {
   // v1.66.17: quando o usuario edita o valor no preview, guardamos o valor
   // calculado pelo motor pra mostrar "Desconto" / "Acrescimo" no PDF.
   valor_original?: number;
-  // v3.91.2: item informativo (custo de terceiro — ex.: emolumentos de cartorio,
-  // taxa da Prefeitura). Aparece na proposta, mas NAO entra no valor a receber
-  // (secao_5_total) nem na base das parcelas.
-  informativo?: boolean;
 }
 
 export interface DocumentoChecklist {
