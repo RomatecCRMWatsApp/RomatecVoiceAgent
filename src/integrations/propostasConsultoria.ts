@@ -2623,11 +2623,13 @@ export async function gerarPdfPropostaConsultoria(
   // v1.99.17: subtipo + modalidade distinguem Desmembramento Rural (Lei 5.868/72)
   // vs Desdobro Urbano (Lei 6.766/79) dentro do mesmo subtipo 'desmembramento'.
   const dadosImovel = (p.dados_imovel as Record<string, unknown> | null) ?? {};
-  const modalidade = dadosImovel.modalidade as 'rural' | 'urbana' | undefined;
+  // v3.91.3: modalidade com fallback pra tipo_zona (urbano = Desdobramento, rural = Desmembramento).
+  const modalidade = (dadosImovel.modalidade as 'rural' | 'urbana' | undefined)
+    ?? (dadosImovel.tipo_zona === 'urbana' ? 'urbana' : dadosImovel.tipo_zona === 'rural' ? 'rural' : undefined);
   const isDesdobro = p.subtipo === 'desmembramento' && modalidade === 'urbana';
   const isDesmRural = p.subtipo === 'desmembramento' && modalidade === 'rural';
   let subtipoLabel = SUBTIPO_LABEL[p.subtipo || ''] || (p.subtipo || '').toUpperCase();
-  if (isDesdobro) subtipoLabel = 'DESDOBRO DE LOTE URBANO';
+  if (isDesdobro) subtipoLabel = 'DESDOBRAMENTO DE LOTE URBANO';
   else if (isDesmRural) subtipoLabel = 'DESMEMBRAMENTO DE IMÓVEL RURAL';
   const isDesmRem = p.subtipo === 'desmembramento' || p.subtipo === 'remembramento';
 

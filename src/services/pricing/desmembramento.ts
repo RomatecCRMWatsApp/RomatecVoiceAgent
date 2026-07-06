@@ -65,6 +65,10 @@ export async function calcularDesmembramento(
   const sm = salarioMinimo();
   const hp = params.honorarios_projeto;
   const isDesm = input.tipo === 'desmembramento';
+  // v3.91.3: nomenclatura do ato — urbano é "Desdobramento" (Lei 6.766/79),
+  // rural é "Desmembramento" (Estatuto da Terra). Remembramento = unificação.
+  const isUrbano = isDesm && (input.modalidade === 'urbana' || input.tipo_zona === 'urbana');
+  const termoAto = !isDesm ? 'Remembramento' : (isUrbano ? 'Desdobramento' : 'Desmembramento');
 
   // v1.99.16: normalização opcional a partir de imoveis[] (modo detalhado do Remembramento)
   if (input.imoveis && input.imoveis.length > 0) {
@@ -256,7 +260,7 @@ export async function calcularDesmembramento(
     const taxaPref = params.prefeitura_acailandia.aprovacao_desmembramento;
     secao_2_taxas.push({
       ordem: ordem++,
-      descricao: 'Taxa de Aprovacao do Desmembramento — Prefeitura de Acailandia',
+      descricao: `Taxa de Aprovacao do ${termoAto} — Prefeitura de Acailandia`,
       valor: taxaPref ?? 0,
       pendente: taxaPref === null,
       observacao: taxaPref === null
@@ -328,7 +332,7 @@ export async function calcularDesmembramento(
       {
         ordem: ordem++,
         descricao: isDesm
-          ? 'Honorarios de Projeto Urbanistico de Desmembramento — levantamento topografico, projeto, memorial descritivo de cada lote, planta, ARTs e responsabilidade tecnica'
+          ? `Honorarios de Projeto Urbanistico de ${termoAto} — levantamento topografico, projeto, memorial descritivo de cada lote, planta, ARTs e responsabilidade tecnica`
           : 'Honorarios de Projeto de Remembramento — levantamento topografico das matriculas, memorial unificado, planta resultante, ARTs e responsabilidade tecnica',
         valor: honorario_projeto,
         observacao: obsHonProjeto,
@@ -458,7 +462,7 @@ export async function calcularDesmembramento(
 
   if (isDesm) {
     avisos.push(
-      'BASE LEGAL DESMEMBRAMENTO: Lei 6.766/1979 (Parcelamento do Solo Urbano) — exige aprovacao previa da Prefeitura, lotes minimos conforme zoneamento (geralmente 125m² em zona urbana de Acailandia), e infraestrutura compativel. Cada lote resultante vira matricula propria no cartorio.'
+      `BASE LEGAL ${termoAto.toUpperCase()}: Lei 6.766/1979 (Parcelamento do Solo Urbano) — exige aprovacao previa da Prefeitura, lotes minimos conforme zoneamento (geralmente 125m² em zona urbana de Acailandia), e infraestrutura compativel. Cada lote resultante vira matricula propria no cartorio.`
     );
     avisos.push(
       'PRAZO ESTIMADO: levantamento (5-10 dias), projeto e memoriais (5-10 dias), analise Prefeitura (30-90 dias), protocolo cartorio (15-30 dias). Total tipico: 60-150 dias.'
@@ -534,7 +538,7 @@ export async function calcularDesmembramento(
         valor: honorario_projeto * 0.5 + honorario_assessoria * 0.5,
       },
       {
-        rotulo: '2a parcela — na aprovacao do desmembramento pela Prefeitura',
+        rotulo: `2a parcela — na aprovacao do ${termoAto.toLowerCase()} pela Prefeitura`,
         descricao: '50% restante dos Honorarios de Projeto',
         valor: honorario_projeto * 0.5,
       },

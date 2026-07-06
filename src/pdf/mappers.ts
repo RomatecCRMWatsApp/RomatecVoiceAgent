@@ -241,11 +241,21 @@ export function propostaConsultoriaToPropostaDados(
     [str(p.cliente.cidade), str(p.cliente.estado)].filter(Boolean).join(' / ') ||
     undefined;
 
+  // v3.91.3: nomenclatura por modalidade — urbano é "Desdobramento" (Lei 6.766/79),
+  // rural é "Desmembramento". Antes o Prime mostrava sempre "Desmembramento".
+  const modalidadeImovel = String(di.modalidade ?? di.tipo_zona ?? '');
+  let tipoServicoLabel = SUBTIPO_LABEL[subtipo] || 'Servico Tecnico de Consultoria';
+  if (subtipo === 'desmembramento') {
+    tipoServicoLabel = modalidadeImovel === 'urbana'
+      ? 'Desdobramento de Lote Urbano'
+      : modalidadeImovel === 'rural' ? 'Desmembramento de Imóvel Rural' : 'Desmembramento';
+  }
+
   return {
     numero: p.numero,
     dataEmissao: fmtDataExtenso(p.data_proposta),
     validade: `${p.validade_dias ?? 30} dias`,
-    tipoServico: SUBTIPO_LABEL[subtipo] || 'Servico Tecnico de Consultoria',
+    tipoServico: tipoServicoLabel,
     cliente: {
       nome: str(p.cliente.nome) ?? 'Contratante',
       cpfCnpj: str(p.cliente.cpf_cnpj) ?? '—',
