@@ -125,7 +125,7 @@ describe('calcularDemarcacaoLotes — calculo principal', () => {
   it('10. Cenario canonico urbano: 500m² · 8 vertices · 8 concreto · 2 diarias · 30km · media · 10% desc', () => {
     const r = calcularDemarcacaoLotes({ ...baseUrbana, desconto_pct: 10 });
     const h = r.honorarios_romatec;
-    expect(h.trt_cft).toBe(93.4);
+    expect(h.trt_cft).toBe(68.17);
     expect(h.tecnicos_campo).toBeCloseTo(2 * SM_2026 * 0.42, 2);
     expect(h.marcos_subtotal).toBeCloseTo(960, 2);
     expect(h.deslocamento).toBeCloseTo(105, 2);
@@ -454,10 +454,10 @@ describe('v3.38.0 — Cenario canonico PROP-2026-0028-R1 (gold standard)', () =>
     num_parcelas: 2,
   };
 
-  it('38. Linhas individuais: TRT 93,40 · Tec 680,82 · Insal 136,16 · Marcos 140 · Desloc 105 · Area 2323,20', () => {
+  it('38. Linhas individuais: TRT 68,17 · Tec 680,82 · Insal 136,16 · Marcos 140 · Desloc 105 · Area 2323,20', () => {
     const r = calcularDemarcacaoLotes(propInput);
     const h = r.honorarios_romatec;
-    expect(h.trt_cft).toBeCloseTo(93.40, 2);
+    expect(h.trt_cft).toBeCloseTo(68.17, 2);
     expect(h.tecnicos_campo).toBeCloseTo(680.82, 2);
     expect(h.adicional_campo.valor).toBeCloseTo(136.16, 2);
     expect(h.marcos_subtotal).toBeCloseTo(140.00, 2);
@@ -465,16 +465,16 @@ describe('v3.38.0 — Cenario canonico PROP-2026-0028-R1 (gold standard)', () =>
     expect(h.area_servico).toBeCloseTo(2323.20, 2);
   });
 
-  it('39. Complexidade (×1,3): subtotal_apos = 4.522,15', () => {
+  it('39. Complexidade (×1,3): subtotal_apos = 4.489,36', () => {
     const r = calcularDemarcacaoLotes(propInput);
     const h = r.honorarios_romatec;
     expect(h.complexidade_multiplicador).toBe(1.3);
-    expect(h.subtotal_apos_complexidade).toBeCloseTo(4522.15, 1);
+    expect(h.subtotal_apos_complexidade).toBeCloseTo(4489.36, 1);
   });
 
-  it('40. Assessoria 5%: 226,11', () => {
+  it('40. Assessoria 5%: 224,47', () => {
     const r = calcularDemarcacaoLotes(propInput);
-    expect(r.honorarios_romatec.assessoria).toBeCloseTo(226.11, 1);
+    expect(r.honorarios_romatec.assessoria).toBeCloseTo(224.47, 1);
   });
 
   it('41. Kit GNSS 1× R$ 250 + Laudo R$ 1.621 (itens diretos)', () => {
@@ -484,16 +484,16 @@ describe('v3.38.0 — Cenario canonico PROP-2026-0028-R1 (gold standard)', () =>
     expect(h.laudo_tecnico_direto.valor).toBeCloseTo(1621.00, 2);
   });
 
-  it('42. VALOR TOTAL DA PROPOSTA = R$ 6.619,26', () => {
+  it('42. VALOR TOTAL DA PROPOSTA = R$ 6.584,83', () => {
     const r = calcularDemarcacaoLotes(propInput);
-    expect(r.honorarios_romatec.total).toBeCloseTo(6619.26, 1);
+    expect(r.honorarios_romatec.total).toBeCloseTo(6584.83, 1);
   });
 
-  it('43. Parcelas 2× = R$ 3.309,63 cada (50/50)', () => {
+  it('43. Parcelas 2× = R$ 3.292,42 cada (50/50)', () => {
     const r = calcularDemarcacaoLotes(propInput);
     expect(r.parcelas).toHaveLength(2);
-    expect(r.parcelas[0].valor).toBeCloseTo(3309.63, 1);
-    expect(r.parcelas[1].valor).toBeCloseTo(3309.63, 1);
+    expect(r.parcelas[0].valor).toBeCloseTo(3292.42, 1);
+    expect(r.parcelas[1].valor).toBeCloseTo(3292.42, 1);
   });
 
   it('44. Alinhamento R$ 0,42/m × 2.190,78 m = R$ 920,13 — SOMA no total (v3.63.5)', () => {

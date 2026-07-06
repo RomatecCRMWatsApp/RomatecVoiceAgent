@@ -36,7 +36,7 @@ export const DEFAULTS_PROJETO_EXECUTIVO = {
   VALOR_M2: 25.00,
   TAXA_ESBOCO: 750.00,
   ART_VALOR: 233.94,
-  TRT_VALOR: 93.40,
+  TRT_VALOR: 68.17, // v3.90.1: TRT real do CFT/MA (boleto CRT-02) — antes 93,40
   AREA_LIMITE_TRT: 80.00,
 } as const;
 

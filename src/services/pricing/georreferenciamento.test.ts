@@ -47,22 +47,22 @@ describe('calcularGeorreferenciamento — PROP-2026-0011-R1', () => {
     const hr = c.honorarios_romatec!;
 
     // Honorarios Romatec
-    expect(hr.trt).toBe(93.4);
+    expect(hr.trt).toBe(68.17);
     expect(hr.tecnicos).toBe(9315.8);
     expect(hr.assessoria).toBe(1621.0);
-    expect(hr.total).toBe(11030.2);
+    expect(hr.total).toBe(11004.97);
 
     // Total na proposta (secao_5_total) = total Romatec
-    expect(c.secao_5_total).toBe(11030.2);
+    expect(c.secao_5_total).toBe(11004.97);
 
     // Condicoes de pagamento
     const [p1, p2, p3] = (c.condicoes_pagamento || []).map((p) => p.valor);
-    expect(p1).toBe(5561.8);
+    expect(p1).toBe(5536.57);
     expect(p2).toBe(4657.9);
     expect(p3).toBe(810.5);
 
     // Fechamento — guard ja validou no calc, aqui confirmamos
-    expect(round2(p1 + p2 + p3)).toBe(11030.2);
+    expect(round2(p1 + p2 + p3)).toBe(11004.97);
   });
 
   it('secao_3_honorarios tem 3 linhas (TRT + Tecnicos + Assessoria) na ordem certa', async () => {
@@ -70,7 +70,7 @@ describe('calcularGeorreferenciamento — PROP-2026-0011-R1', () => {
     const h = r.custos.secao_3_honorarios;
     expect(h.length).toBe(3);
     expect(h[0].descricao).toContain('TRT');
-    expect(h[0].valor).toBe(93.4);
+    expect(h[0].valor).toBe(68.17);
     expect(h[1].descricao).toContain('Honorarios Tecnicos');
     expect(h[1].valor).toBe(9315.8);
     expect(h[2].descricao).toContain('Assessoria');
@@ -92,10 +92,10 @@ describe('calcularGeorreferenciamento — PROP-2026-0011-R1', () => {
     const r = await calcularGeorreferenciamento(inputBase);
     // Emolumentos cartorio aparecem em secao_2_taxas mas nao somam ao total
     const totalSecao2 = r.custos.secao_2_taxas.reduce((s, i) => s + (i.valor || 0), 0);
-    expect(r.custos.secao_5_total).toBe(11030.2);
+    expect(r.custos.secao_5_total).toBe(11004.97);
     // Mesmo que emolumentos sejam > 0, o total Romatec se mantem
     if (totalSecao2 > 0) {
-      expect(r.custos.secao_5_total).not.toBe(11030.2 + totalSecao2);
+      expect(r.custos.secao_5_total).not.toBe(11004.97 + totalSecao2);
     }
   });
 });
@@ -226,9 +226,9 @@ describe('Opcionais (secao_opcionais_georref)', () => {
         retificacao: { contratado: true, valor: 'sob_orcamento' },
       },
     });
-    // Total Romatec continua em 11030.20 mesmo com R$ 4400 em opcionais contratados
-    expect(r.custos.secao_5_total).toBe(11030.2);
-    expect(r.custos.honorarios_romatec!.total).toBe(11030.2);
+    // Total Romatec continua em 11004.97 mesmo com R$ 4400 em opcionais contratados
+    expect(r.custos.secao_5_total).toBe(11004.97);
+    expect(r.custos.honorarios_romatec!.total).toBe(11004.97);
   });
 
   it('Retificacao sempre fica como "sob_orcamento" mesmo contratada', async () => {
@@ -315,7 +315,7 @@ describe('v3.23.6 — valor_unitario editavel (override do default)', () => {
     // 1621 + 1621 + 1500 + 450 = 5192
     expect(r.custos.secao_opcionais_georref!.subtotal).toBe(5192);
     // total Romatec permanece inalterado (opcionais nao somam)
-    expect(r.custos.secao_5_total).toBe(11030.2);
+    expect(r.custos.secao_5_total).toBe(11004.97);
   });
 
   it('cai no default do params (1621) quando payload tem contratado=true mas omite valor_unitario', async () => {
@@ -355,7 +355,7 @@ describe('v3.23.6 — valor_unitario editavel (override do default)', () => {
 describe('Defaults quando opcionais omitidos', () => {
   it('roda sem finalidade nem opcionais (retrocompat com inputs antigos)', async () => {
     const r = await calcularGeorreferenciamento(inputBase);
-    expect(r.custos.secao_5_total).toBe(11030.2);
+    expect(r.custos.secao_5_total).toBe(11004.97);
     // sem finalidade -> sem aviso de finalidade
     expect(r.custos.avisos.some((a) => a.startsWith('FINALIDADE:'))).toBe(false);
     // opcionais sempre populados (5 linhas, todos nao contratados)

@@ -277,6 +277,13 @@ export interface InputDesmembramento {
     art: boolean;
     trt: boolean;
     requerimentos: boolean;
+    // v3.83.2: anotação técnica por processo (desmembramento) — valor unitário +
+    // quantidade (uma anotação por fração/lote). Ausentes → valor do params e
+    // quantidade 1 (a UI preenche a quantidade com o nº de lotes).
+    art_valor?: number;
+    art_quantidade?: number;
+    trt_valor?: number;
+    trt_quantidade?: number;
   };
 
   // ─── Desmembramento (rural) / Desdobro (urbano) detalhado — opcionais

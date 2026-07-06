@@ -101,15 +101,15 @@ describe('v3.40.0 — BUG 2: Kit GNSS sempre presente nos honorarios', () => {
     expect(r.honorarios_romatec.locacao_kit_gnss.valor).toBe(250);
   });
 
-  it('6. Total ja inclui Kit GNSS por default (PROP-2026-0028-R1 R$ 6.619,26)', () => {
+  it('6. Total ja inclui Kit GNSS por default (PROP-2026-0028-R1 R$ 6.584,83)', () => {
     const r = calcularDemarcacaoLotes(baseInput);
-    expect(r.honorarios_romatec.total).toBeCloseTo(6619.26, 1);
+    expect(r.honorarios_romatec.total).toBeCloseTo(6584.83, 1);
   });
 
   it('7. Engine NAO inclui Kit GNSS se user passa qtd_diarias=0 explicito (edge case)', () => {
     const r = calcularDemarcacaoLotes({ ...baseInput, locacao_kit_gnss: { qtd_diarias: 0 } });
     expect(r.honorarios_romatec.locacao_kit_gnss.contratado).toBe(false);
-    expect(r.honorarios_romatec.total).toBeCloseTo(6619.26 - 250, 1);
+    expect(r.honorarios_romatec.total).toBeCloseTo(6584.83 - 250, 1);
   });
 
   it('8. Descritivo do Kit (equipamentos) presente no output', () => {

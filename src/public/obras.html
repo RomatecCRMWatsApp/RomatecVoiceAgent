@@ -9135,9 +9135,23 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
             <label><input type="checkbox" id="dxPecaMapa" checked> Mapa / Planta</label>
             <label><input type="checkbox" id="dxPecaMemorial" checked> Memorial Descritivo</label>
             <label><input type="checkbox" id="dxPecaArt" checked> ART — Anotação de Responsabilidade Técnica (CREA)</label>
+            ${isDesm ? `<div style="display:flex; gap:6px; align-items:center; margin:0 0 4px 22px; flex-wrap:wrap; font-size:10px;">
+              <span style="color:var(--text-muted);">valor un. (R$)</span>
+              <input id="dxPecaArtValor" type="number" min="0" step="0.01" style="width:92px;" placeholder="padrão CREA">
+              <span style="color:var(--text-muted);">× qtd</span>
+              <input id="dxPecaArtQtd" type="number" min="1" step="1" data-auto="1" style="width:56px;" title="Uma anotação por processo/fração (padrão = nº de lotes)">
+              <span id="dxPecaArtResumo" style="color:var(--neon);"></span>
+            </div>` : ''}
             <label><input type="checkbox" id="dxPecaTrt"> TRT — Termo de Responsabilidade Técnica (CFT)</label>
+            ${isDesm ? `<div style="display:flex; gap:6px; align-items:center; margin:0 0 4px 22px; flex-wrap:wrap; font-size:10px;">
+              <span style="color:var(--text-muted);">valor un. (R$)</span>
+              <input id="dxPecaTrtValor" type="number" min="0" step="0.01" style="width:92px;" placeholder="padrão CFT">
+              <span style="color:var(--text-muted);">× qtd</span>
+              <input id="dxPecaTrtQtd" type="number" min="1" step="1" data-auto="1" style="width:56px;" title="Uma anotação por processo/fração (padrão = nº de lotes)">
+              <span id="dxPecaTrtResumo" style="color:var(--neon);"></span>
+            </div>` : ''}
             <label><input type="checkbox" id="dxPecaReq" checked> Requerimentos administrativos (Município / Cartório${isDesm ? ' / INCRA quando rural' : ''})</label>
-            <p style="font-size:10px; color:#dc2626; margin:4px 0 0;">⚠️ Pelo menos ART ou TRT deve estar marcado.</p>
+            <p style="font-size:10px; color:#dc2626; margin:4px 0 0;">⚠️ Pelo menos ART ou TRT deve estar marcado.${isDesm ? ' No desmembramento é uma anotação por processo (valor × quantidade).' : ''}</p>
           </div>
         </details>
 
@@ -9624,6 +9638,38 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
     numLotesEl.oninput = (e) => { if (prev) prev(e); updatePorImovelResumo(); };
   }
 
+  // v3.90.1: anotação técnica por processo (desmembramento). Qtd default = nº de
+  // lotes (data-auto=1); sincroniza ao mudar o nº de lotes até o user editar.
+  function updateAnotResumo() {
+    [['dxPecaArtValor', 'dxPecaArtQtd', 'dxPecaArtResumo'], ['dxPecaTrtValor', 'dxPecaTrtQtd', 'dxPecaTrtResumo']].forEach(([vi, qi, ri]) => {
+      const rEl = document.getElementById(ri); if (!rEl) return;
+      const v = Number(document.getElementById(vi)?.value || 0);
+      const q = Number(document.getElementById(qi)?.value || 0);
+      rEl.textContent = (v > 0 && q >= 1) ? `= R$ ${(v * q).toFixed(2)}` : '';
+    });
+  }
+  function syncAnotQtd() {
+    const n = Number(document.getElementById('dxNumLotes')?.value || 0);
+    ['dxPecaArtQtd', 'dxPecaTrtQtd'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && el.dataset.auto === '1' && n >= 1) el.value = String(n);
+    });
+    updateAnotResumo();
+  }
+  ['dxPecaArtQtd', 'dxPecaTrtQtd'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => { el.dataset.auto = '0'; updateAnotResumo(); });
+  });
+  ['dxPecaArtValor', 'dxPecaTrtValor'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', updateAnotResumo);
+  });
+  if (numLotesEl) {
+    const prevSync = numLotesEl.oninput;
+    numLotesEl.oninput = (e) => { if (prevSync) prevSync(e); syncAnotQtd(); };
+  }
+  syncAnotQtd();
+
   function addValorPorLote() {
     const lista = document.getElementById('dxValoresPorLoteLista');
     const idx = lista.children.length + 1;
@@ -9812,6 +9858,12 @@ async function renderConsultoriaFormDesmRem(v, toggleHTML, subtipo) {
       trt:           pecaTrt,
       requerimentos: document.getElementById('dxPecaReq').checked,
     };
+    // v3.90.1: anotação por processo (desmembramento) — valor unitário + quantidade.
+    if (isDesm) {
+      const gnum = (id) => { const el = document.getElementById(id); if (!el || el.value === '') return undefined; const n = Number(el.value); return Number.isFinite(n) && n >= 0 ? n : undefined; };
+      if (pecaArt) { dados_imovel.pecas_tecnicas.art_valor = gnum('dxPecaArtValor'); dados_imovel.pecas_tecnicas.art_quantidade = gnum('dxPecaArtQtd'); }
+      if (pecaTrt) { dados_imovel.pecas_tecnicas.trt_valor = gnum('dxPecaTrtValor'); dados_imovel.pecas_tecnicas.trt_quantidade = gnum('dxPecaTrtQtd'); }
+    }
 
     const enderecoTxt = document.getElementById('dxEndereco').value.trim();
 

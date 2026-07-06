@@ -34,7 +34,7 @@ import type {
   BaseCalculo,
 } from './types';
 import { calcularEmolumentos } from '../tjma';
-import { getParams, salarioMinimo, anotacaoTecnica } from './params';
+import { getParams, salarioMinimo, anotacaoTecnica, type AnotacaoTecnicaTipo } from './params';
 
 // ── Pacote de servicos por subtipo (Secao 1) ────────────────────────────────
 const ESCOPO_DESMEMBRAMENTO = [
@@ -198,14 +198,35 @@ export async function calcularDesmembramento(
   const fontes: FontesConsulta = {};
   let ordem = 1;
 
-  // 1. Anotacao tecnica
-  const at = anotacaoTecnica('art_crea');
-  secao_2_taxas.push({
-    ordem: ordem++,
-    descricao: at.rotulo,
-    valor: at.valor,
-    observacao: at.fonte,
-  });
+  // 1. Anotacao tecnica — v3.83.2: uma linha por tipo marcado (ART e/ou TRT),
+  //    valor unitario × quantidade (no desmembramento e' uma anotacao por
+  //    processo/fracao). valor e quantidade vem do payload; ausentes => valor do
+  //    params e quantidade 1 (a UI preenche a quantidade com o n de lotes).
+  //    Sem pecas_tecnicas (callers legados) => mantem 1 ART unica, como antes.
+  const anotSel: Array<{ tipo: AnotacaoTecnicaTipo; valor?: number; qtd?: number }> = [];
+  if (input.pecas_tecnicas) {
+    if (input.pecas_tecnicas.art) {
+      anotSel.push({ tipo: 'art_crea', valor: input.pecas_tecnicas.art_valor, qtd: input.pecas_tecnicas.art_quantidade });
+    }
+    if (input.pecas_tecnicas.trt) {
+      anotSel.push({ tipo: 'trt_cft', valor: input.pecas_tecnicas.trt_valor, qtd: input.pecas_tecnicas.trt_quantidade });
+    }
+  } else {
+    anotSel.push({ tipo: 'art_crea' });
+  }
+  for (const a of anotSel) {
+    const base = anotacaoTecnica(a.tipo);
+    const valorUnit = (typeof a.valor === 'number' && a.valor >= 0) ? a.valor : base.valor;
+    const qtd = (typeof a.qtd === 'number' && a.qtd >= 1) ? Math.floor(a.qtd) : 1;
+    secao_2_taxas.push({
+      ordem: ordem++,
+      descricao: qtd > 1
+        ? `${base.rotulo} — ${qtd} × R$ ${valorUnit.toFixed(2)} (uma anotação por processo)`
+        : base.rotulo,
+      valor: +(valorUnit * qtd).toFixed(2),
+      observacao: base.fonte,
+    });
+  }
 
   // 2. Emolumentos cartorarios — averbacao em cada matricula afetada
   // Estima por matricula afetada usando faixa proporcional ao valor venal

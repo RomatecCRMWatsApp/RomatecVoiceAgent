@@ -125,12 +125,12 @@ describe('5. Despesas Administrativas — fora dos honorarios', () => {
       taxa_alvara_municipio: { incluir: true, valor: 450 },
       placa_obra: { incluir: true, valor: 280 },
     }));
-    // Honorarios = projetos 1500 + TRT 93.40 = 1593.40
-    expect(r.projeto_executivo.honorarios.total_honorarios).toBe(1593.40);
+    // Honorarios = projetos 1500 + TRT 68.17 = 1568.17
+    expect(r.projeto_executivo.honorarios.total_honorarios).toBe(1568.17);
     // Despesas = 700 + 450 + 280 = 1430
     expect(r.projeto_executivo.despesas_administrativas.subtotal_despesas).toBe(1430);
     // Total geral = honorarios + despesas
-    expect(r.projeto_executivo.resumo.total_geral).toBe(3023.40);
+    expect(r.projeto_executivo.resumo.total_geral).toBe(2998.17);
   });
 
   it('despesa desmarcada zera valor (mesmo se valor preenchido)', async () => {
@@ -186,8 +186,8 @@ describe('6. Parcelas 50/50 sempre fechando total_honorarios', () => {
 describe('7. Taxa esboco INFORMATIVA — fora do total_geral', () => {
   it('taxa esboco 750 nao soma em total_geral', async () => {
     const r = await calcularProjetoExecutivo(inputBase({ area_construir: 50 }));
-    // Honorarios so: TRT (1250+93.40 = 1343.40), sem despesas
-    expect(r.projeto_executivo.resumo.total_geral).toBe(1343.40);
+    // Honorarios so: TRT (1250+68.17 = 1318.17), sem despesas
+    expect(r.projeto_executivo.resumo.total_geral).toBe(1318.17);
     expect(r.projeto_executivo.taxa_esboco.valor).toBe(750);
     expect(r.projeto_executivo.taxa_esboco.cobranca_condicional).toBe(true);
   });
@@ -263,7 +263,7 @@ describe('10. Defaults estaveis + Projetos', () => {
     expect(DEFAULTS_PROJETO_EXECUTIVO.VALOR_M2).toBe(25.00);
     expect(DEFAULTS_PROJETO_EXECUTIVO.TAXA_ESBOCO).toBe(750.00);
     expect(DEFAULTS_PROJETO_EXECUTIVO.ART_VALOR).toBe(233.94);
-    expect(DEFAULTS_PROJETO_EXECUTIVO.TRT_VALOR).toBe(93.40);
+    expect(DEFAULTS_PROJETO_EXECUTIVO.TRT_VALOR).toBe(68.17);
     expect(DEFAULTS_PROJETO_EXECUTIVO.AREA_LIMITE_TRT).toBe(80.00);
   });
 
