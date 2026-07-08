@@ -212,11 +212,8 @@ void (async () => {
   try { const m = await import('./database/migrations-obras-entregas'); await m.runObrasEntregasMigrations(); }
   catch (err) { console.error('[obras-entregas-migrations] FALHA fatal:', err); }
 })();
-// v3.92.0: Pagamento a Mão de Obra Avulsa (enum tipo + tabela-detalhe)
-void (async () => {
-  try { const m = await import('./database/migrations-mao-obra-avulsa'); await m.runMaoObraAvulsaMigrations(); }
-  catch (err) { console.error('[mao-obra-avulsa-migrations] FALHA fatal:', err); }
-})();
+// v3.92.1: Pagamento a Mão de Obra Avulsa — a migration roda ENCADEADA após a
+// signing (que faz MODIFY do enum recibos.tipo). Ver bloco runSigningMigrations.
 (async () => {
   try { const m = await import('./database/migrations-wifi-leads'); await m.runMigrationsWifiLeads(); }
   catch (err) { console.error('[wifi-leads-migrations] FALHA fatal:', err); }
@@ -5312,6 +5309,11 @@ app.listen(PORT, () => {
     try {
       const m = await import('./database/migrations-signing');
       await m.runSigningMigrations();
+      // v3.92.1: mão de obra avulsa DEPOIS da signing — a signing faz MODIFY do
+      // enum recibos.tipo (sem 'mao_obra_avulsa') e sobrescreveria o nosso valor
+      // se rodássemos antes. Encadeado aqui pra garantir que o nosso é o último.
+      const mao = await import('./database/migrations-mao-obra-avulsa');
+      await mao.runMaoObraAvulsaMigrations();
     } catch (err) {
       console.error('[signing-migrations] FALHA fatal:', err);
     }
