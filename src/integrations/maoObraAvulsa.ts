@@ -53,6 +53,24 @@ function apenasBase64(s?: string | null): string | null {
   return m ? m[1] : s;
 }
 
+/**
+ * v3.92.3 — Resolve o obra_id a partir de um nome livre: acha por nome
+ * (case-insensitive) ou CRIA uma obra nova em romatec_obras (reutilizável na
+ * próxima). Permite o campo "Obra" ser combobox editável (opção OU texto livre).
+ */
+export async function resolverObraIdPorNome(nome: string): Promise<number | null> {
+  const n = String(nome || '').trim();
+  if (!n) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    'SELECT id FROM romatec_obras WHERE LOWER(nome) = LOWER(?) ORDER BY id LIMIT 1', [n],
+  );
+  if (rows.length) return Number(rows[0].id);
+  const [r] = await pool.execute<ResultSetHeader>(
+    'INSERT INTO romatec_obras (nome) VALUES (?)', [n.slice(0, 200)],
+  );
+  return r.insertId;
+}
+
 export async function criar(input: CriarMaoObraInput): Promise<{ id: number }> {
   const forma: FormaPagamentoAvulsa = FORMAS_AVULSA.includes(input.forma_pagamento as FormaPagamentoAvulsa)
     ? (input.forma_pagamento as FormaPagamentoAvulsa) : 'pix';

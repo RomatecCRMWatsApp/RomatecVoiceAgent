@@ -10,7 +10,7 @@ import { getBaseUrl } from '../services/reciboPdf';
 import { getCertForSigning } from '../services/signingCertificates';
 import {
   criar, buscar, listar, definirComprovante, vincularRecibo, comprovanteB64,
-  FORMAS_AVULSA, type FormaPagamentoAvulsa,
+  resolverObraIdPorNome, FORMAS_AVULSA, type FormaPagamentoAvulsa,
 } from '../integrations/maoObraAvulsa';
 import { criarRecibo, marcarEvento, type FormaPagamento } from '../integrations/recibos';
 
@@ -37,8 +37,13 @@ router.post('/', requireCeoToken, async (req: Request, res: Response) => {
     if (!Number.isFinite(valor) || valor <= 0) return res.status(400).json({ error: 'valor_pago inválido.' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dataPag)) return res.status(400).json({ error: 'data_pagamento inválida (YYYY-MM-DD).' });
     const forma = FORMAS_AVULSA.includes(b.forma_pagamento as FormaPagamentoAvulsa) ? (b.forma_pagamento as FormaPagamentoAvulsa) : 'pix';
+    // v3.92.3: obra por id OU por nome livre (combobox) — cria se não existir.
+    let obraId: number | null = b.obra_id != null && b.obra_id !== '' ? Number(b.obra_id) : null;
+    if (!obraId && b.obra_nome != null && String(b.obra_nome).trim()) {
+      obraId = await resolverObraIdPorNome(String(b.obra_nome));
+    }
     const r = await criar({
-      obra_id: b.obra_id != null && b.obra_id !== '' ? Number(b.obra_id) : null,
+      obra_id: obraId,
       nome_prestador: nome,
       telefone_whatsapp: telefone,
       cpf: b.cpf != null ? String(b.cpf) : null,

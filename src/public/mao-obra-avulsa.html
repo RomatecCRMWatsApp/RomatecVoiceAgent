@@ -45,8 +45,9 @@
 <div class="wrap">
   <div class="card">
     <h2>Novo pagamento</h2>
-    <label>Obra</label>
-    <select id="obra"><option value="">— selecione a obra —</option></select>
+    <label>Obra <span style="color:var(--muted);font-weight:400">(escolha uma ou digite uma nova — é salva automaticamente)</span></label>
+    <input id="obra" list="obras-datalist" placeholder="Digite ou escolha a obra" autocomplete="off">
+    <datalist id="obras-datalist"></datalist>
     <div class="row2">
       <div><label>Prestador *</label><input id="nome" placeholder="Nome do prestador"></div>
       <div><label>WhatsApp *</label><input id="tel" placeholder="55DDDNNNNNNNNN" inputmode="numeric"></div>
@@ -99,8 +100,8 @@
   // Carrega obras no select
   fetch('/api/obras',{credentials:'include'}).then(function(r){return r.json();}).then(function(list){
     var arr = Array.isArray(list) ? list : (list.obras||[]);
-    var sel=document.getElementById('obra');
-    arr.forEach(function(o){ var op=document.createElement('option'); op.value=o.id; op.textContent=o.nome; sel.appendChild(op); });
+    var dl=document.getElementById('obras-datalist');
+    arr.forEach(function(o){ var op=document.createElement('option'); op.value=o.nome; dl.appendChild(op); });
   }).catch(function(){});
 
   // Data default = hoje
@@ -117,7 +118,7 @@
     if(!data){toast('Informe a data do pagamento.');return;}
     var btn=this; btn.disabled=true; btn.textContent='⏳ Registrando...';
     try {
-      var payload={ obra_id: val('obra')||null, nome_prestador:nome, telefone_whatsapp:tel, cpf:val('cpf')||null,
+      var payload={ obra_nome: val('obra')||null, nome_prestador:nome, telefone_whatsapp:tel, cpf:val('cpf')||null,
         tipo_servico:tipo, descricao_servico:val('desc')||null, valor_pago:valor, forma_pagamento:val('forma'), data_pagamento:data };
       var j = await api('/', { method:'POST', headers:hdrs(true), body:JSON.stringify(payload) });
       var id = j.mao_obra.id;
