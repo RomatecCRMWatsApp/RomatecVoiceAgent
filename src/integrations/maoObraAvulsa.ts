@@ -156,6 +156,47 @@ export async function vincularRecibo(id: number, reciboId: number): Promise<void
   await pool.execute('UPDATE mao_obra_avulsa SET recibo_id = ? WHERE id = ?', [reciboId, id]);
 }
 
+/** v3.92.4 — Edita os campos do detalhe (o PDF é gerado a partir daqui, então
+ * editar + reenviar já reflete no recibo reemitido). */
+export async function atualizar(id: number, patch: Partial<CriarMaoObraInput>): Promise<boolean> {
+  const forma = patch.forma_pagamento && FORMAS_AVULSA.includes(patch.forma_pagamento)
+    ? patch.forma_pagamento : null;
+  const [r] = await pool.execute<ResultSetHeader>(
+    `UPDATE mao_obra_avulsa SET
+       obra_id = ?, nome_prestador = COALESCE(?, nome_prestador),
+       telefone_whatsapp = COALESCE(?, telefone_whatsapp), cpf = ?,
+       tipo_servico = COALESCE(?, tipo_servico), descricao_servico = ?,
+       valor_pago = COALESCE(?, valor_pago), forma_pagamento = COALESCE(?, forma_pagamento),
+       data_pagamento = COALESCE(?, data_pagamento)
+     WHERE id = ?`,
+    [
+      patch.obra_id ?? null,
+      patch.nome_prestador != null ? String(patch.nome_prestador).slice(0, 150) : null,
+      patch.telefone_whatsapp != null ? String(patch.telefone_whatsapp).replace(/\D/g, '').slice(0, 20) : null,
+      patch.cpf != null ? String(patch.cpf).slice(0, 20) : null,
+      patch.tipo_servico != null ? String(patch.tipo_servico).slice(0, 255) : null,
+      patch.descricao_servico ?? null,
+      patch.valor_pago != null ? Number(patch.valor_pago) : null,
+      forma,
+      patch.data_pagamento ?? null,
+      id,
+    ],
+  );
+  return r.affectedRows > 0;
+}
+
+/** v3.92.4 — Remove o registro; se tiver recibo (não confirmado), marca cancelado. */
+export async function remover(id: number): Promise<boolean> {
+  const [rows] = await pool.execute<RowDataPacket[]>('SELECT recibo_id FROM mao_obra_avulsa WHERE id = ? LIMIT 1', [id]);
+  if (!rows.length) return false;
+  const reciboId = rows[0].recibo_id;
+  if (reciboId) {
+    await pool.execute("UPDATE recibos SET status = 'cancelado' WHERE id = ? AND status <> 'confirmado'", [reciboId]).catch(() => undefined);
+  }
+  const [r] = await pool.execute<ResultSetHeader>('DELETE FROM mao_obra_avulsa WHERE id = ?', [id]);
+  return r.affectedRows > 0;
+}
+
 export async function listar(opts: { obra_id?: number; status?: string; limit?: number } = {}): Promise<MaoObraAvulsa[]> {
   const lim = Math.max(1, Math.min(200, Math.trunc(Number(opts.limit) || 100)));
   const wheres: string[] = [];

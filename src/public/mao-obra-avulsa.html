@@ -69,6 +69,7 @@
       <div><label>Comprovante (PIX/transferência)</label><input id="comprovante" type="file" accept="image/*,application/pdf"></div>
     </div>
     <button class="btn btn-gold" id="btnSalvar" style="margin-top:14px">💾 Registrar e enviar recibo</button>
+    <button class="btn btn-ghost" id="btnCancelarEdicao" style="margin-top:8px;width:100%;display:none">✖ Cancelar edição</button>
     <div id="resultado"></div>
   </div>
 
@@ -109,6 +110,7 @@
 
   function fileToB64(file){ return new Promise(function(res,rej){ var fr=new FileReader(); fr.onload=function(){ var d=String(fr.result); var m=/^data:([^;]+);base64,(.*)$/.exec(d); res({mime:m?m[1]:file.type,base64:m?m[2]:d}); }; fr.onerror=rej; fr.readAsDataURL(file); }); }
 
+  var editingId = null;
   document.getElementById('btnSalvar').onclick = async function(){
     var nome=val('nome'), tel=val('tel').replace(/\D/g,''), tipo=val('tipo'), valor=Number(val('valor')), data=val('data');
     if(!nome){toast('Informe o prestador.');return;}
@@ -116,10 +118,22 @@
     if(!tipo){toast('Informe o tipo de serviço.');return;}
     if(!valor||valor<=0){toast('Informe o valor pago.');return;}
     if(!data){toast('Informe a data do pagamento.');return;}
-    var btn=this; btn.disabled=true; btn.textContent='⏳ Registrando...';
+    var btn=this;
+    var payload={ obra_nome: val('obra')||null, nome_prestador:nome, telefone_whatsapp:tel, cpf:val('cpf')||null,
+      tipo_servico:tipo, descricao_servico:val('desc')||null, valor_pago:valor, forma_pagamento:val('forma'), data_pagamento:data };
+
+    // MODO EDIÇÃO: só salva os campos (PUT), não reenvia.
+    if(editingId){
+      btn.disabled=true; btn.textContent='💾 Salvando...';
+      try { await api('/'+editingId,{method:'PUT',headers:hdrs(true),body:JSON.stringify(payload)});
+        toast('Alterações salvas.'); cancelarEdicao(); carregarLista();
+      } catch(e){ toast(e.message||'Erro'); }
+      finally { btn.disabled=false; btn.textContent = editingId ? '💾 Salvar edição' : '💾 Registrar e enviar recibo'; }
+      return;
+    }
+
+    btn.disabled=true; btn.textContent='⏳ Registrando...';
     try {
-      var payload={ obra_nome: val('obra')||null, nome_prestador:nome, telefone_whatsapp:tel, cpf:val('cpf')||null,
-        tipo_servico:tipo, descricao_servico:val('desc')||null, valor_pago:valor, forma_pagamento:val('forma'), data_pagamento:data };
       var j = await api('/', { method:'POST', headers:hdrs(true), body:JSON.stringify(payload) });
       var id = j.mao_obra.id;
       // comprovante (opcional)
@@ -142,25 +156,89 @@
     finally { btn.disabled=false; btn.textContent='💾 Registrar e enviar recibo'; }
   };
 
+  // Rótulo/cor por status do recibo
+  function statusInfo(st){
+    var map={ rascunho:['Rascunho','#6A6656'], aguardando_envio:['Aguardando envio','#6A6656'],
+      enviado:['📤 Enviado','#3b82f6'], entregue:['📬 Entregue','#3b82f6'], lido:['👁 Lido','#3b82f6'],
+      respondido:['Respondido','#3b82f6'], confirmado:['✓ Confirmado','#10b981'],
+      contestado:['✗ Contestado','#ef4444'], recusado:['✗ Recusado','#ef4444'],
+      cancelado:['Cancelado','#999'], expirado:['Expirado','#999'] };
+    return map[st] || [st, '#6A6656'];
+  }
+
+  var pagamentosCache = [];
   function carregarLista(){
     api('/',{headers:hdrs(false)}).then(function(j){
       var l=document.getElementById('lista');
-      var arr=j.pagamentos||[];
-      if(!arr.length){ l.innerHTML='<p class="muted">Nenhum pagamento avulso registrado ainda.</p>'; return; }
-      l.innerHTML = arr.map(function(p){
+      pagamentosCache = j.pagamentos||[];
+      if(!pagamentosCache.length){ l.innerHTML='<p class="muted">Nenhum pagamento avulso registrado ainda.</p>'; return; }
+      l.innerHTML = pagamentosCache.map(function(p){
         var st = p.recibo_status || 'rascunho';
-        var pillCls = st==='confirmado' ? 'pill ok' : 'pill';
+        var si = statusInfo(st);
         var link = p.recibo_hash ? (location.origin+'/v/'+p.recibo_hash) : null;
+        var enviado = st && st!=='rascunho' && st!=='aguardando_envio';
         return '<div class="item"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center">'
-          +'<div><b>'+esc(p.nome_prestador)+'</b> — '+esc(p.tipo_servico)+'<br>'
+          +'<div style="min-width:200px"><b>'+esc(p.nome_prestador)+'</b> — '+esc(p.tipo_servico)+'<br>'
           +'<span class="muted">'+esc(p.obra_nome||'sem obra')+' · '+brl(p.valor_pago)+' · '+esc(p.data_pagamento||'')+(p.tem_comprovante?' · 📎 comprovante':'')+'</span></div>'
-          +'<div style="text-align:right"><span class="'+pillCls+'">'+esc(st)+'</span>'
+          +'<div style="text-align:right"><span class="pill" style="background:'+si[1]+';color:#fff">'+esc(si[0])+'</span>'
           +(p.recibo_numero?'<div class="muted" style="font-size:11px;margin-top:3px">'+esc(p.recibo_numero)+'</div>':'')
           +(link?'<div style="margin-top:4px"><a href="'+esc(link)+'" target="_blank" style="font-size:12px;color:var(--green)">ver recibo →</a></div>':'')
-          +'</div></div></div>';
+          +'</div></div>'
+          +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+          +'<button class="btn btn-ghost" data-act="editar" data-id="'+p.id+'" style="flex:1;padding:8px;font-size:13px">✏️ Editar</button>'
+          +'<button class="btn btn-ghost" data-act="reenviar" data-id="'+p.id+'" style="flex:1;padding:8px;font-size:13px">'+(enviado?'🔁 Reenviar':'🚀 Enviar')+'</button>'
+          +'<button class="btn" data-act="excluir" data-id="'+p.id+'" style="flex:0 0 auto;padding:8px 12px;font-size:13px;background:transparent;border:1px solid var(--danger);color:var(--danger)">🗑️</button>'
+          +'</div></div>';
       }).join('');
+      Array.prototype.forEach.call(l.querySelectorAll('[data-act]'),function(b){
+        b.onclick=function(){ var id=Number(b.dataset.id); var act=b.dataset.act;
+          if(act==='editar') editarPagamento(id);
+          else if(act==='reenviar') reenviarPagamento(id, b);
+          else if(act==='excluir') excluirPagamento(id, b);
+        };
+      });
     }).catch(function(e){ document.getElementById('lista').innerHTML='<p class="muted">Erro ao carregar: '+esc(e.message)+'</p>'; });
   }
+
+  function editarPagamento(id){
+    var p = pagamentosCache.filter(function(x){return x.id===id;})[0]; if(!p) return;
+    editingId = id;
+    document.getElementById('obra').value = p.obra_nome || '';
+    document.getElementById('nome').value = p.nome_prestador || '';
+    document.getElementById('tel').value = p.telefone_whatsapp || '';
+    document.getElementById('cpf').value = p.cpf || '';
+    document.getElementById('tipo').value = p.tipo_servico || '';
+    document.getElementById('desc').value = p.descricao_servico || '';
+    document.getElementById('valor').value = p.valor_pago || '';
+    document.getElementById('forma').value = p.forma_pagamento || 'pix';
+    document.getElementById('data').value = p.data_pagamento || '';
+    document.getElementById('btnSalvar').textContent = '💾 Salvar edição';
+    document.getElementById('btnCancelarEdicao').style.display = '';
+    document.getElementById('resultado').innerHTML = '';
+    window.scrollTo({top:0,behavior:'smooth'});
+    toast('Editando '+(p.recibo_numero||('#'+id))+'…');
+  }
+  function cancelarEdicao(){
+    editingId = null;
+    ['obra','nome','tel','cpf','tipo','desc','valor'].forEach(function(k){ document.getElementById(k).value=''; });
+    document.getElementById('btnSalvar').textContent = '💾 Registrar e enviar recibo';
+    document.getElementById('btnCancelarEdicao').style.display = 'none';
+    document.getElementById('comprovante').value='';
+  }
+  async function reenviarPagamento(id, btn){
+    if(btn){ btn.disabled=true; btn.textContent='⏳...'; }
+    try { var env = await api('/'+id+'/enviar',{method:'POST',headers:hdrs(true)});
+      toast('Recibo '+env.numero+' enviado.'); carregarLista();
+    } catch(e){ toast(e.message||'Falha ao enviar'); if(btn){ btn.disabled=false; btn.textContent='🔁 Reenviar'; } }
+  }
+  async function excluirPagamento(id, btn){
+    if(!confirm('Excluir este pagamento? (o recibo, se houver e não confirmado, é cancelado)')) return;
+    if(btn) btn.disabled=true;
+    try { await api('/'+id,{method:'DELETE',headers:hdrs(false)}); toast('Excluído.'); if(editingId===id) cancelarEdicao(); carregarLista(); }
+    catch(e){ toast(e.message||'Falha ao excluir'); if(btn) btn.disabled=false; }
+  }
+
+  document.getElementById('btnCancelarEdicao').onclick = cancelarEdicao;
   carregarLista();
 })();
 </script>

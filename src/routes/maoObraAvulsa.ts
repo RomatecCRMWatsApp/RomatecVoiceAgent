@@ -10,7 +10,7 @@ import { getBaseUrl } from '../services/reciboPdf';
 import { getCertForSigning } from '../services/signingCertificates';
 import {
   criar, buscar, listar, definirComprovante, vincularRecibo, comprovanteB64,
-  resolverObraIdPorNome, FORMAS_AVULSA, type FormaPagamentoAvulsa,
+  resolverObraIdPorNome, atualizar, remover, FORMAS_AVULSA, type FormaPagamentoAvulsa,
 } from '../integrations/maoObraAvulsa';
 import { criarRecibo, marcarEvento, type FormaPagamento } from '../integrations/recibos';
 
@@ -85,6 +85,47 @@ router.get('/:id(\\d+)', requireCeoToken, async (req: Request, res: Response) =>
   } catch (err) {
     console.error('[mao-obra GET /:id]', err);
     res.status(500).json({ error: 'Falha ao buscar.' });
+  }
+});
+
+// PUT /:id — edita os campos do pagamento (aceita obra por id ou nome livre).
+router.put('/:id(\\d+)', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await buscar(id))) return res.status(404).json({ error: 'Registro não encontrado.' });
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    let obraId: number | null = b.obra_id != null && b.obra_id !== '' ? Number(b.obra_id) : null;
+    if (!obraId && b.obra_nome != null && String(b.obra_nome).trim()) {
+      obraId = await resolverObraIdPorNome(String(b.obra_nome));
+    }
+    const ok = await atualizar(id, {
+      obra_id: obraId,
+      nome_prestador: b.nome_prestador != null ? String(b.nome_prestador) : undefined,
+      telefone_whatsapp: b.telefone_whatsapp != null ? String(b.telefone_whatsapp) : undefined,
+      cpf: b.cpf != null ? String(b.cpf) : null,
+      tipo_servico: b.tipo_servico != null ? String(b.tipo_servico) : undefined,
+      descricao_servico: b.descricao_servico != null ? String(b.descricao_servico) : null,
+      valor_pago: b.valor_pago != null && b.valor_pago !== '' ? Number(b.valor_pago) : undefined,
+      forma_pagamento: b.forma_pagamento as FormaPagamentoAvulsa | undefined,
+      data_pagamento: b.data_pagamento != null ? String(b.data_pagamento) : undefined,
+    });
+    if (!ok) return res.status(404).json({ error: 'Registro não encontrado.' });
+    res.json({ mao_obra: await buscar(id) });
+  } catch (err) {
+    console.error('[mao-obra PUT /:id]', err);
+    res.status(500).json({ error: 'Falha ao editar.' });
+  }
+});
+
+// DELETE /:id — exclui o pagamento (cancela o recibo se houver e não confirmado).
+router.delete('/:id(\\d+)', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const ok = await remover(Number(req.params.id));
+    if (!ok) return res.status(404).json({ error: 'Registro não encontrado.' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[mao-obra DELETE /:id]', err);
+    res.status(500).json({ error: 'Falha ao excluir.' });
   }
 });
 
