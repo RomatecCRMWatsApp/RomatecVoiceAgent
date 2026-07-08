@@ -2619,6 +2619,13 @@ function renderObras() {
   // v1.65.42: lista PRIMEIRO, form retratil no fim. Botao "+ Nova obra"
   // toggle abre/fecha o form embaixo.
   v.innerHTML = `
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C; margin-bottom:12px;">
+      <div style="min-width:200px;">
+        <p class="section-title" style="margin:0;">🧾 Mão de Obra Avulsa</p>
+        <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Pagamento a prestador avulso/informal (diarista, pedreiro solto, pintor) — recibo assinado (ICP-Brasil), comprovante do PIX anexo, envio por WhatsApp e confirmação via CONFIRMAR.</p>
+      </div>
+      <a href="/mao-obra-avulsa.html" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Novo pagamento →</a>
+    </div>
     <p class="section-title">Obras (${state.obras.length})</p>
     ${lista || '<div class="card empty">Nenhuma obra ainda. Use o botão "+ Nova obra" abaixo.</div>'}
 
