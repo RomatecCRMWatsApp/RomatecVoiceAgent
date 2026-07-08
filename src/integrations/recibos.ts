@@ -15,7 +15,7 @@ import pool from '../database/connection';
 
 export type TipoRecibo =
   | 'funcionario' | 'parcela' | 'despesa' | 'proposta'
-  | 'vistoria' | 'etapa' | 'chaves' | 'custom' | 'vale';
+  | 'vistoria' | 'etapa' | 'chaves' | 'custom' | 'vale' | 'mao_obra_avulsa';
 
 export type StatusRecibo =
   | 'rascunho' | 'aguardando_envio' | 'enviado' | 'entregue'
@@ -37,6 +37,7 @@ const PREFIXOS: Record<TipoRecibo, string> = {
   chaves:      'REC-CHV',
   custom:      'REC-CUS',
   vale:        'REC-VAL', // v1.99.16: vale = recibo universal (fluxo confirmacao WhatsApp)
+  mao_obra_avulsa: 'REC-MAO', // v3.92.0: pagamento a mão de obra avulsa/informal
 };
 
 const TIPO_LABEL: Record<TipoRecibo, string> = {
@@ -49,6 +50,7 @@ const TIPO_LABEL: Record<TipoRecibo, string> = {
   chaves:      'Termo de entrega de chaves',
   custom:      'Recibo personalizado',
   vale:        'Vale (adiantamento)',
+  mao_obra_avulsa: 'Pagamento a mão de obra avulsa',
 };
 
 const TITULO_PDF: Record<TipoRecibo, string> = {
@@ -61,6 +63,7 @@ const TITULO_PDF: Record<TipoRecibo, string> = {
   chaves:      'TERMO DE ENTREGA DE CHAVES',
   custom:      'RECIBO',
   vale:        'RECIBO DE VALE',
+  mao_obra_avulsa: 'RECIBO DE PAGAMENTO — MÃO DE OBRA AVULSA',
 };
 
 // ────────────────────────────────────────────────────────────────────────
@@ -392,6 +395,27 @@ export async function buscarValePendentePorPhone(phone: string): Promise<Recibo 
       ORDER BY created_at DESC
       LIMIT 1`,
     [phoneNorm]
+  );
+  return rows.length ? mapRow(rows[0]) : null;
+}
+
+/**
+ * v3.92.0 — Genérico: recibo pendente de um TIPO específico por telefone.
+ * Usado pelo webhook pra confirmar recibos de mão de obra avulsa (não-vale).
+ */
+export async function buscarReciboPendentePorPhone(phone: string, tipo: TipoRecibo): Promise<Recibo | null> {
+  const phoneNorm = normalizarTelefone(phone, true);
+  if (!phoneNorm) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT * FROM recibos
+      WHERE tenant_id = 1
+        AND tipo = ?
+        AND destinatario_phone = ?
+        AND status IN ('aguardando_envio','enviado','entregue','lido','respondido')
+        AND (expires_at IS NULL OR expires_at > NOW())
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [tipo, phoneNorm]
   );
   return rows.length ? mapRow(rows[0]) : null;
 }

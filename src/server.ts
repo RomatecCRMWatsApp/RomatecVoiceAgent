@@ -77,6 +77,7 @@ import { buscarPorHash as buscarChecklistPorHash } from './services/vtoChecklist
 import { gerarChecklistPdf } from './services/vtoChecklistPdf'; // v3.78.0
 import obrasEntregaRouter from './routes/obrasEntrega'; // v3.81.0 — Entrega de Obra (RE)
 import obrasEntregaPublicaRouter from './routes/obrasEntregaPublica'; // v3.81.0 — página pública /v/entrega/:hash
+import maoObraAvulsaRouter from './routes/maoObraAvulsa'; // v3.92.0 — Pagamento a Mão de Obra Avulsa
 import galeriaExportRouter from './routes/galeriaExport'; // Feature 04 — export Galeria p/ AvalieImob (X-API-Key)
 import pdfPrimeRouter from './routes/pdfPrime'; // v1.99.16 — export PDF templates Prime I/II
 import diligenciasRouter from './routes/diligencias'; // v3.54.0 — Diligências de Campo
@@ -200,6 +201,7 @@ app.use('/api/propostas/reforma-piso', reformaPisoRouter); // v3.67.0 — Propos
 app.use('/api/gestao-obra/vto-checklist', vtoChecklistRouter); // v3.78.0 — VTO Checklist de Atividades
 app.use('/api/gestao-obra/entrega', obrasEntregaRouter); // v3.81.0 — Entrega de Obra (RE)
 app.use('/v/entrega', obrasEntregaPublicaRouter); // v3.81.0 — página pública de entrega (fora da auth)
+app.use('/api/mao-obra-avulsa', maoObraAvulsaRouter); // v3.92.0 — Pagamento a Mão de Obra Avulsa
 // v3.78.0: VTO Checklist de Atividades (Gestão de Obra)
 void (async () => {
   try { const m = await import('./database/migrations-vto-checklist'); await m.runVtoChecklistMigrations(); }
@@ -209,6 +211,11 @@ void (async () => {
 void (async () => {
   try { const m = await import('./database/migrations-obras-entregas'); await m.runObrasEntregasMigrations(); }
   catch (err) { console.error('[obras-entregas-migrations] FALHA fatal:', err); }
+})();
+// v3.92.0: Pagamento a Mão de Obra Avulsa (enum tipo + tabela-detalhe)
+void (async () => {
+  try { const m = await import('./database/migrations-mao-obra-avulsa'); await m.runMaoObraAvulsaMigrations(); }
+  catch (err) { console.error('[mao-obra-avulsa-migrations] FALHA fatal:', err); }
 })();
 (async () => {
   try { const m = await import('./database/migrations-wifi-leads'); await m.runMigrationsWifiLeads(); }
@@ -707,6 +714,10 @@ function handleWhatsAppWebhook(req: Request, res: Response) {
             });
             console.log(`[recibos] roteamento phone=${msg.from} text="${msg.text.body.slice(0,40)}" handled=${r.handled} acao=${r.acao ?? '-'}`);
             if (r.handled) continue;
+            // v3.92.0: confirmação de recibo de MÃO DE OBRA AVULSA (não-vale)
+            const mao = await import('./services/maoObraAvulsaWebhook');
+            const rm = await mao.processarConfirmacaoMaoObra({ phone: msg.from, text: msg.text.body, messageId: msg.id });
+            if (rm.handled) { console.log(`[mao-obra] confirmação phone=${msg.from} acao=${rm.acao ?? '-'}`); continue; }
           }
           const colab = await m.isPhoneDeColaborador(msg.from);
           if (colab) {
@@ -4541,6 +4552,21 @@ app.get('/v/:hash/pdf', async (req: Request, res: Response) => {
     // Tenta recibo primeiro
     const r = await recibos.buscarReciboPorHash(hash);
     if (r) {
+      // v3.92.0: mão de obra avulsa usa PDF próprio (com comprovante + selo).
+      if (r.tipo === 'mao_obra_avulsa') {
+        const [mao, pdfMod] = await Promise.all([
+          import('./integrations/maoObraAvulsa'),
+          import('./services/maoObraAvulsaPdf'),
+        ]);
+        const det = await mao.buscarPorReciboId(r.id);
+        if (det) {
+          const comp = await mao.comprovanteB64(det.id);
+          const buf = await pdfMod.gerarPdfMaoObraAvulsa(r, det, { comprovante: comp });
+          res.setHeader('Content-Type', 'application/pdf');
+          res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
+          return res.send(buf);
+        }
+      }
       const buf = await gerarPdfRecibo(r);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
