@@ -3981,6 +3981,15 @@ export async function gerarPdfPropostaConsultoriaComAnexos(
   signatureMeta?: SignatureVisualMeta,
 ): Promise<Buffer> {
   const propostaPdf = await gerarPdfPropostaConsultoria(id, signatureMeta);
+  return mesclarAnexosProposta(propostaPdf, Number(id));
+}
+
+/**
+ * v3.93.0 — Mescla os anexos (croqui/imagens/PDFs) da proposta em cima de um PDF
+ * PRINCIPAL já gerado (tradicional pdfkit OU Prime puppeteer). Agnóstico ao layout,
+ * por isso reusável pela assinatura do Prime I/II.
+ */
+export async function mesclarAnexosProposta(propostaPdf: Buffer, id: number): Promise<Buffer> {
   const anexos = await carregarAnexosProposta(Number(id));
   if (anexos.length === 0) return propostaPdf;
 
@@ -4122,10 +4131,12 @@ export interface AssinarPropostaResult {
 export async function assinarProposta(
   propostaId: number | string,
   perfil: 'pj' | 'pf' = 'pj',
+  template: 'tradicional' | 'prime1' | 'prime2' = 'tradicional', // v3.93.0
 ): Promise<AssinarPropostaResult> {
   if (perfil !== 'pj' && perfil !== 'pf') {
     throw new Error(`perfil invalido: ${perfil} (esperado: 'pj' ou 'pf')`);
   }
+  const tpl = (['tradicional', 'prime1', 'prime2'].includes(template) ? template : 'tradicional') as 'tradicional' | 'prime1' | 'prime2';
   const certData = await getCertForSigning(perfil);
   if (!certData) {
     const tipo = perfil === 'pj' ? 'e-CNPJ' : 'e-CPF';
@@ -4154,9 +4165,23 @@ export async function assinarProposta(
 
   // Gera PDF JA com bloco visual + assina.
   // v3.24.12 FIX: usa ComAnexos pra incluir croqui/imagens no PDF assinado.
-  // Antes usava gerarPdfPropostaConsultoria (sem anexos) — assinatura ficava
-  // so na proposta principal, anexos sumiam do PDF final salvo no banco.
-  const pdfBuffer = await gerarPdfPropostaConsultoriaComAnexos(String(propostaId), signatureMeta);
+  // v3.93.0: layout escolhido (tradicional pdfkit | prime1/prime2 puppeteer) é
+  // gerado JÁ com a caixa ICP e assinado de verdade. Antes só o tradicional saía
+  // assinado — Prime I/II iam sem assinatura.
+  let pdfBuffer: Buffer;
+  if (tpl === 'prime1' || tpl === 'prime2') {
+    const { montarAssinaturaIcp } = await import('../services/laudoPrimeDados');
+    const { propostaConsultoriaToPropostaDados } = await import('../pdf/mappers');
+    const { gerarPropostaPdf } = await import('../pdf/propostaPdfRouter');
+    const { TemplateId } = await import('../types/templateTypes');
+    type PropostaViewMapper = Parameters<typeof propostaConsultoriaToPropostaDados>[0];
+    const assinaturaIcp = montarAssinaturaIcp(certData.meta, agora, certData.meta.subject_cn ?? 'Romatec Consultoria');
+    const dados = propostaConsultoriaToPropostaDados(proposta as unknown as PropostaViewMapper, undefined, { assinaturaIcp });
+    const primeBuf = await gerarPropostaPdf(dados, tpl === 'prime1' ? TemplateId.PRIME_I : TemplateId.PRIME_II);
+    pdfBuffer = await mesclarAnexosProposta(primeBuf, Number(propostaId)); // v3.93.0: anexos no Prime também
+  } else {
+    pdfBuffer = await gerarPdfPropostaConsultoriaComAnexos(String(propostaId), signatureMeta);
+  }
 
   const signMeta = {
     name: certData.meta.subject_cn ?? `Proposta ${proposta.numero}`,
@@ -4169,6 +4194,7 @@ export async function assinarProposta(
 
   const meta = {
     perfil,                            // v3.23.9: vem do parametro (pj ou pf)
+    template: tpl,                     // v3.93.0: layout assinado (tradicional|prime1|prime2)
     cert_id: certData.meta.id,
     cert_label: certData.meta.label,
     subject_cn: certData.meta.subject_cn,

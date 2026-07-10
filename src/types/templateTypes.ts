@@ -111,6 +111,18 @@ export interface PropostaDados {
   drlIncluida: boolean; // se true, exibe bloco DRL warning
   observacoes?: string;
   tecnico: PropostaTecnico;
+  /**
+   * v3.93.0 — Caixa verde "ASSINADO DIGITALMENTE — ICP-Brasil (PAdES)".
+   * Presente só quando a proposta está assinada (Prime I/II). Espelha o que o
+   * PDF tradicional já desenha via signatureMeta.
+   */
+  assinaturaIcp?: {
+    signerCn: string;
+    signerDoc?: string;
+    issuerCn?: string;
+    validadeAte?: string;   // dd/mm/aaaa
+    dataAssinatura: string; // dd/mm/aaaa HH:mm
+  };
 }
 
 export interface ReciboParcela {

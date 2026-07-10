@@ -4747,13 +4747,16 @@ app.get   ('/api/propostas-consultoria/:id/pdf', async (req: Request, res: Respo
 // v3.23.9: aceita body.perfil ('pj' | 'pf') pra escolher qual cert usar. Default 'pj'.
 app.post('/api/propostas-consultoria/:id/assinar', requireCeoToken, async (req: Request, res: Response) => {
   try {
-    const body = (req.body || {}) as { perfil?: 'pj' | 'pf'; tipo_certificado?: 'pj' | 'pf' | 'e_cnpj' | 'e_cpf' };
+    const body = (req.body || {}) as { perfil?: 'pj' | 'pf'; tipo_certificado?: 'pj' | 'pf' | 'e_cnpj' | 'e_cpf'; template?: string };
     // Aceita tanto perfil quanto tipo_certificado (alias) pra compat com clients diferentes.
     // Tambem traduz e_cnpj/e_cpf (nomes alternativos do brief) pra pj/pf (nomes internos).
     const rawPerfil = body.perfil ?? body.tipo_certificado ?? 'pj';
     const perfil: 'pj' | 'pf' =
       rawPerfil === 'pf' || rawPerfil === 'e_cpf' ? 'pf' : 'pj';
-    const result = await propostasConsultoria.assinarProposta(String(req.params.id), perfil);
+    // v3.93.0: layout que será OFICIALMENTE assinado (tradicional | prime1 | prime2)
+    const tplReq = String(body.template || 'tradicional').toLowerCase();
+    const template = (['tradicional', 'prime1', 'prime2'].includes(tplReq) ? tplReq : 'tradicional') as 'tradicional' | 'prime1' | 'prime2';
+    const result = await propostasConsultoria.assinarProposta(String(req.params.id), perfil, template);
     res.json(result);
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });

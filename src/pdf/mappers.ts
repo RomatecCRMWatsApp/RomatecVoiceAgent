@@ -187,6 +187,7 @@ function str(v: unknown): string | undefined {
 export function propostaConsultoriaToPropostaDados(
   p: PropostaConsultoriaView,
   tecnico: PropostaTecnico = TECNICO_ROMATEC_PROPOSTA,
+  opts?: { assinaturaIcp?: PropostaDados['assinaturaIcp'] }, // v3.93.0
 ): PropostaDados {
   const custos = p.custos_calculados ?? null;
   const subtipo = p.subtipo ?? '';
@@ -283,6 +284,7 @@ export function propostaConsultoriaToPropostaDados(
       nome: str(p.gestor_nome) ?? tecnico.nome,
       cargo: str(p.gestor_cargo) ?? tecnico.cargo,
     },
+    assinaturaIcp: opts?.assinaturaIcp, // v3.93.0
   };
 }
 

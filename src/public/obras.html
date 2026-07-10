@@ -7197,8 +7197,20 @@ async function abrirModalAssinatura(propostaId, btnTrigger) {
         ${cardHtml(pj, defaultPerfil === 'pj')}
         ${cardHtml(pf, defaultPerfil === 'pf' && !pj)}
       </div>
+      <!-- v3.93.0: layout que será assinado (o PDF assinado sai NESTE template) -->
+      <div>
+        <p style="margin:6px 0 4px; font-size:12px; color:var(--text-muted); font-weight:600;">Layout do PDF assinado</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <label style="flex:1; min-width:120px; cursor:pointer; padding:10px; border:2px solid var(--gold); border-radius:8px; text-align:center; font-size:13px;" data-tpl-card="tradicional">
+            <input type="radio" name="modalAssinTpl" value="tradicional" checked style="display:none;">📄 Tradicional</label>
+          <label style="flex:1; min-width:120px; cursor:pointer; padding:10px; border:2px solid var(--border); border-radius:8px; text-align:center; font-size:13px;" data-tpl-card="prime1">
+            <input type="radio" name="modalAssinTpl" value="prime1" style="display:none;">✦ Prime I</label>
+          <label style="flex:1; min-width:120px; cursor:pointer; padding:10px; border:2px solid var(--border); border-radius:8px; text-align:center; font-size:13px;" data-tpl-card="prime2">
+            <input type="radio" name="modalAssinTpl" value="prime2" style="display:none;">✦ Prime II</label>
+        </div>
+      </div>
       <div style="padding:10px 12px; background:rgba(59,130,246,0.08); border-left:3px solid #3b82f6; border-radius:4px; font-size:12px; color:var(--text-muted);">
-        🔐 Assinatura ICP-Brasil A1 (PAdES). Validável no Adobe Reader e em validar.iti.gov.br.
+        🔐 Assinatura ICP-Brasil A1 (PAdES). Validável no Adobe Reader e em validar.iti.gov.br. O PDF assinado sai no layout escolhido acima (Tradicional, Prime I ou Prime II).
       </div>
       <div style="display:flex; gap:8px; justify-content:flex-end;">
         <button type="button" id="modalAssinCancelar" class="btn-secondary">Cancelar</button>
@@ -7221,10 +7233,22 @@ async function abrirModalAssinatura(propostaId, btnTrigger) {
     });
   });
 
+  // v3.93.0: destaque visual do layout escolhido
+  document.querySelectorAll('[data-tpl-card]').forEach(card => {
+    card.querySelector('input[type=radio]').addEventListener('change', () => {
+      document.querySelectorAll('[data-tpl-card]').forEach(c => {
+        const r = c.querySelector('input[type=radio]');
+        c.style.borderColor = r.checked ? 'var(--gold)' : 'var(--border)';
+        c.style.background = r.checked ? 'rgba(201,168,76,0.08)' : 'transparent';
+      });
+    });
+  });
+
   document.getElementById('modalAssinCancelar').onclick = fecharModal;
   document.getElementById('modalAssinConfirmar').onclick = async () => {
     const perfilEscolhido = document.querySelector('input[name="modalAssinPerfil"]:checked')?.value;
     if (!perfilEscolhido) { alert('Selecione um certificado.'); return; }
+    const templateEscolhido = document.querySelector('input[name="modalAssinTpl"]:checked')?.value || 'tradicional';
     const confirmBtn = document.getElementById('modalAssinConfirmar');
     confirmBtn.disabled = true; confirmBtn.textContent = '⏳ Assinando, aguarde...';
     const origBtn = btnTrigger?.textContent;
@@ -7232,10 +7256,11 @@ async function abrirModalAssinatura(propostaId, btnTrigger) {
     try {
       const r = await api('/api/propostas-consultoria/' + propostaId + '/assinar', {
         method: 'POST',
-        body: JSON.stringify({ perfil: perfilEscolhido }),
+        body: JSON.stringify({ perfil: perfilEscolhido, template: templateEscolhido }),
       });
       fecharModal();
-      alert('✅ Proposta assinada com ' + (perfilEscolhido === 'pj' ? 'e-CNPJ Romatec' : 'e-CPF José Romário') +
+      const tplLabel = templateEscolhido === 'prime1' ? 'Prime I' : templateEscolhido === 'prime2' ? 'Prime II' : 'Tradicional';
+      alert('✅ Proposta assinada (layout ' + tplLabel + ') com ' + (perfilEscolhido === 'pj' ? 'e-CNPJ Romatec' : 'e-CPF José Romário') +
             '!\n\nTitular: ' + (r.cert.subject_cn || '?') +
             '\nCertificado: ' + r.cert.label +
             '\nTamanho do PDF: ' + Math.round(r.pdf_size_bytes/1024) + ' KB');

@@ -4,7 +4,7 @@
 
 import type { PropostaDados, PropostaServicoItem } from '../../types/templateTypes';
 import { htmlToPdf } from '../htmlToPdf';
-import { CORES, FONTS_PRIME1, fmtBRL, escapeHtml, blocoAssinaturaHtml } from '../sharedHtml';
+import { CORES, FONTS_PRIME1, fmtBRL, escapeHtml, blocoAssinaturaHtml, assinaturaIcpHtml } from '../sharedHtml';
 
 function linhaServico(s: PropostaServicoItem): string {
   const valor = s.pendente ? 'A confirmar' : (s.valor == null ? 'Incluso' : fmtBRL(s.valor));
@@ -264,6 +264,7 @@ table.invest td.val { text-align:right; color:${CORES.douradoClaro}; font-weight
         <div class="cred">${escapeHtml(dados.cliente.cpfCnpj)}</div>
       </div>
     </div>
+    ${assinaturaIcpHtml(dados.assinaturaIcp)}
     ${dados.observacoes ? `<p class="texto-obj" style="margin-top:34px;font-size:.85rem;">${escapeHtml(dados.observacoes)}</p>` : ''}
   </div>
   <div class="rodape">
