@@ -192,6 +192,7 @@ export function propostaConsultoriaToPropostaDados(
   const custos = p.custos_calculados ?? null;
   const subtipo = p.subtipo ?? '';
   const di = (p.dados_imovel ?? {}) as Record<string, unknown>;
+  const validadeDias = p.validade_dias ?? 30;
 
   // Servicos = honorarios Romatec + custos de terceiros (taxas).
   const servicos: PropostaServicoItem[] = [];
@@ -252,10 +253,29 @@ export function propostaConsultoriaToPropostaDados(
       : modalidadeImovel === 'rural' ? 'Desmembramento de Imóvel Rural' : 'Desmembramento';
   }
 
+  // v3.93.1 — Seções de paridade com o PDF tradicional (só quando há dado).
+  const programaNecessidades = mapProgramaNecessidades(di);
+  const horaTecnica =
+    subtipo === 'projeto_executivo' ? mapHoraTecnica(di) : undefined;
+  const documentos = (custos?.secao_4_checklist ?? []).map((d) => ({
+    texto: d.texto,
+    imprescindivel: d.imprescindivel || undefined,
+    opcional: d.obrigatorio ? undefined : true,
+  }));
+  const avisos = (custos?.avisos ?? []).filter((a) => str(a));
+  const cidadeForo =
+    str(di.cidade_obra) ?? str(di.municipio) ?? str(p.cliente.cidade) ?? 'Açailândia';
+  const ufForo = str(di.uf_obra) ?? str(di.uf) ?? str(di.estado) ?? str(p.cliente.estado) ?? 'MA';
+  const foro =
+    `Fica eleito o Foro da Comarca de ${cidadeForo}/${ufForo} para dirimir quaisquer ` +
+    `questões oriundas desta proposta, com renúncia expressa a qualquer outro, por mais ` +
+    `privilegiado que seja. Esta proposta tem validade de ${validadeDias} ` +
+    `(${validadeDias === 1 ? 'um' : String(validadeDias)}) dia(s) a contar da data de emissão.`;
+
   return {
     numero: p.numero,
     dataEmissao: fmtDataExtenso(p.data_proposta),
-    validade: `${p.validade_dias ?? 30} dias`,
+    validade: `${validadeDias} dias`,
     tipoServico: tipoServicoLabel,
     cliente: {
       nome: str(p.cliente.nome) ?? 'Contratante',
@@ -285,6 +305,87 @@ export function propostaConsultoriaToPropostaDados(
       cargo: str(p.gestor_cargo) ?? tecnico.cargo,
     },
     assinaturaIcp: opts?.assinaturaIcp, // v3.93.0
+    // v3.93.1 — paridade com o tradicional
+    programaNecessidades: programaNecessidades.length ? programaNecessidades : undefined,
+    horaTecnica,
+    documentos: documentos.length ? documentos : undefined,
+    avisos: avisos.length ? avisos : undefined,
+    foro,
+  };
+}
+
+// ── v3.93.1: helpers das seções de paridade (Prime = Tradicional) ───────────
+
+/** Rótulos e ordem das categorias do Programa de Necessidades (espelha o PDF padrão). */
+const PROG_CAT_LABEL: Record<string, string> = {
+  social: 'Área Social', intimo: 'Área Íntima', servico: 'Área de Serviço',
+  externo: 'Área Externa', comercial: 'Área Comercial', tecnico: 'Áreas Técnicas',
+};
+const PROG_CAT_ORDER = ['social', 'intimo', 'servico', 'externo', 'comercial', 'tecnico'];
+
+/** Monta o Programa de Necessidades agrupado por categoria a partir do dados_imovel. */
+function mapProgramaNecessidades(
+  di: Record<string, unknown>,
+): NonNullable<PropostaDados['programaNecessidades']> {
+  const raw = Array.isArray(di.programa_necessidades)
+    ? (di.programa_necessidades as Array<{
+        nome: string; nome_plural?: string; categoria: string;
+        ordem_pdf?: number; quantidade: number; observacao?: string | null;
+      }>)
+    : [];
+  if (!raw.length) return [];
+  const grupos: Record<string, typeof raw> = {};
+  for (const item of [...raw].sort((a, b) => (a.ordem_pdf ?? 0) - (b.ordem_pdf ?? 0))) {
+    (grupos[item.categoria] ??= []).push(item);
+  }
+  const out: NonNullable<PropostaDados['programaNecessidades']> = [];
+  for (const cat of PROG_CAT_ORDER) {
+    const items = grupos[cat];
+    if (!items?.length) continue;
+    out.push({
+      categoria: PROG_CAT_LABEL[cat] ?? cat,
+      itens: items.map((it) => {
+        const nome = it.quantidade > 1 ? (it.nome_plural || it.nome) : it.nome;
+        return `${String(it.quantidade).padStart(2, '0')} × ${nome}` +
+          (it.observacao ? ` — ${it.observacao}` : '');
+      }),
+    });
+  }
+  return out;
+}
+
+/** Monta a Etapa Preliminar / Hora Técnica (box R$ informativo) do projeto executivo. */
+function mapHoraTecnica(
+  di: Record<string, unknown>,
+): NonNullable<PropostaDados['horaTecnica']> {
+  const taxa = Number(di.taxa_esboco) || 750;
+  const valorFormatado = taxa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  return {
+    valorFormatado,
+    paragrafo:
+      'A etapa preliminar consiste no desenvolvimento do ESBOÇO ARQUITETÔNICO (anteprojeto) e do ' +
+      'CROQUI DE ESTUDO, atividade técnica que precede e fundamenta toda a documentação executiva ' +
+      'subsequente. Compreende:',
+    itens: [
+      'a) Análise técnica do terreno e levantamento das condicionantes legais (Plano Diretor, Lei de ' +
+        'Uso e Ocupação do Solo, recuos obrigatórios, taxa de ocupação e coeficiente de aproveitamento);',
+      'b) Reuniões de briefing com o CONTRATANTE para captação do programa de necessidades e ' +
+        'setorização funcional dos ambientes;',
+      'c) Elaboração do partido arquitetônico e estudos volumétricos preliminares;',
+      'd) Confecção do CROQUI ARQUITETÔNICO em planta baixa, com layout, áreas aproximadas e ' +
+        'implantação no lote, observando insolação e ventilação;',
+      'e) Apresentação e ajustes do anteprojeto até a aprovação do CONTRATANTE para deflagrar a fase executiva.',
+    ],
+    condicoes: [
+      `Caso o CONTRATANTE, após a entrega e aprovação do esboço, PROSSIGA com a contratação integral ` +
+        `dos projetos executivos descritos nesta proposta, o valor de ${valorFormatado} NÃO SERÁ COBRADO, ` +
+        `sendo absorvido pelo valor global do contrato.`,
+      `Caso o CONTRATANTE OPTE POR NÃO PROSSEGUIR com a fase executiva após a entrega do anteprojeto, ` +
+        `fica acordado o pagamento da Hora Técnica de ${valorFormatado}, que remunera exclusivamente o ` +
+        `tempo técnico empregado na elaboração do croqui e estudos preliminares.`,
+    ],
+    nota:
+      'Este valor NÃO está incluído no VALOR TOTAL desta proposta, sendo mencionado apenas para clareza contratual.',
   };
 }
 

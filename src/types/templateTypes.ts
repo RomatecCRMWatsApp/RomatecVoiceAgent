@@ -123,6 +123,27 @@ export interface PropostaDados {
     validadeAte?: string;   // dd/mm/aaaa
     dataAssinatura: string; // dd/mm/aaaa HH:mm
   };
+  /**
+   * v3.93.1 — Paridade com o PDF tradicional. Seções que existiam só no layout
+   * padrão e agora também saem nos Prime I/II. Todas OPCIONAIS: renderizam
+   * apenas quando presentes (ex.: georref não tem programa nem hora técnica).
+   */
+  /** Programa de Necessidades (projeto executivo) — cômodos agrupados por área. */
+  programaNecessidades?: Array<{ categoria: string; itens: string[] }>;
+  /** Etapa Preliminar — Hora Técnica de Anteprojeto e Croqui (box informativo R$). */
+  horaTecnica?: {
+    valorFormatado: string;   // ex.: "R$ 750,00"
+    paragrafo: string;        // parágrafo de abertura
+    itens: string[];          // a) … e)
+    condicoes: string[];      // as duas linhas "►" de condição especial
+    nota: string;             // "Este valor NAO esta incluido…"
+  };
+  /** Documentos a serem fornecidos pelo cliente (checklist). */
+  documentos?: Array<{ texto: string; imprescindivel?: boolean; opcional?: boolean }>;
+  /** Avisos e Condições Técnicas (bullets). */
+  avisos?: string[];
+  /** Foro e Validade — parágrafo de fechamento. */
+  foro?: string;
 }
 
 export interface ReciboParcela {

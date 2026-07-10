@@ -24,7 +24,7 @@ import {
   reciboToReciboDados,
   type PropostaConsultoriaView,
 } from '../pdf/mappers';
-import { buscarPropostaConsultoria } from '../integrations/propostasConsultoria';
+import { buscarPropostaConsultoria, mesclarAnexosProposta } from '../integrations/propostasConsultoria';
 import { buscarReciboPorId } from '../integrations/recibos';
 import { getBaseUrl } from '../services/reciboPdf';
 import { construirLaudoDadosPrime } from '../services/laudoPrimeDados';
@@ -47,7 +47,10 @@ pdfPrimeRouter.get('/proposta/:id', async (req: Request, res: Response) => {
     const dados = propostaConsultoriaToPropostaDados(
       proposta as unknown as PropostaConsultoriaView,
     );
-    const buffer = await gerarPropostaPdf(dados, templateId);
+    const primePdf = await gerarPropostaPdf(dados, templateId);
+    // v3.93.1: o export do Prime agora também mescla os anexos (croqui/plantas/
+    // imagens/PDFs) da proposta — antes só o PDF assinado os incluía.
+    const buffer = await mesclarAnexosProposta(primePdf, Number(id));
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="proposta-${id}-${templateId}.pdf"`);
     res.send(buffer);

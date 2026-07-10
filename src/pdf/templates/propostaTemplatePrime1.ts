@@ -4,7 +4,7 @@
 
 import type { PropostaDados, PropostaServicoItem } from '../../types/templateTypes';
 import { htmlToPdf } from '../htmlToPdf';
-import { CORES, FONTS_PRIME1, fmtBRL, escapeHtml, blocoAssinaturaHtml, assinaturaIcpHtml } from '../sharedHtml';
+import { CORES, FONTS_PRIME1, fmtBRL, escapeHtml, blocoAssinaturaHtml, assinaturaIcpHtml, seccoesParidadePropostaHtml } from '../sharedHtml';
 
 function linhaServico(s: PropostaServicoItem): string {
   const valor = s.pendente ? 'A confirmar' : (s.valor == null ? 'Incluso' : fmtBRL(s.valor));
@@ -239,6 +239,10 @@ table.invest td.val { text-align:right; color:${CORES.douradoClaro}; font-weight
     ${drl}
   </div>
 </div>
+
+<!-- v3.93.1: seções de paridade com o Tradicional (Programa, Hora Técnica,
+     Documentos, Avisos, Foro) — só aparecem quando há dado. -->
+${seccoesParidadePropostaHtml(dados)}
 
 <!-- 05 PRAZO + 06 ASSINATURAS -->
 <div class="page">

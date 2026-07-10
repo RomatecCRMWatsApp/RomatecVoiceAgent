@@ -202,3 +202,117 @@ export function arquivosAnexosHtml(arquivos: AnexoTecnicoView[] | undefined, sec
   ${cards}
 </div>`;
 }
+
+// ── v3.93.1 — Seções de PARIDADE com o PDF tradicional (compartilhadas) ──────
+// Programa de Necessidades, Etapa Preliminar/Hora Técnica, Documentos a
+// Fornecer, Avisos e Condições Técnicas e Foro & Validade. Antes existiam só no
+// layout Padrão; agora saem também nos Prime I/II. Cards brancos auto-contidos
+// (mesma estratégia da caixa ICP / arquivos anexos) pra ler bem no dark e no
+// clean. Cada seção usa o wrapper `.bloco` + título `.secao` (presentes nos dois
+// templates). Retorna '' quando não há nenhuma seção presente.
+export interface SeccoesParidadeProposta {
+  programaNecessidades?: Array<{ categoria: string; itens: string[] }>;
+  horaTecnica?: {
+    valorFormatado: string;
+    paragrafo: string;
+    itens: string[];
+    condicoes: string[];
+    nota: string;
+  };
+  documentos?: Array<{ texto: string; imprescindivel?: boolean; opcional?: boolean }>;
+  avisos?: string[];
+  foro?: string;
+}
+
+export function seccoesParidadePropostaHtml(d: SeccoesParidadeProposta): string {
+  const CARD = 'background:#ffffff;border:1px solid #e5e2d8;border-radius:8px;padding:18px 22px;margin-top:12px;color:#2a2620;font-size:.86rem;line-height:1.55;';
+  const partes: string[] = [];
+
+  // Programa de Necessidades
+  if (d.programaNecessidades && d.programaNecessidades.length) {
+    const totalTipos = d.programaNecessidades.reduce((s, g) => s + g.itens.length, 0);
+    const grupos = d.programaNecessidades.map((g) => `
+      <div style="margin-top:10px;">
+        <div style="font-weight:700;color:#0B6E4F;font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;">${escapeHtml(g.categoria)}</div>
+        <ul style="margin:4px 0 0;padding-left:18px;">
+          ${g.itens.map((i) => `<li style="margin:2px 0;">${escapeHtml(i)}</li>`).join('')}
+        </ul>
+      </div>`).join('');
+    partes.push(`
+<div class="bloco">
+  <h2 class="secao">Programa de Necessidades</h2>
+  <div style="${CARD}">
+    <p style="margin:0;">O presente projeto contempla o programa de necessidades abaixo discriminado, composto pelos seguintes cômodos:</p>
+    ${grupos}
+    <div style="margin-top:12px;text-align:right;font-style:italic;color:#666;font-size:.78rem;">Total: ${totalTipos} tipo(s) de cômodo listado(s).</div>
+  </div>
+</div>`);
+  }
+
+  // Etapa Preliminar — Hora Técnica (box informativo destacado)
+  if (d.horaTecnica) {
+    const ht = d.horaTecnica;
+    partes.push(`
+<div class="bloco">
+  <h2 class="secao">Etapa Preliminar — Hora Técnica</h2>
+  <div style="${CARD}border-left:4px solid #d97706;">
+    <div style="font-weight:700;color:#b45309;font-size:.95rem;">Hora Técnica de Anteprojeto e Croqui — ${escapeHtml(ht.valorFormatado)}
+      <span style="font-weight:400;color:#92400e;font-size:.78rem;">(informativo, não incluído no valor total)</span></div>
+    <p style="margin:10px 0 0;">${escapeHtml(ht.paragrafo)}</p>
+    <ul style="margin:8px 0 0;padding-left:18px;">
+      ${ht.itens.map((i) => `<li style="margin:3px 0;">${escapeHtml(i)}</li>`).join('')}
+    </ul>
+    <div style="font-weight:700;color:#b45309;margin-top:12px;font-size:.82rem;text-transform:uppercase;letter-spacing:.5px;">Condição especial de cobrança</div>
+    <ul style="margin:6px 0 0;padding-left:0;list-style:none;">
+      ${ht.condicoes.map((c) => `<li style="margin:5px 0;padding-left:16px;position:relative;"><span style="position:absolute;left:0;color:#d97706;">►</span>${escapeHtml(c)}</li>`).join('')}
+    </ul>
+    <p style="margin:12px 0 0;font-style:italic;color:#666;font-size:.78rem;">${escapeHtml(ht.nota)}</p>
+  </div>
+</div>`);
+  }
+
+  // Documentos a Fornecer pelo Cliente
+  if (d.documentos && d.documentos.length) {
+    const itens = d.documentos.map((doc) => {
+      const marca = '☐ ';
+      if (doc.imprescindivel) {
+        return `<li style="margin:4px 0;color:#dc2626;font-weight:700;">${marca}[IMPRESCINDÍVEL] ${escapeHtml(doc.texto)}</li>`;
+      }
+      return `<li style="margin:4px 0;">${marca}${escapeHtml(doc.texto)}${doc.opcional ? ' <span style="color:#999;font-style:italic;">(opcional)</span>' : ''}</li>`;
+    }).join('');
+    partes.push(`
+<div class="bloco">
+  <h2 class="secao">Documentos a Fornecer pelo Cliente</h2>
+  <div style="${CARD}">
+    <ul style="margin:0;padding-left:0;list-style:none;">${itens}</ul>
+  </div>
+</div>`);
+  }
+
+  // Avisos e Condições Técnicas
+  if (d.avisos && d.avisos.length) {
+    partes.push(`
+<div class="bloco">
+  <h2 class="secao">Avisos e Condições Técnicas</h2>
+  <div style="${CARD}font-size:.8rem;">
+    <ul style="margin:0;padding-left:18px;">
+      ${d.avisos.map((a) => `<li style="margin:5px 0;text-align:justify;">${escapeHtml(a)}</li>`).join('')}
+    </ul>
+  </div>
+</div>`);
+  }
+
+  // Foro e Validade
+  if (d.foro) {
+    partes.push(`
+<div class="bloco">
+  <h2 class="secao">Foro e Validade</h2>
+  <div style="${CARD}">
+    <p style="margin:0;text-align:justify;">${escapeHtml(d.foro)}</p>
+  </div>
+</div>`);
+  }
+
+  if (!partes.length) return '';
+  return `<div class="page">${partes.join('')}</div>`;
+}
