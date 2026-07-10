@@ -63,8 +63,12 @@ describe('HOTFIX/FEAT v3.45.0 — Refactor gerarPdfPropostaConsultoria aceita ov
 });
 
 describe('HOTFIX/FEAT v3.45.0 — Endpoint POST /preview-pdf', () => {
-  it('9. Endpoint registrado com requireAuth', () => {
-    expect(SERVER_TS).toMatch(/app\.post\('\/api\/propostas-consultoria\/preview-pdf',\s*requireAuth/);
+  it('9. Endpoint registrado ABERTO (sem requireAuth) — mesmo padrão do preview de recibo/vale (v3.92.5)', () => {
+    // v3.92.5: removido requireAuth — exigir cookie JWT quebrava o preview quando
+    // a sessão do CEO é via X-CEO-Token / JWT expirado. Preview só renderiza o
+    // body enviado (não busca dado de terceiros), igual /api/recibos/preview-pdf.
+    expect(SERVER_TS).toMatch(/app\.post\('\/api\/propostas-consultoria\/preview-pdf',\s*async/);
+    expect(SERVER_TS).not.toMatch(/app\.post\('\/api\/propostas-consultoria\/preview-pdf',\s*requireAuth/);
   });
 
   it('10. Retorna application/pdf (nao json)', () => {

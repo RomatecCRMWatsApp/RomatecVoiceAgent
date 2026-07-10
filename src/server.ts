@@ -4690,7 +4690,11 @@ app.post('/api/laudos-demarcacao/:laudoId/importar-proposta/:propostaId', async 
 // v3.45.0: preview ao vivo via PDF binario em iframe (mesmo padrao do recibo).
 // Body: { subtipo, dados_imovel, cliente?, endereco_imovel?, validade_dias?, adicional_campo?, ... }
 // Retorna application/pdf. Tolera campos parciais (placeholders).
-app.post('/api/propostas-consultoria/preview-pdf', requireAuth, async (req: Request, res: Response) => {
+// v3.92.5: SEM requireAuth — igual aos previews de recibo/vale (/api/recibos/preview-pdf
+// e /api/recibos/vale/preview-pdf são abertos). O preview só renderiza o que o cliente
+// digita (não busca dado de terceiros); exigir cookie JWT quebrava o preview quando a
+// sessão do CEO é via X-CEO-Token ou o JWT expira ("Faça login pra ver o preview").
+app.post('/api/propostas-consultoria/preview-pdf', async (req: Request, res: Response) => {
   try {
     const buf = await propostasConsultoria.gerarPdfPropostaConsultoriaPreview(req.body || {});
     res.setHeader('Content-Type', 'application/pdf');
