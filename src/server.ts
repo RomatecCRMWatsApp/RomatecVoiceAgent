@@ -1307,7 +1307,13 @@ app.get('/api/propostas/:id/relatorio', async (req: Request, res: Response) => {
 app.get('/api/propostas/:id/pdf', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    const buf = await propostas.gerarPdfProposta(id);
+    // v3.93.2: paridade com a Consultoria — o download de proposta (mão de obra)
+    // também inclui os anexos por DEFAULT (croqui/plantas/imagens/PDFs mergeados
+    // num arquivo único). ?sem_anexos=1 (ou ?somente_principal=1) é o opt-out.
+    const semAnexos = req.query.sem_anexos === '1' || req.query.somente_principal === '1';
+    const buf = semAnexos
+      ? await propostas.gerarPdfProposta(id)
+      : await propostas.gerarPdfPropostaCompleto(id);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="Proposta_${id}.pdf"`);
     res.send(buf);

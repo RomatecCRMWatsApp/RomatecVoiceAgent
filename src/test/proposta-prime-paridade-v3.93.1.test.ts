@@ -121,4 +121,32 @@ describe('Proposta Prime — paridade de conteúdo (v3.93.1)', () => {
     const ROUTE = read('routes', 'pdfPrime.ts');
     expect(ROUTE).toMatch(/mesclarAnexosProposta\(primePdf, Number\(id\)\)/);
   });
+
+  // v3.93.2 — universalidade: a paridade não é exclusiva do projeto executivo.
+  // Qualquer subtipo com checklist/avisos ganha Documentos, Avisos e Foro no Prime.
+  it('subtipo não-PE (georref) com checklist/avisos renderiza Documentos/Avisos/Foro', () => {
+    const georref = propostaConsultoriaToPropostaDados({
+      ...fakeProposta(),
+      subtipo: 'georreferenciamento_rural',
+      dados_imovel: { cidade_obra: 'Açailândia', uf_obra: 'MA' }, // sem programa/hora técnica
+    });
+    // programa/hora técnica são específicos do PE → ausentes; o resto (paridade) vem
+    expect(georref.programaNecessidades).toBeUndefined();
+    expect(georref.horaTecnica).toBeUndefined();
+    expect(georref.documentos?.length).toBeGreaterThan(0);
+    expect(georref.avisos?.length).toBe(2);
+
+    const html = buildPropostaPrime1Html(georref);
+    expect(html).toMatch(/Documentos a Fornecer/);
+    expect(html).toMatch(/Avisos e Condições Técnicas/);
+    expect(html).toMatch(/Foro e Validade/);
+    expect(html).not.toMatch(/Programa de Necessidades/);
+  });
+
+  it('download de proposta mão-de-obra também inclui anexos por default (server.ts)', () => {
+    const SERVER = read('server.ts');
+    expect(SERVER).toMatch(/propostas-consultoria|api\/propostas\/:id\/pdf/);
+    // opt-out sem_anexos=1 → bare; default → gerarPdfPropostaCompleto (com anexos)
+    expect(SERVER).toMatch(/propostas\.gerarPdfPropostaCompleto\(id\)/);
+  });
 });
