@@ -10373,8 +10373,10 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
           <label style="display:flex; gap:6px; align-items:center;"><input id="dmPlaniDxf" type="checkbox"${cache?.planialtimetrico?.entrega_dxf === false ? '' : ' checked'}> Entregar DXF</label>
           <label style="display:flex; gap:6px; align-items:center;"><input id="dmPlaniKml" type="checkbox"${cache?.planialtimetrico?.entrega_kml === false ? '' : ' checked'}> Entregar KML</label>
         </div>
-        <label style="display:flex; gap:6px; align-items:center;"><input id="dmPlaniPerfis" type="checkbox"${cache?.planialtimetrico?.entrega_perfis === false ? '' : ' checked'}> Entregar perfis de seção transversal</label>
+        <label style="display:flex; gap:6px; align-items:center;"><input id="dmPlaniPerfis" type="checkbox"${cache?.planialtimetrico?.entrega_perfis === false ? '' : ' checked'}> Entregar perfis de seção transversal e longitudinal</label>
         <div style="font-size:11px; color:var(--text-muted); margin:4px 0 8px;">Os pontos são contados pelo croqui (grid sobre a poligonal); sem croqui, estima por área/perímetro. Piso técnico de mobilização quando o valor fica baixo. O total aparece na prévia do PDF (seção 4.4c).</div>
+        <button type="button" id="dmPlaniVerMapa" style="background:transparent; border:1px solid var(--border-strong); color:var(--neon); border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer;">🗺️ Ver mapa da nuvem de pontos</button>
+        <div id="dmPlaniMapaBox" style="margin-top:6px;"></div>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">➕ Opcionais (não somam ao total)</p>
         <div class="lp-grid-2">
@@ -10633,6 +10635,26 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
     } catch (_e) { /* nao bloqueia */ }
     return dados;
   }
+
+  // v3.96.0: botao "Ver mapa da nuvem de pontos" — renderiza o croqui com a nuvem
+  // do levantamento planialtimetrico plotada sobre a poligonal (grid ao vivo).
+  const btnMapaNuvem = document.getElementById('dmPlaniVerMapa');
+  if (btnMapaNuvem) btnMapaNuvem.onclick = async () => {
+    const box = document.getElementById('dmPlaniMapaBox');
+    const pts = (typeof window.__dmCroquiPontos === 'function') ? window.__dmCroquiPontos() : [];
+    if (pts.length < 3) { box.innerHTML = '<div style="color:var(--text-muted); font-size:12px; padding:6px;">Desenhe ou importe pelo menos 3 pontos no bloco "Pontos e Croqui" para ver a nuvem.</div>'; return; }
+    const esp = parseFloat(document.getElementById('dmPlaniEsp').value) || 20;
+    const tipo = subtipo === 'demarcacao_urbana' ? 'URBANO' : 'RURAL';
+    box.innerHTML = '<div style="color:var(--text-muted); font-size:12px; padding:6px;">Gerando mapa…</div>';
+    try {
+      const resp = await fetch(`${API}/api/propostas-consultoria/croqui-svg`, {
+        method: 'POST', credentials: 'include',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, getCeoToken() ? { 'X-CEO-Token': getCeoToken() } : {}),
+        body: JSON.stringify({ pontos: pts, tipoImovel: tipo, nuvem: true, espacamento_m: esp }),
+      });
+      box.innerHTML = await resp.text();
+    } catch (e) { box.innerHTML = '<div style="color:#f87171; font-size:12px;">Erro ao gerar o mapa da nuvem.</div>'; }
+  };
 
   document.getElementById('dmPreview').onclick = async () => {
     const cli = document.getElementById('dmCliente').value;

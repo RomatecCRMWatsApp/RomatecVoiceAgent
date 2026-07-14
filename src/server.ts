@@ -4665,12 +4665,23 @@ app.post('/api/propostas-consultoria/croqui-svg', async (req: Request, res: Resp
     const b = req.body ?? {};
     const pontos = Array.isArray(b.pontos) ? b.pontos : [];
     const m = await import('./services/propostaCroqui');
-    const svg = m.gerarSvgProposta(pontos as Parameters<typeof m.gerarSvgProposta>[0], {
-      larguraPx: b.larguraPx, alturaPx: b.alturaPx,
-      tipoImovel: b.tipoImovel, areaTotalM2: b.areaTotalM2,
-      destacarLados: Array.isArray(b.destacarLados) ? b.destacarLados.map(Number) : undefined,
-      tituloDestaque: b.tituloDestaque,
-    });
+    // v3.96.0: quando b.nuvem=true, renderiza o croqui com a nuvem de pontos do
+    // levantamento planialtimetrico (espacamento em b.espacamento_m, default 20).
+    let svg: string;
+    if (b.nuvem) {
+      const esp = Number(b.espacamento_m) > 0 ? Number(b.espacamento_m) : 20;
+      svg = m.gerarSvgNuvemProposta(pontos as Parameters<typeof m.gerarSvgNuvemProposta>[0], esp, {
+        larguraPx: b.larguraPx, alturaPx: b.alturaPx,
+        tipoImovel: b.tipoImovel, areaTotalM2: b.areaTotalM2,
+      });
+    } else {
+      svg = m.gerarSvgProposta(pontos as Parameters<typeof m.gerarSvgProposta>[0], {
+        larguraPx: b.larguraPx, alturaPx: b.alturaPx,
+        tipoImovel: b.tipoImovel, areaTotalM2: b.areaTotalM2,
+        destacarLados: Array.isArray(b.destacarLados) ? b.destacarLados.map(Number) : undefined,
+        tituloDestaque: b.tituloDestaque,
+      });
+    }
     res.type('image/svg+xml').send(svg);
   } catch (err) { res.status(400).json({ ok: false, error: (err as Error).message }); }
 });

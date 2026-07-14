@@ -10,6 +10,7 @@ import pool from '../database/connection';
 import {
   calcularLados, areaGauss, perimetro, geoParaUtm, detectarZonaUtm,
   importarRTK, importarKML, importarGPX, detectarFormatoArquivo,
+  gerarNuvemPontos,
 } from './geometria';
 import { gerarCroquiSvg, type PontoSvg, type LadoSvg } from './croquiSvg';
 import { getParams } from './pricing/params';
@@ -131,6 +132,40 @@ export function gerarSvgProposta(pontosIn: PontoPropostaIn[], opts: SvgPropostaO
     utmHemisferio: 'S',
     destacarLados: opts.destacarLados,
     tituloDestaque: opts.tituloDestaque,
+  });
+}
+
+/**
+ * v3.96.0 — Croqui com a NUVEM DE PONTOS do levantamento planialtimetrico
+ * plotada sobre a poligonal. Reusa gerarNuvemPontos (mesma contagem cobrada) e
+ * o gerarCroquiSvg. Sem poligono valido, cai no croqui normal.
+ */
+export function gerarSvgNuvemProposta(
+  pontosIn: PontoPropostaIn[],
+  espacamento: number,
+  opts: SvgPropostaOpts & { nuvemTitulo?: string } = {},
+): string {
+  const utm = pontosIn.map(coordUtm);
+  const validos = utm.every(u => u !== null) && pontosIn.length >= 3;
+  if (!validos) return gerarSvgProposta(pontosIn, opts);
+  const utmPts = utm as Array<{ e: number; n: number }>;
+  const nuvem = gerarNuvemPontos(utmPts, espacamento);
+  const nuvemPontos = nuvem ? [...nuvem.contorno, ...nuvem.interno] : [];
+  const pontosSvg: PontoSvg[] = pontosIn.map((p, i) => ({
+    rotulo: p.vertice, e: utm[i]?.e ?? 0, n: utm[i]?.n ?? 0,
+  }));
+  const ladosSvg: LadoSvg[] = calcularLados(utmPts).map(l => ({
+    i_idx: l.i_idx, f_idx: l.f_idx, distancia_m: l.distancia_m,
+  }));
+  return gerarCroquiSvg(pontosSvg, ladosSvg, {
+    larguraPx: opts.larguraPx ?? 700,
+    alturaPx: opts.alturaPx ?? 520,
+    tipoImovel: opts.tipoImovel,
+    areaTotalM2: opts.areaTotalM2,
+    utmZona: opts.utmZona ?? 23,
+    utmHemisferio: 'S',
+    nuvemPontos,
+    nuvemTitulo: opts.nuvemTitulo ?? 'NUVEM DE PONTOS — PLANIALTIMETRIA',
   });
 }
 

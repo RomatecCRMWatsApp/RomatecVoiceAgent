@@ -2084,7 +2084,7 @@ async function renderDemarcacaoLotesBody(
     const entreg: string[] = [];
     if (planiEscopo.entrega_dxf) entreg.push('DXF (planta planialtimetrica editavel)');
     if (planiEscopo.entrega_kml) entreg.push('KML (nuvem de pontos georreferenciada SIRGAS2000)');
-    if (planiEscopo.entrega_perfis) entreg.push('perfis de secao transversal do terreno');
+    if (planiEscopo.entrega_perfis) entreg.push('perfis de secao transversal e longitudinal do terreno');
     if (entreg.length) escopoDem.push(`Entregaveis do levantamento planialtimetrico: ${entreg.join('; ')}`);
   }
   escopoDem.forEach((item, i) => {
@@ -2289,7 +2289,7 @@ async function renderDemarcacaoLotesBody(
     const entregP: string[] = [];
     if (planiHr.entrega_dxf) entregP.push('DXF');
     if (planiHr.entrega_kml) entregP.push('KML');
-    if (planiHr.entrega_perfis) entregP.push('perfis de secao transversal');
+    if (planiHr.entrega_perfis) entregP.push('perfis de secao transversal e longitudinal');
     if (entregP.length) doc.text('Entregaveis: ' + entregP.join(', ') + '.', COL_X_INI + 16, doc.y, { width: COL_W - 24 });
     doc.font('Helvetica').fillColor('#111');
     doc.moveDown(0.4);
@@ -2360,7 +2360,7 @@ async function renderDemarcacaoLotesBody(
       } catch { /* segue sem croqui */ }
     }
     if (pontosRaw.length >= 3) {
-      const { gerarSvgProposta } = await import('../services/propostaCroqui');
+      const { gerarSvgProposta, gerarSvgNuvemProposta } = await import('../services/propostaCroqui');
       const { rasterizarSvg } = await import('../services/laudoAnexos');
       const { calcularLados } = await import('../services/geometria');
       const tipoImovel = isUrbana ? 'URBANO' : 'RURAL';
@@ -2396,6 +2396,32 @@ async function renderDemarcacaoLotesBody(
           .text(`${pontosRaw.length} vertices · Area: ${areaTxt} · SIRGAS 2000 / UTM Zona 23S`, COL_X_INI, doc.y, { width: COL_W, align: 'center' });
         doc.font('Helvetica').fillColor('#111');
         doc.moveDown(0.5);
+      }
+
+      // v3.96.0: 4.6b — Croqui da Nuvem de Pontos (Planialtimetria) — condicional.
+      const planiContratadoPdf = !!((di.planialtimetrico as { contratado?: boolean } | undefined)?.contratado);
+      if (planiContratadoPdf) {
+        const espN = Number((di.planialtimetrico as { espacamento_m?: number } | undefined)?.espacamento_m) || 20;
+        const svgNuvem = gerarSvgNuvemProposta(pontosCk, espN, { tipoImovel, areaTotalM2: areaTotalM2 || undefined, larguraPx: SVG_W, alturaPx: 760 });
+        const pngNuvem = await rasterizarSvg(svgNuvem, SVG_W);
+        if (isPng(pngNuvem)) {
+          if (doc.y > 470) doc.addPage();
+          doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.6b Croqui da Nuvem de Pontos (Planialtimetria)');
+          doc.font('Helvetica');
+          doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+          doc.moveDown(0.2);
+          const dN = imgDims(760, 280);
+          doc.image(pngNuvem, dN.x, doc.y, { width: dN.w, height: dN.h });
+          doc.y += dN.h + 6;
+          const plHr = (hr as { planialtimetrico?: { total_pontos: number; espacamento_m: number; fonte_contagem: string } } | undefined)?.planialtimetrico;
+          const capt = plHr
+            ? `${plHr.total_pontos} pontos · espacamento ${plHr.espacamento_m} m${plHr.fonte_contagem === 'aproximacao' ? ' (estimado por area/perimetro)' : ''} · nuvem ilustrativa do levantamento a executar`
+            : 'Nuvem ilustrativa do levantamento a executar';
+          doc.fontSize(7.5).fillColor('#666').font('Helvetica-Oblique')
+            .text(capt, COL_X_INI, doc.y, { width: COL_W, align: 'center' });
+          doc.font('Helvetica').fillColor('#111');
+          doc.moveDown(0.5);
+        }
       }
 
       // 4.7 — Croqui de Alinhamento de Cerca (condicional)

@@ -51,6 +51,14 @@ export interface CroquiOpcoes {
   destacarLados?: number[];
   /** v3.63.0: titulo do croqui de destaque (ex: "CERCA A SER ALINHADA"). */
   tituloDestaque?: string;
+  /**
+   * v3.96.0: nuvem de pontos do levantamento planialtimetrico (coordenadas UTM
+   * de contorno + interior, de gerarNuvemPontos). Renderiza pontinhos sobre a
+   * poligonal — o mapa grafico do que sera levantado. Vazio/ausente => sem nuvem.
+   */
+  nuvemPontos?: Array<{ e: number; n: number }>;
+  /** v3.96.0: titulo do croqui da nuvem (ex: "NUVEM DE PONTOS — PLANIALTIMETRIA"). */
+  nuvemTitulo?: string;
 }
 
 /**
@@ -244,14 +252,37 @@ export function gerarCroquiSvg(
   </g>`;
   }
 
+  // v3.96.0: nuvem de pontos (planialtimetria) — pontinhos sobre a poligonal.
+  let nuvemSvg = '';
+  let nuvemTituloSvg = '';
+  let nuvemLegendaSvg = '';
+  if (opts.nuvemPontos && opts.nuvemPontos.length > 0) {
+    const dots = opts.nuvemPontos.map(pt => {
+      const s = toSvg(pt.e, pt.n);
+      return `<circle cx="${s.x.toFixed(1)}" cy="${s.y.toFixed(1)}" r="1.7" fill="#2563eb" fill-opacity="0.72"/>`;
+    }).join('');
+    nuvemSvg = `<g>${dots}</g>`;
+    if (opts.nuvemTitulo) {
+      nuvemTituloSvg = `
+  <text x="${(W / 2).toFixed(1)}" y="26" text-anchor="middle" font-family="Helvetica" font-size="15" font-weight="bold" fill="#2563eb">${escapeXml(opts.nuvemTitulo)}</text>`;
+    }
+    const ly = H - 30;
+    nuvemLegendaSvg = `
+  <g>
+    <circle cx="17" cy="${ly - 2}" r="3" fill="#2563eb" fill-opacity="0.72"/>
+    <text x="30" y="${ly + 2}" font-family="Helvetica" font-size="11" font-weight="bold" fill="#2563eb">Nuvem de pontos — ${opts.nuvemPontos.length} pontos</text>
+  </g>`;
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <rect width="${W}" height="${H}" fill="#fff"/>
   <path d="${pathD}" fill="${cor}22" stroke="${corBase}" stroke-width="${wBase}" stroke-linejoin="round"/>
+  ${nuvemSvg}
   ${destaqueSegsSvg}
   ${distanciasSvg}
   ${rotulosSvg}
-  ${norteSvg}${areaSvg}${tarjetaSvg}${tituloSvg}${legendaSvg}
+  ${norteSvg}${areaSvg}${tarjetaSvg}${tituloSvg}${legendaSvg}${nuvemTituloSvg}${nuvemLegendaSvg}
   <text x="10" y="${H - 10}" font-family="Helvetica" font-size="11" fill="#666">Escala aprox.: ${escapeXml(escalaTexto)} (UTM)</text>
 </svg>`;
 }

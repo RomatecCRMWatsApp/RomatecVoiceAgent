@@ -123,16 +123,20 @@ export function perimetro(pontos: Array<{ e: number; n: number }>): number {
  */
 const NUVEM_MAX_CELULAS = 2_000_000; // teto de seguranca do lattice
 
-export function contarNuvemPontos(
+/**
+ * v3.96.0 — Gera as COORDENADAS da nuvem de pontos (contorno + interior) sobre a
+ * poligonal, pro croqui grafico. `contarNuvemPontos` delega aqui (contagem =
+ * tamanho das listas), entao a contagem cobrada e o desenho batem sempre.
+ * - contorno: caminha o perimetro fechado a passo `espacamento` (=> ceil(P/esp)).
+ * - interior: nos de uma malha regular que caem DENTRO do poligono (ray-casting).
+ * Retorna null quando invalido (<3 vertices, passo <=0) ou malha alem do teto.
+ */
+export function gerarNuvemPontos(
   pontos: Array<{ e: number; n: number }>,
   espacamento: number,
-): { perimetro: number; interno: number; total: number } | null {
+): { contorno: Array<{ e: number; n: number }>; interno: Array<{ e: number; n: number }> } | null {
   if (!Array.isArray(pontos) || pontos.length < 3) return null;
   if (!Number.isFinite(espacamento) || espacamento <= 0) return null;
-
-  // Contorno: perimetro / espacamento.
-  const perim = perimetro(pontos);
-  const pontosContorno = perim > 0 ? Math.ceil(perim / espacamento) : 0;
 
   // Bounding box do poligono.
   let minE = Infinity, maxE = -Infinity, minN = Infinity, maxN = -Infinity;
@@ -149,17 +153,49 @@ export function contarNuvemPontos(
   const rows = Math.floor(alt / espacamento) + 1;
   if (cols * rows > NUVEM_MAX_CELULAS) return null; // grande demais → fallback
 
-  // Malha regular interna: conta os nos DENTRO do poligono.
-  let interno = 0;
+  // Contorno: caminha o perimetro a passo `espacamento`.
+  const contorno: Array<{ e: number; n: number }> = [];
+  const perim = perimetro(pontos);
+  for (let d = 0; d < perim - 1e-9; d += espacamento) {
+    contorno.push(pontoNoPerimetro(pontos, d));
+  }
+
+  // Interior: nos da malha regular DENTRO do poligono.
+  const interno: Array<{ e: number; n: number }> = [];
   for (let ix = 0; ix <= cols; ix++) {
     const x = minE + ix * espacamento;
     for (let iy = 0; iy <= rows; iy++) {
       const y = minN + iy * espacamento;
-      if (pontoEmPoligono(x, y, pontos)) interno++;
+      if (pontoEmPoligono(x, y, pontos)) interno.push({ e: x, n: y });
     }
   }
 
-  return { perimetro: pontosContorno, interno, total: pontosContorno + interno };
+  return { contorno, interno };
+}
+
+/** Ponto a `dist` metros ao longo do perimetro fechado do poligono. */
+function pontoNoPerimetro(poly: Array<{ e: number; n: number }>, dist: number): { e: number; n: number } {
+  const n = poly.length;
+  let acc = 0;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i], b = poly[(i + 1) % n];
+    const seg = Math.hypot(b.e - a.e, b.n - a.n);
+    if (acc + seg >= dist || i === n - 1) {
+      const t = seg > 0 ? Math.max(0, Math.min(1, (dist - acc) / seg)) : 0;
+      return { e: a.e + (b.e - a.e) * t, n: a.n + (b.n - a.n) * t };
+    }
+    acc += seg;
+  }
+  return { e: poly[0].e, n: poly[0].n };
+}
+
+export function contarNuvemPontos(
+  pontos: Array<{ e: number; n: number }>,
+  espacamento: number,
+): { perimetro: number; interno: number; total: number } | null {
+  const g = gerarNuvemPontos(pontos, espacamento);
+  if (!g) return null;
+  return { perimetro: g.contorno.length, interno: g.interno.length, total: g.contorno.length + g.interno.length };
 }
 
 /** Ray-casting: true se (x,y) esta dentro do poligono (vertices em ordem). */
