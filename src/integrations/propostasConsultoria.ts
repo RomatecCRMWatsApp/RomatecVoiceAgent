@@ -2073,7 +2073,21 @@ async function renderDemarcacaoLotesBody(
   doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
   doc.moveDown(0.2);
   doc.fontSize(9.5).fillColor('#111');
-  ESCOPO_DEMARCACAO.forEach((item, i) => {
+  // v3.95.0: escopo ganha itens condicionais do Levantamento Planialtimetrico.
+  const escopoDem = [...ESCOPO_DEMARCACAO];
+  const planiEscopo = (hr as { planialtimetrico?: { contratado: boolean; espacamento_m: number; pontos_interno: number; entrega_dxf: boolean; entrega_kml: boolean; entrega_perfis: boolean; valor: number } } | undefined)?.planialtimetrico;
+  if (planiEscopo && planiEscopo.contratado && planiEscopo.valor > 0) {
+    escopoDem.push(
+      `Levantamento planialtimetrico por nuvem de pontos (espacamento medio de ${planiEscopo.espacamento_m} m), ` +
+      `com processamento e geracao de planta planialtimetrica${planiEscopo.pontos_interno > 0 ? ' e curvas de nivel' : ''}`,
+    );
+    const entreg: string[] = [];
+    if (planiEscopo.entrega_dxf) entreg.push('DXF (planta planialtimetrica editavel)');
+    if (planiEscopo.entrega_kml) entreg.push('KML (nuvem de pontos georreferenciada SIRGAS2000)');
+    if (planiEscopo.entrega_perfis) entreg.push('perfis de secao transversal do terreno');
+    if (entreg.length) escopoDem.push(`Entregaveis do levantamento planialtimetrico: ${entreg.join('; ')}`);
+  }
+  escopoDem.forEach((item, i) => {
     doc.text(`${i + 1}. ${item}`, { indent: 8, width: COL_W - 8 });
   });
   doc.moveDown(0.5);
@@ -2246,6 +2260,41 @@ async function renderDemarcacaoLotesBody(
     doc.moveDown(0.4);
   }
 
+  // v3.95.0: 4.4c — Levantamento Planialtimetrico (item DIRETO, soma no total).
+  const planiHr = (hr as { planialtimetrico?: { contratado: boolean; espacamento_m: number; pontos_perimetro: number; pontos_interno: number; total_pontos: number; valor_ponto: number; subtotal: number; minimo_aplicado: boolean; valor: number; fonte_contagem: 'poligono' | 'aproximacao' | 'nenhuma'; entrega_dxf: boolean; entrega_kml: boolean; entrega_perfis: boolean } } | undefined)?.planialtimetrico;
+  if (planiHr && planiHr.contratado && planiHr.valor > 0) {
+    if (doc.y > 640) doc.addPage();
+    doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.4c Levantamento Planialtimetrico (Nuvem de Pontos)');
+    doc.font('Helvetica');
+    doc.moveTo(COL_X_INI, doc.y).lineTo(COL_X_FIM, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+    doc.moveDown(0.2);
+    const yP = doc.y;
+    const vpTxt = Number(planiHr.valor_ponto).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    doc.fontSize(9.5).fillColor('#111').font('Helvetica-Bold')
+      .text('Levantamento Planialtimetrico', COL_X_INI + 8, yP, { width: COL_W - 100 });
+    doc.fontSize(10).fillColor(corHex).font('Helvetica-Bold')
+      .text(formatBRL(planiHr.valor), COL_X_FIM - 80, yP, { width: 80, align: 'right' });
+    doc.font('Helvetica').fillColor('#111');
+    const partes = [`Espacamento ${planiHr.espacamento_m} m`, `${planiHr.pontos_perimetro} ponto(s) no perimetro`];
+    if (planiHr.pontos_interno > 0) partes.push(`${planiHr.pontos_interno} ponto(s) internos`);
+    partes.push(`total ${planiHr.total_pontos} ponto(s) × R$ ${vpTxt}/ponto`);
+    doc.fontSize(8).fillColor('#555').font('Helvetica-Oblique')
+      .text(partes.join(' · ') + ' · incluso no valor total da proposta', COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+    if (planiHr.fonte_contagem === 'aproximacao') {
+      doc.text('Contagem estimada por area/perimetro (sem croqui de pontos).', COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+    }
+    if (planiHr.minimo_aplicado) {
+      doc.text('Aplicado minimo tecnico de mobilizacao.', COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+    }
+    const entregP: string[] = [];
+    if (planiHr.entrega_dxf) entregP.push('DXF');
+    if (planiHr.entrega_kml) entregP.push('KML');
+    if (planiHr.entrega_perfis) entregP.push('perfis de secao transversal');
+    if (entregP.length) doc.text('Entregaveis: ' + entregP.join(', ') + '.', COL_X_INI + 16, doc.y, { width: COL_W - 24 });
+    doc.font('Helvetica').fillColor('#111');
+    doc.moveDown(0.4);
+  }
+
   // ── 4.5. IDENTIFICACAO DOS MARCOS (FQNS) ─────────────────────────────
   if (doc.y > 600) doc.addPage();
   doc.fontSize(11).fillColor(corHex).font('Helvetica-Bold').text('4.5 Identificacao dos Marcos (Codificacao INCRA)');
@@ -2395,7 +2444,7 @@ async function renderDemarcacaoLotesBody(
   const totalRomatec = hr?.total ?? custos.honorarios_romatec?.total ?? custos.secao_5_total;
   if (doc.y > 700) doc.addPage();
   // v3.40.0: texto coerente — locacao Kit GNSS e' FIXA (sempre soma), Laudo e' condicional.
-  const txtTotalNota = 'Soma de TRT/CFT + Tecnicos de campo (com adicional de insal/peric quando aplicavel) + Marcos + Deslocamento + Area, com complexidade (x1,3 padrao media) e assessoria (5%), acrescida de Locacao de Kit GNSS (item fixo), Laudo Tecnico de Demarcacao e Alinhamento de Cerca (quando contratados). Eventuais custos de cartorio para averbacao da demarcacao NAO estao inclusos.';
+  const txtTotalNota = 'Soma de TRT/CFT + Tecnicos de campo (com adicional de insal/peric quando aplicavel) + Marcos + Deslocamento + Area, com complexidade (x1,3 padrao media) e assessoria (5%), acrescida de Locacao de Kit GNSS (item fixo), Laudo Tecnico de Demarcacao, Alinhamento de Cerca e Levantamento Planialtimetrico (quando contratados). Eventuais custos de cartorio para averbacao da demarcacao NAO estao inclusos.';
   const boxYT = doc.y;
   const boxAlturaT = doc.heightOfString(txtTotalNota, { width: COL_W - 24 }) + 38;
   doc.rect(COL_X_INI, boxYT, COL_W, boxAlturaT).fillAndStroke(COR_VERDE_BG, COR_VERDE_BORDA);

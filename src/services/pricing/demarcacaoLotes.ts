@@ -40,6 +40,7 @@ import type {
 } from './types';
 import { round2 } from './georreferenciamento';
 import { getParams, salarioMinimo, anotacaoTecnica } from './params';
+import { contarNuvemPontos } from '../geometria';
 
 const COMPLEX_KEYS: Array<'simples' | 'media' | 'alta'> = ['simples', 'media', 'alta'];
 
@@ -255,8 +256,88 @@ export function calcularDemarcacaoLotes(
     };
   })();
 
+  // v3.95.0: Levantamento Planialtimetrico — ITEM DIRETO (soma no total, fora de
+  // complexidade/assessoria/desconto, igual ao alinhamento de cerca). Pontos =
+  // ceil(perimetro/espacamento) + (malha interna: ceil(area/espacamento² × 0,7)).
+  // Piso tecnico de mobilizacao quando o subtotal fica antieconomico.
+  const planialtimetrico = (() => {
+    const it = input.planialtimetrico;
+    const cfgPl = cfg.planialtimetrico;
+    const vazio = {
+      contratado: false, espacamento_m: 0, pontos_perimetro: 0, pontos_interno: 0,
+      total_pontos: 0, valor_ponto: 0, subtotal: 0, minimo_aplicado: false, valor: 0,
+      fonte_contagem: 'nenhuma' as const, entrega_dxf: false, entrega_kml: false, entrega_perfis: false,
+    };
+    if (!it?.contratado || !cfgPl) return vazio;
+
+    const espMin = Number(cfgPl.espacamento_min_m ?? 5);
+    const espMax = Number(cfgPl.espacamento_max_m ?? 100);
+    let esp = Number(it.espacamento_m ?? cfgPl.espacamento_default_m ?? 20);
+    if (!Number.isFinite(esp) || esp < espMin) esp = espMin;
+    if (esp > espMax) esp = espMax;
+
+    // Contagem de pontos: A) motor de geometria sobre a poligonal (exato p/ forma
+    // real do lote), com fallback B) area/perimetro quando nao ha croqui.
+    const num = (v: unknown): number => {
+      if (typeof v === 'number') return v;
+      if (v == null) return NaN;
+      return Number(String(v).trim().replace(',', '.'));
+    };
+    const pontosEN = (Array.isArray(input.pontos) ? input.pontos : [])
+      .map((p) => ({ e: num(p.e ?? p.utmE ?? p.utm_e), n: num(p.n ?? p.utmN ?? p.utm_n) }))
+      .filter((p) => Number.isFinite(p.e) && Number.isFinite(p.n));
+
+    let pontosPerimetro = 0;
+    let pontosInterno = 0;
+    let fonteContagem: 'poligono' | 'aproximacao' | 'nenhuma' = 'nenhuma';
+
+    const nuvem = pontosEN.length >= 3 ? contarNuvemPontos(pontosEN, esp) : null;
+    if (nuvem) {
+      pontosPerimetro = nuvem.perimetro;
+      pontosInterno = nuvem.interno;
+      fonteContagem = 'poligono';
+    } else {
+      // Fallback: deriva dos outputs de geometria ja calculados (area + perimetro).
+      const perim = Number(input.perimetro_m ?? 0);
+      const areaM2 = input.subtipo === 'demarcacao_urbana'
+        ? Number(input.area_m2 ?? 0)
+        : Number(input.area_hectares ?? 0) * 10000; // ha → m²
+      pontosPerimetro = perim > 0 ? Math.ceil(perim / esp) : 0;
+      pontosInterno = areaM2 > 0
+        ? Math.ceil((areaM2 / (esp * esp)) * Number(cfgPl.fator_malha_interna ?? 0.7))
+        : 0;
+      if (pontosPerimetro > 0 || pontosInterno > 0) fonteContagem = 'aproximacao';
+    }
+    const totalPontos = pontosPerimetro + pontosInterno;
+
+    const valorPontoDefault = input.subtipo === 'demarcacao_urbana'
+      ? cfgPl.valor_ponto_urbano : cfgPl.valor_ponto_rural;
+    const valorPonto = Number(it.valor_ponto ?? valorPontoDefault);
+
+    const subtotal = round2(totalPontos * valorPonto);
+    const piso = Number(cfgPl.minimo_tecnico ?? 0);
+    const minimoAplicado = totalPontos > 0 && subtotal < piso;
+    const valor = totalPontos > 0 ? round2(Math.max(subtotal, piso)) : 0;
+
+    return {
+      contratado: true,
+      espacamento_m: esp,
+      pontos_perimetro: pontosPerimetro,
+      pontos_interno: pontosInterno,
+      total_pontos: totalPontos,
+      valor_ponto: round2(valorPonto),
+      subtotal,
+      minimo_aplicado: minimoAplicado,
+      valor,
+      fonte_contagem: totalPontos > 0 ? fonteContagem : 'nenhuma',
+      entrega_dxf: it.entrega_dxf !== false,
+      entrega_kml: it.entrega_kml !== false,
+      entrega_perfis: it.entrega_perfis !== false,
+    };
+  })();
+
   // ── 12. Total = core + extras diretos ────────────────────────────────
-  const extrasDiretos = round2(laudoDireto.valor + kitGnss.valor + alinhamentoCerca.valor);
+  const extrasDiretos = round2(laudoDireto.valor + kitGnss.valor + alinhamentoCerca.valor + planialtimetrico.valor);
   const total = round2(core + extrasDiretos);
 
   // Guard de fechamento
@@ -323,6 +404,7 @@ export function calcularDemarcacaoLotes(
       laudo_tecnico_direto: laudoDireto,
       locacao_kit_gnss: kitGnss,
       alinhamento_cerca: alinhamentoCerca,
+      planialtimetrico,
       total,
     },
     secao_opcionais_demarcacao: {

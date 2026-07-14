@@ -109,6 +109,72 @@ export function perimetro(pontos: Array<{ e: number; n: number }>): number {
 }
 
 /**
+ * v3.95.0 — Contador de NUVEM DE PONTOS sobre a poligonal (levantamento
+ * planialtimetrico). Reaproveita a geometria ja existente (mesmos vertices UTM do
+ * croqui / alinhamento de cerca): conta os pontos de CONTORNO (perimetro /
+ * espacamento) mais os pontos INTERNOS de uma malha regular de passo
+ * `espacamento` que caem DENTRO do poligono (ponto-em-poligono por ray-casting).
+ * Da a contagem exata para a forma REAL do lote — nao superestima em terreno
+ * irregular como faria uma divisao area/espacamento².
+ *
+ * Retorna null quando nao ha poligono valido (<3 vertices) ou quando a malha
+ * excederia o teto de seguranca (evita loop gigante); nesses casos o chamador
+ * cai no calculo aproximado por area/perimetro.
+ */
+const NUVEM_MAX_CELULAS = 2_000_000; // teto de seguranca do lattice
+
+export function contarNuvemPontos(
+  pontos: Array<{ e: number; n: number }>,
+  espacamento: number,
+): { perimetro: number; interno: number; total: number } | null {
+  if (!Array.isArray(pontos) || pontos.length < 3) return null;
+  if (!Number.isFinite(espacamento) || espacamento <= 0) return null;
+
+  // Contorno: perimetro / espacamento.
+  const perim = perimetro(pontos);
+  const pontosContorno = perim > 0 ? Math.ceil(perim / espacamento) : 0;
+
+  // Bounding box do poligono.
+  let minE = Infinity, maxE = -Infinity, minN = Infinity, maxN = -Infinity;
+  for (const p of pontos) {
+    if (p.e < minE) minE = p.e;
+    if (p.e > maxE) maxE = p.e;
+    if (p.n < minN) minN = p.n;
+    if (p.n > maxN) maxN = p.n;
+  }
+  const larg = maxE - minE, alt = maxN - minN;
+  if (!Number.isFinite(larg) || !Number.isFinite(alt) || larg <= 0 || alt <= 0) return null;
+
+  const cols = Math.floor(larg / espacamento) + 1;
+  const rows = Math.floor(alt / espacamento) + 1;
+  if (cols * rows > NUVEM_MAX_CELULAS) return null; // grande demais → fallback
+
+  // Malha regular interna: conta os nos DENTRO do poligono.
+  let interno = 0;
+  for (let ix = 0; ix <= cols; ix++) {
+    const x = minE + ix * espacamento;
+    for (let iy = 0; iy <= rows; iy++) {
+      const y = minN + iy * espacamento;
+      if (pontoEmPoligono(x, y, pontos)) interno++;
+    }
+  }
+
+  return { perimetro: pontosContorno, interno, total: pontosContorno + interno };
+}
+
+/** Ray-casting: true se (x,y) esta dentro do poligono (vertices em ordem). */
+function pontoEmPoligono(x: number, y: number, poly: Array<{ e: number; n: number }>): boolean {
+  let dentro = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].e, yi = poly[i].n, xj = poly[j].e, yj = poly[j].n;
+    const intersecta = ((yi > y) !== (yj > y)) &&
+      (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+    if (intersecta) dentro = !dentro;
+  }
+  return dentro;
+}
+
+/**
  * Calcula lados (segmentos consecutivos): distancia + azimute.
  * Retorna array com n elementos pra poligonal fechada.
  */

@@ -192,6 +192,16 @@
       "valor_unitario_diaria_default": 250.00,
       "descritivo": "Receptor ComNav S6 (base); Receptor T30 Plus com laser (rover); tripe; base niveladora; bastao/bipe; coletora R80."
     },
+    "planialtimetrico": {
+      "_AVISO": "Levantamento Planialtimetrico (nuvem de pontos) v3.95.0 — ITEM DIRETO (soma no total fora de complexidade/assessoria, igual ao alinhamento de cerca). Valor por ponto de referencia de mercado 2026 (GNSS RTK). Piso tecnico de mobilizacao evita levantamento antieconomico em lote pequeno.",
+      "valor_ponto_rural": 22.00,
+      "valor_ponto_urbano": 35.00,
+      "minimo_tecnico": 450.00,
+      "espacamento_default_m": 20,
+      "espacamento_min_m": 5,
+      "espacamento_max_m": 100,
+      "fator_malha_interna": 0.70
+    },
     "minimo_garantido_sm": 2,
     "complexidade_multiplicadores": { "simples": 1.0, "media": 1.3, "alta": 1.6 },
     "assessoria_pct": 0.05,

@@ -10362,6 +10362,20 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
           </select>
         </label>
 
+        <!-- v3.95.0: Levantamento Planialtimetrico (nuvem de pontos) — SOMA ao total -->
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📐 Levantamento Planialtimétrico (soma ao total)</p>
+        <label style="display:flex; gap:6px; align-items:center;"><input id="dmPlaniAtiva" type="checkbox"${cache?.planialtimetrico?.contratado ? ' checked' : ''}> Incluir levantamento planialtimétrico (nuvem de pontos)</label>
+        <div class="lp-grid-2">
+          <label>Espaçamento entre pontos (m) <input id="dmPlaniEsp" type="number" min="5" max="100" step="1" value="${cache?.planialtimetrico?.espacamento_m ?? 20}" style="width:100%;"></label>
+          <label>Valor por ponto (R$) <input id="dmPlaniVP" type="number" min="0" step="0.01" placeholder="${isUrbana ? '35,00 (urbano)' : '22,00 (rural)'}" value="${cache?.planialtimetrico?.valor_ponto ?? ''}" style="width:100%;"></label>
+        </div>
+        <div class="lp-grid-2">
+          <label style="display:flex; gap:6px; align-items:center;"><input id="dmPlaniDxf" type="checkbox"${cache?.planialtimetrico?.entrega_dxf === false ? '' : ' checked'}> Entregar DXF</label>
+          <label style="display:flex; gap:6px; align-items:center;"><input id="dmPlaniKml" type="checkbox"${cache?.planialtimetrico?.entrega_kml === false ? '' : ' checked'}> Entregar KML</label>
+        </div>
+        <label style="display:flex; gap:6px; align-items:center;"><input id="dmPlaniPerfis" type="checkbox"${cache?.planialtimetrico?.entrega_perfis === false ? '' : ' checked'}> Entregar perfis de seção transversal</label>
+        <div style="font-size:11px; color:var(--text-muted); margin:4px 0 8px;">Os pontos são contados pelo croqui (grid sobre a poligonal); sem croqui, estima por área/perímetro. Piso técnico de mobilização quando o valor fica baixo. O total aparece na prévia do PDF (seção 4.4c).</div>
+
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">➕ Opcionais (não somam ao total)</p>
         <div class="lp-grid-2">
           <label style="display:flex; gap:6px; align-items:center;"><input id="dmOpcAlinh" type="checkbox"> Alinhamento de Cerca (R$ 0,42/m)</label>
@@ -10587,6 +10601,16 @@ async function renderConsultoriaFormDemarcacao(v, toggleHTML, subtipo) {
         qtd_diarias: parseFloat(document.getElementById('dmKitGnssQtd').value) || 0,
         diaria: parseFloat(document.getElementById('dmKitGnssDiaria').value) || 250,
       },
+      // v3.95.0: Levantamento Planialtimetrico (item direto). A contagem de pontos
+      // e' feita no backend (motor de geometria sobre dados.pontos; fallback area/perimetro).
+      planialtimetrico: document.getElementById('dmPlaniAtiva')?.checked ? {
+        contratado: true,
+        espacamento_m: parseFloat(document.getElementById('dmPlaniEsp').value) || 20,
+        valor_ponto: parseFloat(document.getElementById('dmPlaniVP').value) || undefined,
+        entrega_dxf: document.getElementById('dmPlaniDxf').checked,
+        entrega_kml: document.getElementById('dmPlaniKml').checked,
+        entrega_perfis: document.getElementById('dmPlaniPerfis').checked,
+      } : undefined,
       num_parcelas: numParcelas,
     };
     if (isUrbana) {

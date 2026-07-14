@@ -123,6 +123,16 @@ interface PricingParams {
       valor_unitario_diaria_default: number;
       descritivo: string;
     };
+    // v3.95.0 — Levantamento Planialtimetrico (item direto, igual ao alinhamento de cerca)
+    planialtimetrico?: {
+      valor_ponto_rural: number;
+      valor_ponto_urbano: number;
+      minimo_tecnico: number;
+      espacamento_default_m: number;
+      espacamento_min_m?: number;
+      espacamento_max_m?: number;
+      fator_malha_interna: number;
+    };
     minimo_garantido_sm: number;
     complexidade_multiplicadores: { simples: number; media: number; alta: number };
     assessoria_pct: number;

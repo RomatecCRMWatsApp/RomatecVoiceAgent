@@ -529,6 +529,30 @@ export interface InputDemarcacaoLotes {
   locacao_kit_gnss?: { qtd_diarias: number; diaria?: number };
   // Parcelamento — default 3x (40/30/30, retrocompat). 2x = 50/50 (sinal + entrega final).
   num_parcelas?: 2 | 3;
+
+  // v3.95.0 — Levantamento Planialtimetrico (nuvem de pontos). ITEM DIRETO: soma
+  // no total FORA da complexidade/assessoria/desconto (mesmo tratamento do
+  // alinhamento de cerca). A contagem de pontos vem do motor de geometria
+  // (contarNuvemPontos sobre a poligonal); fallback area/perimetro quando nao ha
+  // croqui. Piso tecnico de mobilizacao em pricing-params.
+  planialtimetrico?: {
+    contratado: boolean;
+    espacamento_m?: number;      // default config (20); clamp [5,100]
+    valor_ponto?: number;        // default por subtipo (config); editavel
+    // Entregaveis (default todos true)
+    entrega_dxf?: boolean;
+    entrega_kml?: boolean;
+    entrega_perfis?: boolean;
+  };
+
+  // v3.95.0 — Poligonal (vertices do croqui) usada pela contagem exata da nuvem
+  // de pontos. Mesma fonte de dados_imovel.pontos; aceita utmE/utmN, utm_e/utm_n
+  // ou e/n. Ausente => planialtimetria cai na aproximacao area/perimetro.
+  pontos?: Array<{
+    e?: number | null; n?: number | null;
+    utmE?: number | null; utmN?: number | null;
+    utm_e?: number | null; utm_n?: number | null;
+  }>;
 }
 
 export interface CodigosMintadosFQNS {
@@ -562,6 +586,24 @@ export interface DemarcacaoLotesOutput {
     // v3.63.5 — alinhamento de cerca virou item DIRETO (soma no total da proposta),
     // não mais opcional que não soma. Quando contratado, entra nos honorarios.
     alinhamento_cerca: { contratado: boolean; metros: number; valor_unitario: number; valor: number };
+    // v3.95.0 — Levantamento Planialtimetrico (item direto, soma no total).
+    planialtimetrico: {
+      contratado: boolean;
+      espacamento_m: number;
+      pontos_perimetro: number;
+      pontos_interno: number;
+      total_pontos: number;
+      valor_ponto: number;
+      subtotal: number;         // total_pontos × valor_ponto (antes do piso)
+      minimo_aplicado: boolean; // true quando subtotal < piso e cobrou o piso
+      valor: number;            // o que soma no total = max(subtotal, piso) quando ha pontos
+      // Origem da contagem: 'poligono' = grid exato sobre o croqui; 'aproximacao'
+      // = area/perimetro (sem croqui); 'nenhuma' = sem dado suficiente.
+      fonte_contagem: 'poligono' | 'aproximacao' | 'nenhuma';
+      entrega_dxf: boolean;
+      entrega_kml: boolean;
+      entrega_perfis: boolean;
+    };
     total: number;
   };
   secao_opcionais_demarcacao: {
