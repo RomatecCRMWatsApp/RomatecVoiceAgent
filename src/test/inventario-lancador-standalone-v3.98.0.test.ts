@@ -13,12 +13,12 @@ describe('Inventário de Obra — lançador standalone (v3.98.0)', () => {
   const PAGE = read('public', 'inventario-obra.html');
   const ENTREGA = read('public', 'entrega-obra.html');
 
-  it('obras.html tem o lançador PRÓPRIO no nível principal (card + CTA sem ?obra)', () => {
+  it('obras.html tem o lançador PRÓPRIO no nível principal (v3.99.0: aba própria)', () => {
     expect(OBRAS).toContain('🗃️ Inventário de Obra');
     expect(OBRAS).toContain('Iniciar inventário →');
-    // CTA do lançador aponta pra tela SEM obra pré-selecionada (fluxo standalone)
-    expect(OBRAS).toMatch(/<a href="\/inventario-obra\.html"/);
-    // e o lançador é um card irmão dos outros módulos (Entrega continua com o dela)
+    // v3.99.0: o lançador virou ABA; sem obra ativa o CTA cai no standalone (sem ?obra)
+    expect(OBRAS).toContain(`: '/inventario-obra.html'`);
+    // e a Entrega continua com o lançador dela (agora em aba própria também)
     expect(OBRAS).toContain('📦 Entrega de Obra');
     expect(OBRAS).toContain('Nova entrega →');
   });

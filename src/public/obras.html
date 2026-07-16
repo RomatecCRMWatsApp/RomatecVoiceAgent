@@ -1134,6 +1134,11 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="marcar">Marcar Dias</button>
     <button class="tab" data-tab="folha">Folha Mensal</button>
     <button class="tab" data-tab="vto">Vistoria (VTO)</button>
+    <!-- v3.99.0: módulos promovidos a abas próprias (antes eram cards dentro do VTO) -->
+    <button class="tab" data-tab="checklist">📋 Checklist</button>
+    <button class="tab" data-tab="entrega">📦 Entrega de Obra</button>
+    <button class="tab" data-tab="inventario">🗃️ Inventário</button>
+    <button class="tab" data-tab="maoobra">🧾 Mão de Obra</button>
     <button class="tab" data-tab="laudos">📐 Laudo Demarcação</button>
     <button class="tab" data-tab="loteamentos">🏘️ Loteamentos</button>
     <button class="tab" data-tab="galeria">📷 Galeria</button>
@@ -1173,6 +1178,11 @@ window.forcarUpdateApp = forcarUpdate;
   <div id="view-diario" class="view"></div>
   <div id="view-folha" class="view"></div>
   <div id="view-vto" class="view"></div>
+  <!-- v3.99.0: views das abas promovidas -->
+  <div id="view-checklist" class="view"></div>
+  <div id="view-entrega" class="view"></div>
+  <div id="view-inventario" class="view"></div>
+  <div id="view-maoobra" class="view"></div>
   <div id="view-proposta" class="view"></div>
   <div id="view-reforma" class="view"></div>
   <div id="view-diligencias" class="view"></div>
@@ -1869,6 +1879,11 @@ async function render() {
       diario: async () => { await Promise.all([loadObras(), loadDiario()]); renderDiario(); },
       folha: async () => { await Promise.all([loadObras(), loadFolha()]); renderFolha(); },
       vto:   async () => { await Promise.all([loadObras(), loadVistorias()]); renderVto(); },
+      // v3.99.0: módulos promovidos a abas próprias (saíram de dentro do VTO)
+      checklist:  async () => { await loadObras(); renderChecklistTab(); },
+      entrega:    async () => { renderEntregaTab(); },
+      inventario: async () => { await loadObras(); renderInventarioTab(); },
+      maoobra:    async () => { renderMaoObraTab(); },
       proposta: async () => {
         await Promise.all([loadPropostas(), loadPropostasClientes()]);
         // Cache cliente_id → telefone pro input de envio rápido na lista
@@ -6164,6 +6179,75 @@ function vtoCombinarVistoriador() {
   return partes.length ? partes.join(' — ') : null;
 }
 
+// ── v3.99.0: ABAS PRÓPRIAS dos módulos (antes eram cards empilhados dentro do
+// VTO). Cada aba reaproveita a tela/fluxo que já existe — só muda o ponto de
+// entrada. Checklist e Inventário mantêm o seletor "Obra ativa" (deep-link
+// com a obra escolhida); Entrega e Mão de Obra seguem seus fluxos próprios
+// (proposta / prestador) dentro das respectivas telas.
+function renderChecklistTab() {
+  const v = document.getElementById('view-checklist');
+  if (state.obras.length === 0) {
+    v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro.</div>';
+    return;
+  }
+  const obraNome = (state.obras.find(o => String(o.id) === String(state.currentObra)) || {}).nome || '';
+  v.innerHTML = `${obraSelector()}
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
+    <div style="min-width:200px;">
+      <p class="section-title" style="margin:0;">📋 Checklist de Atividades da Obra</p>
+      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Acompanhamento por disciplina (22 áreas) — % de avanço físico automático, PDF e envio por WhatsApp. Usa a obra ativa selecionada acima.</p>
+    </div>
+    <a href="/vto-checklist.html?obra=${escape(state.currentObra||'')}&obra_nome=${encodeURIComponent(obraNome)}" style="background:var(--success); color:#fff; border:1px solid var(--success); border-radius:8px; padding:10px 16px; font-weight:600; font-size:13px; text-decoration:none; white-space:nowrap;">Abrir checklist →</a>
+  </div>`;
+  attachSel();
+}
+
+function renderEntregaTab() {
+  const v = document.getElementById('view-entrega');
+  v.innerHTML = `
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
+    <div style="min-width:200px;">
+      <p class="section-title" style="margin:0;">📦 Entrega de Obra</p>
+      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Relatório de Entrega (RE) a partir da proposta — fotos antes/depois, materiais de sobra, valor a receber, NF, PDF e envio por WhatsApp com confirmação de recebimento. A proposta/serviço é escolhida dentro da tela.</p>
+    </div>
+    <a href="/entrega-obra.html" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Nova entrega →</a>
+  </div>`;
+}
+
+function renderInventarioTab() {
+  const v = document.getElementById('view-inventario');
+  if (state.obras.length === 0) {
+    v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro.</div>';
+    return;
+  }
+  const obraNome = (state.obras.find(o => String(o.id) === String(state.currentObra)) || {}).nome || '';
+  // deep-link com a obra ativa; sem obra selecionada, a tela abre o próprio seletor (v3.98.0)
+  const href = state.currentObra
+    ? `/inventario-obra.html?obra=${escape(state.currentObra)}&obra_nome=${encodeURIComponent(obraNome)}`
+    : '/inventario-obra.html';
+  v.innerHTML = `${obraSelector()}
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
+    <div style="min-width:200px;">
+      <p class="section-title" style="margin:0;">🗃️ Inventário de Obra</p>
+      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Relatório de inventário próprio por obra — registre o que a obra já tem e o que vai entrando após a abertura: nota fiscal (XML/PDF/foto), lançamento manual e importação opcional de sobras de Entrega. Saldo por item, fotos GPS, PDF e envio por WhatsApp.</p>
+    </div>
+    <a href="${href}" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Iniciar inventário →</a>
+  </div>`;
+  attachSel();
+}
+
+function renderMaoObraTab() {
+  const v = document.getElementById('view-maoobra');
+  v.innerHTML = `
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
+    <div style="min-width:200px;">
+      <p class="section-title" style="margin:0;">🧾 Mão de Obra Avulsa</p>
+      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Pagamento a prestador avulso/informal (diarista, pedreiro solto, pintor) — recibo assinado (ICP-Brasil), comprovante do PIX anexo, envio por WhatsApp e confirmação via CONFIRMAR.</p>
+    </div>
+    <a href="/mao-obra-avulsa.html" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Novo pagamento →</a>
+  </div>`;
+}
+
 function renderVto() {
   const v = document.getElementById('view-vto');
   if (state.obras.length === 0) {
@@ -6283,36 +6367,9 @@ function renderVto() {
           </div>`).join('')}
       </div>
     </div>` : '';
+  // v3.99.0: os cards Checklist/Entrega/Inventário/Mão de Obra saíram daqui —
+  // agora cada um tem ABA PRÓPRIA no menu. O VTO ficou só com a vistoria.
   v.innerHTML = `${obraSelector()}
-  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
-    <div style="min-width:200px;">
-      <p class="section-title" style="margin:0;">📋 Checklist de Atividades da Obra</p>
-      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Acompanhamento por disciplina (22 áreas) — % de avanço físico automático, PDF e envio por WhatsApp.</p>
-    </div>
-    <a href="/vto-checklist.html?obra=${escape(state.currentObra||'')}&obra_nome=${encodeURIComponent((state.obras.find(o=>String(o.id)===String(state.currentObra))||{}).nome||'')}" style="background:var(--success); color:#fff; border:1px solid var(--success); border-radius:8px; padding:10px 16px; font-weight:600; font-size:13px; text-decoration:none; white-space:nowrap;">Abrir checklist →</a>
-  </div>
-  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
-    <div style="min-width:200px;">
-      <p class="section-title" style="margin:0;">📦 Entrega de Obra</p>
-      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Relatório de Entrega (RE) a partir da proposta — fotos antes/depois, materiais de sobra, valor a receber, NF, PDF e envio por WhatsApp com confirmação de recebimento.</p>
-    </div>
-    <a href="/entrega-obra.html" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Nova entrega →</a>
-  </div>
-  <!-- v3.98.0: Inventário de Obra — MÓDULO PRÓPRIO (separado da Entrega/RE) -->
-  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
-    <div style="min-width:200px;">
-      <p class="section-title" style="margin:0;">🗃️ Inventário de Obra</p>
-      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Relatório de inventário próprio por obra — registre o que a obra já tem e o que vai entrando após a abertura: nota fiscal (XML/PDF/foto), lançamento manual e importação opcional de sobras de Entrega. Saldo por item, fotos GPS, PDF e envio por WhatsApp.</p>
-    </div>
-    <a href="/inventario-obra.html" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Iniciar inventário →</a>
-  </div>
-  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
-    <div style="min-width:200px;">
-      <p class="section-title" style="margin:0;">🧾 Mão de Obra Avulsa</p>
-      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Pagamento a prestador avulso/informal (diarista, pedreiro solto, pintor) — recibo assinado (ICP-Brasil), comprovante do PIX anexo, envio por WhatsApp e confirmação via CONFIRMAR.</p>
-    </div>
-    <a href="/mao-obra-avulsa.html" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Novo pagamento →</a>
-  </div>
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
       <p class="section-title" style="margin:0;">${escape(titulo)}</p>
