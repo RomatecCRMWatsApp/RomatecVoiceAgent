@@ -16,7 +16,11 @@ const ALTERS_RECIBOS = [
   // 'vale' adicionado na ULTIMA posicao — preserva indices internos dos
   // valores existentes (MySQL armazena ENUM por indice numerico).
   // MODIFY e idempotente: re-aplicar nao da erro nem warning relevante.
-  "ALTER TABLE recibos MODIFY COLUMN tipo ENUM('funcionario','parcela','despesa','proposta','vistoria','etapa','chaves','custom','vale') NOT NULL",
+  // v3.102.1: inclui 'mao_obra_avulsa' — sem ele, o MODIFY falhava TODO boot
+  // ("Data truncated for column 'tipo'") desde que existem recibos desse tipo
+  // no banco (v3.92.0). O enum final continua o mesmo (a migration da mão de
+  // obra reafirma na sequência); isto só mata a FALHA vermelha do log.
+  "ALTER TABLE recibos MODIFY COLUMN tipo ENUM('funcionario','parcela','despesa','proposta','vistoria','etapa','chaves','custom','vale','mao_obra_avulsa') NOT NULL",
 ];
 
 // v1.99.11: assinatura digital tambem em propostas (consultoria + mao de obra)
