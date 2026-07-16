@@ -123,6 +123,10 @@
       api('/' + S.obraId + '/itens' + (S.filtroEtapa!=null ? '?etapa_id='+S.filtroEtapa : '')),
     ]).then(function(r){
       S.resumo = r[0].resumo; S.etapas = r[0].etapas; S.itens = r[1].itens;
+      // v3.100.0: número automático do inventário (INV-AAAA-NNNN) linkado à obra
+      S.numero = r[0].numero || '';
+      var h = document.getElementById('hObra');
+      if(h) h.textContent = (S.obraNome || ('Obra #' + S.obraId)) + (S.numero ? ' · ' + S.numero : '');
       render();
     }).catch(function(e){ toast('Erro: ' + e.message, 4000); });
   }

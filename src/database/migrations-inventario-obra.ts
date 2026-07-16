@@ -182,5 +182,20 @@ export async function runInventarioObraMigrations(): Promise<void> {
     'indice idx_inv_itens_entrega',
   );
 
+  // ── v3.100.0: Cabeçalho do inventário — NÚMERO automático linkado à obra ──
+  // 1 inventário por obra (UNIQUE obra_id). numero = INV-AAAA-NNNN, atribuído
+  // pós-insert (mesmo padrão do RE-AAAA-NNNN das entregas). Criado na primeira
+  // abertura do inventário da obra.
+  await exec(`
+    CREATE TABLE IF NOT EXISTS obra_inventario_cabecalho (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      obra_id INT NOT NULL,
+      numero VARCHAR(20) NULL,
+      colaborador_id VARCHAR(64) NULL,
+      criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_inv_cab_obra (obra_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `, 'tabela obra_inventario_cabecalho');
+
   console.log('[inventario-migrations] concluídas');
 }

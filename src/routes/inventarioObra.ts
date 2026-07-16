@@ -370,7 +370,13 @@ router.post('/:obraId/entregas/:entregaId/importar-sobras', requireAuth, async (
 router.get('/:obraId/resumo', requireAuth, async (req: Request, res: Response) => {
   try {
     const obraId = Number(req.params.obraId);
-    res.json({ ok: true, resumo: await repo.resumoObra(obraId), etapas: await repo.listarEtapas(obraId) });
+    // v3.100.0: garante o cabeçalho na primeira abertura → número INV-AAAA-NNNN
+    // automático, linkado à obra.
+    const cabecalho = await repo.obterOuCriarCabecalho(obraId, donoDe(req));
+    res.json({
+      ok: true, numero: cabecalho.numero, cabecalho,
+      resumo: await repo.resumoObra(obraId), etapas: await repo.listarEtapas(obraId),
+    });
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
@@ -380,10 +386,11 @@ router.get('/:obraId/relatorio', requireAuth, async (req: Request, res: Response
     const etapaId = intOrNull(req.query.etapa_id) ?? undefined;
     const dados = await repo.dadosRelatorio(obraId, etapaId);
     if (String(req.query.formato ?? 'pdf') === 'json') return res.json({ ok: true, ...dados });
-    const { gerarInventarioPdf } = await import('../services/inventario/inventarioObraPdf');
-    const pdf = await gerarInventarioPdf(dados);
+    // v3.100.0: relatório sai com as notas fiscais ANEXADAS e enumeradas.
+    const { gerarInventarioPdfComAnexos } = await import('../services/inventario/inventarioObraPdf');
+    const pdf = await gerarInventarioPdfComAnexos(dados);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="Inventario_Obra_${obraId}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="Inventario_${dados.numero_inventario || obraId}.pdf"`);
     res.send(pdf);
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
@@ -395,13 +402,13 @@ router.post('/:obraId/relatorio/enviar-whatsapp', requireAuth, async (req: Reque
     if (telefone.length < 10) return res.status(400).json({ error: 'Telefone inválido.' });
     const etapaId = intOrNull(req.body?.etapa_id) ?? undefined;
     const dados = await repo.dadosRelatorio(obraId, etapaId);
-    const { gerarInventarioPdf } = await import('../services/inventario/inventarioObraPdf');
-    const pdf = await gerarInventarioPdf(dados);
+    const { gerarInventarioPdfComAnexos } = await import('../services/inventario/inventarioObraPdf');
+    const pdf = await gerarInventarioPdfComAnexos(dados);
     const { sendDocument, sendReply } = await import('../integrations/whatsapp');
     const nomeObra = dados.obra ? String(dados.obra.nome) : `Obra ${obraId}`;
-    await sendDocument(telefone, pdf.toString('base64'), `Inventario_${nomeObra.replace(/\s+/g, '_')}.pdf`, 'pdf');
+    await sendDocument(telefone, pdf.toString('base64'), `Inventario_${dados.numero_inventario || nomeObra.replace(/\s+/g, '_')}.pdf`, 'pdf');
     await sendReply(telefone,
-      `📦 *Inventário de Materiais — ${nomeObra}*\n` +
+      `📦 *Inventário ${dados.numero_inventario} — ${nomeObra}*\n` +
       `Comprado: R$ ${dados.resumo.valor_comprado.toFixed(2)} · Utilizado: R$ ${dados.resumo.valor_utilizado.toFixed(2)} · Em obra: R$ ${dados.resumo.valor_saldo.toFixed(2)}\n` +
       `_Romatec Consultoria Total_`);
     res.json({ ok: true });

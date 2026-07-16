@@ -144,7 +144,7 @@ export function renderInventarioHtml(dados: Dados): string {
 
   <header>
     <div class="logo">Romatec <span>Consultoria Total</span></div>
-    <div class="doc"><b>INVENTÁRIO DE MATERIAIS</b>Relatório de prestação de contas · gerado em ${agora.toLocaleDateString('pt-BR')} ${agora.toLocaleTimeString('pt-BR').slice(0, 5)}</div>
+    <div class="doc"><b>INVENTÁRIO ${esc(dados.numero_inventario || '')}</b>Relatório de prestação de contas · gerado em ${agora.toLocaleDateString('pt-BR')} ${agora.toLocaleTimeString('pt-BR').slice(0, 5)}</div>
   </header>
 
   <div class="page">
@@ -167,6 +167,18 @@ export function renderInventarioHtml(dados: Dados): string {
 
     ${fotosSecoes.length ? `<h2 class="fotos-h">Relatório Fotográfico (entrega × instalação)</h2>${fotosSecoes.join('')}` : ''}
 
+    ${dados.notas && dados.notas.length ? `<h2 class="fotos-h">Anexos — Notas Fiscais</h2>
+    <table><thead><tr><th>Anexo</th><th>NF nº</th><th>Fornecedor</th><th>Emissão</th><th>Valor</th></tr></thead><tbody>
+    ${dados.notas.map((n, ix) => `<tr>
+      <td><b>Anexo ${ix + 1}</b></td>
+      <td>${esc(n.numero_nota ?? '—')}</td>
+      <td>${esc(n.fornecedor_nome ?? '—')}</td>
+      <td class="c">${dataBR(n.data_emissao)}</td>
+      <td class="n">${n.valor_total != null ? brl(n.valor_total) : '—'}</td>
+    </tr>`).join('')}
+    </tbody></table>
+    <p style="font-size:.7rem;color:#777;margin-top:4px">Os documentos originais seguem anexados na ordem acima, ao final deste relatório.</p>` : ''}
+
     <div class="assinatura">
       <div class="linha"></div>
       <div class="nome">José Romário Pinto Bezerra</div>
@@ -183,4 +195,76 @@ export function renderInventarioHtml(dados: Dados): string {
 
 export async function gerarInventarioPdf(dados: Dados): Promise<Buffer> {
   return htmlToPdf(renderInventarioHtml(dados));
+}
+
+// ── v3.100.0: Relatório + ANEXOS ENUMERADOS (arquivos originais das notas) ───
+// Cada nota vira "ANEXO N — NOTA FISCAL Nº X": página separadora (pdf-lib) e,
+// na sequência, o documento original (PDF mesclado página a página; imagem em
+// página A4; XML só a separadora com a chave — o XML não tem forma visual).
+// Falha em UM anexo não derruba o relatório (pula e loga, padrão mesclarAnexos).
+export async function gerarInventarioPdfComAnexos(dados: Dados): Promise<Buffer> {
+  const principal = await gerarInventarioPdf(dados);
+  const notas = dados.notas ?? [];
+  if (!notas.length) return principal;
+
+  const { PDFDocument: PDFLib, StandardFonts, rgb } = await import('pdf-lib');
+  const merged = await PDFLib.create();
+  const fontBold = await merged.embedFont(StandardFonts.HelveticaBold);
+  const font = await merged.embedFont(StandardFonts.Helvetica);
+  const A4_W = 595.28, A4_H = 841.89;
+  const verde = rgb(0.047, 0.2, 0.125);
+  const dourado = rgb(0.788, 0.659, 0.298);
+
+  const principalDoc = await PDFLib.load(principal);
+  (await merged.copyPages(principalDoc, principalDoc.getPageIndices())).forEach(p => merged.addPage(p));
+
+  const texto = (s: unknown) => String(s ?? '').replace(/[^\x20-\xff]/g, ' '); // WinAnsi-safe
+
+  for (let ix = 0; ix < notas.length; ix++) {
+    const n = notas[ix];
+    try {
+      // Página separadora do anexo
+      const sep = merged.addPage([A4_W, A4_H]);
+      sep.drawRectangle({ x: 0, y: A4_H - 90, width: A4_W, height: 90, color: verde });
+      sep.drawText(`ANEXO ${ix + 1}`, { x: 48, y: A4_H - 58, size: 26, font: fontBold, color: dourado });
+      sep.drawText(`NOTA FISCAL N° ${texto(n.numero_nota ?? '—')}`, { x: 48, y: A4_H - 82, size: 12, font: fontBold, color: rgb(1, 1, 1) });
+      const linhas = [
+        n.fornecedor_nome ? `Fornecedor: ${texto(n.fornecedor_nome)}${n.fornecedor_cnpj ? ' - CNPJ ' + texto(n.fornecedor_cnpj) : ''}` : '',
+        n.data_emissao ? `Emissao: ${dataBR(n.data_emissao)}` : '',
+        n.valor_total != null ? `Valor total: ${brl(n.valor_total)}` : '',
+        n.chave_acesso ? `Chave de acesso: ${texto(n.chave_acesso)}` : '',
+        `Arquivo: ${texto(n.arquivo_nome)}`,
+      ].filter(Boolean);
+      linhas.forEach((l, i) => {
+        sep.drawText(String(l), { x: 48, y: A4_H - 140 - i * 20, size: 10.5, font, color: rgb(0.15, 0.18, 0.16) });
+      });
+      if (n.arquivo_tipo === 'xml_nfe') {
+        sep.drawText('Documento eletronico (XML NFe) arquivado no sistema; itens lancados', { x: 48, y: A4_H - 140 - linhas.length * 20 - 14, size: 9, font, color: rgb(0.4, 0.42, 0.4) });
+        sep.drawText('automaticamente neste inventario a partir do arquivo original.', { x: 48, y: A4_H - 140 - linhas.length * 20 - 27, size: 9, font, color: rgb(0.4, 0.42, 0.4) });
+        continue; // XML não tem forma visual — separadora basta
+      }
+
+      const buf = Buffer.from(String(n.arquivo_b64).replace(/^data:[^,]+,/, ''), 'base64');
+      if (n.arquivo_tipo === 'pdf_danfe') {
+        const anexoDoc = await PDFLib.load(buf);
+        (await merged.copyPages(anexoDoc, anexoDoc.getPageIndices())).forEach(p => merged.addPage(p));
+      } else {
+        // imagem (foto da nota) — página A4 com aspecto preservado
+        const mime = String(n.arquivo_mime ?? '').toLowerCase();
+        const img = mime.includes('png') ? await merged.embedPng(buf) : await merged.embedJpg(buf);
+        const margem = 30;
+        const maxW = A4_W - 2 * margem, maxH = A4_H - 2 * margem;
+        const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+        const pg = merged.addPage([A4_W, A4_H]);
+        pg.drawImage(img, {
+          x: (A4_W - img.width * scale) / 2, y: (A4_H - img.height * scale) / 2,
+          width: img.width * scale, height: img.height * scale,
+        });
+      }
+    } catch (err) {
+      console.warn(`[inventario-pdf] anexo ${ix + 1} (nota ${n.id}) pulado: ${(err as Error).message}`);
+    }
+  }
+
+  return Buffer.from(await merged.save());
 }

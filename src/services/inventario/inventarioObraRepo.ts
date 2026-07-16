@@ -409,6 +409,66 @@ export async function apagarFoto(fotoId: number): Promise<void> {
   await pool.execute(`DELETE FROM obra_inventario_fotos WHERE id = ?`, [fotoId]);
 }
 
+// ── Cabeçalho / número do inventário (v3.100.0) ──────────────────────────────
+/** INV-AAAA-NNNN (mesmo espírito do RE-AAAA-NNNN das entregas). Puro/testável. */
+export function formatarNumeroInventario(id: number, ano: number): string {
+  return `INV-${ano}-${String(id).padStart(4, '0')}`;
+}
+
+/**
+ * Devolve o cabeçalho do inventário da obra, criando (com número automático)
+ * na primeira abertura. 1 por obra (UNIQUE obra_id); corrida entre duas
+ * requisições cai no ER_DUP_ENTRY e re-seleciona.
+ */
+export async function obterOuCriarCabecalho(obraId: number, colaboradorId?: string | null): Promise<{
+  id: number; numero: string; criado_em: unknown;
+}> {
+  const sel = async () => {
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT id, numero, criado_em FROM obra_inventario_cabecalho WHERE obra_id = ?`, [obraId],
+    );
+    return rows.length ? { id: Number(rows[0].id), numero: String(rows[0].numero ?? ''), criado_em: rows[0].criado_em } : null;
+  };
+  const existente = await sel();
+  if (existente) return existente;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [r] = await conn.execute<ResultSetHeader>(
+      `INSERT INTO obra_inventario_cabecalho (obra_id, colaborador_id) VALUES (?, ?)`,
+      [obraId, colaboradorId ?? null],
+    );
+    const numero = formatarNumeroInventario(r.insertId, new Date().getFullYear());
+    await conn.execute(`UPDATE obra_inventario_cabecalho SET numero = ? WHERE id = ?`, [numero, r.insertId]);
+    await conn.commit();
+    return { id: r.insertId, numero, criado_em: new Date() };
+  } catch (err) {
+    await conn.rollback().catch(() => undefined);
+    const e = err as { code?: string };
+    if (e.code === 'ER_DUP_ENTRY') {
+      const dup = await sel();
+      if (dup) return dup;
+    }
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+/** Notas COM o arquivo original (base64) — pros anexos enumerados do relatório. */
+export async function listarNotasComArquivo(obraId: number, etapaId?: number): Promise<RowDataPacket[]> {
+  let sql = `SELECT id, etapa_id, numero_nota, chave_acesso, fornecedor_nome, fornecedor_cnpj,
+                    data_emissao, valor_total, arquivo_nome, arquivo_mime, arquivo_b64, arquivo_tipo,
+                    status_processamento, criado_em
+               FROM obra_inventario_notas WHERE obra_id = ?`;
+  const vals: Array<string | number> = [obraId];
+  if (etapaId != null) { sql += ' AND etapa_id = ?'; vals.push(etapaId); }
+  sql += ' ORDER BY id'; // ordem de inserção = ordem dos anexos
+  const [rows] = await pool.execute<RowDataPacket[]>(sql, vals);
+  return rows;
+}
+
 // ── Resumo / dados do relatório ──────────────────────────────────────────────
 export async function resumoObra(obraId: number): Promise<{
   itens_count: number; valor_comprado: number; valor_utilizado: number; valor_saldo: number; pct_utilizado: number;
@@ -434,9 +494,11 @@ export async function resumoObra(obraId: number): Promise<{
 /** Estado COMPLETO pro relatório (sem cache — prestação de contas formal). */
 export async function dadosRelatorio(obraId: number, etapaId?: number): Promise<{
   obra: RowDataPacket | null;
+  numero_inventario: string;
   etapas: Array<RowDataPacket & { itens: Array<RowDataPacket & { fotos: RowDataPacket[] }> }>;
   sem_etapa: Array<RowDataPacket & { fotos: RowDataPacket[] }>;
   resumo: Awaited<ReturnType<typeof resumoObra>>;
+  notas: RowDataPacket[];
 }> {
   const [obraRows] = await pool.execute<RowDataPacket[]>(
     `SELECT id, nome, cliente, endereco, cidade, responsavel_tecnico FROM romatec_obras WHERE id = ?`,
@@ -465,10 +527,16 @@ export async function dadosRelatorio(obraId: number, etapaId?: number): Promise<
 
   const semEtapa = etapaId != null ? [] : anexaFotos(itens.filter((i) => i.etapa_id == null));
 
+  // v3.100.0: número do inventário + notas fiscais (anexos enumerados do PDF).
+  const cabecalho = await obterOuCriarCabecalho(obraId);
+  const notas = await listarNotasComArquivo(obraId, etapaId);
+
   return {
     obra: obraRows[0] ?? null,
+    numero_inventario: cabecalho.numero,
     etapas: porEtapa,
     sem_etapa: semEtapa,
     resumo: await resumoObra(obraId),
+    notas,
   };
 }
