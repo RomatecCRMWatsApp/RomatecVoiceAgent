@@ -2609,10 +2609,10 @@ function renderObras() {
           <a href="/vto-checklist.html?obra=${o.id}&obra_nome=${encodeURIComponent(o.nome||'')}"
             title="Abrir o Checklist de Atividades (VTO) desta obra"
             style="background:transparent; border:1px solid #C9A84C; color:#C9A84C; font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; text-decoration:none;">📋 Checklist VTO →</a>
-          <!-- v3.97.0: Inventário de Materiais por Obra -->
+          <!-- v3.97.0: Inventário de Obra (v3.98.0: módulo próprio — ícone 🗃️ pra não confundir com a Entrega 📦) -->
           <a href="/inventario-obra.html?obra=${o.id}&obra_nome=${encodeURIComponent(o.nome||'')}"
-            title="Inventário de materiais: notas fiscais, utilização, saldo e relatório fotográfico"
-            style="background:transparent; border:1px solid var(--neon); color:var(--neon); font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; text-decoration:none;">📦 Inventário →</a>
+            title="Inventário de Obra: o que a obra tem e o que vai entrando — notas fiscais, utilização, saldo e relatório fotográfico"
+            style="background:transparent; border:1px solid var(--neon); color:var(--neon); font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; text-decoration:none;">🗃️ Inventário →</a>
         </div>
         <div class="parc-inline-box" data-obra="${o.id}" style="display:none; margin-top:8px;"></div>
         <div class="vto-inline-box" data-obra="${o.id}" style="display:none; margin-top:8px;"></div>
@@ -6297,6 +6297,14 @@ function renderVto() {
       <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Relatório de Entrega (RE) a partir da proposta — fotos antes/depois, materiais de sobra, valor a receber, NF, PDF e envio por WhatsApp com confirmação de recebimento.</p>
     </div>
     <a href="/entrega-obra.html" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Nova entrega →</a>
+  </div>
+  <!-- v3.98.0: Inventário de Obra — MÓDULO PRÓPRIO (separado da Entrega/RE) -->
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
+    <div style="min-width:200px;">
+      <p class="section-title" style="margin:0;">🗃️ Inventário de Obra</p>
+      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Relatório de inventário próprio por obra — registre o que a obra já tem e o que vai entrando após a abertura: nota fiscal (XML/PDF/foto), lançamento manual e importação opcional de sobras de Entrega. Saldo por item, fotos GPS, PDF e envio por WhatsApp.</p>
+    </div>
+    <a href="/inventario-obra.html" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Iniciar inventário →</a>
   </div>
   <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
     <div style="min-width:200px;">

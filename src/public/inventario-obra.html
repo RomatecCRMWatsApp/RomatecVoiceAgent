@@ -70,7 +70,7 @@
   <button id="hBack" title="Voltar" style="position:absolute;left:14px;top:14px;background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:6px 12px;font-size:14px;font-weight:600;cursor:pointer">‹ Voltar</button>
   <div style="padding-left:64px">
     <p class="kick">Romatec — Gestão de Obras</p>
-    <h1>📦 Inventário de Materiais</h1>
+    <h1>🗃️ Inventário de Obra</h1>
     <div class="num" id="hObra"></div>
   </div>
 </header>
@@ -467,10 +467,47 @@
     };
   }
 
+  // v3.98.0: fluxo standalone do MÓDULO Inventário de Obra — sem ?obra na URL,
+  // a própria tela seleciona a obra e inicia/abre o inventário dela. O módulo é
+  // independente da Entrega de Obra (sobras são só uma fonte OPCIONAL de itens).
+  function renderSelecaoObra(){
+    document.getElementById('hObra').textContent = 'Selecione a obra';
+    var app = document.getElementById('app');
+    app.innerHTML = '<div class="card"><h2>Iniciar / abrir inventário</h2>' +
+      '<p class="muted">Relatório de inventário próprio por obra: registre o que a obra <b>já tem</b> e o que for <b>entrando</b> depois da abertura — nota fiscal (XML/PDF/foto), lançamento manual e, se quiser, importação das sobras de uma Entrega. Cada obra tem o seu.</p>' +
+      '<label>Obra</label><select id="selObra"><option value="">Carregando obras…</option></select>' +
+      '<div class="btn-row"><button class="btn btn-primary" id="bIniciar" disabled>▶ Iniciar / abrir inventário</button></div></div>';
+    fetch('/api/obras', {credentials:'include'}).then(function(r){
+      if(r.status===401){ location.href='/login?next='+encodeURIComponent(location.pathname+location.search); throw new Error('não autenticado'); }
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
+    }).then(function(obras){
+      var sel = document.getElementById('selObra');
+      var btn = document.getElementById('bIniciar');
+      if(!Array.isArray(obras) || !obras.length){
+        sel.innerHTML = '<option value="">Nenhuma obra cadastrada — crie a obra no painel de Obras</option>';
+        return;
+      }
+      sel.innerHTML = '<option value="">— escolha a obra —</option>' + obras.map(function(o){
+        var rotulo = (o.nome || ('Obra #'+o.id)) + (o.cliente ? ' — '+o.cliente : '') + (o.status ? ' ('+o.status+')' : '');
+        return '<option value="'+esc(o.id)+'" data-nome="'+esc(o.nome||'')+'">'+esc(rotulo)+'</option>';
+      }).join('');
+      sel.onchange = function(){ btn.disabled = !sel.value; };
+      btn.onclick = function(){
+        if(!sel.value) return;
+        var nome = sel.options[sel.selectedIndex].getAttribute('data-nome') || '';
+        location.href = '/inventario-obra.html?obra='+encodeURIComponent(sel.value)+'&obra_nome='+encodeURIComponent(nome);
+      };
+    }).catch(function(e){
+      var sel = document.getElementById('selObra');
+      if(sel) sel.innerHTML = '<option value="">Erro ao carregar obras: '+esc(e.message)+'</option>';
+    });
+  }
+
   // ---- boot ----
   document.getElementById('hBack').onclick = function(){ location.href = '/obras.html'; };
   if(!S.obraId){
-    document.getElementById('app').innerHTML = '<div class="card"><h2>Obra não informada</h2><p class="muted">Abra o inventário pelo botão 📦 no card da obra (painel de Obras).</p></div>';
+    renderSelecaoObra(); // v3.98.0: lançador standalone (seletor de obra)
   } else {
     document.getElementById('hObra').textContent = S.obraNome ? S.obraNome : ('Obra #' + S.obraId);
     carregar();

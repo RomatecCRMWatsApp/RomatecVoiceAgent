@@ -309,7 +309,7 @@
     var idsOriginais=(state.doc.materiais_sobra||[]).map(function(m){return m.id;});
     var app=document.getElementById('app');
     function draw(){
-      app.innerHTML='<div class="card"><h2>4 · Materiais que sobraram</h2><p class="muted">As sobras alimentam o 📦 Inventário de Materiais da obra vinculada (importe pela tela do Inventário se ainda não vinculou). A foto do material recebe o mesmo carimbo GPS das demais.</p><div id="gpsStatus" class="muted" style="margin:4px 0"></div><div id="matList"></div>'
+      app.innerHTML='<div class="card"><h2>4 · Materiais que sobraram</h2><p class="muted">As sobras podem alimentar o 🗃️ Inventário de Obra (módulo próprio — importe pela tela do Inventário, ação opcional). A foto do material recebe o mesmo carimbo GPS das demais.</p><div id="gpsStatus" class="muted" style="margin:4px 0"></div><div id="matList"></div>'
         +'<button class="btn btn-ghost" id="add" style="margin-top:8px">+ Adicionar material</button>'
         +'<div class="btn-row"><button class="btn btn-ghost" id="back">← Voltar</button><button class="btn btn-primary" id="save">Salvar e continuar →</button></div></div>';
       var list=document.getElementById('matList');

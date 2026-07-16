@@ -156,6 +156,6 @@ describe('Wire-up da ponte sobras→inventário (fonte) — v3.97.0', () => {
     expect(PAGE_INV).toContain('modalSobras');
     expect(PAGE_INV).toMatch(/importar-sobras/);
     expect(PAGE_ENTREGA).not.toContain('não movimenta estoque nesta fase');
-    expect(PAGE_ENTREGA).toContain('Inventário de Materiais');
+    expect(PAGE_ENTREGA).toContain('Inventário de Obra'); // v3.98.0: módulo próprio
   });
 });
