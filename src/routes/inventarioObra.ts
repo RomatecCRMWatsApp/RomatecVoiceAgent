@@ -185,6 +185,7 @@ router.get('/notas/:notaId', requireAuth, async (req: Request, res: Response) =>
 });
 
 // Corrigir itens extraídos com baixa confiança e consolidar a nota.
+// v3.103.0: valores TOTAIS editáveis (item e nota — desconto concedido) + cabeçalho.
 router.patch('/notas/:notaId/revisar', requireAuth, async (req: Request, res: Response) => {
   try {
     const notaId = Number(req.params.notaId);
@@ -197,11 +198,33 @@ router.patch('/notas/:notaId/revisar', requireAuth, async (req: Request, res: Re
         unidade_medida: it.unidade_medida,
         quantidade_comprada: numOrNull(it.quantidade_comprada) ?? undefined,
         valor_unitario: it.valor_unitario !== undefined ? numOrNull(it.valor_unitario) : undefined,
+        valor_total: it.valor_total !== undefined ? numOrNull(it.valor_total) : undefined,
+      });
+    }
+    const nb = req.body?.nota;
+    if (nb && typeof nb === 'object') {
+      await repo.atualizarNotaRevisao(notaId, {
+        numero_nota: nb.numero_nota !== undefined ? (String(nb.numero_nota).trim() || null) : undefined,
+        fornecedor_nome: nb.fornecedor_nome !== undefined ? (String(nb.fornecedor_nome).trim() || null) : undefined,
+        data_emissao: nb.data_emissao !== undefined ? (String(nb.data_emissao).slice(0, 10) || null) : undefined,
+        valor_total: nb.valor_total !== undefined ? numOrNull(nb.valor_total) : undefined,
       });
     }
     await repo.marcarNotaRevisada(notaId);
     res.json({ ok: true });
   } catch (err) { res.status(422).json({ error: (err as Error).message }); }
+});
+
+// v3.103.0: arquivo ORIGINAL da nota (foto/PDF/XML) — pra conferir na revisão.
+router.get('/notas/:notaId/arquivo', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const nota = await repo.obterNota(Number(req.params.notaId), true);
+    if (!nota) return res.status(404).json({ error: 'Nota não encontrada.' });
+    const b64 = String(nota.arquivo_b64 ?? '').replace(/^data:[^,]+,/, '');
+    res.setHeader('Content-Type', String(nota.arquivo_mime || 'application/octet-stream'));
+    res.setHeader('Content-Disposition', `inline; filename="${String(nota.arquivo_nome || 'nota')}"`);
+    res.send(Buffer.from(b64, 'base64'));
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
 // ── Itens ────────────────────────────────────────────────────────────────────
@@ -242,6 +265,7 @@ router.patch('/itens/:itemId', requireAuth, async (req: Request, res: Response) 
       descricao: b.descricao, codigo_produto: b.codigo_produto, unidade_medida: b.unidade_medida,
       quantidade_comprada: numOrNull(b.quantidade_comprada) ?? undefined,
       valor_unitario: b.valor_unitario !== undefined ? numOrNull(b.valor_unitario) : undefined,
+      valor_total: b.valor_total !== undefined ? numOrNull(b.valor_total) : undefined, // v3.103.0
       observacoes: b.observacoes,
     });
     res.json({ ok: true });

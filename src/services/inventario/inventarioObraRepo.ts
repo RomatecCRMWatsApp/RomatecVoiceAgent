@@ -224,16 +224,22 @@ export async function moverItemEtapa(itemId: number, etapaId: number | null): Pr
   await pool.execute(`UPDATE obra_inventario_itens SET etapa_id = ? WHERE id = ?`, [etapaId, itemId]);
 }
 
-/** Edita item MANUAL (regra: origem nota_fiscal não permite editar o comprado). */
+/**
+ * Edita item. Regra: quantidade comprada de item de nota fiscal só é editável
+ * enquanto a extração não foi conferida (confianca_baixa=1) — depois disso a
+ * nota é fonte de verdade do comprado. Valores (unitário/total) são SEMPRE
+ * editáveis (v3.103.0 — desconto concedido na negociação).
+ */
 export async function atualizarItemManual(itemId: number, input: {
   descricao?: string; codigo_produto?: string | null; unidade_medida?: string;
-  quantidade_comprada?: number; valor_unitario?: number | null; observacoes?: string | null;
+  quantidade_comprada?: number; valor_unitario?: number | null;
+  valor_total?: number | null; observacoes?: string | null;
 }): Promise<void> {
   const item = await obterItem(itemId);
   if (!item) throw new Error('Item nao encontrado');
   const mudaComprado = input.quantidade_comprada != null;
-  if (mudaComprado && item.origem === 'nota_fiscal') {
-    throw new Error('Item de nota fiscal: a quantidade comprada vem da nota e nao pode ser editada.');
+  if (mudaComprado && item.origem === 'nota_fiscal' && Number(item.confianca_baixa) !== 1) {
+    throw new Error('Item de nota fiscal ja conferida: a quantidade comprada vem da nota e nao pode ser editada.');
   }
   if (mudaComprado && Number(input.quantidade_comprada) < Number(item.quantidade_utilizada) - EPS) {
     throw new Error(`Quantidade comprada (${input.quantidade_comprada}) nao pode ficar menor que a ja utilizada (${item.quantidade_utilizada}).`);
@@ -247,6 +253,7 @@ export async function atualizarItemManual(itemId: number, input: {
     sets.push('status_utilizacao = ?'); vals.push(statusPorSaldo(Number(input.quantidade_comprada), Number(item.quantidade_utilizada)));
   }
   if (input.valor_unitario !== undefined) { sets.push('valor_unitario = ?'); vals.push(input.valor_unitario); }
+  if (input.valor_total !== undefined) { sets.push('valor_total = ?'); vals.push(input.valor_total); } // v3.103.0
   if (input.observacoes !== undefined) { sets.push('observacoes = ?'); vals.push(input.observacoes); }
   if (!sets.length) return;
   vals.push(itemId);
@@ -262,6 +269,8 @@ export async function atualizarItemManual(itemId: number, input: {
 export async function atualizarItemRevisao(itemId: number, notaId: number, input: {
   descricao?: string; codigo_produto?: string | null; unidade_medida?: string;
   quantidade_comprada?: number; valor_unitario?: number | null;
+  /** v3.103.0: total do ITEM editável — desconto concedido faz total ≠ qtd × unit. */
+  valor_total?: number | null;
 }): Promise<void> {
   const item = await obterItem(itemId);
   if (!item) throw new Error(`Item ${itemId} nao encontrado`);
@@ -280,8 +289,29 @@ export async function atualizarItemRevisao(itemId: number, notaId: number, input
     sets.push('status_utilizacao = ?'); vals.push(statusPorSaldo(Number(input.quantidade_comprada), Number(item.quantidade_utilizada)));
   }
   if (input.valor_unitario !== undefined) { sets.push('valor_unitario = ?'); vals.push(input.valor_unitario); }
+  if (input.valor_total !== undefined) { sets.push('valor_total = ?'); vals.push(input.valor_total); }
   vals.push(itemId);
   await pool.execute(`UPDATE obra_inventario_itens SET ${sets.join(', ')} WHERE id = ?`, vals);
+}
+
+/**
+ * v3.103.0 — Cabeçalho da NOTA editável na revisão (nota de venda manuscrita:
+ * fornecedor/nº/data saem fracos do OCR, e o TOTAL pode ser o negociado com
+ * desconto — o que vale é o que o José confirmar).
+ */
+export async function atualizarNotaRevisao(notaId: number, input: {
+  numero_nota?: string | null; fornecedor_nome?: string | null;
+  data_emissao?: string | null; valor_total?: number | null;
+}): Promise<void> {
+  const sets: string[] = [];
+  const vals: Array<string | number | null> = [];
+  if (input.numero_nota !== undefined) { sets.push('numero_nota = ?'); vals.push(input.numero_nota); }
+  if (input.fornecedor_nome !== undefined) { sets.push('fornecedor_nome = ?'); vals.push(input.fornecedor_nome); }
+  if (input.data_emissao !== undefined) { sets.push('data_emissao = ?'); vals.push(input.data_emissao); }
+  if (input.valor_total !== undefined) { sets.push('valor_total = ?'); vals.push(input.valor_total); }
+  if (!sets.length) return;
+  vals.push(notaId);
+  await pool.execute(`UPDATE obra_inventario_notas SET ${sets.join(', ')} WHERE id = ?`, vals);
 }
 
 /** Consolida a nota após revisão: itens deixam de ser baixa-confiança. */

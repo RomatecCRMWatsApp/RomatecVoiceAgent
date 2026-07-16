@@ -164,7 +164,7 @@
       var origemPill = i.origem==='sobra_entrega'
         ? ' <span class="pill" style="background:#e8f4ea;color:#2e7d32">♻ sobra de entrega</span>' : '';
       return '<div class="item" data-item="'+i.id+'">' +
-        '<div class="d">'+esc(i.descricao)+' '+stPill+origemPill+(Number(i.confianca_baixa)?' <span class="flag">⚠ conferir extração</span>':'')+'</div>' +
+        '<div class="d">'+esc(i.descricao)+' '+stPill+origemPill+(Number(i.confianca_baixa)?(i.nota_id?' <span class="flag" data-revisar="'+i.nota_id+'" style="cursor:pointer;text-decoration:underline;" title="Reabrir a conferência da nota">⚠ conferir extração</span>':' <span class="flag">⚠ conferir extração</span>'):'')+'</div>' +
         '<div class="meta">Comprado: <b>'+qn(i.quantidade_comprada)+' '+esc(i.unidade_medida)+'</b> · Utilizado: <b>'+qn(i.quantidade_utilizada)+'</b> · Saldo: <b>'+qn(i.quantidade_saldo)+'</b>' +
           (i.valor_unitario!=null ? ' · '+brl(i.valor_unitario)+'/'+esc(i.unidade_medida) : '') +
           (i.fotos_count ? ' · 📷 '+i.fotos_count : '') + '</div>' +
@@ -173,6 +173,7 @@
           '<button class="btn btn-primary btn-sm" data-usar="'+i.id+'">✔ Utilizar</button>' +
           '<button class="btn btn-ghost btn-sm" data-fotos="'+i.id+'">📷 Fotos</button>' +
           '<button class="btn btn-ghost btn-sm" data-hist="'+i.id+'">🕓 Histórico</button>' +
+          '<button class="btn btn-ghost btn-sm" data-editar="'+i.id+'">✎ Editar</button>' +
           '<button class="btn btn-ghost btn-sm" data-mover="'+i.id+'">↔ Etapa</button>' +
         '</div>' +
       '</div>';
@@ -207,6 +208,8 @@
     app.querySelectorAll('[data-fotos]').forEach(function(b){ b.onclick=function(){ modalFotos(parseInt(b.dataset.fotos,10)); }; });
     app.querySelectorAll('[data-hist]').forEach(function(b){ b.onclick=function(){ modalHistorico(parseInt(b.dataset.hist,10)); }; });
     app.querySelectorAll('[data-mover]').forEach(function(b){ b.onclick=function(){ modalMover(parseInt(b.dataset.mover,10)); }; });
+    app.querySelectorAll('[data-editar]').forEach(function(b){ b.onclick=function(){ modalEditarItem(parseInt(b.dataset.editar,10)); }; });
+    app.querySelectorAll('[data-revisar]').forEach(function(el){ el.onclick=function(){ revisarNota(parseInt(el.dataset.revisar,10)); }; });
   }
 
   function selEtapas(id, incluirVazia){
@@ -268,7 +271,7 @@
 
   function modalUpload(){
     modal('<h2>Subir nota fiscal</h2>' +
-      '<p class="muted">XML da NFe (leitura exata), PDF do DANFE ou foto da nota (leitura por IA). Os itens são lançados automaticamente.</p>' +
+      '<p class="muted">XML da NFe (leitura exata), PDF do DANFE ou FOTO da nota — inclusive <b>nota de venda manuscrita</b> de madeireira/depósito (leitura por IA; manuscrita sempre passa pela sua conferência antes de valer). Os itens são lançados automaticamente.</p>' +
       '<label>Etapa dos materiais</label>' + selEtapas('upEtapa', true) +
       '<label>Arquivo</label><input type="file" id="upArq" accept=".xml,application/xml,text/xml,application/pdf,image/*">' +
       '<div class="btn-row"><button class="btn btn-primary" id="upEnviar">Enviar e lançar itens</button><button class="btn btn-ghost" onclick="invFecharModal()">Cancelar</button></div>' +
@@ -294,19 +297,32 @@
 
   function revisarNota(notaId){
     api('/notas/'+notaId).then(function(r){
-      var itens = r.nota.itens || [];
+      var nota = r.nota || {};
+      var itens = nota.itens || [];
+      // v3.103.0: coluna V.TOTAL editável (desconto concedido faz total ≠ qtd×unit)
       var linhas = itens.map(function(i){
         return '<tr data-id="'+i.id+'">' +
           '<td><input value="'+esc(i.descricao)+'" data-f="descricao"></td>' +
-          '<td style="width:64px"><input value="'+esc(i.unidade_medida)+'" data-f="unidade_medida"></td>' +
-          '<td style="width:84px"><input type="number" step="0.001" value="'+i.quantidade_comprada+'" data-f="quantidade_comprada"></td>' +
-          '<td style="width:90px"><input type="number" step="0.01" value="'+(i.valor_unitario!=null?i.valor_unitario:'')+'" data-f="valor_unitario"></td>' +
+          '<td style="width:56px"><input value="'+esc(i.unidade_medida)+'" data-f="unidade_medida"></td>' +
+          '<td style="width:76px"><input type="number" step="0.001" value="'+i.quantidade_comprada+'" data-f="quantidade_comprada"></td>' +
+          '<td style="width:82px"><input type="number" step="0.01" value="'+(i.valor_unitario!=null?i.valor_unitario:'')+'" data-f="valor_unitario"></td>' +
+          '<td style="width:88px"><input type="number" step="0.01" value="'+(i.valor_total!=null?i.valor_total:'')+'" data-f="valor_total"></td>' +
         '</tr>';
       }).join('');
-      modal('<h2>Revisar itens extraídos</h2>' +
-        '<p class="muted">A leitura teve confiança baixa em alguns campos. Confira/corrija e confirme.</p>' +
-        '<table class="rev"><thead><tr><th>Descrição</th><th>Un.</th><th>Qtd</th><th>V.Unit</th></tr></thead><tbody>'+linhas+'</tbody></table>' +
-        '<div class="btn-row"><button class="btn btn-primary" id="revOk">Confirmar itens</button><button class="btn btn-ghost" onclick="invFecharModal()">Depois</button></div>');
+      var dataNota = nota.data_emissao ? String(nota.data_emissao).slice(0,10) : '';
+      modal('<h2>Revisar nota extraída</h2>' +
+        '<p class="muted">Confira contra o documento — tudo editável, inclusive os valores (desconto concedido). ' +
+        '<a href="'+API+'/notas/'+notaId+'/arquivo" target="_blank" style="color:var(--green);font-weight:700;">📄 Ver nota original</a></p>' +
+        '<div class="row2">' +
+          '<div><label>Fornecedor / loja</label><input id="rvForn" value="'+esc(nota.fornecedor_nome||'')+'"></div>' +
+          '<div><label>Nº da nota</label><input id="rvNum" value="'+esc(nota.numero_nota||'')+'"></div>' +
+        '</div>' +
+        '<div class="row2">' +
+          '<div><label>Data</label><input id="rvData" type="date" value="'+esc(dataNota)+'"></div>' +
+          '<div><label>VALOR TOTAL da nota (R$ — o negociado)</label><input id="rvTotal" type="number" step="0.01" value="'+(nota.valor_total!=null?nota.valor_total:'')+'"></div>' +
+        '</div>' +
+        '<table class="rev" style="margin-top:10px"><thead><tr><th>Descrição</th><th>Un.</th><th>Qtd</th><th>V.Unit</th><th>V.Total</th></tr></thead><tbody>'+linhas+'</tbody></table>' +
+        '<div class="btn-row"><button class="btn btn-primary" id="revOk">Confirmar nota</button><button class="btn btn-ghost" onclick="invFecharModal()">Depois</button></div>');
       document.getElementById('revOk').onclick = function(){
         var payload = [];
         document.querySelectorAll('#modalBox tbody tr').forEach(function(tr){
@@ -314,7 +330,15 @@
           tr.querySelectorAll('input').forEach(function(inp){ o[inp.dataset.f] = inp.value; });
           payload.push(o);
         });
-        api('/notas/'+notaId+'/revisar', {method:'PATCH', body:{itens:payload}})
+        api('/notas/'+notaId+'/revisar', {method:'PATCH', body:{
+          itens: payload,
+          nota: {
+            fornecedor_nome: document.getElementById('rvForn').value,
+            numero_nota: document.getElementById('rvNum').value,
+            data_emissao: document.getElementById('rvData').value || null,
+            valor_total: document.getElementById('rvTotal').value || null,
+          },
+        }})
           .then(function(){ fecharModal(); toast('Nota consolidada.'); carregar(); })
           .catch(function(e){ toast('Erro: '+e.message, 4500); });
       };
@@ -445,6 +469,37 @@
       api('/itens/'+itemId+'/etapa', {method:'PATCH', body:{etapa_id: document.getElementById('mvEtapa').value || null}})
         .then(function(){ fecharModal(); toast('Item movido (histórico preservado).'); carregar(); })
         .catch(function(e){ toast('Erro: '+e.message, 4000); });
+    };
+  }
+
+  // v3.103.0: editar item — VALORES sempre editáveis (desconto concedido);
+  // quantidade só se manual OU extração ainda não conferida (confianca_baixa).
+  function modalEditarItem(itemId){
+    var item = S.itens.find(function(i){return i.id===itemId;}); if(!item) return;
+    var travaQtd = item.origem === 'nota_fiscal' && Number(item.confianca_baixa) !== 1;
+    modal('<h2>Editar — '+esc(item.descricao)+'</h2>' +
+      '<label>Descrição</label><input id="edDesc" value="'+esc(item.descricao)+'">' +
+      '<div class="row3">' +
+        '<div><label>Unidade</label><input id="edUn" value="'+esc(item.unidade_medida)+'"></div>' +
+        '<div><label>Quantidade'+(travaQtd?' (da nota)':'')+'</label><input id="edQtd" type="number" step="0.001" value="'+item.quantidade_comprada+'"'+(travaQtd?' disabled':'')+'></div>' +
+        '<div><label>V. unit. (R$)</label><input id="edVu" type="number" step="0.01" value="'+(item.valor_unitario!=null?item.valor_unitario:'')+'"></div>' +
+      '</div>' +
+      '<label>V. TOTAL do item (R$ — edite em caso de desconto concedido)</label><input id="edVt" type="number" step="0.01" value="'+(item.valor_total!=null?item.valor_total:'')+'">' +
+      '<label>Observações</label><input id="edObs" value="'+esc(item.observacoes||'')+'">' +
+      (travaQtd?'<p class="muted" style="font-size:11px">Quantidade travada: item de nota já conferida (a nota é a fonte do comprado).</p>':'') +
+      '<div class="btn-row"><button class="btn btn-primary" id="edSalvar">Salvar</button><button class="btn btn-ghost" onclick="invFecharModal()">Cancelar</button></div>');
+    document.getElementById('edSalvar').onclick = function(){
+      var body = {
+        descricao: document.getElementById('edDesc').value,
+        unidade_medida: document.getElementById('edUn').value || 'UN',
+        valor_unitario: document.getElementById('edVu').value || null,
+        valor_total: document.getElementById('edVt').value || null,
+        observacoes: document.getElementById('edObs').value || null,
+      };
+      if(!travaQtd) body.quantidade_comprada = document.getElementById('edQtd').value;
+      api('/itens/'+itemId, {method:'PATCH', body: body})
+        .then(function(){ fecharModal(); toast('Item atualizado.'); carregar(); })
+        .catch(function(e){ toast('Erro: '+e.message, 4500); });
     };
   }
 

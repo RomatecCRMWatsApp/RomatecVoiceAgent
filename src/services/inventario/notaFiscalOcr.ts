@@ -18,13 +18,20 @@ function client(): Anthropic {
   return _client;
 }
 
-const PROMPT = `Voce e um extrator de dados de NOTA FISCAL / DANFE brasileira de compra de materiais de construcao.
-Analise o documento e devolva APENAS JSON puro (sem markdown, sem prosa):
+// v3.103.0: prompt ampliado pro MUNDO REAL da obra — alem de NF/DANFE, aceita
+// NOTA DE VENDA / PEDIDO / RECIBO MANUSCRITO de loja de material (madeireira,
+// deposito etc.). Manuscrito NUNCA sai com confianca "alta" → cai na revisao,
+// onde TODOS os campos (inclusive valores, p/ desconto concedido) sao editaveis.
+const PROMPT = `Voce e um extrator de dados de documentos de COMPRA DE MATERIAL de construcao no Brasil.
+O documento pode ser: NF-e/DANFE impressa, cupom fiscal, OU uma NOTA DE VENDA/PEDIDO/RECIBO MANUSCRITO
+de loja (madeireira, deposito, ferragista) — letra de mao, tabela com QUANT/UNID/DISCRIMINACAO/UNITARIO/TOTAL.
+Analise e devolva APENAS JSON puro (sem markdown, sem prosa):
 
 {
-  "numero_nota": "numero da NF (so digitos) ou null",
-  "chave_acesso": "44 digitos da chave de acesso ou null",
-  "fornecedor_nome": "RAZAO SOCIAL DO EMITENTE (max 200 chars) ou null",
+  "tipo_documento": "nfe" | "danfe" | "cupom" | "nota_venda_manuscrita" | "recibo",
+  "numero_nota": "numero da NF/nota (so digitos) ou null",
+  "chave_acesso": "44 digitos da chave de acesso ou null (manuscrita nao tem)",
+  "fornecedor_nome": "NOME DA LOJA/EMITENTE do cabecalho impresso ou escrito (max 200) ou null",
   "fornecedor_cnpj": "00.000.000/0000-00 ou null",
   "data_emissao": "YYYY-MM-DD ou null",
   "valor_total": 9999.99,
@@ -35,11 +42,13 @@ Analise o documento e devolva APENAS JSON puro (sem markdown, sem prosa):
 }
 
 REGRAS CRITICAS:
-- Se o documento nao parecer nota fiscal/DANFE, retorne { "erro": "documento nao parece nota fiscal" }.
-- Valores: decimais com ponto (32.50, nunca "32,50"). Quantidade pode ter fracao.
-- unidade: use a da nota (coluna UN/UNID); se ilegivel, "UN".
-- NAO ALUCINE: item ilegivel => pule; numero ilegivel => null. Melhor faltar que inventar.
-- confianca: "alta" = tabela de itens toda legivel; "media" = 1-2 campos duvidosos; "baixa" = leitura dificil.
+- Se a imagem NAO for documento de compra nenhum (paisagem, selfie, print aleatorio), retorne { "erro": "imagem nao parece documento de compra" }. NOTA MANUSCRITA E VALIDA — nao rejeite por ser a mao.
+- MANUSCRITO: transcreva a descricao como esta (ex: "6X30", "15X15" sao bitolas de madeira — mantenha; unidade "PC"/"PÇ" = PC). Numeros de letra de mao: se ambiguo (1 vs 7, 5 vs J), escolha o mais provavel e rebaixe a confianca.
+- valor_total DA NOTA: use o TOTAL ESCRITO no campo total (pode ser NEGOCIADO/menor que a soma dos itens por desconto concedido — NAO "corrija" a diferenca; linhas soltas de subtotal/desconto/mao de obra tambem viram itens quando tem valor).
+- Item so com TOTAL (sem unitario): preencha valor_total e deixe valor_unitario null (nao invente a divisao).
+- Valores: decimais com ponto (32.50). Quantidade pode ter fracao. unidade ilegivel => "UN".
+- NAO ALUCINE: item ilegivel => pule; campo ilegivel => null. Melhor faltar que inventar.
+- confianca: "alta" SO para documento IMPRESSO totalmente legivel. Manuscrito => NO MAXIMO "media" (sempre revisao humana). Leitura dificil => "baixa".
 
 Responda APENAS com o JSON.`;
 
@@ -53,6 +62,7 @@ export interface NotaOcrItem {
 }
 
 export interface NotaOcrResult {
+  tipo_documento?: 'nfe' | 'danfe' | 'cupom' | 'nota_venda_manuscrita' | 'recibo';
   numero_nota?: string | null;
   chave_acesso?: string | null;
   fornecedor_nome?: string | null;
@@ -116,7 +126,11 @@ export async function extrairNotaFiscal(input: {
     throw new Error(`JSON invalido da extracao: ${(err as Error).message}`);
   }
   if (parsed.erro) throw new Error(parsed.erro);
-  parsed.itens = (parsed.itens ?? []).filter(i => i.descricao && Number(i.quantidade) > 0);
+  // v3.103.0: linha manuscrita pode vir SO com o total (ex: "MAO DE OBRA — 1.700")
+  // → mantem com quantidade 1 em vez de descartar.
+  parsed.itens = (parsed.itens ?? [])
+    .filter(i => i.descricao && (Number(i.quantidade) > 0 || Number(i.valor_total) > 0))
+    .map(i => ({ ...i, quantidade: Number(i.quantidade) > 0 ? Number(i.quantidade) : 1 }));
   if (!parsed.itens.length) throw new Error('Nenhum item legivel na nota. Revise/lance manualmente.');
   return parsed;
 }
