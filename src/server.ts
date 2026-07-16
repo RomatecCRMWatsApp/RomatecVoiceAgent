@@ -76,6 +76,7 @@ import vtoChecklistRouter from './routes/vtoChecklist'; // v3.78.0 — VTO Check
 import { buscarPorHash as buscarChecklistPorHash } from './services/vtoChecklistRepo'; // v3.78.0 — validação pública /v/:hash
 import { gerarChecklistPdf } from './services/vtoChecklistPdf'; // v3.78.0
 import obrasEntregaRouter from './routes/obrasEntrega'; // v3.81.0 — Entrega de Obra (RE)
+import inventarioObraRouter from './routes/inventarioObra'; // v3.97.0 — Inventário de Materiais por Obra
 import obrasEntregaPublicaRouter from './routes/obrasEntregaPublica'; // v3.81.0 — página pública /v/entrega/:hash
 import maoObraAvulsaRouter from './routes/maoObraAvulsa'; // v3.92.0 — Pagamento a Mão de Obra Avulsa
 import galeriaExportRouter from './routes/galeriaExport'; // Feature 04 — export Galeria p/ AvalieImob (X-API-Key)
@@ -200,6 +201,7 @@ app.use('/api/wifi', wifiLeadRoutes); // v3.61.0 — Captive Portal / Captação
 app.use('/api/propostas/reforma-piso', reformaPisoRouter); // v3.67.0 — Proposta de Reforma (Piso Sobreposto)
 app.use('/api/gestao-obra/vto-checklist', vtoChecklistRouter); // v3.78.0 — VTO Checklist de Atividades
 app.use('/api/gestao-obra/entrega', obrasEntregaRouter); // v3.81.0 — Entrega de Obra (RE)
+app.use('/api/gestao-obra/inventario', inventarioObraRouter); // v3.97.0 — Inventário de Materiais por Obra
 app.use('/v/entrega', obrasEntregaPublicaRouter); // v3.81.0 — página pública de entrega (fora da auth)
 app.use('/api/mao-obra-avulsa', maoObraAvulsaRouter); // v3.92.0 — Pagamento a Mão de Obra Avulsa
 // v3.78.0: VTO Checklist de Atividades (Gestão de Obra)
@@ -211,6 +213,11 @@ void (async () => {
 void (async () => {
   try { const m = await import('./database/migrations-obras-entregas'); await m.runObrasEntregasMigrations(); }
   catch (err) { console.error('[obras-entregas-migrations] FALHA fatal:', err); }
+})();
+// v3.97.0: Inventário de Materiais por Obra
+void (async () => {
+  try { const m = await import('./database/migrations-inventario-obra'); await m.runInventarioObraMigrations(); }
+  catch (err) { console.error('[inventario-migrations] FALHA fatal:', err); }
 })();
 // v3.92.1: Pagamento a Mão de Obra Avulsa — a migration roda ENCADEADA após a
 // signing (que faz MODIFY do enum recibos.tipo). Ver bloco runSigningMigrations.

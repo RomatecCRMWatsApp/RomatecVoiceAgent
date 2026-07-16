@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Inventário de Materiais — Romatec</title>
+<style>
+  :root{
+    --green:#0C3320;--green2:#14472B;--gold:#C9A84C;--gold-soft:#E3D19A;
+    --paper:#f2f0e9;--ink:#1C1C18;--muted:#6A6656;--line:#D8D3C4;--danger:#ef4444;--ok:#10b981;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--paper);color:var(--ink);-webkit-text-size-adjust:100%}
+  header{background:linear-gradient(135deg,var(--green),var(--green2));color:#fff;padding:16px 18px;position:sticky;top:0;z-index:10}
+  header .kick{color:var(--gold-soft);letter-spacing:2px;text-transform:uppercase;font-size:10px;margin:0}
+  header h1{margin:2px 0 0;font-size:19px}
+  header .num{color:var(--gold);font-weight:700;font-size:13px;margin-top:2px}
+  .wrap{max-width:860px;margin:0 auto;padding:16px}
+  .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,.05)}
+  h2{color:var(--green);font-size:16px;margin:0 0 10px;border-bottom:2px solid var(--gold);padding-bottom:6px}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;font-weight:600}
+  input,textarea,select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:15px;font-family:inherit;background:#fff}
+  .btn{border:0;border-radius:9px;padding:12px 16px;font-size:15px;font-weight:700;cursor:pointer}
+  .btn-primary{background:var(--green);color:#fff}
+  .btn-gold{background:var(--gold);color:var(--green)}
+  .btn-ghost{background:#fff;color:var(--green);border:1px solid var(--gold)}
+  .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger);padding:6px 10px;font-size:12px}
+  .btn-sm{padding:7px 10px;font-size:12px}
+  .btn-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .kpi{background:#fff;border-top:3px solid var(--green2);border-radius:10px;padding:10px;text-align:center;box-shadow:0 1px 5px rgba(0,0,0,.05)}
+  .kpi .v{font-weight:800;color:var(--green);font-size:15px}
+  .kpi .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  .etapa-card{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px;background:#fff;cursor:pointer}
+  .etapa-card:hover{border-color:var(--gold)}
+  .etapa-card .t{font-weight:700;color:var(--green)}
+  .etapa-card .m{font-size:12px;color:var(--muted);margin-top:2px}
+  .bar{height:8px;background:#eceade;border-radius:6px;overflow:hidden;margin-top:8px}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--green2),var(--gold));border-radius:6px}
+  .item{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px;background:#fff}
+  .item .d{font-weight:700;color:var(--green)}
+  .item .meta{font-size:12px;color:var(--muted);margin:3px 0}
+  .item .flag{color:#b45309;font-size:11px;font-weight:700}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .row3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px}
+  .muted{color:var(--muted);font-size:13px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+  .thumb{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+  .thumb img{width:100%;height:96px;object-fit:cover;display:block}
+  .thumb .cap{font-size:10px;color:var(--muted);padding:3px 5px;background:#faf9f5}
+  .thumb .rm{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;border:0;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:60;opacity:0;transition:opacity .2s;max-width:90%}
+  .toast.show{opacity:1}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:50;display:none;align-items:flex-start;justify-content:center;padding:24px 12px;overflow:auto}
+  .modal-bg.open{display:flex}
+  .modal{background:#fff;border-radius:14px;max-width:560px;width:100%;padding:18px}
+  .pill{display:inline-block;border-radius:12px;padding:2px 10px;font-size:11px;font-weight:700}
+  .pill.ok{background:rgba(16,185,129,.15);color:#0f7a52}
+  .pill.warn{background:rgba(217,119,6,.14);color:#b45309}
+  .pill.err{background:rgba(239,68,68,.12);color:#b91c1c}
+  .hidden{display:none}
+  table.rev{width:100%;border-collapse:collapse;font-size:12px}
+  table.rev th{background:var(--green2);color:#fff;padding:5px 6px;text-align:left}
+  table.rev td{border-bottom:1px solid var(--line);padding:4px}
+  table.rev input{padding:5px 6px;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <button id="hBack" title="Voltar" style="position:absolute;left:14px;top:14px;background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:6px 12px;font-size:14px;font-weight:600;cursor:pointer">‹ Voltar</button>
+  <div style="padding-left:64px">
+    <p class="kick">Romatec — Gestão de Obras</p>
+    <h1>📦 Inventário de Materiais</h1>
+    <div class="num" id="hObra"></div>
+  </div>
+</header>
+
+<div class="wrap" id="app"></div>
+<div class="toast" id="toast"></div>
+<div class="modal-bg" id="modalBg"><div class="modal" id="modalBox"></div></div>
+
+<script>
+(function(){
+  'use strict';
+  var API = '/api/gestao-obra/inventario';
+  var qs = new URLSearchParams(location.search);
+  var S = {
+    obraId: parseInt(qs.get('obra'), 10) || 0,
+    obraNome: qs.get('obra_nome') || '',
+    etapas: [], itens: [], resumo: null,
+    filtroEtapa: null, // null = todas
+  };
+
+  // ---- infra ----
+  function api(path, opts){
+    opts = opts || {}; opts.credentials = 'include';
+    opts.headers = opts.headers || {};
+    if(opts.body && typeof opts.body === 'object' && !(opts.body instanceof FormData)){
+      opts.headers['Content-Type']='application/json'; opts.body = JSON.stringify(opts.body);
+    }
+    return fetch(API + path, opts).then(function(r){
+      if(r.status===401){ location.href='/login?next='+encodeURIComponent(location.pathname+location.search); throw new Error('não autenticado'); }
+      return r.json().then(function(j){ if(!r.ok) throw new Error(j.error || ('HTTP '+r.status)); return j; });
+    });
+  }
+  function toast(msg, ms){
+    var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast._t); toast._t = setTimeout(function(){ t.classList.remove('show'); }, ms || 2600);
+  }
+  function esc(s){ return String(s==null?'':s).replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
+  function brl(v){ return (Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+  function qn(v){ return (Number(v)||0).toLocaleString('pt-BR',{maximumFractionDigits:3}); }
+  function hoje(){ return new Date().toISOString().slice(0,10); }
+  function modal(html){ document.getElementById('modalBox').innerHTML = html; document.getElementById('modalBg').classList.add('open'); }
+  function fecharModal(){ document.getElementById('modalBg').classList.remove('open'); }
+  document.getElementById('modalBg').addEventListener('click', function(e){ if(e.target===this) fecharModal(); });
+  window.invFecharModal = fecharModal;
+
+  // ---- carregamento ----
+  function carregar(){
+    return Promise.all([
+      api('/' + S.obraId + '/resumo'),
+      api('/' + S.obraId + '/itens' + (S.filtroEtapa!=null ? '?etapa_id='+S.filtroEtapa : '')),
+    ]).then(function(r){
+      S.resumo = r[0].resumo; S.etapas = r[0].etapas; S.itens = r[1].itens;
+      render();
+    }).catch(function(e){ toast('Erro: ' + e.message, 4000); });
+  }
+
+  // ---- render ----
+  function render(){
+    var app = document.getElementById('app');
+    var etapaAtiva = S.filtroEtapa!=null ? S.etapas.find(function(e){return e.id===S.filtroEtapa;}) : null;
+    var kpis = S.resumo ? (
+      '<div class="kpis">' +
+      '<div class="kpi"><div class="v">'+brl(S.resumo.valor_comprado)+'</div><div class="l">Comprado</div></div>' +
+      '<div class="kpi"><div class="v">'+brl(S.resumo.valor_utilizado)+'</div><div class="l">Utilizado</div></div>' +
+      '<div class="kpi"><div class="v" style="color:#a2803a">'+brl(S.resumo.valor_saldo)+'</div><div class="l">Em obra</div></div>' +
+      '<div class="kpi"><div class="v">'+S.resumo.pct_utilizado+'%</div><div class="l">Consumo</div></div>' +
+      '</div>'
+    ) : '';
+
+    var etapasHtml = S.etapas.map(function(e){
+      var sel = S.filtroEtapa===e.id;
+      return '<div class="etapa-card" data-etapa="'+e.id+'" style="'+(sel?'border-color:var(--gold);background:#fbf7ea;':'')+'">' +
+        '<div class="t">'+esc(e.titulo)+' <span class="muted">('+e.itens_count+' itens)</span></div>' +
+        '<div class="m">'+brl(e.valor_comprado)+' comprado · '+brl(e.valor_saldo)+' em saldo · '+e.pct_utilizado+'% utilizado</div>' +
+        '<div class="bar"><i style="width:'+Math.min(100, e.pct_utilizado)+'%"></i></div>' +
+      '</div>';
+    }).join('') || '<div class="muted">Nenhuma etapa. Crie a primeira (ex.: Instalação Elétrica).</div>';
+
+    var itensHtml = S.itens.map(function(i){
+      var pct = Number(i.quantidade_comprada)>0 ? Math.round(Number(i.quantidade_utilizada)/Number(i.quantidade_comprada)*100) : 0;
+      var stPill = i.status_utilizacao==='total' ? '<span class="pill ok">consumido</span>'
+        : i.status_utilizacao==='parcial' ? '<span class="pill warn">parcial</span>'
+        : '<span class="pill" style="background:#eee;color:#555">não utilizado</span>';
+      // v3.97.0: item vindo das sobras da Entrega de Obra ganha selo de origem
+      var origemPill = i.origem==='sobra_entrega'
+        ? ' <span class="pill" style="background:#e8f4ea;color:#2e7d32">♻ sobra de entrega</span>' : '';
+      return '<div class="item" data-item="'+i.id+'">' +
+        '<div class="d">'+esc(i.descricao)+' '+stPill+origemPill+(Number(i.confianca_baixa)?' <span class="flag">⚠ conferir extração</span>':'')+'</div>' +
+        '<div class="meta">Comprado: <b>'+qn(i.quantidade_comprada)+' '+esc(i.unidade_medida)+'</b> · Utilizado: <b>'+qn(i.quantidade_utilizada)+'</b> · Saldo: <b>'+qn(i.quantidade_saldo)+'</b>' +
+          (i.valor_unitario!=null ? ' · '+brl(i.valor_unitario)+'/'+esc(i.unidade_medida) : '') +
+          (i.fotos_count ? ' · 📷 '+i.fotos_count : '') + '</div>' +
+        '<div class="bar"><i style="width:'+Math.min(100,pct)+'%"></i></div>' +
+        '<div class="btn-row">' +
+          '<button class="btn btn-primary btn-sm" data-usar="'+i.id+'">✔ Utilizar</button>' +
+          '<button class="btn btn-ghost btn-sm" data-fotos="'+i.id+'">📷 Fotos</button>' +
+          '<button class="btn btn-ghost btn-sm" data-hist="'+i.id+'">🕓 Histórico</button>' +
+          '<button class="btn btn-ghost btn-sm" data-mover="'+i.id+'">↔ Etapa</button>' +
+        '</div>' +
+      '</div>';
+    }).join('') || '<div class="muted">Nenhum item'+(etapaAtiva?' nesta etapa':'')+'. Suba uma nota fiscal ou lance manualmente.</div>';
+
+    app.innerHTML =
+      '<div class="card">'+kpis+'</div>' +
+      '<div class="card"><h2>Etapas da Obra</h2>' + etapasHtml +
+        '<div class="btn-row">' +
+          '<button class="btn btn-gold btn-sm" id="bNovaEtapa">＋ Nova etapa</button>' +
+          (S.filtroEtapa!=null ? '<button class="btn btn-ghost btn-sm" id="bTodas">Ver todas as etapas</button>' : '') +
+        '</div></div>' +
+      '<div class="card"><h2>Materiais '+(etapaAtiva ? '— '+esc(etapaAtiva.titulo) : '(todos)')+'</h2>' +
+        '<div class="btn-row" style="margin:0 0 12px">' +
+          '<button class="btn btn-primary btn-sm" id="bUpload">📄 Subir nota fiscal</button>' +
+          '<button class="btn btn-ghost btn-sm" id="bManual">＋ Lançar item manual</button>' +
+          '<button class="btn btn-ghost btn-sm" id="bSobras">♻ Importar sobras de entrega</button>' +
+          '<button class="btn btn-gold btn-sm" id="bRelatorio">📑 Relatório</button>' +
+        '</div>' + itensHtml + '</div>';
+
+    // listeners
+    app.querySelectorAll('[data-etapa]').forEach(function(el){
+      el.onclick = function(){ var id = parseInt(el.dataset.etapa,10); S.filtroEtapa = (S.filtroEtapa===id? null : id); carregar(); };
+    });
+    var bT = document.getElementById('bTodas'); if(bT) bT.onclick = function(){ S.filtroEtapa=null; carregar(); };
+    document.getElementById('bNovaEtapa').onclick = modalNovaEtapa;
+    document.getElementById('bUpload').onclick = modalUpload;
+    document.getElementById('bManual').onclick = modalItemManual;
+    document.getElementById('bSobras').onclick = modalSobras; // v3.97.0
+    document.getElementById('bRelatorio').onclick = modalRelatorio;
+    app.querySelectorAll('[data-usar]').forEach(function(b){ b.onclick=function(){ modalUtilizar(parseInt(b.dataset.usar,10)); }; });
+    app.querySelectorAll('[data-fotos]').forEach(function(b){ b.onclick=function(){ modalFotos(parseInt(b.dataset.fotos,10)); }; });
+    app.querySelectorAll('[data-hist]').forEach(function(b){ b.onclick=function(){ modalHistorico(parseInt(b.dataset.hist,10)); }; });
+    app.querySelectorAll('[data-mover]').forEach(function(b){ b.onclick=function(){ modalMover(parseInt(b.dataset.mover,10)); }; });
+  }
+
+  function selEtapas(id, incluirVazia){
+    return '<select id="'+id+'">' + (incluirVazia?'<option value="">— sem etapa —</option>':'') +
+      S.etapas.map(function(e){ return '<option value="'+e.id+'"'+(S.filtroEtapa===e.id?' selected':'')+'>'+esc(e.titulo)+'</option>'; }).join('') +
+      '</select>';
+  }
+
+  // ---- modais ----
+  function modalNovaEtapa(){
+    modal('<h2>Nova etapa</h2>' +
+      '<label>Título (ex.: Instalação Elétrica)</label><input id="etTitulo">' +
+      '<label>Descrição (opcional)</label><input id="etDesc">' +
+      '<div class="btn-row"><button class="btn btn-primary" id="etSalvar">Criar</button><button class="btn btn-ghost" onclick="invFecharModal()">Cancelar</button></div>');
+    document.getElementById('etSalvar').onclick = function(){
+      var t = document.getElementById('etTitulo').value.trim();
+      if(!t) return toast('Informe o título.');
+      api('/'+S.obraId+'/etapas', {method:'POST', body:{titulo:t, descricao:document.getElementById('etDesc').value||null}})
+        .then(function(){ fecharModal(); toast('Etapa criada.'); carregar(); })
+        .catch(function(e){ toast('Erro: '+e.message, 4000); });
+    };
+  }
+
+  // v3.97.0: sobras registradas na Entrega de Obra viram itens do inventário.
+  function modalSobras(){
+    modal('<h2>♻ Importar sobras de entrega</h2>' +
+      '<p class="muted">Entregas de Obra com materiais de sobra registrados. Importar vincula a entrega a esta obra e lança as sobras como itens (com foto e GPS). Depois do vínculo, novas sobras entram sozinhas.</p>' +
+      '<div id="sbLista" class="muted">Carregando…</div>');
+    api('/'+S.obraId+'/entregas-sobras').then(function(r){
+      var box = document.getElementById('sbLista');
+      if(!box) return;
+      if(!r.entregas.length){ box.textContent = 'Nenhuma entrega com sobras disponível pra esta obra.'; return; }
+      box.className = '';
+      box.innerHTML = r.entregas.map(function(e){
+        var vinculada = e.obra_id != null;
+        var stat = e.itens_importados > 0
+          ? '<span class="pill ok">'+e.itens_importados+' no inventário</span>'
+          : (vinculada ? '<span class="pill warn">vinculada</span>' : '');
+        return '<div class="item">' +
+          '<div class="d">'+esc(e.numero || ('Entrega #'+e.id))+(e.cliente ? ' — '+esc(e.cliente) : '')+' '+stat+'</div>' +
+          '<div class="meta">'+e.sobras_count+' sobra(s) registrada(s)'+(e.titulo ? ' · '+esc(e.titulo) : '')+'</div>' +
+          '<div class="btn-row"><button class="btn btn-primary btn-sm" data-imp="'+e.id+'">'+(e.itens_importados>0?'↻ Ressincronizar':'♻ Importar sobras')+'</button></div>' +
+        '</div>';
+      }).join('');
+      box.querySelectorAll('[data-imp]').forEach(function(b){
+        b.onclick = function(){
+          b.disabled = true;
+          api('/'+S.obraId+'/entregas/'+b.dataset.imp+'/importar-sobras', {method:'POST', body:{}})
+            .then(function(x){
+              fecharModal();
+              toast('Sobras importadas: '+x.criados+' novo(s), '+x.atualizados+' atualizado(s).');
+              carregar();
+            })
+            .catch(function(e){ b.disabled=false; toast('Erro: '+e.message, 4000); });
+        };
+      });
+    }).catch(function(e){ var box=document.getElementById('sbLista'); if(box) box.textContent='Erro: '+e.message; });
+  }
+
+  function modalUpload(){
+    modal('<h2>Subir nota fiscal</h2>' +
+      '<p class="muted">XML da NFe (leitura exata), PDF do DANFE ou foto da nota (leitura por IA). Os itens são lançados automaticamente.</p>' +
+      '<label>Etapa dos materiais</label>' + selEtapas('upEtapa', true) +
+      '<label>Arquivo</label><input type="file" id="upArq" accept=".xml,application/xml,text/xml,application/pdf,image/*">' +
+      '<div class="btn-row"><button class="btn btn-primary" id="upEnviar">Enviar e lançar itens</button><button class="btn btn-ghost" onclick="invFecharModal()">Cancelar</button></div>' +
+      '<div id="upStatus" class="muted" style="margin-top:8px"></div>');
+    document.getElementById('upEnviar').onclick = function(){
+      var f = document.getElementById('upArq').files[0];
+      if(!f) return toast('Escolha o arquivo.');
+      var fd = new FormData();
+      fd.append('arquivo', f);
+      var et = document.getElementById('upEtapa').value; if(et) fd.append('etapa_id', et);
+      document.getElementById('upStatus').textContent = 'Processando… (XML é instantâneo; PDF/foto usa IA e leva alguns segundos)';
+      this.disabled = true;
+      api('/'+S.obraId+'/notas/upload', {method:'POST', body: fd})
+        .then(function(r){
+          fecharModal();
+          if(r.status==='revisao_manual'){ toast('⚠ '+r.itens_count+' itens lançados — extração precisa de revisão.'); revisarNota(r.nota_id); }
+          else { toast('✔ '+r.itens_count+' itens lançados da nota.'); }
+          carregar();
+        })
+        .catch(function(e){ document.getElementById('upStatus').textContent=''; document.getElementById('upEnviar').disabled=false; toast('Erro: '+e.message, 5000); });
+    };
+  }
+
+  function revisarNota(notaId){
+    api('/notas/'+notaId).then(function(r){
+      var itens = r.nota.itens || [];
+      var linhas = itens.map(function(i){
+        return '<tr data-id="'+i.id+'">' +
+          '<td><input value="'+esc(i.descricao)+'" data-f="descricao"></td>' +
+          '<td style="width:64px"><input value="'+esc(i.unidade_medida)+'" data-f="unidade_medida"></td>' +
+          '<td style="width:84px"><input type="number" step="0.001" value="'+i.quantidade_comprada+'" data-f="quantidade_comprada"></td>' +
+          '<td style="width:90px"><input type="number" step="0.01" value="'+(i.valor_unitario!=null?i.valor_unitario:'')+'" data-f="valor_unitario"></td>' +
+        '</tr>';
+      }).join('');
+      modal('<h2>Revisar itens extraídos</h2>' +
+        '<p class="muted">A leitura teve confiança baixa em alguns campos. Confira/corrija e confirme.</p>' +
+        '<table class="rev"><thead><tr><th>Descrição</th><th>Un.</th><th>Qtd</th><th>V.Unit</th></tr></thead><tbody>'+linhas+'</tbody></table>' +
+        '<div class="btn-row"><button class="btn btn-primary" id="revOk">Confirmar itens</button><button class="btn btn-ghost" onclick="invFecharModal()">Depois</button></div>');
+      document.getElementById('revOk').onclick = function(){
+        var payload = [];
+        document.querySelectorAll('#modalBox tbody tr').forEach(function(tr){
+          var o = { id: parseInt(tr.dataset.id,10) };
+          tr.querySelectorAll('input').forEach(function(inp){ o[inp.dataset.f] = inp.value; });
+          payload.push(o);
+        });
+        api('/notas/'+notaId+'/revisar', {method:'PATCH', body:{itens:payload}})
+          .then(function(){ fecharModal(); toast('Nota consolidada.'); carregar(); })
+          .catch(function(e){ toast('Erro: '+e.message, 4500); });
+      };
+    }).catch(function(e){ toast('Erro: '+e.message, 4000); });
+  }
+
+  function modalItemManual(){
+    modal('<h2>Lançar item manual</h2>' +
+      '<label>Descrição</label><input id="miDesc">' +
+      '<div class="row3">' +
+        '<div><label>Unidade</label><input id="miUn" list="unidades" value="UN"><datalist id="unidades"><option>UN</option><option>M</option><option>M2</option><option>M3</option><option>KG</option><option>L</option><option>SC</option><option>BR</option><option>PC</option><option>CX</option></datalist></div>' +
+        '<div><label>Quantidade</label><input id="miQtd" type="number" step="0.001"></div>' +
+        '<div><label>Valor unit. (R$)</label><input id="miVu" type="number" step="0.01"></div>' +
+      '</div>' +
+      '<label>Etapa</label>' + selEtapas('miEtapa', true) +
+      '<label>Observações</label><input id="miObs">' +
+      '<div class="btn-row"><button class="btn btn-primary" id="miSalvar">Lançar</button><button class="btn btn-ghost" onclick="invFecharModal()">Cancelar</button></div>');
+    document.getElementById('miSalvar').onclick = function(){
+      var body = {
+        descricao: document.getElementById('miDesc').value,
+        unidade_medida: document.getElementById('miUn').value || 'UN',
+        quantidade_comprada: document.getElementById('miQtd').value,
+        valor_unitario: document.getElementById('miVu').value || null,
+        etapa_id: document.getElementById('miEtapa').value || null,
+        observacoes: document.getElementById('miObs').value || null,
+      };
+      api('/'+S.obraId+'/itens', {method:'POST', body: body})
+        .then(function(){ fecharModal(); toast('Item lançado.'); carregar(); })
+        .catch(function(e){ toast('Erro: '+e.message, 4000); });
+    };
+  }
+
+  function modalUtilizar(itemId){
+    var item = S.itens.find(function(i){return i.id===itemId;}); if(!item) return;
+    modal('<h2>Utilizar — '+esc(item.descricao)+'</h2>' +
+      '<p class="muted">Saldo disponível: <b>'+qn(item.quantidade_saldo)+' '+esc(item.unidade_medida)+'</b></p>' +
+      '<label>Tipo</label><select id="utTipo"><option value="parcial">Parcial (informar quantidade)</option><option value="total">Total (consome todo o saldo)</option></select>' +
+      '<div id="utQtdBox"><label>Quantidade ('+esc(item.unidade_medida)+')</label><input id="utQtd" type="number" step="0.001" max="'+item.quantidade_saldo+'"></div>' +
+      '<label>Data</label><input id="utData" type="date" value="'+hoje()+'">' +
+      '<label>Observação (ex.: aplicado no trecho A do 2º pavimento)</label><input id="utObs">' +
+      '<label>Foto da instalação (opcional)</label><input type="file" id="utFoto" accept="image/*" capture="environment">' +
+      '<div class="btn-row"><button class="btn btn-primary" id="utSalvar">Registrar uso</button><button class="btn btn-ghost" onclick="invFecharModal()">Cancelar</button></div>');
+    document.getElementById('utTipo').onchange = function(){
+      document.getElementById('utQtdBox').classList.toggle('hidden', this.value==='total');
+    };
+    document.getElementById('utSalvar').onclick = function(){
+      var tipo = document.getElementById('utTipo').value;
+      var body = { tipo_utilizacao: tipo, data_utilizacao: document.getElementById('utData').value,
+        observacoes: document.getElementById('utObs').value || null };
+      if(tipo==='parcial') body.quantidade_utilizada = document.getElementById('utQtd').value;
+      this.disabled = true;
+      api('/itens/'+itemId+'/utilizacao', {method:'POST', body: body})
+        .then(function(r){
+          var foto = document.getElementById('utFoto').files[0];
+          if(foto){
+            var fd = new FormData();
+            fd.append('fotos', foto); fd.append('tipo_foto','instalacao'); fd.append('utilizacao_id', r.utilizacao_id);
+            return api('/itens/'+itemId+'/fotos', {method:'POST', body: fd}).then(function(){ return r; });
+          }
+          return r;
+        })
+        .then(function(r){ fecharModal(); toast('✔ Uso registrado. Saldo: '+qn(r.saldo_novo)); carregar(); })
+        .catch(function(e){ document.getElementById('utSalvar').disabled=false; toast('Erro: '+e.message, 5000); });
+    };
+  }
+
+  function modalFotos(itemId){
+    var item = S.itens.find(function(i){return i.id===itemId;}) || {descricao:'Item '+itemId};
+    api('/itens/'+itemId+'/fotos').then(function(r){
+      var TIPO = {entrega:'📦 Entrega', instalacao:'🔧 Instalação', avaria:'⚠ Avaria', outro:'Outro'};
+      var grid = (r.fotos||[]).map(function(f){
+        return '<div class="thumb"><img loading="lazy" src="'+API+'/fotos/'+f.id+'/arquivo">' +
+          '<button class="rm" data-rmfoto="'+f.id+'">×</button>' +
+          '<div class="cap">'+(TIPO[f.tipo_foto]||f.tipo_foto)+(f.legenda?' — '+esc(f.legenda):'')+'</div></div>';
+      }).join('') || '<div class="muted">Sem fotos ainda.</div>';
+      modal('<h2>Fotos — '+esc(item.descricao)+'</h2>' +
+        '<div class="grid">'+grid+'</div>' +
+        '<label>Tipo</label><select id="ftTipo"><option value="entrega">📦 Entrega (recebimento)</option><option value="instalacao">🔧 Instalação (aplicação)</option><option value="avaria">⚠ Avaria</option><option value="outro">Outro</option></select>' +
+        '<label>Legenda (opcional)</label><input id="ftLeg">' +
+        '<label>Fotos</label><input type="file" id="ftArq" accept="image/*" capture="environment" multiple>' +
+        '<div class="btn-row"><button class="btn btn-primary" id="ftEnviar">Enviar fotos</button><button class="btn btn-ghost" onclick="invFecharModal()">Fechar</button></div>');
+      document.querySelectorAll('[data-rmfoto]').forEach(function(b){
+        b.onclick = function(){ if(!confirm('Apagar esta foto?')) return;
+          api('/fotos/'+b.dataset.rmfoto, {method:'DELETE'}).then(function(){ modalFotos(itemId); }).catch(function(e){ toast('Erro: '+e.message); }); };
+      });
+      document.getElementById('ftEnviar').onclick = function(){
+        var files = document.getElementById('ftArq').files;
+        if(!files.length) return toast('Escolha as fotos.');
+        var btn = this; btn.disabled = true;
+        var enviar = function(lat, lng){
+          var fd = new FormData();
+          for(var i=0;i<files.length;i++) fd.append('fotos', files[i]);
+          fd.append('tipo_foto', document.getElementById('ftTipo').value);
+          var leg = document.getElementById('ftLeg').value; if(leg) fd.append('legenda', leg);
+          if(lat!=null){ fd.append('latitude', lat); fd.append('longitude', lng); }
+          api('/itens/'+itemId+'/fotos', {method:'POST', body: fd})
+            .then(function(){ toast('✔ Fotos enviadas.'); modalFotos(itemId); carregar(); })
+            .catch(function(e){ btn.disabled=false; toast('Erro: '+e.message, 4500); });
+        };
+        // GPS opcional (carimbo técnico igual à galeria) — sem GPS envia mesmo assim.
+        if(navigator.geolocation){
+          navigator.geolocation.getCurrentPosition(
+            function(p){ enviar(p.coords.latitude, p.coords.longitude); },
+            function(){ enviar(null, null); }, {timeout:4000});
+        } else enviar(null, null);
+      };
+    }).catch(function(e){ toast('Erro: '+e.message, 4000); });
+  }
+
+  function modalHistorico(itemId){
+    var item = S.itens.find(function(i){return i.id===itemId;}) || {descricao:'Item '+itemId};
+    api('/itens/'+itemId+'/utilizacoes').then(function(r){
+      var linhas = (r.utilizacoes||[]).map(function(u){
+        return '<div class="item" style="padding:8px 10px"><b>'+qn(u.quantidade_utilizada)+'</b> — '+
+          (u.tipo_utilizacao==='total'?'total':'parcial')+' · '+String(u.data_utilizacao).slice(0,10).split('-').reverse().join('/') +
+          (u.etapa_execucao_titulo ? ' · '+esc(u.etapa_execucao_titulo) : '') +
+          (u.observacoes ? '<div class="muted">'+esc(u.observacoes)+'</div>' : '') + '</div>';
+      }).join('') || '<div class="muted">Nenhum lançamento ainda.</div>';
+      modal('<h2>Histórico — '+esc(item.descricao)+'</h2>'+linhas+
+        '<div class="btn-row"><button class="btn btn-ghost" onclick="invFecharModal()">Fechar</button></div>');
+    }).catch(function(e){ toast('Erro: '+e.message, 4000); });
+  }
+
+  function modalMover(itemId){
+    modal('<h2>Mover item de etapa</h2><label>Nova etapa</label>'+selEtapas('mvEtapa', true)+
+      '<div class="btn-row"><button class="btn btn-primary" id="mvOk">Mover</button><button class="btn btn-ghost" onclick="invFecharModal()">Cancelar</button></div>');
+    document.getElementById('mvOk').onclick = function(){
+      api('/itens/'+itemId+'/etapa', {method:'PATCH', body:{etapa_id: document.getElementById('mvEtapa').value || null}})
+        .then(function(){ fecharModal(); toast('Item movido (histórico preservado).'); carregar(); })
+        .catch(function(e){ toast('Erro: '+e.message, 4000); });
+    };
+  }
+
+  function modalRelatorio(){
+    modal('<h2>Relatório do inventário</h2>' +
+      '<p class="muted">Comprado × Utilizado × Saldo, com fotos de entrega e instalação. Estado real na hora da geração.</p>' +
+      '<label>Escopo</label><select id="relEtapa"><option value="">Obra completa</option>' +
+        S.etapas.map(function(e){ return '<option value="'+e.id+'">Só: '+esc(e.titulo)+'</option>'; }).join('') + '</select>' +
+      '<label>WhatsApp do cliente (pra envio direto — opcional)</label><input id="relTel" placeholder="(99) 99999-9999">' +
+      '<div class="btn-row">' +
+        '<button class="btn btn-primary" id="relVer">📄 Ver PDF</button>' +
+        '<button class="btn btn-gold" id="relEnviar">📲 Enviar WhatsApp</button>' +
+        '<button class="btn btn-ghost" onclick="invFecharModal()">Fechar</button></div>');
+    function q(){ var e = document.getElementById('relEtapa').value; return e ? '?etapa_id='+e : ''; }
+    document.getElementById('relVer').onclick = function(){
+      window.open(API+'/'+S.obraId+'/relatorio'+q(), '_blank');
+    };
+    document.getElementById('relEnviar').onclick = function(){
+      var tel = document.getElementById('relTel').value.replace(/\D/g,'');
+      if(tel.length<10) return toast('Informe o WhatsApp com DDD.');
+      var btn=this; btn.disabled=true; btn.textContent='Enviando…';
+      var e = document.getElementById('relEtapa').value;
+      api('/'+S.obraId+'/relatorio/enviar-whatsapp', {method:'POST', body:{telefone:tel, etapa_id: e||null}})
+        .then(function(){ fecharModal(); toast('✔ Relatório enviado no WhatsApp.'); })
+        .catch(function(err){ btn.disabled=false; btn.textContent='📲 Enviar WhatsApp'; toast('Erro: '+err.message, 5000); });
+    };
+  }
+
+  // ---- boot ----
+  document.getElementById('hBack').onclick = function(){ location.href = '/obras.html'; };
+  if(!S.obraId){
+    document.getElementById('app').innerHTML = '<div class="card"><h2>Obra não informada</h2><p class="muted">Abra o inventário pelo botão 📦 no card da obra (painel de Obras).</p></div>';
+  } else {
+    document.getElementById('hObra').textContent = S.obraNome ? S.obraNome : ('Obra #' + S.obraId);
+    carregar();
+  }
+})();
+</script>
+</body>
+</html>

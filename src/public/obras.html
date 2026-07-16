@@ -2609,6 +2609,10 @@ function renderObras() {
           <a href="/vto-checklist.html?obra=${o.id}&obra_nome=${encodeURIComponent(o.nome||'')}"
             title="Abrir o Checklist de Atividades (VTO) desta obra"
             style="background:transparent; border:1px solid #C9A84C; color:#C9A84C; font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; text-decoration:none;">📋 Checklist VTO →</a>
+          <!-- v3.97.0: Inventário de Materiais por Obra -->
+          <a href="/inventario-obra.html?obra=${o.id}&obra_nome=${encodeURIComponent(o.nome||'')}"
+            title="Inventário de materiais: notas fiscais, utilização, saldo e relatório fotográfico"
+            style="background:transparent; border:1px solid var(--neon); color:var(--neon); font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; text-decoration:none;">📦 Inventário →</a>
         </div>
         <div class="parc-inline-box" data-obra="${o.id}" style="display:none; margin-top:8px;"></div>
         <div class="vto-inline-box" data-obra="${o.id}" style="display:none; margin-top:8px;"></div>

@@ -14,6 +14,7 @@ import {
   atualizarMaterial, removerMaterial, definirNotaFiscal,
   definirResponsavel, snapshotResponsavelEquipe, definirStatus, marcarEntregue,
 } from '../services/obrasEntregaRepo';
+import { sincronizarSobrasDaEntrega } from '../services/inventario/sobraEntregaSync'; // v3.97.0 — sobras → inventário
 import { gerarEntregaPdf } from '../services/obrasEntregaPdf';
 import { enviarEntregaWhatsapp } from '../services/obrasEntregaEnvio';
 import { ENTREGA_STATUS, ENTREGA_FOTO_TIPOS, PROPOSTA_ORIGENS } from '../types/obrasEntrega';
@@ -26,6 +27,13 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 function donoDe(req: Request): string | null {
   const sub = (req as AuthedRequest).user?.sub;
   return sub ? String(sub) : null;
+}
+
+// v3.97.0: toda mutação de sobra reflete no inventário da obra vinculada.
+// Best-effort: falha do sync NUNCA derruba a resposta da entrega (só loga).
+async function syncInventario(entregaId: number): Promise<void> {
+  try { await sincronizarSobrasDaEntrega(entregaId); }
+  catch (err) { console.error('[entrega→inventario sync]', (err as Error).message); }
 }
 
 function numOrNull(v: unknown): number | null {
@@ -328,6 +336,7 @@ router.put('/:id(\\d+)/materiais', requireAuth, async (req: Request, res: Respon
     const lista = Array.isArray(req.body?.materiais) ? (req.body.materiais as EntregaMaterialSobra[]) : [];
     const ok = await substituirMateriais(Number(req.params.id), dono, lista);
     if (!ok) return res.status(404).json({ error: 'Entrega não encontrada.' });
+    await syncInventario(Number(req.params.id)); // v3.97.0
     res.json({ ok: true, total: lista.length });
   } catch (err) {
     console.error('[entrega PUT /:id/materiais]', err);
@@ -354,6 +363,7 @@ router.post('/:id(\\d+)/materiais', requireAuth, upload.single('foto'), async (r
       ordem: Number(b.ordem) || 0,
     });
     if (!r) return res.status(404).json({ error: 'Entrega não encontrada.' });
+    await syncInventario(Number(req.params.id)); // v3.97.0
     res.status(201).json({ id: r.id });
   } catch (err) {
     console.error('[entrega POST /:id/materiais]', err);
@@ -376,6 +386,7 @@ router.put('/:id(\\d+)/materiais/:materialId(\\d+)', requireAuth, upload.single(
       ...foto,
     });
     if (!ok) return res.status(404).json({ error: 'Material não encontrado.' });
+    await syncInventario(Number(req.params.id)); // v3.97.0
     res.json({ ok: true });
   } catch (err) {
     console.error('[entrega PUT /:id/materiais/:materialId]', err);
@@ -390,6 +401,7 @@ router.delete('/:id(\\d+)/materiais/:materialId(\\d+)', requireAuth, async (req:
     if (!dono) return res.status(401).json({ error: 'Não autenticado.' });
     const ok = await removerMaterial(Number(req.params.id), dono, Number(req.params.materialId));
     if (!ok) return res.status(404).json({ error: 'Material não encontrado.' });
+    await syncInventario(Number(req.params.id)); // v3.97.0
     res.json({ ok: true });
   } catch (err) {
     console.error('[entrega DELETE /:id/materiais/:materialId]', err);
