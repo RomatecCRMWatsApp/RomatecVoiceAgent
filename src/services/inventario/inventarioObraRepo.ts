@@ -456,6 +456,31 @@ export async function obterOuCriarCabecalho(obraId: number, colaboradorId?: stri
   }
 }
 
+/**
+ * v3.100.1 — Lista de TODOS os inventários criados (aba Inventário do painel):
+ * número + obra + KPIs agregados, mais recente primeiro.
+ */
+export async function listarInventarios(): Promise<RowDataPacket[]> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT c.id, c.obra_id, c.numero, c.criado_em, o.nome AS obra_nome,
+            COUNT(i.id) AS itens_count,
+            COALESCE(SUM(i.quantidade_comprada * COALESCE(i.valor_unitario, 0)), 0) AS valor_comprado,
+            COALESCE(SUM(i.quantidade_utilizada * COALESCE(i.valor_unitario, 0)), 0) AS valor_utilizado,
+            COALESCE(SUM(i.quantidade_saldo * COALESCE(i.valor_unitario, 0)), 0) AS valor_saldo,
+            COALESCE(SUM(i.quantidade_comprada), 0) AS qt_c,
+            COALESCE(SUM(i.quantidade_utilizada), 0) AS qt_u,
+            (SELECT COUNT(*) FROM obra_inventario_notas n WHERE n.obra_id = c.obra_id) AS notas_count
+       FROM obra_inventario_cabecalho c
+       LEFT JOIN romatec_obras o ON o.id = c.obra_id
+       LEFT JOIN obra_inventario_itens i ON i.obra_id = c.obra_id
+      GROUP BY c.id, c.obra_id, c.numero, c.criado_em, o.nome
+      ORDER BY c.id DESC`,
+  );
+  return rows.map((r) => Object.assign(r, {
+    pct_utilizado: Number(r.qt_c) > 0 ? Math.round((Number(r.qt_u) / Number(r.qt_c)) * 100) : 0,
+  }));
+}
+
 /** Notas COM o arquivo original (base64) — pros anexos enumerados do relatório. */
 export async function listarNotasComArquivo(obraId: number, etapaId?: number): Promise<RowDataPacket[]> {
   let sql = `SELECT id, etapa_id, numero_nota, chave_acesso, fornecedor_nome, fornecedor_cnpj,

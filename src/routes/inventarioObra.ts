@@ -32,6 +32,12 @@ function fileDe(req: Request): { buffer: Buffer; originalname: string; mimetype:
   return f && f.buffer && f.buffer.length ? f : null;
 }
 
+// ── Lista de inventários (v3.100.1 — aba Inventário do painel) ──────────────
+router.get('/lista', requireAuth, async (_req: Request, res: Response) => {
+  try { res.json({ ok: true, inventarios: await repo.listarInventarios() }); }
+  catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
 // ── Etapas ───────────────────────────────────────────────────────────────────
 router.post('/:obraId/etapas', requireAuth, async (req: Request, res: Response) => {
   try {

@@ -6232,8 +6232,67 @@ function renderInventarioTab() {
       <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Relatório de inventário próprio por obra — registre o que a obra já tem e o que vai entrando após a abertura: nota fiscal (XML/PDF/foto), lançamento manual e importação opcional de sobras de Entrega. Saldo por item, fotos GPS, PDF e envio por WhatsApp.</p>
     </div>
     <a href="${href}" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">Iniciar inventário →</a>
+  </div>
+  <div class="card">
+    <p class="section-title" style="margin:0 0 8px;">📚 Inventários criados</p>
+    <div id="invListaBox" style="font-size:12px; color:var(--text-muted);">Carregando…</div>
   </div>`;
   attachSel();
+  montarListaInventarios();
+}
+
+// v3.100.1: lista dos inventários já criados na aba — abrir/editar, ver relatório
+// e enviar por WhatsApp direto da tela inicial. Fonte: GET /inventario/lista.
+async function montarListaInventarios() {
+  const box = document.getElementById('invListaBox');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/gestao-obra/inventario/lista', { credentials: 'include' });
+    if (r.status === 401) { box.innerHTML = 'Faça login pra ver os inventários.'; return; }
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    const lista = j.inventarios || [];
+    if (!lista.length) { box.innerHTML = 'Nenhum inventário criado ainda — escolha a obra e clique em "Iniciar inventário".'; return; }
+    const fmt = v => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const btnCss = 'background:transparent; border:1px solid var(--border-strong); color:var(--neon); font-size:12px; font-weight:600; padding:5px 10px; border-radius:6px; cursor:pointer; text-decoration:none; display:inline-block;';
+    box.innerHTML = lista.map(inv => `
+      <div style="border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
+        <div style="min-width:220px;">
+          <div style="font-weight:700; color:var(--neon); font-size:13px;">🗃️ ${escape(inv.numero || ('Obra #' + inv.obra_id))} <span style="color:var(--text-muted); font-weight:400;">· ${escape(inv.obra_nome || 'Obra #' + inv.obra_id)}</span></div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${inv.itens_count} item(ns) · Comprado ${fmt(inv.valor_comprado)} · Em obra ${fmt(inv.valor_saldo)} · ${inv.pct_utilizado}% utilizado${Number(inv.notas_count) ? ' · 📄 ' + inv.notas_count + ' NF' : ''}</div>
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <a href="/inventario-obra.html?obra=${inv.obra_id}&obra_nome=${encodeURIComponent(inv.obra_nome || '')}" style="${btnCss} border-color:#C9A84C; color:#C9A84C;">✏️ Abrir</a>
+          <button data-inv-rel="${inv.obra_id}" style="${btnCss}">📄 Relatório</button>
+          <button data-inv-zap="${inv.obra_id}" style="${btnCss}">📲 Enviar</button>
+        </div>
+      </div>`).join('');
+    box.querySelectorAll('[data-inv-rel]').forEach(b => {
+      b.onclick = () => window.open('/api/gestao-obra/inventario/' + b.dataset.invRel + '/relatorio', '_blank');
+    });
+    box.querySelectorAll('[data-inv-zap]').forEach(b => {
+      b.onclick = async () => {
+        const tel = prompt('WhatsApp do cliente (com DDD):');
+        if (!tel) return;
+        b.disabled = true; b.textContent = 'Enviando…';
+        try {
+          const resp = await fetch('/api/gestao-obra/inventario/' + b.dataset.invZap + '/relatorio/enviar-whatsapp', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telefone: tel }),
+          });
+          const jj = await resp.json();
+          if (!resp.ok) throw new Error(jj.error || 'falha no envio');
+          b.textContent = '✔ Enviado';
+        } catch (e) {
+          alert('Erro ao enviar: ' + (e.message || e));
+          b.disabled = false; b.textContent = '📲 Enviar';
+        }
+      };
+    });
+  } catch (e) {
+    box.innerHTML = 'Erro ao carregar inventários: ' + escape(e.message || String(e));
+  }
 }
 
 function renderMaoObraTab() {
