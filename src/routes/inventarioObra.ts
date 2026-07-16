@@ -33,9 +33,21 @@ function fileDe(req: Request): { buffer: Buffer; originalname: string; mimetype:
 }
 
 // ── Lista de inventários (v3.100.1 — aba Inventário do painel) ──────────────
-router.get('/lista', requireAuth, async (_req: Request, res: Response) => {
-  try { res.json({ ok: true, inventarios: await repo.listarInventarios() }); }
-  catch (err) { res.status(500).json({ error: (err as Error).message }); }
+// v3.101.1: ?obra_id= filtra pela obra ativa do seletor.
+router.get('/lista', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const obraId = intOrNull(req.query.obra_id) ?? undefined;
+    res.json({ ok: true, inventarios: await repo.listarInventarios(obraId) });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// v3.101.1: excluir o inventário INTEIRO da obra (confirmação dupla no front).
+router.delete('/:obraId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!donoDe(req)) return res.status(401).json({ error: 'Não autenticado.' });
+    await repo.excluirInventario(Number(req.params.obraId));
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 
 // ── Etapas ───────────────────────────────────────────────────────────────────
@@ -412,12 +424,18 @@ router.post('/:obraId/relatorio/enviar-whatsapp', requireAuth, async (req: Reque
     const pdf = await gerarInventarioPdfComAnexos(dados);
     const { sendDocument, sendReply } = await import('../integrations/whatsapp');
     const nomeObra = dados.obra ? String(dados.obra.nome) : `Obra ${obraId}`;
+    // v3.101.1: link público SEMPRE ATUALIZADO — o cliente acompanha cada material
+    // que entra/é utilizado; o PDF do link é gerado na hora do acesso.
+    const cab = await repo.obterOuCriarCabecalho(obraId);
+    const { getBaseUrl } = await import('../services/reciboPdf');
+    const linkPublico = `${getBaseUrl().replace(/\/$/, '')}/v/inventario/${cab.hash_publico}`;
     await sendDocument(telefone, pdf.toString('base64'), `Inventario_${dados.numero_inventario || nomeObra.replace(/\s+/g, '_')}.pdf`, 'pdf');
     await sendReply(telefone,
       `📦 *Inventário ${dados.numero_inventario} — ${nomeObra}*\n` +
-      `Comprado: R$ ${dados.resumo.valor_comprado.toFixed(2)} · Utilizado: R$ ${dados.resumo.valor_utilizado.toFixed(2)} · Em obra: R$ ${dados.resumo.valor_saldo.toFixed(2)}\n` +
+      `Comprado: R$ ${dados.resumo.valor_comprado.toFixed(2)} · Utilizado: R$ ${dados.resumo.valor_utilizado.toFixed(2)} · Em obra: R$ ${dados.resumo.valor_saldo.toFixed(2)}\n\n` +
+      `🔗 Acompanhe o inventário SEMPRE ATUALIZADO:\n${linkPublico}\n\n` +
       `_Romatec Consultoria Total_`);
-    res.json({ ok: true });
+    res.json({ ok: true, link: linkPublico });
   } catch (err) { res.status(502).json({ error: (err as Error).message }); }
 });
 

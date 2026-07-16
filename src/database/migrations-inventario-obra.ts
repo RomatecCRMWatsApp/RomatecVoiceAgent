@@ -197,5 +197,14 @@ export async function runInventarioObraMigrations(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `, 'tabela obra_inventario_cabecalho');
 
+  // v3.101.1: link PÚBLICO do inventário (cliente acompanha sempre atualizado,
+  // sem login — padrão /v/entrega). Hash de 64 hex, ímpar de adivinhar.
+  await exec(`
+    ALTER TABLE obra_inventario_cabecalho ADD COLUMN hash_publico VARCHAR(64) NULL
+  `, 'coluna hash_publico');
+  await exec(`
+    ALTER TABLE obra_inventario_cabecalho ADD UNIQUE KEY uq_inv_hash (hash_publico)
+  `, 'unique hash_publico');
+
   console.log('[inventario-migrations] concluídas');
 }

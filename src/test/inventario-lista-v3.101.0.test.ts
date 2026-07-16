@@ -23,7 +23,8 @@ describe('Lista de inventários na aba (v3.101.0)', () => {
     expect(iLista).toBeGreaterThan(-1);
     expect(iParam).toBeGreaterThan(-1);
     expect(iLista).toBeLessThan(iParam);
-    expect(ROUTER).toMatch(/repo\.listarInventarios\(\)/);
+    // v3.102.0: passou a receber o filtro opcional da obra ativa
+    expect(ROUTER).toMatch(/repo\.listarInventarios\(obraId\)/);
   });
 
   it('aba Inventário renderiza a lista com Abrir / Relatório / Enviar', () => {

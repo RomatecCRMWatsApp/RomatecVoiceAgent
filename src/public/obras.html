@@ -6247,12 +6247,19 @@ async function montarListaInventarios() {
   const box = document.getElementById('invListaBox');
   if (!box) return;
   try {
-    const r = await fetch('/api/gestao-obra/inventario/lista', { credentials: 'include' });
+    // v3.101.1: filtra pela OBRA ATIVA do seletor (sem obra = todos).
+    const filtro = state.currentObra ? ('?obra_id=' + encodeURIComponent(state.currentObra)) : '';
+    const r = await fetch('/api/gestao-obra/inventario/lista' + filtro, { credentials: 'include' });
     if (r.status === 401) { box.innerHTML = 'Faça login pra ver os inventários.'; return; }
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
     const lista = j.inventarios || [];
-    if (!lista.length) { box.innerHTML = 'Nenhum inventário criado ainda — escolha a obra e clique em "Iniciar inventário".'; return; }
+    if (!lista.length) {
+      box.innerHTML = state.currentObra
+        ? 'Nenhum inventário desta obra ainda — clique em "Iniciar inventário".'
+        : 'Nenhum inventário criado ainda — escolha a obra e clique em "Iniciar inventário".';
+      return;
+    }
     const fmt = v => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const btnCss = 'background:transparent; border:1px solid var(--border-strong); color:var(--neon); font-size:12px; font-weight:600; padding:5px 10px; border-radius:6px; cursor:pointer; text-decoration:none; display:inline-block;';
     box.innerHTML = lista.map(inv => `
@@ -6262,13 +6269,39 @@ async function montarListaInventarios() {
           <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${inv.itens_count} item(ns) · Comprado ${fmt(inv.valor_comprado)} · Em obra ${fmt(inv.valor_saldo)} · ${inv.pct_utilizado}% utilizado${Number(inv.notas_count) ? ' · 📄 ' + inv.notas_count + ' NF' : ''}</div>
         </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap;">
-          <a href="/inventario-obra.html?obra=${inv.obra_id}&obra_nome=${encodeURIComponent(inv.obra_nome || '')}" style="${btnCss} border-color:#C9A84C; color:#C9A84C;">✏️ Abrir</a>
-          <button data-inv-rel="${inv.obra_id}" style="${btnCss}">📄 Relatório</button>
+          <a href="/inventario-obra.html?obra=${inv.obra_id}&obra_nome=${encodeURIComponent(inv.obra_nome || '')}" style="${btnCss} border-color:#C9A84C; color:#C9A84C;">✏️ Abrir/Editar</a>
+          <button data-inv-rel="${escape(inv.hash_publico || '')}" style="${btnCss}">📄 Relatório</button>
+          <button data-inv-link="${escape(inv.hash_publico || '')}" style="${btnCss}">🔗 Link</button>
           <button data-inv-zap="${inv.obra_id}" style="${btnCss}">📲 Enviar</button>
+          <button data-inv-del="${inv.obra_id}" data-num="${escape(inv.numero || '')}" style="${btnCss} border-color:#ef4444; color:#ef4444;">🗑 Excluir</button>
         </div>
       </div>`).join('');
+    // v3.101.1: Relatório abre o LINK PÚBLICO (sem login — funciona no celular);
+    // é o mesmo link que o cliente recebe, sempre com o estado atual.
     box.querySelectorAll('[data-inv-rel]').forEach(b => {
-      b.onclick = () => window.open('/api/gestao-obra/inventario/' + b.dataset.invRel + '/relatorio', '_blank');
+      b.onclick = () => window.open('/v/inventario/' + b.dataset.invRel, '_blank');
+    });
+    box.querySelectorAll('[data-inv-link]').forEach(b => {
+      b.onclick = async () => {
+        const url = location.origin + '/v/inventario/' + b.dataset.invLink;
+        try { await navigator.clipboard.writeText(url); b.textContent = '✔ Copiado'; setTimeout(() => { b.textContent = '🔗 Link'; }, 2000); }
+        catch (_e) { prompt('Link público do inventário (copie):', url); }
+      };
+    });
+    box.querySelectorAll('[data-inv-del]').forEach(b => {
+      b.onclick = async () => {
+        const num = b.dataset.num || 'este inventário';
+        if (!confirm('Excluir ' + num + '?\n\nApaga TODAS as etapas, notas, itens, utilizações e fotos deste inventário. Não tem volta.')) return;
+        const conf = prompt('Pra confirmar, digite: EXCLUIR');
+        if ((conf || '').trim().toUpperCase() !== 'EXCLUIR') return;
+        b.disabled = true; b.textContent = 'Excluindo…';
+        try {
+          const resp = await fetch('/api/gestao-obra/inventario/' + b.dataset.invDel, { method: 'DELETE', credentials: 'include' });
+          const jj = await resp.json();
+          if (!resp.ok) throw new Error(jj.error || 'falha');
+          montarListaInventarios();
+        } catch (e) { alert('Erro ao excluir: ' + (e.message || e)); b.disabled = false; b.textContent = '🗑 Excluir'; }
+      };
     });
     box.querySelectorAll('[data-inv-zap]').forEach(b => {
       b.onclick = async () => {

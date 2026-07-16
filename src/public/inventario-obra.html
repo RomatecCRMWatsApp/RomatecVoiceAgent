@@ -125,6 +125,8 @@
       S.resumo = r[0].resumo; S.etapas = r[0].etapas; S.itens = r[1].itens;
       // v3.100.0: número automático do inventário (INV-AAAA-NNNN) linkado à obra
       S.numero = r[0].numero || '';
+      // v3.101.1: hash do link público (relatório sempre atualizado, sem login)
+      S.hash = (r[0].cabecalho && r[0].cabecalho.hash_publico) || '';
       var h = document.getElementById('hObra');
       if(h) h.textContent = (S.obraNome || ('Obra #' + S.obraId)) + (S.numero ? ' · ' + S.numero : '');
       render();
@@ -455,10 +457,22 @@
       '<div class="btn-row">' +
         '<button class="btn btn-primary" id="relVer">📄 Ver PDF</button>' +
         '<button class="btn btn-gold" id="relEnviar">📲 Enviar WhatsApp</button>' +
+        '<button class="btn btn-ghost" id="relLink">🔗 Copiar link do cliente</button>' +
         '<button class="btn btn-ghost" onclick="invFecharModal()">Fechar</button></div>');
     function q(){ var e = document.getElementById('relEtapa').value; return e ? '?etapa_id='+e : ''; }
+    // v3.101.1: abre pelo LINK PÚBLICO (sem login — funciona no celular);
+    // fallback pra rota autenticada se o hash ainda não carregou.
     document.getElementById('relVer').onclick = function(){
-      window.open(API+'/'+S.obraId+'/relatorio'+q(), '_blank');
+      var url = S.hash ? ('/v/inventario/' + S.hash + q()) : (API+'/'+S.obraId+'/relatorio'+q());
+      window.open(url, '_blank');
+    };
+    document.getElementById('relLink').onclick = function(){
+      if(!S.hash) return toast('Link ainda não disponível — recarregue a página.');
+      var url = location.origin + '/v/inventario/' + S.hash;
+      var btn = this;
+      (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+        .then(function(){ btn.textContent = '✔ Link copiado'; setTimeout(function(){ btn.textContent = '🔗 Copiar link do cliente'; }, 2200); })
+        .catch(function(){ prompt('Link público (sempre atualizado) — copie:', url); });
     };
     document.getElementById('relEnviar').onclick = function(){
       var tel = document.getElementById('relTel').value.replace(/\D/g,'');

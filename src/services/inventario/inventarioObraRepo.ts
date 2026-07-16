@@ -8,6 +8,7 @@
 
 import pool from '../../database/connection';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
+import { randomBytes } from 'crypto';
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 export interface EtapaInventario {
@@ -421,13 +422,20 @@ export function formatarNumeroInventario(id: number, ano: number): string {
  * requisições cai no ER_DUP_ENTRY e re-seleciona.
  */
 export async function obterOuCriarCabecalho(obraId: number, colaboradorId?: string | null): Promise<{
-  id: number; numero: string; criado_em: unknown;
+  id: number; numero: string; hash_publico: string; criado_em: unknown;
 }> {
   const sel = async () => {
     const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id, numero, criado_em FROM obra_inventario_cabecalho WHERE obra_id = ?`, [obraId],
+      `SELECT id, numero, hash_publico, criado_em FROM obra_inventario_cabecalho WHERE obra_id = ?`, [obraId],
     );
-    return rows.length ? { id: Number(rows[0].id), numero: String(rows[0].numero ?? ''), criado_em: rows[0].criado_em } : null;
+    if (!rows.length) return null;
+    let hash = rows[0].hash_publico != null ? String(rows[0].hash_publico) : '';
+    // v3.101.1: backfill do hash pra cabeçalhos criados antes do link público.
+    if (!hash) {
+      hash = randomBytes(32).toString('hex');
+      await pool.execute(`UPDATE obra_inventario_cabecalho SET hash_publico = ? WHERE id = ?`, [hash, rows[0].id]);
+    }
+    return { id: Number(rows[0].id), numero: String(rows[0].numero ?? ''), hash_publico: hash, criado_em: rows[0].criado_em };
   };
   const existente = await sel();
   if (existente) return existente;
@@ -435,14 +443,15 @@ export async function obterOuCriarCabecalho(obraId: number, colaboradorId?: stri
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    const hash = randomBytes(32).toString('hex');
     const [r] = await conn.execute<ResultSetHeader>(
-      `INSERT INTO obra_inventario_cabecalho (obra_id, colaborador_id) VALUES (?, ?)`,
-      [obraId, colaboradorId ?? null],
+      `INSERT INTO obra_inventario_cabecalho (obra_id, colaborador_id, hash_publico) VALUES (?, ?, ?)`,
+      [obraId, colaboradorId ?? null, hash],
     );
     const numero = formatarNumeroInventario(r.insertId, new Date().getFullYear());
     await conn.execute(`UPDATE obra_inventario_cabecalho SET numero = ? WHERE id = ?`, [numero, r.insertId]);
     await conn.commit();
-    return { id: r.insertId, numero, criado_em: new Date() };
+    return { id: r.insertId, numero, hash_publico: hash, criado_em: new Date() };
   } catch (err) {
     await conn.rollback().catch(() => undefined);
     const e = err as { code?: string };
@@ -456,13 +465,48 @@ export async function obterOuCriarCabecalho(obraId: number, colaboradorId?: stri
   }
 }
 
+/** Cabeçalho pelo hash público (link do cliente). Null = link inválido. */
+export async function buscarCabecalhoPorHash(hash: string): Promise<{ obra_id: number; numero: string } | null> {
+  const h = String(hash ?? '').trim();
+  if (!/^[a-f0-9]{64}$/i.test(h)) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT obra_id, numero FROM obra_inventario_cabecalho WHERE hash_publico = ?`, [h],
+  );
+  return rows.length ? { obra_id: Number(rows[0].obra_id), numero: String(rows[0].numero ?? '') } : null;
+}
+
+/**
+ * v3.101.1 — Exclui o inventário INTEIRO da obra (cabeçalho + etapas + notas +
+ * itens; utilizações/fotos caem por CASCADE). Ação destrutiva — o front exige
+ * confirmação dupla antes de chamar.
+ */
+export async function excluirInventario(obraId: number): Promise<void> {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(`DELETE FROM obra_inventario_itens WHERE obra_id = ?`, [obraId]); // cascade: utilizacoes/fotos
+    await conn.execute(`DELETE FROM obra_inventario_notas WHERE obra_id = ?`, [obraId]);
+    await conn.execute(`DELETE FROM obra_inventario_etapas WHERE obra_id = ?`, [obraId]);
+    await conn.execute(`DELETE FROM obra_inventario_cabecalho WHERE obra_id = ?`, [obraId]);
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback().catch(() => undefined);
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 /**
  * v3.100.1 — Lista de TODOS os inventários criados (aba Inventário do painel):
  * número + obra + KPIs agregados, mais recente primeiro.
  */
-export async function listarInventarios(): Promise<RowDataPacket[]> {
+export async function listarInventarios(obraId?: number): Promise<RowDataPacket[]> {
+  // v3.101.1: filtro opcional pela obra ativa do seletor + hash do link público.
+  const where = obraId != null ? 'WHERE c.obra_id = ?' : '';
+  const vals: number[] = obraId != null ? [obraId] : [];
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT c.id, c.obra_id, c.numero, c.criado_em, o.nome AS obra_nome,
+    `SELECT c.id, c.obra_id, c.numero, c.hash_publico, c.criado_em, o.nome AS obra_nome,
             COUNT(i.id) AS itens_count,
             COALESCE(SUM(i.quantidade_comprada * COALESCE(i.valor_unitario, 0)), 0) AS valor_comprado,
             COALESCE(SUM(i.quantidade_utilizada * COALESCE(i.valor_unitario, 0)), 0) AS valor_utilizado,
@@ -473,9 +517,19 @@ export async function listarInventarios(): Promise<RowDataPacket[]> {
        FROM obra_inventario_cabecalho c
        LEFT JOIN romatec_obras o ON o.id = c.obra_id
        LEFT JOIN obra_inventario_itens i ON i.obra_id = c.obra_id
-      GROUP BY c.id, c.obra_id, c.numero, c.criado_em, o.nome
+      ${where}
+      GROUP BY c.id, c.obra_id, c.numero, c.hash_publico, c.criado_em, o.nome
       ORDER BY c.id DESC`,
+    vals,
   );
+  // Backfill preguiçoso do hash (cabeçalhos anteriores ao link público).
+  for (const r of rows) {
+    if (r.hash_publico == null || String(r.hash_publico) === '') {
+      const h = randomBytes(32).toString('hex');
+      await pool.execute(`UPDATE obra_inventario_cabecalho SET hash_publico = ? WHERE id = ?`, [h, r.id]);
+      r.hash_publico = h;
+    }
+  }
   return rows.map((r) => Object.assign(r, {
     pct_utilizado: Number(r.qt_c) > 0 ? Math.round((Number(r.qt_u) / Number(r.qt_c)) * 100) : 0,
   }));
