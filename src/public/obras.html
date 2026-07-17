@@ -11291,12 +11291,40 @@ async function renderConsultoriaFormProjetoExecutivo(v, toggleHTML) {
     try {
       const r = await fetch('/api/propostas-consultoria/projeto-executivo/comodos-catalogo', { credentials: 'same-origin' });
       if (!r.ok) throw new Error('catalogo nao disponivel');
-      const { categorias, comodos, ordem_categorias } = await r.json();
-      renderComodosUI(categorias, comodos, ordem_categorias);
+      // v3.104.0: guarda o catálogo e renderiza FILTRADO pelo tipo de edificação
+      // (comercial não mostra Suíte/Cozinha; residencial não mostra Galpão/Doca).
+      state.peCatalogoComodos = await r.json();
+      renderComodosFiltrado();
+      const selTipo = document.getElementById('peTipo');
+      if (selTipo && !selTipo._comodosBound) {
+        selTipo._comodosBound = true;
+        selTipo.addEventListener('change', function () {
+          const tipo = selTipo.value;
+          // remove do estado os cômodos que não se aplicam ao novo tipo
+          for (const cod of Array.from(state.peComodos.keys())) {
+            const cat = state.peComodos.get(cod).catalogo;
+            if (cat && Array.isArray(cat.tipos) && cat.tipos.indexOf(tipo) === -1) {
+              state.peComodos.delete(cod);
+            }
+          }
+          renderComodosFiltrado();
+          atualizarResumoComodos();
+        });
+      }
     } catch (e) {
       document.getElementById('peComodosCategorias').innerHTML =
         '<p style="color:var(--danger); font-size:12px;">Erro ao carregar catálogo: ' + escape(e.message) + '</p>';
     }
+  }
+
+  function renderComodosFiltrado() {
+    const data = state.peCatalogoComodos;
+    if (!data) return;
+    const tipo = document.getElementById('peTipo')?.value || 'residencial';
+    const comodos = (data.comodos || []).filter(function (c) {
+      return !Array.isArray(c.tipos) || c.tipos.indexOf(tipo) !== -1;
+    });
+    renderComodosUI(data.categorias, comodos, data.ordem_categorias);
   }
 
   function renderComodosUI(categorias, comodos, ordemCategorias) {
