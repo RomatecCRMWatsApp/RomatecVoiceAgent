@@ -87,8 +87,9 @@ export async function listarFotos(opts: {
   obra_id?: number;
 } = {}): Promise<GaleriaFoto[]> {
   const tenant = opts.tenant_id ?? 1;
-  const limit = Math.min(opts.limit ?? 100, 500);
-  const offset = opts.offset ?? 0;
+  // v3.105.0: blinda contra NaN vindo de Number(req.query.limit) — LIMIT NaN quebrava a listagem.
+  const limit = Math.min(Number.isFinite(opts.limit as number) ? Math.max(1, Math.trunc(opts.limit as number)) : 100, 500);
+  const offset = Number.isFinite(opts.offset as number) ? Math.max(0, Math.trunc(opts.offset as number)) : 0;
   const wheres: string[] = ['tenant_id = ?'];
   const params: Array<number | string> = [tenant];
   if (opts.obra_id != null) {
@@ -101,7 +102,7 @@ export async function listarFotos(opts: {
             capturada_em, tags, obra_id, criada_em
        FROM galeria_fotos
       WHERE ${wheres.join(' AND ')}
-      ORDER BY criada_em DESC
+      ORDER BY COALESCE(capturada_em, criada_em) DESC, id DESC
       LIMIT ${limit} OFFSET ${offset}`,
     params,
   );

@@ -24429,8 +24429,12 @@ async function carregarLogoRomatec() {
 }
 
 const GALERIA_DB_NAME = 'romatec-galeria';
-const GALERIA_DB_VERSION = 1;
+// v3.105.0: v2 acrescenta o cache de metadados do servidor (pra galeria continuar
+// visível e ordenada offline) e a fila de exclusões pendentes.
+const GALERIA_DB_VERSION = 2;
 const GALERIA_STORE = 'pendentes';
+const GALERIA_STORE_CACHE = 'cache_fotos';   // metadados das fotos do servidor (sem b64)
+const GALERIA_STORE_DEL = 'exclusoes';       // ids de fotos do servidor a apagar quando voltar online
 
 function galeriaDb() {
   return new Promise((res, rej) => {
@@ -24440,9 +24444,73 @@ function galeriaDb() {
       if (!db.objectStoreNames.contains(GALERIA_STORE)) {
         db.createObjectStore(GALERIA_STORE, { keyPath: 'localId', autoIncrement: true });
       }
+      if (!db.objectStoreNames.contains(GALERIA_STORE_CACHE)) {
+        db.createObjectStore(GALERIA_STORE_CACHE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(GALERIA_STORE_DEL)) {
+        db.createObjectStore(GALERIA_STORE_DEL, { keyPath: 'id' });
+      }
     };
     req.onsuccess = () => res(req.result);
     req.onerror = () => rej(req.error);
+  });
+}
+
+// ---- Cache de metadados do servidor (item 5: galeria legível offline) ----
+async function salvarCacheFotos(fotos) {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(GALERIA_STORE_CACHE, 'readwrite');
+    const store = tx.objectStore(GALERIA_STORE_CACHE);
+    store.clear();
+    for (const f of fotos) {
+      const { arquivo_b64, ...meta } = f; // nunca guarda binário — só metadados
+      store.put(meta);
+    }
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+async function listarCacheFotos() {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(GALERIA_STORE_CACHE, 'readonly');
+    const r = tx.objectStore(GALERIA_STORE_CACHE).getAll();
+    r.onsuccess = () => res(r.result || []);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+// ---- Fila de exclusões (item 5: excluir offline) ----
+async function enfileirarExclusao(id) {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction([GALERIA_STORE_DEL, GALERIA_STORE_CACHE], 'readwrite');
+    tx.objectStore(GALERIA_STORE_DEL).put({ id: Number(id), enfileirado_em: new Date().toISOString() });
+    tx.objectStore(GALERIA_STORE_CACHE).delete(Number(id)); // some da UI na hora
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+async function listarExclusoesPendentes() {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(GALERIA_STORE_DEL, 'readonly');
+    const r = tx.objectStore(GALERIA_STORE_DEL).getAll();
+    r.onsuccess = () => res(r.result || []);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function removerExclusaoPendente(id) {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(GALERIA_STORE_DEL, 'readwrite');
+    const r = tx.objectStore(GALERIA_STORE_DEL).delete(Number(id));
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
   });
 }
 
@@ -24537,15 +24605,29 @@ async function sincronizarPendentes() {
       falhas++;
     }
   }
-  return { enviados, restantes: pendentes.length - enviados, falhas };
+  // v3.105.0: descarrega também a fila de exclusões feitas offline.
+  const exclusoes = await listarExclusoesPendentes().catch(() => []);
+  let excluidos = 0;
+  for (const ex of exclusoes) {
+    try {
+      const r = await fetch(`/api/galeria/${ex.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+      });
+      // 404 = já não existe no servidor: a intenção foi cumprida, tira da fila.
+      if (r.ok || r.status === 404) { await removerExclusaoPendente(ex.id); excluidos++; }
+    } catch (_) { /* segue offline — tenta no próximo sync */ }
+  }
+  return { enviados, restantes: pendentes.length - enviados, falhas, excluidos };
 }
 
 // Auto-sync quando voltar online
 window.addEventListener('online', async () => {
   console.log('[galeria] back online, sincronizando pendentes...');
   const r = await sincronizarPendentes();
-  if (r.enviados > 0) {
-    console.log(`[galeria] ${r.enviados} pendentes sincronizados`);
+  if (r.enviados > 0 || r.excluidos > 0) {
+    console.log(`[galeria] ${r.enviados} enviados, ${r.excluidos || 0} exclusões aplicadas`);
     // Se a aba galeria estiver aberta, recarrega
     if (state.currentTab === 'galeria') recarregarGaleria();
   }
@@ -24594,7 +24676,7 @@ async function recarregarGaleria() {
       netEl.style.background = 'rgba(34,197,94,.15)';
       netEl.style.color = '#22c55e';
     } else {
-      netEl.textContent = '🔴 Offline — fotos ficam em fila local';
+      netEl.textContent = '🔴 Offline — capturas e exclusões ficam em fila local';
       netEl.style.background = 'rgba(239,68,68,.15)';
       netEl.style.color = '#ef4444';
     }
@@ -24603,32 +24685,66 @@ async function recarregarGaleria() {
   // Carrega pendentes locais sempre
   const pendentes = await listarPendentesLocal().catch(() => []);
   let fotosServer = [];
+  let usandoCache = false;
   if (navigator.onLine) {
     try {
       const r = await fetch('/api/galeria?limit=100');
       const data = await r.json();
       fotosServer = data.fotos || [];
+      // v3.105.0: espelha os metadados no IndexedDB pra galeria sobreviver offline.
+      salvarCacheFotos(fotosServer).catch(e => console.warn('[galeria] cache falhou:', e));
     } catch (err) {
       console.warn('[galeria] falha ao listar do server:', err);
+      fotosServer = await listarCacheFotos().catch(() => []);
+      usandoCache = fotosServer.length > 0;
     }
+  } else {
+    // v3.105.0: offline a galeria do servidor sumia por completo — agora vem do cache,
+    // com a mesma ordenação cronológica. Miniaturas ficam indisponíveis (só metadados
+    // são cacheados, não o binário), mas a lista e a ordem se mantêm.
+    fotosServer = await listarCacheFotos().catch(() => []);
+    usandoCache = fotosServer.length > 0;
+  }
+  // Esconde o que já foi excluído offline e ainda não sincronizou.
+  const exclusoesPend = await listarExclusoesPendentes().catch(() => []);
+  if (exclusoesPend.length) {
+    const idsExcluidos = new Set(exclusoesPend.map(e => Number(e.id)));
+    fotosServer = fotosServer.filter(f => !idsExcluidos.has(Number(f.id)));
+  }
+  if (usandoCache) {
+    fotosServer = fotosServer.map(f => ({ ...f, _cacheOffline: true }));
   }
   if (pendentes.length === 0 && fotosServer.length === 0) {
     grid.innerHTML = '<div style="opacity:.6;grid-column:1/-1;">Nenhuma foto ainda. Clique em 📷 Tirar Foto.</div>';
     return;
   }
-  const htmlPendentes = pendentes.map(p => renderGaleriaCard({
-    ...p, id: 'local-' + p.localId, _pendente: true,
-  })).join('');
-  const htmlServer = fotosServer.map(f => renderGaleriaCard(f)).join('');
-  grid.innerHTML = htmlPendentes + htmlServer;
-
-  // v3.90.0: lista normalizada (ordem do grid) pro carrossel + seleção.
+  // v3.105.0: pendentes e fotos do servidor entram numa lista ÚNICA ordenada por
+  // data de captura (desc), com desempate por id. Antes era concatenação cega
+  // (pendentes sempre no topo), o que fazia a galeria parecer fora de ordem.
   const gpsStr = (f) => (f.lat != null && f.lng != null) ? `${Number(f.lat).toFixed(6)}, ${Number(f.lng).toFixed(6)}` : '(sem GPS)';
   const tsStr = (f) => f.capturada_em ? new Date(f.capturada_em).toLocaleString('pt-BR') : (f.criada_em ? new Date(f.criada_em).toLocaleString('pt-BR') : '');
-  _galeriaLista = [
-    ...pendentes.map(p => ({ id: 'local-' + p.localId, isPend: true, src: `data:${p.mime || 'image/jpeg'};base64,${p.arquivo_b64}`, numero: '—', legenda: p.legenda || '(pendente)', gps: gpsStr(p), endereco: p.endereco_reverso || '', timestamp: tsStr(p) })),
-    ...fotosServer.map(f => ({ id: f.id, isPend: false, src: `/api/galeria/${f.id}/arquivo`, numero: f.id, legenda: f.legenda || `Foto #${f.id}`, gps: gpsStr(f), endereco: f.endereco_reverso || '', timestamp: tsStr(f) })),
-  ];
+  // Chave de ordenação: capturada_em > criada_em > 0. Aceita 'YYYY-MM-DD HH:MM:SS' (Safari exige o 'T').
+  const tsKey = (f) => {
+    const raw = f.capturada_em || f.criada_em;
+    if (!raw) return 0;
+    const t = new Date(String(raw).replace(' ', 'T')).getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
+  const itens = [
+    ...pendentes.map(p => ({ raw: { ...p, id: 'local-' + p.localId, _pendente: true }, isPend: true, ts: tsKey(p), ord: Number(p.localId) || 0 })),
+    ...fotosServer.map(f => ({ raw: f, isPend: false, ts: tsKey(f), ord: Number(f.id) || 0 })),
+  ].sort((a, b) => (b.ts - a.ts) || (b.ord - a.ord));
+
+  grid.innerHTML = itens.map(it => renderGaleriaCard(it.raw)).join('');
+
+  // v3.90.0: lista normalizada (mesma ordem do grid) pro carrossel + seleção.
+  _galeriaLista = itens.map(({ raw: f, isPend }) => isPend
+    ? { id: 'local-' + f.localId, isPend: true, src: `data:${f.mime || 'image/jpeg'};base64,${f.arquivo_b64}`, numero: '—', legenda: f.legenda || '(pendente)', gps: gpsStr(f), endereco: f.endereco_reverso || '', timestamp: tsStr(f), lat: f.lat, lng: f.lng, capturada_em: f.capturada_em || null }
+    : { id: f.id, isPend: false, src: `/api/galeria/${f.id}/arquivo`, numero: f.id, legenda: f.legenda || `Foto #${f.id}`, gps: gpsStr(f), endereco: f.endereco_reverso || '', timestamp: tsStr(f), lat: f.lat, lng: f.lng, capturada_em: f.capturada_em || f.criada_em || null });
+
+  // v3.105.0: reancorar o carrossel pelo ID da foto aberta (não pelo índice),
+  // já que a lista pode mudar de tamanho/ordem com o sync rodando em background.
+  reancorarCarrossel();
   // Reaplica o modo seleção após re-render (mantém seleção existente e visual).
   if (modoSelecaoGaleria) {
     document.querySelectorAll('.galeria-card').forEach(c => {
@@ -24646,10 +24762,18 @@ async function syncManual() {
   if (!navigator.onLine) { setStatus('🔴 Sem internet, não posso sincronizar agora'); return; }
   setStatus('☁️ Sincronizando...');
   const r = await sincronizarPendentes();
-  setStatus(`✅ ${r.enviados} enviados${r.restantes > 0 ? ', ' + r.restantes + ' falharam' : ''}`);
+  setStatus(`✅ ${r.enviados} enviados${r.excluidos ? ', ' + r.excluidos + ' excluídas' : ''}${r.restantes > 0 ? ', ' + r.restantes + ' falharam' : ''}`);
   setTimeout(() => setStatus(''), 4000);
   recarregarGaleria();
 }
+
+// v3.105.0: placeholder pra foto do servidor cujo binário não está em cache (offline).
+const GALERIA_IMG_INDISPONIVEL = 'data:image/svg+xml;charset=utf-8,'
+  + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300">'
+    + '<rect width="400" height="300" fill="#111"/>'
+    + '<text x="200" y="140" fill="#C9A84C" font-family="sans-serif" font-size="20" text-anchor="middle">📵 offline</text>'
+    + '<text x="200" y="172" fill="#888" font-family="sans-serif" font-size="14" text-anchor="middle">imagem indisponível</text>'
+    + '</svg>');
 
 function renderGaleriaCard(f) {
   const esc = (s) => String(s || '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
@@ -24666,7 +24790,7 @@ function renderGaleriaCard(f) {
     <div class="galeria-card" data-foto-id="${isPend ? '' : f.id}" data-is-pend="${isPend}" style="border:1px solid ${isPend ? '#f59e0b' : 'var(--border-color,#333)'};border-radius:6px;overflow:hidden;background:var(--bg-secondary,#1a1a1a);position:relative;">
       ${!isPend ? `<input type="checkbox" class="galeria-checkbox" onclick="event.stopPropagation(); toggleSelecaoFotoGaleria(${f.id}, this.closest('.galeria-card'))">` : ''}
       ${isPend ? '<div style="position:absolute;top:6px;right:6px;background:#f59e0b;color:#000;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:3px;z-index:1;">📵 PENDENTE</div>' : ''}
-      <img src="${imgSrc}" onclick="galeriaCardClick(event, '${isPend ? ('local-' + f.localId) : f.id}', ${isPend})" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#000;cursor:pointer;" loading="lazy">
+      <img src="${imgSrc}" onerror="this.onerror=null;this.src=GALERIA_IMG_INDISPONIVEL;" onclick="galeriaCardClick(event, '${isPend ? ('local-' + f.localId) : f.id}', ${isPend})" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#000;cursor:pointer;" loading="lazy">
       <div style="padding:8px;font-size:12px;">
         <div style="font-weight:bold;margin-bottom:4px;">${esc(f.legenda || (isPend ? '(aguardando sync)' : `Foto #${f.id}`))}</div>
         <div style="opacity:.7;">📍 ${gps}</div>
@@ -24692,6 +24816,7 @@ function renderGaleriaCard(f) {
 // ===================== v3.90.0: Carrossel + Seleção em massa (Galeria) =====================
 let _galeriaLista = [];          // fotos normalizadas na ordem do grid
 let gcIndex = 0;                 // índice atual no carrossel
+let gcFotoId = null;             // v3.105.0: ID da foto aberta — fonte da verdade (índice é derivado)
 let modoSelecaoGaleria = false;
 let galeriaSelecionadas = new Set(); // ids (server) selecionados
 
@@ -24704,16 +24829,27 @@ function galeriaCarrosselSelecaoCss() {
     .galeria-barra-selecao.ativa{ display:flex; }
     .galeria-barra-selecao button{ background:transparent; border:1px solid #C9A84C; color:#C9A84C; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
     .galeria-barra-selecao .galeria-btn-zip{ background:#C9A84C; color:#0C3320; font-weight:700; border:none; }
-    .galeria-carrossel-overlay{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.95); z-index:100000; align-items:center; justify-content:center; flex-direction:column; }
+    /* v3.105.0: overlay rolável e com respiro pro rodapé fixo. Antes o conteúdo
+       centralizado estourava a viewport no celular e os botões ficavam fora da tela. */
+    .galeria-carrossel-overlay{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.95); z-index:100000; align-items:center; justify-content:flex-start; flex-direction:column;
+      overflow-y:auto; -webkit-overflow-scrolling:touch;
+      padding:calc(env(safe-area-inset-top, 0px) + 52px) 12px calc(env(safe-area-inset-bottom, 0px) + 86px); }
     .galeria-carrossel-overlay.ativo{ display:flex; }
-    .galeria-carrossel-img{ max-width:90vw; max-height:70vh; object-fit:contain; border:2px solid #C9A84C; border-radius:4px; background:#000; }
-    .galeria-carrossel-seta{ position:absolute; top:50%; transform:translateY(-50%); background:rgba(12,51,32,.85); color:#C9A84C; border:1px solid #C9A84C; font-size:2.2rem; width:54px; height:54px; border-radius:50%; cursor:pointer; line-height:1; }
+    .galeria-carrossel-img{ max-width:100%; max-height:56vh; object-fit:contain; border:2px solid #C9A84C; border-radius:4px; background:#000; }
+    /* position:fixed (não absolute) — com o overlay rolando, absolute saía de vista junto. */
+    .galeria-carrossel-seta{ position:fixed; top:50%; transform:translateY(-50%); background:rgba(12,51,32,.85); color:#C9A84C; border:1px solid #C9A84C; font-size:2.2rem; width:54px; height:54px; border-radius:50%; cursor:pointer; line-height:1; z-index:3; }
     .gc-esq{ left:14px; } .gc-dir{ right:14px; }
-    .galeria-carrossel-fechar{ position:absolute; top:14px; right:16px; background:transparent; color:#fff; font-size:1.8rem; border:none; cursor:pointer; z-index:2; }
-    .galeria-carrossel-contador{ position:absolute; top:16px; left:16px; color:#C9A84C; font-weight:600; font-size:13px; }
-    .galeria-carrossel-meta{ color:#fff; text-align:center; margin-top:12px; font-size:.9rem; line-height:1.5; max-width:90vw; padding:0 12px; }
+    .galeria-carrossel-contador{ position:fixed; top:calc(env(safe-area-inset-top, 0px) + 16px); left:16px; color:#C9A84C; font-weight:600; font-size:13px; z-index:3; }
+    .galeria-carrossel-meta{ color:#fff; text-align:center; margin-top:12px; font-size:.9rem; line-height:1.5; max-width:100%; padding:0 12px; }
     .galeria-carrossel-acoes{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; justify-content:center; }
-    .galeria-carrossel-acoes button{ background:rgba(255,255,255,.1); color:#fff; border:1px solid rgba(255,255,255,.25); padding:8px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+    /* min-height 44px = alvo de toque mínimo (HIG/Material). */
+    .galeria-carrossel-acoes button{ background:rgba(255,255,255,.1); color:#fff; border:1px solid rgba(255,255,255,.25); padding:10px 16px; min-height:44px; border-radius:6px; cursor:pointer; font-size:13px; touch-action:manipulation; }
+    /* Fechar agora é uma barra no rodapé, dentro da safe-area — o X no topo caía sob a
+       barra de status / Dynamic Island e não recebia o toque no iOS. */
+    .galeria-carrossel-fechar{ position:fixed; left:0; right:0; bottom:0; z-index:6;
+      background:#0C3320; border:none; border-top:2px solid #C9A84C; color:#C9A84C;
+      font-size:15px; font-weight:700; cursor:pointer; touch-action:manipulation;
+      padding:14px 16px calc(14px + env(safe-area-inset-bottom, 0px)); }
   </style>`;
 }
 
@@ -24738,18 +24874,24 @@ function garantirCarrosselDom() {
   ov.id = 'galeria-carrossel';
   ov.className = 'galeria-carrossel-overlay';
   ov.innerHTML = `
-    <button class="galeria-carrossel-fechar" onclick="fecharCarrossel()">✕</button>
     <div id="gc-contador" class="galeria-carrossel-contador"></div>
-    <button class="galeria-carrossel-seta gc-esq" onclick="navegarCarrossel(-1)">‹</button>
-    <img id="gc-img" class="galeria-carrossel-img" alt="Foto da obra">
-    <button class="galeria-carrossel-seta gc-dir" onclick="navegarCarrossel(1)">›</button>
+    <button class="galeria-carrossel-seta gc-esq" onclick="navegarCarrossel(-1)" aria-label="Foto anterior">‹</button>
+    <img id="gc-img" class="galeria-carrossel-img" alt="Foto da obra" onerror="this.onerror=null;this.src=GALERIA_IMG_INDISPONIVEL;">
+    <button class="galeria-carrossel-seta gc-dir" onclick="navegarCarrossel(1)" aria-label="Próxima foto">›</button>
     <div id="gc-meta" class="galeria-carrossel-meta"></div>
     <div id="gc-acoes" class="galeria-carrossel-acoes"></div>
+    <button class="galeria-carrossel-fechar" onclick="fecharCarrossel()" aria-label="Fechar visualização">✕ Fechar</button>
   `;
   ov.addEventListener('click', (e) => { if (e.target === ov) fecharCarrossel(); });
-  let sx = 0;
-  ov.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; }, { passive: true });
-  ov.addEventListener('touchend', (e) => { const d = e.changedTouches[0].clientX - sx; if (Math.abs(d) > 50) navegarCarrossel(d < 0 ? 1 : -1); });
+  // v3.105.0: swipe só conta se for claramente horizontal — o overlay agora rola na
+  // vertical e um arrasto de scroll estava podendo ser lido como troca de foto.
+  let sx = 0, sy = 0;
+  ov.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  ov.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - sx;
+    const dy = e.changedTouches[0].clientY - sy;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) navegarCarrossel(dx < 0 ? 1 : -1);
+  });
   document.body.appendChild(ov);
   return ov;
 }
@@ -24757,14 +24899,26 @@ function abrirCarrosselGaleria(id) {
   if (!_galeriaLista.length) return;
   const idx = _galeriaLista.findIndex(f => String(f.id) === String(id));
   gcIndex = idx >= 0 ? idx : 0;
+  gcFotoId = _galeriaLista[gcIndex] ? _galeriaLista[gcIndex].id : null;
   garantirCarrosselDom();
   renderCarrossel();
   document.getElementById('galeria-carrossel').classList.add('ativo');
   document.addEventListener('keydown', handleCarrosselKeydown);
 }
+// v3.105.0: chamado após cada recarregarGaleria(). Reposiciona o carrossel na MESMA
+// foto (por id). Se ela sumiu (excluída/sincronizada), fecha em vez de exibir outra.
+function reancorarCarrossel() {
+  const ov = document.getElementById('galeria-carrossel');
+  if (!ov || !ov.classList.contains('ativo') || gcFotoId == null) return;
+  const idx = _galeriaLista.findIndex(f => String(f.id) === String(gcFotoId));
+  if (idx < 0) { fecharCarrossel(); return; }
+  gcIndex = idx;
+  renderCarrossel();
+}
 function fecharCarrossel() {
   const ov = document.getElementById('galeria-carrossel');
   if (ov) ov.classList.remove('ativo');
+  gcFotoId = null;
   document.removeEventListener('keydown', handleCarrosselKeydown);
 }
 function handleCarrosselKeydown(e) {
@@ -24775,12 +24929,17 @@ function handleCarrosselKeydown(e) {
 function navegarCarrossel(delta) {
   const total = _galeriaLista.length; if (!total) return;
   gcIndex = (gcIndex + delta + total) % total;
+  gcFotoId = _galeriaLista[gcIndex] ? _galeriaLista[gcIndex].id : null;
   renderCarrossel();
 }
 function renderCarrossel() {
   const f = _galeriaLista[gcIndex]; if (!f) return;
+  gcFotoId = f.id; // mantém a âncora sincronizada com o que está na tela
   const esc = (s) => String(s || '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
-  document.getElementById('gc-img').src = f.src;
+  // v3.105.0: religa o onerror a cada troca (o handler se auto-remove ao disparar).
+  const imgEl = document.getElementById('gc-img');
+  imgEl.onerror = function () { this.onerror = null; this.src = GALERIA_IMG_INDISPONIVEL; };
+  imgEl.src = f.src;
   document.getElementById('gc-contador').textContent = `Foto #${f.numero} — ${gcIndex + 1} de ${_galeriaLista.length}`;
   document.getElementById('gc-meta').innerHTML = [
     f.legenda ? `<strong>${esc(f.legenda)}</strong>` : '',
@@ -24800,10 +24959,20 @@ function renderCarrossel() {
   const p = _galeriaLista[(gcIndex - 1 + _galeriaLista.length) % _galeriaLista.length]; if (p) { const im = new Image(); im.src = p.src; }
 }
 async function carrosselAcao(tipo) {
-  const f = _galeriaLista[gcIndex]; if (!f) return;
+  // v3.105.0: resolve a foto pelo ID ancorado, não pelo índice. Congela o alvo aqui
+  // pra que um recarregarGaleria() concorrente não faça a ação cair em outra foto.
+  const f = _galeriaLista.find(x => String(x.id) === String(gcFotoId)) || _galeriaLista[gcIndex];
+  if (!f) return;
   const localId = f.isPend ? Number(String(f.id).replace('local-', '')) : null;
-  if (tipo === 'wa') return reabrirModalCanal(f.id, 'whatsapp');
-  if (tipo === 'tg') return reabrirModalCanal(f.id, 'telegram');
+  // v3.105.0: offline só Excluir (fila) e Baixar (pendente local) fazem sentido.
+  // WhatsApp/Telegram/Salvar precisam do binário no servidor — avisa em vez de falhar mudo.
+  if (!navigator.onLine && (tipo === 'wa' || tipo === 'tg' || (tipo === 'salvar' && !f.isPend))) {
+    toastGalErr('Sem conexão — disponível quando voltar online');
+    return;
+  }
+  const metaF = { lat: f.lat, lng: f.lng, capturada_em: f.capturada_em };
+  if (tipo === 'wa') return reabrirModalCanal(f.id, 'whatsapp', metaF);
+  if (tipo === 'tg') return reabrirModalCanal(f.id, 'telegram', metaF);
   if (tipo === 'salvar') return f.isPend ? baixarPendente(localId) : salvarNoCelular(f.id);
   if (tipo === 'baixar') return baixarPendente(localId);
   if (tipo === 'excluir') {
@@ -24941,15 +25110,19 @@ async function removerPendente(localId) {
 }
 
 // v3.28.0: reabre o modal pos-captura mas com apenas 1 canal pre-marcado.
-async function reabrirModalCanal(fotoId, canalUnico) {
-  // Carrega metadados rapidos da foto (sem b64) pra preview/thumb
-  let meta = {};
-  try {
-    const r = await fetch('/api/galeria?limit=200');
-    const data = await r.json();
-    const f = (data.fotos || []).find((x) => x.id === fotoId);
-    if (f) meta = { lat: f.lat, lng: f.lng, capturada_em: f.capturada_em || f.criada_em };
-  } catch (_) {}
+async function reabrirModalCanal(fotoId, canalUnico, metaConhecida) {
+  // Carrega metadados rapidos da foto (sem b64) pra preview/thumb.
+  // v3.105.0: se o chamador já tem os metadados (carrossel), usa direto — o fetch de
+  // 200 fotos era lento no celular e falhava pra fotos fora das mais recentes.
+  let meta = metaConhecida || {};
+  if (!metaConhecida) {
+    try {
+      const r = await fetch('/api/galeria?limit=200');
+      const data = await r.json();
+      const f = (data.fotos || []).find((x) => x.id === fotoId);
+      if (f) meta = { lat: f.lat, lng: f.lng, capturada_em: f.capturada_em || f.criada_em };
+    } catch (_) {}
+  }
   // Pre-marca o canal solicitado via override de prefs
   await modalPosCaptura(fotoId, meta, { forceShow: true, override: { [canalUnico]: true } });
 }
@@ -24974,14 +25147,30 @@ async function enviarFotoGaleria(id, canal) {
 
 async function apagarFotoGaleria(id) {
   if (!confirm('Apagar essa foto da galeria?')) return;
+  // v3.105.0: offline a exclusão entra em fila e some da UI na hora — antes o fetch
+  // falhava e a foto continuava lá, dando a impressão de botão morto.
+  if (!navigator.onLine) {
+    await enfileirarExclusao(id);
+    toastGalOk('Excluída localmente — vai sincronizar quando voltar online');
+    recarregarGaleria();
+    return;
+  }
   try {
     const r = await fetch(`/api/galeria/${id}`, {
       method: 'DELETE',
+      credentials: 'include',
       headers: { 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
     });
-    if (r.ok) recarregarGaleria();
-    else alert('Falha ao apagar');
-  } catch (err) { alert('Erro: ' + (err.message || err)); }
+    if (r.ok) { recarregarGaleria(); return; }
+    // A rota exige X-CEO-Token; sem ele o botão parecia "não responder".
+    if (r.status === 401 || r.status === 403) alert('Sem permissão para apagar (esta ação exige token de CEO).');
+    else alert(`Falha ao apagar (HTTP ${r.status})`);
+  } catch (err) {
+    // Rede caiu no meio da ação: trata como offline em vez de perder a intenção do usuário.
+    await enfileirarExclusao(id);
+    toastGalOk('Sem conexão — exclusão enfileirada para sincronizar');
+    recarregarGaleria();
+  }
 }
 
 // Captura: arquivo selecionado → lê GPS atual + canvas com carimbo → upload
@@ -25071,12 +25260,14 @@ async function onGaleriaFileSelected(ev) {
     ctx.drawImage(logoRomatec, lx, ly, logoSize, logoSize);
   }
 
-  // v3.8.1 — Salva também na galeria do dispositivo (download da foto carimbada)
-  // ANTES do upload, pra garantir que mesmo offline o user tem o arquivo.
   const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
   const fileName = `romatec-${new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)}.jpg`;
+  // v3.105.0: o download automático da foto carimbada saiu do fluxo de captura.
+  // No iOS o <a download> com data-URL abre a folha de compartilhamento nativa, o que
+  // transformava toda captura num prompt. Agora é OPT-IN explícito (state.galeriaSalvarLocal
+  // === true); o caminho normal é "Salvar" na tela da foto já gravada.
   try {
-    if (state.galeriaSalvarLocal !== false) {
+    if (state.galeriaSalvarLocal === true) {
       baixarBlob(dataUrl, fileName);
     }
   } catch (_) {}
@@ -25097,13 +25288,9 @@ async function onGaleriaFileSelected(ev) {
   } else if (result.queued) {
     setStatus('⚠️ Server rejeitou. Salva local pra tentar de novo: ' + result.error);
   } else if (result.ok) {
-    setStatus('✅ Foto enviada!');
-    // v3.28.0: abre modal pos-captura quando upload sucesso + online
-    if (result.id) {
-      try {
-        await modalPosCaptura(result.id, { lat, lng, capturada_em: payload.capturada_em, dataUrlPreview: dataUrl });
-      } catch (e) { console.warn('[modal-pos-captura]', e); }
-    }
+    // v3.105.0: nada de modal/share sheet na captura — a foto já está salva na galeria.
+    // Compartilhar (WhatsApp/Telegram/Salvar) virou ação da foto, na tela de visualização.
+    setStatus('✅ Foto salva na galeria!');
   } else {
     setStatus('❌ Falha desconhecida');
   }
@@ -25216,7 +25403,13 @@ async function modalPosCaptura(fotoId, meta, opts = {}) {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) fechar(); });
   document.getElementById('gpcm-pular').onclick = fechar;
 
-  document.getElementById('gpcm-enviar').onclick = async () => {
+  document.getElementById('gpcm-enviar').onclick = async (evBtn) => {
+    // v3.105.0: trava contra duplo-toque — a Idempotency-Key carrega Date.now(), então
+    // dois cliques rápidos geravam dois envios reais.
+    const btnEnviar = evBtn.currentTarget;
+    if (btnEnviar.disabled) return;
+    btnEnviar.disabled = true;
+    btnEnviar.textContent = '⏳ Enviando...';
     const salvar = document.getElementById('gpcm-salvar').checked;
     const wa = document.getElementById('gpcm-wa').checked;
     const tg = document.getElementById('gpcm-tg').checked;
@@ -25241,8 +25434,12 @@ async function modalPosCaptura(fotoId, meta, opts = {}) {
       } catch (_) {}
     }
 
-    // Web Share API direto (sem passar pelo backend)
-    if (salvar) await salvarNoCelular(fotoId);
+    // Web Share API direto (sem passar pelo backend).
+    // v3.105.0: se o usuário cancelar a folha de compartilhamento, não pode travar o modal.
+    if (salvar) {
+      try { await salvarNoCelular(fotoId); }
+      catch (e) { console.warn('[salvarNoCelular]', e); }
+    }
 
     // Canais backend
     const canais = [];
