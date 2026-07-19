@@ -2589,7 +2589,7 @@ app.post('/api/galeria/download-zip', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/galeria', requireCeoToken, async (req: Request, res: Response) => {
+app.post('/api/galeria', requireAuth, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/galeria');
     const b = (req.body || {}) as Record<string, unknown>;
@@ -2625,7 +2625,7 @@ app.post('/api/galeria', requireCeoToken, async (req: Request, res: Response) =>
   }
 });
 
-app.put('/api/galeria/:id', requireCeoToken, async (req: Request, res: Response) => {
+app.put('/api/galeria/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/galeria');
     const b = (req.body || {}) as Record<string, unknown>;
@@ -2642,7 +2642,7 @@ app.put('/api/galeria/:id', requireCeoToken, async (req: Request, res: Response)
 
 // v3.108.0: calcula o hash das fotos antigas, em lotes. Sem isto, uma foto nova
 // nunca seria detectada como duplicata das que já estavam no banco.
-app.post('/api/galeria/backfill-hash', requireCeoToken, async (req: Request, res: Response) => {
+app.post('/api/galeria/backfill-hash', requireAuth, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/galeria');
     const limite = Number((req.body || {}).limite) || 50;
@@ -2664,7 +2664,7 @@ app.get('/api/galeria/contagem-por-obra', async (_req: Request, res: Response) =
 
 // v3.107.0: move um lote de fotos pra galeria de uma obra (obra_id null = volta pra geral).
 // Em lote de propósito: a fila offline reenvia a operação inteira, não N updates soltos.
-app.post('/api/galeria/mover-obra', requireCeoToken, async (req: Request, res: Response) => {
+app.post('/api/galeria/mover-obra', requireAuth, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/galeria');
     const b = (req.body || {}) as Record<string, unknown>;
@@ -2685,7 +2685,7 @@ app.post('/api/galeria/mover-obra', requireCeoToken, async (req: Request, res: R
   }
 });
 
-app.delete('/api/galeria/:id', requireCeoToken, async (req: Request, res: Response) => {
+app.delete('/api/galeria/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/galeria');
     const ok = await m.apagarFoto(Number(req.params.id));
@@ -2697,7 +2697,7 @@ app.delete('/api/galeria/:id', requireCeoToken, async (req: Request, res: Respon
 
 // Envia a foto pra WhatsApp ou Telegram
 // body: { canal: 'whatsapp' | 'telegram', destinatario: string, caption?: string }
-app.post('/api/galeria/:id/enviar', requireCeoToken, async (req: Request, res: Response) => {
+app.post('/api/galeria/:id/enviar', requireAuth, async (req: Request, res: Response) => {
   try {
     const g = await import('./integrations/galeria');
     const foto = await g.buscarFotoComB64(Number(req.params.id));

@@ -24700,7 +24700,10 @@ async function uploadFotoOuFila(payload) {
   try {
     const r = await fetch('/api/galeria', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+      // v3.108.1: rotas da galeria passaram de X-CEO-Token pra requireAuth (cookie
+      // zayra_auth). credentials:'include' e OBRIGATORIO — sem ele, 401 no upload.
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     if (!r.ok) {
@@ -24739,7 +24742,8 @@ async function sincronizarPendentes() {
       }
       const r = await fetch('/api/galeria', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+        credentials: 'include',   // v3.108.1: requireAuth por cookie
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       if (r.ok) {
@@ -24764,7 +24768,6 @@ async function sincronizarPendentes() {
       const r = await fetch(`/api/galeria/${ex.id}`, {
         method: 'DELETE',
         credentials: 'include',
-        headers: { 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
       });
       // 404 = já não existe no servidor: a intenção foi cumprida, tira da fila.
       if (r.ok || r.status === 404) { await removerExclusaoPendente(ex.id); excluidos++; }
@@ -24785,7 +24788,7 @@ async function sincronizarPendentes() {
       const r = await fetch('/api/galeria/mover-obra', {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fotoIds: ids, obra_id: chave === 'null' ? null : Number(chave) }),
       });
       if (r.ok) {
@@ -24916,7 +24919,7 @@ async function executarMoverParaObra(fotoIds, obraId, obraNome) {
     const r = await fetch('/api/galeria/mover-obra', {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fotoIds, obra_id: obraId }),
     });
     const j = await r.json().catch(() => ({}));
@@ -24926,7 +24929,7 @@ async function executarMoverParaObra(fotoIds, obraId, obraNome) {
       recarregarGaleria();
       return;
     }
-    if (r.status === 401 || r.status === 403) toastGalErr('Sem permissão para mover (exige token de CEO).');
+    if (r.status === 401 || r.status === 403) toastGalErr('Sessão expirada. Faça login novamente para mover.');
     else toastGalErr(`Falha ao mover: ${j.error || ('HTTP ' + r.status)}`);
   } catch (err) {
     // Rede caiu no meio: não perde a intenção do usuário.
@@ -25688,7 +25691,8 @@ async function enviarFotoGaleria(id, canal) {
   try {
     const r = await fetch(`/api/galeria/${id}/enviar`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+      credentials: 'include',   // v3.108.1: requireAuth por cookie
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ canal, destinatario, caption }),
     });
     const data = await r.json();
@@ -25711,11 +25715,11 @@ async function apagarFotoGaleria(id) {
     const r = await fetch(`/api/galeria/${id}`, {
       method: 'DELETE',
       credentials: 'include',
-      headers: { 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
     });
     if (r.ok) { recarregarGaleria(); return; }
-    // A rota exige X-CEO-Token; sem ele o botão parecia "não responder".
-    if (r.status === 401 || r.status === 403) alert('Sem permissão para apagar (esta ação exige token de CEO).');
+    // v3.108.1: agora é requireAuth por cookie — 401 significa sessão expirada,
+    // não falta de token de CEO.
+    if (r.status === 401 || r.status === 403) alert('Sessão expirada. Faça login novamente para apagar.');
     else alert(`Falha ao apagar (HTTP ${r.status})`);
   } catch (err) {
     // Rede caiu no meio da ação: trata como offline em vez de perder a intenção do usuário.
