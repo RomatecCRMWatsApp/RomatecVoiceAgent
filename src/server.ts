@@ -983,7 +983,7 @@ app.delete('/api/etapas/:id', apiHandle(args => obras.apagarEtapa(args as { id: 
 // deixando todas as rotas admin abertas. Agora checa X-CEO-Token contra env real
 // e FALHA FECHADO se CEO_API_TOKEN nao estiver setada (antes falhava aberto).
 // Implementacao moveu pra src/middleware/auth.ts pra ficar perto do requireAuth.
-import { requireCeoToken, requireAuth, type AuthedRequest } from './middleware/auth';
+import { requireCeoToken, requireAuth, requireRole, type AuthedRequest } from './middleware/auth';
 import { requirePin } from './middleware/requirePin'; // v3.50.0
 
 // v1.64.0: tenant settings (white-label estrutural). GET é público, PUT só CEO.
@@ -2674,6 +2674,30 @@ app.post('/api/galeria/excluir-lote', requireAuth, async (req: Request, res: Res
     res.status(400).json({ error: (err as Error).message });
   }
 });
+
+// v3.114.0 — Diagnostico da integracao esportiva. UNICA rota do modulo.
+//
+// Existe porque nao ha outro jeito de validar a chave e o formato da resposta sem
+// acesso a shell do Railway: a documentacao da API-Sports bloqueia leitura
+// automatizada, entao o mapeamento dos campos foi escrito a partir do contrato v3
+// conhecido e PRECISA ser conferido contra uma chamada real antes de virar job.
+//
+// Nao expoe palpite, odd nem probabilidade — so responde se a integracao esta de
+// pe. O modulo esportivo segue sem tela, conforme a secao 0 da spec.
+//
+// requireAuth + requireRole('admin','owner'): note que requireCeoToken NAO serve
+// mais pra restringir ao dono — a v3.109.0 removeu o gate de papel dele a pedido
+// do CEO, e hoje qualquer usuario logado passa. Este e o padrao que a fase 4
+// tera que usar.
+app.get('/api/esportes/diagnostico', requireAuth, requireRole('admin', 'owner'),
+  async (_req: Request, res: Response) => {
+    try {
+      const m = await import('./services/sportsData/adapters/apiSportsAdapter');
+      res.json(await m.diagnosticarConexao());
+    } catch (err) {
+      res.status(500).json({ ok: false, detalhe: (err as Error).message });
+    }
+  });
 
 // v3.108.0: calcula o hash das fotos antigas, em lotes. Sem isto, uma foto nova
 // nunca seria detectada como duplicata das que já estavam no banco.
