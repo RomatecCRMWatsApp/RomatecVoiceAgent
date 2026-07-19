@@ -2601,7 +2601,9 @@ app.post('/api/galeria', requireCeoToken, async (req: Request, res: Response) =>
       res.status(400).json({ error: 'mime de imagem obrigatório (ex: image/jpeg)' });
       return;
     }
-    const id = await m.criarFoto({
+    // v3.108.0: dedup por hash de conteúdo no mesmo escopo. Se já existir foto
+    // idêntica, devolve o id da original e NÃO cria registro novo — sem diálogo.
+    const r = await m.criarFotoComDedup({
       mime: b.mime,
       arquivo_b64: b.arquivo_b64,
       user_nome: typeof b.user_nome === 'string' ? b.user_nome : null,
@@ -2614,8 +2616,10 @@ app.post('/api/galeria', requireCeoToken, async (req: Request, res: Response) =>
       capturada_em: typeof b.capturada_em === 'string' ? b.capturada_em : null,
       tags: typeof b.tags === 'string' ? b.tags : null,
       obra_id: typeof b.obra_id === 'number' ? b.obra_id : null,
-    });
-    res.json({ id });
+    }, typeof b.origem === 'string' ? b.origem : 'upload');
+    // `id` continua sendo o id utilizável da foto (a original, quando duplicada),
+    // então o cliente que já esperava { id } segue funcionando.
+    res.json({ id: r.id, duplicada: r.duplicada });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -2633,6 +2637,18 @@ app.put('/api/galeria/:id', requireCeoToken, async (req: Request, res: Response)
     res.json({ ok });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+// v3.108.0: calcula o hash das fotos antigas, em lotes. Sem isto, uma foto nova
+// nunca seria detectada como duplicata das que já estavam no banco.
+app.post('/api/galeria/backfill-hash', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    const limite = Number((req.body || {}).limite) || 50;
+    res.json(await m.backfillHashes(limite));
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -5423,6 +5439,27 @@ app.listen(PORT, () => {
     try {
       const m = await import('./database/migrations-galeria');
       await m.runGaleriaMigrations();
+
+      // v3.108.0: backfill do hash das fotos antigas, em lotes pequenos e com pausa.
+      // Fotos são LONGTEXT base64 — processar tudo de uma vez comeria memória e
+      // seguraria o pool no boot. Roda em background, se auto-encerra e é idempotente
+      // (só pega hash_sha256 IS NULL), então reinício do Railway continua de onde parou.
+      void (async () => {
+        try {
+          const g = await import('./integrations/galeria');
+          for (let volta = 0; volta < 200; volta++) {
+            const r = await g.backfillHashes(25);
+            if (r.processadas === 0) {
+              if (volta > 0) console.log('[galeria-dedup] backfill de hash concluido');
+              break;
+            }
+            console.log(`[galeria-dedup] backfill: ${r.processadas} processadas, ${r.restantes} restantes`);
+            await new Promise((r2) => setTimeout(r2, 1500)); // respira entre lotes
+          }
+        } catch (err) {
+          console.error('[galeria-dedup] backfill falhou:', (err as Error).message);
+        }
+      })();
     } catch (err) {
       console.error('[galeria-migrations] FALHA fatal:', err);
     }

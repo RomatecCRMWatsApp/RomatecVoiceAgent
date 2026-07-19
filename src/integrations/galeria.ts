@@ -6,6 +6,7 @@
 // também é aplicado no cliente via canvas, então a `arquivo_b64` já vem
 // com a foto "marcada"). Aqui só persistimos e servimos.
 
+import { createHash } from 'crypto';
 import pool from '../database/connection';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 
@@ -36,6 +37,8 @@ export interface GaleriaFoto {
   tags: string | null;
   obra_id: number | null;
   criada_em: string;
+  /** v3.108.0: SHA-256 do binário. Vai pro front pra dedup offline. */
+  hash_sha256?: string | null;
 }
 
 export interface GaleriaFotoComB64 extends GaleriaFoto {
@@ -76,6 +79,7 @@ function rowToFoto(r: RowDataPacket): GaleriaFoto {
     tags: r.tags ?? null,
     obra_id: r.obra_id != null ? Number(r.obra_id) : null,
     criada_em: String(r.criada_em ?? ''),
+    hash_sha256: r.hash_sha256 ?? null,
   };
 }
 
@@ -105,7 +109,7 @@ export async function listarFotos(opts: {
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT id, tenant_id, user_id, user_nome, mime, legenda,
             lat, lng, altitude_m, accuracy_m, endereco_reverso,
-            capturada_em, tags, obra_id, criada_em
+            capturada_em, tags, obra_id, criada_em, hash_sha256
        FROM galeria_fotos
       WHERE ${wheres.join(' AND ')}
       ORDER BY COALESCE(capturada_em, criada_em) DESC, id DESC
@@ -191,13 +195,115 @@ export async function gerarZipFotos(ids: number[]): Promise<Buffer> {
 }
 
 /** Cria nova foto. Retorna o id criado. */
-export async function criarFoto(input: NovaFotoInput): Promise<number> {
+// ===================== v3.108.0: deduplicação por hash =====================
+//
+// ALCANCE REAL desta dedup: SHA-256 do binário = bytes idênticos. Como o carimbo é
+// queimado no JPEG no cliente e inclui o horário (`🕒 dd/mm/aaaa, hh:mm:ss`), duas
+// capturas da MESMA cena nunca batem — os pixels do texto diferem. Na prática isto
+// pega reenvio do mesmo arquivo: fila offline reprocessada, sync duplicado, upload
+// repetido. NÃO pega "tirei duas fotos parecidas".
+//
+// Não usei hash perceptual de propósito: a exclusão é silenciosa e sem confirmação,
+// então um falso positivo apagaria uma foto legítima de vistoria sem ninguém ver.
+
+/** SHA-256 do binário da imagem (não do base64 — o texto pode variar em padding). */
+export function calcularHashFoto(arquivoB64: string): string {
+  return createHash('sha256').update(Buffer.from(arquivoB64, 'base64')).digest('hex');
+}
+
+/** Procura foto com o mesmo conteúdo NO MESMO ESCOPO (geral ou a mesma obra). */
+export async function buscarDuplicata(
+  hash: string,
+  obraId: number | null,
+  tenantId = 1,
+): Promise<number | null> {
+  // obra_id IS NULL precisa de comparação própria: `= NULL` nunca casa em SQL.
+  const cond = obraId == null ? 'obra_id IS NULL' : 'obra_id = ?';
+  const params: Array<string | number> = [tenantId, hash];
+  if (obraId != null) params.push(obraId);
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id FROM galeria_fotos
+      WHERE tenant_id = ? AND hash_sha256 = ? AND ${cond}
+      ORDER BY id ASC LIMIT 1`,   // a mais antiga prevalece
+    params,
+  );
+  return rows.length ? Number(rows[0].id) : null;
+}
+
+async function registrarDuplicataDescartada(dados: {
+  tenant_id: number; hash: string; original_id: number; obra_id: number | null;
+  origem: string; user_nome?: string | null; capturada_em?: string | null;
+}): Promise<void> {
+  try {
+    await pool.execute(
+      `INSERT INTO galeria_duplicatas_log
+         (tenant_id, hash_sha256, foto_original_id, obra_id, origem, user_nome, capturada_em)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [dados.tenant_id, dados.hash, dados.original_id, dados.obra_id,
+       dados.origem, dados.user_nome ?? null, dados.capturada_em ?? null],
+    );
+  } catch (err) {
+    // Log é diagnóstico: falhar aqui não pode derrubar o upload.
+    console.error('[galeria-dedup] falha ao registrar descarte:', (err as Error).message);
+  }
+}
+
+/**
+ * Insere com dedup. Se já existir foto de conteúdo idêntico no mesmo escopo,
+ * NÃO cria registro novo: devolve o id da original e registra o descarte.
+ */
+export async function criarFotoComDedup(
+  input: NovaFotoInput,
+  origem = 'upload',
+): Promise<{ id: number; duplicada: boolean; original_id: number | null }> {
+  const tenant = input.tenant_id ?? 1;
+  const obraId = input.obra_id ?? null;
+  const hash = calcularHashFoto(input.arquivo_b64);
+
+  const originalId = await buscarDuplicata(hash, obraId, tenant);
+  if (originalId != null) {
+    await registrarDuplicataDescartada({
+      tenant_id: tenant, hash, original_id: originalId, obra_id: obraId,
+      origem, user_nome: input.user_nome ?? null, capturada_em: input.capturada_em ?? null,
+    });
+    return { id: originalId, duplicada: true, original_id: originalId };
+  }
+  const id = await criarFoto({ ...input, hash_sha256: hash });
+  return { id, duplicada: false, original_id: null };
+}
+
+/**
+ * Calcula o hash das fotos antigas (inseridas antes da v3.108.0), em lotes.
+ * Sem isto, uma foto nova nunca seria detectada como duplicata das já existentes.
+ */
+export async function backfillHashes(limite = 50): Promise<{ processadas: number; restantes: number }> {
+  const n = Math.max(1, Math.min(Math.trunc(limite), 200));
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, arquivo_b64 FROM galeria_fotos WHERE hash_sha256 IS NULL LIMIT ${n}`,
+  );
+  for (const r of rows) {
+    try {
+      await pool.execute(
+        `UPDATE galeria_fotos SET hash_sha256 = ? WHERE id = ?`,
+        [calcularHashFoto(String(r.arquivo_b64)), r.id],
+      );
+    } catch (err) {
+      console.error('[galeria-dedup] backfill falhou na foto', r.id, (err as Error).message);
+    }
+  }
+  const [[{ total }]] = await pool.execute<RowDataPacket[]>(
+    `SELECT COUNT(*) AS total FROM galeria_fotos WHERE hash_sha256 IS NULL`,
+  ) as unknown as [[{ total: number }]];
+  return { processadas: rows.length, restantes: Number(total) };
+}
+
+export async function criarFoto(input: NovaFotoInput & { hash_sha256?: string }): Promise<number> {
   const [res] = await pool.execute<ResultSetHeader>(
     `INSERT INTO galeria_fotos
        (tenant_id, user_id, user_nome, mime, arquivo_b64, legenda,
         lat, lng, altitude_m, accuracy_m, endereco_reverso,
-        capturada_em, tags, obra_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        capturada_em, tags, obra_id, hash_sha256)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.tenant_id ?? 1,
       input.user_id ?? null,
@@ -213,6 +319,9 @@ export async function criarFoto(input: NovaFotoInput): Promise<number> {
       input.capturada_em ?? null,
       input.tags ?? null,
       input.obra_id ?? null,
+      // v3.108.0: se o chamador não passou, calcula aqui — nenhuma foto entra sem hash,
+      // senão a dedup teria buracos silenciosos.
+      input.hash_sha256 ?? calcularHashFoto(input.arquivo_b64),
     ],
   );
   return res.insertId;
@@ -259,9 +368,9 @@ export async function moverFotosParaObra(
   fotoIds: number[],
   obraId: number | null,
   opts: { tenant_id?: number } = {},
-): Promise<{ movidas: number; obra_nome: string | null }> {
+): Promise<{ movidas: number; obra_nome: string | null; descartadas: number }> {
   const ids = [...new Set(fotoIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
-  if (ids.length === 0) return { movidas: 0, obra_nome: null };
+  if (ids.length === 0) return { movidas: 0, obra_nome: null, descartadas: 0 };
   const tenant = opts.tenant_id ?? 1;
 
   let obraNome: string | null = null;
@@ -277,12 +386,30 @@ export async function moverFotosParaObra(
   // Precisa da legenda atual de cada foto pra recalcular o prefixo por linha.
   const placeholders = ids.map(() => '?').join(',');
   const [linhas] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, legenda FROM galeria_fotos WHERE id IN (${placeholders}) AND tenant_id = ?`,
+    `SELECT id, legenda, hash_sha256, user_nome, capturada_em
+       FROM galeria_fotos WHERE id IN (${placeholders}) AND tenant_id = ?`,
     [...ids, tenant],
   );
 
   let movidas = 0;
+  let descartadas = 0;
   for (const linha of linhas) {
+    // v3.108.0: se a obra destino JÁ tem foto de conteúdo idêntico, mover criaria
+    // duplicata dentro do escopo. Descarta a que está chegando (a original prevalece).
+    if (linha.hash_sha256) {
+      const originalId = await buscarDuplicata(String(linha.hash_sha256), obraId, tenant);
+      if (originalId != null && originalId !== Number(linha.id)) {
+        await registrarDuplicataDescartada({
+          tenant_id: tenant, hash: String(linha.hash_sha256), original_id: originalId,
+          obra_id: obraId, origem: 'movimentacao',
+          user_nome: linha.user_nome ?? null,
+          capturada_em: linha.capturada_em ? String(linha.capturada_em) : null,
+        });
+        await pool.execute(`DELETE FROM galeria_fotos WHERE id = ? AND tenant_id = ?`, [linha.id, tenant]);
+        descartadas++;
+        continue;
+      }
+    }
     const novaLegenda = aplicarPrefixoObra(linha.legenda, obraNome);
     const [res] = await pool.execute<ResultSetHeader>(
       // tenant no WHERE: atualizarFoto() não filtra, e aqui é operação em lote.
@@ -291,7 +418,7 @@ export async function moverFotosParaObra(
     );
     if (res.affectedRows > 0) movidas++;
   }
-  return { movidas, obra_nome: obraNome };
+  return { movidas, obra_nome: obraNome, descartadas };
 }
 
 /**

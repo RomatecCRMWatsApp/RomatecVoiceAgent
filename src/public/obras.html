@@ -24651,8 +24651,48 @@ async function removerPendenteLocal(localId) {
   });
 }
 
+// ---- v3.108.0: dedup por hash de conteúdo (espelha o servidor) ----
+// SHA-256 do BINÁRIO, igual ao backend (que faz Buffer.from(b64,'base64')).
+// crypto.subtle exige contexto seguro; sem ele devolve null e a dedup fica só
+// no servidor — degradação silenciosa, não erro.
+async function calcularHashFotoFront(arquivoB64) {
+  try {
+    if (!(window.crypto && crypto.subtle)) return null;
+    const bin = atob(arquivoB64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const buf = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (_) { return null; }
+}
+
+// Procura conteúdo idêntico no MESMO escopo, olhando o cache do servidor e a
+// própria fila local (duas capturas iguais offline não podem virar dois registros).
+async function existeDuplicataLocal(hash, obraId) {
+  if (!hash) return false;
+  const mesmo = (o) => {
+    const v = o == null ? null : Number(o);
+    return obraId == null ? v == null : v === Number(obraId);
+  };
+  const cache = await listarCacheFotos().catch(() => []);
+  if (cache.some(f => f.hash_sha256 === hash && mesmo(f.obra_id))) return true;
+  const pend = await listarPendentesLocal().catch(() => []);
+  return pend.some(p => p.hash_sha256 === hash && mesmo(p.obra_id));
+}
+
 // Tenta fazer upload — se falhar OU se offline, salva em IndexedDB.
 async function uploadFotoOuFila(payload) {
+  // v3.108.0: hash calculado UMA vez e carregado no payload — serve pra dedup local
+  // agora e viaja com a foto pra fila offline, sem recalcular a cada sync.
+  if (!payload.hash_sha256) {
+    const h = await calcularHashFotoFront(payload.arquivo_b64);
+    if (h) payload.hash_sha256 = h;
+  }
+  if (await existeDuplicataLocal(payload.hash_sha256, payload.obra_id ?? null)) {
+    // Descarte silencioso: nada de diálogo, conforme especificado.
+    console.log('[galeria-dedup] foto identica ja existente — descartada localmente');
+    return { ok: true, duplicada: true };
+  }
   if (!navigator.onLine) {
     await salvarPendenteLocal(payload);
     return { ok: true, offline: true };
@@ -24684,6 +24724,7 @@ async function sincronizarPendentes() {
   const pendentes = await listarPendentesLocal();
   let enviados = 0;
   let falhas = 0;
+  let duplicadas = 0;   // v3.108.0: já existiam no servidor — saem da fila sem virar registro
   for (const p of pendentes) {
     try {
       const { localId, ...payload } = p;
@@ -24702,8 +24743,12 @@ async function sincronizarPendentes() {
         body: JSON.stringify(payload),
       });
       if (r.ok) {
+        // v3.108.0: reconciliação — o servidor pode responder que essa foto já
+        // existia lá (ex.: outro colaborador sincronizou a mesma antes). Sai da
+        // fila do mesmo jeito; só não conta como envio novo.
+        const j = await r.json().catch(() => ({}));
         await removerPendenteLocal(localId);
-        enviados++;
+        if (j && j.duplicada) duplicadas++; else enviados++;
       } else {
         falhas++;
       }
@@ -24749,7 +24794,7 @@ async function sincronizarPendentes() {
       }
     } catch (_) { /* segue offline — tenta no próximo sync */ }
   }
-  return { enviados, restantes: pendentes.length - enviados, falhas, excluidos, movidos };
+  return { enviados, restantes: pendentes.length - enviados - duplicadas, falhas, excluidos, movidos, duplicadas };
 }
 
 // Auto-sync quando voltar online
@@ -25069,7 +25114,7 @@ async function syncManual() {
   if (!navigator.onLine) { setStatus('🔴 Sem internet, não posso sincronizar agora'); return; }
   setStatus('☁️ Sincronizando...');
   const r = await sincronizarPendentes();
-  setStatus(`✅ ${r.enviados} enviados${r.excluidos ? ', ' + r.excluidos + ' excluídas' : ''}${r.movidos ? ', ' + r.movidos + ' movidas' : ''}${r.restantes > 0 ? ', ' + r.restantes + ' falharam' : ''}`);
+  setStatus(`✅ ${r.enviados} enviados${r.duplicadas ? ', ' + r.duplicadas + ' já existiam' : ''}${r.excluidos ? ', ' + r.excluidos + ' excluídas' : ''}${r.movidos ? ', ' + r.movidos + ' movidas' : ''}${r.restantes > 0 ? ', ' + r.restantes + ' falharam' : ''}`);
   setTimeout(() => setStatus(''), 4000);
   recarregarGaleria();
 }
@@ -25790,7 +25835,11 @@ async function onGaleriaFileSelected(ev) {
     capturada_em: new Date().toISOString().slice(0, 19).replace('T', ' '),
   };
   const result = await uploadFotoOuFila(payload);
-  if (result.offline) {
+  if (result.duplicada) {
+    // v3.108.0: não é diálogo — só um aviso na barra de status, pra foto não
+    // "sumir" sem explicação nenhuma.
+    setStatus('📄 Foto idêntica já existe na galeria — não foi duplicada.');
+  } else if (result.offline) {
     setStatus('📵 Foto salva localmente (sem internet). Vai subir sozinha quando voltar online.');
   } else if (result.queued) {
     setStatus('⚠️ Server rejeitou. Salva local pra tentar de novo: ' + result.error);
