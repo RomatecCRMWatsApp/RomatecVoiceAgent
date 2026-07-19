@@ -96,6 +96,8 @@ export function normalizarFixture(m: MatchApi): Fixture {
     provedorLigaId: m.competition?.code ?? String(m.competition?.id ?? ''),
     timeCasa: m.homeTeam?.name ?? m.homeTeam?.shortName ?? '(desconhecido)',
     timeVisitante: m.awayTeam?.name ?? m.awayTeam?.shortName ?? '(desconhecido)',
+    timeCasaId: String(m.homeTeam?.id ?? ''),
+    timeVisitanteId: String(m.awayTeam?.id ?? ''),
     dataHora: m.utcDate,
     status: mapearStatus(m.status),
     placarCasa: m.score?.fullTime?.home ?? null,

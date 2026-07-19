@@ -14,6 +14,13 @@ export interface Fixture {
   provedorLigaId: string;
   timeCasa: string;
   timeVisitante: string;
+  /**
+   * Ids dos times no provedor. Obrigatorios pra buscar forma recente — a API
+   * identifica time por id, nao por nome. Sem propagar isto, o motor nunca
+   * consegue calcular forca e todo jogo sai sem probabilidade.
+   */
+  timeCasaId: string;
+  timeVisitanteId: string;
   /** ISO 8601 em UTC. */
   dataHora: string;
   status: 'agendado' | 'ao_vivo' | 'encerrado' | 'cancelado';

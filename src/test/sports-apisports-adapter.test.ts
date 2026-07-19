@@ -222,3 +222,34 @@ describe('rota de diagnostico — gate de acesso', () => {
     expect(rotas.length, `rotas de esportes encontradas:\n${rotas.join('\n')}`).toBe(1);
   });
 });
+
+describe('propagacao dos ids de time (bug corrigido antes de ir pro ar)', () => {
+  // Sem o id, obterForca() nao tem o que consultar: o cache nunca se preenche e
+  // TODO jogo sai sem probabilidade. A API identifica time por id, nao por nome —
+  // a primeira versao guardava so o nome e o modulo teria nascido inerte.
+  it('28. fixture carrega os ids de mandante e visitante', () => {
+    const f = normalizarFixtureApiSports({
+      fixture: { id: 1, date: '2026-07-19T21:00:00+00:00', status: { short: 'NS' } },
+      teams: { home: { id: 127, name: 'Flamengo' }, away: { id: 121, name: 'Palmeiras' } },
+    });
+    expect(f.timeCasaId).toBe('127');
+    expect(f.timeVisitanteId).toBe('121');
+  });
+
+  it('29. id ausente vira string vazia, nao "undefined"', () => {
+    const f = normalizarFixtureApiSports({});
+    expect(f.timeCasaId).toBe('');
+    expect(f.timeVisitanteId).toBe('');
+  });
+
+  it('30. os ids nao saem trocados entre si', () => {
+    const f = normalizarFixtureApiSports({
+      fixture: { id: 9 },
+      teams: { home: { id: 111, name: 'A' }, away: { id: 222, name: 'B' } },
+    });
+    expect(f.timeCasa).toBe('A');
+    expect(f.timeCasaId).toBe('111');
+    expect(f.timeVisitante).toBe('B');
+    expect(f.timeVisitanteId).toBe('222');
+  });
+});

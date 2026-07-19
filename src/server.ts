@@ -5493,6 +5493,16 @@ app.listen(PORT, () => {
     }
   })();
 
+  // v3.115.0: migrations do modulo de estatisticas esportivas (cache + historico).
+  void (async () => {
+    try {
+      const m = await import('./database/migrations-esportes');
+      await m.runEsportesMigrations();
+    } catch (err) {
+      console.error('[esportes-migrations] FALHA fatal:', err);
+    }
+  })();
+
   // v3.8.0: migrations da Galeria de Fotos georreferenciadas.
   void (async () => {
     try {
