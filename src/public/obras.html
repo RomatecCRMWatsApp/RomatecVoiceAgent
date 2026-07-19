@@ -24940,6 +24940,169 @@ async function executarMoverParaObra(fotoIds, obraId, obraNome) {
   }
 }
 
+// ===================== v3.110.0: organização por data + varredura de duplicatas =====================
+
+// Alterna o sentido da ordenação por data/hora de captura. A ordenação em si já é
+// automática (server e front ordenam por capturada_em desde a v3.105.0) — este botão
+// só deixa o usuário inverter e torna o critério explícito na tela.
+state.galeriaOrdem = state.galeriaOrdem || 'desc';
+function alternarOrdemGaleria() {
+  state.galeriaOrdem = state.galeriaOrdem === 'desc' ? 'asc' : 'desc';
+  const b = document.getElementById('galeria-btn-ordem');
+  if (b) b.textContent = state.galeriaOrdem === 'desc' ? '🕒 Mais recentes primeiro' : '🕒 Mais antigas primeiro';
+  recarregarGaleria();
+}
+
+async function varrerDuplicatasGaleria() {
+  if (!navigator.onLine) { toastGalErr('Varredura precisa de conexão'); return; }
+  const status = document.getElementById('galeria-status');
+  if (status) status.textContent = '🔍 Varrendo duplicatas...';
+  try {
+    const escopo = state.galeriaObraFiltro != null
+      ? `obra_id=${encodeURIComponent(state.galeriaObraFiltro)}`
+      : 'escopo=geral';
+    const r = await fetch(`/api/galeria/duplicatas?${escopo}`, { credentials: 'include' });
+    const j = await r.json();
+    if (!r.ok) { toastGalErr(`Falha na varredura: ${j.error || r.status}`); return; }
+    if (status) status.textContent = '';
+    abrirModalDuplicatas(j.grupos || []);
+  } catch (err) {
+    toastGalErr('Erro na varredura: ' + (err.message || err));
+  } finally {
+    if (status && status.textContent.startsWith('🔍')) status.textContent = '';
+  }
+}
+
+function abrirModalDuplicatas(grupos) {
+  const anterior = document.getElementById('galeria-modal-dup');
+  if (anterior) anterior.remove();
+
+  const totalFotos = grupos.reduce((s, g) => s + g.fotos.length, 0);
+  const identicas = grupos.filter(g => g.tipo === 'identica');
+  const provaveis = grupos.filter(g => g.tipo === 'provavel');
+
+  const ov = document.createElement('div');
+  ov.id = 'galeria-modal-dup';
+  ov.setAttribute('role', 'dialog');
+  ov.setAttribute('aria-modal', 'true');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100010;display:flex;align-items:center;justify-content:center;padding:12px;';
+
+  if (!grupos.length) {
+    ov.innerHTML = `
+      <div style="background:#1a1a1a;border:1px solid #333;border-radius:12px;max-width:460px;width:100%;color:#fff;padding:22px;">
+        <h2 style="margin:0 0 8px;font-size:17px;">🔍 Nenhuma duplicata encontrada</h2>
+        <p style="margin:0 0 16px;font-size:13px;opacity:.75;line-height:1.6;">
+          Nenhuma foto repetida ${state.galeriaObraFiltro != null ? 'nesta obra' : 'na galeria geral'}.
+        </p>
+        <div style="text-align:right;"><button id="gdup-fechar" style="padding:9px 18px;background:#C9A84C;border:none;color:#0C3320;border-radius:6px;cursor:pointer;font-weight:700;font-size:13px;">Fechar</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    document.getElementById('gdup-fechar').onclick = () => ov.remove();
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+    return;
+  }
+
+  // Monta um grupo. Por padrão a MAIS ANTIGA fica desmarcada (é a que se mantém) e
+  // as demais vêm marcadas — mas só nos grupos 'identica', onde há certeza.
+  const htmlGrupo = (g, i) => {
+    const certo = g.tipo === 'identica';
+    const cor = certo ? '#ef4444' : '#f59e0b';
+    const rotulo = certo
+      ? 'Idênticas — mesmo arquivo, certeza'
+      : 'Prováveis — mesmo local e quase o mesmo instante (confira antes)';
+    return `
+      <div style="border:1px solid ${cor};border-radius:8px;padding:10px;margin-bottom:12px;">
+        <div style="font-size:11px;font-weight:700;color:${cor};text-transform:uppercase;margin-bottom:8px;">
+          ${rotulo} · ${g.fotos.length} fotos
+        </div>
+        <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;">
+          ${g.fotos.map((f, k) => {
+            const manter = f.id === g.manter_id;
+            const marcada = certo && !manter;
+            const dt = f.capturada_em || f.criada_em;
+            const dtTxt = dt ? new Date(String(dt).replace(' ', 'T')).toLocaleString('pt-BR') : '';
+            return `
+              <label style="flex:0 0 118px;cursor:pointer;position:relative;">
+                <img src="/api/galeria/${f.id}/arquivo" loading="lazy"
+                     style="width:118px;height:88px;object-fit:cover;border-radius:5px;background:#000;border:2px solid ${marcada ? cor : 'transparent'};">
+                <div style="font-size:10px;opacity:.75;margin-top:3px;line-height:1.3;">#${f.id}<br>${escapeHtml(dtTxt)}</div>
+                <div style="font-size:10px;margin-top:3px;display:flex;align-items:center;gap:4px;">
+                  <input type="checkbox" class="gdup-chk" data-id="${f.id}" ${marcada ? 'checked' : ''}
+                         onchange="this.closest('label').querySelector('img').style.borderColor = this.checked ? '${cor}' : 'transparent'">
+                  <span>${manter ? 'mais antiga' : 'excluir'}</span>
+                </div>
+              </label>`;
+          }).join('')}
+        </div>
+      </div>`;
+  };
+
+  ov.innerHTML = `
+    <div style="background:#1a1a1a;border:1px solid #333;border-radius:12px;max-width:720px;width:100%;max-height:88vh;display:flex;flex-direction:column;color:#fff;">
+      <div style="padding:18px 20px 10px;border-bottom:1px solid #333;">
+        <h2 style="margin:0 0 6px;font-size:17px;">🔍 Duplicatas encontradas</h2>
+        <p style="margin:0;font-size:12px;opacity:.75;line-height:1.5;">
+          ${grupos.length} grupo(s), ${totalFotos} fotos — ${identicas.length} idêntica(s), ${provaveis.length} provável(is).
+          Marque as que quer excluir. A mais antiga de cada grupo vem desmarcada.
+        </p>
+      </div>
+      <div style="padding:14px 20px;overflow-y:auto;flex:1;">
+        ${grupos.map(htmlGrupo).join('')}
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid #333;display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;">
+        <span id="gdup-contador" style="font-size:12px;opacity:.8;"></span>
+        <span style="display:flex;gap:8px;">
+          <button id="gdup-cancelar" style="padding:9px 16px;background:transparent;border:1px solid #333;color:#bbb;border-radius:6px;cursor:pointer;font-size:13px;">Cancelar</button>
+          <button id="gdup-excluir" style="padding:9px 18px;background:#ef4444;border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;">🗑 Excluir marcadas</button>
+        </span>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  const marcadas = () => Array.from(ov.querySelectorAll('.gdup-chk:checked')).map(c => Number(c.dataset.id));
+  const atualizarContador = () => {
+    const n = marcadas().length;
+    const el = document.getElementById('gdup-contador');
+    if (el) el.textContent = `${n} foto${n !== 1 ? 's' : ''} marcada${n !== 1 ? 's' : ''} pra exclusão`;
+  };
+  ov.addEventListener('change', atualizarContador);
+  atualizarContador();
+
+  const fechar = () => ov.remove();
+  document.getElementById('gdup-cancelar').onclick = fechar;
+  ov.addEventListener('click', (e) => { if (e.target === ov) fechar(); });
+
+  document.getElementById('gdup-excluir').onclick = async (ev) => {
+    const btn = ev.currentTarget;
+    if (btn.disabled) return;
+    const ids = marcadas();
+    if (!ids.length) { alert('Marque ao menos uma foto para excluir.'); return; }
+    // Ação destrutiva e em lote: confirmação explícita com a contagem.
+    if (!confirm(`Excluir ${ids.length} foto(s) definitivamente?\n\nEsta ação não pode ser desfeita.`)) return;
+    btn.disabled = true; btn.textContent = '⏳ Excluindo...';
+    try {
+      const r = await fetch('/api/galeria/excluir-lote', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fotoIds: ids }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        toastGalOk(`${j.apagadas != null ? j.apagadas : ids.length} foto(s) excluída(s)`);
+        fechar();
+        recarregarGaleria();
+      } else {
+        toastGalErr(`Falha ao excluir: ${j.error || r.status}`);
+        btn.disabled = false; btn.textContent = '🗑 Excluir marcadas';
+      }
+    } catch (err) {
+      toastGalErr('Erro de rede ao excluir');
+      btn.disabled = false; btn.textContent = '🗑 Excluir marcadas';
+    }
+  };
+}
+
 async function renderGaleria() {
   const v = document.getElementById('view-galeria');
   if (!v) return;
@@ -24960,6 +25123,11 @@ async function renderGaleria() {
         <button class="btn-secondary" onclick="recarregarGaleria()">🔄 Recarregar</button>
         <button class="btn-secondary" onclick="syncManual()">☁️ Sincronizar pendentes</button>
         <button class="btn-secondary" id="galeria-btn-selecionar" onclick="toggleModoSelecaoGaleria()">☑️ Selecionar</button>
+        <!-- v3.110.0: organização por data/hora de captura + varredura manual de duplicatas -->
+        <button class="btn-secondary" id="galeria-btn-ordem" onclick="alternarOrdemGaleria()"
+                title="Ordena por data e hora de CAPTURA da foto">${(state.galeriaOrdem || 'desc') === 'desc' ? '🕒 Mais recentes primeiro' : '🕒 Mais antigas primeiro'}</button>
+        <button class="btn-secondary" onclick="varrerDuplicatasGaleria()"
+                title="Procura fotos repetidas e mostra uma lista pra você revisar">🔍 Varredura de duplicatas</button>
         <span id="galeria-net" style="font-size:12px;padding:2px 8px;border-radius:4px;"></span>
       </div>
       <div id="galeria-status" style="font-size:12px;color:#888;margin-bottom:8px;"></div>
@@ -25086,12 +25254,37 @@ async function recarregarGaleria() {
     const t = new Date(String(raw).replace(' ', 'T')).getTime();
     return Number.isFinite(t) ? t : 0;
   };
+  // v3.110.0: sentido da ordenação configurável (botão 🕒). O critério continua o
+  // mesmo — data/hora de CAPTURA, com id como desempate.
+  const desc = (state.galeriaOrdem || 'desc') === 'desc';
+  const sinal = desc ? 1 : -1;
   const itens = [
     ...pendentes.map(p => ({ raw: { ...p, id: 'local-' + p.localId, _pendente: true }, isPend: true, ts: tsKey(p), ord: Number(p.localId) || 0 })),
     ...fotosServer.map(f => ({ raw: f, isPend: false, ts: tsKey(f), ord: Number(f.id) || 0 })),
-  ].sort((a, b) => (b.ts - a.ts) || (b.ord - a.ord));
+  ].sort((a, b) => sinal * ((b.ts - a.ts) || (b.ord - a.ord)));
 
-  grid.innerHTML = itens.map(it => renderGaleriaCard(it.raw)).join('');
+  // v3.110.0: separadores por dia — deixa a organização cronológica VISÍVEL, em vez
+  // de o usuário ter que inferir da ordem dos cards.
+  const rotuloDia = (ts) => {
+    if (!ts) return 'Sem data';
+    const d = new Date(ts);
+    const hoje = new Date();
+    const ehMesmoDia = (a, b) => a.toDateString() === b.toDateString();
+    if (ehMesmoDia(d, hoje)) return 'Hoje';
+    const ontem = new Date(hoje.getTime() - 86400000);
+    if (ehMesmoDia(d, ontem)) return 'Ontem';
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+  };
+  let diaAtual = null;
+  grid.innerHTML = itens.map((it) => {
+    const dia = rotuloDia(it.ts);
+    let cabecalho = '';
+    if (dia !== diaAtual) {
+      diaAtual = dia;
+      cabecalho = `<div style="grid-column:1/-1;margin:6px 0 2px;padding-bottom:4px;border-bottom:1px solid var(--border-color,#333);color:#C9A84C;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">${escapeHtml(dia)}</div>`;
+    }
+    return cabecalho + renderGaleriaCard(it.raw);
+  }).join('');
 
   // v3.90.0: lista normalizada (mesma ordem do grid) pro carrossel + seleção.
   _galeriaLista = itens.map(({ raw: f, isPend }) => isPend

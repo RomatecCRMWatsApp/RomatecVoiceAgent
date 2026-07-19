@@ -2640,6 +2640,41 @@ app.put('/api/galeria/:id', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+// v3.110.0: varredura MANUAL de duplicatas. Só lista — não apaga nada.
+app.get('/api/galeria/duplicatas', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    const obraId = req.query.obra_id ? Number(req.query.obra_id) : null;
+    const grupos = await m.varrerDuplicatas({
+      obra_id: Number.isFinite(obraId as number) ? obraId : null,
+      apenas_geral: String(req.query.escopo || '') === 'geral',
+      janela_segundos: Number(req.query.janela) || undefined,
+      raio_metros: Number(req.query.raio) || undefined,
+    });
+    res.json({
+      grupos,
+      total_grupos: grupos.length,
+      total_fotos: grupos.reduce((s, g) => s + g.fotos.length, 0),
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// v3.110.0: exclusão em lote — usada pela revisão de duplicatas.
+app.post('/api/galeria/excluir-lote', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    const b = (req.body || {}) as Record<string, unknown>;
+    if (!Array.isArray(b.fotoIds) || b.fotoIds.length === 0) {
+      res.status(400).json({ error: 'fotoIds vazio' }); return;
+    }
+    res.json(await m.apagarFotosEmLote((b.fotoIds as unknown[]).map(Number)));
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
 // v3.108.0: calcula o hash das fotos antigas, em lotes. Sem isto, uma foto nova
 // nunca seria detectada como duplicata das que já estavam no banco.
 app.post('/api/galeria/backfill-hash', requireAuth, async (req: Request, res: Response) => {

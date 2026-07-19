@@ -439,6 +439,145 @@ export async function contarFotosPorObra(opts: { tenant_id?: number } = {}): Pro
   return out;
 }
 
+// ===================== v3.110.0: varredura MANUAL de duplicatas =====================
+//
+// Duas categorias, porque elas tem confiabilidade bem diferente:
+//
+//  'identica' — mesmo SHA-256. Certeza absoluta, mesmo arquivo. Raro na pratica,
+//               porque o carimbo queimado no JPEG carrega o horario da captura.
+//  'provavel' — mesmo lugar e quase o mesmo instante. E o caso real do campo:
+//               duas fotos da mesma parede, com segundos de diferenca. O hash nunca
+//               vai pegar isso; GPS + tempo pega.
+//
+// Nao uso hash perceptual (decodificar a imagem e comparar pixels): exigiria
+// decodificar centenas de JPEGs de 1920px, ou uma coluna nova + backfill pesado.
+// GPS+tempo ja esta no banco, custa quase nada e acerta o caso de uso. E como aqui
+// a exclusao e MANUAL e revisada com miniatura, um falso positivo nao apaga nada —
+// foi por isso que rejeitei criterio fuzzy na dedup automatica, e aceito aqui.
+
+export interface GrupoDuplicata {
+  tipo: 'identica' | 'provavel';
+  /** Foto mais antiga do grupo — a sugerida pra MANTER. */
+  manter_id: number;
+  fotos: Array<{
+    id: number; legenda: string | null; capturada_em: string | null; criada_em: string;
+    lat: number | null; lng: number | null; obra_id: number | null;
+  }>;
+}
+
+/** Distancia aproximada em metros entre dois pontos (haversine). Exportada pra teste. */
+export function distanciaMetros(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000;
+  const rad = (g: number) => (g * Math.PI) / 180;
+  const dLat = rad(bLat - aLat);
+  const dLng = rad(bLng - aLng);
+  const h = Math.sin(dLat / 2) ** 2
+          + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+export async function varrerDuplicatas(opts: {
+  tenant_id?: number;
+  obra_id?: number | null;
+  apenas_geral?: boolean;
+  /** Janela de tempo pra considerar "mesma cena". Default 120s. */
+  janela_segundos?: number;
+  /** Raio de GPS pra considerar "mesmo lugar". Default 25m. */
+  raio_metros?: number;
+} = {}): Promise<GrupoDuplicata[]> {
+  const tenant = opts.tenant_id ?? 1;
+  const janela = (opts.janela_segundos ?? 120) * 1000;
+  const raio = opts.raio_metros ?? 25;
+
+  const wheres = ['tenant_id = ?'];
+  const params: Array<number> = [tenant];
+  if (opts.obra_id != null) { wheres.push('obra_id = ?'); params.push(opts.obra_id); }
+  else if (opts.apenas_geral) { wheres.push('obra_id IS NULL'); }
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, legenda, capturada_em, criada_em, lat, lng, obra_id, hash_sha256
+       FROM galeria_fotos
+      WHERE ${wheres.join(' AND ')}
+      ORDER BY COALESCE(capturada_em, criada_em) ASC, id ASC`,
+    params,
+  );
+
+  const linha = (r: RowDataPacket) => ({
+    id: Number(r.id),
+    legenda: r.legenda ?? null,
+    capturada_em: r.capturada_em ? String(r.capturada_em) : null,
+    criada_em: String(r.criada_em ?? ''),
+    lat: r.lat != null ? Number(r.lat) : null,
+    lng: r.lng != null ? Number(r.lng) : null,
+    obra_id: r.obra_id != null ? Number(r.obra_id) : null,
+  });
+
+  const grupos: GrupoDuplicata[] = [];
+  const jaAgrupada = new Set<number>();
+
+  // --- 1. Identicas por hash ---
+  const porHash = new Map<string, RowDataPacket[]>();
+  for (const r of rows) {
+    const h = r.hash_sha256 ? String(r.hash_sha256) : '';
+    if (!h) continue;
+    if (!porHash.has(h)) porHash.set(h, []);
+    porHash.get(h)!.push(r);
+  }
+  for (const lista of porHash.values()) {
+    if (lista.length < 2) continue;
+    const fotos = lista.map(linha);
+    fotos.forEach(f => jaAgrupada.add(f.id));
+    grupos.push({ tipo: 'identica', manter_id: fotos[0].id, fotos });
+  }
+
+  // --- 2. Provaveis por GPS + tempo ---
+  // rows ja vem ordenado por data, entao basta varrer em janela deslizante.
+  const comGeo = rows.filter(r => r.lat != null && r.lng != null && !jaAgrupada.has(Number(r.id)));
+  const ts = (r: RowDataPacket) => {
+    const bruto = r.capturada_em || r.criada_em;
+    const t = bruto ? new Date(String(bruto).replace(' ', 'T')).getTime() : NaN;
+    return Number.isFinite(t) ? t : null;
+  };
+  const usada = new Set<number>();
+  for (let i = 0; i < comGeo.length; i++) {
+    const a = comGeo[i];
+    if (usada.has(Number(a.id))) continue;
+    const tA = ts(a);
+    if (tA == null) continue;
+    const cluster: RowDataPacket[] = [a];
+    for (let j = i + 1; j < comGeo.length; j++) {
+      const b = comGeo[j];
+      if (usada.has(Number(b.id))) continue;
+      const tB = ts(b);
+      if (tB == null) continue;
+      if (tB - tA > janela) break;   // ordenado: passou da janela, para
+      const d = distanciaMetros(Number(a.lat), Number(a.lng), Number(b.lat), Number(b.lng));
+      if (d <= raio) cluster.push(b);
+    }
+    if (cluster.length >= 2) {
+      cluster.forEach(r => usada.add(Number(r.id)));
+      const fotos = cluster.map(linha);
+      grupos.push({ tipo: 'provavel', manter_id: fotos[0].id, fotos });
+    }
+  }
+  return grupos;
+}
+
+/** Exclusao em lote, pro fluxo de revisao das duplicatas. */
+export async function apagarFotosEmLote(
+  ids: number[],
+  tenantId = 1,
+): Promise<{ apagadas: number }> {
+  const limpos = [...new Set(ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (limpos.length === 0) return { apagadas: 0 };
+  const ph = limpos.map(() => '?').join(',');
+  const [res] = await pool.execute<ResultSetHeader>(
+    `DELETE FROM galeria_fotos WHERE id IN (${ph}) AND tenant_id = ?`,
+    [...limpos, tenantId],
+  );
+  return { apagadas: res.affectedRows };
+}
+
 /** Atualiza legenda/tags/obra_id de uma foto. */
 export async function atualizarFoto(
   id: number,
