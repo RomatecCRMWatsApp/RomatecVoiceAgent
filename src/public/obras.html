@@ -24662,6 +24662,9 @@ async function renderGaleria() {
     </div>
   `;
   document.getElementById('galeria-input').addEventListener('change', onGaleriaFileSelected);
+  // v3.105.2: prefetch das preferences ao abrir a aba — quando o usuário tocar em
+  // WhatsApp/Telegram o cache já está quente e o modal abre sem espera.
+  carregarPrefsGaleria().catch(() => {});
   recarregarGaleria();
 }
 
@@ -24820,6 +24823,13 @@ let gcFotoId = null;             // v3.105.0: ID da foto aberta — fonte da ver
 let modoSelecaoGaleria = false;
 let galeriaSelecionadas = new Set(); // ids (server) selecionados
 
+// v3.105.2: ORDEM DE EMPILHAMENTO DA GALERIA (GALERIA_Z) — mexeu num, confira os outros.
+//   barra de seleção .......  1.000
+//   carrossel (tela cheia) . 100.000  <- overlay preto opaco
+//   modal de envio ......... 100.010  <- PRECISA ficar acima do carrossel
+//   toasts ................. 100.020  <- acima de tudo, senão o feedback some
+// Já quebrou uma vez: modal em 99.998 e toast em 99.999 abriam ATRÁS do carrossel,
+// e os botões WhatsApp/Telegram/Salvar pareciam mortos porque nada aparecia.
 function galeriaCarrosselSelecaoCss() {
   return `<style>
     .galeria-checkbox{ display:none; position:absolute; top:8px; left:8px; width:22px; height:22px; accent-color:#C9A84C; z-index:5; cursor:pointer; }
@@ -24948,21 +24958,25 @@ function renderCarrossel() {
     `🕒 ${esc(f.timestamp)}`,
   ].filter(Boolean).join('<br>');
   document.getElementById('gc-acoes').innerHTML = f.isPend
-    ? `<button onclick="carrosselAcao('baixar')">💾 Baixar</button>
-       <button onclick="carrosselAcao('excluir')" style="color:#ff8a8a;">🗑 Remover</button>`
-    : `<button onclick="carrosselAcao('wa')">📱 WhatsApp</button>
-       <button onclick="carrosselAcao('tg')">✈️ Telegram</button>
-       <button onclick="carrosselAcao('salvar')">💾 Salvar</button>
-       <button onclick="carrosselAcao('excluir')" style="color:#ff8a8a;">🗑 Excluir</button>`;
+    ? `<button onclick="carrosselAcao('baixar', this)">💾 Baixar</button>
+       <button onclick="carrosselAcao('excluir', this)" style="color:#ff8a8a;">🗑 Remover</button>`
+    : `<button onclick="carrosselAcao('wa', this)">📱 WhatsApp</button>
+       <button onclick="carrosselAcao('tg', this)">✈️ Telegram</button>
+       <button onclick="carrosselAcao('salvar', this)">💾 Salvar</button>
+       <button onclick="carrosselAcao('excluir', this)" style="color:#ff8a8a;">🗑 Excluir</button>`;
   // preload vizinhas
   const n = _galeriaLista[(gcIndex + 1) % _galeriaLista.length]; if (n) { const im = new Image(); im.src = n.src; }
   const p = _galeriaLista[(gcIndex - 1 + _galeriaLista.length) % _galeriaLista.length]; if (p) { const im = new Image(); im.src = p.src; }
 }
-async function carrosselAcao(tipo) {
+let _gcAcaoEmCurso = false;   // v3.105.2: trava contra toque repetido enquanto a ação roda
+
+async function carrosselAcao(tipo, btnEl) {
+  if (_gcAcaoEmCurso) return; // já tem ação rodando — ignora o toque
   // v3.105.0: resolve a foto pelo ID ancorado, não pelo índice. Congela o alvo aqui
   // pra que um recarregarGaleria() concorrente não faça a ação cair em outra foto.
   const f = _galeriaLista.find(x => String(x.id) === String(gcFotoId)) || _galeriaLista[gcIndex];
   if (!f) return;
+  const alvoId = f.id;
   const localId = f.isPend ? Number(String(f.id).replace('local-', '')) : null;
   // v3.105.0: offline só Excluir (fila) e Baixar (pendente local) fazem sentido.
   // WhatsApp/Telegram/Salvar precisam do binário no servidor — avisa em vez de falhar mudo.
@@ -24971,13 +24985,34 @@ async function carrosselAcao(tipo) {
     return;
   }
   const metaF = { lat: f.lat, lng: f.lng, capturada_em: f.capturada_em };
-  if (tipo === 'wa') return reabrirModalCanal(f.id, 'whatsapp', metaF);
-  if (tipo === 'tg') return reabrirModalCanal(f.id, 'telegram', metaF);
-  if (tipo === 'salvar') return f.isPend ? baixarPendente(localId) : salvarNoCelular(f.id);
-  if (tipo === 'baixar') return baixarPendente(localId);
-  if (tipo === 'excluir') {
-    try { if (f.isPend) await removerPendente(localId); else await apagarFotoGaleria(f.id); } catch (_) {}
-    fecharCarrossel(); recarregarGaleria();
+
+  // v3.105.2: feedback IMEDIATO no toque. Sem isto o usuário não tinha sinal nenhum
+  // de que o toque pegou e concluía que o botão estava morto.
+  _gcAcaoEmCurso = true;
+  const acoesEl = document.getElementById('gc-acoes');
+  const rotulo = btnEl ? btnEl.innerHTML : '';
+  if (btnEl) btnEl.innerHTML = '⏳ ...';
+  if (acoesEl) acoesEl.querySelectorAll('button').forEach(b => { b.disabled = true; b.style.opacity = '.5'; });
+  const restaurar = () => {
+    _gcAcaoEmCurso = false;
+    if (btnEl && btnEl.isConnected) btnEl.innerHTML = rotulo;
+    if (acoesEl) acoesEl.querySelectorAll('button').forEach(b => { b.disabled = false; b.style.opacity = ''; });
+  };
+  // Se o usuário navegou pra outra foto durante a espera, a ação não deve mais abrir
+  // nada — era isso que fazia o modal "aparecer sozinho depois", já na foto errada.
+  const aindaNaMesmaFoto = () => String(gcFotoId) === String(alvoId);
+
+  try {
+    if (tipo === 'wa') return await reabrirModalCanal(alvoId, 'whatsapp', metaF, aindaNaMesmaFoto);
+    if (tipo === 'tg') return await reabrirModalCanal(alvoId, 'telegram', metaF, aindaNaMesmaFoto);
+    if (tipo === 'salvar') return await (f.isPend ? baixarPendente(localId) : salvarNoCelular(alvoId));
+    if (tipo === 'baixar') return await baixarPendente(localId);
+    if (tipo === 'excluir') {
+      try { if (f.isPend) await removerPendente(localId); else await apagarFotoGaleria(alvoId); } catch (_) {}
+      fecharCarrossel(); recarregarGaleria();
+    }
+  } finally {
+    restaurar();
   }
 }
 
@@ -25128,7 +25163,7 @@ async function removerPendente(localId) {
 }
 
 // v3.28.0: reabre o modal pos-captura mas com apenas 1 canal pre-marcado.
-async function reabrirModalCanal(fotoId, canalUnico, metaConhecida) {
+async function reabrirModalCanal(fotoId, canalUnico, metaConhecida, aindaValido) {
   // Carrega metadados rapidos da foto (sem b64) pra preview/thumb.
   // v3.105.0: se o chamador já tem os metadados (carrossel), usa direto — o fetch de
   // 200 fotos era lento no celular e falhava pra fotos fora das mais recentes.
@@ -25142,7 +25177,7 @@ async function reabrirModalCanal(fotoId, canalUnico, metaConhecida) {
     } catch (_) {}
   }
   // Pre-marca o canal solicitado via override de prefs
-  await modalPosCaptura(fotoId, meta, { forceShow: true, override: { [canalUnico]: true } });
+  await modalPosCaptura(fotoId, meta, { forceShow: true, override: { [canalUnico]: true }, aindaValido });
 }
 
 async function enviarFotoGaleria(id, canal) {
@@ -25316,22 +25351,59 @@ async function onGaleriaFileSelected(ev) {
   recarregarGaleria();
 }
 
-// v3.28.0: modal pos-captura — multi-canal (Salvar/WhatsApp/Telegram).
-// Pre-marca conforme preferences.galeria_pos_captura. ARIA + Esc + Web Share.
-async function modalPosCaptura(fotoId, meta, opts = {}) {
-  // Carrega preferences (defaults se sem auth ou erro)
-  let prefs = {
-    salvar_celular: false, whatsapp: false, telegram: false,
-    destinatario_whatsapp_default: '', destinatario_telegram_default: '',
-    lembrar_escolha: false, mostrar_modal: true,
-  };
+// v3.105.2: cache das preferences da galeria (em memória + localStorage).
+// Objetivo: o modal abrir INSTANTÂNEO. A rede só é consultada em background, e o
+// resultado serve a próxima abertura — nunca bloqueia o toque atual.
+const GALERIA_PREFS_DEFAULT = {
+  salvar_celular: false, whatsapp: false, telegram: false,
+  destinatario_whatsapp_default: '', destinatario_telegram_default: '',
+  lembrar_escolha: false, mostrar_modal: true,
+};
+const GALERIA_PREFS_LS_KEY = 'zayra_galeria_prefs';
+let _galeriaPrefsCache = null;
+
+function lerPrefsGaleriaLocal() {
+  try {
+    const raw = localStorage.getItem(GALERIA_PREFS_LS_KEY);
+    if (raw) return Object.assign({}, GALERIA_PREFS_DEFAULT, JSON.parse(raw));
+  } catch (_) {}
+  return null;
+}
+
+function gravarPrefsGaleriaLocal(prefs) {
+  _galeriaPrefsCache = Object.assign({}, GALERIA_PREFS_DEFAULT, prefs || {});
+  try { localStorage.setItem(GALERIA_PREFS_LS_KEY, JSON.stringify(_galeriaPrefsCache)); } catch (_) {}
+  return _galeriaPrefsCache;
+}
+
+// Busca no servidor e atualiza o cache. Não é aguardada no caminho crítico.
+async function atualizarPrefsGaleriaEmBackground() {
+  if (!navigator.onLine) return;
   try {
     const r = await fetch('/api/users/me/preferences/galeria', { credentials: 'include' });
     if (r.ok) {
       const j = await r.json();
-      prefs = Object.assign(prefs, j.galeria_pos_captura || {});
+      gravarPrefsGaleriaLocal(j.galeria_pos_captura || {});
     }
-  } catch (_) {}
+  } catch (_) { /* mantém o cache atual */ }
+}
+
+// Retorna imediatamente do cache; só espera a rede na primeiríssima vez sem cache.
+async function carregarPrefsGaleria() {
+  if (_galeriaPrefsCache) { atualizarPrefsGaleriaEmBackground(); return _galeriaPrefsCache; }
+  const local = lerPrefsGaleriaLocal();
+  if (local) { _galeriaPrefsCache = local; atualizarPrefsGaleriaEmBackground(); return local; }
+  await atualizarPrefsGaleriaEmBackground();
+  return _galeriaPrefsCache || Object.assign({}, GALERIA_PREFS_DEFAULT);
+}
+
+// v3.28.0: modal pos-captura — multi-canal (Salvar/WhatsApp/Telegram).
+// Pre-marca conforme preferences.galeria_pos_captura. ARIA + Esc + Web Share.
+async function modalPosCaptura(fotoId, meta, opts = {}) {
+  // v3.105.2: preferences vêm do cache. Antes cada abertura de modal fazia um
+  // round-trip ao servidor ANTES de desenhar qualquer coisa — 2-5s de tela morta
+  // em 4G de campo, com o usuário achando que o botão não funcionou.
+  const prefs = Object.assign({}, await carregarPrefsGaleria());
   // forceShow ignora flag de "nao mostrar modal"; override sobrescreve canais pre-marcados
   if (prefs.mostrar_modal === false && !opts.forceShow) return;
   if (opts.override) {
@@ -25350,7 +25422,10 @@ async function modalPosCaptura(fotoId, meta, opts = {}) {
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
   overlay.setAttribute('aria-labelledby', 'gpcm-title');
-  overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99998;display:flex;align-items:center;justify-content:center;padding:16px;${reduced ? '' : 'animation:fadeIn .2s ease-out;'}`;
+  // v3.105.2: z-index ACIMA do carrossel (100000). Estava em 99998, ou seja, atrás:
+  // com o carrossel aberto o modal abria escondido sob um overlay preto a 95% e o
+  // usuário concluía que WhatsApp/Telegram não respondiam. Ver GALERIA_Z no topo do módulo.
+  overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100010;display:flex;align-items:center;justify-content:center;padding:16px;${reduced ? '' : 'animation:fadeIn .2s ease-out;'}`;
 
   const coordTxt = (meta && meta.lat != null && meta.lng != null)
     ? `📍 ${Number(meta.lat).toFixed(5)}, ${Number(meta.lng).toFixed(5)}` : '';
@@ -25409,6 +25484,9 @@ async function modalPosCaptura(fotoId, meta, opts = {}) {
       </div>
     </div>
   `;
+  // v3.105.2: última checagem antes de aparecer. Se o usuário já trocou de foto
+  // enquanto isto carregava, desiste em silêncio em vez de abrir o modal da foto antiga.
+  if (opts.aindaValido && !opts.aindaValido()) return;
   document.body.appendChild(overlay);
 
   // Focus trap minimo: foca primeiro checkbox
@@ -25438,16 +25516,20 @@ async function modalPosCaptura(fotoId, meta, opts = {}) {
 
     // Persistir preferences se "Lembrar"
     if (lembrar) {
+      const novasPrefs = {
+        salvar_celular: salvar, whatsapp: wa, telegram: tg,
+        destinatario_whatsapp_default: waDest,
+        destinatario_telegram_default: tgDest,
+        lembrar_escolha: true,
+      };
+      // v3.105.2: cache atualizado na hora — a próxima abertura já reflete a escolha
+      // mesmo que o PUT demore ou falhe (offline).
+      gravarPrefsGaleriaLocal(Object.assign({}, _galeriaPrefsCache, novasPrefs));
       try {
         await fetch('/api/users/me/preferences/galeria', {
           method: 'PUT', credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ galeria_pos_captura: {
-            salvar_celular: salvar, whatsapp: wa, telegram: tg,
-            destinatario_whatsapp_default: waDest,
-            destinatario_telegram_default: tgDest,
-            lembrar_escolha: true,
-          } }),
+          body: JSON.stringify({ galeria_pos_captura: novasPrefs }),
         });
       } catch (_) {}
     }
@@ -25506,7 +25588,10 @@ function toastGalOk(msg) { _toastGal(msg, '#22c55e'); }
 function toastGalErr(msg) { _toastGal(msg, '#ef4444'); }
 function _toastGal(msg, cor) {
   const el = document.createElement('div');
-  el.style.cssText = `position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:${cor};color:#000;padding:10px 18px;border-radius:8px;font-weight:600;font-size:13px;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,.3);`;
+  // v3.105.2: toast acima de tudo (carrossel 100000, modal 100010). Estava em 99999,
+  // atrás do carrossel — todo feedback de sucesso/erro era invisível na tela da foto.
+  // bottom:96px pra não ficar sob a barra "✕ Fechar" fixa no rodapé do carrossel.
+  el.style.cssText = `position:fixed;bottom:calc(96px + env(safe-area-inset-bottom, 0px));left:50%;transform:translateX(-50%);background:${cor};color:#000;padding:10px 18px;border-radius:8px;font-weight:600;font-size:13px;z-index:100020;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:88vw;text-align:center;`;
   el.textContent = (cor === '#22c55e' ? '✅ ' : '❌ ') + msg;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 4000);
