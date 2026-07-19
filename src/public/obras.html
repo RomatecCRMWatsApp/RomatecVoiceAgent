@@ -25010,7 +25010,8 @@ async function recarregarGaleria() {
   let usandoCache = false;
   if (navigator.onLine) {
     try {
-      const r = await fetch(urlLista);
+      // v3.109.0: leitura da galeria passou a exigir sessão — sem cookie, 401.
+      const r = await fetch(urlLista, { credentials: 'include' });
       const data = await r.json();
       fotosServer = data.fotos || [];
       // v3.105.0: espelha os metadados no IndexedDB pra galeria sobreviver offline.
@@ -25642,7 +25643,9 @@ function baixarFotoServer(id) {
 async function baixarBlob(url, filename) {
   let objectUrl = null;
   try {
-    const r = await fetch(url);
+    // v3.109.0: credentials pro caso de URL de rota autenticada (/api/galeria/...).
+    // Em data-URL o parâmetro é simplesmente ignorado, então serve pros dois casos.
+    const r = await fetch(url, { credentials: 'include' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const blob = await r.blob();
     objectUrl = URL.createObjectURL(blob);
@@ -25672,7 +25675,7 @@ async function reabrirModalCanal(fotoId, canalUnico, metaConhecida, aindaValido)
   let meta = metaConhecida || {};
   if (!metaConhecida) {
     try {
-      const r = await fetch('/api/galeria?limit=200');
+      const r = await fetch('/api/galeria?limit=200', { credentials: 'include' });
       const data = await r.json();
       const f = (data.fotos || []).find((x) => x.id === fotoId);
       if (f) meta = { lat: f.lat, lng: f.lng, capturada_em: f.capturada_em || f.criada_em };

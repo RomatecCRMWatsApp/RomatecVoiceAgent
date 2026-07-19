@@ -28,6 +28,13 @@ function rotasEscritaGaleria(): string[] {
     .filter((l) => /^app\.(post|put|delete)\('\/api\/galeria/.test(l.trim()));
 }
 
+/** v3.109.0: leitura tambem passou a exigir sessao. */
+function rotasLeituraGaleria(): string[] {
+  return serverTs
+    .split('\n')
+    .filter((l) => /^app\.get\('\/api\/galeria/.test(l.trim()));
+}
+
 describe('galeria — auth por cookie no lugar do token de CEO', () => {
   it('1. nenhuma rota de escrita da galeria usa requireCeoToken', () => {
     const comToken = rotasEscritaGaleria().filter((l) => l.includes('requireCeoToken'));
@@ -73,5 +80,29 @@ describe('galeria — auth por cookie no lugar do token de CEO', () => {
       if (!/credentials:\s*'include'/.test(corpo)) semCookie.push(corpo.slice(0, 90));
     }
     expect(semCookie, `fetch de escrita sem cookie:\n${semCookie.join('\n---\n')}`).toEqual([]);
+  });
+
+  // v3.109.0 — leitura fechada. Antes GET /api/galeria, /arquivo e /download eram
+  // abertos: quem soubesse a URL listava e baixava as fotos das obras sem login.
+  it('6. as rotas de LEITURA da galeria tambem exigem sessao', () => {
+    const abertas = rotasLeituraGaleria().filter((l) => !l.includes('requireAuth'));
+    expect(abertas, `GET sem auth:\n${abertas.join('\n')}`).toEqual([]);
+    expect(rotasLeituraGaleria().length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('7. os fetch de LEITURA da galeria mandam cookie (senao a galeria some)', () => {
+    const ini = obrasHtml.indexOf('const GALERIA_DB_NAME');
+    const fim = obrasHtml.indexOf('v3.25.0: Aba CONFIGURACOES');
+    const regiao = obrasHtml.slice(ini, fim);
+    // fetch(urlLista, {...}) e fetch('/api/galeria?...', {...}) — sem method = GET.
+    const re = /fetch\(\s*(?:urlLista|[`'"][^`'"]*\/api\/galeria[^`'"]*[`'"])\s*,\s*\{([\s\S]{0,200}?)\}\s*\)/g;
+    const semCookie: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(regiao))) {
+      const corpo = m[1];
+      if (/method:\s*'(POST|PUT|DELETE)'/.test(corpo)) continue; // ja coberto no teste 5
+      if (!/credentials:\s*'include'/.test(corpo)) semCookie.push(corpo.slice(0, 90));
+    }
+    expect(semCookie, `fetch de leitura sem cookie:\n${semCookie.join('\n---\n')}`).toEqual([]);
   });
 });

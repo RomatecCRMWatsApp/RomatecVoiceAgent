@@ -2539,7 +2539,7 @@ app.post(
 
 // v3.8.0 — Galeria de Fotos georreferenciadas
 
-app.get('/api/galeria', async (req: Request, res: Response) => {
+app.get('/api/galeria', requireAuth, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/galeria');
     const limit = req.query.limit ? Number(req.query.limit) : 100;
@@ -2556,7 +2556,7 @@ app.get('/api/galeria', async (req: Request, res: Response) => {
 });
 
 // Binário da foto (preview) — retorna data URI ou bytes
-app.get('/api/galeria/:id/arquivo', async (req: Request, res: Response) => {
+app.get('/api/galeria/:id/arquivo', requireAuth, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/galeria');
     const foto = await m.buscarFotoComB64(Number(req.params.id));
@@ -2573,7 +2573,7 @@ app.get('/api/galeria/:id/arquivo', async (req: Request, res: Response) => {
 // v3.90.0: download em lote (ZIP) das fotos selecionadas na Galeria.
 // Fotos são base64 no banco → montamos o ZIP em memória (archiver). Sem auth
 // especial (mesmo nível dos GET /api/galeria e /:id/arquivo, que já são abertos).
-app.post('/api/galeria/download-zip', async (req: Request, res: Response) => {
+app.post('/api/galeria/download-zip', requireAuth, async (req: Request, res: Response) => {
   try {
     const ids = Array.isArray((req.body as { fotoIds?: unknown[] })?.fotoIds)
       ? ((req.body as { fotoIds: unknown[] }).fotoIds).map((n) => Number(n)).filter((n) => Number.isFinite(n))
@@ -2653,7 +2653,7 @@ app.post('/api/galeria/backfill-hash', requireAuth, async (req: Request, res: Re
 });
 
 // v3.107.0: contagem de fotos por obra, pro contador no botão da lista de obras.
-app.get('/api/galeria/contagem-por-obra', async (_req: Request, res: Response) => {
+app.get('/api/galeria/contagem-por-obra', requireAuth, async (_req: Request, res: Response) => {
   try {
     const m = await import('./integrations/galeria');
     res.json({ contagem: await m.contarFotosPorObra() });
@@ -3311,7 +3311,7 @@ app.post('/api/galeria/fotos/:id/compartilhar', requireAuth, async (req: Request
 });
 
 // GET /api/galeria/fotos/:id/download — stream com Content-Disposition: attachment
-app.get('/api/galeria/fotos/:id/download', async (req: Request, res: Response) => {
+app.get('/api/galeria/fotos/:id/download', requireAuth, async (req: Request, res: Response) => {
   try {
     const m = await import('./integrations/galeria');
     const foto = await m.buscarFotoComB64(Number(req.params.id));

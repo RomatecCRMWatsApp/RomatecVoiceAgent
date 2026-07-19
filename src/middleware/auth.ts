@@ -73,36 +73,48 @@ export function requireRole(...rolesPermitidas: AuthRole[]) {
   };
 }
 
-// ─── requireCeoToken (destravado em v3.24.0, hybrid v3.24.19) ─────────
-// Hibrido com JWT auth:
-//   1. JWT admin/owner valido -> libera (CEO ja autenticado via /login)
-//   2. JWT colaborador/gestor sem role admin -> 403
-//   3. Sem JWT -> tenta header X-CEO-Token contra env CEO_API_TOKEN
+// ─── requireCeoToken (destravado v3.24.0, hybrid v3.24.19, aberto a v3.109.0) ──
+// Hoje se comporta como "requireAuth com fallback legacy":
+//   1. JWT valido de QUALQUER role -> libera
+//   2. Sem JWT -> tenta header X-CEO-Token contra env CEO_API_TOKEN
 //
-// Motivacao: depois que o /login com role=admin foi implementado, exigir
-// X-CEO-Token em paralelo era redundante e quebrava UX. CEO pediu que o
-// login dele e da Daniele ja viessem com "token CEO liberado". Solucao:
-// JWT admin == X-CEO-Token (mesmo nivel de poder). Compat com chamadas
-// scripted continua via env.
+// Duas mudancas em v3.109.0:
+//  (a) o nome do cookie estava errado (`auth_token` em vez de `zayra_auth`), o
+//      que fazia o caminho JWT nunca funcionar — todo mundo, CEO incluido, caia
+//      no header. Era o motivo real dos "sem permissao" que apareceram em campo.
+//  (b) a exigencia de role admin/owner saiu a pedido do CEO: sistema de uso
+//      interno unico, e o gate por papel so atrapalhava. Quando virar SaaS, o
+//      controle volta como requireRole(...) por rota — nao como token compartilhado.
+//
+// O fallback X-CEO-Token FOI MANTIDO de proposito: ele nao bloqueia ninguem (e
+// so uma porta a mais) e a env CEO_API_TOKEN ainda e usada por requirePin.ts.
+// Remover exigiria auditar integracoes scripted que nao tenho como ver daqui.
 export function requireCeoToken(req: Request, res: Response, next: NextFunction): void {
-  // 1. Tenta JWT primeiro (cookie definido em /api/auth/login)
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { verifyJWT, isBlacklisted } = require('../services/auth') as typeof import('../services/auth');
-  const token = (req as { cookies?: { auth_token?: string } }).cookies?.auth_token
+  // 1. Tenta JWT primeiro (cookie definido em /api/auth/login).
+  // v3.109.0: usa o verifyJWT importado no topo. Antes havia um require() inline
+  // que estoura em contexto ESM (ReferenceError -> 500 em vez de 401/403).
+  // verifyJWT já checa a blacklist internamente e lança se o jti foi revogado.
+
+  // v3.109.0 — BUG CORRIGIDO: lia `cookies.auth_token`, mas o cookie do login se
+  // chama `zayra_auth` (COOKIE_NAME). O caminho do JWT por cookie NUNCA disparava,
+  // entao todas as ~96 rotas caiam no fallback do header X-CEO-Token — inclusive
+  // pro proprio CEO logado. Era a causa real dos "sem permissao" em campo.
+  // Agora extrai igual ao requireAuth: cookie zayra_auth, com Bearer de reserva.
+  const cookies = req.headers.cookie ? parseCookies(req.headers.cookie) : {};
+  const token = cookies[COOKIE_NAME]
+             || (req as { cookies?: Record<string, string> }).cookies?.[COOKIE_NAME]
              || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
   if (token) {
     try {
       const claims = verifyJWT(token);
-      if (claims && !isBlacklisted(claims.jti) && (claims.role === 'admin' || claims.role === 'owner')) {
-        // Admin via JWT — libera (mesmo poder que X-CEO-Token)
+      // v3.109.0: exigencia de role admin/owner REMOVIDA a pedido do CEO — o sistema
+      // hoje e' de uso interno unico e o gate por papel so travava o time em campo.
+      // Estar logado basta. Quando virar SaaS, o aperto volta como requireRole(...)
+      // nas rotas sensiveis, nao como token compartilhado.
+      if (claims) {
         (req as AuthedRequest).user = claims;
         return next();
       }
-      // Tem JWT mas nao e' admin -> 403 sem fallback (nao tenta token CEO)
-      res.status(403).json({
-        error: 'Forbidden — sua sessao nao tem permissao admin.',
-      });
-      return;
     } catch (_) { /* JWT invalido/expirado -> cai pro fallback X-CEO-Token */ }
   }
 
