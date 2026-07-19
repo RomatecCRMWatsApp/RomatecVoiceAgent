@@ -24845,7 +24845,20 @@ function galeriaCarrosselSelecaoCss() {
       overflow-y:auto; -webkit-overflow-scrolling:touch;
       padding:calc(env(safe-area-inset-top, 0px) + 52px) 12px calc(env(safe-area-inset-bottom, 0px) + 86px); }
     .galeria-carrossel-overlay.ativo{ display:flex; }
-    .galeria-carrossel-img{ max-width:100%; max-height:56vh; object-fit:contain; border:2px solid #C9A84C; border-radius:4px; background:#000; }
+    /* v3.106.0: palco coverflow 3D. Só 3 slides existem no DOM (anterior/atual/próxima)
+       — a galeria inteira nunca é renderizada, senão trava em aparelho de campo.
+       touch-action:pan-y deixa o scroll vertical do overlay funcionar; o arrasto
+       horizontal é nosso. */
+    .gc-palco{ position:relative; width:100%; height:56vh; perspective:1200px; perspective-origin:50% 50%; touch-action:pan-y; }
+    .gc-slide{ position:absolute; inset:0; margin:auto; max-width:78%; max-height:100%; width:auto; height:auto;
+      object-fit:contain; border:2px solid #C9A84C; border-radius:6px; background:#000;
+      backface-visibility:hidden; will-change:transform, opacity; box-shadow:0 18px 40px rgba(0,0,0,.55); }
+    /* Classe aplicada só quando animamos; durante o arrasto fica off pra seguir o dedo sem lag. */
+    .gc-slide.gc-anim{ transition: transform .38s cubic-bezier(.2,.75,.3,1), opacity .38s ease; }
+    /* Acessibilidade + aparelho fraco: sem 3D, troca direta. */
+    @media (prefers-reduced-motion: reduce){
+      .gc-slide{ transition:none !important; }
+    }
     /* position:fixed (não absolute) — com o overlay rolando, absolute saía de vista junto. */
     .galeria-carrossel-seta{ position:fixed; top:50%; transform:translateY(-50%); background:rgba(12,51,32,.85); color:#C9A84C; border:1px solid #C9A84C; font-size:2.2rem; width:54px; height:54px; border-radius:50%; cursor:pointer; line-height:1; z-index:3; }
     .gc-esq{ left:14px; } .gc-dir{ right:14px; }
@@ -24886,33 +24899,154 @@ function garantirCarrosselDom() {
   ov.innerHTML = `
     <div id="gc-contador" class="galeria-carrossel-contador"></div>
     <button class="galeria-carrossel-seta gc-esq" onclick="navegarCarrossel(-1)" aria-label="Foto anterior">‹</button>
-    <img id="gc-img" class="galeria-carrossel-img" alt="Foto da obra" onerror="this.onerror=null;this.src=GALERIA_IMG_INDISPONIVEL;">
+    <div id="gc-palco" class="gc-palco">
+      <img class="gc-slide" data-off="-1" alt="Foto anterior" aria-hidden="true" onerror="this.onerror=null;this.src=GALERIA_IMG_INDISPONIVEL;">
+      <img class="gc-slide" data-off="1"  alt="Próxima foto"  aria-hidden="true" onerror="this.onerror=null;this.src=GALERIA_IMG_INDISPONIVEL;">
+      <img class="gc-slide" data-off="0"  alt="Foto da obra" onerror="this.onerror=null;this.src=GALERIA_IMG_INDISPONIVEL;">
+    </div>
     <button class="galeria-carrossel-seta gc-dir" onclick="navegarCarrossel(1)" aria-label="Próxima foto">›</button>
     <div id="gc-meta" class="galeria-carrossel-meta"></div>
     <div id="gc-acoes" class="galeria-carrossel-acoes"></div>
     <button class="galeria-carrossel-fechar" onclick="fecharCarrossel()" aria-label="Fechar visualização">✕ Fechar</button>
   `;
   ov.addEventListener('click', (e) => { if (e.target === ov) fecharCarrossel(); });
-  // v3.105.0: swipe só conta se for claramente horizontal — o overlay agora rola na
-  // vertical e um arrasto de scroll estava podendo ser lido como troca de foto.
-  let sx = 0, sy = 0;
-  ov.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
-  ov.addEventListener('touchend', (e) => {
-    const dx = e.changedTouches[0].clientX - sx;
-    const dy = e.changedTouches[0].clientY - sy;
-    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) navegarCarrossel(dx < 0 ? 1 : -1);
-  });
+  // v3.106.0: o swipe "detecta ao soltar" saiu — o palco agora acompanha o dedo.
+  ligarArrastoCoverflow(ov.querySelector('#gc-palco'));
   document.body.appendChild(ov);
   return ov;
 }
+
+// ---- v3.106.0: Coverflow 3D com arrasto em tempo real ----
+// Estado do arrasto. `p` é o progresso normalizado: -1 = uma foto pra frente,
+// +1 = uma pra trás (segue o sinal do deslocamento do dedo).
+const GC_LIMIAR_TROCA = 0.22;   // fração da largura que confirma a troca
+const GC_DUR_ANIM = 380;        // ms — precisa casar com o transition do .gc-anim
+let _gcDrag = { ativo: false, x0: 0, y0: 0, dx: 0, largura: 1, eixoDecidido: false, horizontal: false };
+let _gcAnimando = false;
+
+function gcMovimentoReduzido() {
+  return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// Posiciona os 3 slides em função do progresso p. animar=true liga a transição CSS.
+function aplicarCoverflow(p, animar) {
+  const palco = document.getElementById('gc-palco');
+  if (!palco) return;
+  const largura = palco.clientWidth || 1;
+  const total = _galeriaLista.length;
+  palco.querySelectorAll('.gc-slide').forEach((el) => {
+    const off = Number(el.dataset.off);
+    // Com 1 foto só, as laterais não existem: esconde em vez de empilhar cópias.
+    if (total <= 1 && off !== 0) { el.style.opacity = '0'; el.style.visibility = 'hidden'; return; }
+    el.style.visibility = '';
+    el.classList.toggle('gc-anim', !!animar);
+    const d = off + p;                       // distância visual do centro
+    const a = Math.min(Math.abs(d), 1.6);
+    const x = d * largura * 0.42;
+    const z = -a * 180;
+    const r = -Math.max(-1.6, Math.min(1.6, d)) * 38;
+    const s = 1 - Math.min(a, 1) * 0.18;
+    el.style.transform = `translateX(${x}px) translateZ(${z}px) rotateY(${r}deg) scale(${s})`;
+    el.style.opacity = String(Math.max(0, 1 - a * 0.5));
+    el.style.zIndex = String(100 - Math.round(a * 50));
+  });
+}
+
+// Confirma a troca: anima até a foto vizinha, depois recicla os src e volta pro centro.
+function comitarCoverflow(delta) {
+  const total = _galeriaLista.length;
+  if (!total || _gcAnimando) return;
+  if (total > 1 && delta !== 0) {
+    if (gcMovimentoReduzido()) { aplicarIndiceCarrossel(delta); return; }
+    _gcAnimando = true;
+    aplicarCoverflow(-delta, true);          // desliza até a vizinha ficar centralizada
+    setTimeout(() => {
+      aplicarIndiceCarrossel(delta);         // troca os src já na posição final
+      _gcAnimando = false;
+    }, GC_DUR_ANIM);
+  } else {
+    aplicarCoverflow(0, true);               // não passou do limiar: volta pro lugar
+  }
+}
+
+// Avança o índice e redesenha (sem animação — os slides já estão na posição final).
+function aplicarIndiceCarrossel(delta) {
+  const total = _galeriaLista.length; if (!total) return;
+  // v3.106.0: em vez de reatribuir os 3 src, ROTACIONA os rótulos data-off. O slide que
+  // acabou de deslizar pro centro vira o "0" e mantém a imagem já decodificada; só o que
+  // saiu de vista recebe src novo. Sem isso a foto piscava a cada troca.
+  const palco = document.getElementById('gc-palco');
+  if (palco && total > 1 && delta !== 0) {
+    palco.querySelectorAll('.gc-slide').forEach((el) => {
+      const antigo = Number(el.dataset.off);
+      el.dataset.off = String(((antigo - delta + 1 + 3) % 3) - 1);
+    });
+  }
+  gcIndex = (gcIndex + delta + total) % total;
+  gcFotoId = _galeriaLista[gcIndex] ? _galeriaLista[gcIndex].id : null;
+  renderCarrossel();
+}
+
+function ligarArrastoCoverflow(palco) {
+  if (!palco) return;
+  palco.addEventListener('touchstart', (e) => {
+    if (_gcAnimando || _galeriaLista.length <= 1) return;
+    const t = e.touches[0];
+    _gcDrag = { ativo: true, x0: t.clientX, y0: t.clientY, dx: 0,
+                largura: palco.clientWidth || 1, eixoDecidido: false, horizontal: false };
+  }, { passive: true });
+
+  palco.addEventListener('touchmove', (e) => {
+    if (!_gcDrag.ativo) return;
+    const t = e.touches[0];
+    const dx = t.clientX - _gcDrag.x0;
+    const dy = t.clientY - _gcDrag.y0;
+    // Decide o eixo uma única vez: se o gesto começou vertical, é scroll do overlay
+    // e a gente sai do caminho (não sequestra o dedo).
+    if (!_gcDrag.eixoDecidido && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+      _gcDrag.eixoDecidido = true;
+      _gcDrag.horizontal = Math.abs(dx) > Math.abs(dy);
+      if (!_gcDrag.horizontal) { _gcDrag.ativo = false; return; }
+    }
+    if (!_gcDrag.horizontal) return;
+    e.preventDefault();                       // segura o scroll enquanto arrasta lateral
+    _gcDrag.dx = dx;
+    let p = dx / _gcDrag.largura;
+    // Resistência nas pontas da lista (sem wrap visual durante o arrasto).
+    if ((gcIndex === 0 && p > 0) || (gcIndex === _galeriaLista.length - 1 && p < 0)) p *= 0.35;
+    aplicarCoverflow(Math.max(-1, Math.min(1, p)), false);
+  }, { passive: false });
+
+  const soltar = () => {
+    if (!_gcDrag.ativo || !_gcDrag.horizontal) { _gcDrag.ativo = false; return; }
+    const p = _gcDrag.dx / _gcDrag.largura;
+    _gcDrag.ativo = false;
+    if (p <= -GC_LIMIAR_TROCA) comitarCoverflow(1);
+    else if (p >= GC_LIMIAR_TROCA) comitarCoverflow(-1);
+    else comitarCoverflow(0);
+  };
+  palco.addEventListener('touchend', soltar);
+  palco.addEventListener('touchcancel', soltar);
+}
+
+// v3.106.0: girar o celular muda a largura do palco — recentra os slides.
+let _gcResizeTimer = null;
+window.addEventListener('resize', () => {
+  const ov = document.getElementById('galeria-carrossel');
+  if (!ov || !ov.classList.contains('ativo')) return;
+  clearTimeout(_gcResizeTimer);
+  _gcResizeTimer = setTimeout(() => aplicarCoverflow(0, false), 120);
+});
 function abrirCarrosselGaleria(id) {
   if (!_galeriaLista.length) return;
   const idx = _galeriaLista.findIndex(f => String(f.id) === String(id));
   gcIndex = idx >= 0 ? idx : 0;
   gcFotoId = _galeriaLista[gcIndex] ? _galeriaLista[gcIndex].id : null;
   garantirCarrosselDom();
-  renderCarrossel();
+  // v3.106.0: ativa ANTES de renderizar. Com o overlay em display:none o palco tem
+  // clientWidth 0 e o coverflow calcularia os deslocamentos todos errados.
   document.getElementById('galeria-carrossel').classList.add('ativo');
+  renderCarrossel();
   document.addEventListener('keydown', handleCarrosselKeydown);
 }
 // v3.105.0: chamado após cada recarregarGaleria(). Reposiciona o carrossel na MESMA
@@ -24936,20 +25070,31 @@ function handleCarrosselKeydown(e) {
   else if (e.key === 'ArrowLeft') navegarCarrossel(-1);
   else if (e.key === 'Escape') fecharCarrossel();
 }
+// v3.106.0: setas e teclado passam pela mesma animação do arrasto.
 function navegarCarrossel(delta) {
-  const total = _galeriaLista.length; if (!total) return;
-  gcIndex = (gcIndex + delta + total) % total;
-  gcFotoId = _galeriaLista[gcIndex] ? _galeriaLista[gcIndex].id : null;
-  renderCarrossel();
+  if (!_galeriaLista.length || _gcAnimando) return;
+  comitarCoverflow(delta);
 }
 function renderCarrossel() {
   const f = _galeriaLista[gcIndex]; if (!f) return;
   gcFotoId = f.id; // mantém a âncora sincronizada com o que está na tela
   const esc = (s) => String(s || '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
-  // v3.105.0: religa o onerror a cada troca (o handler se auto-remove ao disparar).
-  const imgEl = document.getElementById('gc-img');
-  imgEl.onerror = function () { this.onerror = null; this.src = GALERIA_IMG_INDISPONIVEL; };
-  imgEl.src = f.src;
+  // v3.106.0: carrega os 3 slides (anterior / atual / próxima) e recentra o palco.
+  const total = _galeriaLista.length;
+  const palco = document.getElementById('gc-palco');
+  if (palco) {
+    const vizinha = (passo) => _galeriaLista[(gcIndex + passo + total) % total];
+    palco.querySelectorAll('.gc-slide').forEach((el) => {
+      const off = Number(el.dataset.off);
+      const alvo = (total > 1 || off === 0) ? vizinha(off) : null;
+      // Religa o onerror a cada troca (o handler se auto-remove ao disparar).
+      el.onerror = function () { this.onerror = null; this.src = GALERIA_IMG_INDISPONIVEL; };
+      const novoSrc = alvo ? alvo.src : GALERIA_IMG_INDISPONIVEL;
+      if (el.src !== novoSrc) el.src = novoSrc;
+    });
+    // Sem animação: os src novos já nascem na posição correta.
+    aplicarCoverflow(0, false);
+  }
   document.getElementById('gc-contador').textContent = `Foto #${f.numero} — ${gcIndex + 1} de ${_galeriaLista.length}`;
   document.getElementById('gc-meta').innerHTML = [
     f.legenda ? `<strong>${esc(f.legenda)}</strong>` : '',
@@ -24964,9 +25109,14 @@ function renderCarrossel() {
        <button onclick="carrosselAcao('tg', this)">✈️ Telegram</button>
        <button onclick="carrosselAcao('salvar', this)">💾 Salvar</button>
        <button onclick="carrosselAcao('excluir', this)" style="color:#ff8a8a;">🗑 Excluir</button>`;
-  // preload vizinhas
-  const n = _galeriaLista[(gcIndex + 1) % _galeriaLista.length]; if (n) { const im = new Image(); im.src = n.src; }
-  const p = _galeriaLista[(gcIndex - 1 + _galeriaLista.length) % _galeriaLista.length]; if (p) { const im = new Image(); im.src = p.src; }
+  // v3.106.0: as vizinhas imediatas já estão nos slides; aquece as ±2 pra que a
+  // próxima troca também entre sem piscar.
+  if (total > 3) {
+    [2, -2].forEach((passo) => {
+      const alvo = _galeriaLista[(gcIndex + passo + total) % total];
+      if (alvo) { const im = new Image(); im.src = alvo.src; }
+    });
+  }
 }
 let _gcAcaoEmCurso = false;   // v3.105.2: trava contra toque repetido enquanto a ação roda
 
