@@ -2400,6 +2400,14 @@ const _allToolDefinitions: Anthropic.Tool[] = [
             + 'Use SEMPRE que o Chefe citar times. Nesse modo qualquer competicao vale '
             + '(Copa do Mundo, amistoso, etc), nao so as ligas acompanhadas.',
         },
+        modo: {
+          type: 'string', enum: ['jogos', 'desempenho'],
+          description:
+            'jogos (default) = analisa partidas. desempenho = relatorio de acerto historico '
+            + 'do proprio modelo: confere jogos passados e diz se ele bate a linha de fechamento '
+            + 'da casa. Use quando o Chefe perguntar se o modelo esta acertando, se da pra confiar, '
+            + 'qual o desempenho ou o historico.',
+        },
       },
     },
   },
@@ -3235,11 +3243,20 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       // v3.116.0: aptidao pessoal do CEO. Import dinamico pra nao carregar o
       // modulo esportivo (adapters + motor) em toda inicializacao do agente.
       case 'consultar_probabilidades_esportivas': {
-        const esp = await import('../services/sportsData/consultaEsportiva');
         const arg = input as {
           data?: string; max_jogos?: number;
           ordenar_por?: 'valor' | 'confianca'; times?: string[];
+          modo?: 'jogos' | 'desempenho';
         };
+        // v3.118.0: modo 'desempenho' responde "da pra confiar nesse modelo?" —
+        // confere jogos passados contra a linha de fechamento. E a unica coisa
+        // que separa o motor de um gerador de numero bonito.
+        if (arg.modo === 'desempenho') {
+          const bt = await import('../services/sportsData/backtest');
+          data = await bt.conferirERelatar();
+          break;
+        }
+        const esp = await import('../services/sportsData/consultaEsportiva');
         data = await esp.consultarJogosDoDia({
           data: arg.data,
           maxJogos: arg.max_jogos ?? 10,

@@ -24,6 +24,7 @@ import {
 import type { Fixture, TeamForm, MarketOdds } from './ISportsDataProvider';
 import {
   calcularForcaTime, calcularProbabilidadePartida, probabilidadesImplicitas,
+  probabilidadeOverUnder, probabilidadeAmbasMarcam,
   valorEsperado, METODOLOGIA, DISCLAIMER_OBRIGATORIO,
 } from './probabilityEngine';
 
@@ -138,15 +139,16 @@ async function gravarOdds(odds: MarketOdds[]): Promise<void> {
 }
 
 async function gravarProbabilidades(
-  eventoId: string, linhas: Array<{ selecao: string; prob: number; implicita: number | null; odd: number | null; ev: number | null }>,
+  eventoId: string,
+  linhas: Array<{ mercado: string; selecao: string; prob: number; implicita: number | null; odd: number | null; ev: number | null }>,
 ): Promise<void> {
   for (const l of linhas) {
     await pool.execute(
       `INSERT INTO esportes_probabilidades
          (provedor_evento_id, mercado, selecao, probabilidade_estimada,
           probabilidade_implicita_mercado, odd_referencia, valor_esperado, metodologia)
-       VALUES (?, '1x2', ?, ?, ?, ?, ?, ?)`,
-      [eventoId, l.selecao, l.prob, l.implicita, l.odd, l.ev, METODOLOGIA],
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [eventoId, l.mercado, l.selecao, l.prob, l.implicita, l.odd, l.ev, METODOLOGIA],
     ).catch(() => {});
   }
 }
@@ -162,44 +164,77 @@ export function mapearSelecao1x2(valor: string): 'casa' | 'empate' | 'visitante'
   return null;
 }
 
-/** Mercado 1x2 na API-Sports chama "Match Winner". */
-function ehMercado1x2(nome: string): boolean {
+/**
+ * v3.118.0: traduz o nome do mercado na API-Sports pro vocabulario interno.
+ * Devolve null pros mercados que o motor NAO modela — escanteio, cartao,
+ * jogador a marcar. Ignorar em silencio e' proposital: melhor nao ter linha do
+ * que exibir odd de um mercado sem probabilidade estimada por tras.
+ */
+export function mapearMercado(nome: string): '1x2' | 'over_under_2.5' | 'ambas_marcam' | null {
   const n = nome.trim().toLowerCase();
-  return n === 'match winner' || n === '1x2' || n === 'fulltime result';
+  if (n === 'match winner' || n === '1x2' || n === 'fulltime result') return '1x2';
+  if (n === 'goals over/under' || n === 'over/under' || n === 'total goals') return 'over_under_2.5';
+  if (n === 'both teams score' || n === 'both teams to score' || n === 'btts') return 'ambas_marcam';
+  return null;
 }
 
-async function lerOddsCache(eventoId: string): Promise<Map<string, number> | null> {
+/** Normaliza a selecao dentro de cada mercado. */
+export function mapearSelecaoMercado(mercado: string, valor: string): string | null {
+  const v = valor.trim().toLowerCase();
+  if (mercado === '1x2') return mapearSelecao1x2(v);
+  if (mercado === 'over_under_2.5') {
+    // A API traz varias linhas (0.5, 1.5, 2.5...); so a 2.5 interessa ao motor.
+    if (v === 'over 2.5') return 'over';
+    if (v === 'under 2.5') return 'under';
+    return null;
+  }
+  if (mercado === 'ambas_marcam') {
+    if (v === 'yes' || v === 'sim') return 'sim';
+    if (v === 'no' || v === 'nao' || v === 'não') return 'nao';
+    return null;
+  }
+  return null;
+}
+
+type OddsPorMercado = Map<string, Map<string, number>>;
+
+async function lerOddsCache(eventoId: string): Promise<OddsPorMercado | null> {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT selecao, odd, TIMESTAMPDIFF(SECOND, capturado_em, NOW()) * 1000 AS idade_ms
-       FROM esportes_odds
-      WHERE provedor_evento_id = ? AND mercado = '1x2'`,
+    `SELECT mercado, selecao, odd, TIMESTAMPDIFF(SECOND, capturado_em, NOW()) * 1000 AS idade_ms
+       FROM esportes_odds WHERE provedor_evento_id = ?`,
     [eventoId],
   );
   if (!rows.length) return null;
   const maisVelha = Math.max(...rows.map((r) => Number(r.idade_ms ?? 0)));
   if (maisVelha > TTL_ODDS_MS) return null;
-  const m = new Map<string, number>();
-  for (const r of rows) m.set(String(r.selecao), Number(r.odd));
-  return m;
+  const out: OddsPorMercado = new Map();
+  for (const r of rows) {
+    const merc = String(r.mercado);
+    if (!out.has(merc)) out.set(merc, new Map());
+    out.get(merc)!.set(String(r.selecao), Number(r.odd));
+  }
+  return out;
 }
 
-/** Odds 1x2 do bet365, do cache (1h) ou da API. */
-async function obterOdds1x2(eventoId: string): Promise<Map<string, number> | null> {
+/** Odds do bet365 nos 3 mercados que o motor modela, do cache (1h) ou da API. */
+async function obterOddsMercados(eventoId: string): Promise<OddsPorMercado | null> {
   const cache = await lerOddsCache(eventoId).catch(() => null);
   if (cache) return cache;
   try {
     const brutas = await getOddsBet365(eventoId);
     const normalizadas: MarketOdds[] = [];
-    const m = new Map<string, number>();
+    const out: OddsPorMercado = new Map();
     for (const o of brutas) {
-      if (!ehMercado1x2(o.mercado)) continue;
-      const sel = mapearSelecao1x2(o.selecao);
+      const merc = mapearMercado(o.mercado);
+      if (!merc) continue;
+      const sel = mapearSelecaoMercado(merc, o.selecao);
       if (!sel) continue;
-      m.set(sel, o.odd);
-      normalizadas.push({ ...o, mercado: '1x2', selecao: sel });
+      if (!out.has(merc)) out.set(merc, new Map());
+      out.get(merc)!.set(sel, o.odd);
+      normalizadas.push({ ...o, mercado: merc, selecao: sel });
     }
     if (normalizadas.length) await gravarOdds(normalizadas);
-    return m.size ? m : null;
+    return out.size ? out : null;
   } catch {
     return null;
   }
@@ -216,14 +251,20 @@ export interface JogoAvaliado {
   probCasa: number;
   probEmpate: number;
   probVisitante: number;
-  /** Melhor linha por valor esperado, quando ha odds. */
-  melhor: null | {
-    selecao: 'casa' | 'empate' | 'visitante';
+  /** v3.118.0: over 2.5 e ambas marcam, que o motor ja calculava e o tool descartava. */
+  probOver25: number;
+  probAmbasMarcam: number;
+  /** Todas as linhas com odd, dos 3 mercados modelados, ordenadas por valor esperado. */
+  linhas: Array<{
+    mercado: string;
+    selecao: string;
     probabilidadeEstimada: number;
     odd: number;
     probabilidadeImplicita: number;
     valorEsperado: number;
-  };
+  }>;
+  /** Atalho pra melhor linha do jogo. Null quando nao ha odds. */
+  melhor: null | JogoAvaliado['linhas'][number];
 }
 
 export interface ResultadoConsulta {
@@ -309,7 +350,8 @@ export async function consultarJogosDoDia(opts: {
       avaliados.push({
         eventoId: f.provedorEventoId, competicao: f.competicao,
         timeCasa: f.timeCasa, timeVisitante: f.timeVisitante, dataHora: f.dataHora,
-        probCasa: NaN, probEmpate: NaN, probVisitante: NaN, melhor: null,
+        probCasa: NaN, probEmpate: NaN, probVisitante: NaN,
+        probOver25: NaN, probAmbasMarcam: NaN, linhas: [], melhor: null,
       });
       continue;
     }
@@ -319,39 +361,58 @@ export async function consultarJogosDoDia(opts: {
       mediaGolsLiga: mediaLiga, fatorMando: FATOR_MANDO,
     });
 
-    const odds = await obterOdds1x2(f.provedorEventoId);
-    let melhor: JogoAvaliado['melhor'] = null;
-    const linhasParaGravar: Array<{ selecao: string; prob: number; implicita: number | null; odd: number | null; ev: number | null }> = [];
+    // v3.118.0: o motor ja devolve a matriz de placares — over/under e ambas
+    // marcam saem dela de graca, sem nenhuma requisicao extra.
+    const ou = probabilidadeOverUnder(r.matriz, 2.5);
+    const btts = probabilidadeAmbasMarcam(r.matriz);
 
-    const selecoes: Array<['casa' | 'empate' | 'visitante', number]> = [
-      ['casa', r.probCasa], ['empate', r.probEmpate], ['visitante', r.probVisitante],
+    const odds = await obterOddsMercados(f.provedorEventoId);
+    const linhas: JogoAvaliado['linhas'] = [];
+    const linhasParaGravar: Array<{ mercado: string; selecao: string; prob: number; implicita: number | null; odd: number | null; ev: number | null }> = [];
+
+    // Cada mercado e' normalizado SEPARADAMENTE pra tirar a margem: a margem do
+    // 1x2 nao e' a mesma do over/under, e normalizar tudo junto misturaria as duas.
+    const mercados: Array<{ nome: string; selecoes: Array<[string, number]> }> = [
+      { nome: '1x2', selecoes: [['casa', r.probCasa], ['empate', r.probEmpate], ['visitante', r.probVisitante]] },
+      { nome: 'over_under_2.5', selecoes: [['over', ou.over], ['under', ou.under]] },
+      { nome: 'ambas_marcam', selecoes: [['sim', btts.sim], ['nao', btts.nao]] },
     ];
 
-    if (odds && odds.size === 3) {
-      const listaOdds = selecoes.map(([s]) => odds.get(s) ?? 0);
+    let temAlgumaOdd = false;
+    for (const m of mercados) {
+      const oddsMerc = odds?.get(m.nome);
+      const completo = !!oddsMerc && m.selecoes.every(([s]) => (oddsMerc.get(s) ?? 0) > 1);
+      if (!completo) {
+        // Sem o mercado inteiro nao da pra remover a margem corretamente; grava a
+        // probabilidade do modelo mesmo assim, pro historico do backtest.
+        for (const [sel, prob] of m.selecoes) {
+          linhasParaGravar.push({ mercado: m.nome, selecao: sel, prob, implicita: null, odd: null, ev: null });
+        }
+        continue;
+      }
+      temAlgumaOdd = true;
+      const listaOdds = m.selecoes.map(([s]) => oddsMerc!.get(s)!);
       const { probabilidades: implicitas } = probabilidadesImplicitas(listaOdds);
-      selecoes.forEach(([sel, prob], i) => {
+      m.selecoes.forEach(([sel, prob], i) => {
         const odd = listaOdds[i];
         const ev = valorEsperado(prob, odd);
-        linhasParaGravar.push({ selecao: sel, prob, implicita: implicitas[i], odd, ev });
-        if (!melhor || ev > melhor.valorEsperado) {
-          melhor = { selecao: sel, probabilidadeEstimada: prob, odd,
-                     probabilidadeImplicita: implicitas[i], valorEsperado: ev };
-        }
-      });
-    } else {
-      semOdds++;
-      selecoes.forEach(([sel, prob]) => {
-        linhasParaGravar.push({ selecao: sel, prob, implicita: null, odd: null, ev: null });
+        linhasParaGravar.push({ mercado: m.nome, selecao: sel, prob, implicita: implicitas[i], odd, ev });
+        linhas.push({
+          mercado: m.nome, selecao: sel, probabilidadeEstimada: prob, odd,
+          probabilidadeImplicita: implicitas[i], valorEsperado: ev,
+        });
       });
     }
+    if (!temAlgumaOdd) semOdds++;
+    linhas.sort((a, b) => b.valorEsperado - a.valorEsperado);
 
     await gravarProbabilidades(f.provedorEventoId, linhasParaGravar);
     avaliados.push({
       eventoId: f.provedorEventoId, competicao: f.competicao,
       timeCasa: f.timeCasa, timeVisitante: f.timeVisitante, dataHora: f.dataHora,
       probCasa: r.probCasa, probEmpate: r.probEmpate, probVisitante: r.probVisitante,
-      melhor,
+      probOver25: ou.over, probAmbasMarcam: btts.sim,
+      linhas, melhor: linhas[0] ?? null,
     });
   }
 
