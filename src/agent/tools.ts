@@ -2393,6 +2393,13 @@ const _allToolDefinitions: Anthropic.Tool[] = [
           type: 'string', enum: ['valor', 'confianca'],
           description: 'valor = maior valor esperado vs mercado (exige odds); confianca = maior probabilidade estimada.',
         },
+        times: {
+          type: 'array', items: { type: 'string' },
+          description:
+            'Nomes de time pra analisar UM jogo especifico, ex: ["Argentina","Espanha"]. '
+            + 'Use SEMPRE que o Chefe citar times. Nesse modo qualquer competicao vale '
+            + '(Copa do Mundo, amistoso, etc), nao so as ligas acompanhadas.',
+        },
       },
     },
   },
@@ -3229,11 +3236,15 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       // modulo esportivo (adapters + motor) em toda inicializacao do agente.
       case 'consultar_probabilidades_esportivas': {
         const esp = await import('../services/sportsData/consultaEsportiva');
-        const arg = input as { data?: string; max_jogos?: number; ordenar_por?: 'valor' | 'confianca' };
+        const arg = input as {
+          data?: string; max_jogos?: number;
+          ordenar_por?: 'valor' | 'confianca'; times?: string[];
+        };
         data = await esp.consultarJogosDoDia({
           data: arg.data,
           maxJogos: arg.max_jogos ?? 10,
           ordenarPor: arg.ordenar_por ?? 'valor',
+          times: Array.isArray(arg.times) ? arg.times : undefined,
         });
         break;
       }

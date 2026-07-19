@@ -242,21 +242,54 @@ export interface ResultadoConsulta {
  * `ordenarPor` = 'valor' usa o valor esperado (exige odds); 'confianca' usa a
  * maior probabilidade estimada, e funciona mesmo sem odds.
  */
+/** Normaliza pra comparar nome de time: sem acento, sem caixa, sem espaco extra. */
+export function normalizarNomeTime(s: string): string {
+  return String(s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().trim();
+}
+
+/** Casa se QUALQUER termo buscado aparecer no nome de um dos times. */
+export function jogoBateComBusca(f: { timeCasa: string; timeVisitante: string }, termos: string[]): boolean {
+  if (!termos.length) return true;
+  const casa = normalizarNomeTime(f.timeCasa);
+  const visitante = normalizarNomeTime(f.timeVisitante);
+  return termos.some((t) => {
+    const n = normalizarNomeTime(t);
+    return n.length >= 3 && (casa.includes(n) || visitante.includes(n));
+  });
+}
+
 export async function consultarJogosDoDia(opts: {
   data?: string;
   maxJogos?: number;
   ordenarPor?: 'valor' | 'confianca';
+  /**
+   * Nomes de time pra buscar um jogo especifico ("Argentina", "Espanha").
+   *
+   * Quando informado, o filtro de LIGAS_ACOMPANHADAS e' IGNORADO de proposito:
+   * assim funciona pra Copa do Mundo, amistoso ou qualquer competicao fora da
+   * lista, sem depender de acertar o id da liga na API. Pedir um jogo pelo nome
+   * ja e' um recorte suficiente.
+   */
+  times?: string[];
 } = {}): Promise<ResultadoConsulta> {
   const data = opts.data || new Date().toISOString().slice(0, 10);
   const limite = Math.max(1, Math.min(opts.maxJogos ?? MAX_JOGOS, MAX_JOGOS));
   const ordenarPor = opts.ordenarPor ?? 'valor';
+  const termos = (opts.times ?? []).filter((t) => String(t || '').trim().length >= 3);
+  const buscaPorTime = termos.length > 0;
 
-  // 1 requisicao pra todos os jogos do dia; o filtro por liga e' local, pra nao
-  // gastar uma chamada por competicao.
+  // 1 requisicao pra todos os jogos do dia; o filtro e' local, pra nao gastar
+  // uma chamada por competicao.
   const todos = await getFixturesPorData(data);
   const doInteresse = todos
-    .filter((f) => LIGAS_ACOMPANHADAS.includes(Number(f.provedorLigaId)))
-    .filter((f) => f.status === 'agendado' || f.status === 'ao_vivo')
+    .filter((f) => (buscaPorTime
+      ? jogoBateComBusca(f, termos)
+      : LIGAS_ACOMPANHADAS.includes(Number(f.provedorLigaId))))
+    // Numa busca por time o jogo pode ja ter comecado ou terminado — o usuario
+    // pediu AQUELE jogo, entao nao escondemos por status.
+    .filter((f) => buscaPorTime || f.status === 'agendado' || f.status === 'ao_vivo')
     .sort((a, b) => new Date(a.dataHora).getTime() - new Date(b.dataHora).getTime());
 
   const selecionados = doInteresse.slice(0, limite);
@@ -334,6 +367,27 @@ export async function consultarJogosDoDia(opts: {
   });
 
   const semModelo = avaliados.length - comModelo.length;
+
+  // Mensagens distinguem os tres "vazios" possiveis — sem isso a ZAYRA diria
+  // apenas "nao encontrei", e o usuario nao saberia se o jogo nao existe, se o
+  // nome estava errado ou se faltou historico pro modelo.
+  const avisos: string[] = [];
+  if (buscaPorTime && doInteresse.length === 0) {
+    avisos.push(
+      `Nenhum jogo de ${termos.join(' x ')} encontrado em ${data}. `
+      + `Havia ${todos.length} partida(s) no dia — confira a grafia do time ou a data.`,
+    );
+  }
+  if (semModelo > 0) {
+    avisos.push(
+      `${semModelo} jogo(s) sem probabilidade: falta historico recente dos times no cache. `
+      + 'Repetir a consulta costuma resolver, pois a forma e buscada e guardada a cada chamada.',
+    );
+  }
+  if (buscaPorTime && comModelo.length > 0 && semOdds > 0) {
+    avisos.push('Sem odds de mercado pra este jogo — da pra estimar probabilidade, mas nao valor esperado.');
+  }
+
   return {
     data,
     jogos: comModelo,
@@ -341,9 +395,7 @@ export async function consultarJogosDoDia(opts: {
     jogosAnalisados: comModelo.length,
     semOdds,
     disclaimer: DISCLAIMER_OBRIGATORIO,
-    aviso: semModelo > 0
-      ? `${semModelo} jogo(s) ficaram de fora por falta de historico dos times.`
-      : undefined,
+    aviso: avisos.length ? avisos.join(' ') : undefined,
   };
 }
 
