@@ -27119,6 +27119,17 @@ async function renderCfgAuditoria() {
 <script src="/js/memoriais-estrutural-wizard.js"></script>
 <script src="/js/memoriais-arquitetonico-wizard.js"></script>
 <script src="/js/diligencias.js"></script>
-<!-- v3.94.0: ZAYRA Jarvis — assistente por voz (palma dupla / "Zayra" / Ctrl+Shift+J). Carrega por último: depende de window.state/render e dos abrirModal* globais. -->
-<script src="/jarvis.js" defer></script></body>
+<!-- v3.94.0: ZAYRA Jarvis — assistente por voz (palma dupla / "Zayra" / Ctrl+Shift+J).
+     v3.107.1: DESATIVADO na Gestão de Obras. O orbe 🎙️ flutuava sobre todas as telas
+     (Galeria, Laudo, Loteamentos...) e, pior, escutava em background: abria getUserMedia
+     num loop de rAF pro detector de palma E um SpeechRecognition continuous=true que se
+     reiniciava sozinho — este último, no Chrome, manda o áudio pros servidores do Google.
+     Nada disso exigia tocar no orbe: arrancava no primeiro clique em qualquer lugar da
+     página (jarvis.js:448 `kick`), com os defaults todos true (jarvis.js:23-26).
+     O arquivo jarvis.js continua no repo; basta reativar esta linha se voltar a ser útil.
+     A tela do ZAYRA Chat (index.html) NUNCA carregou este script — ela tem microfone
+     próprio (#micBtn/#btnMicChat), que só grava sob clique e encerra as tracks no fim.
+<script src="/jarvis.js" defer></script>
+-->
+</body>
 </html>
