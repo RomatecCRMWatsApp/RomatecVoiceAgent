@@ -25090,17 +25090,35 @@ async function baixarPendente(localId) {
   const pendentes = await listarPendentesLocal();
   const p = pendentes.find(x => x.localId === localId);
   if (!p) return;
-  baixarBlob(`data:${p.mime || 'image/jpeg'};base64,${p.arquivo_b64}`, `foto-pendente-${localId}.jpg`);
+  const ok = await baixarBlob(`data:${p.mime || 'image/jpeg'};base64,${p.arquivo_b64}`, `foto-pendente-${localId}.jpg`);
+  if (ok) toastGalOk('Foto baixada — veja em Arquivos/Downloads');
+  else toastGalErr('Não consegui baixar essa foto pendente');
 }
 
 function baixarFotoServer(id) {
   baixarBlob(`/api/galeria/${id}/arquivo`, `foto-${id}.jpg`);
 }
 
-function baixarBlob(url, filename) {
-  const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+// v3.105.1: sempre baixa via blob: objectURL, nunca data-URL direto no href.
+// No iOS o <a download> apontando pra data-URL não baixa — abre a folha de
+// compartilhamento do sistema (foi o que travava a captura e o "Baixar" do pendente).
+async function baixarBlob(url, filename) {
+  let objectUrl = null;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl; a.download = filename; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    return true;
+  } catch (err) {
+    console.warn('[baixarBlob]', url.slice(0, 40), err);
+    return false;
+  } finally {
+    if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  }
 }
 
 async function removerPendente(localId) {
@@ -25494,24 +25512,41 @@ function _toastGal(msg, cor) {
   setTimeout(() => el.remove(), 4000);
 }
 
-// v3.28.0: Salvar no celular via Web Share API com fallback de download direto.
+// v3.105.1: Salvar = download direto, SEM Web Share API.
+//
+// O caminho antigo chamava navigator.share({files}) primeiro. No iOS isso abre a folha
+// de compartilhamento genérica ("Abrir com Instagram", "Mais...") — que nem sempre expõe
+// "Salvar Imagem" — e prende o usuário fora do app, sem caminho de volta pra galeria.
+// Agora baixa o blob e dispara <a download>, que não abre nenhum diálogo do sistema.
+//
+// LIMITE DA PLATAFORMA: em navegador, nenhuma API web grava direto no Camera Roll do iOS.
+// O arquivo cai no app Arquivos (iOS) / Downloads (Android). Gravar em Fotos exigiria
+// empacotar como app nativo (Capacitor/Cordova).
 async function salvarNoCelular(fotoId) {
   const downloadUrl = `/api/galeria/fotos/${fotoId}/download`;
-  if (navigator.share && navigator.canShare) {
-    try {
-      const blob = await fetch(downloadUrl, { credentials: 'include' }).then(r => r.blob());
-      const file = new File([blob], `romatec-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      if (navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'Foto Romatec' });
-        return { sucesso: true };
-      }
-    } catch (_) { /* cai pro fallback */ }
+  let objectUrl = null;
+  try {
+    const r = await fetch(downloadUrl, { credentials: 'include' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = `romatec-foto-${fotoId}.jpg`;
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toastGalOk('Foto baixada — veja em Arquivos/Downloads');
+    return { sucesso: true };
+  } catch (err) {
+    console.warn('[salvarNoCelular]', err);
+    toastGalErr('Não consegui baixar a foto: ' + (err.message || err));
+    return { sucesso: false, erro: String(err.message || err) };
+  } finally {
+    // Revoga só depois do clique ser processado, senão o download aborta.
+    if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
   }
-  const link = document.createElement('a');
-  link.href = downloadUrl;
-  link.download = `romatec-${Date.now()}.jpg`;
-  document.body.appendChild(link); link.click(); document.body.removeChild(link);
-  return { sucesso: true };
 }
 
 function readImageFile(file) {
