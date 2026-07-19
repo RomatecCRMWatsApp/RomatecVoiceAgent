@@ -101,6 +101,15 @@
   100% { transform: translateX(-50%); }
 }
 
+/* v3.116.0: cards com 4 metricas (obras) precisam de mais largura pra
+   nao truncar valores em BRL. --zlf-cols eh setado inline em live-feed.js. */
+.zlf-card[style*="--zlf-cols:4"],
+.zlf-card[style*="--zlf-cols: 4"] { width: 420px; }
+.zlf-card[style*="--zlf-cols:4"] .zlf-cell-val,
+.zlf-card[style*="--zlf-cols: 4"] .zlf-cell-val { font-size: 12px; }
+.zlf-card[style*="--zlf-cols:4"] .zlf-cell-val.zlf-hl-green,
+.zlf-card[style*="--zlf-cols: 4"] .zlf-cell-val.zlf-hl-green { font-size: 13px; }
+
 .zlf-card {
   width: 340px;
   flex-shrink: 0;
@@ -157,14 +166,16 @@ a.zlf-card { cursor: pointer; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* v3.116.0: numero de colunas vem do card (--zlf-cols), nao mais fixo em 3.
+   Card de obra passou a ter 4 metricas: Orcamento/Mao de Obra/Saldo/Equipe. */
 .zlf-card-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(var(--zlf-cols, 3), minmax(0, 1fr));
   gap: 8px;
   padding-top: 12px;
   border-top: 1px dashed var(--zlf-border);
 }
-.zlf-cell { text-align: center; }
+.zlf-cell { text-align: center; min-width: 0; }
 .zlf-cell-lbl {
   font-size: 9px;
   color: #888;
@@ -200,6 +211,16 @@ a.zlf-card { cursor: pointer; }
   .zlf-card-title { font-size: 13px; }
   .zlf-cell-val { font-size: 13px; }
   .zlf-cell-val.zlf-hl-green { font-size: 15px; }
+  /* v3.116.0: card de 4 metricas no celular — 2x2 em vez de 4 colunas espremidas */
+  .zlf-card[style*="--zlf-cols:4"],
+  .zlf-card[style*="--zlf-cols: 4"] { width: 300px; }
+  .zlf-card[style*="--zlf-cols:4"] .zlf-card-grid,
+  .zlf-card[style*="--zlf-cols: 4"] .zlf-card-grid {
+    grid-template-columns: 1fr 1fr;
+    row-gap: 12px;
+  }
+  .zlf-card[style*="--zlf-cols:4"] .zlf-cell-val,
+  .zlf-card[style*="--zlf-cols: 4"] .zlf-cell-val { font-size: 13px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

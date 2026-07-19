@@ -19,7 +19,11 @@
   }
 
   function renderCard(card) {
-    const cells = (card.metrics || [])
+    const metrics = card.metrics || [];
+    // v3.116.0: o CSS le --zlf-cols pra montar o grid e ajustar largura/fonte
+    // quando o card tem 4 metricas (Orcamento/Mao de Obra/Saldo/Equipe).
+    const cols = metrics.length > 0 ? metrics.length : 3;
+    const cells = metrics
       .map(function (m) {
         const hl = m.highlight ? ' zlf-hl-' + m.highlight : '';
         return (
@@ -35,7 +39,7 @@
     const href = card.href ? ' href="' + escapeHtml(card.href) + '"' : '';
 
     return (
-      '<' + tag + ' class="zlf-card"' + href + '>' +
+      '<' + tag + ' class="zlf-card" style="--zlf-cols:' + cols + '"' + href + '>' +
         '<div class="zlf-card-top">' +
           '<div class="zlf-avatar">' + escapeHtml(card.avatar) + '</div>' +
           '<div class="zlf-card-info">' +

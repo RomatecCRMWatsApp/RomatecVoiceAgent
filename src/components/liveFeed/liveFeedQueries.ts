@@ -44,6 +44,50 @@ function pctConsumo(consumo: number, orcamento: number): string {
   return `${Math.round((c / o) * 100)}%`;
 }
 
+/**
+ * v3.116.0: SQL reutilizavel do total ja PAGO em mao de obra por obra.
+ * Duas fontes, ambas com obra_id:
+ *  - folha_fechamento_itens (status_pagamento='paga') via folha_fechamentos.obra_id
+ *  - mao_obra_avulsa.valor_pago (prestador informal)
+ * Subquery correlacionada de proposito: evita o produto cartesiano que
+ * inflava o SUM quando havia varios LEFT JOIN no mesmo GROUP BY.
+ */
+const SQL_FOLHA_PAGA = `COALESCE((
+    SELECT SUM(fi.valor_liquido)
+    FROM folha_fechamento_itens fi
+    JOIN folha_fechamentos ff ON ff.id = fi.fechamento_id
+    WHERE ff.obra_id = o.id AND fi.status_pagamento = 'paga'
+  ), 0)`;
+
+const SQL_AVULSA_PAGA = `COALESCE((
+    SELECT SUM(ma.valor_pago)
+    FROM mao_obra_avulsa ma
+    WHERE ma.obra_id = o.id
+  ), 0)`;
+
+/**
+ * v3.116.0: em producao a tabela mao_obra_avulsa pode nao existir — a migration
+ * dela roda encadeada depois da signing (server.ts) e nao rodou no banco atual.
+ * Referenciar a tabela direto derrubava o Live Feed inteiro com ER_NO_SUCH_TABLE,
+ * entao checamos uma vez (cache em memoria) e so somamos a avulsa se ela existir.
+ */
+let avulsaExiste: boolean | null = null;
+
+async function sqlMaoObraPaga(pool: Pool): Promise<string> {
+  if (avulsaExiste === null) {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT 1 AS ok FROM information_schema.tables
+         WHERE table_schema = DATABASE() AND table_name = 'mao_obra_avulsa' LIMIT 1`,
+      );
+      avulsaExiste = rows.length > 0;
+    } catch {
+      avulsaExiste = false;
+    }
+  }
+  return avulsaExiste ? `(${SQL_FOLHA_PAGA} + ${SQL_AVULSA_PAGA})` : `(${SQL_FOLHA_PAGA})`;
+}
+
 function emojiCategoria(cat: string | null | undefined): string {
   const map: Record<string, string> = {
     ferramenta: '🔧',
@@ -137,6 +181,7 @@ export async function queryPainel(pool: Pool): Promise<LiveFeedCard[]> {
  * OBRAS · todas as obras com status e orçamento
  */
 export async function queryObras(pool: Pool): Promise<LiveFeedCard[]> {
+  const sqlPago = await sqlMaoObraPaga(pool);
   const [rows] = await pool.query<RowDataPacket[]>(`
     SELECT
       o.id,
@@ -147,19 +192,22 @@ export async function queryObras(pool: Pool): Promise<LiveFeedCard[]> {
       o.orcamento,
       o.valor_contrato,
       o.status,
-      COALESCE(SUM(CASE WHEN t.tipo = 'saida' THEN t.valor ELSE 0 END), 0) AS consumo,
-      COUNT(DISTINCT d.funcionario_id) AS qtd_colaboradores
+      ${sqlPago} AS mao_obra_paga,
+      (
+        SELECT COUNT(DISTINCT d.funcionario_id)
+        FROM romatec_obra_funcionario_dias d
+        WHERE d.obra_id = o.id
+      ) AS qtd_colaboradores
     FROM romatec_obras o
-    LEFT JOIN romatec_obra_transacoes t ON t.obra_id = o.id
-    LEFT JOIN romatec_obra_funcionario_dias d ON d.obra_id = o.id
     WHERE o.status IN ('em_andamento', 'paralisada', 'planejamento')
-    GROUP BY o.id, o.nome, o.cliente, o.endereco, o.cidade, o.orcamento, o.valor_contrato, o.status
     ORDER BY o.orcamento DESC
   `);
 
   return rows.map((r) => {
     const orcamento = Number(r.orcamento ?? r.valor_contrato ?? 0);
-    const consumo = Number(r.consumo ?? 0);
+    // v3.116.0: card mostra o que ja saiu pra equipe e o que sobra da obra
+    const maoObra = Number(r.mao_obra_paga ?? 0);
+    const saldo = orcamento - maoObra;
     const theme: LiveFeedCard['theme'] =
       r.status === 'paralisada' ? 'red' : r.status === 'planejamento' ? 'blue' : 'gold';
     return {
@@ -171,8 +219,9 @@ export async function queryObras(pool: Pool): Promise<LiveFeedCard[]> {
       href: `/painel#obra-${r.id}`,
       metrics: [
         { label: 'Orçamento', value: formatBRL(orcamento), highlight: 'gold' },
-        { label: 'Consumo', value: pctConsumo(consumo, orcamento), highlight: 'orange' },
-        { label: 'Equipe', value: String(r.qtd_colaboradores ?? 0), highlight: 'green' },
+        { label: 'Mão de Obra', value: formatBRL(maoObra), highlight: 'orange' },
+        { label: 'Saldo', value: formatBRL(saldo), highlight: saldo < 0 ? 'red' : 'green' },
+        { label: 'Equipe', value: String(r.qtd_colaboradores ?? 0), highlight: 'white' },
       ],
     };
   });

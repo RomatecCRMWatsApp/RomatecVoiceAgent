@@ -108,6 +108,9 @@ const ADMIN_ONLY_TOOLS = new Set<string>([
   'apagar_obra', 'apagar_etapa', 'apagar_membro_equipe', 'apagar_material',
   'apagar_vistoria', 'fs_apagar', 'limpar_temp', 'limpar_lixeira',
   'drive_apagar',
+  // v3.116.0: aptidao pessoal do CEO (secao 0 da spec esportiva). Colaborador
+  // que descobrir o nome recebe recusa explicita aqui.
+  'consultar_probabilidades_esportivas',
 ]);
 
 interface Colaborador { nome: string; cargo: string; telefone: string; }
@@ -126,6 +129,19 @@ function getColaboradores(): Colaborador[] {
 // de tools "desabilitadas" — code preservado, só não vai pros providers.
 // Pode reativar tirando da lista quando precisar (ex: voltar Spotify).
 const DISABLED_TOOLS = new Set<string>([
+  // v3.116.0: liberadas a pedido do CEO pra abrir vaga no teto de 128 dos
+  // providers (estavamos em 132). Codigo preservado — executeTool ainda aceita
+  // por nome; so sairam do cardapio oferecido ao modelo. Reverter = tirar daqui.
+  // Google Drive (o CEO usa pela tela, nao por voz)
+  'drive_upload_arquivo', 'drive_listar', 'drive_buscar', 'drive_apagar',
+  'drive_compartilhar', 'drive_status',
+  // Infra e gatilhos manuais (painel do Railway ja mostra; gatilhos rodam sozinhos)
+  'status_railway', 'diagnostico_banco',
+  'rodar_briefing_semanal_agora', 'rodar_detectores_agora',
+  // CRM completo (operado pela tela)
+  'crm_criar_lead', 'crm_atualizar_lead', 'crm_apagar_lead',
+  'crm_criar_contato', 'crm_atualizar_contato', 'crm_apagar_contato',
+  'crm_atualizar_campanha', 'crm_apagar_campanha',
   // Spotify (não usado em produção Romatec)
   'tocar_musica', 'pausar_musica', 'pular_proxima', 'pular_anterior', 'musica_atual',
   // Filesystem local (não roda em Railway/produção)
@@ -2358,6 +2374,28 @@ const _allToolDefinitions: Anthropic.Tool[] = [
       },
     },
   },
+  // v3.116.0: aptidao pessoal do CEO — estatistica esportiva.
+  // Restrita via ADMIN_ONLY_TOOLS. Sem tela, sem rota de frontend: so chat/voz.
+  {
+    name: 'consultar_probabilidades_esportivas',
+    description:
+      'Ranking de jogos do dia por probabilidade estimada e valor esperado, usando modelo '
+      + 'Poisson/Dixon-Coles sobre forma recente + odds de mercado. Use quando o Chefe perguntar '
+      + 'sobre jogos, chances, palpites ou probabilidades de partidas. Cobre Brasileirao A/B, '
+      + 'Copa do Brasil, Libertadores e as principais ligas europeias. ATENCAO: sao estimativas '
+      + 'estatisticas, nunca garantia — o disclaimer vem na resposta e deve ser repassado ao Chefe.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        data: { type: 'string', description: 'Data no formato YYYY-MM-DD. Default: hoje.' },
+        max_jogos: { type: 'integer', description: 'Quantos jogos analisar (default 10, max 20).' },
+        ordenar_por: {
+          type: 'string', enum: ['valor', 'confianca'],
+          description: 'valor = maior valor esperado vs mercado (exige odds); confianca = maior probabilidade estimada.',
+        },
+      },
+    },
+  },
 ];
 
 // v1.60.0: lista filtrada — sem as desabilitadas em DISABLED_TOOLS.
@@ -3187,6 +3225,18 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       case 'pesquisar_web':
         data = await pesquisarWeb(input as { query: string; limite?: number; freshness?: 'pd'|'pw'|'pm'|'py' });
         break;
+      // v3.116.0: aptidao pessoal do CEO. Import dinamico pra nao carregar o
+      // modulo esportivo (adapters + motor) em toda inicializacao do agente.
+      case 'consultar_probabilidades_esportivas': {
+        const esp = await import('../services/sportsData/consultaEsportiva');
+        const arg = input as { data?: string; max_jogos?: number; ordenar_por?: 'valor' | 'confianca' };
+        data = await esp.consultarJogosDoDia({
+          data: arg.data,
+          maxJogos: arg.max_jogos ?? 10,
+          ordenarPor: arg.ordenar_por ?? 'valor',
+        });
+        break;
+      }
       case 'consultar_cnpj':
         data = await consultarCnpj(input as { cnpj: string });
         break;
