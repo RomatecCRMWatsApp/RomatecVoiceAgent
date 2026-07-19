@@ -2545,7 +2545,10 @@ app.get('/api/galeria', async (req: Request, res: Response) => {
     const limit = req.query.limit ? Number(req.query.limit) : 100;
     const offset = req.query.offset ? Number(req.query.offset) : 0;
     const obraId = req.query.obra_id ? Number(req.query.obra_id) : undefined;
-    const fotos = await m.listarFotos({ limit, offset, obra_id: obraId });
+    // v3.107.0: escopo=geral traz só as fotos sem obra vinculada. Default segue
+    // "todas" pra não quebrar quem já consome esta rota.
+    const apenasGeral = String(req.query.escopo || '') === 'geral';
+    const fotos = await m.listarFotos({ limit, offset, obra_id: obraId, apenas_geral: apenasGeral });
     res.json({ fotos });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -2628,6 +2631,39 @@ app.put('/api/galeria/:id', requireCeoToken, async (req: Request, res: Response)
       obra_id: typeof b.obra_id === 'number' ? b.obra_id : undefined,
     });
     res.json({ ok });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+// v3.107.0: contagem de fotos por obra, pro contador no botão da lista de obras.
+app.get('/api/galeria/contagem-por-obra', async (_req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    res.json({ contagem: await m.contarFotosPorObra() });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// v3.107.0: move um lote de fotos pra galeria de uma obra (obra_id null = volta pra geral).
+// Em lote de propósito: a fila offline reenvia a operação inteira, não N updates soltos.
+app.post('/api/galeria/mover-obra', requireCeoToken, async (req: Request, res: Response) => {
+  try {
+    const m = await import('./integrations/galeria');
+    const b = (req.body || {}) as Record<string, unknown>;
+    if (!Array.isArray(b.fotoIds) || b.fotoIds.length === 0) {
+      res.status(400).json({ error: 'fotoIds vazio' }); return;
+    }
+    // obra_id chega como string do front (romatec_obras.id é string no JSON) — normaliza.
+    const obraId = (b.obra_id === null || b.obra_id === undefined || b.obra_id === '')
+      ? null
+      : Number(b.obra_id);
+    if (obraId != null && !Number.isInteger(obraId)) {
+      res.status(400).json({ error: 'obra_id inválido' }); return;
+    }
+    const r = await m.moverFotosParaObra((b.fotoIds as unknown[]).map(Number), obraId);
+    res.json({ ok: true, ...r });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }

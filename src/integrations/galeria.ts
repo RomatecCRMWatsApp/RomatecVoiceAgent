@@ -85,6 +85,8 @@ export async function listarFotos(opts: {
   limit?: number;
   offset?: number;
   obra_id?: number;
+  /** v3.107.0: true = só a galeria geral (fotos ainda não vinculadas a obra). */
+  apenas_geral?: boolean;
 } = {}): Promise<GaleriaFoto[]> {
   const tenant = opts.tenant_id ?? 1;
   // v3.105.0: blinda contra NaN vindo de Number(req.query.limit) — LIMIT NaN quebrava a listagem.
@@ -95,6 +97,10 @@ export async function listarFotos(opts: {
   if (opts.obra_id != null) {
     wheres.push('obra_id = ?');
     params.push(opts.obra_id);
+  } else if (opts.apenas_geral) {
+    // v3.107.0: foto movida pra obra some da geral — transferência, não cópia.
+    // Não é o default da rota: consumidores antigos continuam vendo tudo.
+    wheres.push('obra_id IS NULL');
   }
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT id, tenant_id, user_id, user_nome, mime, legenda,
@@ -219,6 +225,91 @@ export async function apagarFoto(id: number): Promise<boolean> {
     [id],
   );
   return res.affectedRows > 0;
+}
+
+/**
+ * v3.107.0: prefixo de obra na legenda.
+ *
+ * O prefixo é gravado NO banco (decisão do CEO), então precisa ser idempotente:
+ * mover A -> B -> C não pode virar "[A][B][C] Foto". `tirarPrefixoObra` remove um
+ * prefixo `[...]` no início antes de qualquer nova aplicação, e mover de volta pra
+ * galeria geral limpa o prefixo.
+ */
+const RE_PREFIXO_OBRA = /^\s*\[[^\]]*\]\s*/;
+
+export function tirarPrefixoObra(legenda: string | null): string {
+  return String(legenda ?? '').replace(RE_PREFIXO_OBRA, '').trim();
+}
+
+export function aplicarPrefixoObra(legenda: string | null, obraNome: string | null): string {
+  const base = tirarPrefixoObra(legenda);
+  if (!obraNome) return base;
+  const prefixo = `[${obraNome}] `;
+  // legenda é VARCHAR(500) — trunca a base, nunca o prefixo, pra não perder a obra.
+  // trimEnd: sem legenda, o prefixo sozinho não deve ir pro banco com espaço sobrando.
+  return (prefixo + base).slice(0, 500).trimEnd();
+}
+
+/**
+ * Move um lote de fotos para uma obra (ou de volta pra galeria geral com obraId null).
+ * Transferência, não cópia: só troca o obra_id. O nome da obra é resolvido aqui,
+ * a partir de romatec_obras — o cliente não dita o texto que vai pro banco.
+ */
+export async function moverFotosParaObra(
+  fotoIds: number[],
+  obraId: number | null,
+  opts: { tenant_id?: number } = {},
+): Promise<{ movidas: number; obra_nome: string | null }> {
+  const ids = [...new Set(fotoIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (ids.length === 0) return { movidas: 0, obra_nome: null };
+  const tenant = opts.tenant_id ?? 1;
+
+  let obraNome: string | null = null;
+  if (obraId != null) {
+    const [obras] = await pool.execute<RowDataPacket[]>(
+      `SELECT nome FROM romatec_obras WHERE id = ?`,
+      [obraId],
+    );
+    if (!obras.length) throw new Error(`Obra ${obraId} não encontrada`);
+    obraNome = String(obras[0].nome || '').trim() || null;
+  }
+
+  // Precisa da legenda atual de cada foto pra recalcular o prefixo por linha.
+  const placeholders = ids.map(() => '?').join(',');
+  const [linhas] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, legenda FROM galeria_fotos WHERE id IN (${placeholders}) AND tenant_id = ?`,
+    [...ids, tenant],
+  );
+
+  let movidas = 0;
+  for (const linha of linhas) {
+    const novaLegenda = aplicarPrefixoObra(linha.legenda, obraNome);
+    const [res] = await pool.execute<ResultSetHeader>(
+      // tenant no WHERE: atualizarFoto() não filtra, e aqui é operação em lote.
+      `UPDATE galeria_fotos SET obra_id = ?, legenda = ? WHERE id = ? AND tenant_id = ?`,
+      [obraId, novaLegenda || null, linha.id, tenant],
+    );
+    if (res.affectedRows > 0) movidas++;
+  }
+  return { movidas, obra_nome: obraNome };
+}
+
+/**
+ * v3.107.0: quantas fotos cada obra tem. Uma consulta agregada em vez de N contagens
+ * — a lista de obras renderiza o contador em cada botão.
+ */
+export async function contarFotosPorObra(opts: { tenant_id?: number } = {}): Promise<Record<string, number>> {
+  const tenant = opts.tenant_id ?? 1;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT obra_id, COUNT(*) AS total
+       FROM galeria_fotos
+      WHERE tenant_id = ? AND obra_id IS NOT NULL
+      GROUP BY obra_id`,
+    [tenant],
+  );
+  const out: Record<string, number> = {};
+  for (const r of rows) out[String(r.obra_id)] = Number(r.total);
+  return out;
 }
 
 /** Atualiza legenda/tags/obra_id de uma foto. */

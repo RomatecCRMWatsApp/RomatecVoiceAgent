@@ -1905,7 +1905,8 @@ async function render() {
       laudos:  async () => { await loadLaudos(); renderLaudos(); },
       reforma: async () => { await renderReformaPiso(); },
       loteamentos: async () => { await loadLoteamentos(); renderLoteamentos(); },
-      galeria: async () => { await renderGaleria(); },
+      // v3.107.0: carrega obras junto — o seletor de "Mover para Obra" usa state.obras.
+      galeria: async () => { await loadObras(); await renderGaleria(); },
       // v3.35.0: Memoriais & Quantitativos (Fase 1 — Hidraulico)
       memoriais: async () => { await renderMemoriaisQuantitativos(); },
       // v3.25.0: Configuracoes > Usuarios + Permissoes + Auditoria
@@ -2628,6 +2629,13 @@ function renderObras() {
           <a href="/inventario-obra.html?obra=${o.id}&obra_nome=${encodeURIComponent(o.nome||'')}"
             title="Inventário de Obra: o que a obra tem e o que vai entrando — notas fiscais, utilização, saldo e relatório fotográfico"
             style="background:transparent; border:1px solid var(--neon); color:var(--neon); font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; text-decoration:none;">🗃️ Inventário →</a>
+          <!-- v3.107.0: Galeria de Fotos da Obra — abre a aba Galeria filtrada por esta obra.
+               Não é página própria: reaproveita a galeria geral (coverflow, ordenação, offline). -->
+          <button type="button"
+            onclick="abrirGaleriaDaObraPorId('${o.id}')"
+            title="Fotos vinculadas a esta obra"
+            data-galeria-obra="${o.id}"
+            style="background:transparent; border:1px solid #C9A84C; color:#C9A84C; font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; cursor:pointer;">📷 Galeria de Fotos da Obra <span class="galeria-obra-contador" data-obra="${o.id}"></span>→</button>
         </div>
         <div class="parc-inline-box" data-obra="${o.id}" style="display:none; margin-top:8px;"></div>
         <div class="vto-inline-box" data-obra="${o.id}" style="display:none; margin-top:8px;"></div>
@@ -2839,6 +2847,25 @@ function renderObras() {
     } catch (e) { alert('Erro: ' + e.message); }
     finally { b.disabled = false; b.textContent = '✈️ Telegram'; }
   });
+
+  // v3.107.0: preenche o contador de fotos em cada botão "Galeria de Fotos da Obra".
+  atualizarContadoresGaleriaObra();
+}
+
+// Uma requisição agregada preenche todos os contadores. Falha em silêncio: sem
+// contador o botão continua funcionando, então não vale poluir a tela com erro.
+async function atualizarContadoresGaleriaObra() {
+  const spans = document.querySelectorAll('.galeria-obra-contador');
+  if (!spans.length) return;
+  try {
+    const r = await fetch('/api/galeria/contagem-por-obra', { credentials: 'include' });
+    if (!r.ok) return;
+    const { contagem } = await r.json();
+    spans.forEach((s) => {
+      const n = Number((contagem || {})[String(s.dataset.obra)] || 0);
+      s.textContent = n > 0 ? `(${n}) ` : '';
+    });
+  } catch (_) { /* sem contador, sem drama */ }
 }
 
 // v1.65.42: abre janela print-friendly com todos os dados da obra +
@@ -24431,10 +24458,12 @@ async function carregarLogoRomatec() {
 const GALERIA_DB_NAME = 'romatec-galeria';
 // v3.105.0: v2 acrescenta o cache de metadados do servidor (pra galeria continuar
 // visível e ordenada offline) e a fila de exclusões pendentes.
-const GALERIA_DB_VERSION = 2;
+// v3.107.0: v3 acrescenta a fila de movimentações foto -> obra.
+const GALERIA_DB_VERSION = 3;
 const GALERIA_STORE = 'pendentes';
 const GALERIA_STORE_CACHE = 'cache_fotos';   // metadados das fotos do servidor (sem b64)
 const GALERIA_STORE_DEL = 'exclusoes';       // ids de fotos do servidor a apagar quando voltar online
+const GALERIA_STORE_MOV = 'movimentacoes';   // fotos movidas pra obra offline, a sincronizar
 
 function galeriaDb() {
   return new Promise((res, rej) => {
@@ -24450,6 +24479,9 @@ function galeriaDb() {
       if (!db.objectStoreNames.contains(GALERIA_STORE_DEL)) {
         db.createObjectStore(GALERIA_STORE_DEL, { keyPath: 'id' });
       }
+      if (!db.objectStoreNames.contains(GALERIA_STORE_MOV)) {
+        db.createObjectStore(GALERIA_STORE_MOV, { keyPath: 'id' });
+      }
     };
     req.onsuccess = () => res(req.result);
     req.onerror = () => rej(req.error);
@@ -24457,18 +24489,92 @@ function galeriaDb() {
 }
 
 // ---- Cache de metadados do servidor (item 5: galeria legível offline) ----
-async function salvarCacheFotos(fotos) {
+// v3.107.0: cache por ESCOPO. Antes dava clear() no store inteiro — abrir a galeria
+// de uma obra apagaria do cache toda a galeria geral (e vice-versa). Agora só remove
+// as entradas do escopo atual que sumiram do servidor, e mescla o resto.
+function mesmoEscopo(meta, escopoObraId) {
+  const o = meta.obra_id == null ? null : Number(meta.obra_id);
+  return escopoObraId == null ? o == null : o === Number(escopoObraId);
+}
+
+async function salvarCacheFotos(fotos, escopoObraId = null) {
   const db = await galeriaDb();
+  const vivos = new Set(fotos.map(f => Number(f.id)));
   return new Promise((res, rej) => {
     const tx = db.transaction(GALERIA_STORE_CACHE, 'readwrite');
     const store = tx.objectStore(GALERIA_STORE_CACHE);
-    store.clear();
-    for (const f of fotos) {
-      const { arquivo_b64, ...meta } = f; // nunca guarda binário — só metadados
-      store.put(meta);
-    }
+    const req = store.getAll();
+    req.onsuccess = () => {
+      for (const antigo of (req.result || [])) {
+        if (mesmoEscopo(antigo, escopoObraId) && !vivos.has(Number(antigo.id))) {
+          store.delete(Number(antigo.id));
+        }
+      }
+      for (const f of fotos) {
+        const { arquivo_b64, ...meta } = f; // nunca guarda binário — só metadados
+        store.put(meta);
+      }
+    };
     tx.oncomplete = () => res();
     tx.onerror = () => rej(tx.error);
+  });
+}
+
+// ---- v3.107.0: prefixo de obra na legenda (espelha o backend, pro update otimista) ----
+const RE_PREFIXO_OBRA_FRONT = /^\s*\[[^\]]*\]\s*/;
+function tirarPrefixoObraFront(legenda) {
+  return String(legenda == null ? '' : legenda).replace(RE_PREFIXO_OBRA_FRONT, '').trim();
+}
+function aplicarPrefixoObraFront(legenda, obraNome) {
+  const base = tirarPrefixoObraFront(legenda);
+  return obraNome ? (`[${obraNome}] ` + base).slice(0, 500).trimEnd() : base;
+}
+
+// ---- v3.107.0: fila de movimentações foto -> obra ----
+// Aplica o movimento já no cache local (a foto some da geral e aparece na obra na hora)
+// e enfileira pro servidor. Offline continua consistente.
+async function enfileirarMovimentacao(fotoIds, obraId, obraNome) {
+  const db = await galeriaDb();
+  const ids = fotoIds.map(Number).filter(Number.isFinite);
+  return new Promise((res, rej) => {
+    const tx = db.transaction([GALERIA_STORE_MOV, GALERIA_STORE_CACHE], 'readwrite');
+    const mov = tx.objectStore(GALERIA_STORE_MOV);
+    const cache = tx.objectStore(GALERIA_STORE_CACHE);
+    for (const id of ids) {
+      mov.put({ id, obra_id: obraId == null ? null : Number(obraId), obra_nome: obraNome || null,
+                enfileirado_em: new Date().toISOString() });
+      // Reflete no cache pra UI ficar correta antes de sincronizar.
+      const g = cache.get(id);
+      g.onsuccess = () => {
+        const meta = g.result;
+        if (!meta) return;
+        meta.obra_id = obraId == null ? null : Number(obraId);
+        meta.legenda = aplicarPrefixoObraFront(meta.legenda, obraNome);
+        cache.put(meta);
+      };
+    }
+    tx.oncomplete = () => res(ids.length);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+async function listarMovimentacoesPendentes() {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(GALERIA_STORE_MOV, 'readonly');
+    const r = tx.objectStore(GALERIA_STORE_MOV).getAll();
+    r.onsuccess = () => res(r.result || []);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function removerMovimentacaoPendente(id) {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(GALERIA_STORE_MOV, 'readwrite');
+    const r = tx.objectStore(GALERIA_STORE_MOV).delete(Number(id));
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
   });
 }
 
@@ -24619,19 +24725,172 @@ async function sincronizarPendentes() {
       if (r.ok || r.status === 404) { await removerExclusaoPendente(ex.id); excluidos++; }
     } catch (_) { /* segue offline — tenta no próximo sync */ }
   }
-  return { enviados, restantes: pendentes.length - enviados, falhas, excluidos };
+  // v3.107.0: descarrega as movimentações foto -> obra feitas offline.
+  // Agrupa por obra destino pra mandar um POST por obra, não um por foto.
+  const movs = await listarMovimentacoesPendentes().catch(() => []);
+  let movidos = 0;
+  const porObra = new Map();
+  for (const mv of movs) {
+    const chave = mv.obra_id == null ? 'null' : String(mv.obra_id);
+    if (!porObra.has(chave)) porObra.set(chave, []);
+    porObra.get(chave).push(mv.id);
+  }
+  for (const [chave, ids] of porObra) {
+    try {
+      const r = await fetch('/api/galeria/mover-obra', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+        body: JSON.stringify({ fotoIds: ids, obra_id: chave === 'null' ? null : Number(chave) }),
+      });
+      if (r.ok) {
+        for (const id of ids) await removerMovimentacaoPendente(id);
+        movidos += ids.length;
+      }
+    } catch (_) { /* segue offline — tenta no próximo sync */ }
+  }
+  return { enviados, restantes: pendentes.length - enviados, falhas, excluidos, movidos };
 }
 
 // Auto-sync quando voltar online
 window.addEventListener('online', async () => {
   console.log('[galeria] back online, sincronizando pendentes...');
   const r = await sincronizarPendentes();
-  if (r.enviados > 0 || r.excluidos > 0) {
-    console.log(`[galeria] ${r.enviados} enviados, ${r.excluidos || 0} exclusões aplicadas`);
+  if (r.enviados > 0 || r.excluidos > 0 || r.movidos > 0) {
+    console.log(`[galeria] ${r.enviados} enviados, ${r.excluidos || 0} exclusões, ${r.movidos || 0} movimentações`);
     // Se a aba galeria estiver aberta, recarrega
     if (state.currentTab === 'galeria') recarregarGaleria();
   }
 });
+
+// ===================== v3.107.0: Galeria por obra =====================
+// state.galeriaObraFiltro = null -> galeria geral (fotos sem obra vinculada)
+//                         = <id> -> só as fotos daquela obra
+state.galeriaObraFiltro = state.galeriaObraFiltro || null;
+state.galeriaObraNome = state.galeriaObraNome || null;
+
+function galeriaEscopoObra() { return state.galeriaObraFiltro != null; }
+
+// Chamado pelo botão do card da obra. Busca o nome em state.obras em vez de
+// interpolar no onclick — nome com aspas/& quebrava o atributo.
+function abrirGaleriaDaObraPorId(obraId) {
+  const o = (state.obras || []).find(x => String(x.id) === String(obraId));
+  abrirGaleriaDaObra(obraId, o ? o.nome : null);
+}
+
+// Abre a aba Galeria já filtrada por uma obra (chamado do card da obra).
+function abrirGaleriaDaObra(obraId, obraNome) {
+  state.galeriaObraFiltro = obraId == null ? null : String(obraId);
+  state.galeriaObraNome = obraNome || null;
+  limparSelecaoGaleria();
+  if (modoSelecaoGaleria) toggleModoSelecaoGaleria();
+  state.currentTab = 'galeria';
+  render();
+}
+
+function sairDaGaleriaDaObra() {
+  state.galeriaObraFiltro = null;
+  state.galeriaObraNome = null;
+  limparSelecaoGaleria();
+  renderGaleria();
+}
+
+// Modal de escolha da obra destino. Usa state.obras — a MESMA fonte da listagem
+// "OBRAS (N)", sem cadastro novo.
+function moverSelecionadasParaObra() {
+  if (galeriaSelecionadas.size === 0) { alert('Selecione ao menos uma foto.'); return; }
+  const qtd = galeriaSelecionadas.size;
+  const obras = (state.obras || []);
+  if (!obras.length) { alert('Nenhuma obra cadastrada para receber as fotos.'); return; }
+
+  const existente = document.getElementById('galeria-modal-mover');
+  if (existente) existente.remove();
+
+  const ov = document.createElement('div');
+  ov.id = 'galeria-modal-mover';
+  ov.setAttribute('role', 'dialog');
+  ov.setAttribute('aria-modal', 'true');
+  // Acima do carrossel (GALERIA_Z): senão abriria atrás, como já aconteceu no v3.105.2.
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100010;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML = `
+    <div style="background:#1a1a1a;border:1px solid #333;border-radius:12px;max-width:460px;width:100%;color:#fff;padding:20px;">
+      <h2 style="margin:0 0 6px;font-size:17px;">📁 Mover para Obra</h2>
+      <p style="margin:0 0 14px;font-size:12px;opacity:.75;">
+        ${qtd} foto${qtd !== 1 ? 's' : ''} sair${qtd !== 1 ? 'ão' : 'á'} da galeria geral e passar${qtd !== 1 ? 'ão' : 'á'} a existir só na obra escolhida.
+      </p>
+      <label style="display:block;font-size:12px;margin-bottom:6px;color:#ddd;">Obra de destino</label>
+      <select id="gmm-obra" style="width:100%;background:#0a0a0a;border:1px solid #333;border-radius:6px;padding:9px 10px;color:#fff;font-size:14px;margin-bottom:16px;">
+        ${obras.map(o => `<option value="${escapeHtml(String(o.id))}">${escapeHtml(o.nome || ('Obra ' + o.id))}</option>`).join('')}
+        ${galeriaEscopoObra() ? '<option value="">— Devolver para a galeria geral —</option>' : ''}
+      </select>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="gmm-cancelar" style="padding:9px 16px;background:transparent;border:1px solid #333;color:#bbb;border-radius:6px;cursor:pointer;font-size:13px;">Cancelar</button>
+        <button id="gmm-ok" style="padding:9px 18px;background:#C9A84C;border:none;color:#0C3320;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;">Mover</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  const fechar = () => { ov.remove(); document.removeEventListener('keydown', esc); };
+  const esc = (e) => { if (e.key === 'Escape') fechar(); };
+  document.addEventListener('keydown', esc);
+  ov.addEventListener('click', (e) => { if (e.target === ov) fechar(); });
+  document.getElementById('gmm-cancelar').onclick = fechar;
+
+  document.getElementById('gmm-ok').onclick = async (ev) => {
+    const btn = ev.currentTarget;
+    if (btn.disabled) return;
+    const sel = document.getElementById('gmm-obra');
+    const obraId = sel.value;
+    const obraNome = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
+    // Confirmação explícita com contagem + nome da obra (a spec pede, e é destrutivo o bastante).
+    if (!confirm(`Mover ${qtd} foto${qtd !== 1 ? 's' : ''} para "${obraNome}"?\n\nElas saem da galeria geral.`)) return;
+    btn.disabled = true; btn.textContent = '⏳ Movendo...';
+    try {
+      await executarMoverParaObra(Array.from(galeriaSelecionadas), obraId, obraNome);
+      fechar();
+    } finally {
+      if (btn.isConnected) { btn.disabled = false; btn.textContent = 'Mover'; }
+    }
+  };
+}
+
+async function executarMoverParaObra(fotoIds, obraId, obraNome) {
+  // Normaliza a opção "devolver para a geral": select devolve '', que viraria 0 no Number().
+  const destinoId = (obraId === '' || obraId == null) ? null : obraId;
+  const destinoNome = destinoId == null ? null : obraNome;
+  obraId = destinoId; obraNome = destinoNome;
+  // Offline: enfileira e reflete no cache local — a foto já some da geral.
+  if (!navigator.onLine) {
+    await enfileirarMovimentacao(fotoIds, obraId, obraNome);
+    toastGalOk(`${fotoIds.length} foto(s) movidas localmente — sincroniza ao voltar online`);
+    if (modoSelecaoGaleria) toggleModoSelecaoGaleria();
+    recarregarGaleria();
+    return;
+  }
+  try {
+    const r = await fetch('/api/galeria/mover-obra', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-CEO-Token': localStorage.getItem('ceo_token') || '' },
+      body: JSON.stringify({ fotoIds, obra_id: obraId }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) {
+      toastGalOk(`${j.movidas != null ? j.movidas : fotoIds.length} foto(s) ${obraNome ? 'movidas para ' + obraNome : 'devolvidas para a galeria geral'}`);
+      if (modoSelecaoGaleria) toggleModoSelecaoGaleria();
+      recarregarGaleria();
+      return;
+    }
+    if (r.status === 401 || r.status === 403) toastGalErr('Sem permissão para mover (exige token de CEO).');
+    else toastGalErr(`Falha ao mover: ${j.error || ('HTTP ' + r.status)}`);
+  } catch (err) {
+    // Rede caiu no meio: não perde a intenção do usuário.
+    await enfileirarMovimentacao(fotoIds, obraId, obraNome);
+    toastGalOk('Sem conexão — movimentação enfileirada');
+    if (modoSelecaoGaleria) toggleModoSelecaoGaleria();
+    recarregarGaleria();
+  }
+}
 
 async function renderGaleria() {
   const v = document.getElementById('view-galeria');
@@ -24639,8 +24898,14 @@ async function renderGaleria() {
   v.innerHTML = `
     ${galeriaCarrosselSelecaoCss()}
     <div style="padding:16px;">
-      <h2 style="margin-top:0;">📷 Galeria de Fotos</h2>
-      <p style="opacity:.75;font-size:13px;margin:4px 0 12px;">Fotos com carimbo de GPS + endereço, reutilizáveis em laudos / VTO / propostas. Envio direto via WhatsApp/Telegram. Toque numa foto pra abrir o carrossel.</p>
+      <h2 style="margin-top:0;">${galeriaEscopoObra() ? '📷 Fotos da Obra' : '📷 Galeria de Fotos'}</h2>
+      ${galeriaEscopoObra()
+        ? `<p style="opacity:.9;font-size:13px;margin:4px 0 12px;">
+             Mostrando apenas as fotos de <strong>${escapeHtml(state.galeriaObraNome || '')}</strong>.
+             <button class="btn-secondary" style="font-size:12px;padding:3px 10px;margin-left:8px;"
+                     onclick="sairDaGaleriaDaObra()">↩ Voltar pra galeria geral</button>
+           </p>`
+        : `<p style="opacity:.75;font-size:13px;margin:4px 0 12px;">Fotos com carimbo de GPS + endereço, reutilizáveis em laudos / VTO / propostas. Envio direto via WhatsApp/Telegram. Toque numa foto pra abrir o carrossel.</p>`}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
         <input type="file" id="galeria-input" accept="image/*" capture="environment" style="display:none;">
         <button class="btn-primary" onclick="document.getElementById('galeria-input').click()">📷 Tirar Foto</button>
@@ -24658,6 +24923,7 @@ async function renderGaleria() {
       <button onclick="selecionarTodasGaleria()">Selecionar todas</button>
       <button onclick="limparSelecaoGaleria()">Limpar seleção</button>
       <button id="galeria-btn-zip" class="galeria-btn-zip" onclick="baixarSelecionadasZip()">⬇️ Baixar selecionadas (.zip)</button>
+      <button id="galeria-btn-mover" onclick="moverSelecionadasParaObra()">📁 Mover para Obra</button>
       <button onclick="toggleModoSelecaoGaleria()">Cancelar</button>
     </div>
   `;
@@ -24685,17 +24951,22 @@ async function recarregarGaleria() {
     }
   }
   grid.innerHTML = '<div style="opacity:.6;">Carregando…</div>';
-  // Carrega pendentes locais sempre
-  const pendentes = await listarPendentesLocal().catch(() => []);
+  // v3.107.0: escopo atual — obra específica ou galeria geral (obra_id IS NULL).
+  const escopoObra = state.galeriaObraFiltro != null ? String(state.galeriaObraFiltro) : null;
+  const urlLista = escopoObra != null
+    ? `/api/galeria?limit=100&obra_id=${encodeURIComponent(escopoObra)}`
+    : '/api/galeria?limit=100&escopo=geral';
+  // Fotos pendentes de upload ainda não têm obra: só aparecem na galeria geral.
+  const pendentes = escopoObra == null ? await listarPendentesLocal().catch(() => []) : [];
   let fotosServer = [];
   let usandoCache = false;
   if (navigator.onLine) {
     try {
-      const r = await fetch('/api/galeria?limit=100');
+      const r = await fetch(urlLista);
       const data = await r.json();
       fotosServer = data.fotos || [];
       // v3.105.0: espelha os metadados no IndexedDB pra galeria sobreviver offline.
-      salvarCacheFotos(fotosServer).catch(e => console.warn('[galeria] cache falhou:', e));
+      salvarCacheFotos(fotosServer, escopoObra).catch(e => console.warn('[galeria] cache falhou:', e));
     } catch (err) {
       console.warn('[galeria] falha ao listar do server:', err);
       fotosServer = await listarCacheFotos().catch(() => []);
@@ -24708,11 +24979,44 @@ async function recarregarGaleria() {
     fotosServer = await listarCacheFotos().catch(() => []);
     usandoCache = fotosServer.length > 0;
   }
+  // v3.107.0: o cache guarda os dois escopos juntos — filtra pelo escopo atual.
+  // Sem isto, offline a galeria da obra mostraria também as fotos da geral.
+  if (usandoCache) {
+    fotosServer = fotosServer.filter(f => mesmoEscopo(f, escopoObra));
+  }
   // Esconde o que já foi excluído offline e ainda não sincronizou.
   const exclusoesPend = await listarExclusoesPendentes().catch(() => []);
   if (exclusoesPend.length) {
     const idsExcluidos = new Set(exclusoesPend.map(e => Number(e.id)));
     fotosServer = fotosServer.filter(f => !idsExcluidos.has(Number(f.id)));
+  }
+  // v3.107.0: movimentações ainda não sincronizadas mandam mais que o servidor.
+  // Sem isto a foto movida offline reapareceria na galeria antiga assim que a
+  // listagem viesse da rede, antes do sync rodar.
+  const movsPend = await listarMovimentacoesPendentes().catch(() => []);
+  if (movsPend.length) {
+    const destino = new Map(movsPend.map(m => [Number(m.id), m.obra_id == null ? null : Number(m.obra_id)]));
+    // Tira as que foram movidas pra fora do escopo atual.
+    fotosServer = fotosServer.filter(f => {
+      if (!destino.has(Number(f.id))) return true;
+      const alvo = destino.get(Number(f.id));
+      return escopoObra == null ? alvo == null : alvo === Number(escopoObra);
+    });
+    // Traz as que foram movidas PRA DENTRO do escopo atual e o servidor ainda não sabe.
+    const jaListadas = new Set(fotosServer.map(f => Number(f.id)));
+    const entrando = movsPend.filter(m => {
+      const alvo = m.obra_id == null ? null : Number(m.obra_id);
+      const casa = escopoObra == null ? alvo == null : alvo === Number(escopoObra);
+      return casa && !jaListadas.has(Number(m.id));
+    });
+    if (entrando.length) {
+      const cache = await listarCacheFotos().catch(() => []);
+      const porId = new Map(cache.map(c => [Number(c.id), c]));
+      for (const m of entrando) {
+        const meta = porId.get(Number(m.id));
+        if (meta) fotosServer.push(meta);
+      }
+    }
   }
   if (usandoCache) {
     fotosServer = fotosServer.map(f => ({ ...f, _cacheOffline: true }));
@@ -24765,7 +25069,7 @@ async function syncManual() {
   if (!navigator.onLine) { setStatus('🔴 Sem internet, não posso sincronizar agora'); return; }
   setStatus('☁️ Sincronizando...');
   const r = await sincronizarPendentes();
-  setStatus(`✅ ${r.enviados} enviados${r.excluidos ? ', ' + r.excluidos + ' excluídas' : ''}${r.restantes > 0 ? ', ' + r.restantes + ' falharam' : ''}`);
+  setStatus(`✅ ${r.enviados} enviados${r.excluidos ? ', ' + r.excluidos + ' excluídas' : ''}${r.movidos ? ', ' + r.movidos + ' movidas' : ''}${r.restantes > 0 ? ', ' + r.restantes + ' falharam' : ''}`);
   setTimeout(() => setStatus(''), 4000);
   recarregarGaleria();
 }
