@@ -24498,6 +24498,11 @@ function mesmoEscopo(meta, escopoObraId) {
 }
 
 async function salvarCacheFotos(fotos, escopoObraId = null) {
+  // v3.119.0: só grava/poda o cache com uma lista REAL do servidor. Entrada inválida
+  // (não-array — ex.: corpo de resposta de erro) NUNCA pode apagar o cache. A chamada
+  // em recarregarGaleria já é guardada por r.ok+Array; esta é a segunda trava.
+  // Um array vazio legítimo (r.ok + fotos:[]) segue podando normalmente.
+  if (!Array.isArray(fotos)) return;
   const db = await galeriaDb();
   const vivos = new Set(fotos.map(f => Number(f.id)));
   return new Promise((res, rej) => {
@@ -25176,16 +25181,25 @@ async function recarregarGaleria() {
   const pendentes = escopoObra == null ? await listarPendentesLocal().catch(() => []) : [];
   let fotosServer = [];
   let usandoCache = false;
+  let falhaAtualizacao = false; // v3.119.0: online, mas não deu pra atualizar do servidor
   if (navigator.onLine) {
     try {
       // v3.109.0: leitura da galeria passou a exigir sessão — sem cookie, 401.
+      // v3.119.0: NUNCA esvaziar a galeria por resposta ruim. Só confiamos no servidor
+      // quando r.ok E o corpo traz de fato a lista (Array). Um 401/500/HTML de erro/
+      // timeout cai no catch e PRESERVA o cache/tela, em vez de zerar tudo.
       const r = await fetch(urlLista, { credentials: 'include' });
-      const data = await r.json();
-      fotosServer = data.fotos || [];
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json().catch(() => null);
+      if (!data || !Array.isArray(data.fotos)) throw new Error('resposta sem lista de fotos');
+      fotosServer = data.fotos;
       // v3.105.0: espelha os metadados no IndexedDB pra galeria sobreviver offline.
+      // v3.119.0: só chega aqui com estado REAL do servidor (r.ok + lista válida), então
+      // é seguro sobrescrever o cache — inclusive esvaziar num vazio legítimo.
       salvarCacheFotos(fotosServer, escopoObra).catch(e => console.warn('[galeria] cache falhou:', e));
     } catch (err) {
       console.warn('[galeria] falha ao listar do server:', err);
+      falhaAtualizacao = true;
       fotosServer = await listarCacheFotos().catch(() => []);
       usandoCache = fotosServer.length > 0;
     }
@@ -25195,6 +25209,13 @@ async function recarregarGaleria() {
     // são cacheados, não o binário), mas a lista e a ordem se mantêm.
     fotosServer = await listarCacheFotos().catch(() => []);
     usandoCache = fotosServer.length > 0;
+  }
+  // v3.119.0: aviso discreto quando estamos online mas a atualização falhou — a galeria
+  // segue mostrando o que já tinha (cache/tela), sem esvaziar por erro transitório.
+  if (falhaAtualizacao && netEl) {
+    netEl.textContent = '🟡 Não foi possível atualizar agora — mostrando as fotos já carregadas';
+    netEl.style.background = 'rgba(234,179,8,.15)';
+    netEl.style.color = '#eab308';
   }
   // v3.107.0: o cache guarda os dois escopos juntos — filtra pelo escopo atual.
   // Sem isto, offline a galeria da obra mostraria também as fotos da geral.
@@ -25239,7 +25260,11 @@ async function recarregarGaleria() {
     fotosServer = fotosServer.map(f => ({ ...f, _cacheOffline: true }));
   }
   if (pendentes.length === 0 && fotosServer.length === 0) {
-    grid.innerHTML = '<div style="opacity:.6;grid-column:1/-1;">Nenhuma foto ainda. Clique em 📷 Tirar Foto.</div>';
+    // v3.119.0: se a atualização falhou e não há nada em cache, NÃO afirmar "nenhuma foto"
+    // (poderia ser só falha de rede) — orienta a recarregar em vez de dar como vazia.
+    grid.innerHTML = falhaAtualizacao
+      ? '<div style="opacity:.6;grid-column:1/-1;">Não foi possível atualizar a galeria agora. Verifique a conexão e toque em 🔄 Recarregar.</div>'
+      : '<div style="opacity:.6;grid-column:1/-1;">Nenhuma foto ainda. Clique em 📷 Tirar Foto.</div>';
     return;
   }
   // v3.105.0: pendentes e fotos do servidor entram numa lista ÚNICA ordenada por
