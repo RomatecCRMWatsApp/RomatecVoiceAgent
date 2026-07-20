@@ -24728,21 +24728,29 @@ async function uploadFotoOuFila(payload) {
 
 // Sincroniza pendentes: tenta enviar cada um, remove os que subirem.
 async function sincronizarPendentes() {
-  if (!navigator.onLine) return { enviados: 0, restantes: -1, motivo: 'offline' };
+  if (!navigator.onLine) return { enviados: 0, restantes: -1, motivo: 'offline', totalFila: 0, falhas: {} };
   const pendentes = await listarPendentesLocal();
   let enviados = 0;
-  let falhas = 0;
   let duplicadas = 0;   // v3.108.0: já existiam no servidor — saem da fila sem virar registro
+  // v3.120.0: falhas classificadas por tipo (antes era um contador cego "falhas").
+  const falhas = { total: 0, tamanho: 0, servidor: 0, rede: 0, outro: 0 };
+  let sessaoExpirada = false;   // v3.120.0: 401 em qualquer POST => sessão expirou
   for (const p of pendentes) {
     try {
       const { localId, ...payload } = p;
-      // Se faltava endereço, tenta resolver agora que tem internet
+      // Se faltava endereço, tenta resolver agora que tem internet.
+      // v3.120.0: com timeout de 5s (AbortController) — um Nominatim lento NUNCA
+      // pode segurar a fila de fotos. Segue no try/catch: falhou, envia sem endereço.
       if (!payload.endereco_reverso && payload.lat != null && payload.lng != null) {
         try {
-          const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${payload.lat}&lon=${payload.lng}&zoom=18`,
-            { headers: { 'Accept-Language': 'pt-BR' } });
-          const j = await r.json();
-          if (j.display_name) payload.endereco_reverso = j.display_name;
+          const ctrl = new AbortController();
+          const to = setTimeout(() => ctrl.abort(), 5000);
+          try {
+            const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${payload.lat}&lon=${payload.lng}&zoom=18`,
+              { headers: { 'Accept-Language': 'pt-BR' }, signal: ctrl.signal });
+            const j = await r.json();
+            if (j.display_name) payload.endereco_reverso = j.display_name;
+          } finally { clearTimeout(to); }
         } catch (_) {}
       }
       const r = await fetch('/api/galeria', {
@@ -24751,6 +24759,9 @@ async function sincronizarPendentes() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      // v3.120.0: 401 = sessão expirada. PARA o loop e preserva a fila (nada é removido
+      // sem 200). Não conta como falha genérica — o chamador avisa e manda relogar.
+      if (r.status === 401) { sessaoExpirada = true; break; }
       if (r.ok) {
         // v3.108.0: reconciliação — o servidor pode responder que essa foto já
         // existia lá (ex.: outro colaborador sincronizou a mesma antes). Sai da
@@ -24759,11 +24770,26 @@ async function sincronizarPendentes() {
         await removerPendenteLocal(localId);
         if (j && j.duplicada) duplicadas++; else enviados++;
       } else {
-        falhas++;
+        // v3.120.0: classifica pra mensagem específica (413 grande / 5xx servidor / outro).
+        falhas.total++;
+        if (r.status === 413) falhas.tamanho++;
+        else if (r.status >= 500) falhas.servidor++;
+        else falhas.outro++;
       }
     } catch (e) {
-      falhas++;
+      falhas.total++;
+      falhas.rede++;   // exceção de fetch = falha de rede/conexão
     }
+  }
+  // v3.120.0: sessão expirou no meio da fila — PARA aqui. Não mexe em exclusões/
+  // movimentações (dariam 401 também) e preserva tudo que faltou. O syncManual/
+  // listener 'online' avisam e mandam relogar; nada é apagado da store 'pendentes'.
+  if (sessaoExpirada) {
+    return {
+      enviados, duplicadas, falhas, sessaoExpirada: true,
+      totalFila: pendentes.length,
+      restantes: pendentes.length - enviados - duplicadas,
+    };
   }
   // v3.105.0: descarrega também a fila de exclusões feitas offline.
   const exclusoes = await listarExclusoesPendentes().catch(() => []);
@@ -24802,13 +24828,27 @@ async function sincronizarPendentes() {
       }
     } catch (_) { /* segue offline — tenta no próximo sync */ }
   }
-  return { enviados, restantes: pendentes.length - enviados - duplicadas, falhas, excluidos, movidos, duplicadas };
+  return {
+    enviados, duplicadas, excluidos, movidos, falhas,
+    sessaoExpirada: false,
+    totalFila: pendentes.length,
+    restantes: pendentes.length - enviados - duplicadas,
+  };
 }
 
 // Auto-sync quando voltar online
 window.addEventListener('online', async () => {
   console.log('[galeria] back online, sincronizando pendentes...');
   const r = await sincronizarPendentes();
+  // v3.120.0: sessão expirada no auto-sync — NÃO redireciona à força (evita arrancar
+  // o usuário do meio de outra tela). Só avisa; o botão manual "Sincronizar pendentes"
+  // faz o redirect pro login. A fila fica intacta.
+  if (r.sessaoExpirada) {
+    console.warn('[galeria] auto-sync abortado: sessão expirada — relogar para enviar pendentes');
+    const status = document.getElementById('galeria-status');
+    if (status) status.textContent = '🔒 Sessão expirada — faça login para enviar as fotos pendentes.';
+    return;
+  }
   if (r.enviados > 0 || r.excluidos > 0 || r.movidos > 0) {
     console.log(`[galeria] ${r.enviados} enviados, ${r.excluidos || 0} exclusões, ${r.movidos || 0} movimentações`);
     // Se a aba galeria estiver aberta, recarrega
@@ -25336,8 +25376,38 @@ async function syncManual() {
   if (!navigator.onLine) { setStatus('🔴 Sem internet, não posso sincronizar agora'); return; }
   setStatus('☁️ Sincronizando...');
   const r = await sincronizarPendentes();
-  setStatus(`✅ ${r.enviados} enviados${r.duplicadas ? ', ' + r.duplicadas + ' já existiam' : ''}${r.excluidos ? ', ' + r.excluidos + ' excluídas' : ''}${r.movidos ? ', ' + r.movidos + ' movidas' : ''}${r.restantes > 0 ? ', ' + r.restantes + ' falharam' : ''}`);
-  setTimeout(() => setStatus(''), 4000);
+  // v3.120.0: sessão expirada NÃO é "falha genérica" — avisa claro e manda relogar.
+  // As fotos continuam na fila (só saem após 200); depois do login, sobem.
+  if (r.sessaoExpirada) {
+    setStatus('🔒 Sua sessão expirou — faça login e tente de novo. Suas fotos continuam salvas na fila.');
+    setTimeout(() => {
+      window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+    }, 2500);
+    return;
+  }
+  // v3.120.0: fila vazia NESTE aparelho — deixa explícito (o "0 enviados" confundia).
+  if (r.totalFila === 0 && !r.excluidos && !r.movidos) {
+    setStatus('ℹ️ Nenhuma foto pendente neste aparelho.');
+    setTimeout(() => setStatus(''), 6000);
+    recarregarGaleria();
+    return;
+  }
+  // v3.120.0: mensagens específicas por tipo de falha, em vez de "N falharam".
+  const f = r.falhas || {};
+  const avisos = [];
+  if (f.tamanho) avisos.push(`${f.tamanho} foto(s) grande(s) demais`);
+  if (f.servidor) avisos.push(`${f.servidor} erro(s) no servidor`);
+  if (f.rede) avisos.push(`${f.rede} falha(s) de conexão`);
+  if (f.outro) avisos.push(`${f.outro} não aceita(s)`);
+  const partes = [
+    `✅ ${r.enviados} enviada(s)`,
+    r.duplicadas ? `${r.duplicadas} já existiam` : '',
+    r.excluidos ? `${r.excluidos} excluída(s)` : '',
+    r.movidos ? `${r.movidos} movida(s)` : '',
+    avisos.length ? '⚠️ ' + avisos.join(', ') + ' (continuam na fila)' : '',
+  ].filter(Boolean);
+  setStatus(partes.join(' · '));
+  setTimeout(() => setStatus(''), 6000);
   recarregarGaleria();
 }
 
