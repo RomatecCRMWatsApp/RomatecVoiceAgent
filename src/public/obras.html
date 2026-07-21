@@ -25173,6 +25173,11 @@ async function renderGaleria() {
                 title="Ordena por data e hora de CAPTURA da foto">${(state.galeriaOrdem || 'desc') === 'desc' ? '🕒 Mais recentes primeiro' : '🕒 Mais antigas primeiro'}</button>
         <button class="btn-secondary" onclick="varrerDuplicatasGaleria()"
                 title="Procura fotos repetidas e mostra uma lista pra você revisar">🔍 Varredura de duplicatas</button>
+        <!-- v3.121.0: backup automático no aparelho (ligado por padrão) -->
+        <label style="font-size:12px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:2px 6px;"
+               title="Salva automaticamente uma cópia de cada foto tirada no próprio aparelho (Downloads no Android; no iPhone use o botão 💾 da foto)">
+          <input type="checkbox" id="galeria-backup-toggle" onchange="toggleBackupLocalGaleria(this)" style="accent-color:#C9A84C;"> 💾 Backup no aparelho
+        </label>
         <span id="galeria-net" style="font-size:12px;padding:2px 8px;border-radius:4px;"></span>
       </div>
       <div id="galeria-status" style="font-size:12px;color:#888;margin-bottom:8px;"></div>
@@ -25189,6 +25194,9 @@ async function renderGaleria() {
     </div>
   `;
   document.getElementById('galeria-input').addEventListener('change', onGaleriaFileSelected);
+  // v3.121.0: reflete o estado salvo do backup automático (ligado por padrão).
+  const bkToggle = document.getElementById('galeria-backup-toggle');
+  if (bkToggle) bkToggle.checked = backupLocalLigado();
   // v3.105.2: prefetch das preferences ao abrir a aba — quando o usuário tocar em
   // WhatsApp/Telegram o cache já está quente e o modal abre sem espera.
   carregarPrefsGaleria().catch(() => {});
@@ -26021,6 +26029,78 @@ async function apagarFotoGaleria(id) {
 }
 
 // Captura: arquivo selecionado → lê GPS atual + canvas com carimbo → upload
+// ===================== v3.121.0: backup local automático + captura à prova de falha =====
+
+// Backup automático no dispositivo — LIGADO por padrão, persistido em localStorage.
+const BACKUP_LOCAL_LS_KEY = 'zayra_galeria_backup_local';
+function backupLocalLigado() {
+  try { const v = localStorage.getItem(BACKUP_LOCAL_LS_KEY); return v === null ? true : v === '1'; }
+  catch (_) { return true; }
+}
+function toggleBackupLocalGaleria(el) {
+  try { localStorage.setItem(BACKUP_LOCAL_LS_KEY, el.checked ? '1' : '0'); } catch (_) {}
+  const st = document.getElementById('galeria-status');
+  if (st) {
+    st.textContent = el.checked
+      ? '💾 Backup automático no dispositivo LIGADO — cada foto ganha uma cópia local.'
+      : '💾 Backup automático DESLIGADO — use o botão 💾 de cada foto pra salvar manual.';
+    setTimeout(() => { if (st) st.textContent = ''; }, 3500);
+  }
+}
+
+// Nome do arquivo de backup: ZAYRA_galeria_<data-hora>_<lat>_<lon>.jpg
+function nomeArquivoBackupGaleria(lat, lng, tsCompacto) {
+  const coord = (lat != null && lng != null)
+    ? `${Number(lat).toFixed(5)}_${Number(lng).toFixed(5)}`
+    : 'sem-gps';
+  return `ZAYRA_galeria_${tsCompacto}_${coord}.jpg`.replace(/[^\w.\-]/g, '-');
+}
+
+// Salva uma cópia no aparelho. Android/Chrome/desktop: <a download> vai direto pra
+// Downloads. iOS Safari: <a download> é limitado — o fallback é o botão 💾 de cada foto
+// (Web Share sob toque do usuário). Best-effort: nunca lança pra fora.
+async function salvarBackupDispositivo(b64, mime, lat, lng, tsCompacto) {
+  try {
+    const nome = nomeArquivoBackupGaleria(lat, lng, tsCompacto);
+    await baixarBlob('data:' + (mime || 'image/jpeg') + ';base64,' + b64, nome);
+  } catch (e) { console.warn('[galeria] backup local falhou (best-effort):', e); }
+}
+
+// Lê o arquivo como base64 CRU (só bytes → base64, sem decodificar a imagem). Funciona
+// mesmo com HEIC/arquivo que o <img> não abriria — é a garantia do "salva-primeiro".
+function lerArquivoBase64(file) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => { const s = String(fr.result || ''); const i = s.indexOf(','); res(i >= 0 ? s.slice(i + 1) : s); };
+    fr.onerror = () => rej(fr.error || new Error('FileReader falhou'));
+    fr.readAsDataURL(file);
+  });
+}
+
+// Atualiza um pendente já gravado (read-modify-write na store 'pendentes').
+async function atualizarPendenteLocal(localId, patch) {
+  const db = await galeriaDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(GALERIA_STORE, 'readwrite');
+    const store = tx.objectStore(GALERIA_STORE);
+    const g = store.get(localId);
+    g.onsuccess = () => {
+      const row = g.result;
+      if (!row) return; // já saiu da fila (subiu) — nada a atualizar
+      Object.assign(row, patch);
+      store.put(row);
+    };
+    tx.oncomplete = () => res(true);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+// v3.121.0: captura À PROVA DE FALHA. ORDEM:
+//   (1) lê o binário CRU e ENFILEIRA já em 'pendentes' — a partir daqui NADA
+//       (GPS/geocode/decode/carimbo) pode perder a foto;
+//   (2) enriquece em try/catch e ATUALIZA o pendente com a versão carimbada;
+//   (3) backup local automático no aparelho (ligado por padrão);
+//   (4) se online, sobe e sai da fila no 200. Offline, a foto SEMPRE fica na fila.
 async function onGaleriaFileSelected(ev) {
   const file = ev.target.files && ev.target.files[0];
   ev.target.value = ''; // reset pra permitir foto seguinte
@@ -26028,124 +26108,159 @@ async function onGaleriaFileSelected(ev) {
   const status = document.getElementById('galeria-status');
   const setStatus = (s) => { if (status) status.textContent = s; };
 
-  setStatus('📍 Capturando GPS...');
+  // ---- (1) SALVA-PRIMEIRO: nada de await que possa lançar antes de garantir a foto.
+  setStatus('💾 Salvando a foto no aparelho...');
+  const capturada = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const tsCompacto = capturada.replace(' ', '_').replace(/:/g, '-');
+  const userName = (window.state && state.userNome) || 'Romatec';
+  let rawB64 = null;
+  try { rawB64 = await lerArquivoBase64(file); } catch (_) { rawB64 = null; }
+  if (!rawB64) {
+    setStatus('❌ Não consegui ler a foto do arquivo. Tente tirar de novo.');
+    alert('Não consegui ler a foto do arquivo. Tente novamente.');
+    return;
+  }
+  let localId = null;
+  try {
+    localId = await salvarPendenteLocal({
+      mime: file.type || 'image/jpeg',
+      arquivo_b64: rawB64,
+      user_nome: userName,
+      capturada_em: capturada,
+    });
+  } catch (e) {
+    // IndexedDB falhou (cota cheia / bloqueado). NÃO perde em silêncio: avisa ALTO.
+    setStatus('❌ Sem espaço pra salvar no aparelho. Libere memória e tente de novo.');
+    alert('⚠️ Não foi possível salvar a foto no aparelho (armazenamento cheio?).\n\n'
+      + 'A foto NÃO foi salva. Libere espaço e tente novamente.\n\nDetalhe: ' + ((e && e.message) || e));
+    return;
+  }
+  // Daqui pra frente a foto JÁ ESTÁ na fila local. Mostra o card 📵 PENDENTE na hora.
+  recarregarGaleria();
+
+  // ---- (2) ENRIQUECIMENTO best-effort. Qualquer falha é engolida — a foto está segura.
   let lat = null, lng = null, alt = null, acc = null, endereco = null;
   try {
+    setStatus('📍 Capturando GPS...');
     const pos = await new Promise((res, rej) => {
       navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 });
     });
-    lat = pos.coords.latitude;
-    lng = pos.coords.longitude;
-    alt = pos.coords.altitude;
-    acc = pos.coords.accuracy;
-  } catch (err) {
-    setStatus('⚠️ GPS falhou: ' + err.message + '. Continuando sem coordenadas...');
-  }
+    lat = pos.coords.latitude; lng = pos.coords.longitude; alt = pos.coords.altitude; acc = pos.coords.accuracy;
+  } catch (_) { /* sem GPS — segue */ }
 
-  // Endereço reverso via Nominatim (grátis)
-  if (lat != null && lng != null) {
-    setStatus('🗺 Buscando endereço...');
-    try {
-      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-        { headers: { 'Accept-Language': 'pt-BR' } });
-      const j = await r.json();
-      endereco = j.display_name || null;
-    } catch (e) { /* ignora */ }
-  }
-
-  setStatus('🖼 Aplicando carimbo...');
-  // Lê imagem em canvas, aplica carimbo, exporta JPEG
-  const img = await readImageFile(file);
-  const canvas = document.createElement('canvas');
-  // Limita tamanho máximo pra 1920px no maior eixo (economiza banda)
-  const maxLado = 1920;
-  const scale = Math.min(1, maxLado / Math.max(img.width, img.height));
-  canvas.width = Math.round(img.width * scale);
-  canvas.height = Math.round(img.height * scale);
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-  // v3.8.2 — Pré-carrega logo Romatec pra desenhar no canto direito do carimbo
-  const logoRomatec = await carregarLogoRomatec();
-
-  // Carimbo: faixa preta semi-transparente no rodapé + texto branco
-  const userName = (window.state && state.userNome) || 'Romatec';
-  // v3.8.2 — Calcula UTM se houver coordenadas
-  let linhaUtm = null;
   if (lat != null && lng != null) {
     try {
-      const utm = latLngParaUtm(lat, lng);
-      linhaUtm = `🌐 UTM ${utm.zone}${utm.hemisferio} · E=${utm.E.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} · N=${utm.N.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} (SIRGAS 2000)`;
-    } catch (_) {}
-  }
-  const linhas = [
-    `📍 ${lat != null ? lat.toFixed(6) : '—'}, ${lng != null ? lng.toFixed(6) : '—'}${alt != null ? ' alt ' + alt.toFixed(0) + 'm' : ''}`,
-    linhaUtm,
-    endereco ? endereco.slice(0, 80) : null,
-    `🕒 ${new Date().toLocaleString('pt-BR')}`,
-    `👤 ${userName} · Romatec`,
-  ].filter(Boolean);
-  const fontSize = Math.max(14, Math.round(canvas.width * 0.022));
-  ctx.font = `bold ${fontSize}px sans-serif`;
-  const padding = fontSize * 0.5;
-  const lineHeight = fontSize * 1.3;
-  const boxH = linhas.length * lineHeight + padding * 2;
-  // v3.9.2 — Logo do tamanho exato da altura da faixa (centralizado dentro)
-  const logoSize = Math.round(boxH * 0.88); // 88% da altura da faixa → respira
-  const textoMaxW = canvas.width - logoSize - padding * 3;
-  ctx.fillStyle = 'rgba(0,0,0,0.65)';
-  ctx.fillRect(0, canvas.height - boxH, canvas.width, boxH);
-  ctx.fillStyle = '#fff';
-  ctx.textBaseline = 'top';
-  linhas.forEach((line, i) => {
-    ctx.fillText(line, padding, canvas.height - boxH + padding + i * lineHeight, textoMaxW);
-  });
-  // v3.8.2 / v3.9.2 — Logo Romatec dentro da faixa preta, centralizado vertical
-  if (logoRomatec) {
-    const lx = canvas.width - logoSize - padding;
-    const ly = canvas.height - boxH + (boxH - logoSize) / 2;
-    ctx.drawImage(logoRomatec, lx, ly, logoSize, logoSize);
+      setStatus('🗺 Buscando endereço...');
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 5000); // v3.121.0: geocode nunca segura o fluxo
+      try {
+        const rg = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+          { headers: { 'Accept-Language': 'pt-BR' }, signal: ctrl.signal });
+        const jg = await rg.json();
+        endereco = jg.display_name || null;
+      } finally { clearTimeout(to); }
+    } catch (_) { /* sem endereço — segue */ }
   }
 
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-  const fileName = `romatec-${new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)}.jpg`;
-  // v3.105.0: o download automático da foto carimbada saiu do fluxo de captura.
-  // No iOS o <a download> com data-URL abre a folha de compartilhamento nativa, o que
-  // transformava toda captura num prompt. Agora é OPT-IN explícito (state.galeriaSalvarLocal
-  // === true); o caminho normal é "Salvar" na tela da foto já gravada.
+  // Carimbo (canvas). Se o decode/canvas falhar (ex.: HEIC sem suporte), fica com a CRUA.
+  let b64Final = rawB64;
+  let mimeFinal = file.type || 'image/jpeg';
   try {
-    if (state.galeriaSalvarLocal === true) {
-      baixarBlob(dataUrl, fileName);
+    setStatus('🖼 Aplicando carimbo...');
+    const img = await readImageFile(file);
+    const canvas = document.createElement('canvas');
+    const maxLado = 1920; // limita o maior eixo — economiza banda
+    const scale = Math.min(1, maxLado / Math.max(img.width, img.height));
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const logoRomatec = await carregarLogoRomatec();
+    let linhaUtm = null;
+    if (lat != null && lng != null) {
+      try {
+        const utm = latLngParaUtm(lat, lng);
+        linhaUtm = `🌐 UTM ${utm.zone}${utm.hemisferio} · E=${utm.E.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} · N=${utm.N.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} (SIRGAS 2000)`;
+      } catch (_) {}
     }
+    const linhas = [
+      `📍 ${lat != null ? lat.toFixed(6) : '—'}, ${lng != null ? lng.toFixed(6) : '—'}${alt != null ? ' alt ' + alt.toFixed(0) + 'm' : ''}`,
+      linhaUtm,
+      endereco ? endereco.slice(0, 80) : null,
+      `🕒 ${new Date().toLocaleString('pt-BR')}`,
+      `👤 ${userName} · Romatec`,
+    ].filter(Boolean);
+    const fontSize = Math.max(14, Math.round(canvas.width * 0.022));
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    const padding = fontSize * 0.5;
+    const lineHeight = fontSize * 1.3;
+    const boxH = linhas.length * lineHeight + padding * 2;
+    const logoSize = Math.round(boxH * 0.88);
+    const textoMaxW = canvas.width - logoSize - padding * 3;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, canvas.height - boxH, canvas.width, boxH);
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'top';
+    linhas.forEach((line, i) => {
+      ctx.fillText(line, padding, canvas.height - boxH + padding + i * lineHeight, textoMaxW);
+    });
+    if (logoRomatec) {
+      const lx = canvas.width - logoSize - padding;
+      const ly = canvas.height - boxH + (boxH - logoSize) / 2;
+      ctx.drawImage(logoRomatec, lx, ly, logoSize, logoSize);
+    }
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    b64Final = dataUrl.split(',')[1];
+    mimeFinal = 'image/jpeg';
+  } catch (e) {
+    console.warn('[galeria] carimbo/redimensionamento falhou — mantém a foto original:', e);
+  }
+
+  // Atualiza o pendente com a versão final (carimbada, se deu) + metadados de GPS.
+  try {
+    await atualizarPendenteLocal(localId, {
+      arquivo_b64: b64Final, mime: mimeFinal,
+      lat, lng, altitude_m: alt, accuracy_m: acc, endereco_reverso: endereco,
+    });
   } catch (_) {}
 
-  setStatus(navigator.onLine ? '☁️ Enviando...' : '📵 Sem internet — salvando local...');
-  const b64 = dataUrl.split(',')[1];
-  const payload = {
-    mime: 'image/jpeg',
-    arquivo_b64: b64,
-    user_nome: userName,
-    lat, lng, altitude_m: alt, accuracy_m: acc,
-    endereco_reverso: endereco,
-    capturada_em: new Date().toISOString().slice(0, 19).replace('T', ' '),
-  };
-  const result = await uploadFotoOuFila(payload);
-  if (result.duplicada) {
-    // v3.108.0: não é diálogo — só um aviso na barra de status, pra foto não
-    // "sumir" sem explicação nenhuma.
-    setStatus('📄 Foto idêntica já existe na galeria — não foi duplicada.');
-  } else if (result.offline) {
-    setStatus('📵 Foto salva localmente (sem internet). Vai subir sozinha quando voltar online.');
-  } else if (result.queued) {
-    setStatus('⚠️ Server rejeitou. Salva local pra tentar de novo: ' + result.error);
-  } else if (result.ok) {
-    // v3.105.0: nada de modal/share sheet na captura — a foto já está salva na galeria.
-    // Compartilhar (WhatsApp/Telegram/Salvar) virou ação da foto, na tela de visualização.
-    setStatus('✅ Foto salva na galeria!');
-  } else {
-    setStatus('❌ Falha desconhecida');
+  // ---- (3) BACKUP LOCAL AUTOMÁTICO no aparelho (ligado por padrão) ----
+  if (backupLocalLigado()) {
+    await salvarBackupDispositivo(b64Final, mimeFinal, lat, lng, tsCompacto);
   }
-  setTimeout(() => setStatus(''), 4000);
+
+  // ---- (4) Se online, sobe agora e sai da fila no 200. Senão, fica na fila pro sync. ----
+  if (navigator.onLine) {
+    setStatus('☁️ Enviando...');
+    try {
+      const r = await fetch('/api/galeria', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mime: mimeFinal, arquivo_b64: b64Final, user_nome: userName,
+          lat, lng, altitude_m: alt, accuracy_m: acc,
+          endereco_reverso: endereco, capturada_em: capturada,
+        }),
+      });
+      if (r.status === 401) {
+        // Sessão expirou — a foto FICA na fila; o botão Sincronizar leva pro login.
+        setStatus('🔒 Sessão expirou — a foto ficou salva na fila. Faça login e toque em ☁️ Sincronizar.');
+      } else if (r.ok) {
+        const j = await r.json().catch(() => ({}));
+        await removerPendenteLocal(localId).catch(() => {});
+        setStatus(j && j.duplicada
+          ? '📄 Foto idêntica já existia — não duplicada.' + (backupLocalLigado() ? ' Cópia local salva.' : '')
+          : '✅ Foto salva na galeria!' + (backupLocalLigado() ? ' Cópia local salva no aparelho.' : ''));
+      } else {
+        setStatus('⚠️ Servidor recusou (' + r.status + '). Foto na fila — sobe no próximo ☁️ Sincronizar.');
+      }
+    } catch (_) {
+      setStatus('📵 Sem conexão agora — foto na fila. Sobe sozinha quando voltar online.');
+    }
+  } else {
+    setStatus('📵 Sem internet — foto salva na fila e no aparelho. Sobe sozinha quando voltar online.');
+  }
+  setTimeout(() => setStatus(''), 5000);
   recarregarGaleria();
 }
 
