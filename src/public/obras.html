@@ -727,6 +727,23 @@
     font-size: 8px; opacity: 0.8;
     pointer-events: none; z-index: 0;
   }
+  /* v3.122.0: tag discreta com a diaria do dia, so quando ela difere da
+     diaria cadastrada hoje. Canto superior ESQUERDO pra nao brigar com o
+     .cal-cell-label nem com o checkmark ::after (ambos no canto inferior). */
+  .cal-cell-valor {
+    position: absolute; top: 2px; left: 3px;
+    font-size: 8px; font-weight: 700; line-height: 1;
+    color: var(--gold); opacity: 0.95;
+    pointer-events: none; z-index: 2;
+  }
+  /* v3.122.0: dia travado em folha emitida — nao entra na selecao. Cadeado no
+     canto superior direito + cursor de bloqueio. */
+  .cal-cell.bloqueado { cursor: not-allowed; }
+  .cal-cell.bloqueado::before {
+    content: '🔒'; position: absolute; top: 1px; right: 2px;
+    font-size: 8px; opacity: 0.8; z-index: 2; line-height: 1;
+  }
+  .cal-cell.bloqueado:hover { border-color: var(--border); }
   .cal-summary {
     padding: 16px 20px; border-top: 1px solid var(--border);
     display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
@@ -824,6 +841,14 @@
       margin: 0 0 4px;
       text-align: center; font-size: 12px;
     }
+    /* v3.122.0: campo de valor ocupa a linha inteira em mobile (fica acima dos
+       4 botoes de periodo, que seguem no grid 2x2). */
+    #calActions #calValorWrap {
+      grid-column: 1 / -1;
+      justify-content: center;
+      margin: 0 0 4px;
+    }
+    #calActions #calValorDiaria { min-height: 44px; width: 120px; font-size: 16px; }
     #calActions button {
       min-height: 48px;
       font-size: 14px;
@@ -1271,6 +1296,15 @@ window.forcarUpdateApp = forcarUpdate;
     <div class="cal-grid" id="calGrid"></div>
     <div id="calActions" style="padding: 12px 20px; border-top: 1px solid var(--border); display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
       <span id="calSelInfo" style="font-size:12px; color:var(--text-muted); margin-right:auto;">Nenhum dia selecionado</span>
+      <!-- v3.122.0: valor da diaria aplicado nos dias selecionados. Pre-preenchido
+           com o cadastro (ou com o valor ja lancado no dia mais recente da selecao)
+           e editavel — cobre reajuste no meio da obra sem mexer no cadastro. -->
+      <label id="calValorWrap" style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-muted); white-space:nowrap;">
+        Diária R$
+        <input id="calValorDiaria" type="number" min="0.01" step="0.01" inputmode="decimal"
+               style="width:92px; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg-elev); color:var(--text); font-size:13px;"
+               disabled>
+      </label>
       <button id="calBtnIntegral" class="btn-primary" style="padding:6px 12px;" disabled>🟢 Integral</button>
       <button id="calBtnManha" class="btn-gold" style="padding:6px 12px;" disabled>🟡 Manhã</button>
       <button id="calBtnTarde" class="btn-gold" style="padding:6px 12px;" disabled>🟡 Tarde</button>
@@ -14710,6 +14744,9 @@ function desenharCalendario() {
   // mais "forte" na escala paga > cancelada > aberta.
   const statusPorData = {};
   const rankStatus = { 'paga': 3, 'cancelada': 2, 'aberta': 1 };
+  // v3.122.0: diaria cheia lancada no dia (pra tag "R$250") e travas de folha.
+  const valorPorData = {};
+  const bloqueadoPorData = {};
   cal.dias.forEach(d => {
     if (!marcado[d.data]) marcado[d.data] = new Set();
     marcado[d.data].add(d.periodo);
@@ -14718,6 +14755,11 @@ function desenharCalendario() {
       if (!atual || (rankStatus[d.status_fechamento] || 0) > (rankStatus[atual] || 0)) {
         statusPorData[d.data] = d.status_fechamento;
       }
+    }
+    if (d.bloqueado) bloqueadoPorData[d.data] = true;
+    // Manha+tarde no mesmo dia podem ter valores diferentes; mostra o maior.
+    if (Number(d.valor_diaria) > 0) {
+      valorPorData[d.data] = Math.max(valorPorData[d.data] || 0, Number(d.valor_diaria));
     }
   });
 
@@ -14758,7 +14800,15 @@ function desenharCalendario() {
     }
     if (dataIso === todayIso) cls += ' today';
     if (cal.selecionados.has(dataIso)) cls += ' selected';
-    html += `<div class="cal-cell ${cls}" data-d="${dataIso}"><span class="cal-day-num">${d}</span><span class="cal-cell-label">${label}</span></div>`;
+    // v3.122.0: cadeado nos dias ja comprometidos com folha emitida.
+    if (bloqueadoPorData[dataIso]) cls += ' bloqueado';
+    // v3.122.0: tag com a diaria do dia so quando ela difere da cadastrada hoje
+    // — o objetivo e achar rapido os dias com valor especial, nao poluir o mes.
+    const vDia = valorPorData[dataIso];
+    const tagValor = (vDia && Math.abs(vDia - (cal.valorDia || 0)) > 0.01)
+      ? `<span class="cal-cell-valor">${vDia.toLocaleString('pt-BR', { style:'currency', currency:'BRL', minimumFractionDigits:0, maximumFractionDigits:0 })}</span>`
+      : '';
+    html += `<div class="cal-cell ${cls}" data-d="${dataIso}"><span class="cal-day-num">${d}</span><span class="cal-cell-label">${label}</span>${tagValor}</div>`;
   }
 
   grid.innerHTML = html;
@@ -14777,9 +14827,33 @@ function desenharCalendario() {
 }
 
 function toggleSelecaoDia(dataIso) {
+  // v3.122.0: dia ja comprometido com folha emitida nao entra na selecao. O
+  // servidor tambem recusa (diasBloqueadosPorFolha) — isso aqui e' so pra dar
+  // o motivo na hora, em vez de deixar a pessoa marcar e tomar erro no aplicar.
+  const travado = cal.dias.find(d => d.data === dataIso && d.bloqueado);
+  if (travado) {
+    const br = dataIso.split('-').reverse().join('/');
+    alert(`🔒 ${br} já está em folha fechada ou paga.\n\nPra alterar o valor ou o período, reverta o fechamento primeiro.`);
+    return;
+  }
   if (cal.selecionados.has(dataIso)) cal.selecionados.delete(dataIso);
   else cal.selecionados.add(dataIso);
   desenharCalendario();
+}
+
+/**
+ * v3.122.0: valor sugerido pro campo "Diária R$".
+ * Regra: se algum dia selecionado ja tem valor proprio lancado, usa o do dia
+ * MAIS RECENTE da selecao (reabrir um dia pre-carrega o valor dele, nao reseta
+ * pro cadastro). Sem nenhum lancado, cai na diaria cadastrada do colaborador.
+ */
+function sugerirValorDiaria() {
+  const sel = [...cal.selecionados].sort(); // ISO ordena cronologicamente
+  for (let i = sel.length - 1; i >= 0; i--) {
+    const d = cal.dias.find(x => x.data === sel[i] && Number(x.valor_diaria) > 0);
+    if (d) return Number(d.valor_diaria);
+  }
+  return Number(cal.valorDia) || 0;
 }
 
 function atualizarBarraAcoes() {
@@ -14787,11 +14861,20 @@ function atualizarBarraAcoes() {
   const info = document.getElementById('calSelInfo');
   if (info) info.textContent = n === 0
     ? 'Nenhum dia selecionado'
-    : `${n} dia(s) selecionado(s) · clique no período pra aplicar`;
+    : `${n} dia(s) selecionado(s) · confira o valor e clique no período`;
   ['calBtnIntegral','calBtnManha','calBtnTarde','calBtnLimpar'].forEach(id => {
     const b = document.getElementById(id);
     if (b) b.disabled = n === 0;
   });
+  // v3.122.0: re-sugere o valor quando a selecao muda, MAS nunca por cima do
+  // que a pessoa esta digitando (desenharCalendario roda a cada clique de dia).
+  const inp = document.getElementById('calValorDiaria');
+  if (inp) {
+    inp.disabled = n === 0;
+    if (document.activeElement !== inp) {
+      inp.value = n === 0 ? '' : sugerirValorDiaria().toFixed(2);
+    }
+  }
 }
 
 async function aplicarPeriodoSelecionados(periodo) {
@@ -14802,40 +14885,84 @@ async function aplicarPeriodoSelecionados(periodo) {
     return;
   }
   const datas = [...cal.selecionados];
-  console.log('[aplicarPeriodo]', periodo, 'em', datas.length, 'dia(s):', datas, 'obra:', obraId);
-  try {
-    for (const dataIso of datas) {
+
+  // v3.122.0: valor da diaria aplicado neste lote. Vazio = mantem o cadastro
+  // (o servidor decide). Marcar "vazio" (limpar) nao usa valor nenhum.
+  let valorDiaria = null;
+  if (periodo !== 'vazio') {
+    const inp = document.getElementById('calValorDiaria');
+    const bruto = inp ? String(inp.value).trim().replace(',', '.') : '';
+    if (bruto !== '') {
+      valorDiaria = Number(bruto);
+      if (!isFinite(valorDiaria) || valorDiaria <= 0) {
+        alert('Valor da diária inválido. Informe um número maior que zero (ou deixe vazio pra usar a diária cadastrada).');
+        return;
+      }
+    }
+  }
+
+  console.log('[aplicarPeriodo]', periodo, 'em', datas.length, 'dia(s):', datas, 'obra:', obraId, 'valor:', valorDiaria);
+
+  // v3.122.0: aplica dia a dia acumulando falhas em vez de abortar o lote no
+  // primeiro erro — se 1 dia estiver travado em folha, os outros ainda entram
+  // (e o resumo diz exatamente quais ficaram de fora e por que).
+  const falhas = [];
+  let aplicados = 0;
+  for (const dataIso of datas) {
+    try {
       // Sempre limpa antes (DELETE via query string)
       await api(`/api/funcionarios/${cal.funcId}/dias?data=${encodeURIComponent(dataIso)}`, {
         method: 'DELETE',
       });
       if (periodo !== 'vazio') {
+        const body = {
+          funcionario_id: cal.funcId,
+          data: dataIso, periodo,
+          obra_id: obraId,
+          confirm: true,
+        };
+        if (valorDiaria !== null) body.valor_diaria = valorDiaria;
         await api(`/api/funcionarios/${cal.funcId}/dias`, {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({
-            funcionario_id: cal.funcId,
-            data: dataIso, periodo,
-            obra_id: obraId,
-            confirm: true,
-          }),
+          body: JSON.stringify(body),
         });
       }
+      aplicados++;
+    } catch (e) {
+      console.error('[aplicarPeriodo] falhou em', dataIso, e);
+      falhas.push(`${dataIso.split('-').reverse().join('/')}: ${e.message}`);
     }
-    cal.selecionados.clear();
-    await carregarMesCalendario();
-    if (state.currentTab === 'marcar') render();
-  } catch (e) {
-    console.error('[aplicarPeriodo] erro:', e);
-    alert('Erro ao aplicar período: ' + e.message);
+  }
+
+  cal.selecionados.clear();
+  await carregarMesCalendario();
+  if (state.currentTab === 'marcar') render();
+
+  if (falhas.length) {
+    alert(
+      `${aplicados} dia(s) aplicado(s).\n\n` +
+      `${falhas.length} dia(s) NÃO puderam ser alterados:\n\n` + falhas.join('\n')
+    );
   }
 }
 
 async function resetarMesCalendario() {
-  if (!confirm(`Apagar TODAS as marcações de ${cal.nome} no mês ${String(cal.mes).padStart(2,'0')}/${cal.ano}? Irreversível.`)) return;
+  // v3.122.0: dias em folha fechada/paga sao preservados — o servidor recusa
+  // apagar, entao filtramos aqui pra avisar antes em vez de errar no meio.
+  const todasDatas = [...new Set(cal.dias.map(d => d.data))];
+  const travadas = [...new Set(cal.dias.filter(d => d.bloqueado).map(d => d.data))];
+  const datas = todasDatas.filter(d => !travadas.includes(d));
+  if (todasDatas.length === 0) { alert('Nenhuma marcação no mês.'); return; }
+  if (datas.length === 0) {
+    alert(`Todas as ${travadas.length} marcação(ões) do mês estão em folha fechada/paga. Nada a apagar.`);
+    return;
+  }
+  const aviso = travadas.length
+    ? `\n\n🔒 ${travadas.length} dia(s) em folha fechada/paga serão PRESERVADOS.`
+    : '';
+  if (!confirm(`Apagar ${datas.length} marcação(ões) de ${cal.nome} no mês ${String(cal.mes).padStart(2,'0')}/${cal.ano}? Irreversível.${aviso}`)) return;
   try {
-    const datas = [...new Set(cal.dias.map(d => d.data))];
-    if (datas.length === 0) { alert('Nenhuma marcação no mês.'); return; }
     console.log('[resetarMes] apagando', datas.length, 'dias:', datas);
     for (const dataIso of datas) {
       await api(`/api/funcionarios/${cal.funcId}/dias?data=${encodeURIComponent(dataIso)}`, {
@@ -14844,7 +14971,7 @@ async function resetarMesCalendario() {
     }
     await carregarMesCalendario();
     if (state.currentTab === 'marcar') render();
-    alert(`${datas.length} dia(s) apagado(s) de ${cal.nome} em ${cal.mes}/${cal.ano}.`);
+    alert(`${datas.length} dia(s) apagado(s) de ${cal.nome} em ${cal.mes}/${cal.ano}.${travadas.length ? `\n🔒 ${travadas.length} preservado(s) por estarem em folha.` : ''}`);
   } catch (e) {
     console.error('[resetarMes] erro:', e);
     alert('Erro: ' + e.message);
@@ -14856,8 +14983,14 @@ async function resetarTudoCalendario() {
   if (!confirm(`Tem certeza? Confirme novamente apagar TUDO de ${cal.nome}.`)) return;
   try {
     const todos = await api(`/api/funcionarios/${cal.funcId}/dias`);
-    const datas = [...new Set(todos.map(d => d.data))];
-    if (datas.length === 0) { alert('Sem marcações pra apagar.'); return; }
+    // v3.122.0: preserva os dias travados em folha fechada/paga.
+    const travadas = [...new Set(todos.filter(d => d.bloqueado).map(d => d.data))];
+    const datas = [...new Set(todos.map(d => d.data))].filter(d => !travadas.includes(d));
+    if (todos.length === 0) { alert('Sem marcações pra apagar.'); return; }
+    if (datas.length === 0) {
+      alert(`Todas as ${travadas.length} marcação(ões) estão em folha fechada/paga. Nada a apagar.`);
+      return;
+    }
     console.log('[resetarTudo] apagando', datas.length, 'dias:', datas);
     for (const dataIso of datas) {
       await api(`/api/funcionarios/${cal.funcId}/dias?data=${encodeURIComponent(dataIso)}`, {
@@ -14866,7 +14999,7 @@ async function resetarTudoCalendario() {
     }
     await carregarMesCalendario();
     if (state.currentTab === 'marcar') render();
-    alert(`${datas.length} marcação(ões) apagada(s) de ${cal.nome} (todos os meses).`);
+    alert(`${datas.length} marcação(ões) apagada(s) de ${cal.nome} (todos os meses).${travadas.length ? `\n🔒 ${travadas.length} preservada(s) por estarem em folha.` : ''}`);
   } catch (e) {
     console.error('[resetarTudo] erro:', e);
     alert('Erro: ' + e.message);

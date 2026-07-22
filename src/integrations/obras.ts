@@ -1001,10 +1001,64 @@ type DiaRow = RowDataPacket & {
   valor: string | null; observacoes: string | null;
 };
 
+/**
+ * v3.122.0: dias já comprometidos com folha emitida não podem ter valor/período
+ * alterados nem ser apagados — o snapshot do pagamento já foi gerado. Bloqueia
+ * quando:
+ *   - `fechamento_id` preenchido: o dia entrou num fechamento e seu valor já
+ *     está congelado em `folha_fechamento_itens`. Mexer aqui dessincroniza a
+ *     folha (pra corrigir, reverta o fechamento primeiro);
+ *   - o dia é coberto por um recibo quinzenal LEGADO já pago.
+ *
+ * Espelha a mesma regra de status de `listarDiasFuncionario`, pra o cadeado da
+ * UI e o guard do servidor nunca discordarem. Só olha linhas que já existem —
+ * marcar um dia novo nunca é bloqueado.
+ *
+ * @returns Map data ISO → motivo do bloqueio (vazio = nada bloqueado).
+ */
+async function diasBloqueadosPorFolha(
+  funcionarioId: string | number,
+  datas: string[],
+): Promise<Map<string, string>> {
+  const bloqueios = new Map<string, string>();
+  if (datas.length === 0) return bloqueios;
+  const ph = datas.map(() => '?').join(',');
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT d.data, d.fechamento_id,
+            CASE WHEN d.fechamento_id IS NOT NULL THEN 0 ELSE (
+              SELECT 1
+                FROM recibos_envios e
+                JOIN recibos_envios_lotes l ON l.id = e.lote_id
+               WHERE e.membro_id = d.funcionario_id
+                 AND e.status = 'pago'
+                 AND d.data BETWEEN l.periodo_inicio AND l.periodo_fim
+               LIMIT 1
+            ) END AS pago_legado
+       FROM romatec_obra_funcionario_dias d
+      WHERE d.funcionario_id = ? AND d.data IN (${ph})`,
+    [funcionarioId, ...datas],
+  );
+  for (const r of rows) {
+    const iso = r.data instanceof Date ? r.data.toISOString().slice(0, 10) : String(r.data);
+    if (r.fechamento_id != null) {
+      bloqueios.set(iso, `já está no fechamento #${r.fechamento_id} — reverta o fechamento antes de editar`);
+    } else if (Number(r.pago_legado) === 1) {
+      bloqueios.set(iso, 'já foi pago por recibo quinzenal — não pode ser alterado');
+    }
+  }
+  return bloqueios;
+}
+
 export async function marcarDiaTrabalhado(input: {
   funcionario_id: string; data: string;
   periodo?: 'integral' | 'manha' | 'tarde';
   obra_id?: string; observacoes?: string;
+  /** v3.122.0: diária CHEIA a aplicar neste dia, sobrepondo o cadastro do
+   * colaborador (cobre reajuste no meio da obra sem mexer no cadastro nem
+   * corrigir retroativamente dias já lançados). Meia diária grava metade.
+   * Ausente = usa `valor_dia` do cadastro, como antes. O que fica gravado é
+   * snapshot: reajuste posterior no cadastro não altera dia já lançado. */
+  valor_diaria?: number | string;
   confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.funcionario_id || !input.data) throw new Error('funcionario_id e data obrigatórios');
@@ -1015,13 +1069,33 @@ export async function marcarDiaTrabalhado(input: {
     'SELECT * FROM romatec_obra_equipe WHERE id = ?', [input.funcionario_id],
   );
   if (funcs.length === 0) throw new Error(`Funcionário ${input.funcionario_id} não encontrado`);
-  const valor_dia = num(funcs[0].valor_dia);
-  const valor_calc = periodo === 'integral' ? valor_dia : valor_dia / 2;
+
+  // v3.122.0: diária cheia = override informado OU cadastro do colaborador.
+  const valorCadastro = num(funcs[0].valor_dia);
+  let valorCheio = valorCadastro;
+  const override = input.valor_diaria;
+  if (override !== undefined && override !== null && String(override).trim() !== '') {
+    const v = Number(override);
+    if (!Number.isFinite(v) || v <= 0) {
+      throw new Error('valor_diaria deve ser um número maior que zero');
+    }
+    if (v > 100000) {
+      throw new Error('valor_diaria acima do limite de R$ 100.000,00 — confira o valor digitado');
+    }
+    valorCheio = v;
+  }
+  const valor_calc = +(periodo === 'integral' ? valorCheio : valorCheio / 2).toFixed(2);
+  const marcaOverride = Math.abs(valorCheio - valorCadastro) > 0.01 ? ' [valor especial]' : '';
+
+  // v3.122.0: dia já comprometido com folha emitida não aceita nova marcação.
+  const bloqueios = await diasBloqueadosPorFolha(input.funcionario_id, [input.data]);
+  const motivo = bloqueios.get(input.data);
+  if (motivo) throw new Error(`${input.data}: ${motivo}.`);
 
   if (!input.confirm) {
     return {
       preview: true,
-      message: `[PREVIEW] Marcar ${funcs[0].nome} em ${input.data} (${periodo}, R$ ${valor_calc.toFixed(2)}). Reenvie com confirm:true.`,
+      message: `[PREVIEW] Marcar ${funcs[0].nome} em ${input.data} (${periodo}, R$ ${valor_calc.toFixed(2)}${marcaOverride}). Reenvie com confirm:true.`,
     };
   }
 
@@ -1041,7 +1115,7 @@ export async function marcarDiaTrabalhado(input: {
       input.observacoes ?? null,
     ],
   );
-  return { ok: true, insertId: r.insertId, message: `${funcs[0].nome} marcado em ${input.data} (${periodo}) — R$ ${valor_calc.toFixed(2)}.` };
+  return { ok: true, insertId: r.insertId, message: `${funcs[0].nome} marcado em ${input.data} (${periodo}) — R$ ${valor_calc.toFixed(2)}${marcaOverride}.` };
 }
 
 export async function desmarcarDiaTrabalhado(input: {
@@ -1050,6 +1124,14 @@ export async function desmarcarDiaTrabalhado(input: {
   confirm?: boolean;
 }): Promise<MutationResult> {
   if (!input.funcionario_id || !input.data) throw new Error('funcionario_id e data obrigatórios');
+
+  // v3.122.0 FIX: antes o DELETE não olhava `fechamento_id` — o front faz
+  // DELETE+POST pra reaplicar um período, então clicar num dia já pago apagava
+  // a linha que a folha fechada referencia (dessincronizando o total emitido).
+  const bloqueios = await diasBloqueadosPorFolha(input.funcionario_id, [input.data]);
+  const motivo = bloqueios.get(input.data);
+  if (motivo) throw new Error(`${input.data}: ${motivo}.`);
+
   if (!input.confirm) {
     return { preview: true, message: `[PREVIEW] Desmarcar funcionário ${input.funcionario_id} em ${input.data}${input.periodo ? ' ('+input.periodo+')' : ' (todos os períodos)'}. Reenvie com confirm:true.` };
   }
@@ -1121,11 +1203,21 @@ export async function listarDiasFuncionario(input: {
     if (!statusEfetivo && Number(r.pago_legado) === 1) {
       statusEfetivo = 'paga'; // dia coberto por recibo legado pago
     }
+    // v3.122.0: `bloqueado` = dia comprometido com folha emitida (mesma regra
+    // de diasBloqueadosPorFolha). O front usa isso pro cadeado; o servidor
+    // revalida no marcar/desmarcar — a UI é conveniência, não a trava.
+    const bloqueado = r.fechamento_id != null || Number(r.pago_legado) === 1;
+    // v3.122.0: `valor` é o proporcional do dia (meia = metade). `valor_diaria`
+    // reconstrói a diária CHEIA daquele lançamento, que é o número que o CEO
+    // digita e compara com o cadastro.
+    const valorProporcional = num(r.valor);
     return {
       id: String(r.id),
       data: r.data instanceof Date ? r.data.toISOString().slice(0, 10) : String(r.data),
       periodo: r.periodo,
-      valor: num(r.valor),
+      valor: valorProporcional,
+      valor_diaria: r.periodo === 'integral' ? valorProporcional : +(valorProporcional * 2).toFixed(2),
+      bloqueado,
       obra_id: r.obra_id ? String(r.obra_id) : null,
       observacoes: r.observacoes,
       fechamento_id: r.fechamento_id ? Number(r.fechamento_id) : null,

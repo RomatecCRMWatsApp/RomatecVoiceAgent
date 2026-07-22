@@ -791,7 +791,7 @@ async function calcularItens(exec: Executor, obraId: number, dataInicio: string,
   if (linhas.length === 0) return [];
 
   return linhas.map(l => {
-    const diaria = Number(l.diaria) || 0;
+    const diariaCadastro = Number(l.diaria) || 0;
     const dInt = Number(l.dias_integral);
     const dMan = Number(l.dias_manha);
     const dTar = Number(l.dias_tarde);
@@ -801,7 +801,15 @@ async function calcularItens(exec: Executor, obraId: number, dataInicio: string,
     const valorLancado = Number(l.soma_valor_lancado) || 0;
     const valor_total = valorLancado > 0
       ? +valorLancado.toFixed(2)
-      : +(equivalente * diaria).toFixed(2);
+      : +(equivalente * diariaCadastro).toFixed(2);
+    // v3.122.0: com diária editável por dia, `valor_dia` do cadastro deixou de
+    // representar o que foi efetivamente pago no período (ex.: 5 dias a R$170 +
+    // 5 a R$250 num cadastro que hoje diz R$250). A `diaria` do item passa a
+    // ser a EFETIVA (total ÷ dias equivalentes), que é o número coerente com o
+    // valor_total impresso no recibo. Sem dias equivalentes, cai no cadastro.
+    const diaria = equivalente > 0
+      ? +(valor_total / equivalente).toFixed(2)
+      : diariaCadastro;
     // v3.62.0: vales = adiantamentos abertos do período (ver cabeçalho do arquivo).
     const valor_vales = +(Number(l.soma_vales) || 0).toFixed(2);
     const valor_liquido = +(valor_total - valor_vales).toFixed(2);

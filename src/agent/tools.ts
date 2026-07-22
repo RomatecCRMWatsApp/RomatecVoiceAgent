@@ -1833,7 +1833,7 @@ const _allToolDefinitions: Anthropic.Tool[] = [
   },
   {
     name: 'marcar_dia_trabalhado',
-    description: 'Marca um dia trabalhado pra um funcionário com período (integral, manha, tarde). Manhã/tarde valem 50% da diária. Confirm exigido.',
+    description: 'Marca um dia trabalhado pra um funcionário com período (integral, manha, tarde). Manhã/tarde valem 50% da diária. Recusa dias já em folha fechada ou paga. Confirm exigido.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1842,6 +1842,7 @@ const _allToolDefinitions: Anthropic.Tool[] = [
         periodo:        { type: 'string', enum: ['integral','manha','tarde'] },
         obra_id:        { type: 'string', description: 'opcional' },
         observacoes:    { type: 'string' },
+        valor_diaria:   { type: 'number', description: 'opcional — diária CHEIA deste dia, sobrepondo o cadastro do colaborador (cobre reajuste no meio da obra). Meia diária grava metade. Omitir = usa o valor cadastrado.' },
         confirm:        { type: 'boolean' },
       },
       required: ['funcionario_id', 'data'],
