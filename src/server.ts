@@ -5052,13 +5052,18 @@ app.delete('/api/alarmes/:id', apiHandle(args => alarmes.cancelarAlarme(args as 
 app.get('/api/resumo-obras', apiHandle(() => obras.resumoObras()));
 
 // Dias trabalhados
-app.get   ('/api/funcionarios/:funcionario_id/dias',
+// v3.123.1 SEGURANCA: estas 4 rotas respondiam 200 SEM autenticacao nenhuma em
+// producao — dava pra puxar nome, CPF-adjacente, datas e valores pagos de
+// qualquer colaborador so com o id, de fora. Agora exigem o cookie zayra_auth
+// (requireAuth). O front ja bate same-origin, entao o cookie httpOnly segue
+// junto por padrao e nada muda pra quem esta logado.
+app.get   ('/api/funcionarios/:funcionario_id/dias', requireAuth,
   apiHandle(args => obras.listarDiasFuncionario(args as Parameters<typeof obras.listarDiasFuncionario>[0])));
-app.post  ('/api/funcionarios/:funcionario_id/dias',
+app.post  ('/api/funcionarios/:funcionario_id/dias', requireAuth,
   apiHandle(args => obras.marcarDiaTrabalhado(args as Parameters<typeof obras.marcarDiaTrabalhado>[0])));
-app.delete('/api/funcionarios/:funcionario_id/dias',
+app.delete('/api/funcionarios/:funcionario_id/dias', requireAuth,
   apiHandle(args => obras.desmarcarDiaTrabalhado(args as Parameters<typeof obras.desmarcarDiaTrabalhado>[0])));
-app.get   ('/api/funcionarios/:funcionario_id/relatorio',
+app.get   ('/api/funcionarios/:funcionario_id/relatorio', requireAuth,
   apiHandle(args => obras.relatorioMensalFuncionario(args as Parameters<typeof obras.relatorioMensalFuncionario>[0])));
 app.get   ('/api/relatorio-equipe',
   apiHandle(args => obras.relatorioMensalEquipe(args as Parameters<typeof obras.relatorioMensalEquipe>[0])));
