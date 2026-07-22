@@ -388,6 +388,17 @@
     const ehMutacao = ehMutacaoP0(method, path);
     try {
       const r = await fetch(url, fetchOpts);
+      // v3.124.0: 401 = sem sessao (cookie zayra_auth ausente ou expirado).
+      // Com o gate de /api isso deixou de ser caso raro e virou o caminho normal
+      // de quem nao esta logado, entao redireciona pro login preservando a
+      // origem — antes estourava "Erro API" cru em qualquer tela. Guarda contra
+      // loop: se ja' estamos no /login, so propaga o erro.
+      if (r.status === 401) {
+        if (!/^\/login/.test(location.pathname)) {
+          location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search);
+        }
+        throw new Error('nao autenticado');
+      }
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Erro API');
       return d;

@@ -111,6 +111,15 @@ app.use(cookieParser());
 import { bootValidateAuthEnv } from './services/auth';
 bootValidateAuthEnv();
 
+// v3.124.0 SEGURANCA: gate de auth do prefixo /api INTEIRO. Montado aqui de
+// proposito — antes de qualquer rota /api — pra que o padrao passe a ser
+// "fechado por omissao". Rota /api nova nasce exigindo cookie zayra_auth; pra
+// ficar publica precisa entrar na allowlist de middleware/apiAuthGate.ts com
+// motivo escrito. Ver o cabecalho daquele arquivo pro que fica de fora (/v/*,
+// /webhook/*, /recibos/confirmar/* — nada disso mora sob /api).
+import { apiAuthGate } from './middleware/apiAuthGate';
+app.use('/api', apiAuthGate);
+
 // v3.24.0: rotas /api/auth/* (login, logout, me).
 import authRoutes from './routes/auth';
 app.use('/api/auth', authRoutes);
