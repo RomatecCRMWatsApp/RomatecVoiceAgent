@@ -158,9 +158,20 @@ router.post('/:id(\\d+)/enviar', requireCeoToken, async (req: Request, res: Resp
     const det = await buscar(id);
     if (!det) return res.status(404).json({ error: 'Registro não encontrado.' });
 
-    // 1) Recibo universal (idempotente: se já tem recibo_id, reusa)
+    // v3.123.0: emitente (PJ Romatec x PF José Romário) escolhido no envio —
+    // define o texto do recibo E qual certificado ICP-Brasil assina o PDF.
+    // Sem default de propósito: assinar no perfil errado gera documento que não
+    // bate com quem de fato pagou. Só é exigido na CRIAÇÃO; num reenvio o
+    // perfil já está congelado no recibo que foi emitido.
+    const PERFIS_VALIDOS = ['romatec_pj', 'jose_romario_pf'];
     let reciboId = det.recibo_id;
     if (!reciboId) {
+      const perfilEscolhido = String((req.body as { emitente_perfil?: unknown })?.emitente_perfil ?? '').trim();
+      if (!PERFIS_VALIDOS.includes(perfilEscolhido)) {
+        return res.status(400).json({
+          error: "Escolha o emitente do recibo: 'romatec_pj' (PJ) ou 'jose_romario_pf' (PF).",
+        });
+      }
       const recibo = await criarRecibo({
         tenant_id: 1,
         tipo: 'mao_obra_avulsa',
@@ -174,7 +185,7 @@ router.post('/:id(\\d+)/enviar', requireCeoToken, async (req: Request, res: Resp
         descricao_servico: det.descricao_servico ? `${det.tipo_servico} — ${det.descricao_servico}` : det.tipo_servico,
         categoria_servico: 'mao_obra_avulsa',
         categoria_grupo: 'MAO',
-        emitente_perfil: 'romatec_pj',
+        emitente_perfil: perfilEscolhido,
         expira_em_dias: 30,
       });
       reciboId = recibo.id;
@@ -193,11 +204,16 @@ router.post('/:id(\\d+)/enviar', requireCeoToken, async (req: Request, res: Resp
     let pdf = await gerarPdfMaoObraAvulsa(recibo, doc, { comprovante: comp });
     let assinado = false;
     try {
-      const cert = await getCertForSigning('pj');
+      // v3.123.0: assina com o certificado do MESMO perfil gravado no recibo
+      // (antes era sempre 'pj', então um recibo emitido como PF sairia assinado
+      // pelo e-CNPJ). No reenvio isso vem do recibo já existente.
+      const certPerfil = recibo.emitente_perfil === 'jose_romario_pf' ? 'pf' : 'pj';
+      const cert = await getCertForSigning(certPerfil);
       if (cert) {
         const { signPdfBuffer } = await import('../services/pdfSigner');
         pdf = await signPdfBuffer(pdf, cert.pfx, cert.senha, {
-          name: cert.meta.subject_cn ?? 'ROMATEC CONSULTORIA TOTAL',
+          name: cert.meta.subject_cn
+            ?? (certPerfil === 'pf' ? 'José Romário Pinto Bezerra' : 'ROMATEC CONSULTORIA TOTAL'),
           reason: `Recibo Mão de Obra Avulsa ${recibo.numero}`,
           location: 'Açailândia/MA',
           contactInfo: cert.meta.subject_doc ?? '',

@@ -68,6 +68,14 @@
       <div><label>Data do pagamento *</label><input id="data" type="date"></div>
       <div><label>Comprovante (PIX/transferência)</label><input id="comprovante" type="file" accept="image/*,application/pdf"></div>
     </div>
+    <!-- v3.123.0: emitente/pagador do recibo. Sem pre-selecao de proposito —
+         define o texto do recibo e QUAL certificado ICP-Brasil assina o PDF. -->
+    <label>Quem está pagando (emitente e assinatura digital) *</label>
+    <select id="emitente">
+      <option value="" selected disabled>— Escolha PJ ou PF —</option>
+      <option value="romatec_pj">🏢 ROMATEC CONSULTORIA TOTAL (PJ — CNPJ 17.261.987/0001-09)</option>
+      <option value="jose_romario_pf">👤 José Romário Pinto Bezerra (PF — CPF 012.091.853-69)</option>
+    </select>
     <button class="btn btn-gold" id="btnSalvar" style="margin-top:14px">💾 Registrar e enviar recibo</button>
     <button class="btn btn-ghost" id="btnCancelarEdicao" style="margin-top:8px;width:100%;display:none">✖ Cancelar edição</button>
     <div id="resultado"></div>
@@ -118,6 +126,11 @@
     if(!tipo){toast('Informe o tipo de serviço.');return;}
     if(!valor||valor<=0){toast('Informe o valor pago.');return;}
     if(!data){toast('Informe a data do pagamento.');return;}
+    // v3.123.0: emitente obrigatorio (define quem assina o PDF). So exigido no
+    // fluxo de criacao+envio; em modo edicao o recibo ainda nem existe/ja existe
+    // com o perfil congelado, entao nao se aplica.
+    var emitente = val('emitente');
+    if(!editingId && !emitente){ toast('Escolha quem está pagando: PJ (Romatec) ou PF (José Romário).'); return; }
     var btn=this;
     var payload={ obra_nome: val('obra')||null, nome_prestador:nome, telefone_whatsapp:tel, cpf:val('cpf')||null,
       tipo_servico:tipo, descricao_servico:val('desc')||null, valor_pago:valor, forma_pagamento:val('forma'), data_pagamento:data };
@@ -142,7 +155,8 @@
         await api('/'+id+'/comprovante',{method:'POST',headers:hdrs(true),body:JSON.stringify({nome:f.name,mime:o.mime,base64:o.base64})}); }
       // enviar
       btn.textContent='⏳ Enviando recibo...';
-      var env = await api('/'+id+'/enviar',{method:'POST',headers:hdrs(true)});
+      var env = await api('/'+id+'/enviar',{method:'POST',headers:hdrs(true),
+        body:JSON.stringify({ emitente_perfil: emitente })});
       var assinTxt = env.assinado ? '🔒 Assinado (ICP-Brasil). ' : '';
       document.getElementById('resultado').innerHTML =
         '<div class="okbox">✅ Recibo '+esc(env.numero)+' enviado ao prestador. '+assinTxt+
@@ -151,6 +165,8 @@
       // limpa campos principais
       ['nome','tel','cpf','tipo','desc','valor'].forEach(function(k){ document.getElementById(k).value=''; });
       document.getElementById('comprovante').value='';
+      // v3.123.0: volta o emitente pro placeholder — proximo recibo escolhe de novo.
+      document.getElementById('emitente').value='';
       carregarLista();
     } catch(e){ toast(e.message||'Erro'); }
     finally { btn.disabled=false; btn.textContent='💾 Registrar e enviar recibo'; }
@@ -185,6 +201,13 @@
           +(link?'<div style="margin-top:4px"><a href="'+esc(link)+'" target="_blank" style="font-size:12px;color:var(--green)">ver recibo →</a></div>':'')
           +'</div></div>'
           +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+          // v3.123.0: primeiro envio cria o recibo, entao exige escolher o
+          // emitente aqui tambem. Reenvio nao mostra: o perfil ja esta
+          // congelado no recibo emitido.
+          +(enviado?'':'<select data-emit="'+p.id+'" style="flex:1 0 100%;padding:8px;font-size:13px;margin-bottom:2px">'
+            +'<option value="" selected disabled>— Quem paga? PJ ou PF —</option>'
+            +'<option value="romatec_pj">🏢 ROMATEC (PJ)</option>'
+            +'<option value="jose_romario_pf">👤 José Romário (PF)</option></select>')
           +'<button class="btn btn-ghost" data-act="editar" data-id="'+p.id+'" style="flex:1;padding:8px;font-size:13px">✏️ Editar</button>'
           +'<button class="btn btn-ghost" data-act="reenviar" data-id="'+p.id+'" style="flex:1;padding:8px;font-size:13px">'+(enviado?'🔁 Reenviar':'🚀 Enviar')+'</button>'
           +'<button class="btn" data-act="excluir" data-id="'+p.id+'" style="flex:0 0 auto;padding:8px 12px;font-size:13px;background:transparent;border:1px solid var(--danger);color:var(--danger)">🗑️</button>'
@@ -227,7 +250,15 @@
   }
   async function reenviarPagamento(id, btn){
     if(btn){ btn.disabled=true; btn.textContent='⏳...'; }
-    try { var env = await api('/'+id+'/enviar',{method:'POST',headers:hdrs(true)});
+    // v3.123.0: se o item ainda nao tem recibo, o envio vai CRIAR um — e ai o
+    // emitente e' obrigatorio. Reenvio nao tem o select e vai sem body.
+    var selEmit = document.querySelector('[data-emit="'+id+'"]');
+    var corpo = null;
+    if(selEmit){
+      if(!selEmit.value){ toast('Escolha quem está pagando (PJ ou PF) antes de enviar.'); if(btn){btn.disabled=false;btn.textContent='🚀 Enviar';} return; }
+      corpo = JSON.stringify({ emitente_perfil: selEmit.value });
+    }
+    try { var env = await api('/'+id+'/enviar',{method:'POST',headers:hdrs(true),body:corpo});
       toast('Recibo '+env.numero+' enviado.'); carregarLista();
     } catch(e){ toast(e.message||'Falha ao enviar'); if(btn){ btn.disabled=false; btn.textContent='🔁 Reenviar'; } }
   }

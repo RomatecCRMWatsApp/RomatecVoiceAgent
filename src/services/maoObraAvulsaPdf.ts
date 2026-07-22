@@ -5,7 +5,20 @@
 import PDFDocument from 'pdfkit';
 import type { Recibo } from '../integrations/recibos';
 import type { MaoObraAvulsa } from '../integrations/maoObraAvulsa';
-import { renderQRValidacao, renderHashFooter, renderSeloConfirmado } from './reciboPdfShared';
+import { renderQRValidacao, renderHashFooter, renderSeloConfirmado, numeroExtenso } from './reciboPdfShared';
+
+/**
+ * v3.123.0: identidade do emitente/PAGADOR conforme `recibos.emitente_perfil`.
+ * O recibo é emitido PELA Romatec (ou pelo CEO como PF) EM FAVOR do prestador —
+ * quem recebe o dinheiro é o prestador. Antes o PDF não dizia isso em lugar
+ * nenhum e ainda assinava só com o nome do pagador, o que lia exatamente ao
+ * contrário: parecia que a Romatec é que havia recebido.
+ */
+const EMITENTES: Record<string, { nome: string; doc: string }> = {
+  romatec_pj:      { nome: 'ROMATEC CONSULTORIA TOTAL', doc: 'CNPJ 17.261.987/0001-09' },
+  jose_romario_pf: { nome: 'José Romário Pinto Bezerra', doc: 'CPF 012.091.853-69' },
+};
+const emitenteDe = (perfil?: string | null) => EMITENTES[String(perfil || 'romatec_pj')] ?? EMITENTES.romatec_pj;
 
 // getBaseUrl inline (mesma regra do reciboPdf) — evita acoplar este PDF à cadeia
 // pesada de reciboPdf (tenantSettings/embeddings), mantendo o módulo leve/testável.
@@ -90,11 +103,45 @@ export async function gerarPdfMaoObraAvulsa(
     doc.fillColor('#888').font('Helvetica-Oblique').fontSize(10).text('Nenhum comprovante anexado.', M, y); y += 20;
   }
 
-  // ── Assinatura ──
-  const assinaturaY = 690;
-  doc.moveTo(M, assinaturaY).lineTo(M + 300, assinaturaY).strokeColor('#444').lineWidth(0.7).stroke();
-  doc.fillColor('#111').font('Helvetica-Bold').fontSize(11).text('José Romário Pinto Bezerra', M, assinaturaY + 6);
-  doc.fillColor('#555').font('Helvetica').fontSize(9).text('CFT/MA 01209185369 — Romatec Consultoria Total', M, assinaturaY + 22);
+  // ── Declaração de quitação ──────────────────────────────────────────────
+  // v3.123.0: o miolo legal do recibo. Deixa explícito QUEM recebeu (prestador)
+  // e QUEM pagou (emitente) — era o que faltava e invertia a leitura do doc.
+  const emit = emitenteDe(recibo.emitente_perfil);
+  const ondeObra = det.obra_nome ? ` na obra "${det.obra_nome}"` : '';
+  y = Math.max(y + 8, 560);
+  doc.fillColor('#333').font('Helvetica').fontSize(9).text(
+    `Eu, ${det.nome_prestador}${det.cpf ? `, inscrito(a) no CPF sob o nº ${det.cpf}` : ''}, ` +
+    `DECLARO que RECEBI de ${emit.nome} (${emit.doc}) a quantia de ` +
+    `${fmtBRL(det.valor_pago)} (${numeroExtenso(det.valor_pago)}), ` +
+    `referente a ${servico}${ondeObra}, pagos via ` +
+    `${FORMA_LABEL[det.forma_pagamento] || det.forma_pagamento} em ${fmtData(det.data_pagamento)}, ` +
+    `dando plena, geral e irrevogável quitação pelo valor ora recebido.`,
+    M, y, { width: innerW, align: 'justify' },
+  );
+
+  // ── Assinaturas: RECEBEDOR (prestador) e EMITENTE/pagador ───────────────
+  // Duas linhas, mesmo padrão do valePdf: quem recebeu confirma o recebimento;
+  // o emitente assina como pagador (e é o perfil que leva a assinatura digital).
+  const linhaAssinatura = (topo: number, nome: string, sub: string, papel: string) => {
+    doc.moveTo(M, topo).lineTo(M + 300, topo).strokeColor('#444').lineWidth(0.7).stroke();
+    doc.fillColor('#111').font('Helvetica-Bold').fontSize(10).text(nome, M, topo + 6, { width: 300 });
+    doc.fillColor('#555').font('Helvetica').fontSize(8).text(sub, M, topo + 20, { width: 300 });
+    doc.fillColor('#8A8672').font('Helvetica-Bold').fontSize(7).text(papel.toUpperCase(), M, topo + 31, { width: 300 });
+  };
+  // 640/697: as duas linhas cabem acima do rodapé de hash (y=760) e à esquerda
+  // do QR (x=430), sem sobrepor nenhum dos dois.
+  linhaAssinatura(
+    640,
+    det.nome_prestador,
+    det.cpf ? `CPF ${det.cpf}` : 'Prestador do serviço',
+    'Recebedor — assina confirmando o recebimento',
+  );
+  linhaAssinatura(
+    697,
+    emit.nome,
+    emit.doc,
+    'Emitente / pagador',
+  );
 
   // ── Validação (QR + hash) ──
   const baseUrl = getBaseUrl();

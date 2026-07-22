@@ -19,6 +19,7 @@ import {
   renderQRValidacao,
   renderHashFooter,
   renderSeloConfirmado,
+  numeroExtenso,
 } from './reciboPdfShared';
 
 const fmtBRL = (n: number) =>
@@ -37,46 +38,6 @@ function periodoLabel(codigo: string): string {
   if (!m) return codigo;
   const meses = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   return `${m[3]}ª quinzena de ${meses[Number(m[2])]}/${m[1]}`;
-}
-
-// Helper: valor por extenso pt-BR (reusa logica simples)
-function numeroExtenso(n: number): string {
-  if (n === 0) return 'zero';
-  const u = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove'];
-  const d10 = ['dez', 'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
-  const d = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'];
-  const c = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos'];
-  function ate999(x: number): string {
-    if (x === 100) return 'cem';
-    const partes: string[] = [];
-    const cc = Math.floor(x / 100);
-    if (cc > 0) partes.push(c[cc]);
-    const r = x % 100;
-    if (r > 0) {
-      if (r < 10) partes.push(u[r]);
-      else if (r < 20) partes.push(d10[r - 10]);
-      else {
-        const dd = Math.floor(r / 10);
-        const uu = r % 10;
-        if (uu > 0) partes.push(d[dd] + ' e ' + u[uu]);
-        else partes.push(d[dd]);
-      }
-    }
-    return partes.join(' e ');
-  }
-  const inteiro = Math.floor(n);
-  const cent = Math.round((n - inteiro) * 100);
-  let res = '';
-  if (inteiro === 0) res = 'zero';
-  else if (inteiro < 1000) res = ate999(inteiro);
-  else if (inteiro < 1000000) {
-    const mil = Math.floor(inteiro / 1000);
-    const resto = inteiro % 1000;
-    res = (mil === 1 ? 'mil' : ate999(mil) + ' mil') + (resto > 0 ? ' e ' + ate999(resto) : '');
-  } else res = inteiro.toLocaleString('pt-BR');
-  let out = `${res} ${inteiro === 1 ? 'real' : 'reais'}`;
-  if (cent > 0) out += ` e ${ate999(cent)} ${cent === 1 ? 'centavo' : 'centavos'}`;
-  return out;
 }
 
 export interface ValePdfInput {
