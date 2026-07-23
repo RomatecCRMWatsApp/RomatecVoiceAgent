@@ -1163,6 +1163,7 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="checklist">📋 Checklist</button>
     <button class="tab" data-tab="entrega">📦 Entrega de Obra</button>
     <button class="tab" data-tab="inventario">🗃️ Inventário</button>
+    <button class="tab" data-tab="diario-obra">📔 Diário de Obra</button>
     <button class="tab" data-tab="maoobra">🧾 Mão de Obra</button>
     <button class="tab" data-tab="laudos">📐 Laudo Demarcação</button>
     <button class="tab" data-tab="loteamentos">🏘️ Loteamentos</button>
@@ -1207,6 +1208,7 @@ window.forcarUpdateApp = forcarUpdate;
   <div id="view-checklist" class="view"></div>
   <div id="view-entrega" class="view"></div>
   <div id="view-inventario" class="view"></div>
+  <div id="view-diario-obra" class="view"></div>
   <div id="view-maoobra" class="view"></div>
   <div id="view-proposta" class="view"></div>
   <div id="view-reforma" class="view"></div>
@@ -1917,6 +1919,7 @@ async function render() {
       checklist:  async () => { await loadObras(); renderChecklistTab(); },
       entrega:    async () => { renderEntregaTab(); },
       inventario: async () => { await loadObras(); renderInventarioTab(); },
+      'diario-obra': async () => { await loadObras(); await renderDiarioObraTab(); }, // v3.125.0
       maoobra:    async () => { renderMaoObraTab(); },
       proposta: async () => {
         await Promise.all([loadPropostas(), loadPropostasClientes()]);
@@ -2663,6 +2666,10 @@ function renderObras() {
           <a href="/inventario-obra.html?obra=${o.id}&obra_nome=${encodeURIComponent(o.nome||'')}"
             title="Inventário de Obra: o que a obra tem e o que vai entrando — notas fiscais, utilização, saldo e relatório fotográfico"
             style="background:transparent; border:1px solid var(--neon); color:var(--neon); font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; text-decoration:none;">🗃️ Inventário →</a>
+          <!-- v3.125.0: Diário de Obra desta obra (visitas técnicas + anexos) -->
+          <a href="/diario-obra.html?obra=${o.id}&obra_nome=${encodeURIComponent(o.nome||'')}"
+            title="Diário de Obra: visitas técnicas com observações, pendências, solicitações do proprietário e anexos"
+            style="background:transparent; border:1px solid #C9A84C; color:#C9A84C; font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; text-decoration:none;">📔 Diário de Obra →</a>
           <!-- v3.107.0: Galeria de Fotos da Obra — abre a aba Galeria filtrada por esta obra.
                Não é página própria: reaproveita a galeria geral (coverflow, ordenação, offline). -->
           <button type="button"
@@ -6300,6 +6307,71 @@ function renderInventarioTab() {
   </div>`;
   attachSel();
   montarListaInventarios();
+}
+
+// v3.125.0: aba "Diário de Obra" — launcher + lista das entradas. A captura
+// rica (3 modos por campo, canvas, ditado, anexos) mora em /diario-obra.html.
+function renderDiarioObraTab() {
+  const v = document.getElementById('view-diario-obra');
+  if (state.obras.length === 0) {
+    v.innerHTML = '<div class="card empty">Cadastre uma obra primeiro.</div>';
+    return;
+  }
+  const obraNome = (state.obras.find(o => String(o.id) === String(state.currentObra)) || {}).nome || '';
+  const href = state.currentObra
+    ? `/diario-obra.html?obra=${escape(state.currentObra)}&obra_nome=${encodeURIComponent(obraNome)}&nova=1`
+    : '/diario-obra.html?nova=1';
+  v.innerHTML = `${obraSelector()}
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
+    <div style="min-width:200px;">
+      <p class="section-title" style="margin:0;">📔 Diário de Obra</p>
+      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Registro de visitas técnicas por obra: observações, pendências e solicitações do proprietário — com ditado por voz, escrita a mão (caneta) e anexos de fotos/arquivos por entrada.</p>
+    </div>
+    <a href="${href}" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">➕ Nova entrada →</a>
+  </div>
+  <div class="card">
+    <p class="section-title" style="margin:0 0 8px;">📚 Entradas de diário</p>
+    <div id="diarioListaBox" style="font-size:12px; color:var(--text-muted);">Carregando…</div>
+  </div>`;
+  attachSel();
+  montarListaDiarios();
+}
+
+async function montarListaDiarios() {
+  const box = document.getElementById('diarioListaBox');
+  if (!box) return;
+  try {
+    const filtro = state.currentObra ? ('?obra_id=' + encodeURIComponent(state.currentObra)) : '';
+    const r = await fetch('/api/diarios-obra' + filtro, { credentials: 'include' });
+    if (r.status === 401) { box.innerHTML = 'Faça login pra ver o diário.'; return; }
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    const lista = j.diarios || [];
+    if (!lista.length) {
+      box.innerHTML = state.currentObra
+        ? 'Nenhuma entrada desta obra ainda — clique em "Nova entrada".'
+        : 'Nenhuma entrada de diário ainda — escolha a obra e clique em "Nova entrada".';
+      return;
+    }
+    const fmtD = iso => { const p = String(iso || '').slice(0, 10).split('-'); return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : (iso || ''); };
+    const prev = d => {
+      const parts = [];
+      if (d.observacoes) parts.push('Obs: ' + d.observacoes.slice(0, 80));
+      if (d.pendencias) parts.push('Pend: ' + d.pendencias.slice(0, 60));
+      if (d.solicitacoes_proprietario) parts.push('Solic: ' + d.solicitacoes_proprietario.slice(0, 60));
+      return escape(parts.join(' · '));
+    };
+    box.innerHTML = lista.map(d => `
+      <a href="/diario-obra.html?id=${d.id}" style="display:block; text-decoration:none; border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
+          <div style="font-weight:700; color:var(--neon); font-size:13px;">📔 ${escape(d.obra_nome || ('Obra #' + d.obra_id))}</div>
+          <div style="font-size:11px; color:var(--text-muted);">${fmtD(d.data_visita)} · ${escape((d.hora_visita || '').slice(0, 5))}${Number(d.anexos_count) ? ' · 📎 ' + d.anexos_count : ''}</div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">${prev(d)}</div>
+      </a>`).join('');
+  } catch (e) {
+    box.innerHTML = 'Erro ao carregar: ' + escape(e.message);
+  }
 }
 
 // v3.100.1: lista dos inventários já criados na aba — abrir/editar, ver relatório

@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Diário de Obra — Romatec</title>
+<style>
+  :root{
+    --green:#0C3320;--green2:#14472B;--gold:#C9A84C;--gold-soft:#E3D19A;
+    --paper:#f2f0e9;--ink:#1C1C18;--muted:#6A6656;--line:#D8D3C4;--danger:#ef4444;--ok:#10b981;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--paper);color:var(--ink);-webkit-text-size-adjust:100%}
+  header{background:linear-gradient(135deg,var(--green),var(--green2));color:#fff;padding:16px 18px;position:sticky;top:0;z-index:10}
+  header .kick{color:var(--gold-soft);letter-spacing:2px;text-transform:uppercase;font-size:10px;margin:0}
+  header h1{margin:2px 0 0;font-size:19px}
+  header .num{color:var(--gold);font-weight:700;font-size:13px;margin-top:2px}
+  .wrap{max-width:860px;margin:0 auto;padding:16px}
+  .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,.05)}
+  h2{color:var(--green);font-size:16px;margin:0 0 10px;border-bottom:2px solid var(--gold);padding-bottom:6px}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;font-weight:600}
+  input,textarea,select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:15px;font-family:inherit;background:#fff;color:var(--ink)}
+  textarea{min-height:84px;resize:vertical}
+  .btn{border:0;border-radius:9px;padding:12px 16px;font-size:15px;font-weight:700;cursor:pointer}
+  .btn-primary{background:var(--green);color:#fff}
+  .btn-gold{background:var(--gold);color:var(--green)}
+  .btn-ghost{background:#fff;color:var(--green);border:1px solid var(--gold)}
+  .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger);padding:6px 10px;font-size:12px}
+  .btn-sm{padding:7px 10px;font-size:12px}
+  .btn-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .muted{color:var(--muted);font-size:13px}
+  .empty{text-align:center;color:var(--muted);padding:26px 10px}
+  /* lista */
+  .entry{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;background:#fff;cursor:pointer}
+  .entry:hover{border-color:var(--gold)}
+  .entry .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .entry .obra{font-weight:700;color:var(--green)}
+  .entry .dt{font-size:12px;color:var(--muted);white-space:nowrap}
+  .entry .prev{font-size:13px;color:var(--ink);margin-top:6px;line-height:1.35}
+  .entry .prev b{color:var(--green2)}
+  .entry .meta{font-size:11px;color:var(--muted);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap}
+  .chip{display:inline-block;background:#faf7ee;border:1px solid var(--line);border-radius:12px;padding:2px 9px;font-size:11px;color:var(--green2);font-weight:700}
+  /* campo multimodo */
+  .field .modes{display:inline-flex;gap:4px;margin:8px 0 4px}
+  .mode-b{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;color:var(--green2)}
+  .mode-b.on{background:var(--green);color:#fff;border-color:var(--green)}
+  .mode-b.rec{background:var(--danger);color:#fff;border-color:var(--danger);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.55}}
+  .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .thumb{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--line);width:88px}
+  .thumb img{width:100%;height:70px;object-fit:cover;display:block;background:#fff}
+  .thumb .cap{font-size:9px;color:var(--muted);padding:2px 4px;background:#faf9f5;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thumb .rm{position:absolute;top:3px;right:3px;background:rgba(0,0,0,.6);color:#fff;border:0;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:13px;line-height:1}
+  .thumb.file{display:flex;align-items:center;justify-content:center;height:70px;font-size:11px;color:var(--green2);text-align:center;padding:4px}
+  /* detalhe */
+  .dfield{margin-bottom:12px}
+  .dfield .h{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+  .dfield .t{white-space:pre-wrap;line-height:1.4;margin-top:3px}
+  /* toast/modal */
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:60;opacity:0;transition:opacity .2s;max-width:90%}
+  .toast.show{opacity:1}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:none;align-items:center;justify-content:center;padding:14px}
+  .modal-bg.open{display:flex}
+  .modal{background:#fff;border-radius:14px;max-width:640px;width:100%;padding:16px}
+  .draw-wrap{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;touch-action:none}
+  canvas#pad{display:block;width:100%;height:auto;background:#fff;touch-action:none;cursor:crosshair}
+  .draw-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
+  .swatch{width:26px;height:26px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px var(--line);cursor:pointer}
+  .swatch.on{box-shadow:0 0 0 2px var(--green)}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+  <button id="hBack" title="Voltar" style="position:absolute;left:14px;top:14px;background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:6px 12px;font-size:14px;font-weight:600;cursor:pointer">‹ Voltar</button>
+  <div style="padding-left:64px">
+    <p class="kick">Romatec — Gestão de Obras</p>
+    <h1>📔 Diário de Obra</h1>
+    <div class="num" id="hSub"></div>
+  </div>
+</header>
+
+<div class="wrap" id="app"></div>
+<div class="toast" id="toast"></div>
+<div class="modal-bg" id="modalBg"><div class="modal" id="modalBox"></div></div>
+
+<script>
+(function(){
+  'use strict';
+  var API = '/api/diarios-obra';
+  var qs = new URLSearchParams(location.search);
+  var S = {
+    obraId: parseInt(qs.get('obra'), 10) || 0,
+    obraNome: qs.get('obra_nome') || '',
+    view: qs.get('id') ? 'detail' : (qs.get('nova') ? 'form' : 'list'),
+    detailId: parseInt(qs.get('id'), 10) || 0,
+    obras: [],
+    me: null,
+    // rascunho do formulário
+    draft: null,
+  };
+
+  // ---- infra ----
+  function api(path, opts){
+    opts = opts || {}; opts.credentials = 'include';
+    opts.headers = opts.headers || {};
+    if(opts.body && typeof opts.body === 'object' && !(opts.body instanceof FormData)){
+      opts.headers['Content-Type']='application/json'; opts.body = JSON.stringify(opts.body);
+    }
+    return fetch(API + path, opts).then(function(r){
+      if(r.status===401){ location.href='/login?next='+encodeURIComponent(location.pathname+location.search); throw new Error('não autenticado'); }
+      return r.json().then(function(j){ if(!r.ok) throw new Error(j.error || ('HTTP '+r.status)); return j; });
+    });
+  }
+  function apiRoot(path, opts){
+    opts = opts || {}; opts.credentials = 'include';
+    return fetch(path, opts).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+  }
+  function toast(msg, ms){
+    var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast._t); toast._t = setTimeout(function(){ t.classList.remove('show'); }, ms || 2600);
+  }
+  function esc(s){ return String(s==null?'':s).replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
+  function hoje(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  function agora(){ var d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+  function fmtData(iso){ if(!iso) return ''; var p=String(iso).slice(0,10).split('-'); return p.length===3? (p[2]+'/'+p[1]+'/'+p[0]) : iso; }
+  function modal(html){ document.getElementById('modalBox').innerHTML = html; document.getElementById('modalBg').classList.add('open'); }
+  function fecharModal(){ document.getElementById('modalBg').classList.remove('open'); }
+  window.diarioFecharModal = fecharModal;
+  document.getElementById('modalBg').addEventListener('click', function(e){ if(e.target===this) fecharModal(); });
+  document.getElementById('hBack').addEventListener('click', function(){
+    if(S.view!=='list'){ S.view='list'; S.detailId=0; render(); } else { history.length>1 ? history.back() : (location.href='/obras.html'); }
+  });
+
+  function podeEditar(diario){
+    if(!S.me) return true; // backend valida de qualquer forma
+    if(['admin','owner','gestor'].indexOf(S.me.role)>=0) return true;
+    return diario && String(diario.user_sub||'') === String(S.me.sub||'');
+  }
+
+  // ---- carregar dados base ----
+  function boot(){
+    // /api/obras (fora do prefixo do módulo) alimenta o seletor de obra
+    fetch('/api/obras',{credentials:'include'}).then(function(r){ return r.status===401 ? [] : r.json(); })
+      .then(function(list){ S.obras = Array.isArray(list) ? list : (list&&list.data)||[]; })
+      .catch(function(){ S.obras=[]; })
+      .then(function(){ return apiRoot('/api/auth/me',{credentials:'include'}); })
+      .then(function(me){ S.me = me && (me.user||me) || null; render(); });
+  }
+
+  // ---- LISTA ----
+  var filtro = { obra_id: S.obraId||'', data_inicio:'', data_fim:'' };
+  function carregarLista(){
+    var p = [];
+    if(filtro.obra_id) p.push('obra_id='+encodeURIComponent(filtro.obra_id));
+    if(filtro.data_inicio) p.push('data_inicio='+encodeURIComponent(filtro.data_inicio));
+    if(filtro.data_fim) p.push('data_fim='+encodeURIComponent(filtro.data_fim));
+    return api('/'+(p.length?'?'+p.join('&'):'')).then(function(j){ return j.diarios||[]; });
+  }
+  function optionsObras(sel){
+    return '<option value="">— selecione a obra —</option>' + S.obras.map(function(o){
+      return '<option value="'+esc(o.id)+'"'+(String(o.id)===String(sel)?' selected':'')+'>'+esc(o.nome||('Obra '+o.id))+'</option>';
+    }).join('');
+  }
+  function previa(d){
+    var parts = [];
+    if(d.observacoes) parts.push('<b>Obs:</b> '+esc(d.observacoes.slice(0,120)));
+    if(d.pendencias) parts.push('<b>Pend:</b> '+esc(d.pendencias.slice(0,90)));
+    if(d.solicitacoes_proprietario) parts.push('<b>Solic:</b> '+esc(d.solicitacoes_proprietario.slice(0,90)));
+    return parts.join('<br>');
+  }
+  function renderList(){
+    var app = document.getElementById('app');
+    document.getElementById('hSub').textContent = S.obraNome ? S.obraNome : 'Todas as visitas técnicas';
+    app.innerHTML =
+      '<div class="card">'+
+        '<div class="btn-row" style="margin-top:0">'+
+          '<button class="btn btn-primary" id="btnNova">➕ Nova Entrada de Diário</button>'+
+        '</div>'+
+        '<label>Filtrar por obra</label>'+
+        '<select id="fObra">'+optionsObras(filtro.obra_id)+'</select>'+
+        '<div class="row2">'+
+          '<div><label>De</label><input type="date" id="fIni" value="'+esc(filtro.data_inicio)+'"></div>'+
+          '<div><label>Até</label><input type="date" id="fFim" value="'+esc(filtro.data_fim)+'"></div>'+
+        '</div>'+
+      '</div>'+
+      '<div id="lista"><div class="empty">Carregando…</div></div>';
+
+    document.getElementById('btnNova').onclick = function(){ S.view='form'; S.detailId=0; render(); };
+    document.getElementById('fObra').onchange = function(){ filtro.obra_id=this.value; atualizarLista(); };
+    document.getElementById('fIni').onchange = function(){ filtro.data_inicio=this.value; atualizarLista(); };
+    document.getElementById('fFim').onchange = function(){ filtro.data_fim=this.value; atualizarLista(); };
+    atualizarLista();
+  }
+  function atualizarLista(){
+    var box = document.getElementById('lista');
+    carregarLista().then(function(ds){
+      if(!ds.length){ box.innerHTML='<div class="empty">Nenhuma entrada de diário ainda.<br>Toque em “Nova Entrada” para registrar uma visita.</div>'; return; }
+      box.innerHTML = ds.map(function(d){
+        return '<div class="entry" data-id="'+d.id+'">'+
+          '<div class="top"><span class="obra">'+esc(d.obra_nome||('Obra '+d.obra_id))+'</span>'+
+            '<span class="dt">'+fmtData(d.data_visita)+' · '+esc((d.hora_visita||'').slice(0,5))+'</span></div>'+
+          (previa(d)?'<div class="prev">'+previa(d)+'</div>':'')+
+          '<div class="meta">'+
+            (d.anexos_count?'<span class="chip">📎 '+d.anexos_count+' anexo(s)</span>':'')+
+            (d.colaborador_nome?'<span>👤 '+esc(d.colaborador_nome)+'</span>':'')+
+          '</div>'+
+        '</div>';
+      }).join('');
+      Array.prototype.forEach.call(box.querySelectorAll('.entry'), function(el){
+        el.onclick = function(){ S.view='detail'; S.detailId=parseInt(el.getAttribute('data-id'),10); render(); };
+      });
+    }).catch(function(e){ box.innerHTML='<div class="empty">Erro: '+esc(e.message)+'</div>'; });
+  }
+
+  // ---- FORM (nova entrada) — 3 campos multimodo ----
+  var CAMPOS = [
+    {key:'observacoes', label:'Observações', hint:'O que foi visto/verificado na visita'},
+    {key:'pendencias', label:'Pendências', hint:'Itens em aberto identificados'},
+    {key:'solicitacoes_proprietario', label:'Solicitações do Proprietário', hint:'Pedidos feitos pelo proprietário'},
+  ];
+  function novoDraft(){
+    return {
+      obra_id: S.obraId||'', data:hoje(), hora:agora(),
+      textos:{observacoes:'',pendencias:'',solicitacoes_proprietario:''},
+      desenhos:[], // {base64, campo_referencia, nome, url}
+      anexos:[],   // File[]
+    };
+  }
+  function fieldHtml(c, val){
+    return '<div class="field" data-campo="'+c.key+'">'+
+      '<label>'+c.label+' <span class="muted" style="font-weight:400">— '+c.hint+'</span></label>'+
+      '<div class="modes">'+
+        '<button type="button" class="mode-b on" data-m="type">⌨️ Digitar</button>'+
+        '<button type="button" class="mode-b" data-m="voice">🎙️ Ditar</button>'+
+        '<button type="button" class="mode-b" data-m="draw">✍️ Desenhar</button>'+
+      '</div>'+
+      '<textarea data-t="'+c.key+'" placeholder="Digite, dite ou desenhe…">'+esc(val||'')+'</textarea>'+
+      '<div class="thumbs" data-thumbs="'+c.key+'"></div>'+
+    '</div>';
+  }
+  function renderForm(){
+    if(!S.draft) S.draft = novoDraft();
+    var d = S.draft;
+    document.getElementById('hSub').textContent = 'Nova entrada';
+    var app = document.getElementById('app');
+    app.innerHTML =
+      '<div class="card">'+
+        '<label>Obra *</label><select id="fObraSel">'+optionsObras(d.obra_id)+'</select>'+
+        '<div class="row2">'+
+          '<div><label>Data da visita</label><input type="date" id="fData" value="'+esc(d.data)+'"></div>'+
+          '<div><label>Hora</label><input type="time" id="fHora" value="'+esc(d.hora)+'"></div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="card">'+ CAMPOS.map(function(c){ return fieldHtml(c, d.textos[c.key]); }).join('') +'</div>'+
+      '<div class="card">'+
+        '<h2>Anexos gerais (fotos / arquivos)</h2>'+
+        '<input type="file" id="fAnexos" multiple accept="image/*,application/pdf">'+
+        '<div class="thumbs" id="anexoThumbs"></div>'+
+      '</div>'+
+      '<div class="btn-row">'+
+        '<button class="btn btn-primary" id="btnSalvar">💾 Salvar entrada</button>'+
+        '<button class="btn btn-ghost" id="btnCancelar">Cancelar</button>'+
+      '</div>';
+
+    document.getElementById('fObraSel').onchange = function(){ d.obra_id=this.value; };
+    document.getElementById('fData').onchange = function(){ d.data=this.value; };
+    document.getElementById('fHora').onchange = function(){ d.hora=this.value; };
+    document.getElementById('fAnexos').onchange = function(e){
+      Array.prototype.forEach.call(e.target.files, function(f){ d.anexos.push(f); });
+      renderAnexoThumbs(); e.target.value='';
+    };
+    document.getElementById('btnCancelar').onclick = function(){ S.draft=null; S.view='list'; render(); };
+    document.getElementById('btnSalvar').onclick = salvarEntrada;
+
+    // liga cada campo multimodo
+    CAMPOS.forEach(function(c){ ligarCampo(c.key); });
+    renderAnexoThumbs();
+    renderDesenhoThumbs();
+  }
+  function ligarCampo(key){
+    var wrap = document.querySelector('.field[data-campo="'+key+'"]');
+    var ta = wrap.querySelector('textarea[data-t="'+key+'"]');
+    ta.oninput = function(){ S.draft.textos[key]=ta.value; };
+    var botoes = wrap.querySelectorAll('.mode-b');
+    Array.prototype.forEach.call(botoes, function(b){
+      b.onclick = function(){
+        var m = b.getAttribute('data-m');
+        if(m==='type'){ setModeOn(botoes,b); ta.focus(); }
+        else if(m==='voice'){ toggleVoice(key, b, ta, botoes); }
+        else if(m==='draw'){ abrirDesenho(key); }
+      };
+    });
+  }
+  function setModeOn(botoes, ativo){ Array.prototype.forEach.call(botoes,function(x){ x.classList.remove('on'); x.classList.remove('rec'); }); ativo.classList.add('on'); }
+
+  // ---- Ditado por voz (transcrição server-side, NÃO aciona a ZAYRA) ----
+  var REC = { mr:null, chunks:[], key:null, btn:null };
+  function toggleVoice(key, btn, ta, botoes){
+    if(REC.mr && REC.key===key){ pararVoz(); return; }
+    if(REC.mr){ pararVoz(); }
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast('Microfone não disponível neste dispositivo.'); return; }
+    navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+      var mr = new MediaRecorder(stream);
+      REC.mr=mr; REC.chunks=[]; REC.key=key; REC.btn=btn; REC.ta=ta;
+      mr.ondataavailable=function(e){ if(e.data&&e.data.size) REC.chunks.push(e.data); };
+      mr.onstop=function(){
+        stream.getTracks().forEach(function(t){ t.stop(); });
+        var blob = new Blob(REC.chunks, {type: mr.mimeType||'audio/webm'});
+        enviarAudio(blob, key, ta);
+      };
+      mr.start();
+      setModeOn(botoes, btn); btn.classList.add('rec'); btn.textContent='⏹️ Parar';
+      toast('Gravando… toque em Parar para transcrever.');
+    }).catch(function(){ toast('Não foi possível acessar o microfone.'); });
+  }
+  function pararVoz(){
+    if(REC.btn){ REC.btn.classList.remove('rec'); REC.btn.textContent='🎙️ Ditar'; }
+    try{ if(REC.mr && REC.mr.state!=='inactive') REC.mr.stop(); }catch(e){}
+  }
+  function enviarAudio(blob, key, ta){
+    toast('Transcrevendo…');
+    var fd = new FormData(); fd.append('audio', blob, 'ditado.webm');
+    fetch(API+'/transcrever',{method:'POST',credentials:'include',body:fd})
+      .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||'falha'); return j; }); })
+      .then(function(j){
+        var novo = (ta.value ? ta.value.replace(/\s*$/,'')+' ' : '') + (j.texto||'').trim();
+        ta.value = novo; S.draft.textos[key]=novo;
+        toast(j.texto ? 'Transcrito ✓' : 'Nada reconhecido.');
+      })
+      .catch(function(e){ toast('Erro na transcrição: '+e.message); })
+      .then(function(){ REC.mr=null; REC.key=null; });
+  }
+
+  // ---- Escrita a mão (canvas livre) ----
+  var PAD = { ctx:null, drawing:false, color:'#14472B', size:3, last:null };
+  function abrirDesenho(campoRef){
+    modal(
+      '<h2>✍️ Anotação a mão — '+esc(rotuloCampo(campoRef))+'</h2>'+
+      '<div class="draw-wrap"><canvas id="pad" width="600" height="380"></canvas></div>'+
+      '<div class="draw-tools">'+
+        '<span class="swatch on" data-c="#14472B" style="background:#14472B"></span>'+
+        '<span class="swatch" data-c="#1C1C18" style="background:#1C1C18"></span>'+
+        '<span class="swatch" data-c="#ef4444" style="background:#ef4444"></span>'+
+        '<span class="swatch" data-c="#2563eb" style="background:#2563eb"></span>'+
+        '<button class="btn btn-ghost btn-sm" id="padThin">Fino</button>'+
+        '<button class="btn btn-ghost btn-sm" id="padThick">Grosso</button>'+
+        '<button class="btn btn-ghost btn-sm" id="padClear">🧽 Limpar</button>'+
+      '</div>'+
+      '<div class="btn-row">'+
+        '<button class="btn btn-primary" id="padSave">Anexar anotação</button>'+
+        '<button class="btn btn-ghost" onclick="diarioFecharModal()">Cancelar</button>'+
+      '</div>'
+    );
+    var cv = document.getElementById('pad');
+    // ajusta resolução ao tamanho renderizado (pen do tablet)
+    var rect = cv.getBoundingClientRect();
+    cv.width = Math.round(rect.width); cv.height = Math.round(rect.width*0.62);
+    PAD.ctx = cv.getContext('2d');
+    PAD.ctx.fillStyle='#fff'; PAD.ctx.fillRect(0,0,cv.width,cv.height);
+    PAD.ctx.lineJoin='round'; PAD.ctx.lineCap='round';
+    PAD.color='#14472B'; PAD.size=3;
+    function pos(ev){ var r=cv.getBoundingClientRect(); var t=ev.touches?ev.touches[0]:ev; return {x:(t.clientX-r.left)*(cv.width/r.width), y:(t.clientY-r.top)*(cv.height/r.height)}; }
+    function start(ev){ ev.preventDefault(); PAD.drawing=true; PAD.last=pos(ev); }
+    function move(ev){ if(!PAD.drawing) return; ev.preventDefault(); var p=pos(ev); var x=PAD.ctx;
+      x.strokeStyle=PAD.color; x.lineWidth=PAD.size; x.beginPath(); x.moveTo(PAD.last.x,PAD.last.y); x.lineTo(p.x,p.y); x.stroke(); PAD.last=p; }
+    function end(){ PAD.drawing=false; }
+    cv.addEventListener('pointerdown',start); cv.addEventListener('pointermove',move);
+    window.addEventListener('pointerup',end);
+    cv.addEventListener('touchstart',start,{passive:false}); cv.addEventListener('touchmove',move,{passive:false}); cv.addEventListener('touchend',end);
+    Array.prototype.forEach.call(document.querySelectorAll('.swatch'),function(s){
+      s.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('.swatch'),function(z){z.classList.remove('on');}); s.classList.add('on'); PAD.color=s.getAttribute('data-c'); };
+    });
+    document.getElementById('padThin').onclick=function(){ PAD.size=2; };
+    document.getElementById('padThick').onclick=function(){ PAD.size=6; };
+    document.getElementById('padClear').onclick=function(){ PAD.ctx.fillStyle='#fff'; PAD.ctx.fillRect(0,0,cv.width,cv.height); };
+    document.getElementById('padSave').onclick=function(){
+      var url = cv.toDataURL('image/png');
+      S.draft.desenhos.push({ base64:url, campo_referencia:campoRef, nome:'anotacao-'+campoRef+'.png', url:url });
+      fecharModal(); renderDesenhoThumbs(); toast('Anotação anexada ✓');
+    };
+  }
+  function rotuloCampo(k){ var m={observacoes:'Observações',pendencias:'Pendências',solicitacoes_proprietario:'Solicitações'}; return m[k]||k; }
+
+  function renderDesenhoThumbs(){
+    CAMPOS.forEach(function(c){
+      var box = document.querySelector('.thumbs[data-thumbs="'+c.key+'"]'); if(!box) return;
+      var meus = S.draft.desenhos.map(function(d,i){ return {d:d,i:i}; }).filter(function(x){ return x.d.campo_referencia===c.key; });
+      box.innerHTML = meus.map(function(x){
+        return '<div class="thumb"><img src="'+x.d.url+'"><div class="cap">✍️ anotação</div>'+
+          '<button class="rm" data-i="'+x.i+'">×</button></div>';
+      }).join('');
+      Array.prototype.forEach.call(box.querySelectorAll('.rm'),function(b){
+        b.onclick=function(){ S.draft.desenhos.splice(parseInt(b.getAttribute('data-i'),10),1); renderDesenhoThumbs(); };
+      });
+    });
+  }
+  function renderAnexoThumbs(){
+    var box = document.getElementById('anexoThumbs'); if(!box) return;
+    box.innerHTML = S.draft.anexos.map(function(f,i){
+      var img = /^image\//.test(f.type);
+      var inner = img ? '<img src="'+URL.createObjectURL(f)+'">' : '<div class="thumb file">📄 '+esc(f.name)+'</div>';
+      return '<div class="thumb'+(img?'':' ')+'">'+inner+(img?'<div class="cap">'+esc(f.name.slice(0,14))+'</div>':'')+'<button class="rm" data-i="'+i+'">×</button></div>';
+    }).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('.rm'),function(b){
+      b.onclick=function(){ S.draft.anexos.splice(parseInt(b.getAttribute('data-i'),10),1); renderAnexoThumbs(); };
+    });
+  }
+
+  function salvarEntrada(){
+    var d = S.draft;
+    if(!d.obra_id){ toast('Selecione a obra.'); return; }
+    if(!d.textos.observacoes.trim() && !d.textos.pendencias.trim() && !d.textos.solicitacoes_proprietario.trim() && !d.desenhos.length){
+      toast('Preencha ao menos um campo (ou anexe uma anotação).'); return;
+    }
+    var fd = new FormData();
+    fd.append('obra_id', d.obra_id);
+    fd.append('data_visita', d.data||hoje());
+    fd.append('hora_visita', (d.hora||agora())+':00');
+    fd.append('observacoes', d.textos.observacoes);
+    fd.append('pendencias', d.textos.pendencias);
+    fd.append('solicitacoes_proprietario', d.textos.solicitacoes_proprietario);
+    d.anexos.forEach(function(f){ fd.append('anexos', f, f.name); });
+    if(d.desenhos.length) fd.append('desenhos_json', JSON.stringify(d.desenhos.map(function(x){ return {base64:x.base64, campo_referencia:x.campo_referencia, nome:x.nome}; })));
+    var btn=document.getElementById('btnSalvar'); btn.disabled=true; btn.textContent='Salvando…';
+    fetch(API+'/',{method:'POST',credentials:'include',body:fd})
+      .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||'falha'); return j; }); })
+      .then(function(){ toast('Entrada salva ✓'); S.draft=null; S.view='list'; render(); })
+      .catch(function(e){ toast('Erro: '+e.message); btn.disabled=false; btn.textContent='💾 Salvar entrada'; });
+  }
+
+  // ---- DETALHE ----
+  function renderDetail(){
+    var app = document.getElementById('app');
+    app.innerHTML='<div class="empty">Carregando…</div>';
+    api('/'+S.detailId).then(function(j){
+      var d = j.diario;
+      document.getElementById('hSub').textContent = (d.obra_nome||('Obra '+d.obra_id));
+      var anexos = d.anexos||[];
+      function anexosDoCampo(campo){ return anexos.filter(function(a){ return a.campo_referencia===campo; }); }
+      function anexoThumb(a){
+        var img = a.tipo==='foto' || a.tipo==='desenho' || /^image\//.test(a.mime_type||'');
+        var src = API+'/anexos/'+a.id+'/arquivo';
+        var inner = img ? '<a href="'+src+'" target="_blank"><img src="'+src+'"></a>' : '<a class="thumb file" href="'+src+'" target="_blank">📄 '+esc(a.nome_original||'arquivo')+'</a>';
+        var cap = a.tipo==='desenho'?'✍️ anotação':(a.tipo==='arquivo'?'📄 arquivo':'📷 foto');
+        return '<div class="thumb">'+inner+'<div class="cap">'+cap+'</div>'+
+          (podeEditar(d)?'<button class="rm" data-ax="'+a.id+'">×</button>':'')+'</div>';
+      }
+      function campoBloco(c){
+        var txt = d[c.key]; var des = anexosDoCampo(c.key);
+        if(!txt && !des.length) return '';
+        return '<div class="dfield"><div class="h">'+c.label+'</div>'+
+          (txt?'<div class="t">'+esc(txt)+'</div>':'')+
+          (des.length?'<div class="thumbs">'+des.map(anexoThumb).join('')+'</div>':'')+
+        '</div>';
+      }
+      var gerais = anexosDoCampo('geral');
+      app.innerHTML =
+        '<div class="card">'+
+          '<div class="entry" style="cursor:default;border:0;padding:0;margin:0">'+
+            '<div class="top"><span class="obra">'+esc(d.obra_nome||('Obra '+d.obra_id))+'</span>'+
+              '<span class="dt">'+fmtData(d.data_visita)+' · '+esc((d.hora_visita||'').slice(0,5))+'</span></div>'+
+            (d.colaborador_nome?'<div class="meta"><span>👤 '+esc(d.colaborador_nome)+'</span></div>':'')+
+          '</div>'+
+        '</div>'+
+        '<div class="card">'+
+          CAMPOS.map(campoBloco).join('') +
+          (gerais.length?'<div class="dfield"><div class="h">Anexos gerais</div><div class="thumbs">'+gerais.map(anexoThumb).join('')+'</div></div>':'')+
+        '</div>'+
+        (podeEditar(d)?
+          '<div class="btn-row">'+
+            '<button class="btn btn-ghost" id="btnEditar">✏️ Editar</button>'+
+            '<button class="btn btn-danger" id="btnExcluir" style="padding:12px 16px;font-size:15px">🗑️ Excluir</button>'+
+          '</div>' : '');
+
+      Array.prototype.forEach.call(app.querySelectorAll('.rm[data-ax]'),function(b){
+        b.onclick=function(){ if(!confirm('Remover este anexo?')) return;
+          fetch(API+'/anexos/'+b.getAttribute('data-ax'),{method:'DELETE',credentials:'include'})
+            .then(function(r){ if(!r.ok) throw new Error(); toast('Anexo removido'); renderDetail(); })
+            .catch(function(){ toast('Erro ao remover.'); }); };
+      });
+      if(podeEditar(d)){
+        document.getElementById('btnEditar').onclick=function(){ abrirEdicao(d); };
+        document.getElementById('btnExcluir').onclick=function(){
+          if(!confirm('Excluir esta entrada e todos os anexos? Esta ação não pode ser desfeita.')) return;
+          api('/'+d.id,{method:'DELETE'}).then(function(){ toast('Entrada excluída'); S.view='list'; S.detailId=0; render(); })
+            .catch(function(e){ toast('Erro: '+e.message); });
+        };
+      }
+    }).catch(function(e){ app.innerHTML='<div class="empty">Erro: '+esc(e.message)+'</div>'; });
+  }
+  function abrirEdicao(d){
+    modal(
+      '<h2>✏️ Editar entrada</h2>'+
+      '<div class="row2">'+
+        '<div><label>Data</label><input type="date" id="eData" value="'+esc(String(d.data_visita).slice(0,10))+'"></div>'+
+        '<div><label>Hora</label><input type="time" id="eHora" value="'+esc((d.hora_visita||'').slice(0,5))+'"></div>'+
+      '</div>'+
+      '<label>Observações</label><textarea id="eObs">'+esc(d.observacoes||'')+'</textarea>'+
+      '<label>Pendências</label><textarea id="ePend">'+esc(d.pendencias||'')+'</textarea>'+
+      '<label>Solicitações do Proprietário</label><textarea id="eSol">'+esc(d.solicitacoes_proprietario||'')+'</textarea>'+
+      '<div class="btn-row"><button class="btn btn-primary" id="eSave">Salvar</button>'+
+        '<button class="btn btn-ghost" onclick="diarioFecharModal()">Cancelar</button></div>'
+    );
+    document.getElementById('eSave').onclick=function(){
+      var body={ data_visita:document.getElementById('eData').value,
+        hora_visita:document.getElementById('eHora').value+':00',
+        observacoes:document.getElementById('eObs').value,
+        pendencias:document.getElementById('ePend').value,
+        solicitacoes_proprietario:document.getElementById('eSol').value };
+      api('/'+d.id,{method:'PUT',body:body}).then(function(){ fecharModal(); toast('Salvo ✓'); renderDetail(); })
+        .catch(function(e){ toast('Erro: '+e.message); });
+    };
+  }
+
+  // ---- router ----
+  function render(){
+    if(S.view==='form') renderForm();
+    else if(S.view==='detail') renderDetail();
+    else renderList();
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

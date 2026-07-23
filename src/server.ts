@@ -84,6 +84,7 @@ import galeriaExportRouter from './routes/galeriaExport'; // Feature 04 — expo
 import pdfPrimeRouter from './routes/pdfPrime'; // v1.99.16 — export PDF templates Prime I/II
 import diligenciasRouter from './routes/diligencias'; // v3.54.0 — Diligências de Campo
 import wifiLeadRoutes from './routes/wifiLeadRoutes'; // v3.61.0 — Captive Portal / Leads Wi-Fi
+import diarioObraRouter from './routes/diarioObra'; // v3.125.0 — Diário de Obra (visitas técnicas)
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -212,6 +213,14 @@ app.use('/api/propostas/reforma-piso', reformaPisoRouter); // v3.67.0 — Propos
 app.use('/api/gestao-obra/vto-checklist', vtoChecklistRouter); // v3.78.0 — VTO Checklist de Atividades
 app.use('/api/gestao-obra/entrega', obrasEntregaRouter); // v3.81.0 — Entrega de Obra (RE)
 app.use('/api/gestao-obra/inventario', inventarioObraRouter); // v3.97.0 — Inventário de Materiais por Obra
+app.use('/api/diarios-obra', diarioObraRouter); // v3.125.0 — Diário de Obra (visitas técnicas)
+// v3.125.0: entradas de diário de UMA obra (aba dentro da obra).
+app.get('/api/obras/:obraId/diarios-obra', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { listarDiariosDaObra } = await import('./services/diario/diarioObraRepo');
+    res.json({ ok: true, diarios: await listarDiariosDaObra(Number(req.params.obraId)) });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
 app.use('/v/inventario', inventarioPublicoRouter); // v3.101.1 — relatório público sempre atualizado (fora da auth)
 app.use('/v/entrega', obrasEntregaPublicaRouter); // v3.81.0 — página pública de entrega (fora da auth)
 app.use('/api/mao-obra-avulsa', maoObraAvulsaRouter); // v3.92.0 — Pagamento a Mão de Obra Avulsa
@@ -248,6 +257,11 @@ void (async () => {
 void (async () => {
   try { const m = await import('./database/migrations-reforma-piso'); await m.runReformaPisoMigrations(); }
   catch (err) { console.error('[reforma-piso-migrations] FALHA fatal:', err); }
+})();
+// v3.125.0: Diário de Obra (visitas técnicas + anexos)
+void (async () => {
+  try { const m = await import('./database/migrations-diario-obra'); await m.runDiarioObraMigrations(); }
+  catch (err) { console.error('[diario-obra-migrations] FALHA fatal:', err); }
 })();
 
 // v1.99.15: Live Feed Universal — feed animado no topo de toda aba.
