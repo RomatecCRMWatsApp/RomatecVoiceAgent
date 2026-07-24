@@ -217,13 +217,11 @@ app.use('/api/gestao-obra/entrega', obrasEntregaRouter); // v3.81.0 — Entrega 
 app.use('/api/gestao-obra/inventario', inventarioObraRouter); // v3.97.0 — Inventário de Materiais por Obra
 app.use('/api/diarios-obra', diarioObraRouter); // v3.125.0 — Diário de Obra (visitas técnicas)
 app.use('/api/prontuarios', prontuarioRouter); // v3.126.0 — Prontuário do Escritório (Multi-Serviços)
-// v3.125.0: entradas de diário de UMA obra (aba dentro da obra).
-app.get('/api/obras/:obraId/diarios-obra', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const { listarDiariosDaObra } = await import('./services/diario/diarioObraRepo');
-    res.json({ ok: true, diarios: await listarDiariosDaObra(Number(req.params.obraId)) });
-  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
-});
+// v3.128.1 FIX: a rota GET /api/obras/:obraId/diarios-obra saiu DAQUI. Usá-la no
+// topo, com requireAuth, causava TDZ no boot ("Cannot access 'auth_3' before
+// initialization") — o import de requireAuth só vem na ~linha 1023, então o
+// processo morria ANTES do app.listen e TODO deploy >= v3.125.0 falhava no
+// healthcheck. Reposicionada logo após aquele import.
 app.use('/v/diario', diarioPublicoRouter); // v3.128.0 — verificação pública da assinatura do Diário de Obra (fora da auth)
 app.use('/v/inventario', inventarioPublicoRouter); // v3.101.1 — relatório público sempre atualizado (fora da auth)
 app.use('/v/entrega', obrasEntregaPublicaRouter); // v3.81.0 — página pública de entrega (fora da auth)
@@ -1022,6 +1020,16 @@ app.delete('/api/etapas/:id', apiHandle(args => obras.apagarEtapa(args as { id: 
 // Implementacao moveu pra src/middleware/auth.ts pra ficar perto do requireAuth.
 import { requireCeoToken, requireAuth, requireRole, type AuthedRequest } from './middleware/auth';
 import { requirePin } from './middleware/requirePin'; // v3.50.0
+
+// v3.125.0 (reposicionada na v3.128.1): entradas de diário de UMA obra (aba dentro
+// da obra). PRECISA ficar DEPOIS do import de requireAuth acima — registrada no
+// topo do arquivo, o binding ainda está na TDZ e o boot quebra antes do listen.
+app.get('/api/obras/:obraId/diarios-obra', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { listarDiariosDaObra } = await import('./services/diario/diarioObraRepo');
+    res.json({ ok: true, diarios: await listarDiariosDaObra(Number(req.params.obraId)) });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
 
 // v1.64.0: tenant settings (white-label estrutural). GET é público, PUT só CEO.
 app.get('/api/tenant-settings', async (_req: Request, res: Response) => {
