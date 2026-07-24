@@ -1164,6 +1164,7 @@ window.forcarUpdateApp = forcarUpdate;
     <button class="tab" data-tab="entrega">📦 Entrega de Obra</button>
     <button class="tab" data-tab="inventario">🗃️ Inventário</button>
     <button class="tab" data-tab="diario-obra">📔 Diário de Obra</button>
+    <button class="tab" data-tab="prontuario">🗂️ Prontuário</button>
     <button class="tab" data-tab="maoobra">🧾 Mão de Obra</button>
     <button class="tab" data-tab="laudos">📐 Laudo Demarcação</button>
     <button class="tab" data-tab="loteamentos">🏘️ Loteamentos</button>
@@ -1209,6 +1210,7 @@ window.forcarUpdateApp = forcarUpdate;
   <div id="view-entrega" class="view"></div>
   <div id="view-inventario" class="view"></div>
   <div id="view-diario-obra" class="view"></div>
+  <div id="view-prontuario" class="view"></div>
   <div id="view-maoobra" class="view"></div>
   <div id="view-proposta" class="view"></div>
   <div id="view-reforma" class="view"></div>
@@ -1920,6 +1922,7 @@ async function render() {
       entrega:    async () => { renderEntregaTab(); },
       inventario: async () => { await loadObras(); renderInventarioTab(); },
       'diario-obra': async () => { await loadObras(); await renderDiarioObraTab(); }, // v3.125.0
+      prontuario: async () => { renderProntuarioTab(); }, // v3.126.0 — não depende de obra
       maoobra:    async () => { renderMaoObraTab(); },
       proposta: async () => {
         await Promise.all([loadPropostas(), loadPropostasClientes()]);
@@ -6369,6 +6372,62 @@ async function montarListaDiarios() {
         </div>
         <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">${prev(d)}</div>
       </a>`).join('');
+  } catch (e) {
+    box.innerHTML = 'Erro ao carregar: ' + escape(e.message);
+  }
+}
+
+// v3.126.0: aba "Prontuário" — launcher + lista dos serviços do escritório. A
+// tela única (cabeçalho + timeline de etapas + checklist de documentos) mora em
+// /prontuario.html. Diferente das outras abas, NÃO depende de obra ativa: o
+// prontuário é do cliente/serviço do escritório, não da obra.
+function renderProntuarioTab() {
+  const v = document.getElementById('view-prontuario');
+  v.innerHTML = `
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-left:4px solid #C9A84C;">
+    <div style="min-width:200px;">
+      <p class="section-title" style="margin:0;">🗂️ Prontuário do Escritório</p>
+      <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Acompanhamento de cada serviço contratado — projetos, topografia urbana, agrimensura rural, assessoria registral e avaliações. As etapas do roteiro são criadas automaticamente conforme a categoria escolhida.</p>
+    </div>
+    <a href="/prontuario.html?novo=1" style="background:#C9A84C; color:#0C3320; border:1px solid #C9A84C; border-radius:8px; padding:10px 16px; font-weight:700; font-size:13px; text-decoration:none; white-space:nowrap;">➕ Novo prontuário →</a>
+  </div>
+  <div class="card">
+    <p class="section-title" style="margin:0 0 8px;">📚 Prontuários abertos</p>
+    <div id="prontuarioListaBox" style="font-size:12px; color:var(--text-muted);">Carregando…</div>
+  </div>`;
+  montarListaProntuarios();
+}
+
+async function montarListaProntuarios() {
+  const box = document.getElementById('prontuarioListaBox');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/prontuarios', { credentials: 'include' });
+    if (r.status === 401) { box.innerHTML = 'Faça login pra ver os prontuários.'; return; }
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    const lista = j.prontuarios || [];
+    if (!lista.length) {
+      box.innerHTML = 'Nenhum prontuário aberto ainda — clique em "Novo prontuário".';
+      return;
+    }
+    const fmtD = iso => { const p = String(iso || '').slice(0, 10).split('-'); return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : ''; };
+    const rotulo = s => s === 'concluido' ? 'Concluído' : (s === 'cancelado' ? 'Cancelado' : 'Em andamento');
+    box.innerHTML = lista.map(p => {
+      const pr = p.progresso || {};
+      return `
+      <a href="/prontuario.html?id=${p.id}" style="display:block; text-decoration:none; border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
+          <div style="font-weight:700; color:var(--neon); font-size:13px;">🗂️ ${escape(p.cliente.nome)}</div>
+          <div style="font-size:11px; color:var(--text-muted);">${escape(p.numero || ('#' + p.id))} · ${rotulo(p.status)}</div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">${escape(p.servico_contratado.nome)}</div>
+        <div style="height:6px; background:var(--border); border-radius:4px; margin-top:6px; overflow:hidden;">
+          <div style="height:100%; width:${pr.percentual || 0}%; background:#C9A84C;"></div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">${pr.concluidas || 0}/${pr.total || 0} etapas · ${pr.percentual || 0}%${p.servico_contratado.previsao_conclusao ? ' · previsão ' + fmtD(p.servico_contratado.previsao_conclusao) : ''}</div>
+      </a>`;
+    }).join('');
   } catch (e) {
     box.innerHTML = 'Erro ao carregar: ' + escape(e.message);
   }

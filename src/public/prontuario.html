@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prontuário do Escritório — Romatec</title>
+<style>
+  :root{
+    --green:#0C3320;--green2:#14472B;--gold:#C9A84C;--gold-soft:#E3D19A;
+    --paper:#f2f0e9;--ink:#1C1C18;--muted:#6A6656;--line:#D8D3C4;
+    --danger:#ef4444;--ok:#10b981;--warn:#e0a815;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--paper);color:var(--ink);-webkit-text-size-adjust:100%}
+  header{background:linear-gradient(135deg,var(--green),var(--green2));color:#fff;padding:16px 18px;position:sticky;top:0;z-index:10}
+  header .kick{color:var(--gold-soft);letter-spacing:2px;text-transform:uppercase;font-size:10px;margin:0}
+  header h1{margin:2px 0 0;font-size:19px}
+  header .num{color:var(--gold);font-weight:700;font-size:13px;margin-top:2px}
+  .wrap{max-width:900px;margin:0 auto;padding:16px}
+  .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,.05)}
+  h2{color:var(--green);font-size:16px;margin:0 0 10px;border-bottom:2px solid var(--gold);padding-bottom:6px}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;font-weight:600}
+  input,textarea,select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:15px;font-family:inherit;background:#fff;color:var(--ink)}
+  textarea{min-height:70px;resize:vertical}
+  .btn{border:0;border-radius:9px;padding:12px 16px;font-size:15px;font-weight:700;cursor:pointer}
+  .btn-primary{background:var(--green);color:#fff}
+  .btn-gold{background:var(--gold);color:var(--green)}
+  .btn-ghost{background:#fff;color:var(--green);border:1px solid var(--gold)}
+  .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger);padding:6px 10px;font-size:12px}
+  .btn-sm{padding:7px 11px;font-size:12px;border-radius:7px}
+  .btn-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  @media(max-width:600px){.row2,.row3{grid-template-columns:1fr}}
+  .muted{color:var(--muted);font-size:13px}
+  .empty{text-align:center;color:var(--muted);padding:26px 10px}
+  /* lista */
+  .entry{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;background:#fff;cursor:pointer}
+  .entry:hover{border-color:var(--gold)}
+  .entry .top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  .entry .cli{font-weight:700;color:var(--green);font-size:14px}
+  .entry .srv{font-size:12px;color:var(--muted);margin-top:3px}
+  .chip{display:inline-block;background:#faf7ee;border:1px solid var(--line);border-radius:12px;padding:2px 9px;font-size:11px;color:var(--green2);font-weight:700}
+  .chip.num{background:var(--green);color:var(--gold-soft);border-color:var(--green)}
+  .chip.ok{background:#e8f7f0;color:#0a7a52;border-color:#b6e6d2}
+  .chip.warn{background:#fdf4dd;color:#8a6a08;border-color:#f0dfa8}
+  .chip.cancel{background:#fdeaea;color:#a32323;border-color:#f3c4c4}
+  /* barra de progresso */
+  .bar{height:9px;background:#e7e3d6;border-radius:6px;overflow:hidden;margin-top:8px}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--green2),var(--gold));transition:width .3s}
+  /* cabeçalho do prontuário */
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;margin-top:8px}
+  .kv dt{color:var(--muted);font-weight:600}
+  .kv dd{margin:0}
+  /* timeline */
+  .tl{list-style:none;padding:0;margin:8px 0 0}
+  .step{position:relative;padding:12px 12px 12px 44px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fff}
+  .step:before{content:attr(data-ord);position:absolute;left:12px;top:12px;width:22px;height:22px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;background:#eceadf;color:var(--muted)}
+  .step.andamento{border-color:var(--warn)}
+  .step.andamento:before{background:var(--warn);color:#3a2c00}
+  .step.concluido{border-color:var(--ok);background:#fbfefc}
+  .step.concluido:before{content:'✓';background:var(--ok);color:#fff}
+  .step .nome{font-weight:700;color:var(--green2);font-size:14px}
+  .step .sub{font-size:11px;color:var(--muted);margin-top:3px}
+  .step .acoes{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+  .docs{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px}
+  .docs .t{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  .doc{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px}
+  .doc button{background:none;border:0;cursor:pointer;font-size:16px;line-height:1;padding:0}
+  .doc.ok span.nm{color:var(--muted);text-decoration:line-through}
+  /* toast/modal */
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:60;opacity:0;transition:opacity .2s;max-width:90%}
+  .toast.show{opacity:1}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+  <button id="hBack" title="Voltar" style="position:absolute;left:14px;top:14px;background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:6px 12px;font-size:14px;font-weight:600;cursor:pointer">‹ Voltar</button>
+  <div style="padding-left:64px">
+    <p class="kick">Romatec — Escritório</p>
+    <h1>🗂️ Prontuário do Escritório</h1>
+    <div class="num" id="hSub"></div>
+  </div>
+</header>
+
+<div class="wrap" id="app"><div class="card empty">Carregando…</div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  'use strict';
+  var API = '/api/prontuarios';
+  var qs = new URLSearchParams(location.search);
+  var S = {
+    view: qs.get('id') ? 'detail' : (qs.get('novo') ? 'form' : 'list'),
+    detailId: qs.get('id') || '',
+    categorias: [],
+    lista: [],
+    atual: null,
+    filtro: qs.get('cliente') || ''
+  };
+
+  // ---- infra ----
+  function api(path, opts){
+    opts = opts || {}; opts.credentials = 'include';
+    opts.headers = opts.headers || {};
+    if(opts.body && typeof opts.body === 'object' && !(opts.body instanceof FormData)){
+      opts.headers['Content-Type']='application/json'; opts.body = JSON.stringify(opts.body);
+    }
+    return fetch(API + path, opts).then(function(r){
+      if(r.status===401){ location.href='/login?next='+encodeURIComponent(location.pathname+location.search); throw new Error('não autenticado'); }
+      return r.json().then(function(j){ if(!r.ok) throw new Error(j.error || ('HTTP '+r.status)); return j; });
+    });
+  }
+  function toast(msg, ms){
+    var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast._t); toast._t = setTimeout(function(){ t.classList.remove('show'); }, ms || 2600);
+  }
+  function esc(s){ return String(s==null?'':s).replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
+  function fmtData(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3? (p[2]+'/'+p[1]+'/'+p[0]) : iso; }
+  function el(id){ return document.getElementById(id); }
+  function val(id){ var e = el(id); return e ? e.value.trim() : ''; }
+
+  // ---- navegação ----
+  function irPara(view, id){
+    S.view = view; S.detailId = id || '';
+    var u = new URL(location.href);
+    u.search = view==='detail' ? ('?id='+encodeURIComponent(id)) : (view==='form' ? '?novo=1' : '');
+    history.replaceState(null, '', u.toString());
+    render();
+  }
+  el('hBack').addEventListener('click', function(){
+    if(S.view!=='list') irPara('list');
+    else if(history.length>1) history.back();
+    else location.href='/obras.html';
+  });
+
+  // ---- carregamento ----
+  function carregarTemplates(){
+    if(S.categorias.length) return Promise.resolve();
+    return api('/templates').then(function(j){ S.categorias = j.categorias || []; });
+  }
+  function carregarLista(){
+    var q = S.filtro ? ('?cliente='+encodeURIComponent(S.filtro)) : '';
+    return api('/'+q).then(function(j){ S.lista = j.prontuarios || []; });
+  }
+  function carregarProntuario(id){
+    return api('/'+encodeURIComponent(id)).then(function(j){ S.atual = j.prontuario; });
+  }
+
+  // ---- render raiz ----
+  function render(){
+    var app = el('app');
+    if(S.view==='form'){ el('hSub').textContent = 'Novo prontuário'; return renderForm(app); }
+    if(S.view==='detail'){ return renderDetalhe(app); }
+    el('hSub').textContent = 'Serviços em acompanhamento';
+    return renderLista(app);
+  }
+
+  // ---- LISTA ----
+  function renderLista(app){
+    app.innerHTML = '<div class="card empty">Carregando prontuários…</div>';
+    carregarLista().then(function(){
+      var html = ''
+        + '<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+        +   '<div style="min-width:220px;flex:1"><input id="fBusca" placeholder="Buscar por cliente ou número (PRN-…)" value="'+esc(S.filtro)+'"></div>'
+        +   '<button class="btn btn-gold" id="bNovo">➕ Novo prontuário</button>'
+        + '</div>'
+        + '<div class="card"><h2>📋 Prontuários</h2><div id="listaBox"></div></div>';
+      app.innerHTML = html;
+      el('bNovo').addEventListener('click', function(){ irPara('form'); });
+      el('fBusca').addEventListener('change', function(){ S.filtro = this.value.trim(); renderLista(app); });
+
+      var box = el('listaBox');
+      if(!S.lista.length){ box.innerHTML = '<div class="empty">Nenhum prontuário ainda — clique em "Novo prontuário".</div>'; return; }
+      box.innerHTML = S.lista.map(function(p){
+        var pr = p.progresso || {};
+        return '<div class="entry" data-id="'+p.id+'">'
+          + '<div class="top"><div class="cli">'+esc(p.cliente.nome)+'</div>'
+          +   '<div><span class="chip num">'+esc(p.numero||('#'+p.id))+'</span> '+chipStatus(p.status)+'</div></div>'
+          + '<div class="srv">'+esc(p.servico_contratado.nome)+'</div>'
+          + '<div class="bar"><i style="width:'+(pr.percentual||0)+'%"></i></div>'
+          + '<div class="srv">'+(pr.concluidas||0)+' de '+(pr.total||0)+' etapas · '+(pr.percentual||0)+'%'
+          +   (p.servico_contratado.previsao_conclusao ? ' · previsão '+fmtData(p.servico_contratado.previsao_conclusao) : '')+'</div>'
+          + '</div>';
+      }).join('');
+      Array.prototype.forEach.call(box.querySelectorAll('.entry'), function(e){
+        e.addEventListener('click', function(){ irPara('detail', e.getAttribute('data-id')); });
+      });
+    }).catch(function(e){ app.innerHTML = '<div class="card empty">Erro: '+esc(e.message)+'</div>'; });
+  }
+
+  function chipStatus(s){
+    if(s==='concluido') return '<span class="chip ok">Concluído</span>';
+    if(s==='cancelado') return '<span class="chip cancel">Cancelado</span>';
+    return '<span class="chip warn">Em andamento</span>';
+  }
+
+  // ---- NOVO ----
+  function renderForm(app){
+    app.innerHTML = '<div class="card empty">Carregando serviços…</div>';
+    carregarTemplates().then(function(){
+      app.innerHTML = ''
+        + '<div class="card"><h2>👤 Cliente</h2>'
+        +   '<label>Nome *</label><input id="cNome" placeholder="Nome completo / razão social">'
+        +   '<div class="row2"><div><label>CPF/CNPJ</label><input id="cDoc"></div>'
+        +   '<div><label>Telefone</label><input id="cTel" placeholder="(99) 99999-9999"></div></div>'
+        + '</div>'
+        + '<div class="card"><h2>🧾 Serviço contratado</h2>'
+        +   '<label>Categoria *</label><select id="sCat"><option value="">Selecione…</option>'
+        +     S.categorias.map(function(c){ return '<option value="'+esc(c.chave)+'">'+esc(c.nome)+'</option>'; }).join('')
+        +   '</select>'
+        +   '<label>Tipo de serviço *</label><select id="sSub"><option value="">Escolha a categoria primeiro</option></select>'
+        +   '<div class="row2"><div><label>Data de contratação</label><input id="sData" type="date"></div>'
+        +   '<div><label>Previsão de conclusão</label><input id="sPrev" type="date"></div></div>'
+        +   '<label>Responsável</label><input id="sResp" placeholder="Quem toca o serviço">'
+        +   '<label>Observações</label><textarea id="sObs"></textarea>'
+        +   '<div id="previaBox" class="muted" style="margin-top:12px"></div>'
+        +   '<div class="btn-row"><button class="btn btn-primary" id="bSalvar">Abrir prontuário</button>'
+        +   '<button class="btn btn-ghost" id="bCancelar">Cancelar</button></div>'
+        + '</div>';
+
+      el('sCat').addEventListener('change', onCategoria);
+      el('sSub').addEventListener('change', mostrarPrevia);
+      el('bCancelar').addEventListener('click', function(){ irPara('list'); });
+      el('bSalvar').addEventListener('click', salvarNovo);
+    }).catch(function(e){ app.innerHTML = '<div class="card empty">Erro: '+esc(e.message)+'</div>'; });
+  }
+
+  function onCategoria(){
+    var chave = val('sCat');
+    var cat = S.categorias.filter(function(c){ return c.chave===chave; })[0];
+    var sel = el('sSub');
+    if(!cat){ sel.innerHTML = '<option value="">Escolha a categoria primeiro</option>'; el('previaBox').innerHTML=''; return; }
+    sel.innerHTML = '<option value="">Selecione…</option>' + cat.subTipos.map(function(s){
+      return '<option value="'+esc(s.chave)+'">'+esc(s.nome)+' ('+s.total_etapas+' etapas)</option>';
+    }).join('');
+    // Sub-tipo único: já seleciona, evita clique à toa.
+    if(cat.subTipos.length===1){ sel.value = cat.subTipos[0].chave; }
+    mostrarPrevia();
+  }
+
+  // Prévia do roteiro: o usuário vê as etapas ANTES de abrir o prontuário.
+  function mostrarPrevia(){
+    var cat = val('sCat'), sub = val('sSub');
+    var box = el('previaBox');
+    if(!cat){ box.innerHTML=''; return; }
+    box.innerHTML = 'Carregando roteiro…';
+    api('/templates?categoria='+encodeURIComponent(cat)+(sub?('&sub_tipo='+encodeURIComponent(sub)):'')).then(function(j){
+      var p = j.previa; if(!p){ box.innerHTML=''; return; }
+      box.innerHTML = '<b>Etapas que serão criadas ('+p.etapas.length+'):</b><ol style="margin:6px 0 0;padding-left:20px">'
+        + p.etapas.map(function(e){
+            return '<li>'+esc(e.nome)
+              + (e.checklist_documentos ? ' <span class="chip">📎 '+e.checklist_documentos.length+' docs</span>' : '')
+              + '</li>';
+          }).join('')
+        + '</ol>';
+    }).catch(function(){ box.innerHTML=''; });
+  }
+
+  function salvarNovo(){
+    if(!val('cNome')) return toast('Informe o nome do cliente.');
+    if(!val('sCat')) return toast('Escolha a categoria do serviço.');
+    if(!val('sSub')) return toast('Escolha o tipo de serviço.');
+    var b = el('bSalvar'); b.disabled = true; b.textContent = 'Abrindo…';
+    api('/', { method:'POST', body:{
+      cliente_nome: val('cNome'), cliente_cpf_cnpj: val('cDoc'), cliente_telefone: val('cTel'),
+      categoria: val('sCat'), sub_tipo: val('sSub'),
+      data_contratacao: val('sData'), previsao_conclusao: val('sPrev'),
+      responsavel: val('sResp'), observacoes: val('sObs')
+    }}).then(function(j){
+      toast('Prontuário '+j.numero+' aberto com '+j.etapas+' etapas.');
+      irPara('detail', String(j.id));
+    }).catch(function(e){
+      b.disabled = false; b.textContent = 'Abrir prontuário';
+      toast('Erro: '+e.message, 4200);
+    });
+  }
+
+  // ---- TELA ÚNICA DO PRONTUÁRIO ----
+  function renderDetalhe(app){
+    app.innerHTML = '<div class="card empty">Carregando prontuário…</div>';
+    carregarProntuario(S.detailId).then(function(){ pintarDetalhe(app); })
+      .catch(function(e){ app.innerHTML = '<div class="card empty">Erro: '+esc(e.message)+'</div>'; });
+  }
+
+  function pintarDetalhe(app){
+    var p = S.atual, pr = p.progresso || {}, sv = p.servico_contratado;
+    el('hSub').textContent = p.numero + ' · ' + p.cliente.nome;
+    app.innerHTML = ''
+      // cabeçalho
+      + '<div class="card">'
+      +   '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start">'
+      +     '<div><h2 style="border:0;margin:0;padding:0">'+esc(p.cliente.nome)+'</h2>'
+      +       '<div class="muted" style="margin-top:3px">'+esc(sv.nome)+'</div></div>'
+      +     '<div style="text-align:right"><span class="chip num">'+esc(p.numero)+'</span><br>'
+      +       '<span style="display:inline-block;margin-top:6px">'+chipStatus(p.status)+'</span></div>'
+      +   '</div>'
+      +   '<dl class="kv">'
+      +     '<dt>CPF/CNPJ</dt><dd>'+esc(p.cliente.cpf_cnpj||'—')+'</dd>'
+      +     '<dt>Telefone</dt><dd>'+esc(p.cliente.telefone||'—')+'</dd>'
+      +     '<dt>Contratação</dt><dd>'+fmtData(sv.data_contratacao)+'</dd>'
+      +     '<dt>Previsão</dt><dd>'+fmtData(sv.previsao_conclusao)+'</dd>'
+      +     '<dt>Responsável</dt><dd>'+esc(p.responsavel||'—')+'</dd>'
+      +   '</dl>'
+      +   '<div class="bar"><i style="width:'+(pr.percentual||0)+'%"></i></div>'
+      +   '<div class="muted" style="margin-top:6px"><b>'+(pr.percentual||0)+'%</b> · '
+      +     (pr.concluidas||0)+' concluídas · '+(pr.em_andamento||0)+' em andamento · '+(pr.pendentes||0)+' pendentes'
+      +     ' (de '+(pr.total||0)+')</div>'
+      +   (p.observacoes ? '<div class="muted" style="margin-top:8px;white-space:pre-wrap">📝 '+esc(p.observacoes)+'</div>' : '')
+      +   '<div class="btn-row">'
+      +     '<button class="btn btn-ghost btn-sm" id="bVoltar">‹ Todos os prontuários</button>'
+      +     (p.status==='concluido'
+        ? '<button class="btn btn-ghost btn-sm" id="bReabrir">↺ Reabrir serviço</button>'
+        : '<button class="btn btn-gold btn-sm" id="bEncerrar">✓ Encerrar serviço</button>')
+      +   '</div>'
+      + '</div>'
+      // timeline
+      + '<div class="card"><h2>🧭 Andamento das etapas</h2><ul class="tl" id="tl"></ul></div>';
+
+    el('bVoltar').addEventListener('click', function(){ irPara('list'); });
+    var bEnc = el('bEncerrar'); if(bEnc) bEnc.addEventListener('click', function(){ mudarStatusProntuario('concluido'); });
+    var bRe = el('bReabrir'); if(bRe) bRe.addEventListener('click', function(){ mudarStatusProntuario('em_andamento'); });
+
+    var tl = el('tl');
+    tl.innerHTML = (p.etapas||[]).map(pintarEtapa).join('');
+    ligarAcoesEtapas(tl);
+  }
+
+  function pintarEtapa(e){
+    var cls = e.status==='concluido' ? 'concluido' : (e.status==='em_andamento' ? 'andamento' : '');
+    var sub = [];
+    if(e.status==='concluido') sub.push('Concluída em '+fmtData(e.data_conclusao));
+    if(e.responsavel) sub.push('Resp.: '+esc(e.responsavel));
+    var docs = e.checklist_documentos || [];
+    var docsHtml = '';
+    if(docs.length){
+      var okCount = docs.filter(function(d){ return d.status==='ok'; }).length;
+      docsHtml = '<div class="docs"><div class="t">📎 Documentos ('+okCount+'/'+docs.length+')</div>'
+        + docs.map(function(d){
+            return '<div class="doc '+(d.status==='ok'?'ok':'')+'">'
+              + '<button data-doc="'+d.id+'" data-novo="'+(d.status==='ok'?'pendente':'ok')+'" title="Marcar">'
+              +   (d.status==='ok'?'✅':'⬜')+'</button>'
+              + '<span class="nm">'+esc(d.doc)+'</span></div>';
+          }).join('')
+        + '</div>';
+    }
+    return '<li class="step '+cls+'" data-ord="'+e.ordem+'">'
+      + '<div class="nome">'+esc(e.nome)+'</div>'
+      + (sub.length ? '<div class="sub">'+sub.join(' · ')+'</div>' : '')
+      + '<div class="acoes">'
+      +   (e.status!=='em_andamento' && e.status!=='concluido'
+            ? '<button class="btn btn-ghost btn-sm" data-etapa="'+e.id+'" data-status="em_andamento">▶ Iniciar</button>' : '')
+      +   (e.status!=='concluido'
+            ? '<button class="btn btn-primary btn-sm" data-etapa="'+e.id+'" data-status="concluido">✓ Concluir etapa</button>'
+            : '<button class="btn btn-ghost btn-sm" data-etapa="'+e.id+'" data-status="pendente">↺ Reabrir</button>')
+      +   '<button class="btn btn-ghost btn-sm" data-addoc="'+e.id+'">+ Documento</button>'
+      + '</div>'
+      + docsHtml
+      + '</li>';
+  }
+
+  function ligarAcoesEtapas(root){
+    Array.prototype.forEach.call(root.querySelectorAll('[data-etapa]'), function(b){
+      b.addEventListener('click', function(){
+        b.disabled = true;
+        api('/etapas/'+b.getAttribute('data-etapa'), { method:'PUT', body:{ status: b.getAttribute('data-status') } })
+          .then(function(j){ S.atual = j.prontuario; pintarDetalhe(el('app')); toast('Etapa atualizada.'); })
+          .catch(function(e){ b.disabled=false; toast('Erro: '+e.message, 4000); });
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-doc]'), function(b){
+      b.addEventListener('click', function(){
+        b.disabled = true;
+        api('/documentos/'+b.getAttribute('data-doc'), { method:'PUT', body:{ status: b.getAttribute('data-novo') } })
+          .then(function(j){ S.atual = j.prontuario; pintarDetalhe(el('app')); })
+          .catch(function(e){ b.disabled=false; toast('Erro: '+e.message, 4000); });
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-addoc]'), function(b){
+      b.addEventListener('click', function(){
+        var doc = prompt('Documento a exigir nesta etapa:');
+        if(!doc || !doc.trim()) return;
+        api('/etapas/'+b.getAttribute('data-addoc')+'/documentos', { method:'POST', body:{ doc: doc.trim() } })
+          .then(function(j){ S.atual = j.prontuario; pintarDetalhe(el('app')); toast('Documento adicionado.'); })
+          .catch(function(e){ toast('Erro: '+e.message, 4000); });
+      });
+    });
+  }
+
+  function mudarStatusProntuario(status){
+    api('/'+S.atual.id, { method:'PUT', body:{ status: status } })
+      .then(function(j){ S.atual = j.prontuario; pintarDetalhe(el('app'));
+        toast(status==='concluido' ? 'Serviço encerrado.' : 'Serviço reaberto.'); })
+      .catch(function(e){ toast('Erro: '+e.message, 4000); });
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

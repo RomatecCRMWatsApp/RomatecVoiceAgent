@@ -85,6 +85,7 @@ import pdfPrimeRouter from './routes/pdfPrime'; // v1.99.16 — export PDF templ
 import diligenciasRouter from './routes/diligencias'; // v3.54.0 — Diligências de Campo
 import wifiLeadRoutes from './routes/wifiLeadRoutes'; // v3.61.0 — Captive Portal / Leads Wi-Fi
 import diarioObraRouter from './routes/diarioObra'; // v3.125.0 — Diário de Obra (visitas técnicas)
+import prontuarioRouter from './routes/prontuario'; // v3.126.0 — Prontuário do Escritório (Multi-Serviços)
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -214,6 +215,7 @@ app.use('/api/gestao-obra/vto-checklist', vtoChecklistRouter); // v3.78.0 — VT
 app.use('/api/gestao-obra/entrega', obrasEntregaRouter); // v3.81.0 — Entrega de Obra (RE)
 app.use('/api/gestao-obra/inventario', inventarioObraRouter); // v3.97.0 — Inventário de Materiais por Obra
 app.use('/api/diarios-obra', diarioObraRouter); // v3.125.0 — Diário de Obra (visitas técnicas)
+app.use('/api/prontuarios', prontuarioRouter); // v3.126.0 — Prontuário do Escritório (Multi-Serviços)
 // v3.125.0: entradas de diário de UMA obra (aba dentro da obra).
 app.get('/api/obras/:obraId/diarios-obra', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -262,6 +264,11 @@ void (async () => {
 void (async () => {
   try { const m = await import('./database/migrations-diario-obra'); await m.runDiarioObraMigrations(); }
   catch (err) { console.error('[diario-obra-migrations] FALHA fatal:', err); }
+})();
+// v3.126.0: Prontuário do Escritório (prontuarios + etapas + checklist de docs)
+void (async () => {
+  try { const m = await import('./database/migrations-prontuario'); await m.runProntuarioMigrations(); }
+  catch (err) { console.error('[prontuario-migrations] FALHA fatal:', err); }
 })();
 
 // v1.99.15: Live Feed Universal — feed animado no topo de toda aba.
