@@ -128,7 +128,9 @@
   function modal(html){ document.getElementById('modalBox').innerHTML = html; document.getElementById('modalBg').classList.add('open'); }
   function fecharModal(){ document.getElementById('modalBg').classList.remove('open'); }
   window.diarioFecharModal = fecharModal;
-  document.getElementById('modalBg').addEventListener('click', function(e){ if(e.target===this) fecharModal(); });
+  // v3.127.0: fechar pelo fundo também encerra gravação em curso — senão o
+  // microfone continuava aberto e a transcrição caía numa textarea destruída.
+  document.getElementById('modalBg').addEventListener('click', function(e){ if(e.target===this){ pararVoz(); fecharModal(); } });
   document.getElementById('hBack').addEventListener('click', function(){
     if(S.view!=='list'){ S.view='list'; S.detailId=0; render(); } else { history.length>1 ? history.back() : (location.href='/obras.html'); }
   });
@@ -228,6 +230,9 @@
       anexos:[],   // File[]
     };
   }
+  // v3.127.0: "store" = { textos:{}, desenhos:[] }. O mesmo componente de campo
+  // atende a entrada NOVA (store = S.draft) e a EDIÇÃO de entrada existente
+  // (store local do modal) — antes o ditado e a caneta só existiam ao criar.
   function fieldHtml(c, val){
     return '<div class="field" data-campo="'+c.key+'">'+
       '<label>'+c.label+' <span class="muted" style="font-weight:400">— '+c.hint+'</span></label>'+
@@ -275,67 +280,137 @@
     document.getElementById('btnSalvar').onclick = salvarEntrada;
 
     // liga cada campo multimodo
-    CAMPOS.forEach(function(c){ ligarCampo(c.key); });
+    ligarCampos(app, S.draft, function(){ renderDesenhoThumbs(app, S.draft); });
     renderAnexoThumbs();
-    renderDesenhoThumbs();
   }
-  function ligarCampo(key){
-    var wrap = document.querySelector('.field[data-campo="'+key+'"]');
+  // root  = elemento que contém os .field (form em #app ou o corpo do modal)
+  // store = { textos:{}, desenhos:[] }
+  // aoVoltar = re-render depois que o pad de desenho fecha (o modal de edição
+  //            precisa se repintar; o formulário só atualiza as miniaturas)
+  function ligarCampos(root, store, aoVoltar){
+    CAMPOS.forEach(function(c){ ligarCampo(root, c.key, store, aoVoltar); });
+    renderDesenhoThumbs(root, store);
+  }
+  function ligarCampo(root, key, store, aoVoltar){
+    var wrap = root.querySelector('.field[data-campo="'+key+'"]');
+    if(!wrap) return;
     var ta = wrap.querySelector('textarea[data-t="'+key+'"]');
-    ta.oninput = function(){ S.draft.textos[key]=ta.value; };
+    ta.oninput = function(){ store.textos[key]=ta.value; };
     var botoes = wrap.querySelectorAll('.mode-b');
     Array.prototype.forEach.call(botoes, function(b){
       b.onclick = function(){
         var m = b.getAttribute('data-m');
         if(m==='type'){ setModeOn(botoes,b); ta.focus(); }
-        else if(m==='voice'){ toggleVoice(key, b, ta, botoes); }
-        else if(m==='draw'){ abrirDesenho(key); }
+        else if(m==='voice'){ toggleVoice(key, b, ta, botoes, store); }
+        else if(m==='draw'){
+          // Guarda o que já foi digitado antes de trocar a tela pelo pad —
+          // no modal de edição a textarea é destruída ao abrir o desenho.
+          store.textos[key] = ta.value;
+          abrirDesenho(key, store, aoVoltar);
+        }
       };
     });
   }
   function setModeOn(botoes, ativo){ Array.prototype.forEach.call(botoes,function(x){ x.classList.remove('on'); x.classList.remove('rec'); }); ativo.classList.add('on'); }
 
   // ---- Ditado por voz (transcrição server-side, NÃO aciona a ZAYRA) ----
-  var REC = { mr:null, chunks:[], key:null, btn:null };
-  function toggleVoice(key, btn, ta, botoes){
+  // O formato gravado MUDA por navegador: Chrome/Android entregam audio/webm,
+  // Safari/iPad entregam audio/mp4. O Whisper identifica o container pela
+  // extensão do arquivo enviado, então o nome do upload sai do mimeType REAL do
+  // MediaRecorder — mandar tudo como "ditado.webm" rotulava errado o áudio do
+  // iPad. O servidor faz o mesmo com o arquivo temporário (extensaoDeMime em
+  // src/agent/transcribe.ts).
+  var MIME_EXT = [
+    ['audio/webm','webm'], ['video/webm','webm'], ['audio/ogg','ogg'], ['audio/oga','oga'],
+    ['audio/opus','ogg'], ['audio/mp4','mp4'], ['video/mp4','mp4'], ['audio/x-m4a','m4a'],
+    ['audio/m4a','m4a'], ['audio/aac','m4a'], ['audio/mpeg','mp3'], ['audio/mp3','mp3'],
+    ['audio/wav','wav'], ['audio/wave','wav'], ['audio/x-wav','wav'], ['audio/flac','flac']
+  ];
+  function extDeMime(mime){
+    var base = String(mime||'').split(';')[0].trim().toLowerCase();
+    for(var i=0;i<MIME_EXT.length;i++){ if(MIME_EXT[i][0]===base) return MIME_EXT[i][1]; }
+    return 'webm';
+  }
+  // Gravação esquecida estoura o limite de 25MB do upload e só falha no FIM,
+  // depois de a pessoa ter falado tudo. Corta em 5 min e transcreve o que tem.
+  var LIMITE_GRAVACAO_MS = 5*60*1000;
+  var REC = { mr:null, chunks:[], key:null, btn:null, timer:null };
+  function toggleVoice(key, btn, ta, botoes, store){
     if(REC.mr && REC.key===key){ pararVoz(); return; }
     if(REC.mr){ pararVoz(); }
-    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast('Microfone não disponível neste dispositivo.'); return; }
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      toast('Este navegador não permite gravar áudio. Digite ou use a caneta.', 4200); return;
+    }
+    if(typeof window.MediaRecorder === 'undefined'){
+      // iOS < 14.3 tem getUserMedia mas não MediaRecorder — sem esta checagem o
+      // erro caía no catch genérico e acusava falta de microfone, enganando quem
+      // estava no iPad antigo.
+      toast('Gravação não suportada neste navegador (atualize o iOS). Digite ou use a caneta.', 5000); return;
+    }
     navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
-      var mr = new MediaRecorder(stream);
-      REC.mr=mr; REC.chunks=[]; REC.key=key; REC.btn=btn; REC.ta=ta;
+      var mr;
+      try { mr = new MediaRecorder(stream); }
+      catch(err){
+        stream.getTracks().forEach(function(t){ t.stop(); });
+        toast('Não foi possível iniciar a gravação neste dispositivo.', 4200); return;
+      }
+      REC.mr=mr; REC.chunks=[]; REC.key=key; REC.btn=btn;
       mr.ondataavailable=function(e){ if(e.data&&e.data.size) REC.chunks.push(e.data); };
       mr.onstop=function(){
         stream.getTracks().forEach(function(t){ t.stop(); });
-        var blob = new Blob(REC.chunks, {type: mr.mimeType||'audio/webm'});
-        enviarAudio(blob, key, ta);
+        if(REC.timer){ clearTimeout(REC.timer); REC.timer=null; }
+        // mr.mimeType é o que o navegador REALMENTE gravou.
+        var tipo = mr.mimeType || (REC.chunks[0] && REC.chunks[0].type) || 'audio/webm';
+        var blob = new Blob(REC.chunks, {type: tipo});
+        if(!blob.size){ toast('Nada foi gravado — tente de novo.'); REC.mr=null; REC.key=null; return; }
+        enviarAudio(blob, key, ta, store);
       };
       mr.start();
+      REC.timer = setTimeout(function(){
+        if(REC.mr && REC.mr.state!=='inactive'){ toast('Limite de 5 min — transcrevendo o que foi gravado.', 4000); pararVoz(); }
+      }, LIMITE_GRAVACAO_MS);
       setModeOn(botoes, btn); btn.classList.add('rec'); btn.textContent='⏹️ Parar';
       toast('Gravando… toque em Parar para transcrever.');
-    }).catch(function(){ toast('Não foi possível acessar o microfone.'); });
+    }).catch(function(){ toast('Permissão de microfone negada ou indisponível.', 4200); });
   }
   function pararVoz(){
     if(REC.btn){ REC.btn.classList.remove('rec'); REC.btn.textContent='🎙️ Ditar'; }
+    if(REC.timer){ clearTimeout(REC.timer); REC.timer=null; }
     try{ if(REC.mr && REC.mr.state!=='inactive') REC.mr.stop(); }catch(e){}
   }
-  function enviarAudio(blob, key, ta){
+  function enviarAudio(blob, key, ta, store){
     toast('Transcrevendo…');
-    var fd = new FormData(); fd.append('audio', blob, 'ditado.webm');
+    var fd = new FormData();
+    fd.append('audio', blob, 'ditado.'+extDeMime(blob.type));
     fetch(API+'/transcrever',{method:'POST',credentials:'include',body:fd})
       .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||'falha'); return j; }); })
       .then(function(j){
-        var novo = (ta.value ? ta.value.replace(/\s*$/,'')+' ' : '') + (j.texto||'').trim();
-        ta.value = novo; S.draft.textos[key]=novo;
-        toast(j.texto ? 'Transcrito ✓' : 'Nada reconhecido.');
+        var texto = (j.texto||'').trim();
+        if(!texto){ toast('Nada reconhecido no áudio.'); return; }
+        // Ditar de novo ACRESCENTA ao que já existe, não substitui.
+        var novo = (ta.value ? ta.value.replace(/\s*$/,'')+' ' : '') + texto;
+        ta.value = novo; store.textos[key]=novo;
+        toast('Transcrito ✓');
       })
       .catch(function(e){ toast('Erro na transcrição: '+e.message); })
       .then(function(){ REC.mr=null; REC.key=null; });
   }
 
   // ---- Escrita a mão (canvas livre) ----
-  var PAD = { ctx:null, drawing:false, color:'#14472B', size:3, last:null };
-  function abrirDesenho(campoRef){
+  // Entrada em tablet, ponto a ponto:
+  //  - Pointer Events QUANDO existirem, e aí touch NÃO é ligado junto. Antes os
+  //    dois estavam registrados e o mesmo toque disparava start/move duas vezes.
+  //  - setPointerCapture: o traço continua se o dedo/caneta sai do canvas, e o
+  //    pointerup chega no próprio canvas — sem listener pendurado no window
+  //    (que antes vazava um a cada abertura do pad).
+  //  - pointercancel: palma da mão ou gesto do sistema cancelam o ponteiro. Sem
+  //    tratar, ficava drawing=true com o último ponto velho e o toque seguinte
+  //    riscava a tela inteira.
+  //  - Rejeição de palma: se a caneta encostou uma vez, toques de dedo passam a
+  //    ser ignorados até o pad fechar (Apple Pencil apoiando a mão na tela).
+  //  - devicePixelRatio: sem isso o traço sai borrado em tela retina.
+  var PAD = { ctx:null, drawing:false, color:'#14472B', size:3, last:null, sujo:false, caneta:false, ptr:null };
+  function abrirDesenho(campoRef, store, aoVoltar){
     modal(
       '<h2>✍️ Anotação a mão — '+esc(rotuloCampo(campoRef))+'</h2>'+
       '<div class="draw-wrap"><canvas id="pad" width="600" height="380"></canvas></div>'+
@@ -350,49 +425,111 @@
       '</div>'+
       '<div class="btn-row">'+
         '<button class="btn btn-primary" id="padSave">Anexar anotação</button>'+
-        '<button class="btn btn-ghost" onclick="diarioFecharModal()">Cancelar</button>'+
+        '<button class="btn btn-ghost" id="padCancel">Cancelar</button>'+
       '</div>'
     );
     var cv = document.getElementById('pad');
-    // ajusta resolução ao tamanho renderizado (pen do tablet)
-    var rect = cv.getBoundingClientRect();
-    cv.width = Math.round(rect.width); cv.height = Math.round(rect.width*0.62);
-    PAD.ctx = cv.getContext('2d');
-    PAD.ctx.fillStyle='#fff'; PAD.ctx.fillRect(0,0,cv.width,cv.height);
-    PAD.ctx.lineJoin='round'; PAD.ctx.lineCap='round';
-    PAD.color='#14472B'; PAD.size=3;
-    function pos(ev){ var r=cv.getBoundingClientRect(); var t=ev.touches?ev.touches[0]:ev; return {x:(t.clientX-r.left)*(cv.width/r.width), y:(t.clientY-r.top)*(cv.height/r.height)}; }
-    function start(ev){ ev.preventDefault(); PAD.drawing=true; PAD.last=pos(ev); }
-    function move(ev){ if(!PAD.drawing) return; ev.preventDefault(); var p=pos(ev); var x=PAD.ctx;
-      x.strokeStyle=PAD.color; x.lineWidth=PAD.size; x.beginPath(); x.moveTo(PAD.last.x,PAD.last.y); x.lineTo(p.x,p.y); x.stroke(); PAD.last=p; }
-    function end(){ PAD.drawing=false; }
-    cv.addEventListener('pointerdown',start); cv.addEventListener('pointermove',move);
-    window.addEventListener('pointerup',end);
-    cv.addEventListener('touchstart',start,{passive:false}); cv.addEventListener('touchmove',move,{passive:false}); cv.addEventListener('touchend',end);
+    // Resolução real = CSS px × devicePixelRatio (teto de 3 pra não estourar
+    // memória em tela 4x). O contexto é escalado, então todo o resto do código
+    // continua raciocinando em CSS px.
+    var larguraCss = Math.round(cv.getBoundingClientRect().width) || 600;
+    var alturaCss  = Math.round(larguraCss*0.62);
+    var dpr = Math.min(window.devicePixelRatio || 1, 3);
+    cv.width  = Math.round(larguraCss*dpr);
+    cv.height = Math.round(alturaCss*dpr);
+    cv.style.height = alturaCss+'px';
+    var ctx = cv.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,larguraCss,alturaCss);
+    ctx.lineJoin='round'; ctx.lineCap='round';
+    PAD.ctx=ctx; PAD.color='#14472B'; PAD.size=3;
+    PAD.drawing=false; PAD.last=null; PAD.sujo=false; PAD.caneta=false; PAD.ptr=null;
+
+    function pos(ev){
+      var r = cv.getBoundingClientRect();
+      var t = ev.touches ? ev.touches[0] : ev;
+      return { x:(t.clientX-r.left)*(larguraCss/r.width), y:(t.clientY-r.top)*(alturaCss/r.height) };
+    }
+    // Dedo é ignorado depois que a caneta encostou (palma apoiada na tela).
+    function ignorar(ev){
+      if(ev.pointerType==='pen'){ PAD.caneta=true; return false; }
+      return PAD.caneta && ev.pointerType==='touch';
+    }
+    function risco(a, b){
+      ctx.strokeStyle=PAD.color; ctx.lineWidth=PAD.size;
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    }
+    function start(ev){
+      if(ignorar(ev)) return;
+      ev.preventDefault();
+      PAD.drawing=true; PAD.last=pos(ev); PAD.sujo=true;
+      // Ponto isolado (toque curto) também precisa marcar.
+      risco(PAD.last, {x:PAD.last.x+0.01, y:PAD.last.y});
+      if(ev.pointerId!=null && cv.setPointerCapture){
+        PAD.ptr=ev.pointerId;
+        try{ cv.setPointerCapture(ev.pointerId); }catch(e){}
+      }
+    }
+    function move(ev){
+      if(!PAD.drawing || ignorar(ev)) return;
+      ev.preventDefault();
+      var p = pos(ev); risco(PAD.last, p); PAD.last=p;
+    }
+    function end(){
+      PAD.drawing=false; PAD.last=null;
+      if(PAD.ptr!=null && cv.releasePointerCapture){
+        try{ cv.releasePointerCapture(PAD.ptr); }catch(e){}
+        PAD.ptr=null;
+      }
+    }
+    if(window.PointerEvent){
+      cv.addEventListener('pointerdown',start);
+      cv.addEventListener('pointermove',move);
+      cv.addEventListener('pointerup',end);
+      cv.addEventListener('pointercancel',end);   // palma/gesto do sistema
+      cv.addEventListener('pointerleave',end);
+    } else {
+      // Só entra aqui em navegador sem Pointer Events (iOS antigo).
+      cv.addEventListener('touchstart',start,{passive:false});
+      cv.addEventListener('touchmove',move,{passive:false});
+      cv.addEventListener('touchend',end);
+      cv.addEventListener('touchcancel',end);
+      cv.addEventListener('mousedown',start);
+      cv.addEventListener('mousemove',move);
+      cv.addEventListener('mouseup',end);
+      cv.addEventListener('mouseleave',end);
+    }
     Array.prototype.forEach.call(document.querySelectorAll('.swatch'),function(s){
       s.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('.swatch'),function(z){z.classList.remove('on');}); s.classList.add('on'); PAD.color=s.getAttribute('data-c'); };
     });
     document.getElementById('padThin').onclick=function(){ PAD.size=2; };
     document.getElementById('padThick').onclick=function(){ PAD.size=6; };
-    document.getElementById('padClear').onclick=function(){ PAD.ctx.fillStyle='#fff'; PAD.ctx.fillRect(0,0,cv.width,cv.height); };
+    document.getElementById('padClear').onclick=function(){
+      ctx.fillStyle='#fff'; ctx.fillRect(0,0,larguraCss,alturaCss); PAD.sujo=false;
+    };
+    document.getElementById('padCancel').onclick=function(){ fecharModal(); if(aoVoltar) aoVoltar(); };
     document.getElementById('padSave').onclick=function(){
+      // Sem traço nenhum o PNG seria um retângulo branco anexado à entrada.
+      if(!PAD.sujo){ toast('Escreva ou desenhe algo antes de anexar.'); return; }
       var url = cv.toDataURL('image/png');
-      S.draft.desenhos.push({ base64:url, campo_referencia:campoRef, nome:'anotacao-'+campoRef+'.png', url:url });
-      fecharModal(); renderDesenhoThumbs(); toast('Anotação anexada ✓');
+      store.desenhos.push({ base64:url, campo_referencia:campoRef, nome:'anotacao-'+campoRef+'.png', url:url });
+      fecharModal();
+      if(aoVoltar) aoVoltar();
+      toast('Anotação anexada ✓');
     };
   }
   function rotuloCampo(k){ var m={observacoes:'Observações',pendencias:'Pendências',solicitacoes_proprietario:'Solicitações'}; return m[k]||k; }
 
-  function renderDesenhoThumbs(){
+  function renderDesenhoThumbs(root, store){
     CAMPOS.forEach(function(c){
-      var box = document.querySelector('.thumbs[data-thumbs="'+c.key+'"]'); if(!box) return;
-      var meus = S.draft.desenhos.map(function(d,i){ return {d:d,i:i}; }).filter(function(x){ return x.d.campo_referencia===c.key; });
+      var box = root.querySelector('.thumbs[data-thumbs="'+c.key+'"]'); if(!box) return;
+      var meus = store.desenhos.map(function(d,i){ return {d:d,i:i}; }).filter(function(x){ return x.d.campo_referencia===c.key; });
       box.innerHTML = meus.map(function(x){
         return '<div class="thumb"><img src="'+x.d.url+'"><div class="cap">✍️ anotação</div>'+
           '<button class="rm" data-i="'+x.i+'">×</button></div>';
       }).join('');
       Array.prototype.forEach.call(box.querySelectorAll('.rm'),function(b){
-        b.onclick=function(){ S.draft.desenhos.splice(parseInt(b.getAttribute('data-i'),10),1); renderDesenhoThumbs(); };
+        b.onclick=function(){ store.desenhos.splice(parseInt(b.getAttribute('data-i'),10),1); renderDesenhoThumbs(root, store); };
       });
     });
   }
@@ -490,28 +627,69 @@
       }
     }).catch(function(e){ app.innerHTML='<div class="empty">Erro: '+esc(e.message)+'</div>'; });
   }
+  // v3.127.0: a edição passou a usar os MESMOS campos multimodo da entrada nova
+  // (digitar / ditar / desenhar). Antes só tinha textarea, então quem esquecia
+  // uma pendência na visita não conseguia ditá-la nem anexar anotação depois —
+  // tinha que apagar a entrada e refazer. As anotações novas sobem em
+  // POST /:id/anexos (rota que já existia e nenhuma tela chamava).
   function abrirEdicao(d){
-    modal(
-      '<h2>✏️ Editar entrada</h2>'+
-      '<div class="row2">'+
-        '<div><label>Data</label><input type="date" id="eData" value="'+esc(String(d.data_visita).slice(0,10))+'"></div>'+
-        '<div><label>Hora</label><input type="time" id="eHora" value="'+esc((d.hora_visita||'').slice(0,5))+'"></div>'+
-      '</div>'+
-      '<label>Observações</label><textarea id="eObs">'+esc(d.observacoes||'')+'</textarea>'+
-      '<label>Pendências</label><textarea id="ePend">'+esc(d.pendencias||'')+'</textarea>'+
-      '<label>Solicitações do Proprietário</label><textarea id="eSol">'+esc(d.solicitacoes_proprietario||'')+'</textarea>'+
-      '<div class="btn-row"><button class="btn btn-primary" id="eSave">Salvar</button>'+
-        '<button class="btn btn-ghost" onclick="diarioFecharModal()">Cancelar</button></div>'
-    );
-    document.getElementById('eSave').onclick=function(){
-      var body={ data_visita:document.getElementById('eData').value,
-        hora_visita:document.getElementById('eHora').value+':00',
-        observacoes:document.getElementById('eObs').value,
-        pendencias:document.getElementById('ePend').value,
-        solicitacoes_proprietario:document.getElementById('eSol').value };
-      api('/'+d.id,{method:'PUT',body:body}).then(function(){ fecharModal(); toast('Salvo ✓'); renderDetail(); })
-        .catch(function(e){ toast('Erro: '+e.message); });
+    var store = {
+      textos: {
+        observacoes: d.observacoes||'',
+        pendencias: d.pendencias||'',
+        solicitacoes_proprietario: d.solicitacoes_proprietario||''
+      },
+      desenhos: [],
+      data: String(d.data_visita).slice(0,10),
+      hora: (d.hora_visita||'').slice(0,5)
     };
+    function pintar(){
+      modal(
+        '<h2>✏️ Editar entrada</h2>'+
+        '<div class="row2">'+
+          '<div><label>Data</label><input type="date" id="eData" value="'+esc(store.data)+'"></div>'+
+          '<div><label>Hora</label><input type="time" id="eHora" value="'+esc(store.hora)+'"></div>'+
+        '</div>'+
+        CAMPOS.map(function(c){ return fieldHtml(c, store.textos[c.key]); }).join('')+
+        '<div class="btn-row"><button class="btn btn-primary" id="eSave">Salvar</button>'+
+          '<button class="btn btn-ghost" id="eCancel">Cancelar</button></div>'
+      );
+      var box = document.getElementById('modalBox');
+      document.getElementById('eData').onchange=function(){ store.data=this.value; };
+      document.getElementById('eHora').onchange=function(){ store.hora=this.value; };
+      // aoVoltar = repinta o modal de edição depois de fechar o pad de desenho
+      // (o pad ocupa o mesmo modal; sem isso a edição sumia da tela).
+      ligarCampos(box, store, pintar);
+      document.getElementById('eCancel').onclick=function(){ pararVoz(); fecharModal(); };
+      document.getElementById('eSave').onclick=salvar;
+    }
+    function salvar(){
+      pararVoz();
+      var btn = document.getElementById('eSave'); btn.disabled=true; btn.textContent='Salvando…';
+      var body = {
+        data_visita: store.data,
+        hora_visita: (store.hora||'00:00')+':00',
+        observacoes: store.textos.observacoes,
+        pendencias: store.textos.pendencias,
+        solicitacoes_proprietario: store.textos.solicitacoes_proprietario
+      };
+      api('/'+d.id,{method:'PUT',body:body})
+        .then(function(){
+          if(!store.desenhos.length) return null;
+          var fd = new FormData();
+          fd.append('desenhos_json', JSON.stringify(store.desenhos.map(function(x){
+            return { base64:x.base64, campo_referencia:x.campo_referencia, nome:x.nome };
+          })));
+          return fetch(API+'/'+d.id+'/anexos',{method:'POST',credentials:'include',body:fd})
+            .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||'falha ao anexar anotação'); return j; }); });
+        })
+        .then(function(){ fecharModal(); toast('Salvo ✓'); renderDetail(); })
+        .catch(function(e){
+          btn.disabled=false; btn.textContent='Salvar';
+          toast('Erro: '+e.message, 4200);
+        });
+    }
+    pintar();
   }
 
   // ---- router ----
