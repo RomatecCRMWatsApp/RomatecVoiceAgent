@@ -10,7 +10,9 @@ import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { requireAuth, type AuthedRequest } from '../middleware/auth';
 import * as repo from '../services/diario/diarioObraRepo';
+import * as assinRepo from '../services/diario/diarioAssinaturaRepo';
 import { transcribeAudio } from '../agent/transcribe';
+import { getBaseUrl } from '../services/reciboPdf';
 
 const router = Router();
 // Upload em memória (mesmo padrão da galeria/inventário — Railway sem disco).
@@ -221,6 +223,144 @@ router.delete('/anexos/:anexoId', requireAuth, async (req: Request, res: Respons
   try {
     await repo.excluirAnexo(Number(req.params.anexoId));
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ASSINATURA FORMAL (v3.128.0) — proprietário/responsável assina a visita.
+// A página pública de verificação vive em /v/diario/:hash (fora da auth).
+// ─────────────────────────────────────────────────────────────────────────────
+const PAPEIS: assinRepo.PapelSignatario[] = ['proprietario', 'responsavel'];
+function papelDe(v: unknown): assinRepo.PapelSignatario {
+  return PAPEIS.includes(v as assinRepo.PapelSignatario) ? (v as assinRepo.PapelSignatario) : 'proprietario';
+}
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Lista as assinaturas de uma entrada (metadados, sem a rubrica pesada).
+router.get('/:id/assinaturas', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await repo.obterDiario(id))) return res.status(404).json({ error: 'Entrada não encontrada.' });
+    res.json({ ok: true, assinaturas: await assinRepo.listarAssinaturasDoDiario(id, false) });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// Coleta uma assinatura. Congela o conteúdo do diário (snapshot) no ato.
+router.post('/:id/assinaturas', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const diario = await repo.obterDiario(id);
+    if (!diario) return res.status(404).json({ error: 'Entrada não encontrada.' });
+    if (!podeEditar(await repo.donoDoDiario(id), userDe(req))) {
+      return res.status(403).json({ error: 'Só o autor do lançamento (ou um admin) pode colher assinatura.' });
+    }
+
+    const b = req.body ?? {};
+    const nome = txt(b.signatario_nome);
+    if (!nome) return res.status(400).json({ error: 'Nome do signatário é obrigatório.' });
+    const rubrica = String(b.assinatura_b64 ?? '');
+    if (!rubrica || assinRepo.apenasBase64(rubrica).length < 100) {
+      return res.status(400).json({ error: 'Assinatura (rubrica) é obrigatória — desenhe no campo de assinatura.' });
+    }
+
+    const snapshot: assinRepo.SnapshotDiario = {
+      diario_id: id,
+      obra_id: diario.obra_id ?? null,
+      obra_nome: diario.obra_nome ?? null,
+      data_visita: diario.data_visita,
+      hora_visita: diario.hora_visita,
+      observacoes: diario.observacoes ?? null,
+      pendencias: diario.pendencias ?? null,
+      solicitacoes_proprietario: diario.solicitacoes_proprietario ?? null,
+    };
+
+    const ip = (req.get('x-forwarded-for') || '').split(',')[0].trim() || req.ip || null;
+    const criada = await assinRepo.criarAssinatura({
+      diario_id: id,
+      obra_id: diario.obra_id ?? null,
+      signatario_nome: nome,
+      signatario_cpf: txt(b.signatario_cpf),
+      signatario_papel: papelDe(b.signatario_papel),
+      assinatura_b64: rubrica,
+      snapshot,
+      latitude: numOrNull(b.latitude),
+      longitude: numOrNull(b.longitude),
+      local_texto: txt(b.local_texto),
+      ip,
+      user_agent: (req.get('user-agent') || '').slice(0, 255) || null,
+      criado_por: userDe(req).sub,
+    });
+
+    const linkPublico = `${getBaseUrl()}/v/diario/${criada.hash}`;
+    res.status(201).json({ ok: true, id: criada.id, hash: criada.hash, assinado_em: criada.assinado_em, link_publico: linkPublico });
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    if (/Duplicate|ER_DUP_ENTRY/i.test(msg)) {
+      return res.status(409).json({ error: 'Esta assinatura já foi registrada.' });
+    }
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Anula uma assinatura (dono do diário ou admin) — mantém a linha, marca status.
+router.post('/assinaturas/:assinaturaId/anular', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const a = await assinRepo.obterAssinatura(Number(req.params.assinaturaId));
+    if (!a) return res.status(404).json({ error: 'Assinatura não encontrada.' });
+    if (!podeEditar(await repo.donoDoDiario(a.diario_id), userDe(req))) {
+      return res.status(403).json({ error: 'Sem permissão para anular esta assinatura.' });
+    }
+    await assinRepo.anularAssinatura(a.id);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// PDF do diário assinado (autenticado — o link público tem sua própria rota).
+router.get('/assinaturas/:assinaturaId/pdf', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const a = await assinRepo.obterAssinatura(Number(req.params.assinaturaId));
+    if (!a || !a.snapshot) return res.status(404).json({ error: 'Assinatura não encontrada.' });
+    const { gerarAssinaturaPdf } = await import('../services/diario/diarioAssinaturaPdf');
+    const pdf = await gerarAssinaturaPdf({
+      assinatura: a,
+      snapshot: a.snapshot,
+      linkPublico: `${getBaseUrl()}/v/diario/${a.hash_validacao}`,
+      integro: assinRepo.conferirIntegridade(a),
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="diario-assinado-${a.id}.pdf"`);
+    res.send(pdf);
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+
+// Envia o PDF assinado por WhatsApp (Z-API). { telefone }
+router.post('/assinaturas/:assinaturaId/enviar', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const a = await assinRepo.obterAssinatura(Number(req.params.assinaturaId));
+    if (!a || !a.snapshot) return res.status(404).json({ error: 'Assinatura não encontrada.' });
+    const telefone = txt(req.body?.telefone);
+    if (!telefone) return res.status(400).json({ error: 'Telefone de destino é obrigatório.' });
+
+    const { gerarAssinaturaPdf } = await import('../services/diario/diarioAssinaturaPdf');
+    const { enviarAssinaturaWhatsapp } = await import('../services/diario/diarioAssinaturaEnvio');
+    const pdf = await gerarAssinaturaPdf({
+      assinatura: a,
+      snapshot: a.snapshot,
+      linkPublico: `${getBaseUrl()}/v/diario/${a.hash_validacao}`,
+      integro: assinRepo.conferirIntegridade(a),
+    });
+    const nomeObra = a.snapshot.obra_nome || (a.snapshot.obra_id ? 'Obra ' + a.snapshot.obra_id : 'Diário');
+    const r = await enviarAssinaturaWhatsapp({
+      telefone,
+      pdf,
+      nomeArquivo: `diario-assinado-${a.id}.pdf`,
+      legenda: `📔 Relatório de visita técnica assinado — ${nomeObra}.\nVerifique a autenticidade em: ${getBaseUrl()}/v/diario/${a.hash_validacao}`,
+    });
+    res.json({ ok: true, messageId: r.messageId });
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
 

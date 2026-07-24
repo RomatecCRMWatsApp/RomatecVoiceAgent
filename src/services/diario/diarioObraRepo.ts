@@ -175,9 +175,12 @@ export async function atualizarDiario(id: number, campos: {
   await pool.execute(`UPDATE diarios_obra SET ${sets.join(', ')} WHERE id = ?`, vals);
 }
 
-// Exclui a entrada e, em cascata (aplicação), todos os anexos dela.
+// Exclui a entrada e, em cascata (aplicação), todos os anexos e assinaturas.
+// v3.128.0: as assinaturas formais (diario_obra_assinaturas) caem junto — a
+// tabela é do mesmo módulo e não tem FK dura (convenção do Diário de Obra).
 export async function excluirDiario(id: number): Promise<void> {
   await pool.execute(`DELETE FROM diarios_obra_anexos WHERE diario_id = ?`, [id]);
+  await pool.execute(`DELETE FROM diario_obra_assinaturas WHERE diario_id = ?`, [id]);
   await pool.execute(`DELETE FROM diarios_obra WHERE id = ?`, [id]);
 }
 

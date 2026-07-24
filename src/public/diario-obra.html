@@ -605,6 +605,11 @@
           CAMPOS.map(campoBloco).join('') +
           (gerais.length?'<div class="dfield"><div class="h">Anexos gerais</div><div class="thumbs">'+gerais.map(anexoThumb).join('')+'</div></div>':'')+
         '</div>'+
+        // v3.128.0: bloco de assinaturas formais (proprietário/responsável).
+        '<div class="card"><div class="dfield"><div class="h">✍️ Assinaturas</div>'+
+          '<div id="assinBox"><div class="muted">Carregando…</div></div>'+
+          (podeEditar(d)?'<div class="btn-row"><button class="btn btn-gold" id="btnAssinar">✍️ Colher assinatura</button></div>':'')+
+        '</div></div>'+
         (podeEditar(d)?
           '<div class="btn-row">'+
             '<button class="btn btn-ghost" id="btnEditar">✏️ Editar</button>'+
@@ -617,6 +622,9 @@
             .then(function(r){ if(!r.ok) throw new Error(); toast('Anexo removido'); renderDetail(); })
             .catch(function(){ toast('Erro ao remover.'); }); };
       });
+      carregarAssinaturas(d);
+      var bAssinar=document.getElementById('btnAssinar');
+      if(bAssinar) bAssinar.onclick=function(){ abrirAssinatura(d); };
       if(podeEditar(d)){
         document.getElementById('btnEditar').onclick=function(){ abrirEdicao(d); };
         document.getElementById('btnExcluir').onclick=function(){
@@ -626,6 +634,117 @@
         };
       }
     }).catch(function(e){ app.innerHTML='<div class="empty">Erro: '+esc(e.message)+'</div>'; });
+  }
+
+  // ---- Assinatura formal (v3.128.0) ----
+  function papelLabel(p){ return p==='responsavel' ? 'Responsável pela obra' : 'Proprietário'; }
+  function carregarAssinaturas(d){
+    var box = document.getElementById('assinBox'); if(!box) return;
+    api('/'+d.id+'/assinaturas').then(function(j){
+      var lista = j.assinaturas||[];
+      if(!lista.length){ box.innerHTML='<div class="muted">Nenhuma assinatura ainda. Colha a assinatura do proprietário ou responsável.</div>'; return; }
+      box.innerHTML = lista.map(function(a){
+        var pub = '/v/diario/'+a.hash_validacao;
+        var anulado = a.status==='anulado';
+        return '<div class="entry" style="cursor:default">'+
+          '<div class="top"><span class="obra">'+(anulado?'⚠ ':'✅ ')+esc(a.signatario_nome)+'</span>'+
+            '<span class="dt">'+fmtData(a.assinado_em)+'</span></div>'+
+          '<div class="meta"><span>'+esc(papelLabel(a.signatario_papel))+(a.signatario_cpf?' · '+esc(a.signatario_cpf):'')+'</span></div>'+
+          '<div class="meta" style="margin-top:6px;gap:8px">'+
+            '<a class="chip" href="'+pub+'" target="_blank" rel="noopener">🔗 Verificar</a>'+
+            '<a class="chip" href="'+API+'/assinaturas/'+a.id+'/pdf" target="_blank" rel="noopener">📄 PDF</a>'+
+            (podeEditar(d)?'<button class="chip" data-envia="'+a.id+'" style="border:0;cursor:pointer">📤 WhatsApp</button>':'')+
+            (podeEditar(d)&&!anulado?'<button class="chip" data-anula="'+a.id+'" style="border:0;cursor:pointer;color:var(--danger)">✖ Anular</button>':'')+
+          '</div>'+
+        '</div>';
+      }).join('');
+      Array.prototype.forEach.call(box.querySelectorAll('[data-anula]'),function(b){
+        b.onclick=function(){ if(!confirm('Anular esta assinatura? A linha é mantida como registro, marcada "anulada".')) return;
+          api('/assinaturas/'+b.getAttribute('data-anula')+'/anular',{method:'POST'})
+            .then(function(){ toast('Assinatura anulada'); carregarAssinaturas(d); })
+            .catch(function(e){ toast('Erro: '+e.message); }); };
+      });
+      Array.prototype.forEach.call(box.querySelectorAll('[data-envia]'),function(b){
+        b.onclick=function(){
+          var tel = prompt('Enviar o PDF assinado para qual WhatsApp? (com DDD)');
+          if(!tel||!tel.trim()) return;
+          toast('Enviando…');
+          api('/assinaturas/'+b.getAttribute('data-envia')+'/enviar',{method:'POST',body:{telefone:tel.trim()}})
+            .then(function(){ toast('PDF enviado por WhatsApp ✓'); })
+            .catch(function(e){ toast('Erro: '+e.message, 4200); }); };
+      });
+    }).catch(function(e){ box.innerHTML='<div class="muted">Erro ao carregar assinaturas: '+esc(e.message)+'</div>'; });
+  }
+
+  // Modal de coleta: qualificação + rubrica no canvas + GPS opcional.
+  // TODO o estado (nome/cpf/papel/rubrica/gps) vive em `st`, que SOBREVIVE ao
+  // round-trip do pad de desenho — o pad toma o mesmo modal, então antes de
+  // abri-lo salvamos os inputs em `st` e, ao voltar, repintamos a partir de `st`.
+  // `store` no formato { desenhos:[] } é o que abrirDesenho() sabe preencher.
+  function abrirAssinatura(d){
+    var st = { nome:'', cpf:'', papel:'proprietario', rubrica:null, lat:null, lng:null };
+    pintarAssinatura(d, st);
+  }
+  function coletarInputsAssinatura(st){
+    var eN=document.getElementById('asNome');
+    if(eN){ st.nome=eN.value; st.cpf=document.getElementById('asCpf').value; st.papel=document.getElementById('asPapel').value; }
+  }
+  function pintarAssinatura(d, st){
+    modal(
+      '<h2>✍️ Assinatura formal</h2>'+
+      '<label>Nome do signatário *</label><input id="asNome" placeholder="Nome completo" value="'+esc(st.nome)+'">'+
+      '<div class="row2">'+
+        '<div><label>CPF/CNPJ</label><input id="asCpf" inputmode="numeric" placeholder="Somente números" value="'+esc(st.cpf)+'"></div>'+
+        '<div><label>Papel</label><select id="asPapel">'+
+          '<option value="proprietario"'+(st.papel==='proprietario'?' selected':'')+'>Proprietário</option>'+
+          '<option value="responsavel"'+(st.papel==='responsavel'?' selected':'')+'>Responsável pela obra</option>'+
+        '</select></div>'+
+      '</div>'+
+      '<label>Rubrica *</label>'+
+      '<div><button type="button" class="btn btn-ghost" id="asDesenhar">'+(st.rubrica?'✍️ Refazer assinatura':'✍️ Assinar no campo')+'</button></div>'+
+      '<div class="thumbs" id="asThumb" style="margin-top:8px">'+
+        (st.rubrica?'<div class="thumb"><img src="'+st.rubrica+'"><div class="cap">✍️ rubrica</div><button class="rm" id="asRmRub">×</button></div>':'')+
+      '</div>'+
+      '<label style="margin-top:10px"><input type="checkbox" id="asGeo"'+(st.lat!=null?' checked':'')+' style="width:auto;margin-right:6px">Anexar localização (GPS)'+
+        (st.lat!=null?' <span class="muted">('+st.lat.toFixed(5)+', '+st.lng.toFixed(5)+')</span>':'')+'</label>'+
+      '<div class="btn-row"><button class="btn btn-primary" id="asSalvar">Registrar assinatura</button>'+
+        '<button class="btn btn-ghost" id="asCancel">Cancelar</button></div>'
+    );
+    document.getElementById('asDesenhar').onclick=function(){
+      coletarInputsAssinatura(st);
+      var store={ textos:{}, desenhos:[] };
+      // Ao fechar o pad: guarda a rubrica em st e repinta o modal de assinatura.
+      abrirDesenho('assinatura', store, function(){
+        if(store.desenhos.length) st.rubrica = store.desenhos[0].base64;
+        pintarAssinatura(d, st);
+      });
+    };
+    var rm=document.getElementById('asRmRub'); if(rm) rm.onclick=function(){ coletarInputsAssinatura(st); st.rubrica=null; pintarAssinatura(d, st); };
+    document.getElementById('asGeo').onchange=function(){
+      if(this.checked && navigator.geolocation){
+        toast('Obtendo localização…');
+        navigator.geolocation.getCurrentPosition(function(p){
+          coletarInputsAssinatura(st); st.lat=p.coords.latitude; st.lng=p.coords.longitude; pintarAssinatura(d, st);
+        }, function(){ toast('Não foi possível obter a localização.'); document.getElementById('asGeo').checked=false; }, {enableHighAccuracy:true,timeout:8000});
+      } else { st.lat=null; st.lng=null; }
+    };
+    document.getElementById('asCancel').onclick=function(){ fecharModal(); };
+    document.getElementById('asSalvar').onclick=function(){ coletarInputsAssinatura(st); salvarAssinatura(d, st); };
+  }
+  function salvarAssinatura(d, st){
+    if(!st.nome.trim()) return toast('Informe o nome do signatário.');
+    if(!st.rubrica) return toast('Colha a rubrica no campo de assinatura.');
+    var body={
+      signatario_nome:st.nome.trim(),
+      signatario_cpf:st.cpf.trim(),
+      signatario_papel:st.papel,
+      assinatura_b64:st.rubrica,
+      latitude:st.lat, longitude:st.lng
+    };
+    var btn=document.getElementById('asSalvar'); btn.disabled=true; btn.textContent='Registrando…';
+    api('/'+d.id+'/assinaturas',{method:'POST',body:body})
+      .then(function(){ fecharModal(); toast('Assinatura registrada ✓'); renderDetail(); })
+      .catch(function(e){ btn.disabled=false; btn.textContent='Registrar assinatura'; toast('Erro: '+e.message, 4200); });
   }
   // v3.127.0: a edição passou a usar os MESMOS campos multimodo da entrada nova
   // (digitar / ditar / desenhar). Antes só tinha textarea, então quem esquecia

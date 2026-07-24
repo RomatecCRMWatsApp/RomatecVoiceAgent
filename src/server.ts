@@ -86,6 +86,7 @@ import diligenciasRouter from './routes/diligencias'; // v3.54.0 — Diligência
 import wifiLeadRoutes from './routes/wifiLeadRoutes'; // v3.61.0 — Captive Portal / Leads Wi-Fi
 import diarioObraRouter from './routes/diarioObra'; // v3.125.0 — Diário de Obra (visitas técnicas)
 import prontuarioRouter from './routes/prontuario'; // v3.126.0 — Prontuário do Escritório (Multi-Serviços)
+import diarioPublicoRouter from './routes/diarioPublico'; // v3.128.0 — verificação pública da assinatura do Diário
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -223,6 +224,7 @@ app.get('/api/obras/:obraId/diarios-obra', requireAuth, async (req: Request, res
     res.json({ ok: true, diarios: await listarDiariosDaObra(Number(req.params.obraId)) });
   } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });
+app.use('/v/diario', diarioPublicoRouter); // v3.128.0 — verificação pública da assinatura do Diário de Obra (fora da auth)
 app.use('/v/inventario', inventarioPublicoRouter); // v3.101.1 — relatório público sempre atualizado (fora da auth)
 app.use('/v/entrega', obrasEntregaPublicaRouter); // v3.81.0 — página pública de entrega (fora da auth)
 app.use('/api/mao-obra-avulsa', maoObraAvulsaRouter); // v3.92.0 — Pagamento a Mão de Obra Avulsa
@@ -269,6 +271,11 @@ void (async () => {
 void (async () => {
   try { const m = await import('./database/migrations-prontuario'); await m.runProntuarioMigrations(); }
   catch (err) { console.error('[prontuario-migrations] FALHA fatal:', err); }
+})();
+// v3.128.0: Assinatura formal do Diário de Obra (diario_obra_assinaturas)
+void (async () => {
+  try { const m = await import('./database/migrations-diario-assinatura'); await m.runDiarioAssinaturaMigrations(); }
+  catch (err) { console.error('[diario-assinatura-migrations] FALHA fatal:', err); }
 })();
 
 // v1.99.15: Live Feed Universal — feed animado no topo de toda aba.
