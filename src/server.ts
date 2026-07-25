@@ -277,6 +277,11 @@ void (async () => {
   try { const m = await import('./database/migrations-arbitragem'); await m.runArbitragemMigrations(); }
   catch (err) { console.error('[arbitragem-migrations] FALHA fatal:', err); }
 })();
+// v3.130.0: instrumentação de uso de tools (base pra poda das ociosas)
+void (async () => {
+  try { const m = await import('./database/migrations-tool-calls'); await m.runToolCallsMigrations(); }
+  catch (err) { console.error('[tool-calls-migrations] FALHA fatal:', err); }
+})();
 // v3.128.0: Assinatura formal do Diário de Obra (diario_obra_assinaturas)
 void (async () => {
   try { const m = await import('./database/migrations-diario-assinatura'); await m.runDiarioAssinaturaMigrations(); }

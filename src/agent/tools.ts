@@ -52,6 +52,14 @@ import {
   listarTiposDocumento,
 } from '../services/documentosVencimento';
 import { gerarProposta } from '../services/propostaComercial';
+// v3.130.0: divisão de capital (Dutching/Arbitragem) + logger de uso de tools
+import {
+  calcularDivisao,
+  calcularPorLucro,
+  type ResultadoEntrada,
+  type Arredondamento,
+} from '../services/arbitragemService';
+import { registrarChamadaTool } from '../services/toolCallsLog';
 import {
   gerarAtaDeTranscricao, gerarAtaDeAudio,
   listarAtas, consultarAta,
@@ -2412,6 +2420,41 @@ const _allToolDefinitions: Anthropic.Tool[] = [
       },
     },
   },
+  // v3.130.0: Divisão de capital entre resultados (Dutching / Arbitragem).
+  {
+    name: 'calcular_divisao_apostas',
+    description:
+      'Divide um capital entre os resultados possíveis de um evento (casa/empate/fora ou N seleções) '
+      + 'de forma que o retorno bruto seja IDÊNTICO em qualquer cenário (Dutching/arbitragem). '
+      + 'Informe as odds decimais de cada resultado e OU o capital a investir OU o lucro alvo. '
+      + 'Diz objetivamente se há lucro garantido (arbitragem real, S<1) ou prejuízo garantido '
+      + '(margem da casa, S≥1) — e nunca apresenta prejuízo como lucro. Use quando o Chefe falar '
+      + '"divide X reais nesse jogo", "quanto aposto em cada resultado", "tem arbitragem nessas odds", '
+      + '"faz um dutching". As odds vêm do Chefe ou do bloco de estatísticas esportivas.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        evento: { type: 'string', description: 'Nome do evento (opcional), ex: "Newell x Talleres".' },
+        capital: { type: 'number', description: 'Capital total a dividir em R$. Informe capital OU lucroAlvo.' },
+        lucroAlvo: { type: 'number', description: 'Lucro desejado em R$. Só existe se houver arbitragem (S<1). Informe capital OU lucroAlvo.' },
+        arredondamento: { type: 'string', enum: ['centavo', 'real', 'nenhum'], description: 'Arredondamento dos stakes (default centavo).' },
+        resultados: {
+          type: 'array',
+          description: 'Resultados possíveis (mín 2, máx 20), cada um com rótulo e odd decimal.',
+          items: {
+            type: 'object',
+            properties: {
+              rotulo: { type: 'string', description: 'Nome do resultado, ex: "Casa", "Empate", "Fora".' },
+              odd: { type: 'number', description: 'Odd decimal (>1), ex: 2.60.' },
+              casa: { type: 'string', description: 'Casa de aposta (opcional).' },
+            },
+            required: ['rotulo', 'odd'],
+          },
+        },
+      },
+      required: ['resultados'],
+    },
+  },
 ];
 
 // v1.60.0: lista filtrada — sem as desabilitadas em DISABLED_TOOLS.
@@ -2466,6 +2509,7 @@ export async function executeTool(name: string, input: Record<string, unknown>):
   // v1.65.26: lido via requestContext.ts (AsyncLocalStorage isolado).
   const caller = getCurrentCaller();
   void getCurrentSessionId; // silencia warning de unused import (re-exportado)
+  registrarChamadaTool(name, caller); // v3.130.0: instrumentação de uso (fire-and-forget)
   if (caller && caller.role !== 'admin') {
     if (ADMIN_ONLY_TOOLS.has(name)) {
       return { toolName: name, success: false, error: `Acesso negado: a tool "${name}" é restrita ao CEO/admin. Seu papel: ${caller.role}.` };
@@ -3406,6 +3450,34 @@ export async function executeTool(name: string, input: Record<string, unknown>):
       case 'consultar_leads_avalieimob': {
         const { consultarLeads } = await import('../integrations/avalieImobLeads');
         data = await consultarLeads(input as Parameters<typeof consultarLeads>[0]);
+        break;
+      }
+
+      // v3.130.0: divisão de capital (Dutching/Arbitragem). Cálculo puro — a
+      // persistência com user_sub real fica na rota REST autenticada. Aqui só
+      // responde. por-lucro com S≥1 lança ArbitragemError (msg vira a resposta).
+      case 'calcular_divisao_apostas': {
+        const inp = input as {
+          evento?: string;
+          capital?: number;
+          lucroAlvo?: number;
+          arredondamento?: Arredondamento;
+          resultados: ResultadoEntrada[];
+        };
+        data =
+          inp.lucroAlvo != null && inp.capital == null
+            ? calcularPorLucro({
+                evento: inp.evento,
+                lucroAlvo: inp.lucroAlvo,
+                arredondamento: inp.arredondamento,
+                resultados: inp.resultados,
+              })
+            : calcularDivisao({
+                evento: inp.evento,
+                capital: inp.capital as number,
+                arredondamento: inp.arredondamento,
+                resultados: inp.resultados,
+              });
         break;
       }
 
