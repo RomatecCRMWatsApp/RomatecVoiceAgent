@@ -87,6 +87,7 @@ import wifiLeadRoutes from './routes/wifiLeadRoutes'; // v3.61.0 — Captive Por
 import diarioObraRouter from './routes/diarioObra'; // v3.125.0 — Diário de Obra (visitas técnicas)
 import prontuarioRouter from './routes/prontuario'; // v3.126.0 — Prontuário do Escritório (Multi-Serviços)
 import diarioPublicoRouter from './routes/diarioPublico'; // v3.128.0 — verificação pública da assinatura do Diário
+import arbitragemRouter from './routes/arbitragem'; // v3.129.0 — ZAYRA: divisão de capital (Dutching/Arbitragem)
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -217,6 +218,7 @@ app.use('/api/gestao-obra/entrega', obrasEntregaRouter); // v3.81.0 — Entrega 
 app.use('/api/gestao-obra/inventario', inventarioObraRouter); // v3.97.0 — Inventário de Materiais por Obra
 app.use('/api/diarios-obra', diarioObraRouter); // v3.125.0 — Diário de Obra (visitas técnicas)
 app.use('/api/prontuarios', prontuarioRouter); // v3.126.0 — Prontuário do Escritório (Multi-Serviços)
+app.use('/api/zayra/arbitragem', arbitragemRouter); // v3.129.0 — ZAYRA: divisão de capital (Dutching/Arbitragem)
 // v3.128.1 FIX: a rota GET /api/obras/:obraId/diarios-obra saiu DAQUI. Usá-la no
 // topo, com requireAuth, causava TDZ no boot ("Cannot access 'auth_3' before
 // initialization") — o import de requireAuth só vem na ~linha 1023, então o
@@ -269,6 +271,11 @@ void (async () => {
 void (async () => {
   try { const m = await import('./database/migrations-prontuario'); await m.runProntuarioMigrations(); }
   catch (err) { console.error('[prontuario-migrations] FALHA fatal:', err); }
+})();
+// v3.129.0: ZAYRA — histórico de cálculos de divisão de capital (Dutching/Arbitragem)
+void (async () => {
+  try { const m = await import('./database/migrations-arbitragem'); await m.runArbitragemMigrations(); }
+  catch (err) { console.error('[arbitragem-migrations] FALHA fatal:', err); }
 })();
 // v3.128.0: Assinatura formal do Diário de Obra (diario_obra_assinaturas)
 void (async () => {
