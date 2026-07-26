@@ -15216,6 +15216,13 @@ const CALCULADORAS = {
     desc: 'Telhas + madeiramento completo (caibros · ripas · terças)',
     render: renderCalcCobertura,
   },
+  // v3.131.0: divisão de capital entre resultados (Dutching / Arbitragem)
+  divisao_capital: {
+    nome: 'Divisão de Capital',
+    icone: '🎯',
+    desc: 'Distribui um valor entre resultados (odds) · retorno igual em qualquer cenário',
+    render: renderCalcDivisaoCapital,
+  },
 };
 
 // ─── RECIBOS UNIVERSAIS (v1.71.0) ──────────────────────────────────────
@@ -17546,6 +17553,161 @@ function renderCalculos() {
     document.getElementById('calcVoltar').onclick = () => { CALC_ATIVA = null; renderCalculos(); };
     CALCULADORAS[CALC_ATIVA].render();
   }
+}
+
+// ─── 9. DIVISÃO DE CAPITAL / ARBITRAGEM (Dutching) ─────────────────────
+// v3.131.0: capacidade pessoal — distribui um valor entre os resultados de um
+// evento (odds decimais) pra que o retorno seja IDÊNTICO em qualquer cenário.
+// Cálculo client-side, porta fiel do arbitragemService.ts: S = Σ(1/odd); stakes
+// pelo método de Hamilton (a soma bate EXATO com o valor); diz lucro garantido
+// (S<1) ou prejuízo garantido (S≥1) — e nunca apresenta prejuízo como lucro.
+function renderCalcDivisaoCapital() {
+  const resultados = [
+    { rotulo: 'Casa',   odd: '' },
+    { rotulo: 'Empate', odd: '' },
+    { rotulo: 'Fora',   odd: '' },
+  ];
+
+  function lerRowsDoDom() {
+    document.querySelectorAll('#dcRows [data-row]').forEach(row => {
+      const i = +row.dataset.row;
+      resultados[i].rotulo = row.querySelector('.dc-rot').value;
+      resultados[i].odd    = row.querySelector('.dc-odd').value;
+    });
+  }
+
+  function renderRows() {
+    document.getElementById('dcRows').innerHTML = resultados.map((r, i) => `
+      <div data-row="${i}" style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
+        <input class="dc-rot" placeholder="Resultado ${i + 1}" value="${(r.rotulo || '').replace(/"/g, '&quot;')}" style="flex:2;">
+        <input class="dc-odd" type="number" step="0.01" min="1.01" placeholder="odd" value="${r.odd}" style="flex:1;">
+        <button class="dc-del" data-del="${i}" title="Remover" style="padding:6px 10px;">✕</button>
+      </div>
+    `).join('');
+    document.querySelectorAll('#dcRows .dc-del').forEach(b => b.onclick = () => {
+      if (resultados.length <= 2) { alert('Precisa de ao menos 2 resultados.'); return; }
+      lerRowsDoDom();
+      resultados.splice(+b.dataset.del, 1);
+      renderRows();
+    });
+  }
+
+  document.getElementById('calcContent').innerHTML = `
+    <div class="lp-grid-2" style="gap:14px;">
+      <div class="card">
+        <p class="section-title">🎯 Divisão de Capital</p>
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">
+          Distribui um valor entre os resultados de um evento pra que o retorno seja o
+          <b>mesmo em qualquer cenário</b>. Informe o valor e as odds decimais de cada resultado.
+        </p>
+        <input id="dcCapital" type="number" step="0.01" min="0" placeholder="Valor a investir (R$)" style="width:100%; margin-bottom:10px;">
+        <div id="dcRows"></div>
+        <button id="dcAdd" style="width:100%; margin-bottom:10px;">+ Adicionar resultado</button>
+        <button class="btn-primary" id="dcCalc" style="width:100%;">▶ Calcular</button>
+      </div>
+      <div class="card" id="dcResultado">
+        <p class="section-title">Resultados</p>
+        <p style="color:var(--text-muted); font-style:italic; padding:30px 0; text-align:center;">Preencha o valor e as odds, depois clique em Calcular</p>
+      </div>
+    </div>
+  `;
+
+  renderRows();
+
+  document.getElementById('dcAdd').onclick = () => {
+    lerRowsDoDom();
+    resultados.push({ rotulo: '', odd: '' });
+    renderRows();
+  };
+
+  document.getElementById('dcCalc').onclick = () => {
+    lerRowsDoDom();
+    const capital = parseFloat(document.getElementById('dcCapital').value);
+    const box = document.getElementById('dcResultado');
+    const erro = m => { box.innerHTML = `<p class="section-title">Resultados</p><p style="color:#dc2626; padding:14px 0;">⚠️ ${m}</p>`; };
+
+    if (!(capital > 0)) return erro('Informe um valor maior que zero.');
+    if (resultados.length < 2) return erro('Informe ao menos 2 resultados.');
+    const vistos = new Set();
+    const linhas = [];
+    for (let i = 0; i < resultados.length; i++) {
+      const rot = (resultados[i].rotulo || '').trim() || `Resultado ${i + 1}`;
+      const odd = parseFloat(resultados[i].odd);
+      if (!(odd > 1)) return erro(`Odd inválida em "${rot}" (precisa ser maior que 1).`);
+      const chave = rot.toLowerCase();
+      if (vistos.has(chave)) return erro(`Rótulo duplicado: "${rot}".`);
+      vistos.add(chave);
+      linhas.push({ rotulo: rot, odd });
+    }
+
+    // ── engine (porta do arbitragemService) ──
+    const ps = linhas.map(l => 1 / l.odd);
+    const S = ps.reduce((a, b) => a + b, 0);
+    const arbitragem = S < 1;
+    const pesos = ps.map(p => p / S);
+    const unidade = 0.01, total = Math.round(capital / unidade);
+    const bruto = pesos.map(p => total * p);
+    const base = bruto.map(x => Math.floor(x));
+    let resto = total - base.reduce((a, b) => a + b, 0);
+    const ordem = bruto.map((x, i) => ({ i, frac: x - Math.floor(x), peso: pesos[i] }))
+                       .sort((a, b) => b.frac - a.frac || b.peso - a.peso || a.i - b.i);
+    const un = base.slice();
+    for (let k = 0; k < ordem.length && resto > 0; k++) { un[ordem[k].i]++; resto--; }
+    const aloc = linhas.map((l, i) => {
+      const stake = +(un[i] * unidade).toFixed(2);
+      const retorno = +(stake * l.odd).toFixed(2);
+      return { rotulo: l.rotulo, odd: l.odd, stake, retorno, pct: (stake / capital) * 100 };
+    });
+    const retornos = aloc.map(a => a.retorno);
+    const lucroMin = +(Math.min(...retornos) - capital).toFixed(2);
+    const retornoUnif = Math.min(...retornos);
+    const oddsMin = ps.map((p, i) => {
+      const outros = S - p;
+      return outros >= 1 ? null : Math.ceil((1 / (1 - outros)) * 100) / 100;
+    });
+
+    const corBanner = arbitragem ? '#10b981' : '#dc2626';
+    const bannerTit = arbitragem
+      ? `✅ Arbitragem — lucro garantido de ${fmt(lucroMin)}`
+      : `⚠️ Prejuízo garantido de ${fmt(Math.abs(lucroMin))}`;
+    const bannerSub = arbitragem
+      ? `ROI ${((lucroMin / capital) * 100).toFixed(2)}% · retorno ${fmt(retornoUnif)} em qualquer cenário`
+      : `Margem da casa ${((S - 1) * 100).toFixed(2)}% · todo cenário devolve ${fmt(retornoUnif)} sobre ${fmt(capital)}`;
+
+    const linhasHtml = aloc.map(a => `
+      <div style="display:flex; justify-content:space-between; align-items:baseline; padding:8px 0; border-bottom:1px solid var(--surface-1);">
+        <div>
+          <p style="font-weight:600; font-size:13px;">${a.rotulo} <span style="color:var(--text-muted); font-weight:400;">@ ${a.odd}</span></p>
+          <p style="font-size:11px; color:var(--text-muted);">${a.pct.toFixed(1)}% do valor · retorno ${fmt(a.retorno)}</p>
+        </div>
+        <p style="font-size:16px; font-weight:700; color:var(--gold);">${fmt(a.stake)}</p>
+      </div>
+    `).join('');
+
+    const somaStakes = aloc.reduce((s, a) => s + a.stake, 0);
+    const minimasHtml = arbitragem ? '' : `
+      <div style="margin-top:10px; padding:10px; background:var(--surface-1); font-size:12px;">
+        <p style="color:var(--text-muted); text-transform:uppercase; font-size:10px; margin-bottom:4px;">Odds mínimas pra virar lucro</p>
+        ${aloc.map((a, i) => `<span style="margin-right:10px;">${a.rotulo}: <b>${oddsMin[i] != null ? '≥ ' + oddsMin[i].toFixed(2) : '—'}</b></span>`).join('')}
+      </div>`;
+
+    box.innerHTML = `
+      <p class="section-title">Resultados</p>
+      <div style="padding:12px; background:var(--surface-1); border-left:3px solid ${corBanner}; margin-bottom:10px;">
+        <p style="font-size:15px; font-weight:700; color:${corBanner};">${bannerTit}</p>
+        <p style="font-size:12px; color:var(--text-muted);">${bannerSub}</p>
+      </div>
+      ${linhasHtml}
+      <div style="display:flex; justify-content:space-between; padding:10px 0 0; font-size:13px;">
+        <span style="color:var(--text-muted);">Soma das apostas</span>
+        <b>${fmt(somaStakes)}</b>
+      </div>
+      ${minimasHtml}
+      <p style="font-size:10px; color:var(--text-muted); margin-top:12px; font-style:italic;">
+        Soma implícita ${(S * 100).toFixed(2)}%. Cálculo de distribuição — não é recomendação de aposta.
+      </p>
+    `;
+  };
 }
 
 // ─── 1. FOSSA SÉPTICA + FILTRO + SUMIDOURO ────────────────────────────
