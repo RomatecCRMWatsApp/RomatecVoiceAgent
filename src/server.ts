@@ -5258,6 +5258,24 @@ app.post('/api/folha/item/:itemId/editar-valor', async (req: Request, res: Respo
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
+// v3.132.0: reabrir/reverter fechamento inteiro (destrava dias, des-quita vales,
+// apaga snapshot) pra o CEO voltar às marcações, corrigir e fechar de novo.
+// Mesma trava do Fechar: requireAuth + requirePin. Guarda no service bloqueia se
+// houver item pago / comprovante / recibo confirmado (409).
+app.post('/api/folha/fechamento/:id/reabrir', requireAuth, requirePin, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) { res.status(400).json({ error: 'id inválido' }); return; }
+    const { usuario, motivo } = req.body ?? {};
+    const m = await import('./services/folhaFechamento');
+    const r = await m.reabrirFechamento(id, usuario ? String(usuario) : undefined, motivo ? String(motivo) : undefined);
+    res.json(r);
+  } catch (err) {
+    const status = (err as { status?: number }).status ?? 400;
+    res.status(status).json({ error: (err as Error).message, detalhe: (err as { payload?: unknown }).payload ?? null });
+  }
+});
+
 // v3.10.1: PDF detalhado do fechamento
 app.get('/api/folha/fechamento/:id/pdf-relatorio', async (req: Request, res: Response) => {
   try {
