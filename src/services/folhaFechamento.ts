@@ -545,6 +545,145 @@ export async function reverterPagamento(itemId: number, usuario?: string, motivo
   }
 }
 
+// ===== REABRIR / REVERTER FECHAMENTO (v3.132.0) =====
+//
+// Desfaz um fechamento inteiro pra o CEO voltar às marcações de dias, corrigir
+// valor/quantidade de diárias, adicionar uma diária que faltou e fechar de novo.
+// Numa transação:
+//   1. destrava os dias (fechamento_id = NULL, bloqueado_em = NULL) → voltam
+//      editáveis no calendário Marcar Dias;
+//   2. des-quita os vales deste fechamento (fechamento_id = NULL) — só os DELE;
+//      o sentinel 0 (legado conciliado) não é tocado, pois o predicado é = id;
+//   3. recua o ultima_data_fechada da obra pro fechamento anterior (ou NULL);
+//   4. cancela recibos NÃO confirmados vinculados (neutraliza link pendente);
+//   5. apaga o snapshot (itens + cabeçalho) — reverte como se nunca tivesse fechado.
+//
+// GUARDA (decisão do CEO): bloqueia se houver item PAGO, comprovante anexado ou
+// recibo CONFIRMADO — nesses casos é preciso reverter o pagamento / cancelar o
+// recibo antes. Sem force: dinheiro já movimentado não some por reabertura.
+export async function reabrirFechamento(
+  fechamentoId: number,
+  usuario?: string,
+  motivo?: string,
+): Promise<{
+  obraId: number;
+  dias_destravados: number;
+  vales_destravados: number;
+  recibos_cancelados: number;
+  itens_removidos: number;
+}> {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [head] = await conn.query<RowDataPacket[]>(
+      `SELECT id, obra_id, status FROM folha_fechamentos WHERE id = ? FOR UPDATE`,
+      [fechamentoId],
+    );
+    if (head.length === 0) throw new FolhaError(404, 'Fechamento não encontrado.');
+    const obraId = Number(head[0].obra_id);
+
+    // Itens + flags de guarda (comprovante_arquivo é LONGBLOB — só testa IS NOT NULL).
+    const [itemRows] = await conn.query<RowDataPacket[]>(
+      `SELECT id, status_pagamento, (comprovante_arquivo IS NOT NULL) AS tem_comprovante
+         FROM folha_fechamento_itens WHERE fechamento_id = ? FOR UPDATE`,
+      [fechamentoId],
+    );
+    const itemIds = itemRows.map(r => Number(r.id));
+    const pagos = itemRows.filter(r => r.status_pagamento === 'paga').length;
+    const comprovantes = itemRows.filter(r => Number(r.tem_comprovante) === 1).length;
+
+    let recibosConfirmados = 0;
+    if (itemIds.length > 0) {
+      const ph = itemIds.map(() => '?').join(',');
+      const [rc] = await conn.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS n FROM recibos
+          WHERE resource_type = 'folha_fechamento_item'
+            AND resource_id IN (${ph})
+            AND (status = 'confirmado' OR resposta_acao = 'confirma' OR respondido_em IS NOT NULL)`,
+        itemIds.map(String),
+      );
+      recibosConfirmados = Number(rc[0].n) || 0;
+    }
+
+    const impedimentos: string[] = [];
+    if (pagos > 0) impedimentos.push(`${pagos} item(ns) já pago(s)`);
+    if (comprovantes > 0) impedimentos.push(`${comprovantes} comprovante(s) anexado(s)`);
+    if (recibosConfirmados > 0) impedimentos.push(`${recibosConfirmados} recibo(s) confirmado(s) pelo colaborador`);
+    if (impedimentos.length > 0) {
+      throw new FolhaError(409,
+        `Não dá pra reabrir: ${impedimentos.join(', ')}. Reverta o pagamento / cancele o recibo antes de reabrir.`,
+        { impedimentos });
+    }
+
+    // 1. Destrava os dias do fechamento.
+    const [d] = await conn.execute<ResultSetHeader>(
+      `UPDATE romatec_obra_funcionario_dias
+          SET fechamento_id = NULL, bloqueado_em = NULL
+        WHERE fechamento_id = ?`,
+      [fechamentoId],
+    );
+
+    // 2. Des-quita os vales/adiantamentos deste fechamento (volta a ser deduzível).
+    const [v] = await conn.execute<ResultSetHeader>(
+      `UPDATE recibos_ajustes SET fechamento_id = NULL WHERE fechamento_id = ?`,
+      [fechamentoId],
+    );
+
+    // 3. Recua o ciclo da obra: nova última data fechada = MAX(data_fim) dos
+    //    fechamentos restantes da obra (exclui este), senão NULL.
+    const [prev] = await conn.query<RowDataPacket[]>(
+      `SELECT MAX(data_fim) AS ult FROM folha_fechamentos WHERE obra_id = ? AND id <> ?`,
+      [obraId, fechamentoId],
+    );
+    const ultRaw = prev[0]?.ult ?? null;
+    const novaUltima = ultRaw
+      ? String(ultRaw instanceof Date ? ultRaw.toISOString().slice(0, 10) : ultRaw).slice(0, 10)
+      : null;
+    await conn.execute(
+      `UPDATE romatec_obras SET ultima_data_fechada = ? WHERE id = ?`,
+      [novaUltima, obraId],
+    );
+
+    // 4. Cancela recibos NÃO confirmados vinculados (não há confirmados — guarda acima).
+    let recibosCancelados = 0;
+    if (itemIds.length > 0) {
+      const ph = itemIds.map(() => '?').join(',');
+      const [rcUpd] = await conn.execute<ResultSetHeader>(
+        `UPDATE recibos SET status = 'cancelado'
+          WHERE resource_type = 'folha_fechamento_item'
+            AND resource_id IN (${ph})
+            AND (status IS NULL OR status <> 'cancelado')`,
+        itemIds.map(String),
+      );
+      recibosCancelados = rcUpd.affectedRows ?? 0;
+    }
+
+    // 5. Apaga o snapshot (itens + cabeçalho). Reverte como se nunca tivesse fechado.
+    await conn.execute(`DELETE FROM folha_fechamento_itens WHERE fechamento_id = ?`, [fechamentoId]);
+    await conn.execute(`DELETE FROM folha_fechamentos WHERE id = ?`, [fechamentoId]);
+
+    await conn.commit();
+    console.log(
+      `[reabrir-fechamento] OK: fechamento=${fechamentoId} obra=${obraId} ` +
+      `dias=${d.affectedRows ?? 0} vales=${v.affectedRows ?? 0} recibos=${recibosCancelados} ` +
+      `por="${usuario ?? 'Sistema'}" motivo="${motivo ?? ''}"`,
+    );
+    return {
+      obraId,
+      dias_destravados: d.affectedRows ?? 0,
+      vales_destravados: v.affectedRows ?? 0,
+      recibos_cancelados: recibosCancelados,
+      itens_removidos: itemIds.length,
+    };
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
 // ===== AUDITORIA v3.47.0 — detecta dias inconsistentes =====
 //
 // Cenario: CEO reportou que ao pagar uma quinzena nova, dias de outra

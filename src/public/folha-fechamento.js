@@ -426,6 +426,9 @@
                    style="padding:4px 10px; background:#1e40af; color:#fff; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none; display:inline-block;">📄 PDF</a>
                 ${pdfCompletoBtn}
                 ${enviarTudoBtn}
+                ${f.status === 'aberta'
+                  ? `<button onclick="window.reabrirFechamento(${f.id})" title="Reverter o fechamento: destrava os dias no calendário, libera os vales e desfaz este fechamento pra corrigir e fechar de novo" style="padding:4px 10px; background:#b45309; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;">↩️ Reabrir</button>`
+                  : ''}
                 <span style="padding:2px 8px; border-radius:4px; font-size:11px;
                   background:${f.status === 'aberta' ? '#7f1d1d' : f.status === 'quitada' ? '#0e8c63' : '#92400e'};">${f.status}</span>
               </div>
@@ -577,6 +580,39 @@
       if (!r.ok) throw new Error(data.error);
       if (typeof window.recarregarSaldoAberto === 'function') window.recarregarSaldoAberto();
     } catch (err) { alert('Erro: ' + err.message); }
+  };
+
+  // v3.132.0: reabrir/reverter o fechamento inteiro — destrava os dias no
+  // calendário Marcar Dias, libera os vales e desfaz o snapshot pra corrigir
+  // valor/quantidade de diárias (ou adicionar uma que faltou) e fechar de novo.
+  window.reabrirFechamento = async function (fechamentoId) {
+    if (!confirm(
+      `Reabrir o Fechamento #${fechamentoId}?\n\n` +
+      `• Os dias voltam EDITÁVEIS no calendário Marcar Dias\n` +
+      `• Os vales do período são liberados de novo\n` +
+      `• Este fechamento é desfeito (você fecha de novo depois de corrigir)\n\n` +
+      `Só funciona se NADA foi pago ainda. Continuar?`
+    )) return;
+    const motivo = prompt('Motivo da reabertura (opcional):') || 'reabertura manual';
+    try {
+      const r = await apiFetch(`${API}/api/folha/fechamento/${fechamentoId}/reabrir`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuario: window.USUARIO_ATUAL || 'José Romário', motivo }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Erro ao reabrir');
+      alert(
+        `✅ Fechamento #${fechamentoId} reaberto.\n\n` +
+        `${data.dias_destravados} dia(s) liberado(s) · ${data.vales_destravados} vale(s) liberado(s)` +
+        `${data.recibos_cancelados ? ` · ${data.recibos_cancelados} recibo(s) cancelado(s)` : ''}\n\n` +
+        `Abra "Marcar Dias" pra corrigir os valores/diárias e feche a folha de novo.`
+      );
+      if (typeof window.recarregarSaldoAberto === 'function') window.recarregarSaldoAberto();
+      if (typeof window.recarregarFolhaMensal === 'function') window.recarregarFolhaMensal();
+    } catch (err) {
+      alert('Erro ao reabrir: ' + err.message);
+    }
   };
 
   // v3.62.4: editar valor BRUTO do item (corrige diária errada na época do
