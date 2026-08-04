@@ -40,6 +40,26 @@ describe('retificação — anotação técnica selecionável', () => {
   });
 });
 
+describe('retificação — emolumento de cartório (averbação sem valor)', () => {
+  function acharEmolumento(r: Awaited<ReturnType<typeof calcularRetificacao>>) {
+    return r.custos.secao_2_taxas.find(t => /Emolumentos cartor/i.test(t.descricao));
+  }
+
+  it('usa averbação SEM valor declarado (16.22.2 = R$ 134,43 fixo)', async () => {
+    const r = await calcularRetificacao(BASE);
+    const emol = acharEmolumento(r)!;
+    expect(emol.valor).toBe(134.43);
+    expect(emol.observacao).toMatch(/16\.22\.2|sem valor/i);
+  });
+
+  it('NÃO escala com o valor venal (imóvel caro = mesmo emolumento)', async () => {
+    const barato = await calcularRetificacao({ ...BASE, valor_venal: 25464.8 });
+    const caro = await calcularRetificacao({ ...BASE, valor_venal: 5000000 });
+    expect(acharEmolumento(barato)!.valor).toBe(acharEmolumento(caro)!.valor);
+    expect(acharEmolumento(caro)!.valor).toBe(134.43);
+  });
+});
+
 describe('retificação — área real a apurar após levantamento', () => {
   it('não exige área real quando marcado a apurar', async () => {
     const r = await calcularRetificacao({

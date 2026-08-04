@@ -97,8 +97,13 @@ export async function calcularRetificacao(
   });
 
   // 2. Emolumentos cartorarios
+  // v3.135.0: retificacao de area = averbacao de MERA ALTERACAO CADASTRAL na
+  // matricula (sem valor declarado). Nao ha transferencia nem ato com valor,
+  // entao NAO usa a base 16.9 (com valor, que escalava com o valor venal e
+  // inflava o emolumento). Ato correto = TJMA 16.22.2 (averbacao sem valor
+  // declarado) = R$ 134,43 fixo, independente do valor venal do imovel.
   try {
-    const emol = await calcularEmolumentos('averbacao_construcao', input.valor_venal);
+    const emol = await calcularEmolumentos('averbacao_sem_valor');
     secao_2_taxas.push({
       ordem: ordem++,
       descricao: 'Emolumentos cartorarios (averbacao da retificacao de area na matricula)',
