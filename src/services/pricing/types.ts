@@ -54,9 +54,12 @@ export interface CustosCalculados {
   // Base de Calculo explicita da Receita Federal.
   condicoes_pagamento?: CondicaoPagamento[];
   // v3.23.0: despesas administrativas (estimativa) — exibidas em seção separada no PDF, NÃO somam ao secao_5_total.
+  // v3.134.0: itens[] opcional — quando presente, o PDF lista cada diligência com seu valor
+  //           (usado na retificação: Secretaria / Cartório / Anuência dos confrontantes).
   despesas_administrativas?: {
     valor: number;
     descritivo: string;
+    itens?: Array<{ rotulo: string; valor: number }>;
   };
   // Base de Cálculo: memória de cálculo Romatec (fórmula explícita por item).
   // Não há consulta à Receita Federal; o termo "Base" refere-se à derivação interna dos honorários.
@@ -327,13 +330,16 @@ export interface InputRetificacao {
   // Quando true, a proposta sai sem a área real e sem cálculo de divergência
   // (a apurar depois da aprovação). Dispensa area_real_levantada > 0.
   area_real_a_apurar?: boolean;
-  // v3.133.0: diligências e tributos (taxa de retificação, IPTU, CND) —
-  // estimativa editável pelo usuário, em seção separada no PDF (NÃO soma aos
-  // honorários). Mesmo mecanismo do desmembramento.
+  // v3.133.0: diligências e tributos — estimativa editável, seção separada no PDF
+  // (NÃO soma aos honorários).
+  // v3.134.0: itemizado — cada diligência (Secretaria de Habitação/Reg. Fundiária,
+  // Cartório, recolhimento de anuência dos confrontantes) tem rótulo + valor editável.
+  // O front pré-preenche valores default (150/150/300) e o descritivo automático.
   despesas_administrativas?: {
     habilitada: boolean;
     valor: number;
     descritivo: string;
+    itens?: Array<{ rotulo: string; valor: number }>;
   };
 }
 

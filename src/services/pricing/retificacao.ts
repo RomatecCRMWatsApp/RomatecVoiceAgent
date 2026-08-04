@@ -313,15 +313,23 @@ export async function calcularRetificacao(
   // desmembramento).
   const despesasAdm = (input.despesas_administrativas?.habilitada)
     ? (() => {
-        const valor = Number(input.despesas_administrativas?.valor ?? 0);
-        const descritivo = (input.despesas_administrativas?.descritivo ?? '').trim();
+        const da = input.despesas_administrativas!;
+        // v3.134.0: itens[] (diligências) — filtra válidos; total = soma dos itens
+        // (ou o valor manual, se não vierem itens).
+        const itens = (da.itens ?? [])
+          .filter(i => i && i.rotulo?.trim() && Number.isFinite(i.valor) && i.valor >= 0)
+          .map(i => ({ rotulo: i.rotulo.trim(), valor: Number(i.valor) }));
+        const valor = itens.length
+          ? +itens.reduce((s, i) => s + i.valor, 0).toFixed(2)
+          : Number(da.valor ?? 0);
+        const descritivo = (da.descritivo ?? '').trim();
         if (!Number.isFinite(valor) || valor < 0) {
           throw new Error('despesas_administrativas.valor inválido');
         }
-        if (!descritivo) {
-          throw new Error('despesas_administrativas.descritivo obrigatório quando habilitada=true');
+        if (!descritivo && itens.length === 0) {
+          throw new Error('despesas_administrativas: informe descritivo ou ao menos 1 item');
         }
-        return { valor, descritivo };
+        return { valor, descritivo, ...(itens.length ? { itens } : {}) };
       })()
     : undefined;
 

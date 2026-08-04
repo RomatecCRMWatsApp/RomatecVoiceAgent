@@ -3131,9 +3131,19 @@ export async function gerarPdfPropostaConsultoria(
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#0a3d62');
     doc.text(eRetificacao ? 'III — Diligências e Tributos (estimativa)' : 'III — Despesas Administrativas (estimativa)');
     doc.moveDown(0.2);
-    doc.font('Helvetica').fontSize(9).fillColor('#222');
-    doc.text(despesasAdm.descritivo, { align: 'justify' });
-    doc.moveDown(0.2);
+    if (despesasAdm.descritivo) {
+      doc.font('Helvetica').fontSize(9).fillColor('#222');
+      doc.text(despesasAdm.descritivo, { align: 'justify' });
+      doc.moveDown(0.2);
+    }
+    // v3.134.0: quando itemizado (retificação), lista cada diligência com seu valor.
+    if (despesasAdm.itens && despesasAdm.itens.length > 0) {
+      doc.font('Helvetica').fontSize(9).fillColor('#222');
+      despesasAdm.itens.forEach(it => {
+        doc.text(`•  ${it.rotulo}:  ${formatBRL(it.valor)}`, { indent: 8, width: 480 });
+      });
+      doc.moveDown(0.2);
+    }
     doc.font('Helvetica-Bold').fontSize(10).fillColor('#222');
     doc.text(`Estimativa: ${formatBRL(despesasAdm.valor)}`);
     doc.moveDown(0.1);

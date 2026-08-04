@@ -79,12 +79,51 @@ describe('retificação — diligências e tributos (estimativa)', () => {
     expect(comDesp.custos.secao_5_total).toBe(semDesp.custos.secao_5_total);
   });
 
-  it('rejeita habilitada sem descritivo', async () => {
+  it('rejeita habilitada sem descritivo nem itens', async () => {
     await expect(
       calcularRetificacao({
         ...BASE,
         despesas_administrativas: { habilitada: true, valor: 100, descritivo: '' },
       }),
     ).rejects.toThrow(/descritivo/);
+  });
+
+  it('itemizado: total = soma dos itens marcados e preserva os itens', async () => {
+    const r = await calcularRetificacao({
+      ...BASE,
+      despesas_administrativas: {
+        habilitada: true,
+        valor: 0, // ignorado quando há itens
+        descritivo: 'Diligências da retificação',
+        itens: [
+          { rotulo: 'Diligência — Secretaria de Habitação e Reg. Fundiária', valor: 150 },
+          { rotulo: 'Diligência — Cartório de Registro de Imóveis', valor: 150 },
+          { rotulo: 'Diligência — Recolhimento de anuência dos confrontantes', valor: 300 },
+        ],
+      },
+    });
+    expect(r.custos.despesas_administrativas?.valor).toBe(600);
+    expect(r.custos.despesas_administrativas?.itens).toHaveLength(3);
+    // continua sendo estimativa separada (não soma aos honorários)
+    const semDesp = await calcularRetificacao(BASE);
+    expect(r.custos.secao_5_total).toBe(semDesp.custos.secao_5_total);
+  });
+
+  it('itemizado descarta itens inválidos (valor negativo / sem rótulo)', async () => {
+    const r = await calcularRetificacao({
+      ...BASE,
+      despesas_administrativas: {
+        habilitada: true,
+        valor: 0,
+        descritivo: '',
+        itens: [
+          { rotulo: 'Cartório', valor: 150 },
+          { rotulo: '', valor: 999 },
+          { rotulo: 'Negativo', valor: -5 },
+        ],
+      },
+    });
+    expect(r.custos.despesas_administrativas?.valor).toBe(150);
+    expect(r.custos.despesas_administrativas?.itens).toHaveLength(1);
   });
 });

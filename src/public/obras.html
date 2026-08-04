@@ -10363,16 +10363,25 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
         </label>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📋 Diligências e Tributos (estimativa)</p>
-        <label style="display:flex; gap:6px; align-items:flex-start; font-size:12px;">
-          <input id="rxDespAdmHabilitada" type="checkbox" style="margin-top:2px;">
-          <span><strong>Incluir diligências e tributos</strong> — taxa de retificação, puxar IPTU, tirar CND etc. Estimativa separada, você digita o valor. NÃO soma aos honorários.</span>
-        </label>
-        <div id="rxDespAdmBox" style="display:none; border:1px solid var(--border); border-radius:6px; padding:10px; background:rgba(0,200,255,0.04);">
-          <label style="display:block; margin-bottom:8px;">Valor estimado (R$)
-            <input id="rxDespAdmValor" type="number" min="0" step="0.01" style="width:100%;">
+        <p style="font-size:10px; color:var(--text-muted); margin:0 0 6px;">Pré-preenchido automaticamente. Desmarque o que não se aplica e ajuste os valores. Estimativa separada — NÃO soma aos honorários; vai pra proposta.</p>
+        <div style="border:1px solid var(--border); border-radius:6px; padding:10px; background:rgba(0,200,255,0.04); display:grid; gap:8px;">
+          <label style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center; font-size:12px;">
+            <input id="rxDilSecCk" type="checkbox" checked>
+            <span>Secretaria de Habitação e Reg. Fundiária (município) — alteração cadastral + taxa de parcelamento do solo</span>
+            <span style="white-space:nowrap;">R$ <input id="rxDilSecVal" type="number" min="0" step="0.01" value="150" style="width:90px;"></span>
           </label>
-          <label style="display:block;">Descritivo das diligências/tributos
-            <textarea id="rxDespAdmDescritivo" rows="3" style="width:100%;" placeholder="Ex.: Taxa de retificação no cartório, emissão de IPTU dos exercícios, retirada de CND, diligências junto aos confrontantes."></textarea>
+          <label style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center; font-size:12px;">
+            <input id="rxDilCartCk" type="checkbox" checked>
+            <span>Cartório de Registro de Imóveis — ofício e protocolo do processo de retificação</span>
+            <span style="white-space:nowrap;">R$ <input id="rxDilCartVal" type="number" min="0" step="0.01" value="150" style="width:90px;"></span>
+          </label>
+          <label style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center; font-size:12px;">
+            <input id="rxDilConfCk" type="checkbox" checked>
+            <span>Recolhimento de anuência dos confrontantes — assinaturas da retificação do imóvel</span>
+            <span style="white-space:nowrap;">R$ <input id="rxDilConfVal" type="number" min="0" step="0.01" value="300" style="width:90px;"></span>
+          </label>
+          <label style="display:block; font-size:12px;">Descritivo (automático — editável)
+            <textarea id="rxDespAdmDescritivo" rows="4" style="width:100%;">Diligência para protocolo junto à Secretaria de Habitação e Regularização Fundiária do município, para alteração cadastral e emissão da taxa de parcelamento do solo; ofício e diligência ao Cartório de Registro de Imóveis para protocolar o processo de retificação; e diligência para recolhimento da anuência (assinaturas) dos confrontantes referente à retificação do imóvel.</textarea>
           </label>
         </div>
 
@@ -10453,15 +10462,24 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
     setChk('rxAnuencia',      d.tem_anuencia_confrontantes);
     setVal('rxHonorarioSM',   d.honorario_projeto_sm);
     setVal('rxAnotacao',      d.anotacao_tecnica);
+    // v3.134.0: restaura diligências itemizadas (por rótulo → linha correspondente).
     if (d.despesas_administrativas) {
-      setChk('rxDespAdmHabilitada', !!d.despesas_administrativas.habilitada);
-      setVal('rxDespAdmValor',      d.despesas_administrativas.valor);
       setVal('rxDespAdmDescritivo', d.despesas_administrativas.descritivo);
+      const itens = d.despesas_administrativas.itens || [];
+      const mapRow = [
+        { ck: 'rxDilSecCk',  val: 'rxDilSecVal',  key: 'Secretaria' },
+        { ck: 'rxDilCartCk', val: 'rxDilCartVal', key: 'Cartório' },
+        { ck: 'rxDilConfCk', val: 'rxDilConfVal', key: 'confrontantes' },
+      ];
+      mapRow.forEach(r => {
+        const it = itens.find(i => (i.rotulo || '').includes(r.key));
+        setChk(r.ck, !!it);
+        if (it) setVal(r.val, it.valor);
+      });
     }
   }
 
-  // v3.133.0: toggles — Área real desabilita quando "a apurar"; box de diligências
-  // aparece quando habilitado. Aplica o estado atual (fresh ou restaurado do cache).
+  // v3.133.0: toggle — Área real desabilita quando "a apurar".
   const __rxSyncToggles = () => {
     const areaReal = document.getElementById('rxAreaReal');
     const apurar = !!document.getElementById('rxAreaApurar')?.checked;
@@ -10470,18 +10488,24 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
       areaReal.style.opacity = apurar ? '0.4' : '1';
       if (apurar) areaReal.value = '';
     }
-    const box = document.getElementById('rxDespAdmBox');
-    if (box) box.style.display = document.getElementById('rxDespAdmHabilitada')?.checked ? 'block' : 'none';
   };
   document.getElementById('rxAreaApurar')?.addEventListener('change', __rxSyncToggles);
-  document.getElementById('rxDespAdmHabilitada')?.addEventListener('change', __rxSyncToggles);
   __rxSyncToggles();
 
   // v3.46.0: helper que monta dados_imovel da retificacao — reusado por preview ao vivo + calcular
   function __rxMontarDadosImovel() {
-    // v3.133.0: área real a apurar (checkbox) + anotação técnica selecionável + diligências/tributos.
+    // v3.133.0: área real a apurar (checkbox) + anotação técnica selecionável.
     const aApurar = !!document.getElementById('rxAreaApurar')?.checked;
-    const despAdmOn = !!document.getElementById('rxDespAdmHabilitada')?.checked;
+    // v3.134.0: diligências itemizadas (Secretaria / Cartório / Anuência confrontantes).
+    const gv = id => Number(document.getElementById(id)?.value) || 0;
+    const ck = id => !!document.getElementById(id)?.checked;
+    const dilRows = [
+      { on: ck('rxDilSecCk'),  rotulo: 'Diligência — Secretaria de Habitação e Reg. Fundiária (alteração cadastral + taxa de parcelamento do solo)', valor: gv('rxDilSecVal') },
+      { on: ck('rxDilCartCk'), rotulo: 'Diligência — Cartório de Registro de Imóveis (ofício e protocolo do processo de retificação)',              valor: gv('rxDilCartVal') },
+      { on: ck('rxDilConfCk'), rotulo: 'Diligência — Recolhimento de anuência dos confrontantes (retificação do imóvel)',                          valor: gv('rxDilConfVal') },
+    ];
+    const dilItens = dilRows.filter(r => r.on).map(r => ({ rotulo: r.rotulo, valor: r.valor }));
+    const dilTotal = dilItens.reduce((s, i) => s + i.valor, 0);
     return {
       area_atual_matricula: Number(document.getElementById('rxAreaAtual')?.value) || 0,
       area_real_levantada: aApurar ? 0 : (Number(document.getElementById('rxAreaReal')?.value) || 0),
@@ -10492,9 +10516,10 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
       honorario_projeto_sm: Number(document.getElementById('rxHonorarioSM')?.value) || 1.0,
       anotacao_tecnica: document.getElementById('rxAnotacao')?.value || 'art_crea',
       despesas_administrativas: {
-        habilitada: despAdmOn,
-        valor: Number(document.getElementById('rxDespAdmValor')?.value) || 0,
+        habilitada: dilItens.length > 0,
+        valor: +dilTotal.toFixed(2),
         descritivo: document.getElementById('rxDespAdmDescritivo')?.value?.trim() || '',
+        itens: dilItens,
       },
     };
   }
