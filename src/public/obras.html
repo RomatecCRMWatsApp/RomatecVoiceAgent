@@ -10330,9 +10330,9 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
           <input id="rxAreaApurar" type="checkbox" style="margin-top:2px;">
           <span><strong>Área real só após o levantamento</strong> — marque quando a medição em campo ainda não foi feita. A proposta sai sem a área real e sem divergência (a apurar após a aprovação).</span>
         </label>
-        <label>Valor venal do imóvel (R$)
+        <label id="rxValorVenalWrap">Valor venal do imóvel (R$)
           <input id="rxValorVenal" type="number" min="0" step="0.01" style="width:100%;">
-          <span style="font-size:10px; color:var(--text-muted);">Influencia emolumentos cartório e custas judiciais (se aplicável)</span>
+          <span style="font-size:10px; color:var(--text-muted);">Só na via judicial — base da estimativa de custas do TJMA. Na administrativa o emolumento é fixo (averbação sem valor declarado), então este campo fica oculto.</span>
         </label>
 
         <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">⚖️ Tipo de retificação</p>
@@ -10480,6 +10480,9 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
   }
 
   // v3.133.0: toggle — Área real desabilita quando "a apurar".
+  // v3.136.0: Valor venal só aparece na via judicial (na administrativa o
+  // emolumento é fixo — averbação sem valor declarado 16.22.2). Oculta o campo
+  // quando administrativa pra não confundir (não influencia mais o cálculo lá).
   const __rxSyncToggles = () => {
     const areaReal = document.getElementById('rxAreaReal');
     const apurar = !!document.getElementById('rxAreaApurar')?.checked;
@@ -10488,8 +10491,12 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
       areaReal.style.opacity = apurar ? '0.4' : '1';
       if (apurar) areaReal.value = '';
     }
+    const vvWrap = document.getElementById('rxValorVenalWrap');
+    const judicial = document.getElementById('rxTipo')?.value === 'judicial';
+    if (vvWrap) vvWrap.style.display = judicial ? '' : 'none';
   };
   document.getElementById('rxAreaApurar')?.addEventListener('change', __rxSyncToggles);
+  document.getElementById('rxTipo')?.addEventListener('change', __rxSyncToggles);
   __rxSyncToggles();
 
   // v3.46.0: helper que monta dados_imovel da retificacao — reusado por preview ao vivo + calcular
@@ -10556,7 +10563,10 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
     if (!cliId) return alert('Selecione o cliente.');
     if (!areaAtual || areaAtual <= 0) return alert('Informe a área atual da matrícula.');
     if (!aApurar && (!areaReal || areaReal <= 0)) return alert('Informe a área real levantada (ou marque "Área real só após o levantamento").');
-    if (!valorVenal || valorVenal < 0) return alert('Informe o valor venal.');
+    // v3.136.0: valor venal só é exigido na via judicial (base das custas do TJMA).
+    // Na administrativa o emolumento é fixo e o campo fica oculto.
+    const judicial = document.getElementById('rxTipo')?.value === 'judicial';
+    if (judicial && (!valorVenal || valorVenal <= 0)) return alert('Informe o valor venal (base das custas judiciais do TJMA).');
 
     const dados_imovel = __rxMontarDadosImovel();
     const enderecoTxt = document.getElementById('rxEndereco').value.trim();
