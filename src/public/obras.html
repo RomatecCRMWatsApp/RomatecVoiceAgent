@@ -10326,6 +10326,10 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
             <span style="font-size:10px; color:var(--text-muted);">Medida em campo (GPS/Estação)</span>
           </label>
         </div>
+        <label style="display:flex; gap:6px; align-items:flex-start; font-size:12px;">
+          <input id="rxAreaApurar" type="checkbox" style="margin-top:2px;">
+          <span><strong>Área real só após o levantamento</strong> — marque quando a medição em campo ainda não foi feita. A proposta sai sem a área real e sem divergência (a apurar após a aprovação).</span>
+        </label>
         <label>Valor venal do imóvel (R$)
           <input id="rxValorVenal" type="number" min="0" step="0.01" style="width:100%;">
           <span style="font-size:10px; color:var(--text-muted);">Influencia emolumentos cartório e custas judiciais (se aplicável)</span>
@@ -10348,6 +10352,29 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
           <input id="rxHonorarioSM" type="number" min="0.5" step="0.5" value="1.0" style="width:100%;">
           <span style="font-size:10px; color:var(--text-muted);">Default 1 SM. Ajuste pra trabalhos complexos.</span>
         </label>
+
+        <label>Anotação Técnica do Responsável
+          <select id="rxAnotacao" style="width:100%;">
+            <option value="art_crea" selected>ART — CREA-MA (Engenheiro Civil)</option>
+            <option value="rrt_cau">RRT — CAU/MA (Arquiteto e Urbanista)</option>
+            <option value="trt_cft">TRT — CFT (Técnico Industrial)</option>
+          </select>
+          <span style="font-size:10px; color:var(--text-muted);">Escolha conforme a habilitação do responsável técnico.</span>
+        </label>
+
+        <p style="margin:12px 0 4px; font-weight:600; color:var(--neon); font-size:13px;">📋 Diligências e Tributos (estimativa)</p>
+        <label style="display:flex; gap:6px; align-items:flex-start; font-size:12px;">
+          <input id="rxDespAdmHabilitada" type="checkbox" style="margin-top:2px;">
+          <span><strong>Incluir diligências e tributos</strong> — taxa de retificação, puxar IPTU, tirar CND etc. Estimativa separada, você digita o valor. NÃO soma aos honorários.</span>
+        </label>
+        <div id="rxDespAdmBox" style="display:none; border:1px solid var(--border); border-radius:6px; padding:10px; background:rgba(0,200,255,0.04);">
+          <label style="display:block; margin-bottom:8px;">Valor estimado (R$)
+            <input id="rxDespAdmValor" type="number" min="0" step="0.01" style="width:100%;">
+          </label>
+          <label style="display:block;">Descritivo das diligências/tributos
+            <textarea id="rxDespAdmDescritivo" rows="3" style="width:100%;" placeholder="Ex.: Taxa de retificação no cartório, emissão de IPTU dos exercícios, retirada de CND, diligências junto aos confrontantes."></textarea>
+          </label>
+        </div>
 
         <div style="display:flex; gap:6px; margin-top:12px;">
           <button id="rxPreview" style="flex:1; background:var(--success); color:#fff; border-color:var(--success);">🧮 Calcular preview</button>
@@ -10420,21 +10447,55 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
     const d = cache.dados_imovel || {};
     setVal('rxAreaAtual',     d.area_atual_matricula);
     setVal('rxAreaReal',      d.area_real_levantada);
+    setChk('rxAreaApurar',    d.area_real_a_apurar);
     setVal('rxValorVenal',    d.valor_venal);
     setVal('rxTipo',          d.tipo_retificacao);
     setChk('rxAnuencia',      d.tem_anuencia_confrontantes);
     setVal('rxHonorarioSM',   d.honorario_projeto_sm);
+    setVal('rxAnotacao',      d.anotacao_tecnica);
+    if (d.despesas_administrativas) {
+      setChk('rxDespAdmHabilitada', !!d.despesas_administrativas.habilitada);
+      setVal('rxDespAdmValor',      d.despesas_administrativas.valor);
+      setVal('rxDespAdmDescritivo', d.despesas_administrativas.descritivo);
+    }
   }
+
+  // v3.133.0: toggles — Área real desabilita quando "a apurar"; box de diligências
+  // aparece quando habilitado. Aplica o estado atual (fresh ou restaurado do cache).
+  const __rxSyncToggles = () => {
+    const areaReal = document.getElementById('rxAreaReal');
+    const apurar = !!document.getElementById('rxAreaApurar')?.checked;
+    if (areaReal) {
+      areaReal.disabled = apurar;
+      areaReal.style.opacity = apurar ? '0.4' : '1';
+      if (apurar) areaReal.value = '';
+    }
+    const box = document.getElementById('rxDespAdmBox');
+    if (box) box.style.display = document.getElementById('rxDespAdmHabilitada')?.checked ? 'block' : 'none';
+  };
+  document.getElementById('rxAreaApurar')?.addEventListener('change', __rxSyncToggles);
+  document.getElementById('rxDespAdmHabilitada')?.addEventListener('change', __rxSyncToggles);
+  __rxSyncToggles();
 
   // v3.46.0: helper que monta dados_imovel da retificacao — reusado por preview ao vivo + calcular
   function __rxMontarDadosImovel() {
+    // v3.133.0: área real a apurar (checkbox) + anotação técnica selecionável + diligências/tributos.
+    const aApurar = !!document.getElementById('rxAreaApurar')?.checked;
+    const despAdmOn = !!document.getElementById('rxDespAdmHabilitada')?.checked;
     return {
       area_atual_matricula: Number(document.getElementById('rxAreaAtual')?.value) || 0,
-      area_real_levantada: Number(document.getElementById('rxAreaReal')?.value) || 0,
+      area_real_levantada: aApurar ? 0 : (Number(document.getElementById('rxAreaReal')?.value) || 0),
+      area_real_a_apurar: aApurar,
       valor_venal: Number(document.getElementById('rxValorVenal')?.value) || 0,
       tipo_retificacao: document.getElementById('rxTipo')?.value || 'administrativa',
       tem_anuencia_confrontantes: !!document.getElementById('rxAnuencia')?.checked,
       honorario_projeto_sm: Number(document.getElementById('rxHonorarioSM')?.value) || 1.0,
+      anotacao_tecnica: document.getElementById('rxAnotacao')?.value || 'art_crea',
+      despesas_administrativas: {
+        habilitada: despAdmOn,
+        valor: Number(document.getElementById('rxDespAdmValor')?.value) || 0,
+        descritivo: document.getElementById('rxDespAdmDescritivo')?.value?.trim() || '',
+      },
     };
   }
 
@@ -10465,9 +10526,11 @@ async function renderConsultoriaFormRetificacao(v, toggleHTML) {
     const areaAtual = Number(document.getElementById('rxAreaAtual').value);
     const areaReal = Number(document.getElementById('rxAreaReal').value);
     const valorVenal = Number(document.getElementById('rxValorVenal').value);
+    // v3.133.0: quando "área real a apurar" está marcado, não exige a área real.
+    const aApurar = !!document.getElementById('rxAreaApurar')?.checked;
     if (!cliId) return alert('Selecione o cliente.');
     if (!areaAtual || areaAtual <= 0) return alert('Informe a área atual da matrícula.');
-    if (!areaReal || areaReal <= 0) return alert('Informe a área real levantada.');
+    if (!aApurar && (!areaReal || areaReal <= 0)) return alert('Informe a área real levantada (ou marque "Área real só após o levantamento").');
     if (!valorVenal || valorVenal < 0) return alert('Informe o valor venal.');
 
     const dados_imovel = __rxMontarDadosImovel();

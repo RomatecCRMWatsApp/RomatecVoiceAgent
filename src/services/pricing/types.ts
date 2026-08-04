@@ -320,6 +320,21 @@ export interface InputRetificacao {
   tipo_retificacao: 'administrativa' | 'judicial';
   tem_anuencia_confrontantes: boolean;
   honorario_projeto_sm?: number; // default 1.0
+  // v3.133.0: anotação técnica selecionável (ART CREA / RRT CAU / TRT CFT).
+  // Default 'art_crea' — antes ficava travado em ART sem opção de escolher.
+  anotacao_tecnica?: AnotacaoTecnica;
+  // v3.133.0: a área real só é conhecida APÓS o levantamento geo/topográfico.
+  // Quando true, a proposta sai sem a área real e sem cálculo de divergência
+  // (a apurar depois da aprovação). Dispensa area_real_levantada > 0.
+  area_real_a_apurar?: boolean;
+  // v3.133.0: diligências e tributos (taxa de retificação, IPTU, CND) —
+  // estimativa editável pelo usuário, em seção separada no PDF (NÃO soma aos
+  // honorários). Mesmo mecanismo do desmembramento.
+  despesas_administrativas?: {
+    habilitada: boolean;
+    valor: number;
+    descritivo: string;
+  };
 }
 
 export interface InputAvaliacaoPTAM {

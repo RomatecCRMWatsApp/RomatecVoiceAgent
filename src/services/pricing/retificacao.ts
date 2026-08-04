@@ -68,12 +68,15 @@ export async function calcularRetificacao(
   if (!Number.isFinite(input.area_atual_matricula) || input.area_atual_matricula <= 0) {
     throw new Error('area_atual_matricula deve ser > 0');
   }
-  if (!Number.isFinite(input.area_real_levantada) || input.area_real_levantada <= 0) {
-    throw new Error('area_real_levantada deve ser > 0');
+  // v3.133.0: quando a area real so' sera' conhecida apos o levantamento geo,
+  // nao exige area_real_levantada nem calcula divergencia (a apurar pos-aprovacao).
+  const aApurar = !!input.area_real_a_apurar;
+  if (!aApurar && (!Number.isFinite(input.area_real_levantada) || input.area_real_levantada <= 0)) {
+    throw new Error('area_real_levantada deve ser > 0 (ou marque "área real a apurar após levantamento")');
   }
 
-  const divergencia = Math.abs(input.area_real_levantada - input.area_atual_matricula);
-  const percentualDivergencia = (divergencia / input.area_atual_matricula) * 100;
+  const divergencia = aApurar ? 0 : Math.abs(input.area_real_levantada - input.area_atual_matricula);
+  const percentualDivergencia = aApurar ? 0 : (divergencia / input.area_atual_matricula) * 100;
 
   // ── Secao 1: escopo ─────────────────────────────────────────────────────
   const secao_1_projetos = isJudicial ? [...ESCOPO_JUDICIAL] : [...ESCOPO_ADMINISTRATIVA];
@@ -83,8 +86,9 @@ export async function calcularRetificacao(
   const fontes: FontesConsulta = {};
   let ordem = 1;
 
-  // 1. ART CREA
-  const at = anotacaoTecnica('art_crea');
+  // 1. Anotacao tecnica selecionavel (ART CREA / RRT CAU / TRT CFT)
+  // v3.133.0: antes travado em 'art_crea'; agora respeita a escolha do usuario.
+  const at = anotacaoTecnica(input.anotacao_tecnica || 'art_crea');
   secao_2_taxas.push({
     ordem: ordem++,
     descricao: at.rotulo,
@@ -141,7 +145,7 @@ export async function calcularRetificacao(
   const fatorAssessoriaJudicial = isJudicial ? 2.0 : 1.0;
   const honorario_assessoria_total = honorario_assessoria * fatorAssessoriaJudicial;
 
-  const obsHonProjeto = `${fatorSM} SM × R$ ${sm.toFixed(2)} = R$ ${honorario_projeto.toFixed(2)} (Tipo ${isJudicial ? 'JUDICIAL' : 'ADMINISTRATIVA'} — divergencia ${percentualDivergencia.toFixed(2)}%)`;
+  const obsHonProjeto = `${fatorSM} SM × R$ ${sm.toFixed(2)} = R$ ${honorario_projeto.toFixed(2)} (Tipo ${isJudicial ? 'JUDICIAL' : 'ADMINISTRATIVA'} — divergencia ${aApurar ? 'a apurar apos levantamento' : percentualDivergencia.toFixed(2) + '%'})`;
   const obsHonAssessoria = isJudicial
     ? `1 SM × 2.0 (acompanhamento processual estendido — judicial) = R$ ${honorario_assessoria_total.toFixed(2)}`
     : `1 SM × R$ ${sm.toFixed(2)}`;
@@ -220,7 +224,11 @@ export async function calcularRetificacao(
     );
   }
 
-  if (percentualDivergencia > 5) {
+  if (aApurar) {
+    avisos.push(
+      'AREA REAL A APURAR: a area real definitiva sera obtida no levantamento geo/topografico apos a aprovacao desta proposta. A divergencia frente a matricula e os emolumentos de averbacao poderao ser recalculados quando a medicao estiver concluida.'
+    );
+  } else if (percentualDivergencia > 5) {
     avisos.push(
       `DIVERGENCIA CONSIDERAVEL: ${percentualDivergencia.toFixed(2)}% entre area da matricula e area real. Confrontantes podem questionar — recomenda-se reuniao previa de conciliacao antes de protocolar.`
     );
@@ -280,12 +288,12 @@ export async function calcularRetificacao(
     },
     {
       rotulo: 'Area real (levantada GPS/Estacao)',
-      formula: `${input.area_real_levantada.toFixed(2)} m² ou hectares medidos`,
-      valor_resultado: input.area_real_levantada,
+      formula: aApurar ? 'A apurar no levantamento geo/topografico apos aprovacao' : `${input.area_real_levantada.toFixed(2)} m² ou hectares medidos`,
+      valor_resultado: aApurar ? 0 : input.area_real_levantada,
     },
     {
       rotulo: 'Divergencia',
-      formula: `${divergencia.toFixed(2)} (${percentualDivergencia.toFixed(2)}%)`,
+      formula: aApurar ? 'A apurar apos o levantamento' : `${divergencia.toFixed(2)} (${percentualDivergencia.toFixed(2)}%)`,
       valor_resultado: divergencia,
     },
     {
@@ -300,6 +308,23 @@ export async function calcularRetificacao(
     },
   ];
 
+  // v3.133.0: diligencias e tributos (taxa de retificacao, IPTU, CND) — estimativa
+  // editavel, secao separada no PDF, NAO soma ao secao_5_total (mesmo mecanismo do
+  // desmembramento).
+  const despesasAdm = (input.despesas_administrativas?.habilitada)
+    ? (() => {
+        const valor = Number(input.despesas_administrativas?.valor ?? 0);
+        const descritivo = (input.despesas_administrativas?.descritivo ?? '').trim();
+        if (!Number.isFinite(valor) || valor < 0) {
+          throw new Error('despesas_administrativas.valor inválido');
+        }
+        if (!descritivo) {
+          throw new Error('despesas_administrativas.descritivo obrigatório quando habilitada=true');
+        }
+        return { valor, descritivo };
+      })()
+    : undefined;
+
   const custos: CustosCalculados = {
     secao_1_projetos,
     secao_2_taxas,
@@ -309,6 +334,7 @@ export async function calcularRetificacao(
     secao_4_checklist,
     secao_5_total,
     avisos,
+    ...(despesasAdm ? { despesas_administrativas: despesasAdm } : {}),
   };
 
   return { custos, fontes };

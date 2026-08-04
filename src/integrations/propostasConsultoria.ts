@@ -3095,7 +3095,12 @@ export async function gerarPdfPropostaConsultoria(
   }
 
   // v1.66.11: Base de Calculo da Receita Federal (transparencia ao cliente)
-  if (custos.base_calculo && custos.base_calculo.length > 0) {
+  // v3.133.0: INSS/SERO so' existe na AVERBACAO de construcao. Nas demais propostas
+  // (retificacao, desmembramento, remembramento, georref, etc.) nao ha aferição da
+  // Receita Federal — o antigo render cravava esse titulo pra todas, o que estava
+  // errado. Restringe a averbacao residencial/comercial.
+  const eAverbacao = p.subtipo === 'averbacao_residencial' || p.subtipo === 'averbacao_comercial';
+  if (eAverbacao && custos.base_calculo && custos.base_calculo.length > 0) {
     if (doc.y > 680) doc.addPage();
     doc.fontSize(10.5).fillColor(corHex).text('Base de Calculo — Receita Federal (INSS/SERO)');
     doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
@@ -3117,12 +3122,14 @@ export async function gerarPdfPropostaConsultoria(
 
   // v3.23.0: III — Despesas Administrativas (estimativa) — só renderiza se presente em custos.
   // Restrito a remembramento/desmembramento (averbação/georref/etc não populam este campo).
+  // v3.133.0: retificacao_area tambem usa a secao de despesas (diligencias/tributos).
   const despesasAdm = custos.despesas_administrativas;
-  if (despesasAdm && (p.subtipo === 'remembramento' || p.subtipo === 'desmembramento')) {
+  if (despesasAdm && (p.subtipo === 'remembramento' || p.subtipo === 'desmembramento' || p.subtipo === 'retificacao_area')) {
+    const eRetificacao = p.subtipo === 'retificacao_area';
     if (doc.y > 680) doc.addPage();
     doc.moveDown(0.6);
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#0a3d62');
-    doc.text('III — Despesas Administrativas (estimativa)');
+    doc.text(eRetificacao ? 'III — Diligências e Tributos (estimativa)' : 'III — Despesas Administrativas (estimativa)');
     doc.moveDown(0.2);
     doc.font('Helvetica').fontSize(9).fillColor('#222');
     doc.text(despesasAdm.descritivo, { align: 'justify' });
@@ -3131,7 +3138,9 @@ export async function gerarPdfPropostaConsultoria(
     doc.text(`Estimativa: ${formatBRL(despesasAdm.valor)}`);
     doc.moveDown(0.1);
     doc.font('Helvetica-Oblique').fontSize(8).fillColor('#666');
-    doc.text('Esta estimativa NÃO compõe os honorários técnicos. Os valores definitivos correrão por conta do contratante conforme apuração junto à Superintendência de Habitação e Regularização Fundiária.', { align: 'justify' });
+    doc.text(eRetificacao
+      ? 'Esta estimativa NÃO compõe os honorários técnicos. Taxas cartorárias/tributárias (taxa de retificação, IPTU, CND e afins) e diligências correrão por conta do contratante conforme apuração no momento do protocolo.'
+      : 'Esta estimativa NÃO compõe os honorários técnicos. Os valores definitivos correrão por conta do contratante conforme apuração junto à Superintendência de Habitação e Regularização Fundiária.', { align: 'justify' });
     doc.font('Helvetica').fillColor('#111');
     doc.moveDown(0.4);
   }
