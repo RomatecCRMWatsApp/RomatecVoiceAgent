@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Visualizar PDF — Romatec</title>
+<style>
+  :root{ --green:#0C3320; --gold:#C9A84C; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; height:100%; background:#1b1b1b; font-family:system-ui,'Segoe UI',sans-serif; }
+  .bar{
+    position:sticky; top:0; z-index:10;
+    display:flex; align-items:center; gap:8px;
+    background:var(--green); color:#fff;
+    padding:calc(10px + env(safe-area-inset-top)) 12px 10px;
+    box-shadow:0 2px 8px rgba(0,0,0,.35);
+  }
+  .bar button, .bar a{
+    font:600 14px system-ui,sans-serif; text-decoration:none;
+    border:none; border-radius:8px; padding:9px 12px; cursor:pointer; white-space:nowrap;
+  }
+  .bar .voltar{ background:var(--gold); color:var(--green); }
+  .bar .ghost{ background:transparent; color:#fff; border:1px solid rgba(255,255,255,.45); }
+  .bar .title{ flex:1; min-width:0; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#e8f0eb; }
+  .wrap{ height:calc(100vh - 0px); }
+  iframe{ display:block; width:100%; height:calc(100vh - 56px); border:0; background:#fff; }
+  .fallback{
+    display:none; padding:24px; color:#ddd; text-align:center; font-size:14px; line-height:1.6;
+  }
+  .fallback a{ color:var(--gold); font-weight:600; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <button class="voltar" id="btnVoltar" type="button">← Voltar</button>
+    <span class="title" id="title">Documento</span>
+    <a class="ghost" id="btnAbrir" target="_blank" rel="noopener">↗ Abrir</a>
+    <a class="ghost" id="btnBaixar" download>⬇ Baixar</a>
+  </div>
+  <div class="wrap">
+    <iframe id="frame" title="PDF"></iframe>
+    <div class="fallback" id="fallback">
+      Se o PDF não aparecer aqui, toque em <a id="fbAbrir" target="_blank" rel="noopener">Abrir</a> ou <a id="fbBaixar" download>Baixar</a>.
+    </div>
+  </div>
+<script>
+(function(){
+  var q = new URLSearchParams(location.search);
+  var src = q.get('src') || '';
+  var titulo = q.get('title') || 'Documento';
+  // Segurança: só aceita caminho relativo do próprio app (evita open-redirect).
+  if (!/^\//.test(src) || /^\/\//.test(src)) src = '';
+  document.getElementById('title').textContent = titulo;
+  ['btnAbrir','btnBaixar','fbAbrir','fbBaixar'].forEach(function(id){
+    var el = document.getElementById(id); if (el && src) el.href = src;
+  });
+  var frame = document.getElementById('frame');
+  if (src) { frame.src = src; } else { document.getElementById('fallback').style.display = 'block'; frame.style.display = 'none'; }
+
+  // Voltar: volta pro app. history.back se veio de navegação; senão fecha a aba
+  // (quando script-opened) ou cai no /obras.
+  document.getElementById('btnVoltar').addEventListener('click', function(){
+    if (history.length > 1) { history.back(); return; }
+    try { window.close(); } catch (e) {}
+    setTimeout(function(){ location.href = '/obras'; }, 200);
+  });
+
+  // Mostra o fallback se o iframe não carregar em 3s (iOS às vezes não renderiza PDF em iframe).
+  if (src) {
+    var ok = false;
+    frame.addEventListener('load', function(){ ok = true; });
+    setTimeout(function(){ if (!ok) document.getElementById('fallback').style.display = 'block'; }, 3000);
+  }
+})();
+</script>
+</body>
+</html>

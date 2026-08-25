@@ -410,7 +410,7 @@
           ? `<button onclick="window.enviarTudoFechamento(${f.id})" style="padding:4px 10px; background:#7c3aed; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px;" title="Reenvia comprovante+recibo de todos os ${totalPagos} pagos via WhatsApp">📤 Enviar Tudo (${totalPagos})</button>`
           : '';
         const pdfCompletoBtn = totalPagos > 0
-          ? `<a href="/api/folha/fechamento/${f.id}/pdf-completo" target="_blank" style="padding:4px 10px; background:#0e8c63; color:#fff; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none; display:inline-block;" title="PDF do fechamento + comprovantes anexados">📦 PDF Completo</a>`
+          ? `<a href="/pdf-viewer.html?src=${encodeURIComponent('/api/folha/fechamento/' + f.id + '/pdf-completo')}&title=${encodeURIComponent('PDF Completo #' + f.id)}" target="_blank" style="padding:4px 10px; background:#0e8c63; color:#fff; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none; display:inline-block;" title="PDF do fechamento + comprovantes anexados">📦 PDF Completo</a>`
           : '';
         return `
           <div style="border:1px solid #2d4a3a; border-radius:8px; padding:12px; margin-bottom:12px; background:#0f1a14;">
@@ -422,7 +422,7 @@
               </div>
               <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                 <!-- v3.10.1: botao PDF do fechamento -->
-                <a href="/api/folha/fechamento/${f.id}/pdf-relatorio" target="_blank"
+                <a href="/pdf-viewer.html?src=${encodeURIComponent('/api/folha/fechamento/' + f.id + '/pdf-relatorio')}&title=${encodeURIComponent('Relatório #' + f.id)}" target="_blank"
                    style="padding:4px 10px; background:#1e40af; color:#fff; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none; display:inline-block;">📄 PDF</a>
                 ${pdfCompletoBtn}
                 ${enviarTudoBtn}
