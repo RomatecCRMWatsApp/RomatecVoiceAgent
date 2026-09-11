@@ -961,6 +961,8 @@
 </style>
 <!-- v1.84.0: catálogo de serviços técnico-legais (auto-preenchimento descrição recibo) -->
 <script src="/js/catalogo-servicos.js"></script>
+<!-- v3.138.0: utilitários de foto (salvar no dispositivo + purga de temp) -->
+<script src="/js/foto-utils.js"></script>
 <!-- v3.0.0: cálculo de precificação INCRA (Portaria 12/2025) -->
 <script src="/js/incraCalc.js" defer></script>
 <!-- v3.63.0: UI de Pontos & Croqui da Proposta de Demarcação -->
@@ -1521,6 +1523,8 @@ function atualizarBotaoCeo() {
   btn.style.color = tem ? 'var(--neon)' : 'var(--text-muted)';
 }
 document.addEventListener('DOMContentLoaded', () => {
+  // v3.138.0: purga fotos temporárias do VTO com +7 dias (anti-acúmulo/travamento no mobile).
+  if (typeof vtoPurgarRascunhosAntigos === 'function') { try { vtoPurgarRascunhosAntigos(7); } catch (_) {} }
   // v3.36.0: delegate global pra botao "📇 Gerenciar Clientes" que aparece
   // no toggle da aba Proposta. Evita duplicar handler em 10+ renderers.
   document.body.addEventListener('click', (ev) => {
@@ -6221,7 +6225,48 @@ function vtoSalvarRascunho() {
   };
   state.vtoDraft = campos;
   try { localStorage.setItem(vtoDraftKey(), JSON.stringify({ campos })); } catch (_) {}
-  vtoIdbSalvarFotos(vtoDraftKey(), state.vtoFotos); // fotos no IndexedDB (durável)
+  // v3.138.0: carimba a data pra purga automática (7 dias) das fotos temporárias.
+  try { localStorage.setItem('vtoFotosTs_' + vtoDraftKey(), String(Date.now())); } catch (_) {}
+  vtoIdbSalvarFotos(vtoDraftKey(), state.vtoFotos); // fotos no IndexedDB (temporário)
+}
+
+// v3.138.0: purga automática das fotos temporárias do VTO com +7 dias (evita
+// acumular no aparelho e travar). Roda no boot. Fotos já salvas no servidor
+// NÃO são tocadas (isto é só o rascunho local).
+async function vtoPurgarRascunhosAntigos(maxDias) {
+  maxDias = maxDias || 7;
+  const limite = maxDias * 24 * 60 * 60 * 1000, agora = Date.now();
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k || k.indexOf('vtoFotosTs_') !== 0) continue;
+      const ts = Number(localStorage.getItem(k) || 0);
+      if (!ts || (agora - ts) <= limite) continue;
+      const draftKey = k.slice('vtoFotosTs_'.length); // ex.: vtoDraft_123
+      await vtoIdbLimparFotos(draftKey);
+      try { localStorage.removeItem(draftKey); } catch (_) {}
+      try { localStorage.removeItem(k); } catch (_) {}
+      console.log('[vto:purga] rascunho de fotos antigo (>' + maxDias + 'd) removido:', draftKey);
+    }
+  } catch (e) { console.warn('[vto:purga]', e && e.message); }
+}
+
+// v3.138.0: "Liberar espaço" — apaga TODAS as fotos temporárias (rascunhos de
+// todas as obras). Fotos já salvas no servidor NÃO são afetadas.
+async function vtoLiberarEspacoFotos() {
+  if (!confirm('Liberar espaço: apaga as FOTOS TEMPORÁRIAS não salvas (rascunhos de todas as obras).\n\nFotos já enviadas/salvas no servidor NÃO são afetadas. Continuar?')) return;
+  try {
+    const db = await vtoIdbOpen();
+    await new Promise((res) => { const tx = db.transaction(VTO_IDB_STORE, 'readwrite'); tx.objectStore(VTO_IDB_STORE).clear(); tx.oncomplete = () => res(); tx.onerror = () => res(); });
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && (k.indexOf('vtoFotosTs_') === 0 || k.indexOf('vtoDraft_') === 0)) { try { localStorage.removeItem(k); } catch (_) {} }
+    }
+  } catch (e) { console.warn('[vto:liberar]', e && e.message); }
+  state.vtoFotos = [];
+  state._vtoFotosHidratadasObra = null;
+  if (typeof render === 'function') render();
+  alert('Espaço liberado ✓ Fotos temporárias apagadas.');
 }
 function vtoCarregarRascunho() {
   if (state.vtoDraft) return state.vtoDraft;
@@ -6597,6 +6642,8 @@ function renderVto() {
              style="display:block; width:100%; font-size:11px; padding:4px 6px; margin-top:4px;">
       <button data-rm-foto="${i}"
               style="position:absolute; top:6px; right:6px; width:28px; height:28px; padding:0; border-radius:50%; background:var(--danger); color:white; border:none; cursor:pointer; font-size:16px; line-height:1; box-shadow:0 2px 6px rgba(0,0,0,0.4);">×</button>
+      <button data-dl-foto="${i}" title="Salvar esta foto no dispositivo"
+              style="position:absolute; top:6px; left:6px; width:28px; height:28px; padding:0; border-radius:50%; background:#0e8c63; color:white; border:none; cursor:pointer; font-size:14px; line-height:1; box-shadow:0 2px 6px rgba(0,0,0,0.4);">⬇</button>
     </div>
   `).join('');
 
@@ -6688,6 +6735,10 @@ function renderVto() {
       <span style="margin-left:8px; font-size:12px; color:var(--text-muted);">${state.vtoFotos.length} foto(s) ${editandoId ? 'nova(s) — serão ADICIONADAS às já salvas' : 'selecionada(s)'}</span>
     </div>
     ${fotosExistentesHtml}
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+      ${state.vtoFotos.length > 0 ? `<button type="button" data-vto-baixar-todas style="font-size:12px; padding:6px 10px; background:#0e8c63; color:#fff; border:none; border-radius:6px; cursor:pointer;">⬇ Salvar todas no dispositivo (${state.vtoFotos.length})</button>` : ''}
+      <button type="button" data-vto-liberar-espaco title="Apaga fotos temporárias não salvas (todas as obras). Fotos já enviadas ao servidor não são afetadas." style="font-size:12px; padding:6px 10px; background:transparent; color:var(--text-muted); border:1px solid var(--border); border-radius:6px; cursor:pointer;">🧹 Liberar espaço</button>
+    </div>
     ${state.vtoFotos.length > 0 ? `<div style="margin-bottom:12px; display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">${fotosPreview}</div>` : ''}
 
     <button class="btn-primary" id="addVto">${labelBtn}</button>
@@ -6797,8 +6848,8 @@ function renderVto() {
           source: gpsBatch ? `📱 GPS celular (±${Math.round(gpsBatch.accuracy)}m)` : '',
         };
         const result = (typeof compressImageFileComStamp === 'function')
-          ? await compressImageFileComStamp(f, { maxDim: 1600, quality: 0.85 }, stampInfo)
-          : await compressImageFile(f, { maxDim: 1600, quality: 0.85 });
+          ? await compressImageFileComStamp(f, { maxDim: 1600, quality: 0.65 }, stampInfo)
+          : await compressImageFile(f, { maxDim: 1600, quality: 0.65 });
         state.vtoFotos.push({
           mime: result.mime,
           data_base64: result.data_base64,
@@ -6836,6 +6887,24 @@ function renderVto() {
   document.querySelectorAll('[data-rm-foto]').forEach(b => b.onclick = () => {
     state.vtoFotos.splice(parseInt(b.dataset.rmFoto), 1); vtoSalvarRascunho(); renderVto();
   });
+
+  // v3.138.0: salvar 1 foto no dispositivo (1 toque)
+  document.querySelectorAll('[data-dl-foto]').forEach(b => b.onclick = () => {
+    const f = state.vtoFotos[parseInt(b.dataset.dlFoto)];
+    if (f && window.FotoUtils) window.FotoUtils.baixar(f.data_base64, f.mime, 'vistoria-' + (parseInt(b.dataset.dlFoto) + 1) + '.jpg');
+  });
+  // v3.138.0: salvar TODAS no dispositivo
+  const btnBaixarTodas = document.querySelector('[data-vto-baixar-todas]');
+  if (btnBaixarTodas) btnBaixarTodas.onclick = async () => {
+    if (!window.FotoUtils) return;
+    btnBaixarTodas.disabled = true; const txt = btnBaixarTodas.textContent; btnBaixarTodas.textContent = '⏳ Salvando...';
+    const n = await window.FotoUtils.baixarVarias(state.vtoFotos, 'vistoria');
+    btnBaixarTodas.disabled = false; btnBaixarTodas.textContent = txt;
+    if (n) alert(n + ' foto(s) enviada(s) pro dispositivo. No iPhone, confirme "Salvar em Fotos".');
+  };
+  // v3.138.0: liberar espaço (fotos temporárias)
+  const btnLiberar = document.querySelector('[data-vto-liberar-espaco]');
+  if (btnLiberar) btnLiberar.onclick = () => { if (typeof vtoLiberarEspacoFotos === 'function') vtoLiberarEspacoFotos(); };
 
   // v3.67.0: remover uma foto JÁ SALVA durante a edição (rota dedicada — não apaga as outras)
   document.querySelectorAll('[data-rm-foto-existente]').forEach(b => b.onclick = async () => {
@@ -13784,6 +13853,9 @@ async function compressImageFile(file, opts) {
       const base64 = dataUrl.split(',')[1] || '';
       // Estimativa de bytes: cada char base64 = 6 bits = 0.75 byte
       const compressedBytes = Math.round(base64.length * 0.75);
+      // v3.138.0: libera o backing store do canvas na hora (iOS segura memória
+      // de canvas grande e trava a aba ao acumular várias fotos).
+      try { canvas.width = 0; canvas.height = 0; } catch (_) {}
 
       return {
         mime: 'image/jpeg',
