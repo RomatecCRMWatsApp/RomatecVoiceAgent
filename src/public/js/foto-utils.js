@@ -87,5 +87,51 @@
     }
   }
 
-  window.FotoUtils = { baixar: baixar, baixarVarias: baixarVarias, purgarIdbPorIdade: purgarIdbPorIdade };
+  // Converte data-URL / base64 puro / Blob → Blob.
+  async function _paraBlob(src, mime) {
+    if (src instanceof Blob) return src;
+    if (typeof src !== 'string' || !src) return null;
+    if (src.indexOf('data:') === 0) { var r = await fetch(src); return await r.blob(); }
+    var bin = atob(src), len = bin.length, arr = new Uint8Array(len);
+    for (var i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime || 'image/jpeg' });
+  }
+
+  // Salva no dispositivo: tenta Web Share com arquivo (no iPhone abre "Salvar em
+  // Fotos"; no Android idem), e cai no download se não houver suporte.
+  // src pode ser Blob, data-URL ('data:...') ou base64 puro (+ mime).
+  async function salvarNoDispositivo(src, filename, mime) {
+    try {
+      var blob = await _paraBlob(src, mime);
+      if (!blob) return false;
+      var nome = filename || ('foto-' + Date.now() + '.jpg');
+      var tipo = blob.type || mime || 'image/jpeg';
+      if (navigator.canShare) {
+        try {
+          var file = new File([blob], nome, { type: tipo });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file] });
+            return true; // compartilhou (ou o usuário escolheu Salvar em Fotos)
+          }
+        } catch (e) {
+          if (e && e.name === 'AbortError') return true; // usuário cancelou — não baixa por cima
+          /* outro erro → cai no download */
+        }
+      }
+      var u = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = u; a.download = nome; a.style.display = 'none';
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { a.remove(); URL.revokeObjectURL(u); }, 60000);
+      return true;
+    } catch (e) {
+      console.warn('[foto-utils] salvarNoDispositivo:', e && e.message);
+      return false;
+    }
+  }
+
+  window.FotoUtils = {
+    baixar: baixar, baixarVarias: baixarVarias,
+    salvarNoDispositivo: salvarNoDispositivo, purgarIdbPorIdade: purgarIdbPorIdade,
+  };
 })();

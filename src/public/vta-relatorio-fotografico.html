@@ -107,6 +107,7 @@
 </dialog>
 
 <script src="/js/vtaVinculo.js"></script>
+<script src="/js/foto-utils.js"></script>
 <script>
 (function(){
   'use strict';
@@ -192,11 +193,17 @@
         fotos.push(j.id);
         card.innerHTML='<img src="'+j.base64_overlay+'" alt="foto"><div class="meta">'
           +'<span class="badge b-ok">✓ Overlay aplicado</span>'
+          +'<button type="button" data-dl class="badge" style="margin-left:6px;cursor:pointer;background:#0e8c63;color:#fff;border:none;">⬇ Salvar no dispositivo</button>'
           +'<input data-fid="'+j.id+'" placeholder="Descrição (opcional)" style="margin-top:8px">'
           +'</div>';
         card.querySelector('input').addEventListener('change',function(){
           api('/'+relatorioId+'/fotos/'+j.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({descricao:this.value})}).catch(function(){});
         });
+        // v3.139.0: salvar no dispositivo (iPhone → "Salvar em Fotos"; Android → download)
+        var btnDl=card.querySelector('[data-dl]');
+        if(btnDl)btnDl.onclick=function(){
+          if(window.FotoUtils)window.FotoUtils.salvarNoDispositivo(j.base64_overlay,'relatorio-foto-'+j.id+'.jpg');
+        };
       })
       .catch(function(e){card.innerHTML='<div class="meta"><span class="badge b-err">Falha: '+e.message+'</span></div>';});
   }
