@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Recuperar ZAYRA</title>
+  <!-- Página PROPOSITALMENTE mínima e SEM Service Worker: serve pra destravar o app
+       quando /obras.html entra em loop de recarga/crash no iPhone ("Um problema
+       ocorreu repetidamente"). Ela remove o Service Worker e limpa os caches locais,
+       sem apagar fotos ainda não enviadas. -->
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+           background: #0b0f0d; color: #e8e8e8; padding: 24px 18px 60px; line-height: 1.55; }
+    h1 { color: #C9A84C; font-size: 20px; margin: 8px 0 4px; }
+    p { font-size: 14px; opacity: .9; }
+    .card { background: #121a16; border: 1px solid #23372c; border-radius: 12px; padding: 16px; margin: 16px 0; }
+    button { display: block; width: 100%; border: none; border-radius: 10px; padding: 14px 16px;
+             font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 10px; }
+    .primary { background: #16995f; color: #041008; }
+    .danger  { background: #6d1728; color: #ffd7df; border: 1px solid #ff5577; }
+    .ghost   { background: transparent; color: #C9A84C; border: 1px solid #C9A84C; }
+    #log { font-size: 13px; white-space: pre-wrap; margin-top: 14px; color: #9fe6c2; }
+    .aviso { font-size: 12px; color: #f0b357; }
+  </style>
+</head>
+<body>
+  <h1>🛟 Recuperar o aplicativo</h1>
+  <p>Use esta página quando o app (Gestão de Obras) travar ou ficar recarregando sozinho
+     no iPhone. Ela reinstala o app do zero neste aparelho.</p>
+
+  <div class="card">
+    <strong>Recuperação segura (recomendada)</strong>
+    <p>Remove o Service Worker e limpa o cache do aplicativo. <b>Não</b> apaga fotos que
+       ainda não foram enviadas ao servidor.</p>
+    <button class="primary" id="btnSeguro">🧹 Limpar cache e reiniciar o app</button>
+  </div>
+
+  <div class="card">
+    <strong>Limpeza total</strong>
+    <p class="aviso">⚠️ Além do cache, apaga também os dados locais da galeria neste
+       aparelho — inclusive fotos que ainda NÃO subiram ao servidor. Só use se a
+       recuperação segura não resolver.</p>
+    <button class="danger" id="btnTotal">🗑️ Limpeza total (apaga fotos não enviadas)</button>
+  </div>
+
+  <button class="ghost" id="btnVoltar">↩ Voltar ao app sem limpar</button>
+  <div id="log"></div>
+
+  <script>
+    var logEl = document.getElementById('log');
+    function log(msg) { logEl.textContent += msg + '\n'; }
+
+    async function removerServiceWorkers() {
+      if (!('serviceWorker' in navigator)) { log('• Service Worker: não suportado (ok)'); return; }
+      try {
+        var regs = await navigator.serviceWorker.getRegistrations();
+        for (var i = 0; i < regs.length; i++) { await regs[i].unregister(); }
+        log('• Service Worker removido (' + regs.length + ')');
+      } catch (e) { log('• Falha ao remover SW: ' + (e && e.message)); }
+    }
+
+    async function limparCaches() {
+      if (!('caches' in window)) { log('• Cache Storage: não suportado (ok)'); return; }
+      try {
+        var nomes = await caches.keys();
+        for (var i = 0; i < nomes.length; i++) { await caches.delete(nomes[i]); }
+        log('• Caches limpos (' + nomes.length + ')');
+      } catch (e) { log('• Falha ao limpar caches: ' + (e && e.message)); }
+    }
+
+    function apagarIndexedDB(nome) {
+      return new Promise(function (res) {
+        try {
+          var rq = indexedDB.deleteDatabase(nome);
+          rq.onsuccess = rq.onerror = rq.onblocked = function () { res(); };
+        } catch (_) { res(); }
+      });
+    }
+
+    async function limparDadosGaleria() {
+      try {
+        await apagarIndexedDB('romatec-galeria');
+        // Limpa também marcas de rascunho/estado que possam estar corrompidas.
+        try {
+          var apagar = [];
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i);
+            if (k && (k.indexOf('vtoFotos') === 0 || k.indexOf('vtoDraft') === 0 || k === 'zayra_boot_marks' || k === 'zayra_sw_reloaded')) apagar.push(k);
+          }
+          apagar.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+        } catch (_) {}
+        log('• Dados locais da galeria apagados');
+      } catch (e) { log('• Falha ao apagar dados da galeria: ' + (e && e.message)); }
+    }
+
+    function reiniciar() {
+      log('• Reiniciando…');
+      setTimeout(function () { window.location.replace('/obras.html?recuperado=' + Date.now()); }, 1400);
+    }
+
+    document.getElementById('btnSeguro').onclick = async function () {
+      this.disabled = true; this.textContent = '⏳ Limpando…';
+      try { sessionStorage.removeItem('zayra_sw_reloaded'); sessionStorage.removeItem('zayra_boot_marks'); } catch (_) {}
+      await removerServiceWorkers();
+      await limparCaches();
+      log('✅ Pronto. O app vai reiniciar do zero.');
+      reiniciar();
+    };
+
+    document.getElementById('btnTotal').onclick = async function () {
+      if (!confirm('LIMPEZA TOTAL\n\nIsto apaga também as fotos da galeria que ainda NÃO foram enviadas ao servidor, neste aparelho. Continuar?')) return;
+      this.disabled = true; this.textContent = '⏳ Limpando tudo…';
+      await removerServiceWorkers();
+      await limparCaches();
+      await limparDadosGaleria();
+      log('✅ Limpeza total concluída. O app vai reiniciar do zero.');
+      reiniciar();
+    };
+
+    document.getElementById('btnVoltar').onclick = function () {
+      window.location.replace('/obras.html');
+    };
+  </script>
+</body>
+</html>

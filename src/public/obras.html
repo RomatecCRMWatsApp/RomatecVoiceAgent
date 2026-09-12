@@ -978,13 +978,27 @@
 <script>
 let __reloadGuard = false;
 
-// Listener global: quando novo SW assume controle, recarrega 1× pra rodar JS novo.
+// v3.141.0: trava de reload À PROVA DE LOOP.
+// Bug no iOS ("Um problema ocorreu repetidamente em /obras.html"): o SW chama
+// clients.claim() e, se controllerchange disparar em TODA carga, cada reload
+// aciona outro claim → outro reload → loop infinito e o WebKit derruba a aba.
+// A trava antiga (__reloadGuard) era por CARGA — resetava a cada reload, então
+// não segurava o loop. Agora:
+//   (1) só recarrega se JÁ HAVIA um controller no início (o claim da 1ª carga,
+//       de "sem controller" → SW, NÃO conta — é o caso que loopava);
+//   (2) no máximo 1 reload por sessão da aba (sessionStorage sobrevive ao reload).
+const __tinhaControllerNoInicio = ('serviceWorker' in navigator) && !!navigator.serviceWorker.controller;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (__reloadGuard) return;
+    if (!__tinhaControllerNoInicio) return; // 1ª carga (claim inicial): não recarrega
+    try { if (sessionStorage.getItem('zayra_sw_reloaded') === '1') return; } catch (_) {}
     __reloadGuard = true;
+    try { sessionStorage.setItem('zayra_sw_reloaded', '1'); } catch (_) {}
     location.reload();
   });
+  // Limpa a marca quando a aba fecha, pra um novo deploy futuro poder recarregar 1×.
+  window.addEventListener('pagehide', () => { try { sessionStorage.removeItem('zayra_sw_reloaded'); } catch (_) {} });
 }
 
 (async function autoUpdateApp() {
