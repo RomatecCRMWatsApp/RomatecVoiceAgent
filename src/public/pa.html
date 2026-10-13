@@ -646,7 +646,7 @@ async function rFinanceiro(){
         <div style="flex:0 1 200px"><label for="bTipos">Quais lançamentos</label><select class="f" id="bTipos"><option value="BOLETO">Parcelas (boletos)</option><option value="SINAL">Sinais em aberto</option><option value="BOLETO,SINAL">Parcelas + sinais</option></select></div>
         <div style="flex:0 0 auto"><button class="btn btn-gold" id="bEmitir">🧾 Emitir boletos</button></div></div>
         <div id="bProg"></div>` : ''}
-      <div class="row" style="margin-top:8px"><div style="flex:0 1 200px"><label for="bFiltro">Status</label><select class="f" id="bFiltro"><option value="">Todos</option><option>PENDENTE</option><option>VENCIDO</option><option>PAGO</option><option>CANCELADO</option></select></div></div>
+      <div class="row" style="margin-top:8px"><div style="flex:0 1 200px"><label for="bFiltro">Status</label><select class="f" id="bFiltro"><option value="">Ativos (sem cancelados)</option><option value="TODOS">Todos (inclui cancelados)</option><option>PENDENTE</option><option>VENCIDO</option><option>PAGO</option><option>CANCELADO</option></select></div></div>
       <div id="bolBox" class="tbl" style="margin-top:8px"><div class="empty">Carregando…</div></div></div>
     <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;border:0;margin:0">Cobrança</h2>
         <div style="flex:0 0 auto" class="row"><input type="date" id="cAte" value="${hoje}" style="width:160px"><button class="btn btn-ghost btn-sm" id="cAtual">Atualizar</button><button class="btn btn-ghost btn-sm" id="cXlsx">⬇️ XLSX</button></div></div>
@@ -724,8 +724,10 @@ async function rBoletos(){
   } catch { $('#asaasStatus').textContent = ''; }
   const listar = async () => {
     try {
+      // v3.144.9: padrão esconde os cancelados (histórico fica em "Todos" / "CANCELADO").
       const f = $('#bFiltro').value;
-      const { boletos } = await api(`/projetos/${S.pid}/boletos${f ? '?status=' + f : ''}`);
+      const resp = await api(`/projetos/${S.pid}/boletos${f && f !== 'TODOS' ? '?status=' + f : ''}`);
+      const boletos = f ? resp.boletos : resp.boletos.filter((b) => b.status !== 'CANCELADO');
       $('#bolBox').innerHTML = boletos.length ? `<div class="muted" style="margin-bottom:6px">${boletos.length} boleto(s) · ${brl(boletos.reduce((s, b) => s + b.valor, 0))}</div><table><thead><tr><th>Lote</th><th>Associado</th><th>Parcela</th><th>Venc.</th><th class="right">Valor</th><th>Status</th><th></th></tr></thead><tbody>
         ${boletos.map((b) => `<tr><td><b>${esc(b.lote)}</b></td><td>${esc(b.associado_nome)}</td><td>${esc(b.tipo === 'BOLETO' ? 'Parcela ' + b.parcela : b.tipo === 'SINAL' ? 'Sinal' : b.tipo)}</td><td>${dbr(b.vencimento)}</td>
           <td class="right nowrap">${brl(b.valor)}</td><td>${chip(b.status)}${b.ambiente === 'sandbox' ? ' ' + chip('A_VENCER', 'teste') : ''}${b.pago_em ? ' <span class="muted">' + dbr(b.pago_em).slice(0, 10) + '</span>' : ''}</td>
