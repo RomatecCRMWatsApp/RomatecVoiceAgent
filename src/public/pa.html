@@ -83,9 +83,11 @@
   .doc b{display:block;color:var(--green);font-size:11px;margin-bottom:2px}
   /* mapa */
   #mapaSvg{width:100%;height:auto;background:#fbfaf5;border:1px solid var(--line);border-radius:10px;touch-action:manipulation}
-  #mapaSvg .lote{stroke:#0C3320;stroke-width:.4;cursor:pointer}
-  #mapaSvg .lote:hover{stroke:#C9A84C;stroke-width:1.2}
-  #mapaSvg text{font-size:5px;font-weight:700;fill:#0C3320;pointer-events:none;text-anchor:middle;dominant-baseline:middle}
+  #mapaSvg .lote{cursor:pointer}
+  #mapaSvg .lote:hover polygon{stroke:#C9A84C;stroke-width:1.1}
+  #mapaSvg .mt{font-family:'Liberation Sans',Arial,sans-serif;font-weight:700;text-anchor:middle;dominant-baseline:middle;pointer-events:none}
+  #mapaBox:fullscreen{background:#fff;padding:10px;overflow:auto}
+  #mapaBox:fullscreen #mapaSvg{height:100%}
   .leg{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin:8px 0}
   .leg span{display:inline-flex;align-items:center;gap:5px}
   .leg i{width:14px;height:14px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.2)}
@@ -166,7 +168,7 @@ async function abrirDoc(id){
   } catch (e){ toast(e.message, true); }
 }
 
-const S = { projetos: [], pid: null, eu: null, painel: null, lotes: null, assoc: null, aba: 'painel', modoMapa: 'financeiro' };
+const S = { projetos: [], pid: null, eu: null, painel: null, lotes: null, assoc: null, aba: 'painel', modoMapa: 'layout', desenho: undefined };
 const qs = new URLSearchParams(location.search);
 
 // ─── boot ───────────────────────────────────────────────────────────────
@@ -182,7 +184,7 @@ async function boot(){
     const salvo = Number(qs.get('projeto')) || Number(safeGet('pa_projeto'));
     S.pid = projetos.some((p) => p.id === salvo) ? salvo : (projetos[0] ? projetos[0].id : null);
     if (S.pid) sel.value = String(S.pid);
-    sel.onchange = () => { S.pid = Number(sel.value); safeSet('pa_projeto', S.pid); S.painel = S.lotes = S.assoc = null; mostrar(S.aba); };
+    sel.onchange = () => { S.pid = Number(sel.value); safeSet('pa_projeto', S.pid); S.painel = S.lotes = S.assoc = null; S.desenho = undefined; mostrar(S.aba); };
     document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => mostrar(b.dataset.t));
     mostrar(qs.get('aba') || (S.pid ? 'painel' : 'importar'));
     if (qs.get('associado')) abrirAssociado(Number(qs.get('associado')));
@@ -249,41 +251,116 @@ async function rPainel(){
   } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
 }
 
-// ─── Mapa (croqui; SIRGAS quando houver) ────────────────────────────────
+// ─── Mapa — reproduz o layout do PDF (mapa_layout_modelo.py) ────────────
+// v3.142.1: coordenadas do croqui em metros com y para BAIXO (igual ao gerador
+// do kit — antes o mapa saía espelhado). Modo "Layout" = cores do PDF; modos
+// Financeiro/Medição pintam os lotes por situação mantendo vias e equipamentos.
 const COR_FIN = { QUITADO:'#1f7a4d', EM_DIA:'#8cc9a4', SINAL_PARCIAL:'#e9c35a', SINAL_PENDENTE:'#d9786f', VENCIDO:'#B3261E', SEM_ASSOCIADO:'#ffffff' };
 const COR_MED = { PENDENTE:'#efe9da', AGENDADA:'#e9c35a', MEDIDO:'#8cc9a4', PROCESSADO:'#1f7a4d' };
 async function carregarLotes(){ if (!S.lotes) S.lotes = (await api(`/projetos/${S.pid}/lotes`)).lotes; return S.lotes; }
+async function carregarDesenho(){ if (S.desenho === undefined) { try { S.desenho = (await api(`/projetos/${S.pid}/desenho`)).desenho; } catch { S.desenho = null; } } return S.desenho; }
+function nomeTitulo(n){ let t = String(n || '').toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()); for (const a of [' Da ',' De ',' Do ',' Dos ',' Das ',' E ']) t = t.split(a).join(a.toLowerCase()); return t; }
+function quebrar(txt, largura, fs){
+  const max = Math.max(4, Math.floor(largura / (fs * 0.56))); const out = []; let linha = '';
+  for (const p of String(txt).split(/\s+/)) { if (!linha) linha = p; else if ((linha + ' ' + p).length <= max) linha += ' ' + p; else { out.push(linha); linha = p; } }
+  if (linha) out.push(linha); return out.slice(0, 3);
+}
+function pill(x, y, texto, rot, estilo, tam){
+  const fs = tam || 3.3;
+  const w = texto.length * fs * 0.6 + 3, h = fs * 1.35;
+  const tr = `translate(${x.toFixed(2)},${y.toFixed(2)})${rot ? ` rotate(${rot.toFixed(2)})` : ''}`;
+  if (estilo === 'equip') return `<text transform="${tr}" class="mt" font-size="${fs}" fill="#0C3320">${esc(texto)}</text>`;
+  const st = estilo === 'praca' ? 'fill="#0C3320" stroke="none"' : estilo === 'verde' ? 'fill="rgba(255,255,255,.88)" stroke="#2E7D32" stroke-width=".35"' : 'fill="#fff" stroke="#8A8A8A" stroke-width=".3"';
+  const cor = estilo === 'praca' ? '#fff' : estilo === 'verde' ? '#1B5E20' : '#0C3320';
+  return `<g transform="${tr}"><rect x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" rx="${h/2}" ${st}/><text class="mt" font-size="${fs}" fill="${cor}">${esc(texto)}</text></g>`;
+}
+function icone(i){
+  const { x, y, w = 0, h = 0, r = 0 } = i;
+  switch (i.tipo){
+    case 'arvore': return `<circle cx="${x + r*.35}" cy="${y + r*.35}" r="${r}" fill="rgba(0,0,0,.18)"/><circle cx="${x}" cy="${y}" r="${r}" fill="#2E7D32"/><circle cx="${x - r*.25}" cy="${y - r*.25}" r="${r*.62}" fill="#4CAF50"/>`;
+    case 'fonte': return `<circle cx="${x}" cy="${y}" r="${r}" fill="#E9E4D6"/><circle cx="${x}" cy="${y}" r="${r*.54}" fill="#4FC3F7" stroke="#90A4AE" stroke-width=".4"/>`;
+    case 'quiosque': return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1" fill="#F3D9A4" stroke="#C9A84C" stroke-width=".4"/>`;
+    case 'saude': return `<polygon points="${x-2},${y} ${x+w/2},${y-7} ${x+w+2},${y}" fill="#C62828"/><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fff" stroke="#9E9E9E" stroke-width=".4"/>`
+      + `<rect x="${x+w/2-1.4}" y="${y+h/2-4.5}" width="2.8" height="9" fill="#E53935"/><rect x="${x+w/2-4.5}" y="${y+h/2-1.4}" width="9" height="2.8" fill="#E53935"/>`;
+    case 'ambulancia': return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx=".8" fill="#fff" stroke="#757575" stroke-width=".3"/><rect x="${x+w/2-2}" y="${y+h/2-.5}" width="4" height="1" fill="#E53935"/><rect x="${x+w/2-.5}" y="${y+h/2-1.5}" width="1" height="3" fill="#E53935"/><circle cx="${x+2.4}" cy="${y+h}" r="1.1" fill="#263238"/><circle cx="${x+w-2.4}" cy="${y+h}" r="1.1" fill="#263238"/>`;
+    case 'estacionamento': { let s = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1" fill="#9E9E9E" stroke="#757575" stroke-width=".4"/>`; for (let k = 1; k < 7; k++) s += `<line x1="${x + w*k/7}" y1="${y + 3}" x2="${x + w*k/7}" y2="${y + 11}" stroke="#fff" stroke-width=".5"/>`; return s; }
+    case 'quadra': return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1" fill="#4E8F5A" stroke="#2E5E38" stroke-width=".4"/><rect x="${x+2}" y="${y+2}" width="${w-4}" height="${h-4}" fill="none" stroke="#fff" stroke-width=".5"/><line x1="${x+w/2}" y1="${y+2}" x2="${x+w/2}" y2="${y+h-2}" stroke="#fff" stroke-width=".5"/><circle cx="${x+w/2}" cy="${y+h/2}" r="3" fill="none" stroke="#fff" stroke-width=".5"/>`;
+    case 'escola': { let s = `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#ECEFF1" stroke="#9E9E9E" stroke-width=".4"/><rect x="${x-1}" y="${y-2.2}" width="${w+2}" height="2.2" fill="#E64A19"/>`;
+      for (const k of [0, 3]) s += `<rect x="${x + 1.6 + k*(w-3.2)/4}" y="${y + h/2 - 3}" width="${(w-3.2)/4 - 1.6}" height="4" fill="#64B5F6"/>`;
+      return s + `<rect x="${x+w/2-2.2}" y="${y+h-6}" width="4.4" height="6" fill="#6D4C41"/><line x1="${x+w+4}" y1="${y+h}" x2="${x+w+4}" y2="${y-5}" stroke="#616161" stroke-width=".4"/><rect x="${x+w+4}" y="${y-5}" width="5.4" height="3.5" fill="#2E7D32"/>`; }
+  }
+  return '';
+}
+function svgMapa(lotes, d, modo){
+  const com = lotes.filter((l) => Array.isArray(l.croqui_xy) && l.croqui_xy.length >= 3);
+  let lim;
+  if (d) lim = d.limites;
+  else { const xs = com.flatMap((l) => l.croqui_xy.map((p) => p[0])), ys = com.flatMap((l) => l.croqui_xy.map((p) => p[1])); lim = { minX: Math.min(...xs) - 8, minY: Math.min(...ys) - 8, maxX: Math.max(...xs) + 8, maxY: Math.max(...ys) + 8 }; }
+  const W = lim.maxX - lim.minX, H = lim.maxY - lim.minY;
+  const pts = (p) => p.map((q) => `${q[0].toFixed(2)},${q[1].toFixed(2)}`).join(' ');
+  const FILL = { viario:'#BDBDBD', praca:'#B7D99A', equipamento:'#EEF4EA', verde:'#B7D99A' };
+  let s = `<svg id="mapaSvg" viewBox="${lim.minX} ${lim.minY} ${W} ${H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">`;
+  if (d){
+    const praca = d.areas.find((a) => a.tipo === 'praca');
+    if (praca) s += `<defs><clipPath id="clipPraca"><polygon points="${pts(praca.pts)}"/></clipPath></defs>`;
+    s += d.areas.map((a) => `<polygon points="${pts(a.pts)}" fill="${FILL[a.tipo] || '#ddd'}" ${a.tipo === 'viario' ? '' : 'stroke="#3A3A3A" stroke-width=".45"'}/>`).join('');
+    s += d.caminhos.map((c) => `<polyline points="${pts(c.pts)}" stroke="${c.cor}" stroke-width="${c.largura}" fill="none"${praca ? ' clip-path="url(#clipPraca)"' : ''}/>`).join('');
+    s += d.icones.map(icone).join('');
+  }
+  for (const l of com){
+    const xs = l.croqui_xy.map((p) => p[0]), ys = l.croqui_xy.map((p) => p[1]);
+    const x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(...xs) - x0, h = Math.max(...ys) - y0, cx = x0 + w / 2;
+    const inst = l.tipo === 'INSTITUCIONAL';
+    const fill = inst ? '#DCEBF7' : modo === 'financeiro' ? COR_FIN[l.financeiro.situacao] : modo === 'medicao' ? COR_MED[l.status_medicao] : '#EAF3EC';
+    const escuro = !inst && ((modo === 'financeiro' && ['QUITADO','VENCIDO'].includes(l.financeiro.situacao)) || (modo === 'medicao' && l.status_medicao === 'PROCESSADO'));
+    const corTxt = escuro ? '#fff' : '#1B1B1B', corNum = escuro ? '#fff' : inst ? '#1F4E79' : '#0C3320', corDim = escuro ? '#e8f0ea' : '#5A5A5A';
+    const titulo = `Lote ${l.numero}${l.associado ? ' — ' + l.associado.nome : inst ? ' — área institucional' : ''}`;
+    s += `<g class="lote" data-n="${esc(l.numero)}"><title>${esc(titulo)}</title><polygon points="${pts(l.croqui_xy)}" fill="${fill}" stroke="#3A3A3A" stroke-width=".4"/>`;
+    s += `<text class="mt" x="${cx}" y="${y0 + 3.6}" font-size="3.8" fill="${corNum}">${esc(l.numero)}</text>`;
+    const fs = w >= 40 ? 2.45 : 2.3;
+    const linhas = inst ? ['ÁREA', 'INSTITUCIONAL'] : (l.associado ? quebrar(nomeTitulo(l.associado.nome), w - 2.4, fs) : []);
+    const y1 = w >= 40 ? y0 + 3.6 + 2.2 + fs : y0 + h / 2 - ((linhas.length - 1) * (fs + 0.6)) / 2;
+    linhas.forEach((t, i) => { s += `<text class="mt" x="${cx}" y="${(y1 + i * (fs + 0.6)).toFixed(2)}" font-size="${fs}" fill="${inst ? '#1F4E79' : corTxt}" font-weight="${inst ? 400 : 700}">${esc(t)}</text>`; });
+    const dimTxt = `${Math.round(Math.min(w, h))}×${Math.round(Math.max(w, h))} m`, area = l.area_projeto_m2 ? `${Math.round(l.area_projeto_m2)} m²` : '';
+    if (w >= 40) s += `<text class="mt" x="${cx}" y="${y0 + h - 1.3}" font-size="2" fill="${corDim}" font-weight="400">${dimTxt}${area ? ' · ' + area : ''}</text>`;
+    else s += `<text class="mt" x="${cx}" y="${y0 + h - 3.6}" font-size="2" fill="${corDim}" font-weight="400">${dimTxt}</text><text class="mt" x="${cx}" y="${y0 + h - 1.3}" font-size="2" fill="${corDim}" font-weight="400">${area}</text>`;
+    s += '</g>';
+  }
+  if (d){
+    s += d.eixos.map(([a, b]) => `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#F5F5F5" stroke-width=".6" stroke-dasharray="3 3"/>`).join('');
+    s += d.cotas.map((c) => { const hz = c.y1 === c.y2; const mx = (c.x1 + c.x2) / 2, my = (c.y1 + c.y2) / 2;
+      const tk = hz
+        ? `<line x1="${c.x1}" y1="${c.y1-1}" x2="${c.x1}" y2="${c.y1+1}" stroke="#444" stroke-width=".25"/><line x1="${c.x2}" y1="${c.y2-1}" x2="${c.x2}" y2="${c.y2+1}" stroke="#444" stroke-width=".25"/><text class="mt" x="${mx}" y="${my-1.2}" font-size="2.2" fill="#222" font-weight="400">${esc(c.texto)}</text>`
+        : `<line x1="${c.x1-1}" y1="${c.y1}" x2="${c.x1+1}" y2="${c.y1}" stroke="#444" stroke-width=".25"/><line x1="${c.x2-1}" y1="${c.y2}" x2="${c.x2+1}" y2="${c.y2}" stroke="#444" stroke-width=".25"/><text class="mt" transform="translate(${mx-1.4},${my}) rotate(-90)" font-size="2.2" fill="#222" font-weight="400">${esc(c.texto)}</text>`;
+      return `<line x1="${c.x1}" y1="${c.y1}" x2="${c.x2}" y2="${c.y2}" stroke="#444" stroke-width=".25"/>` + tk; }).join('');
+    s += d.rotulos.map((r) => pill(r.x, r.y, r.texto, r.rot || 0, r.estilo, r.tam)).join('');
+  }
+  return s + '</svg>';
+}
 async function rMapa(){
   const v = $('#v-mapa');
   v.innerHTML = '<div class="card empty">Carregando mapa…</div>';
   try {
-    const lotes = await carregarLotes();
-    const com = lotes.filter((l) => Array.isArray(l.croqui_xy) && l.croqui_xy.length >= 3);
-    if (!com.length){ v.innerHTML = '<div class="card empty">Nenhum lote com croqui.</div>'; return; }
-    const xs = com.flatMap((l) => l.croqui_xy.map((p) => p[0])), ys = com.flatMap((l) => l.croqui_xy.map((p) => p[1]));
-    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys), pad = 6;
-    const W = maxX - minX + pad * 2, H = maxY - minY + pad * 2;
-    const cor = (l) => l.tipo === 'INSTITUCIONAL' ? '#c5d5e6' : S.modoMapa === 'financeiro' ? COR_FIN[l.financeiro.situacao] : COR_MED[l.status_medicao];
-    const legenda = S.modoMapa === 'financeiro'
+    const [lotes, d] = await Promise.all([carregarLotes(), carregarDesenho()]);
+    if (!lotes.some((l) => Array.isArray(l.croqui_xy) && l.croqui_xy.length >= 3)){ v.innerHTML = '<div class="card empty">Nenhum lote com croqui.</div>'; return; }
+    const modo = S.modoMapa;
+    const legenda = modo === 'financeiro'
       ? Object.entries({ QUITADO:'Quitado', EM_DIA:'Sinal pago', SINAL_PARCIAL:'Sinal parcial', SINAL_PENDENTE:'Sinal pendente', VENCIDO:'Vencido', SEM_ASSOCIADO:'Sem associado' }).map(([k, t]) => `<span><i style="background:${COR_FIN[k]}"></i>${t}</span>`).join('')
-      : Object.entries(COR_MED).map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join('');
-    v.innerHTML = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="flex:1 1 auto;border:0;margin:0">Mapa do projeto</h2>
-        <div style="flex:0 0 auto"><button class="btn btn-sm ${S.modoMapa==='financeiro'?'btn-primary':'btn-ghost'}" id="mFin">Financeiro</button>
-        <button class="btn btn-sm ${S.modoMapa==='medicao'?'btn-primary':'btn-ghost'}" id="mMed">Medição</button></div></div>
-      <div class="leg">${legenda}<span><i style="background:#c5d5e6"></i>Institucional</span></div>
-      <svg id="mapaSvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
-        ${com.map((l) => { const pts = l.croqui_xy.map((p) => `${(p[0]-minX+pad).toFixed(2)},${(maxY-p[1]+pad).toFixed(2)}`).join(' ');
-          const cx = l.croqui_xy.reduce((s, p) => s + p[0], 0) / l.croqui_xy.length - minX + pad, cy = maxY - l.croqui_xy.reduce((s, p) => s + p[1], 0) / l.croqui_xy.length + pad;
-          return `<polygon class="lote" data-n="${esc(l.numero)}" points="${pts}" fill="${cor(l)}"><title>Lote ${esc(l.numero)}${l.associado ? ' — ' + esc(l.associado.nome) : (l.tipo === 'INSTITUCIONAL' ? ' — área institucional' : '')}</title></polygon><text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}">${esc(l.numero)}</text>`; }).join('')}
-      </svg>
-      <p class="nota">Croqui preliminar – dimensões e posição definitivas conforme georreferenciamento (SIRGAS 2000) e NBR 13133.</p>
+      : modo === 'medicao' ? Object.entries(COR_MED).map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join('')
+      : '<span><i style="background:#EAF3EC"></i>Lote de associado – 20 × 40 m (800 m²)</span><span><i style="background:#EEF4EA"></i>Equipamentos comunitários</span><span><i style="background:#B7D99A"></i>Praça / área verde</span><span><i style="background:#BDBDBD"></i>Sistema viário</span>';
+    const bt = (m, t) => `<button class="btn btn-sm ${modo === m ? 'btn-primary' : 'btn-ghost'}" data-modo="${m}">${t}</button>`;
+    v.innerHTML = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="flex:1 1 auto;border:0;margin:0">Layout dos lotes e associados</h2>
+        <div style="flex:0 0 auto">${bt('layout','Layout')} ${bt('financeiro','Financeiro')} ${bt('medicao','Medição')} <button class="btn btn-sm btn-ghost" id="mFull">⛶ Tela cheia</button></div></div>
+      <div class="leg">${legenda}<span><i style="background:#DCEBF7"></i>Lote institucional – reserva p/ a comunidade</span></div>
+      <div id="mapaBox">${svgMapa(lotes, d, modo)}</div>
+      <p class="nota">Croqui técnico preliminar, sem amarração geodésica – dimensões, áreas e posição definitivas conforme georreferenciamento (SIRGAS 2000) e NBR 13133. Cotas em metros.</p>
       <div id="mapaInfo"></div></div>`;
-    $('#mFin').onclick = () => { S.modoMapa = 'financeiro'; rMapa(); };
-    $('#mMed').onclick = () => { S.modoMapa = 'medicao'; rMapa(); };
-    v.querySelectorAll('polygon.lote').forEach((pg) => pg.onclick = () => {
-      const l = lotes.find((x) => x.numero === pg.dataset.n);
+    v.querySelectorAll('[data-modo]').forEach((b) => b.onclick = () => { S.modoMapa = b.dataset.modo; rMapa(); });
+    $('#mFull').onclick = () => { const el = $('#mapaBox'); const f = el.requestFullscreen || el.webkitRequestFullscreen; if (f) f.call(el); };
+    v.querySelectorAll('g.lote').forEach((g) => g.onclick = () => {
+      const l = lotes.find((x) => x.numero === g.dataset.n);
       if (l && l.associado) abrirAssociado(l.associado.id);
-      else $('#mapaInfo').innerHTML = `<div class="avisos">Lote <b>${esc(l.numero)}</b> · ${chip(l.tipo)} · ${l.area_projeto_m2 ? l.area_projeto_m2.toLocaleString('pt-BR') + ' m²' : ''} · medição ${chip(l.status_medicao)}</div>`;
+      else if (l) $('#mapaInfo').innerHTML = `<div class="avisos">Lote <b>${esc(l.numero)}</b> · ${chip(l.tipo)} · ${l.area_projeto_m2 ? l.area_projeto_m2.toLocaleString('pt-BR') + ' m²' : ''} · medição ${chip(l.status_medicao)}</div>`;
     });
   } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
 }

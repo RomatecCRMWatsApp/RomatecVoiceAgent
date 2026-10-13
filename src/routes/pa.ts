@@ -20,6 +20,7 @@ import * as docs from '../services/pa/paDocumentos';
 import { planejarSeed, type SeedJson } from '../services/pa/seedPlan';
 import { executarSeed, leitorZip, contagemProjeto } from '../services/pa/seedRun';
 import { gerarPixCopiaECola } from '../services/pa/pixBrCode';
+import { desenhoDoProjeto } from '../services/pa/layoutDesenho';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -107,6 +108,12 @@ router.get('/projetos/:id/pix', h(async (req) => {
   const p = await repo.buscarProjeto(id(req.params.id));
   const valor = req.query.valor ? Number(req.query.valor) : null;
   return { copia_e_cola: gerarPixCopiaECola({ chave: p.pix_chave ?? '', favorecido: p.pix_favorecido ?? '', cidade: p.pix_cidade ?? '', valor }) };
+}));
+
+// v3.142.1: elementos do desenho (vias, praça, equipamentos) p/ o mapa igual ao PDF.
+router.get('/projetos/:id/desenho', h(async (req) => {
+  const p = await repo.buscarProjeto(id(req.params.id));
+  return { desenho: desenhoDoProjeto(p.codigo, p.layout_json) };
 }));
 
 // ─── Lotes ────────────────────────────────────────────────────────────────
