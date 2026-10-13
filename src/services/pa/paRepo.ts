@@ -30,6 +30,7 @@ export interface Projeto {
   presidente_nome: string | null; valor_lote: number; sinal_padrao: number; boleto_padrao: number;
   prazo_sinal: string | null; pix_chave: string | null; pix_favorecido: string | null; pix_cidade: string | null;
   rt_nome: string | null; rt_registro: string | null; layout_json: unknown; criado_em: string | null;
+  cep_padrao: string | null; boleto_multa_pct: number; boleto_juros_mes_pct: number;
 }
 
 function mapProjeto(r: Row): Projeto {
@@ -43,6 +44,9 @@ function mapProjeto(r: Row): Projeto {
     pix_favorecido: (r.pix_favorecido as string) ?? null, pix_cidade: (r.pix_cidade as string) ?? null,
     rt_nome: (r.rt_nome as string) ?? null, rt_registro: (r.rt_registro as string) ?? null,
     layout_json: r.layout_json ?? null, criado_em: isoDateTime(r.criado_em),
+    cep_padrao: (r.cep_padrao as string) ?? null,
+    boleto_multa_pct: r.boleto_multa_pct == null ? 2 : num(r.boleto_multa_pct),
+    boleto_juros_mes_pct: r.boleto_juros_mes_pct == null ? 1 : num(r.boleto_juros_mes_pct),
   };
 }
 
@@ -305,6 +309,10 @@ export function mapAssociado(r: Row) {
     contrato_status: String(r.contrato_status), contrato_assinado_em: isoDateTime(r.contrato_assinado_em),
     carteirinha_emitida_em: isoDateTime(r.carteirinha_emitida_em), pendencias: (r.pendencias as string) ?? null,
     acervo_pasta: (r.acervo_pasta as string) ?? null, ativo: num(r.ativo) === 1,
+    asaas_customer_id: (r.asaas_customer_id as string) ?? null,
+    whatsapp_status: String(r.whatsapp_status ?? 'NAO_VERIFICADO'),
+    whatsapp_numero: (r.whatsapp_numero as string) ?? null,
+    whatsapp_verificado_em: isoDateTime(r.whatsapp_verificado_em),
   };
 }
 export type Associado = ReturnType<typeof mapAssociado>;
@@ -510,6 +518,8 @@ export async function atualizarAssociado(aid: number, body: Record<string, unkno
   if ('telefone' in body) {
     const tel = normalizarTelefone(body.telefone);
     put('telefone_e164', tel.e164);
+    // v3.143.0: telefone mudou → a verificação de WhatsApp antiga não vale mais.
+    sets.push("whatsapp_status = 'NAO_VERIFICADO'", 'whatsapp_numero = NULL', 'whatsapp_verificado_em = NULL');
     avisos.push(...tel.avisos, ...(await avisosTelefone(pool, atual.projeto_id, tel.e164, aid)));
   }
   if ('email' in body && body.email && !emailValido(body.email)) avisos.push('e-mail com formato estranho (mantido como informado)');

@@ -221,6 +221,52 @@ const CREATE_PA_USUARIOS_PERFIL = `
   )
 `;
 
+// v3.143.0 — Boletos via Asaas (BolePix). Um lançamento pode ter vários boletos
+// ao longo do tempo (cancelado → reemitido), mas só UM ativo (PENDENTE/VENCIDO)
+// — garantido na aplicação. `externo_id` = id da cobrança no Asaas (pay_…).
+const CREATE_PA_BOLETOS = `
+  CREATE TABLE IF NOT EXISTS pa_boletos (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id      INT NOT NULL,
+    associado_id    INT NOT NULL,
+    lancamento_id   INT NOT NULL,
+    provedor        VARCHAR(20) NOT NULL DEFAULT 'ASAAS',
+    externo_id      VARCHAR(40) NOT NULL,
+    valor           DECIMAL(10,2) NOT NULL,
+    vencimento      DATE NOT NULL,
+    status          ENUM('PENDENTE','VENCIDO','PAGO','CANCELADO','ESTORNADO') NOT NULL DEFAULT 'PENDENTE',
+    linha_digitavel VARCHAR(80)  NULL,
+    nosso_numero    VARCHAR(40)  NULL,
+    pix_copia_cola  TEXT NULL,
+    url_boleto      VARCHAR(400) NULL,
+    url_fatura      VARCHAR(400) NULL,
+    pago_em         DATETIME NULL,
+    valor_pago      DECIMAL(10,2) NULL,
+    pagamento_id    INT NULL,
+    enviado_em      DATETIME NULL,
+    criado_por      VARCHAR(64) NULL,
+    criado_em       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_pa_boleto_ext (provedor, externo_id),
+    INDEX idx_pa_boleto_lanc (lancamento_id, status),
+    INDEX idx_pa_boleto_proj (projeto_id, status, vencimento)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+// v3.143.0 — colunas novas em tabelas já criadas (ALTER idempotente: erro de
+// coluna duplicada = já aplicado).
+export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
+  { label: 'pa_projetos.cep_padrao', sql: 'ALTER TABLE pa_projetos ADD COLUMN cep_padrao CHAR(8) NULL' },
+  { label: 'pa_projetos.boleto_multa_pct', sql: 'ALTER TABLE pa_projetos ADD COLUMN boleto_multa_pct DECIMAL(5,2) NOT NULL DEFAULT 2.00' },
+  { label: 'pa_projetos.boleto_juros_mes_pct', sql: 'ALTER TABLE pa_projetos ADD COLUMN boleto_juros_mes_pct DECIMAL(5,2) NOT NULL DEFAULT 1.00' },
+  { label: 'pa_associados.asaas_customer_id', sql: 'ALTER TABLE pa_associados ADD COLUMN asaas_customer_id VARCHAR(40) NULL' },
+  { label: 'pa_associados.whatsapp_status', sql: "ALTER TABLE pa_associados ADD COLUMN whatsapp_status ENUM('NAO_VERIFICADO','VALIDO','INEXISTENTE','SEM_TELEFONE') NOT NULL DEFAULT 'NAO_VERIFICADO'" },
+  { label: 'pa_associados.whatsapp_numero', sql: 'ALTER TABLE pa_associados ADD COLUMN whatsapp_numero VARCHAR(20) NULL' },
+  { label: 'pa_associados.whatsapp_verificado_em', sql: 'ALTER TABLE pa_associados ADD COLUMN whatsapp_verificado_em DATETIME NULL' },
+  // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
+  { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },
+];
+
 export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_projetos', sql: CREATE_PA_PROJETOS },
   { label: 'pa_lotes', sql: CREATE_PA_LOTES },
@@ -233,6 +279,7 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_entregas', sql: CREATE_PA_ENTREGAS },
   { label: 'pa_eventos', sql: CREATE_PA_EVENTOS },
   { label: 'pa_usuarios_perfil', sql: CREATE_PA_USUARIOS_PERFIL },
+  { label: 'pa_boletos', sql: CREATE_PA_BOLETOS },
 ];
 
 export async function runPaMigrations(): Promise<void> {
@@ -247,6 +294,16 @@ export async function runPaMigrations(): Promise<void> {
       } else {
         console.error(`[pa-migrations] FALHA ${label}:`, msg.slice(0, 200));
       }
+    }
+  }
+  for (const { label, sql } of PA_ALTERS) {
+    try {
+      await pool.execute(sql);
+      console.log(`[pa-migrations] OK: ${label}`);
+    } catch (err) {
+      const msg = (err as Error).message || '';
+      if (/Duplicate column/i.test(msg)) continue;
+      console.error(`[pa-migrations] FALHA ${label}:`, msg.slice(0, 200));
     }
   }
 }

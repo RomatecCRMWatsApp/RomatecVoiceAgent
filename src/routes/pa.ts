@@ -21,6 +21,8 @@ import { planejarSeed, type SeedJson } from '../services/pa/seedPlan';
 import { executarSeed, leitorZip, contagemProjeto } from '../services/pa/seedRun';
 import { gerarPixCopiaECola } from '../services/pa/pixBrCode';
 import { desenhoDoProjeto } from '../services/pa/layoutDesenho';
+import * as boletos from '../services/pa/paBoletos';
+import * as waPa from '../services/pa/paWhatsapp';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -241,6 +243,50 @@ router.get('/projetos/:id/cobranca', h(async (req, res) => {
     return undefined;
   }
   return c;
+}));
+
+// ─── v3.143.0: Boletos (Asaas) ────────────────────────────────────────────
+router.get('/asaas/status', h(async () => boletos.statusAsaas()));
+router.get('/projetos/:id/boletos', h(async (req) => ({
+  boletos: await boletos.listarBoletos(id(req.params.id), typeof req.query.status === 'string' ? req.query.status : null),
+})));
+router.get('/projetos/:id/boletos/elegiveis', h(async (req) => {
+  const tipos = typeof req.query.tipos === 'string' ? req.query.tipos.split(',').map((t) => t.trim().toUpperCase()) : ['BOLETO'];
+  return { lancamentos: await boletos.elegiveisParaBoleto(id(req.params.id), typeof req.query.ate === 'string' ? req.query.ate : null, tipos) };
+}));
+router.post('/lancamentos/:lid/boleto', h(async (req, res) => {
+  exigirEscrita(req);
+  const b = await boletos.emitirBoleto(id(req.params.lid, 'lançamento'), ctx(req).sub);
+  res.status(201);
+  return { boleto: b };
+}));
+router.get('/associados/:aid/boletos', h(async (req) => ({ boletos: await boletos.boletosDoAssociado(id(req.params.aid, 'associado')) })));
+router.delete('/boletos/:bid', h(async (req) => {
+  exigirEscrita(req);
+  return { boleto: await boletos.cancelarBoleto(id(req.params.bid, 'boleto'), ctx(req).sub) };
+}));
+
+// ─── v3.143.0: WhatsApp do sistema (Z-API) ───────────────────────────────
+router.get('/whatsapp/status', h(async () => {
+  try {
+    const s = await (await import('../integrations/whatsapp')).statusInstancia();
+    return { conectado: s.connected, celular_conectado: s.smartphoneConnected ?? null };
+  } catch (err) {
+    return { conectado: false, erro: (err as Error).message.slice(0, 200) };
+  }
+}));
+router.post('/projetos/:id/whatsapp/verificar', h(async (req) => {
+  exigirEscrita(req);
+  return waPa.verificarWhatsAppsProjeto(id(req.params.id), ctx(req).sub, req.body?.somente_nao_verificados === true);
+}));
+router.post('/associados/:aid/whatsapp/enviar', h(async (req) => {
+  exigirEscrita(req);
+  const aid = id(req.params.aid, 'associado');
+  const tipo = String(req.body?.tipo || 'COBRANCA').toUpperCase().replace(/[^A-Z_]/g, '').slice(0, 30) || 'COBRANCA';
+  const r = await waPa.enviarWhatsAppAssociado(aid, String(req.body?.mensagem ?? ''), tipo, ctx(req).sub);
+  const ids = Array.isArray(req.body?.boleto_ids) ? req.body.boleto_ids.map(Number).filter((n: number) => Number.isInteger(n) && n > 0) : [];
+  for (const b of ids) await boletos.marcarEnviado(b);
+  return r;
 }));
 
 // ─── Importação / exportação ──────────────────────────────────────────────

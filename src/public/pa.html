@@ -62,6 +62,11 @@
   .c-A_PAGAR,.c-SINAL_PENDENTE,.c-VENCIDO,.c-RETIDA_PAGAMENTO{background:#fbe9e7;color:var(--red);border-color:#f1c2bd}
   .c-A_VENCER,.c-GERADO,.c-PENDENTE{background:#f1efe8;color:var(--muted)}
   .c-INSTITUCIONAL{background:#e8eef5;color:var(--blue);border-color:#c5d5e6}
+  .c-VALIDO{background:#e6f4ec;color:var(--ok);border-color:#b9e0c9}
+  .c-INEXISTENTE,.c-CANCELADO,.c-ESTORNADO{background:#fbe9e7;color:var(--red);border-color:#f1c2bd}
+  .c-SEM_TELEFONE,.c-NAO_VERIFICADO{background:#f1efe8;color:var(--muted)}
+  .prog{height:10px;background:#eee;border-radius:6px;overflow:hidden;margin:8px 0}
+  .prog i{display:block;height:100%;background:var(--green);transition:width .2s}
   .right{text-align:right} .nowrap{white-space:nowrap}
   .empty{text-align:center;color:var(--muted);padding:26px 10px}
   .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--green);color:#fff;padding:11px 16px;border-radius:10px;font-size:14px;z-index:99;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:92vw}
@@ -158,6 +163,9 @@ async function baixar(path, nome){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = nome || ''; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+async function copiar(txt){
+  try { await navigator.clipboard.writeText(txt || ''); toast('Copiado'); } catch { prompt('Copie:', txt || ''); }
 }
 async function abrirDoc(id){
   try {
@@ -370,7 +378,9 @@ async function rAssociados(){
   const v = $('#v-associados');
   v.innerHTML = `<div class="card"><div class="row"><div style="flex:3 1 260px"><label for="busca">Buscar</label><input id="busca" placeholder="Nome, nº PASM, lote, chácara, CPF ou telefone"></div>
       <div style="flex:1 1 140px"><label for="fSit">Situação</label><select class="f" id="fSit"><option value="">Todas</option><option value="A_PAGAR">Sinal a pagar</option><option value="PARCIAL">Sinal parcial</option><option value="VENCIDO">Com vencido</option><option value="SEMDOC">Sem documentos</option></select></div>
-      ${podeEscrever() ? '<div style="flex:0 0 auto"><button class="btn btn-gold" id="novoAssoc">➕ Novo associado</button></div>' : ''}</div></div>
+      <div style="flex:1 1 140px"><label for="fWa">WhatsApp</label><select class="f" id="fWa"><option value="">Todos</option><option value="VALIDO">Válido</option><option value="INEXISTENTE">Sem WhatsApp</option><option value="SEM_TELEFONE">Sem telefone</option><option value="NAO_VERIFICADO">Não verificado</option></select></div>
+      ${podeEscrever() ? '<div style="flex:0 0 auto"><button class="btn btn-ghost" id="verifWa">📱 Verificar WhatsApps</button> <button class="btn btn-gold" id="novoAssoc">➕ Novo associado</button></div>' : ''}</div>
+      <div id="waBox"></div></div>
     <div class="card"><div id="assocLista" class="tbl"><div class="empty">Carregando…</div></div></div>`;
   let timer = null;
   const carregar = async () => {
@@ -378,10 +388,11 @@ async function rAssociados(){
       const q = $('#busca').value.trim();
       const { associados } = await api(`/projetos/${S.pid}/associados${q ? '?q=' + encodeURIComponent(q) : ''}`);
       const fs = $('#fSit').value;
-      const lista = associados.filter((a) => !fs || (fs === 'VENCIDO' ? a.financeiro.vencidos > 0 : fs === 'SEMDOC' ? a.documentos.total === 0 : a.financeiro.sinal_status === fs));
-      $('#assocLista').innerHTML = lista.length ? `<table><thead><tr><th>Lote</th><th>Nº</th><th>Associado</th><th>Terra</th><th>Entrada</th><th class="right">Recebido</th><th class="right">Saldo</th><th>Contrato</th><th>Docs</th></tr></thead><tbody>
+      const fw = $('#fWa').value;
+      const lista = associados.filter((a) => (!fs || (fs === 'VENCIDO' ? a.financeiro.vencidos > 0 : fs === 'SEMDOC' ? a.documentos.total === 0 : a.financeiro.sinal_status === fs)) && (!fw || a.whatsapp_status === fw));
+      $('#assocLista').innerHTML = lista.length ? `<table><thead><tr><th>Lote</th><th>Nº</th><th>Associado</th><th>Terra</th><th>WhatsApp</th><th>Entrada</th><th class="right">Recebido</th><th class="right">Saldo</th><th>Contrato</th><th>Docs</th></tr></thead><tbody>
         ${lista.map((a) => `<tr class="click" data-id="${a.id}"><td><b>${esc(a.lote)}</b></td><td class="nowrap">${esc(a.numero)}</td><td>${esc(a.nome)}<div class="muted">${esc(a.cpf)}</div></td><td>${esc(a.denominacao_terra || '')}</td>
-          <td>${chip(a.financeiro.sinal_status)}</td><td class="right nowrap">${brl(a.financeiro.recebido)}</td><td class="right nowrap">${a.financeiro.saldo ? brl(a.financeiro.saldo) : chip('QUITADO')}</td>
+          <td>${chip(a.whatsapp_status, WA_TXT[a.whatsapp_status])}</td><td>${chip(a.financeiro.sinal_status)}</td><td class="right nowrap">${brl(a.financeiro.recebido)}</td><td class="right nowrap">${a.financeiro.saldo ? brl(a.financeiro.saldo) : chip('QUITADO')}</td>
           <td>${chip(a.contrato_status)}</td><td class="nowrap">${a.documentos.com_arquivo}/${a.documentos.total}</td></tr>`).join('')}</tbody></table>
         <div class="muted" style="margin-top:6px">${lista.length} associado(s)</div>` : '<div class="empty">Nenhum associado encontrado.</div>';
       $('#assocLista').querySelectorAll('tr.click').forEach((tr) => tr.onclick = () => abrirAssociado(Number(tr.dataset.id)));
@@ -389,9 +400,22 @@ async function rAssociados(){
   };
   $('#busca').oninput = () => { clearTimeout(timer); timer = setTimeout(carregar, 300); };
   $('#fSit').onchange = carregar;
+  $('#fWa').onchange = carregar;
   if ($('#novoAssoc')) $('#novoAssoc').onclick = formNovoAssociado;
+  if ($('#verifWa')) $('#verifWa').onclick = async () => {
+    const b = $('#verifWa'); b.disabled = true; $('#waBox').innerHTML = '<div class="muted" style="margin-top:8px">Consultando a Z-API…</div>';
+    try {
+      const r = await api(`/projetos/${S.pid}/whatsapp/verificar`, { json: {} });
+      const ruins = r.detalhes.filter((x) => x.status !== 'VALIDO');
+      $('#waBox').innerHTML = `<div class="avisos" style="margin-top:8px">📱 ${r.verificados} verificados · ${chip('VALIDO', r.validos + ' com WhatsApp')} ${chip('INEXISTENTE', r.inexistentes + ' sem WhatsApp')} ${chip('SEM_TELEFONE', r.sem_telefone + ' sem telefone')}
+        ${ruins.length ? `<div style="margin-top:6px">${ruins.map((x) => `Lote ${esc(x.lote)} — ${esc(x.nome)} ${chip(x.status, WA_TXT[x.status])}`).join('<br>')}</div>` : ''}</div>`;
+      S.assoc = null; carregar();
+    } catch (e){ $('#waBox').innerHTML = `<div class="avisos" style="margin-top:8px;color:var(--red)">${esc(e.message)}</div>`; }
+    finally { b.disabled = false; }
+  };
   carregar();
 }
+const WA_TXT = { VALIDO:'✓ WhatsApp', INEXISTENTE:'sem WhatsApp', SEM_TELEFONE:'sem telefone', NAO_VERIFICADO:'não verificado' };
 
 function fecharDrawer(){ $('#drawer').classList.remove('on'); }
 $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') fecharDrawer(); });
@@ -405,8 +429,21 @@ async function abrirAssociado(aid, avisos){
   pane.innerHTML = '<div class="phead"><b>Carregando…</b><button class="x" id="dx">✕</button></div>';
   $('#dx').onclick = fecharDrawer;
   try {
-    const d = await api(`/projetos/${S.pid}/associados/${aid}`);
+    const [d, bol] = await Promise.all([
+      api(`/projetos/${S.pid}/associados/${aid}`),
+      api(`/associados/${aid}/boletos`).catch(() => ({ boletos: [] })),
+    ]);
     const a = d.associado;
+    const bolAtivo = new Map(bol.boletos.filter((b) => b.status === 'PENDENTE' || b.status === 'VENCIDO').map((b) => [b.lancamento_id, b]));
+    const bolPago = new Map(bol.boletos.filter((b) => b.status === 'PAGO').map((b) => [b.lancamento_id, b]));
+    const celBoleto = (l) => {
+      const b = bolAtivo.get(l.id) || bolPago.get(l.id);
+      if (b) return `${chip(b.status)} ${b.url_boleto ? `<a href="${esc(b.url_boleto)}" target="_blank" rel="noopener">PDF</a>` : ''}
+        ${b.linha_digitavel ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.linha_digitavel)}">Linha</button>` : ''}
+        ${b.pix_copia_cola ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.pix_copia_cola)}">Pix</button>` : ''}
+        ${podeEscrever() && b.status !== 'PAGO' ? `<button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}`;
+      return podeEscrever() && l.saldo > 0 ? `<button class="btn btn-ghost btn-sm" data-emitir="${l.id}">Emitir boleto</button>` : '';
+    };
     const tipoDoc = { FOTO_3X4:'Foto 3×4', DOC_IDENTIFICACAO:'Identificação', CERTIDAO:'Certidão', DOC_CONJUGE:'Doc. cônjuge', COMPROVANTE_SINAL:'Comprovante do sinal', PROCESSO_FICHA_CONTRATO:'Ficha + contrato', PROCESSO_ASSINADO:'Processo assinado', CARTEIRINHA:'Carteirinha', MAPA_LOTE:'Mapa do lote', MEMORIAL:'Memorial', TRT:'TRT', RELATORIO:'Relatório', ORIGINAL:'Original', OUTRO:'Outro' };
     pane.innerHTML = `<div class="phead"><div><div style="font-size:11px;color:var(--gold-soft)">${esc(a.numero)} · Lote ${esc(a.lote)}</div><b>${esc(a.nome)}</b></div><button class="x" id="dx">✕</button></div>
       <div style="padding:14px">
@@ -416,7 +453,7 @@ async function abrirAssociado(aid, avisos){
             <dt>CPF</dt><dd>${esc(a.cpf)}</dd><dt>RG</dt><dd>${esc(a.rg || '—')}</dd>
             <dt>Nascimento</dt><dd>${dbr(a.nascimento)}</dd><dt>Estado civil</dt><dd>${esc(a.estado_civil || '—')}</dd>
             ${a.conjuge_nome ? `<dt>Cônjuge</dt><dd>${esc(a.conjuge_nome)} ${a.conjuge_cpf ? '· ' + esc(a.conjuge_cpf) : ''}</dd>` : ''}
-            <dt>Telefone</dt><dd>${esc(a.telefone || '—')} ${a.telefone_e164 ? `<a href="https://wa.me/${esc(a.telefone_e164.replace('+',''))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}</dd>
+            <dt>Telefone</dt><dd>${esc(a.telefone || '—')} ${a.telefone_e164 ? `<a href="https://wa.me/${esc(a.telefone_e164.replace('+',''))}" target="_blank" rel="noopener">WhatsApp</a>` : ''} ${chip(a.whatsapp_status, WA_TXT[a.whatsapp_status])}</dd>
             <dt>E-mail</dt><dd>${esc(a.email || '—')}</dd><dt>Terra</dt><dd>${esc(a.denominacao_terra || '—')}</dd>
             <dt>Endereço</dt><dd>${esc(a.endereco || '—')}</dd><dt>Vencimento</dt><dd>dia ${esc(a.dia_vencimento || '—')}</dd>
             <dt>Contrato</dt><dd>${chip(a.contrato_status)} ${a.contrato_assinado_em ? dbr(a.contrato_assinado_em) : ''}</dd>
@@ -429,8 +466,8 @@ async function abrirAssociado(aid, avisos){
           <div class="kpis" style="grid-template-columns:repeat(3,1fr)"><div class="kpi"><div class="l">Contratado</div><div class="v" style="font-size:17px">${brl(d.resumo.contratado)}</div></div>
             <div class="kpi ok"><div class="l">Recebido</div><div class="v" style="font-size:17px">${brl(d.resumo.recebido)}</div></div>
             <div class="kpi ${d.resumo.saldo ? 'red' : 'ok'}"><div class="l">Saldo</div><div class="v" style="font-size:17px">${brl(d.resumo.saldo)}</div></div></div>
-          <div class="tbl" style="margin-top:10px"><table><thead><tr><th>Lançamento</th><th>Venc.</th><th class="right">Valor</th><th class="right">Recebido</th><th>Situação</th></tr></thead><tbody>
-            ${d.lancamentos.map((l) => `<tr><td>${esc(l.tipo === 'BOLETO' ? 'Boleto ' + l.parcela : l.tipo === 'AVISTA' ? 'À vista' : l.tipo === 'SINAL' ? 'Sinal' : l.tipo)}</td><td>${dbr(l.vencimento)}</td><td class="right">${brl(l.valor)}</td><td class="right">${brl(l.valor_recebido)}</td><td>${chip(l.status_efetivo)}</td></tr>`).join('')}
+          <div class="tbl" style="margin-top:10px"><table><thead><tr><th>Lançamento</th><th>Venc.</th><th class="right">Valor</th><th class="right">Recebido</th><th>Situação</th><th>Boleto (Asaas)</th></tr></thead><tbody>
+            ${d.lancamentos.map((l) => `<tr><td>${esc(l.tipo === 'BOLETO' ? 'Boleto ' + l.parcela : l.tipo === 'AVISTA' ? 'À vista' : l.tipo === 'SINAL' ? 'Sinal' : l.tipo)}</td><td>${dbr(l.vencimento)}</td><td class="right">${brl(l.valor)}</td><td class="right">${brl(l.valor_recebido)}</td><td>${chip(l.status_efetivo)}</td><td class="nowrap">${celBoleto(l)}</td></tr>`).join('')}
           </tbody></table></div>
           <h3>Pagamentos</h3>
           ${d.pagamentos.length ? d.pagamentos.map((p) => `<div class="doc" style="margin-bottom:6px"><b>${dbr(p.pago_em)} · ${esc(p.forma.replace(/_/g,' '))} · ${brl(p.valor)}${p.pagamento_compartilhado ? ' · <span class="chip c-PARCIAL">Pagamento único (rateado)</span>' : ''}</b>
@@ -455,6 +492,16 @@ async function abrirAssociado(aid, avisos){
       </div>`;
     $('#dx').onclick = fecharDrawer;
     pane.querySelectorAll('[data-doc]').forEach((b) => b.onclick = () => abrirDoc(b.dataset.doc));
+    pane.querySelectorAll('[data-copiar]').forEach((b) => b.onclick = () => copiar(b.dataset.copiar));
+    pane.querySelectorAll('[data-emitir]').forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      try { await api(`/lancamentos/${b.dataset.emitir}/boleto`, { method: 'POST' }); toast('Boleto emitido no Asaas'); abrirAssociado(aid); }
+      catch (e){ toast(e.message, true); b.disabled = false; }
+    });
+    pane.querySelectorAll('[data-cancbol]').forEach((b) => b.onclick = async () => {
+      if (!confirm('Cancelar este boleto no Asaas? O associado não vai mais conseguir pagá-lo.')) return;
+      try { await api(`/boletos/${b.dataset.cancbol}`, { method: 'DELETE' }); toast('Boleto cancelado'); abrirAssociado(aid); } catch (e){ toast(e.message, true); }
+    });
     if ($('#upBtn')) $('#upBtn').onclick = async () => {
       const files = $('#upArq').files;
       if (!files.length) return toast('Escolha o arquivo', true);
@@ -545,8 +592,17 @@ async function rFinanceiro(){
       <div id="rateioBox" class="tbl" style="margin-top:8px"></div>
       <div class="row" style="margin-top:12px"><button class="btn btn-primary" id="pSalvar" style="flex:0 0 auto">✅ Lançar pagamento</button><span class="muted" id="pSoma" style="flex:1 1 auto"></span></div>
     </div>` : ''}
+    <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;border:0;margin:0">Boletos (Asaas)</h2>
+        <span id="asaasStatus" style="flex:0 0 auto" class="muted">…</span></div>
+      ${podeEscrever() ? `<div class="row" style="margin-top:8px"><div style="flex:0 1 200px"><label for="bAte">Parcelas com vencimento até</label><input type="date" id="bAte" value="2026-12-31"></div>
+        <div style="flex:0 1 200px"><label for="bTipos">Quais lançamentos</label><select class="f" id="bTipos"><option value="BOLETO">Parcelas (boletos)</option><option value="SINAL">Sinais em aberto</option><option value="BOLETO,SINAL">Parcelas + sinais</option></select></div>
+        <div style="flex:0 0 auto"><button class="btn btn-gold" id="bEmitir">🧾 Emitir boletos</button></div></div>
+        <div id="bProg"></div>` : ''}
+      <div class="row" style="margin-top:8px"><div style="flex:0 1 200px"><label for="bFiltro">Status</label><select class="f" id="bFiltro"><option value="">Todos</option><option>PENDENTE</option><option>VENCIDO</option><option>PAGO</option><option>CANCELADO</option></select></div></div>
+      <div id="bolBox" class="tbl" style="margin-top:8px"><div class="empty">Carregando…</div></div></div>
     <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;border:0;margin:0">Cobrança</h2>
         <div style="flex:0 0 auto" class="row"><input type="date" id="cAte" value="${hoje}" style="width:160px"><button class="btn btn-ghost btn-sm" id="cAtual">Atualizar</button><button class="btn btn-ghost btn-sm" id="cXlsx">⬇️ XLSX</button></div></div>
+      <div class="muted" id="waStatus" style="margin:6px 0">WhatsApp do sistema: verificando…</div>
       <div id="cobBox" class="tbl"><div class="empty">Carregando…</div></div></div>
     <div class="card"><h2>Pagamentos lançados</h2><div id="pagBox" class="tbl"><div class="empty">Carregando…</div></div></div>`;
 
@@ -565,10 +621,34 @@ async function rFinanceiro(){
   const cob = async () => {
     try {
       const c = await api(`/projetos/${S.pid}/cobranca?ate=${encodeURIComponent($('#cAte').value)}`);
-      $('#cobBox').innerHTML = c.lista.length ? `<div class="muted" style="margin-bottom:6px">${c.associados} associado(s) · total ${brl(c.total)} até ${dbr(c.ate)}</div><table><thead><tr><th>Lote</th><th>Associado</th><th>Pendências</th><th class="right">Total</th><th></th></tr></thead><tbody>
-        ${c.lista.map((g, i) => `<tr><td><b>${esc(g.lote)}</b></td><td>${esc(g.nome)}<div class="muted">${esc(g.telefone || 'sem telefone')}</div></td>
-          <td>${g.itens.map((x) => `${esc(x.rotulo)} ${brl(x.saldo)} · ${dbr(x.vencimento)} ${chip(x.status)}`).join('<br>')}</td><td class="right nowrap"><b>${brl(g.total)}</b></td>
-          <td class="nowrap">${g.whatsapp_url ? `<a class="btn btn-gold btn-sm" href="${esc(g.whatsapp_url)}" target="_blank" rel="noopener">WhatsApp</a>` : ''} <button class="btn btn-ghost btn-sm" data-pix="${i}">Pix</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nada em aberto até essa data. 🎉</div>';
+      const validos = c.lista.filter((g) => g.whatsapp_status === 'VALIDO');
+      $('#cobBox').innerHTML = c.lista.length ? `<div class="row" style="margin-bottom:6px;align-items:center"><span class="muted" style="flex:1 1 auto">${c.associados} associado(s) · total ${brl(c.total)} até ${dbr(c.ate)}</span>
+          ${podeEscrever() && validos.length ? `<button class="btn btn-primary btn-sm" id="envTodos" style="flex:0 0 auto">📤 Enviar a todos pelo sistema (${validos.length})</button>` : ''}</div>
+        <div id="envProg"></div>
+        <table><thead><tr><th>Lote</th><th>Associado</th><th>Pendências</th><th class="right">Total</th><th></th></tr></thead><tbody>
+        ${c.lista.map((g, i) => `<tr><td><b>${esc(g.lote)}</b></td><td>${esc(g.nome)}<div class="muted">${esc(g.telefone || 'sem telefone')} ${chip(g.whatsapp_status, WA_TXT[g.whatsapp_status])}</div></td>
+          <td>${g.itens.map((x) => `${esc(x.rotulo)} ${brl(x.saldo)} · ${dbr(x.vencimento)} ${chip(x.status)}${x.boleto ? ' ' + chip('PAGO', '🧾 boleto') + (x.boleto.enviado_em ? ' <span class="muted">enviado ' + dbr(x.boleto.enviado_em) + '</span>' : '') : ''}`).join('<br>')}</td><td class="right nowrap"><b>${brl(g.total)}</b></td>
+          <td class="nowrap">${podeEscrever() && g.whatsapp_status === 'VALIDO' ? `<button class="btn btn-primary btn-sm" data-env="${i}">📤 Sistema</button>` : ''}
+            ${g.whatsapp_url ? `<a class="btn btn-gold btn-sm" href="${esc(g.whatsapp_url)}" target="_blank" rel="noopener">WhatsApp</a>` : ''} <button class="btn btn-ghost btn-sm" data-pix="${i}">Pix</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nada em aberto até essa data. 🎉</div>';
+      const enviar = async (g) => api(`/associados/${g.associado_id}/whatsapp/enviar`, { json: { mensagem: g.mensagem, tipo: 'COBRANCA', boleto_ids: g.itens.filter((x) => x.boleto).map((x) => x.boleto.id) } });
+      $('#cobBox').querySelectorAll('[data-env]').forEach((b) => b.onclick = async () => {
+        const g = c.lista[Number(b.dataset.env)];
+        if (!confirm(`Enviar a cobrança para ${g.nome} pelo WhatsApp do sistema?\n\n${g.mensagem}`)) return;
+        b.disabled = true;
+        try { await enviar(g); toast('Enviado para ' + g.nome); b.textContent = '✓ Enviado'; } catch (e){ toast(e.message, true); b.disabled = false; }
+      });
+      if ($('#envTodos')) $('#envTodos').onclick = async () => {
+        if (!confirm(`Enviar a cobrança para ${validos.length} associado(s) com WhatsApp válido, pelo WhatsApp do sistema? (um a cada ~4 s)`)) return;
+        $('#envTodos').disabled = true;
+        let ok = 0, falha = 0;
+        for (const [k, g] of validos.entries()) {
+          $('#envProg').innerHTML = `<div class="prog"><i style="width:${Math.round(k / validos.length * 100)}%"></i></div><div class="muted">Enviando ${k + 1}/${validos.length} — ${esc(g.nome)}</div>`;
+          try { await enviar(g); ok++; } catch (e){ falha++; if (e.codigo === 'ZAPI_INDISPONIVEL'){ toast(e.message, true); break; } }
+          await new Promise((r) => setTimeout(r, 4000));
+        }
+        $('#envProg').innerHTML = `<div class="avisos">📤 ${ok} enviada(s)${falha ? ` · ${falha} falha(s)` : ''}.</div>`;
+        cob();
+      };
       $('#cobBox').querySelectorAll('[data-pix]').forEach((b) => b.onclick = async () => {
         const g = c.lista[Number(b.dataset.pix)];
         try { await navigator.clipboard.writeText(g.pix_copia_e_cola || ''); toast('Pix copia e cola copiado (' + brl(g.total) + ')'); } catch { prompt('Pix copia e cola:', g.pix_copia_e_cola || ''); }
@@ -579,6 +659,60 @@ async function rFinanceiro(){
   $('#cXlsx').onclick = () => baixar(`/projetos/${S.pid}/cobranca?formato=xlsx&ate=${encodeURIComponent($('#cAte').value)}`, `COBRANCA-${$('#cAte').value}.xlsx`).catch((e) => toast(e.message, true));
   cob();
   carregarPagamentos();
+  api('/whatsapp/status').then((w) => {
+    $('#waStatus').innerHTML = w.conectado ? `WhatsApp do sistema: ${chip('VALIDO', 'conectado')}` : `WhatsApp do sistema: ${chip('INEXISTENTE', 'desconectado')} <span class="muted">— envio pelo sistema indisponível (instância Z-API vencida/desconectada); use o botão WhatsApp (link).</span>`;
+  }).catch(() => { $('#waStatus').textContent = ''; });
+  rBoletos();
+}
+
+// ─── Boletos (Asaas) ────────────────────────────────────────────────────
+async function rBoletos(){
+  try {
+    const st = await api('/asaas/status');
+    $('#asaasStatus').innerHTML = st.configurado
+      ? `${chip('VALIDO', 'Asaas ' + (st.ambiente === 'producao' ? 'produção' : 'SANDBOX (teste)'))} ${st.webhook_configurado ? chip('VALIDO', 'baixa automática ativa') : chip('INEXISTENTE', 'webhook sem token')}`
+      : chip('INEXISTENTE', 'Asaas não configurado (ASAAS_API_KEY)');
+    if (!st.configurado && $('#bEmitir')) $('#bEmitir').disabled = true;
+  } catch { $('#asaasStatus').textContent = ''; }
+  const listar = async () => {
+    try {
+      const f = $('#bFiltro').value;
+      const { boletos } = await api(`/projetos/${S.pid}/boletos${f ? '?status=' + f : ''}`);
+      $('#bolBox').innerHTML = boletos.length ? `<div class="muted" style="margin-bottom:6px">${boletos.length} boleto(s) · ${brl(boletos.reduce((s, b) => s + b.valor, 0))}</div><table><thead><tr><th>Lote</th><th>Associado</th><th>Parcela</th><th>Venc.</th><th class="right">Valor</th><th>Status</th><th></th></tr></thead><tbody>
+        ${boletos.map((b) => `<tr><td><b>${esc(b.lote)}</b></td><td>${esc(b.associado_nome)}</td><td>${esc(b.tipo === 'BOLETO' ? 'Parcela ' + b.parcela : b.tipo === 'SINAL' ? 'Sinal' : b.tipo)}</td><td>${dbr(b.vencimento)}</td>
+          <td class="right nowrap">${brl(b.valor)}</td><td>${chip(b.status)}${b.pago_em ? ' <span class="muted">' + dbr(b.pago_em).slice(0, 10) + '</span>' : ''}</td>
+          <td class="nowrap">${b.url_boleto ? `<a class="btn btn-ghost btn-sm" href="${esc(b.url_boleto)}" target="_blank" rel="noopener">PDF</a>` : ''}
+            ${b.linha_digitavel ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.linha_digitavel)}">Linha</button>` : ''}
+            ${b.pix_copia_cola ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.pix_copia_cola)}">Pix</button>` : ''}
+            ${podeEscrever() && (b.status === 'PENDENTE' || b.status === 'VENCIDO') ? `<button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum boleto emitido.</div>';
+      $('#bolBox').querySelectorAll('[data-copiar]').forEach((b) => b.onclick = () => copiar(b.dataset.copiar));
+      $('#bolBox').querySelectorAll('[data-cancbol]').forEach((b) => b.onclick = async () => {
+        if (!confirm('Cancelar este boleto no Asaas?')) return;
+        try { await api(`/boletos/${b.dataset.cancbol}`, { method: 'DELETE' }); toast('Boleto cancelado'); listar(); } catch (e){ toast(e.message, true); }
+      });
+    } catch (e){ $('#bolBox').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  };
+  $('#bFiltro').onchange = listar;
+  if ($('#bEmitir')) $('#bEmitir').onclick = async () => {
+    const b = $('#bEmitir');
+    try {
+      const { lancamentos } = await api(`/projetos/${S.pid}/boletos/elegiveis?ate=${encodeURIComponent($('#bAte').value)}&tipos=${encodeURIComponent($('#bTipos').value)}`);
+      if (!lancamentos.length) return toast('Nenhuma parcela em aberto sem boleto nesse período');
+      const total = lancamentos.reduce((s, l) => s + l.saldo, 0);
+      if (!confirm(`Emitir ${lancamentos.length} boleto(s) no Asaas, total ${brl(total)}?\n\nCada boleto fica registrado no banco com o CPF e o endereço do associado.`)) return;
+      b.disabled = true;
+      let ok = 0; const falhas = [];
+      for (const [k, l] of lancamentos.entries()) {
+        $('#bProg').innerHTML = `<div class="prog"><i style="width:${Math.round(k / lancamentos.length * 100)}%"></i></div><div class="muted">Emitindo ${k + 1}/${lancamentos.length} — Lote ${esc(l.lote)} ${esc(l.nome)}</div>`;
+        try { await api(`/lancamentos/${l.id}/boleto`, { method: 'POST' }); ok++; }
+        catch (e){ falhas.push(`Lote ${l.lote} — ${l.nome}: ${e.message}`); if (['ASAAS_NAO_CONFIGURADO', 'ASAAS_CHAVE_INVALIDA', 'CEP_NAO_CONFIGURADO'].includes(e.codigo)) break; }
+      }
+      $('#bProg').innerHTML = `<div class="avisos">🧾 ${ok} boleto(s) emitido(s)${falhas.length ? ` · ${falhas.length} falha(s):<ul>${falhas.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : '.'}</div>`;
+      listar();
+    } catch (e){ toast(e.message, true); }
+    finally { b.disabled = false; }
+  };
+  listar();
 }
 async function carregarPagamentos(){
   try {

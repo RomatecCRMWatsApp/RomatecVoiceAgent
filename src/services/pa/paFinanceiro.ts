@@ -261,20 +261,37 @@ function dataBr(iso: string | null): string {
 
 export function mensagemCobranca(
   projeto: Pick<Projeto, 'nome' | 'pix_chave'>,
-  nome: string, lote: string, itens: Array<{ rotulo: string; saldo: number; vencimento: string | null }>, total: number, pix: string | null,
+  nome: string, lote: string,
+  itens: Array<{ rotulo: string; saldo: number; vencimento: string | null; boleto?: BoletoNaCobranca | null }>,
+  total: number, pix: string | null,
 ): string {
   const primeiro = nome.split(/\s+/)[0];
   const nomeFmt = primeiro.charAt(0) + primeiro.slice(1).toLowerCase();
-  const linhas = itens.map((i) => `• ${i.rotulo}: *${brl(i.saldo)}* (venc. ${dataBr(i.vencimento)})`);
+  // v3.143.0: item com boleto Asaas leva link + linha digitável + Pix DA COBRANÇA
+  // (esse Pix dá baixa automática; a chave fixa do projeto não).
+  const linhas = itens.flatMap((i) => {
+    const out = [`• ${i.rotulo}: *${brl(i.saldo)}* (venc. ${dataBr(i.vencimento)})`];
+    if (i.boleto?.url_boleto) out.push(`  Boleto: ${i.boleto.url_boleto}`);
+    if (i.boleto?.linha_digitavel) out.push(`  Linha digitável: ${i.boleto.linha_digitavel}`);
+    if (i.boleto?.pix_copia_cola) out.push(`  Pix copia e cola:\n${i.boleto.pix_copia_cola}`);
+    return out;
+  });
+  const todosComBoleto = itens.length > 0 && itens.every((i) => i.boleto);
   return [
     `Olá, ${nomeFmt}! Aqui é a Zayra, assistente virtual da Romatec Consultoria Total. 🌱`,
     `Sobre o *Lote ${lote}* do ${projeto.nome}:`,
     ...linhas,
     `Total em aberto: *${brl(total)}*`,
-    projeto.pix_chave ? `Chave Pix: *${projeto.pix_chave}*` : '',
-    pix ? `Pix copia e cola:\n${pix}` : '',
-    'Depois de pagar, é só mandar o comprovante (ou o link do recibo) aqui mesmo. Obrigada!',
+    !todosComBoleto && projeto.pix_chave ? `Chave Pix: *${projeto.pix_chave}*` : '',
+    !todosComBoleto && pix ? `Pix copia e cola:\n${pix}` : '',
+    todosComBoleto
+      ? 'Pagando pelo boleto ou pelo Pix acima, a baixa é automática. Obrigada!'
+      : 'Depois de pagar, é só mandar o comprovante (ou o link do recibo) aqui mesmo. Obrigada!',
   ].filter(Boolean).join('\n');
+}
+
+export interface BoletoNaCobranca {
+  id: number; status: string; url_boleto: string | null; linha_digitavel: string | null; pix_copia_cola: string | null; enviado_em: string | null;
 }
 
 const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à vista', BOLETO: 'Parcela', AJUSTE: 'Ajuste' };
@@ -291,7 +308,7 @@ export async function cobranca(projetoId: number, ateIso: string | null) {
     ORDER BY CAST(lt.numero AS UNSIGNED), FIELD(l.tipo,'SINAL','AVISTA','BOLETO','AJUSTE'), l.parcela`, [projetoId, ate]);
   const grupos = new Map<number, {
     associado_id: number; numero: string; nome: string; lote: string; telefone: string | null; telefone_e164: string | null;
-    itens: Array<{ lancamento_id: number; tipo: string; parcela: number; rotulo: string; valor: number; recebido: number; saldo: number; vencimento: string | null; status: StatusLancamento }>;
+    itens: Array<{ lancamento_id: number; tipo: string; parcela: number; rotulo: string; valor: number; recebido: number; saldo: number; vencimento: string | null; status: StatusLancamento; boleto: BoletoNaCobranca | null }>;
     total: number;
   }>();
   for (const r of ls) {
@@ -308,10 +325,25 @@ export async function cobranca(projetoId: number, ateIso: string | null) {
     g.itens.push({
       lancamento_id: l.id, tipo: l.tipo, parcela: l.parcela,
       rotulo: `${ROTULO[l.tipo] ?? l.tipo}${l.tipo === 'BOLETO' ? ` ${l.parcela}` : ''}${l.status === 'PARCIAL' ? ' (saldo)' : ''}`,
-      valor: l.valor, recebido: l.valor_recebido, saldo: l.saldo, vencimento: l.vencimento, status: l.status_efetivo,
+      valor: l.valor, recebido: l.valor_recebido, saldo: l.saldo, vencimento: l.vencimento, status: l.status_efetivo, boleto: null,
     });
     g.total = centavos(g.total + l.saldo);
   }
+  // v3.143.0: boleto ativo (Asaas) de cada item + status do WhatsApp do associado.
+  const idsLanc = [...grupos.values()].flatMap((g) => g.itens.map((i) => i.lancamento_id));
+  const boletos = idsLanc.length ? await rows(pool, `
+    SELECT id, lancamento_id, status, url_boleto, linha_digitavel, pix_copia_cola, enviado_em FROM pa_boletos
+    WHERE lancamento_id IN (${idsLanc.map(() => '?').join(',')}) AND status IN ('PENDENTE','VENCIDO')`, idsLanc) : [];
+  const bolPorLanc = new Map<number, BoletoNaCobranca>(boletos.map((b) => [num(b.lancamento_id), {
+    id: num(b.id), status: String(b.status), url_boleto: (b.url_boleto as string) ?? null,
+    linha_digitavel: (b.linha_digitavel as string) ?? null, pix_copia_cola: (b.pix_copia_cola as string) ?? null,
+    enviado_em: isoDateTime(b.enviado_em),
+  }]));
+  for (const g of grupos.values()) for (const i of g.itens) i.boleto = bolPorLanc.get(i.lancamento_id) ?? null;
+  const aids = [...grupos.keys()];
+  const waRows = aids.length ? await rows(pool, `SELECT id, whatsapp_status FROM pa_associados WHERE id IN (${aids.map(() => '?').join(',')})`, aids) : [];
+  const waPorAssoc = new Map(waRows.map((a) => [num(a.id), String(a.whatsapp_status ?? 'NAO_VERIFICADO')]));
+
   const lista = [...grupos.values()].map((g) => {
     let pix: string | null = null;
     try {
@@ -321,7 +353,7 @@ export async function cobranca(projetoId: number, ateIso: string | null) {
     } catch { pix = null; }
     const msg = mensagemCobranca(projeto, g.nome, g.lote, g.itens, g.total, pix);
     return {
-      ...g, pix_copia_e_cola: pix, mensagem: msg,
+      ...g, pix_copia_e_cola: pix, mensagem: msg, whatsapp_status: waPorAssoc.get(g.associado_id) ?? 'NAO_VERIFICADO',
       whatsapp_url: g.telefone_e164 ? `https://wa.me/${g.telefone_e164.replace('+', '')}?text=${encodeURIComponent(msg)}` : null,
     };
   });

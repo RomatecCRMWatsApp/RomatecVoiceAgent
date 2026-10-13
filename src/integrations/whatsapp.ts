@@ -191,6 +191,45 @@ export async function sendReply(to: string, message: string): Promise<{ messageI
   return { messageId: zApiMessageId, phone };
 }
 
+// ── v3.143.0: "Número com WhatsApp?" em lote (Z-API phone-exists-batch) ─────
+// Usado pelo módulo PA pra testar os telefones dos associados antes de mandar
+// cobrança/boleto pelo WhatsApp do sistema. Aceita resposta em array (lote) ou
+// objeto (consulta individual, fallback se o lote não existir no plano).
+export interface ResultadoNumeroWhatsApp { entrada: string; existe: boolean; numero: string | null }
+
+export async function verificarNumerosWhatsApp(numeros: string[]): Promise<ResultadoNumeroWhatsApp[]> {
+  const phones = [...new Set(numeros.map((n) => normalizarTelefone(n)))];
+  if (!phones.length) return [];
+  const ler = (o: Record<string, unknown>, entrada: string): ResultadoNumeroWhatsApp => ({
+    entrada: String(o.inputPhone ?? entrada),
+    existe: o.exists === true || o.exists === 'true',
+    numero: (o.outputPhone ?? o.phone ?? null) as string | null,
+  });
+  try {
+    const r = await axios.post<unknown>(`${zapiBase()}/phone-exists-batch`, { phones }, { headers: zapiHeaders(), timeout: 30000 });
+    if (Array.isArray(r.data)) return (r.data as Array<Record<string, unknown>>).map((o, i) => ler(o, phones[i]));
+    throw new Error(`resposta inesperada do lote: ${JSON.stringify(r.data).slice(0, 200)}`);
+  } catch (err) {
+    const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+    // 404/405 = endpoint de lote indisponível → cai na consulta individual.
+    if (ax.response?.status !== 404 && ax.response?.status !== 405) {
+      throw new Error(`ZAPI phone-exists-batch HTTP ${ax.response?.status ?? '?'}: ${JSON.stringify(ax.response?.data ?? ax.message)}`);
+    }
+  }
+  const out: ResultadoNumeroWhatsApp[] = [];
+  for (const phone of phones) {
+    try {
+      const r = await axios.get<unknown>(`${zapiBase()}/phone-exists/${phone}`, { headers: zapiHeaders(), timeout: 10000 });
+      const o = (Array.isArray(r.data) ? r.data[0] : r.data) as Record<string, unknown>;
+      out.push(ler(o ?? {}, phone));
+    } catch (err) {
+      const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+      throw new Error(`ZAPI phone-exists HTTP ${ax.response?.status ?? '?'}: ${JSON.stringify(ax.response?.data ?? ax.message)}`);
+    }
+  }
+  return out;
+}
+
 // ── Info do número/aparelho conectado na instância (debug) ───────────────────
 export async function infoInstancia(): Promise<Record<string, unknown>> {
   const baseInst = `${ZAPI_BASE_URL}/instances/${ZAPI_INSTANCE_ID}/token/${ZAPI_TOKEN}`;
