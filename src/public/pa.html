@@ -82,6 +82,9 @@
   .drawer .phead{background:var(--green);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;gap:8px}
   .drawer .phead .x{background:transparent;border:1px solid var(--gold);color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer}
   .kv{display:grid;grid-template-columns:150px 1fr;gap:4px 10px;font-size:13px}
+  /* v3.144.4: foto 3x4 do associado na ficha */
+  .foto3x4{float:right;width:96px;height:128px;margin:0 0 8px 12px;border-radius:8px;border:2px solid var(--gold);background:#f1efe8 center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);text-align:center;overflow:hidden}
+  .foto3x4 img{width:100%;height:100%;object-fit:cover;display:block}
   .kv dt{color:var(--muted);font-weight:700} .kv dd{margin:0;word-break:break-word}
   @media(max-width:600px){.kv{grid-template-columns:1fr}}
   .docs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
@@ -175,6 +178,24 @@ async function abrirBoletoRomatec(btn){
     if (!url) { url = (await api(`/boletos/${btn.dataset.romatec}/link`, { method: 'POST' })).url_romatec; btn.dataset.url = url; }
     if (janela) janela.location.href = url; else window.open(url, '_blank');
   } catch (e){ if (janela) janela.close(); toast(e.message, true); }
+}
+// v3.144.4: foto 3x4 (documento FOTO_3X4 mais recente com arquivo) — leitura auditada no servidor.
+async function carregarFoto(docs){
+  const box = $('#fotoBox');
+  if (!box) return;
+  const foto = (docs || []).filter((x) => x.tipo === 'FOTO_3X4' && x.arquivo_presente).sort((a, b) => b.versao - a.versao)[0];
+  if (!foto) return;
+  box.textContent = 'carregando…';
+  try {
+    const r = await api('/documentos/' + foto.id);
+    const url = URL.createObjectURL(await r.blob());
+    box.innerHTML = '';
+    const img = document.createElement('img');
+    img.alt = 'Foto 3x4'; img.src = url; img.onload = () => setTimeout(() => URL.revokeObjectURL(url), 60000);
+    box.appendChild(img);
+    box.style.cursor = 'pointer'; box.title = 'Abrir foto';
+    box.onclick = () => abrirDoc(foto.id);
+  } catch { box.textContent = 'sem foto'; }
 }
 async function copiar(txt){
   try { await navigator.clipboard.writeText(txt || ''); toast('Copiado'); } catch { prompt('Copie:', txt || ''); }
@@ -471,6 +492,7 @@ async function abrirAssociado(aid, avisos){
       <div style="padding:14px">
         ${avisosHtml(avisos)}
         <div class="card"><h2>Dados</h2>
+          ${S.eu.ve_documentos ? '<div class="foto3x4" id="fotoBox">sem foto</div>' : ''}
           <dl class="kv">
             <dt>CPF</dt><dd>${esc(a.cpf)}</dd><dt>RG</dt><dd>${esc(a.rg || '—')}</dd>
             <dt>Nascimento</dt><dd>${dbr(a.nascimento)}</dd><dt>Estado civil</dt><dd>${esc(a.estado_civil || '—')}</dd>
@@ -514,6 +536,7 @@ async function abrirAssociado(aid, avisos){
       </div>`;
     $('#dx').onclick = fecharDrawer;
     pane.querySelectorAll('[data-doc]').forEach((b) => b.onclick = () => abrirDoc(b.dataset.doc));
+    carregarFoto(d.documentos);
     pane.querySelectorAll('[data-copiar]').forEach((b) => b.onclick = () => copiar(b.dataset.copiar));
     pane.querySelectorAll('[data-romatec]').forEach((b) => b.onclick = () => abrirBoletoRomatec(b));
     pane.querySelectorAll('[data-emitir]').forEach((b) => b.onclick = async () => {
