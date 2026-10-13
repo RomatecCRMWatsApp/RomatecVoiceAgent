@@ -167,6 +167,11 @@ export async function cancelarCobranca(cfg: AsaasConfig, id: string, fetchFn?: F
   return asaasReq<{ deleted?: boolean }>(cfg, 'DELETE', `/payments/${encodeURIComponent(id)}`, undefined, fetchFn);
 }
 
+/** Agência/conta do beneficiário (campo "Agência / Código do beneficiário" do boleto). */
+export async function numeroConta(cfg: AsaasConfig, fetchFn?: FetchFn) {
+  return asaasReq<{ agency?: string; account?: string; accountDigit?: string }>(cfg, 'GET', '/myAccount/accountNumber', undefined, fetchFn);
+}
+
 export async function obterCobranca(cfg: AsaasConfig, id: string, fetchFn?: FetchFn) {
   return asaasReq<AsaasCobranca>(cfg, 'GET', `/payments/${encodeURIComponent(id)}`, undefined, fetchFn);
 }

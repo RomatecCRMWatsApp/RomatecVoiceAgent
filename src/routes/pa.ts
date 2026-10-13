@@ -23,6 +23,7 @@ import { gerarPixCopiaECola } from '../services/pa/pixBrCode';
 import { desenhoDoProjeto } from '../services/pa/layoutDesenho';
 import * as boletos from '../services/pa/paBoletos';
 import * as waPa from '../services/pa/paWhatsapp';
+import * as boletoPdf from '../services/pa/paBoletoPdf';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -261,6 +262,22 @@ router.post('/lancamentos/:lid/boleto', h(async (req, res) => {
   return { boleto: b };
 }));
 router.get('/associados/:aid/boletos', h(async (req) => ({ boletos: await boletos.boletosDoAssociado(id(req.params.aid, 'associado')) })));
+// v3.144.0: boleto com layout Romatec — modelo Carnê (escolhido pelo CEO em 13/10/2026).
+router.get('/boletos/:bid/pdf', h(async (req, res) => {
+  const bid = id(req.params.bid, 'boleto');
+  await boletoPdf.garantirToken(bid);
+  const { pdf, nome } = await boletoPdf.gerarPdfBoleto(bid, 'carne');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${nome}"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.end(pdf);
+  return undefined;
+}));
+router.post('/boletos/:bid/link', h(async (req) => {
+  exigirEscrita(req);
+  const t = await boletoPdf.garantirToken(id(req.params.bid, 'boleto'));
+  return { url_romatec: boletoPdf.urlBoletoRomatec(t) };
+}));
 router.delete('/boletos/:bid', h(async (req) => {
   exigirEscrita(req);
   return { boleto: await boletos.cancelarBoleto(id(req.params.bid, 'boleto'), ctx(req).sub) };

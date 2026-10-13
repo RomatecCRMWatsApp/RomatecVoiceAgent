@@ -12,6 +12,7 @@ import {
   buscarOuCriarCliente, criarCobranca, linhaDigitavel, pixDaCobranca, cancelarCobranca,
   type StatusBoleto,
 } from './asaas';
+import { novoToken, urlBoletoRomatec } from './paBoletoPdf';
 
 export function mapBoleto(b: Record<string, unknown>) {
   return {
@@ -22,6 +23,7 @@ export function mapBoleto(b: Record<string, unknown>) {
     url_boleto: (b.url_boleto as string) ?? null, url_fatura: (b.url_fatura as string) ?? null,
     pago_em: isoDateTime(b.pago_em), valor_pago: b.valor_pago == null ? null : num(b.valor_pago),
     enviado_em: isoDateTime(b.enviado_em), criado_em: isoDateTime(b.criado_em),
+    url_romatec: urlBoletoRomatec((b.token_publico as string) ?? null),
     lote: (b.lote as string) ?? null, associado_nome: (b.associado_nome as string) ?? null,
     tipo: (b.tipo as string) ?? null, parcela: b.parcela == null ? null : num(b.parcela),
   };
@@ -86,10 +88,10 @@ export async function emitirBoleto(lancamentoId: number, usuario: string | null)
 
     const ins = await exec(pool, `
       INSERT INTO pa_boletos (projeto_id, associado_id, lancamento_id, provedor, externo_id, valor, vencimento, status,
-        linha_digitavel, nosso_numero, pix_copia_cola, url_boleto, url_fatura, criado_por)
-      VALUES (?, ?, ?, 'ASAAS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        linha_digitavel, nosso_numero, pix_copia_cola, url_boleto, url_fatura, criado_por, token_publico)
+      VALUES (?, ?, ?, 'ASAAS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
       projeto.id, a.id, lancamentoId, cob.id, cob.value ?? l.saldo, cob.dueDate ?? venc, statusLocal(cob.status),
-      linha, nosso, pix, cob.bankSlipUrl ?? null, cob.invoiceUrl ?? null, usuario,
+      linha, nosso, pix, cob.bankSlipUrl ?? null, cob.invoiceUrl ?? null, usuario, novoToken(),
     ]);
     await registrarEvento(pool, {
       projeto_id: projeto.id, associado_id: a.id, usuario, tipo: 'BOLETO_EMITIDO',

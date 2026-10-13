@@ -19,6 +19,8 @@
   header h1{margin:2px 0 0;font-size:18px}
   header select{background:transparent;color:#fff;border:1px solid var(--gold);border-radius:8px;padding:6px 8px;font-size:13px;max-width:280px}
   header select option{color:var(--ink)}
+  .versao{font-size:11px;color:#fff;background:rgba(255,255,255,.08);border:1px solid rgba(201,168,76,.6);border-radius:8px;padding:4px 9px;white-space:nowrap;line-height:1.3}
+  .versao b{color:var(--gold)}
   .perfil{font-size:11px;border:1px solid var(--gold);color:var(--gold-soft);border-radius:12px;padding:2px 8px;white-space:nowrap}
   nav.tabs{display:flex;gap:2px;overflow-x:auto;margin-top:10px;scrollbar-width:none}
   nav.tabs button{background:transparent;border:0;color:#d9e6dd;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap}
@@ -109,6 +111,7 @@
       <h1>🌾 Gestão de PA / Loteamentos</h1>
     </div>
     <div class="row" style="flex:0 0 auto;align-items:center">
+      <span class="versao" id="versaoChip" title="Versão e horário do último deploy (package.json via /api/version)">…</span>
       <select id="selProjeto" aria-label="Projeto"></select>
       <span class="perfil" id="perfilChip">…</span>
       <a href="/obras.html" style="color:var(--gold-soft);font-size:12px">← Gestão</a>
@@ -164,6 +167,15 @@ async function baixar(path, nome){
   const a = document.createElement('a'); a.href = url; a.download = nome || ''; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
+// v3.144.0: boleto com layout Romatec — abre o link público (o mesmo que vai no WhatsApp).
+async function abrirBoletoRomatec(btn){
+  const janela = window.open('about:blank', '_blank');
+  try {
+    let url = btn.dataset.url;
+    if (!url) { url = (await api(`/boletos/${btn.dataset.romatec}/link`, { method: 'POST' })).url_romatec; btn.dataset.url = url; }
+    if (janela) janela.location.href = url; else window.open(url, '_blank');
+  } catch (e){ if (janela) janela.close(); toast(e.message, true); }
+}
 async function copiar(txt){
   try { await navigator.clipboard.writeText(txt || ''); toast('Copiado'); } catch { prompt('Copie:', txt || ''); }
 }
@@ -180,7 +192,17 @@ const S = { projetos: [], pid: null, eu: null, painel: null, lotes: null, assoc:
 const qs = new URLSearchParams(location.search);
 
 // ─── boot ───────────────────────────────────────────────────────────────
+// v3.143.1: versão + data/hora do deploy (fonte única: package.json → /api/version).
+async function mostrarVersao(){
+  try {
+    const r = await fetch('/api/version', { cache: 'no-store' });
+    const v = await r.json();
+    const quando = v.buildTime ? new Date(v.buildTime).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+    $('#versaoChip').innerHTML = `<b>v${esc(v.version)}</b> · deploy ${esc(quando)}`;
+  } catch { $('#versaoChip').textContent = 'versão indisponível'; }
+}
 async function boot(){
+  mostrarVersao();
   try {
     S.eu = await api('/eu');
     $('#perfilChip').textContent = S.eu.perfil.replace(/_/g, ' ');
@@ -438,7 +460,7 @@ async function abrirAssociado(aid, avisos){
     const bolPago = new Map(bol.boletos.filter((b) => b.status === 'PAGO').map((b) => [b.lancamento_id, b]));
     const celBoleto = (l) => {
       const b = bolAtivo.get(l.id) || bolPago.get(l.id);
-      if (b) return `${chip(b.status)} ${b.url_boleto ? `<a href="${esc(b.url_boleto)}" target="_blank" rel="noopener">PDF</a>` : ''}
+      if (b) return `${chip(b.status)} ${b.linha_digitavel ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}">🧾 Boleto Romatec</button>` : ''} ${b.url_boleto ? `<a href="${esc(b.url_boleto)}" target="_blank" rel="noopener">PDF Asaas</a>` : ''}
         ${b.linha_digitavel ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.linha_digitavel)}">Linha</button>` : ''}
         ${b.pix_copia_cola ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.pix_copia_cola)}">Pix</button>` : ''}
         ${podeEscrever() && b.status !== 'PAGO' ? `<button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}`;
@@ -493,6 +515,7 @@ async function abrirAssociado(aid, avisos){
     $('#dx').onclick = fecharDrawer;
     pane.querySelectorAll('[data-doc]').forEach((b) => b.onclick = () => abrirDoc(b.dataset.doc));
     pane.querySelectorAll('[data-copiar]').forEach((b) => b.onclick = () => copiar(b.dataset.copiar));
+    pane.querySelectorAll('[data-romatec]').forEach((b) => b.onclick = () => abrirBoletoRomatec(b));
     pane.querySelectorAll('[data-emitir]').forEach((b) => b.onclick = async () => {
       b.disabled = true;
       try { await api(`/lancamentos/${b.dataset.emitir}/boleto`, { method: 'POST' }); toast('Boleto emitido no Asaas'); abrirAssociado(aid); }
@@ -681,11 +704,13 @@ async function rBoletos(){
       $('#bolBox').innerHTML = boletos.length ? `<div class="muted" style="margin-bottom:6px">${boletos.length} boleto(s) · ${brl(boletos.reduce((s, b) => s + b.valor, 0))}</div><table><thead><tr><th>Lote</th><th>Associado</th><th>Parcela</th><th>Venc.</th><th class="right">Valor</th><th>Status</th><th></th></tr></thead><tbody>
         ${boletos.map((b) => `<tr><td><b>${esc(b.lote)}</b></td><td>${esc(b.associado_nome)}</td><td>${esc(b.tipo === 'BOLETO' ? 'Parcela ' + b.parcela : b.tipo === 'SINAL' ? 'Sinal' : b.tipo)}</td><td>${dbr(b.vencimento)}</td>
           <td class="right nowrap">${brl(b.valor)}</td><td>${chip(b.status)}${b.pago_em ? ' <span class="muted">' + dbr(b.pago_em).slice(0, 10) + '</span>' : ''}</td>
-          <td class="nowrap">${b.url_boleto ? `<a class="btn btn-ghost btn-sm" href="${esc(b.url_boleto)}" target="_blank" rel="noopener">PDF</a>` : ''}
+          <td class="nowrap">${b.linha_digitavel && b.status !== 'CANCELADO' ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}">🧾 Boleto Romatec</button>` : ''}
+            ${b.url_boleto ? `<a class="btn btn-ghost btn-sm" href="${esc(b.url_boleto)}" target="_blank" rel="noopener">Asaas</a>` : ''}
             ${b.linha_digitavel ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.linha_digitavel)}">Linha</button>` : ''}
             ${b.pix_copia_cola ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.pix_copia_cola)}">Pix</button>` : ''}
             ${podeEscrever() && (b.status === 'PENDENTE' || b.status === 'VENCIDO') ? `<button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum boleto emitido.</div>';
       $('#bolBox').querySelectorAll('[data-copiar]').forEach((b) => b.onclick = () => copiar(b.dataset.copiar));
+      $('#bolBox').querySelectorAll('[data-romatec]').forEach((b) => b.onclick = () => abrirBoletoRomatec(b));
       $('#bolBox').querySelectorAll('[data-cancbol]').forEach((b) => b.onclick = async () => {
         if (!confirm('Cancelar este boleto no Asaas?')) return;
         try { await api(`/boletos/${b.dataset.cancbol}`, { method: 'DELETE' }); toast('Boleto cancelado'); listar(); } catch (e){ toast(e.message, true); }

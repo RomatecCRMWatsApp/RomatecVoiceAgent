@@ -7,6 +7,7 @@ import { cpfParcialConfere, dataHoraBrParaSql, soDigitos } from './validadores';
 import { centavos, ratearAutomatico, statusAposRecebimento, type Rateio, type StatusLancamento } from './regrasFinanceiras';
 import { parseRecibo, destinoEhRomatec, type ReciboInfinitePay } from './infinitepay';
 import { gerarPixCopiaECola } from './pixBrCode';
+import { urlBoletoRomatec } from './paBoletoPdf';
 
 export const FORMAS = ['PIX', 'ESPECIE', 'CARTAO_DEBITO', 'CARTAO_CREDITO', 'BOLETO', 'MISTO'] as const;
 export type Forma = (typeof FORMAS)[number];
@@ -271,7 +272,8 @@ export function mensagemCobranca(
   // (esse Pix dá baixa automática; a chave fixa do projeto não).
   const linhas = itens.flatMap((i) => {
     const out = [`• ${i.rotulo}: *${brl(i.saldo)}* (venc. ${dataBr(i.vencimento)})`];
-    if (i.boleto?.url_boleto) out.push(`  Boleto: ${i.boleto.url_boleto}`);
+    const link = i.boleto?.url_romatec || i.boleto?.url_boleto;
+    if (link) out.push(`  Boleto: ${link}`);
     if (i.boleto?.linha_digitavel) out.push(`  Linha digitável: ${i.boleto.linha_digitavel}`);
     if (i.boleto?.pix_copia_cola) out.push(`  Pix copia e cola:\n${i.boleto.pix_copia_cola}`);
     return out;
@@ -291,7 +293,7 @@ export function mensagemCobranca(
 }
 
 export interface BoletoNaCobranca {
-  id: number; status: string; url_boleto: string | null; linha_digitavel: string | null; pix_copia_cola: string | null; enviado_em: string | null;
+  id: number; status: string; url_boleto: string | null; url_romatec: string | null; linha_digitavel: string | null; pix_copia_cola: string | null; enviado_em: string | null;
 }
 
 const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à vista', BOLETO: 'Parcela', AJUSTE: 'Ajuste' };
@@ -332,10 +334,11 @@ export async function cobranca(projetoId: number, ateIso: string | null) {
   // v3.143.0: boleto ativo (Asaas) de cada item + status do WhatsApp do associado.
   const idsLanc = [...grupos.values()].flatMap((g) => g.itens.map((i) => i.lancamento_id));
   const boletos = idsLanc.length ? await rows(pool, `
-    SELECT id, lancamento_id, status, url_boleto, linha_digitavel, pix_copia_cola, enviado_em FROM pa_boletos
+    SELECT id, lancamento_id, status, url_boleto, linha_digitavel, pix_copia_cola, enviado_em, token_publico FROM pa_boletos
     WHERE lancamento_id IN (${idsLanc.map(() => '?').join(',')}) AND status IN ('PENDENTE','VENCIDO')`, idsLanc) : [];
   const bolPorLanc = new Map<number, BoletoNaCobranca>(boletos.map((b) => [num(b.lancamento_id), {
     id: num(b.id), status: String(b.status), url_boleto: (b.url_boleto as string) ?? null,
+    url_romatec: urlBoletoRomatec((b.token_publico as string) ?? null),
     linha_digitavel: (b.linha_digitavel as string) ?? null, pix_copia_cola: (b.pix_copia_cola as string) ?? null,
     enviado_em: isoDateTime(b.enviado_em),
   }]));

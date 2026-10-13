@@ -263,6 +263,8 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_associados.whatsapp_status', sql: "ALTER TABLE pa_associados ADD COLUMN whatsapp_status ENUM('NAO_VERIFICADO','VALIDO','INEXISTENTE','SEM_TELEFONE') NOT NULL DEFAULT 'NAO_VERIFICADO'" },
   { label: 'pa_associados.whatsapp_numero', sql: 'ALTER TABLE pa_associados ADD COLUMN whatsapp_numero VARCHAR(20) NULL' },
   { label: 'pa_associados.whatsapp_verificado_em', sql: 'ALTER TABLE pa_associados ADD COLUMN whatsapp_verificado_em DATETIME NULL' },
+  // v3.144.0: link público do boleto Romatec (/pa/boleto/<token>) — token aleatório, não adivinhável.
+  { label: 'pa_boletos.token_publico', sql: 'ALTER TABLE pa_boletos ADD COLUMN token_publico VARCHAR(48) NULL, ADD UNIQUE KEY uk_pa_boleto_token (token_publico)' },
   // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },
 ];
