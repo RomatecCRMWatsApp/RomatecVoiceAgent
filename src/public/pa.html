@@ -460,7 +460,7 @@ async function abrirAssociado(aid, avisos){
     const bolPago = new Map(bol.boletos.filter((b) => b.status === 'PAGO').map((b) => [b.lancamento_id, b]));
     const celBoleto = (l) => {
       const b = bolAtivo.get(l.id) || bolPago.get(l.id);
-      if (b) return `${chip(b.status)} ${b.linha_digitavel ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}">🧾 Boleto Romatec</button>` : ''} ${b.url_boleto ? `<a href="${esc(b.url_boleto)}" target="_blank" rel="noopener">PDF Asaas</a>` : ''}
+      if (b) return `${chip(b.status)} ${b.linha_digitavel ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}" title="Carnê Romatec (mesmo código de barras e Pix do Asaas)">🧾 PDF</button>` : ''}
         ${b.linha_digitavel ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.linha_digitavel)}">Linha</button>` : ''}
         ${b.pix_copia_cola ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.pix_copia_cola)}">Pix</button>` : ''}
         ${podeEscrever() && b.status !== 'PAGO' ? `<button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}`;
@@ -704,8 +704,7 @@ async function rBoletos(){
       $('#bolBox').innerHTML = boletos.length ? `<div class="muted" style="margin-bottom:6px">${boletos.length} boleto(s) · ${brl(boletos.reduce((s, b) => s + b.valor, 0))}</div><table><thead><tr><th>Lote</th><th>Associado</th><th>Parcela</th><th>Venc.</th><th class="right">Valor</th><th>Status</th><th></th></tr></thead><tbody>
         ${boletos.map((b) => `<tr><td><b>${esc(b.lote)}</b></td><td>${esc(b.associado_nome)}</td><td>${esc(b.tipo === 'BOLETO' ? 'Parcela ' + b.parcela : b.tipo === 'SINAL' ? 'Sinal' : b.tipo)}</td><td>${dbr(b.vencimento)}</td>
           <td class="right nowrap">${brl(b.valor)}</td><td>${chip(b.status)}${b.pago_em ? ' <span class="muted">' + dbr(b.pago_em).slice(0, 10) + '</span>' : ''}</td>
-          <td class="nowrap">${b.linha_digitavel && b.status !== 'CANCELADO' ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}">🧾 Boleto Romatec</button>` : ''}
-            ${b.url_boleto ? `<a class="btn btn-ghost btn-sm" href="${esc(b.url_boleto)}" target="_blank" rel="noopener">Asaas</a>` : ''}
+          <td class="nowrap">${b.linha_digitavel && b.status !== 'CANCELADO' ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}" title="Carnê Romatec (mesmo código de barras e Pix do Asaas)">🧾 PDF</button>` : ''}
             ${b.linha_digitavel ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.linha_digitavel)}">Linha</button>` : ''}
             ${b.pix_copia_cola ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.pix_copia_cola)}">Pix</button>` : ''}
             ${podeEscrever() && (b.status === 'PENDENTE' || b.status === 'VENCIDO') ? `<button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum boleto emitido.</div>';
