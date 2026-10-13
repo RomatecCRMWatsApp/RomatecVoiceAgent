@@ -11,6 +11,7 @@ import {
   type StatusLancamento, type TipoLancamento,
 } from './regrasFinanceiras';
 import type { PerfilPa } from './lgpd';
+import { marcaUrls } from './marcaProjeto';
 
 // ─── Perfil ───────────────────────────────────────────────────────────────
 export async function perfilOverride(sub: string | null): Promise<PerfilPa | null> {
@@ -166,8 +167,26 @@ export async function painel(projetoId: number) {
   const porForma = await rows(pool, `
     SELECT forma, SUM(valor) AS total, COUNT(*) AS n FROM pa_pagamentos WHERE projeto_id = ? GROUP BY forma`, [projetoId]);
 
+  // v3.145.0: previsão de recebimento por mês de vencimento, boletos e cadastro.
+  const meses = await rows(pool, `
+    SELECT DATE_FORMAT(l.vencimento, '%Y-%m') AS mes,
+      SUM(l.valor) AS valor, SUM(l.valor_recebido) AS recebido, SUM(l.valor - l.valor_recebido) AS saldo
+    FROM pa_lancamentos l JOIN pa_associados a ON a.id = l.associado_id AND a.ativo = 1
+    WHERE a.projeto_id = ? AND l.status <> 'CANCELADO' AND l.vencimento IS NOT NULL
+    GROUP BY mes ORDER BY mes`, [projetoId]);
+  let boletosResumo: Record<string, number> = {};
+  try {
+    const bs = await rows(pool, "SELECT status, COUNT(*) AS n, SUM(valor) AS total FROM pa_boletos WHERE projeto_id = ? AND status <> 'CANCELADO' GROUP BY status", [projetoId]);
+    boletosResumo = Object.fromEntries(bs.map((r) => [String(r.status), num(r.n)]));
+  } catch { boletosResumo = {}; }
+  const cadastro = await pendenciasCadastrais(projetoId);
+
   return {
     projeto,
+    marca: marcaUrls(projeto.codigo),
+    previsao_mensal: meses.map((r) => ({ mes: String(r.mes), valor: num(r.valor), recebido: num(r.recebido), saldo: num(r.saldo) })),
+    boletos: boletosResumo,
+    cadastro,
     posicao_em: hoje,
     financeiro: {
       contratado, recebido, a_receber: centavos(contratado - recebido),
@@ -180,6 +199,44 @@ export async function painel(projetoId: number) {
     associados: { total: num(assoc?.total), contratos_assinados: num(assoc?.assinados), carteirinhas_emitidas: num(assoc?.carteirinhas) },
     entregas: Object.fromEntries(entregas.map((r) => [String(r.status), num(r.n)])),
   };
+}
+
+// ─── v3.145.0: pendências cadastrais (o que falta em cada associado) ───────
+export const ITENS_CADASTRO: Record<string, string> = {
+  telefone: 'Telefone', whatsapp: 'WhatsApp', email: 'E-mail', nascimento: 'Nascimento', rg: 'RG',
+  foto: 'Foto 3×4', documento: 'Documento de identidade', conjuge: 'CPF do cônjuge', contrato: 'Contrato assinado',
+  observacao: 'Pendência anotada',
+};
+
+export async function pendenciasCadastrais(projetoId: number) {
+  const as = await rows(pool, `
+    SELECT a.id, a.numero, a.nome, a.telefone, a.telefone_e164, a.email, a.nascimento, a.rg, a.estado_civil,
+      a.conjuge_cpf, a.contrato_status, a.pendencias, a.whatsapp_status, l.numero AS lote,
+      (SELECT COUNT(*) FROM pa_documentos d WHERE d.associado_id = a.id AND d.tipo = 'FOTO_3X4' AND d.arquivo_presente = 1) AS fotos,
+      (SELECT COUNT(*) FROM pa_documentos d WHERE d.associado_id = a.id AND d.tipo = 'DOC_IDENTIFICACAO' AND d.arquivo_presente = 1) AS docs
+    FROM pa_associados a JOIN pa_lotes l ON l.id = a.lote_id
+    WHERE a.projeto_id = ? AND a.ativo = 1 ORDER BY CAST(l.numero AS UNSIGNED)`, [projetoId]);
+  const resumo: Record<string, number> = Object.fromEntries(Object.keys(ITENS_CADASTRO).map((k) => [k, 0]));
+  const lista: Array<{ id: number; numero: string; nome: string; lote: string; telefone: string | null; faltando: string[]; observacao: string | null }> = [];
+  for (const a of as) {
+    const f: string[] = [];
+    if (!a.telefone_e164) f.push('telefone');
+    if (a.telefone_e164 && a.whatsapp_status !== 'VALIDO') f.push('whatsapp');
+    if (!a.email || !emailValido(a.email)) f.push('email');
+    if (!a.nascimento) f.push('nascimento');
+    if (!a.rg) f.push('rg');
+    if (num(a.fotos) === 0) f.push('foto');
+    if (num(a.docs) === 0) f.push('documento');
+    if (/casad/i.test(String(a.estado_civil ?? '')) && !a.conjuge_cpf) f.push('conjuge');
+    if (a.contrato_status !== 'ASSINADO') f.push('contrato');
+    if (a.pendencias && String(a.pendencias).trim()) f.push('observacao');
+    for (const k of f) resumo[k]++;
+    if (f.length) lista.push({ id: num(a.id), numero: String(a.numero), nome: String(a.nome), lote: String(a.lote), telefone: (a.telefone as string) ?? null, faltando: f, observacao: (a.pendencias as string) ?? null });
+  }
+  // Cadastro completo = só falta o que não depende do associado (contrato/WhatsApp ainda não verificado).
+  const completos = as.length - lista.filter((x) => x.faltando.some((k) => !['contrato', 'whatsapp', 'observacao'].includes(k))).length;
+  lista.sort((x, y) => y.faltando.length - x.faltando.length || Number(x.lote) - Number(y.lote));
+  return { total: as.length, completos, itens: ITENS_CADASTRO, resumo, lista };
 }
 
 // ─── Lotes ────────────────────────────────────────────────────────────────

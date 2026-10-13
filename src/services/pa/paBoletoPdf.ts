@@ -6,6 +6,7 @@ import { PaErro } from './erros';
 import { pool, rows, one, exec, num, isoDate, hojeBrasil } from './paDb';
 import { buscarProjeto, buscarAssociado, mapLancamento } from './paRepo';
 import { desenhoDoProjeto } from './layoutDesenho';
+import { marcaArquivos } from './marcaProjeto';
 import { configAsaas, numeroConta, linhaDigitavel, pixDaCobranca } from './asaas';
 import { pdfBoletoRomatec, type DadosBoletoRomatec, type ModeloBoleto } from './boletoRomatec';
 
@@ -47,9 +48,6 @@ async function agenciaCodigo(): Promise<string> {
   contaCache = { valor, ate: Date.now() + 6 * 3600_000 };
   return valor;
 }
-
-// v3.144.6: brasão oficial do PA (manual de identidade visual) no canto do carnê.
-const BRASAO_POR_PROJETO: Record<string, string> = { 'PA-SALETE-MORENO': 'brasao_salete_moreno.png' };
 
 const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à vista', AJUSTE: 'Ajuste' };
 
@@ -134,7 +132,7 @@ export async function dadosBoletoRomatec(boletoId: number): Promise<DadosBoletoR
     },
     // Marca de teste segue o ambiente em que ESTE boleto foi emitido.
     ambiente_teste: String(b.ambiente ?? 'sandbox') !== 'producao',
-    brasao: BRASAO_POR_PROJETO[projeto.codigo] ?? null,
+    brasao: marcaArquivos(projeto.codigo).brasao,
   };
 }
 

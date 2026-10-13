@@ -26,6 +26,52 @@
   nav.tabs button{background:transparent;border:0;color:#d9e6dd;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap}
   nav.tabs button.on{color:#fff;border-bottom-color:var(--gold)}
   .wrap{max-width:1180px;margin:0 auto;padding:16px}
+  /* v3.145.0: cabeçalho com navegação + painel moderno */
+  .navbtn{background:rgba(255,255,255,.1);color:#fff;border:1px solid var(--gold);border-radius:8px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;white-space:nowrap;font-family:inherit}
+  .navbtn:hover{background:rgba(201,168,76,.25)}
+  .navbtn.fechar{background:var(--gold);color:var(--green);border-color:var(--gold)}
+  .titulo{display:flex;align-items:center;gap:10px}
+  .titulo img{height:42px;width:42px;border-radius:50%;background:#fff;padding:2px}
+  .hero{position:relative;display:flex;align-items:center;gap:18px;background:linear-gradient(120deg,#0C3320 0%,#14472B 55%,#1e5a36 100%);color:#fff;border-radius:16px;padding:18px 20px;margin-bottom:14px;overflow:hidden;box-shadow:0 6px 18px rgba(12,51,32,.25)}
+  .hero:after{content:'';position:absolute;right:-60px;top:-60px;width:260px;height:260px;border-radius:50%;background:radial-gradient(circle,rgba(201,168,76,.28),transparent 70%)}
+  .hero-emb{width:96px;height:96px;border-radius:50%;background:#fff;padding:3px;flex:0 0 auto;box-shadow:0 0 0 3px var(--gold)}
+  .hero-txt{flex:1 1 auto;min-width:0;position:relative;z-index:1}
+  .hero-kick{color:var(--gold-soft);font-size:11px;letter-spacing:2px;text-transform:uppercase}
+  .hero h2{color:#fff;border:0;margin:2px 0 2px;padding:0;font-size:26px;letter-spacing:.5px}
+  .hero-sub{color:#d9e6dd;font-size:13px}
+  .hero-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .hero-chips span{background:rgba(255,255,255,.12);border:1px solid rgba(201,168,76,.5);border-radius:14px;padding:3px 10px;font-size:12px}
+  .hero-chips span.warn{background:rgba(179,38,30,.35);border-color:#e7a29c}
+  .hero-bras{height:118px;width:auto;flex:0 0 auto;position:relative;z-index:1;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35))}
+  @media(max-width:700px){.hero{flex-wrap:wrap}.hero-bras{height:84px}.hero-emb{width:72px;height:72px}.hero h2{font-size:21px}}
+  .kpis2{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px}
+  .k2{display:flex;gap:10px;align-items:flex-start;background:#fff;border-radius:14px;padding:13px 14px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-top:4px solid var(--gold)}
+  .k2.ok{border-top-color:var(--ok)} .k2.red{border-top-color:var(--red)}
+  .k2i{font-size:20px;width:38px;height:38px;border-radius:10px;background:var(--cream);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .k2 .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+  .k2 .v{font-size:20px;font-weight:800;color:var(--green);margin:2px 0}
+  .k2.red .v{color:var(--red)}
+  .bar2{height:7px;background:#ece7d8;border-radius:5px;overflow:hidden;margin:4px 0}
+  .bar2 i{display:block;height:100%;background:linear-gradient(90deg,#1f7a4d,#C9A84C)}
+  .grid3c{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:900px){.grid3c{grid-template-columns:1fr}}
+  .rosca{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:center}
+  .rosca svg{width:150px;height:150px;flex:0 0 auto}
+  .vleg{flex-direction:column;gap:5px}
+  .vleg b{color:var(--green)}
+  .medl{display:flex;align-items:center;gap:10px;margin:7px 0}
+  .medl span{width:100px}
+  .mini-k{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .mini-k div{background:var(--cream);border-radius:10px;padding:10px;text-align:center}
+  .mini-k b{display:block;font-size:22px;color:var(--green)}
+  .mini-k span{font-size:11px;color:var(--muted)}
+  .pchips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
+  .pchip{border:1px solid var(--line);background:#fff;border-radius:16px;padding:5px 11px;font-size:12px;cursor:pointer;font-family:inherit;color:var(--ink)}
+  .pchip b{color:var(--red);margin-left:3px}
+  .pchip.on{background:var(--green);color:#fff;border-color:var(--green)}
+  .pchip.on b{color:var(--gold-soft)}
+  .mapa-bras{position:absolute;left:10px;bottom:10px;height:96px;width:auto;filter:drop-shadow(0 3px 6px rgba(0,0,0,.3));pointer-events:none}
+  #mapaBox{position:relative}
   .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,.05)}
   h2{color:var(--green);font-size:16px;margin:0 0 10px;border-bottom:2px solid var(--gold);padding-bottom:6px}
   h3{color:var(--green);font-size:14px;margin:14px 0 8px}
@@ -109,15 +155,19 @@
 <body>
 <header>
   <div class="top">
-    <div>
-      <p class="kick">Romatec · ZAYRA</p>
-      <h1>🌾 Gestão de PA / Loteamentos</h1>
+    <div class="titulo">
+      <button class="navbtn hide" id="btnVoltar" title="Voltar para a tela anterior">← Voltar</button>
+      <img id="hdrEmblema" class="hide" alt="Emblema do PA">
+      <div>
+        <p class="kick">Romatec · ZAYRA</p>
+        <h1>🌾 Gestão de PA / Loteamentos</h1>
+      </div>
     </div>
     <div class="row" style="flex:0 0 auto;align-items:center">
       <span class="versao" id="versaoChip" title="Versão e horário do último deploy (package.json via /api/version)">…</span>
       <select id="selProjeto" aria-label="Projeto"></select>
       <span class="perfil" id="perfilChip">…</span>
-      <a href="/obras.html" style="color:var(--gold-soft);font-size:12px">← Gestão</a>
+      <a href="/obras.html" class="navbtn fechar" title="Fechar e voltar para a Gestão da ZAYRA">✕ Voltar à Gestão</a>
     </div>
   </div>
   <nav class="tabs" id="tabs">
@@ -219,7 +269,7 @@ async function mostrarVersao(){
     const r = await fetch('/api/version', { cache: 'no-store' });
     const v = await r.json();
     const quando = v.buildTime ? new Date(v.buildTime).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-    $('#versaoChip').innerHTML = `<b>v${esc(v.version)}</b> · deploy ${esc(quando)}`;
+    $('#versaoChip').innerHTML = `<b>v${esc(v.version)}</b> · DEPLOY ${esc(quando)}`;
   } catch { $('#versaoChip').textContent = 'versão indisponível'; }
 }
 async function boot(){
@@ -236,7 +286,9 @@ async function boot(){
     S.pid = projetos.some((p) => p.id === salvo) ? salvo : (projetos[0] ? projetos[0].id : null);
     if (S.pid) sel.value = String(S.pid);
     sel.onchange = () => { S.pid = Number(sel.value); safeSet('pa_projeto', S.pid); S.painel = S.lotes = S.assoc = null; S.desenho = undefined; mostrar(S.aba); };
-    document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => mostrar(b.dataset.t));
+    document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => irPara(b.dataset.t));
+    $('#btnVoltar').onclick = voltar;
+    try { history.replaceState({ aba: S.aba }, ''); } catch { /* ok */ }
     mostrar(qs.get('aba') || (S.pid ? 'painel' : 'importar'));
     if (qs.get('associado')) abrirAssociado(Number(qs.get('associado')));
   } catch (e){ $('#v-painel').innerHTML = `<div class="card empty">Erro ao carregar: ${esc(e.message)}</div>`; }
@@ -244,8 +296,27 @@ async function boot(){
 function safeGet(k){ try { return localStorage.getItem(k); } catch { return null; } }
 function safeSet(k, v){ try { localStorage.setItem(k, v); } catch { /* sem storage */ } }
 
+// v3.145.0: histórico das abas — botão "← Voltar" e o voltar do navegador.
+S.hist = [];
+function atualizarVoltar(){ const b = $('#btnVoltar'); if (b) b.classList.toggle('hide', !S.hist.length && !$('#drawer').classList.contains('on')); }
+function irPara(aba){
+  if (aba === S.aba) return mostrar(aba);
+  if (S.aba) S.hist.push(S.aba);
+  try { history.pushState({ aba }, '', `?projeto=${S.pid || ''}&aba=${aba}`); } catch { /* sem history */ }
+  mostrar(aba);
+}
+function voltar(){
+  if ($('#drawer').classList.contains('on')) { fecharDrawer(); return; }
+  if (S.hist.length) { try { history.back(); } catch { mostrar(S.hist.pop()); } }
+}
+window.addEventListener('popstate', () => {
+  if ($('#drawer').classList.contains('on')) fecharDrawer();
+  const ant = S.hist.pop();
+  if (ant) mostrar(ant); else atualizarVoltar();
+});
 function mostrar(aba){
   S.aba = aba;
+  setTimeout(atualizarVoltar, 0);
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === aba));
   document.querySelectorAll('.wrap > section').forEach((s) => s.classList.toggle('hide', s.id !== 'v-' + aba));
   if (!S.pid && aba !== 'importar'){ $('#v-' + aba).innerHTML = '<div class="card empty">Nenhum projeto cadastrado ainda. Use <b>Importar</b> para carregar o seed do PA.</div>'; return; }
@@ -253,52 +324,132 @@ function mostrar(aba){
 }
 const podeEscrever = () => S.eu && S.eu.pode_escrever;
 
-// ─── Painel ─────────────────────────────────────────────────────────────
+// ─── Painel (v3.145.0: identidade do PA, KPIs, gráficos e pendências cadastrais) ─
+const CORES_FORMA = { PIX:'#1f7a4d', ESPECIE:'#C9A84C', CARTAO_DEBITO:'#2b5f8a', CARTAO_CREDITO:'#5b7fb0', BOLETO:'#14472B', MISTO:'#B3261E' };
+const MES_ABR = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const mesTxt = (ym) => { const [a, m] = String(ym).split('-'); return `${MES_ABR[Number(m) - 1] || m}/${String(a).slice(2)}`; };
+const kfmt = (v) => v >= 1000 ? (v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'k' : String(Math.round(v));
+
+/** Rosca SVG: segs = [{v, cor, rotulo}] */
+function rosca(segs, centro, sub){
+  const tot = segs.reduce((s, x) => s + x.v, 0) || 1;
+  const R = 52, C = 2 * Math.PI * R; let off = 0;
+  const arcos = segs.filter((x) => x.v > 0).map((x) => { const l = x.v / tot * C; const a = `<circle r="${R}" cx="70" cy="70" fill="none" stroke="${x.cor}" stroke-width="20" stroke-dasharray="${l.toFixed(2)} ${(C - l).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 70 70)"><title>${esc(x.rotulo)}: ${x.fmt ?? x.v}</title></circle>`; off += l; return a; }).join('');
+  return `<div class="rosca"><svg viewBox="0 0 140 140" role="img"><circle r="${R}" cx="70" cy="70" fill="none" stroke="#efeadb" stroke-width="20"/>${arcos}
+    <text x="70" y="66" text-anchor="middle" font-size="19" font-weight="800" fill="#0C3320">${esc(centro)}</text><text x="70" y="84" text-anchor="middle" font-size="9.5" fill="#6A6656">${esc(sub || '')}</text></svg>
+    <div class="leg vleg">${segs.map((x) => `<span><i style="background:${x.cor}"></i>${esc(x.rotulo)} <b>${x.fmt ?? x.v}</b></span>`).join('')}</div></div>`;
+}
+
+/** Barras SVG empilhadas: itens [{rotulo, partes:[{v,cor,nome}]}] */
+function barras(itens, fmtV){
+  if (!itens.length) return '<div class="empty">Sem dados ainda.</div>';
+  const max = Math.max(1, ...itens.map((i) => i.partes.reduce((s, p) => s + p.v, 0)));
+  const L = 54, W = Math.max(300, itens.length * L + 20), H = 170, base = 140;
+  let g = '';
+  itens.forEach((it, i) => {
+    let y = base; const x = 14 + i * L;
+    const tot = it.partes.reduce((s, p) => s + p.v, 0);
+    for (const p of it.partes) { const h = p.v / max * 112; if (h <= 0) continue; y -= h; g += `<rect x="${x}" y="${y.toFixed(1)}" width="34" height="${h.toFixed(1)}" rx="3" fill="${p.cor}"><title>${esc(it.rotulo)} · ${esc(p.nome)}: ${fmtV(p.v)}</title></rect>`; }
+    g += `<text x="${x + 17}" y="${(y - 5).toFixed(1)}" font-size="10" font-weight="700" text-anchor="middle" fill="#0C3320">${kfmt(tot)}</text><text x="${x + 17}" y="${base + 15}" font-size="10" text-anchor="middle" fill="#6A6656">${esc(it.rotulo)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:190px" role="img"><line x1="6" y1="${base}" x2="${W - 6}" y2="${base}" stroke="#DCD5C2"/>${g}</svg>`;
+}
+
+let PEND_FILTRO = '';
 async function rPainel(){
   const v = $('#v-painel');
   v.innerHTML = '<div class="card empty">Carregando painel…</div>';
   try {
     const p = S.painel = await api(`/projetos/${S.pid}/painel`);
+    S.marca = p.marca; mostrarEmblema();
     const f = p.financeiro;
     const pct = f.contratado ? Math.round(f.recebido / f.contratado * 1000) / 10 : 0;
-    const maxDia = Math.max(1, ...f.recebido_por_dia.map((d) => d.total));
     const med = p.lotes.por_status_medicao;
+    const cad = p.cadastro;
+    const pctCad = cad.total ? Math.round(cad.completos / cad.total * 100) : 0;
+    const bol = p.boletos || {};
     v.innerHTML = `
-      <div class="card"><h2>${esc(p.projeto.nome)}</h2>
-        <div class="muted">${esc(p.projeto.municipio)}/${esc(p.projeto.uf)} · ${esc(p.projeto.associacao_nome || '')}
-          ${p.projeto.associacao_cnpj_status === 'EM_HOMOLOGACAO' ? chip('PENDENTE','CNPJ em homologação') : ''} · posição ${dbr(p.posicao_em)}</div>
-      </div>
-      <div class="kpis">
-        <div class="kpi"><div class="l">Contratado</div><div class="v">${brl(f.contratado)}</div></div>
-        <div class="kpi ok"><div class="l">Recebido</div><div class="v">${brl(f.recebido)}</div><div class="muted">${pct}%</div></div>
-        <div class="kpi"><div class="l">A receber</div><div class="v">${brl(f.a_receber)}</div></div>
-        <div class="kpi red"><div class="l">Sinais pendentes</div><div class="v">${brl(f.sinais_pendentes)}</div><div class="muted">${f.sinais.a_pagar} a pagar · ${f.sinais.parciais} parcial</div></div>
-        <div class="kpi ${f.vencido > 0 ? 'red' : ''}"><div class="l">Vencido</div><div class="v">${brl(f.vencido)}</div></div>
-        <div class="kpi"><div class="l">Associados</div><div class="v">${p.associados.total}</div><div class="muted">${p.associados.contratos_assinados} contratos assinados</div></div>
-      </div>
-      <div class="card" style="margin-top:14px"><h2>Recebido × a receber</h2>
-        <div class="stack" role="img" aria-label="Recebido ${pct}%"><i style="width:${pct}%;background:var(--ok)"></i><i style="width:${100 - pct}%;background:var(--gold-soft)"></i></div>
-        <div class="leg"><span><i style="background:var(--ok)"></i>Recebido ${brl(f.recebido)}</span><span><i style="background:var(--gold-soft)"></i>A receber ${brl(f.a_receber)}</span></div>
-        <div class="grid3" style="margin-top:8px">
-          <div><b>Entradas (sinal/à vista)</b><div class="muted">${chip('PAGO', f.sinais.pagos + ' pagas')} ${chip('A_PAGAR', f.sinais.a_pagar + ' a pagar')} ${chip('PARCIAL', f.sinais.parciais + ' parcial')}</div><div class="muted" style="margin-top:4px">${f.sinais.quitados_avista} quitados à vista</div></div>
-          <div><b>Por forma</b><div class="muted">${f.recebido_por_forma.map((x) => `${esc(x.forma.replace(/_/g,' '))}: ${brl(x.total)} (${x.n})`).join('<br>') || '—'}</div></div>
-          <div><b>Lotes</b><div class="muted">${p.lotes.total} lotes · ${p.lotes.por_tipo.ASSOCIADO || 0} de associados · ${p.lotes.por_tipo.INSTITUCIONAL || 0} institucionais · ${p.lotes.por_tipo.VAGO || 0} vagos</div></div>
+      <div class="hero">
+        ${p.marca && p.marca.emblema ? `<img class="hero-emb" src="${esc(p.marca.emblema)}" alt="Emblema do PA">` : ''}
+        <div class="hero-txt">
+          <div class="hero-kick">Projeto de Assentamento</div>
+          <h2>${esc(p.projeto.nome.replace(/^Projeto de Assentamento\s*/i, ''))}</h2>
+          <div class="hero-sub">${esc(p.projeto.associacao_nome || '')}</div>
+          <div class="hero-chips"><span>📍 ${esc(p.projeto.municipio)}/${esc(p.projeto.uf)}</span><span>🏘️ ${p.lotes.total} lotes</span><span>👥 ${p.associados.total} associados</span>
+            ${p.projeto.associacao_cnpj_status === 'EM_HOMOLOGACAO' ? '<span class="warn">CNPJ em homologação</span>' : ''}<span>🗓️ posição ${dbr(p.posicao_em)}</span></div>
         </div>
+        ${p.marca && p.marca.brasao ? `<img class="hero-bras" src="${esc(p.marca.brasao)}" alt="Brasão do PA">` : ''}
       </div>
+
+      <div class="kpis2">
+        <div class="k2"><div class="k2i">📄</div><div><div class="l">Contratado</div><div class="v">${brl(f.contratado)}</div><div class="muted">${p.associados.total} associados</div></div></div>
+        <div class="k2 ok"><div class="k2i">✅</div><div><div class="l">Recebido</div><div class="v">${brl(f.recebido)}</div><div class="bar2"><i style="width:${pct}%"></i></div><div class="muted">${pct}% do contratado</div></div></div>
+        <div class="k2"><div class="k2i">⏳</div><div><div class="l">A receber</div><div class="v">${brl(f.a_receber)}</div><div class="muted">${(bol.PENDENTE || 0) + (bol.VENCIDO || 0)} boleto(s) em aberto</div></div></div>
+        <div class="k2 red"><div class="k2i">⚠️</div><div><div class="l">Sinais pendentes</div><div class="v">${brl(f.sinais_pendentes)}</div><div class="muted">${f.sinais.a_pagar} a pagar · ${f.sinais.parciais} parcial</div></div></div>
+        <div class="k2 ${f.vencido > 0 ? 'red' : 'ok'}"><div class="k2i">📆</div><div><div class="l">Vencido</div><div class="v">${brl(f.vencido)}</div><div class="muted">${f.vencido > 0 ? 'cobrar' : 'nada vencido'}</div></div></div>
+        <div class="k2"><div class="k2i">🗂️</div><div><div class="l">Cadastro completo</div><div class="v">${cad.completos}/${cad.total}</div><div class="bar2"><i style="width:${pctCad}%"></i></div><div class="muted">${pctCad}% sem pendência de dados</div></div></div>
+      </div>
+
+      <div class="grid3c">
+        <div class="card"><h2>Recebido × a receber</h2>${rosca([
+          { v: f.recebido, cor: '#1f7a4d', rotulo: 'Recebido', fmt: brl(f.recebido) },
+          { v: f.a_receber, cor: '#E3D19A', rotulo: 'A receber', fmt: brl(f.a_receber) },
+        ], pct + '%', 'recebido')}</div>
+        <div class="card"><h2>Entradas (sinal / à vista)</h2>${rosca([
+          { v: f.sinais.pagos, cor: '#1f7a4d', rotulo: 'Pagas' },
+          { v: f.sinais.parciais, cor: '#C9A84C', rotulo: 'Parciais' },
+          { v: f.sinais.a_pagar, cor: '#B3261E', rotulo: 'A pagar' },
+        ], String(f.sinais.pagos), 'pagas')}<div class="muted" style="text-align:center">${f.sinais.quitados_avista} quitado(s) à vista</div></div>
+        <div class="card"><h2>Formas de pagamento</h2>${f.recebido_por_forma.length ? rosca(f.recebido_por_forma.map((x) => ({ v: x.total, cor: CORES_FORMA[x.forma] || '#888', rotulo: x.forma.replace(/_/g, ' '), fmt: brl(x.total) })), String(f.recebido_por_forma.reduce((s, x) => s + x.n, 0)), 'pagamentos') : '<div class="empty">Sem pagamentos.</div>'}</div>
+      </div>
+
       <div class="grid2">
-        <div class="card"><h2>Recebimentos por dia</h2>
-          ${f.recebido_por_dia.length ? `<svg viewBox="0 0 ${Math.max(220, f.recebido_por_dia.length * 46)} 130" style="width:100%;height:150px" role="img" aria-label="Recebimentos por dia">
-            ${f.recebido_por_dia.map((d, i) => { const h = Math.round(d.total / maxDia * 90); return `<g><rect x="${i*46+8}" y="${100-h}" width="30" height="${h}" rx="3" fill="#0C3320"><title>${dbr(d.dia)}: ${brl(d.total)} (${d.n})</title></rect>
-              <text x="${i*46+23}" y="${94-h}" font-size="9" text-anchor="middle" fill="#0C3320">${Math.round(d.total)}</text>
-              <text x="${i*46+23}" y="115" font-size="9" text-anchor="middle" fill="#6A6656">${dbr(d.dia).slice(0,5)}</text></g>`; }).join('')}
-          </svg>` : '<div class="empty">Sem pagamentos ainda.</div>'}
+        <div class="card"><h2>Previsão de recebimento por mês</h2>
+          ${barras(p.previsao_mensal.map((m) => ({ rotulo: mesTxt(m.mes), partes: [{ v: m.recebido, cor: '#1f7a4d', nome: 'recebido' }, { v: m.saldo, cor: '#E3D19A', nome: 'a receber' }] })), brl)}
+          <div class="leg"><span><i style="background:#1f7a4d"></i>Recebido</span><span><i style="background:#E3D19A"></i>A receber (por vencimento)</span></div>
         </div>
+        <div class="card"><h2>Recebimentos por dia</h2>
+          ${barras(f.recebido_por_dia.slice(-10).map((d) => ({ rotulo: dbr(d.dia).slice(0, 5), partes: [{ v: d.total, cor: '#0C3320', nome: d.n + ' pagamento(s)' }] })), brl)}
+        </div>
+      </div>
+
+      <div class="grid2">
         <div class="card"><h2>Medição de campo</h2>
           ${['PENDENTE','AGENDADA','MEDIDO','PROCESSADO'].map((s) => { const n = med[s] || 0; const w = p.lotes.total ? n / p.lotes.total * 100 : 0;
-            return `<div style="margin:6px 0"><div class="row" style="justify-content:space-between"><span>${chip(s)}</span><b style="flex:0 0 auto">${n}</b></div><div class="stack" style="height:8px;margin:4px 0"><i style="width:${w}%;background:var(--green)"></i></div></div>`; }).join('')}
-          <div class="muted">Entregas: ${Object.entries(p.entregas).map(([k, n]) => `${chip(k)} ${n}`).join(' ') || 'nenhuma ainda'}</div>
+            return `<div class="medl"><span>${chip(s)}</span><div class="bar2" style="flex:1"><i style="width:${w}%"></i></div><b>${n}</b></div>`; }).join('')}
+          <div class="muted" style="margin-top:6px">Lotes: ${p.lotes.por_tipo.ASSOCIADO || 0} de associados · ${p.lotes.por_tipo.INSTITUCIONAL || 0} institucionais · ${p.lotes.por_tipo.VAGO || 0} vagos</div>
         </div>
+        <div class="card"><h2>Boletos e contratos</h2>
+          <div class="mini-k">
+            <div><b>${bol.PENDENTE || 0}</b><span>boletos pendentes</span></div><div><b>${bol.VENCIDO || 0}</b><span>vencidos</span></div>
+            <div><b>${bol.PAGO || 0}</b><span>pagos</span></div><div><b>${p.associados.contratos_assinados}</b><span>contratos assinados</span></div>
+            <div><b>${p.associados.carteirinhas_emitidas}</b><span>carteirinhas</span></div><div><b>${Object.values(p.entregas).reduce((s, n) => s + n, 0)}</b><span>entregas</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">🗂️ Pendências cadastrais</h2>
+          <span class="muted" style="flex:0 0 auto">${cad.lista.length} associado(s) com algo a completar</span></div>
+        <div class="pchips" id="pChips">
+          <button class="pchip ${PEND_FILTRO ? '' : 'on'}" data-p="">Todos <b>${cad.lista.length}</b></button>
+          ${Object.entries(cad.itens).filter(([k]) => cad.resumo[k] > 0).map(([k, t]) => `<button class="pchip ${PEND_FILTRO === k ? 'on' : ''}" data-p="${k}">${esc(t)} <b>${cad.resumo[k]}</b></button>`).join('')}
+        </div>
+        <div class="tbl" id="pTabela"></div>
       </div>`;
+    const desenharPend = () => {
+      const lista = cad.lista.filter((x) => !PEND_FILTRO || x.faltando.includes(PEND_FILTRO));
+      $('#pTabela').innerHTML = lista.length ? `<table><thead><tr><th>Lote</th><th>Associado</th><th>Telefone</th><th>O que falta</th></tr></thead><tbody>
+        ${lista.map((x) => `<tr class="click" data-id="${x.id}"><td><b>${esc(x.lote)}</b></td><td>${esc(x.nome)}<div class="muted">${esc(x.numero)}</div></td><td class="nowrap">${esc(x.telefone || '—')}</td>
+          <td>${x.faltando.map((k) => `<span class="chip ${k === 'observacao' || k === 'contrato' ? 'c-PARCIAL' : 'c-A_PAGAR'}">${esc(cad.itens[k])}</span>`).join(' ')}${x.observacao ? `<div class="muted" style="margin-top:3px">📝 ${esc(x.observacao)}</div>` : ''}</td></tr>`).join('')}</tbody></table>`
+        : '<div class="empty">Nenhuma pendência nesse item. 🎉</div>';
+      $('#pTabela').querySelectorAll('tr.click').forEach((tr) => tr.onclick = () => abrirAssociado(Number(tr.dataset.id)));
+    };
+    $('#pChips').querySelectorAll('[data-p]').forEach((b) => b.onclick = () => {
+      PEND_FILTRO = b.dataset.p;
+      $('#pChips').querySelectorAll('.pchip').forEach((x) => x.classList.toggle('on', x === b));
+      desenharPend();
+    });
+    desenharPend();
   } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
 }
 
@@ -309,7 +460,8 @@ async function rPainel(){
 const COR_FIN = { QUITADO:'#1f7a4d', EM_DIA:'#8cc9a4', SINAL_PARCIAL:'#e9c35a', SINAL_PENDENTE:'#d9786f', VENCIDO:'#B3261E', SEM_ASSOCIADO:'#ffffff' };
 const COR_MED = { PENDENTE:'#efe9da', AGENDADA:'#e9c35a', MEDIDO:'#8cc9a4', PROCESSADO:'#1f7a4d' };
 async function carregarLotes(){ if (!S.lotes) S.lotes = (await api(`/projetos/${S.pid}/lotes`)).lotes; return S.lotes; }
-async function carregarDesenho(){ if (S.desenho === undefined) { try { S.desenho = (await api(`/projetos/${S.pid}/desenho`)).desenho; } catch { S.desenho = null; } } return S.desenho; }
+async function carregarDesenho(){ if (S.desenho === undefined) { try { const r = await api(`/projetos/${S.pid}/desenho`); S.desenho = r.desenho; S.marca = r.marca || S.marca; mostrarEmblema(); } catch { S.desenho = null; } } return S.desenho; }
+function mostrarEmblema(){ const i = $('#hdrEmblema'); if (i && S.marca && S.marca.emblema){ i.src = S.marca.emblema; i.classList.remove('hide'); } }
 function nomeTitulo(n){ let t = String(n || '').toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()); for (const a of [' Da ',' De ',' Do ',' Dos ',' Das ',' E ']) t = t.split(a).join(a.toLowerCase()); return t; }
 function quebrar(txt, largura, fs){
   const max = Math.max(4, Math.floor(largura / (fs * 0.56))); const out = []; let linha = '';
@@ -403,7 +555,7 @@ async function rMapa(){
     v.innerHTML = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="flex:1 1 auto;border:0;margin:0">Layout dos lotes e associados</h2>
         <div style="flex:0 0 auto">${bt('layout','Layout')} ${bt('financeiro','Financeiro')} ${bt('medicao','Medição')} <button class="btn btn-sm btn-ghost" id="mFull">⛶ Tela cheia</button></div></div>
       <div class="leg">${legenda}<span><i style="background:#DCEBF7"></i>Lote institucional – reserva p/ a comunidade</span></div>
-      <div id="mapaBox">${svgMapa(lotes, d, modo)}</div>
+      <div id="mapaBox">${svgMapa(lotes, d, modo)}${S.marca && S.marca.brasao ? `<img class="mapa-bras" src="${esc(S.marca.brasao)}" alt="Brasão do PA">` : ''}</div>
       <p class="nota">Croqui técnico preliminar, sem amarração geodésica – dimensões, áreas e posição definitivas conforme georreferenciamento (SIRGAS 2000) e NBR 13133. Cotas em metros.</p>
       <div id="mapaInfo"></div></div>`;
     v.querySelectorAll('[data-modo]').forEach((b) => b.onclick = () => { S.modoMapa = b.dataset.modo; rMapa(); });
@@ -460,7 +612,7 @@ async function rAssociados(){
 }
 const WA_TXT = { VALIDO:'✓ WhatsApp', INEXISTENTE:'sem WhatsApp', SEM_TELEFONE:'sem telefone', NAO_VERIFICADO:'não verificado' };
 
-function fecharDrawer(){ $('#drawer').classList.remove('on'); }
+function fecharDrawer(){ $('#drawer').classList.remove('on'); atualizarVoltar(); }
 $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') fecharDrawer(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharDrawer(); });
 
@@ -469,6 +621,7 @@ function avisosHtml(av){ return av && av.length ? `<ul class="avisos">${av.map((
 async function abrirAssociado(aid, avisos){
   const pane = $('#drawerPane');
   $('#drawer').classList.add('on');
+  atualizarVoltar();
   pane.innerHTML = '<div class="phead"><b>Carregando…</b><button class="x" id="dx">✕</button></div>';
   $('#dx').onclick = fecharDrawer;
   try {

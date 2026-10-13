@@ -21,6 +21,7 @@ import { planejarSeed, type SeedJson } from '../services/pa/seedPlan';
 import { executarSeed, leitorZip, contagemProjeto } from '../services/pa/seedRun';
 import { gerarPixCopiaECola } from '../services/pa/pixBrCode';
 import { desenhoDoProjeto } from '../services/pa/layoutDesenho';
+import { marcaUrls } from '../services/pa/marcaProjeto';
 import * as boletos from '../services/pa/paBoletos';
 import * as waPa from '../services/pa/paWhatsapp';
 import * as boletoPdf from '../services/pa/paBoletoPdf';
@@ -116,7 +117,7 @@ router.get('/projetos/:id/pix', h(async (req) => {
 // v3.142.1: elementos do desenho (vias, praça, equipamentos) p/ o mapa igual ao PDF.
 router.get('/projetos/:id/desenho', h(async (req) => {
   const p = await repo.buscarProjeto(id(req.params.id));
-  return { desenho: desenhoDoProjeto(p.codigo, p.layout_json) };
+  return { desenho: desenhoDoProjeto(p.codigo, p.layout_json), marca: marcaUrls(p.codigo) };
 }));
 
 // ─── Lotes ────────────────────────────────────────────────────────────────
