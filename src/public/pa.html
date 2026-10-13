@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gestão de PA — Romatec</title>
+<!-- v3.142.0 — Módulo Gestão de PA / Loteamentos. Identidade do manual do PA:
+     #0C3320 (verde), #C9A84C (ouro), #B3261E (alerta), #FFF4DC (creme). -->
+<style>
+  :root{
+    --green:#0C3320;--green2:#14472B;--gold:#C9A84C;--gold-soft:#E3D19A;--red:#B3261E;--cream:#FFF4DC;
+    --paper:#f4f1e8;--ink:#1C1C18;--muted:#6A6656;--line:#DCD5C2;--ok:#1f7a4d;--warn:#a07a10;--blue:#2b5f8a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Liberation Sans',Arial,Helvetica,sans-serif;background:var(--paper);color:var(--ink);-webkit-text-size-adjust:100%}
+  header{background:linear-gradient(135deg,var(--green),var(--green2));color:#fff;padding:14px 18px 0;position:sticky;top:0;z-index:20}
+  header .top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  header .kick{color:var(--gold-soft);letter-spacing:2px;text-transform:uppercase;font-size:10px;margin:0}
+  header h1{margin:2px 0 0;font-size:18px}
+  header select{background:transparent;color:#fff;border:1px solid var(--gold);border-radius:8px;padding:6px 8px;font-size:13px;max-width:280px}
+  header select option{color:var(--ink)}
+  .perfil{font-size:11px;border:1px solid var(--gold);color:var(--gold-soft);border-radius:12px;padding:2px 8px;white-space:nowrap}
+  nav.tabs{display:flex;gap:2px;overflow-x:auto;margin-top:10px;scrollbar-width:none}
+  nav.tabs button{background:transparent;border:0;color:#d9e6dd;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap}
+  nav.tabs button.on{color:#fff;border-bottom-color:var(--gold)}
+  .wrap{max-width:1180px;margin:0 auto;padding:16px}
+  .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,.05)}
+  h2{color:var(--green);font-size:16px;margin:0 0 10px;border-bottom:2px solid var(--gold);padding-bottom:6px}
+  h3{color:var(--green);font-size:14px;margin:14px 0 8px}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px;font-weight:700}
+  input,textarea,select.f{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;background:#fff;color:var(--ink)}
+  textarea{min-height:60px;resize:vertical}
+  .btn{border:0;border-radius:8px;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit}
+  .btn-primary{background:var(--green);color:#fff}
+  .btn-gold{background:var(--gold);color:var(--green)}
+  .btn-ghost{background:#fff;color:var(--green);border:1px solid var(--gold)}
+  .btn-danger{background:#fff;color:var(--red);border:1px solid var(--red)}
+  .btn-sm{padding:6px 10px;font-size:12px}
+  .btn:disabled{opacity:.5;cursor:default}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
+  .row>*{flex:1 1 160px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  @media(max-width:700px){.grid2,.grid3{grid-template-columns:1fr}}
+  .muted{color:var(--muted);font-size:12px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+  .kpi{background:#fff;border-radius:12px;padding:14px;border-left:5px solid var(--gold);box-shadow:0 2px 6px rgba(0,0,0,.05)}
+  .kpi .v{font-size:22px;font-weight:800;color:var(--green);margin-top:4px}
+  .kpi .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+  .kpi.red{border-left-color:var(--red)} .kpi.red .v{color:var(--red)}
+  .kpi.ok{border-left-color:var(--ok)}
+  .stack{display:flex;height:22px;border-radius:6px;overflow:hidden;background:#eee;margin:8px 0}
+  .stack i{display:block;height:100%}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase;padding:7px 6px;border-bottom:2px solid var(--line);white-space:nowrap}
+  td{padding:7px 6px;border-bottom:1px solid #eee8d8;vertical-align:top}
+  tr.click{cursor:pointer} tr.click:hover td{background:var(--cream)}
+  .tbl{overflow-x:auto}
+  .chip{display:inline-block;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:700;border:1px solid var(--line);background:#faf7ee;color:var(--green2);white-space:nowrap}
+  .c-PAGO,.c-QUITADO,.c-EM_DIA,.c-ASSINADO,.c-MEDIDO,.c-PROCESSADO,.c-ENTREGUE{background:#e6f4ec;color:var(--ok);border-color:#b9e0c9}
+  .c-PARCIAL,.c-SINAL_PARCIAL,.c-AGENDADA,.c-ENVIADO,.c-PREPARADA{background:#fdf4dd;color:var(--warn);border-color:#f0dfa8}
+  .c-A_PAGAR,.c-SINAL_PENDENTE,.c-VENCIDO,.c-RETIDA_PAGAMENTO{background:#fbe9e7;color:var(--red);border-color:#f1c2bd}
+  .c-A_VENCER,.c-GERADO,.c-PENDENTE{background:#f1efe8;color:var(--muted)}
+  .c-INSTITUCIONAL{background:#e8eef5;color:var(--blue);border-color:#c5d5e6}
+  .right{text-align:right} .nowrap{white-space:nowrap}
+  .empty{text-align:center;color:var(--muted);padding:26px 10px}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--green);color:#fff;padding:11px 16px;border-radius:10px;font-size:14px;z-index:99;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:92vw}
+  .toast.err{background:var(--red)}
+  .avisos{background:var(--cream);border:1px solid var(--gold-soft);border-radius:8px;padding:8px 10px;font-size:12px;margin:8px 0}
+  .avisos li{margin:2px 0}
+  /* drawer do associado */
+  .drawer{position:fixed;inset:0;background:rgba(12,51,32,.45);z-index:50;display:none}
+  .drawer.on{display:block}
+  .drawer .pane{position:absolute;right:0;top:0;bottom:0;width:min(760px,100vw);background:var(--paper);overflow-y:auto;box-shadow:-8px 0 30px rgba(0,0,0,.25)}
+  .drawer .phead{background:var(--green);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .drawer .phead .x{background:transparent;border:1px solid var(--gold);color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer}
+  .kv{display:grid;grid-template-columns:150px 1fr;gap:4px 10px;font-size:13px}
+  .kv dt{color:var(--muted);font-weight:700} .kv dd{margin:0;word-break:break-word}
+  @media(max-width:600px){.kv{grid-template-columns:1fr}}
+  .docs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+  .doc{border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff;font-size:12px}
+  .doc.aus{opacity:.6;border-style:dashed}
+  .doc b{display:block;color:var(--green);font-size:11px;margin-bottom:2px}
+  /* mapa */
+  #mapaSvg{width:100%;height:auto;background:#fbfaf5;border:1px solid var(--line);border-radius:10px;touch-action:manipulation}
+  #mapaSvg .lote{stroke:#0C3320;stroke-width:.4;cursor:pointer}
+  #mapaSvg .lote:hover{stroke:#C9A84C;stroke-width:1.2}
+  #mapaSvg text{font-size:5px;font-weight:700;fill:#0C3320;pointer-events:none;text-anchor:middle;dominant-baseline:middle}
+  .leg{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin:8px 0}
+  .leg span{display:inline-flex;align-items:center;gap:5px}
+  .leg i{width:14px;height:14px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.2)}
+  .nota{font-size:11px;color:var(--muted);font-style:italic;margin-top:6px}
+  .pre{font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-all;background:#f6f3ea;border-radius:6px;padding:6px}
+  .hide{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div>
+      <p class="kick">Romatec · ZAYRA</p>
+      <h1>🌾 Gestão de PA / Loteamentos</h1>
+    </div>
+    <div class="row" style="flex:0 0 auto;align-items:center">
+      <select id="selProjeto" aria-label="Projeto"></select>
+      <span class="perfil" id="perfilChip">…</span>
+      <a href="/obras.html" style="color:var(--gold-soft);font-size:12px">← Gestão</a>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-t="painel" class="on">📊 Painel</button>
+    <button data-t="mapa">🗺️ Mapa</button>
+    <button data-t="associados">👥 Associados</button>
+    <button data-t="financeiro">💰 Financeiro</button>
+    <button data-t="campo">📡 Campo</button>
+    <button data-t="importar" data-admin="1">📥 Importar / Exportar</button>
+  </nav>
+</header>
+
+<div class="wrap">
+  <section id="v-painel"></section>
+  <section id="v-mapa" class="hide"></section>
+  <section id="v-associados" class="hide"></section>
+  <section id="v-financeiro" class="hide"></section>
+  <section id="v-campo" class="hide"></section>
+  <section id="v-importar" class="hide"></section>
+</div>
+
+<div class="drawer" id="drawer"><div class="pane" id="drawerPane"></div></div>
+
+<script>
+(function(){
+'use strict';
+// ─── infra ──────────────────────────────────────────────────────────────
+const $ = (s, el) => (el || document).querySelector(s);
+const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+const dbr = (iso) => iso ? `${iso.slice(8,10)}/${iso.slice(5,7)}/${iso.slice(0,4)}${iso.length > 10 ? ' ' + iso.slice(11,16) : ''}` : '—';
+const chip = (s, txt) => s ? `<span class="chip c-${esc(s)}">${esc(txt || String(s).replace(/_/g,' '))}</span>` : '';
+function toast(msg, err){ const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), err ? 6000 : 3200); }
+
+async function api(path, opts){
+  opts = opts || {}; opts.credentials = 'include';
+  if (opts.json !== undefined){ opts.method = opts.method || 'POST'; opts.headers = Object.assign({ 'Content-Type':'application/json' }, opts.headers || {}); opts.body = JSON.stringify(opts.json); delete opts.json; }
+  const r = await fetch('/api/pa' + path, opts);
+  if (r.status === 401){ location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); throw new Error('não autenticado'); }
+  const ct = r.headers.get('content-type') || '';
+  if (!ct.includes('application/json')){ if (!r.ok) throw new Error('HTTP ' + r.status); return r; }
+  const j = await r.json();
+  if (!r.ok){ const e = new Error(j.erro || ('HTTP ' + r.status)); e.codigo = j.codigo; e.detalhe = j.detalhe; throw e; }
+  return j;
+}
+async function baixar(path, nome){
+  const r = await api(path);
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = nome || ''; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+async function abrirDoc(id){
+  try {
+    const r = await api('/documentos/' + id);
+    const url = URL.createObjectURL(await r.blob());
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch (e){ toast(e.message, true); }
+}
+
+const S = { projetos: [], pid: null, eu: null, painel: null, lotes: null, assoc: null, aba: 'painel', modoMapa: 'financeiro' };
+const qs = new URLSearchParams(location.search);
+
+// ─── boot ───────────────────────────────────────────────────────────────
+async function boot(){
+  try {
+    S.eu = await api('/eu');
+    $('#perfilChip').textContent = S.eu.perfil.replace(/_/g, ' ');
+    if (S.eu.perfil !== 'ADMIN') document.querySelectorAll('[data-admin]').forEach((b) => b.classList.add('hide'));
+    const { projetos } = await api('/projetos');
+    S.projetos = projetos;
+    const sel = $('#selProjeto');
+    sel.innerHTML = projetos.length ? projetos.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join('') : '<option value="">(nenhum projeto)</option>';
+    const salvo = Number(qs.get('projeto')) || Number(safeGet('pa_projeto'));
+    S.pid = projetos.some((p) => p.id === salvo) ? salvo : (projetos[0] ? projetos[0].id : null);
+    if (S.pid) sel.value = String(S.pid);
+    sel.onchange = () => { S.pid = Number(sel.value); safeSet('pa_projeto', S.pid); S.painel = S.lotes = S.assoc = null; mostrar(S.aba); };
+    document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => mostrar(b.dataset.t));
+    mostrar(qs.get('aba') || (S.pid ? 'painel' : 'importar'));
+    if (qs.get('associado')) abrirAssociado(Number(qs.get('associado')));
+  } catch (e){ $('#v-painel').innerHTML = `<div class="card empty">Erro ao carregar: ${esc(e.message)}</div>`; }
+}
+function safeGet(k){ try { return localStorage.getItem(k); } catch { return null; } }
+function safeSet(k, v){ try { localStorage.setItem(k, v); } catch { /* sem storage */ } }
+
+function mostrar(aba){
+  S.aba = aba;
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === aba));
+  document.querySelectorAll('.wrap > section').forEach((s) => s.classList.toggle('hide', s.id !== 'v-' + aba));
+  if (!S.pid && aba !== 'importar'){ $('#v-' + aba).innerHTML = '<div class="card empty">Nenhum projeto cadastrado ainda. Use <b>Importar</b> para carregar o seed do PA.</div>'; return; }
+  ({ painel: rPainel, mapa: rMapa, associados: rAssociados, financeiro: rFinanceiro, campo: rCampo, importar: rImportar })[aba]();
+}
+const podeEscrever = () => S.eu && S.eu.pode_escrever;
+
+// ─── Painel ─────────────────────────────────────────────────────────────
+async function rPainel(){
+  const v = $('#v-painel');
+  v.innerHTML = '<div class="card empty">Carregando painel…</div>';
+  try {
+    const p = S.painel = await api(`/projetos/${S.pid}/painel`);
+    const f = p.financeiro;
+    const pct = f.contratado ? Math.round(f.recebido / f.contratado * 1000) / 10 : 0;
+    const maxDia = Math.max(1, ...f.recebido_por_dia.map((d) => d.total));
+    const med = p.lotes.por_status_medicao;
+    v.innerHTML = `
+      <div class="card"><h2>${esc(p.projeto.nome)}</h2>
+        <div class="muted">${esc(p.projeto.municipio)}/${esc(p.projeto.uf)} · ${esc(p.projeto.associacao_nome || '')}
+          ${p.projeto.associacao_cnpj_status === 'EM_HOMOLOGACAO' ? chip('PENDENTE','CNPJ em homologação') : ''} · posição ${dbr(p.posicao_em)}</div>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><div class="l">Contratado</div><div class="v">${brl(f.contratado)}</div></div>
+        <div class="kpi ok"><div class="l">Recebido</div><div class="v">${brl(f.recebido)}</div><div class="muted">${pct}%</div></div>
+        <div class="kpi"><div class="l">A receber</div><div class="v">${brl(f.a_receber)}</div></div>
+        <div class="kpi red"><div class="l">Sinais pendentes</div><div class="v">${brl(f.sinais_pendentes)}</div><div class="muted">${f.sinais.a_pagar} a pagar · ${f.sinais.parciais} parcial</div></div>
+        <div class="kpi ${f.vencido > 0 ? 'red' : ''}"><div class="l">Vencido</div><div class="v">${brl(f.vencido)}</div></div>
+        <div class="kpi"><div class="l">Associados</div><div class="v">${p.associados.total}</div><div class="muted">${p.associados.contratos_assinados} contratos assinados</div></div>
+      </div>
+      <div class="card" style="margin-top:14px"><h2>Recebido × a receber</h2>
+        <div class="stack" role="img" aria-label="Recebido ${pct}%"><i style="width:${pct}%;background:var(--ok)"></i><i style="width:${100 - pct}%;background:var(--gold-soft)"></i></div>
+        <div class="leg"><span><i style="background:var(--ok)"></i>Recebido ${brl(f.recebido)}</span><span><i style="background:var(--gold-soft)"></i>A receber ${brl(f.a_receber)}</span></div>
+        <div class="grid3" style="margin-top:8px">
+          <div><b>Entradas (sinal/à vista)</b><div class="muted">${chip('PAGO', f.sinais.pagos + ' pagas')} ${chip('A_PAGAR', f.sinais.a_pagar + ' a pagar')} ${chip('PARCIAL', f.sinais.parciais + ' parcial')}</div><div class="muted" style="margin-top:4px">${f.sinais.quitados_avista} quitados à vista</div></div>
+          <div><b>Por forma</b><div class="muted">${f.recebido_por_forma.map((x) => `${esc(x.forma.replace(/_/g,' '))}: ${brl(x.total)} (${x.n})`).join('<br>') || '—'}</div></div>
+          <div><b>Lotes</b><div class="muted">${p.lotes.total} lotes · ${p.lotes.por_tipo.ASSOCIADO || 0} de associados · ${p.lotes.por_tipo.INSTITUCIONAL || 0} institucionais · ${p.lotes.por_tipo.VAGO || 0} vagos</div></div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h2>Recebimentos por dia</h2>
+          ${f.recebido_por_dia.length ? `<svg viewBox="0 0 ${Math.max(220, f.recebido_por_dia.length * 46)} 130" style="width:100%;height:150px" role="img" aria-label="Recebimentos por dia">
+            ${f.recebido_por_dia.map((d, i) => { const h = Math.round(d.total / maxDia * 90); return `<g><rect x="${i*46+8}" y="${100-h}" width="30" height="${h}" rx="3" fill="#0C3320"><title>${dbr(d.dia)}: ${brl(d.total)} (${d.n})</title></rect>
+              <text x="${i*46+23}" y="${94-h}" font-size="9" text-anchor="middle" fill="#0C3320">${Math.round(d.total)}</text>
+              <text x="${i*46+23}" y="115" font-size="9" text-anchor="middle" fill="#6A6656">${dbr(d.dia).slice(0,5)}</text></g>`; }).join('')}
+          </svg>` : '<div class="empty">Sem pagamentos ainda.</div>'}
+        </div>
+        <div class="card"><h2>Medição de campo</h2>
+          ${['PENDENTE','AGENDADA','MEDIDO','PROCESSADO'].map((s) => { const n = med[s] || 0; const w = p.lotes.total ? n / p.lotes.total * 100 : 0;
+            return `<div style="margin:6px 0"><div class="row" style="justify-content:space-between"><span>${chip(s)}</span><b style="flex:0 0 auto">${n}</b></div><div class="stack" style="height:8px;margin:4px 0"><i style="width:${w}%;background:var(--green)"></i></div></div>`; }).join('')}
+          <div class="muted">Entregas: ${Object.entries(p.entregas).map(([k, n]) => `${chip(k)} ${n}`).join(' ') || 'nenhuma ainda'}</div>
+        </div>
+      </div>`;
+  } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
+}
+
+// ─── Mapa (croqui; SIRGAS quando houver) ────────────────────────────────
+const COR_FIN = { QUITADO:'#1f7a4d', EM_DIA:'#8cc9a4', SINAL_PARCIAL:'#e9c35a', SINAL_PENDENTE:'#d9786f', VENCIDO:'#B3261E', SEM_ASSOCIADO:'#ffffff' };
+const COR_MED = { PENDENTE:'#efe9da', AGENDADA:'#e9c35a', MEDIDO:'#8cc9a4', PROCESSADO:'#1f7a4d' };
+async function carregarLotes(){ if (!S.lotes) S.lotes = (await api(`/projetos/${S.pid}/lotes`)).lotes; return S.lotes; }
+async function rMapa(){
+  const v = $('#v-mapa');
+  v.innerHTML = '<div class="card empty">Carregando mapa…</div>';
+  try {
+    const lotes = await carregarLotes();
+    const com = lotes.filter((l) => Array.isArray(l.croqui_xy) && l.croqui_xy.length >= 3);
+    if (!com.length){ v.innerHTML = '<div class="card empty">Nenhum lote com croqui.</div>'; return; }
+    const xs = com.flatMap((l) => l.croqui_xy.map((p) => p[0])), ys = com.flatMap((l) => l.croqui_xy.map((p) => p[1]));
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys), pad = 6;
+    const W = maxX - minX + pad * 2, H = maxY - minY + pad * 2;
+    const cor = (l) => l.tipo === 'INSTITUCIONAL' ? '#c5d5e6' : S.modoMapa === 'financeiro' ? COR_FIN[l.financeiro.situacao] : COR_MED[l.status_medicao];
+    const legenda = S.modoMapa === 'financeiro'
+      ? Object.entries({ QUITADO:'Quitado', EM_DIA:'Sinal pago', SINAL_PARCIAL:'Sinal parcial', SINAL_PENDENTE:'Sinal pendente', VENCIDO:'Vencido', SEM_ASSOCIADO:'Sem associado' }).map(([k, t]) => `<span><i style="background:${COR_FIN[k]}"></i>${t}</span>`).join('')
+      : Object.entries(COR_MED).map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join('');
+    v.innerHTML = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="flex:1 1 auto;border:0;margin:0">Mapa do projeto</h2>
+        <div style="flex:0 0 auto"><button class="btn btn-sm ${S.modoMapa==='financeiro'?'btn-primary':'btn-ghost'}" id="mFin">Financeiro</button>
+        <button class="btn btn-sm ${S.modoMapa==='medicao'?'btn-primary':'btn-ghost'}" id="mMed">Medição</button></div></div>
+      <div class="leg">${legenda}<span><i style="background:#c5d5e6"></i>Institucional</span></div>
+      <svg id="mapaSvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+        ${com.map((l) => { const pts = l.croqui_xy.map((p) => `${(p[0]-minX+pad).toFixed(2)},${(maxY-p[1]+pad).toFixed(2)}`).join(' ');
+          const cx = l.croqui_xy.reduce((s, p) => s + p[0], 0) / l.croqui_xy.length - minX + pad, cy = maxY - l.croqui_xy.reduce((s, p) => s + p[1], 0) / l.croqui_xy.length + pad;
+          return `<polygon class="lote" data-n="${esc(l.numero)}" points="${pts}" fill="${cor(l)}"><title>Lote ${esc(l.numero)}${l.associado ? ' — ' + esc(l.associado.nome) : (l.tipo === 'INSTITUCIONAL' ? ' — área institucional' : '')}</title></polygon><text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}">${esc(l.numero)}</text>`; }).join('')}
+      </svg>
+      <p class="nota">Croqui preliminar – dimensões e posição definitivas conforme georreferenciamento (SIRGAS 2000) e NBR 13133.</p>
+      <div id="mapaInfo"></div></div>`;
+    $('#mFin').onclick = () => { S.modoMapa = 'financeiro'; rMapa(); };
+    $('#mMed').onclick = () => { S.modoMapa = 'medicao'; rMapa(); };
+    v.querySelectorAll('polygon.lote').forEach((pg) => pg.onclick = () => {
+      const l = lotes.find((x) => x.numero === pg.dataset.n);
+      if (l && l.associado) abrirAssociado(l.associado.id);
+      else $('#mapaInfo').innerHTML = `<div class="avisos">Lote <b>${esc(l.numero)}</b> · ${chip(l.tipo)} · ${l.area_projeto_m2 ? l.area_projeto_m2.toLocaleString('pt-BR') + ' m²' : ''} · medição ${chip(l.status_medicao)}</div>`;
+    });
+  } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
+}
+
+// ─── Associados ─────────────────────────────────────────────────────────
+async function rAssociados(){
+  const v = $('#v-associados');
+  v.innerHTML = `<div class="card"><div class="row"><div style="flex:3 1 260px"><label for="busca">Buscar</label><input id="busca" placeholder="Nome, nº PASM, lote, chácara, CPF ou telefone"></div>
+      <div style="flex:1 1 140px"><label for="fSit">Situação</label><select class="f" id="fSit"><option value="">Todas</option><option value="A_PAGAR">Sinal a pagar</option><option value="PARCIAL">Sinal parcial</option><option value="VENCIDO">Com vencido</option><option value="SEMDOC">Sem documentos</option></select></div>
+      ${podeEscrever() ? '<div style="flex:0 0 auto"><button class="btn btn-gold" id="novoAssoc">➕ Novo associado</button></div>' : ''}</div></div>
+    <div class="card"><div id="assocLista" class="tbl"><div class="empty">Carregando…</div></div></div>`;
+  let timer = null;
+  const carregar = async () => {
+    try {
+      const q = $('#busca').value.trim();
+      const { associados } = await api(`/projetos/${S.pid}/associados${q ? '?q=' + encodeURIComponent(q) : ''}`);
+      const fs = $('#fSit').value;
+      const lista = associados.filter((a) => !fs || (fs === 'VENCIDO' ? a.financeiro.vencidos > 0 : fs === 'SEMDOC' ? a.documentos.total === 0 : a.financeiro.sinal_status === fs));
+      $('#assocLista').innerHTML = lista.length ? `<table><thead><tr><th>Lote</th><th>Nº</th><th>Associado</th><th>Terra</th><th>Entrada</th><th class="right">Recebido</th><th class="right">Saldo</th><th>Contrato</th><th>Docs</th></tr></thead><tbody>
+        ${lista.map((a) => `<tr class="click" data-id="${a.id}"><td><b>${esc(a.lote)}</b></td><td class="nowrap">${esc(a.numero)}</td><td>${esc(a.nome)}<div class="muted">${esc(a.cpf)}</div></td><td>${esc(a.denominacao_terra || '')}</td>
+          <td>${chip(a.financeiro.sinal_status)}</td><td class="right nowrap">${brl(a.financeiro.recebido)}</td><td class="right nowrap">${a.financeiro.saldo ? brl(a.financeiro.saldo) : chip('QUITADO')}</td>
+          <td>${chip(a.contrato_status)}</td><td class="nowrap">${a.documentos.com_arquivo}/${a.documentos.total}</td></tr>`).join('')}</tbody></table>
+        <div class="muted" style="margin-top:6px">${lista.length} associado(s)</div>` : '<div class="empty">Nenhum associado encontrado.</div>';
+      $('#assocLista').querySelectorAll('tr.click').forEach((tr) => tr.onclick = () => abrirAssociado(Number(tr.dataset.id)));
+    } catch (e){ $('#assocLista').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  };
+  $('#busca').oninput = () => { clearTimeout(timer); timer = setTimeout(carregar, 300); };
+  $('#fSit').onchange = carregar;
+  if ($('#novoAssoc')) $('#novoAssoc').onclick = formNovoAssociado;
+  carregar();
+}
+
+function fecharDrawer(){ $('#drawer').classList.remove('on'); }
+$('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') fecharDrawer(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharDrawer(); });
+
+function avisosHtml(av){ return av && av.length ? `<ul class="avisos">${av.map((a) => `<li>⚠️ ${esc(a)}</li>`).join('')}</ul>` : ''; }
+
+async function abrirAssociado(aid, avisos){
+  const pane = $('#drawerPane');
+  $('#drawer').classList.add('on');
+  pane.innerHTML = '<div class="phead"><b>Carregando…</b><button class="x" id="dx">✕</button></div>';
+  $('#dx').onclick = fecharDrawer;
+  try {
+    const d = await api(`/projetos/${S.pid}/associados/${aid}`);
+    const a = d.associado;
+    const tipoDoc = { FOTO_3X4:'Foto 3×4', DOC_IDENTIFICACAO:'Identificação', CERTIDAO:'Certidão', DOC_CONJUGE:'Doc. cônjuge', COMPROVANTE_SINAL:'Comprovante do sinal', PROCESSO_FICHA_CONTRATO:'Ficha + contrato', PROCESSO_ASSINADO:'Processo assinado', CARTEIRINHA:'Carteirinha', MAPA_LOTE:'Mapa do lote', MEMORIAL:'Memorial', TRT:'TRT', RELATORIO:'Relatório', ORIGINAL:'Original', OUTRO:'Outro' };
+    pane.innerHTML = `<div class="phead"><div><div style="font-size:11px;color:var(--gold-soft)">${esc(a.numero)} · Lote ${esc(a.lote)}</div><b>${esc(a.nome)}</b></div><button class="x" id="dx">✕</button></div>
+      <div style="padding:14px">
+        ${avisosHtml(avisos)}
+        <div class="card"><h2>Dados</h2>
+          <dl class="kv">
+            <dt>CPF</dt><dd>${esc(a.cpf)}</dd><dt>RG</dt><dd>${esc(a.rg || '—')}</dd>
+            <dt>Nascimento</dt><dd>${dbr(a.nascimento)}</dd><dt>Estado civil</dt><dd>${esc(a.estado_civil || '—')}</dd>
+            ${a.conjuge_nome ? `<dt>Cônjuge</dt><dd>${esc(a.conjuge_nome)} ${a.conjuge_cpf ? '· ' + esc(a.conjuge_cpf) : ''}</dd>` : ''}
+            <dt>Telefone</dt><dd>${esc(a.telefone || '—')} ${a.telefone_e164 ? `<a href="https://wa.me/${esc(a.telefone_e164.replace('+',''))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}</dd>
+            <dt>E-mail</dt><dd>${esc(a.email || '—')}</dd><dt>Terra</dt><dd>${esc(a.denominacao_terra || '—')}</dd>
+            <dt>Endereço</dt><dd>${esc(a.endereco || '—')}</dd><dt>Vencimento</dt><dd>dia ${esc(a.dia_vencimento || '—')}</dd>
+            <dt>Contrato</dt><dd>${chip(a.contrato_status)} ${a.contrato_assinado_em ? dbr(a.contrato_assinado_em) : ''}</dd>
+            <dt>Pendências</dt><dd>${esc(a.pendencias || '—')}</dd>
+          </dl>
+          ${podeEscrever() ? '<div class="row" style="margin-top:10px"><button class="btn btn-ghost btn-sm" id="edAssoc">✏️ Editar dados</button><button class="btn btn-ghost btn-sm" id="edPlano">🔁 Sinal diferente do padrão</button></div>' : ''}
+          <div id="edBox"></div>
+        </div>
+        <div class="card"><h2>Financeiro</h2>
+          <div class="kpis" style="grid-template-columns:repeat(3,1fr)"><div class="kpi"><div class="l">Contratado</div><div class="v" style="font-size:17px">${brl(d.resumo.contratado)}</div></div>
+            <div class="kpi ok"><div class="l">Recebido</div><div class="v" style="font-size:17px">${brl(d.resumo.recebido)}</div></div>
+            <div class="kpi ${d.resumo.saldo ? 'red' : 'ok'}"><div class="l">Saldo</div><div class="v" style="font-size:17px">${brl(d.resumo.saldo)}</div></div></div>
+          <div class="tbl" style="margin-top:10px"><table><thead><tr><th>Lançamento</th><th>Venc.</th><th class="right">Valor</th><th class="right">Recebido</th><th>Situação</th></tr></thead><tbody>
+            ${d.lancamentos.map((l) => `<tr><td>${esc(l.tipo === 'BOLETO' ? 'Boleto ' + l.parcela : l.tipo === 'AVISTA' ? 'À vista' : l.tipo === 'SINAL' ? 'Sinal' : l.tipo)}</td><td>${dbr(l.vencimento)}</td><td class="right">${brl(l.valor)}</td><td class="right">${brl(l.valor_recebido)}</td><td>${chip(l.status_efetivo)}</td></tr>`).join('')}
+          </tbody></table></div>
+          <h3>Pagamentos</h3>
+          ${d.pagamentos.length ? d.pagamentos.map((p) => `<div class="doc" style="margin-bottom:6px"><b>${dbr(p.pago_em)} · ${esc(p.forma.replace(/_/g,' '))} · ${brl(p.valor)}${p.pagamento_compartilhado ? ' · <span class="chip c-PARCIAL">Pagamento único (rateado)</span>' : ''}</b>
+            ${p.pagador_nome ? 'Pagador: ' + esc(p.pagador_nome) : ''}${p.vinculo_pagador ? ' (' + esc(p.vinculo_pagador) + ')' : ''}${p.pagador_cpf_parcial ? ' · CPF ' + esc(p.pagador_cpf_parcial) : ''}
+            ${p.id_transacao ? `<div class="muted">ID ${esc(p.id_transacao)}</div>` : ''}${p.url_recibo ? `<div><a href="${esc(p.url_recibo)}" target="_blank" rel="noopener">Recibo InfinitePay ↗</a></div>` : ''}
+            ${p.obs ? `<div class="muted">${esc(p.obs)}</div>` : ''}</div>`).join('') : '<div class="muted">Nenhum pagamento lançado.</div>'}
+          ${podeEscrever() && d.resumo.saldo > 0 ? `<button class="btn btn-gold btn-sm" style="margin-top:8px" id="pagarAqui">💰 Lançar pagamento</button>` : ''}
+        </div>
+        ${S.eu.ve_documentos ? `<div class="card"><h2>Documentos</h2>
+          <div class="docs">${d.documentos.map((x) => `<div class="doc ${x.arquivo_presente ? '' : 'aus'}"><b>${esc(tipoDoc[x.tipo] || x.tipo)}${x.versao > 1 ? ' v' + x.versao : ''}</b>${esc(x.nome_original || '')}
+            <div style="margin-top:4px">${x.arquivo_presente ? `<button class="btn btn-ghost btn-sm" data-doc="${x.id}">Abrir</button>` : '<span class="muted">arquivo não carregado</span>'}</div></div>`).join('') || '<div class="muted">Nenhum documento.</div>'}</div>
+          ${podeEscrever() ? `<div class="row" style="margin-top:10px"><div><label for="upTipo">Tipo</label><select class="f" id="upTipo">${Object.entries(tipoDoc).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></div>
+            <div><label for="upArq">Arquivo (PDF/JPG/PNG)</label><input type="file" id="upArq" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.docx"></div>
+            <div style="flex:0 0 auto"><button class="btn btn-primary" id="upBtn">Enviar</button></div></div>
+            <div class="muted">PDF assinado no gov.br → tipo "Processo assinado" (marca o contrato como ASSINADO).</div>` : ''}
+        </div>` : ''}
+        ${d.entregas.length ? `<div class="card"><h2>Entregas</h2>${d.entregas.map((e) => `<div>${esc(e.protocolo)} ${chip(e.status)} ${e.entregue_em ? dbr(e.entregue_em) : ''}</div>`).join('')}</div>` : ''}
+        <div class="card"><h2>Eventos</h2>
+          ${d.eventos.length ? `<div class="tbl"><table><tbody>${d.eventos.map((e) => `<tr><td class="nowrap">${dbr(e.criado_em)}</td><td>${chip('A_VENCER', e.tipo.replace(/_/g,' '))}</td><td class="muted">${esc(e.usuario || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted">Sem eventos.</div>'}
+        </div>
+        ${S.eu.pode_excluir ? `<div style="text-align:right"><button class="btn btn-danger btn-sm" id="delAssoc">Excluir cadastro (sem pagamentos)</button></div>` : ''}
+      </div>`;
+    $('#dx').onclick = fecharDrawer;
+    pane.querySelectorAll('[data-doc]').forEach((b) => b.onclick = () => abrirDoc(b.dataset.doc));
+    if ($('#upBtn')) $('#upBtn').onclick = async () => {
+      const files = $('#upArq').files;
+      if (!files.length) return toast('Escolha o arquivo', true);
+      const fd = new FormData(); fd.append('tipo', $('#upTipo').value); for (const f of files) fd.append('arquivo', f);
+      $('#upBtn').disabled = true;
+      try { const r = await api(`/associados/${aid}/documentos`, { method:'POST', body: fd }); toast(`${r.documentos.length} documento(s) enviado(s)` + (r.falhas.length ? ` · ${r.falhas.length} recusado(s)` : '')); S.assoc = null; abrirAssociado(aid); }
+      catch (e){ toast(e.message, true); $('#upBtn').disabled = false; }
+    };
+    if ($('#edAssoc')) $('#edAssoc').onclick = () => formEditar(a);
+    if ($('#edPlano')) $('#edPlano').onclick = () => {
+      $('#edBox').innerHTML = `<div class="avisos">Refaz sinal + boletos: ≥ R$ 500 de entrada → 1 boleto com o saldo; abaixo disso → 2 parcelas iguais. Só é permitido enquanto nenhum boleto foi pago.</div>
+        <div class="row"><div><label for="novoSinal">Sinal combinado (R$)</label><input id="novoSinal" inputmode="decimal" placeholder="ex.: 400"></div><div style="flex:0 0 auto"><button class="btn btn-primary" id="salvaPlano">Recalcular</button></div></div>`;
+      $('#salvaPlano').onclick = async () => { try { await api(`/associados/${aid}/plano`, { json: { sinal: $('#novoSinal').value.replace(',', '.') } }); toast('Plano recalculado'); S.painel = S.lotes = null; abrirAssociado(aid); } catch (e){ toast(e.message, true); } };
+    };
+    if ($('#pagarAqui')) $('#pagarAqui').onclick = () => { fecharDrawer(); mostrar('financeiro'); setTimeout(() => preSelecionar(a), 50); };
+    if ($('#delAssoc')) $('#delAssoc').onclick = async () => {
+      if (!confirm(`Excluir o cadastro de ${a.nome}? Remove dados e documentos e libera o lote ${a.lote}. Só funciona sem pagamentos.`)) return;
+      try { await api(`/projetos/${S.pid}/associados/${aid}`, { method:'DELETE' }); toast('Cadastro excluído'); fecharDrawer(); S.painel = S.lotes = null; mostrar(S.aba); } catch (e){ toast(e.message, true); }
+    };
+  } catch (e){ pane.innerHTML = `<div class="phead"><b>Erro</b><button class="x" id="dx">✕</button></div><div class="card empty">${esc(e.message)}</div>`; $('#dx').onclick = fecharDrawer; }
+}
+
+const CAMPOS_ASSOC = [
+  ['nome','Nome completo'],['cpf','CPF'],['rg','RG / órgão'],['nascimento','Nascimento (dd/mm/aaaa)'],['estado_civil','Estado civil'],
+  ['conjuge_nome','Cônjuge'],['conjuge_cpf','CPF do cônjuge'],['telefone','Telefone (DDD)'],['email','E-mail'],
+  ['denominacao_terra','Denominação da terra (chácara)'],['endereco','Endereço'],['dia_vencimento','Dia do vencimento'],['pendencias','Pendências'],
+];
+function formEditar(a){
+  $('#edBox').innerHTML = `<div class="grid2" style="margin-top:10px">${CAMPOS_ASSOC.map(([k, t]) => `<div><label for="e_${k}">${t}</label><input id="e_${k}" value="${esc(k === 'nascimento' ? (a[k] ? dbr(a[k]) : '') : (a[k] ?? ''))}"></div>`).join('')}
+    <div><label for="e_contrato_status">Contrato</label><select class="f" id="e_contrato_status">${['GERADO','ENVIADO','ASSINADO'].map((s) => `<option ${a.contrato_status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div></div>
+    <div class="row" style="margin-top:10px"><button class="btn btn-primary" id="salvaEd" style="flex:0 0 auto">Salvar</button></div>`;
+  $('#salvaEd').onclick = async () => {
+    const body = {};
+    for (const [k] of CAMPOS_ASSOC){ const val = $('#e_' + k).value.trim(); const orig = k === 'nascimento' ? (a[k] ? dbr(a[k]) : '') : String(a[k] ?? ''); if (val !== orig) body[k] = val || null; }
+    if ($('#e_contrato_status').value !== a.contrato_status) body.contrato_status = $('#e_contrato_status').value;
+    if (!Object.keys(body).length) return toast('Nada mudou');
+    try { const r = await api(`/projetos/${S.pid}/associados/${a.id}`, { method:'PATCH', json: body }); toast('Dados salvos'); S.assoc = null; abrirAssociado(a.id, r.avisos); } catch (e){ toast(e.message, true); }
+  };
+}
+
+async function formNovoAssociado(){
+  const lotes = await carregarLotes();
+  const livres = lotes.filter((l) => !l.associado && l.tipo !== 'INSTITUCIONAL');
+  const pane = $('#drawerPane');
+  $('#drawer').classList.add('on');
+  const proj = S.projetos.find((p) => p.id === S.pid);
+  pane.innerHTML = `<div class="phead"><b>Novo associado</b><button class="x" id="dx">✕</button></div><div style="padding:14px"><div class="card">
+    <div class="grid2"><div><label for="n_lote">Lote</label><select class="f" id="n_lote">${livres.map((l) => `<option value="${esc(l.numero)}">Lote ${esc(l.numero)}${l.tipo === 'VAGO' ? ' (vago)' : ''}</option>`).join('')}</select></div>
+      <div><label for="n_sinal">Sinal combinado (R$)</label><input id="n_sinal" inputmode="decimal" value="${esc(proj ? proj.sinal_padrao : '')}"></div>
+      ${CAMPOS_ASSOC.filter(([k]) => k !== 'pendencias').map(([k, t]) => `<div><label for="n_${k}">${t}</label><input id="n_${k}"></div>`).join('')}</div>
+    <div class="muted" style="margin-top:8px">CPF é conferido pelo dígito verificador e não pode repetir no projeto. Telefone repetido só gera aviso.</div>
+    <div class="row" style="margin-top:10px"><button class="btn btn-primary" id="salvaNovo" style="flex:0 0 auto">Cadastrar</button></div></div></div>`;
+  $('#dx').onclick = fecharDrawer;
+  if (!livres.length){ $('#salvaNovo').disabled = true; toast('Não há lote livre', true); }
+  $('#salvaNovo').onclick = async () => {
+    const body = { lote: $('#n_lote').value, sinal: $('#n_sinal').value.replace(',', '.') };
+    for (const [k] of CAMPOS_ASSOC){ const el = $('#n_' + k); if (el && el.value.trim()) body[k] = el.value.trim(); }
+    try { const r = await api(`/projetos/${S.pid}/associados`, { json: body }); toast('Associado cadastrado'); S.painel = S.lotes = S.assoc = null; abrirAssociado(r.detalhe.associado.id, r.avisos); if (S.aba === 'associados') rAssociados(); }
+    catch (e){ toast(e.message, true); }
+  };
+}
+
+// ─── Financeiro ─────────────────────────────────────────────────────────
+let FIN = { recibo: null, selecionados: [] };
+async function carregarAssoc(){ if (!S.assoc) S.assoc = (await api(`/projetos/${S.pid}/associados`)).associados; return S.assoc; }
+async function rFinanceiro(){
+  const v = $('#v-financeiro');
+  FIN = { recibo: null, selecionados: [] };
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  v.innerHTML = `
+    ${podeEscrever() ? `<div class="card"><h2>Lançar pagamento</h2>
+      <label for="urlRecibo">Link do recibo InfinitePay (opcional)</label>
+      <div class="row"><input id="urlRecibo" placeholder="https://recibo.infinitepay.io/statements/…" style="flex:4 1 300px"><button class="btn btn-ghost" id="prevBtn" style="flex:0 0 auto">🔍 Ler recibo</button></div>
+      <div id="prevBox"></div>
+      <div class="grid3" style="margin-top:6px">
+        <div><label for="pForma">Forma</label><select class="f" id="pForma"><option>PIX</option><option value="ESPECIE">ESPÉCIE</option><option value="CARTAO_DEBITO">CARTÃO DÉBITO</option><option value="CARTAO_CREDITO">CARTÃO CRÉDITO</option><option>BOLETO</option><option>MISTO</option></select></div>
+        <div><label for="pValor">Valor (R$)</label><input id="pValor" inputmode="decimal"></div>
+        <div><label for="pData">Data/hora</label><input id="pData" type="datetime-local"></div>
+        <div><label for="pTx">ID da transação (E2E / AUT·NSU)</label><input id="pTx"></div>
+        <div><label for="pPagador">Pagador</label><input id="pPagador"></div>
+        <div><label for="pCpf">CPF parcial do comprovante</label><input id="pCpf" placeholder="***.XXX.XXX-**"></div>
+        <div><label for="pVinc">Vínculo do pagador (se terceiro)</label><input id="pVinc" placeholder="pai, mãe, cônjuge, associado do lote 64…"></div>
+        <div style="grid-column:span 2"><label for="pObs">Observação</label><input id="pObs"></div>
+      </div>
+      <h3>Associado(s) e rateio</h3>
+      <div class="row"><div style="flex:3 1 260px"><label for="pAssocBusca">Adicionar associado (Pix único para 2 lotes → adicione os dois)</label><input id="pAssocBusca" list="pAssocList" placeholder="Digite lote ou nome"><datalist id="pAssocList"></datalist></div>
+        <div style="flex:0 0 auto"><button class="btn btn-ghost" id="pAddAssoc">Adicionar</button></div></div>
+      <div id="rateioBox" class="tbl" style="margin-top:8px"></div>
+      <div class="row" style="margin-top:12px"><button class="btn btn-primary" id="pSalvar" style="flex:0 0 auto">✅ Lançar pagamento</button><span class="muted" id="pSoma" style="flex:1 1 auto"></span></div>
+    </div>` : ''}
+    <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;border:0;margin:0">Cobrança</h2>
+        <div style="flex:0 0 auto" class="row"><input type="date" id="cAte" value="${hoje}" style="width:160px"><button class="btn btn-ghost btn-sm" id="cAtual">Atualizar</button><button class="btn btn-ghost btn-sm" id="cXlsx">⬇️ XLSX</button></div></div>
+      <div id="cobBox" class="tbl"><div class="empty">Carregando…</div></div></div>
+    <div class="card"><h2>Pagamentos lançados</h2><div id="pagBox" class="tbl"><div class="empty">Carregando…</div></div></div>`;
+
+  if (podeEscrever()){
+    carregarAssoc().then((as) => { $('#pAssocList').innerHTML = as.map((a) => `<option value="Lote ${esc(a.lote)} — ${esc(a.nome)}">`).join(''); }).catch(() => undefined);
+    $('#prevBtn').onclick = lerRecibo;
+    $('#pAddAssoc').onclick = async () => {
+      const as = await carregarAssoc(); const t = $('#pAssocBusca').value.trim();
+      const m = t.match(/^Lote\s+(\S+)/i); const a = as.find((x) => m ? x.lote === m[1] : (x.lote === t.padStart(2, '0') || x.nome.toLowerCase().includes(t.toLowerCase())));
+      if (!a) return toast('Associado não encontrado', true);
+      await adicionarAoRateio(a.id); $('#pAssocBusca').value = '';
+    };
+    $('#pSalvar').onclick = salvarPagamento;
+    $('#pValor').oninput = somaRateio;
+  }
+  const cob = async () => {
+    try {
+      const c = await api(`/projetos/${S.pid}/cobranca?ate=${encodeURIComponent($('#cAte').value)}`);
+      $('#cobBox').innerHTML = c.lista.length ? `<div class="muted" style="margin-bottom:6px">${c.associados} associado(s) · total ${brl(c.total)} até ${dbr(c.ate)}</div><table><thead><tr><th>Lote</th><th>Associado</th><th>Pendências</th><th class="right">Total</th><th></th></tr></thead><tbody>
+        ${c.lista.map((g, i) => `<tr><td><b>${esc(g.lote)}</b></td><td>${esc(g.nome)}<div class="muted">${esc(g.telefone || 'sem telefone')}</div></td>
+          <td>${g.itens.map((x) => `${esc(x.rotulo)} ${brl(x.saldo)} · ${dbr(x.vencimento)} ${chip(x.status)}`).join('<br>')}</td><td class="right nowrap"><b>${brl(g.total)}</b></td>
+          <td class="nowrap">${g.whatsapp_url ? `<a class="btn btn-gold btn-sm" href="${esc(g.whatsapp_url)}" target="_blank" rel="noopener">WhatsApp</a>` : ''} <button class="btn btn-ghost btn-sm" data-pix="${i}">Pix</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nada em aberto até essa data. 🎉</div>';
+      $('#cobBox').querySelectorAll('[data-pix]').forEach((b) => b.onclick = async () => {
+        const g = c.lista[Number(b.dataset.pix)];
+        try { await navigator.clipboard.writeText(g.pix_copia_e_cola || ''); toast('Pix copia e cola copiado (' + brl(g.total) + ')'); } catch { prompt('Pix copia e cola:', g.pix_copia_e_cola || ''); }
+      });
+    } catch (e){ $('#cobBox').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  };
+  $('#cAtual').onclick = cob;
+  $('#cXlsx').onclick = () => baixar(`/projetos/${S.pid}/cobranca?formato=xlsx&ate=${encodeURIComponent($('#cAte').value)}`, `COBRANCA-${$('#cAte').value}.xlsx`).catch((e) => toast(e.message, true));
+  cob();
+  carregarPagamentos();
+}
+async function carregarPagamentos(){
+  try {
+    const { pagamentos } = await api(`/projetos/${S.pid}/pagamentos?limite=300`);
+    $('#pagBox').innerHTML = pagamentos.length ? `<table><thead><tr><th>Data</th><th>Lote(s)</th><th>Associado(s)</th><th>Forma</th><th class="right">Valor</th><th>ID</th></tr></thead><tbody>
+      ${pagamentos.map((p) => `<tr><td class="nowrap">${dbr(p.pago_em)}</td><td>${esc(p.lotes)}</td><td>${esc(p.associados)}${p.vinculo_pagador ? `<div class="muted">pagador: ${esc(p.pagador_nome || '')} (${esc(p.vinculo_pagador)})</div>` : ''}</td><td>${esc(p.forma.replace(/_/g,' '))}</td><td class="right nowrap">${brl(p.valor)}</td><td class="muted" style="max-width:180px;word-break:break-all">${esc(p.id_transacao || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum pagamento.</div>';
+  } catch (e){ $('#pagBox').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function lerRecibo(){
+  const url = $('#urlRecibo').value.trim();
+  if (!url) return toast('Cole o link do recibo', true);
+  $('#prevBtn').disabled = true; $('#prevBox').innerHTML = '<div class="muted">Lendo recibo…</div>';
+  try {
+    const r = await api(`/projetos/${S.pid}/pagamentos/preview`, { json: { url_recibo: url } });
+    FIN.recibo = r.recibo;
+    const rc = r.recibo;
+    $('#prevBox').innerHTML = `<div class="avisos"><b>${brl(rc.valor)}</b> · ${dbr(rc.pago_em)} · ${esc(rc.status || '')}<br>
+      Origem: ${esc(rc.origem.nome || '?')} · CPF ${esc(rc.origem.cpf || '?')} · ${esc(rc.origem.instituicao || '')}<br>
+      Destino: ${esc(rc.destino.nome || '?')} ${r.destino_ok ? chip('PAGO','Romatec ✓') : chip('VENCIDO','NÃO é a Romatec')}<br>
+      <span class="pre">ID ${esc(rc.id_transacao || '—')}</span>
+      ${r.ja_lancado ? `<div style="color:var(--red);font-weight:700;margin-top:4px">⚠️ Este ID já foi lançado (pagamento #${r.ja_lancado}).</div>` : ''}
+      ${r.candidatos.length ? `<div style="margin-top:4px">CPF parcial bate com: ${r.candidatos.map((c) => `<button class="btn btn-ghost btn-sm" data-cand="${c.id}">Lote ${esc(c.lote)} — ${esc(c.nome)}</button>`).join(' ')}</div>` : '<div style="margin-top:4px">CPF parcial não bate com nenhum associado → pagador terceiro: informe o vínculo.</div>'}</div>`;
+    $('#pForma').value = 'PIX'; $('#pValor').value = String(rc.valor).replace('.', ',');
+    if (rc.pago_em) $('#pData').value = rc.pago_em.replace(' ', 'T').slice(0, 16);
+    $('#pTx').value = rc.id_transacao || ''; $('#pPagador').value = rc.origem.nome || ''; $('#pCpf').value = rc.origem.cpf || '';
+    $('#prevBox').querySelectorAll('[data-cand]').forEach((b) => b.onclick = () => adicionarAoRateio(Number(b.dataset.cand)));
+    if (r.candidatos.length === 1) adicionarAoRateio(r.candidatos[0].id);
+  } catch (e){ $('#prevBox').innerHTML = `<div class="avisos" style="color:var(--red)">${esc(e.codigo === 'RECIBO_NAO_ENCONTRADO' ? '❌ ' + e.message : e.message)}</div>`; }
+  finally { $('#prevBtn').disabled = false; }
+}
+async function preSelecionar(a){ await adicionarAoRateio(a.id); $('#pPagador').value = a.nome; }
+async function adicionarAoRateio(aid){
+  if (FIN.selecionados.some((s) => s.associado.id === aid)) return;
+  try {
+    const d = await api(`/projetos/${S.pid}/associados/${aid}`);
+    FIN.selecionados.push({ associado: d.associado, abertos: d.lancamentos.filter((l) => l.saldo > 0) });
+    desenharRateio();
+  } catch (e){ toast(e.message, true); }
+}
+function desenharRateio(){
+  const box = $('#rateioBox');
+  if (!FIN.selecionados.length){ box.innerHTML = '<div class="muted">Nenhum associado selecionado.</div>'; return; }
+  let resto = Number(String($('#pValor').value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+  box.innerHTML = `<table><thead><tr><th>Lote</th><th>Associado</th><th>Lançamento</th><th class="right">Saldo</th><th class="right">Ratear (R$)</th><th></th></tr></thead><tbody>
+    ${FIN.selecionados.map((s, si) => s.abertos.map((l, li) => { const v = Math.min(resto, l.saldo); resto = Math.max(0, Math.round((resto - v) * 100) / 100);
+      return `<tr><td>${esc(s.associado.lote)}</td><td>${esc(s.associado.nome)}</td><td>${esc(l.tipo === 'BOLETO' ? 'Boleto ' + l.parcela : l.tipo === 'AVISTA' ? 'À vista' : 'Sinal')} ${chip(l.status_efetivo)}</td><td class="right">${brl(l.saldo)}</td>
+        <td class="right"><input data-lanc="${l.id}" data-saldo="${l.saldo}" inputmode="decimal" style="width:100px;text-align:right" value="${v ? String(v).replace('.', ',') : ''}"></td>
+        <td>${li === 0 ? `<button class="btn btn-ghost btn-sm" data-rm="${si}">✕</button>` : ''}</td></tr>`; }).join('') || `<tr><td>${esc(s.associado.lote)}</td><td colspan="5">${esc(s.associado.nome)} — sem saldo em aberto <button class="btn btn-ghost btn-sm" data-rm="${si}">✕</button></td></tr>`).join('')}
+  </tbody></table>`;
+  box.querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => { FIN.selecionados.splice(Number(b.dataset.rm), 1); desenharRateio(); });
+  box.querySelectorAll('[data-lanc]').forEach((i) => i.oninput = somaRateio);
+  somaRateio();
+}
+function lerRateio(){
+  return [...document.querySelectorAll('#rateioBox [data-lanc]')].map((i) => ({ lancamento_id: Number(i.dataset.lanc), valor: Number(i.value.replace(/\./g, '').replace(',', '.')) || 0 })).filter((r) => r.valor > 0);
+}
+function somaRateio(e){
+  if (e && e.target && e.target.id === 'pValor' && FIN.selecionados.length) { desenharRateio(); return; }
+  const soma = lerRateio().reduce((s, r) => s + r.valor, 0);
+  const valor = Number(String($('#pValor').value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+  $('#pSoma').textContent = FIN.selecionados.length ? `Rateado ${brl(soma)} de ${brl(valor)}${Math.abs(soma - valor) > 0.009 ? ' — diferença ' + brl(valor - soma) : ' ✓'}` : '';
+}
+async function salvarPagamento(){
+  const rateio = lerRateio();
+  if (!rateio.length) return toast('Selecione o associado e o valor de cada lançamento', true);
+  const body = {
+    forma: $('#pForma').value, valor: $('#pValor').value.replace(/\./g, '').replace(',', '.'),
+    pago_em: $('#pData').value ? $('#pData').value.replace('T', ' ') + ':00' : null,
+    id_transacao: $('#pTx').value.trim() || null, pagador_nome: $('#pPagador').value.trim() || null,
+    pagador_cpf_parcial: $('#pCpf').value.trim() || null, vinculo_pagador: $('#pVinc').value.trim() || null,
+    obs: $('#pObs').value.trim() || null, url_recibo: FIN.recibo ? $('#urlRecibo').value.trim() : null, rateio,
+  };
+  $('#pSalvar').disabled = true;
+  try {
+    const r = await api(`/projetos/${S.pid}/pagamentos`, { json: body });
+    toast(`Pagamento #${r.pagamento_id} lançado` + (r.pagador_terceiro ? ' (pagador terceiro)' : ''));
+    S.painel = S.lotes = S.assoc = null; rFinanceiro();
+  } catch (e){
+    toast(e.message, true);
+    if (e.codigo === 'VINCULO_OBRIGATORIO') $('#pVinc').focus();
+  } finally { const b = $('#pSalvar'); if (b) b.disabled = false; }
+}
+
+// ─── Campo ──────────────────────────────────────────────────────────────
+async function rCampo(){
+  const v = $('#v-campo');
+  v.innerHTML = '<div class="card empty">Carregando lotes…</div>';
+  try {
+    const lotes = await carregarLotes();
+    v.innerHTML = `<div class="card"><div class="row"><div style="flex:0 1 220px"><label for="fMed">Status de medição</label><select class="f" id="fMed"><option value="">Todos</option>${Object.keys(COR_MED).map((s) => `<option>${s}</option>`).join('')}</select></div>
+      <div class="muted" style="flex:1 1 300px">Mudar para AGENDADA/MEDIDO registra evento (aviso ao associado pela Zayra entra na fase 4). Vértices SIRGAS (E,N,h) por lote: importação de CSV na fase 5.</div></div></div>
+      <div class="card"><div class="tbl" id="campoBox"></div></div>`;
+    const desenhar = () => {
+      const f = $('#fMed').value;
+      const ls = lotes.filter((l) => !f || l.status_medicao === f);
+      $('#campoBox').innerHTML = `<table><thead><tr><th>Lote</th><th>Associado</th><th>Área projeto</th><th>Status</th><th>Data</th><th>Equipe</th><th>Base GNSS</th><th>Área medida (m²)</th><th></th></tr></thead><tbody>
+        ${ls.map((l) => `<tr data-n="${esc(l.numero)}"><td><b>${esc(l.numero)}</b> ${l.tipo === 'INSTITUCIONAL' ? chip('INSTITUCIONAL','inst.') : ''}</td><td>${esc(l.associado ? l.associado.nome : '—')}</td><td class="nowrap">${l.area_projeto_m2 ? l.area_projeto_m2.toLocaleString('pt-BR') : '—'}</td>
+          <td><select class="f" data-c="status_medicao" ${podeEscrever() ? '' : 'disabled'}>${Object.keys(COR_MED).map((s) => `<option ${l.status_medicao === s ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
+          <td><input type="date" data-c="data_medicao" value="${esc(l.data_medicao || '')}" ${podeEscrever() ? '' : 'disabled'}></td>
+          <td><input data-c="equipe" value="${esc(l.equipe || '')}" ${podeEscrever() ? '' : 'disabled'}></td>
+          <td><input data-c="base_gnss" value="${esc(l.base_gnss || '')}" style="width:110px" ${podeEscrever() ? '' : 'disabled'}></td>
+          <td><input data-c="area_medida_m2" inputmode="decimal" value="${l.area_medida_m2 == null ? '' : esc(l.area_medida_m2)}" style="width:100px" ${podeEscrever() ? '' : 'disabled'}></td>
+          <td>${podeEscrever() ? '<button class="btn btn-ghost btn-sm" data-salvar="1">Salvar</button>' : ''}</td></tr>`).join('')}</tbody></table>`;
+      $('#campoBox').querySelectorAll('[data-salvar]').forEach((b) => b.onclick = async () => {
+        const tr = b.closest('tr'); const n = tr.dataset.n; const l = lotes.find((x) => x.numero === n); const body = {};
+        tr.querySelectorAll('[data-c]').forEach((i) => { const c = i.dataset.c; const val = i.value.trim().replace(',', '.'); const orig = l[c] == null ? '' : String(l[c]); if (val !== orig) body[c] = val || null; });
+        if (!Object.keys(body).length) return toast('Nada mudou');
+        b.disabled = true;
+        try { const r = await api(`/projetos/${S.pid}/lotes/${encodeURIComponent(n)}`, { method:'PATCH', json: body }); Object.assign(l, r.lote); toast(`Lote ${n} atualizado`); S.painel = null; }
+        catch (e){ toast(e.message, true); } finally { b.disabled = false; }
+      });
+    };
+    $('#fMed').onchange = desenhar;
+    desenhar();
+  } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
+}
+
+// ─── Importar / exportar ────────────────────────────────────────────────
+function rImportar(){
+  const v = $('#v-importar');
+  if (!S.eu || S.eu.perfil !== 'ADMIN'){ v.innerHTML = '<div class="card empty">Somente ADMIN.</div>'; return; }
+  v.innerHTML = `<div class="card"><h2>Importar seed + acervo</h2>
+      <p class="muted">Idempotente: pode reenviar o mesmo seed quantas vezes quiser — só entra o que falta e o que foi editado na tela é mantido. O acervo (ZIP com as pastas LOTE-XX-Nome/) é opcional e pode vir depois.</p>
+      <div class="grid2"><div><label for="iSeed">Seed (JSON)</label><input type="file" id="iSeed" accept=".json,application/json"></div>
+        <div><label for="iAcervo">Acervo digital (ZIP, opcional)</label><input type="file" id="iAcervo" accept=".zip,application/zip"></div></div>
+      <div class="row" style="margin-top:10px"><button class="btn btn-primary" id="iBtn" style="flex:0 0 auto">📥 Importar</button><span class="muted" id="iProg"></span></div>
+      <div id="iRel"></div></div>
+    ${S.pid ? `<div class="card"><h2>Exportar acervo</h2><p class="muted">ZIP com a estrutura LOTE-XX-Nome/ de todos os documentos carregados. Fica registrado em eventos (LGPD).</p>
+      <button class="btn btn-ghost" id="eBtn">⬇️ Baixar ZIP do acervo</button></div>` : ''}`;
+  $('#iBtn').onclick = () => {
+    const seed = $('#iSeed').files[0];
+    if (!seed) return toast('Escolha o seed JSON', true);
+    const fd = new FormData(); fd.append('seed', seed); if ($('#iAcervo').files[0]) fd.append('acervo', $('#iAcervo').files[0]);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/pa/importar'); xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) $('#iProg').textContent = `Enviando ${Math.round(e.loaded / e.total * 100)}%…`; };
+    xhr.upload.onload = () => { $('#iProg').textContent = 'Processando no servidor (pode levar alguns minutos com o acervo)…'; };
+    xhr.onload = () => {
+      $('#iBtn').disabled = false;
+      if (xhr.status === 401){ location.href = '/login?next=' + encodeURIComponent(location.pathname); return; }
+      let j = null; try { j = JSON.parse(xhr.responseText); } catch { /* resposta não-JSON */ }
+      if (xhr.status >= 300 || !j){ $('#iProg').textContent = ''; return toast((j && j.erro) || ('Falha HTTP ' + xhr.status), true); }
+      const r = j.relatorio;
+      $('#iProg').textContent = 'Concluído ✓';
+      $('#iRel').innerHTML = `<div class="avisos"><b>Banco agora:</b> ${j.contagem.lotes} lotes · ${j.contagem.associados} associados · ${j.contagem.documentos} documentos (${j.contagem.documentos_com_arquivo} com arquivo)<br>
+        <b>Inseridos:</b> ${esc(JSON.stringify(r.inseridos))}<br><b>Atualizados:</b> ${esc(JSON.stringify(r.atualizados))}<br><b>Arquivos:</b> ${esc(JSON.stringify(r.arquivos))}</div>
+        ${r.erros.length ? `<h3 style="color:var(--red)">Erros (${r.erros.length})</h3><ul class="avisos">${r.erros.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        ${avisosHtml(r.avisos)}`;
+      api('/projetos').then(({ projetos }) => { S.projetos = projetos; const sel = $('#selProjeto'); sel.innerHTML = projetos.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join(''); S.pid = r.projeto_id; sel.value = String(S.pid); S.painel = S.lotes = S.assoc = null; });
+    };
+    xhr.onerror = () => { $('#iBtn').disabled = false; $('#iProg').textContent = ''; toast('Falha de rede no envio', true); };
+    $('#iBtn').disabled = true; xhr.send(fd);
+  };
+  if ($('#eBtn')) $('#eBtn').onclick = () => { toast('Gerando ZIP…'); baixar(`/projetos/${S.pid}/export`, 'ACERVO.zip').catch((e) => toast(e.message, true)); };
+}
+
+boot();
+})();
+</script>
+</body>
+</html>

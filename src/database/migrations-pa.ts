@@ -1,0 +1,252 @@
+// v3.142.0 — Migrations do módulo "Gestão de PA / Loteamentos" (pa_*).
+//
+// Módulo NOVO e independente do `loteamentos` legado (v2.8.0, auto-preenchimento
+// de laudo): aqui o foco é a gestão social/financeira de um Projeto de
+// Assentamento — lotes, associados, sinal/boletos, documentos e entregas.
+//
+// Adaptações em relação ao spec (ZAYRA-MODULO-GESTAO-PA-v1):
+//   - Railway não tem disco → o binário dos documentos fica em
+//     pa_documentos_arquivos (LONGBLOB, 1:1 com pa_documentos). `caminho` guarda o
+//     caminho LÓGICO (<projeto>/<LOTE-XX-Nome>/<arquivo>), usado no export ZIP.
+//   - pa_lancamentos.parcela é NOT NULL (0 = sinal/à vista) para a chave única
+//     (associado, tipo, parcela) funcionar — UNIQUE com NULL não deduplica no MySQL.
+//   - pa_pagamentos.seed_chave: idempotência do seed para pagamentos SEM id de
+//     transação (espécie). forma ganha 'MISTO' (espécie + Pix no mesmo sinal).
+//   - pa_usuarios_perfil: perfil LGPD por usuário (ADMIN/OPERADOR/
+//     DIRECAO_ASSOCIACAO); sem linha, o perfil sai do role do JWT.
+//   - estado_civil 60 chars ("casada (comunhão parcial de bens)" vem no seed).
+
+import pool from './connection';
+
+const CREATE_PA_PROJETOS = `
+  CREATE TABLE IF NOT EXISTS pa_projetos (
+    id                     INT AUTO_INCREMENT PRIMARY KEY,
+    codigo                 VARCHAR(40)  NOT NULL,
+    nome                   VARCHAR(160) NOT NULL,
+    municipio              VARCHAR(80)  NOT NULL,
+    uf                     CHAR(2)      NOT NULL,
+    associacao_nome        VARCHAR(200) NULL,
+    associacao_cnpj        VARCHAR(18)  NULL,
+    associacao_cnpj_status ENUM('EM_HOMOLOGACAO','ATIVO') DEFAULT 'EM_HOMOLOGACAO',
+    presidente_nome        VARCHAR(160) NULL,
+    valor_lote             DECIMAL(10,2) NOT NULL,
+    sinal_padrao           DECIMAL(10,2) NOT NULL,
+    boleto_padrao          DECIMAL(10,2) NOT NULL,
+    prazo_sinal            DATE NULL,
+    pix_chave              VARCHAR(120) NULL,
+    pix_favorecido         VARCHAR(25)  NULL,
+    pix_cidade             VARCHAR(15)  NULL,
+    rt_nome                VARCHAR(160) NULL,
+    rt_registro            VARCHAR(60)  NULL,
+    layout_json            JSON NULL,
+    criado_em              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_pa_projeto_codigo (codigo)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+const CREATE_PA_LOTES = `
+  CREATE TABLE IF NOT EXISTS pa_lotes (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id      INT NOT NULL,
+    numero          VARCHAR(10) NOT NULL,
+    tipo            ENUM('ASSOCIADO','INSTITUCIONAL','VAGO') NOT NULL,
+    largura_m       DECIMAL(8,2)  NULL,
+    profundidade_m  DECIMAL(8,2)  NULL,
+    area_projeto_m2 DECIMAL(12,2) NULL,
+    area_medida_m2  DECIMAL(12,2) NULL,
+    perimetro_m     DECIMAL(12,2) NULL,
+    croqui_xy       JSON NULL,
+    geom_sirgas     JSON NULL,
+    status_medicao  ENUM('PENDENTE','AGENDADA','MEDIDO','PROCESSADO') DEFAULT 'PENDENTE',
+    data_medicao    DATE NULL,
+    equipe          VARCHAR(160) NULL,
+    base_gnss       VARCHAR(60)  NULL,
+    UNIQUE KEY uk_pa_lote (projeto_id, numero),
+    CONSTRAINT fk_pa_lote_projeto FOREIGN KEY (projeto_id) REFERENCES pa_projetos(id)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+const CREATE_PA_ASSOCIADOS = `
+  CREATE TABLE IF NOT EXISTS pa_associados (
+    id                     INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id             INT NOT NULL,
+    lote_id                INT NOT NULL,
+    numero                 VARCHAR(20)  NOT NULL,
+    nome                   VARCHAR(160) NOT NULL,
+    cpf                    CHAR(14)     NOT NULL,
+    rg                     VARCHAR(80)  NULL,
+    nascimento             DATE NULL,
+    estado_civil           VARCHAR(60)  NULL,
+    conjuge_nome           VARCHAR(160) NULL,
+    conjuge_cpf            CHAR(14)     NULL,
+    telefone               VARCHAR(60)  NULL,
+    telefone_e164          VARCHAR(20)  NULL,
+    email                  VARCHAR(160) NULL,
+    denominacao_terra      VARCHAR(120) NULL,
+    endereco               VARCHAR(255) NULL,
+    dia_vencimento         TINYINT NULL,
+    contrato_status        ENUM('GERADO','ENVIADO','ASSINADO') DEFAULT 'GERADO',
+    contrato_assinado_em   DATETIME NULL,
+    carteirinha_emitida_em DATETIME NULL,
+    pendencias             TEXT NULL,
+    acervo_pasta           VARCHAR(160) NULL,
+    ativo                  TINYINT DEFAULT 1,
+    criado_em              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_pa_assoc_cpf (projeto_id, cpf),
+    UNIQUE KEY uk_pa_assoc_lote (lote_id),
+    UNIQUE KEY uk_pa_assoc_num (projeto_id, numero),
+    INDEX idx_pa_assoc_tel (telefone_e164),
+    CONSTRAINT fk_pa_assoc_lote FOREIGN KEY (lote_id) REFERENCES pa_lotes(id)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+const CREATE_PA_LANCAMENTOS = `
+  CREATE TABLE IF NOT EXISTS pa_lancamentos (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    associado_id   INT NOT NULL,
+    tipo           ENUM('SINAL','BOLETO','AVISTA','AJUSTE') NOT NULL,
+    parcela        TINYINT NOT NULL DEFAULT 0,
+    valor          DECIMAL(10,2) NOT NULL,
+    vencimento     DATE NULL,
+    status         ENUM('A_PAGAR','PARCIAL','PAGO','A_VENCER','VENCIDO','CANCELADO') NOT NULL,
+    valor_recebido DECIMAL(10,2) DEFAULT 0,
+    descricao      VARCHAR(255) NULL,
+    UNIQUE KEY uk_pa_lanc (associado_id, tipo, parcela),
+    INDEX idx_pa_lanc_venc (vencimento, status),
+    CONSTRAINT fk_pa_lanc_assoc FOREIGN KEY (associado_id) REFERENCES pa_associados(id)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+const CREATE_PA_PAGAMENTOS = `
+  CREATE TABLE IF NOT EXISTS pa_pagamentos (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id          INT NOT NULL,
+    forma               ENUM('PIX','ESPECIE','CARTAO_DEBITO','CARTAO_CREDITO','BOLETO','MISTO') NOT NULL,
+    valor               DECIMAL(10,2) NOT NULL,
+    pago_em             DATETIME NOT NULL,
+    id_transacao        VARCHAR(100) NULL,
+    pagador_nome        VARCHAR(160) NULL,
+    pagador_cpf_parcial VARCHAR(20)  NULL,
+    pagador_instituicao VARCHAR(120) NULL,
+    vinculo_pagador     VARCHAR(80)  NULL,
+    url_recibo          VARCHAR(400) NULL,
+    comprovante_doc_id  INT NULL,
+    obs                 TEXT NULL,
+    seed_chave          VARCHAR(80) NULL,
+    criado_por          VARCHAR(64) NULL,
+    criado_em           DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_pa_txid (id_transacao),
+    UNIQUE KEY uk_pa_pag_seed (seed_chave),
+    INDEX idx_pa_pag_proj (projeto_id, pago_em)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+const CREATE_PA_PAGAMENTO_RATEIO = `
+  CREATE TABLE IF NOT EXISTS pa_pagamento_rateio (
+    pagamento_id  INT NOT NULL,
+    lancamento_id INT NOT NULL,
+    valor         DECIMAL(10,2) NOT NULL,
+    PRIMARY KEY (pagamento_id, lancamento_id),
+    INDEX idx_pa_rateio_lanc (lancamento_id)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+const CREATE_PA_DOCUMENTOS = `
+  CREATE TABLE IF NOT EXISTS pa_documentos (
+    id               INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id       INT NOT NULL,
+    lote_id          INT NULL,
+    associado_id     INT NULL,
+    tipo             ENUM('FOTO_3X4','DOC_IDENTIFICACAO','CERTIDAO','DOC_CONJUGE','COMPROVANTE_SINAL',
+                          'PROCESSO_FICHA_CONTRATO','PROCESSO_ASSINADO','CARTEIRINHA','MAPA_LOTE',
+                          'MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO') NOT NULL,
+    versao           INT DEFAULT 1,
+    caminho          VARCHAR(400) NOT NULL,
+    nome_original    VARCHAR(255) NULL,
+    mime             VARCHAR(80)  NULL,
+    sha256           CHAR(64)     NULL,
+    tamanho          INT NULL,
+    arquivo_presente TINYINT NOT NULL DEFAULT 0,
+    assinaturas_json JSON NULL,
+    criado_em        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_pa_doc_caminho (projeto_id, caminho),
+    INDEX idx_pa_doc_assoc (associado_id, tipo),
+    INDEX idx_pa_doc_sha (sha256)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+const CREATE_PA_DOCUMENTOS_ARQUIVOS = `
+  CREATE TABLE IF NOT EXISTS pa_documentos_arquivos (
+    documento_id INT PRIMARY KEY,
+    conteudo     LONGBLOB NOT NULL
+  )
+`;
+
+const CREATE_PA_ENTREGAS = `
+  CREATE TABLE IF NOT EXISTS pa_entregas (
+    id                 INT AUTO_INCREMENT PRIMARY KEY,
+    associado_id       INT NOT NULL,
+    protocolo          VARCHAR(30) NOT NULL,
+    itens_json         JSON NOT NULL,
+    entregue_em        DATETIME NULL,
+    recebedor_nome     VARCHAR(160) NULL,
+    recebedor_cpf      CHAR(14) NULL,
+    forma              ENUM('PRESENCIAL','WHATSAPP','EMAIL','GOVBR') NULL,
+    comprovante_doc_id INT NULL,
+    status             ENUM('PREPARADA','ENTREGUE','RETIDA_PAGAMENTO') DEFAULT 'PREPARADA',
+    UNIQUE KEY uk_pa_entrega_prot (protocolo),
+    INDEX idx_pa_entrega_assoc (associado_id)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+const CREATE_PA_EVENTOS = `
+  CREATE TABLE IF NOT EXISTS pa_eventos (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id   INT NULL,
+    associado_id INT NULL,
+    usuario_id   VARCHAR(64) NULL,
+    tipo         VARCHAR(40) NOT NULL,
+    dados        JSON NULL,
+    criado_em    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_pa_evt_proj (projeto_id, criado_em),
+    INDEX idx_pa_evt_assoc (associado_id, criado_em)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+const CREATE_PA_USUARIOS_PERFIL = `
+  CREATE TABLE IF NOT EXISTS pa_usuarios_perfil (
+    user_sub  VARCHAR(64) PRIMARY KEY,
+    perfil    ENUM('ADMIN','OPERADOR','DIRECAO_ASSOCIACAO') NOT NULL,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`;
+
+export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
+  { label: 'pa_projetos', sql: CREATE_PA_PROJETOS },
+  { label: 'pa_lotes', sql: CREATE_PA_LOTES },
+  { label: 'pa_associados', sql: CREATE_PA_ASSOCIADOS },
+  { label: 'pa_lancamentos', sql: CREATE_PA_LANCAMENTOS },
+  { label: 'pa_pagamentos', sql: CREATE_PA_PAGAMENTOS },
+  { label: 'pa_pagamento_rateio', sql: CREATE_PA_PAGAMENTO_RATEIO },
+  { label: 'pa_documentos', sql: CREATE_PA_DOCUMENTOS },
+  { label: 'pa_documentos_arquivos', sql: CREATE_PA_DOCUMENTOS_ARQUIVOS },
+  { label: 'pa_entregas', sql: CREATE_PA_ENTREGAS },
+  { label: 'pa_eventos', sql: CREATE_PA_EVENTOS },
+  { label: 'pa_usuarios_perfil', sql: CREATE_PA_USUARIOS_PERFIL },
+];
+
+export async function runPaMigrations(): Promise<void> {
+  for (const { label, sql } of PA_MIGRATIONS) {
+    try {
+      await pool.execute(sql);
+      console.log(`[pa-migrations] OK: ${label}`);
+    } catch (err) {
+      const msg = (err as Error).message || '';
+      if (/already exists|Duplicate/i.test(msg)) {
+        console.log(`[pa-migrations] ja existe (OK): ${label}`);
+      } else {
+        console.error(`[pa-migrations] FALHA ${label}:`, msg.slice(0, 200));
+      }
+    }
+  }
+}

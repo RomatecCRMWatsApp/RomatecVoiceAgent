@@ -1,6 +1,6 @@
 {
   "name": "romatec-voice-agent",
-  "version": "3.141.0",
+  "version": "3.142.0",
   "description": "Roma - Assistente executivo de voz da Romatec Consultoria Imobiliaria",
   "main": "dist/server.js",
   "scripts": {
@@ -13,7 +13,8 @@
     "rag:ingest-folder": "tsx src/scripts/ragIngestFolder.ts",
     "rag:ingest-obsidian": "tsx src/scripts/ragIngestObsidian.ts",
     "contracts:ingest": "tsx src/scripts/contractsIngestFile.ts",
-    "validar:laudo": "tsx src/scripts/validarLaudoAsBuilt.ts"
+    "validar:laudo": "tsx src/scripts/validarLaudoAsBuilt.ts",
+    "pa:seed": "tsx src/scripts/paSeed.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
