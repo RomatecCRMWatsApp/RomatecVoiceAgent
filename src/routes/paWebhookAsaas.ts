@@ -28,10 +28,15 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
   // v3.144.3: espaço sobrando no token colado no painel do Asaas não derruba a baixa.
-  const recebido = (req.header('asaas-access-token') || '').trim();
+  // v3.144.7: plano B — token também aceito na URL do webhook (?token=...), para
+  // quando o painel do Asaas não manda o header asaas-access-token.
+  const doHeader = (req.header('asaas-access-token') || '').trim();
+  const daUrl = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+  const recebido = doHeader || daUrl;
   if (!tokenConfere(recebido, esperado)) {
-    // Diagnóstico sem expor o segredo: ausente x diferente, e os tamanhos.
-    console.warn(`[pa-asaas-webhook] 401: token ${recebido ? `diferente (recebido ${recebido.length} chars, esperado ${esperado.length})` : 'ausente no header asaas-access-token'} — confira o "Token de autenticação" do webhook no Asaas`);
+    // Diagnóstico sem expor o segredo: ausente x diferente, tamanhos e NOMES dos headers recebidos.
+    const nomes = Object.keys(req.headers).filter((h) => !/^(cookie|authorization)$/i.test(h)).join(',');
+    console.warn(`[pa-asaas-webhook] 401: token ${recebido ? `diferente (recebido ${recebido.length} chars via ${doHeader ? 'header' : 'url'}, esperado ${esperado.length})` : 'ausente no header asaas-access-token e na URL'} — headers recebidos: ${nomes}`);
     res.status(401).json({ erro: 'token inválido' });
     return;
   }

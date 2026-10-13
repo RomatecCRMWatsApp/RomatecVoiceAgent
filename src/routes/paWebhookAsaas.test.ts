@@ -46,6 +46,10 @@ describe('webhook Asaas (PA)', () => {
     const r = await request(app()).post('/webhook/asaas-pa').set('asaas-access-token', 'segredo-teste  ').send(evento);
     expect(r.status).toBe(200);
   });
+  it('plano B: token na URL (?token=) também é aceito; errado na URL → 401', async () => {
+    expect((await request(app()).post('/webhook/asaas-pa?token=segredo-teste').send(evento)).status).toBe(200);
+    expect((await request(app()).post('/webhook/asaas-pa?token=errado').send(evento)).status).toBe(401);
+  });
   it('falha interna → 500 (o Asaas reenvia)', async () => {
     vi.mocked(processarEventoAsaas).mockRejectedValueOnce(new Error('banco fora'));
     const r = await request(app()).post('/webhook/asaas-pa').set('asaas-access-token', 'segredo-teste').send(evento);
