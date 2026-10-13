@@ -7,11 +7,31 @@
 // Resposta: 200 para tudo que foi entendido (inclusive cobrança que não é do
 // PA) — o Asaas pausa a fila se receber muitos erros. 500 só em falha real
 // (banco fora), pra ele reenviar depois.
-import { Router, type Request, type Response } from 'express';
+import express, { Router, type Request, type Response } from 'express';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { processarEventoAsaas, type EventoAsaas } from '../services/pa/paBoletos';
 
 const router = Router();
+
+// v3.144.8: o Asaas pode mandar o JSON com content-type que o express.json global
+// não reconhece — aí o corpo chegava vazio ("ignorado:sem_payment"). Lê o corpo
+// cru em QUALQUER content-type (se ainda não foi lido) e faz o parse aqui.
+router.use(express.text({ type: () => true, limit: '2mb' }));
+export function corpoDoEvento(body: unknown): EventoAsaas {
+  if (typeof body === 'string') {
+    const s = body.trim();
+    if (!s) return {};
+    try { return JSON.parse(s) as EventoAsaas; } catch { /* pode ser form-urlencoded */ }
+    try {
+      const p = new URLSearchParams(s);
+      const dados = p.get('data') || p.get('payload') || p.get('body');
+      if (dados) return JSON.parse(dados) as EventoAsaas;
+    } catch { /* formato desconhecido */ }
+    return {};
+  }
+  if (Buffer.isBuffer(body)) return corpoDoEvento(body.toString('utf8'));
+  return (body && typeof body === 'object' ? body : {}) as EventoAsaas;
+}
 
 export function tokenConfere(recebido: unknown, esperado: string | undefined): boolean {
   if (!esperado || typeof recebido !== 'string' || !recebido) return false;
@@ -41,8 +61,9 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
   try {
-    const r = await processarEventoAsaas((req.body ?? {}) as EventoAsaas);
-    console.log(`[pa-asaas-webhook] ${(req.body as EventoAsaas)?.event} ${(req.body as EventoAsaas)?.payment?.id} → ${r.acao}`);
+    const ev = corpoDoEvento(req.body);
+    const r = await processarEventoAsaas(ev);
+    console.log(`[pa-asaas-webhook] ${ev.event ?? '(sem event)'} ${ev.payment?.id ?? '(sem payment)'} → ${r.acao}${ev.event ? '' : ` [content-type=${req.header('content-type') ?? '-'}, body=${typeof req.body}]`}`);
     res.json({ ok: true, ...r });
   } catch (err) {
     console.error('[pa-asaas-webhook] falha:', err);

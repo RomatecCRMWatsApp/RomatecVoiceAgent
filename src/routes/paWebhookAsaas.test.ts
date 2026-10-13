@@ -7,7 +7,7 @@ vi.mock('../services/pa/paBoletos', () => ({
   processarEventoAsaas: vi.fn(async () => ({ acao: 'baixado', boleto_id: 3 })),
 }));
 
-import router, { tokenConfere } from './paWebhookAsaas';
+import router, { tokenConfere, corpoDoEvento } from './paWebhookAsaas';
 import { processarEventoAsaas } from '../services/pa/paBoletos';
 
 function app() {
@@ -49,6 +49,18 @@ describe('webhook Asaas (PA)', () => {
   it('plano B: token na URL (?token=) também é aceito; errado na URL → 401', async () => {
     expect((await request(app()).post('/webhook/asaas-pa?token=segredo-teste').send(evento)).status).toBe(200);
     expect((await request(app()).post('/webhook/asaas-pa?token=errado').send(evento)).status).toBe(401);
+  });
+  it('corpo JSON com content-type não-JSON (text/plain) ainda é lido', async () => {
+    const r = await request(app()).post('/webhook/asaas-pa?token=segredo-teste')
+      .set('Content-Type', 'text/plain').send(JSON.stringify(evento));
+    expect(r.status).toBe(200);
+    expect(processarEventoAsaas).toHaveBeenCalledWith(evento);
+  });
+  it('corpoDoEvento: string JSON, form com campo data, objeto e lixo', () => {
+    expect(corpoDoEvento(JSON.stringify(evento))).toEqual(evento);
+    expect(corpoDoEvento('data=' + encodeURIComponent(JSON.stringify(evento)))).toEqual(evento);
+    expect(corpoDoEvento(evento)).toEqual(evento);
+    expect(corpoDoEvento('xx')).toEqual({});
   });
   it('falha interna → 500 (o Asaas reenvia)', async () => {
     vi.mocked(processarEventoAsaas).mockRejectedValueOnce(new Error('banco fora'));
