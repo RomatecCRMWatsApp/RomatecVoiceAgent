@@ -47,6 +47,8 @@ export interface DadosBoletoRomatec {
   parcelas: Array<{ rotulo: string; valor: number; vencimento: string | null; status: string }>;
   mapa: { lotes: LoteMapa[]; desenho: DesenhoLayout | null } | null;
   ambiente_teste?: boolean;
+  /** v3.144.6: arquivo do brasão do projeto em public/brand/pa (ex.: brasao_salete_moreno.png). */
+  brasao?: string | null;
 }
 
 // ─── utilidades ───────────────────────────────────────────────────────────
@@ -294,19 +296,24 @@ function topoTopografico(d: DadosBoletoRomatec, logo: string, _wm: string, qr: s
 }
 
 function topoCarne(d: DadosBoletoRomatec, logo: string, wm: string, qr: string): string {
+  const brasao = d.brasao ? asset(d.brasao) : '';
   const total = d.parcelas.reduce((s, p) => s + p.valor, 0);
   const pago = d.parcelas.filter((p) => p.status === 'PAGO').reduce((s, p) => s + p.valor, 0);
   const pct = total ? Math.round((pago / total) * 100) : 0;
-  const mapa = svgMapa(d, { largura: '100%', destaque: '#C9A84C', fundo: '#ffffff', altura: '44mm', rotulosVias: false });
+  const mapa = svgMapa(d, { largura: '100%', destaque: '#C9A84C', fundo: '#ffffff', altura: d.brasao ? '31mm' : '44mm', rotulosVias: false });
   return `
   <style>
     .cn{display:grid;grid-template-columns:52mm 1fr;border:1.4px solid #0C3320;border-radius:3mm;overflow:hidden;height:118mm}
     .stub{background:#0C3320;color:#fff;padding:4mm;position:relative;overflow:hidden}
     .stub .lg{background:#fff;border-radius:2mm;padding:1.4mm;text-align:center}.stub .lg img{width:100%}
-    .stub h3{color:#C9A84C;font-size:8pt;letter-spacing:1px;margin:3mm 0 1.2mm}
-    .stub .it{font-size:7.8pt;margin-bottom:1.5mm;line-height:1.25}.stub .it span{display:block;color:#E3D19A;font-size:6.6pt;font-weight:700}
+    .stub h3{color:#C9A84C;font-size:8pt;letter-spacing:1px;margin:2.4mm 0 1mm}
+    .stub .it{font-size:7.6pt;margin-bottom:1.2mm;line-height:1.22}.stub .it span{display:block;color:#E3D19A;font-size:6.6pt;font-weight:700}
     .stub .wm{position:absolute;bottom:-14mm;left:-10mm;width:70mm;opacity:.12;filter:brightness(3)}
-    .stub .mini{margin-top:3mm;border-radius:1.5mm;overflow:hidden;border:1px solid rgba(255,255,255,.3)}
+    .stub .bras{position:relative;margin-top:2.2mm;display:flex;align-items:flex-end;gap:2.5mm}
+    .stub .bras img{height:22mm;width:auto;filter:drop-shadow(0 .6mm 1mm rgba(0,0,0,.45))}
+    .stub .bras span{font-size:6.4pt;line-height:1.3;color:#E3D19A;padding-bottom:1.5mm}
+    .stub .bras b{display:block;color:#fff;font-size:7.2pt;letter-spacing:.3px}
+    .stub .mini{margin-top:2mm;border-radius:1.5mm;overflow:hidden;border:1px solid rgba(255,255,255,.3)}
     .main{padding:4mm 5mm;position:relative;background:linear-gradient(180deg,#FFF4DC 0,#fff 40mm)}
     .main h1{margin:0;font-size:14pt;color:#0C3320}.main .s{font-size:8pt;color:#6A6656;margin-top:.6mm}
     .prog{margin:4mm 0 2mm;height:5mm;background:#ECE7D8;border-radius:3mm;overflow:hidden}.prog i{display:block;height:100%;background:linear-gradient(90deg,#1f7a4d,#C9A84C);margin:0}
@@ -338,6 +345,7 @@ function topoCarne(d: DadosBoletoRomatec, logo: string, wm: string, qr: string):
       <div class="it"><span>LOTE · ÁREA</span>${esc(d.lote.numero)} · ${esc(m2(d.lote.area_m2))}</div>
       ${d.lote.terra ? `<div class="it"><span>DENOMINAÇÃO</span>${esc(d.lote.terra)}</div>` : ''}
       <div class="mini">${mapa}</div>
+      ${brasao ? `<div class="bras"><img src="${brasao}" alt="Brasão"><span><b>${esc(d.projeto.nome.replace(/^Projeto de Assentamento/i, 'PA'))}</b>Terra · Trabalho · Vida<br>${esc(d.projeto.municipio)} – ${esc(d.projeto.uf)}</span></div>` : ''}
     </div>
     <div class="main">
       <div class="icons">⌖ Agrimensura · Georreferenciamento<br>${esc(d.responsavel_tecnico.registro)}</div>
