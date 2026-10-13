@@ -262,6 +262,11 @@ router.post('/lancamentos/:lid/boleto', h(async (req, res) => {
   return { boleto: b };
 }));
 router.get('/associados/:aid/boletos', h(async (req) => ({ boletos: await boletos.boletosDoAssociado(id(req.params.aid, 'associado')) })));
+// v3.144.5: consulta o Asaas e dá baixa no que já foi pago (independe do webhook).
+router.post('/projetos/:id/boletos/sincronizar', h(async (req) => {
+  exigirEscrita(req);
+  return boletos.sincronizarBoletos(id(req.params.id), ctx(req).sub);
+}));
 // v3.144.0: boleto com layout Romatec — modelo Carnê (escolhido pelo CEO em 13/10/2026).
 router.get('/boletos/:bid/pdf', h(async (req, res) => {
   const bid = id(req.params.bid, 'boleto');

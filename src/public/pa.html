@@ -639,7 +639,9 @@ async function rFinanceiro(){
       <div class="row" style="margin-top:12px"><button class="btn btn-primary" id="pSalvar" style="flex:0 0 auto">✅ Lançar pagamento</button><span class="muted" id="pSoma" style="flex:1 1 auto"></span></div>
     </div>` : ''}
     <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;border:0;margin:0">Boletos (Asaas)</h2>
-        <span id="asaasStatus" style="flex:0 0 auto" class="muted">…</span></div>
+        <span id="asaasStatus" style="flex:0 0 auto" class="muted">…</span>
+        ${podeEscrever() ? '<button class="btn btn-primary btn-sm" id="bSync" style="flex:0 0 auto" title="Consulta no Asaas a situação de cada boleto em aberto e dá baixa no que já foi pago">🔄 Sincronizar com o Asaas</button>' : ''}</div>
+      <div id="bSyncBox"></div>
       ${podeEscrever() ? `<div class="row" style="margin-top:8px"><div style="flex:0 1 200px"><label for="bAte">Parcelas com vencimento até</label><input type="date" id="bAte" value="2026-12-31"></div>
         <div style="flex:0 1 200px"><label for="bTipos">Quais lançamentos</label><select class="f" id="bTipos"><option value="BOLETO">Parcelas (boletos)</option><option value="SINAL">Sinais em aberto</option><option value="BOLETO,SINAL">Parcelas + sinais</option></select></div>
         <div style="flex:0 0 auto"><button class="btn btn-gold" id="bEmitir">🧾 Emitir boletos</button></div></div>
@@ -740,6 +742,19 @@ async function rBoletos(){
     } catch (e){ $('#bolBox').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   };
   $('#bFiltro').onchange = listar;
+  if ($('#bSync')) $('#bSync').onclick = async () => {
+    const b = $('#bSync'); b.disabled = true; $('#bSyncBox').innerHTML = '<div class="muted" style="margin-top:6px">Consultando o Asaas…</div>';
+    try {
+      const r = await api(`/projetos/${S.pid}/boletos/sincronizar`, { method: 'POST' });
+      const nome = { baixado: 'pago → baixa feita', pago_sem_saldo: 'pago (parcela já estava quitada — conferir devolução)', 'status:VENCIDO': 'vencido', 'status:CANCELADO': 'cancelado no Asaas', 'status:ESTORNADO': 'estornado — conferir' };
+      $('#bSyncBox').innerHTML = `<div class="avisos" style="margin-top:6px">🔄 ${r.consultados} boleto(s) consultado(s) · ${chip('PAGO', r.baixados + ' baixa(s)')} ${chip('VENCIDO', r.vencidos + ' vencido(s)')} ${chip('CANCELADO', r.cancelados + ' cancelado(s)')} ${r.estornados ? chip('ESTORNADO', r.estornados + ' estornado(s)') : ''} · ${r.sem_mudanca} sem mudança
+        ${r.detalhes.length ? '<div style="margin-top:4px">' + r.detalhes.map((x) => `Lote ${esc(x.lote)} — ${esc(x.associado)}: ${esc(nome[x.acao] || x.acao)}`).join('<br>') + '</div>' : ''}
+        ${r.erros.length ? '<div style="margin-top:4px;color:var(--red)">' + r.erros.map((x) => `Lote ${esc(x.lote)}: ${esc(x.erro)}`).join('<br>') + '</div>' : ''}</div>`;
+      if (r.baixados) { S.painel = S.lotes = S.assoc = null; }
+      listar();
+    } catch (e){ $('#bSyncBox').innerHTML = `<div class="avisos" style="margin-top:6px;color:var(--red)">${esc(e.message)}</div>`; }
+    finally { b.disabled = false; }
+  };
   if ($('#bEmitir')) $('#bEmitir').onclick = async () => {
     const b = $('#bEmitir');
     try {

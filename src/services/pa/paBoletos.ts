@@ -9,7 +9,7 @@ import { buscarProjeto, buscarAssociado, mapLancamento } from './paRepo';
 import { lancarPagamento } from './paFinanceiro';
 import {
   exigirConfigAsaas, configAsaas, payloadCliente, payloadCobranca, vencimentoBoleto, statusLocal,
-  buscarOuCriarCliente, criarCobranca, linhaDigitavel, pixDaCobranca, cancelarCobranca,
+  buscarOuCriarCliente, criarCobranca, linhaDigitavel, pixDaCobranca, cancelarCobranca, obterCobranca,
   type StatusBoleto,
 } from './asaas';
 import { novoToken, urlBoletoRomatec } from './paBoletoPdf';
@@ -158,6 +158,64 @@ export async function cancelarBoleto(id: number, usuario: string | null) {
   await exec(pool, "UPDATE pa_boletos SET status = 'CANCELADO' WHERE id = ?", [id]);
   await registrarEvento(pool, { projeto_id: b.projeto_id, associado_id: b.associado_id, usuario, tipo: 'BOLETO_CANCELADO', dados: { boleto_id: id, asaas_id: b.externo_id } });
   return buscarBoleto(id);
+}
+
+// ─── v3.144.5: sincronização ativa com o Asaas (não depende do webhook) ──
+const EVENTO_POR_STATUS: Record<string, string> = {
+  RECEIVED: 'PAYMENT_RECEIVED', CONFIRMED: 'PAYMENT_CONFIRMED', RECEIVED_IN_CASH: 'PAYMENT_RECEIVED_IN_CASH',
+  OVERDUE: 'PAYMENT_OVERDUE', REFUNDED: 'PAYMENT_REFUNDED', REFUND_REQUESTED: 'PAYMENT_REFUNDED',
+  CHARGEBACK_REQUESTED: 'PAYMENT_CHARGEBACK_REQUESTED', DELETED: 'PAYMENT_DELETED',
+};
+
+export interface ResultadoSincronizacao {
+  consultados: number; baixados: number; vencidos: number; cancelados: number; estornados: number; sem_mudanca: number;
+  erros: Array<{ boleto_id: number; lote: string | null; erro: string }>;
+  detalhes: Array<{ boleto_id: number; lote: string | null; associado: string | null; acao: string }>;
+}
+
+/**
+ * Consulta no Asaas cada boleto em aberto (PENDENTE/VENCIDO) do ambiente atual
+ * e aplica a MESMA lógica do webhook (processarEventoAsaas) — idempotente: se o
+ * webhook chegar depois, a baixa não duplica (id_transacao asaas:<pay_id>).
+ */
+export async function sincronizarBoletos(projetoId: number, usuario: string | null): Promise<ResultadoSincronizacao> {
+  const cfg = exigirConfigAsaas();
+  await buscarProjeto(projetoId);
+  const abertos = (await rows(pool, `${SELECT_BOLETO} WHERE b.projeto_id = ? AND b.status IN ('PENDENTE','VENCIDO') AND b.ambiente = ? ORDER BY b.id`, [projetoId, cfg.ambiente])).map(mapBoleto);
+  const out: ResultadoSincronizacao = { consultados: 0, baixados: 0, vencidos: 0, cancelados: 0, estornados: 0, sem_mudanca: 0, erros: [], detalhes: [] };
+  for (const b of abertos) {
+    out.consultados++;
+    let acao = 'sem_mudanca';
+    try {
+      let cob: Awaited<ReturnType<typeof obterCobranca>> | null = null;
+      try {
+        cob = await obterCobranca(cfg, b.externo_id);
+      } catch (err) {
+        if (!(err instanceof PaErro) || err.codigo !== 'ASAAS_NAO_ENCONTRADO') throw err;
+      }
+      const statusAsaas = !cob || (cob as { deleted?: boolean }).deleted ? 'DELETED' : String(cob.status || '').toUpperCase();
+      const evento = EVENTO_POR_STATUS[statusAsaas];
+      if (evento && !(evento === 'PAYMENT_OVERDUE' && b.status === 'VENCIDO')) {
+        const r = await processarEventoAsaas({ event: evento, payment: { ...(cob ?? {}), id: b.externo_id } });
+        acao = r.acao;
+      }
+    } catch (err) {
+      out.erros.push({ boleto_id: b.id, lote: b.lote, erro: (err as Error).message.slice(0, 200) });
+      if (err instanceof PaErro && (err.codigo === 'ASAAS_CHAVE_INVALIDA' || err.codigo === 'ASAAS_INDISPONIVEL')) break;
+      continue;
+    }
+    if (acao === 'baixado' || acao === 'pago_sem_saldo') out.baixados++;
+    else if (acao === 'status:VENCIDO') out.vencidos++;
+    else if (acao === 'status:CANCELADO') out.cancelados++;
+    else if (acao === 'status:ESTORNADO') out.estornados++;
+    else out.sem_mudanca++;
+    if (acao !== 'sem_mudanca') out.detalhes.push({ boleto_id: b.id, lote: b.lote, associado: b.associado_nome, acao });
+  }
+  await registrarEvento(pool, {
+    projeto_id: projetoId, usuario, tipo: 'BOLETOS_SINCRONIZADOS',
+    dados: { consultados: out.consultados, baixados: out.baixados, vencidos: out.vencidos, cancelados: out.cancelados, estornados: out.estornados, erros: out.erros.length, ambiente: cfg.ambiente },
+  });
+  return out;
 }
 
 export async function marcarEnviado(id: number) {
