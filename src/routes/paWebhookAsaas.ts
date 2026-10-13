@@ -27,7 +27,11 @@ router.post('/', async (req: Request, res: Response) => {
     res.status(503).json({ erro: 'webhook não configurado' });
     return;
   }
-  if (!tokenConfere(req.header('asaas-access-token'), esperado)) {
+  // v3.144.3: espaço sobrando no token colado no painel do Asaas não derruba a baixa.
+  const recebido = (req.header('asaas-access-token') || '').trim();
+  if (!tokenConfere(recebido, esperado)) {
+    // Diagnóstico sem expor o segredo: ausente x diferente, e os tamanhos.
+    console.warn(`[pa-asaas-webhook] 401: token ${recebido ? `diferente (recebido ${recebido.length} chars, esperado ${esperado.length})` : 'ausente no header asaas-access-token'} — confira o "Token de autenticação" do webhook no Asaas`);
     res.status(401).json({ erro: 'token inválido' });
     return;
   }

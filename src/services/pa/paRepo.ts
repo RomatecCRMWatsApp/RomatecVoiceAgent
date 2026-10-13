@@ -310,6 +310,7 @@ export function mapAssociado(r: Row) {
     carteirinha_emitida_em: isoDateTime(r.carteirinha_emitida_em), pendencias: (r.pendencias as string) ?? null,
     acervo_pasta: (r.acervo_pasta as string) ?? null, ativo: num(r.ativo) === 1,
     asaas_customer_id: (r.asaas_customer_id as string) ?? null,
+    asaas_ambiente: (r.asaas_ambiente as string) ?? null,
     whatsapp_status: String(r.whatsapp_status ?? 'NAO_VERIFICADO'),
     whatsapp_numero: (r.whatsapp_numero as string) ?? null,
     whatsapp_verificado_em: isoDateTime(r.whatsapp_verificado_em),

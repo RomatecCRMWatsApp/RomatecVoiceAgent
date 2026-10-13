@@ -57,7 +57,7 @@ const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à v
  */
 async function atualizarDoAsaas(b: Record<string, unknown>): Promise<void> {
   const cfg = configAsaas();
-  if (!cfg || (b.status !== 'PENDENTE' && b.status !== 'VENCIDO')) return;
+  if (!cfg || (b.status !== 'PENDENTE' && b.status !== 'VENCIDO') || String(b.ambiente ?? 'sandbox') !== cfg.ambiente) return;
   const id = String(b.externo_id);
   try {
     const ld = await linhaDigitavel(cfg, id);
@@ -129,7 +129,8 @@ export async function dadosBoletoRomatec(boletoId: number): Promise<DadosBoletoR
       lotes: lotesMapa.filter((l) => Array.isArray(l.croqui_xy)).map((l) => ({ numero: String(l.numero), xy: l.croqui_xy as number[][], institucional: l.tipo === 'INSTITUCIONAL' })),
       desenho: desenhoDoProjeto(projeto.codigo, projeto.layout_json),
     },
-    ambiente_teste: configAsaas()?.ambiente !== 'producao',
+    // Marca de teste segue o ambiente em que ESTE boleto foi emitido.
+    ambiente_teste: String(b.ambiente ?? 'sandbox') !== 'producao',
   };
 }
 

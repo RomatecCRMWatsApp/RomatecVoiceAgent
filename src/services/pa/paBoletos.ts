@@ -24,6 +24,9 @@ export function mapBoleto(b: Record<string, unknown>) {
     pago_em: isoDateTime(b.pago_em), valor_pago: b.valor_pago == null ? null : num(b.valor_pago),
     enviado_em: isoDateTime(b.enviado_em), criado_em: isoDateTime(b.criado_em),
     url_romatec: urlBoletoRomatec((b.token_publico as string) ?? null),
+    ambiente: String(b.ambiente ?? 'sandbox'),
+    // v3.144.3: boleto do ambiente Asaas configurado agora (sandbox x produção).
+    ambiente_atual: String(b.ambiente ?? 'sandbox') === ambienteAtual(),
     lote: (b.lote as string) ?? null, associado_nome: (b.associado_nome as string) ?? null,
     tipo: (b.tipo as string) ?? null, parcela: b.parcela == null ? null : num(b.parcela),
   };
@@ -41,6 +44,11 @@ export function statusAsaas() {
     configurado: !!c, ambiente: c?.ambiente ?? null,
     webhook_configurado: !!(process.env.ASAAS_WEBHOOK_TOKEN || '').trim(),
   };
+}
+
+/** Ambiente Asaas em uso (sem chave = sandbox, só pra comparação). */
+export function ambienteAtual(): 'producao' | 'sandbox' {
+  return configAsaas()?.ambiente ?? 'sandbox';
 }
 
 // Trava em memória contra clique duplo (Railway roda 1 instância do app).
@@ -62,18 +70,22 @@ export async function emitirBoleto(lancamentoId: number, usuario: string | null)
     if (!lr) throw new PaErro('LANCAMENTO_NAO_ENCONTRADO', 'Lançamento não encontrado', 404);
     const l = mapLancamento(lr);
     if (l.status === 'CANCELADO' || l.saldo <= 0) throw new PaErro('SEM_SALDO', 'Lançamento sem saldo em aberto', 409);
-    const ativo = await one(pool, "SELECT id FROM pa_boletos WHERE lancamento_id = ? AND status IN ('PENDENTE','VENCIDO')", [lancamentoId]);
+    // Boleto ativo de OUTRO ambiente (ex.: teste do sandbox depois de ligar a produção) não vale
+    // mais: cancela só aqui no sistema — no Asaas real ele nem existe.
+    await exec(pool, "UPDATE pa_boletos SET status = 'CANCELADO' WHERE lancamento_id = ? AND status IN ('PENDENTE','VENCIDO') AND ambiente <> ?", [lancamentoId, cfg.ambiente]);
+    const ativo = await one(pool, "SELECT id FROM pa_boletos WHERE lancamento_id = ? AND status IN ('PENDENTE','VENCIDO') AND ambiente = ?", [lancamentoId, cfg.ambiente]);
     if (ativo) throw new PaErro('BOLETO_JA_EMITIDO', `Já existe boleto ativo para esta parcela (#${ativo.id})`, 409, { boleto_id: num(ativo.id) });
 
     const a = await buscarAssociado(l.associado_id);
     const projeto = await buscarProjeto(a.projeto_id);
-    let customerId = a.asaas_customer_id;
+    // Cliente do Asaas só vale no ambiente em que foi criado.
+    let customerId = a.asaas_ambiente === cfg.ambiente ? a.asaas_customer_id : null;
     if (!customerId) {
       customerId = await buscarOuCriarCliente(cfg, payloadCliente({
         nome: a.nome, cpf: a.cpf, telefone_e164: a.telefone_e164, email: a.email, lote: a.lote,
         denominacao_terra: a.denominacao_terra, associado_id: a.id,
       }, projeto));
-      await exec(pool, 'UPDATE pa_associados SET asaas_customer_id = ? WHERE id = ?', [customerId, a.id]);
+      await exec(pool, 'UPDATE pa_associados SET asaas_customer_id = ?, asaas_ambiente = ? WHERE id = ?', [customerId, cfg.ambiente, a.id]);
     }
     const tot = await one(pool, "SELECT COUNT(*) AS n FROM pa_lancamentos WHERE associado_id = ? AND tipo = 'BOLETO'", [a.id]);
     const venc = vencimentoBoleto(l.vencimento, hojeBrasil());
@@ -88,10 +100,10 @@ export async function emitirBoleto(lancamentoId: number, usuario: string | null)
 
     const ins = await exec(pool, `
       INSERT INTO pa_boletos (projeto_id, associado_id, lancamento_id, provedor, externo_id, valor, vencimento, status,
-        linha_digitavel, nosso_numero, pix_copia_cola, url_boleto, url_fatura, criado_por, token_publico)
-      VALUES (?, ?, ?, 'ASAAS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        linha_digitavel, nosso_numero, pix_copia_cola, url_boleto, url_fatura, criado_por, token_publico, ambiente)
+      VALUES (?, ?, ?, 'ASAAS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
       projeto.id, a.id, lancamentoId, cob.id, cob.value ?? l.saldo, cob.dueDate ?? venc, statusLocal(cob.status),
-      linha, nosso, pix, cob.bankSlipUrl ?? null, cob.invoiceUrl ?? null, usuario, novoToken(),
+      linha, nosso, pix, cob.bankSlipUrl ?? null, cob.invoiceUrl ?? null, usuario, novoToken(), cfg.ambiente,
     ]);
     await registrarEvento(pool, {
       projeto_id: projeto.id, associado_id: a.id, usuario, tipo: 'BOLETO_EMITIDO',
@@ -132,15 +144,17 @@ export async function elegiveisParaBoleto(projetoId: number, ateIso: string | nu
     JOIN pa_associados a ON a.id = l.associado_id AND a.ativo = 1 JOIN pa_lotes lt ON lt.id = a.lote_id
     WHERE a.projeto_id = ? AND l.status NOT IN ('PAGO','CANCELADO') AND l.tipo IN (${ts.map(() => '?').join(',')})
       AND (l.vencimento IS NULL OR l.vencimento <= ?)
-      AND NOT EXISTS (SELECT 1 FROM pa_boletos b WHERE b.lancamento_id = l.id AND b.status IN ('PENDENTE','VENCIDO'))
-    ORDER BY l.vencimento, CAST(lt.numero AS UNSIGNED), l.parcela`, [projetoId, ...ts, ate]);
+      AND NOT EXISTS (SELECT 1 FROM pa_boletos b WHERE b.lancamento_id = l.id AND b.status IN ('PENDENTE','VENCIDO') AND b.ambiente = ?)
+    ORDER BY l.vencimento, CAST(lt.numero AS UNSIGNED), l.parcela`, [projetoId, ...ts, ate, ambienteAtual()]);
   return ls.map((r) => ({ ...mapLancamento(r), nome: String(r.nome), lote: String(r.lote) })).filter((l) => l.saldo > 0);
 }
 
 export async function cancelarBoleto(id: number, usuario: string | null) {
   const b = await buscarBoleto(id);
   if (b.status !== 'PENDENTE' && b.status !== 'VENCIDO') throw new PaErro('BOLETO_NAO_CANCELAVEL', `Boleto ${b.status.toLowerCase()} não pode ser cancelado`, 409);
-  await cancelarCobranca(exigirConfigAsaas(), b.externo_id);
+  const cfg = exigirConfigAsaas();
+  // Boleto de outro ambiente (teste do sandbox) não existe no Asaas atual: cancela só aqui.
+  if (b.ambiente === cfg.ambiente) await cancelarCobranca(cfg, b.externo_id);
   await exec(pool, "UPDATE pa_boletos SET status = 'CANCELADO' WHERE id = ?", [id]);
   await registrarEvento(pool, { projeto_id: b.projeto_id, associado_id: b.associado_id, usuario, tipo: 'BOLETO_CANCELADO', dados: { boleto_id: id, asaas_id: b.externo_id } });
   return buscarBoleto(id);

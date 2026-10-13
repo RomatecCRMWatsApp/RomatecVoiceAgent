@@ -8,6 +8,7 @@ import { centavos, ratearAutomatico, statusAposRecebimento, type Rateio, type St
 import { parseRecibo, destinoEhRomatec, type ReciboInfinitePay } from './infinitepay';
 import { gerarPixCopiaECola } from './pixBrCode';
 import { urlBoletoRomatec } from './paBoletoPdf';
+import { configAsaas } from './asaas';
 
 export const FORMAS = ['PIX', 'ESPECIE', 'CARTAO_DEBITO', 'CARTAO_CREDITO', 'BOLETO', 'MISTO'] as const;
 export type Forma = (typeof FORMAS)[number];
@@ -335,7 +336,7 @@ export async function cobranca(projetoId: number, ateIso: string | null) {
   const idsLanc = [...grupos.values()].flatMap((g) => g.itens.map((i) => i.lancamento_id));
   const boletos = idsLanc.length ? await rows(pool, `
     SELECT id, lancamento_id, status, url_boleto, linha_digitavel, pix_copia_cola, enviado_em, token_publico FROM pa_boletos
-    WHERE lancamento_id IN (${idsLanc.map(() => '?').join(',')}) AND status IN ('PENDENTE','VENCIDO')`, idsLanc) : [];
+    WHERE lancamento_id IN (${idsLanc.map(() => '?').join(',')}) AND status IN ('PENDENTE','VENCIDO') AND ambiente = ?`, [...idsLanc, configAsaas()?.ambiente ?? 'sandbox']) : [];
   const bolPorLanc = new Map<number, BoletoNaCobranca>(boletos.map((b) => [num(b.lancamento_id), {
     id: num(b.id), status: String(b.status), url_boleto: (b.url_boleto as string) ?? null,
     url_romatec: urlBoletoRomatec((b.token_publico as string) ?? null),
