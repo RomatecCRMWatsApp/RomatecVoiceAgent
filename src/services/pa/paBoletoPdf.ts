@@ -6,7 +6,7 @@ import { PaErro } from './erros';
 import { pool, rows, one, exec, num, isoDate, hojeBrasil } from './paDb';
 import { buscarProjeto, buscarAssociado, mapLancamento } from './paRepo';
 import { desenhoDoProjeto } from './layoutDesenho';
-import { configAsaas, numeroConta } from './asaas';
+import { configAsaas, numeroConta, linhaDigitavel, pixDaCobranca } from './asaas';
 import { pdfBoletoRomatec, type DadosBoletoRomatec, type ModeloBoleto } from './boletoRomatec';
 
 export function baseUrlPublica(): string {
@@ -50,9 +50,36 @@ async function agenciaCodigo(): Promise<string> {
 
 const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à vista', AJUSTE: 'Ajuste' };
 
+/**
+ * O Asaas pode regerar linha digitável/nosso número (ex.: mudança nos dados da
+ * conta). Antes de montar o carnê, busca os valores ATUAIS da cobrança e
+ * atualiza o banco; se o Asaas não responder, segue com o que está gravado.
+ */
+async function atualizarDoAsaas(b: Record<string, unknown>): Promise<void> {
+  const cfg = configAsaas();
+  if (!cfg || (b.status !== 'PENDENTE' && b.status !== 'VENCIDO')) return;
+  const id = String(b.externo_id);
+  try {
+    const ld = await linhaDigitavel(cfg, id);
+    if (ld.identificationField && ld.identificationField !== b.linha_digitavel) {
+      b.linha_digitavel = ld.identificationField;
+      b.nosso_numero = ld.nossoNumero ?? b.nosso_numero;
+      await exec(pool, 'UPDATE pa_boletos SET linha_digitavel = ?, nosso_numero = ? WHERE id = ?', [b.linha_digitavel, b.nosso_numero, b.id]);
+    }
+  } catch (e) { console.warn('[pa-boleto-pdf] linha atual Asaas:', (e as Error).message); }
+  try {
+    const px = await pixDaCobranca(cfg, id);
+    if (px.payload && px.payload !== b.pix_copia_cola) {
+      b.pix_copia_cola = px.payload;
+      await exec(pool, 'UPDATE pa_boletos SET pix_copia_cola = ? WHERE id = ?', [px.payload, b.id]);
+    }
+  } catch (e) { console.warn('[pa-boleto-pdf] pix atual Asaas:', (e as Error).message); }
+}
+
 export async function dadosBoletoRomatec(boletoId: number): Promise<DadosBoletoRomatec> {
   const b = await one(pool, 'SELECT * FROM pa_boletos WHERE id = ?', [boletoId]);
   if (!b) throw new PaErro('BOLETO_NAO_ENCONTRADO', 'Boleto não encontrado', 404);
+  await atualizarDoAsaas(b);
   if (!b.linha_digitavel) throw new PaErro('BOLETO_SEM_LINHA', 'Boleto sem linha digitável (o Asaas não devolveu na emissão) — use o PDF do Asaas', 409);
   const a = await buscarAssociado(num(b.associado_id));
   const projeto = await buscarProjeto(a.projeto_id);
