@@ -299,12 +299,15 @@ router.get('/projetos/:id/extrato', h(async (req, res) => {
   if (req.query.formato === 'xlsx') {
     enviarXlsx(res, `EXTRATO-ASSOCIADOS-${e.projeto.codigo}-${e.posicao_em}.xlsx`, [
       {
-        nome: 'Por associado', cols: [6, 38, 14, 14, 14, 14, 14, 8, 12, 14],
+        nome: 'Por associado', cols: [6, 38, 14, 18, 14, 14, 16, 60, 14, 14, 8, 12, 14],
         linhas: e.lista.map((x) => ({
-          Lote: x.lote, Associado: x.nome, 'Contratado (R$)': x.contratado, 'Recebido (R$)': x.recebido, 'Em aberto (R$)': x.em_aberto,
+          Lote: x.lote, Associado: x.nome, 'Contratado (R$)': x.contratado,
+          Sinal: x.sinal ? (x.sinal.estado === 'PAGO' ? 'Pago' : x.sinal.estado === 'PARCIAL' ? `Parcial (falta ${x.sinal.falta.toFixed(2).replace('.', ',')})` : 'Pendente') : '—',
+          'Recebido (R$)': x.recebido, 'Em aberto (R$)': x.em_aberto, Divisão: x.divisao,
+          Vencimentos: x.boletos.map((b) => `P${b.parcela} ${dBr(b.vencimento)} ${b.valor.toFixed(2).replace('.', ',')}${b.falta <= 0 ? ' pago' : b.recebido > 0 ? ` (falta ${b.falta.toFixed(2).replace('.', ',')})` : ''}`).join(' | '),
           'Vencido (R$)': x.vencido, 'A vencer (R$)': x.a_vencer, '% pago': x.pct_pago, Situação: SITUACAO_TXT[x.situacao], 'Último pagamento': dBr(x.ultimo_pagamento),
         })),
-        rodape: [['', 'TOTAL', e.totais.contratado, e.totais.recebido, e.totais.em_aberto, e.totais.vencido, e.totais.a_vencer]],
+        rodape: [['', 'TOTAL', e.totais.contratado, '', e.totais.recebido, e.totais.em_aberto, '', '', e.totais.vencido, e.totais.a_vencer]],
       },
       {
         nome: 'Parcelas', cols: [6, 38, 12, 12, 13, 13, 12, 12],

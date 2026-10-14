@@ -121,7 +121,10 @@
   .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
   .pbar{height:7px;background:#efeadb;border-radius:4px;overflow:hidden;min-width:60px}.pbar i{display:block;height:100%;background:var(--ok)}
   tr.det td{background:#fbfaf5;font-size:12px} tfoot td{font-weight:800;border-top:2px solid var(--line)}
-  .neg{color:var(--red)} .pos{color:var(--ok)}
+  .neg{color:var(--red)} .pos{color:var(--ok)} .warn{color:var(--warn)}
+  .sinal{font-size:11px;margin-top:3px;color:var(--ok);font-weight:600} .sinal.warn{color:var(--warn)} .sinal.neg{color:var(--red)}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle} .d-ok{background:var(--ok)} .d-warn{background:var(--warn)} .d-red{border:2px solid var(--red);width:6px;height:6px}
+  .bl{font-size:12px;line-height:1.7}
   .c-SEM_TELEFONE,.c-NAO_VERIFICADO{background:#f1efe8;color:var(--muted)}
   .prog{height:10px;background:#eee;border-radius:6px;overflow:hidden;margin:8px 0}
   .prog i{display:block;height:100%;background:var(--green);transition:width .2s}
@@ -1046,13 +1049,13 @@ async function rExtrato(){
       <div class="kpi ok"><div class="l">Recebido</div><div class="v">${brl(t.recebido)}</div><div class="pbar" style="margin-top:6px"><i style="width:${Math.min(100, pct)}%"></i></div><div class="muted">${pct.toLocaleString('pt-BR')}% do contratado</div></div>
       <div class="kpi"><div class="l">Em aberto</div><div class="v">${brl(t.em_aberto)}</div><div class="muted">a vencer ${brl(t.a_vencer)}</div></div>
       <div class="kpi red"><div class="l">Vencido</div><div class="v">${brl(t.vencido)}</div><div class="muted">${t.em_atraso} associado(s) em atraso</div></div>
-      <div class="kpi ok"><div class="l">Situação</div><div style="margin-top:6px;line-height:1.9">${chip('QUITADO', t.quitados + ' quitados')} ${chip('EM_DIA', t.em_dia + ' em dia')} ${chip('EM_ATRASO', t.em_atraso + ' em atraso')}${t.sem_plano ? ' ' + chip('SEM_PLANO', t.sem_plano + ' sem plano') : ''}</div></div>
+      <div class="kpi ok"><div class="l">Situação</div><div style="margin-top:6px;line-height:1.9">${chip('QUITADO', t.quitados + ' quitados')} ${chip('EM_DIA', t.em_dia + ' em dia')} ${chip('EM_ATRASO', t.em_atraso + ' em atraso')}${t.com_parcial ? ' ' + chip('PARCIAL', t.com_parcial + ' com parcial') : ''}${t.sem_plano ? ' ' + chip('SEM_PLANO', t.sem_plano + ' sem plano') : ''}</div></div>
     </div>
     <div class="card">
       <div class="row" style="align-items:end;margin-bottom:8px">
         <h2 style="flex:1 1 200px;border:0;margin:0">Associados — recebido × em aberto</h2>
         <div style="flex:1 1 200px"><label for="exBusca">Buscar</label><input id="exBusca" placeholder="Lote ou nome" value="${esc(EXT.busca)}"></div>
-        <div style="flex:0 1 160px"><label for="exSit">Situação</label><select class="f" id="exSit"><option value="">Todas</option>${Object.entries(SIT_TXT).map(([k, v]) => `<option value="${k}" ${EXT.sit === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+        <div style="flex:0 1 160px"><label for="exSit">Situação</label><select class="f" id="exSit"><option value="">Todas</option>${Object.entries(SIT_TXT).map(([k, v]) => `<option value="${k}" ${EXT.sit === k ? 'selected' : ''}>${v}</option>`).join('')}<option value="PARCIAL" ${EXT.sit === 'PARCIAL' ? 'selected' : ''}>Com pagamento parcial</option></select></div>
         <div style="flex:0 1 180px"><label for="exOrdem">Ordenar por</label><select class="f" id="exOrdem">${[['lote', 'Lote'], ['nome', 'Nome'], ['aberto', 'Maior em aberto'], ['vencido', 'Maior vencido'], ['recebido', 'Maior recebido']].map(([k, v]) => `<option value="${k}" ${EXT.ordem === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
         <div style="flex:0 0 auto"><button class="btn btn-ghost btn-sm" id="exXlsx">⬇️ XLSX</button></div>
       </div>
@@ -1066,22 +1069,40 @@ async function rExtrato(){
   $('#exXlsx').onclick = () => baixar(`/projetos/${S.pid}/extrato?formato=xlsx`, `EXTRATO-ASSOCIADOS-${EXT.dados.posicao_em}.xlsx`).catch((e) => toast(e.message, true));
   redesenhar();
 }
+// v3.147.1: pontinho do sinal na coluna Recebido e a divisão em boletos com o que falta de cada um.
+function marcaSinal(si){
+  if (!si) return '';
+  const rot = si.tipo === 'AVISTA' ? 'à vista' : 'sinal';
+  if (si.estado === 'PAGO') return `<div class="sinal"><i class="dot d-ok"></i>${rot} pago</div>`;
+  if (si.estado === 'PARCIAL') return `<div class="sinal warn"><i class="dot d-warn"></i>${rot} parcial · falta <b>${brl(si.falta)}</b></div>`;
+  return `<div class="sinal neg"><i class="dot d-red"></i>${rot} pendente ${brl(si.falta)}</div>`;
+}
+function linhasBoletos(bs){
+  if (!bs.length) return '<span class="muted">—</span>';
+  return bs.map((b) => {
+    const tag = b.falta <= 0 ? '<span class="pos">✓ pago</span>'
+      : b.recebido > 0 ? `<span class="warn">pagou ${brl(b.recebido)} · <b>falta ${brl(b.falta)}</b></span>`
+      : b.status === 'VENCIDO' ? '<span class="neg">vencido</span>' : '<span class="muted">a vencer</span>';
+    return `<div class="bl"><b>P${b.parcela}</b> · ${b.vencimento ? dbr(b.vencimento) : 'sem venc.'} · ${brl(b.valor)} — ${tag}</div>`;
+  }).join('');
+}
 function desenharExtrato(){
   const q = EXT.busca.trim().toLowerCase();
-  let lista = EXT.dados.lista.filter((x) => (!EXT.sit || x.situacao === EXT.sit) && (!q || x.nome.toLowerCase().includes(q) || x.lote === q.padStart(2, '0') || x.lote === q));
+  let lista = EXT.dados.lista.filter((x) => (!EXT.sit || (EXT.sit === 'PARCIAL' ? x.parciais > 0 : x.situacao === EXT.sit)) && (!q || x.nome.toLowerCase().includes(q) || x.lote === q.padStart(2, '0') || x.lote === q));
   const ord = { lote: (a, b) => (parseInt(a.lote, 10) || 0) - (parseInt(b.lote, 10) || 0), nome: (a, b) => a.nome.localeCompare(b.nome), aberto: (a, b) => b.em_aberto - a.em_aberto, vencido: (a, b) => b.vencido - a.vencido, recebido: (a, b) => b.recebido - a.recebido }[EXT.ordem];
   lista = [...lista].sort(ord);
   const soma = (k) => lista.reduce((s, x) => s + x[k], 0);
   if (!lista.length){ $('#exTabela').innerHTML = '<div class="empty">Nenhum associado com esse filtro.</div>'; return; }
-  $('#exTabela').innerHTML = `<table><thead><tr><th>Lote</th><th>Associado</th><th class="right">Contratado</th><th class="right">Recebido</th><th class="right">Em aberto</th><th class="right">Vencido</th><th>% pago</th><th>Situação</th><th>Últ. pagamento</th></tr></thead><tbody>
+  $('#exTabela').innerHTML = `<table><thead><tr><th>Lote</th><th>Associado</th><th class="right">Contratado</th><th class="right">Recebido</th><th class="right">Em aberto</th><th>Divisão</th><th>Boletos — vencimento e valor</th><th class="right">Vencido</th><th>% pago</th><th>Situação</th><th>Últ. pagamento</th></tr></thead><tbody>
     ${lista.map((x) => `<tr class="click" data-ex="${x.associado_id}"><td><b>${esc(x.lote)}</b></td><td>${esc(x.nome)}</td>
-      <td class="right nowrap">${brl(x.contratado)}</td><td class="right nowrap pos">${brl(x.recebido)}</td><td class="right nowrap"><b>${brl(x.em_aberto)}</b></td>
+      <td class="right nowrap">${brl(x.contratado)}</td><td class="right nowrap"><span class="pos">${brl(x.recebido)}</span>${marcaSinal(x.sinal)}</td><td class="right nowrap"><b>${brl(x.em_aberto)}</b></td>
+      <td class="nowrap"><b>${esc(x.divisao)}</b>${x.qtd_boletos ? `<div class="muted">${x.qtd_boletos} boleto(s)</div>` : ''}</td><td class="nowrap">${linhasBoletos(x.boletos)}</td>
       <td class="right nowrap ${x.vencido > 0 ? 'neg' : 'muted'}">${x.vencido > 0 ? brl(x.vencido) : '—'}</td>
       <td style="min-width:90px"><div class="pbar"><i style="width:${Math.min(100, x.pct_pago)}%"></i></div><span class="muted">${x.pct_pago.toLocaleString('pt-BR')}%</span></td>
-      <td>${chip(x.situacao, SIT_TXT[x.situacao])}</td><td class="nowrap">${x.ultimo_pagamento ? dbr(x.ultimo_pagamento) : '<span class="muted">nunca</span>'}</td></tr>
-      ${EXT.abertos.has(x.associado_id) ? `<tr class="det"><td></td><td colspan="8">${x.parcelas.length ? x.parcelas.map((p) => `<div class="row" style="align-items:center;gap:10px;margin:2px 0"><span style="flex:0 0 90px"><b>${esc(p.rotulo)}</b></span><span style="flex:0 0 90px">${p.vencimento ? 'venc. ' + dbr(p.vencimento) : 'sem venc.'}</span><span style="flex:0 0 120px">valor ${brl(p.valor)}</span><span style="flex:0 0 130px" class="pos">pago ${brl(p.recebido)}</span><span style="flex:0 0 130px">saldo <b>${brl(p.saldo)}</b></span>${chip(p.status)}</div>`).join('') : '<span class="muted">Sem parcelas lançadas.</span>'}
+      <td>${chip(x.situacao, SIT_TXT[x.situacao])}${x.parciais ? '<div style="margin-top:3px">' + chip('PARCIAL', 'pagou parcial') + '</div>' : ''}</td><td class="nowrap">${x.ultimo_pagamento ? dbr(x.ultimo_pagamento) : '<span class="muted">nunca</span>'}</td></tr>
+      ${EXT.abertos.has(x.associado_id) ? `<tr class="det"><td></td><td colspan="10">${x.parcelas.length ? x.parcelas.map((p) => `<div class="row" style="align-items:center;gap:10px;margin:2px 0"><span style="flex:0 0 90px"><b>${esc(p.rotulo)}</b></span><span style="flex:0 0 90px">${p.vencimento ? 'venc. ' + dbr(p.vencimento) : 'sem venc.'}</span><span style="flex:0 0 120px">valor ${brl(p.valor)}</span><span style="flex:0 0 130px" class="pos">pago ${brl(p.recebido)}</span><span style="flex:0 0 130px">saldo <b>${brl(p.saldo)}</b></span>${chip(p.status)}</div>`).join('') : '<span class="muted">Sem parcelas lançadas.</span>'}
         <div style="margin-top:6px"><button class="btn btn-ghost btn-sm" data-abrir="${x.associado_id}">Abrir cadastro</button></div></td></tr>` : ''}`).join('')}</tbody>
-    <tfoot><tr><td></td><td>${lista.length} associado(s)</td><td class="right nowrap">${brl(soma('contratado'))}</td><td class="right nowrap pos">${brl(soma('recebido'))}</td><td class="right nowrap">${brl(soma('em_aberto'))}</td><td class="right nowrap neg">${brl(soma('vencido'))}</td><td colspan="3"></td></tr></tfoot></table>`;
+    <tfoot><tr><td></td><td>${lista.length} associado(s)</td><td class="right nowrap">${brl(soma('contratado'))}</td><td class="right nowrap pos">${brl(soma('recebido'))}</td><td class="right nowrap">${brl(soma('em_aberto'))}</td><td colspan="2"></td><td class="right nowrap neg">${brl(soma('vencido'))}</td><td colspan="3"></td></tr></tfoot></table>`;
   $('#exTabela').querySelectorAll('tr[data-ex]').forEach((tr) => tr.onclick = () => { const id = Number(tr.dataset.ex); EXT.abertos.has(id) ? EXT.abertos.delete(id) : EXT.abertos.add(id); desenharExtrato(); });
   $('#exTabela').querySelectorAll('[data-abrir]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); abrirAssociado(Number(b.dataset.abrir)); });
 }

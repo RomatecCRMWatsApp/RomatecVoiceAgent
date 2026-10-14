@@ -54,3 +54,23 @@ describe('lançamento manual', () => {
     expect(lerMovimento({ tipo: 'ENTRADA', data: '2026-10-14', descricao: 'x', valor: '10' }).categoria).toBe('Outras entradas');
   });
 });
+
+import { resumoParcelas } from './paCaixa';
+describe('resumo das parcelas (v3.147.1)', () => {
+  const p = (tipo: string, parcela: number, valor: number, recebido: number, venc: string | null, status = 'A_VENCER') =>
+    ({ lancamento_id: parcela + 1, tipo, parcela, rotulo: tipo, valor, recebido, saldo: Math.round((valor - recebido) * 100) / 100, vencimento: venc, status });
+  it('sinal pago + 2 boletos iguais, um pago parcial faltando 50', () => {
+    const r = resumoParcelas([p('SINAL', 0, 300, 300, null, 'PAGO'), p('BOLETO', 2, 350, 0, '2026-12-15'), p('BOLETO', 1, 350, 300, '2026-11-15', 'PARCIAL')]);
+    expect(r.sinal).toMatchObject({ estado: 'PAGO', falta: 0 });
+    expect(r.divisao).toBe('2× R$\u00a0350,00');
+    expect(r.qtd_boletos).toBe(2);
+    expect(r.parciais).toBe(1);
+    expect(r.boletos.map((b) => [b.parcela, b.vencimento, b.falta])).toEqual([[1, '2026-11-15', 50], [2, '2026-12-15', 350]]);
+  });
+  it('sinal parcial, valores diferentes e à vista', () => {
+    const r = resumoParcelas([p('SINAL', 0, 500, 200, null, 'PARCIAL'), p('BOLETO', 1, 400, 0, '2026-11-10'), p('BOLETO', 2, 300, 0, '2026-12-10')]);
+    expect(r.sinal).toMatchObject({ estado: 'PARCIAL', falta: 300 });
+    expect(r.divisao).toBe('R$\u00a0400,00 + R$\u00a0300,00');
+    expect(resumoParcelas([p('AVISTA', 0, 1000, 1000, null, 'PAGO')]).divisao).toBe('À vista');
+  });
+});

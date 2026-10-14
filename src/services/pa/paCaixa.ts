@@ -17,6 +17,31 @@ export function situacaoAssociado(t: { contratado: number; em_aberto: number; ve
 
 const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'À vista', BOLETO: 'Parcela', AJUSTE: 'Ajuste' };
 
+export interface ParcelaExtrato { lancamento_id: number; tipo: string; parcela: number; rotulo: string; valor: number; recebido: number; saldo: number; vencimento: string | null; status: string }
+const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+/**
+ * v3.147.1: resumo do plano do associado para o extrato — situação do sinal/à vista
+ * e a divisão em boletos ("2× R$ 350,00"), com o que falta de cada parcela parcial.
+ */
+export function resumoParcelas(ps: ParcelaExtrato[]) {
+  const entrada = ps.find((p) => p.tipo === 'SINAL' || p.tipo === 'AVISTA') ?? null;
+  const boletos = ps.filter((p) => p.tipo === 'BOLETO').sort((a, b) => a.parcela - b.parcela);
+  const valores = [...new Set(boletos.map((b) => b.valor))];
+  const divisao = !boletos.length ? (entrada?.tipo === 'AVISTA' ? 'À vista' : 'Sem boletos')
+    : valores.length === 1 ? `${boletos.length}× ${brl(valores[0])}` : boletos.map((b) => brl(b.valor)).join(' + ');
+  return {
+    sinal: entrada ? {
+      tipo: entrada.tipo, valor: entrada.valor, recebido: entrada.recebido, falta: entrada.saldo,
+      estado: entrada.saldo <= 0 ? 'PAGO' : entrada.recebido > 0 ? 'PARCIAL' : 'PENDENTE',
+    } : null,
+    divisao,
+    qtd_boletos: boletos.length,
+    parciais: ps.filter((p) => p.recebido > 0 && p.saldo > 0).length,
+    boletos: boletos.map((b) => ({ parcela: b.parcela, vencimento: b.vencimento, valor: b.valor, recebido: b.recebido, falta: b.saldo, status: b.status })),
+  };
+}
+
 export async function extratoAssociados(projetoId: number) {
   const projeto = await buscarProjeto(projetoId);
   const hoje = hojeBrasil();
@@ -49,16 +74,17 @@ export async function extratoAssociados(projetoId: number) {
     }
     const t = { contratado: centavos(contratado), recebido: centavos(recebido), em_aberto: centavos(em_aberto), vencido: centavos(vencido) };
     const ult = ultPor.get(num(a.id));
+    const parcelas: ParcelaExtrato[] = ls.map((l) => ({
+      lancamento_id: l.id, tipo: l.tipo, parcela: l.parcela, rotulo: `${ROTULO[l.tipo] ?? l.tipo}${l.tipo === 'BOLETO' ? ` ${l.parcela}` : ''}`,
+      valor: l.valor, recebido: l.valor_recebido, saldo: l.saldo, vencimento: l.vencimento, status: l.status_efetivo,
+    }));
     return {
       associado_id: num(a.id), numero: String(a.numero), nome: String(a.nome), lote: String(a.lote), telefone: (a.telefone as string) ?? null,
       ...t, a_vencer: centavos(t.em_aberto - t.vencido),
       pct_pago: t.contratado > 0 ? Math.round((t.recebido / t.contratado) * 1000) / 10 : 0,
       situacao: situacaoAssociado(t),
       ultimo_pagamento: ult?.data ?? null, pagamentos: ult?.n ?? 0,
-      parcelas: ls.map((l) => ({
-        lancamento_id: l.id, rotulo: `${ROTULO[l.tipo] ?? l.tipo}${l.tipo === 'BOLETO' ? ` ${l.parcela}` : ''}`,
-        valor: l.valor, recebido: l.valor_recebido, saldo: l.saldo, vencimento: l.vencimento, status: l.status_efetivo,
-      })),
+      parcelas, ...resumoParcelas(parcelas),
     };
   });
   const soma = (k: 'contratado' | 'recebido' | 'em_aberto' | 'vencido' | 'a_vencer') => centavos(lista.reduce((s, x) => s + x[k], 0));
@@ -69,7 +95,7 @@ export async function extratoAssociados(projetoId: number) {
     totais: {
       associados: lista.length, contratado: soma('contratado'), recebido: soma('recebido'), em_aberto: soma('em_aberto'),
       vencido: soma('vencido'), a_vencer: soma('a_vencer'),
-      quitados: cont('QUITADO'), em_dia: cont('EM_DIA'), em_atraso: cont('EM_ATRASO'), sem_plano: cont('SEM_PLANO'),
+      quitados: cont('QUITADO'), em_dia: cont('EM_DIA'), em_atraso: cont('EM_ATRASO'), sem_plano: cont('SEM_PLANO'), com_parcial: lista.filter((x) => x.parciais > 0).length,
     },
     lista,
   };
