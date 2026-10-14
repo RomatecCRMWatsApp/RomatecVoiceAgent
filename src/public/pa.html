@@ -118,6 +118,9 @@
   .c-INEXISTENTE,.c-CANCELADO,.c-ESTORNADO{background:#fbe9e7;color:var(--red);border-color:#f1c2bd}
   .c-EM_ATRASO{background:#fbe9e7;color:var(--red);border-color:#f1c2bd} .c-SEM_PLANO{background:#f1efe8;color:var(--muted)}
   .grid21{display:grid;grid-template-columns:2fr 1fr;gap:14px} @media (max-width:800px){.grid21{grid-template-columns:1fr}}
+  .av{width:36px;height:48px;border-radius:6px;object-fit:cover;border:2px solid var(--gold-soft);background:#f1efe8;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#9c967f;vertical-align:middle}
+  .ctframe{width:100%;height:420px;border:1px solid var(--line);border-radius:10px;background:#e9e5d9}
+  @media (min-width:801px){.ctgrid{grid-template-columns:3fr 2fr}}
   .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
   .pbar{height:7px;background:#efeadb;border-radius:4px;overflow:hidden;min-width:60px}.pbar i{display:block;height:100%;background:var(--ok)}
   tr.det td{background:#fbfaf5;font-size:12px} tfoot td{font-weight:800;border-top:2px solid var(--line)}
@@ -190,6 +193,7 @@
     <button data-t="mapa">🗺️ Mapa</button>
     <button data-t="associados">👥 Associados</button>
     <button data-t="financeiro">💰 Financeiro</button>
+    <button data-t="carteirinhas">🪪 Carteirinhas</button>
     <button data-t="campo">📡 Campo</button>
     <button data-t="importar" data-admin="1">📥 Importar / Exportar</button>
   </nav>
@@ -200,6 +204,7 @@
   <section id="v-mapa" class="hide"></section>
   <section id="v-associados" class="hide"></section>
   <section id="v-financeiro" class="hide"></section>
+  <section id="v-carteirinhas" class="hide"></section>
   <section id="v-campo" class="hide"></section>
   <section id="v-importar" class="hide"></section>
 </div>
@@ -335,7 +340,7 @@ function mostrar(aba){
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === aba));
   document.querySelectorAll('.wrap > section').forEach((s) => s.classList.toggle('hide', s.id !== 'v-' + aba));
   if (!S.pid && aba !== 'importar'){ $('#v-' + aba).innerHTML = '<div class="card empty">Nenhum projeto cadastrado ainda. Use <b>Importar</b> para carregar o seed do PA.</div>'; return; }
-  ({ painel: rPainel, mapa: rMapa, associados: rAssociados, financeiro: rFinanceiro, campo: rCampo, importar: rImportar })[aba]();
+  ({ painel: rPainel, mapa: rMapa, associados: rAssociados, financeiro: rFinanceiro, carteirinhas: rCarteirinhas, campo: rCampo, importar: rImportar })[aba]();
 }
 const podeEscrever = () => S.eu && S.eu.pode_escrever;
 
@@ -685,6 +690,108 @@ async function rMapaVila(){
   } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
 }
 
+// ─── v3.148.0: foto (miniatura) e aba Carteirinhas ───────────────────────
+const iniciaisDe = (nome) => String(nome || '').trim().split(/\s+/).filter((p) => p.length > 2).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
+function fotoMini(a, cls){
+  const ini = `<span class="av ${cls || ''}">${esc(iniciaisDe(a.nome))}</span>`;
+  if (!a.documentos || !a.documentos.tem_foto || !(S.eu && S.eu.ve_documentos)) return ini;
+  const v = a.documentos.foto_v || '';
+  return `<img class="av ${cls || ''}" loading="lazy" alt="" src="/api/pa/associados/${a.id}/foto?tam=mini${v ? '&v=' + v : ''}" onerror="this.outerHTML='<span class=&quot;av ${cls || ''}&quot;>${esc(iniciaisDe(a.nome))}</span>'">`;
+}
+let CART = { busca: '', filtro: '', sel: new Set(), lista: [] };
+async function rCarteirinhas(){
+  const v = $('#v-carteirinhas');
+  if (!(S.eu && S.eu.ve_documentos)){ v.innerHTML = '<div class="card empty">Seu perfil não acessa fotos e documentos (LGPD).</div>'; return; }
+  v.innerHTML = `<div class="card"><div class="row" style="align-items:end">
+      <h2 style="flex:1 1 220px;border:0;margin:0">🪪 Carteirinhas dos associados</h2>
+      <div style="flex:1 1 200px"><label for="ctBusca">Buscar</label><input id="ctBusca" placeholder="Lote ou nome" value="${esc(CART.busca)}"></div>
+      <div style="flex:0 1 190px"><label for="ctFiltro">Mostrar</label><select class="f" id="ctFiltro"><option value="">Todos</option><option value="SEMFOTO">Sem foto</option><option value="NAOEMITIDA">Ainda não emitida</option><option value="EMITIDA">Já emitida</option></select></div>
+    </div>
+    <div class="muted" style="margin:8px 0">A carteirinha é montada na hora com os dados do cadastro. Mudou nome, telefone, chácara ou a foto 3×4, a próxima impressão já sai atualizada. PDF em A4 com 4 por página — frente e verso lado a lado: recorte, dobre na linha tracejada e plastifique.</div>
+    <div class="row" style="align-items:center">
+      <span class="muted" style="flex:1 1 auto" id="ctResumo"></span>
+      <button class="btn btn-ghost btn-sm" id="ctPrevSel" style="flex:0 0 auto">👁 Prévia dos marcados</button>
+      <button class="btn btn-primary btn-sm" id="ctPdfSel" style="flex:0 0 auto">📄 PDF dos marcados (<span id="ctN">0</span>)</button>
+      <button class="btn btn-gold btn-sm" id="ctPdfTodos" style="flex:0 0 auto">📄 PDF de todos</button>
+    </div></div>
+    <div class="grid21 ctgrid"><div class="card" style="margin:0"><div id="ctLista" class="tbl"><div class="empty">Carregando…</div></div></div>
+      <div class="card" style="margin:0"><h3 style="margin-top:0">Prévia</h3><div id="ctPrev"><div class="empty">Clique em 👁 num associado para ver a carteirinha.</div></div></div></div>`;
+  $('#ctFiltro').value = CART.filtro;
+  try { CART.lista = await api(`/projetos/${S.pid}/associados`).then((r) => r.associados); }
+  catch (e){ $('#ctLista').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  $('#ctBusca').oninput = (e) => { CART.busca = e.target.value; desenharCarteirinhas(); };
+  $('#ctFiltro').onchange = (e) => { CART.filtro = e.target.value; desenharCarteirinhas(); };
+  $('#ctPdfTodos').onclick = () => gerarPdfCarteirinhas(null, CART.lista.length);
+  $('#ctPdfSel').onclick = () => { if (!CART.sel.size) return toast('Marque ao menos um associado', true); gerarPdfCarteirinhas([...CART.sel], CART.sel.size); };
+  $('#ctPrevSel').onclick = () => { if (!CART.sel.size) return toast('Marque ao menos um associado', true); previaCarteirinha([...CART.sel]); };
+  desenharCarteirinhas();
+}
+function desenharCarteirinhas(){
+  const q = CART.busca.trim().toLowerCase();
+  const lista = CART.lista.filter((a) => (!q || a.nome.toLowerCase().includes(q) || a.lote === q.padStart(2, '0') || a.lote === q)
+    && (!CART.filtro || (CART.filtro === 'SEMFOTO' ? !a.documentos.tem_foto : CART.filtro === 'NAOEMITIDA' ? !a.carteirinha_emitida_em : !!a.carteirinha_emitida_em)));
+  const semFoto = CART.lista.filter((a) => !a.documentos.tem_foto).length;
+  const emitidas = CART.lista.filter((a) => a.carteirinha_emitida_em).length;
+  $('#ctResumo').innerHTML = `${CART.lista.length} associado(s) · ${chip('VALIDO', emitidas + ' emitidas')} ${semFoto ? chip('PENDENTE', semFoto + ' sem foto') : chip('VALIDO', 'todos com foto')}`;
+  $('#ctN').textContent = CART.sel.size;
+  if (!lista.length){ $('#ctLista').innerHTML = '<div class="empty">Nenhum associado com esse filtro.</div>'; return; }
+  $('#ctLista').innerHTML = `<table><thead><tr><th><input type="checkbox" id="ctTodos" title="Marcar todos da lista"></th><th></th><th>Lote</th><th>Associado</th><th>Situação</th><th></th></tr></thead><tbody>
+    ${lista.map((a) => `<tr><td><input type="checkbox" class="ctSel" data-id="${a.id}" ${CART.sel.has(a.id) ? 'checked' : ''}></td>
+      <td>${fotoMini(a)}</td><td><b>${esc(a.lote)}</b></td><td>${esc(a.nome)}<div class="muted">${esc(a.numero)} · ${esc(a.cpf)}</div></td>
+      <td>${a.documentos.tem_foto ? '' : chip('PENDENTE', 'sem foto') + ' '}${a.carteirinha_emitida_em ? chip('VALIDO', 'emitida ' + dbr(a.carteirinha_emitida_em).slice(0, 10)) : chip('A_VENCER', 'não emitida')}</td>
+      <td class="nowrap"><button class="btn btn-ghost btn-sm" data-ctprev="${a.id}" title="Ver carteirinha">👁</button>
+        <button class="btn btn-ghost btn-sm" data-ctpdf="${a.id}" title="PDF individual">📄</button>
+        ${podeEscrever() ? `<button class="btn btn-ghost btn-sm" data-ctfoto="${a.id}" title="Trocar a foto 3×4">📷</button>` : ''}
+        <button class="btn btn-ghost btn-sm" data-ctedit="${a.id}" title="Editar cadastro">✏️</button></td></tr>`).join('')}</tbody></table>`;
+  const box = $('#ctLista');
+  box.querySelectorAll('.ctSel').forEach((c) => c.onchange = () => { const id = Number(c.dataset.id); c.checked ? CART.sel.add(id) : CART.sel.delete(id); $('#ctN').textContent = CART.sel.size; });
+  $('#ctTodos').onchange = (e) => { lista.forEach((a) => e.target.checked ? CART.sel.add(a.id) : CART.sel.delete(a.id)); desenharCarteirinhas(); };
+  box.querySelectorAll('[data-ctprev]').forEach((b) => b.onclick = () => previaCarteirinha([Number(b.dataset.ctprev)]));
+  box.querySelectorAll('[data-ctpdf]').forEach((b) => b.onclick = () => gerarPdfCarteirinhas([Number(b.dataset.ctpdf)], 1));
+  box.querySelectorAll('[data-ctedit]').forEach((b) => b.onclick = () => abrirAssociado(Number(b.dataset.ctedit)));
+  box.querySelectorAll('[data-ctfoto]').forEach((b) => b.onclick = () => trocarFoto(Number(b.dataset.ctfoto)));
+}
+function previaCarteirinha(ids){
+  $('#ctPrev').innerHTML = `<iframe class="ctframe" src="/api/pa/projetos/${S.pid}/carteirinhas.html?ids=${ids.join(',')}&t=${Date.now()}" title="Prévia da carteirinha"></iframe>
+    <div class="row" style="margin-top:8px"><button class="btn btn-primary btn-sm" id="ctPrevPdf">📄 Gerar PDF ${ids.length > 1 ? 'destes ' + ids.length : 'desta carteirinha'}</button></div>`;
+  $('#ctPrevPdf').onclick = () => gerarPdfCarteirinhas(ids, ids.length);
+}
+async function gerarPdfCarteirinhas(ids, n){
+  if (n > 1 && !confirm(`Gerar o PDF com ${n} carteirinha(s)? Pode levar alguns segundos.`)) return;
+  const janela = window.open('about:blank', '_blank');
+  toast('Gerando PDF…');
+  try {
+    const r = await fetch(`/api/pa/projetos/${S.pid}/carteirinhas.pdf${ids ? '?ids=' + ids.join(',') : ''}`, { credentials: 'include' });
+    if (r.status === 401){ location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); return; }
+    if (!r.ok){ let m = 'HTTP ' + r.status; try { m = (await r.json()).erro || m; } catch { /* ok */ } throw new Error(m); }
+    const url = URL.createObjectURL(await r.blob());
+    if (janela) janela.location.href = url; else window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+    const agora = new Date().toISOString();
+    CART.lista.forEach((a) => { if (!ids || ids.includes(a.id)) a.carteirinha_emitida_em = agora; });
+    desenharCarteirinhas();
+  } catch (e){ if (janela) janela.close(); toast(e.message, true); }
+}
+function trocarFoto(aid){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*'; inp.capture = 'user';
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append('tipo', 'FOTO_3X4'); fd.append('arquivo', f, f.name);
+    try {
+      const r = await fetch(`/api/pa/associados/${aid}/documentos`, { method: 'POST', body: fd, credentials: 'include' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.erro || 'HTTP ' + r.status);
+      toast('Foto atualizada — a carteirinha já usa a nova');
+      const a = CART.lista.find((x) => x.id === aid); if (a){ a.documentos.tem_foto = true; a.documentos.foto_v = Date.now(); }
+      S.assoc = null;
+      desenharCarteirinhas();
+      previaCarteirinha([aid]);
+    } catch (e){ toast(e.message, true); }
+  };
+  inp.click();
+}
+
 // ─── Associados ─────────────────────────────────────────────────────────
 async function rAssociados(){
   const v = $('#v-associados');
@@ -702,8 +809,8 @@ async function rAssociados(){
       const fs = $('#fSit').value;
       const fw = $('#fWa').value;
       const lista = associados.filter((a) => (!fs || (fs === 'VENCIDO' ? a.financeiro.vencidos > 0 : fs === 'SEMDOC' ? a.documentos.total === 0 : a.financeiro.sinal_status === fs)) && (!fw || a.whatsapp_status === fw));
-      $('#assocLista').innerHTML = lista.length ? `<table><thead><tr><th>Lote</th><th>Nº</th><th>Associado</th><th>Terra</th><th>WhatsApp</th><th>Entrada</th><th class="right">Recebido</th><th class="right">Saldo</th><th>Contrato</th><th>Docs</th></tr></thead><tbody>
-        ${lista.map((a) => `<tr class="click" data-id="${a.id}"><td><b>${esc(a.lote)}</b></td><td class="nowrap">${esc(a.numero)}</td><td>${esc(a.nome)}<div class="muted">${esc(a.cpf)}</div></td><td>${esc(a.denominacao_terra || '')}</td>
+      $('#assocLista').innerHTML = lista.length ? `<table><thead><tr><th></th><th>Lote</th><th>Nº</th><th>Associado</th><th>Terra</th><th>WhatsApp</th><th>Entrada</th><th class="right">Recebido</th><th class="right">Saldo</th><th>Contrato</th><th>Docs</th></tr></thead><tbody>
+        ${lista.map((a) => `<tr class="click" data-id="${a.id}"><td>${fotoMini(a)}</td><td><b>${esc(a.lote)}</b></td><td class="nowrap">${esc(a.numero)}</td><td>${esc(a.nome)}<div class="muted">${esc(a.cpf)}</div></td><td>${esc(a.denominacao_terra || '')}</td>
           <td>${chip(a.whatsapp_status, WA_TXT[a.whatsapp_status])}</td><td>${chip(a.financeiro.sinal_status)}</td><td class="right nowrap">${brl(a.financeiro.recebido)}</td><td class="right nowrap">${a.financeiro.saldo ? brl(a.financeiro.saldo) : chip('QUITADO')}</td>
           <td>${chip(a.contrato_status)}</td><td class="nowrap">${a.documentos.com_arquivo}/${a.documentos.total}</td></tr>`).join('')}</tbody></table>
         <div class="muted" style="margin-top:6px">${lista.length} associado(s)</div>` : '<div class="empty">Nenhum associado encontrado.</div>';

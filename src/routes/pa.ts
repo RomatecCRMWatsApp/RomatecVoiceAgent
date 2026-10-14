@@ -27,6 +27,7 @@ import * as waPa from '../services/pa/paWhatsapp';
 import * as boletoPdf from '../services/pa/paBoletoPdf';
 import * as mapas from '../services/pa/paMapas';
 import * as caixa from '../services/pa/paCaixa';
+import * as carteirinha from '../services/pa/paCarteirinha';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -275,6 +276,31 @@ router.get('/projetos/:id/cobranca', h(async (req, res) => {
     return undefined;
   }
   return c;
+}));
+
+// ─── v3.148.0: foto do associado e carteirinhas ──────────────────────────
+router.get('/associados/:aid/foto', h(async (req, res) => {
+  exigirDocumentos(req);
+  const f = await carteirinha.fotoAssociado(id(req.params.aid, 'associado'), req.query.tam === 'cart' ? 'cart' : 'mini');
+  if (!f) throw new PaErro('SEM_FOTO', 'Associado sem foto 3x4', 404);
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'private, no-cache');
+  res.setHeader('ETag', `"foto-${f.documento_id}"`);
+  res.end(f.jpeg);
+  return undefined;
+}));
+router.get('/projetos/:id/carteirinhas.pdf', h(async (req, res) => {
+  exigirDocumentos(req);
+  enviarPdf(res, await carteirinha.pdfCarteirinhas(id(req.params.id), carteirinha.lerIds(req.query.ids), ctx(req).sub));
+  return undefined;
+}));
+router.get('/projetos/:id/carteirinhas.html', h(async (req, res) => {
+  exigirDocumentos(req);
+  const html = await carteirinha.previaCarteirinhas(id(req.params.id), carteirinha.lerIds(req.query.ids));
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.end(html);
+  return undefined;
 }));
 
 // ─── v3.147.0: extrato por associado e fluxo de caixa ─────────────────────

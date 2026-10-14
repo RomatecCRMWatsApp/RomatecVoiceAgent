@@ -393,8 +393,8 @@ export async function listarAssociados(projetoId: number, q?: string) {
     ORDER BY CAST(l.numero AS UNSIGNED), l.numero`, params);
   const ids = as.map((a) => num(a.id));
   const lanc = ids.length ? await rows(pool, `SELECT * FROM pa_lancamentos WHERE associado_id IN (${ids.map(() => '?').join(',')})`, ids) : [];
-  const docs = ids.length ? await rows(pool, `SELECT associado_id, COUNT(*) AS n, SUM(arquivo_presente) AS presentes FROM pa_documentos WHERE associado_id IN (${ids.map(() => '?').join(',')}) GROUP BY associado_id`, ids) : [];
-  const docMap = new Map(docs.map((d) => [num(d.associado_id), { total: num(d.n), com_arquivo: num(d.presentes) }]));
+  const docs = ids.length ? await rows(pool, `SELECT associado_id, COUNT(*) AS n, SUM(arquivo_presente) AS presentes, SUM(tipo = 'FOTO_3X4' AND arquivo_presente = 1) AS fotos FROM pa_documentos WHERE associado_id IN (${ids.map(() => '?').join(',')}) GROUP BY associado_id`, ids) : [];
+  const docMap = new Map(docs.map((d) => [num(d.associado_id), { total: num(d.n), com_arquivo: num(d.presentes), tem_foto: num(d.fotos) > 0 }]));
   return as.map((a) => {
     const ll = lanc.filter((l) => num(l.associado_id) === num(a.id)).map((l) => mapLancamento(l, hoje));
     return {
@@ -406,7 +406,7 @@ export async function listarAssociados(projetoId: number, q?: string) {
         sinal_status: (ll.find((l) => l.tipo === 'SINAL' || l.tipo === 'AVISTA')?.status_efetivo) ?? null,
         vencidos: ll.filter((l) => l.status_efetivo === 'VENCIDO').length,
       },
-      documentos: docMap.get(num(a.id)) ?? { total: 0, com_arquivo: 0 },
+      documentos: docMap.get(num(a.id)) ?? { total: 0, com_arquivo: 0, tem_foto: false },
     };
   });
 }
