@@ -346,6 +346,24 @@ router.post('/projetos/:id/boletos/zerar-envio', h(async (req) => {
   const ids = Array.isArray(req.body?.lancamento_ids) ? req.body.lancamento_ids.map(Number) : null;
   return boletos.zerarEnviados(id(req.params.id), ids, ctx(req).sub);
 }));
+// v3.146.1: envio em LOTE pela fila do servidor (devagar, anti-bloqueio).
+router.post('/projetos/:id/whatsapp/fila', h(async (req) => {
+  exigirEscrita(req);
+  const pid = id(req.params.id);
+  const itens = (Array.isArray(req.body?.itens) ? req.body.itens : []).map((x: Record<string, unknown>) => ({
+    associado_id: Number(x.associado_id), nome: String(x.nome ?? '').slice(0, 160),
+    lancamento_ids: Array.isArray(x.lancamento_ids) ? (x.lancamento_ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0) : [],
+  })).filter((x: { associado_id: number }) => Number.isInteger(x.associado_id) && x.associado_id > 0);
+  const usuario = ctx(req).sub;
+  return waPa.iniciarFila(pid, itens, usuario, async (it) => {
+    const m = await fin.mensagemParaLancamentos(it.associado_id, it.lancamento_ids);
+    await waPa.enviarWhatsAppAssociado(it.associado_id, m.mensagem, 'COBRANCA', usuario);
+    for (const b of m.boleto_ids) await boletos.marcarEnviado(b);
+  });
+}));
+router.get('/whatsapp/fila', h(async () => ({ fila: waPa.estadoFila(), ritmo: { entre_associados_s: waPa.RITMO.entreAssociadosMs.map((x) => x / 1000) } })));
+router.post('/whatsapp/fila/parar', h(async (req) => { exigirEscrita(req); return { fila: waPa.pararFila() }; }));
+
 // v3.145.4: cobrança seletiva — só as parcelas marcadas. previa=true devolve o texto sem enviar.
 router.post('/associados/:aid/whatsapp/cobranca', h(async (req) => {
   const aid = id(req.params.aid, 'associado');

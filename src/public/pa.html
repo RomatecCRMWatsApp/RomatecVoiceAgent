@@ -947,6 +947,7 @@ async function rFinanceiro(){
           <td class="nowrap">${podeEscrever() && g.whatsapp_status === 'VALIDO' ? `<button class="btn btn-primary btn-sm" data-env="${i}">${g.itens.some((x) => x.boleto && x.boleto.enviado_em) ? '↻ Reenviar' : '📤 Sistema'}</button>` : ''}
             ${g.whatsapp_url ? `<a class="btn btn-gold btn-sm" href="${esc(g.whatsapp_url)}" target="_blank" rel="noopener">WhatsApp</a>` : ''} <button class="btn btn-ghost btn-sm" data-pix="${i}">Pix</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nada em aberto até essa data. 🎉</div>';
       const box = $('#cobBox');
+      acompanharFila();
       const idsDe = (i) => [...box.querySelectorAll(`.cItem[data-g="${i}"]`)].filter((x) => x.checked).map((x) => Number(x.dataset.l));
       const contar = () => { const n = [...box.querySelectorAll('.cAssoc')].filter((x) => x.checked && !x.disabled && idsDe(x.dataset.g).length).length; if ($('#envN')) $('#envN').textContent = n; };
       const aplicarQuais = () => {
@@ -979,18 +980,14 @@ async function rFinanceiro(){
         const quais = $('#cQuais') ? $('#cQuais').selectedOptions[0].textContent : 'as parcelas marcadas';
         let exemplo = '';
         try { exemplo = (await previa(c.lista[alvo[0]], idsDe(alvo[0]))).mensagem; } catch { /* prévia é só ilustração */ }
-        if (!confirm(`Enviar para ${alvo.length} associado(s) — ${quais} — pelo WhatsApp do sistema? (um a cada ~4 s)\n\nExemplo (${c.lista[alvo[0]].nome}):\n${exemplo}`)) return;
-        $('#envSel').disabled = true;
-        let ok = 0, falha = 0;
-        for (const [k, i] of alvo.entries()) {
-          const g = c.lista[i];
-          $('#envProg').innerHTML = `<div class="prog"><i style="width:${Math.round(k / alvo.length * 100)}%"></i></div><div class="muted">Enviando ${k + 1}/${alvo.length} — ${esc(g.nome)}</div>`;
-          try { await enviar(g, idsDe(i)); ok++; } catch (e){ falha++; if (e.codigo === 'ZAPI_INDISPONIVEL'){ toast(e.message, true); break; } }
-          await new Promise((r) => setTimeout(r, 4000));
-        }
-        $('#envProg').innerHTML = `<div class="avisos">📤 ${ok} enviada(s)${falha ? ` · ${falha} falha(s)` : ''}.</div>`;
-        $('#envSel').disabled = false;
-        cob();
+        // v3.146.1: envio em lote pela FILA DO SERVIDOR — um associado por vez, 30–60 s sorteados entre eles.
+        const minutos = Math.ceil(alvo.length * 45 / 60);
+        if (!confirm(`Enviar para ${alvo.length} associado(s) — ${quais} — pelo WhatsApp do sistema?\n\nPara não bloquear o número, o envio é DEVAGAR: um associado por vez, com 30 a 60 segundos sorteados entre eles (≈ ${minutos} min no total). Pode fechar a tela — a fila continua no servidor.\n\nExemplo (${c.lista[alvo[0]].nome}):\n${exemplo}`)) return;
+        try {
+          await api(`/projetos/${S.pid}/whatsapp/fila`, { json: { itens: alvo.map((i) => ({ associado_id: c.lista[i].associado_id, nome: c.lista[i].nome, lancamento_ids: idsDe(i) })) } });
+          toast('Fila iniciada — envio devagar em andamento');
+          acompanharFila();
+        } catch (e){ toast(e.message, true); }
       };
       if ($('#envZerar')) $('#envZerar').onclick = async () => {
         const marcados = [...box.querySelectorAll('.cAssoc')].filter((x) => x.checked).map((x) => Number(x.dataset.g));
@@ -1079,6 +1076,28 @@ async function rBoletos(){
     finally { b.disabled = false; }
   };
   listar();
+}
+// v3.146.1: progresso da fila de envio (servidor). Atualiza a cada 3 s enquanto roda.
+let FILA_TIMER = null;
+async function acompanharFila(){
+  clearTimeout(FILA_TIMER);
+  const alvo = $('#envProg'); if (!alvo) return;
+  try {
+    const { fila: f } = await api('/whatsapp/fila');
+    if (!f){ alvo.innerHTML = ''; return; }
+    const pct = f.total ? Math.round((f.enviados + f.falhas) / f.total * 100) : 0;
+    const resta = f.total - f.enviados - f.falhas;
+    const prox = f.proximo_em ? Math.max(0, Math.round((new Date(f.proximo_em) - Date.now()) / 1000)) : null;
+    const rodando = f.status === 'RODANDO';
+    const titulo = rodando ? 'em andamento' : f.status === 'CONCLUIDA' ? 'concluído' : f.status === 'PARADA' ? 'parado' : 'interrompido';
+    alvo.innerHTML = `<div class="avisos"><b>📤 Envio em lote ${titulo}</b> — ${f.enviados} enviado(s)${f.falhas ? ` · ${f.falhas} falha(s)` : ''} de ${f.total}
+      <div class="prog"><i style="width:${pct}%"></i></div>
+      ${rodando ? (f.atual ? `Enviando para <b>${esc(f.atual)}</b>…` : prox != null ? `Próximo envio em ${prox} s (intervalo sorteado para não parecer robô) · faltam ${resta} · ≈ ${Math.ceil(resta * 45 / 60)} min` : '') : ''}
+      ${f.erro ? `<div style="color:var(--red);margin-top:4px">⚠️ ${esc(f.erro)} — a fila parou para proteger o número.</div>` : ''}
+      ${rodando ? '<div style="margin-top:6px"><button class="btn btn-danger btn-sm" id="filaParar">⏹ Parar fila</button></div>' : ''}</div>`;
+    if ($('#filaParar')) $('#filaParar').onclick = async () => { try { await api('/whatsapp/fila/parar', { method: 'POST' }); toast('Parando a fila (termina o envio atual)'); acompanharFila(); } catch (e){ toast(e.message, true); } };
+    if (rodando) FILA_TIMER = setTimeout(acompanharFila, 3000);
+  } catch { /* sem fila */ }
 }
 async function carregarPagamentos(){
   try {
