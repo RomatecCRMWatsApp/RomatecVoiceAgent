@@ -62,6 +62,21 @@ export async function verificarWhatsAppsProjeto(projetoId: number, usuario: stri
   return out;
 }
 
+/**
+ * v3.145.3: separa os códigos Pix copia-e-cola do texto. No WhatsApp o código no
+ * meio da mensagem quebra em várias linhas e só dá pra copiar a mensagem inteira —
+ * o código vai sozinho na mensagem seguinte (um toque pra copiar).
+ */
+export function separarCodigosPix(texto: string): { principal: string; codigos: string[] } {
+  const codigos: string[] = [];
+  const linhas = texto.split('\n').filter((l) => {
+    const t = l.trim();
+    if (/^000201[0-9A-Za-z.@\-_*/ ]{30,}$/.test(t)) { codigos.push(t); return false; }
+    return true;
+  }).map((l) => l.replace(/Pix copia e cola:\s*$/i, codigos.length ? 'Pix copia e cola: (na próxima mensagem — toque e segure para copiar)' : 'Pix copia e cola:'));
+  return { principal: linhas.join('\n').replace(/\n{3,}/g, '\n\n').trim(), codigos };
+}
+
 /** Envia um texto ao associado pelo WhatsApp do sistema (só número VALIDO). */
 export async function enviarWhatsAppAssociado(aid: number, mensagem: string, tipo: string, usuario: string | null) {
   const a = await one(pool, 'SELECT id, projeto_id, nome, whatsapp_status, whatsapp_numero FROM pa_associados WHERE id = ?', [aid]);
@@ -71,9 +86,12 @@ export async function enviarWhatsAppAssociado(aid: number, mensagem: string, tip
   }
   const texto = String(mensagem || '').trim();
   if (!texto) throw new PaErro('CAMPO_INVALIDO', 'Mensagem vazia', 400);
+  const { principal, codigos } = separarCodigosPix(texto);
   let r;
   try {
-    r = await (await zapi()).sendReply(String(a.whatsapp_numero), texto.slice(0, 4000));
+    const z = await zapi();
+    r = await z.sendReply(String(a.whatsapp_numero), principal.slice(0, 4000));
+    for (const c of codigos) await z.sendReply(String(a.whatsapp_numero), c);
   } catch (err) {
     throw new PaErro('ZAPI_INDISPONIVEL', `Falha ao enviar pelo WhatsApp do sistema: ${(err as Error).message.slice(0, 200)}`, 502);
   }

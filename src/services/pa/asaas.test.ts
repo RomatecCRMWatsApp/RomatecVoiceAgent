@@ -82,3 +82,16 @@ describe('WhatsApp — variantes do número', () => {
     expect(variantesNumero('+559932221111')).toEqual(['559932221111']);
   });
 });
+
+describe('WhatsApp — código Pix em mensagem separada', () => {
+  it('tira o copia-e-cola do texto e devolve à parte', async () => {
+    const { separarCodigosPix } = await import('./paWhatsapp');
+    const code = '00020126530014br.gov.bcb.pix0131romatec-consultoria-256@jim.com5204000053039865406700.005802BR5925ROMATEC CONSULTORIA TOTAL6010ACAILANDIA62070503***63040E35';
+    const r = separarCodigosPix(`Olá!\nTotal: R$ 700,00\nPix copia e cola:\n${code}\nObrigada!`);
+    expect(r.codigos).toEqual([code]);
+    expect(r.principal).not.toContain('000201');
+    expect(r.principal).toContain('na próxima mensagem');
+    expect(r.principal).toContain('Obrigada!');
+    expect(separarCodigosPix('sem pix aqui').codigos).toEqual([]);
+  });
+});
