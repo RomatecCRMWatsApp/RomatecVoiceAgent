@@ -799,6 +799,17 @@ function handleWhatsAppWebhook(req: Request, res: Response) {
           console.warn('[recibos] roteamento/bloqueio falhou — caindo no fluxo normal:', (err as Error).message);
         }
 
+        // v3.147.3: só o CEO conversa com a ZAYRA pelo WhatsApp. Associado do PA (e
+        // qualquer outro número) recebe resposta curta automática, 1× a cada 6 h.
+        try {
+          const auto = await import('./services/pa/paAutoResposta');
+          const d = await auto.decidirAutoResposta(msg.from);
+          if (d.acao === 'SILENCIO') { console.log(`[auto-resposta] phone=${msg.from} silenciado (${d.motivo})`); continue; }
+          if (d.acao === 'RESPONDER') { await sendReply(msg.from, d.texto); console.log(`[auto-resposta] phone=${msg.from} tipo=${d.tipo}`); continue; }
+        } catch (err) {
+          console.warn('[auto-resposta] falhou — caindo no fluxo normal:', (err as Error).message);
+        }
+
         const reply = await processMessage(msg);
         await sendReply(msg.from, reply);
       } catch (err) {
