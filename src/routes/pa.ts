@@ -26,6 +26,7 @@ import * as boletos from '../services/pa/paBoletos';
 import * as waPa from '../services/pa/paWhatsapp';
 import * as boletoPdf from '../services/pa/paBoletoPdf';
 import * as mapas from '../services/pa/paMapas';
+import * as caixa from '../services/pa/paCaixa';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -275,6 +276,81 @@ router.get('/projetos/:id/cobranca', h(async (req, res) => {
   }
   return c;
 }));
+
+// ─── v3.147.0: extrato por associado e fluxo de caixa ─────────────────────
+function enviarXlsx(res: Response, nome: string, abas: Array<{ nome: string; linhas: Record<string, unknown>[]; cols?: number[]; rodape?: unknown[][] }>) {
+  const wb = XLSX.utils.book_new();
+  for (const a of abas) {
+    const ws = XLSX.utils.json_to_sheet(a.linhas.length ? a.linhas : [{ '': 'Sem dados no período' }]);
+    if (a.cols) ws['!cols'] = a.cols.map((wch) => ({ wch }));
+    XLSX.utils.sheet_add_aoa(ws, [[], ...(a.rodape ?? []), ['Uso interno — Romatec Consultoria Total (LGPD)']], { origin: -1 });
+    XLSX.utils.book_append_sheet(wb, ws, a.nome.slice(0, 31));
+  }
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${nome}"`);
+  res.end(buf);
+}
+const dBr = (iso: string | null) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
+const SITUACAO_TXT: Record<string, string> = { QUITADO: 'Quitado', EM_DIA: 'Em dia', EM_ATRASO: 'Em atraso', SEM_PLANO: 'Sem plano' };
+
+router.get('/projetos/:id/extrato', h(async (req, res) => {
+  const e = await caixa.extratoAssociados(id(req.params.id));
+  if (req.query.formato === 'xlsx') {
+    enviarXlsx(res, `EXTRATO-ASSOCIADOS-${e.projeto.codigo}-${e.posicao_em}.xlsx`, [
+      {
+        nome: 'Por associado', cols: [6, 38, 14, 14, 14, 14, 14, 8, 12, 14],
+        linhas: e.lista.map((x) => ({
+          Lote: x.lote, Associado: x.nome, 'Contratado (R$)': x.contratado, 'Recebido (R$)': x.recebido, 'Em aberto (R$)': x.em_aberto,
+          'Vencido (R$)': x.vencido, 'A vencer (R$)': x.a_vencer, '% pago': x.pct_pago, Situação: SITUACAO_TXT[x.situacao], 'Último pagamento': dBr(x.ultimo_pagamento),
+        })),
+        rodape: [['', 'TOTAL', e.totais.contratado, e.totais.recebido, e.totais.em_aberto, e.totais.vencido, e.totais.a_vencer]],
+      },
+      {
+        nome: 'Parcelas', cols: [6, 38, 12, 12, 13, 13, 12, 12],
+        linhas: e.lista.flatMap((x) => x.parcelas.map((p) => ({
+          Lote: x.lote, Associado: x.nome, Lançamento: p.rotulo, Vencimento: dBr(p.vencimento),
+          'Valor (R$)': p.valor, 'Recebido (R$)': p.recebido, 'Saldo (R$)': p.saldo, Situação: p.status,
+        }))),
+      },
+    ]);
+    return undefined;
+  }
+  return { ...e, lista: visao(e.lista, ctx(req).perfil) };
+}));
+router.get('/projetos/:id/caixa', h(async (req, res) => {
+  const q = (k: string) => (typeof req.query[k] === 'string' ? (req.query[k] as string) : null);
+  const f = await caixa.fluxoCaixa(id(req.params.id), q('de'), q('ate'), q('agrupar') === 'dia' ? 'dia' : 'mes');
+  if (req.query.formato === 'xlsx') {
+    enviarXlsx(res, `FLUXO-CAIXA-${f.projeto.codigo}-${f.de}-a-${f.ate}.xlsx`, [
+      {
+        nome: 'Fluxo', cols: [12, 18, 16, 14, 14, 16],
+        linhas: f.periodos.map((p) => ({
+          Período: p.periodo.length === 7 ? `${p.periodo.slice(5)}/${p.periodo.slice(0, 4)}` : dBr(p.periodo),
+          'Entradas associados (R$)': p.entradas_associados, 'Entradas avulsas (R$)': p.entradas_avulsas, 'Saídas (R$)': p.saidas,
+          'Saldo do período (R$)': p.saldo_periodo, 'Saldo acumulado (R$)': p.saldo_acumulado,
+        })),
+        rodape: [['Saldo inicial', f.saldo_inicial], ['Entradas', f.totais.entradas], ['Saídas', f.totais.saidas], ['Saldo final', f.totais.saldo_final]],
+      },
+      {
+        nome: 'Extrato', cols: [11, 9, 22, 50, 14, 13, 14],
+        linhas: f.extrato.map((m) => ({
+          Data: dBr(m.data), Tipo: m.tipo === 'SAIDA' ? 'Saída' : 'Entrada', Categoria: m.categoria, Descrição: m.descricao,
+          Forma: (m.forma ?? '').replace(/_/g, ' '), 'Valor (R$)': m.tipo === 'SAIDA' ? -m.valor : m.valor, 'Saldo (R$)': m.saldo,
+        })),
+      },
+    ]);
+    return undefined;
+  }
+  return f;
+}));
+router.get('/caixa/categorias', h(async () => ({ saida: caixa.CATEGORIAS_SAIDA, entrada: caixa.CATEGORIAS_ENTRADA })));
+router.post('/projetos/:id/caixa', h(async (req, res) => {
+  exigirEscrita(req);
+  res.status(201);
+  return { movimento: await caixa.lancarMovimento(id(req.params.id), req.body ?? {}, ctx(req).sub) };
+}));
+router.delete('/caixa/:mid', h(async (req) => { exigirEscrita(req); return caixa.excluirMovimento(id(req.params.mid, 'movimento'), ctx(req).sub); }));
 
 // ─── v3.143.0: Boletos (Asaas) ────────────────────────────────────────────
 router.get('/asaas/status', h(async () => boletos.statusAsaas()));

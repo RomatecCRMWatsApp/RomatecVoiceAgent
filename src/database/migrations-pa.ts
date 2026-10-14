@@ -253,6 +253,27 @@ const CREATE_PA_BOLETOS = `
   ) DEFAULT CHARSET=utf8mb4
 `;
 
+// v3.147.0 — Caixa do PA: movimentos MANUAIS (saídas e entradas avulsas). As
+// entradas dos associados vêm de pa_pagamentos — não são duplicadas aqui.
+const CREATE_PA_CAIXA_MOVIMENTOS = `
+  CREATE TABLE IF NOT EXISTS pa_caixa_movimentos (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id    INT NOT NULL,
+    tipo          ENUM('ENTRADA','SAIDA') NOT NULL,
+    data          DATE NOT NULL,
+    categoria     VARCHAR(60)  NOT NULL,
+    descricao     VARCHAR(255) NOT NULL,
+    valor         DECIMAL(10,2) NOT NULL,
+    forma         VARCHAR(20)  NULL,
+    favorecido    VARCHAR(160) NULL,
+    criado_por    VARCHAR(64)  NULL,
+    criado_em     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    excluido_em   DATETIME NULL,
+    excluido_por  VARCHAR(64)  NULL,
+    INDEX idx_pa_caixa_proj (projeto_id, data)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
 // v3.143.0 — colunas novas em tabelas já criadas (ALTER idempotente: erro de
 // coluna duplicada = já aplicado).
 export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
@@ -289,6 +310,7 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_eventos', sql: CREATE_PA_EVENTOS },
   { label: 'pa_usuarios_perfil', sql: CREATE_PA_USUARIOS_PERFIL },
   { label: 'pa_boletos', sql: CREATE_PA_BOLETOS },
+  { label: 'pa_caixa_movimentos', sql: CREATE_PA_CAIXA_MOVIMENTOS },
 ];
 
 export async function runPaMigrations(): Promise<void> {
