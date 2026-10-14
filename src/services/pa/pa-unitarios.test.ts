@@ -43,7 +43,8 @@ describe('telefone E.164', () => {
   });
   it('avisa sem bloquear', () => {
     expect(normalizarTelefone('(99) 55667-3942').avisos.join()).toMatch(/não começa com 9/);
-    expect(normalizarTelefone('(91) 9 8888-7777').avisos.join()).toMatch(/DDD 91/);
+    expect(normalizarTelefone('(65) 9 9270-3619')).toEqual({ e164: '+5565992703619', avisos: [] }); // outro estado: aceito sem aviso
+    expect(normalizarTelefone('(20) 9 8888-7777').avisos.join()).toMatch(/DDD 20 não existe/);
     const dois = normalizarTelefone('(99) 9 9232-7068 / (99) 9 9193-4972');
     expect(dois.e164).toBe('+5599992327068');
     expect(dois.avisos.join()).toMatch(/2 telefones/);

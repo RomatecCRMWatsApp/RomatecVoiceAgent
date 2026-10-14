@@ -49,8 +49,10 @@ export interface TelefoneNormalizado {
   avisos: string[];
 }
 
-// DDDs da região de atuação (MA/TO/PA) — "DDD de fora" é aviso, não erro.
-const DDD_REGIAO = new Set(['99', '98', '63', '94']);
+// v3.145.1: qualquer DDD brasileiro VÁLIDO é aceito sem aviso (associado pode ter
+// número de outro estado — decisão do CEO). Aviso só para DDD que não existe.
+const DDD_VALIDOS = new Set(('11 12 13 14 15 16 17 18 19 21 22 24 27 28 31 32 33 34 35 37 38 41 42 43 44 45 46 47 48 49 51 53 54 55 '
+  + '61 62 63 64 65 66 67 68 69 71 73 74 75 77 79 81 82 83 84 85 86 87 88 89 91 92 93 94 95 96 97 98 99').split(' '));
 
 /**
  * Normaliza para E.164 (+55 DDD 9XXXXXXXX). Campo com 2 números ("a / b") usa o
@@ -74,7 +76,7 @@ export function normalizarTelefone(v: unknown): TelefoneNormalizado {
     return { e164: null, avisos };
   }
   if (d[2] !== '9') avisos.push('número não começa com 9 (fixo?)');
-  if (!DDD_REGIAO.has(d.slice(0, 2))) avisos.push(`DDD ${d.slice(0, 2)} fora da região`);
+  if (!DDD_VALIDOS.has(d.slice(0, 2))) avisos.push(`DDD ${d.slice(0, 2)} não existe — confira o número`);
   return { e164: `+55${d}`, avisos };
 }
 
