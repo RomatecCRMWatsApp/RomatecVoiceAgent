@@ -73,6 +73,7 @@
   .pchip.on{background:var(--green);color:#fff;border-color:var(--green)}
   .pchip.on b{color:var(--gold-soft)}
   /* v3.145.2: brasão no espaço vazio do canto inferior direito (depois da Rua 08 diagonal) */
+  .memo-t{text-align:justify;line-height:1.55;font-size:13px}
   .mapa-bras{position:absolute;right:3%;bottom:3%;width:16%;max-width:210px;height:auto;filter:drop-shadow(0 3px 6px rgba(0,0,0,.3));pointer-events:none}
   #mapaBox{position:relative}
   .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,.05)}
@@ -543,8 +544,110 @@ function svgMapa(lotes, d, modo){
   }
   return s + '</svg>';
 }
+// ─── v3.146.0: aba Mapa com duas visões — vila (layout + memorial) e geral (perímetro) ─
+S.mapaVisao = 'vila';
 async function rMapa(){
   const v = $('#v-mapa');
+  v.innerHTML = `<div class="row" style="margin-bottom:10px;align-items:center">
+      <div style="flex:1 1 auto"><button class="btn btn-sm ${S.mapaVisao === 'vila' ? 'btn-primary' : 'btn-ghost'}" data-visao="vila">🏘️ Mapa da vila</button>
+        <button class="btn btn-sm ${S.mapaVisao === 'geral' ? 'btn-primary' : 'btn-ghost'}" data-visao="geral">🌐 Mapa geral do PA</button></div>
+    </div><div id="mapaVilaBox"></div><div id="mapaGeralBox"></div>`;
+  v.querySelectorAll('[data-visao]').forEach((b) => b.onclick = () => { S.mapaVisao = b.dataset.visao; rMapa(); });
+  if (S.mapaVisao === 'geral') return rMapaGeral();
+  await rMapaVila();
+  rMemorialVila();
+}
+
+async function abrirPdf(caminho){
+  const janela = window.open('about:blank', '_blank');
+  try {
+    if (janela) janela.document.write('<p style="font-family:Arial;padding:20px">Gerando PDF…</p>');
+    const r = await api(caminho);
+    const url = URL.createObjectURL(await r.blob());
+    if (janela) janela.location.href = url; else window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch (e){ if (janela) janela.close(); toast(e.message, true); }
+}
+
+async function rMemorialVila(){
+  const box = document.createElement('div');
+  box.className = 'card';
+  box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">📐 Memorial descritivo dos lotes</h2>
+      <button class="btn btn-gold btn-sm" id="pdfVila" style="flex:0 0 auto">📄 PDF — Mapa + Memorial</button></div>
+    <p class="muted">Frente = lado voltado para a via; laterais vistas de quem está na via, de frente para o lote. Gerado automaticamente do croqui do layout (preliminar).</p>
+    <div class="tbl" id="memVila"><div class="empty">Calculando…</div></div>`;
+  $('#mapaVilaBox').appendChild(box);
+  $('#pdfVila').onclick = () => abrirPdf(`/projetos/${S.pid}/mapa-vila.pdf`);
+  try {
+    const { memorial } = await api(`/projetos/${S.pid}/memorial-vila`);
+    const fm = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const cel = (l) => `${fm(l.medida)} m<div class="muted">${esc(l.confrontante)}</div>`;
+    $('#memVila').innerHTML = memorial.length ? `<table><thead><tr><th>Lote</th><th>Frente</th><th>Fundos</th><th>Lateral direita</th><th>Lateral esquerda</th><th class="right">Área (m²)</th><th class="right">Perímetro (m)</th></tr></thead><tbody>
+      ${memorial.map((m) => `<tr><td><b>${esc(m.numero)}</b>${m.institucional ? '<div class="muted">institucional</div>' : ''}</td><td>${cel(m.frente)}</td><td>${cel(m.fundos)}</td><td>${cel(m.direita)}</td><td>${cel(m.esquerda)}</td><td class="right">${fm(m.area_m2)}</td><td class="right">${fm(m.perimetro_m)}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Sem croqui dos lotes.</div>';
+  } catch (e){ $('#memVila').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+function svgPerimetroTela(p){
+  const Es = p.vertices.map((x) => x.E), Ns = p.vertices.map((x) => x.N);
+  const minE = Math.min(...Es), maxE = Math.max(...Es), minN = Math.min(...Ns), maxN = Math.max(...Ns);
+  const span = Math.max(maxE - minE, maxN - minN) || 1, pad = span * 0.12;
+  const x0 = minE - pad, y0 = -(maxN + pad), W = maxE - minE + pad * 2, H = maxN - minN + pad * 2, fs = span * 0.025, sw = span * 0.003;
+  const cx = Es.reduce((s, x) => s + x, 0) / Es.length, cy = -Ns.reduce((s, x) => s + x, 0) / Ns.length;
+  return `<svg viewBox="${x0} ${y0} ${W} ${H}" style="width:100%;max-height:560px;display:block;background:#FBFAF5;border:1px solid var(--line);border-radius:10px">
+    <polygon points="${p.vertices.map((x) => `${x.E},${-x.N}`).join(' ')}" fill="#B7D99A" fill-opacity=".55" stroke="#0C3320" stroke-width="${sw * 2}"/>
+    ${p.vertices.map((x) => { const dx = x.E - cx, dy = -x.N - cy, L = Math.hypot(dx, dy) || 1; return `<circle cx="${x.E}" cy="${-x.N}" r="${sw * 3}" fill="#B3261E"/><text x="${x.E + dx / L * fs * 1.2}" y="${-x.N + dy / L * fs * 1.2}" font-size="${fs * 0.85}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#B3261E">${esc(x.nome)}</text>`; }).join('')}
+    <text x="${cx}" y="${cy}" font-size="${fs * 1.3}" font-weight="800" text-anchor="middle" fill="#0C3320">${Number(p.area_ha).toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ha</text>
+    <g transform="translate(${x0 + W - pad * 0.55},${y0 + pad * 0.6})"><polygon points="0,${-fs * 1.6} ${fs * 0.7},${fs * 0.6} 0,${fs * 0.2} ${-fs * 0.7},${fs * 0.6}" fill="#0C3320"/><text y="${-fs * 1.9}" font-size="${fs}" font-weight="800" text-anchor="middle" fill="#0C3320">N</text></g></svg>`;
+}
+const dms = (g) => { const t = Math.round(g * 3600); return `${Math.floor(t / 3600)}°${String(Math.floor(t % 3600 / 60)).padStart(2, '0')}'${String(t % 60).padStart(2, '0')}"`; };
+
+async function rMapaGeral(){
+  const box = $('#mapaGeralBox');
+  box.innerHTML = '<div class="card empty">Carregando perímetro…</div>';
+  try {
+    const { perimetro: p } = await api(`/projetos/${S.pid}/perimetro`);
+    const fm = (v, d = 2) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+    box.innerHTML = `
+      ${podeEscrever() ? `<div class="card"><h2>${p ? '🔄 Atualizar perímetro' : '📤 Enviar perímetro do PA'}</h2>
+        <p class="muted">Arquivo <b>TXT/CSV</b> com uma linha por vértice — <code>nome E N</code> (UTM SIRGAS 2000) ou <code>lat lon</code> em graus decimais; separador espaço, tab, “;” ou “,”; cabeçalho opcional (Ponto;E;N…). Ou <b>DXF</b> com a polilinha fechada do perímetro (coordenadas UTM). A cada novo envio o mapa geral e o memorial são refeitos automaticamente.</p>
+        <div class="row"><div style="flex:2 1 260px"><label for="perArq">Arquivo</label><input type="file" id="perArq" accept=".txt,.csv,.dxf,.xyz,.dat"></div>
+          <div style="flex:0 1 140px"><label for="perFuso">Fuso UTM</label><select class="f" id="perFuso">${[21, 22, 23, 24, 25].map((z) => `<option ${z === (p ? p.fuso : 23) ? 'selected' : ''}>${z}</option>`).join('')}</select></div>
+          <div style="flex:0 1 140px"><label for="perHem">Hemisfério</label><select class="f" id="perHem"><option value="S">Sul</option><option value="N">Norte</option></select></div>
+          <div style="flex:0 0 auto"><button class="btn btn-primary" id="perEnviar">Processar</button></div></div>
+        <div class="muted" style="margin-top:4px">Fuso usado só para coordenadas UTM; em lat/lon o fuso é calculado. Açailândia/MA = fuso 23 Sul.</div></div>` : ''}
+      ${p ? `<div class="kpis2">
+          <div class="k2 ok"><div class="k2i">📐</div><div><div class="l">Área</div><div class="v">${fm(p.area_ha, 4)} ha</div><div class="muted">${fm(p.area_m2)} m²</div></div></div>
+          <div class="k2"><div class="k2i">📏</div><div><div class="l">Perímetro</div><div class="v">${fm(p.perimetro_m)} m</div><div class="muted">${p.vertices.length} vértices</div></div></div>
+          <div class="k2"><div class="k2i">🌐</div><div><div class="l">Referência</div><div class="v" style="font-size:16px">${esc(p.datum)}</div><div class="muted">UTM fuso ${p.fuso}${p.hemisferio === 'S' ? ' Sul' : ' Norte'} · ${esc(p.origem.formato)} (${esc(p.origem.sistema_entrada === 'UTM' ? 'UTM' : 'lat/lon')})</div></div></div>
+          <div class="k2"><div class="k2i">🗓️</div><div><div class="l">Atualizado</div><div class="v" style="font-size:16px">${p.atualizado_em ? new Date(p.atualizado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'}</div><div class="muted">${esc(p.origem.arquivo || '')}</div></div></div>
+        </div>
+        <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">🌐 Mapa geral do PA</h2>
+            <div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="pdfGeral">📄 PDF — Mapa geral + Memorial</button>${S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger btn-sm" id="perRemover">Remover</button>' : ''}</div></div>
+          <div style="position:relative;margin-top:8px">${svgPerimetroTela(p)}${S.marca && S.marca.brasao ? `<img class="mapa-bras" src="${esc(S.marca.brasao)}" alt="Brasão do PA">` : ''}</div></div>
+        <div class="card"><h2>📜 Memorial descritivo do perímetro</h2>
+          <p class="memo-t">Inicia-se a descrição deste perímetro no vértice <b>${esc(p.vertices[0].nome)}</b>, de coordenadas N ${fm(p.vertices[0].N, 3)} m e E ${fm(p.vertices[0].E, 3)} m; ${p.segmentos.map((s, i) => { const w = p.vertices[(i + 1) % p.vertices.length]; return `deste segue com azimute de ${dms(s.azimute)} e distância de ${fm(s.distancia)} m até o vértice <b>${esc(s.para)}</b>, de coordenadas N ${fm(w.N, 3)} m e E ${fm(w.E, 3)} m`; }).join('; ')}, ponto inicial da descrição deste perímetro.</p>
+          <div class="tbl"><table><thead><tr><th>Vértice</th><th class="right">E (m)</th><th class="right">N (m)</th><th class="right">Lat</th><th class="right">Lon</th><th>Lado</th><th class="right">Azimute</th><th class="right">Distância (m)</th></tr></thead><tbody>
+            ${p.vertices.map((x, i) => { const s = p.segmentos[i]; return `<tr><td><b>${esc(x.nome)}</b></td><td class="right">${fm(x.E, 3)}</td><td class="right">${fm(x.N, 3)}</td><td class="right">${x.lat.toFixed(7)}</td><td class="right">${x.lon.toFixed(7)}</td><td>${esc(s.de)} → ${esc(s.para)}</td><td class="right">${dms(s.azimute)}</td><td class="right">${fm(s.distancia)}</td></tr>`; }).join('')}</tbody></table></div></div>`
+      : '<div class="card empty">Nenhum perímetro enviado ainda. Envie o arquivo de coordenadas do PA para gerar o mapa geral e o memorial descritivo.</div>'}`;
+    if ($('#perEnviar')) $('#perEnviar').onclick = async () => {
+      const f = $('#perArq').files[0];
+      if (!f) return toast('Escolha o arquivo TXT, CSV ou DXF', true);
+      const fd = new FormData(); fd.append('arquivo', f); fd.append('fuso', $('#perFuso').value); fd.append('hemisferio', $('#perHem').value);
+      $('#perEnviar').disabled = true;
+      try { const r = await api(`/projetos/${S.pid}/perimetro`, { method: 'POST', body: fd }); toast(`Perímetro processado: ${r.perimetro.vertices.length} vértices, ${Number(r.perimetro.area_ha).toLocaleString('pt-BR')} ha`); rMapaGeral(); }
+      catch (e){ toast(e.message, true); $('#perEnviar').disabled = false; }
+    };
+    if ($('#pdfGeral')) $('#pdfGeral').onclick = () => abrirPdf(`/projetos/${S.pid}/mapa-geral.pdf`);
+    if ($('#perRemover')) $('#perRemover').onclick = async () => {
+      if (!confirm('Remover o perímetro do PA? O mapa geral e o memorial deixam de existir até um novo envio.')) return;
+      try { await api(`/projetos/${S.pid}/perimetro`, { method: 'DELETE' }); toast('Perímetro removido'); rMapaGeral(); } catch (e){ toast(e.message, true); }
+    };
+  } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
+}
+
+async function rMapaVila(){
+  const v = $('#mapaVilaBox');
   v.innerHTML = '<div class="card empty">Carregando mapa…</div>';
   try {
     const [lotes, d] = await Promise.all([carregarLotes(), carregarDesenho()]);

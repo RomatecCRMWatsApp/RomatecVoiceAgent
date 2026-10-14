@@ -270,6 +270,8 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_associados.asaas_ambiente', sql: 'ALTER TABLE pa_associados ADD COLUMN asaas_ambiente VARCHAR(10) NULL' },
   // Tudo emitido até aqui foi no sandbox (única chave usada antes da produção).
   { label: 'asaas_ambiente legado', sql: "UPDATE pa_associados SET asaas_ambiente = 'sandbox' WHERE asaas_customer_id IS NOT NULL AND asaas_ambiente IS NULL" },
+  // v3.146.0: perímetro geral do PA (vértices UTM/geográficos, área, memorial).
+  { label: 'pa_projetos.perimetro_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN perimetro_json JSON NULL' },
   // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },
 ];

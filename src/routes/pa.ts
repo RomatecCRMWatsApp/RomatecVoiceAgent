@@ -25,6 +25,7 @@ import { marcaUrls } from '../services/pa/marcaProjeto';
 import * as boletos from '../services/pa/paBoletos';
 import * as waPa from '../services/pa/paWhatsapp';
 import * as boletoPdf from '../services/pa/paBoletoPdf';
+import * as mapas from '../services/pa/paMapas';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -119,6 +120,34 @@ router.get('/projetos/:id/desenho', h(async (req) => {
   const p = await repo.buscarProjeto(id(req.params.id));
   return { desenho: desenhoDoProjeto(p.codigo, p.layout_json), marca: marcaUrls(p.codigo) };
 }));
+
+// ─── v3.146.0: mapas técnicos (vila + memorial; perímetro geral + memorial) ──
+function enviarPdf(res: Response, r: { pdf: Buffer; nome: string }) {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${r.nome}"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.end(r.pdf);
+}
+function textoDoArquivo(buf: Buffer): string {
+  const utf = buf.toString('utf8');
+  // TXT de coletora/planilha costuma vir em Latin-1: se o UTF-8 quebrar, relê.
+  return utf.includes('�') ? buf.toString('latin1') : utf;
+}
+router.get('/projetos/:id/memorial-vila', h(async (req) => ({ memorial: await mapas.memorialDoProjeto(id(req.params.id)) })));
+router.get('/projetos/:id/mapa-vila.pdf', h(async (req, res) => { enviarPdf(res, await mapas.pdfMapaVila(id(req.params.id))); return undefined; }));
+router.get('/projetos/:id/perimetro', h(async (req) => ({ perimetro: await mapas.buscarPerimetro(id(req.params.id)) })));
+router.post('/projetos/:id/perimetro', uploadMem.single('arquivo'), h(async (req) => {
+  exigirEscrita(req);
+  const f = req.file as Express.Multer.File | undefined;
+  if (!f?.buffer?.length) throw new PaErro('ARQUIVO_VAZIO', 'Envie o arquivo do perímetro (TXT, CSV ou DXF) no campo "arquivo"', 400);
+  if (!/\.(txt|csv|dxf|xyz|dat)$/i.test(f.originalname)) throw new PaErro('TIPO_ARQUIVO', 'Formatos aceitos: TXT, CSV ou DXF', 415);
+  const fuso = req.body?.fuso ? Number(req.body.fuso) : null;
+  if (fuso != null && (!Number.isInteger(fuso) || fuso < 18 || fuso > 25)) throw new PaErro('CAMPO_INVALIDO', 'Fuso UTM inválido para o Brasil (18 a 25)', 400);
+  const hem = req.body?.hemisferio === 'N' ? 'N' : 'S';
+  return { perimetro: await mapas.salvarPerimetro(id(req.params.id), { nome: f.originalname, conteudo: textoDoArquivo(f.buffer) }, { fuso, hemisferio: hem }, ctx(req).sub) };
+}));
+router.delete('/projetos/:id/perimetro', h(async (req) => { exigirAdmin(req); await mapas.removerPerimetro(id(req.params.id), ctx(req).sub); return { ok: true }; }));
+router.get('/projetos/:id/mapa-geral.pdf', h(async (req, res) => { enviarPdf(res, await mapas.pdfMapaGeral(id(req.params.id))); return undefined; }));
 
 // ─── Lotes ────────────────────────────────────────────────────────────────
 router.get('/projetos/:id/lotes', h(async (req) => ({ lotes: await repo.listarLotes(id(req.params.id)) })));
