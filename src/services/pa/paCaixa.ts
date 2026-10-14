@@ -5,6 +5,7 @@ import { PaErro } from './erros';
 import { pool, rows, one, exec, num, isoDate, hojeBrasil, registrarEvento } from './paDb';
 import { buscarProjeto, mapLancamento } from './paRepo';
 import { centavos } from './regrasFinanceiras';
+import { configAsaas } from './asaas';
 
 // ─── Extrato por associado ────────────────────────────────────────────────
 export type Situacao = 'QUITADO' | 'EM_ATRASO' | 'EM_DIA' | 'SEM_PLANO';
@@ -17,7 +18,9 @@ export function situacaoAssociado(t: { contratado: number; em_aberto: number; ve
 
 const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'À vista', BOLETO: 'Parcela', AJUSTE: 'Ajuste' };
 
-export interface ParcelaExtrato { lancamento_id: number; tipo: string; parcela: number; rotulo: string; valor: number; recebido: number; saldo: number; vencimento: string | null; status: string }
+/** v3.147.2: boleto do lançamento (último não cancelado do ambiente Asaas atual) e quando foi enviado pelo WhatsApp. */
+export interface BoletoEnvio { status: string; gerado_em: string | null; enviado_em: string | null }
+export interface ParcelaExtrato { lancamento_id: number; tipo: string; parcela: number; rotulo: string; valor: number; recebido: number; saldo: number; vencimento: string | null; status: string; boleto?: BoletoEnvio | null }
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 /**
@@ -33,12 +36,14 @@ export function resumoParcelas(ps: ParcelaExtrato[]) {
   return {
     sinal: entrada ? {
       tipo: entrada.tipo, valor: entrada.valor, recebido: entrada.recebido, falta: entrada.saldo,
-      estado: entrada.saldo <= 0 ? 'PAGO' : entrada.recebido > 0 ? 'PARCIAL' : 'PENDENTE',
+      estado: entrada.saldo <= 0 ? 'PAGO' : entrada.recebido > 0 ? 'PARCIAL' : 'PENDENTE', boleto: entrada.boleto ?? null,
     } : null,
     divisao,
     qtd_boletos: boletos.length,
     parciais: ps.filter((p) => p.recebido > 0 && p.saldo > 0).length,
-    boletos: boletos.map((b) => ({ parcela: b.parcela, vencimento: b.vencimento, valor: b.valor, recebido: b.recebido, falta: b.saldo, status: b.status })),
+    boletos: boletos.map((b) => ({ parcela: b.parcela, vencimento: b.vencimento, valor: b.valor, recebido: b.recebido, falta: b.saldo, status: b.status, boleto: b.boleto ?? null })),
+    // Envio: quantos boletos em aberto já foram gerados e quantos já foram enviados.
+    envio: (() => { const abertos = ps.filter((x) => x.saldo > 0); const ger = abertos.filter((x) => x.boleto); return { em_aberto: abertos.length, gerados: ger.length, enviados: ger.filter((x) => x.boleto!.enviado_em).length }; })(),
   };
 }
 
@@ -46,7 +51,7 @@ export async function extratoAssociados(projetoId: number) {
   const projeto = await buscarProjeto(projetoId);
   const hoje = hojeBrasil();
   const assoc = await rows(pool, `
-    SELECT a.id, a.numero, a.nome, a.telefone, lt.numero AS lote
+    SELECT a.id, a.numero, a.nome, a.telefone, a.whatsapp_status, lt.numero AS lote
     FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id
     WHERE a.projeto_id = ? AND a.ativo = 1 ORDER BY CAST(lt.numero AS UNSIGNED), lt.numero`, [projetoId]);
   const lancs = await rows(pool, `
@@ -57,6 +62,11 @@ export async function extratoAssociados(projetoId: number) {
     SELECT l.associado_id, DATE_FORMAT(MAX(p.pago_em), '%Y-%m-%d') AS ultimo, COUNT(DISTINCT p.id) AS n
     FROM pa_pagamento_rateio r JOIN pa_pagamentos p ON p.id = r.pagamento_id JOIN pa_lancamentos l ON l.id = r.lancamento_id
     WHERE p.projeto_id = ? GROUP BY l.associado_id`, [projetoId]);
+  const bols = await rows(pool, `
+    SELECT lancamento_id, status, DATE_FORMAT(criado_em, '%Y-%m-%d %H:%i') AS gerado_em, DATE_FORMAT(enviado_em, '%Y-%m-%d %H:%i') AS enviado_em
+    FROM pa_boletos WHERE projeto_id = ? AND ambiente = ? AND status <> 'CANCELADO' ORDER BY id DESC`, [projetoId, configAsaas()?.ambiente ?? 'sandbox']);
+  const bolPor = new Map<number, BoletoEnvio>();
+  for (const b of bols) if (!bolPor.has(num(b.lancamento_id))) bolPor.set(num(b.lancamento_id), { status: String(b.status), gerado_em: (b.gerado_em as string) ?? null, enviado_em: (b.enviado_em as string) ?? null });
   const ultPor = new Map(ultimos.map((u) => [num(u.associado_id), { data: (u.ultimo as string) ?? null, n: num(u.n) }]));
   const porAssoc = new Map<number, ReturnType<typeof mapLancamento>[]>();
   for (const r of lancs) {
@@ -76,10 +86,10 @@ export async function extratoAssociados(projetoId: number) {
     const ult = ultPor.get(num(a.id));
     const parcelas: ParcelaExtrato[] = ls.map((l) => ({
       lancamento_id: l.id, tipo: l.tipo, parcela: l.parcela, rotulo: `${ROTULO[l.tipo] ?? l.tipo}${l.tipo === 'BOLETO' ? ` ${l.parcela}` : ''}`,
-      valor: l.valor, recebido: l.valor_recebido, saldo: l.saldo, vencimento: l.vencimento, status: l.status_efetivo,
+      valor: l.valor, recebido: l.valor_recebido, saldo: l.saldo, vencimento: l.vencimento, status: l.status_efetivo, boleto: bolPor.get(l.id) ?? null,
     }));
     return {
-      associado_id: num(a.id), numero: String(a.numero), nome: String(a.nome), lote: String(a.lote), telefone: (a.telefone as string) ?? null,
+      associado_id: num(a.id), numero: String(a.numero), nome: String(a.nome), lote: String(a.lote), telefone: (a.telefone as string) ?? null, whatsapp_status: String(a.whatsapp_status ?? 'NAO_VERIFICADO'),
       ...t, a_vencer: centavos(t.em_aberto - t.vencido),
       pct_pago: t.contratado > 0 ? Math.round((t.recebido / t.contratado) * 1000) / 10 : 0,
       situacao: situacaoAssociado(t),
@@ -96,6 +106,7 @@ export async function extratoAssociados(projetoId: number) {
       associados: lista.length, contratado: soma('contratado'), recebido: soma('recebido'), em_aberto: soma('em_aberto'),
       vencido: soma('vencido'), a_vencer: soma('a_vencer'),
       quitados: cont('QUITADO'), em_dia: cont('EM_DIA'), em_atraso: cont('EM_ATRASO'), sem_plano: cont('SEM_PLANO'), com_parcial: lista.filter((x) => x.parciais > 0).length,
+      sem_boleto: lista.filter((x) => x.envio.gerados < x.envio.em_aberto).length, nao_enviados: lista.filter((x) => x.envio.enviados < x.envio.gerados).length,
     },
     lista,
   };
