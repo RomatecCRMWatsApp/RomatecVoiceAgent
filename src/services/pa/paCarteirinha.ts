@@ -111,7 +111,7 @@ async function cartao(p: Projeto, a: DadosCarteirinha, img: { brasao: string; em
         <p>Este cartão identifica o(a) portador(a) como associado(a) do <b>${esc(p.nome)}</b>. É pessoal e intransferível.</p>
         ${a.conjuge ? `<p class="mini"><b>Cônjuge:</b> ${esc(a.conjuge)}</p>` : ''}
         ${a.telefone ? `<p class="mini"><b>Telefone:</b> ${esc(a.telefone)}</p>` : ''}
-        <div class="ass"><div class="linha"></div><div class="mini">${esc(p.presidente_nome || 'Presidente da Associação')}<br>Presidente da Associação</div></div>
+        <div class="ass"><div class="linha"></div><div class="mini">${p.presidente_nome ? `${esc(p.presidente_nome)}<br>` : ''}Presidente da Associação</div></div>
       </div>
       <div class="qr"><img src="${qr}"><div class="mini c">Emitida em ${esc(emissao)}</div></div>
       <div class="vrod">${img.logo ? `<img src="${img.logo}">` : ''}<span>Romatec Consultoria Total · Açailândia/MA</span></div>
@@ -160,7 +160,8 @@ export async function htmlCarteirinhas(p: Projeto, itens: DadosCarteirinha[], em
     .c { text-align: center; margin-top: .8mm; }
     .vrod { position: absolute; left: 0; right: 0; bottom: 0; height: 7mm; border-top: 0.6mm solid #C9A84C; display: flex; align-items: center; gap: 2mm; padding: 0 3.5mm; background: #fff; font-size: 5.6pt; color: #0C3320; font-weight: 700; }
     .vrod img { height: 5mm; width: auto; }
-  </style></head><body>${paginas.join('')}</body></html>`;
+    ${modo === 'tela' ? 'html,body{overflow-x:hidden}.par{flex-direction:column;gap:4mm}.dobra{display:none}.pag{gap:7mm}#cx{transform-origin:0 0;width:max-content}' : ''}
+  </style></head><body>${modo === 'tela' ? `<div id="cx">${paginas.join('')}</div><script>(function(){var c=document.getElementById('cx');function f(){c.style.transform='';var w=document.documentElement.clientWidth-28,s=Math.min(1,w/c.scrollWidth);c.style.transform='scale('+s+')';document.body.style.height=(c.scrollHeight*s+28)+'px';}window.addEventListener('resize',f);window.addEventListener('load',f);f();})();</script>` : paginas.join('')}</body></html>`;
 }
 
 export async function pdfCarteirinhas(projetoId: number, ids: number[] | null, usuario: string | null): Promise<{ pdf: Buffer; nome: string; quantidade: number }> {
