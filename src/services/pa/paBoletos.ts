@@ -218,6 +218,16 @@ export async function sincronizarBoletos(projetoId: number, usuario: string | nu
   return out;
 }
 
+/** v3.145.4: limpa a marcação "enviado" dos boletos ativos dos lançamentos informados (ou do projeto todo). */
+export async function zerarEnviados(projetoId: number, lancamentoIds: number[] | null, usuario: string | null) {
+  const ids = (lancamentoIds ?? []).filter((n) => Number.isInteger(n) && n > 0);
+  const r = ids.length
+    ? await exec(pool, `UPDATE pa_boletos SET enviado_em = NULL WHERE projeto_id = ? AND lancamento_id IN (${ids.map(() => '?').join(',')}) AND enviado_em IS NOT NULL`, [projetoId, ...ids])
+    : await exec(pool, 'UPDATE pa_boletos SET enviado_em = NULL WHERE projeto_id = ? AND enviado_em IS NOT NULL', [projetoId]);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'ENVIOS_ZERADOS', dados: { boletos: r.affectedRows, lancamentos: ids.length || 'todos' } });
+  return { zerados: r.affectedRows };
+}
+
 export async function marcarEnviado(id: number) {
   await exec(pool, 'UPDATE pa_boletos SET enviado_em = NOW() WHERE id = ?', [id]);
 }

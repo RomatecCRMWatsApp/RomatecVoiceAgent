@@ -369,3 +369,42 @@ export async function cobranca(projetoId: number, ateIso: string | null) {
     lista,
   };
 }
+
+/**
+ * v3.145.4: mensagem de cobrança de UM associado só com os lançamentos escolhidos
+ * (ex.: só a Parcela 1). Usada pelo envio seletivo pelo WhatsApp do sistema.
+ */
+export async function mensagemParaLancamentos(aid: number, lancamentoIds: number[]) {
+  const ids = [...new Set(lancamentoIds.filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) throw new PaErro('NADA_SELECIONADO', 'Selecione ao menos uma parcela para enviar', 400);
+  const a = await one(pool, 'SELECT a.id, a.nome, a.projeto_id, lt.numero AS lote FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id WHERE a.id = ?', [aid]);
+  if (!a) throw new PaErro('ASSOCIADO_NAO_ENCONTRADO', 'Associado não encontrado', 404);
+  const projeto = await buscarProjeto(num(a.projeto_id));
+  const ls = (await rows(pool, `
+    SELECT * FROM pa_lancamentos WHERE associado_id = ? AND id IN (${ids.map(() => '?').join(',')}) AND status NOT IN ('PAGO','CANCELADO')
+    ORDER BY FIELD(tipo,'SINAL','AVISTA','BOLETO','AJUSTE'), parcela`, [aid, ...ids])).map((r) => mapLancamento(r)).filter((l) => l.saldo > 0);
+  if (!ls.length) throw new PaErro('SEM_SALDO', 'As parcelas selecionadas já estão pagas', 409);
+  const bs = await rows(pool, `
+    SELECT id, lancamento_id, status, url_boleto, linha_digitavel, pix_copia_cola, enviado_em, token_publico FROM pa_boletos
+    WHERE lancamento_id IN (${ls.map(() => '?').join(',')}) AND status IN ('PENDENTE','VENCIDO') AND ambiente = ?`, [...ls.map((l) => l.id), configAsaas()?.ambiente ?? 'sandbox']);
+  const bol = new Map<number, BoletoNaCobranca>(bs.map((b) => [num(b.lancamento_id), {
+    id: num(b.id), status: String(b.status), url_boleto: (b.url_boleto as string) ?? null, url_romatec: urlBoletoRomatec((b.token_publico as string) ?? null),
+    linha_digitavel: (b.linha_digitavel as string) ?? null, pix_copia_cola: (b.pix_copia_cola as string) ?? null, enviado_em: isoDateTime(b.enviado_em),
+  }]));
+  const itens = ls.map((l) => ({
+    rotulo: `${ROTULO[l.tipo] ?? l.tipo}${l.tipo === 'BOLETO' ? ` ${l.parcela}` : ''}${l.status === 'PARCIAL' ? ' (saldo)' : ''}`,
+    saldo: l.saldo, vencimento: l.vencimento, boleto: bol.get(l.id) ?? null,
+  }));
+  const total = centavos(itens.reduce((s, i) => s + i.saldo, 0));
+  let pix: string | null = null;
+  try {
+    pix = projeto.pix_chave && projeto.pix_favorecido && projeto.pix_cidade
+      ? gerarPixCopiaECola({ chave: projeto.pix_chave, favorecido: projeto.pix_favorecido, cidade: projeto.pix_cidade, valor: total })
+      : null;
+  } catch { pix = null; }
+  return {
+    mensagem: mensagemCobranca(projeto, String(a.nome), String(a.lote), itens, total, pix),
+    boleto_ids: itens.filter((i) => i.boleto).map((i) => i.boleto!.id),
+    total, itens: itens.length,
+  };
+}

@@ -312,6 +312,23 @@ router.post('/associados/:aid/whatsapp/enviar', h(async (req) => {
   return r;
 }));
 
+router.post('/projetos/:id/boletos/zerar-envio', h(async (req) => {
+  exigirEscrita(req);
+  const ids = Array.isArray(req.body?.lancamento_ids) ? req.body.lancamento_ids.map(Number) : null;
+  return boletos.zerarEnviados(id(req.params.id), ids, ctx(req).sub);
+}));
+// v3.145.4: cobrança seletiva — só as parcelas marcadas. previa=true devolve o texto sem enviar.
+router.post('/associados/:aid/whatsapp/cobranca', h(async (req) => {
+  const aid = id(req.params.aid, 'associado');
+  const ids = Array.isArray(req.body?.lancamento_ids) ? req.body.lancamento_ids.map(Number) : [];
+  const m = await fin.mensagemParaLancamentos(aid, ids);
+  if (req.body?.previa === true) return m;
+  exigirEscrita(req);
+  const r = await waPa.enviarWhatsAppAssociado(aid, m.mensagem, 'COBRANCA', ctx(req).sub);
+  for (const b of m.boleto_ids) await boletos.marcarEnviado(b);
+  return { ...r, total: m.total, itens: m.itens };
+}));
+
 // ─── Importação / exportação ──────────────────────────────────────────────
 // seed (JSON) obrigatório; acervo (ZIP) opcional — pode vir depois, num segundo
 // envio com o mesmo seed (idempotente: só carrega os arquivos que faltam).

@@ -66,6 +66,8 @@
   .mini-k b{display:block;font-size:22px;color:var(--green)}
   .mini-k span{font-size:11px;color:var(--muted)}
   .pchips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
+  .citem{display:block;font-size:13px;margin:2px 0;cursor:pointer}
+  .citem input{margin-right:4px;vertical-align:middle}
   .pchip{border:1px solid var(--line);background:#fff;border-radius:16px;padding:5px 11px;font-size:12px;cursor:pointer;font-family:inherit;color:var(--ink)}
   .pchip b{color:var(--red);margin-left:3px}
   .pchip.on{background:var(--green);color:#fff;border-color:var(--green)}
@@ -823,33 +825,76 @@ async function rFinanceiro(){
   const cob = async () => {
     try {
       const c = await api(`/projetos/${S.pid}/cobranca?ate=${encodeURIComponent($('#cAte').value)}`);
+      // v3.145.4: envio seletivo — escolhe QUAIS parcelas vão e PARA QUEM.
       const validos = c.lista.filter((g) => g.whatsapp_status === 'VALIDO');
-      $('#cobBox').innerHTML = c.lista.length ? `<div class="row" style="margin-bottom:6px;align-items:center"><span class="muted" style="flex:1 1 auto">${c.associados} associado(s) · total ${brl(c.total)} até ${dbr(c.ate)}</span>
-          ${podeEscrever() && validos.length ? `<button class="btn btn-primary btn-sm" id="envTodos" style="flex:0 0 auto">📤 Enviar a todos pelo sistema (${validos.length})</button>` : ''}</div>
+      const casaFiltro = (x, f) => !f || (f === 'P1' ? x.tipo === 'BOLETO' && x.parcela === 1 : f === 'P2' ? x.tipo === 'BOLETO' && x.parcela === 2 : f === 'SINAL' ? (x.tipo === 'SINAL' || x.tipo === 'AVISTA') : true);
+      $('#cobBox').innerHTML = c.lista.length ? `<div class="row" style="margin-bottom:6px;align-items:end">
+          <span class="muted" style="flex:1 1 220px">${c.associados} associado(s) · total ${brl(c.total)} até ${dbr(c.ate)}</span>
+          ${podeEscrever() ? `<div style="flex:0 1 230px"><label for="cQuais">Enviar quais parcelas</label><select class="f" id="cQuais">
+              <option value="">Todas as pendências listadas</option><option value="P1">Só Parcela 1</option><option value="P2">Só Parcela 2</option><option value="SINAL">Só Sinal / à vista</option></select></div>
+            <div style="flex:0 0 auto"><label class="citem" style="margin-bottom:4px"><input type="checkbox" id="cPular" checked> Pular quem já recebeu</label>
+              <button class="btn btn-primary btn-sm" id="envSel">📤 Enviar selecionados (<span id="envN">0</span>)</button>
+              <button class="btn btn-ghost btn-sm" id="envZerar" title="Limpa a marcação de enviado dos associados marcados">↺ Zerar "enviado"</button></div>` : ''}</div>
         <div id="envProg"></div>
-        <table><thead><tr><th>Lote</th><th>Associado</th><th>Pendências</th><th class="right">Total</th><th></th></tr></thead><tbody>
-        ${c.lista.map((g, i) => `<tr><td><b>${esc(g.lote)}</b></td><td>${esc(g.nome)}<div class="muted">${esc(g.telefone || 'sem telefone')} ${chip(g.whatsapp_status, WA_TXT[g.whatsapp_status])}</div></td>
-          <td>${g.itens.map((x) => `${esc(x.rotulo)} ${brl(x.saldo)} · ${dbr(x.vencimento)} ${chip(x.status)}${x.boleto ? ' ' + chip('PAGO', '🧾 boleto') + (x.boleto.enviado_em ? ' <span class="muted">enviado ' + dbr(x.boleto.enviado_em) + '</span>' : '') : ''}`).join('<br>')}</td><td class="right nowrap"><b>${brl(g.total)}</b></td>
-          <td class="nowrap">${podeEscrever() && g.whatsapp_status === 'VALIDO' ? `<button class="btn btn-primary btn-sm" data-env="${i}">📤 Sistema</button>` : ''}
+        <table><thead><tr>${podeEscrever() ? '<th><input type="checkbox" id="cTodos" title="Marcar todos com WhatsApp válido"></th>' : ''}<th>Lote</th><th>Associado</th><th>Pendências (marque o que vai na mensagem)</th><th class="right">Total</th><th></th></tr></thead><tbody>
+        ${c.lista.map((g, i) => `<tr data-g="${i}">${podeEscrever() ? `<td><input type="checkbox" class="cAssoc" data-g="${i}" ${g.whatsapp_status === 'VALIDO' ? 'checked' : 'disabled title="Sem WhatsApp válido"'}></td>` : ''}
+          <td><b>${esc(g.lote)}</b></td><td>${esc(g.nome)}<div class="muted">${esc(g.telefone || 'sem telefone')} ${chip(g.whatsapp_status, WA_TXT[g.whatsapp_status])}</div></td>
+          <td>${g.itens.map((x) => `<label class="citem"><input type="checkbox" class="cItem" data-g="${i}" data-l="${x.lancamento_id}" data-tipo="${esc(x.tipo)}" data-parc="${x.parcela}" checked> ${esc(x.rotulo)} ${brl(x.saldo)} · ${dbr(x.vencimento)} ${chip(x.status)}${x.boleto ? ' ' + chip('PAGO', '🧾 boleto') + (x.boleto.enviado_em ? ' <span class="muted">enviado ' + dbr(x.boleto.enviado_em) + '</span>' : '') : ''}</label>`).join('')}</td>
+          <td class="right nowrap"><b>${brl(g.total)}</b></td>
+          <td class="nowrap">${podeEscrever() && g.whatsapp_status === 'VALIDO' ? `<button class="btn btn-primary btn-sm" data-env="${i}">${g.itens.some((x) => x.boleto && x.boleto.enviado_em) ? '↻ Reenviar' : '📤 Sistema'}</button>` : ''}
             ${g.whatsapp_url ? `<a class="btn btn-gold btn-sm" href="${esc(g.whatsapp_url)}" target="_blank" rel="noopener">WhatsApp</a>` : ''} <button class="btn btn-ghost btn-sm" data-pix="${i}">Pix</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nada em aberto até essa data. 🎉</div>';
-      const enviar = async (g) => api(`/associados/${g.associado_id}/whatsapp/enviar`, { json: { mensagem: g.mensagem, tipo: 'COBRANCA', boleto_ids: g.itens.filter((x) => x.boleto).map((x) => x.boleto.id) } });
-      $('#cobBox').querySelectorAll('[data-env]').forEach((b) => b.onclick = async () => {
-        const g = c.lista[Number(b.dataset.env)];
-        if (!confirm(`Enviar a cobrança para ${g.nome} pelo WhatsApp do sistema?\n\n${g.mensagem}`)) return;
-        b.disabled = true;
-        try { await enviar(g); toast('Enviado para ' + g.nome); b.textContent = '✓ Enviado'; } catch (e){ toast(e.message, true); b.disabled = false; }
+      const box = $('#cobBox');
+      const idsDe = (i) => [...box.querySelectorAll(`.cItem[data-g="${i}"]`)].filter((x) => x.checked).map((x) => Number(x.dataset.l));
+      const contar = () => { const n = [...box.querySelectorAll('.cAssoc')].filter((x) => x.checked && !x.disabled && idsDe(x.dataset.g).length).length; if ($('#envN')) $('#envN').textContent = n; };
+      const aplicarQuais = () => {
+        const f = $('#cQuais') ? $('#cQuais').value : '';
+        box.querySelectorAll('.cItem').forEach((x) => { x.checked = casaFiltro({ tipo: x.dataset.tipo, parcela: Number(x.dataset.parc) }, f); });
+        contar();
+      };
+      box.querySelectorAll('.cItem, .cAssoc').forEach((x) => x.onchange = contar);
+      if ($('#cQuais')) $('#cQuais').onchange = aplicarQuais;
+      if ($('#cTodos')) { $('#cTodos').checked = true; $('#cTodos').onchange = () => { box.querySelectorAll('.cAssoc:not([disabled])').forEach((x) => { x.checked = $('#cTodos').checked; }); contar(); }; }
+      contar();
+      const previa = (g, ids) => api(`/associados/${g.associado_id}/whatsapp/cobranca`, { json: { lancamento_ids: ids, previa: true } });
+      const enviar = (g, ids) => api(`/associados/${g.associado_id}/whatsapp/cobranca`, { json: { lancamento_ids: ids } });
+      box.querySelectorAll('[data-env]').forEach((b) => b.onclick = async () => {
+        const i = Number(b.dataset.env); const g = c.lista[i]; const ids = idsDe(i);
+        if (!ids.length) return toast('Marque ao menos uma parcela desse associado', true);
+        try {
+          const pv = await previa(g, ids);
+          if (!confirm(`Enviar para ${g.nome} pelo WhatsApp do sistema?\n\n${pv.mensagem}`)) return;
+          b.disabled = true;
+          await enviar(g, ids); toast('Enviado para ' + g.nome); b.textContent = '↻ Reenviar';
+        } catch (e){ toast(e.message, true); }
+        finally { b.disabled = false; }
       });
-      if ($('#envTodos')) $('#envTodos').onclick = async () => {
-        if (!confirm(`Enviar a cobrança para ${validos.length} associado(s) com WhatsApp válido, pelo WhatsApp do sistema? (um a cada ~4 s)`)) return;
-        $('#envTodos').disabled = true;
+      if ($('#envSel')) $('#envSel').onclick = async () => {
+        const pular = $('#cPular') && $('#cPular').checked;
+        const jaRecebeu = (i) => { const sel = new Set(idsDe(i)); return c.lista[i].itens.some((x) => sel.has(x.lancamento_id) && x.boleto && x.boleto.enviado_em); };
+        const alvo = [...box.querySelectorAll('.cAssoc')].filter((x) => x.checked && !x.disabled).map((x) => Number(x.dataset.g)).filter((i) => idsDe(i).length && !(pular && jaRecebeu(i)));
+        if (!alvo.length) return toast(pular ? 'Nada a enviar — todos os marcados já receberam (desmarque "Pular quem já recebeu" para reenviar)' : 'Nenhum associado/parcela marcado', true);
+        const quais = $('#cQuais') ? $('#cQuais').selectedOptions[0].textContent : 'as parcelas marcadas';
+        let exemplo = '';
+        try { exemplo = (await previa(c.lista[alvo[0]], idsDe(alvo[0]))).mensagem; } catch { /* prévia é só ilustração */ }
+        if (!confirm(`Enviar para ${alvo.length} associado(s) — ${quais} — pelo WhatsApp do sistema? (um a cada ~4 s)\n\nExemplo (${c.lista[alvo[0]].nome}):\n${exemplo}`)) return;
+        $('#envSel').disabled = true;
         let ok = 0, falha = 0;
-        for (const [k, g] of validos.entries()) {
-          $('#envProg').innerHTML = `<div class="prog"><i style="width:${Math.round(k / validos.length * 100)}%"></i></div><div class="muted">Enviando ${k + 1}/${validos.length} — ${esc(g.nome)}</div>`;
-          try { await enviar(g); ok++; } catch (e){ falha++; if (e.codigo === 'ZAPI_INDISPONIVEL'){ toast(e.message, true); break; } }
+        for (const [k, i] of alvo.entries()) {
+          const g = c.lista[i];
+          $('#envProg').innerHTML = `<div class="prog"><i style="width:${Math.round(k / alvo.length * 100)}%"></i></div><div class="muted">Enviando ${k + 1}/${alvo.length} — ${esc(g.nome)}</div>`;
+          try { await enviar(g, idsDe(i)); ok++; } catch (e){ falha++; if (e.codigo === 'ZAPI_INDISPONIVEL'){ toast(e.message, true); break; } }
           await new Promise((r) => setTimeout(r, 4000));
         }
         $('#envProg').innerHTML = `<div class="avisos">📤 ${ok} enviada(s)${falha ? ` · ${falha} falha(s)` : ''}.</div>`;
+        $('#envSel').disabled = false;
         cob();
+      };
+      if ($('#envZerar')) $('#envZerar').onclick = async () => {
+        const marcados = [...box.querySelectorAll('.cAssoc')].filter((x) => x.checked).map((x) => Number(x.dataset.g));
+        const ids = marcados.flatMap((i) => c.lista[i].itens.map((x) => x.lancamento_id));
+        if (!ids.length) return toast('Marque os associados', true);
+        if (!confirm(`Zerar a marcação "enviado" de ${marcados.length} associado(s)? Eles voltam a aparecer como não enviados (nenhuma mensagem é apagada do WhatsApp).`)) return;
+        try { const r = await api(`/projetos/${S.pid}/boletos/zerar-envio`, { json: { lancamento_ids: ids } }); toast(r.zerados + ' marcação(ões) zerada(s)'); cob(); } catch (e){ toast(e.message, true); }
       };
       $('#cobBox').querySelectorAll('[data-pix]').forEach((b) => b.onclick = async () => {
         const g = c.lista[Number(b.dataset.pix)];
