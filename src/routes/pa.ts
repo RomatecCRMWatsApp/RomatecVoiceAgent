@@ -28,6 +28,7 @@ import * as boletoPdf from '../services/pa/paBoletoPdf';
 import * as mapas from '../services/pa/paMapas';
 import * as caixa from '../services/pa/paCaixa';
 import * as carteirinha from '../services/pa/paCarteirinha';
+import * as ata from '../services/pa/paAta';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -300,6 +301,20 @@ router.get('/projetos/:id/carteirinhas.html', h(async (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'private, no-store');
   res.end(html);
+  return undefined;
+}));
+
+// ─── v3.149.0: ata da assembleia de aprovação da contratação (padrão INCRA) ─
+router.get('/projetos/:id/ata-assembleia.pdf', h(async (req, res) => {
+  enviarPdf(res, await ata.pdfAta(id(req.params.id), ata.lerDadosAta(req.query as Record<string, unknown>), ctx(req).sub));
+  return undefined;
+}));
+router.get('/projetos/:id/ata-assembleia.docx', h(async (req, res) => {
+  const r = await ata.docxAta(id(req.params.id), ata.lerDadosAta(req.query as Record<string, unknown>), ctx(req).sub);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  res.setHeader('Content-Disposition', `attachment; filename="${r.nome}"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.end(r.docx);
   return undefined;
 }));
 

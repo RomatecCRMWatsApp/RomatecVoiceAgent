@@ -792,14 +792,57 @@ function trocarFoto(aid){
   inp.click();
 }
 
+// ─── v3.149.0: Ata da AGE de aprovação da contratação (padrão INCRA) ─────
+function formAta(){
+  const box = $('#ataBox');
+  if (box.innerHTML){ box.innerHTML = ''; return; }
+  const amanha = new Date(Date.now() - 3 * 3600e3 + 86400e3).toISOString().slice(0, 10);
+  let salvo = {}; try { salvo = JSON.parse(localStorage.getItem('pa_ata_' + S.pid) || '{}'); } catch { salvo = {}; }
+  const val = (k, d) => esc(salvo[k] != null ? salvo[k] : (d || ''));
+  box.innerHTML = `<div class="avisos" style="margin-top:10px"><b>📝 Ata da Assembleia Geral Extraordinária — aprovação da contratação do georreferenciamento (padrão INCRA)</b>
+    <div class="muted" style="margin:4px 0 8px">Sai com os dados do projeto e a <b>lista de presença com todos os associados</b> para assinar. Campo em branco vira linha para preencher à mão na reunião.</div>
+    <div class="grid3">
+      <div><label for="atData">Data da assembleia</label><input type="date" id="atData" value="${val('data', amanha)}"></div>
+      <div><label for="atHi">Hora de início</label><input type="time" id="atHi" value="${val('hora_inicio')}"></div>
+      <div><label for="atHf">Hora de encerramento</label><input type="time" id="atHf" value="${val('hora_fim')}"></div>
+      <div style="grid-column:span 2"><label for="atLocal">Local</label><input id="atLocal" placeholder="Ex.: sede da Associação, Vila do PA Salete Moreno" value="${val('local')}"></div>
+      <div><label for="atEdital">Data do edital de convocação</label><input type="date" id="atEdital" value="${val('edital_data')}"></div>
+      <div><label for="atPres">Presidente da assembleia</label><input id="atPres" value="${val('presidente_mesa')}"></div>
+      <div><label for="atSec">Secretário(a)</label><input id="atSec" value="${val('secretario')}"></div>
+      <div><label for="atN">Nº de presentes</label><input id="atN" inputmode="numeric" value="${val('presentes')}"></div>
+      <div><label for="atVf">Votos favoráveis</label><input id="atVf" inputmode="numeric" value="${val('votos_favor')}"></div>
+      <div><label for="atVc">Votos contrários</label><input id="atVc" inputmode="numeric" value="${val('votos_contra')}"></div>
+      <div><label for="atAb">Abstenções</label><input id="atAb" inputmode="numeric" value="${val('abstencoes')}"></div>
+      <div style="grid-column:1/-1"><label for="atObs">Assuntos gerais (opcional)</label><input id="atObs" value="${val('observacoes')}"></div>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="atPdf" style="flex:0 0 auto">📄 Gerar PDF</button><button class="btn btn-gold btn-sm" id="atDoc" style="flex:0 0 auto">📝 Gerar DOC (Word)</button></div></div>`;
+  const params = () => {
+    const d = { data: $('#atData').value, hora_inicio: $('#atHi').value, hora_fim: $('#atHf').value, local: $('#atLocal').value, edital_data: $('#atEdital').value,
+      presidente_mesa: $('#atPres').value, secretario: $('#atSec').value, presentes: $('#atN').value, votos_favor: $('#atVf').value, votos_contra: $('#atVc').value, abstencoes: $('#atAb').value, observacoes: $('#atObs').value };
+    try { localStorage.setItem('pa_ata_' + S.pid, JSON.stringify(d)); } catch { /* ok */ }
+    return new URLSearchParams(Object.entries(d).filter(([, v]) => v && String(v).trim())).toString();
+  };
+  $('#atPdf').onclick = async () => {
+    const janela = window.open('about:blank', '_blank'); toast('Gerando a ata…');
+    try {
+      const r = await fetch(`/api/pa/projetos/${S.pid}/ata-assembleia.pdf?${params()}`, { credentials: 'include' });
+      if (!r.ok){ let m = 'HTTP ' + r.status; try { m = (await r.json()).erro || m; } catch { /* ok */ } throw new Error(m); }
+      const url = URL.createObjectURL(await r.blob());
+      if (janela) janela.location.href = url; else window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
+    } catch (e){ if (janela) janela.close(); toast(e.message, true); }
+  };
+  $('#atDoc').onclick = () => baixar(`/projetos/${S.pid}/ata-assembleia.docx?${params()}`, `ATA-ASSEMBLEIA-${$('#atData').value || 'PA'}.docx`).catch((e) => toast(e.message, true));
+}
+
 // ─── Associados ─────────────────────────────────────────────────────────
 async function rAssociados(){
   const v = $('#v-associados');
   v.innerHTML = `<div class="card"><div class="row"><div style="flex:3 1 260px"><label for="busca">Buscar</label><input id="busca" placeholder="Nome, nº PASM, lote, chácara, CPF ou telefone"></div>
       <div style="flex:1 1 140px"><label for="fSit">Situação</label><select class="f" id="fSit"><option value="">Todas</option><option value="A_PAGAR">Sinal a pagar</option><option value="PARCIAL">Sinal parcial</option><option value="VENCIDO">Com vencido</option><option value="SEMDOC">Sem documentos</option></select></div>
       <div style="flex:1 1 140px"><label for="fWa">WhatsApp</label><select class="f" id="fWa"><option value="">Todos</option><option value="VALIDO">Válido</option><option value="INEXISTENTE">Sem WhatsApp</option><option value="SEM_TELEFONE">Sem telefone</option><option value="NAO_VERIFICADO">Não verificado</option></select></div>
-      ${podeEscrever() ? '<div style="flex:0 0 auto"><button class="btn btn-ghost" id="verifWa">📱 Verificar WhatsApps</button> <button class="btn btn-gold" id="novoAssoc">➕ Novo associado</button></div>' : ''}</div>
-      <div id="waBox"></div></div>
+      <div style="flex:0 0 auto"><button class="btn btn-ghost" id="ataBtn">📝 Ata da assembleia</button>${podeEscrever() ? ' <button class="btn btn-ghost" id="verifWa">📱 Verificar WhatsApps</button> <button class="btn btn-gold" id="novoAssoc">➕ Novo associado</button>' : ''}</div></div>
+      <div id="waBox"></div><div id="ataBox"></div></div>
     <div class="card"><div id="assocLista" class="tbl"><div class="empty">Carregando…</div></div></div>`;
   let timer = null;
   const carregar = async () => {
@@ -821,6 +864,7 @@ async function rAssociados(){
   $('#fSit').onchange = carregar;
   $('#fWa').onchange = carregar;
   if ($('#novoAssoc')) $('#novoAssoc').onclick = formNovoAssociado;
+  $('#ataBtn').onclick = formAta;
   if ($('#verifWa')) $('#verifWa').onclick = async () => {
     const b = $('#verifWa'); b.disabled = true; $('#waBox').innerHTML = '<div class="muted" style="margin-top:8px">Consultando a Z-API…</div>';
     try {
