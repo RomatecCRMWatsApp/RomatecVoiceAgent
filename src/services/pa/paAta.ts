@@ -7,7 +7,7 @@ import path from 'node:path';
 import {
   AlignmentType, BorderStyle, Document, Footer, Header, ImageRun, Packer, PageNumber, Paragraph, Table, TableCell, TableRow, TextRun, WidthType,
 } from 'docx';
-import { pool, rows, registrarEvento } from './paDb';
+import { pool, rows, isoDate, registrarEvento } from './paDb';
 import { buscarProjeto, type Projeto } from './paRepo';
 import { marcaArquivos } from './marcaProjeto';
 
@@ -71,7 +71,22 @@ type Bloco =
   | { k: 'p'; r: Run[] }
   | { k: 'item'; n: string; r: Run[] };
 
-export interface Associado { lote: string; numero: string; nome: string; cpf: string }
+export interface Associado {
+  lote: string; numero: string; nome: string; cpf: string;
+  rg?: string | null; nascimento?: string | null; estado_civil?: string | null; conjuge_nome?: string | null; conjuge_cpf?: string | null; terra?: string | null;
+}
+
+/** v3.149.1: qualificação completa do associado (só com o que está no cadastro — nada inventado). */
+export function qualificacao(a: Associado, p: Pick<Projeto, 'nome' | 'municipio' | 'uf'>): string {
+  const partes = [a.nome, 'brasileiro(a)'];
+  if (a.estado_civil) partes.push(a.estado_civil.toLowerCase());
+  if (a.rg) partes.push(`portador(a) do RG nº ${a.rg}`);
+  partes.push(`inscrito(a) no CPF sob o nº ${a.cpf}`);
+  if (a.nascimento) partes.push(`nascido(a) em ${dBr(a.nascimento)}`);
+  partes.push(`associado(a) nº ${a.numero}, beneficiário(a) do Lote ${a.lote}${a.terra ? ` (${a.terra})` : ''} do ${p.nome}, ${p.municipio}/${p.uf}`);
+  if (a.conjuge_nome) partes.push(`cônjuge/companheiro(a): ${a.conjuge_nome}${a.conjuge_cpf ? `, CPF ${a.conjuge_cpf}` : ''}`);
+  return partes.join(', ') + '.';
+}
 
 export function conteudoAta(p: Projeto, d: DadosAta, totalAssociados: number): Bloco[] {
   const assoc = p.associacao_nome || `Associação do ${p.nome}`;
@@ -158,9 +173,14 @@ export const ASSINATURAS = (p: Projeto, d: DadosAta) => [
 
 async function associadosDoProjeto(projetoId: number): Promise<Associado[]> {
   const r = await rows(pool, `
-    SELECT a.numero, a.nome, a.cpf, lt.numero AS lote FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id
+    SELECT a.numero, a.nome, a.cpf, a.rg, a.nascimento, a.estado_civil, a.conjuge_nome, a.conjuge_cpf, a.denominacao_terra, lt.numero AS lote
+    FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id
     WHERE a.projeto_id = ? AND a.ativo = 1 ORDER BY CAST(lt.numero AS UNSIGNED), lt.numero`, [projetoId]);
-  return r.map((x) => ({ lote: String(x.lote), numero: String(x.numero), nome: String(x.nome), cpf: String(x.cpf) }));
+  return r.map((x) => ({
+    lote: String(x.lote), numero: String(x.numero), nome: String(x.nome), cpf: String(x.cpf),
+    rg: (x.rg as string) ?? null, nascimento: isoDate(x.nascimento), estado_civil: (x.estado_civil as string) ?? null,
+    conjuge_nome: (x.conjuge_nome as string) ?? null, conjuge_cpf: (x.conjuge_cpf as string) ?? null, terra: (x.denominacao_terra as string) ?? null,
+  }));
 }
 
 function arquivoBrand(nome: string | null): Buffer | null {
@@ -171,7 +191,9 @@ function arquivoBrand(nome: string | null): Buffer | null {
 
 // ─── PDF (HTML) ───────────────────────────────────────────────────────────
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
-const EXTRAS = 8; // linhas em branco no fim da lista para quem não está cadastrado
+const EXTRAS = 4; // blocos em branco no fim (uma folha) para quem não está cadastrado
+export const POR_PAGINA = 4;
+const EM_BRANCO = '__________________________________________________________________________________';
 
 export function htmlAta(p: Projeto, d: DadosAta, lista: Associado[]): string {
   const m = marcaArquivos(p.codigo);
@@ -186,10 +208,28 @@ export function htmlAta(p: Projeto, d: DadosAta, lista: Associado[]): string {
     return bl.k === 'item' ? `<p class="item"><span>${esc(bl.n)}</span>${txt}</p>` : `<p>${txt}</p>`;
   }).join('');
   const ass = ASSINATURAS(p, d).map((a) => `<div class="as"><div class="ln"></div><b>${esc(a.nome || '')}</b><span>${esc(a.cargo)}</span></div>`).join('');
-  const linhas = [...lista.map((a, i) => ({ ...a, i: i + 1 })), ...Array.from({ length: EXTRAS }, (_, k) => ({ i: lista.length + k + 1, lote: '', numero: '', nome: '', cpf: '' }))];
-  const tabela = `<table><thead><tr><th style="width:7mm">Nº</th><th style="width:11mm">Lote</th><th>Nome do(a) associado(a)</th><th style="width:31mm">CPF</th><th style="width:62mm">Assinatura</th></tr></thead><tbody>
-    ${linhas.map((a) => `<tr><td class="c">${a.i}</td><td class="c">${esc(a.lote)}</td><td>${esc(a.nome)}</td><td class="c">${esc(a.cpf)}</td><td></td></tr>`).join('')}</tbody></table>`;
+  // v3.149.1: um bloco por associado — qualificação completa, assinatura, a rogo (+2 testemunhas) e impressão digital.
+  const blocoHtml = (a: Associado | null, i: number) => `<div class="bl">
+      <div class="bt"><span class="bn">${i}</span>${a ? `<span class="bl1">LOTE ${esc(a.lote)} · ${esc(a.numero)}</span><b>${esc(a.nome)}</b>` : '<span class="bl1">LOTE ______ · Nº ______</span><b>&nbsp;</b>'}</div>
+      <div class="bq">${a ? esc(qualificacao(a, p)) : `Nome e qualificação: ${EM_BRANCO}${EM_BRANCO}`}</div>
+      <div class="bg">
+        <div class="bs">
+          <div class="ass1"><div class="ln"></div><span>Assinatura do(a) associado(a)</span></div>
+          <div class="rogo"><b>A ROGO</b> <span>(para quem não sabe ou não pode assinar)</span>
+            <div class="rl"><span>Assinado a rogo por:</span><i></i><span>CPF:</span><i class="cp"></i></div>
+            <div class="rl"><span>Testemunha 1:</span><i></i><span>Testemunha 2:</span><i></i></div></div>
+        </div>
+        <div class="dg"><div class="dgb"></div><span>Impressão digital<br>(polegar direito)</span></div>
+      </div></div>`;
+  const todos: Array<Associado | null> = [...lista, ...Array.from({ length: EXTRAS }, () => null)];
+  const folhas = Math.ceil(todos.length / POR_PAGINA);
+  const paginasLista: string[] = [];
   const cab = `<div class="cab">${bras ? `<img class="bras" src="${bras}">` : '<span></span>'}<div class="ct"><div class="a1">${esc((p.associacao_nome || `Associação do ${p.nome}`).toUpperCase())}</div><div class="a2">${esc(p.municipio)}/${esc(p.uf)} · ${p.associacao_cnpj ? 'CNPJ ' + esc(p.associacao_cnpj) : 'CNPJ em homologação'}</div></div>${logo ? `<img class="logo" src="${logo}">` : '<span></span>'}</div>`;
+  for (let k = 0; k < todos.length; k += POR_PAGINA) {
+    paginasLista.push(`<section class="anexo">${cab}<div class="faixa"></div><h1>ANEXO I — LISTA DE PRESENÇA E ASSINATURAS</h1>
+      <h2>Assembleia Geral Extraordinária de ${d.data ? dBr(d.data) : LINHA} — ${esc(p.nome)} · folha ${k / POR_PAGINA + 1} de ${folhas}</h2>
+      ${todos.slice(k, k + POR_PAGINA).map((a, j) => blocoHtml(a, k + j + 1)).join('')}</section>`);
+  }
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Ata — ${esc(p.nome)}</title><style>
     @page { size: A4; margin: 16mm 18mm 18mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -206,7 +246,23 @@ export function htmlAta(p: Projeto, d: DadosAta, lista: Associado[]): string {
     .assin { display: grid; grid-template-columns: 1fr 1fr; gap: 14mm 12mm; margin-top: 14mm; page-break-inside: avoid; }
     .as { text-align: center; font-size: 10pt; } .as .ln { border-top: .3mm solid #111; margin-bottom: 1.2mm; } .as b { display: block; min-height: 4mm; } .as span { color: #444; font-size: 9pt; }
     .anexo { page-break-before: always; }
-    .anexo h1 { margin-top: 0; } .anexo h2 { margin-bottom: 3mm; }
+    .anexo h1 { margin-top: 0; font-size: 12.5pt; } .anexo h2 { margin-bottom: 3mm; font-size: 9.5pt; font-weight: 400; }
+    .bl { border: .35mm solid #0C3320; border-radius: 2mm; height: 53mm; margin-bottom: 2mm; overflow: hidden; page-break-inside: avoid; font-family: Arial, sans-serif; display: flex; flex-direction: column; }
+    .bt { background: #0C3320; color: #fff; display: flex; align-items: center; gap: 2.5mm; padding: 1.2mm 2.5mm; font-size: 9.5pt; }
+    .bt .bn { background: #C9A84C; color: #0C3320; font-weight: 800; border-radius: 1mm; padding: 0 1.6mm; font-size: 8.5pt; }
+    .bt .bl1 { color: #E3D19A; font-size: 7.6pt; font-weight: 700; letter-spacing: .3pt; white-space: nowrap; }
+    .bt b { font-size: 9.6pt; letter-spacing: .2pt; }
+    .bq { font-size: 7.3pt; line-height: 1.32; padding: 1.2mm 2.5mm 0; color: #222; text-align: justify; max-height: 14mm; overflow: hidden; }
+    .bg { flex: 1; display: flex; gap: 2.5mm; padding: 1mm 2.5mm 2mm; }
+    .bs { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+    .ass1 { padding-top: 6mm; } .ass1 .ln { border-top: .3mm solid #111; } .ass1 span { font-size: 7pt; color: #444; }
+    .rogo { border-top: .25mm dashed #b9b2a0; padding-top: 1mm; font-size: 6.8pt; color: #333; }
+    .rogo b { color: #a07a10; letter-spacing: .4pt; } .rogo > span { color: #777; }
+    .rl { display: flex; align-items: flex-end; gap: 1.2mm; margin-top: 2.2mm; white-space: nowrap; }
+    .rl i { flex: 1; border-bottom: .25mm solid #555; height: 3mm; } .rl i.cp { flex: 0 0 26mm; }
+    .dg { flex: 0 0 25mm; display: flex; flex-direction: column; align-items: center; gap: .8mm; }
+    .dgb { width: 23mm; height: 26mm; border: .3mm solid #555; border-radius: 1.5mm; background: #fbfaf5; }
+    .dg span { font-size: 6.2pt; color: #555; text-align: center; line-height: 1.15; }
     table { width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 8.6pt; }
     th { background: #0C3320; color: #fff; padding: 1.6mm 1.2mm; border: .25mm solid #0C3320; }
     td { border: .25mm solid #888; padding: 0 1.4mm; height: 8.6mm; }
@@ -215,8 +271,7 @@ export function htmlAta(p: Projeto, d: DadosAta, lista: Associado[]): string {
     thead { display: table-header-group; } tr { page-break-inside: avoid; }
   </style></head><body>
     ${cab}<div class="faixa"></div>${corpo}<div class="assin">${ass}</div>
-    <section class="anexo">${cab}<div class="faixa"></div><h1>ANEXO I — LISTA DE PRESENÇA E ASSINATURAS</h1>
-      <h2>Assembleia Geral Extraordinária de ${d.data ? dBr(d.data) : LINHA} — ${esc(p.nome)}</h2>${tabela}</section>
+    ${paginasLista.join('')}
   </body></html>`;
 }
 
@@ -279,14 +334,41 @@ export async function docxAta(projetoId: number, d: DadosAta, usuario: string | 
     width: { size: w, type: WidthType.PERCENTAGE }, shading: opts.head ? { fill: VERDE, color: 'auto', type: 'clear' as never } : undefined,
     children: [new Paragraph({ alignment: opts.center || opts.head ? AlignmentType.CENTER : AlignmentType.LEFT, children: [new TextRun({ text: t, font: 'Arial', size: 17, bold: opts.head, color: opts.head ? 'FFFFFF' : '111111' })] })],
   });
-  const linhas = [...lista.map((a, i) => ({ ...a, i: i + 1 })), ...Array.from({ length: EXTRAS }, (_, k) => ({ i: lista.length + k + 1, lote: '', numero: '', nome: '', cpf: '' }))];
-  const tabelaLista = new Table({
+  // v3.149.1: lista de presença em blocos (qualificação, assinatura, a rogo + testemunhas, digital), 4 por folha.
+  const T = (text: string, o: { b?: boolean; size?: number; color?: string } = {}) => new TextRun({ text, bold: o.b, font: 'Arial', size: o.size ?? 16, color: o.color ?? '222222' });
+  const linhaB = { style: BorderStyle.SINGLE, size: 6, color: VERDE };
+  const bordaBloco = { top: linhaB, bottom: linhaB, left: linhaB, right: linhaB };
+  const blocoDocx = (a: Associado | null, i: number) => new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [
-      new TableRow({ tableHeader: true, children: [cel('Nº', 6, { head: true }), cel('Lote', 8, { head: true }), cel('Nome do(a) associado(a)', 40, { head: true }), cel('CPF', 17, { head: true }), cel('Assinatura', 29, { head: true })] }),
-      ...linhas.map((a) => new TableRow({ height: { value: 480, rule: 'atLeast' as never }, cantSplit: true, children: [cel(String(a.i), 6, { center: true }), cel(a.lote, 8, { center: true }), cel(a.nome, 40), cel(a.cpf, 17, { center: true }), cel('', 29)] })),
+      new TableRow({ cantSplit: true, children: [new TableCell({ columnSpan: 2, borders: bordaBloco, shading: { fill: VERDE, color: 'auto', type: 'clear' as never }, children: [new Paragraph({ children: [
+        T(` ${i} `, { b: true, size: 17, color: 'E3D19A' }), T(a ? `  LOTE ${a.lote} · ${a.numero}   ` : '  LOTE ______ · Nº ______   ', { b: true, size: 15, color: 'E3D19A' }), T(a ? a.nome : '', { b: true, size: 19, color: 'FFFFFF' }),
+      ] })] })] }),
+      new TableRow({ cantSplit: true, children: [new TableCell({ columnSpan: 2, borders: bordaBloco, children: [new Paragraph({ alignment: AlignmentType.JUSTIFIED, spacing: { before: 40, after: 40 }, children: [T(a ? qualificacao(a, p) : `Nome e qualificação: ${EM_BRANCO}`, { size: 15 })] })] })] }),
+      new TableRow({ cantSplit: true, children: [
+        new TableCell({ width: { size: 78, type: WidthType.PERCENTAGE }, borders: bordaBloco, children: [
+          new Paragraph({ spacing: { before: 420 }, children: [T('_____________________________________________________________________', { size: 16, color: '111111' })] }),
+          new Paragraph({ children: [T('Assinatura do(a) associado(a)', { size: 13, color: '444444' })] }),
+          new Paragraph({ spacing: { before: 120 }, children: [T('A ROGO ', { b: true, size: 13, color: 'A07A10' }), T('(para quem não sabe ou não pode assinar)', { size: 12, color: '777777' })] }),
+          new Paragraph({ spacing: { before: 140 }, children: [T('Assinado a rogo por: _________________________________  CPF: _________________', { size: 13 })] }),
+          new Paragraph({ spacing: { before: 160, after: 60 }, children: [T('Testemunha 1: ___________________________  Testemunha 2: ___________________________', { size: 13 })] }),
+        ] }),
+        new TableCell({ width: { size: 22, type: WidthType.PERCENTAGE }, borders: bordaBloco, children: [
+          new Table({ width: { size: 1300, type: WidthType.DXA }, alignment: AlignmentType.CENTER, rows: [new TableRow({ height: { value: 1450, rule: 'exact' as never }, children: [new TableCell({ children: [new Paragraph('')] })] })] }),
+          new Paragraph({ alignment: AlignmentType.CENTER, children: [T('Impressão digital', { size: 12, color: '555555' })] }),
+          new Paragraph({ alignment: AlignmentType.CENTER, children: [T('(polegar direito)', { size: 12, color: '555555' })] }),
+        ] }),
+      ] }),
     ],
   });
+  const todosDocx: Array<Associado | null> = [...lista, ...Array.from({ length: EXTRAS }, () => null)];
+  const folhasDocx = Math.ceil(todosDocx.length / POR_PAGINA);
+  const filhosAnexo: Array<Paragraph | Table> = [];
+  for (let k = 0; k < todosDocx.length; k += POR_PAGINA) {
+    filhosAnexo.push(new Paragraph({ pageBreakBefore: k > 0, alignment: AlignmentType.CENTER, spacing: { before: 60, after: 20 }, children: [new TextRun({ text: 'ANEXO I — LISTA DE PRESENÇA E ASSINATURAS', bold: true, font: FONTE, size: 24 })] }));
+    filhosAnexo.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 100 }, children: [new TextRun({ text: `Assembleia Geral Extraordinária de ${d.data ? dBr(d.data) : LINHA} — ${p.nome} · folha ${k / POR_PAGINA + 1} de ${folhasDocx}`, font: FONTE, size: 18 })] }));
+    todosDocx.slice(k, k + POR_PAGINA).forEach((a, j) => { filhosAnexo.push(blocoDocx(a, k + j + 1)); filhosAnexo.push(new Paragraph({ spacing: { after: 80 }, children: [] })); });
+  }
 
   const rodape = new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [
     new TextRun({ text: `Ata da AGE — ${p.nome} · documento elaborado por Romatec Consultoria Total · Página `, font: 'Arial', size: 14, color: '777777' }),
@@ -300,9 +382,7 @@ export async function docxAta(projetoId: number, d: DadosAta, usuario: string | 
     sections: [
       { properties: { page: { margin: margem } }, headers: { default: new Header({ children: [cabecalho()] }) }, footers: { default: rodape }, children: [...corpo, tabelaAss] },
       { properties: { page: { margin: margem } }, headers: { default: new Header({ children: [cabecalho()] }) }, footers: { default: rodape }, children: [
-        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 120, after: 60 }, children: [new TextRun({ text: 'ANEXO I — LISTA DE PRESENÇA E ASSINATURAS', bold: true, font: FONTE, size: 25 })] }),
-        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 160 }, children: [new TextRun({ text: `Assembleia Geral Extraordinária de ${d.data ? dBr(d.data) : LINHA} — ${p.nome}`, font: FONTE, size: 20 })] }),
-        tabelaLista,
+        ...filhosAnexo,
       ] },
     ],
   });

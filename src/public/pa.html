@@ -194,6 +194,7 @@
     <button data-t="associados">👥 Associados</button>
     <button data-t="financeiro">💰 Financeiro</button>
     <button data-t="carteirinhas">🪪 Carteirinhas</button>
+    <button data-t="documentos">📜 Documentos oficiais</button>
     <button data-t="campo">📡 Campo</button>
     <button data-t="importar" data-admin="1">📥 Importar / Exportar</button>
   </nav>
@@ -205,6 +206,7 @@
   <section id="v-associados" class="hide"></section>
   <section id="v-financeiro" class="hide"></section>
   <section id="v-carteirinhas" class="hide"></section>
+  <section id="v-documentos" class="hide"></section>
   <section id="v-campo" class="hide"></section>
   <section id="v-importar" class="hide"></section>
 </div>
@@ -340,7 +342,7 @@ function mostrar(aba){
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === aba));
   document.querySelectorAll('.wrap > section').forEach((s) => s.classList.toggle('hide', s.id !== 'v-' + aba));
   if (!S.pid && aba !== 'importar'){ $('#v-' + aba).innerHTML = '<div class="card empty">Nenhum projeto cadastrado ainda. Use <b>Importar</b> para carregar o seed do PA.</div>'; return; }
-  ({ painel: rPainel, mapa: rMapa, associados: rAssociados, financeiro: rFinanceiro, carteirinhas: rCarteirinhas, campo: rCampo, importar: rImportar })[aba]();
+  ({ painel: rPainel, mapa: rMapa, associados: rAssociados, financeiro: rFinanceiro, carteirinhas: rCarteirinhas, documentos: rDocumentosOficiais, campo: rCampo, importar: rImportar })[aba]();
 }
 const podeEscrever = () => S.eu && S.eu.pode_escrever;
 
@@ -793,14 +795,23 @@ function trocarFoto(aid){
 }
 
 // ─── v3.149.0: Ata da AGE de aprovação da contratação (padrão INCRA) ─────
+// v3.149.1: aba Documentos oficiais — documentos do PA gerados com os dados do sistema.
+function rDocumentosOficiais(){
+  const v = $('#v-documentos');
+  v.innerHTML = `<div class="card"><h2 style="margin-top:0">📜 Documentos oficiais do PA</h2>
+      <div class="muted">Documentos gerados com os dados do projeto e do cadastro dos associados, em PDF (para imprimir) e DOC (Word, para ajustar).</div>
+      <div class="row" style="margin-top:10px"><button class="btn btn-primary btn-sm" data-doc-of="ata" style="flex:0 0 auto">📝 Ata da Assembleia — aprovação da contratação (INCRA)</button></div></div>
+    <div id="ataBox"></div>`;
+  v.querySelectorAll('[data-doc-of]').forEach((b) => b.onclick = () => formAta());
+  formAta();
+}
 function formAta(){
   const box = $('#ataBox');
-  if (box.innerHTML){ box.innerHTML = ''; return; }
   const amanha = new Date(Date.now() - 3 * 3600e3 + 86400e3).toISOString().slice(0, 10);
   let salvo = {}; try { salvo = JSON.parse(localStorage.getItem('pa_ata_' + S.pid) || '{}'); } catch { salvo = {}; }
   const val = (k, d) => esc(salvo[k] != null ? salvo[k] : (d || ''));
-  box.innerHTML = `<div class="avisos" style="margin-top:10px"><b>📝 Ata da Assembleia Geral Extraordinária — aprovação da contratação do georreferenciamento (padrão INCRA)</b>
-    <div class="muted" style="margin:4px 0 8px">Sai com os dados do projeto e a <b>lista de presença com todos os associados</b> para assinar. Campo em branco vira linha para preencher à mão na reunião.</div>
+  box.innerHTML = `<div class="card"><b>📝 Ata da Assembleia Geral Extraordinária — aprovação da contratação do georreferenciamento (padrão INCRA)</b>
+    <div class="muted" style="margin:4px 0 8px">Sai com os dados do projeto e o <b>Anexo I — lista de presença com a qualificação completa de cada associado</b>, espaço para assinatura, assinatura <b>a rogo</b> (com 2 testemunhas) e <b>impressão digital</b> — 4 associados por folha. Campo em branco vira linha para preencher à mão na reunião.</div>
     <div class="grid3">
       <div><label for="atData">Data da assembleia</label><input type="date" id="atData" value="${val('data', amanha)}"></div>
       <div><label for="atHi">Hora de início</label><input type="time" id="atHi" value="${val('hora_inicio')}"></div>
@@ -841,8 +852,8 @@ async function rAssociados(){
   v.innerHTML = `<div class="card"><div class="row"><div style="flex:3 1 260px"><label for="busca">Buscar</label><input id="busca" placeholder="Nome, nº PASM, lote, chácara, CPF ou telefone"></div>
       <div style="flex:1 1 140px"><label for="fSit">Situação</label><select class="f" id="fSit"><option value="">Todas</option><option value="A_PAGAR">Sinal a pagar</option><option value="PARCIAL">Sinal parcial</option><option value="VENCIDO">Com vencido</option><option value="SEMDOC">Sem documentos</option></select></div>
       <div style="flex:1 1 140px"><label for="fWa">WhatsApp</label><select class="f" id="fWa"><option value="">Todos</option><option value="VALIDO">Válido</option><option value="INEXISTENTE">Sem WhatsApp</option><option value="SEM_TELEFONE">Sem telefone</option><option value="NAO_VERIFICADO">Não verificado</option></select></div>
-      <div style="flex:0 0 auto"><button class="btn btn-ghost" id="ataBtn">📝 Ata da assembleia</button>${podeEscrever() ? ' <button class="btn btn-ghost" id="verifWa">📱 Verificar WhatsApps</button> <button class="btn btn-gold" id="novoAssoc">➕ Novo associado</button>' : ''}</div></div>
-      <div id="waBox"></div><div id="ataBox"></div></div>
+      ${podeEscrever() ? '<div style="flex:0 0 auto"><button class="btn btn-ghost" id="verifWa">📱 Verificar WhatsApps</button> <button class="btn btn-gold" id="novoAssoc">➕ Novo associado</button></div>' : ''}</div>
+      <div id="waBox"></div></div>
     <div class="card"><div id="assocLista" class="tbl"><div class="empty">Carregando…</div></div></div>`;
   let timer = null;
   const carregar = async () => {
@@ -864,7 +875,6 @@ async function rAssociados(){
   $('#fSit').onchange = carregar;
   $('#fWa').onchange = carregar;
   if ($('#novoAssoc')) $('#novoAssoc').onclick = formNovoAssociado;
-  $('#ataBtn').onclick = formAta;
   if ($('#verifWa')) $('#verifWa').onclick = async () => {
     const b = $('#verifWa'); b.disabled = true; $('#waBox').innerHTML = '<div class="muted" style="margin-top:8px">Consultando a Z-API…</div>';
     try {
