@@ -21,7 +21,7 @@ describe('ata da assembleia (INCRA)', () => {
   });
   it('traz os requisitos do INCRA: assembleia, rateio, prestação de contas, credenciado, termo de doação', () => {
     const t = texto();
-    for (const k of ['exclusivamente em serviço técnico de georreferenciamento', 'relação particular entre a Associação e a contratada', 'não garante, nem assegura, o êxito', 'Cadastro Ambiental Rural (CAR)', '(CCIR)', '(ITR)', 'marcos', 'será orçado e cobrado à parte', 'Termo de Responsabilidade Técnica (TRT)', 'Termo de Doação', 'prestará contas', 'credenciado(a) no INCRA', 'facultativa', 'SIGEF', 'R$ 63.000,00', 'estradas', '17.261.987/0001-09']) {
+    for (const k of ['exclusivamente em serviço técnico de georreferenciamento', 'relação particular entre a Associação e a contratada', 'não garante, nem assegura, o êxito', 'Cadastro Ambiental Rural (CAR)', '(CCIR)', '(ITR)', 'marcos', 'será orçado e cobrado à parte', 'não serão submetidas à certificação no SIGEF', 'planilhas ODS', 'plaquetas de identificação', 'Termo de Responsabilidade Técnica (TRT)', 'Termo de Doação', 'prestará contas', 'credenciado(a) no INCRA', 'facultativa', 'SIGEF', 'R$ 63.000,00', 'estradas', '17.261.987/0001-09']) {
       expect(t.replace(/\u00a0/g, ' ')).toContain(k);
     }
   });
