@@ -274,6 +274,40 @@ const CREATE_PA_CAIXA_MOVIMENTOS = `
   ) DEFAULT CHARSET=utf8mb4
 `;
 
+// v3.150.0 — Participantes do lote além do titular (cônjuge, filho, amigo…) e
+// fotografia dos membros do grupo do WhatsApp do PA (substituída a cada sincronização).
+const CREATE_PA_PARTICIPANTES = `
+  CREATE TABLE IF NOT EXISTS pa_participantes (
+    id                 INT AUTO_INCREMENT PRIMARY KEY,
+    associado_id       INT NOT NULL,
+    nome               VARCHAR(160) NOT NULL,
+    vinculo            VARCHAR(40)  NOT NULL,
+    cpf                CHAR(14)     NULL,
+    rg                 VARCHAR(80)  NULL,
+    nascimento         DATE NULL,
+    telefone           VARCHAR(60)  NULL,
+    telefone_e164      VARCHAR(20)  NULL,
+    email              VARCHAR(160) NULL,
+    responsavel_campo  TINYINT NOT NULL DEFAULT 0,
+    grupo_whatsapp_manual ENUM('SIM','NAO') NULL,
+    obs                VARCHAR(255) NULL,
+    ativo              TINYINT NOT NULL DEFAULT 1,
+    criado_por         VARCHAR(64) NULL,
+    criado_em          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_pa_part_assoc (associado_id),
+    INDEX idx_pa_part_tel (telefone_e164)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+const CREATE_PA_WA_GRUPO_MEMBROS = `
+  CREATE TABLE IF NOT EXISTS pa_whatsapp_grupo_membros (
+    projeto_id  INT NOT NULL,
+    telefone    VARCHAR(20) NOT NULL,
+    admin       TINYINT NOT NULL DEFAULT 0,
+    visto_em    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (projeto_id, telefone)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
 // v3.143.0 — colunas novas em tabelas já criadas (ALTER idempotente: erro de
 // coluna duplicada = já aplicado).
 export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
@@ -293,6 +327,9 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'asaas_ambiente legado', sql: "UPDATE pa_associados SET asaas_ambiente = 'sandbox' WHERE asaas_customer_id IS NOT NULL AND asaas_ambiente IS NULL" },
   // v3.146.0: perímetro geral do PA (vértices UTM/geográficos, área, memorial).
   { label: 'pa_projetos.perimetro_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN perimetro_json JSON NULL' },
+  // v3.150.0: grupo do WhatsApp do PA e marcação manual de quem está no grupo.
+  { label: 'pa_projetos.whatsapp_grupo', sql: 'ALTER TABLE pa_projetos ADD COLUMN whatsapp_grupo_id VARCHAR(60) NULL, ADD COLUMN whatsapp_grupo_nome VARCHAR(160) NULL, ADD COLUMN whatsapp_grupo_sync_em DATETIME NULL' },
+  { label: 'pa_associados.grupo_whatsapp_manual', sql: "ALTER TABLE pa_associados ADD COLUMN grupo_whatsapp_manual ENUM('SIM','NAO') NULL" },
   // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },
 ];
@@ -311,6 +348,8 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_usuarios_perfil', sql: CREATE_PA_USUARIOS_PERFIL },
   { label: 'pa_boletos', sql: CREATE_PA_BOLETOS },
   { label: 'pa_caixa_movimentos', sql: CREATE_PA_CAIXA_MOVIMENTOS },
+  { label: 'pa_participantes', sql: CREATE_PA_PARTICIPANTES },
+  { label: 'pa_whatsapp_grupo_membros', sql: CREATE_PA_WA_GRUPO_MEMBROS },
 ];
 
 export async function runPaMigrations(): Promise<void> {

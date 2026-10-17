@@ -395,6 +395,9 @@ export async function listarAssociados(projetoId: number, q?: string) {
   const lanc = ids.length ? await rows(pool, `SELECT * FROM pa_lancamentos WHERE associado_id IN (${ids.map(() => '?').join(',')})`, ids) : [];
   const docs = ids.length ? await rows(pool, `SELECT associado_id, COUNT(*) AS n, SUM(arquivo_presente) AS presentes, SUM(tipo = 'FOTO_3X4' AND arquivo_presente = 1) AS fotos FROM pa_documentos WHERE associado_id IN (${ids.map(() => '?').join(',')}) GROUP BY associado_id`, ids) : [];
   const docMap = new Map(docs.map((d) => [num(d.associado_id), { total: num(d.n), com_arquivo: num(d.presentes), tem_foto: num(d.fotos) > 0 }]));
+  // v3.150.0: participantes do lote (nome, vínculo, responsável em campo) para a listagem.
+  let partRows: Row[] = [];
+  try { partRows = ids.length ? await rows(pool, `SELECT associado_id, nome, vinculo, responsavel_campo FROM pa_participantes WHERE ativo = 1 AND associado_id IN (${ids.map(() => '?').join(',')}) ORDER BY responsavel_campo DESC, id`, ids) : []; } catch { partRows = []; }
   return as.map((a) => {
     const ll = lanc.filter((l) => num(l.associado_id) === num(a.id)).map((l) => mapLancamento(l, hoje));
     return {
@@ -407,6 +410,7 @@ export async function listarAssociados(projetoId: number, q?: string) {
         vencidos: ll.filter((l) => l.status_efetivo === 'VENCIDO').length,
       },
       documentos: docMap.get(num(a.id)) ?? { total: 0, com_arquivo: 0, tem_foto: false },
+      participantes: partRows.filter((x) => num(x.associado_id) === num(a.id)).map((x) => ({ nome: String(x.nome), vinculo: String(x.vinculo), responsavel_campo: num(x.responsavel_campo) === 1 })),
     };
   });
 }

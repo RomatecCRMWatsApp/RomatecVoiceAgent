@@ -846,14 +846,126 @@ function formAta(){
   $('#atDoc').onclick = () => baixar(`/projetos/${S.pid}/ata-assembleia.docx?${params()}`, `ATA-ASSEMBLEIA-${$('#atData').value || 'PA'}.docx`).catch((e) => toast(e.message, true));
 }
 
+// ─── v3.150.0: participantes do lote (cônjuge, filho, amigo… que também responde pelo lote) ─
+const GRUPO_TXT = { SIM: 'no grupo (manual)', NAO: 'fora do grupo (manual)' };
+async function carregarParticipantes(aid){
+  const box = $('#partBox'); if (!box) return;
+  let r; try { r = await api(`/associados/${aid}/participantes`); } catch (e){ box.innerHTML = `<h2>👥 Participantes do lote</h2><div class="muted">${esc(e.message)}</div>`; return; }
+  const ps = r.participantes;
+  box.innerHTML = `<h2>👥 Participantes do lote</h2>
+    <div class="muted" style="margin-bottom:8px">Quem mais responde pelo lote além do titular — ex.: o esposo que fica em campo, um filho, um amigo.</div>
+    ${ps.length ? ps.map((x) => `<div class="doc" style="margin-bottom:6px"><b>${esc(x.nome)}</b> ${chip('INSTITUCIONAL', x.vinculo)}${x.responsavel_campo ? ' ' + chip('VALIDO', '🌾 responsável em campo') : ''}
+        <div class="muted">${x.cpf ? 'CPF ' + esc(x.cpf) + ' · ' : ''}${x.rg ? 'RG ' + esc(x.rg) + ' · ' : ''}${x.nascimento ? 'nasc. ' + dbr(x.nascimento) + ' · ' : ''}${esc(x.telefone || 'sem telefone')}${x.telefone_e164 ? ` · <a href="https://wa.me/${esc(x.telefone_e164.replace('+', ''))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${x.email ? ' · ' + esc(x.email) : ''}</div>
+        ${x.obs ? `<div class="muted">${esc(x.obs)}</div>` : ''}
+        ${podeEscrever() ? `<div style="margin-top:4px"><button class="btn btn-ghost btn-sm" data-pted="${x.id}">✏️ Editar</button> <button class="btn btn-danger btn-sm" data-ptdel="${x.id}">Remover</button></div>` : ''}</div>`).join('') : '<div class="muted">Nenhum participante além do titular.</div>'}
+    ${podeEscrever() ? '<button class="btn btn-gold btn-sm" id="ptNovo" style="margin-top:6px">➕ Incluir participante</button>' : ''}<div id="ptForm"></div>`;
+  const form = (x) => {
+    const v = x || {};
+    $('#ptForm').innerHTML = `<div class="avisos" style="margin-top:8px"><b>${x ? 'Editar' : 'Novo'} participante</b>
+      <div class="grid3" style="margin-top:6px">
+        <div style="grid-column:span 2"><label for="ptNome">Nome completo</label><input id="ptNome" value="${esc(v.nome || '')}"></div>
+        <div><label for="ptVinc">Vínculo com o titular</label><select class="f" id="ptVinc">${r.vinculos.map((k) => `<option ${v.vinculo === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div>
+        <div><label for="ptCpf">CPF</label><input id="ptCpf" value="${esc(v.cpf || '')}"></div>
+        <div><label for="ptRg">RG</label><input id="ptRg" value="${esc(v.rg || '')}"></div>
+        <div><label for="ptNasc">Nascimento</label><input type="date" id="ptNasc" value="${esc(v.nascimento || '')}"></div>
+        <div><label for="ptTel">Telefone / WhatsApp</label><input id="ptTel" placeholder="(99) 9 9999-9999" value="${esc(v.telefone || '')}"></div>
+        <div><label for="ptEmail">E-mail</label><input id="ptEmail" value="${esc(v.email || '')}"></div>
+        <div><label for="ptGrupo">Grupo do WhatsApp</label><select class="f" id="ptGrupo"><option value="">Automático (pela sincronização)</option><option value="SIM" ${v.grupo_whatsapp_manual === 'SIM' ? 'selected' : ''}>Está no grupo</option><option value="NAO" ${v.grupo_whatsapp_manual === 'NAO' ? 'selected' : ''}>Não está no grupo</option></select></div>
+        <div style="grid-column:span 2"><label for="ptObs">Observação</label><input id="ptObs" value="${esc(v.obs || '')}"></div>
+        <div><label class="citem" style="margin-top:22px"><input type="checkbox" id="ptCampo" ${v.responsavel_campo ? 'checked' : ''}> 🌾 Responsável em campo</label></div>
+      </div>
+      <div class="row" style="margin-top:8px"><button class="btn btn-primary btn-sm" id="ptSalvar" style="flex:0 0 auto">Salvar</button><button class="btn btn-ghost btn-sm" id="ptCanc" style="flex:0 0 auto">Cancelar</button></div></div>`;
+    $('#ptCanc').onclick = () => { $('#ptForm').innerHTML = ''; };
+    $('#ptSalvar').onclick = async () => {
+      const body = { nome: $('#ptNome').value, vinculo: $('#ptVinc').value, cpf: $('#ptCpf').value, rg: $('#ptRg').value, nascimento: $('#ptNasc').value,
+        telefone: $('#ptTel').value, email: $('#ptEmail').value, grupo_whatsapp_manual: $('#ptGrupo').value || null, obs: $('#ptObs').value, responsavel_campo: $('#ptCampo').checked };
+      try {
+        const res = x ? await api(`/participantes/${x.id}`, { method: 'PATCH', json: body }) : await api(`/associados/${aid}/participantes`, { json: body });
+        toast('Participante salvo' + (res.avisos && res.avisos.length ? ' — ' + res.avisos.join('; ') : ''));
+        S.assoc = null; carregarParticipantes(aid);
+      } catch (e){ toast(e.message, true); }
+    };
+  };
+  if ($('#ptNovo')) $('#ptNovo').onclick = () => form(null);
+  box.querySelectorAll('[data-pted]').forEach((b) => b.onclick = () => form(ps.find((x) => x.id === Number(b.dataset.pted))));
+  box.querySelectorAll('[data-ptdel]').forEach((b) => b.onclick = async () => {
+    const x = ps.find((y) => y.id === Number(b.dataset.ptdel));
+    if (!confirm(`Remover ${x.nome} dos participantes do lote?`)) return;
+    try { await api(`/participantes/${x.id}`, { method: 'DELETE' }); toast('Participante removido'); S.assoc = null; carregarParticipantes(aid); } catch (e){ toast(e.message, true); }
+  });
+}
+
+// ─── v3.150.0: controle do grupo do WhatsApp do PA ─────────────────────────
+let GRP = { filtro: 'FORA', dados: null };
+async function painelGrupoWhatsApp(){
+  const box = $('#grpBox');
+  if (box.innerHTML){ box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="avisos" style="margin-top:10px">Carregando o grupo…</div>';
+  await desenharGrupo();
+}
+async function desenharGrupo(dados){
+  const box = $('#grpBox');
+  try { GRP.dados = dados || await api(`/projetos/${S.pid}/whatsapp/grupo`); } catch (e){ box.innerHTML = `<div class="avisos" style="margin-top:10px">${esc(e.message)}</div>`; return; }
+  const g = GRP.dados, t = g.totais;
+  const pessoaHtml = (l, x) => `<div class="row" style="align-items:center;gap:6px;margin:2px 0;flex-wrap:nowrap">
+      <span style="flex:1 1 auto;min-width:0">${x.tipo === 'TITULAR' ? '<b>' + esc(x.nome) + '</b>' : esc(x.nome) + ' ' + chip('INSTITUCIONAL', x.vinculo)} <span class="muted">${esc(x.telefone || 'sem telefone')}</span></span>
+      ${x.no_grupo ? chip('VALIDO', '✓ no grupo' + (x.origem === 'MANUAL' ? ' (manual)' : '')) : chip(x.telefone ? 'A_PAGAR' : 'SEM_TELEFONE', x.origem === 'MANUAL' ? 'fora (manual)' : 'fora do grupo')}
+      ${podeEscrever() ? `<select class="f grpMan" data-tipo="${x.tipo}" data-id="${x.id}" style="width:auto;flex:0 0 auto;padding:3px 6px;font-size:12px" title="Marcação manual"><option value="">auto</option><option value="SIM" ${x.manual === 'SIM' ? 'selected' : ''}>está</option><option value="NAO" ${x.manual === 'NAO' ? 'selected' : ''}>não está</option></select>` : ''}
+      ${x.telefone && !x.no_grupo ? `<a class="btn btn-ghost btn-sm" style="flex:0 0 auto" href="https://wa.me/${esc(x.telefone.replace('+', ''))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}</div>`;
+  const lotes = g.lotes.filter((l) => GRP.filtro === 'TODOS' || (GRP.filtro === 'FORA' ? !l.algum_no_grupo : l.algum_no_grupo));
+  box.innerHTML = `<div class="avisos" style="margin-top:10px">
+    <div class="row" style="align-items:end">
+      <div style="flex:1 1 260px"><b>👥 Grupo do WhatsApp do PA</b><div class="muted">${g.grupo.id ? `${esc(g.grupo.nome || g.grupo.id)}${g.grupo.sincronizado_em ? ' · lido em ' + dbr(g.grupo.sincronizado_em) : ' · ainda não lido'}` : 'Nenhum grupo escolhido — escolha abaixo ou use só a marcação manual.'}</div></div>
+      ${podeEscrever() ? `<div style="flex:0 0 auto"><button class="btn btn-ghost btn-sm" id="grpEscolher">⚙️ Escolher grupo</button> ${g.grupo.id ? '<button class="btn btn-primary btn-sm" id="grpSync">🔄 Ler membros do grupo</button>' : ''}</div>` : ''}
+    </div>
+    <div id="grpCfg"></div>
+    <div class="kpis" style="margin:10px 0">
+      <div class="kpi"><div class="l">Números no grupo</div><div class="v">${t.membros_no_grupo}</div><div class="muted">lidos do WhatsApp</div></div>
+      <div class="kpi ok"><div class="l">Lotes no grupo</div><div class="v">${t.lotes_com_alguem_no_grupo}/${t.lotes}</div><div class="muted">com ao menos 1 pessoa</div></div>
+      <div class="kpi red"><div class="l">Lotes fora</div><div class="v">${t.lotes_fora}</div><div class="muted">${t.sem_telefone} pessoa(s) sem telefone</div></div>
+      <div class="kpi"><div class="l">Pessoas cadastradas</div><div class="v">${t.pessoas_no_grupo}/${t.pessoas_cadastradas}</div><div class="muted">titulares + ${t.participantes} participante(s)</div></div>
+      <div class="kpi"><div class="l">No grupo sem cadastro</div><div class="v">${t.desconhecidos}</div><div class="muted">números não reconhecidos</div></div>
+    </div>
+    <div class="row" style="margin-bottom:6px"><div style="flex:0 1 220px"><label for="grpFiltro">Mostrar</label><select class="f" id="grpFiltro"><option value="FORA">Lotes fora do grupo</option><option value="DENTRO">Lotes no grupo</option><option value="TODOS">Todos os lotes</option></select></div></div>
+    <div class="tbl">${lotes.length ? `<table><thead><tr><th>Lote</th><th>Pessoas do lote</th></tr></thead><tbody>${lotes.map((l) => `<tr><td class="nowrap"><b>${esc(l.lote)}</b></td><td>${l.pessoas.map((x) => pessoaHtml(l, x)).join('')}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum lote nesse filtro. 🎉</div>'}</div>
+    ${g.desconhecidos.length ? `<h3>Números no grupo sem cadastro (${g.desconhecidos.length})</h3><div class="muted" style="margin-bottom:4px">Pode ser um participante ainda não cadastrado (inclua no cadastro do lote), alguém de fora ou um número antigo.</div><div style="line-height:2">${g.desconhecidos.map((n) => `<span class="chip">+${esc(n)}</span>`).join(' ')}</div>` : ''}
+  </div>`;
+  $('#grpFiltro').value = GRP.filtro;
+  $('#grpFiltro').onchange = (e) => { GRP.filtro = e.target.value; desenharGrupo(GRP.dados); };
+  box.querySelectorAll('.grpMan').forEach((sel) => sel.onchange = async () => {
+    try { await api('/whatsapp/grupo/manual', { json: { tipo: sel.dataset.tipo, id: Number(sel.dataset.id), valor: sel.value || null } }); desenharGrupo(); } catch (e){ toast(e.message, true); }
+  });
+  if ($('#grpSync')) $('#grpSync').onclick = async () => {
+    const b = $('#grpSync'); b.disabled = true; b.textContent = 'Lendo…';
+    try { desenharGrupo(await api(`/projetos/${S.pid}/whatsapp/grupo/sincronizar`, { json: {} })); toast('Membros do grupo atualizados'); }
+    catch (e){ toast(e.message, true); b.disabled = false; b.textContent = '🔄 Ler membros do grupo'; }
+  };
+  if ($('#grpEscolher')) $('#grpEscolher').onclick = async () => {
+    const cfg = $('#grpCfg'); cfg.innerHTML = '<div class="muted" style="margin-top:6px">Buscando os grupos do número do sistema…</div>';
+    let grupos = [];
+    try { grupos = (await api('/whatsapp/grupos')).grupos; } catch (e){ cfg.innerHTML = `<div class="muted" style="margin-top:6px">${esc(e.message)} — você ainda pode colar o ID do grupo.</div>`; }
+    cfg.innerHTML += `<div class="row" style="margin-top:6px;align-items:end">
+      ${grupos.length ? `<div style="flex:2 1 260px"><label for="grpSel">Grupos em que o número do sistema está</label><select class="f" id="grpSel"><option value="">— escolha —</option>${grupos.map((x) => `<option value="${esc(x.id)}" data-nome="${esc(x.nome)}" ${x.id === g.grupo.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select></div>` : ''}
+      <div style="flex:1 1 220px"><label for="grpId">ou ID do grupo</label><input id="grpId" placeholder="120363…-group" value="${esc(g.grupo.id || '')}"></div>
+      <div style="flex:0 0 auto"><button class="btn btn-primary btn-sm" id="grpSalvar">Salvar</button> ${g.grupo.id ? '<button class="btn btn-ghost btn-sm" id="grpLimpar">Desvincular</button>' : ''}</div></div>
+      <div class="muted" style="margin-top:4px">O número do sistema (Z-API) precisa estar no grupo para o sistema ler os membros. Se não estiver, use a marcação manual em cada pessoa.</div>`;
+    if ($('#grpSel')) $('#grpSel').onchange = () => { $('#grpId').value = $('#grpSel').value; };
+    $('#grpSalvar').onclick = async () => {
+      const id = $('#grpId').value.trim(); const opt = $('#grpSel') && $('#grpSel').selectedOptions[0];
+      try { const r = await api(`/projetos/${S.pid}/whatsapp/grupo`, { json: { grupo_id: id || null, nome: opt && opt.value === id ? opt.dataset.nome : null } }); toast('Grupo salvo'); desenharGrupo(r); } catch (e){ toast(e.message, true); }
+    };
+    if ($('#grpLimpar')) $('#grpLimpar').onclick = async () => { try { desenharGrupo(await api(`/projetos/${S.pid}/whatsapp/grupo`, { json: { grupo_id: null } })); } catch (e){ toast(e.message, true); } };
+  };
+}
+
 // ─── Associados ─────────────────────────────────────────────────────────
 async function rAssociados(){
   const v = $('#v-associados');
   v.innerHTML = `<div class="card"><div class="row"><div style="flex:3 1 260px"><label for="busca">Buscar</label><input id="busca" placeholder="Nome, nº PASM, lote, chácara, CPF ou telefone"></div>
       <div style="flex:1 1 140px"><label for="fSit">Situação</label><select class="f" id="fSit"><option value="">Todas</option><option value="A_PAGAR">Sinal a pagar</option><option value="PARCIAL">Sinal parcial</option><option value="VENCIDO">Com vencido</option><option value="SEMDOC">Sem documentos</option></select></div>
       <div style="flex:1 1 140px"><label for="fWa">WhatsApp</label><select class="f" id="fWa"><option value="">Todos</option><option value="VALIDO">Válido</option><option value="INEXISTENTE">Sem WhatsApp</option><option value="SEM_TELEFONE">Sem telefone</option><option value="NAO_VERIFICADO">Não verificado</option></select></div>
-      ${podeEscrever() ? '<div style="flex:0 0 auto"><button class="btn btn-ghost" id="verifWa">📱 Verificar WhatsApps</button> <button class="btn btn-gold" id="novoAssoc">➕ Novo associado</button></div>' : ''}</div>
-      <div id="waBox"></div></div>
+      <div style="flex:0 0 auto"><button class="btn btn-ghost" id="grpBtn">👥 Grupo do WhatsApp</button>${podeEscrever() ? ' <button class="btn btn-ghost" id="verifWa">📱 Verificar WhatsApps</button> <button class="btn btn-gold" id="novoAssoc">➕ Novo associado</button>' : ''}</div></div>
+      <div id="waBox"></div><div id="grpBox"></div></div>
     <div class="card"><div id="assocLista" class="tbl"><div class="empty">Carregando…</div></div></div>`;
   let timer = null;
   const carregar = async () => {
@@ -864,7 +976,7 @@ async function rAssociados(){
       const fw = $('#fWa').value;
       const lista = associados.filter((a) => (!fs || (fs === 'VENCIDO' ? a.financeiro.vencidos > 0 : fs === 'SEMDOC' ? a.documentos.total === 0 : a.financeiro.sinal_status === fs)) && (!fw || a.whatsapp_status === fw));
       $('#assocLista').innerHTML = lista.length ? `<table><thead><tr><th></th><th>Lote</th><th>Nº</th><th>Associado</th><th>Terra</th><th>WhatsApp</th><th>Entrada</th><th class="right">Recebido</th><th class="right">Saldo</th><th>Contrato</th><th>Docs</th></tr></thead><tbody>
-        ${lista.map((a) => `<tr class="click" data-id="${a.id}"><td>${fotoMini(a)}</td><td><b>${esc(a.lote)}</b></td><td class="nowrap">${esc(a.numero)}</td><td>${esc(a.nome)}<div class="muted">${esc(a.cpf)}</div></td><td>${esc(a.denominacao_terra || '')}</td>
+        ${lista.map((a) => `<tr class="click" data-id="${a.id}"><td>${fotoMini(a)}</td><td><b>${esc(a.lote)}</b></td><td class="nowrap">${esc(a.numero)}</td><td>${esc(a.nome)}<div class="muted">${esc(a.cpf)}</div>${(a.participantes || []).map((x) => `<div class="muted">+ ${esc(x.nome)} <i>(${esc(x.vinculo.toLowerCase())}${x.responsavel_campo ? ', em campo' : ''})</i></div>`).join('')}</td><td>${esc(a.denominacao_terra || '')}</td>
           <td>${chip(a.whatsapp_status, WA_TXT[a.whatsapp_status])}</td><td>${chip(a.financeiro.sinal_status)}</td><td class="right nowrap">${brl(a.financeiro.recebido)}</td><td class="right nowrap">${a.financeiro.saldo ? brl(a.financeiro.saldo) : chip('QUITADO')}</td>
           <td>${chip(a.contrato_status)}</td><td class="nowrap">${a.documentos.com_arquivo}/${a.documentos.total}</td></tr>`).join('')}</tbody></table>
         <div class="muted" style="margin-top:6px">${lista.length} associado(s)</div>` : '<div class="empty">Nenhum associado encontrado.</div>';
@@ -875,6 +987,7 @@ async function rAssociados(){
   $('#fSit').onchange = carregar;
   $('#fWa').onchange = carregar;
   if ($('#novoAssoc')) $('#novoAssoc').onclick = formNovoAssociado;
+  $('#grpBtn').onclick = painelGrupoWhatsApp;
   if ($('#verifWa')) $('#verifWa').onclick = async () => {
     const b = $('#verifWa'); b.disabled = true; $('#waBox').innerHTML = '<div class="muted" style="margin-top:8px">Consultando a Z-API…</div>';
     try {
@@ -937,6 +1050,7 @@ async function abrirAssociado(aid, avisos){
           ${podeEscrever() ? '<div class="row" style="margin-top:10px"><button class="btn btn-ghost btn-sm" id="edAssoc">✏️ Editar dados</button><button class="btn btn-ghost btn-sm" id="edPlano">🔁 Sinal diferente do padrão</button></div>' : ''}
           <div id="edBox"></div>
         </div>
+        <div class="card" id="partBox"><h2>👥 Participantes do lote</h2><div class="muted">Carregando…</div></div>
         <div class="card"><h2>Financeiro</h2>
           <div class="kpis" style="grid-template-columns:repeat(3,1fr)"><div class="kpi"><div class="l">Contratado</div><div class="v" style="font-size:17px">${brl(d.resumo.contratado)}</div></div>
             <div class="kpi ok"><div class="l">Recebido</div><div class="v" style="font-size:17px">${brl(d.resumo.recebido)}</div></div>
@@ -968,6 +1082,7 @@ async function abrirAssociado(aid, avisos){
     $('#dx').onclick = fecharDrawer;
     pane.querySelectorAll('[data-doc]').forEach((b) => b.onclick = () => abrirDoc(b.dataset.doc));
     carregarFoto(d.documentos);
+    carregarParticipantes(a.id);
     pane.querySelectorAll('[data-copiar]').forEach((b) => b.onclick = () => copiar(b.dataset.copiar));
     pane.querySelectorAll('[data-romatec]').forEach((b) => b.onclick = () => abrirBoletoRomatec(b));
     pane.querySelectorAll('[data-emitir]').forEach((b) => b.onclick = async () => {

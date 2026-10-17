@@ -58,7 +58,17 @@ export async function associadoPorTelefone(tel: string): Promise<{ id: number; n
     FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id JOIN pa_projetos p ON p.id = a.projeto_id
     WHERE a.ativo = 1 AND (REPLACE(a.telefone_e164, '+', '') IN (${ph}) OR a.whatsapp_numero IN (${ph}))
     ORDER BY a.id LIMIT 1`, [...vs, ...vs]);
-  return r[0] ? { id: num(r[0].id), nome: String(r[0].nome), lote: String(r[0].lote), projeto: String(r[0].projeto) } : null;
+  if (r[0]) return { id: num(r[0].id), nome: String(r[0].nome), lote: String(r[0].lote), projeto: String(r[0].projeto) };
+  // v3.150.0: participante do lote (ex.: o esposo que fica em campo) — cumprimenta pelo nome dele.
+  try {
+    const q = await rows(pool, `
+      SELECT a.id, pt.nome, lt.numero AS lote, p.nome AS projeto
+      FROM pa_participantes pt JOIN pa_associados a ON a.id = pt.associado_id AND a.ativo = 1
+      JOIN pa_lotes lt ON lt.id = a.lote_id JOIN pa_projetos p ON p.id = a.projeto_id
+      WHERE pt.ativo = 1 AND REPLACE(pt.telefone_e164, '+', '') IN (${ph}) ORDER BY pt.id LIMIT 1`, vs);
+    if (q[0]) return { id: num(q[0].id), nome: String(q[0].nome), lote: String(q[0].lote), projeto: String(q[0].projeto) };
+  } catch { /* tabela ainda não migrada */ }
+  return null;
 }
 
 export type DecisaoAuto = { acao: 'ZAYRA' } | { acao: 'SILENCIO'; motivo: string } | { acao: 'RESPONDER'; texto: string; tipo: 'ASSOCIADO' | 'GENERICA' };

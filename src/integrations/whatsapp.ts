@@ -601,3 +601,33 @@ export async function listarAudiosWhatsApp(input: {
     aviso: 'Esta listagem mostra apenas metadados (data, telefone, ID). O conteudo do audio em si nao e armazenado pelo sistema — apenas Z-API/WhatsApp guarda a midia.',
   };
 }
+
+// ── v3.150.0: grupos do WhatsApp (controle do grupo do PA) ───────────────────
+export interface GrupoWhatsApp { id: string; nome: string }
+export interface MembroGrupo { telefone: string; admin: boolean }
+
+/** Grupos de que o número da instância participa. */
+export async function listarGruposWhatsApp(): Promise<GrupoWhatsApp[]> {
+  const out: GrupoWhatsApp[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const r = await axios.get<unknown>(`${zapiBase()}/groups`, { params: { page, pageSize: 100 }, headers: zapiHeaders(), timeout: 20000 });
+    const lista = Array.isArray(r.data) ? (r.data as Array<Record<string, unknown>>) : [];
+    for (const g of lista) {
+      const id = String(g.phone ?? g.id ?? '');
+      if (id) out.push({ id, nome: String(g.name ?? g.subject ?? id) });
+    }
+    if (lista.length < 100) break;
+  }
+  return out;
+}
+
+/** Participantes de um grupo (o número da instância precisa estar no grupo). */
+export async function membrosGrupoWhatsApp(grupoId: string): Promise<{ nome: string; membros: MembroGrupo[] }> {
+  const r = await axios.get<Record<string, unknown>>(`${zapiBase()}/group-metadata/${encodeURIComponent(grupoId)}`, { headers: zapiHeaders(), timeout: 20000 });
+  const d = r.data ?? {};
+  const parts = Array.isArray(d.participants) ? (d.participants as Array<Record<string, unknown>>) : [];
+  return {
+    nome: String(d.subject ?? d.name ?? grupoId),
+    membros: parts.map((p) => ({ telefone: String(p.phone ?? p.id ?? '').replace(/\D/g, ''), admin: p.isAdmin === true || p.isSuperAdmin === true })).filter((m) => m.telefone),
+  };
+}

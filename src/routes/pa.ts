@@ -29,6 +29,7 @@ import * as mapas from '../services/pa/paMapas';
 import * as caixa from '../services/pa/paCaixa';
 import * as carteirinha from '../services/pa/paCarteirinha';
 import * as ata from '../services/pa/paAta';
+import * as part from '../services/pa/paParticipantes';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -302,6 +303,35 @@ router.get('/projetos/:id/carteirinhas.html', h(async (req, res) => {
   res.setHeader('Cache-Control', 'private, no-store');
   res.end(html);
   return undefined;
+}));
+
+// ─── v3.150.0: participantes do lote e grupo do WhatsApp ──────────────────
+router.get('/associados/:aid/participantes', h(async (req) => ({ participantes: visao(await part.listarParticipantes(id(req.params.aid, 'associado')), ctx(req).perfil), vinculos: part.VINCULOS })));
+router.post('/associados/:aid/participantes', h(async (req, res) => {
+  exigirEscrita(req);
+  res.status(201);
+  return part.criarParticipante(id(req.params.aid, 'associado'), req.body ?? {}, ctx(req).sub);
+}));
+router.patch('/participantes/:pid', h(async (req) => { exigirEscrita(req); return part.atualizarParticipante(id(req.params.pid, 'participante'), req.body ?? {}, ctx(req).sub); }));
+router.delete('/participantes/:pid', h(async (req) => { exigirEscrita(req); return part.removerParticipante(id(req.params.pid, 'participante'), ctx(req).sub); }));
+router.get('/projetos/:id/whatsapp/grupo', h(async (req) => part.situacaoGrupo(id(req.params.id))));
+router.get('/whatsapp/grupos', h(async () => {
+  const wa = await import('../integrations/whatsapp');
+  try { return { grupos: await wa.listarGruposWhatsApp() }; } catch (e) {
+    throw new PaErro('ZAPI_INDISPONIVEL', `Não consegui listar os grupos pela Z-API: ${(e as Error).message}`.slice(0, 300), 502);
+  }
+}));
+router.post('/projetos/:id/whatsapp/grupo', h(async (req) => {
+  exigirEscrita(req);
+  return part.configurarGrupo(id(req.params.id), req.body?.grupo_id ?? null, req.body?.nome ?? null, ctx(req).sub);
+}));
+router.post('/projetos/:id/whatsapp/grupo/sincronizar', h(async (req) => { exigirEscrita(req); return part.sincronizarGrupo(id(req.params.id), ctx(req).sub); }));
+router.post('/whatsapp/grupo/manual', h(async (req) => {
+  exigirEscrita(req);
+  const b = req.body ?? {};
+  const tipo = b.tipo === 'PARTICIPANTE' ? 'PARTICIPANTE' : 'TITULAR';
+  const valor = b.valor === 'SIM' || b.valor === 'NAO' ? b.valor : null;
+  return part.marcarGrupoManual(tipo, id(b.id), valor, ctx(req).sub);
 }));
 
 // ─── v3.149.0: ata da assembleia de aprovação da contratação (padrão INCRA) ─
