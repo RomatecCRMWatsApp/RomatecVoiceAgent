@@ -59,6 +59,10 @@ import {
   getReciboPdfAssinado,
   getStatusAssinatura,
 } from './integrations/recibosAssinatura';
+// v3.151.0: Assinatura do RT — fila de aprovação ICP-Brasil A1 · PAdES (módulo
+// isolado em /api/assinatura, auth e parser próprios). Reutiliza o `pool`
+// (mysql2/promise) já importado abaixo; não altera a assinatura existente.
+import { criarRotasAssinatura } from './modules/assinatura';
 import ragRoutes from './routes/rag';
 import pool from './database/connection';
 import { runMigrationsExplicativo } from './database/migrations-explicativo';
@@ -130,6 +134,20 @@ app.use('/api', apiAuthGate);
 // v3.24.0: rotas /api/auth/* (login, logout, me).
 import authRoutes from './routes/auth';
 app.use('/api/auth', authRoutes);
+
+// v3.151.0: Assinatura do RT — fila de aprovação ICP-Brasil A1 · PAdES. Montado
+// logo após o apiAuthGate (precisa estar DEPOIS dele) porque o módulo tem auth
+// própria por Bearer ASSINATURA_RT_TOKEN, não cookie de usuário — por isso o
+// prefixo /assinatura está na allowlist de middleware/apiAuthGate.ts. `pool` já
+// é um Pool de mysql2/promise (export default de ./database/connection), que é
+// exatamente o que criarRotasAssinatura espera. try/catch pra nunca derrubar o
+// boot; o módulo é isolado e não toca na assinatura existente da ZAYRA.
+try {
+  app.use('/api/assinatura', criarRotasAssinatura(pool));
+  console.log('[assinatura] rotas /api/assinatura ativas');
+} catch (e) {
+  console.error('[assinatura] módulo desativado:', e instanceof Error ? e.message : e);
+}
 
 // v3.24.1: rotas /api/minha-quinzena/* — colaborador self-service.
 import minhaQuinzenaRoutes from './routes/minhaQuinzena';

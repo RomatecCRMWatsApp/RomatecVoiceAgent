@@ -57,6 +57,10 @@ export const ROTAS_PUBLICAS_API: readonly RotaPublica[] = [
     metodos: ['POST'],
     motivo: 'webhook de entrada do AvalieImob (serviço externo, sem sessão)',
   },
+  {
+    match: /^\/assinatura(\/|$)/,
+    motivo: 'módulo de Assinatura do RT (fila de aprovação ICP-Brasil A1 · PAdES): autentica por Bearer ASSINATURA_RT_TOKEN com timingSafeEqual (middleware próprio), não pelo cookie zayra_auth',
+  },
 ];
 
 /**

@@ -12,3 +12,8 @@ __pycache__/
 *.pyc
 # artefato do smoke test do laudo (npm run validar:laudo)
 _validacao-laudo-asbuilt.pdf
+
+# v3.151.0 Assinatura do RT — nunca versionar certificados nem PDFs assinados/enviados
+storage/
+*.pfx
+*.p12
