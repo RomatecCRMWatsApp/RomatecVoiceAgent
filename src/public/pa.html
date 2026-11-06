@@ -671,8 +671,8 @@ let SUBV = { busca: '', lote: null };
 async function rSubdivisao(){
   const box = $('#subdivBox');
   box.innerHTML = '<div class="card empty">Carregando a subdivisão…</div>';
-  let sub;
-  try { sub = (await api(`/projetos/${S.pid}/subdivisao`)).subdivisao; } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  let sub, vinc = {}, assocs = [];
+  try { const r = await api(`/projetos/${S.pid}/subdivisao`); sub = r.subdivisao; vinc = r.vinculos || {}; if (sub) assocs = await carregarAssoc().catch(() => []); } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
   const fm = (v, d = 2) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
   const tot = sub ? sub.parcelas.reduce((a, x) => a + x.perimetro.area_ha, 0) : 0;
   box.innerHTML = `
@@ -713,10 +713,18 @@ async function rSubdivisao(){
   const lista = () => {
     const q = SUBV.busca.trim().replace(/\D/g, '');
     const ps = sub.parcelas.filter((x) => !q || x.lote === q.padStart(2, '0') || x.lote === q);
-    $('#sdLista').innerHTML = ps.length ? `<table><thead><tr><th>Lote</th><th class="right">Área total (ha)</th><th class="right">Útil (ha)</th><th class="right">Perímetro (m)</th><th class="right">Vért.</th><th></th></tr></thead><tbody>
+    $('#sdLista').innerHTML = ps.length ? `<table><thead><tr><th>Lote</th><th class="right">Área total (ha)</th><th class="right">Útil (ha)</th><th class="right">Perímetro (m)</th><th class="right">Vért.</th><th>Beneficiário(a)</th><th></th></tr></thead><tbody>
       ${ps.map((x) => `<tr><td><b>LT-${esc(x.lote)}</b></td><td class="right">${fm(x.perimetro.area_ha, 4)}</td><td class="right">${x.area_util_ha != null ? fm(x.area_util_ha, 4) : '—'}</td><td class="right">${fm(x.perimetro.perimetro_m)}</td><td class="right">${x.perimetro.vertices.length}</td>
+        <td>${podeEscrever() ? `<select class="f sdVinc" data-lote="${esc(x.lote)}" style="min-width:170px;padding:4px 6px;font-size:12px"><option value="">— sem vínculo —</option>${assocs.map((a) => `<option value="${a.id}" ${vinc[x.lote] && vinc[x.lote].associado_id === a.id ? 'selected' : ''}>${esc(a.nome)}${a.parcela && a.parcela !== x.lote ? ' (já no LT-' + esc(a.parcela) + ')' : ''}</option>`).join('')}</select>` : esc(vinc[x.lote] ? vinc[x.lote].nome : '—')}</td>
         <td class="nowrap"><button class="btn btn-ghost btn-sm" data-sdver="${esc(x.lote)}" title="Mapa e memorial">👁</button> <button class="btn btn-ghost btn-sm" data-sdpdf="${esc(x.lote)}" title="PDF do lote">📄</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum lote com esse número.</div>';
     $('#sdLista').querySelectorAll('[data-sdver]').forEach((b) => b.onclick = () => verLote(b.dataset.sdver));
+    $('#sdLista').querySelectorAll('.sdVinc').forEach((sel) => sel.onchange = async () => {
+      const lote = sel.dataset.lote, aid = sel.value ? Number(sel.value) : null;
+      const ant = Object.entries(vinc).find(([l, v]) => aid && v.associado_id === aid && l !== lote);
+      if (ant && !confirm(`Esse associado já está no LT-${ant[0]}. Mover para o LT-${lote}?`)) { lista(); return; }
+      try { vinc = (await api(`/projetos/${S.pid}/subdivisao/vinculo`, { json: { lote, associado_id: aid } })).vinculos; S.assoc = null; assocs = await carregarAssoc().catch(() => assocs); toast(aid ? `LT-${lote} vinculado` : `Vínculo do LT-${lote} removido`); lista(); if (SUBV.lote === lote) verLote(lote); }
+      catch (e){ toast(e.message, true); lista(); }
+    });
     $('#sdLista').querySelectorAll('[data-sdpdf]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=${encodeURIComponent(b.dataset.sdpdf)}`));
   };
   const verLote = async (lote) => {
@@ -727,6 +735,7 @@ async function rSubdivisao(){
       const pc = r.parcela, per = pc.perimetro;
       el.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">LT-${esc(pc.lote)} · ${fm(per.area_ha, 4)} ha</h2><button class="btn btn-gold btn-sm" id="sdPdfUm" style="flex:0 0 auto">📄 PDF do lote</button></div>
         <img src="/api/pa/projetos/${S.pid}/subdivisao.svg?lote=${encodeURIComponent(pc.lote)}&t=${Date.now()}" alt="Mapa do lote ${esc(pc.lote)}" style="width:100%;display:block;border:1px solid var(--line);border-radius:10px;margin-top:8px">
+        <div style="margin:6px 0">Beneficiário(a): ${r.beneficiario ? `<b>${esc(r.beneficiario.nome)}</b> · CPF ${esc(r.beneficiario.cpf)}` : '<span class="muted">sem vínculo — escolha na lista ao lado</span>'}</div>
         <div class="muted" style="margin:6px 0">Perímetro ${fm(per.perimetro_m)} m · ${per.vertices.length} vértices${pc.area_util_ha != null ? ' · área útil ' + fm(pc.area_util_ha, 4) + ' ha (área total inclui APP e estradas)' : ''}</div>
         <h3>Memorial descritivo</h3>${r.memorial.map((t) => `<p class="memo-t">${esc(t)}</p>`).join('')}
         <div class="tbl"><table><thead><tr><th>Vértice</th><th class="right">E (m)</th><th class="right">N (m)</th><th class="right">Azimute</th><th class="right">Dist. (m)</th><th>Confrontante</th></tr></thead><tbody>
@@ -1121,6 +1130,7 @@ async function abrirAssociado(aid, avisos){
             <dt>E-mail</dt><dd>${esc(a.email || '—')}</dd><dt>Terra</dt><dd>${esc(a.denominacao_terra || '—')}</dd>
             <dt>Endereço</dt><dd>${esc(a.endereco || '—')}</dd><dt>Vencimento</dt><dd>dia ${esc(a.dia_vencimento || '—')}</dd>
             <dt>Contrato</dt><dd>${chip(a.contrato_status)} ${a.contrato_assinado_em ? dbr(a.contrato_assinado_em) : ''}</dd>
+            <dt>Lote rural (PA)</dt><dd>${a.parcela ? 'LT-' + esc(a.parcela) : '<span class="muted">sem vínculo (Mapa → Lotes do PA)</span>'}</dd>
             <dt>Pendências</dt><dd>${esc(a.pendencias || '—')}</dd>
           </dl>
           ${podeEscrever() ? '<div class="row" style="margin-top:10px"><button class="btn btn-ghost btn-sm" id="edAssoc">✏️ Editar dados</button><button class="btn btn-ghost btn-sm" id="edPlano">🔁 Sinal diferente do padrão</button></div>' : ''}

@@ -371,6 +371,7 @@ export function mapAssociado(r: Row) {
     whatsapp_status: String(r.whatsapp_status ?? 'NAO_VERIFICADO'),
     whatsapp_numero: (r.whatsapp_numero as string) ?? null,
     whatsapp_verificado_em: isoDateTime(r.whatsapp_verificado_em),
+    parcela: (r.parcela as string) ?? null,
   };
 }
 export type Associado = ReturnType<typeof mapAssociado>;

@@ -154,7 +154,13 @@ router.delete('/projetos/:id/perimetro', h(async (req) => { exigirAdmin(req); aw
 // v3.151.0: subdivisão do PA em lotes (DXF da divisão/marcos).
 router.get('/projetos/:id/subdivisao', h(async (req) => {
   const sub = await mapas.buscarSubdivisao(id(req.params.id));
-  return { subdivisao: sub ? { ...sub, camadas: undefined } : null };
+  return { subdivisao: sub ? { ...sub, camadas: undefined } : null, vinculos: sub ? visao(await mapas.vinculosParcelas(id(req.params.id)), ctx(req).perfil) : {} };
+}));
+router.post('/projetos/:id/subdivisao/vinculo', h(async (req) => {
+  exigirEscrita(req);
+  const b = req.body ?? {};
+  const aid = b.associado_id == null || b.associado_id === '' ? null : id(b.associado_id, 'associado');
+  return { vinculos: await mapas.vincularParcela(id(req.params.id), String(b.lote ?? ''), aid, ctx(req).sub) };
 }));
 router.post('/projetos/:id/subdivisao', uploadMem.single('arquivo'), h(async (req) => {
   exigirEscrita(req);

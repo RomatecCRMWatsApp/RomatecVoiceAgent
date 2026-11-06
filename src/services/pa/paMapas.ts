@@ -6,7 +6,7 @@ import { desenhoDoProjeto } from './layoutDesenho';
 import { marcaArquivos } from './marcaProjeto';
 import { memorialVila, type MemorialLote } from './memorialVila';
 import { perimetroDeArquivo, type Perimetro } from './perimetro';
-import { htmlMapaVila, htmlMapaGeral, htmlSubdivisao, svgSubdivisao, pdfDeHtml, type DadosMapaPA } from './mapasPdf';
+import { htmlMapaVila, htmlMapaGeral, htmlSubdivisao, svgSubdivisao, pdfDeHtml, type DadosMapaPA, type BeneficiarioParcela } from './mapasPdf';
 import { subdivisaoDeDxf, textoMemorialParcela, type Subdivisao } from './parcelas';
 import type { LoteDoMapa } from './mapaSvg';
 
@@ -112,12 +112,34 @@ export async function svgSubdivisaoProjeto(projetoId: number, lote: string | nul
   return svgSubdivisao(sub, { destaque: lote, perimetro: lote ? null : await buscarPerimetro(projetoId) });
 }
 
+/** Vínculos lote rural (LT-NN) → associado. */
+export async function vinculosParcelas(projetoId: number): Promise<Record<string, BeneficiarioParcela & { associado_id: number; lote_vila: string }>> {
+  const r = await rows(pool, `SELECT a.id, a.nome, a.cpf, a.parcela, lt.numero AS lote_vila FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id
+    WHERE a.projeto_id = ? AND a.ativo = 1 AND a.parcela IS NOT NULL`, [projetoId]);
+  return Object.fromEntries(r.map((x) => [String(x.parcela), { associado_id: Number(x.id), nome: String(x.nome), cpf: String(x.cpf), lote_vila: String(x.lote_vila) }]));
+}
+
+/** Liga (ou desliga, com associadoId null) um lote da subdivisão a um associado. Um associado por lote e um lote por associado. */
+export async function vincularParcela(projetoId: number, lote: string, associadoId: number | null, usuario: string | null) {
+  const sub = await exigirSubdivisao(projetoId);
+  if (!sub.parcelas.some((p) => p.lote === lote)) throw new PaErro('LOTE_NAO_ENCONTRADO', `Lote ${lote} não está na subdivisão`, 404);
+  if (associadoId != null) {
+    const a = await one(pool, 'SELECT id FROM pa_associados WHERE id = ? AND projeto_id = ? AND ativo = 1', [associadoId, projetoId]);
+    if (!a) throw new PaErro('ASSOCIADO_NAO_ENCONTRADO', 'Associado não encontrado neste projeto', 404);
+  }
+  await exec(pool, 'UPDATE pa_associados SET parcela = NULL WHERE projeto_id = ? AND parcela = ?', [projetoId, lote]);
+  if (associadoId != null) await exec(pool, 'UPDATE pa_associados SET parcela = ? WHERE id = ?', [lote, associadoId]);
+  await registrarEvento(pool, { projeto_id: projetoId, associado_id: associadoId, usuario, tipo: 'PARCELA_VINCULADA', dados: { lote, associado_id: associadoId } });
+  return vinculosParcelas(projetoId);
+}
+
 export async function memorialParcela(projetoId: number, lote: string) {
   const p = await buscarProjeto(projetoId);
   const sub = await exigirSubdivisao(projetoId);
   const pc = sub.parcelas.find((x) => x.lote === lote);
   if (!pc) throw new PaErro('LOTE_NAO_ENCONTRADO', `Lote ${lote} não está na subdivisão`, 404);
-  return { parcela: pc, memorial: textoMemorialParcela(pc, p.nome, `${p.municipio}/${p.uf}`, null) };
+  const ben = (await vinculosParcelas(projetoId))[lote] ?? null;
+  return { parcela: pc, beneficiario: ben, memorial: textoMemorialParcela(pc, p.nome, `${p.municipio}/${p.uf}`, ben ? `${ben.nome}, CPF ${ben.cpf}` : null) };
 }
 
 /** PDF com o mapa geral da subdivisão (geral) e/ou mapa + memorial de cada lote pedido (null = todos). */
@@ -125,7 +147,7 @@ export async function pdfSubdivisao(projetoId: number, lotes: string[] | null, g
   const p = await buscarProjeto(projetoId);
   const sub = await exigirSubdivisao(projetoId);
   const lista = lotes ?? sub.parcelas.map((x) => x.lote);
-  const html = htmlSubdivisao(dadosCabecalho(p), sub, { lotes: lista, geral, perimetro: await buscarPerimetro(projetoId) });
+  const html = htmlSubdivisao(dadosCabecalho(p), sub, { lotes: lista, geral, perimetro: await buscarPerimetro(projetoId), beneficiarios: await vinculosParcelas(projetoId) });
   const nome = !geral && lista.length === 1 ? `LOTE-${lista[0]}-MAPA-MEMORIAL-${p.codigo}.pdf` : geral && !lotes?.length ? `SUBDIVISAO-LOTES-${p.codigo}.pdf` : `LOTES-MAPAS-MEMORIAIS-${p.codigo}.pdf`;
   return { pdf: await pdfDeHtml(html), nome };
 }

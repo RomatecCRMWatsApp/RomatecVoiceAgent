@@ -39,3 +39,14 @@ describe('subdivisão do PA (DXF)', () => {
     expect(() => subdivisaoDeDxf(dxf.replace('LT-02', 'LT-01'))).toThrow(/repetido/);
   });
 });
+
+import { htmlSubdivisao } from './mapasPdf';
+describe('beneficiário do lote (v3.152.0)', () => {
+  const sub = subdivisaoDeDxf(dxf);
+  const d = { projeto: { nome: 'PA Teste', municipio: 'Açailândia', uf: 'MA', associacao: null }, rt: { nome: 'RT', registro: 'CFT' }, marca: { brasao: null, emblema: null }, data: '06/11/2026' };
+  it('com vínculo, o PDF sai com nome e CPF; sem vínculo, linha em branco', () => {
+    const html = htmlSubdivisao(d, sub, { lotes: ['01', '02'], geral: true, perimetro: null, beneficiarios: { '01': { nome: 'MARIA TESTE', cpf: '000.000.000-00' } } });
+    expect(html).toContain('Beneficiário(a): MARIA TESTE, CPF 000.000.000-00');
+    expect((html.match(/______________________________<\/b>CPF/g) || []).length).toBe(1);
+  });
+});

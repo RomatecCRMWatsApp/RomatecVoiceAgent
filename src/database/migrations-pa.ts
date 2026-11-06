@@ -331,6 +331,8 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_projetos.whatsapp_grupo', sql: 'ALTER TABLE pa_projetos ADD COLUMN whatsapp_grupo_id VARCHAR(60) NULL, ADD COLUMN whatsapp_grupo_nome VARCHAR(160) NULL, ADD COLUMN whatsapp_grupo_sync_em DATETIME NULL' },
   { label: 'pa_associados.grupo_whatsapp_manual', sql: "ALTER TABLE pa_associados ADD COLUMN grupo_whatsapp_manual ENUM('SIM','NAO') NULL" },
   // v3.151.0: subdivisão do PA em lotes (parcelas do DXF: vértices/marcos, confrontantes, camadas do desenho).
+  // v3.152.0: lote rural (parcela LT-NN da subdivisão) de cada associado — um associado por lote.
+  { label: 'pa_associados.parcela', sql: 'ALTER TABLE pa_associados ADD COLUMN parcela VARCHAR(10) NULL, ADD UNIQUE KEY uk_pa_assoc_parcela (projeto_id, parcela)' },
   { label: 'pa_projetos.subdivisao_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN subdivisao_json JSON NULL' },
   // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },
