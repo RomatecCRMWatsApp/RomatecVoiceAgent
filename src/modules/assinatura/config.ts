@@ -19,6 +19,12 @@ export const configAssinatura = {
     if (t.length < 32) throw new Error('ASSINATURA_RT_TOKEN deve ter no mínimo 32 caracteres');
     return t;
   },
+  /** v3.152.0 — Token de envio restrito (Claude → ZAYRA): só /api/assinatura/chat, origem claude-chat. */
+  get uploadToken(): string {
+    const t = obrigatorio('ASSINATURA_UPLOAD_TOKEN');
+    if (t.length < 32) throw new Error('ASSINATURA_UPLOAD_TOKEN deve ter no mínimo 32 caracteres');
+    return t;
+  },
   storageDir: process.env.ASSINATURA_STORAGE_DIR ?? path.resolve('storage/assinatura'),
   local: process.env.ASSINATURA_LOCAL ?? 'Açailândia/MA',
   contato: process.env.ASSINATURA_CONTATO ?? 'contato@consultoriaromatec.com.br',
@@ -27,4 +33,15 @@ export const configAssinatura = {
   tamanhoMaxMB: 40,
   maxDocsPorLote: 50,
   diasAlertaVencimento: 30,
+  // v3.152.0 — assinatura pelo chat (lotes com aprovação por link)
+  loteExpiraMinutos: 30,
+  loteMaxDocs: 10,
+  chatReqPorMin: 30,
+  chatDocsPorHora: 20,
+  // v3.152.1 — âncoras (selo em vários pontos do PDF)
+  maxAncorasPorArquivo: 40,
+  ancoraLarguraMin: 80,
+  ancoraLarguraMax: 400,
+  ancoraAlturaMin: 24,
+  ancoraAlturaMax: 120,
 } as const;

@@ -62,7 +62,14 @@ import {
 // v3.151.0: Assinatura do RT — fila de aprovação ICP-Brasil A1 · PAdES (módulo
 // isolado em /api/assinatura, auth e parser próprios). Reutiliza o `pool`
 // (mysql2/promise) já importado abaixo; não altera a assinatura existente.
-import { criarRotasAssinatura } from './modules/assinatura';
+// v3.152.0: assinatura iniciada pelo chat do Claude (/api/assinatura/chat) +
+// página pública de aprovação (/assinatura/aprovar) + expiração de lotes.
+import {
+  criarRotasAssinatura,
+  criarRotasAssinaturaChat,
+  criarRotasAprovacao,
+  expirarLotesVencidos,
+} from './modules/assinatura';
 import ragRoutes from './routes/rag';
 import pool from './database/connection';
 import { runMigrationsExplicativo } from './database/migrations-explicativo';
@@ -143,8 +150,14 @@ app.use('/api/auth', authRoutes);
 // exatamente o que criarRotasAssinatura espera. try/catch pra nunca derrubar o
 // boot; o módulo é isolado e não toca na assinatura existente da ZAYRA.
 try {
+  // v3.152.0: /api/assinatura/chat ANTES do /api/assinatura — o RT router aplica
+  // autenticarRT em tudo que entra nele; mantê-lo depois faz o chat router (auth
+  // própria por upload token) ser alcançado primeiro no seu prefixo.
+  app.use('/api/assinatura/chat', criarRotasAssinaturaChat(pool));
   app.use('/api/assinatura', criarRotasAssinatura(pool));
-  console.log('[assinatura] rotas /api/assinatura ativas');
+  // Página pública de aprovação (NÃO é /api — fora do apiAuthGate, como /v/*).
+  app.use('/assinatura/aprovar', criarRotasAprovacao(pool));
+  console.log('[assinatura] rotas /api/assinatura (+ /chat + /assinatura/aprovar) ativas');
 } catch (e) {
   console.error('[assinatura] módulo desativado:', e instanceof Error ? e.message : e);
 }
@@ -315,6 +328,11 @@ void (async () => {
 void (async () => {
   try { const m = await import('./database/migrations-pa'); await m.runPaMigrations(); }
   catch (err) { console.error('[pa-migrations] FALHA fatal:', err); }
+})();
+// v3.152.0: Assinatura pelo chat — lotes de aprovação (assinatura_lotes) + lote_id/ancoras
+void (async () => {
+  try { const m = await import('./database/migrations-assinatura-chat'); await m.runAssinaturaChatMigrations(); }
+  catch (err) { console.error('[assinatura-chat-migrations] FALHA fatal:', err); }
 })();
 
 // v1.99.15: Live Feed Universal — feed animado no topo de toda aba.
@@ -5559,6 +5577,10 @@ app.listen(PORT, () => {
   console.log(`${AGENT_IDENTITY.name} v${AGENT_IDENTITY.version} rodando na porta ${PORT}`);
   startProactiveNotifications();
   startDailyScheduler();
+  // v3.152.0: expira lotes de assinatura aguardando vencidos (a cada 5 min).
+  setInterval(() => {
+    void expirarLotesVencidos(pool).catch((e) => console.warn('[assinatura] expirar lotes:', (e as Error)?.message));
+  }, 5 * 60_000).unref();
   void import('./agent/briefingSemanal').then(m => m.startWeeklyBriefingScheduler()).catch(() => {});
   alarmes.startAlarmesTicker();
   cowork.startCoworkWorker();
