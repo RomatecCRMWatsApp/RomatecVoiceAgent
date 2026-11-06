@@ -6457,6 +6457,7 @@ function renderGestaoPaTab() {
     .then((r) => { if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.pathname); throw new Error('não autenticado'); } return r.json(); })
     .then((j) => {
       const box = document.getElementById('paListaBox');
+      if (j && j.erro) throw new Error(j.erro); // v3.154.1: erro do servidor não vira "nenhum projeto"
       const ps = (j && j.projetos) || [];
       box.innerHTML = ps.length ? ps.map((p) => `<a href="/pa.html?projeto=${p.id}" style="display:block; text-decoration:none; border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;"><div style="font-weight:700; color:var(--neon); font-size:13px;">${escape(p.nome)}</div><div style="color:var(--text-muted);">${escape(p.municipio)}/${escape(p.uf)} · ${p.total_lotes} lotes · ${p.total_associados} associados</div></a>`).join('') : 'Nenhum projeto ainda — abra o módulo e importe o seed.';
     })

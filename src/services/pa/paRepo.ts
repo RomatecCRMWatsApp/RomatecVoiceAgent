@@ -56,8 +56,11 @@ export async function listarProjetos(): Promise<Array<Projeto & { total_lotes: n
     SELECT p.*,
       (SELECT COUNT(*) FROM pa_lotes l WHERE l.projeto_id = p.id) AS total_lotes,
       (SELECT COUNT(*) FROM pa_associados a WHERE a.projeto_id = p.id AND a.ativo = 1) AS total_associados
-    FROM pa_projetos p ORDER BY p.nome`);
-  return r.map((x) => ({ ...mapProjeto(x), total_lotes: num(x.total_lotes), total_associados: num(x.total_associados) }));
+    FROM pa_projetos p`);
+  // v3.154.1: ordena aqui — ORDER BY no MySQL com as colunas JSON grandes (subdivisão ~240 KB)
+  // estoura o buffer de ordenação ("Out of sort memory") e a lista de projetos sumia.
+  return r.map((x) => ({ ...mapProjeto(x), total_lotes: num(x.total_lotes), total_associados: num(x.total_associados) }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
 export async function buscarProjeto(id: number, db: Db = pool): Promise<Projeto> {
