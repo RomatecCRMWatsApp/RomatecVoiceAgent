@@ -224,11 +224,11 @@ export function htmlSubdivisao(d: DadosMapaPA, sub: Subdivisao, opts: { lotes: s
       <div class="mapa">${svgSubdivisao(sub, { perimetro: opts.perimetro, css: 'width:100%;height:205mm;display:block' })}${bras ? `<img class="bras" src="${bras}">` : ''}</div>
       ${LEGENDA}
       <div class="quadros"><div class="q"><span>Lotes</span><b>${sub.parcelas.length}</b>${sub.marcos} marcos</div>
-        <div class="q"><span>Área dos lotes</span><b>${fm(tot, 4)} ha</b>${opts.perimetro ? `perímetro do PA: ${fm(opts.perimetro.area_ha, 4)} ha` : ''}</div>
+        <div class="q"><span>Área total dos lotes</span><b>${fm(tot, 4)} ha</b>${opts.perimetro ? `perímetro do PA: ${fm(opts.perimetro.area_ha, 4)} ha` : ''}</div>
         <div class="q"><span>Referência</span><b>SIRGAS 2000</b>UTM fuso ${sub.fuso}${sub.hemisferio === 'S' ? ' Sul' : ' Norte'}</div></div>
       ${rodape(d)}`);
     paginas.push(`${cabecalho(d, 'QUADRO DE ÁREAS DOS LOTES')}
-      <table><thead><tr><th>Lote</th><th class="n">Área (ha)</th><th class="n">Área útil (ha)</th><th class="n">Perímetro (m)</th><th class="n">Vértices</th><th>Confrontantes</th></tr></thead><tbody>
+      <table><thead><tr><th>Lote</th><th class="n">Área total (ha)</th><th class="n">Área útil (ha)</th><th class="n">Perímetro (m)</th><th class="n">Vértices</th><th>Confrontantes</th></tr></thead><tbody>
       ${sub.parcelas.map((p) => `<tr><td><b>LT-${esc(p.lote)}</b></td><td class="n">${fm(p.perimetro.area_ha, 4)}</td><td class="n">${p.area_util_ha != null ? fm(p.area_util_ha, 4) : '—'}</td><td class="n">${fm(p.perimetro.perimetro_m)}</td><td class="n">${p.perimetro.vertices.length}</td><td class="conf">${esc([...new Set(p.lados.map((l) => l.confrontante))].join('; '))}</td></tr>`).join('')}
       </tbody></table>${rodape(d)}`);
   }
@@ -240,7 +240,7 @@ export function htmlSubdivisao(d: DadosMapaPA, sub: Subdivisao, opts: { lotes: s
     paginas.push(`${cabecalho(d, `LOTE ${pc.lote} — MAPA E MEMORIAL DESCRITIVO`)}
       <div class="mapa">${svgSubdivisao(sub, { destaque: pc.lote, css: 'width:100%;height:112mm;display:block' })}</div>
       ${LEGENDA}
-      <div class="quadros"><div class="q"><span>Área</span><b>${fm(p.area_ha, 4)} ha</b>${fm(p.area_m2)} m²${pc.area_util_ha != null ? ` · útil ${fm(pc.area_util_ha, 4)} ha` : ''}</div>
+      <div class="quadros"><div class="q"><span>Área total (com APP e estradas)</span><b>${fm(p.area_ha, 4)} ha</b>${pc.area_util_ha != null ? `área útil: <b style="display:inline;font-size:9pt">${fm(pc.area_util_ha, 4)} ha</b>` : `${fm(p.area_m2)} m²`}</div>
         <div class="q"><span>Perímetro</span><b>${fm(p.perimetro_m)} m</b>${p.vertices.length} vértices</div>
         <div class="q"><span>Beneficiário(a)</span><b style="font-size:9pt">______________________________</b>CPF: ____________________</div></div>
       <h2>Memorial descritivo</h2>${paragrafos.map((t) => `<p class="memo">${esc(t)}</p>`).join('')}

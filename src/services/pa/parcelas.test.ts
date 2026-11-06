@@ -33,7 +33,7 @@ describe('subdivisão do PA (DXF)', () => {
     expect(conf1.filter((c) => c === 'Limite do Projeto de Assentamento')).toHaveLength(3);
     const memo = textoMemorialParcela(sub.parcelas[0], 'PA Teste', 'Açailândia/MA', null).join(' ');
     expect(memo).toContain('confrontando com Lote 02');
-    expect(memo).toContain('área útil indicada no projeto: 0,9500 ha');
+    expect(memo).toContain('área útil (descontadas APP e estradas): 0,9500 ha');
   });
   it('rótulo de lote repetido é recusado', () => {
     expect(() => subdivisaoDeDxf(dxf.replace('LT-02', 'LT-01'))).toThrow(/repetido/);

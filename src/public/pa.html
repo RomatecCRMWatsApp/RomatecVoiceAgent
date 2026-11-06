@@ -713,7 +713,7 @@ async function rSubdivisao(){
   const lista = () => {
     const q = SUBV.busca.trim().replace(/\D/g, '');
     const ps = sub.parcelas.filter((x) => !q || x.lote === q.padStart(2, '0') || x.lote === q);
-    $('#sdLista').innerHTML = ps.length ? `<table><thead><tr><th>Lote</th><th class="right">Área (ha)</th><th class="right">Útil (ha)</th><th class="right">Perímetro (m)</th><th class="right">Vért.</th><th></th></tr></thead><tbody>
+    $('#sdLista').innerHTML = ps.length ? `<table><thead><tr><th>Lote</th><th class="right">Área total (ha)</th><th class="right">Útil (ha)</th><th class="right">Perímetro (m)</th><th class="right">Vért.</th><th></th></tr></thead><tbody>
       ${ps.map((x) => `<tr><td><b>LT-${esc(x.lote)}</b></td><td class="right">${fm(x.perimetro.area_ha, 4)}</td><td class="right">${x.area_util_ha != null ? fm(x.area_util_ha, 4) : '—'}</td><td class="right">${fm(x.perimetro.perimetro_m)}</td><td class="right">${x.perimetro.vertices.length}</td>
         <td class="nowrap"><button class="btn btn-ghost btn-sm" data-sdver="${esc(x.lote)}" title="Mapa e memorial">👁</button> <button class="btn btn-ghost btn-sm" data-sdpdf="${esc(x.lote)}" title="PDF do lote">📄</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum lote com esse número.</div>';
     $('#sdLista').querySelectorAll('[data-sdver]').forEach((b) => b.onclick = () => verLote(b.dataset.sdver));
@@ -727,7 +727,7 @@ async function rSubdivisao(){
       const pc = r.parcela, per = pc.perimetro;
       el.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">LT-${esc(pc.lote)} · ${fm(per.area_ha, 4)} ha</h2><button class="btn btn-gold btn-sm" id="sdPdfUm" style="flex:0 0 auto">📄 PDF do lote</button></div>
         <img src="/api/pa/projetos/${S.pid}/subdivisao.svg?lote=${encodeURIComponent(pc.lote)}&t=${Date.now()}" alt="Mapa do lote ${esc(pc.lote)}" style="width:100%;display:block;border:1px solid var(--line);border-radius:10px;margin-top:8px">
-        <div class="muted" style="margin:6px 0">Perímetro ${fm(per.perimetro_m)} m · ${per.vertices.length} vértices${pc.area_util_ha != null ? ' · área útil ' + fm(pc.area_util_ha, 4) + ' ha' : ''}</div>
+        <div class="muted" style="margin:6px 0">Perímetro ${fm(per.perimetro_m)} m · ${per.vertices.length} vértices${pc.area_util_ha != null ? ' · área útil ' + fm(pc.area_util_ha, 4) + ' ha (área total inclui APP e estradas)' : ''}</div>
         <h3>Memorial descritivo</h3>${r.memorial.map((t) => `<p class="memo-t">${esc(t)}</p>`).join('')}
         <div class="tbl"><table><thead><tr><th>Vértice</th><th class="right">E (m)</th><th class="right">N (m)</th><th class="right">Azimute</th><th class="right">Dist. (m)</th><th>Confrontante</th></tr></thead><tbody>
           ${per.vertices.map((v, i) => { const l = pc.lados[i]; const t = Math.round(l.azimute * 3600); return `<tr><td><b>${esc(v.nome)}</b></td><td class="right">${fm(v.E, 3)}</td><td class="right">${fm(v.N, 3)}</td><td class="right">${Math.floor(t / 3600)}°${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}'${String(t % 60).padStart(2, '0')}"</td><td class="right">${fm(l.distancia)}</td><td>${esc(l.confrontante)}</td></tr>`; }).join('')}
