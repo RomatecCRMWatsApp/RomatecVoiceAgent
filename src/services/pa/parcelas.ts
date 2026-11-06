@@ -81,9 +81,9 @@ export interface Marco { codigo: string; tipo: string; x: number; y: number }
  * acha esse deslocamento (mediana) e casa cada ponto com o rótulo mais próximo de
  * "ponto + deslocamento" — o mais próximo do ponto pode ser o rótulo do vizinho.
  */
-export function marcosDoDxf(pontos: PontoDxf[], textos: TextoDxf[]): Marco[] {
-  const pts = pontos.filter((p) => /MARCO/i.test(p.camada));
-  const rots = textos.filter((t) => /MARCO/i.test(t.camada) && /^[A-Z]{1,4}[-_ ]?\d{1,5}$/i.test(t.texto.trim()));
+export function marcosDoDxf(pontos: PontoDxf[], textos: TextoDxf[], camada: RegExp = /MARCO/i): Marco[] {
+  const pts = pontos.filter((p) => camada.test(p.camada));
+  const rots = textos.filter((t) => camada.test(t.camada) && /^[A-Z]{1,4}[-_ ]?\d{1,5}$/i.test(t.texto.trim()));
   if (!pts.length || !rots.length) return [];
   const mediana = (v: number[]) => v.sort((a, b) => a - b)[Math.floor(v.length / 2)];
   const viz = pts.map((p) => rots.reduce((b, t) => (Math.hypot(t.x - p.x, t.y - p.y) < Math.hypot(b.x - p.x, b.y - p.y) ? t : b)));
@@ -192,4 +192,26 @@ export function textoMemorialParcela(pc: Parcela, nomePa: string, municipio: str
   par.push(`Inicia-se a descrição deste perímetro no vértice ${v[0].nome}, de coordenadas N ${m2br(v[0].N, 3)} m e E ${m2br(v[0].E, 3)} m; ${trechos.join('; ')}, ponto inicial da descrição deste perímetro.`);
   par.push('Todas as coordenadas aqui descritas estão georreferenciadas ao Sistema Geodésico Brasileiro, referenciadas ao datum SIRGAS 2000, e encontram-se representadas no sistema UTM. Os azimutes e distâncias, área e perímetro foram calculados no plano de projeção UTM.');
   return par;
+}
+
+// ─── v3.154.0: perímetro real da vila (DXF da AC-01: área total + núcleo levantado) ─
+export interface VilaPerimetro { total: Perimetro; nucleo: Perimetro | null; arquivo: string | null; atualizado_em: string | null }
+
+/** Lê do DXF da vila a poligonal da área total (camada com "TOTAL" ou a maior) e a do núcleo (camada com "NUCLEO"); vértices nomeados pelos rótulos VL-01…/VN-01…. */
+export function vilaDeDxf(dxf: string, opts: { fuso?: number | null; hemisferio?: 'S' | 'N'; arquivo?: string | null } = {}): VilaPerimetro {
+  const { polilinhas, textos, pontos } = lerDxfEntidades(dxf);
+  const fechadas = polilinhas.filter((p) => p.fechada && p.pts.length >= 3);
+  if (!fechadas.length) throw new PaErro('VILA_DXF', 'Nenhuma polilinha fechada no DXF da vila', 400);
+  const area = (p: PolilinhaDxf) => { let a = 0; for (let i = 0; i < p.pts.length; i++) { const q = p.pts[i], r = p.pts[(i + 1) % p.pts.length]; a += q.x * r.y - r.x * q.y; } return Math.abs(a / 2); };
+  const nucleoPl = fechadas.find((p) => /NUCLEO|NÚCLEO/i.test(p.camada)) ?? null;
+  const totalPl = fechadas.find((p) => /TOTAL/i.test(p.camada)) ?? [...fechadas].filter((p) => p !== nucleoPl).sort((a, b) => area(b) - area(a))[0] ?? nucleoPl!;
+  const fuso = opts.fuso ?? 23, hem = opts.hemisferio ?? 'S';
+  const montar = (pl: PolilinhaDxf, prefixo: string) => {
+    const mk = marcosDoDxf(pontos, textos, new RegExp(pl.camada.replace(/[^A-Z0-9]/gi, '.').replace(/\.(VERTICES|TEXTO)$/i, '') || 'VILA', 'i'));
+    const em = (q: { x: number; y: number }) => mk.find((m) => Math.hypot(m.x - q.x, m.y - q.y) < 0.5)?.codigo ?? null;
+    let k = 0;
+    const nomes = pl.pts.map((q) => em(q) ?? `${prefixo}-${String(++k).padStart(2, '0')}`);
+    return montarPerimetro({ sistema: 'UTM', pares: pl.pts, nomes }, { fuso, hemisferio: hem, formato: 'DXF', arquivo: opts.arquivo ?? null });
+  };
+  return { total: montar(totalPl, 'VL'), nucleo: nucleoPl && nucleoPl !== totalPl ? montar(nucleoPl, 'VN') : null, arquivo: opts.arquivo ?? null, atualizado_em: null };
 }

@@ -333,6 +333,8 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   // v3.151.0: subdivisão do PA em lotes (parcelas do DXF: vértices/marcos, confrontantes, camadas do desenho).
   // v3.152.0: lote rural (parcela LT-NN da subdivisão) de cada associado — um associado por lote.
   { label: 'pa_associados.parcela', sql: 'ALTER TABLE pa_associados ADD COLUMN parcela VARCHAR(10) NULL, ADD UNIQUE KEY uk_pa_assoc_parcela (projeto_id, parcela)' },
+  // v3.154.0: perímetro real da vila (AC-01): área total + núcleo levantado.
+  { label: 'pa_projetos.vila_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN vila_json JSON NULL' },
   { label: 'pa_projetos.subdivisao_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN subdivisao_json JSON NULL' },
   // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },

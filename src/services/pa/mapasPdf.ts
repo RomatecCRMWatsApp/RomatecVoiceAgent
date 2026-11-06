@@ -20,7 +20,7 @@ function asset(nome: string | null): string {
 
 export interface DadosMapaPA {
   projeto: { nome: string; municipio: string; uf: string; associacao: string | null };
-  rt: { nome: string; registro: string };
+  rt: { nome: string; registro: string; cft?: string | null; incra?: string | null };
   marca: { brasao: string | null; emblema: string | null }; // nomes de arquivo
   data: string; // dd/mm/aaaa
 }
@@ -126,19 +126,19 @@ export function svgPerimetro(p: Perimetro, css = 'width:100%;height:auto;display
   </svg>`;
 }
 
-export function htmlMapaGeral(d: DadosMapaPA, p: Perimetro): string {
+export function htmlMapaGeral(d: DadosMapaPA, p: Perimetro, t: { imovel?: string; mapa?: string; memorial?: string } = {}): string {
   const bras = asset(d.marca.brasao);
-  const paragrafos = textoMemorialPerimetro(p, d.projeto.nome, `${d.projeto.municipio}/${d.projeto.uf}`);
+  const paragrafos = textoMemorialPerimetro(p, t.imovel ?? d.projeto.nome, `${d.projeto.municipio}/${d.projeto.uf}`);
   const linhas = p.vertices.map((v, i) => { const s = p.segmentos[i]; return `<tr><td><b>${esc(v.nome)}</b></td><td class="n">${fm(v.E, 3)}</td><td class="n">${fm(v.N, 3)}</td><td class="n">${esc(latLonDms(v.lat, 'lat'))}</td><td class="n">${esc(latLonDms(v.lon, 'lon'))}</td><td>${esc(s.de)} → ${esc(s.para)}</td><td class="n">${esc(grausDms(s.azimute))}</td><td class="n">${fm(s.distancia)}</td></tr>`; }).join('');
   return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><title>Mapa geral e memorial descritivo — ${esc(d.projeto.nome)}</title><style>${CSS}</style></head><body>
-    ${cabecalho(d, 'MAPA GERAL DO PROJETO DE ASSENTAMENTO — PERÍMETRO')}
+    ${cabecalho(d, t.mapa ?? 'MAPA GERAL DO PROJETO DE ASSENTAMENTO — PERÍMETRO')}
     <div class="mapa">${svgPerimetro(p, 'width:100%;height:200mm;display:block')}${bras ? `<img class="bras" src="${bras}">` : ''}</div>
     <div class="quadros"><div class="q"><span>Área</span><b>${fm(p.area_ha, 4)} ha</b>${fm(p.area_m2)} m²</div>
       <div class="q"><span>Perímetro</span><b>${fm(p.perimetro_m)} m</b>${p.vertices.length} vértices</div>
       <div class="q"><span>Referência</span><b>${esc(p.datum)}</b>UTM fuso ${p.fuso}${p.hemisferio === 'S' ? ' Sul' : ' Norte'} · origem ${esc(p.origem.formato)}</div></div>
     ${rodape(d)}
     <div class="quebra"></div>
-    ${cabecalho(d, 'MEMORIAL DESCRITIVO DO PERÍMETRO')}
+    ${cabecalho(d, t.memorial ?? 'MEMORIAL DESCRITIVO DO PERÍMETRO')}
     <h2>Descrição</h2>${paragrafos.map((t) => `<p class="memo">${esc(t)}</p>`).join('')}
     <h2>Quadro de coordenadas, azimutes e distâncias</h2>
     <table><thead><tr><th>Vértice</th><th>E (m)</th><th>N (m)</th><th>Latitude</th><th>Longitude</th><th>Lado</th><th>Azimute</th><th>Distância (m)</th></tr></thead><tbody>${linhas}</tbody></table>

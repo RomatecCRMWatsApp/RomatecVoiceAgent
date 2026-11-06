@@ -151,6 +151,20 @@ router.post('/projetos/:id/perimetro', uploadMem.single('arquivo'), h(async (req
   return { perimetro: await mapas.salvarPerimetro(id(req.params.id), { nome: f.originalname, conteudo: textoDoArquivo(f.buffer) }, { fuso, hemisferio: hem }, ctx(req).sub) };
 }));
 router.delete('/projetos/:id/perimetro', h(async (req) => { exigirAdmin(req); await mapas.removerPerimetro(id(req.params.id), ctx(req).sub); return { ok: true }; }));
+// v3.154.0: perímetro real da vila (DXF da AC-01).
+router.get('/projetos/:id/vila-perimetro', h(async (req) => ({ vila: await mapas.buscarVila(id(req.params.id)) })));
+router.post('/projetos/:id/vila-perimetro', uploadMem.single('arquivo'), h(async (req) => {
+  exigirEscrita(req);
+  const f = req.file;
+  if (!f) throw new PaErro('ARQUIVO_VAZIO', 'Envie o DXF da vila no campo "arquivo"', 400);
+  if (!/\.dxf$/i.test(f.originalname)) throw new PaErro('TIPO_ARQUIVO', 'Envie o DXF do perímetro da vila', 415);
+  return { vila: await mapas.salvarVila(id(req.params.id), { nome: f.originalname, conteudo: textoDoArquivo(f.buffer) }, { fuso: Number(req.body?.fuso) || null, hemisferio: req.body?.hemisferio === 'N' ? 'N' : 'S' }, ctx(req).sub) };
+}));
+router.delete('/projetos/:id/vila-perimetro', h(async (req) => { exigirAdmin(req); await mapas.removerVila(id(req.params.id), ctx(req).sub); return { ok: true }; }));
+router.get('/projetos/:id/vila-perimetro.pdf', h(async (req, res) => {
+  enviarPdf(res, await mapas.pdfVila(id(req.params.id), req.query.parte === 'nucleo' ? 'nucleo' : 'total', req.query.modelo === 'sigef' ? 'sigef' : 'tradicional'));
+  return undefined;
+}));
 // v3.151.0: subdivisão do PA em lotes (DXF da divisão/marcos).
 router.get('/projetos/:id/subdivisao', h(async (req) => {
   const sub = await mapas.buscarSubdivisao(id(req.params.id));
@@ -183,10 +197,10 @@ router.get('/projetos/:id/subdivisao/lotes/:lote', h(async (req) => mapas.memori
 router.get('/projetos/:id/subdivisao.pdf', h(async (req, res) => {
   const q = typeof req.query.lotes === 'string' ? req.query.lotes : '';
   const lotes = q === 'todos' ? null : q.split(',').map((x) => x.trim()).filter(Boolean);
-  enviarPdf(res, await mapas.pdfSubdivisao(id(req.params.id), lotes, req.query.geral === '1'));
+  enviarPdf(res, await mapas.pdfSubdivisao(id(req.params.id), lotes, req.query.geral === '1', req.query.modelo === 'sigef' ? 'sigef' : 'tradicional'));
   return undefined;
 }));
-router.get('/projetos/:id/mapa-geral.pdf', h(async (req, res) => { enviarPdf(res, await mapas.pdfMapaGeral(id(req.params.id))); return undefined; }));
+router.get('/projetos/:id/mapa-geral.pdf', h(async (req, res) => { enviarPdf(res, await mapas.pdfMapaGeral(id(req.params.id), req.query.modelo === 'sigef' ? 'sigef' : 'tradicional')); return undefined; }));
 
 // ─── Lotes ────────────────────────────────────────────────────────────────
 router.get('/projetos/:id/lotes', h(async (req) => ({ lotes: await repo.listarLotes(id(req.params.id)) })));

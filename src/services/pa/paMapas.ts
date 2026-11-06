@@ -7,7 +7,9 @@ import { marcaArquivos } from './marcaProjeto';
 import { memorialVila, type MemorialLote } from './memorialVila';
 import { perimetroDeArquivo, type Perimetro } from './perimetro';
 import { htmlMapaVila, htmlMapaGeral, htmlSubdivisao, svgSubdivisao, pdfDeHtml, type DadosMapaPA, type BeneficiarioParcela } from './mapasPdf';
-import { subdivisaoDeDxf, textoMemorialParcela, type Subdivisao } from './parcelas';
+import { subdivisaoDeDxf, vilaDeDxf, textoMemorialParcela, type Subdivisao, type VilaPerimetro } from './parcelas';
+import { plantaSigef, memorialSigef, documentoSigef, pdfSigef } from './sigefPdf';
+import { svgPerimetro } from './mapasPdf';
 import type { LoteDoMapa } from './mapaSvg';
 
 async function lotesDoMapa(projetoId: number): Promise<LoteDoMapa[]> {
@@ -24,6 +26,9 @@ function dadosCabecalho(p: Projeto): DadosMapaPA {
     rt: {
       nome: rt.nome || p.rt_nome || 'Responsável técnico',
       registro: ['Técnico em Agrimensura', rt.cft ? `CFT ${rt.cft}` : '', rt.incra ? `INCRA ${rt.incra}` : ''].filter(Boolean).join(' · ') || (p.rt_registro ?? ''),
+      // v3.154.0: CFT e código de credenciado separados (modelo SIGEF); cai no texto de rt_registro ("CFT 012… · INCRA FQNS").
+      cft: rt.cft || (p.rt_registro ?? '').match(/CFT\s*([\w.-]+)/i)?.[1] || null,
+      incra: rt.incra || (p.rt_registro ?? '').match(/INCRA\s*([A-Z0-9]+)/i)?.[1] || null,
     },
     marca: marcaArquivos(p.codigo),
     data: `${h.slice(8, 10)}/${h.slice(5, 7)}/${h.slice(0, 4)}`,
@@ -69,10 +74,15 @@ export async function removerPerimetro(projetoId: number, usuario: string | null
   await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'PERIMETRO_REMOVIDO' });
 }
 
-export async function pdfMapaGeral(projetoId: number): Promise<{ pdf: Buffer; nome: string }> {
+export async function pdfMapaGeral(projetoId: number, modelo: 'tradicional' | 'sigef' = 'tradicional'): Promise<{ pdf: Buffer; nome: string }> {
   const p = await buscarProjeto(projetoId);
   const per = await buscarPerimetro(projetoId);
   if (!per) throw new PaErro('SEM_PERIMETRO', 'Envie o arquivo do perímetro (TXT/CSV/DXF) antes de gerar o mapa geral', 409);
+  if (modelo === 'sigef') {
+    const d = dadosCabecalho(p);
+    const peca = { denominacao: p.nome, titular: null, natureza: 'Projeto de Assentamento', perimetro: per, confrontantes: null, mapaSvg: svgPerimetro(per, 'width:100%;height:150mm;display:block') };
+    return { pdf: await pdfSigef(documentoSigef(p.nome, [plantaSigef(d, peca), memorialSigef(d, peca)])), nome: `PERIMETRO-PLANTA-MEMORIAL-SIGEF-${p.codigo}.pdf` };
+  }
   return { pdf: await pdfDeHtml(htmlMapaGeral(dadosCabecalho(p), per)), nome: `MAPA-GERAL-MEMORIAL-${p.codigo}.pdf` };
 }
 
@@ -143,11 +153,65 @@ export async function memorialParcela(projetoId: number, lote: string) {
 }
 
 /** PDF com o mapa geral da subdivisão (geral) e/ou mapa + memorial de cada lote pedido (null = todos). */
-export async function pdfSubdivisao(projetoId: number, lotes: string[] | null, geral: boolean): Promise<{ pdf: Buffer; nome: string }> {
+export async function pdfSubdivisao(projetoId: number, lotes: string[] | null, geral: boolean, modelo: 'tradicional' | 'sigef' = 'tradicional'): Promise<{ pdf: Buffer; nome: string }> {
   const p = await buscarProjeto(projetoId);
   const sub = await exigirSubdivisao(projetoId);
   const lista = lotes ?? sub.parcelas.map((x) => x.lote);
+  if (modelo === 'sigef') {
+    // v3.154.0: planta + memorial no modelo SIGEF para cada lote pedido.
+    const d = dadosCabecalho(p);
+    const ben = await vinculosParcelas(projetoId);
+    const secoes = lista.flatMap((l) => {
+      const pc = sub.parcelas.find((x) => x.lote === l);
+      if (!pc) return [];
+      const peca = { denominacao: `Lote ${pc.lote} — ${p.nome}`, titular: ben[pc.lote] ? { nome: ben[pc.lote].nome, cpf: ben[pc.lote].cpf } : null, natureza: 'Projeto de Assentamento', perimetro: pc.perimetro, confrontantes: pc.lados.map((x) => x.confrontante), mapaSvg: svgSubdivisao(sub, { destaque: pc.lote, css: 'width:100%;height:150mm;display:block' }) };
+      return [plantaSigef(d, peca), memorialSigef(d, peca)];
+    });
+    if (!secoes.length) throw new PaErro('LOTE_NAO_ENCONTRADO', 'Nenhum dos lotes pedidos está na subdivisão', 404);
+    const nome = lista.length === 1 ? `LOTE-${lista[0]}-PLANTA-MEMORIAL-SIGEF-${p.codigo}.pdf` : `LOTES-PLANTAS-MEMORIAIS-SIGEF-${p.codigo}.pdf`;
+    return { pdf: await pdfSigef(documentoSigef(`Lotes — ${p.nome}`, secoes)), nome };
+  }
   const html = htmlSubdivisao(dadosCabecalho(p), sub, { lotes: lista, geral, perimetro: await buscarPerimetro(projetoId), beneficiarios: await vinculosParcelas(projetoId) });
   const nome = !geral && lista.length === 1 ? `LOTE-${lista[0]}-MAPA-MEMORIAL-${p.codigo}.pdf` : geral && !lotes?.length ? `SUBDIVISAO-LOTES-${p.codigo}.pdf` : `LOTES-MAPAS-MEMORIAIS-${p.codigo}.pdf`;
   return { pdf: await pdfDeHtml(html), nome };
+}
+
+// ─── v3.154.0: perímetro real da vila (AC-01) ──────────────────────────────
+export async function buscarVila(projetoId: number): Promise<VilaPerimetro | null> {
+  const r = await one(pool, 'SELECT vila_json FROM pa_projetos WHERE id = ?', [projetoId]);
+  if (!r) throw new PaErro('PROJETO_NAO_ENCONTRADO', 'Projeto não encontrado', 404);
+  return (r.vila_json as VilaPerimetro | null) ?? null;
+}
+
+export async function salvarVila(projetoId: number, arquivo: { nome: string; conteudo: string }, opts: { fuso?: number | null; hemisferio?: 'S' | 'N' }, usuario: string | null): Promise<VilaPerimetro> {
+  await buscarProjeto(projetoId);
+  const v = vilaDeDxf(arquivo.conteudo, { ...opts, arquivo: arquivo.nome });
+  v.atualizado_em = new Date().toISOString();
+  await exec(pool, 'UPDATE pa_projetos SET vila_json = ? WHERE id = ?', [JSON.stringify(v), projetoId]);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'VILA_PERIMETRO_ATUALIZADO', dados: { arquivo: arquivo.nome, area_ha: v.total.area_ha, nucleo_ha: v.nucleo?.area_ha ?? null } });
+  return v;
+}
+
+export async function removerVila(projetoId: number, usuario: string | null): Promise<void> {
+  await exec(pool, 'UPDATE pa_projetos SET vila_json = NULL WHERE id = ?', [projetoId]);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'VILA_PERIMETRO_REMOVIDO' });
+}
+
+/** Planta + memorial da vila (área total ou núcleo), modelo tradicional ou SIGEF. */
+export async function pdfVila(projetoId: number, parte: 'total' | 'nucleo', modelo: 'tradicional' | 'sigef'): Promise<{ pdf: Buffer; nome: string }> {
+  const p = await buscarProjeto(projetoId);
+  const v = await buscarVila(projetoId);
+  if (!v) throw new PaErro('SEM_VILA', 'Envie o DXF do perímetro da vila primeiro', 409);
+  const per = parte === 'nucleo' ? v.nucleo : v.total;
+  if (!per) throw new PaErro('SEM_NUCLEO', 'O DXF da vila não tem a poligonal do núcleo', 404);
+  const rotulo = parte === 'nucleo' ? 'Núcleo da vila (AC-01)' : 'Área da vila (AC-01)';
+  const d = dadosCabecalho(p);
+  const imovel = `${rotulo} — ${p.nome}`;
+  const nome = `VILA-${parte === 'nucleo' ? 'NUCLEO' : 'AREA-TOTAL'}-${modelo === 'sigef' ? 'PLANTA-MEMORIAL-SIGEF' : 'MAPA-MEMORIAL'}-${p.codigo}.pdf`;
+  if (modelo === 'sigef') {
+    const peca = { denominacao: imovel, titular: null, natureza: 'Área comunitária — vila do Projeto de Assentamento', perimetro: per, confrontantes: null, mapaSvg: svgPerimetro(per, 'width:100%;height:150mm;display:block') };
+    return { pdf: await pdfSigef(documentoSigef(imovel, [plantaSigef(d, peca), memorialSigef(d, peca)])), nome };
+  }
+  const t = parte === 'nucleo' ? 'NÚCLEO DA VILA' : 'ÁREA DA VILA';
+  return { pdf: await pdfDeHtml(htmlMapaGeral(d, per, { imovel, mapa: `MAPA — ${t} (AC-01)`, memorial: `MEMORIAL DESCRITIVO — ${t} (AC-01)` })), nome };
 }

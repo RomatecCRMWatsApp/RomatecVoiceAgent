@@ -570,10 +570,11 @@ async function rMapa(){
       <div style="flex:1 1 auto"><button class="btn btn-sm ${S.mapaVisao === 'vila' ? 'btn-primary' : 'btn-ghost'}" data-visao="vila">🏘️ Mapa da vila</button>
         <button class="btn btn-sm ${S.mapaVisao === 'geral' ? 'btn-primary' : 'btn-ghost'}" data-visao="geral">🌐 Mapa geral do PA</button>
         <button class="btn btn-sm ${S.mapaVisao === 'lotes' ? 'btn-primary' : 'btn-ghost'}" data-visao="lotes">🧩 Lotes do PA (subdivisão)</button></div>
-    </div><div id="mapaVilaBox"></div><div id="mapaGeralBox"></div><div id="subdivBox"></div>`;
+    </div><div id="vilaPerBox"></div><div id="mapaVilaBox"></div><div id="mapaGeralBox"></div><div id="subdivBox"></div>`;
   v.querySelectorAll('[data-visao]').forEach((b) => b.onclick = () => { S.mapaVisao = b.dataset.visao; rMapa(); });
   if (S.mapaVisao === 'geral') return rMapaGeral();
   if (S.mapaVisao === 'lotes') return rSubdivisao();
+  rVilaPerimetro();
   await rMapaVila();
   rMemorialVila();
 }
@@ -643,7 +644,7 @@ async function rMapaGeral(){
           <div class="k2"><div class="k2i">🗓️</div><div><div class="l">Atualizado</div><div class="v" style="font-size:16px">${p.atualizado_em ? new Date(p.atualizado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'}</div><div class="muted">${esc(p.origem.arquivo || '')}</div></div></div>
         </div>
         <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">🌐 Mapa geral do PA</h2>
-            <div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="pdfGeral">📄 PDF — Mapa geral + Memorial</button>${S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger btn-sm" id="perRemover">Remover</button>' : ''}</div></div>
+            <div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="pdfGeral">📄 PDF — Mapa geral + Memorial</button> <button class="btn btn-primary btn-sm" id="pdfGeralSigef" title="Planta e memorial no modelo SIGEF">📄 Modelo SIGEF</button>${S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger btn-sm" id="perRemover">Remover</button>' : ''}</div></div>
           <div style="position:relative;margin-top:8px">${svgPerimetroTela(p)}${S.marca && S.marca.brasao ? `<img class="mapa-bras" src="${esc(S.marca.brasao)}" alt="Brasão do PA">` : ''}</div></div>
         <div class="card"><h2>📜 Memorial descritivo do perímetro</h2>
           <p class="memo-t">Inicia-se a descrição deste perímetro no vértice <b>${esc(p.vertices[0].nome)}</b>, de coordenadas N ${fm(p.vertices[0].N, 3)} m e E ${fm(p.vertices[0].E, 3)} m; ${p.segmentos.map((s, i) => { const w = p.vertices[(i + 1) % p.vertices.length]; return `deste segue com azimute de ${dms(s.azimute)} e distância de ${fm(s.distancia)} m até o vértice <b>${esc(s.para)}</b>, de coordenadas N ${fm(w.N, 3)} m e E ${fm(w.E, 3)} m`; }).join('; ')}, ponto inicial da descrição deste perímetro.</p>
@@ -659,6 +660,7 @@ async function rMapaGeral(){
       catch (e){ toast(e.message, true); $('#perEnviar').disabled = false; }
     };
     if ($('#pdfGeral')) $('#pdfGeral').onclick = () => abrirPdf(`/projetos/${S.pid}/mapa-geral.pdf`);
+    if ($('#pdfGeralSigef')) $('#pdfGeralSigef').onclick = () => abrirPdf(`/projetos/${S.pid}/mapa-geral.pdf?modelo=sigef`);
     if ($('#perRemover')) $('#perRemover').onclick = async () => {
       if (!confirm('Remover o perímetro do PA? O mapa geral e o memorial deixam de existir até um novo envio.')) return;
       try { await api(`/projetos/${S.pid}/perimetro`, { method: 'DELETE' }); toast('Perímetro removido'); rMapaGeral(); } catch (e){ toast(e.message, true); }
@@ -688,7 +690,7 @@ async function rSubdivisao(){
         <div class="k2"><div class="k2i">🗓️</div><div><div class="l">Atualizado</div><div class="v" style="font-size:16px">${sub.atualizado_em ? new Date(sub.atualizado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'}</div><div class="muted">${esc(sub.arquivo || '')}</div></div></div>
       </div>
       <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">🧩 Mapa da subdivisão</h2>
-          <div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="sdPdfGeral">📄 PDF — Mapa geral + quadro de áreas</button> <button class="btn btn-primary btn-sm" id="sdPdfTodos">📄 PDF — Mapa + memorial de todos os lotes</button>${S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger btn-sm" id="sdRemover">Remover</button>' : ''}</div></div>
+          <div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="sdPdfGeral">📄 PDF — Mapa geral + quadro de áreas</button> <button class="btn btn-primary btn-sm" id="sdPdfTodos">📄 Todos os lotes — tradicional</button> <button class="btn btn-primary btn-sm" id="sdPdfTodosSigef">📄 Todos os lotes — modelo SIGEF</button>${S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger btn-sm" id="sdRemover">Remover</button>' : ''}</div></div>
         <div style="position:relative;margin-top:8px"><img src="/api/pa/projetos/${S.pid}/subdivisao.svg?t=${Date.now()}" alt="Mapa da subdivisão em lotes" style="width:100%;display:block;border:1px solid var(--line);border-radius:10px"></div>
         <div class="muted" style="margin-top:4px">Legenda: lotes · <span style="color:#3E8E41">APP</span> · <span style="color:#A07A10">áreas comunitárias</span> · <span style="color:#8C5A2B">estradas/servidão</span> · <span style="color:#2B6CB0">córregos</span></div></div>
       <div class="grid21"><div class="card" style="margin:0"><div class="row" style="align-items:end"><h2 style="flex:1 1 auto;margin:0;border:0">Lotes</h2><div style="flex:0 1 200px"><label for="sdBusca">Buscar lote</label><input id="sdBusca" placeholder="ex.: 12" value="${esc(SUBV.busca)}"></div></div>
@@ -706,6 +708,7 @@ async function rSubdivisao(){
   if (!sub) return;
   $('#sdPdfGeral').onclick = () => abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?geral=1`);
   $('#sdPdfTodos').onclick = () => { if (confirm(`Gerar o PDF com o mapa e o memorial dos ${sub.parcelas.length} lotes? Pode levar um minuto.`)) abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=todos`); };
+  $('#sdPdfTodosSigef').onclick = () => { if (confirm(`Gerar planta + memorial no modelo SIGEF dos ${sub.parcelas.length} lotes? Pode levar um minuto.`)) abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=todos&modelo=sigef`); };
   if ($('#sdRemover')) $('#sdRemover').onclick = async () => {
     if (!confirm('Remover a subdivisão em lotes? O mapa e os memoriais dos lotes deixam de existir até um novo envio.')) return;
     try { await api(`/projetos/${S.pid}/subdivisao`, { method: 'DELETE' }); toast('Subdivisão removida'); rSubdivisao(); } catch (e){ toast(e.message, true); }
@@ -716,7 +719,7 @@ async function rSubdivisao(){
     $('#sdLista').innerHTML = ps.length ? `<table><thead><tr><th>Lote</th><th class="right">Área total (ha)</th><th class="right">Útil (ha)</th><th class="right">Perímetro (m)</th><th class="right">Vért.</th><th>Beneficiário(a)</th><th></th></tr></thead><tbody>
       ${ps.map((x) => `<tr><td><b>LT-${esc(x.lote)}</b></td><td class="right">${fm(x.perimetro.area_ha, 4)}</td><td class="right">${x.area_util_ha != null ? fm(x.area_util_ha, 4) : '—'}</td><td class="right">${fm(x.perimetro.perimetro_m)}</td><td class="right">${x.perimetro.vertices.length}</td>
         <td>${podeEscrever() ? `<select class="f sdVinc" data-lote="${esc(x.lote)}" style="min-width:170px;padding:4px 6px;font-size:12px"><option value="">— sem vínculo —</option>${assocs.map((a) => `<option value="${a.id}" ${vinc[x.lote] && vinc[x.lote].associado_id === a.id ? 'selected' : ''}>${esc(a.nome)}${a.parcela && a.parcela !== x.lote ? ' (já no LT-' + esc(a.parcela) + ')' : ''}</option>`).join('')}</select>` : esc(vinc[x.lote] ? vinc[x.lote].nome : '—')}</td>
-        <td class="nowrap"><button class="btn btn-ghost btn-sm" data-sdver="${esc(x.lote)}" title="Mapa e memorial">👁</button> <button class="btn btn-ghost btn-sm" data-sdpdf="${esc(x.lote)}" title="PDF do lote">📄</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum lote com esse número.</div>';
+        <td class="nowrap"><button class="btn btn-ghost btn-sm" data-sdver="${esc(x.lote)}" title="Mapa e memorial">👁</button> <button class="btn btn-ghost btn-sm" data-sdpdf="${esc(x.lote)}" title="Mapa + memorial tradicional">📄</button> <button class="btn btn-ghost btn-sm" data-sdsigef="${esc(x.lote)}" title="Planta + memorial modelo SIGEF">SIGEF</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum lote com esse número.</div>';
     $('#sdLista').querySelectorAll('[data-sdver]').forEach((b) => b.onclick = () => verLote(b.dataset.sdver));
     $('#sdLista').querySelectorAll('.sdVinc').forEach((sel) => sel.onchange = async () => {
       const lote = sel.dataset.lote, aid = sel.value ? Number(sel.value) : null;
@@ -726,6 +729,7 @@ async function rSubdivisao(){
       catch (e){ toast(e.message, true); lista(); }
     });
     $('#sdLista').querySelectorAll('[data-sdpdf]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=${encodeURIComponent(b.dataset.sdpdf)}`));
+    $('#sdLista').querySelectorAll('[data-sdsigef]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=${encodeURIComponent(b.dataset.sdsigef)}&modelo=sigef`));
   };
   const verLote = async (lote) => {
     SUBV.lote = lote;
@@ -733,7 +737,7 @@ async function rSubdivisao(){
     try {
       const r = await api(`/projetos/${S.pid}/subdivisao/lotes/${encodeURIComponent(lote)}`);
       const pc = r.parcela, per = pc.perimetro;
-      el.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">LT-${esc(pc.lote)} · ${fm(per.area_ha, 4)} ha</h2><button class="btn btn-gold btn-sm" id="sdPdfUm" style="flex:0 0 auto">📄 PDF do lote</button></div>
+      el.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">LT-${esc(pc.lote)} · ${fm(per.area_ha, 4)} ha</h2><span style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="sdPdfUm">📄 Tradicional</button> <button class="btn btn-primary btn-sm" id="sdPdfUmSigef">📄 Modelo SIGEF</button></span></div>
         <img src="/api/pa/projetos/${S.pid}/subdivisao.svg?lote=${encodeURIComponent(pc.lote)}&t=${Date.now()}" alt="Mapa do lote ${esc(pc.lote)}" style="width:100%;display:block;border:1px solid var(--line);border-radius:10px;margin-top:8px">
         <div style="margin:6px 0">Beneficiário(a): ${r.beneficiario ? `<b>${esc(r.beneficiario.nome)}</b> · CPF ${esc(r.beneficiario.cpf)}` : '<span class="muted">sem vínculo — escolha na lista ao lado</span>'}</div>
         <div class="muted" style="margin:6px 0">Perímetro ${fm(per.perimetro_m)} m · ${per.vertices.length} vértices${pc.area_util_ha != null ? ' · área útil ' + fm(pc.area_util_ha, 4) + ' ha (área total inclui APP e estradas)' : ''}</div>
@@ -742,11 +746,40 @@ async function rSubdivisao(){
           ${per.vertices.map((v, i) => { const l = pc.lados[i]; const t = Math.round(l.azimute * 3600); return `<tr><td><b>${esc(v.nome)}</b></td><td class="right">${fm(v.E, 3)}</td><td class="right">${fm(v.N, 3)}</td><td class="right">${Math.floor(t / 3600)}°${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}'${String(t % 60).padStart(2, '0')}"</td><td class="right">${fm(l.distancia)}</td><td>${esc(l.confrontante)}</td></tr>`; }).join('')}
         </tbody></table></div>`;
       $('#sdPdfUm').onclick = () => abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=${encodeURIComponent(pc.lote)}`);
+      $('#sdPdfUmSigef').onclick = () => abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=${encodeURIComponent(pc.lote)}&modelo=sigef`);
     } catch (e){ el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   };
   $('#sdBusca').oninput = (e) => { SUBV.busca = e.target.value; lista(); };
   lista();
   if (SUBV.lote) verLote(SUBV.lote);
+}
+
+// ─── v3.154.0: perímetro real da vila (DXF da AC-01: área total VL + núcleo VN) ─
+async function rVilaPerimetro(){
+  const box = $('#vilaPerBox'); if (!box) return;
+  let v = null;
+  try { v = (await api(`/projetos/${S.pid}/vila-perimetro`)).vila; } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  const fm = (x, d = 2) => Number(x).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+  box.innerHTML = `<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">📍 Perímetro real da vila (AC-01)</h2>
+      ${v ? `<div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" data-vpdf="total|tradicional">📄 Área total — tradicional</button> <button class="btn btn-primary btn-sm" data-vpdf="total|sigef">📄 Área total — SIGEF</button>${v.nucleo ? ' <button class="btn btn-ghost btn-sm" data-vpdf="nucleo|tradicional">📄 Núcleo — tradicional</button> <button class="btn btn-ghost btn-sm" data-vpdf="nucleo|sigef">📄 Núcleo — SIGEF</button>' : ''}</div>` : ''}</div>
+    ${v ? `<div class="kpis2" style="margin-top:8px">
+        <div class="k2 ok"><div class="k2i">📐</div><div><div class="l">Área total</div><div class="v">${fm(v.total.area_ha, 4)} ha</div><div class="muted">${v.total.vertices.length} vértices · perímetro ${fm(v.total.perimetro_m)} m</div></div></div>
+        ${v.nucleo ? `<div class="k2"><div class="k2i">🏘️</div><div><div class="l">Núcleo levantado</div><div class="v">${fm(v.nucleo.area_ha, 4)} ha</div><div class="muted">${v.nucleo.vertices.length} vértices · perímetro ${fm(v.nucleo.perimetro_m)} m</div></div></div>` : ''}
+        <div class="k2"><div class="k2i">🗓️</div><div><div class="l">Arquivo</div><div class="v" style="font-size:14px">${esc(v.arquivo || '')}</div><div class="muted">${v.atualizado_em ? new Date(v.atualizado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : ''}</div></div></div></div>
+      <div style="margin-top:8px">${svgPerimetroTela(v.total)}</div>
+      <div class="muted" style="margin-top:4px">Os 70 lotes internos da vila continuam no desenho do croqui abaixo (não há arquivo com os lotes da vila levantados).</div>`
+      : '<div class="muted" style="margin-top:6px">Envie o DXF da vila (AC-01, SIRGAS 2000/UTM) com a poligonal da área total e, se houver, a do núcleo levantado. Vértices nomeados pelos rótulos VL-01…/VN-01….</div>'}
+    ${podeEscrever() ? `<div class="row" style="margin-top:10px"><div style="flex:2 1 260px"><label for="vpArq">${v ? 'Atualizar com novo DXF da vila' : 'DXF da vila'}</label><input type="file" id="vpArq" accept=".dxf"></div>
+      <div style="flex:0 0 auto"><button class="btn btn-primary" id="vpEnviar">Processar</button>${v && S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger" id="vpRemover">Remover</button>' : ''}</div></div>` : ''}</div>`;
+  box.querySelectorAll('[data-vpdf]').forEach((b) => b.onclick = () => { const [parte, modelo] = b.dataset.vpdf.split('|'); abrirPdf(`/projetos/${S.pid}/vila-perimetro.pdf?parte=${parte}&modelo=${modelo}`); });
+  if ($('#vpEnviar')) $('#vpEnviar').onclick = async () => {
+    const f = $('#vpArq').files[0]; if (!f) return toast('Escolha o DXF da vila', true);
+    const fd = new FormData(); fd.append('arquivo', f);
+    $('#vpEnviar').disabled = true;
+    try { const r = await api(`/projetos/${S.pid}/vila-perimetro`, { method: 'POST', body: fd }); toast(`Vila processada: ${Number(r.vila.total.area_ha).toLocaleString('pt-BR')} ha`); rVilaPerimetro(); }
+    catch (e){ toast(e.message, true); $('#vpEnviar').disabled = false; }
+  };
+  if ($('#vpRemover')) $('#vpRemover').onclick = async () => { if (!confirm('Remover o perímetro real da vila?')) return; try { await api(`/projetos/${S.pid}/vila-perimetro`, { method: 'DELETE' }); rVilaPerimetro(); } catch (e){ toast(e.message, true); } };
 }
 
 async function rMapaVila(){

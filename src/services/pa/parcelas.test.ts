@@ -50,3 +50,31 @@ describe('beneficiário do lote (v3.152.0)', () => {
     expect((html.match(/______________________________<\/b>CPF/g) || []).length).toBe(1);
   });
 });
+
+import { vilaDeDxf } from './parcelas';
+import { plantaSigef, memorialSigef } from './sigefPdf';
+describe('perímetro da vila e modelo SIGEF (v3.154.0)', () => {
+  const quad = (camada: string, s: number, pre: string) => [
+    ...pl(camada, [[0, 0], [s, 0], [s, s], [0, s]]),
+    ...[[0, 0], [s, 0], [s, s], [0, s]].flatMap(([x, y], i) => [...pt(`${camada}_VERTICES`, x, y), ...tx(`${camada}_TEXTO`, x + 4, y + 4, `${pre}-0${i + 1}`)]),
+    ...tx(`${camada}_TEXTO`, s / 2, -10, `${s},00 m`),
+  ];
+  const dxfVila = ['0', 'SECTION', '2', 'ENTITIES', ...quad('VILA_AC01_AREA_TOTAL', 300, 'VL'), ...quad('VILA_NUCLEO_LEVANTADO', 280, 'VN'), '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const v = vilaDeDxf(dxfVila);
+  it('separa área total e núcleo e nomeia os vértices pelos rótulos', () => {
+    expect(v.total.area_m2).toBe(90000);
+    expect(v.nucleo?.area_m2).toBe(78400);
+    expect(v.total.vertices.map((x) => x.nome).sort()).toEqual(['VL-01', 'VL-02', 'VL-03', 'VL-04']);
+    expect(v.nucleo?.vertices.map((x) => x.nome).sort()).toEqual(['VN-01', 'VN-02', 'VN-03', 'VN-04']);
+  });
+  it('planta e memorial SIGEF trazem a identificação e o aviso de não certificado', () => {
+    const d = { projeto: { nome: 'PA Teste', municipio: 'Açailândia', uf: 'MA', associacao: 'Associação Teste' }, rt: { nome: 'RT Teste', registro: 'CFT 1', cft: '1', incra: 'FQNS' }, marca: { brasao: null, emblema: null }, data: '07/11/2026' };
+    const peca = { denominacao: 'Área da vila', titular: null, natureza: 'Área comunitária', perimetro: v.total, confrontantes: null, mapaSvg: '<svg></svg>' };
+    const html = plantaSigef(d, peca) + memorialSigef(d, peca);
+    expect(html).toContain('PLANTA');
+    expect(html).toContain('DESCRIÇÃO DA PARCELA');
+    expect(html).toContain('NÃO certificado no SIGEF');
+    expect(html).toContain('Cód. Credenciado(a) INCRA:</b> FQNS');
+    expect((html.match(/<tr><td class="c"><b>VL-0/g) || []).length).toBe(4);
+  });
+});
