@@ -151,6 +151,35 @@ router.post('/projetos/:id/perimetro', uploadMem.single('arquivo'), h(async (req
   return { perimetro: await mapas.salvarPerimetro(id(req.params.id), { nome: f.originalname, conteudo: textoDoArquivo(f.buffer) }, { fuso, hemisferio: hem }, ctx(req).sub) };
 }));
 router.delete('/projetos/:id/perimetro', h(async (req) => { exigirAdmin(req); await mapas.removerPerimetro(id(req.params.id), ctx(req).sub); return { ok: true }; }));
+// v3.151.0: subdivisão do PA em lotes (DXF da divisão/marcos).
+router.get('/projetos/:id/subdivisao', h(async (req) => {
+  const sub = await mapas.buscarSubdivisao(id(req.params.id));
+  return { subdivisao: sub ? { ...sub, camadas: undefined } : null };
+}));
+router.post('/projetos/:id/subdivisao', uploadMem.single('arquivo'), h(async (req) => {
+  exigirEscrita(req);
+  const f = req.file;
+  if (!f) throw new PaErro('ARQUIVO_VAZIO', 'Envie o DXF no campo "arquivo"', 400);
+  const fuso = Number(req.body?.fuso) || null;
+  const hem = req.body?.hemisferio === 'N' ? 'N' : 'S';
+  const sub = await mapas.salvarSubdivisao(id(req.params.id), { nome: f.originalname, conteudo: textoDoArquivo(f.buffer) }, { fuso, hemisferio: hem }, ctx(req).sub);
+  return { subdivisao: { ...sub, camadas: undefined } };
+}));
+router.delete('/projetos/:id/subdivisao', h(async (req) => { exigirAdmin(req); await mapas.removerSubdivisao(id(req.params.id), ctx(req).sub); return { ok: true }; }));
+router.get('/projetos/:id/subdivisao.svg', h(async (req, res) => {
+  const lote = typeof req.query.lote === 'string' && req.query.lote ? req.query.lote : null;
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'private, no-cache');
+  res.end(await mapas.svgSubdivisaoProjeto(id(req.params.id), lote));
+  return undefined;
+}));
+router.get('/projetos/:id/subdivisao/lotes/:lote', h(async (req) => mapas.memorialParcela(id(req.params.id), String(req.params.lote))));
+router.get('/projetos/:id/subdivisao.pdf', h(async (req, res) => {
+  const q = typeof req.query.lotes === 'string' ? req.query.lotes : '';
+  const lotes = q === 'todos' ? null : q.split(',').map((x) => x.trim()).filter(Boolean);
+  enviarPdf(res, await mapas.pdfSubdivisao(id(req.params.id), lotes, req.query.geral === '1'));
+  return undefined;
+}));
 router.get('/projetos/:id/mapa-geral.pdf', h(async (req, res) => { enviarPdf(res, await mapas.pdfMapaGeral(id(req.params.id))); return undefined; }));
 
 // ─── Lotes ────────────────────────────────────────────────────────────────

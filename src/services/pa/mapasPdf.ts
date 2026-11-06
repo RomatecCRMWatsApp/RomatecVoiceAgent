@@ -7,6 +7,7 @@ import { svgLayoutPA, type LoteDoMapa } from './mapaSvg';
 import type { DesenhoLayout } from './layoutDesenho';
 import type { MemorialLote } from './memorialVila';
 import { grausDms, latLonDms, textoMemorialPerimetro, type Perimetro } from './perimetro';
+import { textoMemorialParcela, type Subdivisao, type CamadaDesenho } from './parcelas';
 
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 const fm = (v: number, d = 2) => v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -149,4 +150,109 @@ export function htmlMapaGeral(d: DadosMapaPA, p: Perimetro): string {
 export async function pdfDeHtml(html: string): Promise<Buffer> {
   const { htmlToPdf } = await import('../../pdf/htmlToPdf');
   return htmlToPdf(html, { format: 'A4', printBackground: true, margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' } });
+}
+
+// ─── v3.151.0: subdivisão do PA em lotes — mapa geral e mapa + memorial por lote ─
+const COR_CAMADA: Record<CamadaDesenho['tipo'], { fill: string; stroke: string }> = {
+  APP: { fill: '#9FD08A', stroke: '#3E8E41' },
+  COMUNITARIA: { fill: '#F1DFA4', stroke: '#A07A10' },
+  AGUA: { fill: 'none', stroke: '#2B6CB0' },
+  ESTRADA: { fill: 'none', stroke: '#8C5A2B' },
+  OUTRA: { fill: 'none', stroke: '#999' },
+};
+
+/** SVG da subdivisão: todos os lotes, ou um lote em destaque (zoom nele, vértices nomeados). */
+export function svgSubdivisao(sub: Subdivisao, opts: { destaque?: string | null; perimetro?: Perimetro | null; css?: string } = {}): string {
+  const alvo = opts.destaque ? sub.parcelas.find((p) => p.lote === opts.destaque) ?? null : null;
+  const todosPts = (alvo ? alvo.perimetro.vertices : sub.parcelas.flatMap((p) => p.perimetro.vertices)).map((v) => [v.E, v.N]);
+  const Es = todosPts.map((p) => p[0]), Ns = todosPts.map((p) => p[1]);
+  const minE = Math.min(...Es), maxE = Math.max(...Es), minN = Math.min(...Ns), maxN = Math.max(...Ns);
+  const span = Math.max(maxE - minE, maxN - minN) || 1;
+  const pad = span * (alvo ? 0.35 : 0.06);
+  const x0 = minE - pad, y0 = -(maxN + pad), W = maxE - minE + pad * 2, H = maxN - minN + pad * 2;
+  // só desenha o que aparece no recorte (PDF de 63 lotes não carrega o PA inteiro 63 vezes)
+  const vis = (pts: number[][]) => pts.some(([e, n]) => e > x0 - pad && e < x0 + W + pad && -n > y0 - pad && -n < y0 + H + pad);
+  const base = alvo ? span * 1.7 : span;
+  const fs = base * 0.012, sw = base * 0.0012;
+  const poly = (pts: number[][]) => pts.map(([e, n]) => `${e.toFixed(1)},${(-n).toFixed(1)}`).join(' ');
+  const centro = (pts: number[][]) => [pts.reduce((s, p) => s + p[0], 0) / pts.length, -pts.reduce((s, p) => s + p[1], 0) / pts.length];
+  const camadas = sub.camadas.filter((c) => vis(c.pts)).map((c) => {
+    const k = COR_CAMADA[c.tipo];
+    const larg = c.tipo === 'ESTRADA' ? sw * 2.4 : c.tipo === 'AGUA' ? sw * 1.2 : sw;
+    const forma = c.fechada
+      ? `<polygon points="${poly(c.pts)}" fill="${k.fill}" fill-opacity="${c.tipo === 'APP' ? 0.45 : 0.6}" stroke="${k.stroke}" stroke-width="${larg}"/>`
+      : `<polyline points="${poly(c.pts)}" fill="none" stroke="${k.stroke}" stroke-width="${larg}"/>`;
+    let rot = '';
+    if (c.rotulo && c.tipo === 'COMUNITARIA') { const [cx, cy] = centro(c.pts); rot = `<text x="${cx}" y="${cy}" font-size="${fs * 0.75}" text-anchor="middle" fill="#6b4f08" font-weight="700">${esc(c.rotulo)}</text>`; }
+    return forma + rot;
+  }).join('');
+  const lotes = sub.parcelas.filter((p) => vis(p.perimetro.vertices.map((v) => [v.E, v.N]))).map((p) => {
+    const pts = p.perimetro.vertices.map((v) => [v.E, v.N]);
+    const [cx, cy] = centro(pts);
+    const eu = alvo !== null && p.lote === alvo.lote;
+    return `<polygon points="${poly(pts)}" fill="${eu ? '#B7D99A' : alvo ? '#F4F1E6' : '#E4EED8'}" fill-opacity="${eu ? 0.75 : 0.55}" stroke="${eu ? '#0C3320' : '#55704A'}" stroke-width="${eu ? sw * 3 : sw}"/>`
+      + `<text x="${cx}" y="${cy}" font-size="${eu ? fs * 1.6 : fs}" font-weight="800" text-anchor="middle" dominant-baseline="middle" fill="${eu ? '#0C3320' : '#3d5233'}">LT-${esc(p.lote)}</text>`
+      + (eu ? `<text x="${cx}" y="${cy + fs * 1.8}" font-size="${fs * 0.95}" text-anchor="middle" fill="#0C3320">${fm(p.perimetro.area_ha, 4)} ha</text>` : '');
+  }).join('');
+  const per = opts.perimetro && !alvo ? `<polygon points="${poly(opts.perimetro.vertices.map((v) => [v.E, v.N]))}" fill="none" stroke="#0C3320" stroke-width="${sw * 3.5}"/>` : '';
+  let vert = '';
+  if (alvo) {
+    const [cx, cy] = centro(alvo.perimetro.vertices.map((v) => [v.E, v.N]));
+    vert = alvo.perimetro.vertices.map((v) => { const dx = v.E - cx, dy = -v.N - cy, L = Math.hypot(dx, dy) || 1; return `<circle cx="${v.E}" cy="${-v.N}" r="${sw * 3.2}" fill="#B3261E"/><text x="${v.E + (dx / L) * fs * 1.6}" y="${-v.N + (dy / L) * fs * 1.6}" font-size="${fs * 1.15}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#B3261E">${esc(v.nome)}</text>`; }).join('');
+  }
+  const alvoBarra = W / 5;
+  const passo = [1, 2, 5].map((m) => m * 10 ** Math.floor(Math.log10(alvoBarra))).concat([10 ** Math.ceil(Math.log10(alvoBarra))]).reduce((a, b) => (Math.abs(b - alvoBarra) < Math.abs(a - alvoBarra) ? b : a));
+  const sbx = x0 + W * 0.04, sby = y0 + H * 0.96;
+  const fsg = fs * 0.8;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x0} ${y0} ${W} ${H}" style="${opts.css ?? 'width:100%;height:auto;display:block'}" font-family="Liberation Sans, Arial, sans-serif">
+    <rect x="${x0}" y="${y0}" width="${W}" height="${H}" fill="#FBFAF5"/>${lotes}${camadas}${per}${vert}
+    <g transform="translate(${x0 + W * 0.95},${y0 + H * 0.07})"><polygon points="0,${-fsg * 1.6} ${fsg * 0.7},${fsg * 0.6} 0,${fsg * 0.2} ${-fsg * 0.7},${fsg * 0.6}" fill="#0C3320"/><text y="${-fsg * 1.9}" font-size="${fsg}" font-weight="800" text-anchor="middle" fill="#0C3320">N</text></g>
+    <g><rect x="${sbx}" y="${sby}" width="${passo / 2}" height="${fsg * 0.4}" fill="#0C3320"/><rect x="${sbx + passo / 2}" y="${sby}" width="${passo / 2}" height="${fsg * 0.4}" fill="#fff" stroke="#0C3320" stroke-width="${sw * 0.6}"/>
+      <text x="${sbx}" y="${sby - fsg * 0.3}" font-size="${fsg * 0.8}" fill="#0C3320">0</text><text x="${sbx + passo}" y="${sby - fsg * 0.3}" font-size="${fsg * 0.8}" text-anchor="end" fill="#0C3320">${passo >= 1000 ? fm(passo / 1000, 0) + ' km' : fm(passo, 0) + ' m'}</text></g>
+  </svg>`;
+}
+
+const LEGENDA = `<div class="nota" style="font-style:normal">Legenda: <span style="color:#55704A">▭ lotes</span> · <span style="color:#3E8E41">■ APP</span> · <span style="color:#A07A10">■ áreas comunitárias</span> · <span style="color:#8C5A2B">━ estradas/servidão</span> · <span style="color:#2B6CB0">━ córregos</span></div>`;
+
+/** PDF: mapa geral da subdivisão + quadro de áreas, e/ou mapa + memorial de cada lote. */
+export function htmlSubdivisao(d: DadosMapaPA, sub: Subdivisao, opts: { lotes: string[]; geral: boolean; perimetro: Perimetro | null }): string {
+  const bras = asset(d.marca.brasao);
+  const paginas: string[] = [];
+  if (opts.geral) {
+    const tot = sub.parcelas.reduce((s, p) => s + p.perimetro.area_ha, 0);
+    paginas.push(`${cabecalho(d, 'MAPA GERAL DA SUBDIVISÃO EM LOTES')}
+      <div class="mapa">${svgSubdivisao(sub, { perimetro: opts.perimetro, css: 'width:100%;height:205mm;display:block' })}${bras ? `<img class="bras" src="${bras}">` : ''}</div>
+      ${LEGENDA}
+      <div class="quadros"><div class="q"><span>Lotes</span><b>${sub.parcelas.length}</b>${sub.marcos} marcos</div>
+        <div class="q"><span>Área dos lotes</span><b>${fm(tot, 4)} ha</b>${opts.perimetro ? `perímetro do PA: ${fm(opts.perimetro.area_ha, 4)} ha` : ''}</div>
+        <div class="q"><span>Referência</span><b>SIRGAS 2000</b>UTM fuso ${sub.fuso}${sub.hemisferio === 'S' ? ' Sul' : ' Norte'}</div></div>
+      ${rodape(d)}`);
+    paginas.push(`${cabecalho(d, 'QUADRO DE ÁREAS DOS LOTES')}
+      <table><thead><tr><th>Lote</th><th class="n">Área (ha)</th><th class="n">Área útil (ha)</th><th class="n">Perímetro (m)</th><th class="n">Vértices</th><th>Confrontantes</th></tr></thead><tbody>
+      ${sub.parcelas.map((p) => `<tr><td><b>LT-${esc(p.lote)}</b></td><td class="n">${fm(p.perimetro.area_ha, 4)}</td><td class="n">${p.area_util_ha != null ? fm(p.area_util_ha, 4) : '—'}</td><td class="n">${fm(p.perimetro.perimetro_m)}</td><td class="n">${p.perimetro.vertices.length}</td><td class="conf">${esc([...new Set(p.lados.map((l) => l.confrontante))].join('; '))}</td></tr>`).join('')}
+      </tbody></table>${rodape(d)}`);
+  }
+  for (const lote of opts.lotes) {
+    const pc = sub.parcelas.find((p) => p.lote === lote);
+    if (!pc) continue;
+    const p = pc.perimetro;
+    const paragrafos = textoMemorialParcela(pc, d.projeto.nome, `${d.projeto.municipio}/${d.projeto.uf}`, null);
+    paginas.push(`${cabecalho(d, `LOTE ${pc.lote} — MAPA E MEMORIAL DESCRITIVO`)}
+      <div class="mapa">${svgSubdivisao(sub, { destaque: pc.lote, css: 'width:100%;height:112mm;display:block' })}</div>
+      ${LEGENDA}
+      <div class="quadros"><div class="q"><span>Área</span><b>${fm(p.area_ha, 4)} ha</b>${fm(p.area_m2)} m²${pc.area_util_ha != null ? ` · útil ${fm(pc.area_util_ha, 4)} ha` : ''}</div>
+        <div class="q"><span>Perímetro</span><b>${fm(p.perimetro_m)} m</b>${p.vertices.length} vértices</div>
+        <div class="q"><span>Beneficiário(a)</span><b style="font-size:9pt">______________________________</b>CPF: ____________________</div></div>
+      <h2>Memorial descritivo</h2>${paragrafos.map((t) => `<p class="memo">${esc(t)}</p>`).join('')}
+      ${rodape(d)}`);
+    paginas.push(`${cabecalho(d, `LOTE ${pc.lote} — QUADRO DE COORDENADAS E CONFRONTAÇÕES`)}
+      <table><thead><tr><th>Vértice</th><th>Tipo</th><th class="n">E (m)</th><th class="n">N (m)</th><th class="n">Latitude</th><th class="n">Longitude</th><th>Lado</th><th class="n">Azimute</th><th class="n">Dist. (m)</th><th>Confrontante</th></tr></thead><tbody>
+      ${p.vertices.map((v, i) => { const s = pc.lados[i]; return `<tr><td><b>${esc(v.nome)}</b></td><td class="conf">${esc(pc.tipos_vertice[i] ?? '—')}</td><td class="n">${fm(v.E, 3)}</td><td class="n">${fm(v.N, 3)}</td><td class="n">${esc(latLonDms(v.lat, 'lat'))}</td><td class="n">${esc(latLonDms(v.lon, 'lon'))}</td><td>${esc(s.de)} → ${esc(s.para)}</td><td class="n">${esc(grausDms(s.azimute))}</td><td class="n">${fm(s.distancia)}</td><td class="conf">${esc(s.confrontante)}</td></tr>`; }).join('')}
+      </tbody></table>
+      <div class="ass"><div>${esc(d.rt.nome)}</div>${esc(d.rt.registro)}</div>
+      ${rodape(d)}`);
+  }
+  return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><title>Subdivisão em lotes — ${esc(d.projeto.nome)}</title><style>${CSS}</style></head><body>
+    ${paginas.join('<div class="quebra"></div>')}
+  </body></html>`;
 }

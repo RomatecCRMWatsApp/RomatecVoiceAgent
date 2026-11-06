@@ -568,10 +568,12 @@ async function rMapa(){
   const v = $('#v-mapa');
   v.innerHTML = `<div class="row" style="margin-bottom:10px;align-items:center">
       <div style="flex:1 1 auto"><button class="btn btn-sm ${S.mapaVisao === 'vila' ? 'btn-primary' : 'btn-ghost'}" data-visao="vila">🏘️ Mapa da vila</button>
-        <button class="btn btn-sm ${S.mapaVisao === 'geral' ? 'btn-primary' : 'btn-ghost'}" data-visao="geral">🌐 Mapa geral do PA</button></div>
-    </div><div id="mapaVilaBox"></div><div id="mapaGeralBox"></div>`;
+        <button class="btn btn-sm ${S.mapaVisao === 'geral' ? 'btn-primary' : 'btn-ghost'}" data-visao="geral">🌐 Mapa geral do PA</button>
+        <button class="btn btn-sm ${S.mapaVisao === 'lotes' ? 'btn-primary' : 'btn-ghost'}" data-visao="lotes">🧩 Lotes do PA (subdivisão)</button></div>
+    </div><div id="mapaVilaBox"></div><div id="mapaGeralBox"></div><div id="subdivBox"></div>`;
   v.querySelectorAll('[data-visao]').forEach((b) => b.onclick = () => { S.mapaVisao = b.dataset.visao; rMapa(); });
   if (S.mapaVisao === 'geral') return rMapaGeral();
+  if (S.mapaVisao === 'lotes') return rSubdivisao();
   await rMapaVila();
   rMemorialVila();
 }
@@ -662,6 +664,80 @@ async function rMapaGeral(){
       try { await api(`/projetos/${S.pid}/perimetro`, { method: 'DELETE' }); toast('Perímetro removido'); rMapaGeral(); } catch (e){ toast(e.message, true); }
     };
   } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
+}
+
+// ─── v3.151.0: subdivisão do PA em lotes (DXF da divisão com marcos) ───────
+let SUBV = { busca: '', lote: null };
+async function rSubdivisao(){
+  const box = $('#subdivBox');
+  box.innerHTML = '<div class="card empty">Carregando a subdivisão…</div>';
+  let sub;
+  try { sub = (await api(`/projetos/${S.pid}/subdivisao`)).subdivisao; } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  const fm = (v, d = 2) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const tot = sub ? sub.parcelas.reduce((a, x) => a + x.perimetro.area_ha, 0) : 0;
+  box.innerHTML = `
+    ${podeEscrever() ? `<div class="card"><h2>${sub ? '🔄 Atualizar subdivisão' : '📤 Enviar a subdivisão dos lotes'}</h2>
+      <p class="muted">Envie o <b>DXF da divisão</b> (SIRGAS 2000 / UTM) com uma polilinha fechada por lote (camada <code>LOTES</code>) e o rótulo <code>LT-NN</code> dentro de cada lote. Se o DXF tiver os <b>marcos</b> (pontos nas camadas <code>MARCOS_…</code> com rótulo <code>M-001</code>…), os vértices do memorial usam os códigos dos marcos. Estradas, APP, áreas comunitárias e córregos entram no desenho e nas confrontações.</p>
+      <div class="row"><div style="flex:2 1 260px"><label for="sdArq">Arquivo DXF</label><input type="file" id="sdArq" accept=".dxf"></div>
+        <div style="flex:0 1 140px"><label for="sdFuso">Fuso UTM</label><select class="f" id="sdFuso">${[21, 22, 23, 24, 25].map((z) => `<option ${z === (sub ? sub.fuso : 23) ? 'selected' : ''}>${z}</option>`).join('')}</select></div>
+        <div style="flex:0 0 auto"><button class="btn btn-primary" id="sdEnviar">Processar</button></div></div></div>` : ''}
+    ${sub ? `<div class="kpis2">
+        <div class="k2 ok"><div class="k2i">🧩</div><div><div class="l">Lotes</div><div class="v">${sub.parcelas.length}</div><div class="muted">${sub.marcos} marcos no DXF</div></div></div>
+        <div class="k2"><div class="k2i">📐</div><div><div class="l">Área dos lotes</div><div class="v">${fm(tot, 4)} ha</div><div class="muted">média ${fm(tot / sub.parcelas.length, 4)} ha</div></div></div>
+        <div class="k2"><div class="k2i">🌐</div><div><div class="l">Referência</div><div class="v" style="font-size:16px">SIRGAS 2000</div><div class="muted">UTM fuso ${sub.fuso} ${sub.hemisferio === 'S' ? 'Sul' : 'Norte'}</div></div></div>
+        <div class="k2"><div class="k2i">🗓️</div><div><div class="l">Atualizado</div><div class="v" style="font-size:16px">${sub.atualizado_em ? new Date(sub.atualizado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'}</div><div class="muted">${esc(sub.arquivo || '')}</div></div></div>
+      </div>
+      <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">🧩 Mapa da subdivisão</h2>
+          <div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="sdPdfGeral">📄 PDF — Mapa geral + quadro de áreas</button> <button class="btn btn-primary btn-sm" id="sdPdfTodos">📄 PDF — Mapa + memorial de todos os lotes</button>${S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger btn-sm" id="sdRemover">Remover</button>' : ''}</div></div>
+        <div style="position:relative;margin-top:8px"><img src="/api/pa/projetos/${S.pid}/subdivisao.svg?t=${Date.now()}" alt="Mapa da subdivisão em lotes" style="width:100%;display:block;border:1px solid var(--line);border-radius:10px"></div>
+        <div class="muted" style="margin-top:4px">Legenda: lotes · <span style="color:#3E8E41">APP</span> · <span style="color:#A07A10">áreas comunitárias</span> · <span style="color:#8C5A2B">estradas/servidão</span> · <span style="color:#2B6CB0">córregos</span></div></div>
+      <div class="grid21"><div class="card" style="margin:0"><div class="row" style="align-items:end"><h2 style="flex:1 1 auto;margin:0;border:0">Lotes</h2><div style="flex:0 1 200px"><label for="sdBusca">Buscar lote</label><input id="sdBusca" placeholder="ex.: 12" value="${esc(SUBV.busca)}"></div></div>
+          <div id="sdLista" class="tbl" style="margin-top:8px"></div></div>
+        <div class="card" style="margin:0"><div id="sdLote"><div class="empty">Clique em 👁 num lote para ver o mapa individual e o memorial descritivo.</div></div></div></div>`
+    : '<div class="card empty">Nenhuma subdivisão enviada ainda. Envie o DXF da divisão dos lotes para gerar o mapa geral, o mapa individual e o memorial de cada lote.</div>'}`;
+  if ($('#sdEnviar')) $('#sdEnviar').onclick = async () => {
+    const f = $('#sdArq').files[0];
+    if (!f) return toast('Escolha o arquivo DXF', true);
+    const fd = new FormData(); fd.append('arquivo', f); fd.append('fuso', $('#sdFuso').value);
+    $('#sdEnviar').disabled = true; $('#sdEnviar').textContent = 'Processando…';
+    try { const r = await api(`/projetos/${S.pid}/subdivisao`, { method: 'POST', body: fd }); toast(`Subdivisão processada: ${r.subdivisao.parcelas.length} lotes, ${r.subdivisao.marcos} marcos`); rSubdivisao(); }
+    catch (e){ toast(e.message, true); $('#sdEnviar').disabled = false; $('#sdEnviar').textContent = 'Processar'; }
+  };
+  if (!sub) return;
+  $('#sdPdfGeral').onclick = () => abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?geral=1`);
+  $('#sdPdfTodos').onclick = () => { if (confirm(`Gerar o PDF com o mapa e o memorial dos ${sub.parcelas.length} lotes? Pode levar um minuto.`)) abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=todos`); };
+  if ($('#sdRemover')) $('#sdRemover').onclick = async () => {
+    if (!confirm('Remover a subdivisão em lotes? O mapa e os memoriais dos lotes deixam de existir até um novo envio.')) return;
+    try { await api(`/projetos/${S.pid}/subdivisao`, { method: 'DELETE' }); toast('Subdivisão removida'); rSubdivisao(); } catch (e){ toast(e.message, true); }
+  };
+  const lista = () => {
+    const q = SUBV.busca.trim().replace(/\D/g, '');
+    const ps = sub.parcelas.filter((x) => !q || x.lote === q.padStart(2, '0') || x.lote === q);
+    $('#sdLista').innerHTML = ps.length ? `<table><thead><tr><th>Lote</th><th class="right">Área (ha)</th><th class="right">Útil (ha)</th><th class="right">Perímetro (m)</th><th class="right">Vért.</th><th></th></tr></thead><tbody>
+      ${ps.map((x) => `<tr><td><b>LT-${esc(x.lote)}</b></td><td class="right">${fm(x.perimetro.area_ha, 4)}</td><td class="right">${x.area_util_ha != null ? fm(x.area_util_ha, 4) : '—'}</td><td class="right">${fm(x.perimetro.perimetro_m)}</td><td class="right">${x.perimetro.vertices.length}</td>
+        <td class="nowrap"><button class="btn btn-ghost btn-sm" data-sdver="${esc(x.lote)}" title="Mapa e memorial">👁</button> <button class="btn btn-ghost btn-sm" data-sdpdf="${esc(x.lote)}" title="PDF do lote">📄</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum lote com esse número.</div>';
+    $('#sdLista').querySelectorAll('[data-sdver]').forEach((b) => b.onclick = () => verLote(b.dataset.sdver));
+    $('#sdLista').querySelectorAll('[data-sdpdf]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=${encodeURIComponent(b.dataset.sdpdf)}`));
+  };
+  const verLote = async (lote) => {
+    SUBV.lote = lote;
+    const el = $('#sdLote'); el.innerHTML = '<div class="empty">Carregando…</div>';
+    try {
+      const r = await api(`/projetos/${S.pid}/subdivisao/lotes/${encodeURIComponent(lote)}`);
+      const pc = r.parcela, per = pc.perimetro;
+      el.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">LT-${esc(pc.lote)} · ${fm(per.area_ha, 4)} ha</h2><button class="btn btn-gold btn-sm" id="sdPdfUm" style="flex:0 0 auto">📄 PDF do lote</button></div>
+        <img src="/api/pa/projetos/${S.pid}/subdivisao.svg?lote=${encodeURIComponent(pc.lote)}&t=${Date.now()}" alt="Mapa do lote ${esc(pc.lote)}" style="width:100%;display:block;border:1px solid var(--line);border-radius:10px;margin-top:8px">
+        <div class="muted" style="margin:6px 0">Perímetro ${fm(per.perimetro_m)} m · ${per.vertices.length} vértices${pc.area_util_ha != null ? ' · área útil ' + fm(pc.area_util_ha, 4) + ' ha' : ''}</div>
+        <h3>Memorial descritivo</h3>${r.memorial.map((t) => `<p class="memo-t">${esc(t)}</p>`).join('')}
+        <div class="tbl"><table><thead><tr><th>Vértice</th><th class="right">E (m)</th><th class="right">N (m)</th><th class="right">Azimute</th><th class="right">Dist. (m)</th><th>Confrontante</th></tr></thead><tbody>
+          ${per.vertices.map((v, i) => { const l = pc.lados[i]; const t = Math.round(l.azimute * 3600); return `<tr><td><b>${esc(v.nome)}</b></td><td class="right">${fm(v.E, 3)}</td><td class="right">${fm(v.N, 3)}</td><td class="right">${Math.floor(t / 3600)}°${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}'${String(t % 60).padStart(2, '0')}"</td><td class="right">${fm(l.distancia)}</td><td>${esc(l.confrontante)}</td></tr>`; }).join('')}
+        </tbody></table></div>`;
+      $('#sdPdfUm').onclick = () => abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=${encodeURIComponent(pc.lote)}`);
+    } catch (e){ el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  };
+  $('#sdBusca').oninput = (e) => { SUBV.busca = e.target.value; lista(); };
+  lista();
+  if (SUBV.lote) verLote(SUBV.lote);
 }
 
 async function rMapaVila(){
