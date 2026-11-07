@@ -148,6 +148,12 @@
   .ml-ctl .pill.on{background:#0C3320;color:#fff}
   .ml-ctl .seg{display:flex;flex-wrap:nowrap;max-width:100%;overflow-x:auto;scrollbar-width:none;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.18);background:#fff}
   .ml-ctl .seg button.on{background:#0C3320;color:#fff}
+  .ml-vert{display:flex;align-items:center;gap:3px;cursor:pointer;transform:translate(0,0)}
+  .ml-vert i{width:9px;height:9px;border-radius:50%;background:#B3261E;border:1.5px solid #fff;box-shadow:0 0 2px #0006;flex:0 0 auto}
+  .ml-vert span{color:#B3261E;font-weight:800;font-size:10px;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff;white-space:nowrap}
+  .ml-vert.on i{width:15px;height:15px;background:#2F5FD0}
+  .ml-vert.on span{color:#1E3F99;font-size:12px}
+  .leaflet-tooltip.ml-rotv{color:#B3261E;font-size:10px}
   .ml-rot3d{color:#0C3320;font-weight:800;font-size:11px;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff;pointer-events:none;white-space:nowrap}
   @media (max-width:700px){.ml-ctl{max-width:calc(100% - 52px)}.ml-ctl .pill,.ml-ctl .seg button{padding:6px 8px;font-size:11px;gap:4px}.ml-rot3d{font-size:10px}}
   .ml-card{margin-top:14px;padding:16px;border-radius:16px;background:#fff;border:2px solid #C9A84C}
@@ -155,18 +161,25 @@
   /* v3.157.0: grid21 não deixa o card passar da tela; tabela de lotes vira cartões no celular */
   .grid21>*{min-width:0}
   @media (max-width:700px){
-    table.tlotes thead{display:none}
+    /* v3.158.1: cartão compacto — ha e alqueire na mesma linha, botões ao lado do lote */
+    table.tlotes thead,table.tlotes .so-desk{display:none}
     table.tlotes,table.tlotes tbody{display:block}
-    table.tlotes tr{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;padding:10px 4px;border-bottom:1px solid var(--line)}
-    table.tlotes td{display:flex;justify-content:space-between;gap:6px;padding:2px 0;border:0;text-align:right}
-    table.tlotes td[data-l]::before{content:attr(data-l);color:var(--muted);font-size:11px;text-align:left}
-    table.tlotes td.tl-lote,table.tlotes td.tl-ben,table.tlotes td.tl-acoes{grid-column:1/-1}
-    table.tlotes td.tl-lote{font-size:15px}
-    table.tlotes td.tl-ben{flex-direction:column;align-items:stretch;text-align:left}
-    table.tlotes td.tl-ben select{min-width:0 !important;width:100%}
-    table.tlotes td.tl-acoes{justify-content:flex-start}
+    table.tlotes tr{display:grid;grid-template-columns:1fr 1fr;gap:3px 14px;padding:10px 10px;margin-bottom:8px;border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;background:#fff}
+    table.tlotes tr.tl-tem{border-left-color:#6E9E3A;background:#F6FAF0}
+    table.tlotes td{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:1px 0;border:0;text-align:right;font-size:13px}
+    table.tlotes td[data-l]::before{content:attr(data-l);color:var(--muted);font-size:11px;text-align:left;white-space:nowrap;margin-right:auto}
+    table.tlotes td[data-l]{justify-content:flex-end;gap:0}
+    table.tlotes td.tl-ben{gap:8px}
+    table.tlotes td.tl-lote{grid-column:1;justify-content:flex-start;align-items:center;font-size:16px;flex-wrap:wrap}
+    table.tlotes td.tl-acoes{grid-column:2;grid-row:1;justify-content:flex-end;gap:4px}
+    table.tlotes td.tl-acoes .btn{padding:5px 8px}
+    table.tlotes td[data-l="Área total"],table.tlotes td[data-l="Área útil"],table.tlotes td.tl-ben{grid-column:1/-1}
+    table.tlotes td.tl-ben{align-items:center;margin-top:4px}
+    table.tlotes td.tl-ben select{min-width:0 !important;width:auto;flex:1 1 auto;font-size:13px !important;padding:6px 8px !important}
   }
   .ml-limp summary{cursor:pointer;color:var(--green2)}
+  .so-cel{display:none}
+  @media (max-width:700px){table.tlotes .so-cel{display:inline}}
   .ml-alq{font-weight:700;color:#7A5B12;margin:-2px 0 4px}
   .ml-ben{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
   .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -619,6 +632,7 @@ function svgMapa(lotes, d, modo){
 // ─── v3.146.0: aba Mapa com duas visões — vila (layout + memorial) e geral (perímetro) ─
 S.mapaVisao = 'vila';
 async function rMapa(){
+  if (MAPA_PG.parar) MAPA_PG.parar(); if (MAPA_LOTES.parar) MAPA_LOTES.parar(); // v3.159.0: para o giro ao trocar de mapa
   const v = $('#v-mapa');
   v.innerHTML = `<div class="row" style="margin-bottom:10px;align-items:center">
       <div style="flex:1 1 auto"><button class="btn btn-sm ${S.mapaVisao === 'vila' ? 'btn-primary' : 'btn-ghost'}" data-visao="vila">🏘️ Mapa da vila</button>
@@ -699,7 +713,13 @@ async function rMapaGeral(){
         </div>
         <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">🌐 Mapa geral do PA</h2>
             <div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="pdfGeral">📄 PDF — Mapa geral + Memorial</button> <button class="btn btn-primary btn-sm" id="pdfGeralSigef" title="Planta e memorial no modelo SIGEF">📄 Modelo SIGEF</button>${S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger btn-sm" id="perRemover">Remover</button>' : ''}</div></div>
-          <div style="position:relative;margin-top:8px">${svgPerimetroTela(p)}${S.marca && S.marca.brasao ? `<img class="mapa-bras" src="${esc(S.marca.brasao)}" alt="Brasão do PA">` : ''}</div></div>
+          <div class="row" style="margin-top:8px;align-items:center"><span class="muted" style="flex:1 1 auto">Toque na área do PA ou num vértice para ver as informações. Arraste e use os dedos para aproximar.</span>
+            <span style="flex:0 0 auto" class="pgBase"><button class="btn btn-sm btn-primary" data-base="mapa">🗺️ Mapa</button> <button class="btn btn-sm btn-ghost" data-base="satelite">🛰️ Satélite</button> <button class="btn btn-sm btn-ghost" data-base="relevo">⛰️ Relevo</button></span></div>
+          <div class="ml-modo" id="pgModo"><button data-modo="2d">🗺️ Mapa 2D</button><button data-modo="3d">🧊 Mapa 3D</button></div>
+          <div class="ml-wrap"><div id="pgMapa" class="ml-mapa"><div class="empty" style="padding-top:120px">Carregando o mapa…</div></div><div id="pgCtl" class="ml-ctl" hidden></div></div>
+          <div class="leg ml-leg"><span><i style="background:none;border:2px dashed #0C3320"></i>Perímetro do PA</span><span><i style="background:#B3261E;border-radius:50%"></i>Vértice</span><span><i style="background:#2F5FD0"></i>Selecionado</span><span><i style="background:none;border:1.5px solid #9aa"></i>Lotes</span><span><i style="background:#8C5A2B;height:4px"></i>Estradas</span><span><i style="background:#2B6CB0;height:3px"></i>Córregos</span></div>
+          <label style="display:block;margin-top:10px"><b>Ou escolha o vértice:</b><select class="f" id="pgSel"><option value="">Selecione um vértice</option></select></label>
+          <div id="pgCard"></div></div>
         <div class="card"><h2>📜 Memorial descritivo do perímetro</h2>
           <p class="memo-t">Inicia-se a descrição deste perímetro no vértice <b>${esc(p.vertices[0].nome)}</b>, de coordenadas N ${fm(p.vertices[0].N, 3)} m e E ${fm(p.vertices[0].E, 3)} m; ${p.segmentos.map((s, i) => { const w = p.vertices[(i + 1) % p.vertices.length]; return `deste segue com azimute de ${dms(s.azimute)} e distância de ${fm(s.distancia)} m até o vértice <b>${esc(s.para)}</b>, de coordenadas N ${fm(w.N, 3)} m e E ${fm(w.E, 3)} m`; }).join('; ')}, ponto inicial da descrição deste perímetro.</p>
           <div class="tbl"><table><thead><tr><th>Vértice</th><th class="right">E (m)</th><th class="right">N (m)</th><th class="right">Lat</th><th class="right">Lon</th><th>Lado</th><th class="right">Azimute</th><th class="right">Distância (m)</th></tr></thead><tbody>
@@ -713,6 +733,7 @@ async function rMapaGeral(){
       try { const r = await api(`/projetos/${S.pid}/perimetro`, { method: 'POST', body: fd }); toast(`Perímetro processado: ${r.perimetro.vertices.length} vértices, ${haAlq(r.perimetro.area_ha)}`); rMapaGeral(); }
       catch (e){ toast(e.message, true); $('#perEnviar').disabled = false; }
     };
+    if (p) mapaPerimetro(p);
     if ($('#pdfGeral')) $('#pdfGeral').onclick = () => abrirPdf(`/projetos/${S.pid}/mapa-geral.pdf`);
     if ($('#pdfGeralSigef')) $('#pdfGeralSigef').onclick = () => abrirPdf(`/projetos/${S.pid}/mapa-geral.pdf?modelo=sigef`);
     if ($('#perRemover')) $('#perRemover').onclick = async () => {
@@ -783,8 +804,8 @@ async function rSubdivisao(){
     const q = SUBV.busca.trim().replace(/\D/g, '');
     const ps = sub.parcelas.filter((x) => !q || x.lote === q.padStart(2, '0') || x.lote === q);
     $('#sdLista').innerHTML = ps.length ? `<table class="tlotes"><thead><tr><th>Lote</th><th class="right">Área total (ha)</th><th class="right">Total (alq.)</th><th class="right">Útil (ha)</th><th class="right">Útil (alq.)</th><th class="right">Perímetro (m)</th><th class="right">Vért.</th><th>Beneficiário(a)</th><th></th></tr></thead><tbody>
-      ${ps.map((x) => `<tr><td class="tl-lote"><b>LT-${esc(x.lote)}</b></td><td class="right" data-l="Área total (ha)">${fm(x.perimetro.area_ha, 4)}</td><td class="right" data-l="Total (alq.)">${fm(x.perimetro.area_ha / ALQ_HA, 4)}</td><td class="right" data-l="Útil (ha)">${x.area_util_ha != null ? fm(x.area_util_ha, 4) : '—'}</td><td class="right" data-l="Útil (alq.)">${x.area_util_ha != null ? fm(x.area_util_ha / ALQ_HA, 4) : '—'}</td><td class="right" data-l="Perímetro (m)">${fm(x.perimetro.perimetro_m)}</td><td class="right" data-l="Vértices">${x.perimetro.vertices.length}</td>
-        <td class="tl-ben" data-l="Beneficiário(a)">${podeEscrever() ? `<select class="f sdVinc" data-lote="${esc(x.lote)}" style="min-width:170px;padding:4px 6px;font-size:12px"><option value="">— sem vínculo —</option>${assocs.map((a) => `<option value="${a.id}" ${vinc[x.lote] && vinc[x.lote].associado_id === a.id ? 'selected' : ''}>${esc(a.nome)}${a.parcela && a.parcela !== x.lote ? ' (já no LT-' + esc(a.parcela) + ')' : ''}</option>`).join('')}</select>` : esc(vinc[x.lote] ? vinc[x.lote].nome : '—')}</td>
+      ${ps.map((x) => `<tr${vinc[x.lote] ? ' class="tl-tem"' : ''}><td class="tl-lote"><b>LT-${esc(x.lote)}</b>${vinc[x.lote] ? ' <span class="chip c-VALIDO so-cel">com associado</span>' : ''}</td><td class="right" data-l="Área total">${fm(x.perimetro.area_ha, 4)}<span class="so-cel">&nbsp;ha · ${fm(x.perimetro.area_ha / ALQ_HA, 4)} alq.</span></td><td class="right so-desk">${fm(x.perimetro.area_ha / ALQ_HA, 4)}</td><td class="right" data-l="Área útil">${x.area_util_ha != null ? fm(x.area_util_ha, 4) + `<span class="so-cel">&nbsp;ha · ${fm(x.area_util_ha / ALQ_HA, 4)} alq.</span>` : '—'}</td><td class="right so-desk">${x.area_util_ha != null ? fm(x.area_util_ha / ALQ_HA, 4) : '—'}</td><td class="right" data-l="Perímetro (m)">${fm(x.perimetro.perimetro_m)}</td><td class="right" data-l="Vértices">${x.perimetro.vertices.length}</td>
+        <td class="tl-ben" data-l="Beneficiário">${podeEscrever() ? `<select class="f sdVinc" data-lote="${esc(x.lote)}" style="min-width:170px;padding:4px 6px;font-size:12px"><option value="">— sem vínculo —</option>${assocs.map((a) => `<option value="${a.id}" ${vinc[x.lote] && vinc[x.lote].associado_id === a.id ? 'selected' : ''}>${esc(a.nome)}${a.parcela && a.parcela !== x.lote ? ' (já no LT-' + esc(a.parcela) + ')' : ''}</option>`).join('')}</select>` : esc(vinc[x.lote] ? vinc[x.lote].nome : '—')}</td>
         <td class="nowrap tl-acoes"><button class="btn btn-ghost btn-sm" data-sdver="${esc(x.lote)}" title="Mapa e memorial">👁</button> <button class="btn btn-ghost btn-sm" data-sdpdf="${esc(x.lote)}" title="Mapa + memorial tradicional">📄</button> <button class="btn btn-ghost btn-sm" data-sdsigef="${esc(x.lote)}" title="Planta + memorial modelo SIGEF">SIGEF</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum lote com esse número.</div>';
     $('#sdLista').querySelectorAll('[data-sdver]').forEach((b) => b.onclick = () => verLote(b.dataset.sdver));
     $('#sdLista').querySelectorAll('.sdVinc').forEach((sel) => sel.onchange = async () => {
@@ -897,6 +918,61 @@ const TILES_3D = {
   relevo: { tiles: ['https://a.tile.opentopomap.org/{z}/{x}/{y}.png', 'https://b.tile.opentopomap.org/{z}/{x}/{y}.png', 'https://c.tile.opentopomap.org/{z}/{x}/{y}.png'], maxzoom: 17, attribution: '© OpenTopoMap (CC-BY-SA) · relevo e curvas de nível' },
 };
 let MAPA_SEL = null;
+// ─── v3.159.0: mapa geral do PA navegável (mesmas funções do mapa dos lotes) ─
+let MAPA_PG = {};
+async function mapaPerimetro(p){
+  const box = $('#pgMapa'); if (!box) return;
+  const modo = modoMapaLotes();
+  document.querySelectorAll('#pgModo [data-modo]').forEach((b) => {
+    b.classList.toggle('on', b.dataset.modo === modo);
+    b.onclick = () => { if (b.dataset.modo === modoMapaLotes()) return; try { localStorage.setItem('pa_mapa_modo', b.dataset.modo); } catch { /* ok */ } mapaPerimetro(p); };
+  });
+  if (MAPA_PG.parar) MAPA_PG.parar();
+  if (MAPA_PG.mapa) { try { MAPA_PG.mapa.remove(); } catch { /* ok */ } }
+  MAPA_PG = {};
+  const ctl = $('#pgCtl'); ctl.hidden = true; ctl.innerHTML = '';
+  box.innerHTML = '<div class="empty" style="padding-top:120px">Carregando o mapa…</div>';
+  let lib, geo = null;
+  try { [lib, geo] = await Promise.all([modo === '3d' ? carregarMapLibre() : carregarLeaflet(), api(`/projetos/${S.pid}/subdivisao.geojson`).catch(() => null)]); }
+  catch (e){
+    if (modo === '3d') { try { localStorage.setItem('pa_mapa_modo', '2d'); } catch { /* ok */ } toast(e.message + ' — abrindo o Mapa 2D', true); return mapaPerimetro(p); }
+    box.innerHTML = `<div style="position:relative">${svgPerimetroTela(p)}</div><div class="muted" style="padding:6px">${esc(e.message)} — mostrando a planta estática.</div>`; return;
+  }
+  if (!$('#pgMapa')) return; // saiu da tela enquanto carregava
+  box.innerHTML = '';
+  const anel = p.vertices.map((v) => [v.lon, v.lat]);
+  const fPA = { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[...anel, anel[0]]] }, properties: { lote: 'PA', area_ha: p.area_ha } };
+  const outros = ((geo && geo.features) || []).filter((f) => f.properties.tipo !== 'PERIMETRO')
+    .map((f) => (f.properties.tipo === 'LOTE' ? { type: 'Feature', geometry: f.geometry, properties: { tipo: 'LOTE_CTX' } } : f));
+  const pontos = p.vertices.map((v, i) => ({ id: i, nome: v.nome, lngLat: [v.lon, v.lat] }));
+  const sel = $('#pgSel');
+  sel.innerHTML = '<option value="">Selecione um vértice</option>' + p.vertices.map((v, i) => `<option value="${i}">${esc(v.nome)} · N ${nbr(v.N, 3)} · E ${nbr(v.E, 3)}</option>`).join('');
+  const ctx = { geo: { features: [] }, lotesF: [fPA], porLote: { PA: fPA }, outros, pontos, ctl, baseSel: '.pgBase [data-base]',
+    borda: '#0C3320', rotulo: () => haAlqC(p.area_ha), opacSel3d: .55, opacSel2d: .3, zoomExtra: -.2 };
+  const eng = modo === '3d' ? mapaLotes3D(lib, box, ctx) : mapaLotes2D(lib, box, ctx);
+  ctx.selecionar = () => { eng.marcar('PA', false); sel.value = ''; cartaoPerimetro(p); }; // o PA já é a área toda: não move a câmera
+  ctx.selPonto = (i) => { eng.limpar(); eng.marcarPonto(i); sel.value = String(i); cartaoVertice(p, i); };
+  sel.onchange = () => { if (sel.value !== '') ctx.selPonto(Number(sel.value)); };
+  MAPA_PG = { mapa: eng.mapa, parar: eng.parar };
+}
+const nbr = (v, d = 2) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+function cartaoPerimetro(p){
+  $('#pgCard').innerHTML = `<div class="ml-card"><div class="muted">Perímetro do PA</div>
+    <div class="ml-tit">${nbr(p.area_ha, 4)} ha</div><div class="ml-alq">${alqTxt(p.area_ha)} · ${nbr(p.area_m2)} m²</div>
+    <div>Perímetro ${nbr(p.perimetro_m)} m · ${p.vertices.length} vértices · ${esc(p.datum)}, UTM fuso ${p.fuso}${p.hemisferio === 'S' ? ' Sul' : ' Norte'}</div></div>`;
+}
+function cartaoVertice(p, i){
+  const v = p.vertices[i], n = p.vertices.length, s = p.segmentos[i], a = p.segmentos[(i - 1 + n) % n];
+  $('#pgCard').innerHTML = `<div class="ml-card"><div class="muted">Vértice ${i + 1} de ${n}</div>
+    <div class="ml-tit">${esc(v.nome)}</div>
+    <div class="kv" style="margin-top:4px;grid-template-columns:1fr 1fr"><div><span class="muted">N</span> <b>${nbr(v.N, 3)} m</b></div><div><span class="muted">E</span> <b>${nbr(v.E, 3)} m</b></div>
+      <div><span class="muted">Latitude</span> <b>${v.lat.toFixed(7)}</b></div><div><span class="muted">Longitude</span> <b>${v.lon.toFixed(7)}</b></div></div>
+    <div style="margin-top:8px">➡️ Segue para <b>${esc(s.para)}</b>: azimute ${dms(s.azimute)} · ${nbr(s.distancia)} m</div>
+    <div class="muted">⬅️ Vem de ${esc(a.de)}: azimute ${dms(a.azimute)} · ${nbr(a.distancia)} m</div>
+    <div class="row" style="margin-top:8px"><button class="btn btn-ghost btn-sm" id="pgAnt" style="flex:0 0 auto">◀ ${esc(a.de)}</button><button class="btn btn-ghost btn-sm" id="pgProx" style="flex:0 0 auto">${esc(s.para)} ▶</button></div></div>`;
+  $('#pgAnt').onclick = () => { const sel = $('#pgSel'); sel.value = String((i - 1 + n) % n); sel.onchange(); };
+  $('#pgProx').onclick = () => { const sel = $('#pgSel'); sel.value = String((i + 1) % n); sel.onchange(); };
+}
 function modoMapaLotes(){ try { return localStorage.getItem('pa_mapa_modo') === '2d' ? '2d' : '3d'; } catch { return '3d'; } }
 async function mapaLotes(sub, verLote){
   const box = $('#mlMapa'); if (!box) return;
@@ -921,7 +997,7 @@ async function mapaLotes(sub, verLote){
   const porLote = Object.fromEntries(lotesF.map((f) => [f.properties.lote, f]));
   const sel = $('#mlSel');
   sel.innerHTML = '<option value="">Selecione um lote</option>' + lotesF.map((f) => `<option value="${esc(f.properties.lote)}">LT-${esc(f.properties.lote)} · ${haAlqC(f.properties.area_ha)}${f.properties.beneficiario ? ' · ' + esc(f.properties.beneficiario.nome) : ''}</option>`).join('');
-  const ctx = { geo, lotesF, porLote, verLote };
+  const ctx = { geo, lotesF, porLote, verLote, ctl: $('#mlCtl'), baseSel: '.mlBase [data-base]' };
   const api3 = modo === '3d' ? mapaLotes3D(lib, box, ctx) : mapaLotes2D(lib, box, ctx);
   const selecionar = (lote, centralizar) => { if (!porLote[lote]) return; MAPA_SEL = { pid: S.pid, lote }; api3.marcar(lote, centralizar); sel.value = lote; cartaoLote(porLote[lote].properties, verLote); };
   ctx.selecionar = selecionar;
@@ -935,36 +1011,53 @@ function mapaLotes2D(L, box, ctx){
   let base = L.tileLayer(...BASES_MAPA.mapa).addTo(mapa);
   const camadas = {};
   let atual = null;
-  document.querySelectorAll('.mlBase [data-base]').forEach((b) => {
+  document.querySelectorAll(ctx.baseSel).forEach((b) => {
     b.className = 'btn btn-sm ' + (b.dataset.base === 'mapa' ? 'btn-primary' : 'btn-ghost');
     b.onclick = () => {
       mapa.removeLayer(base); base = L.tileLayer(...BASES_MAPA[b.dataset.base]).addTo(mapa); base.bringToBack();
-      
-      document.querySelectorAll('.mlBase [data-base]').forEach((x) => x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-ghost'));
+      document.querySelectorAll(ctx.baseSel).forEach((x) => x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-ghost'));
     };
   });
   const estilo = { APP: { color: '#3E8E41', weight: 1, fillColor: '#9FD08A', fillOpacity: .45 }, COMUNITARIA: { color: '#A07A10', weight: 1.5, fillColor: '#F1DFA4', fillOpacity: .75 },
     ESTRADA: { color: '#8C5A2B', weight: 3 }, AGUA: { color: '#2B6CB0', weight: 1.6 }, OUTRA: { color: '#999', weight: 1 },
     PERIMETRO: { color: '#0C3320', weight: 3, dashArray: '8 5', fill: false }, VILA: { color: '#B3261E', weight: 2, dashArray: '4 4', fill: false } };
-  L.geoJSON({ type: 'FeatureCollection', features: ctx.geo.features.filter((f) => f.properties.tipo !== 'LOTE') }, {
+  estilo.LOTE_CTX = { color: '#ffffff', weight: 1.2, opacity: .9, fill: false };
+  L.geoJSON({ type: 'FeatureCollection', features: ctx.outros || ctx.geo.features.filter((f) => f.properties.tipo !== 'LOTE') }, {
     style: (f) => estilo[f.properties.tipo] || estilo.OUTRA, interactive: false,
   }).addTo(mapa);
   const corLote = (f, s) => s ? '#2F5FD0' : f.properties.beneficiario ? '#9CC46A' : '#F3E3C3';
+  const borda = (f) => ctx.borda ? ctx.borda : f.properties.beneficiario ? '#6E9E3A' : '#ffffff';
   const lotes = L.geoJSON({ type: 'FeatureCollection', features: ctx.lotesF }, {
-    style: (f) => ({ color: f.properties.beneficiario ? '#6E9E3A' : '#ffffff', weight: 1.8, fillColor: corLote(f, false), fillOpacity: .12 }),
+    style: (f) => ({ color: borda(f), weight: ctx.borda ? 3 : 1.8, dashArray: ctx.borda ? '8 5' : null, fillColor: corLote(f, false), fillOpacity: .12 }),
     onEachFeature: (f, ly) => {
       camadas[f.properties.lote] = ly;
-      ly.bindTooltip('LT-' + f.properties.lote, { permanent: true, direction: 'center', className: 'ml-rot' });
+      ly.bindTooltip(ctx.rotulo ? ctx.rotulo(f) : 'LT-' + f.properties.lote, { permanent: true, direction: 'center', className: 'ml-rot' });
       ly.on('click', () => ctx.selecionar(f.properties.lote, true));
     },
   }).addTo(mapa);
   mapa.fitBounds(lotes.getBounds(), { padding: [12, 12] });
+  // v3.159.0: pontos clicáveis (vértices do perímetro)
+  const pts2 = {};
+  for (const pt of ctx.pontos || []) {
+    pts2[pt.id] = L.circleMarker([pt.lngLat[1], pt.lngLat[0]], { radius: 5, color: '#fff', weight: 1.5, fillColor: '#B3261E', fillOpacity: 1 })
+      .bindTooltip(pt.nome, { permanent: true, direction: 'top', offset: [0, -4], className: 'ml-rot ml-rotv' }).on('click', () => ctx.selPonto(pt.id)).addTo(mapa);
+  }
+  let ptAtual = null;
   return {
     mapa, parar: () => {},
+    limpar(){
+      if (atual && camadas[atual]) camadas[atual].setStyle({ fillColor: corLote(camadas[atual].feature, false), color: borda(camadas[atual].feature), weight: ctx.borda ? 3 : 1.8, fillOpacity: .12 });
+      atual = null;
+    },
+    marcarPonto(id){
+      if (ptAtual != null && pts2[ptAtual]) pts2[ptAtual].setStyle({ radius: 5, fillColor: '#B3261E' });
+      ptAtual = id; const m = pts2[id]; if (!m) return; m.setStyle({ radius: 9, fillColor: '#2F5FD0' }); m.bringToFront();
+      mapa.setView(m.getLatLng(), Math.max(mapa.getZoom(), 15));
+    },
     marcar(lote, centralizar){
       const ly = camadas[lote];
-      if (atual && camadas[atual]) camadas[atual].setStyle({ fillColor: corLote(camadas[atual].feature, false), color: camadas[atual].feature.properties.beneficiario ? '#6E9E3A' : '#ffffff', weight: 1.8, fillOpacity: .12 });
-      atual = lote; ly.setStyle({ fillColor: corLote(ly.feature, true), color: '#1E3F99', weight: 3, fillOpacity: .7 }); ly.bringToFront();
+      if (atual && camadas[atual]) camadas[atual].setStyle({ fillColor: corLote(camadas[atual].feature, false), color: borda(camadas[atual].feature), weight: ctx.borda ? 3 : 1.8, fillOpacity: .12 });
+      atual = lote; ly.setStyle({ fillColor: corLote(ly.feature, true), color: '#1E3F99', weight: 3, fillOpacity: ctx.opacSel2d ?? .7 }); ly.bringToFront();
       if (centralizar) mapa.fitBounds(ly.getBounds(), { padding: [60, 60], maxZoom: 16 });
     },
   };
@@ -982,10 +1075,11 @@ function mapaLotes3D(maplibregl, box, ctx){
   // altura das placas proporcional ao tamanho do loteamento (lote rural de dezenas de ha ≠ lote urbano)
   const diag = Math.hypot((tot[2] - tot[0]) * 111320 * Math.cos(((tot[1] + tot[3]) / 2) * Math.PI / 180), (tot[3] - tot[1]) * 110540);
   const H = { relevo: Math.max(5, diag * .006), sobe: Math.max(15, diag * .022) };
-  let relevo = 'relevo', atual = null, girando = false, rafGiro = 0, rafSobe = 0;
+  let relevo = 'relevo', atual = null, girando = false, rafGiro = 0, rafSobe = 0, ptAtual = null;
+  const marcadores = {};
   const cor = ['case', ['==', ['get', 'tem'], 1], '#9CC46A', '#FFFFFF'];
   const lotesGeo = { type: 'FeatureCollection', features: ctx.lotesF.map((f) => ({ type: 'Feature', geometry: f.geometry, properties: { lote: f.properties.lote, tem: f.properties.beneficiario ? 1 : 0 } })) };
-  const outros = ctx.geo.features.filter((f) => f.properties.tipo !== 'LOTE');
+  const outros = ctx.outros || ctx.geo.features.filter((f) => f.properties.tipo !== 'LOTE');
   const fc = (tipos, poly) => ({ type: 'FeatureCollection', features: outros.filter((f) => tipos.includes(f.properties.tipo) && (poly === undefined || (f.geometry.type === 'Polygon') === poly)) });
   const mapa = new maplibregl.Map({
     container: box, attributionControl: { compact: true }, maxPitch: 75, antialias: true,
@@ -996,7 +1090,8 @@ function mapaLotes3D(maplibregl, box, ctx){
   });
   mapa.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
   mapa.on('load', () => {
-    mapa.addSource('outros', { type: 'geojson', data: fc(['APP', 'COMUNITARIA', 'ESTRADA', 'AGUA', 'OUTRA', 'PERIMETRO', 'VILA']) });
+    mapa.addSource('outros', { type: 'geojson', data: fc(['APP', 'COMUNITARIA', 'ESTRADA', 'AGUA', 'OUTRA', 'PERIMETRO', 'VILA', 'LOTE_CTX']) });
+    mapa.addLayer({ id: 'ctxlotes', type: 'line', source: 'outros', filter: ['==', ['get', 'tipo'], 'LOTE_CTX'], paint: { 'line-color': '#FFFFFF', 'line-width': 1.1, 'line-opacity': .85 } });
     mapa.addSource('lotes', { type: 'geojson', data: lotesGeo });
     mapa.addLayer({ id: 'app', type: 'fill', source: 'outros', filter: ['all', ['==', ['geometry-type'], 'Polygon'], ['==', ['get', 'tipo'], 'APP']], paint: { 'fill-color': '#9FD08A', 'fill-opacity': .35 } });
     mapa.addLayer({ id: 'com', type: 'fill', source: 'outros', filter: ['all', ['==', ['geometry-type'], 'Polygon'], ['==', ['get', 'tipo'], 'COMUNITARIA']], paint: { 'fill-color': '#F1DFA4', 'fill-opacity': .5 } });
@@ -1006,23 +1101,29 @@ function mapaLotes3D(maplibregl, box, ctx){
     mapa.addLayer({ id: 'vila', type: 'line', source: 'outros', filter: ['==', ['get', 'tipo'], 'VILA'], paint: { 'line-color': '#B3261E', 'line-width': 2, 'line-dasharray': [2, 2] } });
     // v3.157.0: lotes transparentes (vê-se a imagem por baixo); só o clicado sobe em azul
     mapa.addLayer({ id: 'lotes3d', type: 'fill', source: 'lotes', filter: ['!=', ['get', 'lote'], ''], paint: { 'fill-color': cor, 'fill-opacity': .12 } });
-    mapa.addLayer({ id: 'lotesborda', type: 'line', source: 'lotes', paint: { 'line-color': ['case', ['==', ['get', 'tem'], 1], '#9CC46A', '#FFFFFF'], 'line-width': 1.8, 'line-opacity': .95 } });
+    mapa.addLayer({ id: 'lotesborda', type: 'line', source: 'lotes', paint: ctx.borda ? { 'line-color': ctx.borda, 'line-width': 3, 'line-dasharray': [3, 2] } : { 'line-color': ['case', ['==', ['get', 'tem'], 1], '#9CC46A', '#FFFFFF'], 'line-width': 1.8, 'line-opacity': .95 } });
     mapa.addLayer({ id: 'lotesel', type: 'fill-extrusion', source: 'lotes', filter: ['==', ['get', 'lote'], ''],
-      paint: { 'fill-extrusion-color': '#2F5FD0', 'fill-extrusion-height': H.relevo, 'fill-extrusion-base': 0, 'fill-extrusion-opacity': .97, 'fill-extrusion-vertical-gradient': true } });
+      paint: { 'fill-extrusion-color': '#2F5FD0', 'fill-extrusion-height': H.relevo, 'fill-extrusion-base': 0, 'fill-extrusion-opacity': ctx.opacSel3d ?? .97, 'fill-extrusion-vertical-gradient': true } });
     for (const id of ['lotes3d', 'lotesel']) {
       mapa.on('click', id, (e) => { const f = e.features && e.features[0]; if (f) ctx.selecionar(f.properties.lote, true); });
       mapa.on('mouseenter', id, () => { mapa.getCanvas().style.cursor = 'pointer'; });
       mapa.on('mouseleave', id, () => { mapa.getCanvas().style.cursor = ''; });
     }
     for (const f of ctx.lotesF) {
-      const el = document.createElement('div'); el.className = 'ml-rot3d'; el.textContent = 'LT-' + f.properties.lote;
+      const el = document.createElement('div'); el.className = 'ml-rot3d'; el.textContent = ctx.rotulo ? ctx.rotulo(f) : 'LT-' + f.properties.lote;
       new maplibregl.Marker({ element: el }).setLngLat(centro(anel(f))).addTo(mapa);
     }
-    mapa.easeTo({ pitch: 55, bearing: -18, zoom: mapa.getZoom() + .6, duration: 900 });
+    // v3.159.0: pontos clicáveis (vértices do perímetro)
+    for (const pt of ctx.pontos || []) {
+      const el = document.createElement('div'); el.className = 'ml-vert'; el.innerHTML = `<i></i><span>${esc(pt.nome)}</span>`;
+      el.onclick = (ev) => { ev.stopPropagation(); ctx.selPonto(pt.id); };
+      marcadores[pt.id] = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(pt.lngLat).addTo(mapa);
+    }
+    mapa.easeTo({ pitch: 55, bearing: -18, zoom: mapa.getZoom() + (ctx.zoomExtra ?? .6), duration: 900 });
     if (atual) marcar(atual, false, true);
   });
   // controles por cima do mapa (Girar / Plano / Alto relevo / Vista de cima)
-  const ctl = $('#mlCtl');
+  const ctl = ctx.ctl;
   ctl.innerHTML = `<button class="pill" data-a="girar">🔄 Girar</button>
     <div class="seg"><button data-a="plano">▱ Plano</button><button data-a="relevo" class="on">⛰️ Alto relevo</button><button data-a="cima">🧭 Vista de cima</button></div>`;
   ctl.hidden = false;
@@ -1055,16 +1156,16 @@ function mapaLotes3D(maplibregl, box, ctx){
   };
   mapa.on('dragstart', () => girando && pararGiro());
   // bases Mapa / Satélite / Relevo
-  document.querySelectorAll('.mlBase [data-base]').forEach((b) => {
+  document.querySelectorAll(ctx.baseSel).forEach((b) => {
     b.className = 'btn btn-sm ' + (b.dataset.base === 'mapa' ? 'btn-primary' : 'btn-ghost');
     b.onclick = () => {
       const t = TILES_3D[b.dataset.base];
       if (mapa.getLayer('base')) mapa.removeLayer('base');
       if (mapa.getSource('base')) mapa.removeSource('base');
       mapa.addSource('base', { type: 'raster', tileSize: 256, ...t });
-      const antes = mapa.getLayer('app') ? 'app' : undefined;
+      const antes = mapa.getLayer('ctxlotes') ? 'ctxlotes' : undefined;
       mapa.addLayer({ id: 'base', type: 'raster', source: 'base', paint: b.dataset.base === 'mapa' ? { 'raster-opacity': .55, 'raster-saturation': -.6 } : { 'raster-opacity': 1 } }, antes);
-      document.querySelectorAll('.mlBase [data-base]').forEach((x) => x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-ghost'));
+      document.querySelectorAll(ctx.baseSel).forEach((x) => x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-ghost'));
     };
   });
   function marcar(lote, centralizar, semAnim){
@@ -1080,7 +1181,19 @@ function mapaLotes3D(maplibregl, box, ctx){
       if (cam) mapa.easeTo({ center: cam.center, zoom: Math.min(cam.zoom, 17), duration: 700 });
     }
   }
-  return { mapa, parar: () => { pararGiro(); cancelAnimationFrame(rafSobe); }, marcar };
+  function limpar(){
+    atual = null;
+    if (!pronto()) return;
+    mapa.setFilter('lotes3d', ['!=', ['get', 'lote'], '']);
+    mapa.setFilter('lotesel', ['==', ['get', 'lote'], '']);
+  }
+  function marcarPonto(id){
+    if (ptAtual != null && marcadores[ptAtual]) marcadores[ptAtual].getElement().classList.remove('on');
+    ptAtual = id; const m = marcadores[id]; if (!m) return;
+    m.getElement().classList.add('on');
+    mapa.easeTo({ center: m.getLngLat(), zoom: Math.max(mapa.getZoom(), 14.5), duration: 700 });
+  }
+  return { mapa, parar: () => { pararGiro(); cancelAnimationFrame(rafSobe); }, marcar, marcarPonto, limpar };
 }
 function cartaoLote(pr, verLote){
   const fm = (v, d = 2) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
