@@ -91,6 +91,17 @@
   .btn:disabled{opacity:.5;cursor:default}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
   .row>*{flex:1 1 160px}
+  /* v3.155.1: mobile — blocos de botões com flex:0 0 auto não encolhiam e estouravam a largura da tela */
+  html,body{max-width:100%;overflow-x:clip}
+  .row>*{min-width:0;max-width:100%}
+  .btn{max-width:100%;white-space:normal}
+  @media (max-width:700px){
+    .row>[style*="flex:0 0 auto"]{flex-shrink:1 !important}
+    header .top>.row{flex:1 1 100% !important}
+    header select{max-width:100%;min-width:0;flex:1 1 160px}
+    .versao{overflow:hidden;text-overflow:ellipsis}
+    .card .row>h2{flex:1 1 100% !important}
+  }
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
   @media(max-width:700px){.grid2,.grid3{grid-template-columns:1fr}}
