@@ -323,6 +323,14 @@ router.get('/projetos/:id/documentos', h(async (req) => {
 }));
 
 // ─── Financeiro ───────────────────────────────────────────────────────────
+// v3.162.0: compensar — mover o recebimento para a parcela certa (pagou o boleto do mês errado)
+router.post('/projetos/:id/pagamentos/:pid/compensar', h(async (req) => {
+  exigirEscrita(req);
+  const b = req.body ?? {};
+  return fin.compensarPagamento(id(req.params.id), id(req.params.pid, 'pagamento'), id(b.de_lancamento_id, 'parcela de origem'), id(b.para_lancamento_id, 'parcela de destino'), {
+    cancelar_boleto: b.cancelar_boleto !== false, emitir_boleto: b.emitir_boleto !== false, avisar: b.avisar === true,
+  }, ctx(req).sub);
+}));
 // v3.161.0: reenviar a confirmação do pagamento (associado + administrador)
 router.post('/projetos/:id/pagamentos/:pid/notificar', h(async (req) => {
   exigirEscrita(req);

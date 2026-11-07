@@ -189,6 +189,7 @@
   }
   .so-cel{display:none}
   @media (max-width:700px){table.tlotes .so-cel{display:inline}}
+  .cpchk{display:flex !important;gap:8px;align-items:flex-start;margin:6px 0 !important}.cpchk input{width:auto !important;flex:0 0 auto;margin:2px 0 0}
   .ml-alq{font-weight:700;color:#7A5B12;margin:-2px 0 4px}
   .ml-ben{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
   .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -1729,7 +1730,9 @@ async function abrirAssociado(aid, avisos){
           ${d.pagamentos.length ? d.pagamentos.map((p) => `<div class="doc" style="margin-bottom:6px"><b>${dbr(p.pago_em)} · ${esc(p.forma.replace(/_/g,' '))} · ${brl(p.valor)}${p.pagamento_compartilhado ? ' · <span class="chip c-PARCIAL">Pagamento único (rateado)</span>' : ''}</b>
             ${p.pagador_nome ? 'Pagador: ' + esc(p.pagador_nome) : ''}${p.vinculo_pagador ? ' (' + esc(p.vinculo_pagador) + ')' : ''}${p.pagador_cpf_parcial ? ' · CPF ' + esc(p.pagador_cpf_parcial) : ''}
             ${p.id_transacao ? `<div class="muted">ID ${esc(p.id_transacao)}</div>` : ''}${p.url_recibo ? `<div><a href="${esc(p.url_recibo)}" target="_blank" rel="noopener">Recibo InfinitePay ↗</a></div>` : ''}
-            ${p.obs ? `<div class="muted">${esc(p.obs)}</div>` : ''}</div>`).join('') : '<div class="muted">Nenhum pagamento lançado.</div>'}
+            ${p.obs ? `<div class="muted">${esc(p.obs)}</div>` : ''}
+            <div class="muted">Em: ${p.rateio.map((r) => { const l = d.lancamentos.find((x) => x.id === r.lancamento_id); return `${esc(l ? rotLanc(l) : '#' + r.lancamento_id)} (${brl(r.valor)})`; }).join(' + ')}</div>
+            ${podeEscrever() && d.lancamentos.some((l) => l.saldo > 0.009 && l.status !== 'CANCELADO') && p.rateio.some((r) => d.lancamentos.some((x) => x.id === r.lancamento_id)) ? `<button class="btn btn-ghost btn-sm" style="margin-top:6px" data-compensar="${p.id}">🔁 Compensar em outra parcela</button><div data-compbox="${p.id}"></div>` : ''}</div>`).join('') : '<div class="muted">Nenhum pagamento lançado.</div>'}
           ${podeEscrever() && d.resumo.saldo > 0 ? `<button class="btn btn-gold btn-sm" style="margin-top:8px" id="pagarAqui">💰 Lançar pagamento</button>` : ''}
         </div>
         ${S.eu.ve_documentos ? `<div class="card"><h2>Documentos</h2>
@@ -1776,6 +1779,37 @@ async function abrirAssociado(aid, avisos){
       $('#salvaPlano').onclick = async () => { try { await api(`/associados/${aid}/plano`, { json: { sinal: $('#novoSinal').value.replace(',', '.') } }); toast('Plano recalculado'); S.painel = S.lotes = null; abrirAssociado(aid); } catch (e){ toast(e.message, true); } };
     };
     if ($('#pagarAqui')) $('#pagarAqui').onclick = () => { fecharDrawer(); mostrar('financeiro'); setTimeout(() => preSelecionar(a), 50); };
+    // v3.162.0: compensar um pagamento em outra parcela (pagou/recebeu o boleto do mês errado)
+    pane.querySelectorAll('[data-compensar]').forEach((bt) => bt.onclick = () => {
+      const p = d.pagamentos.find((x) => x.id === Number(bt.dataset.compensar));
+      const box = pane.querySelector(`[data-compbox="${p.id}"]`);
+      if (box.innerHTML) { box.innerHTML = ''; return; }
+      const origens = p.rateio.map((r) => ({ r, l: d.lancamentos.find((x) => x.id === r.lancamento_id) })).filter((o) => o.l);
+      const destinos = d.lancamentos.filter((l) => l.saldo > 0.009 && l.status !== 'CANCELADO').sort((x, y) => String(x.vencimento || '9999').localeCompare(String(y.vencimento || '9999')));
+      const opt = (l, extra) => `<option value="${l.id}">${esc(rotLanc(l))} · ${dbr(l.vencimento).slice(0, 5)} · ${extra}</option>`;
+      box.innerHTML = `<div style="margin-top:8px;padding:10px;border:1px dashed var(--gold);border-radius:10px;background:#FBF8EE">
+        <div class="muted" style="margin-bottom:6px">Use quando o associado pagou (ou você mandou) o boleto da parcela errada: o valor passa para a parcela certa e a outra volta a ficar em aberto, com o vencimento dela.</div>
+        <div class="row"><div><label>Tirar de</label><select class="f" id="cpDe${p.id}">${origens.map((o) => opt(o.l, 'pago ' + brl(o.r.valor))).join('')}</select></div>
+          <div><label>Passar para</label><select class="f" id="cpPara${p.id}">${destinos.map((l) => opt(l, 'falta ' + brl(l.saldo))).join('')}</select></div></div>
+        <label class="citem cpchk" style="margin-top:6px"><input type="checkbox" id="cpCanc${p.id}" checked> Cancelar no Asaas o boleto em aberto da parcela que ficar paga (evita pagar duas vezes)</label>
+        <label class="citem cpchk"><input type="checkbox" id="cpEmit${p.id}" checked> Emitir boleto novo para a parcela que reabrir (com o vencimento dela)</label>
+        <label class="citem cpchk"><input type="checkbox" id="cpAvis${p.id}"> Reenviar a confirmação de pagamento no WhatsApp (já com a parcela certa)</label>
+        <div class="row" style="margin-top:8px"><button class="btn btn-primary btn-sm" style="flex:0 0 auto" id="cpOk${p.id}">✅ Confirmar compensação</button></div></div>`;
+      const de = $('#cpDe' + p.id), para = $('#cpPara' + p.id);
+      const ajustar = () => { [...para.options].forEach((o) => { o.disabled = o.value === de.value; }); if (para.value === de.value) { const o = [...para.options].find((x) => !x.disabled); if (o) para.value = o.value; } };
+      de.onchange = ajustar; ajustar();
+      $('#cpOk' + p.id).onclick = async (ev) => {
+        if (!para.value || para.value === de.value) return toast('Escolha a parcela de destino', true);
+        const tDe = de.options[de.selectedIndex].text.split(' · ')[0], tPara = para.options[para.selectedIndex].text.split(' · ')[0];
+        if (!confirm(`Passar este pagamento de "${tDe}" para "${tPara}"?`)) return;
+        ev.target.disabled = true;
+        try {
+          const r = await api(`/projetos/${S.pid}/pagamentos/${p.id}/compensar`, { json: { de_lancamento_id: Number(de.value), para_lancamento_id: Number(para.value), cancelar_boleto: $('#cpCanc' + p.id).checked, emitir_boleto: $('#cpEmit' + p.id).checked, avisar: $('#cpAvis' + p.id).checked } });
+          toast('✅ ' + r.feitos.join(' · ') + (r.avisos.length ? ' ⚠️ ' + r.avisos.join(' · ') : ''), r.avisos.length > 0);
+          S.painel = S.lotes = null; abrirAssociado(a.id);
+        } catch (e){ toast(e.message, true); ev.target.disabled = false; }
+      };
+    });
     if ($('#delAssoc')) $('#delAssoc').onclick = async () => {
       if (!confirm(`Excluir o cadastro de ${a.nome}? Remove dados e documentos e libera o lote ${a.lote}. Só funciona sem pagamentos.`)) return;
       try { await api(`/projetos/${S.pid}/associados/${aid}`, { method:'DELETE' }); toast('Cadastro excluído'); fecharDrawer(); S.painel = S.lotes = null; mostrar(S.aba); } catch (e){ toast(e.message, true); }
@@ -2257,6 +2291,7 @@ function avisoPagamento(p){
   const tit = [...n.associados.map((a) => `${a.nome}: ${a.ok ? 'avisado' : a.motivo || 'falhou'}`), `Administrador: ${n.admin && n.admin.ok ? 'avisado' : (n.admin && n.admin.motivo) || '—'}`].join('\n');
   return `<span title="${esc(tit)}">${ok ? '✅' : '⚠️'} ${ok ? 'avisado' : 'ver'}</span>${bt}`;
 }
+const rotLanc = (l) => (l.tipo === 'BOLETO' ? 'Boleto ' + l.parcela : l.tipo === 'AVISTA' ? 'À vista' : l.tipo === 'SINAL' ? 'Sinal' : l.tipo);
 async function carregarPagamentos(){
   try {
     const { pagamentos } = await api(`/projetos/${S.pid}/pagamentos?limite=300`);

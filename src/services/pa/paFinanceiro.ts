@@ -216,6 +216,111 @@ export async function lancarPagamento(projetoId: number, entrada: NovoPagamento,
   return { ...resultado, recibo, pagamento: await buscarPagamento(resultado.pagamento_id) };
 }
 
+// ─── v3.162.0: compensação — mover um recebimento para a parcela certa ─────
+// Caso típico: o associado pagou (ou recebeu por engano) o boleto do mês seguinte.
+// O valor sai da parcela errada e vai para a parcela devida; a parcela errada reabre
+// (com o vencimento dela). Depois, opcionalmente: cancela no Asaas o boleto em aberto
+// da parcela que ficou paga, emite boleto novo para a parcela que reabriu e reenvia a
+// confirmação no WhatsApp. O boleto do Asaas que foi pago passa a documentar a parcela certa.
+export interface OpcoesCompensacao { cancelar_boleto: boolean; emitir_boleto: boolean; avisar: boolean }
+export const statusSemRecebimento = (tipo: string): StatusLancamento => (tipo === 'BOLETO' ? 'A_VENCER' : 'A_PAGAR');
+export function statusAposEstorno(valor: number, recebido: number, tipo: string, statusAtual: StatusLancamento): StatusLancamento {
+  if (statusAtual === 'CANCELADO') return 'CANCELADO';
+  if (centavos(recebido) >= centavos(valor) - 0.009) return 'PAGO';
+  if (recebido > 0.009) return 'PARCIAL';
+  return statusSemRecebimento(tipo);
+}
+
+export async function compensarPagamento(
+  projetoId: number, pagamentoId: number, deId: number, paraId: number, opts: OpcoesCompensacao, usuario: string | null,
+) {
+  if (deId === paraId) throw new PaErro('CAMPO_INVALIDO', 'Escolha parcelas diferentes', 400);
+  const mov = await transacao(async (c) => {
+    const p = await one(c, 'SELECT id, projeto_id FROM pa_pagamentos WHERE id = ? FOR UPDATE', [pagamentoId]);
+    if (!p || num(p.projeto_id) !== projetoId) throw new PaErro('PAGAMENTO_NAO_ENCONTRADO', 'Pagamento não encontrado', 404);
+    const r = await one(c, 'SELECT valor FROM pa_pagamento_rateio WHERE pagamento_id = ? AND lancamento_id = ? FOR UPDATE', [pagamentoId, deId]);
+    if (!r) throw new PaErro('RATEIO_INVALIDO', 'Este pagamento não está na parcela de origem', 409);
+    const ls = await rows(c, `SELECT l.*, a.projeto_id, a.id AS aid FROM pa_lancamentos l JOIN pa_associados a ON a.id = l.associado_id WHERE l.id IN (?, ?) FOR UPDATE`, [deId, paraId]);
+    const de = ls.find((l) => num(l.id) === deId), para = ls.find((l) => num(l.id) === paraId);
+    if (!de || !para) throw new PaErro('LANCAMENTO_NAO_ENCONTRADO', 'Parcela não encontrada', 404);
+    if (num(de.aid) !== num(para.aid)) throw new PaErro('RATEIO_INVALIDO', 'As duas parcelas precisam ser do mesmo associado', 400);
+    if (num(para.projeto_id) !== projetoId) throw new PaErro('RATEIO_INVALIDO', 'Parcela de outro projeto', 400);
+    const mPara = mapLancamento(para);
+    if (mPara.status === 'CANCELADO') throw new PaErro('RATEIO_INVALIDO', 'A parcela de destino está cancelada', 409);
+    if (mPara.saldo <= 0.009) throw new PaErro('SEM_SALDO', 'A parcela de destino já está quitada', 409);
+    const noRateio = num(r.valor);
+    const valor = centavos(Math.min(noRateio, mPara.saldo));
+    // rateio: tira da origem, põe no destino
+    if (valor >= noRateio - 0.009) await exec(c, 'DELETE FROM pa_pagamento_rateio WHERE pagamento_id = ? AND lancamento_id = ?', [pagamentoId, deId]);
+    else await exec(c, 'UPDATE pa_pagamento_rateio SET valor = ? WHERE pagamento_id = ? AND lancamento_id = ?', [centavos(noRateio - valor), pagamentoId, deId]);
+    await exec(c, 'INSERT INTO pa_pagamento_rateio (pagamento_id, lancamento_id, valor) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE valor = valor + VALUES(valor)', [pagamentoId, paraId, valor]);
+    const recDe = centavos(Math.max(0, num(de.valor_recebido) - valor));
+    const stDe = statusAposEstorno(num(de.valor), recDe, String(de.tipo), de.status as StatusLancamento);
+    await exec(c, 'UPDATE pa_lancamentos SET valor_recebido = ?, status = ? WHERE id = ?', [recDe, stDe, deId]);
+    const recPara = centavos(num(para.valor_recebido) + valor);
+    const stPara = statusAposRecebimento(num(para.valor), recPara, para.status as StatusLancamento);
+    await exec(c, 'UPDATE pa_lancamentos SET valor_recebido = ?, status = ? WHERE id = ?', [recPara, stPara, paraId]);
+    // o boleto do Asaas que foi pago (com este pagamento) passa a documentar a parcela certa
+    let boletoMovido: number | null = null;
+    if (valor >= noRateio - 0.009) {
+      const b = await one(c, "SELECT id FROM pa_boletos WHERE pagamento_id = ? AND lancamento_id = ? AND status = 'PAGO' LIMIT 1", [pagamentoId, deId]);
+      if (b) { boletoMovido = num(b.id); await exec(c, 'UPDATE pa_boletos SET lancamento_id = ? WHERE id = ?', [paraId, boletoMovido]); }
+    }
+    const rot = (l: Record<string, unknown>) => (l.tipo === 'BOLETO' ? `Boleto ${num(l.parcela)}` : String(l.tipo));
+    await registrarEvento(c, {
+      projeto_id: projetoId, associado_id: num(de.aid), usuario, tipo: 'PAGAMENTO_COMPENSADO',
+      dados: { pagamento_id: pagamentoId, valor, de: { lancamento_id: deId, rotulo: rot(de), status: stDe }, para: { lancamento_id: paraId, rotulo: rot(para), status: stPara }, boleto_movido: boletoMovido },
+    });
+    return { valor, associado_id: num(de.aid), de: { id: deId, rotulo: rot(de), status: stDe, saldo: centavos(num(de.valor) - recDe) }, para: { id: paraId, rotulo: rot(para), status: stPara }, boleto_movido: boletoMovido };
+  });
+
+  // passos externos (Asaas/WhatsApp): falha aqui não desfaz a compensação — vira aviso
+  const avisos: string[] = [];
+  const feitos: string[] = [`${brl(mov.valor)} movidos de ${mov.de.rotulo} para ${mov.para.rotulo}`];
+  const bol = await import('./paBoletos');
+  if (opts.cancelar_boleto && mov.para.status === 'PAGO') {
+    const abertos = await rows(pool, "SELECT id FROM pa_boletos WHERE lancamento_id = ? AND status IN ('PENDENTE','VENCIDO')", [mov.para.id]);
+    for (const b of abertos) {
+      try { await bol.cancelarBoleto(num(b.id), usuario); feitos.push(`boleto em aberto #${b.id} da ${mov.para.rotulo} cancelado no Asaas`); }
+      catch (e) { avisos.push(`não consegui cancelar o boleto #${b.id}: ${(e as Error).message.slice(0, 140)}`); }
+    }
+  }
+  let boletoNovo: number | null = null;
+  if (opts.emitir_boleto && mov.de.saldo > 0.009) {
+    try {
+      const ja = await one(pool, "SELECT id FROM pa_boletos WHERE lancamento_id = ? AND status IN ('PENDENTE','VENCIDO')", [mov.de.id]);
+      if (ja) feitos.push(`a ${mov.de.rotulo} já tem boleto em aberto (#${ja.id})`);
+      else { const nb = await bol.emitirBoleto(mov.de.id, usuario); boletoNovo = nb.id; feitos.push(`boleto novo #${nb.id} emitido para a ${mov.de.rotulo} (venc. ${dataBr(nb.vencimento ?? null)})`); }
+    } catch (e) { avisos.push(`não consegui emitir o boleto novo da ${mov.de.rotulo}: ${(e as Error).message.slice(0, 140)}`); }
+  }
+  if (opts.avisar) {
+    try { const n = await import('./paNotificacoes'); await n.notificarPagamento(pagamentoId, { forcar: true, usuario }); feitos.push('confirmação reenviada no WhatsApp'); }
+    catch (e) { avisos.push(`não consegui reenviar a confirmação: ${(e as Error).message.slice(0, 140)}`); }
+  }
+  return { ...mov, boleto_novo: boletoNovo, feitos, avisos };
+}
+
+/**
+ * v3.162.0: correção pontual pedida pelo CEO (07/11/2026) — Silvana da Silva Gomes, lote 14:
+ * recebeu/pagou o boleto de 10/12 (Boleto 2) no lugar do de 10/11 (Boleto 1). Roda uma vez no
+ * boot e só age se encontrar exatamente essa situação (Boleto 1 sem recebimento, Boleto 2 quitado
+ * por um único pagamento do Asaas, sem compensação anterior). Idempotente.
+ */
+export async function corrigirCompensacoesConhecidas(): Promise<void> {
+  const a = await one(pool, `SELECT a.id, a.projeto_id FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id
+    WHERE a.nome = 'SILVANA DA SILVA GOMES' AND CAST(lt.numero AS UNSIGNED) = 14 AND a.ativo = 1 LIMIT 1`);
+  if (!a) return;
+  const ja = await one(pool, "SELECT id FROM pa_eventos WHERE associado_id = ? AND tipo = 'PAGAMENTO_COMPENSADO' LIMIT 1", [a.id]);
+  if (ja) return;
+  const l1 = await one(pool, "SELECT * FROM pa_lancamentos WHERE associado_id = ? AND tipo = 'BOLETO' AND parcela = 1", [a.id]);
+  const l2 = await one(pool, "SELECT * FROM pa_lancamentos WHERE associado_id = ? AND tipo = 'BOLETO' AND parcela = 2", [a.id]);
+  if (!l1 || !l2 || num(l1.valor_recebido) > 0.009 || l1.status === 'CANCELADO' || l2.status !== 'PAGO') return;
+  const ps = await rows(pool, `SELECT r.pagamento_id, r.valor, p.id_transacao, p.criado_por FROM pa_pagamento_rateio r JOIN pa_pagamentos p ON p.id = r.pagamento_id WHERE r.lancamento_id = ?`, [l2.id]);
+  if (ps.length !== 1 || !/^asaas:/i.test(String(ps[0].id_transacao ?? ''))) return;
+  const r = await compensarPagamento(num(a.projeto_id), num(ps[0].pagamento_id), num(l2.id), num(l1.id), { cancelar_boleto: true, emitir_boleto: true, avisar: false }, 'sistema (correção pedida pelo CEO)');
+  console.log(`[pa-compensacao] Silvana (lote 14): ${r.feitos.join(' · ')}${r.avisos.length ? ' · AVISOS: ' + r.avisos.join(' | ') : ''}`);
+}
+
 export async function buscarPagamento(id: number) {
   const p = await one(pool, 'SELECT * FROM pa_pagamentos WHERE id = ?', [id]);
   if (!p) throw new PaErro('PAGAMENTO_NAO_ENCONTRADO', 'Pagamento não encontrado', 404);
