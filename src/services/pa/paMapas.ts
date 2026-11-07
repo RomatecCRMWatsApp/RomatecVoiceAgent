@@ -5,7 +5,7 @@ import { buscarProjeto, type Projeto } from './paRepo';
 import { desenhoDoProjeto } from './layoutDesenho';
 import { marcaArquivos } from './marcaProjeto';
 import { memorialVila, type MemorialLote } from './memorialVila';
-import { perimetroDeArquivo, type Perimetro } from './perimetro';
+import { perimetroDeArquivo, utmParaLonLat, type Perimetro } from './perimetro';
 import { htmlMapaVila, htmlMapaGeral, htmlSubdivisao, svgSubdivisao, pdfDeHtml, type DadosMapaPA, type BeneficiarioParcela } from './mapasPdf';
 import { subdivisaoDeDxf, vilaDeDxf, textoMemorialParcela, type Subdivisao, type VilaPerimetro } from './parcelas';
 import { plantaSigef, memorialSigef, documentoSigef, pdfSigef } from './sigefPdf';
@@ -214,4 +214,37 @@ export async function pdfVila(projetoId: number, parte: 'total' | 'nucleo', mode
   }
   const t = parte === 'nucleo' ? 'NÚCLEO DA VILA' : 'ÁREA DA VILA';
   return { pdf: await pdfDeHtml(htmlMapaGeral(d, per, { imovel, mapa: `MAPA — ${t} (AC-01)`, memorial: `MEMORIAL DESCRITIVO — ${t} (AC-01)` })), nome };
+}
+
+// ─── v3.155.0: dados do mapa interativo dos lotes (GeoJSON em lon/lat) ─────
+/** Lotes (com beneficiário vinculado), camadas do desenho, perímetro do PA e da vila, prontos para o Leaflet. */
+export async function geojsonSubdivisao(projetoId: number) {
+  const sub = await exigirSubdivisao(projetoId);
+  const [per, vila, vinc] = await Promise.all([buscarPerimetro(projetoId), buscarVila(projetoId), vinculosParcelas(projetoId)]);
+  const conv = utmParaLonLat(sub.fuso, sub.hemisferio);
+  const fechar = (c: number[][]) => (c.length && (c[0][0] !== c[c.length - 1][0] || c[0][1] !== c[c.length - 1][1]) ? [...c, c[0]] : c);
+  const aids = Object.values(vinc).map((v) => v.associado_id);
+  const extras = aids.length ? await rows(pool, `SELECT a.id, a.numero, a.telefone, a.whatsapp_status, lt.numero AS lote_vila FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id WHERE a.id IN (${aids.map(() => '?').join(',')})`, aids) : [];
+  const extraPor = new Map(extras.map((e) => [Number(e.id), e]));
+  const features: Array<Record<string, unknown>> = sub.parcelas.map((pc) => {
+    const b = vinc[pc.lote] ?? null;
+    const ex = b ? extraPor.get(b.associado_id) : null;
+    return {
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [fechar(pc.perimetro.vertices.map((v) => [Math.round(v.lon * 1e7) / 1e7, Math.round(v.lat * 1e7) / 1e7]))] },
+      properties: {
+        tipo: 'LOTE', lote: pc.lote, area_ha: pc.perimetro.area_ha, area_util_ha: pc.area_util_ha, perimetro_m: pc.perimetro.perimetro_m,
+        vertices: pc.perimetro.vertices.length, confrontantes: [...new Set(pc.lados.map((l) => l.confrontante))],
+        beneficiario: b ? { associado_id: b.associado_id, nome: b.nome, cpf: b.cpf, numero: ex?.numero ?? null, telefone: ex?.telefone ?? null, whatsapp_status: ex?.whatsapp_status ?? null, lote_vila: b.lote_vila } : null,
+      },
+    };
+  });
+  for (const c of sub.camadas) {
+    const coords = c.pts.map(([e, n]) => conv(e, n));
+    features.push({ type: 'Feature', geometry: c.fechada ? { type: 'Polygon', coordinates: [fechar(coords)] } : { type: 'LineString', coordinates: coords }, properties: { tipo: c.tipo, rotulo: c.rotulo, camada: c.camada } });
+  }
+  const anel = (p: Perimetro, tipo: string, rotulo: string) => ({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [fechar(p.vertices.map((v) => [v.lon, v.lat]))] }, properties: { tipo, rotulo, area_ha: p.area_ha } });
+  if (per) features.push(anel(per, 'PERIMETRO', 'Perímetro do PA'));
+  if (vila) features.push(anel(vila.total, 'VILA', 'Área da vila (AC-01)'));
+  return { type: 'FeatureCollection', features, lotes: sub.parcelas.length, vinculados: Object.keys(vinc).length };
 }

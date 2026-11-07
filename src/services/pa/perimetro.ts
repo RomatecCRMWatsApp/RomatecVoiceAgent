@@ -24,6 +24,12 @@ export interface Perimetro {
 const defUtm = (fuso: number, hem: 'S' | 'N') => `+proj=utm +zone=${fuso}${hem === 'S' ? ' +south' : ''} +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs`;
 const GEO = '+proj=longlat +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +no_defs';
 
+/** v3.155.0: conversor UTM (SIRGAS 2000) → [lon, lat] para o mapa interativo. */
+export function utmParaLonLat(fuso: number, hem: 'S' | 'N'): (e: number, n: number) => [number, number] {
+  const conv = proj4(defUtm(fuso, hem), GEO);
+  return (e, n) => { const [lon, lat] = conv.forward([e, n]); return [Math.round(lon * 1e7) / 1e7, Math.round(lat * 1e7) / 1e7]; };
+}
+
 export function fusoDaLongitude(lon: number): number {
   return Math.min(60, Math.max(1, Math.floor((lon + 180) / 6) + 1));
 }

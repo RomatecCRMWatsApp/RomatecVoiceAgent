@@ -193,6 +193,7 @@ router.get('/projetos/:id/subdivisao.svg', h(async (req, res) => {
   res.end(await mapas.svgSubdivisaoProjeto(id(req.params.id), lote));
   return undefined;
 }));
+router.get('/projetos/:id/subdivisao.geojson', h(async (req) => visao(await mapas.geojsonSubdivisao(id(req.params.id)), ctx(req).perfil)));
 router.get('/projetos/:id/subdivisao/lotes/:lote', h(async (req) => mapas.memorialParcela(id(req.params.id), String(req.params.lote))));
 router.get('/projetos/:id/subdivisao.pdf', h(async (req, res) => {
   const q = typeof req.query.lotes === 'string' ? req.query.lotes : '';
