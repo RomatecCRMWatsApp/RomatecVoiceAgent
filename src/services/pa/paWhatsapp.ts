@@ -140,6 +140,18 @@ export async function enviarWhatsAppAssociado(aid: number, mensagem: string, tip
   return { enviado: true, message_id: r.messageId ?? null };
 }
 
+/** v3.161.0: texto livre para um número (ex.: aviso ao administrador) — mesma fila/ritmo dos associados. */
+export async function enviarWhatsAppNumero(numero: string, mensagem: string): Promise<{ message_id: string | null }> {
+  const n = String(numero).replace(/\D/g, '');
+  if (n.length < 10) throw new PaErro('CAMPO_INVALIDO', 'Número de WhatsApp inválido', 400);
+  try {
+    const r = await naVez(async () => (await zapi()).sendReply(n, String(mensagem).slice(0, 4000)));
+    return { message_id: (r as { messageId?: string })?.messageId ?? null };
+  } catch (err) {
+    throw new PaErro('ZAPI_INDISPONIVEL', `Falha ao enviar pelo WhatsApp do sistema: ${(err as Error).message.slice(0, 200)}`, 502);
+  }
+}
+
 // ─── v3.146.1: fila de envio em lote (roda no servidor, devagar) ──────────
 export interface ItemFila { associado_id: number; nome: string; lancamento_ids: number[] }
 export interface EstadoFila {

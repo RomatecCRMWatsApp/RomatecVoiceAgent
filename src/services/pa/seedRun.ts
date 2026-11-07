@@ -140,8 +140,8 @@ export async function executarSeed(plano: PlanoSeed, lerArquivo: LerArquivo | nu
         .filter((r): r is typeof r & { id: number } => !!r.id);
       if (!rateio.length) { rel.erros.push(`pagamento ${p.seed_chave}: lançamentos não encontrados`); continue; }
       const ins = await exec(c, `
-        INSERT INTO pa_pagamentos (projeto_id, forma, valor, pago_em, id_transacao, pagador_nome, vinculo_pagador, obs, seed_chave, criado_por)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        INSERT INTO pa_pagamentos (projeto_id, forma, valor, pago_em, id_transacao, pagador_nome, vinculo_pagador, obs, seed_chave, criado_por, notificado_em)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`, [
         projetoId, p.forma, p.valor, p.pago_em, p.id_transacao, p.pagador_nome, p.vinculo_pagador, p.obs, p.seed_chave, usuario ?? 'seed',
       ]);
       for (const r of rateio) {

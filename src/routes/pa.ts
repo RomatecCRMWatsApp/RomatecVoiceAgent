@@ -323,6 +323,15 @@ router.get('/projetos/:id/documentos', h(async (req) => {
 }));
 
 // ─── Financeiro ───────────────────────────────────────────────────────────
+// v3.161.0: reenviar a confirmação do pagamento (associado + administrador)
+router.post('/projetos/:id/pagamentos/:pid/notificar', h(async (req) => {
+  exigirEscrita(req);
+  const pid = id(req.params.pid, 'pagamento');
+  const pg = await fin.buscarPagamento(pid);
+  if (pg.projeto_id !== id(req.params.id)) throw new PaErro('PAGAMENTO_NAO_ENCONTRADO', 'Pagamento não encontrado', 404);
+  const n = await import('../services/pa/paNotificacoes');
+  return { notificacao: await n.notificarPagamento(pid, { forcar: true, usuario: ctx(req).sub }) };
+}));
 router.post('/projetos/:id/pagamentos/preview', h(async (req) => {
   exigirEscrita(req);
   const url = String(req.body?.url_recibo ?? '');

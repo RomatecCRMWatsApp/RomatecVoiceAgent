@@ -16,6 +16,10 @@ export function baseUrlPublica(): string {
 export function urlBoletoRomatec(token: string | null): string | null {
   return token ? `${baseUrlPublica()}/pa/boleto/${token}` : null;
 }
+/** v3.161.0: página pública do Pix do boleto (QR + botão "copiar código Pix"). */
+export function urlPixBoleto(token: string | null): string | null {
+  return token ? `${baseUrlPublica()}/pa/pix/${token}` : null;
+}
 export function novoToken(): string {
   return randomBytes(18).toString('base64url');
 }
@@ -56,7 +60,7 @@ const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à v
  * conta). Antes de montar o carnê, busca os valores ATUAIS da cobrança e
  * atualiza o banco; se o Asaas não responder, segue com o que está gravado.
  */
-async function atualizarDoAsaas(b: Record<string, unknown>): Promise<void> {
+export async function atualizarDoAsaas(b: Record<string, unknown>): Promise<void> {
   const cfg = configAsaas();
   if (!cfg || (b.status !== 'PENDENTE' && b.status !== 'VENCIDO') || String(b.ambiente ?? 'sandbox') !== cfg.ambiente) return;
   const id = String(b.externo_id);
@@ -120,6 +124,7 @@ export async function dadosBoletoRomatec(boletoId: number): Promise<DadosBoletoR
     numero_documento: String(b.externo_id).replace(/^pay_/, ''),
     data_documento: isoDate(b.criado_em) ?? hojeBrasil(),
     pix_copia_cola: (b.pix_copia_cola as string) ?? null,
+    url_pix: b.pix_copia_cola ? urlPixBoleto(await garantirToken(boletoId)) : null,
     url_fatura: (b.url_fatura as string) ?? null,
     responsavel_tecnico: {
       nome: rt.nome || projeto.rt_nome || 'José Romário Pinto Bezerra',

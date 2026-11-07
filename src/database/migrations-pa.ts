@@ -337,6 +337,10 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_projetos.vila_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN vila_json JSON NULL' },
   { label: 'pa_projetos.subdivisao_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN subdivisao_json JSON NULL' },
   // v3.160.0: divisa municipal (linha IBGE + municípios de cada lado) — áreas saem do perímetro salvo.
+  // v3.161.0: confirmação de pagamento no WhatsApp. A coluna nasce com NOW() nos pagamentos
+  // que já existem (não dispara histórico) e em seguida o padrão vira NULL (pagamento novo = a avisar).
+  { label: 'pa_pagamentos.notificacao', sql: 'ALTER TABLE pa_pagamentos ADD COLUMN notificado_em DATETIME NULL DEFAULT CURRENT_TIMESTAMP, ADD COLUMN notificacao_json JSON NULL' },
+  { label: 'pa_pagamentos.notificado_em padrao NULL', sql: 'ALTER TABLE pa_pagamentos ALTER COLUMN notificado_em SET DEFAULT NULL' },
   { label: 'pa_projetos.divisa_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN divisa_json JSON NULL' },
   // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },

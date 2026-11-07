@@ -70,6 +70,17 @@ function dados(): DadosBoletoRomatec {
 }
 
 describe('HTML do boleto', () => {
+  it('v3.161.0: link clicável para copiar o Pix + explicação (nos 3 modelos)', async () => {
+    for (const m of ['carta', 'topografico', 'carne'] as const) {
+      const h = await htmlBoletoRomatec({ ...dados(), url_pix: 'https://exemplo/pa/pix/TOKEN123' }, m);
+      expect(h).toContain('href="https://exemplo/pa/pix/TOKEN123"');
+      expect(h).toMatch(/TOQUE AQUI (PARA COPIAR|E COPIE) O PIX/);
+      expect(h).toContain('escaneie o QR Code');
+      expect(h).toContain('1 dia útil');
+    }
+    // sem a página do Pix, continua só com o QR Code
+    expect(await htmlBoletoRomatec(dados(), 'carta')).not.toMatch(/TOQUE AQUI/);
+  });
   it('modelo carta: ficha de compensação, linha, valor, QR Pix, marca de teste', async () => {
     const h = await htmlBoletoRomatec(dados(), 'carta');
     expect(h).toContain('FICHA DE COMPENSAÇÃO');

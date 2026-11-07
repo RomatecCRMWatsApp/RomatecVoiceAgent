@@ -42,6 +42,8 @@ export interface DadosBoletoRomatec {
   numero_documento: string;
   data_documento: string;
   pix_copia_cola: string | null;
+  /** v3.161.0: página pública que copia o Pix com um toque (link clicável no PDF). */
+  url_pix?: string | null;
   url_fatura: string | null;
   responsavel_tecnico: { nome: string; registro: string };
   parcelas: Array<{ rotulo: string; valor: number; vencimento: string | null; status: string }>;
@@ -188,12 +190,23 @@ const CSS_BASE = `
   .ft td.finst{font-size:7.4pt;line-height:1.35}
   .fbar{display:flex;justify-content:space-between;align-items:flex-start;margin-top:2mm}
   .faut{font-size:7pt;text-align:right;color:#333}
+  .pixlink{display:block;color:#fff !important;text-decoration:none;font-weight:800;font-size:7.6pt;letter-spacing:.2px;text-align:center;border-radius:1.6mm;padding:1.3mm 2mm;margin:1mm 0 .8mm}
+  .pixobs{display:block;color:#6A6656;font-size:6.4pt;margin-top:.6mm}
 `;
 
 // ─── modelos (parte de cima) ──────────────────────────────────────────────
-function blocoPix(d: DadosBoletoRomatec, qr: string, cor: string): string {
+function blocoPix(d: DadosBoletoRomatec, qr: string, cor: string, compacto = false): string {
   if (!qr) return '';
-  return `<div class="pix" style="border-color:${cor}"><div class="pixqr">${qr}</div><div class="pixtxt"><b style="color:${cor}">Pague com Pix</b><span>Abra o app do banco, escolha Pix › Ler QR Code. A baixa é automática.</span></div></div>`;
+  if (compacto && d.url_pix) {
+    // carnê: altura fixa — mesmo conteúdo em menos linhas
+    return `<div class="pix" style="border-color:${cor}"><div class="pixqr">${qr}</div><div class="pixtxt"><b style="color:${cor}">Pague com Pix</b><a class="pixlink" href="${esc(d.url_pix)}" style="background:${cor}">TOQUE AQUI E COPIE O PIX</a><span>ou escaneie o QR Code. Cai na hora.</span><span class="pixobs">Código de barras: até 1 dia útil.</span></div></div>`;
+  }
+  // v3.161.0: além do QR Code, link clicável que abre a página do Pix com botão "copiar"
+  // (quem abre o PDF no próprio celular não consegue ler o QR com a câmera).
+  const link = d.url_pix
+    ? `<a class="pixlink" href="${esc(d.url_pix)}" style="background:${cor}">TOQUE AQUI PARA COPIAR O PIX</a><span>ou escaneie o QR Code com o app do banco.</span>`
+    : '<span>Abra o app do banco, escolha Pix › Ler QR Code.</span>';
+  return `<div class="pix" style="border-color:${cor}"><div class="pixqr">${qr}</div><div class="pixtxt"><b style="color:${cor}">Pague com Pix — cai na hora</b>${link}<span class="pixobs">Pelo código de barras a compensação leva até 1 dia útil. Baixa automática.</span></div></div>`;
 }
 
 function topoCarta(d: DadosBoletoRomatec, logo: string, wm: string, qr: string): string {
@@ -324,12 +337,14 @@ function topoCarne(d: DadosBoletoRomatec, logo: string, wm: string, qr: string):
     .tl .dot{width:10mm;height:10mm;border-radius:50%;margin:0 auto 1.6mm;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:9pt;border:1.2mm solid #fff;box-shadow:0 0 0 .4mm #DCD5C2}
     .tl .PAGO .dot{background:#1f7a4d;color:#fff}.tl .atual .dot{background:#C9A84C;color:#0C3320;box-shadow:0 0 0 .6mm #0C3320}.tl .fut .dot{background:#F1EFE8;color:#6A6656}
     .tl b{display:block;font-size:8.6pt;color:#0C3320}
-    .agora{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:3mm;margin-top:3mm;align-items:stretch}
+    .agora{display:grid;grid-template-columns:.85fr .85fr 2.1fr;gap:3mm;margin-top:3mm;align-items:stretch}
     .agora>div{border-radius:2mm;padding:2.5mm 3mm;border:1px solid #DCD5C2;background:#fff}
     .agora b{display:block;font-size:14pt;color:#0C3320;margin-top:.6mm}
     .agora .v{background:#0C3320;color:#E3D19A;border-color:#0C3320}.agora .v b{color:#fff}
     .pix{display:flex;gap:2.5mm;align-items:center;border:1.5px solid;border-radius:2mm;padding:1.6mm 2.4mm}
-    .pixqr svg{width:20mm;height:20mm;display:block}.pixtxt{font-size:7.2pt;line-height:1.3}.pixtxt b{display:block;font-size:9.5pt}
+    .pixqr svg{width:19mm;height:19mm;display:block}.pixtxt{font-size:7pt;line-height:1.28}.pixtxt b{display:block;font-size:9pt}
+    .pix .pixlink{font-size:6.9pt;padding:1.1mm 1.5mm;margin:.8mm 0 .6mm}.pix .pixobs{font-size:6.1pt}
+    .agora b{font-size:13pt}
     .icons{position:absolute;right:5mm;top:4mm;font-size:6.8pt;color:#6A6656;text-align:right}
     .como{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm;margin-top:4mm;font-size:7.4pt;color:#444;line-height:1.35}
     .como div{border-top:1.2mm solid #C9A84C;padding-top:1.6mm}
@@ -363,11 +378,11 @@ function topoCarne(d: DadosBoletoRomatec, logo: string, wm: string, qr: string):
       <div class="agora">
         <div><span style="font-size:7pt;color:#6A6656;font-weight:700">VENCIMENTO</span><b>${dbr(d.parcela.vencimento)}</b></div>
         <div class="v"><span style="font-size:7pt;font-weight:700">VALOR DESTA PARCELA</span><b>${brl(d.parcela.valor)}</b></div>
-        ${blocoPix(d, qr, '#0C3320') || '<div></div>'}
+        ${blocoPix(d, qr, '#0C3320', true) || '<div></div>'}
       </div>
       <div class="como">
         <div><b>1 · Boleto</b>Pague em qualquer banco, app ou lotérica usando o código de barras abaixo.</div>
-        <div><b>2 · Pix</b>Leia o QR Code com o app do banco — cai na hora.</div>
+        <div><b>2 · Pix (recomendado)</b>Toque em “copiar o Pix” ou leia o QR Code — cai na hora.</div>
         <div><b>3 · Baixa automática</b>Não precisa mandar comprovante: o sistema da Romatec confirma sozinho.</div>
       </div>
     </div>

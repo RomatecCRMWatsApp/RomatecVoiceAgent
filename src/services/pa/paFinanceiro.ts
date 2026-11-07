@@ -211,6 +211,8 @@ export async function lancarPagamento(projetoId: number, entrada: NovoPagamento,
     return { pagamento_id: ins.insertId, rateio, atualizados, pagador_terceiro: pagadorTerceiro };
   });
 
+  // v3.161.0: confirmação no WhatsApp (associado + administrador) em segundo plano
+  void import('./paNotificacoes').then((m) => m.agendarNotificacao(resultado.pagamento_id)).catch(() => undefined);
   return { ...resultado, recibo, pagamento: await buscarPagamento(resultado.pagamento_id) };
 }
 
@@ -250,6 +252,9 @@ export async function listarPagamentos(projetoId: number, limite = 500) {
     id: num(p.id), forma: String(p.forma), valor: num(p.valor), pago_em: isoDateTime(p.pago_em), id_transacao: p.id_transacao ?? null,
     pagador_nome: p.pagador_nome ?? null, pagador_cpf_parcial: p.pagador_cpf_parcial ?? null, vinculo_pagador: p.vinculo_pagador ?? null,
     url_recibo: p.url_recibo ?? null, obs: p.obs ?? null, lotes: p.lotes ?? '', associados: p.associados ?? '',
+    // v3.161.0: situação da confirmação no WhatsApp
+    notificacao: p.notificacao_json ? (typeof p.notificacao_json === 'string' ? JSON.parse(p.notificacao_json) : p.notificacao_json) : null,
+    notificado_em: p.notificado_em ? isoDateTime(p.notificado_em) : null,
   }));
 }
 
