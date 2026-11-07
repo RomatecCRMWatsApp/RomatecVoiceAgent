@@ -26,6 +26,13 @@ describe('confirmação de pagamento no WhatsApp', () => {
     // a saudação varia no envio (anti-bloqueio) e continua começando pelo nome
     expect(variarSaudacao(t, new Date('2026-11-06T13:00:00Z'))).toMatch(/^(Olá|Oi|Bom dia), Maria!/);
   });
+  it('versículos aprovados: 11 de gratidão/confiança, sem os de trabalho', () => {
+    expect(VERSICULOS).toHaveLength(11);
+    const refs = VERSICULOS.map((v) => v.ref);
+    expect(refs).toContain('1 Tessalonicenses 5:18');
+    expect(refs).toContain('Provérbios 3:5');
+    for (const fora of ['Salmos 128:2', 'Salmos 90:17', 'Colossenses 3:23']) expect(refs).not.toContain(fora);
+  });
   it('quitou tudo: parabeniza; parcial: mostra quanto falta; Asaas sem horário', () => {
     const q = textoConfirmacaoAssociado({ ...base, pago_em: '2026-11-06 12:00:00' }, { ...base.associados[0], abertas: 0, saldo_devedor: 0 });
     expect(q).toContain('todas as suas parcelas estão quitadas');

@@ -18,15 +18,19 @@ import { PaErro } from './erros';
 import { pool, rows, one, exec, num, registrarEvento } from './paDb';
 import { enviarWhatsAppAssociado, enviarWhatsAppNumero } from './paWhatsapp';
 
+// v3.162.0: versículos de gratidão e confiança (ARC), aprovados pelo CEO em 07/11/2026; um por pagamento, em rodízio.
 export const VERSICULOS: ReadonlyArray<{ texto: string; ref: string }> = [
-  { texto: 'Confia ao Senhor as tuas obras, e teus pensamentos serão estabelecidos.', ref: 'Provérbios 16:3' },
-  { texto: 'Confia no Senhor e faze o bem; habitarás na terra e, verdadeiramente, serás alimentado.', ref: 'Salmos 37:3' },
-  { texto: 'Pois comerás do trabalho das tuas mãos; feliz serás, e te irá bem.', ref: 'Salmos 128:2' },
-  { texto: 'O Senhor te abençoe e te guarde; o Senhor faça resplandecer o seu rosto sobre ti e tenha misericórdia de ti.', ref: 'Números 6:24-25' },
-  { texto: 'O meu Deus, segundo as suas riquezas, suprirá todas as vossas necessidades em glória, por Cristo Jesus.', ref: 'Filipenses 4:19' },
-  { texto: 'E seja sobre nós a graça do Senhor, nosso Deus; e confirma sobre nós a obra das nossas mãos.', ref: 'Salmos 90:17' },
   { texto: 'Em tudo dai graças, porque esta é a vontade de Deus em Cristo Jesus para convosco.', ref: '1 Tessalonicenses 5:18' },
-  { texto: 'E, tudo quanto fizerdes, fazei-o de todo o coração, como ao Senhor e não aos homens.', ref: 'Colossenses 3:23' },
+  { texto: 'Louvai ao Senhor, porque ele é bom, porque a sua benignidade dura para sempre.', ref: 'Salmos 107:1' },
+  { texto: 'Eu te louvarei, Senhor, de todo o meu coração; contarei todas as tuas maravilhas.', ref: 'Salmos 9:1' },
+  { texto: 'E a paz de Deus, para a qual também fostes chamados em um corpo, domine em vossos corações; e sede agradecidos.', ref: 'Colossenses 3:15' },
+  { texto: 'Confia no Senhor de todo o teu coração e não te estribes no teu próprio entendimento.', ref: 'Provérbios 3:5' },
+  { texto: 'Entrega o teu caminho ao Senhor; confia nele, e ele tudo fará.', ref: 'Salmos 37:5' },
+  { texto: 'Confia no Senhor e faze o bem; habitarás na terra e, verdadeiramente, serás alimentado.', ref: 'Salmos 37:3' },
+  { texto: 'Tu conservarás em paz aquele cuja mente está firme em ti; porque ele confia em ti.', ref: 'Isaías 26:3' },
+  { texto: 'Confia ao Senhor as tuas obras, e teus pensamentos serão estabelecidos.', ref: 'Provérbios 16:3' },
+  { texto: 'O meu Deus, segundo as suas riquezas, suprirá todas as vossas necessidades em glória, por Cristo Jesus.', ref: 'Filipenses 4:19' },
+  { texto: 'O Senhor te abençoe e te guarde; o Senhor faça resplandecer o seu rosto sobre ti e tenha misericórdia de ti.', ref: 'Números 6:24-25' },
 ];
 
 const FORMA: Record<string, string> = {
