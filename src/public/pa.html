@@ -166,6 +166,7 @@
     table.tlotes td.tl-ben select{min-width:0 !important;width:100%}
     table.tlotes td.tl-acoes{justify-content:flex-start}
   }
+  .ml-limp summary{cursor:pointer;color:var(--green2)}
   .ml-alq{font-weight:700;color:#7A5B12;margin:-2px 0 4px}
   .ml-ben{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
   .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -743,7 +744,8 @@ async function rSubdivisao(){
         <div class="k2"><div class="k2i">🗓️</div><div><div class="l">Atualizado</div><div class="v" style="font-size:16px">${sub.atualizado_em ? new Date(sub.atualizado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'}</div><div class="muted">${esc(sub.arquivo || '')}</div></div></div>
       </div>
       <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">🧩 Mapa da subdivisão</h2>
-          <div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="sdPdfGeral">📄 PDF — Mapa geral + quadro de áreas</button> <button class="btn btn-primary btn-sm" id="sdPdfTodos">📄 Todos os lotes — tradicional</button> <button class="btn btn-primary btn-sm" id="sdPdfTodosSigef">📄 Todos os lotes — modelo SIGEF</button>${S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger btn-sm" id="sdRemover">Remover</button>' : ''}</div></div>
+          <div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="sdPdfGeral">📄 PDF — Mapa geral + quadro de áreas</button> <button class="btn btn-primary btn-sm" id="sdPdfTodos">📄 Todos os lotes — tradicional</button> <button class="btn btn-primary btn-sm" id="sdPdfTodosSigef">📄 Todos os lotes — modelo SIGEF</button> <a class="btn btn-ghost btn-sm" style="text-decoration:none;display:inline-block" href="/api/pa/projetos/${S.pid}/subdivisao.dxf" download>⬇️ DXF limpo</a>${podeEscrever() ? ' <button class="btn btn-ghost btn-sm" id="sdLimpar" title="Fecha cada poligonal no canto certo, tira pontos repetidos, traços soltos, frestas e sobreposições">🧹 Limpar poligonais</button>' : ''}${S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger btn-sm" id="sdRemover">Remover</button>' : ''}</div></div>
+        ${quadroLimpeza(sub.limpeza)}
         <div class="row" style="margin-top:8px;align-items:center"><span class="muted" style="flex:1 1 auto">Clique num lote para ver as informações. Arraste e use a roda do mouse (ou os dedos) para aproximar.</span>
           <span style="flex:0 0 auto" class="mlBase"><button class="btn btn-sm btn-primary" data-base="mapa">🗺️ Mapa</button> <button class="btn btn-sm btn-ghost" data-base="satelite">🛰️ Satélite</button> <button class="btn btn-sm btn-ghost" data-base="relevo">⛰️ Relevo</button></span></div>
         <div class="ml-modo" id="mlModo"><button data-modo="2d">🗺️ Mapa 2D</button><button data-modo="3d">🧊 Mapa 3D</button></div>
@@ -760,13 +762,19 @@ async function rSubdivisao(){
     if (!f) return toast('Escolha o arquivo DXF', true);
     const fd = new FormData(); fd.append('arquivo', f); fd.append('fuso', $('#sdFuso').value);
     $('#sdEnviar').disabled = true; $('#sdEnviar').textContent = 'Processando…';
-    try { const r = await api(`/projetos/${S.pid}/subdivisao`, { method: 'POST', body: fd }); toast(`Subdivisão processada: ${r.subdivisao.parcelas.length} lotes, ${r.subdivisao.marcos} marcos`); rSubdivisao(); }
+    try { const r = await api(`/projetos/${S.pid}/subdivisao`, { method: 'POST', body: fd }); toast(`Subdivisão processada: ${r.subdivisao.parcelas.length} lotes, ${r.subdivisao.marcos} marcos${r.limpeza && r.limpeza.lotes_corrigidos ? ` · ${r.limpeza.lotes_corrigidos} poligonal(is) corrigida(s)` : ''}`); rSubdivisao(); }
     catch (e){ toast(e.message, true); $('#sdEnviar').disabled = false; $('#sdEnviar').textContent = 'Processar'; }
   };
   if (!sub) return;
   $('#sdPdfGeral').onclick = () => abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?geral=1`);
   $('#sdPdfTodos').onclick = () => { if (confirm(`Gerar o PDF com o mapa e o memorial dos ${sub.parcelas.length} lotes? Pode levar um minuto.`)) abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=todos`); };
   $('#sdPdfTodosSigef').onclick = () => { if (confirm(`Gerar planta + memorial no modelo SIGEF dos ${sub.parcelas.length} lotes? Pode levar um minuto.`)) abrirPdf(`/projetos/${S.pid}/subdivisao.pdf?lotes=todos&modelo=sigef`); };
+  if ($('#sdLimpar')) $('#sdLimpar').onclick = async () => {
+    if (!confirm('Limpar as poligonais dos lotes? Cada lote é refeito pelas divisas: fecha no canto certo, tira pontos repetidos, traços soltos, frestas e sobreposições. A geometria original fica guardada.')) return;
+    $('#sdLimpar').disabled = true;
+    try { const r = await api(`/projetos/${S.pid}/subdivisao/limpar`, { method: 'POST', json: {} }); toast(r.limpeza && r.limpeza.lotes_corrigidos ? `${r.limpeza.lotes_corrigidos} poligonal(is) corrigida(s)` : 'Poligonais conferidas — nada a corrigir'); rSubdivisao(); }
+    catch (e){ toast(e.message, true); $('#sdLimpar').disabled = false; }
+  };
   if ($('#sdRemover')) $('#sdRemover').onclick = async () => {
     if (!confirm('Remover a subdivisão em lotes? O mapa e os memoriais dos lotes deixam de existir até um novo envio.')) return;
     try { await api(`/projetos/${S.pid}/subdivisao`, { method: 'DELETE' }); toast('Subdivisão removida'); rSubdivisao(); } catch (e){ toast(e.message, true); }
@@ -843,6 +851,17 @@ async function rVilaPerimetro(){
 }
 
 // ─── v3.155.0: mapa interativo dos lotes + relevo · v3.156.0: Mapa 3D (padrão) ─
+// v3.158.0: quadro do que a limpeza das poligonais corrigiu
+function quadroLimpeza(l){
+  if (!l) return '';
+  const m2 = (v) => v == null ? '—' : Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+  const quando = new Date(l.em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  if (!l.lotes_corrigidos && !l.avisos.length) return `<div class="muted" style="margin-top:8px">🧹 Poligonais conferidas em ${quando}: todas fechadas, sem sobreposição nem traço solto.</div>`;
+  return `<details class="ml-limp" style="margin-top:8px"${l.avisos.length ? ' open' : ''}><summary>🧹 Limpeza das poligonais (${quando}): <b>${l.lotes_corrigidos} lote(s) corrigido(s)</b>${l.avisos.length ? ` · ${l.avisos.length} aviso(s)` : ''}</summary>
+    ${l.avisos.length ? `<ul style="margin:6px 0;color:var(--warn)">${l.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+    ${l.relatorio.length ? `<div class="tbl"><table><thead><tr><th>Lote</th><th class="right">Área antes (m²)</th><th class="right">Área depois (m²)</th><th class="right">Vértices</th><th>O que foi feito</th></tr></thead><tbody>
+      ${l.relatorio.map((r) => `<tr><td><b>LT-${esc(r.lote)}</b></td><td class="right">${m2(r.area_antes_m2)}</td><td class="right">${m2(r.area_depois_m2)}</td><td class="right">${r.vertices_antes} → ${r.vertices_depois}</td><td>${r.acoes.map(esc).join('; ')}</td></tr>`).join('')}</tbody></table></div>` : ''}</details>`;
+}
 let MAPA_LOTES = {};
 function carregarLeaflet(){
   if (window.L) return Promise.resolve(window.L);

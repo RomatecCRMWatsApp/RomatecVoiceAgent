@@ -168,7 +168,7 @@ router.get('/projetos/:id/vila-perimetro.pdf', h(async (req, res) => {
 // v3.151.0: subdivisão do PA em lotes (DXF da divisão/marcos).
 router.get('/projetos/:id/subdivisao', h(async (req) => {
   const sub = await mapas.buscarSubdivisao(id(req.params.id));
-  return { subdivisao: sub ? { ...sub, camadas: undefined } : null, vinculos: sub ? visao(await mapas.vinculosParcelas(id(req.params.id)), ctx(req).perfil) : {} };
+  return { subdivisao: sub ? { ...sub, camadas: undefined, geometria_original: undefined } : null, vinculos: sub ? visao(await mapas.vinculosParcelas(id(req.params.id)), ctx(req).perfil) : {} };
 }));
 router.post('/projetos/:id/subdivisao/vinculo', h(async (req) => {
   exigirEscrita(req);
@@ -183,9 +183,22 @@ router.post('/projetos/:id/subdivisao', uploadMem.single('arquivo'), h(async (re
   const fuso = Number(req.body?.fuso) || null;
   const hem = req.body?.hemisferio === 'N' ? 'N' : 'S';
   const sub = await mapas.salvarSubdivisao(id(req.params.id), { nome: f.originalname, conteudo: textoDoArquivo(f.buffer) }, { fuso, hemisferio: hem }, ctx(req).sub);
-  return { subdivisao: { ...sub, camadas: undefined } };
+  return { subdivisao: { ...sub, camadas: undefined, geometria_original: undefined }, limpeza: sub.limpeza };
 }));
 router.delete('/projetos/:id/subdivisao', h(async (req) => { exigirAdmin(req); await mapas.removerSubdivisao(id(req.params.id), ctx(req).sub); return { ok: true }; }));
+// v3.158.0: limpar poligonais (reprocessa o que está salvo) e baixar o DXF limpo
+router.post('/projetos/:id/subdivisao/limpar', h(async (req) => {
+  exigirEscrita(req);
+  const sub = await mapas.limparSubdivisaoSalva(id(req.params.id), ctx(req).sub);
+  return { subdivisao: { ...sub, camadas: undefined, geometria_original: undefined }, limpeza: sub.limpeza };
+}));
+router.get('/projetos/:id/subdivisao.dxf', h(async (req, res) => {
+  const { dxf, nome } = await mapas.dxfSubdivisaoProjeto(id(req.params.id));
+  res.setHeader('Content-Type', 'application/dxf; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${nome.replace(/[^\w.\-]+/g, '_')}"`);
+  res.end(dxf);
+  return undefined;
+}));
 router.get('/projetos/:id/subdivisao.svg', h(async (req, res) => {
   const lote = typeof req.query.lote === 'string' && req.query.lote ? req.query.lote : null;
   res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');

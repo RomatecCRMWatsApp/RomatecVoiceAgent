@@ -7,7 +7,7 @@ import { marcaArquivos } from './marcaProjeto';
 import { memorialVila, type MemorialLote } from './memorialVila';
 import { perimetroDeArquivo, utmParaLonLat, type Perimetro } from './perimetro';
 import { htmlMapaVila, htmlMapaGeral, htmlSubdivisao, svgSubdivisao, pdfDeHtml, type DadosMapaPA, type BeneficiarioParcela } from './mapasPdf';
-import { subdivisaoDeDxf, vilaDeDxf, textoMemorialParcela, type Subdivisao, type VilaPerimetro } from './parcelas';
+import { subdivisaoDeDxf, vilaDeDxf, textoMemorialParcela, limparSubdivisao, dxfSubdivisao, VERSAO_LIMPEZA, type Subdivisao, type VilaPerimetro } from './parcelas';
 import { plantaSigef, memorialSigef, documentoSigef, pdfSigef } from './sigefPdf';
 import { svgPerimetro } from './mapasPdf';
 import type { LoteDoMapa } from './mapaSvg';
@@ -98,11 +98,52 @@ export async function salvarSubdivisao(
 ): Promise<Subdivisao> {
   await buscarProjeto(projetoId);
   if (!/\.dxf$/i.test(arquivo.nome) && !/^\s*0\s*\r?\n\s*SECTION/i.test(arquivo.conteudo)) throw new PaErro('SUBDIVISAO_DXF', 'Envie o DXF da divisão dos lotes', 400);
-  const sub = subdivisaoDeDxf(arquivo.conteudo, { ...opts, arquivo: arquivo.nome });
+  const per = await buscarPerimetro(projetoId);
+  const sub = subdivisaoDeDxf(arquivo.conteudo, { ...opts, arquivo: arquivo.nome, perimetro: perimetroUtm(per, opts.fuso ?? 23) });
   sub.atualizado_em = new Date().toISOString();
   await exec(pool, 'UPDATE pa_projetos SET subdivisao_json = ? WHERE id = ?', [JSON.stringify(sub), projetoId]);
-  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'SUBDIVISAO_ATUALIZADA', dados: { arquivo: arquivo.nome, lotes: sub.parcelas.length, marcos: sub.marcos } });
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'SUBDIVISAO_ATUALIZADA', dados: { arquivo: arquivo.nome, lotes: sub.parcelas.length, marcos: sub.marcos, corrigidos: sub.limpeza?.lotes_corrigidos ?? 0 } });
   return sub;
+}
+
+// ─── v3.158.0: limpeza das poligonais (fecha no canto certo, sem traço solto) ─
+function perimetroUtm(per: Perimetro | null, fuso: number) {
+  return per && per.fuso === fuso ? per.vertices.map((v) => ({ x: v.E, y: v.N })) : null;
+}
+
+/** Limpa as poligonais da subdivisão já salva e grava o resultado (backup da geometria original fica no JSON). */
+export async function limparSubdivisaoSalva(projetoId: number, usuario: string | null): Promise<Subdivisao> {
+  const sub = await buscarSubdivisao(projetoId);
+  if (!sub) throw new PaErro('SEM_SUBDIVISAO', 'Envie o DXF da divisão dos lotes primeiro', 409);
+  const per = await buscarPerimetro(projetoId);
+  const limpa = limparSubdivisao(sub, perimetroUtm(per, sub.fuso));
+  limpa.atualizado_em = new Date().toISOString();
+  await exec(pool, 'UPDATE pa_projetos SET subdivisao_json = ? WHERE id = ?', [JSON.stringify(limpa), projetoId]);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'SUBDIVISAO_LIMPA', dados: { lotes: limpa.parcelas.length, corrigidos: limpa.limpeza?.lotes_corrigidos ?? 0, avisos: limpa.limpeza?.avisos ?? [] } });
+  return limpa;
+}
+
+/** DXF limpo da subdivisão (R12), com o perímetro do PA se estiver no mesmo fuso. */
+export async function dxfSubdivisaoProjeto(projetoId: number): Promise<{ dxf: string; nome: string }> {
+  const sub = await buscarSubdivisao(projetoId);
+  if (!sub) throw new PaErro('SEM_SUBDIVISAO', 'Nenhuma subdivisão enviada', 404);
+  const [p, per] = await Promise.all([buscarProjeto(projetoId), buscarPerimetro(projetoId)]);
+  const base = (sub.arquivo || `SUBDIVISAO-${p.codigo}`).replace(/\.dxf$/i, '').replace(/-LIMPO$/i, '');
+  return { dxf: dxfSubdivisao(sub, perimetroUtm(per, sub.fuso)), nome: `${base}-LIMPO.dxf` };
+}
+
+/** Boot: limpa as subdivisões salvas que ainda não passaram pela limpeza desta versão. */
+export async function limparSubdivisoesPendentes(): Promise<void> {
+  const ids = await rows(pool, 'SELECT id FROM pa_projetos WHERE subdivisao_json IS NOT NULL');
+  for (const r of ids) {
+    const id = Number(r.id);
+    try {
+      const sub = await buscarSubdivisao(id);
+      if (!sub || (sub.limpeza && sub.limpeza.versao >= VERSAO_LIMPEZA)) continue;
+      const l = await limparSubdivisaoSalva(id, 'sistema');
+      console.log(`[pa-limpeza] projeto ${id}: ${l.limpeza?.lotes_corrigidos ?? 0} lote(s) corrigido(s)${l.limpeza?.avisos.length ? ' · ' + l.limpeza.avisos.join(' | ') : ''}`);
+    } catch (e) { console.error(`[pa-limpeza] projeto ${id}: falhou`, e); }
+  }
 }
 
 export async function removerSubdivisao(projetoId: number, usuario: string | null): Promise<void> {
