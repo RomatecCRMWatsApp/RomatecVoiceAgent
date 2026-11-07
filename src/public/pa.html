@@ -154,6 +154,18 @@
   .ml-vert.on i{width:15px;height:15px;background:#2F5FD0}
   .ml-vert.on span{color:#1E3F99;font-size:12px}
   .leaflet-tooltip.ml-rotv{color:#B3261E;font-size:10px}
+  /* v3.163.0: tela cheia em todos os mapas (no iPhone o Safari não tem tela cheia de elemento: vira camada fixa) */
+  .ml-full{position:absolute;left:10px;bottom:10px;z-index:6;background:#fff;color:#0C3320;border:0;border-radius:10px;padding:8px 12px;font-weight:700;font-size:13px;font-family:inherit;box-shadow:0 2px 8px rgba(0,0,0,.22);cursor:pointer}
+  .ml-wrap.cheia,#mapaBox.cheia{position:fixed !important;inset:0;z-index:9999;margin:0 !important;background:#E7EEDB;border-radius:0}
+  .ml-wrap.cheia .ml-mapa{height:100vh;height:100dvh;border:0;border-radius:0;margin:0}
+  .ml-wrap:fullscreen .ml-mapa{height:100%}
+  .ml-wrap.cheia .ml-ctl{top:calc(10px + env(safe-area-inset-top))}
+  .cheia>.ml-full{bottom:calc(14px + env(safe-area-inset-bottom));left:calc(12px + env(safe-area-inset-left));background:#0C3320;color:#fff;padding:10px 14px;font-size:14px}
+  #mapaBox.cheia{background:#fff;padding:10px;overflow:auto}#mapaBox.cheia #mapaSvg{height:100%}
+  body.ml-travado{overflow:hidden}
+  .ml-fsbar{position:absolute;z-index:6;left:calc(12px + env(safe-area-inset-left));bottom:calc(64px + env(safe-area-inset-bottom));display:flex;flex-wrap:wrap;gap:6px;max-width:calc(100% - 24px);align-items:center}
+  .ml-fsbar .ml-modo{margin:0}.ml-fsbar .ml-modo button{padding:6px 12px;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,.18)}
+  .ml-fsbar .btn{box-shadow:0 2px 6px rgba(0,0,0,.18)}
   .ml-rot3d{color:#0C3320;font-weight:800;font-size:11px;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff;pointer-events:none;white-space:nowrap}
   @media (max-width:700px){.ml-ctl{max-width:calc(100% - 52px)}.ml-ctl .pill,.ml-ctl .seg button{padding:6px 8px;font-size:11px;gap:4px}.ml-rot3d{font-size:10px}}
   .ml-card{margin-top:14px;padding:16px;border-radius:16px;background:#fff;border:2px solid #C9A84C}
@@ -728,7 +740,7 @@ async function rMapaGeral(){
           <div class="row" style="margin-top:8px;align-items:center"><span class="muted" style="flex:1 1 auto">Toque na área do PA ou num vértice para ver as informações. Arraste e use os dedos para aproximar.</span>
             <span style="flex:0 0 auto" class="pgBase"><button class="btn btn-sm btn-primary" data-base="mapa">🗺️ Mapa</button> <button class="btn btn-sm btn-ghost" data-base="satelite">🛰️ Satélite</button> <button class="btn btn-sm btn-ghost" data-base="relevo">⛰️ Relevo</button></span></div>
           <div class="ml-modo" id="pgModo"><button data-modo="2d">🗺️ Mapa 2D</button><button data-modo="3d">🧊 Mapa 3D</button></div>
-          <div class="ml-wrap"><div id="pgMapa" class="ml-mapa"><div class="empty" style="padding-top:120px">Carregando o mapa…</div></div><div id="pgCtl" class="ml-ctl" hidden></div></div>
+          <div class="ml-wrap"><div id="pgMapa" class="ml-mapa"><div class="empty" style="padding-top:120px">Carregando o mapa…</div></div><button type="button" class="ml-full" title="Tela cheia">⛶ Tela cheia</button><div id="pgCtl" class="ml-ctl" hidden></div></div>
           <div class="leg ml-leg"><span><i style="background:none;border:2px dashed #0C3320"></i>Perímetro do PA</span><span><i style="background:#B3261E;border-radius:50%"></i>Vértice</span><span><i style="background:#2F5FD0"></i>Selecionado</span><span><i style="background:none;border:1.5px solid #9aa"></i>Lotes</span><span><i style="background:#8C5A2B;height:4px"></i>Estradas</span><span><i style="background:#2B6CB0;height:3px"></i>Córregos</span></div>
           <label style="display:block;margin-top:10px"><b>Ou escolha o vértice:</b><select class="f" id="pgSel"><option value="">Selecione um vértice</option></select></label>
           <div id="pgCard"></div></div>
@@ -782,7 +794,7 @@ async function rSubdivisao(){
         <div class="row" style="margin-top:8px;align-items:center"><span class="muted" style="flex:1 1 auto">Clique num lote para ver as informações. Arraste e use a roda do mouse (ou os dedos) para aproximar.</span>
           <span style="flex:0 0 auto" class="mlBase"><button class="btn btn-sm btn-primary" data-base="mapa">🗺️ Mapa</button> <button class="btn btn-sm btn-ghost" data-base="satelite">🛰️ Satélite</button> <button class="btn btn-sm btn-ghost" data-base="relevo">⛰️ Relevo</button></span></div>
         <div class="ml-modo" id="mlModo"><button data-modo="2d">🗺️ Mapa 2D</button><button data-modo="3d">🧊 Mapa 3D</button></div>
-        <div class="ml-wrap"><div id="mlMapa" class="ml-mapa"><div class="empty" style="padding-top:120px">Carregando o mapa…</div></div><div id="mlCtl" class="ml-ctl" hidden></div></div>
+        <div class="ml-wrap"><div id="mlMapa" class="ml-mapa"><div class="empty" style="padding-top:120px">Carregando o mapa…</div></div><button type="button" class="ml-full" title="Tela cheia">⛶ Tela cheia</button><div id="mlCtl" class="ml-ctl" hidden></div></div>
         <div class="leg ml-leg"><span><i style="background:#9CC46A22;border:2px solid #6E9E3A"></i>Lote com associado</span><span><i style="background:#ffffff33;border:2px solid #fff;box-shadow:0 0 0 1px #0C332055"></i>Lote sem vínculo</span><span><i style="background:#2F5FD0"></i>Selecionado</span><span><i style="background:#9FD08A;opacity:.7"></i>APP</span><span><i style="background:#F1DFA4"></i>Áreas comunitárias</span><span><i style="background:#8C5A2B;height:4px"></i>Estradas</span><span><i style="background:#2B6CB0;height:3px"></i>Córregos</span><span><i style="background:none;border:2px dashed #0C3320"></i>Perímetro do PA</span></div>
         <label style="display:block;margin-top:10px"><b>Ou escolha pela lista:</b><select class="f" id="mlSel"><option value="">Selecione um lote</option></select></label>
         <div id="mlCard"></div></div>
@@ -1011,7 +1023,7 @@ async function rDivisa(){
       <div class="row" style="margin-top:8px;align-items:center"><span class="muted" style="flex:1 1 auto">Toque na parte de cada município ou num ponto da divisa (D-01…) para ver as informações.</span>
         <span style="flex:0 0 auto" class="dvBase"><button class="btn btn-sm btn-primary" data-base="mapa">🗺️ Mapa</button> <button class="btn btn-sm btn-ghost" data-base="satelite">🛰️ Satélite</button> <button class="btn btn-sm btn-ghost" data-base="relevo">⛰️ Relevo</button></span></div>
       <div class="ml-modo" id="dvModo"><button data-modo="2d">🗺️ Mapa 2D</button><button data-modo="3d">🧊 Mapa 3D</button></div>
-      <div class="ml-wrap"><div id="dvMapa" class="ml-mapa"><div class="empty" style="padding-top:120px">Carregando o mapa…</div></div><div id="dvCtl" class="ml-ctl" hidden></div></div>
+      <div class="ml-wrap"><div id="dvMapa" class="ml-mapa"><div class="empty" style="padding-top:120px">Carregando o mapa…</div></div><button type="button" class="ml-full" title="Tela cheia">⛶ Tela cheia</button><div id="dvCtl" class="ml-ctl" hidden></div></div>
       <div class="leg ml-leg">${ms.map((m) => `<span><i style="background:${esc(m.cor)};opacity:.75"></i>PA em ${esc(m.nome)}</span>`).join('')}<span><i style="background:#C62828;height:4px"></i>Divisa intermunicipal (IBGE)</span><span><i style="background:#B3261E;border-radius:50%"></i>Ponto de divisa</span><span><i style="background:#F1DFA4"></i>Áreas comunitárias</span><span><i style="background:#8C5A2B;height:4px"></i>Estradas</span><span><i style="background:#2B6CB0;height:3px"></i>Córregos</span></div>
       <div id="dvCard"></div></div>
     <div class="card"><h2>📊 Quadro de áreas por município</h2><div class="tbl"><table class="tcard"><thead><tr><th>Município</th><th class="right">Hectares</th><th class="right">Metros quadrados</th><th class="right">Alqueires*</th><th class="right">%</th>${d.tem_lotes ? '<th class="right">Lotes</th>' : ''}</tr></thead><tbody>
@@ -1087,6 +1099,52 @@ async function mapaDivisa(d, geo){
   };
   MAPA_DV = { mapa: eng.mapa, parar: eng.parar };
 }
+// ─── v3.163.0: tela cheia de qualquer mapa ─────────────────────────────────
+const BASE_LEMBRADA = {};
+function aplicarBaseLembrada(ctx){
+  const b = BASE_LEMBRADA[ctx.baseSel];
+  if (!b || b === 'mapa') return;
+  const bt = document.querySelector(ctx.baseSel.replace('[data-base]', `[data-base="${b}"]`));
+  if (bt && bt.onclick) bt.onclick();
+}
+function redimensionarMapa(w){
+  const box = w.querySelector('.ml-mapa') || {}, m = box.__mapa;
+  [60, 350].forEach((t) => setTimeout(() => {
+    try { if (m && m.resize) m.resize(); if (m && m.invalidateSize) m.invalidateSize(); if (t === 350 && box.__ajustar) box.__ajustar(); } catch { /* ok */ }
+  }, t));
+}
+function alternarTelaCheia(w){
+  if (!w) return;
+  const sair = w.classList.contains('cheia');
+  let bt = w.querySelector(':scope > .ml-full');
+  if (!sair && !bt) { bt = document.createElement('button'); bt.type = 'button'; bt.className = 'ml-full'; bt.dataset.temp = '1'; w.appendChild(bt); }
+  if (sair) {
+    w.classList.remove('cheia'); document.body.classList.remove('ml-travado');
+    (w.__movidos || []).forEach(({ el, ph }) => ph.replaceWith(el)); w.__movidos = null;
+    w.querySelectorAll(':scope > .ml-fsbar').forEach((x) => x.remove());
+    if (document.fullscreenElement === w || document.webkitFullscreenElement === w) { try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch { /* ok */ } }
+    if (bt && bt.dataset.temp) bt.remove(); else if (bt) bt.textContent = '⛶ Tela cheia';
+  } else {
+    w.classList.add('cheia'); document.body.classList.add('ml-travado');
+    // leva para dentro do mapa os botões Mapa/Satélite/Relevo e 2D/3D (voltam ao sair)
+    const card = w.closest('.card');
+    const mover = card ? [card.querySelector('.ml-modo'), card.querySelector('.mlBase, .pgBase, .dvBase')].filter(Boolean) : [];
+    if (mover.length) {
+      const barra = document.createElement('div'); barra.className = 'ml-fsbar';
+      w.__movidos = mover.map((el) => { const ph = document.createComment('ml-fs'); el.replaceWith(ph); barra.appendChild(el); return { el, ph }; });
+      w.appendChild(barra);
+    }
+    if (bt) bt.textContent = '✕ Sair da tela cheia';
+    const f = w.requestFullscreen || w.webkitRequestFullscreen; // computador/Android: esconde também a barra do navegador
+    if (f) { try { const r = f.call(w); if (r && r.catch) r.catch(() => {}); } catch { /* ok */ } }
+  }
+  redimensionarMapa(w);
+}
+document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('.ml-full'); if (b) alternarTelaCheia(b.parentElement); });
+const aoSairFullscreen = () => { if (document.fullscreenElement || document.webkitFullscreenElement) return; document.querySelectorAll('.cheia').forEach((w) => alternarTelaCheia(w)); };
+document.addEventListener('fullscreenchange', aoSairFullscreen);
+document.addEventListener('webkitfullscreenchange', aoSairFullscreen);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('.cheia').forEach((w) => alternarTelaCheia(w)); });
 function modoMapaLotes(){ try { return localStorage.getItem('pa_mapa_modo') === '2d' ? '2d' : '3d'; } catch { return '3d'; } }
 async function mapaLotes(sub, verLote){
   const box = $('#mlMapa'); if (!box) return;
@@ -1122,6 +1180,7 @@ async function mapaLotes(sub, verLote){
 }
 function mapaLotes2D(L, box, ctx){
   const mapa = L.map(box, { zoomControl: true, scrollWheelZoom: true, zoomSnap: .25, zoomDelta: .5 });
+  box.__mapa = mapa;
   let base = L.tileLayer(...BASES_MAPA.mapa).addTo(mapa);
   const camadas = {};
   let atual = null;
@@ -1129,6 +1188,7 @@ function mapaLotes2D(L, box, ctx){
     b.className = 'btn btn-sm ' + (b.dataset.base === 'mapa' ? 'btn-primary' : 'btn-ghost');
     b.onclick = () => {
       mapa.removeLayer(base); base = L.tileLayer(...BASES_MAPA[b.dataset.base]).addTo(mapa); base.bringToBack();
+      BASE_LEMBRADA[ctx.baseSel] = b.dataset.base;
       document.querySelectorAll(ctx.baseSel).forEach((x) => x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-ghost'));
     };
   });
@@ -1152,6 +1212,8 @@ function mapaLotes2D(L, box, ctx){
     },
   }).addTo(mapa);
   mapa.fitBounds(lotes.getBounds(), { padding: [12, 12] });
+  box.__ajustar = () => mapa.fitBounds(lotes.getBounds(), { padding: [16, 16] });
+  aplicarBaseLembrada(ctx);
   // v3.159.0: pontos clicáveis (vértices do perímetro)
   const pts2 = {};
   for (const pt of ctx.pontos || []) {
@@ -1205,6 +1267,11 @@ function mapaLotes3D(maplibregl, box, ctx){
     bounds: [[tot[0], tot[1]], [tot[2], tot[3]]], fitBoundsOptions: { padding: 30 },
   });
   mapa.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+  box.__mapa = mapa;
+  box.__ajustar = () => {
+    const cam = mapa.cameraForBounds([[tot[0], tot[1]], [tot[2], tot[3]]], { padding: 40, bearing: mapa.getBearing() });
+    if (cam) mapa.easeTo({ center: cam.center, zoom: cam.zoom + (mapa.getPitch() > 20 ? (ctx.zoomExtra ?? .6) : 0), duration: 600 });
+  };
   mapa.on('load', () => {
     mapa.addSource('outros', { type: 'geojson', data: fc(['APP', 'COMUNITARIA', 'ESTRADA', 'AGUA', 'OUTRA', 'PERIMETRO', 'VILA', 'LOTE_CTX', 'DIVISA']) });
     mapa.addLayer({ id: 'ctxlotes', type: 'line', source: 'outros', filter: ['==', ['get', 'tipo'], 'LOTE_CTX'], paint: { 'line-color': '#FFFFFF', 'line-width': 1.1, 'line-opacity': .85 } });
@@ -1237,6 +1304,7 @@ function mapaLotes3D(maplibregl, box, ctx){
       marcadores[pt.id] = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(pt.lngLat).addTo(mapa);
     }
     mapa.easeTo({ pitch: 55, bearing: -18, zoom: mapa.getZoom() + (ctx.zoomExtra ?? .6), duration: 900 });
+    aplicarBaseLembrada(ctx);
     if (atual) marcar(atual, false, true);
   });
   // controles por cima do mapa (Girar / Plano / Alto relevo / Vista de cima)
@@ -1282,6 +1350,7 @@ function mapaLotes3D(maplibregl, box, ctx){
       mapa.addSource('base', { type: 'raster', tileSize: 256, ...t });
       const antes = mapa.getLayer('ctxlotes') ? 'ctxlotes' : undefined;
       mapa.addLayer({ id: 'base', type: 'raster', source: 'base', paint: b.dataset.base === 'mapa' ? { 'raster-opacity': .55, 'raster-saturation': -.6 } : { 'raster-opacity': 1 } }, antes);
+      BASE_LEMBRADA[ctx.baseSel] = b.dataset.base;
       document.querySelectorAll(ctx.baseSel).forEach((x) => x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-ghost'));
     };
   });
@@ -1350,7 +1419,7 @@ async function rMapaVila(){
       <p class="nota">Croqui técnico preliminar, sem amarração geodésica – dimensões, áreas e posição definitivas conforme georreferenciamento (SIRGAS 2000) e NBR 13133. Cotas em metros.</p>
       <div id="mapaInfo"></div></div>`;
     v.querySelectorAll('[data-modo]').forEach((b) => b.onclick = () => { S.modoMapa = b.dataset.modo; rMapa(); });
-    $('#mFull').onclick = () => { const el = $('#mapaBox'); const f = el.requestFullscreen || el.webkitRequestFullscreen; if (f) f.call(el); };
+    $('#mFull').onclick = () => alternarTelaCheia($('#mapaBox'));
     v.querySelectorAll('g.lote').forEach((g) => g.onclick = () => {
       const l = lotes.find((x) => x.numero === g.dataset.n);
       if (l && l.associado) abrirAssociado(l.associado.id);
