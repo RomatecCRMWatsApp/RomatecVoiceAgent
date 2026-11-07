@@ -9,6 +9,8 @@ import { perimetroDeArquivo, utmParaLonLat, type Perimetro } from './perimetro';
 import { htmlMapaVila, htmlMapaGeral, htmlSubdivisao, svgSubdivisao, pdfDeHtml, type DadosMapaPA, type BeneficiarioParcela } from './mapasPdf';
 import { subdivisaoDeDxf, vilaDeDxf, textoMemorialParcela, limparSubdivisao, dxfSubdivisao, VERSAO_LIMPEZA, type Subdivisao, type VilaPerimetro } from './parcelas';
 import { plantaSigef, memorialSigef, documentoSigef, pdfSigef } from './sigefPdf';
+import { calcularDivisa, divisaDeDxf, dxfDivisa, type DivisaSalva } from './divisa';
+import { DIVISA_SALETE_MORENO } from './seeds/divisaSaleteMoreno';
 import { svgPerimetro } from './mapasPdf';
 import type { LoteDoMapa } from './mapaSvg';
 
@@ -288,4 +290,86 @@ export async function geojsonSubdivisao(projetoId: number) {
   if (per) features.push(anel(per, 'PERIMETRO', 'Perímetro do PA'));
   if (vila) features.push(anel(vila.total, 'VILA', 'Área da vila (AC-01)'));
   return { type: 'FeatureCollection', features, lotes: sub.parcelas.length, vinculados: Object.keys(vinc).length };
+}
+
+// ─── v3.160.0: divisa municipal (Açailândia × Itinga etc.) ─────────────────
+async function lerDivisa(projetoId: number): Promise<DivisaSalva | null> {
+  const r = await one(pool, 'SELECT divisa_json FROM pa_projetos WHERE id = ?', [projetoId]);
+  if (!r) throw new PaErro('PROJETO_NAO_ENCONTRADO', 'Projeto não encontrado', 404);
+  return (r.divisa_json as DivisaSalva | null) ?? null;
+}
+
+async function contextoDivisa(projetoId: number) {
+  const [div, per, sub] = await Promise.all([lerDivisa(projetoId), buscarPerimetro(projetoId), buscarSubdivisao(projetoId)]);
+  if (!div) return null;
+  const fuso = per?.fuso ?? sub?.fuso ?? 23, hem = per?.hemisferio ?? sub?.hemisferio ?? 'S';
+  // perímetro GNSS salvo (mais preciso); sem ele, o do próprio mapa da divisa
+  const perimetro = per ? per.vertices.map((v) => ({ x: v.E, y: v.N })) : (div.perimetro_pdf ?? []).map(([x, y]) => ({ x, y }));
+  if (perimetro.length < 3) throw new PaErro('SEM_PERIMETRO', 'Envie o perímetro do PA para calcular a divisa', 409);
+  const comunitarias = (sub?.camadas ?? []).filter((c) => c.tipo === 'COMUNITARIA' && c.fechada)
+    .map((c, i) => ({ rotulo: c.rotulo || `Área comunitária ${i + 1}`, pts: c.pts.map(([x, y]) => ({ x, y })) }));
+  const lotes = (sub?.parcelas ?? []).map((pc) => ({ lote: pc.lote, pts: pc.perimetro.vertices.map((v) => ({ x: v.E, y: v.N })) }));
+  const r = calcularDivisa(perimetro, div, { comunitarias, lotes });
+  return { div, per, sub, perimetro, comunitarias, r, fuso, hem, usa_perimetro_salvo: !!per };
+}
+
+/** Divisa calculada + GeoJSON (lat/lon) para o mapa. */
+export async function buscarDivisa(projetoId: number) {
+  const c = await contextoDivisa(projetoId);
+  if (!c) return { divisa: null };
+  const conv = utmParaLonLat(c.fuso, c.hem);
+  const ll = (pts: Array<{ x: number; y: number }>) => pts.map((q) => conv(q.x, q.y));
+  const anel = (pts: Array<{ x: number; y: number }>) => { const a = ll(pts); return [...a, a[0]]; };
+  const features: Array<Record<string, unknown>> = [];
+  c.r.municipios.forEach((m, i) => m.aneis.forEach((a, k) => features.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [anel(a)] }, properties: { tipo: 'MUNICIPIO', lote: `M${i}${k ? '-' + k : ''}`, idx: i, nome: m.nome, cor: m.cor } })));
+  features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: c.div.linha.map(([x, y]) => conv(x, y)) }, properties: { tipo: 'DIVISA' } });
+  for (const l of c.div.corregos ?? []) features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: l.map(([x, y]) => conv(x, y)) }, properties: { tipo: 'AGUA' } });
+  for (const l of c.div.estradas ?? []) features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: l.map(([x, y]) => conv(x, y)) }, properties: { tipo: 'ESTRADA' } });
+  for (const cm of c.comunitarias) features.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [anel(cm.pts)] }, properties: { tipo: 'COMUNITARIA', rotulo: cm.rotulo } });
+  for (const pc of c.sub?.parcelas ?? []) features.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [anel(pc.perimetro.vertices.map((v) => ({ x: v.E, y: v.N })))] }, properties: { tipo: 'LOTE_CTX' } });
+  const pontos = c.r.pontos.map((p) => { const [lon, lat] = conv(p.E, p.N); return { ...p, lat, lon }; });
+  return {
+    divisa: {
+      municipios: c.r.municipios.map(({ aneis, ...m }) => ({ ...m, partes: aneis.length })), pontos, extensao_m: c.r.extensao_m, total_m2: c.r.total_m2,
+      comunitarias: c.r.comunitarias, lotes_divididos: c.r.lotes_divididos, lotes_por_municipio: c.r.lotes_por_municipio, tem_lotes: !!c.sub,
+      fonte: c.div.fonte, arquivo: c.div.arquivo ?? null, atualizado_em: c.div.atualizado_em ?? null, usa_perimetro_salvo: c.usa_perimetro_salvo,
+      perimetro_ha: c.per?.area_ha ?? null, perimetro_m: c.per?.perimetro_m ?? null,
+    },
+    geo: { type: 'FeatureCollection', features },
+  };
+}
+
+export async function salvarDivisa(projetoId: number, arquivo: { nome: string; conteudo: string }, nomes: Array<string | null>, usuario: string | null) {
+  await buscarProjeto(projetoId);
+  if (!/\.dxf$/i.test(arquivo.nome) && !/^\s*0\s*\r?\n\s*SECTION/i.test(arquivo.conteudo)) throw new PaErro('DIVISA_DXF', 'Envie o DXF com a linha da divisa (camada DIVISA)', 400);
+  const div = divisaDeDxf(arquivo.conteudo, nomes, arquivo.nome);
+  div.atualizado_em = new Date().toISOString();
+  // valida antes de gravar (a linha precisa atravessar o perímetro)
+  const per = await buscarPerimetro(projetoId);
+  if (per) calcularDivisa(per.vertices.map((v) => ({ x: v.E, y: v.N })), div);
+  await exec(pool, 'UPDATE pa_projetos SET divisa_json = ? WHERE id = ?', [JSON.stringify(div), projetoId]);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'DIVISA_ATUALIZADA', dados: { arquivo: arquivo.nome, municipios: div.municipios.map((m) => m.nome) } });
+  return buscarDivisa(projetoId);
+}
+
+export async function removerDivisa(projetoId: number, usuario: string | null): Promise<void> {
+  await exec(pool, 'UPDATE pa_projetos SET divisa_json = NULL WHERE id = ?', [projetoId]);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'DIVISA_REMOVIDA' });
+}
+
+export async function dxfDivisaProjeto(projetoId: number): Promise<{ dxf: string; nome: string }> {
+  const c = await contextoDivisa(projetoId);
+  if (!c) throw new PaErro('SEM_DIVISA', 'Nenhuma divisa municipal cadastrada', 404);
+  const p = await buscarProjeto(projetoId);
+  return { dxf: dxfDivisa(c.perimetro, c.div, c.r, c.comunitarias), nome: `MAPA-DIVISA-MUNICIPAL-${p.codigo}.dxf` };
+}
+
+/** Boot: carrega a divisa do MT-03 no PA Salete Moreno se ainda não houver divisa cadastrada. */
+export async function semearDivisas(): Promise<void> {
+  const r = await one(pool, "SELECT id FROM pa_projetos WHERE codigo = 'PA-SALETE-MORENO' AND divisa_json IS NULL", []);
+  if (!r) return;
+  const div: DivisaSalva = { ...DIVISA_SALETE_MORENO, atualizado_em: new Date().toISOString() };
+  await exec(pool, 'UPDATE pa_projetos SET divisa_json = ? WHERE id = ?', [JSON.stringify(div), Number(r.id)]);
+  await registrarEvento(pool, { projeto_id: Number(r.id), usuario: 'sistema', tipo: 'DIVISA_ATUALIZADA', dados: { arquivo: div.arquivo, municipios: div.municipios.map((m) => m.nome) } });
+  console.log('[pa-divisa] divisa municipal do MT-03 carregada no PA Salete Moreno');
 }

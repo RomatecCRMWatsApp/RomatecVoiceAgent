@@ -331,6 +331,9 @@ void (async () => {
   // v3.158.0: limpa as poligonais dos lotes já salvos (fecha no canto certo, sem traço solto)
   try { const l = await import('./services/pa/paMapas'); await l.limparSubdivisoesPendentes(); }
   catch (err) { console.error('[pa-limpeza] falhou:', err); }
+  // v3.160.0: divisa municipal do PA Salete Moreno (MT-03)
+  try { const l = await import('./services/pa/paMapas'); await l.semearDivisas(); }
+  catch (err) { console.error('[pa-divisa] falhou:', err); }
 })();
 // v3.152.0: Assinatura pelo chat — lotes de aprovação (assinatura_lotes) + lote_id/ancoras
 void (async () => {

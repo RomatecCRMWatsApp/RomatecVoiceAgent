@@ -192,6 +192,23 @@ router.post('/projetos/:id/subdivisao/limpar', h(async (req) => {
   const sub = await mapas.limparSubdivisaoSalva(id(req.params.id), ctx(req).sub);
   return { subdivisao: { ...sub, camadas: undefined, geometria_original: undefined }, limpeza: sub.limpeza };
 }));
+// v3.160.0: divisa municipal
+router.get('/projetos/:id/divisa', h(async (req) => mapas.buscarDivisa(id(req.params.id))));
+router.post('/projetos/:id/divisa', uploadMem.single('arquivo'), h(async (req) => {
+  exigirEscrita(req);
+  const f = req.file;
+  if (!f) throw new PaErro('ARQUIVO_VAZIO', 'Envie o DXF no campo "arquivo"', 400);
+  const nomes = [req.body?.municipio_a, req.body?.municipio_b].map((x) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, 80) : null));
+  return mapas.salvarDivisa(id(req.params.id), { nome: f.originalname, conteudo: textoDoArquivo(f.buffer) }, nomes, ctx(req).sub);
+}));
+router.delete('/projetos/:id/divisa', h(async (req) => { exigirAdmin(req); await mapas.removerDivisa(id(req.params.id), ctx(req).sub); return { ok: true }; }));
+router.get('/projetos/:id/divisa.dxf', h(async (req, res) => {
+  const { dxf, nome } = await mapas.dxfDivisaProjeto(id(req.params.id));
+  res.setHeader('Content-Type', 'application/dxf; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${nome.replace(/[^\w.\-]+/g, '_')}"`);
+  res.end(dxf);
+  return undefined;
+}));
 router.get('/projetos/:id/subdivisao.dxf', h(async (req, res) => {
   const { dxf, nome } = await mapas.dxfSubdivisaoProjeto(id(req.params.id));
   res.setHeader('Content-Type', 'application/dxf; charset=utf-8');
