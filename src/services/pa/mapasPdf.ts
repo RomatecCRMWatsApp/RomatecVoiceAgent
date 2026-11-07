@@ -8,6 +8,7 @@ import type { DesenhoLayout } from './layoutDesenho';
 import type { MemorialLote } from './memorialVila';
 import { grausDms, latLonDms, textoMemorialPerimetro, type Perimetro } from './perimetro';
 import { textoMemorialParcela, type Subdivisao, type CamadaDesenho } from './parcelas';
+import { alqueiresTxt, haAlq, haAlqCurto, haParaAlqueires } from './unidades';
 
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 const fm = (v: number, d = 2) => v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -82,7 +83,7 @@ export function htmlMapaVila(d: DadosMapaPA, lotes: LoteDoMapa[], desenho: Desen
     ${cabecalho(d, 'MAPA DA VILA — LAYOUT DOS LOTES')}
     <div class="mapa">${mapa}${bras ? `<img class="bras" src="${bras}">` : ''}</div>
     <div class="quadros"><div class="q"><span>Lotes</span><b>${memorial.length}</b>${memorial.length - inst} de associados · ${inst} institucionais</div>
-      <div class="q"><span>Área total dos lotes</span><b>${fm(areaLotes)} m²</b>${fm(areaLotes / 10000, 4)} ha</div>
+      <div class="q"><span>Área total dos lotes</span><b>${fm(areaLotes)} m²</b>${haAlq(areaLotes / 10000)}</div>
       <div class="q"><span>Padrão</span><b>20,00 × 40,00 m</b>vias de 10,00 m</div></div>
     <div class="nota">Croqui técnico preliminar, sem amarração geodésica — dimensões, áreas e posição definitivas conforme georreferenciamento (SIRGAS 2000) e NBR 13133. Cotas em metros.</div>
     ${rodape(d)}
@@ -119,7 +120,7 @@ export function svgPerimetro(p: Perimetro, css = 'width:100%;height:auto;display
     <rect x="${x0}" y="${y0}" width="${W}" height="${H}" fill="#FBFAF5"/>${grade.join('')}
     <polygon points="${pts}" fill="#B7D99A" fill-opacity=".55" stroke="#0C3320" stroke-width="${sw * 2}"/>
     ${p.vertices.map((v) => { const dx = v.E - cx, dy = -v.N - cy, L = Math.hypot(dx, dy) || 1; return `<circle cx="${v.E}" cy="${-v.N}" r="${sw * 3}" fill="#B3261E"/><text x="${v.E + (dx / L) * fs * 1.2}" y="${-v.N + (dy / L) * fs * 1.2}" font-size="${fs * 0.85}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#B3261E">${esc(v.nome)}</text>`; }).join('')}
-    <text x="${cx}" y="${cy}" font-size="${fs * 1.3}" font-weight="800" text-anchor="middle" fill="#0C3320">${fm(p.area_ha, 4)} ha</text>
+    <text x="${cx}" y="${cy}" font-size="${fs * 1.3}" font-weight="800" text-anchor="middle" fill="#0C3320">${fm(p.area_ha, 4)} ha</text><text x="${cx}" y="${cy + fs * 1.5}" font-size="${fs * 1.05}" font-weight="700" text-anchor="middle" fill="#0C3320">${alqueiresTxt(p.area_ha)}</text>
     <g transform="translate(${x0 + W - pad * 0.55},${y0 + pad * 0.6})"><polygon points="0,${-fs * 1.6} ${fs * 0.7},${fs * 0.6} 0,${fs * 0.2} ${-fs * 0.7},${fs * 0.6}" fill="#0C3320"/><text y="${-fs * 1.9}" font-size="${fs}" font-weight="800" text-anchor="middle" fill="#0C3320">N</text></g>
     <g><rect x="${sbx}" y="${sby}" width="${passo / 2}" height="${fs * 0.4}" fill="#0C3320"/><rect x="${sbx + passo / 2}" y="${sby}" width="${passo / 2}" height="${fs * 0.4}" fill="#fff" stroke="#0C3320" stroke-width="${sw * 0.6}"/>
       <text x="${sbx}" y="${sby - fs * 0.3}" font-size="${fs * 0.7}" fill="#0C3320">0</text><text x="${sbx + passo}" y="${sby - fs * 0.3}" font-size="${fs * 0.7}" text-anchor="end" fill="#0C3320">${passo >= 1000 ? fm(passo / 1000, 0) + ' km' : fm(passo, 0) + ' m'}</text></g>
@@ -133,7 +134,7 @@ export function htmlMapaGeral(d: DadosMapaPA, p: Perimetro, t: { imovel?: string
   return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><title>Mapa geral e memorial descritivo — ${esc(d.projeto.nome)}</title><style>${CSS}</style></head><body>
     ${cabecalho(d, t.mapa ?? 'MAPA GERAL DO PROJETO DE ASSENTAMENTO — PERÍMETRO')}
     <div class="mapa">${svgPerimetro(p, 'width:100%;height:200mm;display:block')}${bras ? `<img class="bras" src="${bras}">` : ''}</div>
-    <div class="quadros"><div class="q"><span>Área</span><b>${fm(p.area_ha, 4)} ha</b>${fm(p.area_m2)} m²</div>
+    <div class="quadros"><div class="q"><span>Área</span><b>${fm(p.area_ha, 4)} ha</b>${alqueiresTxt(p.area_ha)} · ${fm(p.area_m2)} m²</div>
       <div class="q"><span>Perímetro</span><b>${fm(p.perimetro_m)} m</b>${p.vertices.length} vértices</div>
       <div class="q"><span>Referência</span><b>${esc(p.datum)}</b>UTM fuso ${p.fuso}${p.hemisferio === 'S' ? ' Sul' : ' Norte'} · origem ${esc(p.origem.formato)}</div></div>
     ${rodape(d)}
@@ -192,7 +193,7 @@ export function svgSubdivisao(sub: Subdivisao, opts: { destaque?: string | null;
     const eu = alvo !== null && p.lote === alvo.lote;
     return `<polygon points="${poly(pts)}" fill="${eu ? '#B7D99A' : alvo ? '#F4F1E6' : '#E4EED8'}" fill-opacity="${eu ? 0.75 : 0.55}" stroke="${eu ? '#0C3320' : '#55704A'}" stroke-width="${eu ? sw * 3 : sw}"/>`
       + `<text x="${cx}" y="${cy}" font-size="${eu ? fs * 1.6 : fs}" font-weight="800" text-anchor="middle" dominant-baseline="middle" fill="${eu ? '#0C3320' : '#3d5233'}">LT-${esc(p.lote)}</text>`
-      + (eu ? `<text x="${cx}" y="${cy + fs * 1.8}" font-size="${fs * 0.95}" text-anchor="middle" fill="#0C3320">${fm(p.perimetro.area_ha, 4)} ha</text>` : '');
+      + (eu ? `<text x="${cx}" y="${cy + fs * 1.8}" font-size="${fs * 0.95}" text-anchor="middle" fill="#0C3320">${haAlqCurto(p.perimetro.area_ha)}</text>` : '');
   }).join('');
   const per = opts.perimetro && !alvo ? `<polygon points="${poly(opts.perimetro.vertices.map((v) => [v.E, v.N]))}" fill="none" stroke="#0C3320" stroke-width="${sw * 3.5}"/>` : '';
   let vert = '';
@@ -225,12 +226,12 @@ export function htmlSubdivisao(d: DadosMapaPA, sub: Subdivisao, opts: { lotes: s
       <div class="mapa">${svgSubdivisao(sub, { perimetro: opts.perimetro, css: 'width:100%;height:205mm;display:block' })}${bras ? `<img class="bras" src="${bras}">` : ''}</div>
       ${LEGENDA}
       <div class="quadros"><div class="q"><span>Lotes</span><b>${sub.parcelas.length}</b>${sub.marcos} marcos</div>
-        <div class="q"><span>Área total dos lotes</span><b>${fm(tot, 4)} ha</b>${opts.perimetro ? `perímetro do PA: ${fm(opts.perimetro.area_ha, 4)} ha` : ''}</div>
+        <div class="q"><span>Área total dos lotes</span><b>${fm(tot, 4)} ha</b>${alqueiresTxt(tot)}${opts.perimetro ? `<br>perímetro do PA: ${haAlq(opts.perimetro.area_ha)}` : ''}</div>
         <div class="q"><span>Referência</span><b>SIRGAS 2000</b>UTM fuso ${sub.fuso}${sub.hemisferio === 'S' ? ' Sul' : ' Norte'}</div></div>
       ${rodape(d)}`);
     paginas.push(`${cabecalho(d, 'QUADRO DE ÁREAS DOS LOTES')}
-      <table><thead><tr><th>Lote</th><th class="n">Área total (ha)</th><th class="n">Área útil (ha)</th><th class="n">Perímetro (m)</th><th class="n">Vértices</th><th>Beneficiário(a)</th><th>Confrontantes</th></tr></thead><tbody>
-      ${sub.parcelas.map((p) => `<tr><td><b>LT-${esc(p.lote)}</b></td><td class="n">${fm(p.perimetro.area_ha, 4)}</td><td class="n">${p.area_util_ha != null ? fm(p.area_util_ha, 4) : '—'}</td><td class="n">${fm(p.perimetro.perimetro_m)}</td><td class="n">${p.perimetro.vertices.length}</td><td class="conf">${esc(opts.beneficiarios?.[p.lote]?.nome ?? '—')}</td><td class="conf">${esc([...new Set(p.lados.map((l) => l.confrontante))].join('; '))}</td></tr>`).join('')}
+      <table><thead><tr><th>Lote</th><th class="n">Área total (ha)</th><th class="n">Área total (alq.)</th><th class="n">Área útil (ha)</th><th class="n">Área útil (alq.)</th><th class="n">Perímetro (m)</th><th class="n">Vértices</th><th>Beneficiário(a)</th><th>Confrontantes</th></tr></thead><tbody>
+      ${sub.parcelas.map((p) => `<tr><td><b>LT-${esc(p.lote)}</b></td><td class="n">${fm(p.perimetro.area_ha, 4)}</td><td class="n">${fm(haParaAlqueires(p.perimetro.area_ha), 4)}</td><td class="n">${p.area_util_ha != null ? fm(p.area_util_ha, 4) : '—'}</td><td class="n">${p.area_util_ha != null ? fm(haParaAlqueires(p.area_util_ha), 4) : '—'}</td><td class="n">${fm(p.perimetro.perimetro_m)}</td><td class="n">${p.perimetro.vertices.length}</td><td class="conf">${esc(opts.beneficiarios?.[p.lote]?.nome ?? '—')}</td><td class="conf">${esc([...new Set(p.lados.map((l) => l.confrontante))].join('; '))}</td></tr>`).join('')}
       </tbody></table>${rodape(d)}`);
   }
   for (const lote of opts.lotes) {
@@ -242,7 +243,7 @@ export function htmlSubdivisao(d: DadosMapaPA, sub: Subdivisao, opts: { lotes: s
     paginas.push(`${cabecalho(d, `LOTE ${pc.lote} — MAPA E MEMORIAL DESCRITIVO`)}
       <div class="mapa">${svgSubdivisao(sub, { destaque: pc.lote, css: 'width:100%;height:112mm;display:block' })}</div>
       ${LEGENDA}
-      <div class="quadros"><div class="q"><span>Área total (com APP e estradas)</span><b>${fm(p.area_ha, 4)} ha</b>${pc.area_util_ha != null ? `área útil: <b style="display:inline;font-size:9pt">${fm(pc.area_util_ha, 4)} ha</b>` : `${fm(p.area_m2)} m²`}</div>
+      <div class="quadros"><div class="q"><span>Área total (com APP e estradas)</span><b>${fm(p.area_ha, 4)} ha</b>${alqueiresTxt(p.area_ha)}<br>${pc.area_util_ha != null ? `área útil: <b style="display:inline;font-size:9pt">${haAlq(pc.area_util_ha)}</b>` : `${fm(p.area_m2)} m²`}</div>
         <div class="q"><span>Perímetro</span><b>${fm(p.perimetro_m)} m</b>${p.vertices.length} vértices</div>
         <div class="q"><span>Beneficiário(a)</span>${ben ? `<b style="font-size:9pt">${esc(ben.nome)}</b>CPF: ${esc(ben.cpf)}` : '<b style="font-size:9pt">______________________________</b>CPF: ____________________'}</div></div>
       <h2>Memorial descritivo</h2>${paragrafos.map((t) => `<p class="memo">${esc(t)}</p>`).join('')}

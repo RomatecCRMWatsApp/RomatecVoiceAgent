@@ -5,6 +5,7 @@
 // polilinha fechada (LWPOLYLINE/POLYLINE, coordenadas UTM). Funções puras.
 import proj4 from 'proj4';
 import { PaErro } from './erros';
+import { alqueiresTxt } from './unidades';
 
 export interface Vertice { nome: string; E: number; N: number; h: number | null; lat: number; lon: number }
 export interface Segmento { de: string; para: string; azimute: number; distancia: number }
@@ -229,7 +230,7 @@ const m2br = (v: number, d = 2) => v.toLocaleString('pt-BR', { minimumFractionDi
 export function textoMemorialPerimetro(p: Perimetro, nomeImovel: string, municipio: string): string[] {
   const v = p.vertices;
   const par: string[] = [];
-  par.push(`Imóvel: ${nomeImovel} — ${municipio}. Área: ${m2br(p.area_ha, 4)} ha (${m2br(p.area_m2)} m²). Perímetro: ${m2br(p.perimetro_m)} m. Sistema de referência: ${p.datum}, projeção UTM, fuso ${p.fuso}${p.hemisferio === 'S' ? ' Sul' : ' Norte'}.`);
+  par.push(`Imóvel: ${nomeImovel} — ${municipio}. Área: ${m2br(p.area_ha, 4)} ha (${alqueiresTxt(p.area_ha)}; ${m2br(p.area_m2)} m²). Perímetro: ${m2br(p.perimetro_m)} m. Sistema de referência: ${p.datum}, projeção UTM, fuso ${p.fuso}${p.hemisferio === 'S' ? ' Sul' : ' Norte'}.`);
   const trechos = p.segmentos.map((s, i) => {
     const w = v[(i + 1) % v.length];
     return `deste segue com azimute de ${grausDms(s.azimute)} e distância de ${m2br(s.distancia)} m até o vértice ${s.para}, de coordenadas N ${m2br(w.N, 3)} m e E ${m2br(w.E, 3)} m`;

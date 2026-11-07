@@ -8,6 +8,7 @@ import path from 'node:path';
 import type { Perimetro } from './perimetro';
 import { inversoGeodesico, areaGeodesicaLocal, dmsSigef, azimuteSigef } from './geodesia';
 import type { DadosMapaPA } from './mapasPdf';
+import { alqueiresTxt } from './unidades';
 
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 const fm = (v: number, d = 2) => v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -80,7 +81,7 @@ function blocoId(d: DadosMapaPA, pc: PecaSigef, c: ReturnType<typeof calculoSige
     ${it('Responsável Técnico(a)', esc(rt.nome.toUpperCase()))}${it('Formação', 'Técnico(a) em Agrimensura')}
     ${it('Conselho Profissional', esc(rt.cft ? `${rt.cft}/${d.projeto.uf}` : '—'))}${it('Cód. Credenciado(a) INCRA', esc(rt.incra || '—'))}
     ${it('Documento de RT', 'TRT nº ____________________')}${it('Sistema Geodésico', 'SIRGAS 2000')}
-    ${it('Área (Sistema Geodésico Local)', `<b>${fm(c.area_ha, 4)} ha</b>`)}${it('Perímetro', `<b>${fm(c.perimetro_m)} m</b>`)}
+    ${it('Área (Sistema Geodésico Local)', `<b>${fm(c.area_ha, 4)} ha</b> (${alqueiresTxt(c.area_ha)})`)}${it('Perímetro', `<b>${fm(c.perimetro_m)} m</b>`)}
     ${extra.join('')}
   </div>`;
 }

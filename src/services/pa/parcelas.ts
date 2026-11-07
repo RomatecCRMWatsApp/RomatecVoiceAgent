@@ -5,6 +5,7 @@
 // (vértices, azimutes, distâncias, área) com confrontantes por lado. Funções puras.
 import { PaErro } from './erros';
 import { montarPerimetro, type Perimetro } from './perimetro';
+import { alqueiresTxt, haAlq } from './unidades';
 
 export interface PolilinhaDxf { camada: string; pts: Array<{ x: number; y: number }>; fechada: boolean }
 export interface TextoDxf { camada: string; x: number; y: number; texto: string }
@@ -180,7 +181,7 @@ const dms = (g: number) => { const t = Math.round(g * 3600); return `${Math.floo
 export function textoMemorialParcela(pc: Parcela, nomePa: string, municipio: string, beneficiario: string | null): string[] {
   const p = pc.perimetro, v = p.vertices;
   const par: string[] = [];
-  par.push(`Imóvel: Lote ${pc.lote} do ${nomePa} — ${municipio}.${beneficiario ? ` Beneficiário(a): ${beneficiario}.` : ''} Área total: ${m2br(p.area_ha, 4)} ha (${m2br(p.area_m2)} m²), incluídas as áreas de preservação permanente (APP) e as faixas de estrada que incidem no lote${pc.area_util_ha != null ? `; área útil (descontadas APP e estradas): ${m2br(pc.area_util_ha, 4)} ha` : ''}. Perímetro: ${m2br(p.perimetro_m)} m. Sistema de referência: ${p.datum}, projeção UTM, fuso ${p.fuso}${p.hemisferio === 'S' ? ' Sul' : ' Norte'}.`);
+  par.push(`Imóvel: Lote ${pc.lote} do ${nomePa} — ${municipio}.${beneficiario ? ` Beneficiário(a): ${beneficiario}.` : ''} Área total: ${m2br(p.area_ha, 4)} ha (${alqueiresTxt(p.area_ha)}; ${m2br(p.area_m2)} m²), incluídas as áreas de preservação permanente (APP) e as faixas de estrada que incidem no lote${pc.area_util_ha != null ? `; área útil (descontadas APP e estradas): ${haAlq(pc.area_util_ha)}` : ''}. Perímetro: ${m2br(p.perimetro_m)} m. Sistema de referência: ${p.datum}, projeção UTM, fuso ${p.fuso}${p.hemisferio === 'S' ? ' Sul' : ' Norte'}.`);
   const trechos: string[] = [];
   let conf = '';
   pc.lados.forEach((s, i) => {
