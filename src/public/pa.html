@@ -1822,7 +1822,8 @@ async function abrirAssociado(aid, avisos){
             <div class="kpi ok"><div class="l">Recebido</div><div class="v" style="font-size:17px">${brl(d.resumo.recebido)}</div></div>
             <div class="kpi ${d.resumo.saldo ? 'red' : 'ok'}"><div class="l">Saldo</div><div class="v" style="font-size:17px">${brl(d.resumo.saldo)}</div></div></div>
           <div class="tbl" style="margin-top:10px"><table><thead><tr><th>Lançamento</th><th>Venc.</th><th class="right">Valor</th><th class="right">Recebido</th><th>Situação</th><th>Boleto (Asaas)</th></tr></thead><tbody>
-            ${d.lancamentos.map((l) => `<tr><td>${esc(l.tipo === 'BOLETO' ? 'Boleto ' + l.parcela : l.tipo === 'AVISTA' ? 'À vista' : l.tipo === 'SINAL' ? 'Sinal' : l.tipo)}</td><td>${dbr(l.vencimento)}</td><td class="right">${brl(l.valor)}</td><td class="right">${brl(l.valor_recebido)}</td><td>${chip(l.status_efetivo)}</td><td class="nowrap">${celBoleto(l)}</td></tr>`).join('')}
+            ${d.lancamentos.map((l) => `<tr><td>${esc(l.tipo === 'BOLETO' ? 'Boleto ' + l.parcela : l.tipo === 'AVISTA' ? 'À vista' : l.tipo === 'SINAL' ? 'Sinal' : l.tipo)}</td><td>${dbr(l.vencimento)}</td><td class="right">${brl(l.valor)}</td><td class="right">${brl(l.valor_recebido)}</td><td>${chip(l.status_efetivo)}</td><td class="nowrap">${celBoleto(l)}${podeEscrever() && l.saldo > 0.009 && l.valor_recebido < 0.01 && l.status !== 'CANCELADO' ? ` <button class="btn btn-ghost btn-sm" data-dividir="${l.id}" title="Dividir esta parcela em duas ou mais (valores e vencimentos)">✂️ Dividir</button>` : ''}</td></tr>
+            <tr class="hide" data-divrow="${l.id}"><td colspan="6"><div data-divbox="${l.id}"></div></td></tr>`).join('')}
           </tbody></table></div>
           <h3>Pagamentos</h3>
           ${d.pagamentos.length ? d.pagamentos.map((p) => `<div class="doc" style="margin-bottom:6px"><b>${dbr(p.pago_em)} · ${esc(p.forma.replace(/_/g,' '))} · ${brl(p.valor)}${p.pagamento_compartilhado ? ' · <span class="chip c-PARCIAL">Pagamento único (rateado)</span>' : ''}</b>
@@ -1877,6 +1878,40 @@ async function abrirAssociado(aid, avisos){
       $('#salvaPlano').onclick = async () => { try { await api(`/associados/${aid}/plano`, { json: { sinal: $('#novoSinal').value.replace(',', '.') } }); toast('Plano recalculado'); S.painel = S.lotes = null; abrirAssociado(aid); } catch (e){ toast(e.message, true); } };
     };
     if ($('#pagarAqui')) $('#pagarAqui').onclick = () => { fecharDrawer(); mostrar('financeiro'); setTimeout(() => preSelecionar(a), 50); };
+    // v3.164.0: dividir uma parcela (ex.: R$ 350 → R$ 200 hoje + R$ 150 depois)
+    pane.querySelectorAll('[data-dividir]').forEach((bt) => bt.onclick = () => {
+      const l = d.lancamentos.find((x) => x.id === Number(bt.dataset.dividir));
+      const linha = pane.querySelector(`[data-divrow="${l.id}"]`), box = pane.querySelector(`[data-divbox="${l.id}"]`);
+      if (!linha.classList.contains('hide')) { linha.classList.add('hide'); box.innerHTML = ''; return; }
+      linha.classList.remove('hide');
+      const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+      const parte = (v, dt) => `<div class="row dvparte" style="margin-top:4px"><div><label>Valor (R$)</label><input class="dvv" inputmode="decimal" value="${v}"></div><div><label>Vencimento</label><input class="dvd" type="date" value="${dt}"></div></div>`;
+      const metade = Math.round(l.valor * 50) / 100;
+      box.innerHTML = `<div style="padding:10px;border:1px dashed var(--gold);border-radius:10px;background:#FBF8EE">
+        <div class="muted">Dividir <b>${esc(rotLanc(l))}</b> (${brl(l.valor)}, venc. ${dbr(l.vencimento)}) em partes. A soma tem que dar ${brl(l.valor)}; as parcelas seguintes são renumeradas.</div>
+        <div class="dvpartes">${parte(String(metade).replace('.', ','), l.vencimento && l.vencimento > hoje ? l.vencimento : hoje)}${parte(String(Math.round((l.valor - metade) * 100) / 100).replace('.', ','), '')}</div>
+        <div class="row" style="margin-top:6px;align-items:center"><button class="btn btn-ghost btn-sm" style="flex:0 0 auto" data-dvmais>＋ parte</button><span class="muted dvsoma" style="flex:1 1 auto"></span></div>
+        <label class="citem cpchk"><input type="checkbox" class="dvcanc" checked> Cancelar no Asaas o boleto antigo desta parcela (tem o valor cheio)</label>
+        <label class="citem cpchk"><input type="checkbox" class="dvemit" checked> Emitir um boleto para cada parte</label>
+        <div class="row" style="margin-top:8px"><button class="btn btn-primary btn-sm" style="flex:0 0 auto" data-dvok>✅ Confirmar divisão</button></div></div>`;
+      const num = (t) => Number(String(t).replace(/\./g, '').replace(',', '.')) || 0;
+      const ler = () => [...box.querySelectorAll('.dvparte')].map((r) => ({ valor: num(r.querySelector('.dvv').value), vencimento: r.querySelector('.dvd').value }));
+      const somar = () => { const s = ler().reduce((t, p) => t + p.valor, 0); const ok = Math.abs(s - l.valor) < 0.01; box.querySelector('.dvsoma').innerHTML = `Soma: <b style="color:${ok ? 'var(--ok)' : 'var(--red)'}">${brl(s)}</b> de ${brl(l.valor)}${ok ? ' ✔️' : ''}`; return ok; };
+      box.addEventListener('input', somar); somar();
+      box.querySelector('[data-dvmais]').onclick = () => { if (box.querySelectorAll('.dvparte').length >= 6) return toast('No máximo 6 partes', true); box.querySelector('.dvpartes').insertAdjacentHTML('beforeend', parte('', '')); somar(); };
+      box.querySelector('[data-dvok]').onclick = async (ev) => {
+        const partes = ler();
+        if (partes.some((p) => !(p.valor > 0) || !p.vencimento)) return toast('Preencha valor e vencimento de todas as partes', true);
+        if (!somar()) return toast(`A soma precisa dar ${brl(l.valor)}`, true);
+        if (!confirm(`Dividir ${rotLanc(l)} em ${partes.map((p) => `${brl(p.valor)} (venc. ${dbr(p.vencimento)})`).join(' + ')}?`)) return;
+        ev.target.disabled = true;
+        try {
+          const r = await api(`/projetos/${S.pid}/lancamentos/${l.id}/dividir`, { json: { partes, cancelar_boleto: box.querySelector('.dvcanc').checked, emitir_boletos: box.querySelector('.dvemit').checked } });
+          toast('✅ ' + r.feitos.join(' · ') + (r.avisos.length ? ' ⚠️ ' + r.avisos.join(' · ') : ''), r.avisos.length > 0);
+          S.painel = S.lotes = null; abrirAssociado(a.id);
+        } catch (e){ toast(e.message, true); ev.target.disabled = false; }
+      };
+    });
     // v3.162.0: compensar um pagamento em outra parcela (pagou/recebeu o boleto do mês errado)
     pane.querySelectorAll('[data-compensar]').forEach((bt) => bt.onclick = () => {
       const p = d.pagamentos.find((x) => x.id === Number(bt.dataset.compensar));

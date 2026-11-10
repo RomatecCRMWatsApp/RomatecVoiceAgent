@@ -323,6 +323,13 @@ router.get('/projetos/:id/documentos', h(async (req) => {
 }));
 
 // ─── Financeiro ───────────────────────────────────────────────────────────
+// v3.164.0: dividir uma parcela em várias (valores e vencimentos), com boletos novos
+router.post('/projetos/:id/lancamentos/:lid/dividir', h(async (req) => {
+  exigirEscrita(req);
+  const b = req.body ?? {};
+  const partes = Array.isArray(b.partes) ? b.partes.map((x: { valor?: unknown; vencimento?: unknown }) => ({ valor: Number(x?.valor), vencimento: String(x?.vencimento ?? '') })) : [];
+  return fin.dividirLancamento(id(req.params.id), id(req.params.lid, 'parcela'), partes, { cancelar_boleto: b.cancelar_boleto !== false, emitir_boletos: b.emitir_boletos !== false }, ctx(req).sub);
+}));
 // v3.162.0: compensar — mover o recebimento para a parcela certa (pagou o boleto do mês errado)
 router.post('/projetos/:id/pagamentos/:pid/compensar', h(async (req) => {
   exigirEscrita(req);

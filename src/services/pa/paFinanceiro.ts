@@ -300,6 +300,92 @@ export async function compensarPagamento(
   return { ...mov, boleto_novo: boletoNovo, feitos, avisos };
 }
 
+// ─── v3.164.0: dividir uma parcela em várias (ex.: R$ 350 hoje → R$ 200 hoje + R$ 150 depois) ─
+// A parcela original fica com a 1ª parte; as demais entram logo depois dela (as parcelas seguintes
+// do mesmo tipo são renumeradas). O valor total do contrato não muda. Depois, opcionalmente, cancela
+// no Asaas o boleto em aberto da parcela original (o valor mudou) e emite um boleto para cada parte.
+export interface ParteDivisao { valor: number; vencimento: string }
+export async function dividirLancamento(
+  projetoId: number, lancamentoId: number, partes: ParteDivisao[], opts: { cancelar_boleto: boolean; emitir_boletos: boolean }, usuario: string | null,
+) {
+  if (!Array.isArray(partes) || partes.length < 2 || partes.length > 6) throw new PaErro('CAMPO_INVALIDO', 'Divida em 2 a 6 partes', 400);
+  for (const pt of partes) {
+    if (!(Number(pt.valor) > 0)) throw new PaErro('CAMPO_INVALIDO', 'Todas as partes precisam ter valor', 400);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(pt.vencimento))) throw new PaErro('CAMPO_INVALIDO', 'Vencimento inválido em uma das partes', 400);
+  }
+  const mov = await transacao(async (c) => {
+    const l = await one(c, 'SELECT l.*, a.projeto_id FROM pa_lancamentos l JOIN pa_associados a ON a.id = l.associado_id WHERE l.id = ? FOR UPDATE', [lancamentoId]);
+    if (!l || num(l.projeto_id) !== projetoId) throw new PaErro('LANCAMENTO_NAO_ENCONTRADO', 'Parcela não encontrada', 404);
+    if (l.status === 'PAGO' || l.status === 'CANCELADO') throw new PaErro('RATEIO_INVALIDO', l.status === 'PAGO' ? 'Parcela já paga não pode ser dividida' : 'Parcela cancelada não pode ser dividida', 409);
+    if (num(l.valor_recebido) > 0.009) throw new PaErro('RATEIO_INVALIDO', 'A parcela já tem valor recebido — compense ou lance o restante antes de dividir', 409);
+    const soma = centavos(partes.reduce((t, pt) => t + Number(pt.valor), 0));
+    if (Math.abs(soma - num(l.valor)) > 0.009) throw new PaErro('RATEIO_INVALIDO', `A soma das partes (${brl(soma)}) precisa ser igual ao valor da parcela (${brl(num(l.valor))})`, 422);
+    const aid = num(l.associado_id), tipo = String(l.tipo), parc = num(l.parcela), extra = partes.length - 1;
+    // abre espaço: renumera as parcelas seguintes do mesmo tipo (de trás para frente — chave única)
+    const seguintes = await rows(c, 'SELECT id, parcela FROM pa_lancamentos WHERE associado_id = ? AND tipo = ? AND parcela > ? ORDER BY parcela DESC FOR UPDATE', [aid, tipo, parc]);
+    for (const x of seguintes) await exec(c, 'UPDATE pa_lancamentos SET parcela = ? WHERE id = ?', [num(x.parcela) + extra, num(x.id)]);
+    const rotulo = tipo === 'BOLETO' ? `Boleto ${parc}` : tipo;
+    const nota = `Dividida de ${rotulo} (${brl(num(l.valor))}) em ${partes.length} partes`;
+    const stAberto = statusSemRecebimento(tipo);
+    await exec(c, 'UPDATE pa_lancamentos SET valor = ?, vencimento = ?, status = ?, descricao = ? WHERE id = ?', [centavos(Number(partes[0].valor)), partes[0].vencimento, stAberto, nota, lancamentoId]);
+    const ids = [lancamentoId];
+    for (let i = 1; i < partes.length; i++) {
+      const ins = await exec(c, 'INSERT INTO pa_lancamentos (associado_id, tipo, parcela, valor, vencimento, status, valor_recebido, descricao) VALUES (?, ?, ?, ?, ?, ?, 0, ?)', [
+        aid, tipo, parc + i, centavos(Number(partes[i].valor)), partes[i].vencimento, stAberto, nota,
+      ]);
+      ids.push(ins.insertId);
+    }
+    await registrarEvento(c, {
+      projeto_id: projetoId, associado_id: aid, usuario, tipo: 'PARCELA_DIVIDIDA',
+      dados: { lancamento_id: lancamentoId, de: { rotulo, valor: num(l.valor), vencimento: l.vencimento ? String(isoDateTime(l.vencimento)).slice(0, 10) : null }, partes, lancamentos: ids, renumeradas: seguintes.length },
+    });
+    return { associado_id: aid, rotulo, ids, renumeradas: seguintes.length };
+  });
+
+  const avisos: string[] = [];
+  const feitos: string[] = [`${mov.rotulo} dividida em ${partes.map((pt) => `${brl(Number(pt.valor))} (venc. ${dataBr(pt.vencimento)})`).join(' + ')}`];
+  if (mov.renumeradas) feitos.push(`${mov.renumeradas} parcela(s) seguinte(s) renumerada(s)`);
+  const bol = await import('./paBoletos');
+  // o boleto antigo tinha o valor cheio: sai do Asaas antes de emitir os novos
+  const abertos = await rows(pool, "SELECT id FROM pa_boletos WHERE lancamento_id = ? AND status IN ('PENDENTE','VENCIDO')", [lancamentoId]);
+  if (opts.cancelar_boleto) {
+    for (const b of abertos) {
+      try { await bol.cancelarBoleto(num(b.id), usuario); feitos.push(`boleto antigo #${b.id} cancelado no Asaas`); }
+      catch (e) { avisos.push(`não consegui cancelar o boleto antigo #${b.id}: ${(e as Error).message.slice(0, 140)}`); }
+    }
+  } else if (abertos.length) avisos.push(`o boleto antigo #${abertos.map((b) => b.id).join(', #')} continua ativo com o valor cheio — cancele antes de mandar os novos`);
+  const boletos: number[] = [];
+  if (opts.emitir_boletos) {
+    for (const id of mov.ids) {
+      try { const nb = await bol.emitirBoleto(id, usuario); boletos.push(nb.id); feitos.push(`boleto #${nb.id} emitido: ${brl(nb.valor)} venc. ${dataBr(nb.vencimento ?? null)}`); }
+      catch (e) { avisos.push(`não consegui emitir o boleto da parte ${mov.ids.indexOf(id) + 1}: ${(e as Error).message.slice(0, 140)}`); }
+    }
+  }
+  return { ...mov, boletos, feitos, avisos };
+}
+
+/**
+ * v3.164.0: pedido do CEO (10/11/2026) — Edielma Maria Rodrigues Sousa, lote 35: cancelar o boleto que
+ * vence hoje e gerar dois — R$ 200,00 para hoje e R$ 150,00 para quinta-feira 19/11/2026. Roda uma vez no
+ * boot e só age se achar exatamente um boleto em aberto vencendo em 10/11 numa parcela de R$ 350,00 sem
+ * recebimento, e nenhuma divisão anterior. Idempotente.
+ */
+export async function corrigirDivisoesConhecidas(): Promise<void> {
+  const a = await one(pool, `SELECT a.id, a.projeto_id FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id
+    WHERE UPPER(a.nome) LIKE 'EDIELMA%RODRIGUES%SOUSA%' AND CAST(lt.numero AS UNSIGNED) = 35 AND a.ativo = 1 LIMIT 1`);
+  if (!a) return;
+  const ja = await one(pool, "SELECT id FROM pa_eventos WHERE associado_id = ? AND tipo = 'PARCELA_DIVIDIDA' LIMIT 1", [a.id]);
+  if (ja) return;
+  const cands = await rows(pool, `SELECT DISTINCT l.id, l.valor, l.valor_recebido, l.status FROM pa_boletos b JOIN pa_lancamentos l ON l.id = b.lancamento_id
+    WHERE b.associado_id = ? AND b.status IN ('PENDENTE','VENCIDO') AND (b.vencimento = '2026-11-10' OR l.vencimento = '2026-11-10')`, [a.id]);
+  if (cands.length !== 1) { console.warn(`[pa-divisao] Edielma (lote 35): ${cands.length} boleto(s) em aberto vencendo em 10/11 — nada feito, use "Dividir" na ficha`); return; }
+  const l = cands[0];
+  if (Math.abs(num(l.valor) - 350) > 0.009 || num(l.valor_recebido) > 0.009) { console.warn(`[pa-divisao] Edielma (lote 35): parcela de ${brl(num(l.valor))} com ${brl(num(l.valor_recebido))} recebido — não bate com 200 + 150, nada feito`); return; }
+  const r = await dividirLancamento(num(a.projeto_id), num(l.id), [{ valor: 200, vencimento: '2026-11-10' }, { valor: 150, vencimento: '2026-11-19' }],
+    { cancelar_boleto: true, emitir_boletos: true }, 'sistema (pedido do CEO)');
+  console.log(`[pa-divisao] Edielma (lote 35): ${r.feitos.join(' · ')}${r.avisos.length ? ' · AVISOS: ' + r.avisos.join(' | ') : ''}`);
+}
+
 /**
  * v3.162.0: correção pontual pedida pelo CEO (07/11/2026) — Silvana da Silva Gomes, lote 14:
  * recebeu/pagou o boleto de 10/12 (Boleto 2) no lugar do de 10/11 (Boleto 1). Roda uma vez no

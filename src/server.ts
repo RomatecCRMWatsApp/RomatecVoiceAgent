@@ -342,6 +342,9 @@ void (async () => {
   // v3.162.0: correção pontual (Silvana, lote 14 — pagou o boleto de dezembro no lugar do de novembro)
   try { const f = await import('./services/pa/paFinanceiro'); await f.corrigirCompensacoesConhecidas(); }
   catch (err) { console.error('[pa-compensacao] falhou:', err); }
+  // v3.164.0: divisão pedida pelo CEO (Edielma, lote 35: R$ 200 hoje + R$ 150 em 19/11)
+  try { const f = await import('./services/pa/paFinanceiro'); await f.corrigirDivisoesConhecidas(); }
+  catch (err) { console.error('[pa-divisao] falhou:', err); }
 })();
 // v3.152.0: Assinatura pelo chat — lotes de aprovação (assinatura_lotes) + lote_id/ancoras
 void (async () => {
