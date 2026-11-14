@@ -11,6 +11,7 @@ import { subdivisaoDeDxf, vilaDeDxf, textoMemorialParcela, limparSubdivisao, dxf
 import { plantaSigef, memorialSigef, documentoSigef, pdfSigef } from './sigefPdf';
 import { calcularDivisa, divisaDeDxf, dxfDivisa, type DivisaSalva } from './divisa';
 import { DIVISA_SALETE_MORENO } from './seeds/divisaSaleteMoreno';
+import { htmlExtrato, textoResumoExtrato, descreverFiltro, RODAPE_PDF, type FiltroExtrato } from './extratoPdf';
 import { svgPerimetro } from './mapasPdf';
 import type { LoteDoMapa } from './mapaSvg';
 
@@ -19,7 +20,7 @@ async function lotesDoMapa(projetoId: number): Promise<LoteDoMapa[]> {
   return ls.filter((l) => Array.isArray(l.croqui_xy)).map((l) => ({ numero: String(l.numero), xy: l.croqui_xy as number[][], institucional: l.tipo === 'INSTITUCIONAL' }));
 }
 
-function dadosCabecalho(p: Projeto): DadosMapaPA {
+export function dadosCabecalho(p: Projeto): DadosMapaPA {
   const lj = (p.layout_json ?? {}) as { responsavel_tecnico?: { nome?: string; cft?: string; incra?: string } };
   const rt = lj.responsavel_tecnico ?? {};
   const h = hojeBrasil();
@@ -372,4 +373,44 @@ export async function semearDivisas(): Promise<void> {
   await exec(pool, 'UPDATE pa_projetos SET divisa_json = ? WHERE id = ?', [JSON.stringify(div), Number(r.id)]);
   await registrarEvento(pool, { projeto_id: Number(r.id), usuario: 'sistema', tipo: 'DIVISA_ATUALIZADA', dados: { arquivo: div.arquivo, municipios: div.municipios.map((m) => m.nome) } });
   console.log('[pa-divisa] divisa municipal do MT-03 carregada no PA Salete Moreno');
+}
+
+// ─── v3.165.0: extrato financeiro dos associados em PDF + envio pelo WhatsApp ─
+async function montarPdfExtrato(projetoId: number, f: FiltroExtrato) {
+  const caixa = await import('./paCaixa');
+  const [p, e] = await Promise.all([buscarProjeto(projetoId), caixa.extratoAssociados(projetoId)]);
+  const d = dadosCabecalho(p);
+  const lj = (p.layout_json ?? {}) as { responsavel_tecnico?: { empresa?: string; cnpj?: string } };
+  const emp = {
+    nome: lj.responsavel_tecnico?.empresa || 'Romatec Consultoria Total', cnpj: lj.responsavel_tecnico?.cnpj || '17.261.987/0001-09', cidade: 'Açailândia/MA',
+    rt: `${d.rt.nome} — ${d.rt.registro}`, associacao: p.associacao_nome, associacao_cnpj: p.associacao_cnpj,
+  };
+  const agora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const html = htmlExtrato(e, d, emp, f, agora);
+  const { htmlToPdf } = await import('../../pdf/htmlToPdf');
+  const pdf = await htmlToPdf(html, {
+    format: 'A4', landscape: true, printBackground: true, displayHeaderFooter: true, headerTemplate: '<div></div>',
+    footerTemplate: RODAPE_PDF(`${p.nome} · ${descreverFiltro(f)} · ${emp.nome} · gerado em ${agora}`),
+    margin: { top: '9mm', right: '9mm', bottom: '13mm', left: '9mm' },
+  });
+  const sufixo = f.sit ? `-${String(f.sit).replace(/_/g, '-')}` : '';
+  return { pdf, nome: `EXTRATO-ASSOCIADOS${sufixo}-${p.codigo}-${e.posicao_em}.pdf`, e, p };
+}
+
+export async function pdfExtrato(projetoId: number, f: FiltroExtrato): Promise<{ pdf: Buffer; nome: string }> {
+  const { pdf, nome } = await montarPdfExtrato(projetoId, f);
+  return { pdf, nome };
+}
+
+/** Manda o PDF (+ resumo em texto) pelo WhatsApp do sistema: para o número informado ou para o administrador. */
+export async function enviarExtratoWhatsApp(projetoId: number, f: FiltroExtrato, numero: string | null, usuario: string | null) {
+  const { numerosAdmin } = await import('./paNotificacoes');
+  const destinos = numero ? [numero.replace(/\D/g, '')] : numerosAdmin();
+  if (!destinos.length) throw new PaErro('SEM_DESTINO', 'Nenhum número de administrador configurado (PA_ADMIN_WHATSAPP/CEO_WHATSAPP_PHONE) — informe um número', 400);
+  const { pdf, nome, e, p } = await montarPdfExtrato(projetoId, f);
+  const texto = textoResumoExtrato(e, p.nome, f);
+  const { enviarDocumentoNumero } = await import('./paWhatsapp');
+  for (const n of destinos) await enviarDocumentoNumero(n, pdf, nome, texto);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'EXTRATO_WHATSAPP', dados: { filtro: f, destinos: destinos.map((x) => x.slice(0, 4) + '…' + x.slice(-4)), arquivo: nome } });
+  return { enviados: destinos.length, arquivo: nome, para_admin: !numero };
 }

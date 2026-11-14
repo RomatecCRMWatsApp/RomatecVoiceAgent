@@ -152,6 +152,21 @@ export async function enviarWhatsAppNumero(numero: string, mensagem: string): Pr
   }
 }
 
+/** v3.165.0: documento (PDF) para um número — mesma fila/ritmo; o texto vai antes, como legenda. */
+export async function enviarDocumentoNumero(numero: string, pdf: Buffer, nomeArquivo: string, texto?: string): Promise<void> {
+  const n = String(numero).replace(/\D/g, '');
+  if (n.length < 10) throw new PaErro('CAMPO_INVALIDO', 'Número de WhatsApp inválido', 400);
+  try {
+    await naVez(async () => {
+      const z = await zapi();
+      if (texto) { await z.sendReply(n, texto.slice(0, 4000)); await dormir(sorteio(...RITMO.entreMensagensMs)); }
+      await z.sendDocument(n, pdf.toString('base64'), nomeArquivo, 'pdf');
+    });
+  } catch (err) {
+    throw new PaErro('ZAPI_INDISPONIVEL', `Falha ao enviar pelo WhatsApp do sistema: ${(err as Error).message.slice(0, 200)}`, 502);
+  }
+}
+
 // ─── v3.146.1: fila de envio em lote (roda no servidor, devagar) ──────────
 export interface ItemFila { associado_id: number; nome: string; lancamento_ids: number[] }
 export interface EstadoFila {

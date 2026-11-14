@@ -469,6 +469,25 @@ function enviarXlsx(res: Response, nome: string, abas: Array<{ nome: string; lin
 const dBr = (iso: string | null) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
 const SITUACAO_TXT: Record<string, string> = { QUITADO: 'Quitado', EM_DIA: 'Em dia', EM_ATRASO: 'Em atraso', SEM_PLANO: 'Sem plano' };
 
+// v3.165.0: extrato em PDF (mesmo filtro da tela) e envio pelo WhatsApp do sistema
+const filtroExtrato = (q: Record<string, unknown>) => ({
+  busca: typeof q.busca === 'string' ? q.busca.slice(0, 80) : null,
+  sit: typeof q.sit === 'string' && /^[A-Z_]{0,20}$/.test(q.sit) ? q.sit : null,
+  ordem: typeof q.ordem === 'string' && /^[a-z]{0,12}$/.test(q.ordem) ? q.ordem : null,
+});
+router.get('/projetos/:id/extrato.pdf', h(async (req, res) => {
+  const { pdf, nome } = await mapas.pdfExtrato(id(req.params.id), filtroExtrato(req.query as Record<string, unknown>));
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${nome}"`);
+  res.end(pdf);
+  return undefined;
+}));
+router.post('/projetos/:id/extrato/whatsapp', h(async (req) => {
+  exigirEscrita(req);
+  const b = req.body ?? {};
+  const numero = typeof b.numero === 'string' && b.numero.replace(/\D/g, '').length >= 10 ? b.numero : null;
+  return mapas.enviarExtratoWhatsApp(id(req.params.id), filtroExtrato(b), numero, ctx(req).sub);
+}));
 router.get('/projetos/:id/extrato', h(async (req, res) => {
   const e = await caixa.extratoAssociados(id(req.params.id));
   if (req.query.formato === 'xlsx') {

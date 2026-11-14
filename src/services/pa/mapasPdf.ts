@@ -58,7 +58,7 @@ const CSS = `
   .ass div{border-top:1px solid #333;width:80mm;margin:0 auto 1mm;padding-top:1mm}
 `;
 
-function cabecalho(d: DadosMapaPA, titulo: string): string {
+export function cabecalho(d: DadosMapaPA, titulo: string): string {
   const logo = (() => { const f = [path.resolve(__dirname, '../../public/brand/pa/logo_romatec.jpg'), path.resolve(process.cwd(), 'src/public/brand/pa/logo_romatec.jpg')].find((c) => existsSync(c)); return f ? `data:image/jpeg;base64,${readFileSync(f).toString('base64')}` : ''; })();
   const em = asset(d.marca.emblema);
   return `<div class="cab">${logo ? `<div class="lg"><img src="${logo}"></div>` : ''}<div class="t"><h1>${esc(titulo)}</h1><div class="s">${esc(d.projeto.nome)} · ${esc(d.projeto.municipio)}/${esc(d.projeto.uf)}${d.projeto.associacao ? ' · ' + esc(d.projeto.associacao) : ''}</div></div>${em ? `<img class="em" src="${em}">` : ''}</div>`;
