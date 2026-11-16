@@ -58,6 +58,7 @@ function rotuloParcela(tipo: string, parcela: number, totalBoletos: number): str
   if (tipo === 'BOLETO') return `Parcela ${parcela}/${totalBoletos}`;
   if (tipo === 'SINAL') return 'Sinal';
   if (tipo === 'AVISTA') return 'Pagamento à vista';
+  if (tipo === 'MARCO') return 'Taxa de marcos de concreto';
   return 'Ajuste';
 }
 
@@ -137,7 +138,7 @@ export async function boletosDoAssociado(aid: number) {
 export async function elegiveisParaBoleto(projetoId: number, ateIso: string | null, tipos: string[] = ['BOLETO']) {
   await buscarProjeto(projetoId);
   const ate = ateIso && /^\d{4}-\d{2}-\d{2}$/.test(ateIso) ? ateIso : '9999-12-31';
-  const ts = tipos.filter((t) => ['SINAL', 'BOLETO', 'AVISTA', 'AJUSTE'].includes(t));
+  const ts = tipos.filter((t) => ['SINAL', 'BOLETO', 'AVISTA', 'AJUSTE', 'MARCO'].includes(t));
   if (!ts.length) return [];
   const ls = await rows(pool, `
     SELECT l.*, a.nome, lt.numero AS lote FROM pa_lancamentos l

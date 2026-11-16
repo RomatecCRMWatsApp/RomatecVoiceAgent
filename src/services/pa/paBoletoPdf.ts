@@ -53,7 +53,7 @@ async function agenciaCodigo(): Promise<string> {
   return valor;
 }
 
-const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à vista', AJUSTE: 'Ajuste' };
+const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à vista', AJUSTE: 'Ajuste', MARCO: 'Taxa de marcos' };
 
 /**
  * O Asaas pode regerar linha digitável/nosso número (ex.: mudança nos dados da
@@ -89,7 +89,7 @@ export async function dadosBoletoRomatec(boletoId: number): Promise<DadosBoletoR
   const a = await buscarAssociado(num(b.associado_id));
   const projeto = await buscarProjeto(a.projeto_id);
   const lote = await one(pool, 'SELECT * FROM pa_lotes WHERE id = ?', [a.lote_id]);
-  const lancs = (await rows(pool, `SELECT * FROM pa_lancamentos WHERE associado_id = ? AND status <> 'CANCELADO' ORDER BY FIELD(tipo,'SINAL','AVISTA','BOLETO','AJUSTE'), parcela`, [a.id])).map((l) => mapLancamento(l));
+  const lancs = (await rows(pool, `SELECT * FROM pa_lancamentos WHERE associado_id = ? AND status <> 'CANCELADO' ORDER BY FIELD(tipo,'SINAL','AVISTA','BOLETO','AJUSTE','MARCO'), parcela`, [a.id])).map((l) => mapLancamento(l));
   const totBoletos = lancs.filter((l) => l.tipo === 'BOLETO').length;
   const rot = (l: { tipo: string; parcela: number }) => (l.tipo === 'BOLETO' ? `Parcela ${l.parcela}/${totBoletos}` : ROTULO[l.tipo] ?? l.tipo);
   const lancAtual = lancs.find((l) => l.id === num(b.lancamento_id));

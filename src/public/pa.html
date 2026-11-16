@@ -2035,7 +2035,7 @@ async function formNovoAssociado(){
 let FIN = { recibo: null, selecionados: [] };
 async function carregarAssoc(){ if (!S.assoc) S.assoc = (await api(`/projetos/${S.pid}/associados`)).associados; return S.assoc; }
 // v3.147.0: sub-abas do Financeiro — Lançamentos e cobrança | Extrato por associado | Fluxo de caixa.
-const FIN_VISOES = [['lancamentos', '💳 Lançamentos e cobrança'], ['extrato', '📋 Extrato por associado'], ['caixa', '📈 Fluxo de caixa']];
+const FIN_VISOES = [['lancamentos', '💳 Lançamentos e cobrança'], ['extrato', '📋 Extrato por associado'], ['caixa', '📈 Fluxo de caixa'], ['marcos', '🪨 Taxa de marcos']];
 function barraFin(){
   return `<div class="subtabs">${FIN_VISOES.map(([k, t]) => `<button class="btn btn-sm ${S.finVisao === k ? 'btn-primary' : 'btn-ghost'}" data-fin="${k}">${t}</button>`).join('')}</div>`;
 }
@@ -2046,7 +2046,7 @@ async function rFinanceiro(){
   if (S.finVisao !== 'lancamentos'){
     v.innerHTML = barraFin() + '<div id="finSub"></div>';
     ligarBarraFin();
-    return S.finVisao === 'extrato' ? rExtrato() : rCaixa();
+    return S.finVisao === 'extrato' ? rExtrato() : S.finVisao === 'marcos' ? rMarcos() : rCaixa();
   }
   FIN = { recibo: null, selecionados: [] };
   const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
@@ -2318,6 +2318,67 @@ function desenharExtrato(){
     <tfoot><tr><td></td><td>${lista.length} associado(s)</td><td class="right nowrap">${brl(soma('contratado'))}</td><td class="right nowrap pos">${brl(soma('recebido'))}</td><td class="right nowrap">${brl(soma('em_aberto'))}</td><td colspan="2"></td><td class="right nowrap neg">${brl(soma('vencido'))}</td><td colspan="3"></td></tr></tfoot></table>`;
   $('#exTabela').querySelectorAll('tr[data-ex]').forEach((tr) => tr.onclick = () => { const id = Number(tr.dataset.ex); EXT.abertos.has(id) ? EXT.abertos.delete(id) : EXT.abertos.add(id); desenharExtrato(); });
   $('#exTabela').querySelectorAll('[data-abrir]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); abrirAssociado(Number(b.dataset.abrir)); });
+}
+
+// ─── v3.168.0: Taxa de marcos de concreto — um boleto por associado, gerar e enviar com um clique ─
+let MARCOS_TIMER = null;
+async function rMarcos(){
+  const box = $('#finSub');
+  clearTimeout(MARCOS_TIMER);
+  let d;
+  try { d = await api(`/projetos/${S.pid}/marcos`); } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  const L = d.associados;
+  const com = L.filter((a) => a.lancamento), bol = L.filter((a) => a.boleto), env = L.filter((a) => a.boleto && a.boleto.enviado_em), pagos = L.filter((a) => a.lancamento && a.lancamento.status === 'PAGO');
+  const comVenc = com.find((a) => a.lancamento.vencimento);
+  const venc0 = comVenc ? comVenc.lancamento.vencimento : '';
+  const valor0 = com[0] ? com[0].lancamento.valor : d.valor_padrao;
+  const j = d.job, f = d.fila;
+  const rodando = (j && j.status === 'RODANDO') || (f && f.status === 'RODANDO');
+  const stBol = (a) => {
+    if (!a.lancamento) return '<span class="muted">—</span>';
+    if (a.lancamento.status === 'PAGO') return chip('PAGO');
+    if (!a.boleto) return chip('A_PAGAR', 'sem boleto');
+    return chip(a.boleto.status, a.boleto.status === 'VENCIDO' ? 'vencido' : '🧾 gerado') + (a.boleto.enviado_em ? ' ' + chip('VALIDO', '📲 enviado ' + dbr(a.boleto.enviado_em)) : '');
+  };
+  const kpi = (l, v, extra) => `<div class="k2"><div><div class="l">${l}</div><div class="v">${v}</div>${extra ? `<div class="muted">${extra}</div>` : ''}</div></div>`;
+  const form = podeEscrever() ? `<div class="grid3">
+        <div><label for="mkValor">Valor por associado (R$)</label><input id="mkValor" inputmode="decimal" value="${esc(String(valor0).replace('.', ','))}"></div>
+        <div><label for="mkVenc">Vencimento (o mesmo para todos)</label><input type="date" id="mkVenc" value="${esc(venc0)}"></div>
+        <div style="display:flex;align-items:end"><label class="citem" style="margin:0"><input type="checkbox" id="mkEnviar" checked> Enviar pelo WhatsApp automaticamente</label></div>
+      </div>
+      <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="mkTodos" style="flex:0 0 auto" ${rodando ? 'disabled' : ''}>🪨 Gerar boleto do marco — todos (${L.length})</button>
+        <button class="btn btn-gold" id="mkMarcados" style="flex:0 0 auto" ${rodando ? 'disabled' : ''}>Gerar só para os marcados</button>
+        ${f && f.status === 'RODANDO' ? '<button class="btn btn-ghost" id="mkParar" style="flex:0 0 auto">⏹ Parar envio</button>' : ''}
+      </div>` : '';
+  const jobHtml = j ? `<div class="avisos" style="margin-top:10px"><b>${esc(j.fase)}</b> — boletos emitidos: ${j.emitidos}${j.ja_tinham ? ` · já tinham: ${j.ja_tinham}` : ''} de ${j.total}${j.erros.length ? ` · <span style="color:var(--red)">${j.erros.length} erro(s)</span>` : ''}${j.fila_erro ? `<br><span style="color:var(--red)">WhatsApp: ${esc(j.fila_erro)}</span>` : ''}
+        ${j.erros.length ? `<ul>${j.erros.map((x) => `<li>${esc(x.nome)}: ${esc(x.erro)}</li>`).join('')}</ul>` : ''}</div>` : '';
+  const filaHtml = f ? `<div class="avisos">📲 Envio pelo WhatsApp: <b>${esc(f.status)}</b> · ${f.enviados} enviado(s)${f.falhas ? ` · ${f.falhas} falha(s)` : ''} de ${f.total}${f.atual && f.status === 'RODANDO' ? ` · agora: ${esc(f.atual)}` : ''}</div>` : '';
+  const linhas = L.map((a) => `<tr>${podeEscrever() ? `<td><input type="checkbox" class="mkCk" value="${a.associado_id}"></td>` : ''}<td><b>${esc(a.lote_vila)}</b></td><td class="nowrap">${a.parcela ? 'LT-' + esc(a.parcela) : '—'}</td><td>${esc(a.nome)}<div class="muted">${esc(a.numero)}</div></td>
+        <td>${a.whatsapp_valido ? chip('VALIDO', '✓') : '<span class="muted">sem WhatsApp</span>'}</td><td class="right nowrap">${a.lancamento ? brl(a.lancamento.valor) : '—'}</td><td class="nowrap">${a.lancamento ? dbr(a.lancamento.vencimento) : '—'}</td><td>${stBol(a)}</td></tr>`).join('');
+  box.innerHTML = `<div class="card"><h2 style="margin-top:0">🪨 Taxa de marcos de concreto</h2>
+      <div class="muted">Um boleto por associado para os marcos de concreto cravados nos vértices do lote. Mesmo valor e mesmo vencimento para todos. Gera o boleto no Asaas e, com o envio marcado, manda pelo WhatsApp do sistema <b>um por vez, com 30 a 60 s entre associados</b> (anti-bloqueio).</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">${kpi('Associados', L.length)}${kpi('Com taxa lançada', com.length)}${kpi('Boleto gerado', bol.length)}${kpi('Enviado no WhatsApp', env.length)}${kpi('Pagos', pagos.length, brl(pagos.reduce((s, a) => s + a.lancamento.valor, 0)))}</div>
+      ${form}
+      <div id="mkJob">${jobHtml}${filaHtml}</div></div>
+    <div class="card"><div class="tbl"><table><thead><tr>${podeEscrever() ? '<th><input type="checkbox" id="mkTodosCk" title="Marcar todos"></th>' : ''}<th>Lote vila</th><th>Lote produção</th><th>Associado</th><th>WhatsApp</th><th class="right">Taxa</th><th>Vencimento</th><th>Boleto</th></tr></thead><tbody>${linhas}</tbody></table></div>
+      <div class="muted" style="margin-top:6px">Quem está sem WhatsApp recebe o boleto pelo 🧾 na ficha do associado (imprimir ou mandar por outro meio).</div></div>`;
+  if ($('#mkTodosCk')) $('#mkTodosCk').onchange = (e) => box.querySelectorAll('.mkCk').forEach((c) => { c.checked = e.target.checked; });
+  const gerar = async (aids) => {
+    const valor = Number(String($('#mkValor').value).replace(/\./g, '').replace(',', '.'));
+    const venc = $('#mkVenc').value, enviar = $('#mkEnviar').checked;
+    if (!(valor > 0)) return toast('Informe o valor', true);
+    if (!venc) return toast('Escolha o vencimento', true);
+    const n = aids ? aids.length : L.length;
+    if (!n) return toast('Marque ao menos um associado', true);
+    if (!confirm(`Gerar o boleto da taxa de marcos de ${brl(valor)} com vencimento ${dbr(venc)} para ${n} associado(s)${enviar ? ' e enviar pelo WhatsApp (um por vez, devagar)' : ''}?\n\nQuem já tem boleto da taxa não ganha outro.`)) return;
+    try { await api(`/projetos/${S.pid}/marcos/gerar`, { json: { valor, vencimento: venc, enviar, associado_ids: aids } }); toast('Gerando os boletos…'); rMarcos(); }
+    catch (e){ toast(e.message, true); }
+  };
+  if ($('#mkTodos')) $('#mkTodos').onclick = () => gerar(null);
+  if ($('#mkMarcados')) $('#mkMarcados').onclick = () => gerar([...box.querySelectorAll('.mkCk:checked')].map((c) => Number(c.value)));
+  if ($('#mkParar')) $('#mkParar').onclick = async () => { try { await api('/whatsapp/fila/parar', { json: {} }); toast('Envio parado'); rMarcos(); } catch (e){ toast(e.message, true); } };
+  if (rodando) MARCOS_TIMER = setTimeout(() => { if (S.finVisao === 'marcos' && $('#mkJob')) rMarcos(); }, 5000);
 }
 
 // ─── v3.147.0: Fluxo de caixa (entradas dos associados + movimentos manuais) ─
@@ -2653,6 +2714,8 @@ function rImportar(){
         <div><label for="iAcervo">Acervo digital (ZIP, opcional)</label><input type="file" id="iAcervo" accept=".zip,application/zip"></div></div>
       <div class="row" style="margin-top:10px"><button class="btn btn-primary" id="iBtn" style="flex:0 0 auto">📥 Importar</button><span class="muted" id="iProg"></span></div>
       <div id="iRel"></div></div>
+    ${S.pid ? `<div class="card"><h2>📡 Pontos para a coletora (locação dos marcos)</h2><p class="muted">Todos os vértices dos lotes, do perímetro e da vila, sem repetir ponto (vértice comum a dois lotes sai uma vez). Coordenadas UTM SIRGAS 2000. Carregue na coletora e use na locação/cravação dos marcos; a caderneta de campo traz os pontos por lote, com caixa para marcar o que foi cravado.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn btn-primary" data-col="csv" style="flex:0 0 auto">⬇️ CSV (Nome, E, N, Cota, Código)</button><button class="btn btn-ghost" data-col="txt" style="flex:0 0 auto">⬇️ TXT (P,E,N,Z,D)</button><button class="btn btn-ghost" data-col="dxf" style="flex:0 0 auto">⬇️ DXF (pontos + lotes)</button><button class="btn btn-gold" id="colCad" style="flex:0 0 auto">📒 Caderneta de campo (PDF)</button></div></div>` : ''}
     ${S.pid ? `<div class="card"><h2>Exportar acervo</h2><p class="muted">ZIP com a estrutura LOTE-XX-Nome/ de todos os documentos carregados. Fica registrado em eventos (LGPD).</p>
       <button class="btn btn-ghost" id="eBtn">⬇️ Baixar ZIP do acervo</button></div>` : ''}`;
   $('#iBtn').onclick = () => {
@@ -2679,6 +2742,8 @@ function rImportar(){
     xhr.onerror = () => { $('#iBtn').disabled = false; $('#iProg').textContent = ''; toast('Falha de rede no envio', true); };
     $('#iBtn').disabled = true; xhr.send(fd);
   };
+  v.querySelectorAll('[data-col]').forEach((b) => b.onclick = () => baixar(`/projetos/${S.pid}/coletora.${b.dataset.col}`, `PONTOS-COLETORA.${b.dataset.col}`).catch((e) => toast(e.message, true)));
+  if ($('#colCad')) $('#colCad').onclick = () => abrirPdf(`/projetos/${S.pid}/caderneta-campo.pdf`);
   if ($('#eBtn')) $('#eBtn').onclick = () => { toast('Gerando ZIP…'); baixar(`/projetos/${S.pid}/export`, 'ACERVO.zip').catch((e) => toast(e.message, true)); };
 }
 

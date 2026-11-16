@@ -36,7 +36,7 @@ export const VERSICULOS: ReadonlyArray<{ texto: string; ref: string }> = [
 const FORMA: Record<string, string> = {
   PIX: 'Pix', BOLETO: 'Boleto', ESPECIE: 'Dinheiro', CARTAO_DEBITO: 'Cartão de débito', CARTAO_CREDITO: 'Cartão de crédito', MISTO: 'Misto',
 };
-const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à vista', AJUSTE: 'Ajuste' };
+const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à vista', AJUSTE: 'Ajuste', MARCO: 'Taxa de marcos (marcos de concreto)' };
 export const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBr = (iso: string | null) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
 const horaBr = (iso: string | null) => (iso && iso.length >= 16 && iso.slice(11, 16) !== '12:00' && iso.slice(11, 16) !== '00:00' ? iso.slice(11, 16) : null);

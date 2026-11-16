@@ -87,7 +87,7 @@ export function aplicarRecibo(p: NovoPagamento, r: ReciboInfinitePay): NovoPagam
 async function abertosDoAssociado(db: Db, aid: number) {
   const ls = await rows(db, `
     SELECT * FROM pa_lancamentos WHERE associado_id = ? AND status NOT IN ('PAGO','CANCELADO')
-    ORDER BY FIELD(tipo,'SINAL','AVISTA','BOLETO','AJUSTE'), parcela FOR UPDATE`, [aid]);
+    ORDER BY FIELD(tipo,'SINAL','AVISTA','BOLETO','AJUSTE','MARCO'), parcela FOR UPDATE`, [aid]);
   return ls.map((l) => mapLancamento(l)).filter((l) => l.saldo > 0);
 }
 
@@ -237,7 +237,7 @@ export async function lancarPagamento(projetoId: number, entrada: NovoPagamento,
 // da parcela que ficou paga, emite boleto novo para a parcela que reabriu e reenvia a
 // confirmação no WhatsApp. O boleto do Asaas que foi pago passa a documentar a parcela certa.
 export interface OpcoesCompensacao { cancelar_boleto: boolean; emitir_boleto: boolean; avisar: boolean }
-export const statusSemRecebimento = (tipo: string): StatusLancamento => (tipo === 'BOLETO' ? 'A_VENCER' : 'A_PAGAR');
+export const statusSemRecebimento = (tipo: string): StatusLancamento => (tipo === 'BOLETO' || tipo === 'MARCO' ? 'A_VENCER' : 'A_PAGAR');
 export function statusAposEstorno(valor: number, recebido: number, tipo: string, statusAtual: StatusLancamento): StatusLancamento {
   if (statusAtual === 'CANCELADO') return 'CANCELADO';
   if (centavos(recebido) >= centavos(valor) - 0.009) return 'PAGO';
@@ -507,7 +507,7 @@ export interface BoletoNaCobranca {
   id: number; status: string; url_boleto: string | null; url_romatec: string | null; linha_digitavel: string | null; pix_copia_cola: string | null; enviado_em: string | null;
 }
 
-const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à vista', BOLETO: 'Parcela', AJUSTE: 'Ajuste' };
+const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'Pagamento à vista', BOLETO: 'Parcela', AJUSTE: 'Ajuste', MARCO: 'Taxa de marcos (marcos de concreto cravados nos vértices do seu lote)' };
 
 /** Pendências com vencimento até `ate` (sinal sem vencimento entra sempre). */
 export async function cobranca(projetoId: number, ateIso: string | null) {
@@ -518,7 +518,7 @@ export async function cobranca(projetoId: number, ateIso: string | null) {
     SELECT l.*, a.id AS aid, a.numero AS anum, a.nome, a.telefone, a.telefone_e164, lt.numero AS lote
     FROM pa_lancamentos l JOIN pa_associados a ON a.id = l.associado_id AND a.ativo = 1 JOIN pa_lotes lt ON lt.id = a.lote_id
     WHERE a.projeto_id = ? AND l.status NOT IN ('PAGO','CANCELADO') AND (l.vencimento IS NULL OR l.vencimento <= ?)
-    ORDER BY CAST(lt.numero AS UNSIGNED), FIELD(l.tipo,'SINAL','AVISTA','BOLETO','AJUSTE'), l.parcela`, [projetoId, ate]);
+    ORDER BY CAST(lt.numero AS UNSIGNED), FIELD(l.tipo,'SINAL','AVISTA','BOLETO','AJUSTE','MARCO'), l.parcela`, [projetoId, ate]);
   const grupos = new Map<number, {
     associado_id: number; numero: string; nome: string; lote: string; telefone: string | null; telefone_e164: string | null;
     itens: Array<{ lancamento_id: number; tipo: string; parcela: number; rotulo: string; valor: number; recebido: number; saldo: number; vencimento: string | null; status: StatusLancamento; boleto: BoletoNaCobranca | null }>;
@@ -592,7 +592,7 @@ export async function mensagemParaLancamentos(aid: number, lancamentoIds: number
   const projeto = await buscarProjeto(num(a.projeto_id));
   const ls = (await rows(pool, `
     SELECT * FROM pa_lancamentos WHERE associado_id = ? AND id IN (${ids.map(() => '?').join(',')}) AND status NOT IN ('PAGO','CANCELADO')
-    ORDER BY FIELD(tipo,'SINAL','AVISTA','BOLETO','AJUSTE'), parcela`, [aid, ...ids])).map((r) => mapLancamento(r)).filter((l) => l.saldo > 0);
+    ORDER BY FIELD(tipo,'SINAL','AVISTA','BOLETO','AJUSTE','MARCO'), parcela`, [aid, ...ids])).map((r) => mapLancamento(r)).filter((l) => l.saldo > 0);
   if (!ls.length) throw new PaErro('SEM_SALDO', 'As parcelas selecionadas já estão pagas', 409);
   const bs = await rows(pool, `
     SELECT id, lancamento_id, status, url_boleto, linha_digitavel, pix_copia_cola, enviado_em, token_publico FROM pa_boletos

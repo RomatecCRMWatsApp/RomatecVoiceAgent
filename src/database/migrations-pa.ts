@@ -104,7 +104,7 @@ const CREATE_PA_LANCAMENTOS = `
   CREATE TABLE IF NOT EXISTS pa_lancamentos (
     id             INT AUTO_INCREMENT PRIMARY KEY,
     associado_id   INT NOT NULL,
-    tipo           ENUM('SINAL','BOLETO','AVISTA','AJUSTE') NOT NULL,
+    tipo           ENUM('SINAL','BOLETO','AVISTA','AJUSTE','MARCO') NOT NULL,
     parcela        TINYINT NOT NULL DEFAULT 0,
     valor          DECIMAL(10,2) NOT NULL,
     vencimento     DATE NULL,
@@ -311,6 +311,8 @@ const CREATE_PA_WA_GRUPO_MEMBROS = `
 // v3.143.0 — colunas novas em tabelas já criadas (ALTER idempotente: erro de
 // coluna duplicada = já aplicado).
 export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
+  // v3.168.0: taxa de marcos de concreto (um boleto por associado)
+  { label: 'pa_lancamentos.tipo +MARCO', sql: "ALTER TABLE pa_lancamentos MODIFY tipo ENUM('SINAL','BOLETO','AVISTA','AJUSTE','MARCO') NOT NULL" },
   { label: 'pa_projetos.cep_padrao', sql: 'ALTER TABLE pa_projetos ADD COLUMN cep_padrao CHAR(8) NULL' },
   { label: 'pa_projetos.boleto_multa_pct', sql: 'ALTER TABLE pa_projetos ADD COLUMN boleto_multa_pct DECIMAL(5,2) NOT NULL DEFAULT 2.00' },
   { label: 'pa_projetos.boleto_juros_mes_pct', sql: 'ALTER TABLE pa_projetos ADD COLUMN boleto_juros_mes_pct DECIMAL(5,2) NOT NULL DEFAULT 1.00' },

@@ -16,7 +16,7 @@ export function situacaoAssociado(t: { contratado: number; em_aberto: number; ve
   return t.vencido > 0 ? 'EM_ATRASO' : 'EM_DIA';
 }
 
-const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'À vista', BOLETO: 'Parcela', AJUSTE: 'Ajuste' };
+const ROTULO: Record<string, string> = { SINAL: 'Sinal', AVISTA: 'À vista', BOLETO: 'Parcela', AJUSTE: 'Ajuste', MARCO: 'Taxa de marcos' };
 
 /** v3.147.2: boleto do lançamento (último não cancelado do ambiente Asaas atual) e quando foi enviado pelo WhatsApp. */
 export interface BoletoEnvio { status: string; gerado_em: string | null; enviado_em: string | null }
@@ -57,7 +57,7 @@ export async function extratoAssociados(projetoId: number) {
   const lancs = await rows(pool, `
     SELECT l.* FROM pa_lancamentos l JOIN pa_associados a ON a.id = l.associado_id AND a.ativo = 1
     WHERE a.projeto_id = ? AND l.status <> 'CANCELADO'
-    ORDER BY FIELD(l.tipo,'SINAL','AVISTA','BOLETO','AJUSTE'), l.parcela`, [projetoId]);
+    ORDER BY FIELD(l.tipo,'SINAL','AVISTA','BOLETO','AJUSTE','MARCO'), l.parcela`, [projetoId]);
   const ultimos = await rows(pool, `
     SELECT l.associado_id, DATE_FORMAT(MAX(p.pago_em), '%Y-%m-%d') AS ultimo, COUNT(DISTINCT p.id) AS n
     FROM pa_pagamento_rateio r JOIN pa_pagamentos p ON p.id = r.pagamento_id JOIN pa_lancamentos l ON l.id = r.lancamento_id

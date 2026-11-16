@@ -31,6 +31,8 @@ import * as carteirinha from '../services/pa/paCarteirinha';
 import * as ata from '../services/pa/paAta';
 import * as part from '../services/pa/paParticipantes';
 import * as relacao from '../services/pa/paRelacaoLotes';
+import * as marcos from '../services/pa/paMarcos';
+import * as coletora from '../services/pa/paColetora';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -444,6 +446,24 @@ router.get('/projetos/:id/ata-assembleia.pdf', h(async (req, res) => {
   enviarPdf(res, await ata.pdfAta(id(req.params.id), ata.lerDadosAta(req.query as Record<string, unknown>), ctx(req).sub));
   return undefined;
 }));
+// v3.168.0: taxa de marcos de concreto — um boleto por associado, gerar e enviar com um clique
+router.get('/projetos/:id/marcos', h(async (req) => ({ valor_padrao: marcos.VALOR_MARCO_PADRAO, associados: visao(await marcos.situacaoMarcos(id(req.params.id)), ctx(req).perfil), job: marcos.estadoJob(), fila: waPa.estadoFila() })));
+router.post('/projetos/:id/marcos/gerar', h(async (req) => {
+  exigirEscrita(req);
+  const b = req.body ?? {};
+  const aids = Array.isArray(b.associado_ids) ? b.associado_ids.map(Number).filter((n: number) => Number.isInteger(n) && n > 0) : null;
+  return { job: await marcos.gerarTaxaMarcos(id(req.params.id), { valor: Number(b.valor ?? marcos.VALOR_MARCO_PADRAO), vencimento: String(b.vencimento ?? ''), associado_ids: aids && aids.length ? aids : null, enviar: b.enviar !== false }, ctx(req).sub) };
+}));
+// v3.168.0: pontos para a coletora (CSV, TXT P,E,N,Z,D, DXF) e caderneta de campo (PDF)
+router.get('/projetos/:id/coletora.:fmt(csv|txt|dxf)', h(async (req, res) => {
+  const r = await coletora.arquivoColetora(id(req.params.id), req.params.fmt as 'csv' | 'txt' | 'dxf');
+  res.setHeader('Content-Type', r.tipo);
+  res.setHeader('Content-Disposition', `attachment; filename="${r.nome}"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.end(r.conteudo);
+  return undefined;
+}));
+router.get('/projetos/:id/caderneta-campo.pdf', h(async (req, res) => { enviarPdf(res, await coletora.pdfCaderneta(id(req.params.id))); return undefined; }));
 // v3.156.0: relação de associados por lote rural (para a diretoria conferir)
 router.get('/projetos/:id/relacao-lotes.pdf', h(async (req, res) => {
   enviarPdf(res, await relacao.pdfRelacaoLotes(id(req.params.id), ctx(req).sub));

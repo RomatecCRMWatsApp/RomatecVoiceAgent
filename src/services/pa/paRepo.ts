@@ -429,7 +429,7 @@ export async function buscarAssociado(aid: number, db: Db = pool) {
 export async function detalheAssociado(aid: number) {
   const associado = await buscarAssociado(aid);
   const hoje = hojeBrasil();
-  const lanc = (await rows(pool, `SELECT * FROM pa_lancamentos WHERE associado_id = ? ORDER BY FIELD(tipo,'SINAL','AVISTA','BOLETO','AJUSTE'), parcela`, [aid]))
+  const lanc = (await rows(pool, `SELECT * FROM pa_lancamentos WHERE associado_id = ? ORDER BY FIELD(tipo,'SINAL','AVISTA','BOLETO','AJUSTE','MARCO'), parcela`, [aid]))
     .map((l) => mapLancamento(l, hoje));
   const pags = await rows(pool, `
     SELECT p.*, r.lancamento_id, r.valor AS valor_rateio

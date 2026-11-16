@@ -1,7 +1,7 @@
 // v3.142.0 — Regras financeiras do módulo PA (regras-e-conferencias.md §Pagamentos
 // e spec §5.4/§5.5). Funções puras — o repositório só persiste o resultado.
 
-export type TipoLancamento = 'SINAL' | 'BOLETO' | 'AVISTA' | 'AJUSTE';
+export type TipoLancamento = 'SINAL' | 'BOLETO' | 'AVISTA' | 'AJUSTE' | 'MARCO';
 export type StatusLancamento = 'A_PAGAR' | 'PARCIAL' | 'PAGO' | 'A_VENCER' | 'VENCIDO' | 'CANCELADO';
 
 export interface ParcelaPlanejada {
