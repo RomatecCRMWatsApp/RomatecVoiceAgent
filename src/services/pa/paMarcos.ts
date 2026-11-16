@@ -36,27 +36,30 @@ export async function situacaoMarcos(projetoId: number): Promise<SituacaoMarco[]
   }).sort((a, b) => a.lote_vila.localeCompare(b.lote_vila, 'pt-BR', { numeric: true }));
 }
 
-/** Cria (ou ajusta, se ainda sem boleto e sem pagamento) o lançamento MARCO de cada associado. */
+/** Cria o lançamento MARCO de quem não tem; quem tem, sem nenhum pagamento e com valor/vencimento
+ *  diferente: sem boleto → ajusta já; com boleto → vai para "reemitir" (o job cancela no Asaas, ajusta e emite de novo). */
 export async function prepararLancamentos(projetoId: number, valor: number, vencimento: string, aids: number[] | null, usuario: string | null) {
   if (!(valor > 0) || valor > 10000) throw new PaErro('CAMPO_INVALIDO', 'Valor da taxa de marcos inválido', 400);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(vencimento) || vencimento < hojeBrasil()) throw new PaErro('CAMPO_INVALIDO', 'Informe o vencimento (hoje ou depois)', 400);
   const sit = (await situacaoMarcos(projetoId)).filter((s) => !aids || aids.includes(s.associado_id));
   let criados = 0, ajustados = 0;
+  const reemitir: Array<{ lancamento_id: number; boleto_id: number; nome: string }> = [];
   for (const s of sit) {
     if (!s.lancamento) {
       await exec(pool, "INSERT INTO pa_lancamentos (associado_id, tipo, parcela, valor, vencimento, status, descricao) VALUES (?, 'MARCO', 0, ?, ?, 'A_VENCER', 'Taxa de marcos de concreto')", [s.associado_id, valor, vencimento]);
       criados++;
-    } else if (!s.boleto && s.lancamento.saldo >= s.lancamento.valor - 0.009 && (s.lancamento.valor !== valor || s.lancamento.vencimento !== vencimento)) {
-      await exec(pool, 'UPDATE pa_lancamentos SET valor = ?, vencimento = ? WHERE id = ?', [valor, vencimento, s.lancamento.id]);
-      ajustados++;
+    } else if (s.lancamento.saldo >= s.lancamento.valor - 0.009 && s.lancamento.status !== 'PAGO' && (Math.abs(s.lancamento.valor - valor) > 0.009 || s.lancamento.vencimento !== vencimento)) {
+      // v3.168.1: valor/vencimento editado → ajusta (e, se já tinha boleto, reemite)
+      if (s.boleto && s.boleto.status !== 'PAGO') reemitir.push({ lancamento_id: s.lancamento.id, boleto_id: s.boleto.id, nome: s.nome });
+      else if (!s.boleto) { await exec(pool, 'UPDATE pa_lancamentos SET valor = ?, vencimento = ? WHERE id = ?', [valor, vencimento, s.lancamento.id]); ajustados++; }
     }
   }
-  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'MARCOS_LANCADOS', dados: { valor, vencimento, criados, ajustados, associados: sit.length } });
-  return { criados, ajustados, associados: sit.map((s) => s.associado_id) };
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'MARCOS_LANCADOS', dados: { valor, vencimento, criados, ajustados, reemitir: reemitir.length, associados: sit.length } });
+  return { criados, ajustados, reemitir, associados: sit.map((s) => s.associado_id) };
 }
 
 export interface JobMarcos {
-  projeto_id: number; status: 'RODANDO' | 'CONCLUIDO' | 'ERRO'; fase: string; total: number; emitidos: number; ja_tinham: number;
+  projeto_id: number; status: 'RODANDO' | 'CONCLUIDO' | 'ERRO'; fase: string; total: number; emitidos: number; ja_tinham: number; reemitidos: number;
   erros: Array<{ nome: string; erro: string }>; fila_iniciada: boolean; fila_erro: string | null; iniciado_em: string; terminado_em: string | null;
 }
 let job: JobMarcos | null = null;
@@ -67,11 +70,21 @@ export async function gerarTaxaMarcos(projetoId: number, opts: { valor: number; 
   if (job?.status === 'RODANDO') throw new PaErro('MARCOS_EM_ANDAMENTO', 'A geração da taxa de marcos já está em andamento', 409);
   if (!configAsaas()) throw new PaErro('ASAAS_NAO_CONFIGURADO', 'Asaas não configurado', 503);
   const prep = await prepararLancamentos(projetoId, opts.valor, opts.vencimento, opts.associado_ids, usuario);
-  const j: JobMarcos = { projeto_id: projetoId, status: 'RODANDO', fase: 'Emitindo boletos no Asaas', total: prep.associados.length, emitidos: 0, ja_tinham: 0, erros: [], fila_iniciada: false, fila_erro: null, iniciado_em: new Date().toISOString(), terminado_em: null };
+  const j: JobMarcos = { projeto_id: projetoId, status: 'RODANDO', fase: 'Emitindo boletos no Asaas', total: prep.associados.length, emitidos: 0, ja_tinham: 0, reemitidos: 0, erros: [], fila_iniciada: false, fila_erro: null, iniciado_em: new Date().toISOString(), terminado_em: null };
   job = j;
   void (async () => {
     try {
       const bol = await import('./paBoletos');
+      // v3.168.1: valor ou vencimento mudou → cancela o boleto antigo no Asaas e ajusta antes de emitir o novo
+      if (prep.reemitir.length) j.fase = 'Cancelando boletos antigos (valor/vencimento alterado)';
+      for (const r of prep.reemitir) {
+        try {
+          await bol.cancelarBoleto(r.boleto_id, usuario);
+          await exec(pool, 'UPDATE pa_lancamentos SET valor = ?, vencimento = ? WHERE id = ?', [opts.valor, opts.vencimento, r.lancamento_id]);
+          j.reemitidos++;
+        } catch (e) { j.erros.push({ nome: r.nome, erro: `não consegui cancelar o boleto antigo: ${(e as Error).message.slice(0, 120)}` }); }
+      }
+      j.fase = 'Emitindo boletos no Asaas';
       const alvo = (await situacaoMarcos(projetoId)).filter((s) => prep.associados.includes(s.associado_id) && s.lancamento && s.lancamento.saldo > 0.009);
       for (const s of alvo) {
         if (s.boleto) { j.ja_tinham++; continue; }
@@ -97,7 +110,7 @@ export async function gerarTaxaMarcos(projetoId: number, opts: { valor: number; 
       j.status = 'ERRO'; j.fase = (e as Error).message.slice(0, 200);
     } finally {
       j.terminado_em = new Date().toISOString();
-      await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'MARCOS_BOLETOS', dados: { emitidos: j.emitidos, ja_tinham: j.ja_tinham, erros: j.erros.length, fila: j.fila_iniciada } });
+      await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'MARCOS_BOLETOS', dados: { emitidos: j.emitidos, reemitidos: j.reemitidos, ja_tinham: j.ja_tinham, erros: j.erros.length, fila: j.fila_iniciada } });
     }
   })();
   return j;

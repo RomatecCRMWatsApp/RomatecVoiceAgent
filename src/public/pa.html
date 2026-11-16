@@ -2342,7 +2342,7 @@ async function rMarcos(){
   };
   const kpi = (l, v, extra) => `<div class="k2"><div><div class="l">${l}</div><div class="v">${v}</div>${extra ? `<div class="muted">${extra}</div>` : ''}</div></div>`;
   const form = podeEscrever() ? `<div class="grid3">
-        <div><label for="mkValor">Valor por associado (R$)</label><input id="mkValor" inputmode="decimal" value="${esc(String(valor0).replace('.', ','))}"></div>
+        <div><label for="mkValor">Valor por associado (R$) — pode alterar</label><input id="mkValor" inputmode="decimal" value="${esc(String(valor0).replace('.', ','))}"></div>
         <div><label for="mkVenc">Vencimento (o mesmo para todos)</label><input type="date" id="mkVenc" value="${esc(venc0)}"></div>
         <div style="display:flex;align-items:end"><label class="citem" style="margin:0"><input type="checkbox" id="mkEnviar" checked> Enviar pelo WhatsApp automaticamente</label></div>
       </div>
@@ -2351,7 +2351,7 @@ async function rMarcos(){
         <button class="btn btn-gold" id="mkMarcados" style="flex:0 0 auto" ${rodando ? 'disabled' : ''}>Gerar só para os marcados</button>
         ${f && f.status === 'RODANDO' ? '<button class="btn btn-ghost" id="mkParar" style="flex:0 0 auto">⏹ Parar envio</button>' : ''}
       </div>` : '';
-  const jobHtml = j ? `<div class="avisos" style="margin-top:10px"><b>${esc(j.fase)}</b> — boletos emitidos: ${j.emitidos}${j.ja_tinham ? ` · já tinham: ${j.ja_tinham}` : ''} de ${j.total}${j.erros.length ? ` · <span style="color:var(--red)">${j.erros.length} erro(s)</span>` : ''}${j.fila_erro ? `<br><span style="color:var(--red)">WhatsApp: ${esc(j.fila_erro)}</span>` : ''}
+  const jobHtml = j ? `<div class="avisos" style="margin-top:10px"><b>${esc(j.fase)}</b> — boletos emitidos: ${j.emitidos}${j.reemitidos ? ` (${j.reemitidos} reemitido(s) com o valor novo)` : ''}${j.ja_tinham ? ` · já tinham: ${j.ja_tinham}` : ''} de ${j.total}${j.erros.length ? ` · <span style="color:var(--red)">${j.erros.length} erro(s)</span>` : ''}${j.fila_erro ? `<br><span style="color:var(--red)">WhatsApp: ${esc(j.fila_erro)}</span>` : ''}
         ${j.erros.length ? `<ul>${j.erros.map((x) => `<li>${esc(x.nome)}: ${esc(x.erro)}</li>`).join('')}</ul>` : ''}</div>` : '';
   const filaHtml = f ? `<div class="avisos">📲 Envio pelo WhatsApp: <b>${esc(f.status)}</b> · ${f.enviados} enviado(s)${f.falhas ? ` · ${f.falhas} falha(s)` : ''} de ${f.total}${f.atual && f.status === 'RODANDO' ? ` · agora: ${esc(f.atual)}` : ''}</div>` : '';
   const linhas = L.map((a) => `<tr>${podeEscrever() ? `<td><input type="checkbox" class="mkCk" value="${a.associado_id}"></td>` : ''}<td><b>${esc(a.lote_vila)}</b></td><td class="nowrap">${a.parcela ? 'LT-' + esc(a.parcela) : '—'}</td><td>${esc(a.nome)}<div class="muted">${esc(a.numero)}</div></td>
@@ -2371,7 +2371,9 @@ async function rMarcos(){
     if (!venc) return toast('Escolha o vencimento', true);
     const n = aids ? aids.length : L.length;
     if (!n) return toast('Marque ao menos um associado', true);
-    if (!confirm(`Gerar o boleto da taxa de marcos de ${brl(valor)} com vencimento ${dbr(venc)} para ${n} associado(s)${enviar ? ' e enviar pelo WhatsApp (um por vez, devagar)' : ''}?\n\nQuem já tem boleto da taxa não ganha outro.`)) return;
+    // v3.168.1: boleto já gerado com outro valor/vencimento e ainda não pago → será cancelado e reemitido
+    const trocar = L.filter((a) => (!aids || aids.includes(a.associado_id)) && a.boleto && a.boleto.status !== 'PAGO' && a.lancamento && a.lancamento.status !== 'PAGO' && a.lancamento.saldo >= a.lancamento.valor - 0.009 && (Math.abs(a.lancamento.valor - valor) > 0.009 || a.lancamento.vencimento !== venc)).length;
+    if (!confirm(`Gerar o boleto da taxa de marcos de ${brl(valor)} com vencimento ${dbr(venc)} para ${n} associado(s)${enviar ? ' e enviar pelo WhatsApp (um por vez, devagar)' : ''}?${trocar ? `\n\n⚠️ ${trocar} boleto(s) já gerado(s) com outro valor ou vencimento serão CANCELADOS no Asaas e reemitidos com ${brl(valor)} / ${dbr(venc)}${enviar ? ' (e reenviados)' : ''}.` : ''}\n\nQuem já tem boleto com este valor e vencimento não ganha outro; quem já pagou não é alterado.`)) return;
     try { await api(`/projetos/${S.pid}/marcos/gerar`, { json: { valor, vencimento: venc, enviar, associado_ids: aids } }); toast('Gerando os boletos…'); rMarcos(); }
     catch (e){ toast(e.message, true); }
   };
