@@ -213,7 +213,21 @@ export async function lancarPagamento(projetoId: number, entrada: NovoPagamento,
 
   // v3.161.0: confirmação no WhatsApp (associado + administrador) em segundo plano
   void import('./paNotificacoes').then((m) => m.agendarNotificacao(resultado.pagamento_id)).catch(() => undefined);
-  return { ...resultado, recibo, pagamento: await buscarPagamento(resultado.pagamento_id) };
+  // v3.166.1: pagamento por fora (Pix/InfinitePay) que quitou a parcela → cancela no Asaas o boleto em aberto
+  // dela, senão o associado segue "devendo" o boleto vencido. Baixa do próprio Asaas (asaas:…) não entra:
+  // o webhook marca aquele boleto como PAGO logo depois.
+  const avisos: string[] = [];
+  const boletosCancelados: number[] = [];
+  const quitados = resultado.atualizados.filter((a) => a.status === 'PAGO').map((a) => a.lancamento_id);
+  if (quitados.length && !String(p.id_transacao ?? '').startsWith('asaas:')) {
+    const bol = await import('./paBoletos');
+    const abertos = await rows(pool, `SELECT id FROM pa_boletos WHERE lancamento_id IN (${quitados.map(() => '?').join(',')}) AND status IN ('PENDENTE','VENCIDO')`, quitados);
+    for (const b of abertos) {
+      try { await bol.cancelarBoleto(num(b.id), usuario); boletosCancelados.push(num(b.id)); }
+      catch (e) { avisos.push(`Pagamento lançado, mas não consegui cancelar o boleto #${b.id} no Asaas: ${(e as Error).message.slice(0, 140)}`); }
+    }
+  }
+  return { ...resultado, recibo, boletos_cancelados: boletosCancelados, avisos, pagamento: await buscarPagamento(resultado.pagamento_id) };
 }
 
 // ─── v3.162.0: compensação — mover um recebimento para a parcela certa ─────

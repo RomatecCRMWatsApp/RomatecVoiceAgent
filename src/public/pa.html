@@ -2571,7 +2571,8 @@ async function salvarPagamento(){
   $('#pSalvar').disabled = true;
   try {
     const r = await api(`/projetos/${S.pid}/pagamentos`, { json: body });
-    toast(`Pagamento #${r.pagamento_id} lançado` + (r.pagador_terceiro ? ' (pagador terceiro)' : ''));
+    toast(`Pagamento #${r.pagamento_id} lançado` + (r.pagador_terceiro ? ' (pagador terceiro)' : '') + ((r.boletos_cancelados || []).length ? ` · boleto em aberto cancelado no Asaas (#${r.boletos_cancelados.join(', #')})` : ''));
+    (r.avisos || []).forEach((a) => toast(a, true)); // v3.166.1
     S.painel = S.lotes = S.assoc = null; rFinanceiro();
   } catch (e){
     toast(e.message, true);
