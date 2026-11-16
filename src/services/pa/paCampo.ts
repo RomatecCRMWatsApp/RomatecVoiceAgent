@@ -104,7 +104,7 @@ export async function marcarPonto(projetoId: number, ponto: string, entrada: { g
       await registrarEvento(pool, { projeto_id: projetoId, associado_id: ben[lote]?.associado_id ?? null, usuario: u.id, tipo: 'CAMPO_LOTE_MEDIDO', dados: { lote, pontos: new Set(vs).size, area_ha: pc?.perimetro.area_ha ?? null } });
       fechados.push({ lote, area_ha: pc?.perimetro.area_ha ?? 0, associado: ben[lote]?.nome ?? null });
       // v3.169.0: lote medido → dossiê de pronta entrega (aguarda pagamento/autorização do CEO)
-      if (ben[lote]) { try { const dz = await import('./paDossie'); await dz.criarDossie(projetoId, lote, u.id); } catch (e) { console.warn('[pa-campo] dossiê:', (e as Error).message); } }
+      if (ben[lote]) { try { const dz = await import('./paDossie'); await dz.criarDossie(projetoId, lote, u.id); void dz.enviarProntos(projetoId, [ben[lote].associado_id]).catch(() => undefined); } catch (e) { console.warn('[pa-campo] dossiê:', (e as Error).message); } }
     }
   }
   await registrarEvento(pool, { projeto_id: projetoId, usuario: u.id, tipo: 'CAMPO_PONTO_MARCADO', dados: { ponto, lotes: p.lotes, gps: !!g } });

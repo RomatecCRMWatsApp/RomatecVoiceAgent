@@ -213,6 +213,14 @@ export async function lancarPagamento(projetoId: number, entrada: NovoPagamento,
 
   // v3.161.0: confirmação no WhatsApp (associado + administrador) em segundo plano
   void import('./paNotificacoes').then((m) => m.agendarNotificacao(resultado.pagamento_id)).catch(() => undefined);
+  // v3.169.2: quitou tudo e o lote já foi medido → o dossiê sai sozinho (associado + cópia ao CEO)
+  void (async () => {
+    const ids = resultado.atualizados.map((x) => x.lancamento_id);
+    if (!ids.length) return;
+    const as = await rows(pool, `SELECT DISTINCT associado_id FROM pa_lancamentos WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+    const dz = await import('./paDossie');
+    await dz.enviarProntos(projetoId, as.map((x) => num(x.associado_id)));
+  })().catch((e) => console.warn('[pa-dossie] pós-pagamento:', (e as Error).message));
   // v3.166.1: pagamento por fora (Pix/InfinitePay) que quitou a parcela → cancela no Asaas o boleto em aberto
   // dela, senão o associado segue "devendo" o boleto vencido. Baixa do próprio Asaas (asaas:…) não entra:
   // o webhook marca aquele boleto como PAGO logo depois.

@@ -2977,7 +2977,7 @@ function cartaoPontoCampo(d, id, podeMarcar, eng){
 }
 
 // ─── v3.169.0: Dossiês de pronta entrega (lote medido → carta + quitação + mapa/memorial) ─
-const ST_DOSSIE = { AGUARDANDO_PAGAMENTO: ['VENCIDO', '⏳ aguardando pagamento'], PRONTO: ['PARCIAL', '🟡 aguardando autorização'], ENVIADO: ['VALIDO', '📲 enviado'], ENTREGUE: ['PAGO', '✅ entregue fisicamente'] };
+const ST_DOSSIE = { AGUARDANDO_PAGAMENTO: ['VENCIDO', '⏳ aguardando pagamento'], PRONTO: ['PARCIAL', '🟡 pronto (envio automático)'], ENVIADO: ['VALIDO', '📲 enviado'], ENTREGUE: ['PAGO', '✅ entregue fisicamente'] };
 async function rDossies(){
   const v = $('#v-dossies');
   v.innerHTML = '<div class="card empty">Carregando…</div>';
@@ -2988,7 +2988,7 @@ async function rDossies(){
   const lista = ds.filter((d) => !f || d.status === f);
   const hb = (iso) => iso ? new Date(iso.replace(' ', 'T') + (/[zZ]$/.test(iso) ? '' : 'Z')).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
   v.innerHTML = `<div class="card"><h2 style="margin-top:0">📦 Dossiês de pronta entrega</h2>
-      <div class="muted">Quando a equipe fecha um lote em campo, o sistema monta o dossiê: <b>carta</b> pedindo para o associado comparecer ao escritório (anotação técnica e via impressa), <b>termo de quitação</b> e <b>mapa + memorial descritivo</b> do lote. Só sai pelo WhatsApp com tudo pago e com a sua autorização.</div>
+      <div class="muted">Quando a equipe fecha um lote em campo, o sistema monta o dossiê: <b>carta</b> pedindo para o associado comparecer ao escritório (anotação técnica e via impressa), <b>termo de quitação</b> e <b>mapa + memorial descritivo</b> do lote. <b>Sai sozinho pelo WhatsApp</b> do associado assim que o lote estiver medido e <b>todas as cobranças pagas</b>, com uma cópia no seu WhatsApp. O botão serve para reenviar ou enviar quem ficou travado.</div>
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
         <button class="btn btn-sm ${!f ? 'btn-primary' : 'btn-ghost'}" data-dsf="">Todos (${ds.length})</button>
         ${Object.entries(ST_DOSSIE).map(([k, [, t]]) => `<button class="btn btn-sm ${f === k ? 'btn-primary' : 'btn-ghost'}" data-dsf="${k}">${t} (${n(k)})</button>`).join('')}
@@ -2999,7 +2999,7 @@ async function rDossies(){
         <td class="right nowrap">${d.saldo > 0.009 ? brl(d.saldo) : chip('QUITADO')}</td>
         <td>${chip(ST_DOSSIE[d.status][0], ST_DOSSIE[d.status][1])}${d.enviado_em ? `<div class="muted">enviado ${hb(d.enviado_em)}</div>` : ''}${d.entregue_em ? `<div class="muted">entregue ${hb(d.entregue_em)} · ${esc(d.entregue_por || '')}${d.entregue_obs ? ' · ' + esc(d.entregue_obs) : ''}</div>` : ''}</td>
         <td class="nowrap"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button>
-          ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>📲 Autorizar e enviar</button>` : ''}
+          ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>📲 Enviar agora</button>` : ''}
           ${admin && d.status === 'ENVIADO' ? `<button class="btn btn-ghost btn-sm" data-dsenv="${esc(d.lote)}">🔁 Reenviar</button>` : ''}
           ${d.status !== 'ENTREGUE' && d.status !== 'AGUARDANDO_PAGAMENTO' ? `<button class="btn btn-gold btn-sm" data-dsent="${esc(d.lote)}">📦 Entregue fisicamente</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">Nenhum dossiê nesta situação. Eles aparecem aqui quando um lote é fechado na aba Campo.</div>'}</div>`;

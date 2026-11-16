@@ -111,21 +111,52 @@ export async function pdfDossie(projetoId: number, lote: string): Promise<{ pdf:
   return { pdf: Buffer.from(await out.save()), nome: `DOSSIE-LT-${lote}-${String(a?.nome ?? '').normalize('NFD').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').toUpperCase()}.pdf`, quitado };
 }
 
-/** CEO autoriza: manda o dossiê pelo WhatsApp do sistema (só quitado). */
-export async function enviarDossie(projetoId: number, lote: string, usuario: string | null) {
+/** Número do CEO para a cópia do dossiê (mesma configuração do atendimento automático). */
+const numeroCeo = () => String(process.env.CEO_WHATSAPP_PHONE || process.env.PA_CONTATO_WHATSAPP || process.env.ROMATEC_CONTATO_WHATSAPP || '(99) 99181-1246').replace(/\D/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1');
+
+/**
+ * Envia o dossiê ao associado (WhatsApp cadastrado) e uma cópia ao CEO.
+ * v3.169.2: sai sozinho quando o lote está medido e TODAS as cobranças do associado estão pagas;
+ * o botão do ADMIN fica para reenviar. A trava (UPDATE … WHERE status) evita envio em dobro.
+ */
+export async function enviarDossie(projetoId: number, lote: string, usuario: string | null, automatico = false) {
   const d = (await listarDossies(projetoId)).find((x) => x.lote === lote);
   if (!d) throw new PaErro('DOSSIE_NAO_ENCONTRADO', 'Dossiê não encontrado', 404);
   if (d.status === 'AGUARDANDO_PAGAMENTO') throw new PaErro('AGUARDANDO_PAGAMENTO', `Ainda há ${brl(d.saldo)} em aberto — o dossiê só sai com tudo pago`, 409);
   if (!d.whatsapp_valido) throw new PaErro('SEM_WHATSAPP', 'Associado sem WhatsApp válido — entregue a via impressa', 409);
-  const a = await one(pool, 'SELECT whatsapp_numero FROM pa_associados WHERE id = ?', [d.associado_id]);
-  const r = await pdfDossie(projetoId, lote);
-  const primeiro = d.nome.split(/\s+/)[0]; const nome = primeiro.charAt(0) + primeiro.slice(1).toLowerCase();
-  const texto = [`Olá, ${nome}! Aqui é a Zayra, da Romatec Consultoria Total. 🌱`, ``, `A demarcação do seu lote *LT-${lote}* foi concluída. Segue o dossiê com o *mapa*, o *memorial descritivo* e o *termo de quitação*.`, ``, `📍 Compareça ao escritório da Romatec (${ENDERECO_ROMATEC}) para a emissão da *anotação técnica (TRT)* e para retirar a *via impressa*. Leve um documento com foto.`, ``, `Obrigada pela confiança!`].join('\n');
-  const wa = await import('./paWhatsapp');
-  await wa.enviarDocumentoNumero(String(a?.whatsapp_numero ?? ''), r.pdf, r.nome, texto);
-  await exec(pool, "UPDATE pa_dossies SET status = 'ENVIADO', enviado_em = NOW(), enviado_por = ? WHERE projeto_id = ? AND lote = ? AND status <> 'ENTREGUE'", [usuario, projetoId, lote]);
-  await registrarEvento(pool, { projeto_id: projetoId, associado_id: d.associado_id, usuario, tipo: 'DOSSIE_ENVIADO', dados: { lote } });
-  return { lote, status: 'ENVIADO' as StatusDossie };
+  const quem = automatico ? 'automatico' : usuario;
+  // trava: só um envio por vez (automático não reenvia o que já saiu)
+  const trava = await exec(pool, `UPDATE pa_dossies SET status = 'ENVIADO', enviado_em = NOW(), enviado_por = ? WHERE projeto_id = ? AND lote = ? AND status ${automatico ? "= 'PRONTO'" : "IN ('PRONTO','ENVIADO')"}`, [quem, projetoId, lote]);
+  if (!trava.affectedRows) return { lote, status: d.status, enviado: false };
+  try {
+    const a = await one(pool, 'SELECT whatsapp_numero FROM pa_associados WHERE id = ?', [d.associado_id]);
+    const r = await pdfDossie(projetoId, lote);
+    const primeiro = d.nome.split(/\s+/)[0]; const nome = primeiro.charAt(0) + primeiro.slice(1).toLowerCase();
+    const texto = [`Olá, ${nome}! Aqui é a Zayra, da Romatec Consultoria Total. 🌱`, ``, `A demarcação do seu lote *LT-${lote}* foi concluída e o pagamento está quitado. Segue o dossiê com o *mapa*, o *memorial descritivo* e o *termo de quitação*.`, ``, `📍 Compareça ao escritório da Romatec (${ENDERECO_ROMATEC}) para a emissão da *anotação técnica (TRT)* e para retirar a *via impressa*. Leve um documento com foto.`, ``, `Obrigada pela confiança!`].join('\n');
+    const wa = await import('./paWhatsapp');
+    await wa.enviarDocumentoNumero(String(a?.whatsapp_numero ?? ''), r.pdf, r.nome, texto);
+    // cópia para o CEO (falha aqui não desfaz o envio ao associado)
+    try { await wa.enviarDocumentoNumero(numeroCeo(), r.pdf, r.nome, `📋 Cópia — dossiê do *LT-${lote}* enviado para *${d.nome}* (vila ${d.lote_vila})${automatico ? ' automaticamente após a quitação' : ''}.`); }
+    catch (e) { console.warn('[pa-dossie] cópia CEO:', (e as Error).message); }
+    await registrarEvento(pool, { projeto_id: projetoId, associado_id: d.associado_id, usuario: quem, tipo: 'DOSSIE_ENVIADO', dados: { lote, automatico } });
+    return { lote, status: 'ENVIADO' as StatusDossie, enviado: true };
+  } catch (e) {
+    // não saiu: volta para PRONTO para tentar de novo (pagamento seguinte ou botão)
+    await exec(pool, "UPDATE pa_dossies SET status = ?, enviado_em = ?, enviado_por = ? WHERE projeto_id = ? AND lote = ?", [d.status === 'ENVIADO' ? 'ENVIADO' : 'PRONTO', d.enviado_em, d.enviado_por, projetoId, lote]);
+    await registrarEvento(pool, { projeto_id: projetoId, associado_id: d.associado_id, usuario: quem, tipo: 'DOSSIE_FALHA_ENVIO', dados: { lote, erro: (e as Error).message.slice(0, 200) } });
+    throw e;
+  }
+}
+
+/** Dispara sozinho os dossiês que ficaram PRONTOS (lote medido + tudo pago). Chamado após pagamento e ao fechar lote. */
+export async function enviarProntos(projetoId: number, associadoIds: number[] | null = null) {
+  const ds = (await listarDossies(projetoId)).filter((d) => d.status === 'PRONTO' && d.whatsapp_valido && (!associadoIds || associadoIds.includes(d.associado_id)));
+  const out: Array<{ lote: string; ok: boolean; erro?: string }> = [];
+  for (const d of ds) {
+    try { const r = await enviarDossie(projetoId, d.lote, null, true); if (r.enviado) out.push({ lote: d.lote, ok: true }); }
+    catch (e) { out.push({ lote: d.lote, ok: false, erro: (e as Error).message.slice(0, 160) }); console.warn('[pa-dossie] envio automático LT-' + d.lote + ':', (e as Error).message); }
+  }
+  return out;
 }
 
 /** Secretária marca a entrega física da via impressa. */
