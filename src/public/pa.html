@@ -1565,9 +1565,21 @@ function rDocumentosOficiais(){
   const v = $('#v-documentos');
   v.innerHTML = `<div class="card"><h2 style="margin-top:0">📜 Documentos oficiais do PA</h2>
       <div class="muted">Documentos gerados com os dados do projeto e do cadastro dos associados, em PDF (para imprimir) e DOC (Word, para ajustar).</div>
-      <div class="row" style="margin-top:10px"><button class="btn btn-primary btn-sm" data-doc-of="ata" style="flex:0 0 auto">📝 Ata da Assembleia — aprovação da contratação (INCRA)</button></div></div>
+      <div class="row" style="margin-top:10px"><button class="btn btn-primary btn-sm" data-doc-of="ata" style="flex:0 0 auto">📝 Ata da Assembleia — aprovação da contratação (INCRA)</button><button class="btn btn-gold btn-sm" id="docRelLotes" style="flex:0 0 auto">📋 Relação de associados por lote (conferência da diretoria)</button></div></div>
     <div id="ataBox"></div>`;
   v.querySelectorAll('[data-doc-of]').forEach((b) => b.onclick = () => formAta());
+  // v3.156.0: relação lote → associado em PDF, com campo de conferência e assinatura da diretoria
+  $('#docRelLotes').onclick = async () => {
+    const janela = window.open('about:blank', '_blank'); toast('Gerando a relação…');
+    try {
+      const r = await fetch(`/api/pa/projetos/${S.pid}/relacao-lotes.pdf`, { credentials: 'include' });
+      if (r.status === 401){ location.href = '/login?next=' + encodeURIComponent(location.pathname); return; }
+      if (!r.ok){ let m = 'HTTP ' + r.status; try { m = (await r.json()).erro || m; } catch { /* ok */ } throw new Error(m); }
+      const url = URL.createObjectURL(await r.blob());
+      if (janela) janela.location.href = url; else window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
+    } catch (e){ if (janela) janela.close(); toast(e.message, true); }
+  };
   formAta();
 }
 function formAta(){

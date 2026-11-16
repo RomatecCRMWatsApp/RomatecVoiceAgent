@@ -30,6 +30,7 @@ import * as caixa from '../services/pa/paCaixa';
 import * as carteirinha from '../services/pa/paCarteirinha';
 import * as ata from '../services/pa/paAta';
 import * as part from '../services/pa/paParticipantes';
+import * as relacao from '../services/pa/paRelacaoLotes';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -441,6 +442,11 @@ router.post('/whatsapp/grupo/manual', h(async (req) => {
 // ─── v3.149.0: ata da assembleia de aprovação da contratação (padrão INCRA) ─
 router.get('/projetos/:id/ata-assembleia.pdf', h(async (req, res) => {
   enviarPdf(res, await ata.pdfAta(id(req.params.id), ata.lerDadosAta(req.query as Record<string, unknown>), ctx(req).sub));
+  return undefined;
+}));
+// v3.156.0: relação de associados por lote rural (para a diretoria conferir)
+router.get('/projetos/:id/relacao-lotes.pdf', h(async (req, res) => {
+  enviarPdf(res, await relacao.pdfRelacaoLotes(id(req.params.id), ctx(req).sub));
   return undefined;
 }));
 router.get('/projetos/:id/ata-assembleia.docx', h(async (req, res) => {
