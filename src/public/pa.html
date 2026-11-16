@@ -177,6 +177,18 @@
   .ml-tit{font-size:22px;font-weight:700;color:#0C3320;font-family:'Playfair Display',Georgia,serif;margin:2px 0 4px}
   /* v3.157.0: grid21 não deixa o card passar da tela; tabela de lotes vira cartões no celular */
   .grid21>*{min-width:0}
+  /* v3.166.2: tabela de lotes sem corte */
+  table.tlotes td{vertical-align:top}
+  table.tlotes .tl-sub{display:block;color:var(--muted);font-size:11px;font-weight:400}
+  table.tlotes td.tl-ben{min-width:150px}
+  table.tlotes .tl-nome{display:block;font-weight:600;line-height:1.25;word-break:break-word}
+  table.tlotes .tl-edit{margin-top:4px;padding:3px 8px;font-size:11px}
+  table.tlotes select.sdVinc{display:block;width:100%;max-width:260px;margin-top:4px;padding:5px 6px;font-size:12px}
+  table.tlotes select.sdVinc[hidden]{display:none}
+  table.tlotes td.tl-lote .tl-sub{white-space:nowrap}
+  table.tlotes td.tl-acoes{width:112px}
+  table.tlotes .tl-bts{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}
+  table.tlotes .tl-bts .btn{padding:4px 7px}
   @media (max-width:700px){
     /* v3.158.1: cartão compacto — ha e alqueire na mesma linha, botões ao lado do lote */
     table.tlotes thead,table.tlotes .so-desk{display:none}
@@ -186,13 +198,18 @@
     table.tlotes td{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:1px 0;border:0;text-align:right;font-size:13px}
     table.tlotes td[data-l]::before{content:attr(data-l);color:var(--muted);font-size:11px;text-align:left;white-space:nowrap;margin-right:auto}
     table.tlotes td[data-l]{justify-content:flex-end;gap:0}
-    table.tlotes td.tl-ben{gap:8px}
-    table.tlotes td.tl-lote{grid-column:1;justify-content:flex-start;align-items:center;font-size:16px;flex-wrap:wrap}
+    table.tlotes td.tl-ben{gap:6px;flex-wrap:wrap;justify-content:flex-start;text-align:left}
+    table.tlotes .tl-sub{display:inline;margin-left:6px}
+    table.tlotes td.tl-lote .tl-sub{display:block;margin-left:0;font-size:12px}
+    table.tlotes td.tl-acoes{width:auto}
+    table.tlotes td[data-l]::before{padding-right:8px}
+    table.tlotes select.sdVinc{max-width:none;flex:1 1 100%}
+    table.tlotes td.tl-lote{grid-column:1;flex-direction:column;align-items:flex-start;font-size:16px;text-align:left}
     table.tlotes td.tl-acoes{grid-column:2;grid-row:1;justify-content:flex-end;gap:4px}
     table.tlotes td.tl-acoes .btn{padding:5px 8px}
-    table.tlotes td[data-l="Área total"],table.tlotes td[data-l="Área útil"],table.tlotes td.tl-ben{grid-column:1/-1}
+    table.tlotes td[data-l="Área total"],table.tlotes td[data-l="Área útil"],table.tlotes td[data-l="Perímetro"],table.tlotes td.tl-ben{grid-column:1/-1}
     table.tlotes td.tl-ben{align-items:center;margin-top:4px}
-    table.tlotes td.tl-ben select{min-width:0 !important;width:auto;flex:1 1 auto;font-size:13px !important;padding:6px 8px !important}
+    table.tlotes .tl-nome{flex:1 1 auto}
   }
   .ml-limp summary{cursor:pointer;color:var(--green2)}
   /* v3.160.0: tabela que vira cartão no celular (rótulo vem do data-l de cada célula) */
@@ -832,10 +849,15 @@ async function rSubdivisao(){
   const lista = () => {
     const q = SUBV.busca.trim().replace(/\D/g, '');
     const ps = sub.parcelas.filter((x) => !q || x.lote === q.padStart(2, '0') || x.lote === q);
-    $('#sdLista').innerHTML = ps.length ? `<table class="tlotes"><thead><tr><th>Lote</th><th class="right">Área total (ha)</th><th class="right">Total (alq.)</th><th class="right">Útil (ha)</th><th class="right">Útil (alq.)</th><th class="right">Perímetro (m)</th><th class="right">Vért.</th><th>Beneficiário(a)</th><th></th></tr></thead><tbody>
-      ${ps.map((x) => `<tr${vinc[x.lote] ? ' class="tl-tem"' : ''}><td class="tl-lote"><b>LT-${esc(x.lote)}</b>${vinc[x.lote] ? ' <span class="chip c-VALIDO so-cel">com associado</span>' : ''}</td><td class="right" data-l="Área total">${fm(x.perimetro.area_ha, 4)}<span class="so-cel">&nbsp;ha · ${fm(x.perimetro.area_ha / ALQ_HA, 4)} alq.</span></td><td class="right so-desk">${fm(x.perimetro.area_ha / ALQ_HA, 4)}</td><td class="right" data-l="Área útil">${x.area_util_ha != null ? fm(x.area_util_ha, 4) + `<span class="so-cel">&nbsp;ha · ${fm(x.area_util_ha / ALQ_HA, 4)} alq.</span>` : '—'}</td><td class="right so-desk">${x.area_util_ha != null ? fm(x.area_util_ha / ALQ_HA, 4) : '—'}</td><td class="right" data-l="Perímetro (m)">${fm(x.perimetro.perimetro_m)}</td><td class="right" data-l="Vértices">${x.perimetro.vertices.length}</td>
-        <td class="tl-ben" data-l="Beneficiário">${podeEscrever() ? `<select class="f sdVinc" data-lote="${esc(x.lote)}" style="min-width:170px;padding:4px 6px;font-size:12px"><option value="">— sem vínculo —</option>${assocs.map((a) => `<option value="${a.id}" ${vinc[x.lote] && vinc[x.lote].associado_id === a.id ? 'selected' : ''}>${esc(a.nome)}${a.parcela && a.parcela !== x.lote ? ' (já no LT-' + esc(a.parcela) + ')' : ''}</option>`).join('')}</select>` : esc(vinc[x.lote] ? vinc[x.lote].nome : '—')}</td>
-        <td class="nowrap tl-acoes"><button class="btn btn-ghost btn-sm" data-sdver="${esc(x.lote)}" title="Mapa e memorial">👁</button> <button class="btn btn-ghost btn-sm" data-sdpdf="${esc(x.lote)}" title="Mapa + memorial tradicional">📄</button> <button class="btn btn-ghost btn-sm" data-sdsigef="${esc(x.lote)}" title="Planta + memorial modelo SIGEF">SIGEF</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum lote com esse número.</div>';
+    // v3.166.2: linha enxuta — nada cortado (nome inteiro, ha/alq na mesma célula, botões quebram linha); troca do associado no ✏️
+    $('#sdLista').innerHTML = ps.length ? `<table class="tlotes"><thead><tr><th>Lote</th><th class="right">Área total</th><th class="right">Área útil</th><th class="right">Perímetro</th><th>Beneficiário(a)</th><th></th></tr></thead><tbody>
+      ${ps.map((x) => { const v = vinc[x.lote]; return `<tr${v ? ' class="tl-tem"' : ''}><td class="tl-lote"><b class="nowrap">LT-${esc(x.lote)}</b>${v && v.lote_vila ? `<span class="tl-sub">vila: lote ${esc(v.lote_vila)}</span>` : ''}</td>
+        <td class="right" data-l="Área total"><span class="nowrap">${fm(x.perimetro.area_ha, 4)} ha</span><span class="tl-sub nowrap">${fm(x.perimetro.area_ha / ALQ_HA, 4)} alq.</span></td>
+        <td class="right" data-l="Área útil">${x.area_util_ha != null ? `<span class="nowrap">${fm(x.area_util_ha, 4)} ha</span><span class="tl-sub nowrap">${fm(x.area_util_ha / ALQ_HA, 4)} alq.</span>` : '—'}</td>
+        <td class="right" data-l="Perímetro"><span class="nowrap">${fm(x.perimetro.perimetro_m)} m</span><span class="tl-sub nowrap">${x.perimetro.vertices.length} vértices</span></td>
+        <td class="tl-ben" data-l="Beneficiário"><span class="tl-nome">${v ? esc(v.nome) : '<span class="muted">— sem vínculo —</span>'}</span>${podeEscrever() ? `<button class="btn btn-ghost btn-sm tl-edit" data-sdedit="${esc(x.lote)}" title="Vincular ou trocar o associado deste lote">✏️ ${v ? 'Trocar' : 'Vincular'}</button><select class="f sdVinc" data-lote="${esc(x.lote)}" hidden><option value="">— sem vínculo —</option>${assocs.map((a) => `<option value="${a.id}" ${v && v.associado_id === a.id ? 'selected' : ''}>${esc(a.nome)}${a.lote ? ' · vila ' + esc(a.lote) : ''}${a.parcela && a.parcela !== x.lote ? ' (já no LT-' + esc(a.parcela) + ')' : ''}</option>`).join('')}</select>` : ''}</td>
+        <td class="tl-acoes"><div class="tl-bts"><button class="btn btn-ghost btn-sm" data-sdver="${esc(x.lote)}" title="Mapa e memorial">👁</button><button class="btn btn-ghost btn-sm" data-sdpdf="${esc(x.lote)}" title="Mapa + memorial tradicional">📄</button><button class="btn btn-ghost btn-sm" data-sdsigef="${esc(x.lote)}" title="Planta + memorial modelo SIGEF">SIGEF</button></div></td></tr>`; }).join('')}</tbody></table>` : '<div class="empty">Nenhum lote com esse número.</div>';
+    $('#sdLista').querySelectorAll('[data-sdedit]').forEach((b) => b.onclick = () => { const sel = b.nextElementSibling; sel.hidden = !sel.hidden; if (!sel.hidden) sel.focus(); });
     $('#sdLista').querySelectorAll('[data-sdver]').forEach((b) => b.onclick = () => verLote(b.dataset.sdver));
     $('#sdLista').querySelectorAll('.sdVinc').forEach((sel) => sel.onchange = async () => {
       const lote = sel.dataset.lote, aid = sel.value ? Number(sel.value) : null;
@@ -1752,8 +1774,8 @@ async function rAssociados(){
       const fs = $('#fSit').value;
       const fw = $('#fWa').value;
       const lista = associados.filter((a) => (!fs || (fs === 'VENCIDO' ? a.financeiro.vencidos > 0 : fs === 'SEMDOC' ? a.documentos.total === 0 : a.financeiro.sinal_status === fs)) && (!fw || a.whatsapp_status === fw));
-      $('#assocLista').innerHTML = lista.length ? `<table><thead><tr><th></th><th>Lote</th><th>Nº</th><th>Associado</th><th>Terra</th><th>WhatsApp</th><th>Entrada</th><th class="right">Recebido</th><th class="right">Saldo</th><th>Contrato</th><th>Docs</th></tr></thead><tbody>
-        ${lista.map((a) => `<tr class="click" data-id="${a.id}"><td>${fotoMini(a)}</td><td><b>${esc(a.lote)}</b></td><td class="nowrap">${esc(a.numero)}</td><td>${esc(a.nome)}<div class="muted">${esc(a.cpf)}</div>${(a.participantes || []).map((x) => `<div class="muted">+ ${esc(x.nome)} <i>(${esc(x.vinculo.toLowerCase())}${x.responsavel_campo ? ', em campo' : ''})</i></div>`).join('')}</td><td>${esc(a.denominacao_terra || '')}</td>
+      $('#assocLista').innerHTML = lista.length ? `<table><thead><tr><th></th><th title="Lote onde mora, na vila">Lote vila</th><th title="Lote rural de produção (subdivisão)">Lote produção</th><th>Nº</th><th>Associado</th><th>Terra</th><th>WhatsApp</th><th>Entrada</th><th class="right">Recebido</th><th class="right">Saldo</th><th>Contrato</th><th>Docs</th></tr></thead><tbody>
+        ${lista.map((a) => `<tr class="click" data-id="${a.id}"><td>${fotoMini(a)}</td><td><b>${esc(a.lote)}</b></td><td class="nowrap">${a.parcela ? '<b>LT-' + esc(a.parcela) + '</b>' : '<span class="muted">—</span>'}</td><td class="nowrap">${esc(a.numero)}</td><td>${esc(a.nome)}<div class="muted">${esc(a.cpf)}</div>${(a.participantes || []).map((x) => `<div class="muted">+ ${esc(x.nome)} <i>(${esc(x.vinculo.toLowerCase())}${x.responsavel_campo ? ', em campo' : ''})</i></div>`).join('')}</td><td>${esc(a.denominacao_terra || '')}</td>
           <td>${chip(a.whatsapp_status, WA_TXT[a.whatsapp_status])}</td><td>${chip(a.financeiro.sinal_status)}</td><td class="right nowrap">${brl(a.financeiro.recebido)}</td><td class="right nowrap">${a.financeiro.saldo ? brl(a.financeiro.saldo) : chip('QUITADO')}</td>
           <td>${chip(a.contrato_status)}</td><td class="nowrap">${a.documentos.com_arquivo}/${a.documentos.total}</td></tr>`).join('')}</tbody></table>
         <div class="muted" style="margin-top:6px">${lista.length} associado(s)</div>` : '<div class="empty">Nenhum associado encontrado.</div>';

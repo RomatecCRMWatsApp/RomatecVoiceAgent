@@ -9,8 +9,8 @@ import { buscarSubdivisao } from './paMapas';
 import { marcaArquivos } from './marcaProjeto';
 import { PaErro } from './erros';
 
-export interface LinhaRelacao { lote: string; area_ha: number | null; nome: string | null; cpf: string | null; numero: string | null }
-export interface Relacao { linhas: LinhaRelacao[]; semLote: Array<{ nome: string; numero: string }> }
+export interface LinhaRelacao { lote: string; area_ha: number | null; nome: string | null; cpf: string | null; numero: string | null; lote_vila: string | null }
+export interface Relacao { linhas: LinhaRelacao[]; semLote: Array<{ nome: string; numero: string; lote_vila: string | null }> }
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 /** LGPD: documento circula fora do sistema — CPF só com os 6 dígitos do meio. */
@@ -20,11 +20,11 @@ export const cpfMascarado = (cpf: string | null) => {
 };
 const ha = (v: number | null) => (v == null ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }));
 
-export function montarRelacao(lotes: Array<{ lote: string; area_ha: number | null }>, associados: Array<{ nome: string; cpf: string; numero: string; parcela: string | null }>): Relacao {
+export function montarRelacao(lotes: Array<{ lote: string; area_ha: number | null }>, associados: Array<{ nome: string; cpf: string; numero: string; parcela: string | null; lote_vila?: string | null }>): Relacao {
   const por = new Map(associados.filter((a) => a.parcela).map((a) => [a.parcela as string, a]));
   return {
-    linhas: lotes.map((l) => { const a = por.get(l.lote); return { lote: l.lote, area_ha: l.area_ha, nome: a?.nome ?? null, cpf: a?.cpf ?? null, numero: a?.numero ?? null }; }),
-    semLote: associados.filter((a) => !a.parcela || !lotes.some((l) => l.lote === a.parcela)).map((a) => ({ nome: a.nome, numero: a.numero })),
+    linhas: lotes.map((l) => { const a = por.get(l.lote); return { lote: l.lote, area_ha: l.area_ha, nome: a?.nome ?? null, cpf: a?.cpf ?? null, numero: a?.numero ?? null, lote_vila: a?.lote_vila ?? null }; }),
+    semLote: associados.filter((a) => !a.parcela || !lotes.some((l) => l.lote === a.parcela)).map((a) => ({ nome: a.nome, numero: a.numero, lote_vila: a.lote_vila ?? null })),
   };
 }
 
@@ -40,12 +40,11 @@ export function htmlRelacao(p: Projeto, r: Relacao, hoje: Date = new Date()): st
   const assoc = (p.associacao_nome || `Associação do ${p.nome}`).toUpperCase();
   const vinc = r.linhas.filter((l) => l.nome).length;
   const pend = r.linhas.length - vinc;
-  const linhas = r.linhas.map((l) => `<tr${l.nome ? '' : ' class="pd"'}><td class="c"><b>${esc(l.lote)}</b></td><td class="c">${ha(l.area_ha)}</td>
-    <td>${l.nome ? esc(l.nome) : '<b>A CONFIRMAR</b> — nome: ____________________________'}</td><td class="c">${l.nome ? esc(cpfMascarado(l.cpf)) : ''}</td><td class="c">${esc(l.numero ?? '')}</td>
-    <td class="c ck">(&nbsp;&nbsp;) Sim&nbsp; (&nbsp;&nbsp;) Não</td></tr>`).join('');
+  const linhas = r.linhas.map((l) => `<tr${l.nome ? '' : ' class="pd"'}><td class="c"><b>${esc(l.lote)}</b></td><td class="c">${ha(l.area_ha)}</td><td class="c"><b>${esc(l.lote_vila ?? '')}</b></td>
+    <td>${l.nome ? esc(l.nome) : '<b>A CONFIRMAR</b> — nome: ____________________________'}</td><td class="c">${l.nome ? esc(cpfMascarado(l.cpf)) : ''}</td>    <td class="c ck">(&nbsp;&nbsp;) Sim&nbsp; (&nbsp;&nbsp;) Não</td></tr>`).join('');
   const semLote = r.semLote.length
-    ? `<h3>Associados ativos sem lote definido na relação recebida</h3><table><thead><tr><th style="width:16mm">Nº</th><th>Associado(a)</th><th style="width:44mm">Lote correto (diretoria)</th></tr></thead><tbody>
-      ${r.semLote.map((a) => `<tr><td class="c">${esc(a.numero)}</td><td>${esc(a.nome)}</td><td></td></tr>`).join('')}</tbody></table>` : '';
+    ? `<h3>Associados ativos sem lote definido na relação recebida</h3><table><thead><tr><th style="width:18mm">Lote vila</th><th>Associado(a)</th><th style="width:44mm">Lote de produção (diretoria)</th></tr></thead><tbody>
+      ${r.semLote.map((a) => `<tr><td class="c">${esc(a.lote_vila ?? '')}</td><td>${esc(a.nome)}</td><td></td></tr>`).join('')}</tbody></table>` : '';
   const data = hoje.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: 'long', year: 'numeric' });
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relação por lote — ${esc(p.nome)}</title><style>
     @page { size: A4; margin: 14mm 14mm 16mm; }
@@ -72,11 +71,11 @@ export function htmlRelacao(p: Projeto, r: Relacao, hoje: Date = new Date()): st
   </style></head><body>
     <div class="cab">${bras ? `<img class="bras" src="${bras}">` : '<span></span>'}<div class="ct"><div class="a1">${esc(assoc)}</div><div class="a2">${esc(p.municipio)}/${esc(p.uf)} · ${p.associacao_cnpj ? 'CNPJ ' + esc(p.associacao_cnpj) : 'CNPJ em homologação'}</div></div>${logo ? `<img class="logo" src="${logo}">` : '<span></span>'}</div>
     <div class="faixa"></div>
-    <h1>RELAÇÃO DE ASSOCIADOS POR LOTE RURAL</h1>
+    <h1>RELAÇÃO DE ASSOCIADOS — LOTE NA VILA × LOTE DE PRODUÇÃO</h1>
     <h2>${esc(p.nome)} — documento para conferência e confirmação da Diretoria</h2>
-    <p>A Romatec Consultoria Total, responsável técnica pelo levantamento georreferenciado do ${esc(p.nome)}, apresenta à Diretoria da ${esc(assoc)} a relação de associados por lote rural da subdivisão levantada em campo, conforme informação recebida da Associação, para que a Diretoria <b>confira e confirme</b> cada vínculo. Somente após a confirmação os nomes serão lançados de forma definitiva nos mapas e memoriais descritivos individuais dos lotes. Linhas em destaque (amarelo) indicam lote sem associado definido ou com informação a confirmar.</p>
+    <p>A Romatec Consultoria Total, responsável técnica pelo levantamento georreferenciado do ${esc(p.nome)}, apresenta à Diretoria da ${esc(assoc)} a relação de associados com o <b>lote na vila</b> (moradia) e o <b>lote de produção</b> (lote rural da subdivisão levantada em campo, que será demarcado), conforme informação recebida da Associação, para que a Diretoria <b>confira e confirme</b> cada vínculo. Somente após a confirmação os nomes serão lançados de forma definitiva nos mapas e memoriais descritivos individuais dos lotes. Linhas em destaque (amarelo) indicam lote sem associado definido ou com informação a confirmar.</p>
     <div class="res"><div><b>${r.linhas.length}</b>lotes na subdivisão</div><div><b>${vinc}</b>lotes com associado</div><div><b>${pend}</b>lotes a confirmar</div><div><b>${r.semLote.length}</b>associados sem lote</div></div>
-    <table><thead><tr><th style="width:12mm">Lote</th><th style="width:20mm">Área (ha)</th><th>Associado(a)</th><th style="width:30mm">CPF</th><th style="width:18mm">Nº</th><th style="width:30mm">Confere?</th></tr></thead><tbody>${linhas}</tbody></table>
+    <table><thead><tr><th style="width:19mm">Lote de produção</th><th style="width:19mm">Área (ha)</th><th style="width:15mm">Lote na vila</th><th>Associado(a)</th><th style="width:28mm">CPF</th><th style="width:28mm">Confere?</th></tr></thead><tbody>${linhas}</tbody></table>
     ${semLote}
     <div class="decl"><h3>Declaração da Diretoria</h3>
     <p>Declaramos, para os devidos fins, que conferimos a relação acima e que ela (&nbsp;&nbsp;) está correta (&nbsp;&nbsp;) está correta com as correções anotadas neste documento, correspondendo à ocupação de cada lote rural do ${esc(p.nome)} pelos respectivos associados. Observações: ________________________________________________________________________________________________________________________________________________.</p>
@@ -94,10 +93,10 @@ export async function pdfRelacaoLotes(projetoId: number, usuario: string | null)
   const p = await buscarProjeto(projetoId);
   const sub = await buscarSubdivisao(projetoId);
   if (!sub) throw new PaErro('SEM_SUBDIVISAO', 'Envie primeiro o DXF da divisão dos lotes (Mapa → Lotes do PA)', 404);
-  const as = await rows(pool, 'SELECT nome, cpf, numero, parcela FROM pa_associados WHERE projeto_id = ? AND ativo = 1 ORDER BY nome', [projetoId]);
+  const as = await rows(pool, 'SELECT a.nome, a.cpf, a.numero, a.parcela, lt.numero AS lote_vila FROM pa_associados a LEFT JOIN pa_lotes lt ON lt.id = a.lote_id WHERE a.projeto_id = ? AND a.ativo = 1 ORDER BY a.nome', [projetoId]);
   const r = montarRelacao(
     sub.parcelas.map((x) => ({ lote: x.lote, area_ha: x.perimetro.area_ha })).sort((a, b) => a.lote.localeCompare(b.lote, 'pt-BR', { numeric: true })),
-    as.map((a) => ({ nome: String(a.nome), cpf: String(a.cpf ?? ''), numero: String(a.numero ?? ''), parcela: a.parcela == null ? null : String(a.parcela) })),
+    as.map((a) => ({ nome: String(a.nome), cpf: String(a.cpf ?? ''), numero: String(a.numero ?? ''), parcela: a.parcela == null ? null : String(a.parcela), lote_vila: a.lote_vila == null ? null : String(a.lote_vila) })),
   );
   const { htmlToPdf } = await import('../../pdf/htmlToPdf');
   const pdf = await htmlToPdf(htmlRelacao(p, r), {
