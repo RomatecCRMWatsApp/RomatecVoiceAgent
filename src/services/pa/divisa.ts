@@ -28,6 +28,8 @@ export interface ResultadoDivisa {
   comunitarias: Array<{ rotulo: string; por_municipio: number[] }>;
   lotes_divididos: Array<{ lote: string; por_municipio: number[] }>;
   lotes_por_municipio: number[];
+  /** v3.166.3: índice do município com a maior área de cada lote */
+  municipio_do_lote: Record<string, number>;
 }
 
 const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -155,16 +157,18 @@ export function calcularDivisa(
   const comunitarias = (extras.comunitarias ?? []).map((c) => ({ rotulo: c.rotulo, por_municipio: repartir(c.pts).map(r2) }));
   const lotes_por_municipio = div.municipios.map(() => 0);
   const lotes_divididos: ResultadoDivisa['lotes_divididos'] = [];
+  const municipio_do_lote: Record<string, number> = {};
   for (const l of extras.lotes ?? []) {
     const v = repartir(l.pts);
     const tot = v.reduce((a, b) => a + b, 0);
     const maior = v.indexOf(Math.max(...v));
     lotes_por_municipio[maior]++;
+    municipio_do_lote[l.lote] = maior;
     if (v.filter((x) => x > Math.max(100, tot * 0.001)).length > 1) lotes_divididos.push({ lote: l.lote, por_municipio: v.map(r2) });
   }
   return {
     municipios, pontos: xs.map((x, i) => ({ nome: `D-${String(i + 1).padStart(2, '0')}`, E: Math.round(x.p.x * 1000) / 1000, N: Math.round(x.p.y * 1000) / 1000 })),
-    extensao_m: r2(ext), total_m2: r2(total), comunitarias, lotes_divididos, lotes_por_municipio,
+    extensao_m: r2(ext), total_m2: r2(total), comunitarias, lotes_divididos, lotes_por_municipio, municipio_do_lote,
   };
 }
 

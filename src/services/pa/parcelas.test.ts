@@ -34,6 +34,8 @@ describe('subdivisão do PA (DXF)', () => {
     const memo = textoMemorialParcela(sub.parcelas[0], 'PA Teste', 'Açailândia/MA', null).join(' ');
     expect(memo).toContain('confrontando com Lote 02');
     expect(memo).toContain('área útil (descontadas APP e estradas): 0,9500 ha');
+    // v3.167.0: denominação da terra do cadastro
+    expect(textoMemorialParcela(sub.parcelas[0], 'PA Teste', 'Açailândia/MA', 'FULANO, CPF 1', 'Chácara Cajueiro')[0]).toMatch(/^Imóvel: "Chácara Cajueiro", Lote 01/);
   });
   it('rótulo de lote repetido é recusado', () => {
     expect(() => subdivisaoDeDxf(dxf.replace('LT-02', 'LT-01'))).toThrow(/repetido/);

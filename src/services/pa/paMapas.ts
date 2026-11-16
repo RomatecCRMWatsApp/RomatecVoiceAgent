@@ -168,9 +168,9 @@ export async function svgSubdivisaoProjeto(projetoId: number, lote: string | nul
 
 /** Vínculos lote rural (LT-NN) → associado. */
 export async function vinculosParcelas(projetoId: number): Promise<Record<string, BeneficiarioParcela & { associado_id: number; lote_vila: string }>> {
-  const r = await rows(pool, `SELECT a.id, a.nome, a.cpf, a.parcela, lt.numero AS lote_vila FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id
+  const r = await rows(pool, `SELECT a.id, a.nome, a.cpf, a.parcela, a.denominacao_terra, lt.numero AS lote_vila FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id
     WHERE a.projeto_id = ? AND a.ativo = 1 AND a.parcela IS NOT NULL`, [projetoId]);
-  return Object.fromEntries(r.map((x) => [String(x.parcela), { associado_id: Number(x.id), nome: String(x.nome), cpf: String(x.cpf), lote_vila: String(x.lote_vila) }]));
+  return Object.fromEntries(r.map((x) => [String(x.parcela), { associado_id: Number(x.id), nome: String(x.nome), cpf: String(x.cpf), lote_vila: String(x.lote_vila), denominacao: x.denominacao_terra ? String(x.denominacao_terra).trim() || null : null }]));
 }
 
 /** Liga (ou desliga, com associadoId null) um lote da subdivisão a um associado. Um associado por lote e um lote por associado. */
@@ -193,7 +193,7 @@ export async function memorialParcela(projetoId: number, lote: string) {
   const pc = sub.parcelas.find((x) => x.lote === lote);
   if (!pc) throw new PaErro('LOTE_NAO_ENCONTRADO', `Lote ${lote} não está na subdivisão`, 404);
   const ben = (await vinculosParcelas(projetoId))[lote] ?? null;
-  return { parcela: pc, beneficiario: ben, memorial: textoMemorialParcela(pc, p.nome, `${p.municipio}/${p.uf}`, ben ? `${ben.nome}, CPF ${ben.cpf}` : null) };
+  return { parcela: pc, beneficiario: ben, memorial: textoMemorialParcela(pc, p.nome, `${p.municipio}/${p.uf}`, ben ? `${ben.nome}, CPF ${ben.cpf}` : null, ben?.denominacao ?? null) };
 }
 
 /** PDF com o mapa geral da subdivisão (geral) e/ou mapa + memorial de cada lote pedido (null = todos). */
@@ -208,7 +208,8 @@ export async function pdfSubdivisao(projetoId: number, lotes: string[] | null, g
     const secoes = lista.flatMap((l) => {
       const pc = sub.parcelas.find((x) => x.lote === l);
       if (!pc) return [];
-      const peca = { denominacao: `Lote ${pc.lote} — ${p.nome}`, titular: ben[pc.lote] ? { nome: ben[pc.lote].nome, cpf: ben[pc.lote].cpf } : null, natureza: 'Projeto de Assentamento', perimetro: pc.perimetro, confrontantes: pc.lados.map((x) => x.confrontante), mapaSvg: svgSubdivisao(sub, { destaque: pc.lote, css: 'width:100%;height:150mm;display:block' }) };
+      const den = ben[pc.lote]?.denominacao;
+      const peca = { denominacao: `${den ? `${den} — ` : ''}Lote ${pc.lote} — ${p.nome}`, titular: ben[pc.lote] ? { nome: ben[pc.lote].nome, cpf: ben[pc.lote].cpf } : null, natureza: 'Projeto de Assentamento', perimetro: pc.perimetro, confrontantes: pc.lados.map((x) => x.confrontante), mapaSvg: svgSubdivisao(sub, { destaque: pc.lote, css: 'width:100%;height:150mm;display:block' }) };
       return [plantaSigef(d, peca), memorialSigef(d, peca)];
     });
     if (!secoes.length) throw new PaErro('LOTE_NAO_ENCONTRADO', 'Nenhum dos lotes pedidos está na subdivisão', 404);
@@ -279,7 +280,7 @@ export async function geojsonSubdivisao(projetoId: number) {
       properties: {
         tipo: 'LOTE', lote: pc.lote, area_ha: pc.perimetro.area_ha, area_util_ha: pc.area_util_ha, perimetro_m: pc.perimetro.perimetro_m,
         vertices: pc.perimetro.vertices.length, confrontantes: [...new Set(pc.lados.map((l) => l.confrontante))],
-        beneficiario: b ? { associado_id: b.associado_id, nome: b.nome, cpf: b.cpf, numero: ex?.numero ?? null, telefone: ex?.telefone ?? null, whatsapp_status: ex?.whatsapp_status ?? null, lote_vila: b.lote_vila } : null,
+        beneficiario: b ? { associado_id: b.associado_id, nome: b.nome, cpf: b.cpf, denominacao: b.denominacao ?? null, numero: ex?.numero ?? null, telefone: ex?.telefone ?? null, whatsapp_status: ex?.whatsapp_status ?? null, lote_vila: b.lote_vila } : null,
       },
     };
   });
@@ -312,6 +313,13 @@ async function contextoDivisa(projetoId: number) {
   const lotes = (sub?.parcelas ?? []).map((pc) => ({ lote: pc.lote, pts: pc.perimetro.vertices.map((v) => ({ x: v.E, y: v.N })) }));
   const r = calcularDivisa(perimetro, div, { comunitarias, lotes });
   return { div, per, sub, perimetro, comunitarias, r, fuso, hem, usa_perimetro_salvo: !!per };
+}
+
+/** v3.166.3: município de cada lote (para colorir a tabela de lotes); null sem divisa. */
+export async function municipiosDosLotes(projetoId: number) {
+  const c = await contextoDivisa(projetoId).catch(() => null);
+  if (!c?.sub) return null;
+  return { municipios: c.r.municipios.map((m) => ({ nome: m.nome, cor: m.cor })), por_lote: c.r.municipio_do_lote, divididos: c.r.lotes_divididos.map((l) => l.lote) };
 }
 
 /** Divisa calculada + GeoJSON (lat/lon) para o mapa. */

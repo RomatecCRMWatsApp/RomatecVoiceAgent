@@ -216,7 +216,7 @@ export function svgSubdivisao(sub: Subdivisao, opts: { destaque?: string | null;
 const LEGENDA = `<div class="nota" style="font-style:normal">Legenda: <span style="color:#55704A">▭ lotes</span> · <span style="color:#3E8E41">■ APP</span> · <span style="color:#A07A10">■ áreas comunitárias</span> · <span style="color:#8C5A2B">━ estradas/servidão</span> · <span style="color:#2B6CB0">━ córregos</span></div>`;
 
 /** PDF: mapa geral da subdivisão + quadro de áreas, e/ou mapa + memorial de cada lote. */
-export interface BeneficiarioParcela { nome: string; cpf: string }
+export interface BeneficiarioParcela { nome: string; cpf: string; denominacao?: string | null }
 export function htmlSubdivisao(d: DadosMapaPA, sub: Subdivisao, opts: { lotes: string[]; geral: boolean; perimetro: Perimetro | null; beneficiarios?: Record<string, BeneficiarioParcela> }): string {
   const bras = asset(d.marca.brasao);
   const paginas: string[] = [];
@@ -239,16 +239,17 @@ export function htmlSubdivisao(d: DadosMapaPA, sub: Subdivisao, opts: { lotes: s
     if (!pc) continue;
     const p = pc.perimetro;
     const ben = opts.beneficiarios?.[pc.lote] ?? null;
-    const paragrafos = textoMemorialParcela(pc, d.projeto.nome, `${d.projeto.municipio}/${d.projeto.uf}`, ben ? `${ben.nome}, CPF ${ben.cpf}` : null);
-    paginas.push(`${cabecalho(d, `LOTE ${pc.lote} — MAPA E MEMORIAL DESCRITIVO`)}
+    const paragrafos = textoMemorialParcela(pc, d.projeto.nome, `${d.projeto.municipio}/${d.projeto.uf}`, ben ? `${ben.nome}, CPF ${ben.cpf}` : null, ben?.denominacao ?? null);
+    const den = ben?.denominacao ? ` — ${ben.denominacao.toUpperCase()}` : '';
+    paginas.push(`${cabecalho(d, `LOTE ${pc.lote}${den} — MAPA E MEMORIAL DESCRITIVO`)}
       <div class="mapa">${svgSubdivisao(sub, { destaque: pc.lote, css: 'width:100%;height:112mm;display:block' })}</div>
       ${LEGENDA}
       <div class="quadros"><div class="q"><span>Área total (com APP e estradas)</span><b>${fm(p.area_ha, 4)} ha</b>${alqueiresTxt(p.area_ha)}<br>${pc.area_util_ha != null ? `área útil: <b style="display:inline;font-size:9pt">${haAlq(pc.area_util_ha)}</b>` : `${fm(p.area_m2)} m²`}</div>
         <div class="q"><span>Perímetro</span><b>${fm(p.perimetro_m)} m</b>${p.vertices.length} vértices</div>
-        <div class="q"><span>Beneficiário(a)</span>${ben ? `<b style="font-size:9pt">${esc(ben.nome)}</b>CPF: ${esc(ben.cpf)}` : '<b style="font-size:9pt">______________________________</b>CPF: ____________________'}</div></div>
+        <div class="q"><span>Beneficiário(a)</span>${ben ? `<b style="font-size:9pt">${esc(ben.nome)}</b>CPF: ${esc(ben.cpf)}${ben.denominacao ? `<br>Denominação: <b style="display:inline;font-size:9pt">${esc(ben.denominacao)}</b>` : ''}` : '<b style="font-size:9pt">______________________________</b>CPF: ____________________'}</div></div>
       <h2>Memorial descritivo</h2>${paragrafos.map((t) => `<p class="memo">${esc(t)}</p>`).join('')}
       ${rodape(d)}`);
-    paginas.push(`${cabecalho(d, `LOTE ${pc.lote} — QUADRO DE COORDENADAS E CONFRONTAÇÕES`)}
+    paginas.push(`${cabecalho(d, `LOTE ${pc.lote}${den} — QUADRO DE COORDENADAS E CONFRONTAÇÕES`)}
       <table><thead><tr><th>Vértice</th><th>Tipo</th><th class="n">E (m)</th><th class="n">N (m)</th><th class="n">Latitude</th><th class="n">Longitude</th><th>Lado</th><th class="n">Azimute</th><th class="n">Dist. (m)</th><th>Confrontante</th></tr></thead><tbody>
       ${p.vertices.map((v, i) => { const s = pc.lados[i]; return `<tr><td><b>${esc(v.nome)}</b></td><td class="conf">${esc(pc.tipos_vertice[i] ?? '—')}</td><td class="n">${fm(v.E, 3)}</td><td class="n">${fm(v.N, 3)}</td><td class="n">${esc(latLonDms(v.lat, 'lat'))}</td><td class="n">${esc(latLonDms(v.lon, 'lon'))}</td><td>${esc(s.de)} → ${esc(s.para)}</td><td class="n">${esc(grausDms(s.azimute))}</td><td class="n">${fm(s.distancia)}</td><td class="conf">${esc(s.confrontante)}</td></tr>`; }).join('')}
       </tbody></table>

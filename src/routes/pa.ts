@@ -169,7 +169,7 @@ router.get('/projetos/:id/vila-perimetro.pdf', h(async (req, res) => {
 // v3.151.0: subdivisão do PA em lotes (DXF da divisão/marcos).
 router.get('/projetos/:id/subdivisao', h(async (req) => {
   const sub = await mapas.buscarSubdivisao(id(req.params.id));
-  return { subdivisao: sub ? { ...sub, camadas: undefined, geometria_original: undefined } : null, vinculos: sub ? visao(await mapas.vinculosParcelas(id(req.params.id)), ctx(req).perfil) : {} };
+  return { subdivisao: sub ? { ...sub, camadas: undefined, geometria_original: undefined } : null, vinculos: sub ? visao(await mapas.vinculosParcelas(id(req.params.id)), ctx(req).perfil) : {}, municipios: sub ? await mapas.municipiosDosLotes(id(req.params.id)) : null };
 }));
 router.post('/projetos/:id/subdivisao/vinculo', h(async (req) => {
   exigirEscrita(req);

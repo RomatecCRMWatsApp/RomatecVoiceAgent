@@ -186,6 +186,10 @@
   table.tlotes select.sdVinc{display:block;width:100%;max-width:260px;margin-top:4px;padding:5px 6px;font-size:12px}
   table.tlotes select.sdVinc[hidden]{display:none}
   table.tlotes td.tl-lote .tl-sub{white-space:nowrap}
+  /* v3.166.3: tom do município (divisa) */
+  table.tlotes tr.tl-mun td{background:color-mix(in srgb, var(--mun) 13%, #fff)}
+  table.tlotes tr.tl-mun td.tl-lote{box-shadow:inset 5px 0 0 var(--mun);padding-left:10px}
+  table.tlotes .tl-mnome{display:block;font-size:10.5px;font-weight:700;white-space:nowrap;color:color-mix(in srgb, var(--mun) 70%, #000)}
   table.tlotes td.tl-acoes{width:112px}
   table.tlotes .tl-bts{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}
   table.tlotes .tl-bts .btn{padding:4px 7px}
@@ -195,6 +199,8 @@
     table.tlotes,table.tlotes tbody{display:block}
     table.tlotes tr{display:grid;grid-template-columns:1fr 1fr;gap:3px 14px;padding:10px 10px;margin-bottom:8px;border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;background:#fff}
     table.tlotes tr.tl-tem{border-left-color:#6E9E3A;background:#F6FAF0}
+    table.tlotes tr.tl-mun{border-left-color:var(--mun);background:color-mix(in srgb, var(--mun) 13%, #fff)}
+    table.tlotes tr.tl-mun td,table.tlotes tr.tl-mun td.tl-lote{background:transparent;box-shadow:none;padding-left:0}
     table.tlotes td{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:1px 0;border:0;text-align:right;font-size:13px}
     table.tlotes td[data-l]::before{content:attr(data-l);color:var(--muted);font-size:11px;text-align:left;white-space:nowrap;margin-right:auto}
     table.tlotes td[data-l]{justify-content:flex-end;gap:0}
@@ -794,8 +800,8 @@ let SUBV = { busca: '', lote: null };
 async function rSubdivisao(){
   const box = $('#subdivBox');
   box.innerHTML = '<div class="card empty">Carregando a subdivisão…</div>';
-  let sub, vinc = {}, assocs = [];
-  try { const r = await api(`/projetos/${S.pid}/subdivisao`); sub = r.subdivisao; vinc = r.vinculos || {}; if (sub) assocs = await carregarAssoc().catch(() => []); } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  let sub, vinc = {}, assocs = [], mun = null;
+  try { const r = await api(`/projetos/${S.pid}/subdivisao`); sub = r.subdivisao; vinc = r.vinculos || {}; mun = r.municipios || null; if (sub) assocs = await carregarAssoc().catch(() => []); } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
   const fm = (v, d = 2) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
   const tot = sub ? sub.parcelas.reduce((a, x) => a + x.perimetro.area_ha, 0) : 0;
   box.innerHTML = `
@@ -850,8 +856,9 @@ async function rSubdivisao(){
     const q = SUBV.busca.trim().replace(/\D/g, '');
     const ps = sub.parcelas.filter((x) => !q || x.lote === q.padStart(2, '0') || x.lote === q);
     // v3.166.2: linha enxuta — nada cortado (nome inteiro, ha/alq na mesma célula, botões quebram linha); troca do associado no ✏️
-    $('#sdLista').innerHTML = ps.length ? `<table class="tlotes"><thead><tr><th>Lote</th><th class="right">Área total</th><th class="right">Área útil</th><th class="right">Perímetro</th><th>Beneficiário(a)</th><th></th></tr></thead><tbody>
-      ${ps.map((x) => { const v = vinc[x.lote]; return `<tr${v ? ' class="tl-tem"' : ''}><td class="tl-lote"><b class="nowrap">LT-${esc(x.lote)}</b>${v && v.lote_vila ? `<span class="tl-sub">vila: lote ${esc(v.lote_vila)}</span>` : ''}</td>
+    const legMun = mun && mun.municipios.length ? `<div class="leg" style="margin:0 0 6px">${mun.municipios.map((m, i) => `<span><i style="background:${esc(m.cor)}"></i>${esc(m.nome)} · ${Object.values(mun.por_lote).filter((k) => k === i).length} lotes</span>`).join('')}${mun.divididos.length ? `<span class="muted">${mun.divididos.length} lote(s) cortado(s) pela divisa — cor do município com a maior parte</span>` : ''}</div>` : '';
+    $('#sdLista').innerHTML = ps.length ? legMun + `<table class="tlotes"><thead><tr><th>Lote</th><th class="right">Área total</th><th class="right">Área útil</th><th class="right">Perímetro</th><th>Beneficiário(a)</th><th></th></tr></thead><tbody>
+      ${ps.map((x) => { const v = vinc[x.lote]; const mi = mun && mun.por_lote ? mun.por_lote[x.lote] : undefined; const m = mi != null ? mun.municipios[mi] : null; const div = !!(mun && mun.divididos.includes(x.lote)); return `<tr class="${v ? 'tl-tem' : ''}${m ? ' tl-mun' : ''}"${m ? ` style="--mun:${esc(m.cor)}"` : ''}><td class="tl-lote"><b class="nowrap">LT-${esc(x.lote)}</b>${v && v.lote_vila ? `<span class="tl-sub">vila: lote ${esc(v.lote_vila)}</span>` : ''}${m ? `<span class="tl-mnome">${esc(m.nome.split('/')[0])}${div ? ' · dividido' : ''}</span>` : ''}</td>
         <td class="right" data-l="Área total"><span class="nowrap">${fm(x.perimetro.area_ha, 4)} ha</span><span class="tl-sub nowrap">${fm(x.perimetro.area_ha / ALQ_HA, 4)} alq.</span></td>
         <td class="right" data-l="Área útil">${x.area_util_ha != null ? `<span class="nowrap">${fm(x.area_util_ha, 4)} ha</span><span class="tl-sub nowrap">${fm(x.area_util_ha / ALQ_HA, 4)} alq.</span>` : '—'}</td>
         <td class="right" data-l="Perímetro"><span class="nowrap">${fm(x.perimetro.perimetro_m)} m</span><span class="tl-sub nowrap">${x.perimetro.vertices.length} vértices</span></td>
@@ -1440,7 +1447,7 @@ function cartaoLote(pr, verLote){
     <div class="ml-tit">LT-${esc(pr.lote)} · ${fm(pr.area_ha, 4)} ha</div><div class="ml-alq">${alqTxt(pr.area_ha)}</div>
     <div>Área útil ${pr.area_util_ha != null ? haAlq(pr.area_util_ha) : '—'} · perímetro ${fm(pr.perimetro_m)} m · ${pr.vertices} vértices</div>
     <div class="muted" style="margin-top:2px">Confronta com: ${esc(pr.confrontantes.join('; '))}</div>
-    <div class="ml-ben">${b ? `<b>👤 ${esc(b.nome)}</b><div class="muted">CPF ${esc(b.cpf)}${b.numero ? ' · ' + esc(b.numero) : ''}${b.lote_vila ? ' · lote da vila ' + esc(b.lote_vila) : ''}${b.telefone ? ' · ' + esc(b.telefone) : ''}</div>
+    <div class="ml-ben">${b ? `<b>👤 ${esc(b.nome)}</b>${b.denominacao ? `<div style="font-weight:700;color:#0C3320">🏡 ${esc(b.denominacao)}</div>` : ""}<div class="muted">CPF ${esc(b.cpf)}${b.numero ? ' · ' + esc(b.numero) : ''}${b.lote_vila ? ' · lote da vila ' + esc(b.lote_vila) : ''}${b.telefone ? ' · ' + esc(b.telefone) : ''}</div>
         <button class="btn btn-ghost btn-sm" style="margin-top:6px" id="mlCad">Abrir cadastro do associado</button>`
       : '<span class="muted">Sem associado vinculado a este lote.</span>' + (podeEscrever() ? ' <span class="muted">Vincule na lista de lotes abaixo (coluna Beneficiário).</span>' : '')}</div>
     <div class="row" style="margin-top:8px"><button class="btn btn-ghost btn-sm" id="mlMemo" style="flex:0 0 auto">👁 Memorial</button><button class="btn btn-gold btn-sm" id="mlPdf" style="flex:0 0 auto">📄 Tradicional</button><button class="btn btn-primary btn-sm" id="mlSigef" style="flex:0 0 auto">📄 Modelo SIGEF</button></div>

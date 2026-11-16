@@ -344,10 +344,11 @@ const m2br = (v: number, d = 2) => v.toLocaleString('pt-BR', { minimumFractionDi
 const dms = (g: number) => { const t = Math.round(g * 3600); return `${Math.floor(t / 3600)}°${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}'${String(t % 60).padStart(2, '0')}"`; };
 
 /** Memorial descritivo de uma parcela, com confrontantes (lados seguidos com o mesmo confrontante são agrupados no texto). */
-export function textoMemorialParcela(pc: Parcela, nomePa: string, municipio: string, beneficiario: string | null): string[] {
+export function textoMemorialParcela(pc: Parcela, nomePa: string, municipio: string, beneficiario: string | null, denominacao: string | null = null): string[] {
   const p = pc.perimetro, v = p.vertices;
   const par: string[] = [];
-  par.push(`Imóvel: Lote ${pc.lote} do ${nomePa} — ${municipio}.${beneficiario ? ` Beneficiário(a): ${beneficiario}.` : ''} Área total: ${m2br(p.area_ha, 4)} ha (${alqueiresTxt(p.area_ha)}; ${m2br(p.area_m2)} m²), incluídas as áreas de preservação permanente (APP) e as faixas de estrada que incidem no lote${pc.area_util_ha != null ? `; área útil (descontadas APP e estradas): ${haAlq(pc.area_util_ha)}` : ''}. Perímetro: ${m2br(p.perimetro_m)} m. Sistema de referência: ${p.datum}, projeção UTM, fuso ${p.fuso}${p.hemisferio === 'S' ? ' Sul' : ' Norte'}.`);
+  // v3.166.3: denominação da terra definida no cadastro do associado
+  par.push(`Imóvel: ${denominacao ? `"${denominacao}", ` : ''}Lote ${pc.lote} do ${nomePa} — ${municipio}.${beneficiario ? ` Beneficiário(a): ${beneficiario}.` : ''} Área total: ${m2br(p.area_ha, 4)} ha (${alqueiresTxt(p.area_ha)}; ${m2br(p.area_m2)} m²), incluídas as áreas de preservação permanente (APP) e as faixas de estrada que incidem no lote${pc.area_util_ha != null ? `; área útil (descontadas APP e estradas): ${haAlq(pc.area_util_ha)}` : ''}. Perímetro: ${m2br(p.perimetro_m)} m. Sistema de referência: ${p.datum}, projeção UTM, fuso ${p.fuso}${p.hemisferio === 'S' ? ' Sul' : ' Norte'}.`);
   const trechos: string[] = [];
   let conf = '';
   pc.lados.forEach((s, i) => {
