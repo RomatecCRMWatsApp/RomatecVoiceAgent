@@ -105,7 +105,16 @@ async function buscarUserPorLogin(login: string): Promise<UserRow | null> {
         LIMIT 1`,
       [digits],
     );
-    return rows[0] || null;
+    if (rows[0]) return rows[0];
+    // v3.169.0: equipe do PA entra com o CPF (login guardado como <cpf>@campo.romatec.local)
+    if (digits.length === 11) {
+      const [porCpf] = await pool.execute<UserRow[]>(
+        `SELECT * FROM users WHERE email = ? AND deleted_at IS NULL LIMIT 1`,
+        [`${digits}@campo.romatec.local`],
+      );
+      return porCpf[0] || null;
+    }
+    return null;
   } else {
     const [rows] = await pool.execute<UserRow[]>(
       `SELECT * FROM users WHERE email = ? AND deleted_at IS NULL LIMIT 1`,
@@ -214,8 +223,18 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
 
   await registrarTentativa({ user_id: user.id, login_attempt: login, ip, user_agent: ua, sucesso: true });
 
+  // v3.169.0: equipe do PA (role viewer + perfil no PA) cai direto na Gestão de PA
+  let destino: string | null = null;
+  if (tu.role === 'viewer') {
+    try {
+      const { acessoPa } = await import('../services/pa/paEquipe');
+      if ((await acessoPa(String(user.id))).perfil) destino = '/pa.html';
+    } catch { /* sem módulo PA → fluxo normal */ }
+  }
+
   res.json({
     ok: true,
+    destino,
     user: {
       id: user.id,
       email: user.email,

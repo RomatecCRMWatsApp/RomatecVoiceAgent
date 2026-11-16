@@ -82,5 +82,22 @@ export function ehRotaApiPublica(metodo: string, caminho: string): boolean {
  */
 export function apiAuthGate(req: Request, res: Response, next: NextFunction): void {
   if (ehRotaApiPublica(req.method, req.path)) { next(); return; }
-  requireAuth(req, res, next);
+  requireAuth(req, res, () => { void restricaoEquipePa(req, res, next); });
+}
+
+/**
+ * v3.169.0: quem foi cadastrado pela Equipe do PA (role viewer + linha em
+ * pa_usuarios_perfil) só usa o módulo PA. Sem isso, o funcionário de campo
+ * logado conseguiria chamar qualquer outra rota do /api.
+ */
+async function restricaoEquipePa(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const u = (req as Request & { user?: { sub?: string; role?: string } }).user;
+    if (u?.role === 'viewer' && u.sub) {
+      const { acessoPa, apiPermitidaCampo } = await import('../services/pa/paEquipe');
+      const a = await acessoPa(String(u.sub));
+      if (a.perfil && !apiPermitidaCampo(req.path)) { res.status(403).json({ error: 'Seu acesso é só ao módulo Gestão de PA.' }); return; }
+    }
+    next();
+  } catch (err) { next(err); }
 }

@@ -221,7 +221,7 @@
         type="text"
         id="login"
         name="login"
-        placeholder="email ou celular"
+        placeholder="email, celular ou CPF"
         autocomplete="username"
         autocapitalize="off"
         autocorrect="off"
@@ -304,7 +304,10 @@ form.addEventListener('submit', async (e) => {
     // open-redirect). Colaborador sempre vai pra /minha-quinzena.
     let next = new URLSearchParams(location.search).get('next') || '';
     if (next && !(next.charAt(0) === '/' && next.charAt(1) !== '/')) next = '';
-    if (role === 'colaborador') {
+    if (data.destino) {
+      // v3.169.0: equipe do PA só usa a Gestão de PA
+      window.location.href = data.destino;
+    } else if (role === 'colaborador') {
       window.location.href = '/minha-quinzena';
     } else {
       window.location.href = next || '/obras';

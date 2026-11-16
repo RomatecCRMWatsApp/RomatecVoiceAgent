@@ -7,9 +7,46 @@ import { PaErro } from './erros';
 import { buscarProjeto } from './paRepo';
 import { buscarSubdivisao, buscarPerimetro, buscarVila, vinculosParcelas, dadosCabecalho } from './paMapas';
 import { cabecalho, pdfDeHtml } from './mapasPdf';
-import type { Vertice } from './perimetro';
+import { utmParaLonLat, type Vertice } from './perimetro';
+import { pool, one, exec, registrarEvento } from './paDb';
+import * as XLSX from 'xlsx';
 
-export interface PontoColetora { nome: string; E: number; N: number; h: number | null; lat: number; lon: number; tipo: string; lotes: string[]; origem: 'LOTE' | 'PERIMETRO' | 'VILA' }
+/** existente = marco que já está no chão (perímetro do georreferenciamento): não compra nem crava. */
+export interface PontoColetora { nome: string; E: number; N: number; h: number | null; lat: number; lon: number; tipo: string; lotes: string[]; origem: 'LOTE' | 'PERIMETRO' | 'VILA'; existente?: boolean; implantar_com?: string | null }
+/** v3.169.0: marco oficial (planilha QUANTITATIVO-MARCOS-POR-LOTE). */
+export interface MarcoOficial { codigo: string; E: number; N: number; tipo: string; implantar_com: string | null; lotes: string[]; comprar: boolean }
+
+const loteNum = (t: string) => { const m = String(t).match(/(\d+)/); return m ? m[1].padStart(2, '0') : null; };
+/** Lê a aba "Coordenadas dos Marcos" da planilha de quantitativo (pura — testável). */
+export function marcosDePlanilha(buf: Buffer): MarcoOficial[] {
+  const wb = XLSX.read(buf, { type: 'buffer' });
+  const aba = wb.SheetNames.find((n) => /coordenad/i.test(n)) ?? wb.SheetNames.find((n) => /marco/i.test(n));
+  if (!aba) throw new PaErro('PLANILHA_MARCOS', 'Aba "Coordenadas dos Marcos" não encontrada na planilha', 400);
+  const linhas = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[aba], { header: 1, defval: '' });
+  const out: MarcoOficial[] = [];
+  for (const r of linhas) {
+    const c = String(r[0] ?? '').trim();
+    if (!/^M-?\d+/i.test(c)) continue;
+    const E = Number(String(r[1]).replace(',', '.')), N = Number(String(r[2]).replace(',', '.'));
+    if (!Number.isFinite(E) || !Number.isFinite(N) || E < 100000 || N < 1000000) continue;
+    out.push({ codigo: c.toUpperCase(), E, N, tipo: String(r[5] ?? '').trim() || 'Marco', implantar_com: loteNum(String(r[6] ?? '')),
+      lotes: String(r[7] ?? '').split(/[,;/]/).map(loteNum).filter((x): x is string => !!x), comprar: !/^n/i.test(String(r[8] ?? '').trim()) });
+  }
+  if (!out.length) throw new PaErro('PLANILHA_MARCOS', 'Nenhum marco (M-001…) com coordenadas na planilha', 400);
+  return out;
+}
+
+export async function buscarMarcos(projetoId: number): Promise<MarcoOficial[] | null> {
+  const r = await one(pool, 'SELECT marcos_json FROM pa_projetos WHERE id = ?', [projetoId]).catch(() => null);
+  const v = r?.marcos_json;
+  return (typeof v === 'string' ? JSON.parse(v) : v) as MarcoOficial[] | null ?? null;
+}
+export async function salvarMarcos(projetoId: number, buf: Buffer, usuario: string | null) {
+  const marcos = marcosDePlanilha(buf);
+  await exec(pool, 'UPDATE pa_projetos SET marcos_json = ? WHERE id = ?', [JSON.stringify(marcos), projetoId]);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'MARCOS_OFICIAIS', dados: { marcos: marcos.length, a_implantar: marcos.filter((m) => m.comprar).length } });
+  return { marcos: marcos.length, a_implantar: marcos.filter((m) => m.comprar).length, existentes: marcos.filter((m) => !m.comprar).length };
+}
 export interface PontosColetora { pontos: PontoColetora[]; fuso: number; hemisferio: 'S' | 'N'; lotes: Array<{ lote: string; area_ha: number; vertices: string[] }> }
 
 const chave = (E: number, N: number) => `${Math.round(E * 50)}:${Math.round(N * 50)}`; // 2 cm
@@ -44,6 +81,18 @@ export async function pontosColetora(projetoId: number): Promise<PontosColetora>
   for (const pc of sub?.parcelas ?? []) fontes.push({ origem: 'LOTE', lote: pc.lote, vertices: pc.perimetro.vertices, tipos: pc.tipos_vertice });
   if (per) fontes.push({ origem: 'PERIMETRO', vertices: per.vertices });
   if (vila) { fontes.push({ origem: 'VILA', vertices: vila.total.vertices }); if (vila.nucleo) fontes.push({ origem: 'VILA', vertices: vila.nucleo.vertices }); }
+  const fuso = sub?.fuso ?? per?.fuso ?? vila?.total.fuso ?? 23, hem = sub?.hemisferio ?? per?.hemisferio ?? 'S';
+  // v3.169.0: com a planilha oficial, os pontos são os marcos (M-001…) — vértice extra do desenho não é marco
+  const marcos = await buscarMarcos(projetoId);
+  if (marcos?.length) {
+    const ll = utmParaLonLat(fuso, hem);
+    const pm: PontoColetora[] = marcos.map((m) => { const [lon, lat] = ll(m.E, m.N); return { nome: m.codigo, E: m.E, N: m.N, h: null, lat, lon, tipo: m.tipo, lotes: m.lotes, origem: 'LOTE' as const, existente: !m.comprar, implantar_com: m.implantar_com }; });
+    const vilaPts = juntarPontos(fontes.filter((f) => f.origem === 'VILA'));
+    return {
+      pontos: [...pm, ...vilaPts], fuso, hemisferio: hem,
+      lotes: (sub?.parcelas ?? []).map((pc) => ({ lote: pc.lote, area_ha: pc.perimetro.area_ha, vertices: marcos.filter((m) => m.lotes.includes(pc.lote)).map((m) => m.codigo) })),
+    };
+  }
   const pontos = juntarPontos(fontes);
   const nomeDe = new Map(pontos.map((p) => [chave(p.E, p.N), p.nome]));
   return {
@@ -53,7 +102,7 @@ export async function pontosColetora(projetoId: number): Promise<PontosColetora>
 }
 
 const f3 = (v: number) => v.toFixed(3);
-const cod = (p: PontoColetora) => (p.lotes.length ? `${p.tipo} LT-${p.lotes.join('/')}` : p.tipo).replace(/,/g, ' ');
+const cod = (p: PontoColetora) => (`${p.existente ? 'EXISTENTE ' : ''}${p.tipo}${p.lotes.length ? ` LT-${p.lotes.join('/')}` : ''}`).replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** CSV com cabeçalho (Emlid Flow, CHC LandStar, Carlson, SurvCE…): Name,Easting,Northing,Elevation,Code. */
 export const csvColetora = (d: PontosColetora) => ['Name,Easting,Northing,Elevation,Code', ...d.pontos.map((p) => [p.nome, f3(p.E), f3(p.N), f3(p.h ?? 0), cod(p)].join(','))].join('\r\n') + '\r\n';
@@ -101,7 +150,7 @@ export async function pdfCaderneta(projetoId: number): Promise<{ pdf: Buffer; no
   const ben = await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>));
   const cab = dadosCabecalho(p);
   const porNome = new Map(d.pontos.map((x) => [x.nome, x]));
-  const linha = (x: PontoColetora) => `<tr><td><b>${esc(x.nome)}</b></td><td class="conf">${esc(x.tipo)}</td><td class="n">${br(x.E)}</td><td class="n">${br(x.N)}</td><td class="n">${esc(gms(x.lat, 'lat'))}</td><td class="n">${esc(gms(x.lon, 'lon'))}</td><td class="ck">☐</td><td class="obs"></td></tr>`;
+  const linha = (x: PontoColetora) => `<tr><td><b>${esc(x.nome)}</b></td><td class="conf">${esc(x.tipo)}</td><td class="n">${br(x.E)}</td><td class="n">${br(x.N)}</td><td class="n">${esc(gms(x.lat, 'lat'))}</td><td class="n">${esc(gms(x.lon, 'lon'))}</td><td class="ck">${x.existente ? '<span style="font-size:7pt;color:#1f7a4d">já existe</span>' : '☐'}</td><td class="obs"></td></tr>`;
   const thead = '<thead><tr><th>Ponto</th><th>Tipo</th><th class="n">E (m)</th><th class="n">N (m)</th><th class="n">Latitude</th><th class="n">Longitude</th><th>Cravado</th><th style="width:34mm">Obs. de campo</th></tr></thead>';
   const blocos = d.lotes.map((l) => {
     const b = ben[l.lote];

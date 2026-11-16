@@ -33,20 +33,28 @@ import * as part from '../services/pa/paParticipantes';
 import * as relacao from '../services/pa/paRelacaoLotes';
 import * as marcos from '../services/pa/paMarcos';
 import * as coletora from '../services/pa/paColetora';
+import * as equipe from '../services/pa/paEquipe';
+import * as campo from '../services/pa/paCampo';
+import * as dossie from '../services/pa/paDossie';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
 // Acervo pode passar de 100 MB → disco temporário (efêmero no Railway, apagado após o import).
 const uploadDisco = multer({ dest: os.tmpdir(), limits: { fileSize: 400 * 1024 * 1024, files: 2 } });
 
-interface Ctx { sub: string | null; perfil: PerfilPa }
+interface Ctx { sub: string | null; perfil: PerfilPa; nome: string | null; permissoes: equipe.PermissoesCampo }
 type ReqPa = Request & { pa?: Ctx };
 
 async function contexto(req: ReqPa, _res: Response, next: NextFunction) {
   try {
     const u = (req as AuthedRequest).user;
     const sub = u?.sub ? String(u.sub) : null;
-    req.pa = { sub, perfil: (await repo.perfilOverride(sub)) ?? perfilPorRole(u?.role) };
+    const a = await equipe.acessoPa(sub);
+    req.pa = { sub, perfil: a.perfil ?? perfilPorRole(u?.role), nome: a.nome ?? (u as { name?: string } | undefined)?.name ?? null, permissoes: a.permissoes };
+    // v3.169.0: funcionário de campo — só as rotas liberadas (o resto 403, inclusive PDF de mapa)
+    if (req.pa.perfil === 'CAMPO' && !equipe.rotaPaPermitidaCampo(req.method, req.path, a.permissoes)) {
+      throw new PaErro('SEM_PERMISSAO', 'Seu perfil (funcionário de campo) não tem acesso a isto', 403);
+    }
     next();
   } catch (err) {
     next(err);
@@ -55,7 +63,7 @@ async function contexto(req: ReqPa, _res: Response, next: NextFunction) {
 router.use(contexto);
 
 function ctx(req: Request): Ctx {
-  return (req as ReqPa).pa ?? { sub: null, perfil: 'DIRECAO_ASSOCIACAO' };
+  return (req as ReqPa).pa ?? { sub: null, perfil: 'DIRECAO_ASSOCIACAO', nome: null, permissoes: equipe.PERMISSOES_PADRAO };
 }
 function exigirEscrita(req: Request) {
   if (!podeEscrever(ctx(req).perfil)) throw new PaErro('SEM_PERMISSAO', 'Perfil somente leitura (Direção da Associação)', 403);
@@ -105,7 +113,7 @@ function visao<T>(v: T, perfil: PerfilPa): T {
 }
 
 // ─── Sessão ───────────────────────────────────────────────────────────────
-router.get('/eu', h(async (req) => ({ perfil: ctx(req).perfil, pode_escrever: podeEscrever(ctx(req).perfil), pode_excluir: podeExcluir(ctx(req).perfil), ve_documentos: podeVerDocumentos(ctx(req).perfil) })));
+router.get('/eu', h(async (req) => ({ id: ctx(req).sub, nome: ctx(req).nome, permissoes: ctx(req).permissoes, perfil: ctx(req).perfil, pode_escrever: podeEscrever(ctx(req).perfil), pode_excluir: podeExcluir(ctx(req).perfil), ve_documentos: podeVerDocumentos(ctx(req).perfil) })));
 
 // ─── Projetos ─────────────────────────────────────────────────────────────
 router.get('/projetos', h(async () => ({ projetos: await repo.listarProjetos() })));
@@ -237,7 +245,11 @@ router.get('/projetos/:id/subdivisao.pdf', h(async (req, res) => {
 router.get('/projetos/:id/mapa-geral.pdf', h(async (req, res) => { enviarPdf(res, await mapas.pdfMapaGeral(id(req.params.id), req.query.modelo === 'sigef' ? 'sigef' : 'tradicional')); return undefined; }));
 
 // ─── Lotes ────────────────────────────────────────────────────────────────
-router.get('/projetos/:id/lotes', h(async (req) => ({ lotes: await repo.listarLotes(id(req.params.id)) })));
+router.get('/projetos/:id/lotes', h(async (req) => {
+  const lotes = await repo.listarLotes(id(req.params.id));
+  // v3.169.0: funcionário de campo não vê financeiro
+  return { lotes: ctx(req).perfil === 'CAMPO' ? lotes.map((l) => ({ ...l, financeiro: { saldo: 0, situacao: l.associado ? 'EM_DIA' : 'SEM_ASSOCIADO', sinal_status: null } })) : lotes };
+}));
 router.get('/projetos/:id/lotes/:numero', h(async (req) => {
   const ls = await repo.listarLotes(id(req.params.id));
   const n = String(req.params.numero).padStart(2, '0');
@@ -454,6 +466,42 @@ router.post('/projetos/:id/marcos/gerar', h(async (req) => {
   const aids = Array.isArray(b.associado_ids) ? b.associado_ids.map(Number).filter((n: number) => Number.isInteger(n) && n > 0) : null;
   return { job: await marcos.gerarTaxaMarcos(id(req.params.id), { valor: Number(b.valor ?? marcos.VALOR_MARCO_PADRAO), vencimento: String(b.vencimento ?? ''), associado_ids: aids && aids.length ? aids : null, enviar: b.enviar !== false }, ctx(req).sub) };
 }));
+// ─── v3.169.0: Equipe do PA (cadastro + login pelo WhatsApp + permissões) ─
+router.get('/equipe', h(async (req) => { exigirAdmin(req); return { equipe: await equipe.listarEquipe(), perfis: equipe.PERFIS_EQUIPE }; }));
+router.post('/equipe', h(async (req, res) => { exigirAdmin(req); res.status(201); return equipe.cadastrarMembro(req.body ?? {}, ctx(req).sub); }));
+router.post('/equipe/:uid/reenviar', h(async (req) => { exigirAdmin(req); return equipe.reenviarAcesso(id(req.params.uid, 'usuário'), ctx(req).sub); }));
+router.post('/equipe/:uid/ativo', h(async (req) => { exigirAdmin(req); return equipe.ativarMembro(id(req.params.uid, 'usuário'), req.body?.ativo === true, ctx(req).sub); }));
+router.patch('/equipe/:uid', h(async (req) => { exigirAdmin(req); return equipe.atualizarMembro(id(req.params.uid, 'usuário'), req.body ?? {}, ctx(req).sub); }));
+
+// ─── v3.169.0: produção de campo (marcar marco locado; lote fecha sozinho) ─
+const usuarioCampo = (req: Request) => ({ id: ctx(req).sub, nome: ctx(req).nome });
+router.get('/projetos/:id/campo', h(async (req) => campo.estadoCampo(id(req.params.id))));
+router.post('/projetos/:id/campo/pontos', h(async (req) => {
+  const p = ctx(req).perfil;
+  if (!(p === 'ADMIN' || p === 'OPERADOR' || (p === 'CAMPO' && ctx(req).permissoes.marcar_campo))) throw new PaErro('SEM_PERMISSAO', 'Sem permissão para marcar pontos', 403);
+  const b = req.body ?? {};
+  return campo.marcarPonto(id(req.params.id), String(b.ponto ?? '').slice(0, 40), { gps: b.gps ?? null, obs: b.obs, base: b.base, rover: b.rover }, usuarioCampo(req));
+}));
+router.delete('/projetos/:id/campo/pontos/:ponto', h(async (req) => {
+  const p = ctx(req).perfil;
+  if (p === 'DIRECAO_ASSOCIACAO') throw new PaErro('SEM_PERMISSAO', 'Perfil somente leitura', 403);
+  return campo.desmarcarPonto(id(req.params.id), String(req.params.ponto).slice(0, 40), usuarioCampo(req), p === 'ADMIN');
+}));
+// ─── v3.169.0: dossiês de pronta entrega ─
+router.get('/projetos/:id/dossies', h(async (req) => { exigirEscrita(req); return { dossies: visao(await dossie.listarDossies(id(req.params.id)), ctx(req).perfil) }; }));
+router.get('/projetos/:id/dossies/:lote.pdf', h(async (req, res) => { exigirEscrita(req); const r = await dossie.pdfDossie(id(req.params.id), String(req.params.lote).slice(0, 10)); enviarPdf(res, r); return undefined; }));
+router.post('/projetos/:id/dossies/:lote/gerar', h(async (req) => { exigirAdmin(req); return dossie.criarDossie(id(req.params.id), String(req.params.lote).slice(0, 10), ctx(req).sub); }));
+router.post('/projetos/:id/dossies/:lote/enviar', h(async (req) => { exigirAdmin(req); return dossie.enviarDossie(id(req.params.id), String(req.params.lote).slice(0, 10), ctx(req).sub); }));
+router.post('/projetos/:id/dossies/:lote/entregue', h(async (req) => { exigirEscrita(req); return dossie.marcarEntregue(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.obs, ctx(req).sub, ctx(req).nome); }));
+
+// v3.169.0: planilha oficial de marcos (QUANTITATIVO-MARCOS-POR-LOTE) → códigos M-001… na coletora/caderneta/campo
+router.post('/projetos/:id/marcos-planilha', uploadMem.single('arquivo'), h(async (req) => {
+  exigirAdmin(req);
+  const f = (req as Request & { file?: { buffer: Buffer } }).file;
+  if (!f) throw new PaErro('CAMPO_INVALIDO', 'Envie a planilha (XLSX)', 400);
+  return coletora.salvarMarcos(id(req.params.id), f.buffer, ctx(req).sub);
+}));
+
 // v3.168.0: pontos para a coletora (CSV, TXT P,E,N,Z,D, DXF) e caderneta de campo (PDF)
 router.get('/projetos/:id/coletora.:fmt(csv|txt|dxf)', h(async (req, res) => {
   const r = await coletora.arquivoColetora(id(req.params.id), req.params.fmt as 'csv' | 'txt' | 'dxf');

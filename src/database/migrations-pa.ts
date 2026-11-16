@@ -182,6 +182,64 @@ const CREATE_PA_DOCUMENTOS_ARQUIVOS = `
   )
 `;
 
+// v3.169.0: produção de campo — cada marco locado (ponto da coletora) e o fechamento do lote
+const CREATE_PA_CAMPO_PONTOS = `
+  CREATE TABLE IF NOT EXISTS pa_campo_pontos (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id    INT NOT NULL,
+    ponto         VARCHAR(40) NOT NULL,
+    e             DECIMAL(12,3) NOT NULL,
+    n             DECIMAL(12,3) NOT NULL,
+    marcado_em    DATETIME NOT NULL,
+    usuario_id    VARCHAR(60) NULL,
+    usuario_nome  VARCHAR(160) NULL,
+    gps_lat       DECIMAL(10,7) NULL,
+    gps_lon       DECIMAL(10,7) NULL,
+    gps_precisao  DECIMAL(8,1) NULL,
+    base_gnss     VARCHAR(80) NULL,
+    rover_gnss    VARCHAR(80) NULL,
+    obs           VARCHAR(255) NULL,
+    UNIQUE KEY uk_pa_campo_ponto (projeto_id, ponto),
+    INDEX idx_pa_campo_dia (projeto_id, marcado_em)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+const CREATE_PA_CAMPO_LOTES = `
+  CREATE TABLE IF NOT EXISTS pa_campo_lotes (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id    INT NOT NULL,
+    lote          VARCHAR(10) NOT NULL,
+    concluido_em  DATETIME NOT NULL,
+    usuario_id    VARCHAR(60) NULL,
+    usuario_nome  VARCHAR(160) NULL,
+    inicio_em     DATETIME NULL,
+    pontos        INT NOT NULL,
+    area_ha       DECIMAL(12,4) NULL,
+    perimetro_m   DECIMAL(12,2) NULL,
+    associado_id  INT NULL,
+    base_gnss     VARCHAR(80) NULL,
+    rover_gnss    VARCHAR(80) NULL,
+    UNIQUE KEY uk_pa_campo_lote (projeto_id, lote)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+// v3.169.0: dossiês de pronta entrega (lote medido → carta + quitação + mapa/memorial)
+const CREATE_PA_DOSSIES = `
+  CREATE TABLE IF NOT EXISTS pa_dossies (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id    INT NOT NULL,
+    lote          VARCHAR(10) NOT NULL,
+    associado_id  INT NOT NULL,
+    status        ENUM('AGUARDANDO_PAGAMENTO','PRONTO','ENVIADO','ENTREGUE') NOT NULL,
+    gerado_em     DATETIME NOT NULL,
+    enviado_em    DATETIME NULL,
+    enviado_por   VARCHAR(64) NULL,
+    entregue_em   DATETIME NULL,
+    entregue_por  VARCHAR(160) NULL,
+    entregue_obs  VARCHAR(255) NULL,
+    UNIQUE KEY uk_pa_dossie (projeto_id, lote)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
 const CREATE_PA_ENTREGAS = `
   CREATE TABLE IF NOT EXISTS pa_entregas (
     id                 INT AUTO_INCREMENT PRIMARY KEY,
@@ -311,6 +369,10 @@ const CREATE_PA_WA_GRUPO_MEMBROS = `
 // v3.143.0 — colunas novas em tabelas já criadas (ALTER idempotente: erro de
 // coluna duplicada = já aplicado).
 export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
+  // v3.169.0: marcos oficiais (planilha de quantitativo) + perfil CAMPO com permissões
+  { label: 'pa_projetos.marcos_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN marcos_json JSON NULL' },
+  { label: 'pa_usuarios_perfil +CAMPO', sql: "ALTER TABLE pa_usuarios_perfil MODIFY perfil ENUM('ADMIN','OPERADOR','DIRECAO_ASSOCIACAO','CAMPO') NOT NULL" },
+  { label: 'pa_usuarios_perfil.permissoes', sql: 'ALTER TABLE pa_usuarios_perfil ADD COLUMN permissoes JSON NULL, ADD COLUMN criado_por VARCHAR(64) NULL' },
   // v3.168.0: taxa de marcos de concreto (um boleto por associado)
   { label: 'pa_lancamentos.tipo +MARCO', sql: "ALTER TABLE pa_lancamentos MODIFY tipo ENUM('SINAL','BOLETO','AVISTA','AJUSTE','MARCO') NOT NULL" },
   { label: 'pa_projetos.cep_padrao', sql: 'ALTER TABLE pa_projetos ADD COLUMN cep_padrao CHAR(8) NULL' },
@@ -369,6 +431,9 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_caixa_movimentos', sql: CREATE_PA_CAIXA_MOVIMENTOS },
   { label: 'pa_participantes', sql: CREATE_PA_PARTICIPANTES },
   { label: 'pa_whatsapp_grupo_membros', sql: CREATE_PA_WA_GRUPO_MEMBROS },
+  { label: 'pa_campo_pontos', sql: CREATE_PA_CAMPO_PONTOS },
+  { label: 'pa_campo_lotes', sql: CREATE_PA_CAMPO_LOTES },
+  { label: 'pa_dossies', sql: CREATE_PA_DOSSIES },
 ];
 
 export async function runPaMigrations(): Promise<void> {

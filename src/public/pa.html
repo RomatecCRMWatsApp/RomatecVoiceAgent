@@ -26,6 +26,24 @@
   nav.tabs button{background:transparent;border:0;color:#d9e6dd;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap}
   nav.tabs button.on{color:#fff;border-bottom-color:var(--gold)}
   .wrap{max-width:1180px;margin:0 auto;padding:16px}
+  /* v3.169.0: menu na lateral (padrão do CRM, nas cores da ZAYRA) — só no computador; no celular segue a barra de cima */
+  @media (min-width:980px){
+    body{padding-left:272px}
+    header{position:fixed;left:12px;top:12px;bottom:12px;width:248px;padding:16px 12px 12px;border-radius:18px;border:1px solid rgba(201,168,76,.4);
+      display:flex;flex-direction:column;overflow-y:auto;box-shadow:0 10px 30px rgba(12,51,32,.25);scrollbar-width:thin}
+    header .top{display:contents}
+    header .titulo{order:0;display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:0 4px 12px;border-bottom:1px solid rgba(201,168,76,.35)}
+    header .titulo #hdrEmblema{width:46px;height:46px}
+    header h1{font-size:16px;line-height:1.25}
+    nav.tabs{order:1;flex-direction:column;gap:3px;overflow:visible;margin:12px 0}
+    nav.tabs button{text-align:left;border-bottom:0;border:1px solid transparent;border-radius:11px;padding:10px 12px;color:#d9e6dd;font-size:14px}
+    nav.tabs button:hover{background:rgba(255,255,255,.06);color:#fff}
+    nav.tabs button.on{color:var(--gold-soft);background:rgba(201,168,76,.14);border-color:var(--gold)}
+    header .top > .row{order:2;margin-top:auto;flex-direction:column;align-items:stretch !important;gap:8px;padding-top:12px;border-top:1px solid rgba(201,168,76,.35)}
+    header .top > .row > *{max-width:none;width:100%;text-align:center;flex:0 0 auto !important}
+    header select{max-width:none}
+    .wrap{max-width:1240px}
+  }
   /* v3.145.0: cabeçalho com navegação + painel moderno */
   .navbtn{background:rgba(255,255,255,.1);color:#fff;border:1px solid var(--gold);border-radius:8px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;white-space:nowrap;font-family:inherit}
   .navbtn:hover{background:rgba(201,168,76,.25)}
@@ -149,8 +167,8 @@
   .ml-ctl .seg{display:flex;flex-wrap:nowrap;max-width:100%;overflow-x:auto;scrollbar-width:none;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.18);background:#fff}
   .ml-ctl .seg button.on{background:#0C3320;color:#fff}
   .ml-vert{display:flex;align-items:center;gap:3px;cursor:pointer;transform:translate(0,0)}
-  .ml-vert i{width:9px;height:9px;border-radius:50%;background:#B3261E;border:1.5px solid #fff;box-shadow:0 0 2px #0006;flex:0 0 auto}
-  .ml-vert span{color:#B3261E;font-weight:800;font-size:10px;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff;white-space:nowrap}
+  .ml-vert i{width:9px;height:9px;border-radius:50%;background:var(--vc,#B3261E);border:1.5px solid #fff;box-shadow:0 0 2px #0006;flex:0 0 auto}
+  .ml-vert span{color:var(--vc,#B3261E);font-weight:800;font-size:10px;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff;white-space:nowrap}
   .ml-vert.on i{width:15px;height:15px;background:#2F5FD0}
   .ml-vert.on span{color:#1E3F99;font-size:12px}
   .leaflet-tooltip.ml-rotv{color:#B3261E;font-size:10px}
@@ -177,6 +195,15 @@
   .ml-tit{font-size:22px;font-weight:700;color:#0C3320;font-family:'Playfair Display',Georgia,serif;margin:2px 0 4px}
   /* v3.157.0: grid21 não deixa o card passar da tela; tabela de lotes vira cartões no celular */
   .grid21>*{min-width:0}
+  /* v3.169.0: equipe do PA e perfil de campo */
+  .eq-item{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;background:#fff}
+  .eq-item.off{opacity:.6}
+  .eq-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .eq-perm{margin-top:6px;display:flex;gap:4px 14px;flex-wrap:wrap;align-items:center}
+  .eq-perm label.citem{display:inline-flex;align-items:center;gap:6px;font-weight:600;margin:0}
+  .eq-perm input[type=checkbox]{width:auto;margin:0}
+  .wm-campo{position:fixed;inset:0;pointer-events:none;z-index:9999;background-repeat:repeat}
+  @media print{ body.perfil-campo *{display:none !important} body.perfil-campo::after{content:'Impressão bloqueada para este perfil';display:block;padding:40px;font:20px Arial} }
   /* v3.166.2: tabela de lotes sem corte */
   table.tlotes td{vertical-align:top}
   table.tlotes .tl-sub{display:block;color:var(--muted);font-size:11px;font-weight:400}
@@ -307,7 +334,9 @@
     <button data-t="carteirinhas">🪪 Carteirinhas</button>
     <button data-t="documentos">📜 Documentos oficiais</button>
     <button data-t="campo">📡 Campo</button>
+    <button data-t="dossies">📦 Dossiês</button>
     <button data-t="importar" data-admin="1">📥 Importar / Exportar</button>
+    <button data-t="equipe" data-admin="1">👷 Equipe</button>
   </nav>
 </header>
 
@@ -319,7 +348,9 @@
   <section id="v-carteirinhas" class="hide"></section>
   <section id="v-documentos" class="hide"></section>
   <section id="v-campo" class="hide"></section>
+  <section id="v-dossies" class="hide"></section>
   <section id="v-importar" class="hide"></section>
+  <section id="v-equipe" class="hide"></section>
 </div>
 
 <div class="drawer" id="drawer"><div class="pane" id="drawerPane"></div></div>
@@ -415,8 +446,9 @@ async function boot(){
   mostrarVersao();
   try {
     S.eu = await api('/eu');
-    $('#perfilChip').textContent = S.eu.perfil.replace(/_/g, ' ');
+    $('#perfilChip').textContent = (S.eu.nome ? S.eu.nome.split(' ').slice(0, 2).join(' ') + ' · ' : '') + ({ ADMIN: 'Administrador', OPERADOR: 'Operador', DIRECAO_ASSOCIACAO: 'Direção da associação', CAMPO: 'Funcionário de campo' }[S.eu.perfil] || S.eu.perfil); // v3.169.0
     if (S.eu.perfil !== 'ADMIN') document.querySelectorAll('[data-admin]').forEach((b) => b.classList.add('hide'));
+    if (S.eu.perfil === 'CAMPO') aplicarPerfilCampo(); // v3.169.0
     const { projetos } = await api('/projetos');
     S.projetos = projetos;
     const sel = $('#selProjeto');
@@ -428,7 +460,8 @@ async function boot(){
     document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => irPara(b.dataset.t));
     $('#btnVoltar').onclick = voltar;
     try { history.replaceState({ aba: S.aba }, ''); } catch { /* ok */ }
-    mostrar(qs.get('aba') || (S.pid ? 'painel' : 'importar'));
+    const abaIni = qs.get('aba') || (S.eu.perfil === 'CAMPO' ? 'campo' : S.pid ? 'painel' : 'importar');
+    mostrar(S.eu.perfil === 'CAMPO' && !['campo', 'mapa', 'importar'].includes(abaIni) ? 'campo' : abaIni);
     if (qs.get('associado')) abrirAssociado(Number(qs.get('associado')));
   } catch (e){ $('#v-painel').innerHTML = `<div class="card empty">Erro ao carregar: ${esc(e.message)}</div>`; }
 }
@@ -459,7 +492,7 @@ function mostrar(aba){
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === aba));
   document.querySelectorAll('.wrap > section').forEach((s) => s.classList.toggle('hide', s.id !== 'v-' + aba));
   if (!S.pid && aba !== 'importar'){ $('#v-' + aba).innerHTML = '<div class="card empty">Nenhum projeto cadastrado ainda. Use <b>Importar</b> para carregar o seed do PA.</div>'; return; }
-  ({ painel: rPainel, mapa: rMapa, associados: rAssociados, financeiro: rFinanceiro, carteirinhas: rCarteirinhas, documentos: rDocumentosOficiais, campo: rCampo, importar: rImportar })[aba]();
+  ({ painel: rPainel, mapa: rMapa, associados: rAssociados, financeiro: rFinanceiro, carteirinhas: rCarteirinhas, documentos: rDocumentosOficiais, campo: rCampo, importar: rImportar, equipe: rEquipe, dossies: rDossies })[aba]();
 }
 const podeEscrever = () => S.eu && S.eu.pode_escrever;
 
@@ -1274,7 +1307,7 @@ function mapaLotes2D(L, box, ctx){
   // v3.159.0: pontos clicáveis (vértices do perímetro)
   const pts2 = {};
   for (const pt of ctx.pontos || []) {
-    pts2[pt.id] = L.circleMarker([pt.lngLat[1], pt.lngLat[0]], { radius: 5, color: '#fff', weight: 1.5, fillColor: '#B3261E', fillOpacity: 1 })
+    pts2[pt.id] = L.circleMarker([pt.lngLat[1], pt.lngLat[0]], { radius: pt.cor ? 6 : 5, color: '#fff', weight: 1.5, fillColor: pt.cor || '#B3261E', fillOpacity: 1 })
       .bindTooltip(pt.nome, { permanent: true, direction: 'top', offset: [0, -4], className: 'ml-rot ml-rotv' }).on('click', () => ctx.selPonto(pt.id)).addTo(mapa);
   }
   let ptAtual = null;
@@ -1285,7 +1318,7 @@ function mapaLotes2D(L, box, ctx){
       atual = null;
     },
     marcarPonto(id){
-      if (ptAtual != null && pts2[ptAtual]) pts2[ptAtual].setStyle({ radius: 5, fillColor: '#B3261E' });
+      if (ptAtual != null && pts2[ptAtual]) { const pa = (ctx.pontos || []).find((x) => x.id === ptAtual); pts2[ptAtual].setStyle({ radius: pa && pa.cor ? 6 : 5, fillColor: (pa && pa.cor) || '#B3261E' }); }
       ptAtual = id; const m = pts2[id]; if (!m) return; m.setStyle({ radius: 9, fillColor: '#2F5FD0' }); m.bringToFront();
       mapa.setView(m.getLatLng(), Math.max(mapa.getZoom(), 15));
     },
@@ -1358,6 +1391,7 @@ function mapaLotes3D(maplibregl, box, ctx){
     // v3.159.0: pontos clicáveis (vértices do perímetro)
     for (const pt of ctx.pontos || []) {
       const el = document.createElement('div'); el.className = 'ml-vert'; el.innerHTML = `<i></i><span>${esc(pt.nome)}</span>`;
+      if (pt.cor) el.style.setProperty('--vc', pt.cor); // v3.169.0: cor por ponto (locado/existente)
       el.onclick = (ev) => { ev.stopPropagation(); ctx.selPonto(pt.id); };
       marcadores[pt.id] = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(pt.lngLat).addTo(mapa);
     }
@@ -2675,10 +2709,14 @@ async function salvarPagamento(){
 // ─── Campo ──────────────────────────────────────────────────────────────
 async function rCampo(){
   const v = $('#v-campo');
-  v.innerHTML = '<div class="card empty">Carregando lotes…</div>';
+  v.innerHTML = '<div id="cpBox"><div class="card empty">Carregando o mapa de campo…</div></div><div id="cpVila"></div>';
+  rLocacao($('#cpBox'));
+  if (S.eu.perfil === 'CAMPO') return; // funcionário de campo usa só a locação no mapa
+  const vb = $('#cpVila');
   try {
     const lotes = await carregarLotes();
-    v.innerHTML = `<div class="card"><div class="row"><div style="flex:0 1 220px"><label for="fMed">Status de medição</label><select class="f" id="fMed"><option value="">Todos</option>${Object.keys(COR_MED).map((s) => `<option>${s}</option>`).join('')}</select></div>
+    const EQP_VILA = 'S6 Plus (base) · Jupiter ComNav (rover)'; // v3.169.0: equipamentos padrão
+    vb.innerHTML = `<div class="card"><h2 style="margin-top:0">🏘️ Lotes da vila — medição</h2><div class="row"><div style="flex:0 1 220px"><label for="fMed">Status de medição</label><select class="f" id="fMed"><option value="">Todos</option>${Object.keys(COR_MED).map((s) => `<option>${s}</option>`).join('')}</select></div>
       <div class="muted" style="flex:1 1 300px">Mudar para AGENDADA/MEDIDO registra evento (aviso ao associado pela Zayra entra na fase 4). Vértices SIRGAS (E,N,h) por lote: importação de CSV na fase 5.</div></div></div>
       <div class="card"><div class="tbl" id="campoBox"></div></div>`;
     const desenhar = () => {
@@ -2688,9 +2726,9 @@ async function rCampo(){
         ${ls.map((l) => `<tr data-n="${esc(l.numero)}"><td><b>${esc(l.numero)}</b> ${l.tipo === 'INSTITUCIONAL' ? chip('INSTITUCIONAL','inst.') : ''}</td><td>${esc(l.associado ? l.associado.nome : '—')}</td><td class="nowrap">${l.area_projeto_m2 ? l.area_projeto_m2.toLocaleString('pt-BR') : '—'}</td>
           <td><select class="f" data-c="status_medicao" ${podeEscrever() ? '' : 'disabled'}>${Object.keys(COR_MED).map((s) => `<option ${l.status_medicao === s ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
           <td><input type="date" data-c="data_medicao" value="${esc(l.data_medicao || '')}" ${podeEscrever() ? '' : 'disabled'}></td>
-          <td><input data-c="equipe" value="${esc(l.equipe || '')}" ${podeEscrever() ? '' : 'disabled'}></td>
-          <td><input data-c="base_gnss" value="${esc(l.base_gnss || '')}" style="width:110px" ${podeEscrever() ? '' : 'disabled'}></td>
-          <td><input data-c="area_medida_m2" inputmode="decimal" value="${l.area_medida_m2 == null ? '' : esc(l.area_medida_m2)}" style="width:100px" ${podeEscrever() ? '' : 'disabled'}></td>
+          <td><input data-c="equipe" value="${esc(l.equipe || S.eu.nome || '')}" ${podeEscrever() ? '' : 'disabled'}></td>
+          <td><input data-c="base_gnss" value="${esc(l.base_gnss || EQP_VILA)}" style="width:150px" ${podeEscrever() ? '' : 'disabled'}></td>
+          <td><input data-c="area_medida_m2" inputmode="decimal" value="${l.area_medida_m2 == null ? (l.area_projeto_m2 == null ? '' : esc(l.area_projeto_m2)) : esc(l.area_medida_m2)}" style="width:100px" ${podeEscrever() ? '' : 'disabled'}></td>
           <td>${podeEscrever() ? '<button class="btn btn-ghost btn-sm" data-salvar="1">Salvar</button>' : ''}</td></tr>`).join('')}</tbody></table>`;
       $('#campoBox').querySelectorAll('[data-salvar]').forEach((b) => b.onclick = async () => {
         const tr = b.closest('tr'); const n = tr.dataset.n; const l = lotes.find((x) => x.numero === n); const body = {};
@@ -2703,12 +2741,268 @@ async function rCampo(){
     };
     $('#fMed').onchange = desenhar;
     desenhar();
-  } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
+  } catch (e){ vb.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
+}
+
+// ─── v3.169.0: perfil CAMPO (funcionário de campo) — só Campo, Mapa (ver) e arquivos da coletora ─
+function aplicarPerfilCampo(){
+  const pe = S.eu.permissoes || {};
+  const libera = { campo: true, mapa: pe.ver_mapa !== false, importar: pe.baixar_coletora !== false };
+  document.querySelectorAll('#tabs button').forEach((b) => { b.classList.toggle('hide', !libera[b.dataset.t]); });
+  document.body.classList.add('perfil-campo');
+  // marca d'água com o nome de quem está logado (print vazado tem dono)
+  const nome = (S.eu.nome || 'Funcionário de campo') + ' · ' + new Date().toLocaleDateString('pt-BR');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="340" height="190"><text x="10" y="110" transform="rotate(-24 170 95)" font-family="Arial" font-size="15" fill="rgba(12,51,32,.13)">${esc(nome)} · ROMATEC</text></svg>`;
+  const wm = document.createElement('div'); wm.className = 'wm-campo'; wm.style.backgroundImage = `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`;
+  document.body.appendChild(wm);
+  // sem menu de contexto, sem Ctrl+P / Ctrl+S
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+  document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && /^[ps]$/i.test(e.key)) { e.preventDefault(); toast('Impressão e download bloqueados para o seu perfil', true); } });
+  // no mapa: some tudo que gera PDF, imprime, envia, baixa, altera ou abre cadastro (o servidor também recusa)
+  const proibido = /PDF|SIGEF|Tradicional|Imprimir|Remover|Limpar|DXF|Enviar|Baixar|Abrir cadastro|Financeiro|📄|🖨|Vincular|Trocar/i;
+  const limpar = (raiz) => {
+    raiz.querySelectorAll('button, a').forEach((b) => { if (proibido.test(b.textContent || '') || proibido.test(b.title || '')) b.style.display = 'none'; });
+    raiz.querySelectorAll('input[type=file], select.sdVinc').forEach((i) => { const p = i.closest('label, .row, div'); (p || i).style.display = 'none'; });
+  };
+  const alvo = $('#v-mapa');
+  new MutationObserver(() => limpar(alvo)).observe(alvo, { childList: true, subtree: true });
+}
+
+// ─── v3.169.0: Equipe do PA (cadastro + login pelo WhatsApp + permissões) ─
+async function rEquipe(){
+  const v = $('#v-equipe');
+  if (!S.eu || S.eu.perfil !== 'ADMIN'){ v.innerHTML = '<div class="card empty">Somente ADMIN.</div>'; return; }
+  v.innerHTML = '<div class="card empty">Carregando…</div>';
+  let d; try { d = await api('/equipe'); } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  const permHtml = (p, pref) => `<label class="citem"><input type="checkbox" class="${pref}" data-p="ver_mapa" ${p.ver_mapa ? 'checked' : ''}> Ver os mapas</label>
+      <label class="citem"><input type="checkbox" class="${pref}" data-p="baixar_coletora" ${p.baixar_coletora ? 'checked' : ''}> Baixar arquivos da coletora e caderneta</label>
+      <label class="citem"><input type="checkbox" class="${pref}" data-p="marcar_campo" ${p.marcar_campo ? 'checked' : ''}> Marcar marcos locados no mapa</label>`;
+  const lerPerm = (raiz, pref) => { const o = {}; raiz.querySelectorAll('.' + pref).forEach((c) => { o[c.dataset.p] = c.checked; }); return o; };
+  v.innerHTML = `<div class="card"><h2 style="margin-top:0">👷 Convidar para a equipe do PA</h2>
+      <div class="grid3">
+        <div><label for="eqPerfil">Perfil</label><select class="f" id="eqPerfil">${Object.entries(d.perfis).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join('')}</select></div>
+        <div><label for="eqNome">Nome</label><input id="eqNome" placeholder="Nome completo"></div>
+        <div><label for="eqCpf">CPF (será o login)</label><input id="eqCpf" inputmode="numeric" placeholder="000.000.000-00"></div>
+        <div><label for="eqTel">WhatsApp</label><input id="eqTel" inputmode="tel" placeholder="(99) 9 9999-9999"></div>
+        <div style="grid-column:span 2" id="eqPermBox"><label>O que ele pode fazer</label><div class="eq-perm">${permHtml({ ver_mapa: true, baixar_coletora: true, marcar_campo: true }, 'eqPerm')}</div></div>
+      </div>
+      <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" id="eqCriar" style="flex:0 0 auto">📲 Criar e enviar pelo WhatsApp</button><button class="btn btn-ghost" id="eqSoCriar" style="flex:0 0 auto">Só criar (mostrar a senha)</button></div>
+      <div class="muted" style="margin-top:6px">A pessoa recebe o link, o login (CPF) e uma senha provisória. <b>Funcionário de campo</b> entra só na Gestão de PA e vê apenas Campo, Mapa (sem PDF, sem imprimir, sem enviar) e a caderneta/arquivos da coletora — financeiro, carteirinhas, associados e documentos ficam fechados também no servidor.</div>
+      <div id="eqRes"></div></div>
+    <div class="card"><h2 style="margin-top:0">Equipe (${d.equipe.length})</h2>
+      ${d.equipe.length ? d.equipe.map((m) => `<div class="eq-item${m.ativo ? '' : ' off'}" data-uid="${m.user_id}">
+          <div class="eq-top"><b>${esc(m.nome)}</b> <span class="muted">${esc(m.perfil_rotulo)} · login ${esc(m.login)}${m.telefone ? ' · ' + esc(m.telefone) : ''}</span>
+            ${m.ativo ? chip('VALIDO', 'Acesso ativo') : chip('CANCELADO', 'Desativado')}<span class="muted" style="margin-left:auto">${m.ultimo_acesso ? 'último acesso ' + dbr(m.ultimo_acesso) : 'ainda não entrou'}</span></div>
+          ${m.perfil === 'CAMPO' ? `<div class="eq-perm">${permHtml(m.permissoes, 'eqP' + m.user_id)} <button class="btn btn-ghost btn-sm" data-eqsalvar="${m.user_id}">Salvar permissões</button></div>` : ''}
+          <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" data-eqreenv="${m.user_id}" style="flex:0 0 auto">🔁 Reenviar acesso (nova senha)</button>
+            <button class="btn btn-sm ${m.ativo ? 'btn-danger' : 'btn-ghost'}" data-eqativo="${m.user_id}" data-v="${m.ativo ? '0' : '1'}" style="flex:0 0 auto">${m.ativo ? '⛔ Desativar login' : '✅ Reativar login'}</button></div></div>`).join('') : '<div class="empty">Ninguém cadastrado ainda.</div>'}</div>`;
+  $('#eqPerfil').onchange = () => { $('#eqPermBox').style.display = $('#eqPerfil').value === 'CAMPO' ? '' : 'none'; };
+  const resultado = (r) => {
+    $('#eqRes').innerHTML = r.enviado ? `<div class="avisos">✅ Acesso criado e enviado pelo WhatsApp. Login: <b>${esc(r.login || '')}</b></div>`
+      : `<div class="avisos">⚠️ ${r.erro_envio ? 'Não saiu pelo WhatsApp (' + esc(r.erro_envio) + '). ' : ''}Copie e mande para a pessoa:<textarea class="f" rows="8" style="width:100%;margin-top:6px" readonly>${esc(r.mensagem || '')}</textarea></div>`;
+  };
+  const criar = async (enviar) => {
+    const body = { perfil: $('#eqPerfil').value, nome: $('#eqNome').value, cpf: $('#eqCpf').value, telefone: $('#eqTel').value, permissoes: lerPerm(v, 'eqPerm'), enviar };
+    try { const r = await api('/equipe', { json: body }); resultado(r); toast('Acesso criado'); setTimeout(rEquipe, enviar ? 1500 : 60000); }
+    catch (e){ toast(e.message, true); }
+  };
+  $('#eqCriar').onclick = () => criar(true);
+  $('#eqSoCriar').onclick = () => criar(false);
+  v.querySelectorAll('[data-eqreenv]').forEach((b) => b.onclick = async () => {
+    if (!confirm('Gerar uma nova senha e enviar pelo WhatsApp? A senha antiga deixa de valer.')) return;
+    try { const r = await api(`/equipe/${b.dataset.eqreenv}/reenviar`, { json: {} }); resultado(r); toast(r.enviado ? 'Nova senha enviada' : 'Nova senha gerada'); } catch (e){ toast(e.message, true); }
+  });
+  v.querySelectorAll('[data-eqativo]').forEach((b) => b.onclick = async () => {
+    const ativo = b.dataset.v === '1';
+    if (!ativo && !confirm('Desativar o login? A pessoa não consegue mais entrar.')) return;
+    try { await api(`/equipe/${b.dataset.eqativo}/ativo`, { json: { ativo } }); toast(ativo ? 'Login reativado' : 'Login desativado'); rEquipe(); } catch (e){ toast(e.message, true); }
+  });
+  v.querySelectorAll('[data-eqsalvar]').forEach((b) => b.onclick = async () => {
+    const uid = b.dataset.eqsalvar;
+    try { await api(`/equipe/${uid}`, { method: 'PATCH', json: { permissoes: lerPerm(v, 'eqP' + uid) } }); toast('Permissões salvas'); } catch (e){ toast(e.message, true); }
+  });
+}
+
+// ─── v3.169.0: locação dos marcos no mapa (aba Campo) ─
+let MAPA_CP = {};
+const CP = { lote: '', ponto: null };
+const COR_PT = { pend: '#B3261E', ok: '#1f9d55', exist: '#5b6b62' };
+const corPonto = (p) => (p.marca ? COR_PT.ok : p.existente ? COR_PT.exist : COR_PT.pend);
+const hBr = (iso) => iso ? new Date(iso.replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? '' : 'Z')).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+function equipamentos(d){
+  let s = {}; try { s = JSON.parse(localStorage.getItem('pa_campo_eqp') || '{}'); } catch { s = {}; }
+  return { base: s.base || d.equipamentos.base, rover: s.rover || d.equipamentos.rover };
+}
+async function rLocacao(box){
+  if (MAPA_CP.parar) MAPA_CP.parar();
+  let d; try { d = await api(`/projetos/${S.pid}/campo`); } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  S.campo = d;
+  const eq = equipamentos(d);
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const meuHoje = d.producao.filter((p) => p.dia === hoje);
+  const pontosHoje = meuHoje.reduce((s, p) => s + p.pontos, 0), lotesHoje = meuHoje.reduce((s, p) => s + p.lotes, 0);
+  const podeMarcar = podeEscrever() || (S.eu.perfil === 'CAMPO' && (S.eu.permissoes || {}).marcar_campo !== false);
+  const optLote = (l) => `<option value="${esc(l.lote)}" ${CP.lote === l.lote ? 'selected' : ''}>LT-${esc(l.lote)} · ${l.fechado ? '✅ MEDIDO' : `${l.marcados}/${l.exigidos.length} marcos`}${l.associado ? ' · ' + esc(l.associado.nome) : ''}</option>`;
+  box.innerHTML = `<div class="card"><h2 style="margin-top:0">📍 Locação dos marcos</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 10px">
+        <div class="k2"><div><div class="l">Marcos a cravar</div><div class="v">${d.totais.marcados}/${d.totais.a_implantar}</div><div class="muted">${d.totais.existentes} já existem (perímetro)</div></div></div>
+        <div class="k2 ok"><div><div class="l">Lotes medidos</div><div class="v">${d.totais.fechados}/${d.totais.lotes}</div></div></div>
+        <div class="k2"><div><div class="l">Hoje</div><div class="v">${pontosHoje} marcos</div><div class="muted">${lotesHoje} lote(s) fechado(s)</div></div></div>
+      </div>
+      <div class="grid3">
+        <div style="grid-column:span 1"><label for="cpLote">Lote (comece pelo LT-01)</label><select class="f" id="cpLote"><option value="">Todos os lotes</option>${d.lotes.map(optLote).join('')}</select></div>
+        <div><label for="cpBase">Base GNSS</label><input id="cpBase" value="${esc(eq.base)}"></div>
+        <div><label for="cpRover">Rover</label><input id="cpRover" value="${esc(eq.rover)}"></div>
+      </div>
+      <div class="muted" style="margin:6px 0">Operador: <b>${esc(S.eu.nome || '—')}</b> (quem está logado). Toque no marco no mapa → <b>✅ Salvar marcado</b>. Quando todos os marcos do lote estiverem marcados, o lote fecha sozinho como <b>MEDIDO</b>, com área e perímetro.</div>
+      <div class="row" style="align-items:center"><span style="flex:1 1 auto" class="leg"><span><i style="background:${COR_PT.pend};border-radius:50%"></i>A cravar</span><span><i style="background:${COR_PT.ok};border-radius:50%"></i>Locado</span><span><i style="background:${COR_PT.exist};border-radius:50%"></i>Já existe (perímetro)</span></span>
+        <span style="flex:0 0 auto" class="cpBase"><button class="btn btn-sm btn-primary" data-base="mapa">🗺️ Mapa</button> <button class="btn btn-sm btn-ghost" data-base="satelite">🛰️ Satélite</button> <button class="btn btn-sm btn-ghost" data-base="relevo">⛰️ Relevo</button></span></div>
+      <div class="ml-modo" id="cpModo"><button data-modo="2d">🗺️ Mapa 2D</button><button data-modo="3d">🧊 Mapa 3D</button><button type="button" class="ml-fullbtn" title="Ver o mapa em tela cheia">⛶ Tela cheia</button></div>
+      <div class="ml-wrap"><div id="cpMapa" class="ml-mapa"><div class="empty" style="padding-top:120px">Carregando o mapa…</div></div><div id="cpCtl" class="ml-ctl" hidden></div></div>
+      <label style="display:block;margin-top:10px"><b>Ou escolha o marco:</b><select class="f" id="cpSel"></select></label>
+      <div id="cpCard"></div></div>
+    <div class="card"><h2 style="margin-top:0">Lotes</h2><div class="tbl"><table><thead><tr><th>Lote</th><th>Associado</th><th class="right">Área</th><th>Marcos</th><th>Situação</th></tr></thead><tbody>
+      ${d.lotes.map((l) => `<tr class="click" data-cplote="${esc(l.lote)}"><td><b>LT-${esc(l.lote)}</b></td><td>${l.associado ? esc(l.associado.nome) + `<div class="muted">vila ${esc(l.associado.lote_vila)}${l.associado.denominacao ? ' · ' + esc(l.associado.denominacao) : ''}</div>` : '—'}</td><td class="right nowrap">${nbr(l.area_ha, 4)} ha</td>
+        <td class="nowrap">${l.marcados}/${l.exigidos.length}${l.existentes ? ` <span class="muted">+${l.existentes} existentes</span>` : ''}</td>
+        <td>${l.fechado ? chip('PAGO', '✅ MEDIDO') + `<div class="muted">${hBr(l.fechado.concluido_em)} · ${esc(l.fechado.usuario_nome || '')}</div>` : l.marcados ? chip('PARCIAL', 'em andamento') : '<span class="muted">pendente</span>'}</td></tr>`).join('')}
+    </tbody></table></div></div>
+    <div class="card"><h2 style="margin-top:0">Produção de campo</h2>${d.producao.length ? `<div class="tbl"><table><thead><tr><th>Dia</th><th>Funcionário</th><th class="right">Marcos</th><th class="right">Lotes fechados</th><th>Início → fim</th><th class="right">Horas</th></tr></thead><tbody>
+      ${d.producao.map((p) => `<tr><td class="nowrap">${dbr(p.dia)}</td><td>${esc(p.usuario)}</td><td class="right">${p.pontos}</td><td class="right">${p.lotes}</td><td class="nowrap">${hBr(p.primeiro).slice(-5)} → ${hBr(p.ultimo).slice(-5)}</td><td class="right">${String(p.horas).replace('.', ',')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum marco locado ainda.</div>'}</div>`;
+  ['cpBase', 'cpRover'].forEach((k) => { $('#' + k).onchange = () => { try { localStorage.setItem('pa_campo_eqp', JSON.stringify({ base: $('#cpBase').value, rover: $('#cpRover').value })); } catch { /* ok */ } }; });
+  $('#cpLote').onchange = () => { CP.lote = $('#cpLote').value; CP.ponto = null; mapaCampo(d, podeMarcar); };
+  box.querySelectorAll('[data-cplote]').forEach((tr) => tr.onclick = () => { CP.lote = tr.dataset.cplote; $('#cpLote').value = CP.lote; CP.ponto = null; mapaCampo(d, podeMarcar); $('#cpMapa').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+  mapaCampo(d, podeMarcar);
+}
+async function mapaCampo(d, podeMarcar){
+  const box = $('#cpMapa'); if (!box) return;
+  const modo = modoMapaLotes();
+  document.querySelectorAll('#cpModo [data-modo]').forEach((b) => {
+    b.classList.toggle('on', b.dataset.modo === modo);
+    b.onclick = () => { if (b.dataset.modo === modoMapaLotes()) return; try { localStorage.setItem('pa_mapa_modo', b.dataset.modo); } catch { /* ok */ } mapaCampo(d, podeMarcar); };
+  });
+  if (MAPA_CP.parar) MAPA_CP.parar();
+  if (MAPA_CP.mapa) { try { MAPA_CP.mapa.remove(); } catch { /* ok */ } }
+  MAPA_CP = {};
+  const ctl = $('#cpCtl'); ctl.hidden = true; ctl.innerHTML = '';
+  box.innerHTML = '<div class="empty" style="padding-top:120px">Carregando o mapa…</div>';
+  let lib, geo;
+  try { [lib, geo] = await Promise.all([modo === '3d' ? carregarMapLibre() : carregarLeaflet(), api(`/projetos/${S.pid}/subdivisao.geojson`)]); }
+  catch (e){
+    if (modo === '3d') { try { localStorage.setItem('pa_mapa_modo', '2d'); } catch { /* ok */ } return mapaCampo(d, podeMarcar); }
+    box.innerHTML = `<div class="empty" style="padding-top:60px">${esc(e.message)}</div>`; return;
+  }
+  if (!$('#cpMapa')) return;
+  box.innerHTML = '';
+  const fechados = new Set(d.lotes.filter((l) => l.fechado).map((l) => l.lote));
+  // lote medido em verde, a medir em branco (cor do motor do mapa via properties.cor)
+  const lotesF = geo.features.filter((f) => f.properties.tipo === 'LOTE').map((f) => ({ ...f, properties: { ...f.properties, cor: fechados.has(f.properties.lote) ? '#9CC46A' : '#ffffff' } }));
+  const porLote = Object.fromEntries(lotesF.map((f) => [f.properties.lote, f]));
+  const outros = geo.features.filter((f) => f.properties.tipo !== 'LOTE');
+  const lote = CP.lote ? d.lotes.find((l) => l.lote === CP.lote) : null;
+  const vis = lote ? d.pontos.filter((p) => p.lotes.includes(lote.lote)) : d.pontos.filter((p) => p.lotes.length);
+  const pontos = vis.map((p) => ({ id: p.nome, nome: p.nome, lngLat: [p.lon, p.lat], cor: corPonto(p) }));
+  const sel = $('#cpSel');
+  sel.innerHTML = '<option value="">Selecione o marco</option>' + vis.map((p) => `<option value="${esc(p.nome)}">${p.marca ? '✅' : p.existente ? '◻️' : '🔴'} ${esc(p.nome)} · ${esc(p.tipo)}</option>`).join('');
+  const ctx = { geo: { ...geo, features: [...lotesF, ...outros] }, lotesF, porLote, outros, pontos, ctl, baseSel: '.cpBase [data-base]',
+    rotulo: (f) => `LT-${f.properties.lote}`, opacSel3d: .35, opacSel2d: .25 };
+  const eng = modo === '3d' ? mapaLotes3D(lib, box, ctx) : mapaLotes2D(lib, box, ctx);
+  ctx.selecionar = (l, centralizar) => { CP.lote = l; const s = $('#cpLote'); if (s) s.value = l; eng.marcar(l, centralizar); cartaoLoteCampo(d, l); };
+  ctx.selPonto = (id) => { CP.ponto = id; eng.marcarPonto(id); sel.value = id; cartaoPontoCampo(d, id, podeMarcar, eng); };
+  sel.onchange = () => { if (sel.value) ctx.selPonto(sel.value); };
+  MAPA_CP = { mapa: eng.mapa, parar: eng.parar };
+  if (lote) setTimeout(() => { eng.marcar(lote.lote, true); if (CP.ponto) ctx.selPonto(CP.ponto); else cartaoLoteCampo(d, lote.lote); }, 300);
+}
+function cartaoLoteCampo(d, l){
+  const lo = d.lotes.find((x) => x.lote === l); if (!lo) return;
+  $('#cpCard').innerHTML = `<div class="ml-card"><div class="muted">Lote de produção</div><div class="ml-tit">LT-${esc(lo.lote)} · ${nbr(lo.area_ha, 4)} ha</div>
+    ${lo.associado ? `<div><b>${esc(lo.associado.nome)}</b> · vila ${esc(lo.associado.lote_vila)}${lo.associado.denominacao ? ' · ' + esc(lo.associado.denominacao) : ''}</div>` : ''}
+    <div style="margin-top:6px">Marcos: <b>${lo.marcados}/${lo.exigidos.length}</b> locados${lo.existentes ? ` · ${lo.existentes} já existem` : ''}</div>
+    ${lo.fechado ? `<div class="avisos" style="margin-top:8px">✅ <b>MEDIDO</b> em ${hBr(lo.fechado.concluido_em)} por ${esc(lo.fechado.usuario_nome || '—')} · ${nbr(lo.fechado.area_ha ?? lo.area_ha, 4)} ha · perímetro ${nbr(lo.fechado.perimetro_m ?? 0)} m${lo.fechado.base ? ` · ${esc(lo.fechado.base)} / ${esc(lo.fechado.rover || '')}` : ''}</div>` : '<div class="muted" style="margin-top:6px">Toque num marco vermelho para marcar como locado.</div>'}</div>`;
+}
+function cartaoPontoCampo(d, id, podeMarcar, eng){
+  const p = d.pontos.find((x) => x.nome === id); if (!p) return;
+  const m = p.marca;
+  const podeDesfazer = m && (S.eu.perfil === 'ADMIN' || (String(m.usuario_id) === String(S.eu.id || '') ));
+  $('#cpCard').innerHTML = `<div class="ml-card"><div class="muted">${esc(p.tipo)}${p.existente ? ' · já existe no chão' : ''}</div>
+    <div class="ml-tit">${esc(p.nome)}</div>
+    <div>E ${nbr(p.E, 3)} · N ${nbr(p.N, 3)} · lotes ${p.lotes.map((x) => 'LT-' + esc(x)).join(', ') || '—'}${p.implantar_com ? ` · implantar com LT-${esc(p.implantar_com)}` : ''}</div>
+    ${m ? `<div class="avisos" style="margin-top:8px">✅ Locado em <b>${hBr(m.marcado_em)}</b> por <b>${esc(m.usuario_nome || '—')}</b>${m.base ? `<br>${esc(m.base)} · ${esc(m.rover || '')}` : ''}${m.gps ? `<br>GPS do celular ±${m.gps.precisao ?? '?'} m` : ''}${m.obs ? `<br>Obs.: ${esc(m.obs)}` : ''}</div>
+        ${podeMarcar ? '<button class="btn btn-ghost btn-sm" id="cpDesf" style="margin-top:6px">↩️ Desfazer marcação</button>' : ''}`
+      : podeMarcar ? `<input id="cpObs" placeholder="Observação (opcional)" style="margin-top:8px;width:100%"><button class="btn btn-primary" id="cpSalvar" style="margin-top:8px;width:100%;font-size:16px;padding:12px">✅ Salvar marcado</button>` : ''}</div>`;
+  if ($('#cpSalvar')) $('#cpSalvar').onclick = async () => {
+    const b = $('#cpSalvar'); b.disabled = true; b.textContent = 'Salvando…';
+    const gps = await new Promise((ok) => { if (!navigator.geolocation) return ok(null); navigator.geolocation.getCurrentPosition((g) => ok({ lat: g.coords.latitude, lon: g.coords.longitude, precisao: Math.round(g.coords.accuracy) }), () => ok(null), { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 }); });
+    try {
+      const r = await api(`/projetos/${S.pid}/campo/pontos`, { json: { ponto: p.nome, gps, obs: $('#cpObs') ? $('#cpObs').value : '', base: $('#cpBase').value, rover: $('#cpRover').value } });
+      toast(`${p.nome} marcado ✅`);
+      r.lotes_fechados.forEach((f) => toast(`🎉 LT-${f.lote} fechado como MEDIDO (${nbr(f.area_ha, 4)} ha)${f.associado ? ' — ' + f.associado : ''}`));
+      CP.ponto = r.lotes_fechados.length ? null : p.nome;
+      rLocacao($('#cpBox'));
+    } catch (e){ toast(e.message, true); b.disabled = false; b.textContent = '✅ Salvar marcado'; }
+  };
+  if ($('#cpDesf')) $('#cpDesf').onclick = async () => {
+    if (!confirm(`Desfazer a marcação do ${p.nome}?${p.lotes.length ? ' O lote volta para "em andamento".' : ''}`)) return;
+    try { await api(`/projetos/${S.pid}/campo/pontos/${encodeURIComponent(p.nome)}`, { method: 'DELETE' }); toast('Marcação desfeita'); rLocacao($('#cpBox')); } catch (e){ toast(e.message, true); }
+  };
+  void podeDesfazer; void eng;
+}
+
+// ─── v3.169.0: Dossiês de pronta entrega (lote medido → carta + quitação + mapa/memorial) ─
+const ST_DOSSIE = { AGUARDANDO_PAGAMENTO: ['VENCIDO', '⏳ aguardando pagamento'], PRONTO: ['PARCIAL', '🟡 aguardando autorização'], ENVIADO: ['VALIDO', '📲 enviado'], ENTREGUE: ['PAGO', '✅ entregue fisicamente'] };
+async function rDossies(){
+  const v = $('#v-dossies');
+  v.innerHTML = '<div class="card empty">Carregando…</div>';
+  let ds; try { ds = (await api(`/projetos/${S.pid}/dossies`)).dossies; } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  const f = S.dossieFiltro || '';
+  const n = (st) => ds.filter((d) => d.status === st).length;
+  const admin = S.eu && S.eu.perfil === 'ADMIN';
+  const lista = ds.filter((d) => !f || d.status === f);
+  const hb = (iso) => iso ? new Date(iso.replace(' ', 'T') + (/[zZ]$/.test(iso) ? '' : 'Z')).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  v.innerHTML = `<div class="card"><h2 style="margin-top:0">📦 Dossiês de pronta entrega</h2>
+      <div class="muted">Quando a equipe fecha um lote em campo, o sistema monta o dossiê: <b>carta</b> pedindo para o associado comparecer ao escritório (anotação técnica e via impressa), <b>termo de quitação</b> e <b>mapa + memorial descritivo</b> do lote. Só sai pelo WhatsApp com tudo pago e com a sua autorização.</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn btn-sm ${!f ? 'btn-primary' : 'btn-ghost'}" data-dsf="">Todos (${ds.length})</button>
+        ${Object.entries(ST_DOSSIE).map(([k, [, t]]) => `<button class="btn btn-sm ${f === k ? 'btn-primary' : 'btn-ghost'}" data-dsf="${k}">${t} (${n(k)})</button>`).join('')}
+      </div></div>
+    <div class="card">${lista.length ? `<div class="tbl"><table><thead><tr><th>Lote</th><th>Associado</th><th>Medido</th><th class="right">Em aberto</th><th>Situação</th><th></th></tr></thead><tbody>
+      ${lista.map((d) => `<tr><td><b>LT-${esc(d.lote)}</b><div class="muted">vila ${esc(d.lote_vila)}</div></td><td>${esc(d.nome)}<div class="muted">${esc(d.numero)}${d.denominacao ? ' · ' + esc(d.denominacao) : ''}</div></td>
+        <td class="nowrap">${d.medido_em ? hb(d.medido_em) + `<div class="muted">${esc(d.medidor || '')}</div>` : '—'}</td>
+        <td class="right nowrap">${d.saldo > 0.009 ? brl(d.saldo) : chip('QUITADO')}</td>
+        <td>${chip(ST_DOSSIE[d.status][0], ST_DOSSIE[d.status][1])}${d.enviado_em ? `<div class="muted">enviado ${hb(d.enviado_em)}</div>` : ''}${d.entregue_em ? `<div class="muted">entregue ${hb(d.entregue_em)} · ${esc(d.entregue_por || '')}${d.entregue_obs ? ' · ' + esc(d.entregue_obs) : ''}</div>` : ''}</td>
+        <td class="nowrap"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button>
+          ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>📲 Autorizar e enviar</button>` : ''}
+          ${admin && d.status === 'ENVIADO' ? `<button class="btn btn-ghost btn-sm" data-dsenv="${esc(d.lote)}">🔁 Reenviar</button>` : ''}
+          ${d.status !== 'ENTREGUE' && d.status !== 'AGUARDANDO_PAGAMENTO' ? `<button class="btn btn-gold btn-sm" data-dsent="${esc(d.lote)}">📦 Entregue fisicamente</button>` : ''}</td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="empty">Nenhum dossiê nesta situação. Eles aparecem aqui quando um lote é fechado na aba Campo.</div>'}</div>`;
+  v.querySelectorAll('[data-dsf]').forEach((b) => b.onclick = () => { S.dossieFiltro = b.dataset.dsf; rDossies(); });
+  v.querySelectorAll('[data-dsver]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dsver)}.pdf`));
+  v.querySelectorAll('[data-dsenv]').forEach((b) => b.onclick = async () => {
+    const d = ds.find((x) => x.lote === b.dataset.dsenv);
+    if (!confirm(`Enviar o dossiê do LT-${d.lote} para ${d.nome} pelo WhatsApp?\n\nVai: carta (comparecer ao escritório para a anotação técnica e retirar a via impressa), termo de quitação, mapa e memorial descritivo.`)) return;
+    b.disabled = true; toast('Gerando e enviando o dossiê…');
+    try { await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/enviar`, { json: {} }); toast(`Dossiê do LT-${d.lote} enviado ✅`); rDossies(); }
+    catch (e){ toast(e.message, true); b.disabled = false; }
+  });
+  v.querySelectorAll('[data-dsent]').forEach((b) => b.onclick = async () => {
+    const lote = b.dataset.dsent;
+    const obs = prompt(`Entrega da via impressa do LT-${lote}.\nObservação (quem recebeu, etc. — opcional):`, '');
+    if (obs === null) return;
+    try { await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(lote)}/entregue`, { json: { obs } }); toast(`LT-${lote} marcado como entregue ✅`); rDossies(); }
+    catch (e){ toast(e.message, true); }
+  });
 }
 
 // ─── Importar / exportar ────────────────────────────────────────────────
 function rImportar(){
   const v = $('#v-importar');
+  if (S.eu && S.eu.perfil === 'CAMPO'){
+    v.innerHTML = `<div class="card"><h2>📡 Arquivos para a coletora e caderneta de campo</h2><p class="muted">Marcos oficiais do PA em UTM SIRGAS 2000. Carregue na coletora; a caderneta traz os marcos por lote.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn btn-primary" data-col="csv" style="flex:0 0 auto">⬇️ CSV</button><button class="btn btn-ghost" data-col="txt" style="flex:0 0 auto">⬇️ TXT (P,E,N,Z,D)</button><button class="btn btn-ghost" data-col="dxf" style="flex:0 0 auto">⬇️ DXF</button><button class="btn btn-gold" id="colCad" style="flex:0 0 auto">📒 Caderneta de campo (PDF)</button></div></div>`;
+    v.querySelectorAll('[data-col]').forEach((b) => b.onclick = () => baixar(`/projetos/${S.pid}/coletora.${b.dataset.col}`, `PONTOS-COLETORA.${b.dataset.col}`).catch((e) => toast(e.message, true)));
+    $('#colCad').onclick = () => abrirPdf(`/projetos/${S.pid}/caderneta-campo.pdf`);
+    return;
+  }
   if (!S.eu || S.eu.perfil !== 'ADMIN'){ v.innerHTML = '<div class="card empty">Somente ADMIN.</div>'; return; }
   v.innerHTML = `<div class="card"><h2>Importar seed + acervo</h2>
       <p class="muted">Idempotente: pode reenviar o mesmo seed quantas vezes quiser — só entra o que falta e o que foi editado na tela é mantido. O acervo (ZIP com as pastas LOTE-XX-Nome/) é opcional e pode vir depois.</p>
@@ -2716,6 +3010,8 @@ function rImportar(){
         <div><label for="iAcervo">Acervo digital (ZIP, opcional)</label><input type="file" id="iAcervo" accept=".zip,application/zip"></div></div>
       <div class="row" style="margin-top:10px"><button class="btn btn-primary" id="iBtn" style="flex:0 0 auto">📥 Importar</button><span class="muted" id="iProg"></span></div>
       <div id="iRel"></div></div>
+    ${S.pid ? `<div class="card"><h2>🪨 Planilha oficial de marcos</h2><p class="muted">QUANTITATIVO-MARCOS-POR-LOTE (.xlsx), aba "Coordenadas dos Marcos". Os códigos M-001… passam a valer na coletora, na caderneta e no mapa de campo; marcos do perímetro marcados "NÃO comprar" aparecem como já existentes.</p>
+      <div class="row" style="gap:8px;align-items:end"><div style="flex:1 1 260px"><input type="file" id="mkPlan" accept=".xlsx,.xls"></div><button class="btn btn-primary" id="mkPlanBtn" style="flex:0 0 auto">⬆️ Enviar planilha</button></div></div>` : ''}
     ${S.pid ? `<div class="card"><h2>📡 Pontos para a coletora (locação dos marcos)</h2><p class="muted">Todos os vértices dos lotes, do perímetro e da vila, sem repetir ponto (vértice comum a dois lotes sai uma vez). Coordenadas UTM SIRGAS 2000. Carregue na coletora e use na locação/cravação dos marcos; a caderneta de campo traz os pontos por lote, com caixa para marcar o que foi cravado.</p>
       <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn btn-primary" data-col="csv" style="flex:0 0 auto">⬇️ CSV (Nome, E, N, Cota, Código)</button><button class="btn btn-ghost" data-col="txt" style="flex:0 0 auto">⬇️ TXT (P,E,N,Z,D)</button><button class="btn btn-ghost" data-col="dxf" style="flex:0 0 auto">⬇️ DXF (pontos + lotes)</button><button class="btn btn-gold" id="colCad" style="flex:0 0 auto">📒 Caderneta de campo (PDF)</button></div></div>` : ''}
     ${S.pid ? `<div class="card"><h2>Exportar acervo</h2><p class="muted">ZIP com a estrutura LOTE-XX-Nome/ de todos os documentos carregados. Fica registrado em eventos (LGPD).</p>
@@ -2746,6 +3042,12 @@ function rImportar(){
   };
   v.querySelectorAll('[data-col]').forEach((b) => b.onclick = () => baixar(`/projetos/${S.pid}/coletora.${b.dataset.col}`, `PONTOS-COLETORA.${b.dataset.col}`).catch((e) => toast(e.message, true)));
   if ($('#colCad')) $('#colCad').onclick = () => abrirPdf(`/projetos/${S.pid}/caderneta-campo.pdf`);
+  if ($('#mkPlanBtn')) $('#mkPlanBtn').onclick = async () => {
+    const f = $('#mkPlan').files[0]; if (!f) return toast('Escolha a planilha', true);
+    const fd = new FormData(); fd.append('arquivo', f);
+    try { const r = await api(`/projetos/${S.pid}/marcos-planilha`, { method: 'POST', body: fd }); toast(`Planilha carregada: ${r.marcos} marcos (${r.a_implantar} a cravar, ${r.existentes} já existentes)`); S.campo = null; }
+    catch (e){ toast(e.message, true); }
+  };
   if ($('#eBtn')) $('#eBtn').onclick = () => { toast('Gerando ZIP…'); baixar(`/projetos/${S.pid}/export`, 'ACERVO.zip').catch((e) => toast(e.message, true)); };
 }
 
