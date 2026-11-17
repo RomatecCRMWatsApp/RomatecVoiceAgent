@@ -363,8 +363,8 @@
     <button data-t="documentos">📜 Documentos oficiais</button>
     <button data-t="campo">📡 Campo</button>
     <button data-t="dossies">📦 Dossiês</button>
-    <button data-t="importar" data-admin="1">📥 Importar / Exportar</button>
-    <button data-t="equipe" data-admin="1">👷 Equipe</button>
+    <button data-t="importar">📥 Importar / Exportar</button>
+    <button data-t="equipe" data-admin="1">👷 Equipe e permissões</button>
   </nav>
 </header>
 
@@ -2811,7 +2811,8 @@ async function rEquipe(){
       <label class="citem"><input type="checkbox" class="${pref}" data-p="baixar_coletora" ${p.baixar_coletora ? 'checked' : ''}> Baixar arquivos da coletora e caderneta</label>
       <label class="citem"><input type="checkbox" class="${pref}" data-p="marcar_campo" ${p.marcar_campo ? 'checked' : ''}> Marcar marcos locados no mapa</label>`;
   const lerPerm = (raiz, pref) => { const o = {}; raiz.querySelectorAll('.' + pref).forEach((c) => { o[c.dataset.p] = c.checked; }); return o; };
-  v.innerHTML = `<div class="card"><h2 style="margin-top:0">👷 Convidar para a equipe do PA</h2>
+  v.innerHTML = `<div class="card" style="border-left:5px solid var(--gold)"><b>Como liberar funções para os funcionários:</b> cadastre a pessoa abaixo (ou ache ela na lista <b>Equipe</b>), escolha o <b>perfil</b> e marque o que ela pode fazer — <b>ver os mapas</b>, <b>baixar arquivos da coletora e caderneta</b> (aba Importar / Exportar) e <b>marcar marcos no mapa</b> (aba Campo). Clique em <b>Salvar perfil e permissões</b>.</div>
+    <div class="card"><h2 style="margin-top:0">👷 Convidar para a equipe do PA</h2>
       <div class="grid3">
         <div><label for="eqPerfil">Perfil</label><select class="f" id="eqPerfil">${Object.entries(d.perfis).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join('')}</select></div>
         <div><label for="eqNome">Nome</label><input id="eqNome" placeholder="Nome completo"></div>
@@ -2826,7 +2827,10 @@ async function rEquipe(){
       ${d.equipe.length ? d.equipe.map((m) => `<div class="eq-item${m.ativo ? '' : ' off'}" data-uid="${m.user_id}">
           <div class="eq-top"><b>${esc(m.nome)}</b> <span class="muted">${esc(m.perfil_rotulo)} · login ${esc(m.login)}${m.telefone ? ' · ' + esc(m.telefone) : ''}</span>
             ${m.ativo ? chip('VALIDO', 'Acesso ativo') : chip('CANCELADO', 'Desativado')}<span class="muted" style="margin-left:auto">${m.ultimo_acesso ? 'último acesso ' + dbr(m.ultimo_acesso) : 'ainda não entrou'}</span></div>
-          ${m.perfil === 'CAMPO' ? `<div class="eq-perm">${permHtml(m.permissoes, 'eqP' + m.user_id)} <button class="btn btn-ghost btn-sm" data-eqsalvar="${m.user_id}">Salvar permissões</button></div>` : ''}
+          <div class="row" style="gap:8px;align-items:end;margin-top:6px"><div style="flex:0 1 260px"><label for="eqPf${m.user_id}">Perfil</label><select class="f eqPf" id="eqPf${m.user_id}" data-uid="${m.user_id}">${Object.entries(d.perfis).map(([k, t]) => `<option value="${k}" ${k === m.perfil ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div></div>
+          <div class="eq-perm" id="eqPb${m.user_id}" style="${m.perfil === 'CAMPO' ? '' : 'display:none'}">${permHtml(m.permissoes, 'eqP' + m.user_id)}</div>
+          <div class="muted eq-perfnota" id="eqPn${m.user_id}" style="${m.perfil === 'CAMPO' ? 'display:none' : ''}">Operador: usa todas as abas (sem excluir). Direção: só leitura. As caixinhas de permissão valem para o funcionário de campo.</div>
+          <button class="btn btn-primary btn-sm" data-eqsalvar="${m.user_id}" style="margin-top:6px">💾 Salvar perfil e permissões</button>
           <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
             <button class="btn btn-ghost btn-sm" data-eqreenv="${m.user_id}" style="flex:0 0 auto">🔁 Reenviar acesso (nova senha)</button>
             <button class="btn btn-sm ${m.ativo ? 'btn-danger' : 'btn-ghost'}" data-eqativo="${m.user_id}" data-v="${m.ativo ? '0' : '1'}" style="flex:0 0 auto">${m.ativo ? '⛔ Desativar login' : '✅ Reativar login'}</button></div></div>`).join('') : '<div class="empty">Ninguém cadastrado ainda.</div>'}</div>`;
@@ -2853,8 +2857,9 @@ async function rEquipe(){
   });
   v.querySelectorAll('[data-eqsalvar]').forEach((b) => b.onclick = async () => {
     const uid = b.dataset.eqsalvar;
-    try { await api(`/equipe/${uid}`, { method: 'PATCH', json: { permissoes: lerPerm(v, 'eqP' + uid) } }); toast('Permissões salvas'); } catch (e){ toast(e.message, true); }
+    try { await api(`/equipe/${uid}`, { method: 'PATCH', json: { perfil: $('#eqPf' + uid).value, permissoes: lerPerm(v, 'eqP' + uid) } }); toast('Perfil e permissões salvos — valem no próximo acesso (até 30 s)'); rEquipe(); } catch (e){ toast(e.message, true); }
   });
+  v.querySelectorAll('.eqPf').forEach((sel) => sel.onchange = () => { const c = sel.value === 'CAMPO'; $('#eqPb' + sel.dataset.uid).style.display = c ? '' : 'none'; $('#eqPn' + sel.dataset.uid).style.display = c ? 'none' : ''; });
 }
 
 // ─── v3.171.0: ordem de serviço de campo pelo pagamento (cor + prioridade; preferência sem bloqueio) ─
@@ -2884,7 +2889,8 @@ async function rLocacao(box){
   const grupo = (t, ls) => ls.length ? `<optgroup label="${esc(t)} (${ls.length})">${ls.map(optLote).join('')}</optgroup>` : '';
   const qAM = quitadosAMedir(d), abertos = d.lotes.filter((l) => !l.fechado && !(l.pagamento && l.pagamento.quitado)), medidos = d.lotes.filter((l) => l.fechado);
   const contaFaixa = (id) => d.lotes.filter((l) => l.faixa === id);
-  box.innerHTML = `<div class="card"><h2 style="margin-top:0">📍 Locação dos marcos</h2>
+  box.innerHTML = `${S.eu && S.eu.perfil === 'ADMIN' ? `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 220px" class="muted">Funcionários de campo: cadastre, escolha o perfil e libere o que cada um pode fazer.</span><button class="btn btn-gold btn-sm" id="cpEquipe" style="flex:0 0 auto">👷 Equipe e permissões</button> <button class="btn btn-ghost btn-sm" id="cpColetora" style="flex:0 0 auto">📥 Coletora e caderneta</button></div>` : `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 220px" class="muted">Arquivos para a coletora (CSV, TXT, DXF) e a caderneta de campo.</span><button class="btn btn-ghost btn-sm" id="cpColetora" style="flex:0 0 auto">📥 Coletora e caderneta</button></div>`}
+    <div class="card"><h2 style="margin-top:0">📍 Locação dos marcos</h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 10px">
         <div class="k2"><div><div class="l">Marcos a cravar</div><div class="v">${d.totais.marcados}/${d.totais.a_implantar}</div><div class="muted">${d.totais.existentes} já existem (perímetro)</div></div></div>
         <div class="k2 ok"><div><div class="l">Lotes medidos</div><div class="v">${d.totais.fechados}/${d.totais.lotes}</div></div></div>
@@ -2913,10 +2919,13 @@ async function rLocacao(box){
         <td data-l="Situação">${l.fechado ? chip('PAGO', '✅ MEDIDO') + `<div class="muted">${hBr(l.fechado.concluido_em)} · ${esc(l.fechado.usuario_nome || '')}</div>` : l.marcados ? chip('PARCIAL', 'em andamento') : '<span class="muted">pendente</span>'}</td></tr>`).join('')}
     </tbody></table></div></div>
     <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">Produção de campo</h2>
-      <span style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="cpBolPdf" title="Boletim do dia: mapa colorido, evolução por dia e fila de medição">📄 Boletim (PDF)</button> <button class="btn btn-primary btn-sm" id="cpBolShare" title="Enviar o PDF com o texto para o grupo do PA">📤 Enviar no grupo</button> <button class="btn btn-ghost btn-sm" id="cpBolTxt">📋 Copiar texto</button></span></div>
+      <span style="flex:0 0 auto${S.eu && S.eu.perfil === 'CAMPO' ? ';display:none' : ''}"><button class="btn btn-gold btn-sm" id="cpBolPdf" title="Boletim do dia: mapa colorido, evolução por dia e fila de medição">📄 Boletim (PDF)</button> <button class="btn btn-primary btn-sm" id="cpBolShare" title="Enviar o PDF com o texto para o grupo do PA">📤 Enviar no grupo</button> <button class="btn btn-ghost btn-sm" id="cpBolTxt">📋 Copiar texto</button></span></div>
       <div class="muted" style="margin:4px 0 8px">Boletim para o grupo do PA: lotes medidos e marcos cravados por dia, ritmo, previsão, mapa colorido pelo pagamento e a ordem de medição (quitados primeiro).</div>${d.producao.length ? `<div class="tbl"><table><thead><tr><th>Dia</th><th>Funcionário</th><th class="right">Marcos</th><th class="right">Lotes fechados</th><th>Início → fim</th><th class="right">Horas</th></tr></thead><tbody>
       ${d.producao.map((p) => `<tr><td class="nowrap">${dbr(p.dia)}</td><td>${esc(p.usuario)}</td><td class="right">${p.pontos}</td><td class="right">${p.lotes}</td><td class="nowrap">${hBr(p.primeiro).slice(-5)} → ${hBr(p.ultimo).slice(-5)}</td><td class="right">${String(p.horas).replace('.', ',')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum marco locado ainda.</div>'}</div>`;
   ['cpBase', 'cpRover'].forEach((k) => { $('#' + k).onchange = () => { try { localStorage.setItem('pa_campo_eqp', JSON.stringify({ base: $('#cpBase').value, rover: $('#cpRover').value })); } catch { /* ok */ } }; });
+  // v3.173.0: atalhos para equipe/permissões e para os arquivos da coletora
+  if ($('#cpEquipe')) $('#cpEquipe').onclick = () => mostrar('equipe');
+  if ($('#cpColetora')) $('#cpColetora').onclick = () => mostrar('importar');
   // v3.172.0: boletim de campo (PDF + texto) para o grupo do PA
   // o fundo do mapa no PDF segue o que está escolhido na tela (Mapa / Satélite / Relevo); padrão satélite
   const baseBol = () => { const b = BASE_LEMBRADA['.cpBase [data-base]']; return b === 'mapa' || b === 'relevo' ? b : 'satelite'; };
@@ -3084,14 +3093,14 @@ async function rDossies(){
 // ─── Importar / exportar ────────────────────────────────────────────────
 function rImportar(){
   const v = $('#v-importar');
-  if (S.eu && S.eu.perfil === 'CAMPO'){
+  // v3.173.0: arquivos da coletora e caderneta liberados para todos os usuários do PA (ADMIN vê a página completa)
+  if (S.eu && S.eu.perfil !== 'ADMIN'){
     v.innerHTML = `<div class="card"><h2>📡 Arquivos para a coletora e caderneta de campo</h2><p class="muted">Marcos oficiais do PA em UTM SIRGAS 2000. Carregue na coletora; a caderneta traz os marcos por lote.</p>
       <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn btn-primary" data-col="csv" style="flex:0 0 auto">⬇️ CSV</button><button class="btn btn-ghost" data-col="txt" style="flex:0 0 auto">⬇️ TXT (P,E,N,Z,D)</button><button class="btn btn-ghost" data-col="dxf" style="flex:0 0 auto">⬇️ DXF</button><button class="btn btn-gold" id="colCad" style="flex:0 0 auto">📒 Caderneta de campo (PDF)</button></div></div>`;
     v.querySelectorAll('[data-col]').forEach((b) => b.onclick = () => baixar(`/projetos/${S.pid}/coletora.${b.dataset.col}`, `PONTOS-COLETORA.${b.dataset.col}`).catch((e) => toast(e.message, true)));
     $('#colCad').onclick = () => abrirPdf(`/projetos/${S.pid}/caderneta-campo.pdf`);
     return;
   }
-  if (!S.eu || S.eu.perfil !== 'ADMIN'){ v.innerHTML = '<div class="card empty">Somente ADMIN.</div>'; return; }
   v.innerHTML = `<div class="card"><h2>Importar seed + acervo</h2>
       <p class="muted">Idempotente: pode reenviar o mesmo seed quantas vezes quiser — só entra o que falta e o que foi editado na tela é mantido. O acervo (ZIP com as pastas LOTE-XX-Nome/) é opcional e pode vir depois.</p>
       <div class="grid2"><div><label for="iSeed">Seed (JSON)</label><input type="file" id="iSeed" accept=".json,application/json"></div>
