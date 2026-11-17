@@ -24,6 +24,19 @@ export function centavos(v: number): number {
   return Math.round(Number(v) * 100) / 100;
 }
 
+// v3.176.0: regra ÚNICA de "parcela paga" (tolerância de 1 centavo) — usada no financeiro,
+// no plano do associado, no dossiê e (em SQL) na ordem de serviço de campo.
+/** O valor recebido quita o valor do lançamento? */
+export function quita(valor: number, recebido: number): boolean {
+  return centavos(recebido) >= centavos(valor) - 0.009;
+}
+/** Lançamento quitado: status PAGO ou recebido cobrindo o valor. */
+export function lancamentoQuitado(l: { valor: unknown; valor_recebido: unknown; status: unknown }): boolean {
+  return l.status === 'PAGO' || quita(Number(l.valor), Number(l.valor_recebido || 0));
+}
+/** A mesma regra em SQL (alias da tabela pa_lancamentos), para agregações no banco. */
+export const sqlLancamentoQuitado = (a: string) => `(${a}.status = 'PAGO' OR ${a}.valor_recebido >= ${a}.valor - 0.009)`;
+
 /** Soma `meses` a uma data ISO fixando o dia (clamp no fim do mês: 31 → 30/28). */
 export function vencimentoMensal(baseIso: string, meses: number, dia: number): string {
   const [a, m] = baseIso.split('-').map(Number);
@@ -87,7 +100,7 @@ export function saldoLancamento(l: Pick<LancamentoValores, 'valor' | 'valor_rece
 /** Status após receber um valor (PAGO quando quita, PARCIAL quando sobra saldo). */
 export function statusAposRecebimento(valor: number, recebido: number, statusAtual: StatusLancamento): StatusLancamento {
   if (statusAtual === 'CANCELADO') return 'CANCELADO';
-  if (centavos(recebido) >= centavos(valor) - 0.009) return 'PAGO';
+  if (quita(valor, recebido)) return 'PAGO';
   if (recebido > 0) return 'PARCIAL';
   return statusAtual;
 }

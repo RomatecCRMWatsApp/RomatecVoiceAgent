@@ -4,6 +4,7 @@
 // Produção por dia e por funcionário: pontos, lotes fechados e horas em campo
 // (do primeiro ao último ponto do dia).
 import { PaErro } from './erros';
+import { sqlLancamentoQuitado } from './regrasFinanceiras';
 import { pool, rows, one, exec, num, isoDateTime, registrarEvento } from './paDb';
 import { pontosColetora } from './paColetora';
 import { buscarSubdivisao, vinculosParcelas } from './paMapas';
@@ -74,9 +75,9 @@ export function ordemServico<T extends { lote: string; fechado: unknown; pagamen
 async function pagamentosPorAssociado(projetoId: number): Promise<Map<number, PagamentoLote>> {
   const r = await rows(pool, `SELECT l.associado_id,
       SUM(l.tipo <> 'MARCO') AS parcelas,
-      SUM(l.tipo <> 'MARCO' AND (l.status = 'PAGO' OR l.valor_recebido >= l.valor - 0.009)) AS pagas,
+      SUM(l.tipo <> 'MARCO' AND ${sqlLancamentoQuitado('l')}) AS pagas,
       SUM(l.tipo = 'MARCO') AS marcos,
-      SUM(l.tipo = 'MARCO' AND (l.status = 'PAGO' OR l.valor_recebido >= l.valor - 0.009)) AS marcos_pagos
+      SUM(l.tipo = 'MARCO' AND ${sqlLancamentoQuitado('l')}) AS marcos_pagos
     FROM pa_lancamentos l JOIN pa_associados a ON a.id = l.associado_id
     WHERE a.projeto_id = ? AND a.ativo = 1 AND l.status <> 'CANCELADO' GROUP BY l.associado_id`, [projetoId]);
   return new Map(r.map((x) => {
@@ -98,8 +99,8 @@ export async function estadoCampo(projetoId: number) {
   const porPonto = new Map(marcas.map((x) => [x.ponto, x]));
   const existentes = new Set(d.pontos.filter((p) => p.existente).map((p) => p.nome));
   const fech = new Map(fechados.map((f) => [f.lote, f]));
-  const ben = await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>));
-  const pags = await pagamentosPorAssociado(projetoId).catch(() => new Map<number, PagamentoLote>());
+  const ben = await vinculosParcelas(projetoId).catch((e) => { console.warn('[pa-campo] vínculos lote→associado indisponíveis:', (e as Error).message); return {} as Awaited<ReturnType<typeof vinculosParcelas>>; });
+  const pags = await pagamentosPorAssociado(projetoId).catch((e) => { console.warn('[pa-campo] situação de pagamento indisponível:', (e as Error).message); return new Map<number, PagamentoLote>(); });
   return {
     pontos: d.pontos.map((p) => ({ nome: p.nome, E: p.E, N: p.N, lat: p.lat, lon: p.lon, tipo: p.tipo, lotes: p.lotes, existente: !!p.existente, implantar_com: p.implantar_com ?? null, marca: porPonto.get(p.nome) ?? null })),
     lotes: ordemServico(d.lotes.map((l) => {
@@ -138,7 +139,7 @@ export async function marcarPonto(projetoId: number, ponto: string, entrada: { g
   const fechados: Array<{ lote: string; area_ha: number; associado: string | null }> = [];
   if (novos.length) {
     const sub = await buscarSubdivisao(projetoId);
-    const ben = await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>));
+    const ben = await vinculosParcelas(projetoId).catch((e) => { console.warn('[pa-campo] vínculos lote→associado indisponíveis:', (e as Error).message); return {} as Awaited<ReturnType<typeof vinculosParcelas>>; });
     for (const lote of novos) {
       const pc = sub?.parcelas.find((x) => x.lote === lote);
       const vs = d.lotes.find((x) => x.lote === lote)!.vertices; const vsEx = exigidos(vs, existentes);

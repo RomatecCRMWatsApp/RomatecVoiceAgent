@@ -7,7 +7,7 @@ import {
   cpfValido, formatarCpf, normalizarTelefone, dataBrParaIso, soDigitos, emailValido,
 } from './validadores';
 import {
-  planoPagamento, saldoLancamento, statusEfetivo, centavos,
+  planoPagamento, saldoLancamento, statusEfetivo, centavos, quita,
   type StatusLancamento, type TipoLancamento,
 } from './regrasFinanceiras';
 import { marcaUrls } from './marcaProjeto';
@@ -637,7 +637,7 @@ export async function recalcularPlano(aid: number, sinalInformado: unknown, usua
     for (const p of plano) {
       if (p.tipo === 'SINAL' || p.tipo === 'AVISTA') {
         const recebido = centavos(recebidoSinal);
-        const status: StatusLancamento = recebido >= p.valor - 0.009 ? 'PAGO' : recebido > 0 ? 'PARCIAL' : 'A_PAGAR';
+        const status: StatusLancamento = quita(p.valor, recebido) ? 'PAGO' : recebido > 0 ? 'PARCIAL' : 'A_PAGAR';
         if (sinalAntigo) {
           await exec(c, 'UPDATE pa_lancamentos SET tipo = ?, valor = ?, vencimento = ?, status = ?, valor_recebido = ? WHERE id = ?', [
             p.tipo, p.valor, p.vencimento, status, recebido, sinalAntigo.id,

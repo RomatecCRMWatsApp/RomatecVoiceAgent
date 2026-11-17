@@ -147,7 +147,7 @@ function gms(v: number, eixo: 'lat' | 'lon') {
 export async function pdfCaderneta(projetoId: number): Promise<{ pdf: Buffer; nome: string }> {
   const p = await buscarProjeto(projetoId);
   const d = await pontosColetora(projetoId);
-  const ben = await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>));
+  const ben = await vinculosParcelas(projetoId).catch((e) => { console.warn('[pa-caderneta] vínculos lote→associado indisponíveis:', (e as Error).message); return {} as Awaited<ReturnType<typeof vinculosParcelas>>; });
   const cab = dadosCabecalho(p);
   const porNome = new Map(d.pontos.map((x) => [x.nome, x]));
   const linha = (x: PontoColetora) => `<tr><td><b>${esc(x.nome)}</b></td><td class="conf">${esc(x.tipo)}</td><td class="n">${br(x.E)}</td><td class="n">${br(x.N)}</td><td class="n">${esc(gms(x.lat, 'lat'))}</td><td class="n">${esc(gms(x.lon, 'lon'))}</td><td class="ck">${x.existente ? '<span style="font-size:7pt;color:#1f7a4d">já existe</span>' : '☐'}</td><td class="obs"></td></tr>`;

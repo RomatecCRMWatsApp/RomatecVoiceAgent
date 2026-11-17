@@ -187,3 +187,23 @@ describe('InfinitePay — parser (fixtures sintéticas)', () => {
     expect(fDown).toHaveBeenCalledTimes(3);
   });
 });
+
+// v3.176.0: regra única de parcela paga (TS e SQL com a mesma tolerância de 1 centavo)
+import { quita, lancamentoQuitado, sqlLancamentoQuitado } from './regrasFinanceiras';
+describe('regra única de parcela paga', () => {
+  it('quita com tolerância de 1 centavo e arredondamento em centavos', () => {
+    expect(quita(350, 350)).toBe(true);
+    expect(quita(350, 349.995)).toBe(true);
+    expect(quita(350, 349.99)).toBe(false); // falta 1 centavo: não quita
+    expect(quita(0.1 + 0.2, 0.3)).toBe(true);
+  });
+  it('lançamento quitado: status PAGO ou recebido cobrindo o valor', () => {
+    expect(lancamentoQuitado({ valor: 27, valor_recebido: 0, status: 'PAGO' })).toBe(true);
+    expect(lancamentoQuitado({ valor: '27.00', valor_recebido: '27.00', status: 'A_VENCER' })).toBe(true);
+    expect(lancamentoQuitado({ valor: 27, valor_recebido: 20, status: 'PARCIAL' })).toBe(false);
+    expect(lancamentoQuitado({ valor: 27, valor_recebido: null, status: 'A_VENCER' })).toBe(false);
+  });
+  it('SQL espelha a regra (status PAGO ou recebido ≥ valor − 0,009)', () => {
+    expect(sqlLancamentoQuitado('l')).toBe("(l.status = 'PAGO' OR l.valor_recebido >= l.valor - 0.009)");
+  });
+});

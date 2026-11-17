@@ -12,6 +12,7 @@
 //   • na entrega, sai sozinha a mensagem de conclusão (gratidão + versículo), em nome de José Romário.
 import { PDFDocument } from 'pdf-lib';
 import { PaErro } from './erros';
+import { lancamentoQuitado } from './regrasFinanceiras';
 import { pool, rows, one, exec, num, isoDate, isoDateTime, registrarEvento } from './paDb';
 import { buscarProjeto } from './paRepo';
 import { pdfSubdivisao, vinculosParcelas, dadosCabecalho } from './paMapas';
@@ -56,7 +57,7 @@ async function financeiro(aid: number) {
   const contrato = ls.filter((l) => l.tipo !== 'MARCO').reduce((s, l) => s + num(l.valor), 0);
   return {
     saldo: Math.max(0, Math.round((total - recebido) * 100) / 100), total, recebido, contrato: Math.round(contrato * 100) / 100,
-    marcos: { lancados: marcosL.length, pagos: marcosL.length > 0 && marcosL.every((l) => l.status === 'PAGO' || num(l.valor_recebido) >= num(l.valor) - 0.009), valor: marcosL.reduce((s, l) => s + num(l.valor), 0) },
+    marcos: { lancados: marcosL.length, pagos: marcosL.length > 0 && marcosL.every((l) => lancamentoQuitado({ valor: l.valor, valor_recebido: l.valor_recebido, status: l.status })), valor: marcosL.reduce((s, l) => s + num(l.valor), 0) },
     pagamentos: pags.map((p) => ({ data: isoDate(p.pago_em), forma: String(p.forma), valor: num(p.valor), item: `${ROT[String(p.tipo)] ?? p.tipo}${p.tipo === 'BOLETO' ? ' ' + num(p.parcela) : ''}` })),
   };
 }

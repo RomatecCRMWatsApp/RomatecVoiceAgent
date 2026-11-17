@@ -4,7 +4,7 @@ import { PaErro } from './erros';
 import { pool, rows, one, exec, transacao, num, isoDateTime, hojeBrasil, agoraBrasilSql, registrarEvento, type Db } from './paDb';
 import { buscarProjeto, mapLancamento, type Projeto } from './paRepo';
 import { cpfParcialConfere, dataHoraBrParaSql, soDigitos } from './validadores';
-import { centavos, ratearAutomatico, statusAposRecebimento, type Rateio, type StatusLancamento } from './regrasFinanceiras';
+import { centavos, quita, ratearAutomatico, statusAposRecebimento, type Rateio, type StatusLancamento } from './regrasFinanceiras';
 import { parseRecibo, destinoEhRomatec, type ReciboInfinitePay } from './infinitepay';
 import { gerarPixCopiaECola } from './pixBrCode';
 import { urlBoletoRomatec } from './paBoletoPdf';
@@ -248,7 +248,7 @@ export interface OpcoesCompensacao { cancelar_boleto: boolean; emitir_boleto: bo
 export const statusSemRecebimento = (tipo: string): StatusLancamento => (tipo === 'BOLETO' || tipo === 'MARCO' ? 'A_VENCER' : 'A_PAGAR');
 export function statusAposEstorno(valor: number, recebido: number, tipo: string, statusAtual: StatusLancamento): StatusLancamento {
   if (statusAtual === 'CANCELADO') return 'CANCELADO';
-  if (centavos(recebido) >= centavos(valor) - 0.009) return 'PAGO';
+  if (quita(valor, recebido)) return 'PAGO';
   if (recebido > 0.009) return 'PARCIAL';
   return statusSemRecebimento(tipo);
 }
