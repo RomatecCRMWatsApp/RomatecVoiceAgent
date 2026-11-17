@@ -54,10 +54,10 @@ describe('v3.172.0 — boletim de campo', () => {
     expect(t).not.toMatch(/ASSOCIADO/);
   });
 
-  it('tema do mapa: ★ quitado, #prioridade e medido hachurado', () => {
+  it('rótulos do mapa como no sistema: ★ quitado, ✓ medido e #fila', () => {
     const tm = temaMapa(b, lotes);
-    expect(tm['01']).toMatchObject({ rotulo: '★LT-01', medido: true, sub: '✓ medido', cor: '#1E7B34' });
-    expect(tm['05']).toMatchObject({ rotulo: 'LT-05', medido: false, sub: '#2' });
+    expect(tm['01']).toMatchObject({ rotulo: '★ LT-01 ✓', sub: 'medido', cor: '#1E7B34' });
+    expect(tm['05']).toMatchObject({ rotulo: 'LT-05', sub: '#2' });
     expect(tm['06'].cor).toBe('#B8BDB9');
   });
 });

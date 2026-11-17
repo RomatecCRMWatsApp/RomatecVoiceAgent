@@ -2918,7 +2918,9 @@ async function rLocacao(box){
       ${d.producao.map((p) => `<tr><td class="nowrap">${dbr(p.dia)}</td><td>${esc(p.usuario)}</td><td class="right">${p.pontos}</td><td class="right">${p.lotes}</td><td class="nowrap">${hBr(p.primeiro).slice(-5)} → ${hBr(p.ultimo).slice(-5)}</td><td class="right">${String(p.horas).replace('.', ',')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum marco locado ainda.</div>'}</div>`;
   ['cpBase', 'cpRover'].forEach((k) => { $('#' + k).onchange = () => { try { localStorage.setItem('pa_campo_eqp', JSON.stringify({ base: $('#cpBase').value, rover: $('#cpRover').value })); } catch { /* ok */ } }; });
   // v3.172.0: boletim de campo (PDF + texto) para o grupo do PA
-  $('#cpBolPdf').onclick = () => abrirPdf(`/projetos/${S.pid}/campo/boletim.pdf`);
+  // o fundo do mapa no PDF segue o que está escolhido na tela (Mapa / Satélite / Relevo); padrão satélite
+  const baseBol = () => { const b = BASE_LEMBRADA['.cpBase [data-base]']; return b === 'mapa' || b === 'relevo' ? b : 'satelite'; };
+  $('#cpBolPdf').onclick = () => abrirPdf(`/projetos/${S.pid}/campo/boletim.pdf?base=${baseBol()}`);
   $('#cpBolTxt').onclick = async () => {
     try { const r = await api(`/projetos/${S.pid}/campo/boletim`); await navigator.clipboard.writeText(r.texto); toast('Texto do boletim copiado — cole no grupo do PA'); }
     catch (e){ toast(e.message || 'Não foi possível copiar', true); }
@@ -2926,7 +2928,7 @@ async function rLocacao(box){
   $('#cpBolShare').onclick = async (ev) => {
     const bt = ev.currentTarget; bt.disabled = true;
     try {
-      const [t, r] = await Promise.all([api(`/projetos/${S.pid}/campo/boletim`), api(`/projetos/${S.pid}/campo/boletim.pdf`)]);
+      const [t, r] = await Promise.all([api(`/projetos/${S.pid}/campo/boletim`), api(`/projetos/${S.pid}/campo/boletim.pdf?base=${baseBol()}`)]);
       const arq = new File([await r.blob()], t.nome, { type: 'application/pdf' });
       if (navigator.canShare && navigator.canShare({ files: [arq] })) {
         // o WhatsApp descarta o texto quando vai junto com arquivo em alguns celulares — copia antes para colar

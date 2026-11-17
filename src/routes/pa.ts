@@ -36,6 +36,7 @@ import * as coletora from '../services/pa/paColetora';
 import * as equipe from '../services/pa/paEquipe';
 import * as campo from '../services/pa/paCampo';
 import * as boletim from '../services/pa/paCampoBoletim';
+import { baseValida } from '../services/pa/mapaTiles';
 import * as dossie from '../services/pa/paDossie';
 
 const router = Router();
@@ -478,7 +479,7 @@ router.patch('/equipe/:uid', h(async (req) => { exigirAdmin(req); return equipe.
 const usuarioCampo = (req: Request) => ({ id: ctx(req).sub, nome: ctx(req).nome });
 router.get('/projetos/:id/campo', h(async (req) => campo.estadoCampo(id(req.params.id))));
 // v3.172.0: boletim de campo (PDF A4 com mapa temático, evolução diária e fila) + texto para o grupo do PA
-router.get('/projetos/:id/campo/boletim.pdf', h(async (req, res) => { enviarPdf(res, await boletim.pdfBoletimCampo(id(req.params.id))); return undefined; }));
+router.get('/projetos/:id/campo/boletim.pdf', h(async (req, res) => { enviarPdf(res, await boletim.pdfBoletimCampo(id(req.params.id), baseValida(req.query.base))); return undefined; }));
 router.get('/projetos/:id/campo/boletim', h(async (req) => boletim.textoBoletimCampo(id(req.params.id))));
 router.post('/projetos/:id/campo/pontos', h(async (req) => {
   const p = ctx(req).perfil;

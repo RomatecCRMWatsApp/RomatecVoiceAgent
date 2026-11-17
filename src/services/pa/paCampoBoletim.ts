@@ -4,8 +4,9 @@
 // medido = hachurado) e a ordem de medição (quitados primeiro, depois pelo pagamento).
 // Sem valores em R$ nem percentual individual por associado — vai para o grupo.
 import { buscarProjeto } from './paRepo';
-import { buscarSubdivisao, buscarPerimetro, dadosCabecalho } from './paMapas';
-import { cabecalho, pdfDeHtml, svgSubdivisao, type DadosMapaPA, type TemaLote } from './mapasPdf';
+import { geojsonSubdivisao, dadosCabecalho } from './paMapas';
+import { cabecalho, pdfDeHtml, type DadosMapaPA } from './mapasPdf';
+import { htmlMapaLotes, type BaseMapa, type RotuloLote } from './mapaTiles';
 import { estadoCampo, FAIXAS_PAGAMENTO, type PagamentoLote } from './paCampo';
 
 export interface LoteBoletim {
@@ -146,7 +147,7 @@ export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string 
     .k.ok{border-color:#2E7D4F;background:#EEF6EF}
     .barra{height:4.5mm;border-radius:2.3mm;background:#E7E2D2;overflow:hidden;margin:2.5mm 0 1mm;position:relative}.barra i{display:block;height:100%;background:linear-gradient(90deg,#1E7B34,#3DA35D)}
     .barra em{position:absolute;inset:0;text-align:center;font-style:normal;font-weight:700;font-size:7.4pt;line-height:4.5mm;color:#0C3320}
-    .mapa{border:1px solid #C9C2AE;border-radius:2mm;overflow:hidden;background:#fff;margin-top:2mm}
+    .mapa{border:1px solid #C9C2AE;border-radius:2mm;overflow:hidden;background:#fff;margin-top:2mm;width:718px;max-width:100%}
     .sob{display:grid;grid-template-columns:1.15fr 1fr;gap:3mm;margin-top:2mm}
     h2{color:#0C3320;font-size:10.5pt;margin:3mm 0 1.6mm;border-bottom:1.2px solid #C9A84C;padding-bottom:.8mm}
     table{width:100%;border-collapse:collapse;font-size:7.8pt}th{background:#0C3320;color:#fff;padding:1.3mm 1.2mm;text-align:left;font-size:7pt}td{border-bottom:1px solid #E5DFCD;padding:1.2mm;vertical-align:middle}
@@ -175,7 +176,7 @@ export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string 
     <div class="sob">
       <div><table class="leg"><thead><tr><th>Cor do lote</th><th>Parcelas do contrato pagas</th><th class="n">A medir</th><th class="n">Medidos</th></tr></thead><tbody>
         ${b.faixas.map((f) => `<tr><td><i style="background:${f.cor}"></i></td><td>${esc(f.rotulo)}</td><td class="n">${f.aMedir}</td><td class="n">${f.medidos}</td></tr>`).join('')}
-      </tbody></table><div class="nota">Lote hachurado (listras brancas) = já medido. ★ = contrato quitado. #N = posição na fila de medição.</div></div>
+      </tbody></table><div class="nota">★ = contrato quitado · ✓ medido = lote já medido · #N = posição na fila de medição.</div></div>
       <div class="regra"><b>★ Ordem de medição</b><br>
         <b>1º — Lotes quitados (${b.quitados.total}):</b> ${b.quitados.aMedir.length ? `faltam ${esc(lts(b.quitados.aMedir))}` : 'todos já medidos ✓'}${b.quitados.medidos.length ? `<br><span class="m">já medidos: ${esc(lts(b.quitados.medidos))}</span>` : ''}<br>
         <b>2º — Demais lotes</b>, pela proporção de parcelas do contrato pagas (quem pagou mais vem antes).<br>
@@ -195,12 +196,12 @@ export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string 
   </body></html>`;
 }
 
-/** Tema do mapa: cor da faixa de pagamento, ★ quitado, #prioridade ou ✓ medido. */
-export function temaMapa(b: Boletim, lotes: LoteBoletim[]): Record<string, TemaLote> {
+/** Rótulos do mapa como no sistema: cor da faixa de pagamento, "★ LT-xx ✓" (quitado / medido) e #fila. */
+export function temaMapa(b: Boletim, lotes: LoteBoletim[]): Record<string, RotuloLote> {
   const cor = new Map(b.faixas.map((f) => [f.id, f.cor]));
   return Object.fromEntries(lotes.map((l) => [l.lote, {
-    cor: cor.get(l.faixa) ?? '#B8BDB9', rotulo: `${quitado(l) ? '★' : ''}LT-${l.lote}`, medido: !!l.fechado,
-    sub: l.fechado ? '✓ medido' : l.prioridade ? `#${l.prioridade}` : undefined,
+    cor: cor.get(l.faixa) ?? '#B8BDB9', rotulo: `${quitado(l) ? '★ ' : ''}LT-${l.lote}${l.fechado ? ' ✓' : ''}`,
+    sub: l.fechado ? 'medido' : l.prioridade ? `#${l.prioridade}` : undefined,
   }]));
 }
 
@@ -218,10 +219,14 @@ export async function textoBoletimCampo(projetoId: number) {
 }
 const nomeArquivo = (codigo: string, hoje: string) => `BOLETIM-CAMPO-${codigo}-${hoje}.pdf`;
 
-export async function pdfBoletimCampo(projetoId: number): Promise<{ pdf: Buffer; nome: string }> {
+/** Feições do mapa de Campo do sistema: lotes, camadas do DXF (estradas, córregos, APP, áreas comunitárias), perímetro e vila. */
+async function geoDoSistema(projetoId: number) {
+  return (await geojsonSubdivisao(projetoId)) as unknown as { features: Array<{ geometry: { type: string; coordinates: unknown }; properties: Record<string, unknown> }> };
+}
+
+export async function pdfBoletimCampo(projetoId: number, base: BaseMapa = 'satelite'): Promise<{ pdf: Buffer; nome: string }> {
   const { p, e, b } = await dados(projetoId);
-  const sub = await buscarSubdivisao(projetoId);
-  const per = await buscarPerimetro(projetoId).catch(() => null);
-  const mapa = sub ? svgSubdivisao(sub, { perimetro: per, tematico: temaMapa(b, e.lotes), css: 'width:100%;height:150mm;display:block' }) : '<div style="padding:20mm;text-align:center;color:#777">Subdivisão dos lotes ainda não carregada.</div>';
+  const geo = await geoDoSistema(projetoId).catch(() => ({ features: [] }));
+  const { html: mapa } = await htmlMapaLotes(geo, temaMapa(b, e.lotes), { base });
   return { pdf: await pdfDeHtml(htmlBoletim(dadosCabecalho(p), b, mapa)), nome: nomeArquivo(p.codigo, b.hoje) };
 }
