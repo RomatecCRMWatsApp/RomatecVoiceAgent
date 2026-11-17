@@ -42,22 +42,24 @@ describe('v3.172.0 — boletim de campo', () => {
     expect(b.faixas.find((f) => f.id === 'QUITADO')).toMatchObject({ aMedir: 1, medidos: 1 });
   });
 
-  it('texto para o grupo: sem valores em R$ nem % individual', () => {
+  it('texto para o grupo: medidos do dia com o associado OK, sem fila/pagamento nem R$', () => {
     const t = textoBoletim(b, 'PA Salete Moreno');
     expect(t).toContain('*BOLETIM DE CAMPO — PA SALETE MORENO*');
     expect(t).toContain('12/11/2026 (quinta-feira)');
     expect(t).toContain('*Lotes medidos:* 3 de 6 (50%)');
     expect(t).toContain('*Hoje:* 2 lotes medidos (LT-02, LT-03) · 10 marcos cravados');
-    expect(t).toContain('1º *Lotes quitados* (2): faltam LT-04 · já medidos: LT-01');
-    expect(t).toContain('#1 LT-04★ · #2 LT-05 · #3 LT-06');
-    expect(t).not.toMatch(/R\$/);
-    expect(t).not.toMatch(/ASSOCIADO/);
+    expect(t).toContain('✅ *MEDIDOS HOJE — associados com o lote OK:*');
+    expect(t).toContain('• LT-02 — ASSOCIADO 02 ✅');
+    expect(t).toContain('• LT-03 — ASSOCIADO 03 ✅');
+    expect(t).not.toMatch(/R\$|quitad|fila|ORDEM/i);
   });
 
-  it('rótulos do mapa como no sistema: ★ quitado, ✓ medido e #fila', () => {
+  it('mapa do grupo: todo branco, só os medidos em destaque com o associado OK', () => {
     const tm = temaMapa(b, lotes);
-    expect(tm['01']).toMatchObject({ rotulo: '★ LT-01 ✓', sub: 'medido', cor: '#1E7B34' });
-    expect(tm['05']).toMatchObject({ rotulo: 'LT-05', sub: '#2' });
-    expect(tm['06'].cor).toBe('#B8BDB9');
+    expect(tm['01']).toMatchObject({ cor: '#2E9D4F', rotulo: 'LT-01 ✓', sub: 'ASSOCIADO 01 — OK', destaque: true });
+    expect(tm['02']).toMatchObject({ cor: '#F2C94C', rotulo: 'LT-02 ✓' }); // medido hoje
+    expect(tm['05']).toMatchObject({ cor: '#FFFFFF', rotulo: 'LT-05' });
+    expect(tm['05'].sub).toBeUndefined();
+    expect(tm['04'].cor).toBe('#FFFFFF'); // em andamento ainda não destaca
   });
 });

@@ -14,7 +14,7 @@ export const baseValida = (v: unknown): BaseMapa => (v === 'mapa' || v === 'rele
 
 type Pos = [number, number];
 interface Feicao { geometry: { type: string; coordinates: unknown }; properties: Record<string, unknown> }
-export interface RotuloLote { cor: string; rotulo: string; sub?: string }
+export interface RotuloLote { cor: string; rotulo: string; sub?: string; opac?: number; destaque?: boolean }
 export type BuscarTile = (url: string) => Promise<Buffer | null>;
 
 /** Web Mercator: lon/lat → pixel do "mundo" no zoom 0 (256 px). */
@@ -108,7 +108,7 @@ export async function htmlMapaLotes(geo: { features: Feicao[] }, cores: Record<s
   }).join('');
   const poli = lotes.map((f) => {
     const c = cores[String(f.properties.lote)];
-    return `<path d="${path(anel(f), true)}" fill="${c?.cor ?? 'none'}" fill-opacity="${c ? 0.5 : 0}" stroke="${c ? '#0C3320' : '#fff'}" stroke-width="1.8" stroke-linejoin="round"/>`;
+    return `<path d="${path(anel(f), true)}" fill="${c?.cor ?? 'none'}" fill-opacity="${c ? (c.opac ?? 0.5) : 0}" stroke="${c ? '#0C3320' : '#fff'}" stroke-width="${c?.destaque ? 2.6 : 1.8}" stroke-linejoin="round"/>`;
   }).join('');
   const halo = 'stroke="#fff" stroke-width="3" paint-order="stroke" stroke-linejoin="round"';
   const fs = Math.max(7, Math.min(10, Math.sqrt((W * H) / Math.max(lotes.length, 1)) / 7));

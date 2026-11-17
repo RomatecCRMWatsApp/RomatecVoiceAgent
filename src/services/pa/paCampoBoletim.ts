@@ -1,8 +1,9 @@
 // v3.172.0 — Boletim de campo (PDF A4 + texto para o grupo do PA no WhatsApp):
 // evolução diária da medição (lotes medidos e marcos cravados por dia, acumulado,
-// ritmo e previsão), mapa temático pela proporção de parcelas pagas (★ quitado,
-// medido = hachurado) e a ordem de medição (quitados primeiro, depois pelo pagamento).
-// Sem valores em R$ nem percentual individual por associado — vai para o grupo.
+// ritmo e previsão) e o mapa dos lotes como no sistema.
+// v3.174.0: é o boletim do GRUPO — mapa todo branco, só os lotes medidos em destaque
+// (amarelo = medidos no dia) com o nome do associado e o OK. A ordem de serviço
+// (pagamento/quitados/fila) é controle da equipe e não vai para o grupo.
 import { buscarProjeto } from './paRepo';
 import { geojsonSubdivisao, dadosCabecalho } from './paMapas';
 import { cabecalho, pdfDeHtml, type DadosMapaPA } from './mapasPdf';
@@ -82,15 +83,15 @@ export function textoBoletim(b: Boletim, projetoNome: string): string {
   if (b.diasCampo) L.push(`📈 *Ritmo:* média de ${plural(b.mediaLotes, 'lote', 'lotes')} por dia em ${plural(b.diasCampo, 'dia', 'dias')} de campo (${nb(b.mediaMarcos)} marcos/dia)`);
   if (b.previsaoDias) L.push(`⏳ *Previsão:* faltam ${b.restantes} lotes — cerca de ${plural(b.previsaoDias, 'dia', 'dias')} de campo no ritmo atual`);
   else if (!b.restantes) L.push('🏁 *Todos os lotes foram medidos!*');
+  const ref = b.diaHoje && b.diaHoje.lotes.length ? { t: 'MEDIDOS HOJE', d: b.diaHoje } : b.ultimo && b.ultimo.lotes.length ? { t: `MEDIDOS EM ${dbr(b.ultimo.dia)}`, d: b.ultimo } : null;
+  if (ref) {
+    L.push('');
+    L.push(`✅ *${ref.t} — associados com o lote OK:*`);
+    const porLote = new Map(b.medidosLista.map((l) => [l.lote, l]));
+    for (const lt of ref.d.lotes) { const l = porLote.get(lt); L.push(`• LT-${lt} — ${l?.associado ? l.associado.nome : 'sem associado vinculado'} ✅`); }
+  }
   L.push('');
-  L.push('★ *ORDEM DE MEDIÇÃO*');
-  L.push(`1º *Lotes quitados* (${b.quitados.total}): ${b.quitados.aMedir.length ? `faltam ${lts(b.quitados.aMedir)}` : 'todos já medidos ✅'}${b.quitados.medidos.length && b.quitados.aMedir.length ? ` · já medidos: ${lts(b.quitados.medidos)}` : ''}`);
-  L.push('2º *Demais lotes*, pela ordem de pagamento das parcelas do contrato.');
-  const prox = b.aMedir.slice(0, 10);
-  if (prox.length) { L.push(''); L.push(`👉 *Próximos da fila:* ${prox.map((l) => `#${l.prioridade} LT-${l.lote}${quitado(l) ? '★' : ''}`).join(' · ')}`); }
-  L.push('');
-  L.push('💡 Quem quitar o contrato passa para a frente na fila de medição.');
-  L.push('🗺️ Mapa colorido, evolução por dia e a fila completa no PDF em anexo.');
+  L.push(`📋 Os ${b.medidos} lotes já medidos (com o nome de cada associado), o mapa e a evolução por dia estão no PDF em anexo.`);
   L.push('');
   L.push('_Romatec Consultoria Total — Resp. técnico José Romário_');
   return L.join('\n');
@@ -127,13 +128,8 @@ function svgEvolucao(dias: DiaBoletim[], totalLotes: number): string {
 export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string {
   const k = (rot: string, v: string, s: string, cls = '') => `<div class="k ${cls}"><span>${rot}</span><b>${v}</b><i>${s}</i></div>`;
   const hojeTxt = b.diaHoje ? plural(b.diaHoje.lotes.length, 'lote', 'lotes') : '—';
-  const sit = (l: LoteBoletim) => (l.marcados > 0 ? `<span class="tag and">em andamento ${l.marcados}/${l.exigidos.length}</span>` : quitado(l) ? '<span class="tag q">★ quitado — prioridade</span>' : '<span class="tag">aguardando</span>');
-  const fila = b.aMedir.map((l) => {
-    const f = b.faixas.find((x) => x.id === l.faixa);
-    return `<tr class="${quitado(l) ? 'lq' : ''}"><td class="n"><b>#${l.prioridade}</b></td><td><i class="sw" style="background:${f?.cor ?? '#ccc'}"></i><b>${quitado(l) ? '★ ' : ''}LT-${esc(l.lote)}</b></td>
-      <td>${l.associado ? esc(l.associado.nome) : '<span class="m">sem associado vinculado</span>'}</td><td class="n">${ha(l.area_ha)} ha</td><td>${sit(l)}</td></tr>`;
-  }).join('');
-  const medidos = b.medidosLista.map((l) => `<tr><td><b>${quitado(l) ? '★ ' : ''}LT-${esc(l.lote)}</b></td><td>${l.associado ? esc(l.associado.nome) : '—'}</td><td class="n">${ha(l.area_ha)} ha</td><td class="n">${l.fechado ? dbr(l.fechado.concluido_em.slice(0, 10)) : ''}</td><td>${esc(l.fechado?.usuario_nome ?? '')}</td></tr>`).join('');
+  const medidos = b.medidosLista.map((l) => `<tr class="${l.fechado && l.fechado.concluido_em.slice(0, 10) === b.hoje ? 'hj' : ''}"><td><b>LT-${esc(l.lote)}</b></td><td><b>${l.associado ? esc(l.associado.nome) : '—'}</b></td><td class="n">${ha(l.area_ha)} ha</td><td class="n">${l.fechado ? dbr(l.fechado.concluido_em.slice(0, 10)) : ''}</td><td><span class="tag q">✓ MEDIDO — OK</span></td></tr>`).join('');
+  const refHtml = b.diaHoje && b.diaHoje.lotes.length ? { t: 'Medidos hoje', d: b.diaHoje } : b.ultimo && b.ultimo.lotes.length ? { t: `Medidos em ${dbr(b.ultimo.dia)}`, d: b.ultimo } : null;
   const diasTab = [...b.dias].reverse().map((d) => `<tr><td class="nw"><b>${dbr(d.dia)}</b><div class="m">${semana(d.dia)}</div></td><td>${esc(d.equipe.join(', ') || '—')}</td><td class="n">${d.marcos}</td>
     <td class="n"><b>${d.lotes.length}</b></td><td>${d.lotes.length ? esc(lts(d.lotes)) : '<span class="m">—</span>'}</td><td class="n">${d.acum_lotes}/${b.totalLotes}</td><td class="n"><b>${nb(d.pct)}%</b></td></tr>`).join('');
   return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><title>Boletim de campo — ${esc(cab.projeto.nome)}</title><style>
@@ -155,7 +151,9 @@ export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string 
     thead{display:table-header-group}tr{page-break-inside:avoid}
     .leg i,.sw{display:inline-block;width:3.6mm;height:3.6mm;border-radius:.8mm;vertical-align:middle;margin-right:1.2mm;border:1px solid rgba(0,0,0,.25)}
     .sw{width:2.6mm;height:2.6mm}
-    tr.lq td{background:#EAF5EC !important}
+    tr.hj td{background:#FFF6D6 !important}
+    .legg{display:flex;flex-wrap:wrap;gap:2mm 4mm;font-size:8pt;margin-top:1mm}.legg i{display:inline-block;width:4mm;height:4mm;border-radius:.8mm;vertical-align:middle;margin-right:1.2mm;border:1px solid #0C3320}
+    .ok{color:#1E7B34;font-weight:800}
     .tag{display:inline-block;border-radius:2mm;padding:.3mm 1.6mm;font-size:6.8pt;background:#EEE;color:#555;font-weight:700}.tag.q{background:#1E7B34;color:#fff}.tag.and{background:#F2C94C;color:#4a3b00}
     .regra{border:1.2px solid #1E7B34;background:#EEF6EF;border-radius:2mm;padding:2mm 3mm;font-size:8.2pt;line-height:1.45}
     .regra b{color:#0C3320}
@@ -164,7 +162,7 @@ export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string 
     .quebra{page-break-before:always}
   </style></head><body>
     ${cabecalho(cab, 'BOLETIM DE CAMPO — MEDIÇÃO DOS LOTES')}
-    <div class="data"><span>📅 <b>${dbr(b.hoje)}</b> · ${semana(b.hoje)}</span><span>Medição e cravação dos marcos dos lotes — SIRGAS 2000 · NBR 13133</span></div>
+    <div class="data"><span>Data: <b>${dbr(b.hoje)}</b> · ${semana(b.hoje)}</span><span>Medição e cravação dos marcos dos lotes — SIRGAS 2000 · NBR 13133</span></div>
     <div class="ks">
       ${k('Lotes medidos', `${b.medidos}/${b.totalLotes}`, `${nb(b.pct)}% do PA · faltam ${b.restantes}`, 'ok')}
       ${k('Marcos cravados', `${b.marcos.cravados}/${b.marcos.total}`, `${nb(b.marcos.pct)}% dos marcos`)}
@@ -174,13 +172,9 @@ export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string 
     <div class="barra"><i style="width:${Math.min(100, b.pct)}%"></i><em>${b.medidos} de ${b.totalLotes} lotes medidos — ${nb(b.pct)}%</em></div>
     <div class="mapa">${mapa}</div>
     <div class="sob">
-      <div><table class="leg"><thead><tr><th>Cor do lote</th><th>Parcelas do contrato pagas</th><th class="n">A medir</th><th class="n">Medidos</th></tr></thead><tbody>
-        ${b.faixas.map((f) => `<tr><td><i style="background:${f.cor}"></i></td><td>${esc(f.rotulo)}</td><td class="n">${f.aMedir}</td><td class="n">${f.medidos}</td></tr>`).join('')}
-      </tbody></table><div class="nota">★ = contrato quitado · ✓ medido = lote já medido · #N = posição na fila de medição.</div></div>
-      <div class="regra"><b>★ Ordem de medição</b><br>
-        <b>1º — Lotes quitados (${b.quitados.total}):</b> ${b.quitados.aMedir.length ? `faltam ${esc(lts(b.quitados.aMedir))}` : 'todos já medidos ✓'}${b.quitados.medidos.length ? `<br><span class="m">já medidos: ${esc(lts(b.quitados.medidos))}</span>` : ''}<br>
-        <b>2º — Demais lotes</b>, pela proporção de parcelas do contrato pagas (quem pagou mais vem antes).<br>
-        <b>Quem quitar o contrato passa para a frente na fila.</b>
+      <div><div class="legg"><span><i style="background:#fff"></i>Ainda não medido</span><span><i style="background:#2E9D4F"></i>Medido — associado OK ✓</span><span><i style="background:#F2C94C"></i>Medido ${b.diaHoje ? 'hoje' : 'no último dia de campo'}</span></div>
+        <div class="nota">No mapa, cada lote medido traz o nome do associado. Lista completa na página seguinte.</div></div>
+      <div class="regra"><b>✅ ${refHtml ? esc(refHtml.t) : 'Lotes medidos'}</b><br>${refHtml && refHtml.d.lotes.length ? refHtml.d.lotes.map((lt) => { const l = b.medidosLista.find((x) => x.lote === lt); return `<b>LT-${esc(lt)}</b> — ${l?.associado ? esc(l.associado.nome) : 'sem associado vinculado'} <span class="ok">OK ✓</span>`; }).join('<br>') : '<span class="m">Nenhum lote medido ainda.</span>'}
         ${b.emAndamento.length ? `<br><span class="m">Em andamento: ${esc(lts(b.emAndamento))}</span>` : ''}</div>
     </div>
     <div class="quebra"></div>
@@ -189,20 +183,20 @@ export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string 
       <div class="nota">Barras verdes: lotes medidos (fechados) no dia · linha dourada: acumulado em % do PA${b.dias.length > 20 ? ' (últimos 20 dias)' : ''}.</div>
       <h2>Produção por dia</h2><table><thead><tr><th>Dia</th><th>Equipe</th><th class="n">Marcos cravados</th><th class="n">Lotes medidos</th><th>Lotes</th><th class="n">Acumulado</th><th class="n">% do PA</th></tr></thead><tbody>${diasTab}</tbody></table>`
       : '<div class="regra">Campo ainda não iniciado — nenhum marco cravado.</div>'}
-    <h2>Fila de medição — próximos lotes (${b.aMedir.length})</h2>
-    ${b.aMedir.length ? `<table><thead><tr><th class="n">#</th><th>Lote</th><th>Associado</th><th class="n">Área</th><th>Situação</th></tr></thead><tbody>${fila}</tbody></table>` : '<div class="regra">🏁 Todos os lotes foram medidos.</div>'}
-    ${medidos ? `<h2>Lotes já medidos (${b.medidosLista.length})</h2><table><thead><tr><th>Lote</th><th>Associado</th><th class="n">Área</th><th class="n">Medido em</th><th>Equipe</th></tr></thead><tbody>${medidos}</tbody></table>` : ''}
+    <h2>Associados com o lote medido — OK ✓ (${b.medidosLista.length} de ${b.totalLotes})</h2>
+    ${medidos ? `<table><thead><tr><th>Lote</th><th>Associado</th><th class="n">Área</th><th class="n">Medido em</th><th>Situação</th></tr></thead><tbody>${medidos}</tbody></table>` : '<div class="regra">Nenhum lote medido ainda.</div>'}
     <div class="rod"><span>Responsável técnico: ${esc(cab.rt.nome)} · ${esc(cab.rt.registro)}</span><span>Romatec Consultoria Total · gerado em ${esc(cab.data)}</span></div>
   </body></html>`;
 }
 
-/** Rótulos do mapa como no sistema: cor da faixa de pagamento, "★ LT-xx ✓" (quitado / medido) e #fila. */
+const curto = (n: string) => { const p = n.trim().split(/\s+/); return p.length > 2 ? `${p[0]} ${p[p.length - 1]}` : n.trim(); };
+/** Mapa do grupo: todo branco; só os lotes medidos em destaque (verde; amarelo = medidos hoje), com o nome do associado e o OK. */
 export function temaMapa(b: Boletim, lotes: LoteBoletim[]): Record<string, RotuloLote> {
-  const cor = new Map(b.faixas.map((f) => [f.id, f.cor]));
-  return Object.fromEntries(lotes.map((l) => [l.lote, {
-    cor: cor.get(l.faixa) ?? '#B8BDB9', rotulo: `${quitado(l) ? '★ ' : ''}LT-${l.lote}${l.fechado ? ' ✓' : ''}`,
-    sub: l.fechado ? 'medido' : l.prioridade ? `#${l.prioridade}` : undefined,
-  }]));
+  const ref = b.diaHoje ?? null;
+  const doDia = new Set(ref ? ref.lotes : b.ultimo ? b.ultimo.lotes : []);
+  return Object.fromEntries(lotes.map((l) => [l.lote, l.fechado
+    ? { cor: doDia.has(l.lote) ? '#F2C94C' : '#2E9D4F', opac: 0.85, destaque: true, rotulo: `LT-${l.lote} ✓`, sub: l.associado ? `${curto(l.associado.nome)} — OK` : 'medido' }
+    : { cor: '#FFFFFF', opac: 0.72, rotulo: `LT-${l.lote}` }]));
 }
 
 export const hojeBrasilia = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
