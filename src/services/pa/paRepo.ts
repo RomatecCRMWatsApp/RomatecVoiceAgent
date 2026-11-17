@@ -10,19 +10,7 @@ import {
   planoPagamento, saldoLancamento, statusEfetivo, centavos,
   type StatusLancamento, type TipoLancamento,
 } from './regrasFinanceiras';
-import type { PerfilPa } from './lgpd';
 import { marcaUrls } from './marcaProjeto';
-
-// ─── Perfil ───────────────────────────────────────────────────────────────
-export async function perfilOverride(sub: string | null): Promise<PerfilPa | null> {
-  if (!sub) return null;
-  try {
-    const r = await one<{ perfil: PerfilPa }>(pool, 'SELECT perfil FROM pa_usuarios_perfil WHERE user_sub = ?', [sub]);
-    return r?.perfil ?? null;
-  } catch {
-    return null; // tabela ainda não migrada → cai no role do JWT
-  }
-}
 
 // ─── Projetos ─────────────────────────────────────────────────────────────
 export interface Projeto {

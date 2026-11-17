@@ -8,6 +8,7 @@ import { buscarProjeto } from './paRepo';
 import { geojsonSubdivisao, dadosCabecalho } from './paMapas';
 import { cabecalho, pdfDeHtml, type DadosMapaPA } from './mapasPdf';
 import { htmlMapaLotes, type BaseMapa, type RotuloLote } from './mapaTiles';
+import { hojeBrasil } from './paDb';
 import { estadoCampo, FAIXAS_PAGAMENTO, type PagamentoLote } from './paCampo';
 
 export interface LoteBoletim {
@@ -199,12 +200,10 @@ export function temaMapa(b: Boletim, lotes: LoteBoletim[]): Record<string, Rotul
     : { cor: '#FFFFFF', opac: 0.72, rotulo: `LT-${l.lote}` }]));
 }
 
-export const hojeBrasilia = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
-
 async function dados(projetoId: number) {
   const p = await buscarProjeto(projetoId);
   const e = await estadoCampo(projetoId);
-  return { p, e, b: montarBoletim(e, hojeBrasilia()) };
+  return { p, e, b: montarBoletim(e, hojeBrasil()) };
 }
 
 export async function textoBoletimCampo(projetoId: number) {

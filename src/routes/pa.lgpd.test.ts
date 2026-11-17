@@ -5,7 +5,6 @@ import express from 'express';
 import request from 'supertest';
 
 vi.mock('../services/pa/paRepo', () => ({
-  perfilOverride: vi.fn(async () => null),
   listarAssociados: vi.fn(async () => [{
     id: 7, nome: 'FULANA TESTE', cpf: '529.982.247-25', rg: '529.982.247-25 SSP/MA (CIN)', conjuge_cpf: '111.444.777-35',
     telefone: '(99) 9 9000-0001', financeiro: { saldo: 700 }, documentos: { total: 3, com_arquivo: 3 },
@@ -15,6 +14,11 @@ vi.mock('../services/pa/paRepo', () => ({
   desativarAssociado: vi.fn(async () => undefined),
   painel: vi.fn(async () => { const { PaErro } = await import('../services/pa/erros'); throw new PaErro('PROJETO_NAO_ENCONTRADO', 'Projeto não encontrado', 404); }),
 }));
+// v3.176.0: o perfil cadastrado na Equipe vem de equipe.acessoPa (era paRepo.perfilOverride até a v3.169)
+vi.mock('../services/pa/paEquipe', async (orig) => {
+  const real = await orig<typeof import('../services/pa/paEquipe')>();
+  return { ...real, acessoPa: vi.fn(async () => ({ perfil: null, permissoes: real.PERMISSOES_PADRAO, nome: null })) };
+});
 vi.mock('../services/pa/paFinanceiro', () => ({}));
 vi.mock('../services/pa/seedRun', () => ({}));
 vi.mock('../services/pa/paDocumentos', () => ({
@@ -23,6 +27,7 @@ vi.mock('../services/pa/paDocumentos', () => ({
 
 import paRouter from './pa';
 import * as repo from '../services/pa/paRepo';
+import * as equipe from '../services/pa/paEquipe';
 import * as docs from '../services/pa/paDocumentos';
 
 function app(role: string) {
@@ -43,7 +48,7 @@ describe('/api/pa — perfis LGPD', () => {
   });
 
   it('override em pa_usuarios_perfil prevalece sobre o role', async () => {
-    vi.mocked(repo.perfilOverride).mockResolvedValueOnce('DIRECAO_ASSOCIACAO');
+    vi.mocked(equipe.acessoPa).mockResolvedValueOnce({ perfil: 'DIRECAO_ASSOCIACAO', permissoes: equipe.PERMISSOES_PADRAO, nome: 'Diretor' });
     expect((await request(app('admin')).get('/api/pa/eu')).body.perfil).toBe('DIRECAO_ASSOCIACAO');
   });
 
