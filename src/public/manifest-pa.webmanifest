@@ -1,0 +1,23 @@
+{
+  "id": "/pa.html",
+  "name": "Romatec Campo — Gestão de PA",
+  "short_name": "Romatec PA",
+  "description": "Gestão de PA / Loteamentos da Romatec Consultoria Total: campo, mapa, coletora e caderneta — Açailândia/MA",
+  "start_url": "/pa.html?app=1",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0C3320",
+  "theme_color": "#0C3320",
+  "lang": "pt-BR",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    { "src": "/icons/pa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/pa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/pa-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Campo — locação dos marcos", "short_name": "Campo", "url": "/pa.html?app=1&aba=campo", "icons": [{ "src": "/icons/pa-192.png", "sizes": "192x192" }] },
+    { "name": "Coletora e caderneta", "short_name": "Coletora", "url": "/pa.html?app=1&aba=importar", "icons": [{ "src": "/icons/pa-192.png", "sizes": "192x192" }] }
+  ]
+}

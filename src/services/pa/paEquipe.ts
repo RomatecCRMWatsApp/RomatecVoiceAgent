@@ -95,6 +95,8 @@ function mensagemAcesso(nome: string, login: string, senha: string, perfil: stri
     `👤 Login: ${login}`,
     `🔑 Senha provisória: ${senha}`,
     ``,
+    `📲 *Instale o app no celular:* abra o link no *Chrome* (Android) ou no *Safari* (iPhone), entre e toque em *Instalar app* — fica o ícone *Romatec PA* na tela inicial. No iPhone: Compartilhar ⬆️ → Adicionar à Tela de Início.`,
+    ``,
     `Guarde esta mensagem. Qualquer dúvida, fale com o José Romário.`,
   ].join('\n');
 }

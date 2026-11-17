@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gestão de PA — Romatec</title>
+<!-- v3.175.0: PWA — instala no celular (Android: pop-up de instalação; iPhone: Compartilhar → Tela de Início) -->
+<link rel="manifest" href="/manifest-pa.webmanifest">
+<meta name="theme-color" content="#0C3320">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Romatec PA">
+<link rel="apple-touch-icon" href="/icons/pa-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/pa-192.png">
 <!-- v3.142.0 — Módulo Gestão de PA / Loteamentos. Identidade do manual do PA:
      #0C3320 (verde), #C9A84C (ouro), #B3261E (alerta), #FFF4DC (creme). -->
 <style>
@@ -28,6 +37,12 @@
   .wrap{max-width:1180px;margin:0 auto;padding:16px}
   /* v3.169.0: celular — barra de cima com ☰; o menu abre na lateral (padrão do CRM) */
   .menu-btn,.menu-fechar{display:none}
+  /* v3.175.0: pop-up de instalação do app (PWA) */
+  .pwa-ban{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:3000;background:#fff;border:2px solid var(--gold);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.28);padding:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;max-width:560px;margin:0 auto}
+  .pwa-ban img{width:48px;height:48px;border-radius:12px;flex:0 0 auto}
+  .pwa-ban .pwa-txt{flex:1 1 200px;font-size:13px;line-height:1.35;color:var(--ink)}.pwa-ban .pwa-txt b{display:block;color:var(--green);font-size:14px}.pwa-ban .pwa-txt span b{display:inline;font-size:13px}
+  .pwa-ban .pwa-bts{display:flex;gap:6px;flex:0 0 auto;margin-left:auto}
+  .pwa-ban.hide{display:none}
   .menu-fundo{display:none}
   @media (max-width:979px){
     .menu-btn{display:inline-flex;font-size:18px;padding:4px 12px;line-height:1}
@@ -348,6 +363,7 @@
       </div>
     </div>
     <div class="row" style="flex:0 0 auto;align-items:center">
+      <button class="navbtn hide" id="btnInstalar" title="Instalar o app no celular (ícone na tela inicial)">📲 Instalar app</button>
       <span class="versao" id="versaoChip" title="Versão e horário do último deploy (package.json via /api/version)">…</span>
       <select id="selProjeto" aria-label="Projeto"></select>
       <span class="perfil" id="perfilChip">…</span>
@@ -3149,6 +3165,57 @@ function rImportar(){
 }
 
 boot();
+})();
+</script>
+<div id="pwaBanner" class="pwa-ban hide" role="dialog" aria-label="Instalar o app">
+  <img src="/icons/pa-192.png" alt="">
+  <div class="pwa-txt"><b>Instale o app Romatec PA</b><span id="pwaMsg">Fica o ícone na tela do celular e abre direto, sem navegador.</span></div>
+  <div class="pwa-bts"><button class="btn btn-gold btn-sm" id="pwaSim">📲 Instalar</button><button class="btn btn-ghost btn-sm" id="pwaNao">Agora não</button></div>
+</div>
+<script>
+// v3.175.0: PWA do PA — service worker + pop-up de instalação (Android/Chrome nativo; iPhone e
+// navegadores sem o pop-up nativo recebem o passo a passo). Não aparece se já estiver instalado.
+(() => {
+  const instalado = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  const ua = navigator.userAgent || '';
+  const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const android = /android/i.test(ua);
+  const inApp = /FBAN|FBAV|Instagram|WhatsApp|; wv\)/i.test(ua); // navegador embutido (WhatsApp etc.) não instala
+  const iosSafari = ios && /safari/i.test(ua) && !/crios|fxios|edgios/i.test(ua);
+  const ban = document.getElementById('pwaBanner'), msg = document.getElementById('pwaMsg'), sim = document.getElementById('pwaSim'), btn = document.getElementById('btnInstalar');
+  let evento = null;
+  const CHAVE = 'pa_pwa_adiado';
+  const adiado = () => { try { return Number(localStorage.getItem(CHAVE) || 0) > Date.now(); } catch { return false; } };
+  const adiar = (dias) => { try { localStorage.setItem(CHAVE, String(Date.now() + dias * 864e5)); } catch { /* ok */ } };
+  const passo = () => {
+    if (inApp) return 'Abra este link no <b>Chrome</b> (⋮ → <b>Abrir no navegador</b>) para instalar o app.';
+    if (ios && !iosSafari) return 'No iPhone, abra este endereço no <b>Safari</b> e toque em <b>Compartilhar ⬆️</b> → <b>Adicionar à Tela de Início</b>.';
+    if (ios) return 'Toque em <b>Compartilhar ⬆️</b> (barra de baixo) → <b>Adicionar à Tela de Início</b> → <b>Adicionar</b>.';
+    if (android) return 'No Chrome, toque no menu <b>⋮</b> (canto de cima) → <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.';
+    return 'No navegador, use o ícone de instalar na barra de endereço ou o menu → <b>Instalar app</b>.';
+  };
+  const mostrar = (forcar) => {
+    if (instalado() || (!forcar && adiado())) return;
+    msg.innerHTML = evento ? 'Fica o ícone na tela do celular e abre direto, sem navegador.' : passo();
+    sim.textContent = evento ? '📲 Instalar' : 'Entendi';
+    ban.classList.remove('hide');
+  };
+  if (instalado()) return;
+  if (ios || android || matchMedia('(pointer:coarse)').matches) btn.classList.remove('hide');
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); evento = e; btn.classList.remove('hide'); mostrar(false); });
+  window.addEventListener('appinstalled', () => { ban.classList.add('hide'); btn.classList.add('hide'); evento = null; toast('✅ App instalado — procure o ícone Romatec PA na tela do celular'); });
+  sim.onclick = async () => {
+    if (!evento) { ban.classList.add('hide'); adiar(1); return; }
+    evento.prompt();
+    const r = await evento.userChoice.catch(() => ({ outcome: 'dismissed' }));
+    evento = null; ban.classList.add('hide');
+    if (r.outcome !== 'accepted') adiar(2);
+  };
+  document.getElementById('pwaNao').onclick = () => { ban.classList.add('hide'); adiar(3); };
+  btn.onclick = () => (evento ? sim.onclick() : mostrar(true));
+  // iPhone e navegadores sem o pop-up nativo: mostra o passo a passo depois de entrar
+  setTimeout(() => { if (!evento && (ios || android)) mostrar(false); }, 4000);
 })();
 </script>
 </body>
