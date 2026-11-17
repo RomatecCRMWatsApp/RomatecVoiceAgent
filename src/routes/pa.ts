@@ -47,7 +47,7 @@ const uploadDisco = multer({ dest: os.tmpdir(), limits: { fileSize: 400 * 1024 *
 interface Ctx { sub: string | null; perfil: PerfilPa; nome: string | null; permissoes: equipe.PermissoesCampo }
 type ReqPa = Request & { pa?: Ctx };
 
-async function contexto(req: ReqPa, _res: Response, next: NextFunction) {
+async function contexto(req: ReqPa, res: Response, next: NextFunction) {
   try {
     const u = (req as AuthedRequest).user;
     const sub = u?.sub ? String(u.sub) : null;
@@ -59,6 +59,8 @@ async function contexto(req: ReqPa, _res: Response, next: NextFunction) {
     }
     next();
   } catch (err) {
+    // v3.176.0: bloqueio de perfil responde 403 em JSON (antes caía no handler padrão do Express → 500)
+    if (err instanceof PaErro) { res.status(err.http).json({ erro: err.message, codigo: err.codigo, detalhe: err.detalhe ?? null }); return; }
     next(err);
   }
 }
@@ -478,11 +480,10 @@ router.patch('/equipe/:uid', h(async (req) => { exigirAdmin(req); return equipe.
 // ─── v3.169.0: produção de campo (marcar marco locado; lote fecha sozinho) ─
 const usuarioCampo = (req: Request) => ({ id: ctx(req).sub, nome: ctx(req).nome });
 router.get('/projetos/:id/campo', h(async (req) => campo.estadoCampo(id(req.params.id))));
-// funcionário de campo não gera PDF nem mensagem para grupo (só a caderneta e os arquivos da coletora)
-const semCampo = (req: Request) => { if (ctx(req).perfil === 'CAMPO') throw new PaErro('SEM_PERMISSAO', 'Seu perfil (funcionário de campo) não gera o boletim', 403); };
+// (funcionário de campo não gera o boletim: bloqueado em equipe.rotaPaPermitidaCampo, no contexto acima)
 // v3.172.0: boletim de campo (PDF A4 com mapa temático, evolução diária e fila) + texto para o grupo do PA
-router.get('/projetos/:id/campo/boletim.pdf', h(async (req, res) => { semCampo(req); enviarPdf(res, await boletim.pdfBoletimCampo(id(req.params.id), baseValida(req.query.base))); return undefined; }));
-router.get('/projetos/:id/campo/boletim', h(async (req) => { semCampo(req); return boletim.textoBoletimCampo(id(req.params.id)); }));
+router.get('/projetos/:id/campo/boletim.pdf', h(async (req, res) => { enviarPdf(res, await boletim.pdfBoletimCampo(id(req.params.id), baseValida(req.query.base))); return undefined; }));
+router.get('/projetos/:id/campo/boletim', h(async (req) => boletim.textoBoletimCampo(id(req.params.id))));
 router.post('/projetos/:id/campo/pontos', h(async (req) => {
   const p = ctx(req).perfil;
   if (!(p === 'ADMIN' || p === 'OPERADOR' || (p === 'CAMPO' && ctx(req).permissoes.marcar_campo))) throw new PaErro('SEM_PERMISSAO', 'Sem permissão para marcar pontos', 403);

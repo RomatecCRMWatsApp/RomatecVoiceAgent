@@ -60,6 +60,8 @@ export function rotaPaPermitidaCampo(metodo: string, caminho: string, p: Permiss
   const c = caminho.split('?')[0];
   const m = metodo.toUpperCase();
   if (m === 'GET' && /^\/(eu|projetos)$/.test(c)) return true;
+  // v3.176.0: boletim de campo (PDF/texto para o grupo) não é do funcionário de campo — regra só aqui
+  if (/^\/projetos\/\d+\/campo\/boletim(\.pdf)?$/.test(c)) return false;
   if (/^\/projetos\/\d+\/campo(\/|$)/.test(c)) return m === 'GET' || p.marcar_campo;
   if (m !== 'GET') return false;
   if (p.baixar_coletora && /^\/projetos\/\d+\/(coletora\.(csv|txt|dxf)|caderneta-campo\.pdf)$/.test(c)) return true;

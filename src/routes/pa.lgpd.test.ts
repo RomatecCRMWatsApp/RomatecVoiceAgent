@@ -47,6 +47,16 @@ describe('/api/pa — perfis LGPD', () => {
     expect((await request(app('viewer')).get('/api/pa/eu')).body).toMatchObject({ perfil: 'DIRECAO_ASSOCIACAO', pode_escrever: false, ve_documentos: false });
   });
 
+  it('funcionário de campo: boletim do grupo bloqueado no servidor (403); campo liberado', async () => {
+    const campo = { perfil: 'CAMPO' as const, permissoes: equipe.PERMISSOES_PADRAO, nome: 'Operador' };
+    vi.mocked(equipe.acessoPa).mockResolvedValueOnce(campo);
+    expect((await request(app('gestor')).get('/api/pa/projetos/1/campo/boletim.pdf?base=satelite')).status).toBe(403);
+    vi.mocked(equipe.acessoPa).mockResolvedValueOnce(campo);
+    expect((await request(app('gestor')).get('/api/pa/projetos/1/campo/boletim')).status).toBe(403);
+    vi.mocked(equipe.acessoPa).mockResolvedValueOnce(campo);
+    expect((await request(app('gestor')).get('/api/pa/projetos/1/associados')).status).toBe(403);
+  });
+
   it('override em pa_usuarios_perfil prevalece sobre o role', async () => {
     vi.mocked(equipe.acessoPa).mockResolvedValueOnce({ perfil: 'DIRECAO_ASSOCIACAO', permissoes: equipe.PERMISSOES_PADRAO, nome: 'Diretor' });
     expect((await request(app('admin')).get('/api/pa/eu')).body.perfil).toBe('DIRECAO_ASSOCIACAO');

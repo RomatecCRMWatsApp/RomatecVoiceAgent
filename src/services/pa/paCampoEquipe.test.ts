@@ -33,6 +33,11 @@ describe('funcionário de campo — o que ele acessa', () => {
     expect(ok('GET', '/projetos/1/associados')).toBe(false);
     expect(ok('POST', '/projetos/1/subdivisao/vinculo')).toBe(false);
     expect(ok('GET', '/projetos/1/dossies')).toBe(false);
+    // v3.176.0: boletim do grupo fica fora do perfil de campo (inclusive com ?base=)
+    expect(ok('GET', '/projetos/1/campo/boletim.pdf')).toBe(false);
+    expect(ok('GET', '/projetos/1/campo/boletim.pdf?base=satelite')).toBe(false);
+    expect(ok('GET', '/projetos/1/campo/boletim')).toBe(false);
+    expect(ok('GET', '/projetos/1/coletora.dxf')).toBe(true);
   });
   it('permissões desligadas fecham as rotas', () => {
     const p = lerPermissoes({ ver_mapa: false, baixar_coletora: false, marcar_campo: false });
