@@ -44,6 +44,47 @@ export function producaoPorDia(marcas: Array<{ marcado_em: string; usuario_nome:
 
 const dt = (v: unknown) => isoDateTime(v) ?? String(v);
 
+// ─── v3.171.0: ordem de serviço de campo pelo pagamento ───────────────────
+// Cor e prioridade de cada lote pela proporção de PARCELAS DO CONTRATO pagas (sem valores em R$ —
+// o funcionário de campo vê só a situação). Preferência (não bloqueia): medir primeiro os quitados.
+export interface PagamentoLote { parcelas: number; pagas: number; pct: number; quitado: boolean; marcos_lancados: boolean; marcos_pago: boolean }
+export const FAIXAS_PAGAMENTO: ReadonlyArray<{ id: string; rotulo: string; cor: string; min: number }> = [
+  { id: 'QUITADO', rotulo: 'Quitado ★', cor: '#1E7B34', min: 100 },
+  { id: 'P75', rotulo: '75% a 99%', cor: '#8BC34A', min: 75 },
+  { id: 'P50', rotulo: '50% a 74%', cor: '#F2C94C', min: 50 },
+  { id: 'P25', rotulo: '25% a 49%', cor: '#F2994A', min: 25 },
+  { id: 'P1', rotulo: '1% a 24%', cor: '#EB5757', min: 0.01 },
+  { id: 'P0', rotulo: 'Nada pago', cor: '#9B1C1C', min: 0 },
+  { id: 'SEM', rotulo: 'Sem associado', cor: '#B8BDB9', min: -1 },
+];
+export function faixaPagamento(p: PagamentoLote | null): (typeof FAIXAS_PAGAMENTO)[number] {
+  if (!p || !p.parcelas) return FAIXAS_PAGAMENTO[FAIXAS_PAGAMENTO.length - 1];
+  if (p.quitado) return FAIXAS_PAGAMENTO[0];
+  return FAIXAS_PAGAMENTO.find((f) => f.id !== 'QUITADO' && f.id !== 'SEM' && p.pct >= f.min) ?? FAIXAS_PAGAMENTO[5];
+}
+/** Ordem de serviço: a medir primeiro (quitados com marcos pagos → quitados → maior % pago → sem associado), medidos no fim. */
+export function ordemServico<T extends { lote: string; fechado: unknown; pagamento: PagamentoLote | null }>(lotes: T[]): T[] {
+  const nota = (l: T) => {
+    const p = l.pagamento;
+    if (!p || !p.parcelas) return -1;
+    return p.quitado ? 1000 + (p.marcos_pago ? 100 : 0) : p.pct;
+  };
+  return [...lotes].sort((a, b) => (a.fechado ? 1 : 0) - (b.fechado ? 1 : 0) || nota(b) - nota(a) || a.lote.localeCompare(b.lote, 'pt-BR', { numeric: true }));
+}
+async function pagamentosPorAssociado(projetoId: number): Promise<Map<number, PagamentoLote>> {
+  const r = await rows(pool, `SELECT l.associado_id,
+      SUM(l.tipo <> 'MARCO') AS parcelas,
+      SUM(l.tipo <> 'MARCO' AND (l.status = 'PAGO' OR l.valor_recebido >= l.valor - 0.009)) AS pagas,
+      SUM(l.tipo = 'MARCO') AS marcos,
+      SUM(l.tipo = 'MARCO' AND (l.status = 'PAGO' OR l.valor_recebido >= l.valor - 0.009)) AS marcos_pagos
+    FROM pa_lancamentos l JOIN pa_associados a ON a.id = l.associado_id
+    WHERE a.projeto_id = ? AND a.ativo = 1 AND l.status <> 'CANCELADO' GROUP BY l.associado_id`, [projetoId]);
+  return new Map(r.map((x) => {
+    const parcelas = num(x.parcelas), pagas = num(x.pagas), marcos = num(x.marcos);
+    return [num(x.associado_id), { parcelas, pagas, pct: parcelas ? Math.round((pagas / parcelas) * 1000) / 10 : 0, quitado: parcelas > 0 && pagas >= parcelas, marcos_lancados: marcos > 0, marcos_pago: marcos > 0 && num(x.marcos_pagos) >= marcos }];
+  }));
+}
+
 export async function estadoCampo(projetoId: number) {
   const d = await pontosColetora(projetoId);
   const marcas = (await rows(pool, 'SELECT * FROM pa_campo_pontos WHERE projeto_id = ? ORDER BY marcado_em', [projetoId])).map((r): MarcaPonto => ({
@@ -58,15 +99,18 @@ export async function estadoCampo(projetoId: number) {
   const existentes = new Set(d.pontos.filter((p) => p.existente).map((p) => p.nome));
   const fech = new Map(fechados.map((f) => [f.lote, f]));
   const ben = await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>));
+  const pags = await pagamentosPorAssociado(projetoId).catch(() => new Map<number, PagamentoLote>());
   return {
     pontos: d.pontos.map((p) => ({ nome: p.nome, E: p.E, N: p.N, lat: p.lat, lon: p.lon, tipo: p.tipo, lotes: p.lotes, existente: !!p.existente, implantar_com: p.implantar_com ?? null, marca: porPonto.get(p.nome) ?? null })),
-    lotes: d.lotes.map((l) => {
+    lotes: ordemServico(d.lotes.map((l) => {
       const vs = [...new Set(l.vertices)];
       const imp = exigidos(vs, existentes); // marcos a cravar (o perímetro já existe)
       const b = ben[l.lote];
       return { lote: l.lote, area_ha: l.area_ha, vertices: vs, exigidos: imp, a_implantar: vs.filter((v) => !existentes.has(v)).length, existentes: vs.filter((v) => existentes.has(v)).length, marcados: imp.filter((v) => porPonto.has(v)).length, fechado: fech.get(l.lote) ?? null,
-        associado: b ? { nome: b.nome, lote_vila: b.lote_vila, denominacao: b.denominacao ?? null } : null };
-    }),
+        associado: b ? { nome: b.nome, lote_vila: b.lote_vila, denominacao: b.denominacao ?? null } : null,
+        pagamento: b ? pags.get(b.associado_id) ?? { parcelas: 0, pagas: 0, pct: 0, quitado: false, marcos_lancados: false, marcos_pago: false } : null };
+    })).map((l, i) => ({ ...l, prioridade: l.fechado ? null : i + 1, faixa: faixaPagamento(l.pagamento).id })),
+    faixas: FAIXAS_PAGAMENTO,
     producao: producaoPorDia(marcas, fechados),
     equipamentos: EQUIPAMENTOS_PADRAO,
     totais: { pontos: d.pontos.length, a_implantar: d.pontos.filter((p) => !p.existente && p.origem === 'LOTE').length, existentes: existentes.size, marcados: marcas.filter((m) => !existentes.has(m.ponto)).length, lotes: d.lotes.length, fechados: fechados.length },

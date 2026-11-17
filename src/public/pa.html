@@ -278,6 +278,11 @@
   .so-cel{display:none}
   @media (max-width:700px){table.tlotes .so-cel{display:inline}}
   .cpchk{display:flex !important;gap:8px;align-items:flex-start;margin:6px 0 !important}.cpchk input{width:auto !important;flex:0 0 auto;margin:2px 0 0}
+  .cp-pref{background:#FBF4E0;border:1px solid #E8D59A;border-radius:10px;padding:8px 12px;font-size:13px;margin:4px 0 8px}
+  .cp-leg{font-size:13px}.cp-leg td,.cp-leg th{padding:4px 6px}
+  @media (max-width:700px){table.tcard td.cp-pg{flex-direction:column;align-items:stretch;text-align:left}table.tcard td.cp-pg::before{margin-bottom:2px}}
+  .cp-leg i{display:inline-block;width:26px;height:14px;border-radius:4px;border:1px solid #0002;vertical-align:middle}
+  .cp-aviso{margin-top:8px;padding:8px 10px;border-radius:8px;font-size:13px}.cp-aviso.q{background:#E6F4EC;color:#1B5E20}.cp-aviso.p{background:#FFF4E5;color:#8A4B00;border:1px solid #F2C94C}
   .ml-alq{font-weight:700;color:#7A5B12;margin:-2px 0 4px}
   .ml-ben{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
   .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -2852,6 +2857,10 @@ async function rEquipe(){
   });
 }
 
+// ─── v3.171.0: ordem de serviço de campo pelo pagamento (cor + prioridade; preferência sem bloqueio) ─
+const faixaCampo = (d, l) => (d.faixas || []).find((f) => f.id === l.faixa) || { cor: '#B8BDB9', rotulo: '—' };
+const pagTxt = (l) => !l.pagamento ? 'sem associado' : !l.pagamento.parcelas ? 'sem parcelas' : l.pagamento.quitado ? '★ quitado' : `${l.pagamento.pct.toLocaleString('pt-BR')}% pago (${l.pagamento.pagas}/${l.pagamento.parcelas})`;
+const quitadosAMedir = (d) => d.lotes.filter((l) => !l.fechado && l.pagamento && l.pagamento.quitado);
 // ─── v3.169.0: locação dos marcos no mapa (aba Campo) ─
 let MAPA_CP = {};
 const CP = { lote: '', ponto: null };
@@ -2871,15 +2880,22 @@ async function rLocacao(box){
   const meuHoje = d.producao.filter((p) => p.dia === hoje);
   const pontosHoje = meuHoje.reduce((s, p) => s + p.pontos, 0), lotesHoje = meuHoje.reduce((s, p) => s + p.lotes, 0);
   const podeMarcar = podeEscrever() || (S.eu.perfil === 'CAMPO' && (S.eu.permissoes || {}).marcar_campo !== false);
-  const optLote = (l) => `<option value="${esc(l.lote)}" ${CP.lote === l.lote ? 'selected' : ''}>LT-${esc(l.lote)} · ${l.fechado ? '✅ MEDIDO' : `${l.marcados}/${l.exigidos.length} marcos`}${l.associado ? ' · ' + esc(l.associado.nome) : ''}</option>`;
+  const optLote = (l) => `<option value="${esc(l.lote)}" ${CP.lote === l.lote ? 'selected' : ''}>${l.prioridade ? '#' + l.prioridade + ' · ' : ''}${l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${esc(l.lote)} · ${l.fechado ? '✅ MEDIDO' : `${l.marcados}/${l.exigidos.length} marcos · ${pagTxt(l)}`}${l.associado ? ' · ' + esc(l.associado.nome) : ''}</option>`;
+  const grupo = (t, ls) => ls.length ? `<optgroup label="${esc(t)} (${ls.length})">${ls.map(optLote).join('')}</optgroup>` : '';
+  const qAM = quitadosAMedir(d), abertos = d.lotes.filter((l) => !l.fechado && !(l.pagamento && l.pagamento.quitado)), medidos = d.lotes.filter((l) => l.fechado);
+  const contaFaixa = (id) => d.lotes.filter((l) => l.faixa === id);
   box.innerHTML = `<div class="card"><h2 style="margin-top:0">📍 Locação dos marcos</h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 10px">
         <div class="k2"><div><div class="l">Marcos a cravar</div><div class="v">${d.totais.marcados}/${d.totais.a_implantar}</div><div class="muted">${d.totais.existentes} já existem (perímetro)</div></div></div>
         <div class="k2 ok"><div><div class="l">Lotes medidos</div><div class="v">${d.totais.fechados}/${d.totais.lotes}</div></div></div>
         <div class="k2"><div><div class="l">Hoje</div><div class="v">${pontosHoje} marcos</div><div class="muted">${lotesHoje} lote(s) fechado(s)</div></div></div>
       </div>
+      <div class="cp-pref">${qAM.length ? `<b>★ Preferência:</b> medir primeiro os <b>${qAM.length} lote(s) quitado(s)</b> ainda não medidos (${qAM.slice(0, 8).map((l) => 'LT-' + esc(l.lote)).join(', ')}${qAM.length > 8 ? '…' : ''}); depois os em aberto, pela ordem de pagamento. Não bloqueia — dá para medir qualquer lote.` : '✅ Todos os lotes quitados já foram medidos — siga a ordem de pagamento dos demais.'}</div>
+      <div class="tbl" style="margin:6px 0 10px"><table class="cp-leg"><thead><tr><th>Cor</th><th>Parcelas do contrato pagas</th><th class="right">A medir</th><th class="right">Medidos</th></tr></thead><tbody>
+        ${(d.faixas || []).map((f) => { const ls = contaFaixa(f.id); return `<tr><td><i style="background:${f.cor}"></i></td><td>${esc(f.rotulo)}</td><td class="right">${ls.filter((l) => !l.fechado).length}</td><td class="right">${ls.filter((l) => l.fechado).length}</td></tr>`; }).join('')}
+      </tbody></table></div>
       <div class="grid3">
-        <div style="grid-column:span 1"><label for="cpLote">Lote (comece pelo LT-01)</label><select class="f" id="cpLote"><option value="">Todos os lotes</option>${d.lotes.map(optLote).join('')}</select></div>
+        <div style="grid-column:span 1"><label for="cpLote">Lote — ordem de serviço (quitados primeiro)</label><select class="f" id="cpLote"><option value="">Todos os lotes</option>${grupo('★ Quitados — medir primeiro', qAM)}${grupo('Em aberto — pela ordem de pagamento', abertos)}${grupo('✅ Já medidos', medidos)}</select></div>
         <div><label for="cpBase">Base GNSS</label><input id="cpBase" value="${esc(eq.base)}"></div>
         <div><label for="cpRover">Rover</label><input id="cpRover" value="${esc(eq.rover)}"></div>
       </div>
@@ -2890,10 +2906,11 @@ async function rLocacao(box){
       <div class="ml-wrap"><div id="cpMapa" class="ml-mapa"><div class="empty" style="padding-top:120px">Carregando o mapa…</div></div><div id="cpCtl" class="ml-ctl" hidden></div></div>
       <label style="display:block;margin-top:10px"><b>Ou escolha o marco:</b><select class="f" id="cpSel"></select></label>
       <div id="cpCard"></div></div>
-    <div class="card"><h2 style="margin-top:0">Lotes</h2><div class="tbl"><table><thead><tr><th>Lote</th><th>Associado</th><th class="right">Área</th><th>Marcos</th><th>Situação</th></tr></thead><tbody>
-      ${d.lotes.map((l) => `<tr class="click" data-cplote="${esc(l.lote)}"><td><b>LT-${esc(l.lote)}</b></td><td>${l.associado ? esc(l.associado.nome) + `<div class="muted">vila ${esc(l.associado.lote_vila)}${l.associado.denominacao ? ' · ' + esc(l.associado.denominacao) : ''}</div>` : '—'}</td><td class="right nowrap">${nbr(l.area_ha, 4)} ha</td>
-        <td class="nowrap">${l.marcados}/${l.exigidos.length}${l.existentes ? ` <span class="muted">+${l.existentes} existentes</span>` : ''}</td>
-        <td>${l.fechado ? chip('PAGO', '✅ MEDIDO') + `<div class="muted">${hBr(l.fechado.concluido_em)} · ${esc(l.fechado.usuario_nome || '')}</div>` : l.marcados ? chip('PARCIAL', 'em andamento') : '<span class="muted">pendente</span>'}</td></tr>`).join('')}
+    <div class="card"><h2 style="margin-top:0">Lotes — ordem de serviço</h2><div class="muted" style="margin-bottom:6px">Quitados primeiro, depois pela proporção de parcelas pagas; os já medidos ficam no fim.</div><div class="tbl"><table class="tcard"><thead><tr><th># · Lote</th><th>Pagamento</th><th>Associado</th><th class="right">Área</th><th>Marcos</th><th>Situação</th></tr></thead><tbody>
+      ${d.lotes.map((l) => `<tr class="click" data-cplote="${esc(l.lote)}" style="box-shadow:inset 5px 0 0 ${faixaCampo(d, l).cor}"><td class="nowrap tc-tit"><b>${l.prioridade ? '#' + l.prioridade : '—'}</b> · <b>${l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${esc(l.lote)}</b></td>
+        <td class="nowrap cp-pg" data-l="Pagamento" style="min-width:110px"><div class="pbar"><i style="width:${l.pagamento ? Math.min(100, l.pagamento.pct) : 0}%;background:${faixaCampo(d, l).cor}"></i></div><span class="muted">${esc(pagTxt(l))}</span>${l.pagamento && l.pagamento.parcelas ? `<div class="muted">🪨 marcos ${l.pagamento.marcos_pago ? 'pagos' : l.pagamento.marcos_lancados ? 'em aberto' : 'não lançados'}</div>` : ''}</td><td data-l="Associado">${l.associado ? esc(l.associado.nome) + `<div class="muted">vila ${esc(l.associado.lote_vila)}${l.associado.denominacao ? ' · ' + esc(l.associado.denominacao) : ''}</div>` : '—'}</td><td class="right nowrap" data-l="Área">${nbr(l.area_ha, 4)} ha</td>
+        <td class="nowrap" data-l="Marcos">${l.marcados}/${l.exigidos.length}${l.existentes ? ` <span class="muted">+${l.existentes} existentes</span>` : ''}</td>
+        <td data-l="Situação">${l.fechado ? chip('PAGO', '✅ MEDIDO') + `<div class="muted">${hBr(l.fechado.concluido_em)} · ${esc(l.fechado.usuario_nome || '')}</div>` : l.marcados ? chip('PARCIAL', 'em andamento') : '<span class="muted">pendente</span>'}</td></tr>`).join('')}
     </tbody></table></div></div>
     <div class="card"><h2 style="margin-top:0">Produção de campo</h2>${d.producao.length ? `<div class="tbl"><table><thead><tr><th>Dia</th><th>Funcionário</th><th class="right">Marcos</th><th class="right">Lotes fechados</th><th>Início → fim</th><th class="right">Horas</th></tr></thead><tbody>
       ${d.producao.map((p) => `<tr><td class="nowrap">${dbr(p.dia)}</td><td>${esc(p.usuario)}</td><td class="right">${p.pontos}</td><td class="right">${p.lotes}</td><td class="nowrap">${hBr(p.primeiro).slice(-5)} → ${hBr(p.ultimo).slice(-5)}</td><td class="right">${String(p.horas).replace('.', ',')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum marco locado ainda.</div>'}</div>`;
@@ -2923,8 +2940,9 @@ async function mapaCampo(d, podeMarcar){
   if (!$('#cpMapa')) return;
   box.innerHTML = '';
   const fechados = new Set(d.lotes.filter((l) => l.fechado).map((l) => l.lote));
-  // lote medido em verde, a medir em branco (cor do motor do mapa via properties.cor)
-  const lotesF = geo.features.filter((f) => f.properties.tipo === 'LOTE').map((f) => ({ ...f, properties: { ...f.properties, cor: fechados.has(f.properties.lote) ? '#9CC46A' : '#ffffff' } }));
+  // v3.171.0: cor pela proporção de parcelas pagas (★ quitado); ✅ no rótulo = já medido
+  const porLoteCampo = Object.fromEntries(d.lotes.map((l) => [l.lote, l]));
+  const lotesF = geo.features.filter((f) => f.properties.tipo === 'LOTE').map((f) => { const l = porLoteCampo[f.properties.lote]; return { ...f, properties: { ...f.properties, cor: l ? faixaCampo(d, l).cor : '#B8BDB9' } }; });
   const porLote = Object.fromEntries(lotesF.map((f) => [f.properties.lote, f]));
   const outros = geo.features.filter((f) => f.properties.tipo !== 'LOTE');
   const lote = CP.lote ? d.lotes.find((l) => l.lote === CP.lote) : null;
@@ -2933,7 +2951,7 @@ async function mapaCampo(d, podeMarcar){
   const sel = $('#cpSel');
   sel.innerHTML = '<option value="">Selecione o marco</option>' + vis.map((p) => `<option value="${esc(p.nome)}">${p.marca ? '✅' : p.existente ? '◻️' : '🔴'} ${esc(p.nome)} · ${esc(p.tipo)}</option>`).join('');
   const ctx = { geo: { ...geo, features: [...lotesF, ...outros] }, lotesF, porLote, outros, pontos, ctl, baseSel: '.cpBase [data-base]',
-    rotulo: (f) => `LT-${f.properties.lote}`, opacSel3d: .35, opacSel2d: .25 };
+    rotulo: (f) => { const l = porLoteCampo[f.properties.lote]; return `${l && l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${f.properties.lote}${fechados.has(f.properties.lote) ? ' ✅' : ''}`; }, opacFill: .5, opacSel3d: .45, opacSel2d: .65 };
   const eng = modo === '3d' ? mapaLotes3D(lib, box, ctx) : mapaLotes2D(lib, box, ctx);
   ctx.selecionar = (l, centralizar) => { CP.lote = l; const s = $('#cpLote'); if (s) s.value = l; eng.marcar(l, centralizar); cartaoLoteCampo(d, l); };
   ctx.selPonto = (id) => { CP.ponto = id; eng.marcarPonto(id); sel.value = id; cartaoPontoCampo(d, id, podeMarcar, eng); };
@@ -2945,6 +2963,9 @@ function cartaoLoteCampo(d, l){
   const lo = d.lotes.find((x) => x.lote === l); if (!lo) return;
   $('#cpCard').innerHTML = `<div class="ml-card"><div class="muted">Lote de produção</div><div class="ml-tit">LT-${esc(lo.lote)} · ${nbr(lo.area_ha, 4)} ha</div>
     ${lo.associado ? `<div><b>${esc(lo.associado.nome)}</b> · vila ${esc(lo.associado.lote_vila)}${lo.associado.denominacao ? ' · ' + esc(lo.associado.denominacao) : ''}</div>` : ''}
+    <div style="margin-top:4px"><i style="display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:middle;background:${faixaCampo(d, lo).cor}"></i> ${esc(pagTxt(lo))}${lo.prioridade ? ` · prioridade <b>#${lo.prioridade}</b>` : ''}</div>
+    ${!lo.fechado && lo.pagamento && lo.pagamento.quitado ? '<div class="cp-aviso q">★ Lote quitado — prioridade de medição.</div>' : ''}
+    ${(() => { const q = quitadosAMedir(d); return !lo.fechado && !(lo.pagamento && lo.pagamento.quitado) && q.length ? `<div class="cp-aviso p">⚠️ <b>Preferência:</b> ainda há ${q.length} lote(s) quitado(s) a medir (${q.slice(0, 6).map((x) => 'LT-' + esc(x.lote)).join(', ')}${q.length > 6 ? '…' : ''}). Pode medir este, mas o ideal é começar pelos quitados.</div>` : ''; })()}
     <div style="margin-top:6px">Marcos: <b>${lo.marcados}/${lo.exigidos.length}</b> locados${lo.existentes ? ` · ${lo.existentes} já existem` : ''}</div>
     ${lo.fechado ? `<div class="avisos" style="margin-top:8px">✅ <b>MEDIDO</b> em ${hBr(lo.fechado.concluido_em)} por ${esc(lo.fechado.usuario_nome || '—')} · ${nbr(lo.fechado.area_ha ?? lo.area_ha, 4)} ha · perímetro ${nbr(lo.fechado.perimetro_m ?? 0)} m${lo.fechado.base ? ` · ${esc(lo.fechado.base)} / ${esc(lo.fechado.rover || '')}` : ''}</div>` : '<div class="muted" style="margin-top:6px">Toque num marco vermelho para marcar como locado.</div>'}</div>`;
 }
