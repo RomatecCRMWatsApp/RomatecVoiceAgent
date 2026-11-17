@@ -2912,9 +2912,33 @@ async function rLocacao(box){
         <td class="nowrap" data-l="Marcos">${l.marcados}/${l.exigidos.length}${l.existentes ? ` <span class="muted">+${l.existentes} existentes</span>` : ''}</td>
         <td data-l="Situação">${l.fechado ? chip('PAGO', '✅ MEDIDO') + `<div class="muted">${hBr(l.fechado.concluido_em)} · ${esc(l.fechado.usuario_nome || '')}</div>` : l.marcados ? chip('PARCIAL', 'em andamento') : '<span class="muted">pendente</span>'}</td></tr>`).join('')}
     </tbody></table></div></div>
-    <div class="card"><h2 style="margin-top:0">Produção de campo</h2>${d.producao.length ? `<div class="tbl"><table><thead><tr><th>Dia</th><th>Funcionário</th><th class="right">Marcos</th><th class="right">Lotes fechados</th><th>Início → fim</th><th class="right">Horas</th></tr></thead><tbody>
+    <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">Produção de campo</h2>
+      <span style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="cpBolPdf" title="Boletim do dia: mapa colorido, evolução por dia e fila de medição">📄 Boletim (PDF)</button> <button class="btn btn-primary btn-sm" id="cpBolShare" title="Enviar o PDF com o texto para o grupo do PA">📤 Enviar no grupo</button> <button class="btn btn-ghost btn-sm" id="cpBolTxt">📋 Copiar texto</button></span></div>
+      <div class="muted" style="margin:4px 0 8px">Boletim para o grupo do PA: lotes medidos e marcos cravados por dia, ritmo, previsão, mapa colorido pelo pagamento e a ordem de medição (quitados primeiro).</div>${d.producao.length ? `<div class="tbl"><table><thead><tr><th>Dia</th><th>Funcionário</th><th class="right">Marcos</th><th class="right">Lotes fechados</th><th>Início → fim</th><th class="right">Horas</th></tr></thead><tbody>
       ${d.producao.map((p) => `<tr><td class="nowrap">${dbr(p.dia)}</td><td>${esc(p.usuario)}</td><td class="right">${p.pontos}</td><td class="right">${p.lotes}</td><td class="nowrap">${hBr(p.primeiro).slice(-5)} → ${hBr(p.ultimo).slice(-5)}</td><td class="right">${String(p.horas).replace('.', ',')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum marco locado ainda.</div>'}</div>`;
   ['cpBase', 'cpRover'].forEach((k) => { $('#' + k).onchange = () => { try { localStorage.setItem('pa_campo_eqp', JSON.stringify({ base: $('#cpBase').value, rover: $('#cpRover').value })); } catch { /* ok */ } }; });
+  // v3.172.0: boletim de campo (PDF + texto) para o grupo do PA
+  $('#cpBolPdf').onclick = () => abrirPdf(`/projetos/${S.pid}/campo/boletim.pdf`);
+  $('#cpBolTxt').onclick = async () => {
+    try { const r = await api(`/projetos/${S.pid}/campo/boletim`); await navigator.clipboard.writeText(r.texto); toast('Texto do boletim copiado — cole no grupo do PA'); }
+    catch (e){ toast(e.message || 'Não foi possível copiar', true); }
+  };
+  $('#cpBolShare').onclick = async (ev) => {
+    const bt = ev.currentTarget; bt.disabled = true;
+    try {
+      const [t, r] = await Promise.all([api(`/projetos/${S.pid}/campo/boletim`), api(`/projetos/${S.pid}/campo/boletim.pdf`)]);
+      const arq = new File([await r.blob()], t.nome, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [arq] })) {
+        // o WhatsApp descarta o texto quando vai junto com arquivo em alguns celulares — copia antes para colar
+        try { await navigator.clipboard.writeText(t.texto); } catch { /* ok */ }
+        await navigator.share({ files: [arq], title: arq.name, text: t.texto }).catch((e) => { if (e && e.name !== 'AbortError') throw e; });
+      } else {
+        const url = URL.createObjectURL(arq); const a = document.createElement('a'); a.href = url; a.download = arq.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+        window.open('https://wa.me/?text=' + encodeURIComponent(t.texto + '\n\n(PDF baixado — anexe na conversa)'), '_blank');
+      }
+    } catch (e){ toast(e.message, true); }
+    bt.disabled = false;
+  };
   $('#cpLote').onchange = () => { CP.lote = $('#cpLote').value; CP.ponto = null; mapaCampo(d, podeMarcar); };
   box.querySelectorAll('[data-cplote]').forEach((tr) => tr.onclick = () => { CP.lote = tr.dataset.cplote; $('#cpLote').value = CP.lote; CP.ponto = null; mapaCampo(d, podeMarcar); $('#cpMapa').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
   mapaCampo(d, podeMarcar);

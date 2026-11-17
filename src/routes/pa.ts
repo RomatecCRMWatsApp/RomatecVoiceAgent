@@ -35,6 +35,7 @@ import * as marcos from '../services/pa/paMarcos';
 import * as coletora from '../services/pa/paColetora';
 import * as equipe from '../services/pa/paEquipe';
 import * as campo from '../services/pa/paCampo';
+import * as boletim from '../services/pa/paCampoBoletim';
 import * as dossie from '../services/pa/paDossie';
 
 const router = Router();
@@ -476,6 +477,9 @@ router.patch('/equipe/:uid', h(async (req) => { exigirAdmin(req); return equipe.
 // ─── v3.169.0: produção de campo (marcar marco locado; lote fecha sozinho) ─
 const usuarioCampo = (req: Request) => ({ id: ctx(req).sub, nome: ctx(req).nome });
 router.get('/projetos/:id/campo', h(async (req) => campo.estadoCampo(id(req.params.id))));
+// v3.172.0: boletim de campo (PDF A4 com mapa temático, evolução diária e fila) + texto para o grupo do PA
+router.get('/projetos/:id/campo/boletim.pdf', h(async (req, res) => { enviarPdf(res, await boletim.pdfBoletimCampo(id(req.params.id))); return undefined; }));
+router.get('/projetos/:id/campo/boletim', h(async (req) => boletim.textoBoletimCampo(id(req.params.id))));
 router.post('/projetos/:id/campo/pontos', h(async (req) => {
   const p = ctx(req).perfil;
   if (!(p === 'ADMIN' || p === 'OPERADOR' || (p === 'CAMPO' && ctx(req).permissoes.marcar_campo))) throw new PaErro('SEM_PERMISSAO', 'Sem permissão para marcar pontos', 403);

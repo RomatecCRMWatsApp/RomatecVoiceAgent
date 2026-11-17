@@ -163,7 +163,10 @@ const COR_CAMADA: Record<CamadaDesenho['tipo'], { fill: string; stroke: string }
 };
 
 /** SVG da subdivisão: todos os lotes, ou um lote em destaque (zoom nele, vértices nomeados). */
-export function svgSubdivisao(sub: Subdivisao, opts: { destaque?: string | null; perimetro?: Perimetro | null; css?: string } = {}): string {
+/** v3.172.0: cor/rótulo por lote (mapa temático do boletim de campo); medido = hachurado. */
+export interface TemaLote { cor: string; rotulo: string; sub?: string; medido?: boolean }
+const claro = (hex: string) => { const m = hex.replace('#', ''); const [r, g, b] = [0, 2, 4].map((i) => parseInt(m.slice(i, i + 2), 16)); return 0.299 * r + 0.587 * g + 0.114 * b > 150; };
+export function svgSubdivisao(sub: Subdivisao, opts: { destaque?: string | null; perimetro?: Perimetro | null; css?: string; tematico?: Record<string, TemaLote> } = {}): string {
   const alvo = opts.destaque ? sub.parcelas.find((p) => p.lote === opts.destaque) ?? null : null;
   const todosPts = (alvo ? alvo.perimetro.vertices : sub.parcelas.flatMap((p) => p.perimetro.vertices)).map((v) => [v.E, v.N]);
   const Es = todosPts.map((p) => p[0]), Ns = todosPts.map((p) => p[1]);
@@ -191,6 +194,14 @@ export function svgSubdivisao(sub: Subdivisao, opts: { destaque?: string | null;
     const pts = p.perimetro.vertices.map((v) => [v.E, v.N]);
     const [cx, cy] = centro(pts);
     const eu = alvo !== null && p.lote === alvo.lote;
+    const t = opts.tematico?.[p.lote];
+    if (t) {
+      const tx = claro(t.cor) ? '#1C1C18' : '#fff';
+      return `<polygon points="${poly(pts)}" fill="${t.cor}" fill-opacity="0.85" stroke="#0C3320" stroke-width="${sw * 1.4}"/>`
+        + (t.medido ? `<polygon points="${poly(pts)}" fill="url(#hachura)" stroke="none"/>` : '')
+        + `<text x="${cx}" y="${cy - (t.sub ? fs * 0.6 : 0)}" font-size="${fs * 1.25}" font-weight="800" text-anchor="middle" dominant-baseline="middle" fill="${tx}" stroke="${tx === '#fff' ? 'rgba(0,0,0,.35)' : 'rgba(255,255,255,.6)'}" stroke-width="${sw * 0.8}" paint-order="stroke">${esc(t.rotulo)}</text>`
+        + (t.sub ? `<text x="${cx}" y="${cy + fs * 0.85}" font-size="${fs * 0.95}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="${tx}">${esc(t.sub)}</text>` : '');
+    }
     return `<polygon points="${poly(pts)}" fill="${eu ? '#B7D99A' : alvo ? '#F4F1E6' : '#E4EED8'}" fill-opacity="${eu ? 0.75 : 0.55}" stroke="${eu ? '#0C3320' : '#55704A'}" stroke-width="${eu ? sw * 3 : sw}"/>`
       + `<text x="${cx}" y="${cy}" font-size="${eu ? fs * 1.6 : fs}" font-weight="800" text-anchor="middle" dominant-baseline="middle" fill="${eu ? '#0C3320' : '#3d5233'}">LT-${esc(p.lote)}</text>`
       + (eu ? `<text x="${cx}" y="${cy + fs * 1.8}" font-size="${fs * 0.95}" text-anchor="middle" fill="#0C3320">${haAlqCurto(p.perimetro.area_ha)}</text>` : '');
@@ -206,6 +217,7 @@ export function svgSubdivisao(sub: Subdivisao, opts: { destaque?: string | null;
   const sbx = x0 + W * 0.04, sby = y0 + H * 0.96;
   const fsg = fs * 0.8;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x0} ${y0} ${W} ${H}" style="${opts.css ?? 'width:100%;height:auto;display:block'}" font-family="Liberation Sans, Arial, sans-serif">
+    ${opts.tematico ? `<defs><pattern id="hachura" patternUnits="userSpaceOnUse" width="${fs * 0.9}" height="${fs * 0.9}" patternTransform="rotate(45)"><rect width="${fs * 0.9}" height="${fs * 0.9}" fill="none"/><line x1="0" y1="0" x2="0" y2="${fs * 0.9}" stroke="#fff" stroke-width="${sw * 2.2}" stroke-opacity=".75"/></pattern></defs>` : ''}
     <rect x="${x0}" y="${y0}" width="${W}" height="${H}" fill="#FBFAF5"/>${lotes}${camadas}${per}${vert}
     <g transform="translate(${x0 + W * 0.95},${y0 + H * 0.07})"><polygon points="0,${-fsg * 1.6} ${fsg * 0.7},${fsg * 0.6} 0,${fsg * 0.2} ${-fsg * 0.7},${fsg * 0.6}" fill="#0C3320"/><text y="${-fsg * 1.9}" font-size="${fsg}" font-weight="800" text-anchor="middle" fill="#0C3320">N</text></g>
     <g><rect x="${sbx}" y="${sby}" width="${passo / 2}" height="${fsg * 0.4}" fill="#0C3320"/><rect x="${sbx + passo / 2}" y="${sby}" width="${passo / 2}" height="${fsg * 0.4}" fill="#fff" stroke="#0C3320" stroke-width="${sw * 0.6}"/>
