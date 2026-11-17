@@ -20,6 +20,13 @@ async function lotesDoMapa(projetoId: number): Promise<LoteDoMapa[]> {
   return ls.filter((l) => Array.isArray(l.croqui_xy)).map((l) => ({ numero: String(l.numero), xy: l.croqui_xy as number[][], institucional: l.tipo === 'INSTITUCIONAL' }));
 }
 
+/** v3.170.0: coluna JSON vem como objeto no MySQL e como texto no MariaDB — aceita os dois. */
+function lerJson<T>(v: unknown): T | null {
+  if (v == null) return null;
+  if (typeof v === 'string') { try { return JSON.parse(v) as T; } catch { return null; } }
+  return v as T;
+}
+
 export function dadosCabecalho(p: Projeto): DadosMapaPA {
   const lj = (p.layout_json ?? {}) as { responsavel_tecnico?: { nome?: string; cft?: string; incra?: string } };
   const rt = lj.responsavel_tecnico ?? {};
@@ -27,8 +34,8 @@ export function dadosCabecalho(p: Projeto): DadosMapaPA {
   return {
     projeto: { nome: p.nome, municipio: p.municipio, uf: p.uf, associacao: p.associacao_nome },
     rt: {
-      nome: rt.nome || p.rt_nome || 'Responsável técnico',
-      registro: ['Técnico em Agrimensura', rt.cft ? `CFT ${rt.cft}` : '', rt.incra ? `INCRA ${rt.incra}` : ''].filter(Boolean).join(' · ') || (p.rt_registro ?? ''),
+      nome: rt.nome || p.rt_nome || 'José Romário Pinto Bezerra', // v3.170.0: RT padrão da Romatec
+      registro: (rt.cft || rt.incra) ? ['Técnico em Agrimensura', rt.cft ? `CFT ${rt.cft}` : '', rt.incra ? `INCRA ${rt.incra}` : ''].filter(Boolean).join(' · ') : (p.rt_registro || 'Técnico em Agrimensura · CFT 01209185369 · INCRA FQNS'),
       // v3.154.0: CFT e código de credenciado separados (modelo SIGEF); cai no texto de rt_registro ("CFT 012… · INCRA FQNS").
       cft: rt.cft || (p.rt_registro ?? '').match(/CFT\s*([\w.-]+)/i)?.[1] || null,
       incra: rt.incra || (p.rt_registro ?? '').match(/INCRA\s*([A-Z0-9]+)/i)?.[1] || null,
@@ -55,7 +62,7 @@ export async function pdfMapaVila(projetoId: number): Promise<{ pdf: Buffer; nom
 export async function buscarPerimetro(projetoId: number): Promise<Perimetro | null> {
   const r = await one(pool, 'SELECT perimetro_json FROM pa_projetos WHERE id = ?', [projetoId]);
   if (!r) throw new PaErro('PROJETO_NAO_ENCONTRADO', 'Projeto não encontrado', 404);
-  return (r.perimetro_json as Perimetro | null) ?? null;
+  return lerJson<Perimetro>(r.perimetro_json);
 }
 
 export async function salvarPerimetro(
@@ -93,7 +100,7 @@ export async function pdfMapaGeral(projetoId: number, modelo: 'tradicional' | 's
 export async function buscarSubdivisao(projetoId: number): Promise<Subdivisao | null> {
   const r = await one(pool, 'SELECT subdivisao_json FROM pa_projetos WHERE id = ?', [projetoId]);
   if (!r) throw new PaErro('PROJETO_NAO_ENCONTRADO', 'Projeto não encontrado', 404);
-  return (r.subdivisao_json as Subdivisao | null) ?? null;
+  return lerJson<Subdivisao>(r.subdivisao_json);
 }
 
 export async function salvarSubdivisao(
@@ -225,7 +232,7 @@ export async function pdfSubdivisao(projetoId: number, lotes: string[] | null, g
 export async function buscarVila(projetoId: number): Promise<VilaPerimetro | null> {
   const r = await one(pool, 'SELECT vila_json FROM pa_projetos WHERE id = ?', [projetoId]);
   if (!r) throw new PaErro('PROJETO_NAO_ENCONTRADO', 'Projeto não encontrado', 404);
-  return (r.vila_json as VilaPerimetro | null) ?? null;
+  return lerJson<VilaPerimetro>(r.vila_json);
 }
 
 export async function salvarVila(projetoId: number, arquivo: { nome: string; conteudo: string }, opts: { fuso?: number | null; hemisferio?: 'S' | 'N' }, usuario: string | null): Promise<VilaPerimetro> {
@@ -298,7 +305,7 @@ export async function geojsonSubdivisao(projetoId: number) {
 async function lerDivisa(projetoId: number): Promise<DivisaSalva | null> {
   const r = await one(pool, 'SELECT divisa_json FROM pa_projetos WHERE id = ?', [projetoId]);
   if (!r) throw new PaErro('PROJETO_NAO_ENCONTRADO', 'Projeto não encontrado', 404);
-  return (r.divisa_json as DivisaSalva | null) ?? null;
+  return lerJson<DivisaSalva>(r.divisa_json);
 }
 
 async function contextoDivisa(projetoId: number) {

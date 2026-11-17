@@ -410,6 +410,8 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   // Recupera os pagamentos que entraram com o padrão errado: marcados no mesmo instante da criação e sem
   // registro de envio (os antigos foram marcados na migração, em outro instante). O vigia envia.
   { label: 'pa_pagamentos.notificacao recupera pendentes', sql: 'UPDATE pa_pagamentos SET notificado_em = NULL WHERE notificacao_json IS NULL AND seed_chave IS NULL AND notificado_em = criado_em AND criado_em >= NOW() - INTERVAL 3 DAY' },
+  // v3.170.0: dossiê — etapa da TRT (emitida → paga libera a entrega das vias impressas) e mensagem de conclusão.
+  { label: 'pa_dossies.trt', sql: 'ALTER TABLE pa_dossies ADD COLUMN trt_numero VARCHAR(40) NULL, ADD COLUMN trt_emitida_em DATETIME NULL, ADD COLUMN trt_emitida_por VARCHAR(160) NULL, ADD COLUMN trt_paga_em DATETIME NULL, ADD COLUMN trt_paga_por VARCHAR(160) NULL, ADD COLUMN conclusao_enviada_em DATETIME NULL' },
   { label: 'pa_projetos.divisa_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN divisa_json JSON NULL' },
   // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },

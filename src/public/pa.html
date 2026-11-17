@@ -2988,6 +2988,7 @@ async function rDossies(){
   const lista = ds.filter((d) => !f || d.status === f);
   const hb = (iso) => iso ? new Date(iso.replace(' ', 'T') + (/[zZ]$/.test(iso) ? '' : 'Z')).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
   v.innerHTML = `<div class="card"><h2 style="margin-top:0">📦 Dossiês de pronta entrega</h2>
+      <div class="muted" style="margin-bottom:6px"><b>v3.170.0:</b> o dossiê só libera com o <b>lote medido</b> + <b>contrato quitado</b> + <b>taxa de marcos paga</b>. O PDF reúne capa, sumário e prazos, comunicado, mapa geral, mapa e memorial (tradicional e <b>modelo SIGEF</b>), <b>carteirinha</b> e <b>termo de quitação</b>. Depois do envio: TRT emitida → TRT paga → entrega das vias impressas → <b>mensagem de conclusão</b> com versículo, em nome de José Romário, sai sozinha.</div>
       <div class="muted">Quando a equipe fecha um lote em campo, o sistema monta o dossiê: <b>carta</b> pedindo para o associado comparecer ao escritório (anotação técnica e via impressa), <b>termo de quitação</b> e <b>mapa + memorial descritivo</b> do lote. <b>Sai sozinho pelo WhatsApp</b> do associado assim que o lote estiver medido e <b>todas as cobranças pagas</b>, com uma cópia no seu WhatsApp. O botão serve para reenviar ou enviar quem ficou travado.</div>
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
         <button class="btn btn-sm ${!f ? 'btn-primary' : 'btn-ghost'}" data-dsf="">Todos (${ds.length})</button>
@@ -2996,27 +2997,39 @@ async function rDossies(){
     <div class="card">${lista.length ? `<div class="tbl"><table><thead><tr><th>Lote</th><th>Associado</th><th>Medido</th><th class="right">Em aberto</th><th>Situação</th><th></th></tr></thead><tbody>
       ${lista.map((d) => `<tr><td><b>LT-${esc(d.lote)}</b><div class="muted">vila ${esc(d.lote_vila)}</div></td><td>${esc(d.nome)}<div class="muted">${esc(d.numero)}${d.denominacao ? ' · ' + esc(d.denominacao) : ''}</div></td>
         <td class="nowrap">${d.medido_em ? hb(d.medido_em) + `<div class="muted">${esc(d.medidor || '')}</div>` : '—'}</td>
-        <td class="right nowrap">${d.saldo > 0.009 ? brl(d.saldo) : chip('QUITADO')}</td>
-        <td>${chip(ST_DOSSIE[d.status][0], ST_DOSSIE[d.status][1])}${d.enviado_em ? `<div class="muted">enviado ${hb(d.enviado_em)}</div>` : ''}${d.entregue_em ? `<div class="muted">entregue ${hb(d.entregue_em)} · ${esc(d.entregue_por || '')}${d.entregue_obs ? ' · ' + esc(d.entregue_obs) : ''}</div>` : ''}</td>
+        <td class="right nowrap">${d.saldo > 0.009 ? brl(d.saldo) : chip('QUITADO')}<div class="muted">${d.marcos_pagos ? '🪨 marcos pagos' : d.marcos_lancados ? '🪨 marcos em aberto' : '🪨 marcos não lançados'}</div></td>
+        <td>${chip(ST_DOSSIE[d.status][0], ST_DOSSIE[d.status][1])}${d.pendencia && d.status === 'AGUARDANDO_PAGAMENTO' ? `<div class="muted" style="color:var(--red)">🔒 ${esc(d.pendencia)}</div>` : ''}${d.enviado_em ? `<div class="muted">enviado ${hb(d.enviado_em)}</div>` : ''}
+          ${d.status === 'ENVIADO' || d.status === 'ENTREGUE' ? `<div class="muted">📄 TRT: ${d.trt_paga_em ? `✅ paga ${hb(d.trt_paga_em)}` : d.trt_emitida_em ? `emitida ${hb(d.trt_emitida_em)} — aguardando pagamento` : 'a emitir'}${d.trt_numero ? ' · nº ' + esc(d.trt_numero) : ''}</div>` : ''}
+          ${d.conclusao_enviada_em ? `<div class="muted">🙏 mensagem de conclusão enviada ${hb(d.conclusao_enviada_em)}</div>` : ''}${d.entregue_em ? `<div class="muted">entregue ${hb(d.entregue_em)} · ${esc(d.entregue_por || '')}${d.entregue_obs ? ' · ' + esc(d.entregue_obs) : ''}</div>` : ''}</td>
         <td class="nowrap"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button>
           ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>📲 Enviar agora</button>` : ''}
           ${admin && d.status === 'ENVIADO' ? `<button class="btn btn-ghost btn-sm" data-dsenv="${esc(d.lote)}">🔁 Reenviar</button>` : ''}
-          ${d.status !== 'ENTREGUE' && d.status !== 'AGUARDANDO_PAGAMENTO' ? `<button class="btn btn-gold btn-sm" data-dsent="${esc(d.lote)}">📦 Entregue fisicamente</button>` : ''}</td></tr>`).join('')}
+          ${(d.status === 'ENVIADO' || d.status === 'PRONTO') && !d.trt_emitida_em ? `<button class="btn btn-ghost btn-sm" data-dstrt="emitida" data-lote="${esc(d.lote)}">📄 TRT emitida</button>` : ''}
+          ${d.trt_emitida_em && !d.trt_paga_em ? `<button class="btn btn-ghost btn-sm" data-dstrt="paga" data-lote="${esc(d.lote)}">💳 TRT paga</button>` : ''}
+          ${d.status !== 'ENTREGUE' && d.status !== 'AGUARDANDO_PAGAMENTO' ? `<button class="btn btn-gold btn-sm" data-dsent="${esc(d.lote)}" ${d.trt_paga_em ? '' : 'disabled title="Libera depois da TRT paga"'}>📦 Entregue fisicamente</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">Nenhum dossiê nesta situação. Eles aparecem aqui quando um lote é fechado na aba Campo.</div>'}</div>`;
   v.querySelectorAll('[data-dsf]').forEach((b) => b.onclick = () => { S.dossieFiltro = b.dataset.dsf; rDossies(); });
   v.querySelectorAll('[data-dsver]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dsver)}.pdf`));
   v.querySelectorAll('[data-dsenv]').forEach((b) => b.onclick = async () => {
     const d = ds.find((x) => x.lote === b.dataset.dsenv);
-    if (!confirm(`Enviar o dossiê do LT-${d.lote} para ${d.nome} pelo WhatsApp?\n\nVai: carta (comparecer ao escritório para a anotação técnica e retirar a via impressa), termo de quitação, mapa e memorial descritivo.`)) return;
+    if (!confirm(`Enviar o dossiê do LT-${d.lote} para ${d.nome} pelo WhatsApp?\n\nVai: capa, sumário e prazos, comunicado (carteirinha + TRT + vias impressas), mapa geral, mapa e memorial (tradicional e SIGEF), carteirinha e termo de quitação.`)) return;
     b.disabled = true; toast('Gerando e enviando o dossiê…');
     try { await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/enviar`, { json: {} }); toast(`Dossiê do LT-${d.lote} enviado ✅`); rDossies(); }
     catch (e){ toast(e.message, true); b.disabled = false; }
+  });
+  v.querySelectorAll('[data-dstrt]').forEach((b) => b.onclick = async () => {
+    const lote = b.dataset.lote, acao = b.dataset.dstrt;
+    let numero = null;
+    if (acao === 'emitida') { numero = prompt(`TRT do LT-${lote} emitida.\nNúmero da TRT (opcional):`, ''); if (numero === null) return; }
+    else if (!confirm(`Confirmar o pagamento da TRT do LT-${lote}? Isso libera a entrega das vias impressas.`)) return;
+    try { await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(lote)}/trt`, { json: { acao, numero } }); toast(acao === 'emitida' ? `TRT do LT-${lote} registrada ✅` : `TRT do LT-${lote} paga ✅ — vias impressas liberadas`); rDossies(); }
+    catch (e){ toast(e.message, true); }
   });
   v.querySelectorAll('[data-dsent]').forEach((b) => b.onclick = async () => {
     const lote = b.dataset.dsent;
     const obs = prompt(`Entrega da via impressa do LT-${lote}.\nObservação (quem recebeu, etc. — opcional):`, '');
     if (obs === null) return;
-    try { await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(lote)}/entregue`, { json: { obs } }); toast(`LT-${lote} marcado como entregue ✅`); rDossies(); }
+    try { const r = await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(lote)}/entregue`, { json: { obs } }); toast(`LT-${lote} marcado como entregue ✅${r.conclusao && r.conclusao.enviado ? ' · mensagem de conclusão enviada 🙏' : r.conclusao && r.conclusao.motivo ? ' · conclusão não enviada: ' + r.conclusao.motivo : ''}`); rDossies(); }
     catch (e){ toast(e.message, true); }
   });
 }
