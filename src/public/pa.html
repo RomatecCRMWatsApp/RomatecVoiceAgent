@@ -320,6 +320,7 @@
   .pq-dist i{display:block;width:70%;border-radius:4px 4px 0 0;min-height:2px}.pq-dist span{color:var(--muted)}
   .ico-marco{display:inline-block;width:.85em;height:1.35em;vertical-align:-.3em}.k2i .ico-marco{width:1.1em;height:1.7em}
   .lk-card{border-left:5px solid var(--gold)}.lk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.lk{border:1px solid var(--line);border-radius:10px;padding:10px;background:#FBFAF5}.lk b{color:var(--green)}
+  @media (max-width:700px){table.tcard td.bol-acoes{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;align-items:center}table.tcard td.bol-acoes .btn{flex:0 0 auto}}
   /* v3.177.0: programação do dia */
   .cp-prog .pg-lista{display:flex;flex-direction:column;gap:4px;margin-top:8px}
   .cp-prog .pg-it{display:flex;align-items:center;gap:6px;flex-wrap:wrap;border:1px solid var(--line);border-left:5px solid #5DA9E9;border-radius:8px;padding:6px 8px;background:#fff}
@@ -2073,6 +2074,7 @@ async function rFinanceiro(){
         <div style="flex:0 1 200px"><label for="bTipos">Quais lançamentos</label><select class="f" id="bTipos"><option value="BOLETO">Parcelas (boletos)</option><option value="SINAL">Sinais em aberto</option><option value="BOLETO,SINAL">Parcelas + sinais</option></select></div>
         <div style="flex:0 0 auto"><button class="btn btn-gold" id="bEmitir">🧾 Emitir boletos</button></div></div>
         <div id="bProg"></div>` : ''}
+      <div class="row" style="margin-top:8px;align-items:end"><div style="flex:1 1 280px;position:relative"><label for="bAssoc">👤 Associado — toque e digite o nome</label><input id="bAssoc" placeholder="Toque para ver a lista ou digite: Lucineide, 35…" autocomplete="off"><div id="bAssocRes" class="pg-res"></div></div><div id="bAssocSel" style="flex:0 0 auto"></div></div>
       <div class="row" style="margin-top:8px"><div style="flex:0 1 200px"><label for="bFiltro">Status</label><select class="f" id="bFiltro"><option value="">Ativos (sem cancelados)</option><option value="TODOS">Todos (inclui cancelados)</option><option>PENDENTE</option><option>VENCIDO</option><option>PAGO</option><option>CANCELADO</option></select></div></div>
       <div id="bolBox" class="tbl" style="margin-top:8px"><div class="empty">Carregando…</div></div></div>
     <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;border:0;margin:0">Cobrança</h2>
@@ -2596,6 +2598,7 @@ async function rCaixa(){
 }
 
 // ─── Boletos (Asaas) ────────────────────────────────────────────────────
+let BOL = { aid: null, nome: '', lista: [] };
 async function rBoletos(){
   try {
     const st = await api('/asaas/status');
@@ -2609,14 +2612,27 @@ async function rBoletos(){
       // v3.144.9: padrão esconde os cancelados (histórico fica em "Todos" / "CANCELADO").
       const f = $('#bFiltro').value;
       const resp = await api(`/projetos/${S.pid}/boletos${f && f !== 'TODOS' ? '?status=' + f : ''}`);
-      const boletos = f ? resp.boletos : resp.boletos.filter((b) => b.status !== 'CANCELADO');
-      $('#bolBox').innerHTML = boletos.length ? `<div class="muted" style="margin-bottom:6px">${boletos.length} boleto(s) · ${brl(boletos.reduce((s, b) => s + b.valor, 0))}</div><table><thead><tr><th>Lote</th><th>Associado</th><th>Parcela</th><th>Venc.</th><th class="right">Valor</th><th>Status</th><th></th></tr></thead><tbody>
-        ${boletos.map((b) => `<tr><td><b>${esc(b.lote)}</b></td><td>${esc(b.associado_nome)}</td><td>${esc(b.tipo === 'BOLETO' ? 'Parcela ' + b.parcela : b.tipo === 'SINAL' ? 'Sinal' : b.tipo)}</td><td>${dbr(b.vencimento)}</td>
-          <td class="right nowrap">${brl(b.valor)}</td><td>${chip(b.status)}${b.ambiente === 'sandbox' ? ' ' + chip('A_VENCER', 'teste') : ''}${b.pago_em ? ' <span class="muted">' + dbr(b.pago_em).slice(0, 10) + '</span>' : ''}</td>
-          <td class="nowrap">${b.linha_digitavel && b.status !== 'CANCELADO' ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}" title="Carnê Romatec (mesmo código de barras e Pix do Asaas)">🧾 PDF</button>` : ''}
+      const todos = f ? resp.boletos : resp.boletos.filter((b) => b.status !== 'CANCELADO');
+      BOL.lista = resp.boletos;
+      const boletos = BOL.aid ? todos.filter((b) => b.associado_id === BOL.aid) : todos;
+      $('#bolBox').innerHTML = boletos.length ? `<div class="muted" style="margin-bottom:6px">${boletos.length} boleto(s) · ${brl(boletos.reduce((s, b) => s + b.valor, 0))}</div><table class="tcard"><thead><tr><th>Lote · Associado</th><th>Parcela</th><th>Venc.</th><th class="right">Valor</th><th>Status</th><th></th></tr></thead><tbody>
+        ${boletos.map((b) => `<tr><td class="tc-tit"><b>LT ${esc(b.lote)}</b> · ${esc(b.associado_nome)}</td><td data-l="Parcela">${esc(b.tipo === 'BOLETO' ? 'Parcela ' + b.parcela : b.tipo === 'SINAL' ? 'Sinal' : b.tipo === 'MARCO' ? 'Taxa de marcos' : b.tipo)}</td><td data-l="Vencimento">${dbr(b.vencimento)}</td>
+          <td class="right nowrap" data-l="Valor">${brl(b.valor)}</td><td data-l="Status">${chip(b.status)}${b.ambiente === 'sandbox' ? ' ' + chip('A_VENCER', 'teste') : ''}${b.pago_em ? ' <span class="muted">' + dbr(b.pago_em).slice(0, 10) + '</span>' : ''}</td>
+          <td class="bol-acoes">${b.linha_digitavel && b.status !== 'CANCELADO' ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}" title="Carnê Romatec (mesmo código de barras e Pix do Asaas)">🧾 PDF</button>` : ''}
             ${b.linha_digitavel ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.linha_digitavel)}">Linha</button>` : ''}
             ${b.pix_copia_cola ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.pix_copia_cola)}">Pix</button>` : ''}
-            ${podeEscrever() && (b.status === 'PENDENTE' || b.status === 'VENCIDO') ? `<button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum boleto emitido.</div>';
+            ${podeEscrever() && (b.status === 'PENDENTE' || b.status === 'VENCIDO') ? `<button class="btn btn-primary btn-sm" data-envbol="${b.id}" title="Enviar este boleto no WhatsApp do associado">📲 ${b.enviado_em ? 'Reenviar' : 'Enviar'}</button>${b.enviado_em ? ` <span class="muted" style="font-size:11px">enviado ${esc(dhBr(b.enviado_em))}</span>` : ''} <button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${BOL.aid ? 'Nenhum boleto deste associado com esse status.' : 'Nenhum boleto emitido.'}</div>`;
+      $('#bolBox').querySelectorAll('[data-envbol]').forEach((bt) => bt.onclick = async () => {
+        const b = boletos.find((x) => x.id === Number(bt.dataset.envbol)); if (!b) return;
+        const r = prompt(`Enviar o boleto de ${b.associado_nome} — ${b.tipo === 'BOLETO' ? 'parcela ' + b.parcela : b.tipo === 'MARCO' ? 'taxa de marcos' : b.tipo.toLowerCase()} de ${brl(b.valor)}.\n\nDeixe EM BRANCO para mandar no WhatsApp cadastrado, ou digite outro número:`, '');
+        if (r === null) return;
+        const d = r.replace(/\D/g, '');
+        if (d && d.length < 10) return toast('Número incompleto (DDD + número)', true);
+        const numero = d ? (d.length <= 11 ? '55' + d : d) : '';
+        bt.disabled = true;
+        try { await api(`/associados/${b.associado_id}/whatsapp/cobranca`, { json: { lancamento_ids: [b.lancamento_id], numero: numero || undefined } }); toast(`Boleto enviado para ${b.associado_nome.split(' ')[0]} ✅`); listar(); }
+        catch (e){ toast(e.message, true); bt.disabled = false; }
+      });
       $('#bolBox').querySelectorAll('[data-copiar]').forEach((b) => b.onclick = () => copiar(b.dataset.copiar));
       $('#bolBox').querySelectorAll('[data-romatec]').forEach((b) => b.onclick = () => abrirBoletoRomatec(b));
       $('#bolBox').querySelectorAll('[data-cancbol]').forEach((b) => b.onclick = async () => {
@@ -2626,6 +2642,23 @@ async function rBoletos(){
     } catch (e){ $('#bolBox').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   };
   $('#bFiltro').onchange = listar;
+  // v3.186.0: seletor de associado (toque → lista; digite → filtra; escolha → só os boletos dele, com 📲 Enviar)
+  const inp = $('#bAssoc'), res = $('#bAssocRes');
+  const mostrarSel = () => { $('#bAssocSel').innerHTML = BOL.aid ? `<span class="chip c-VALIDO" style="font-size:13px">Só: ${esc(BOL.nome)}</span> <button class="btn btn-ghost btn-sm" id="bAssocLimpar">✕ Todos</button>` : '';
+    if ($('#bAssocLimpar')) $('#bAssocLimpar').onclick = () => { BOL.aid = null; BOL.nome = ''; inp.value = ''; mostrarSel(); listar(); }; };
+  const abrirLista = () => {
+    const q = semAcento(inp.value.trim());
+    const mapa = new Map();
+    for (const b of BOL.lista || []) if (!mapa.has(b.associado_id)) mapa.set(b.associado_id, { id: b.associado_id, nome: b.associado_nome || '', lote: b.lote || '', abertos: 0 });
+    for (const b of BOL.lista || []) if (b.status === 'PENDENTE' || b.status === 'VENCIDO') mapa.get(b.associado_id).abertos++;
+    const ls = [...mapa.values()].filter((a) => !q || semAcento(a.nome).includes(q) || String(a.lote) === q.replace(/\D/g, '').padStart(2, '0'))
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')).slice(0, 80);
+    res.innerHTML = ls.length ? ls.map((a) => `<button type="button" class="pg-op" data-bass="${a.id}"><b>${esc(a.nome)}</b> <span class="muted">· lote ${esc(a.lote)} · ${a.abertos ? a.abertos + ' boleto(s) em aberto' : 'sem boleto em aberto'}</span></button>`).join('') : '<div class="muted" style="padding:8px">Ninguém com esse nome nos boletos.</div>';
+    res.querySelectorAll('[data-bass]').forEach((b) => b.onmousedown = (ev) => { ev.preventDefault(); const a = mapa.get(Number(b.dataset.bass)); BOL.aid = a.id; BOL.nome = a.nome; inp.value = ''; res.innerHTML = ''; inp.blur(); mostrarSel(); listar(); });
+  };
+  inp.onfocus = abrirLista; inp.oninput = abrirLista;
+  inp.onblur = () => setTimeout(() => { res.innerHTML = ''; }, 150);
+  mostrarSel();
   if ($('#bSync')) $('#bSync').onclick = async () => {
     const b = $('#bSync'); b.disabled = true; $('#bSyncBox').innerHTML = '<div class="muted" style="margin-top:6px">Consultando o Asaas…</div>';
     try {
