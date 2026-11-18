@@ -43,6 +43,7 @@ describe('funcionário de campo — o que ele acessa', () => {
     const p = lerPermissoes({ ver_mapa: false, baixar_coletora: false, marcar_campo: false });
     expect(rotaPaPermitidaCampo('GET', '/projetos/1/subdivisao.geojson', p)).toBe(false);
     expect(rotaPaPermitidaCampo('GET', '/projetos/1/coletora.csv', p)).toBe(false);
+    expect(rotaPaPermitidaCampo('GET', '/projetos/1/coletora.kml', PERMISSOES_PADRAO)).toBe(true);
     expect(rotaPaPermitidaCampo('POST', '/projetos/1/campo/pontos', p)).toBe(false);
     expect(rotaPaPermitidaCampo('GET', '/projetos/1/campo', p)).toBe(true);
   });

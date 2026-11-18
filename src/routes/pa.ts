@@ -472,6 +472,7 @@ router.post('/projetos/:id/concessao.pdf', h(async (req, res) => {
 }));
 // v3.168.0: taxa de marcos de concreto — um boleto por associado, gerar e enviar com um clique
 router.get('/projetos/:id/marcos', h(async (req) => ({ valor_padrao: marcos.VALOR_MARCO_PADRAO, associados: visao(await marcos.situacaoMarcos(id(req.params.id)), ctx(req).perfil), job: marcos.estadoJob(), fila: waPa.estadoFila() })));
+router.post('/projetos/:id/marcos/:aid/enviar', h(async (req) => { exigirEscrita(req); return marcos.enviarUm(id(req.params.id), id(req.params.aid, 'associado'), ctx(req).sub); }));
 router.post('/projetos/:id/marcos/gerar', h(async (req) => {
   exigirEscrita(req);
   const b = req.body ?? {};
@@ -520,8 +521,8 @@ router.post('/projetos/:id/marcos-planilha', uploadMem.single('arquivo'), h(asyn
 }));
 
 // v3.168.0: pontos para a coletora (CSV, TXT P,E,N,Z,D, DXF) e caderneta de campo (PDF)
-router.get('/projetos/:id/coletora.:fmt(csv|txt|dxf)', h(async (req, res) => {
-  const r = await coletora.arquivoColetora(id(req.params.id), req.params.fmt as 'csv' | 'txt' | 'dxf');
+router.get('/projetos/:id/coletora.:fmt(csv|txt|dxf|kml)', h(async (req, res) => {
+  const r = await coletora.arquivoColetora(id(req.params.id), req.params.fmt as 'csv' | 'txt' | 'dxf' | 'kml');
   res.setHeader('Content-Type', r.tipo);
   res.setHeader('Content-Disposition', `attachment; filename="${r.nome}"`);
   res.setHeader('Cache-Control', 'private, no-store');

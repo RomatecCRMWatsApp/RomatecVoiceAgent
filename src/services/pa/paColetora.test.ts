@@ -5,7 +5,7 @@ vi.mock('./paRepo', () => ({ buscarProjeto: vi.fn() }));
 vi.mock('./paMapas', () => ({ buscarSubdivisao: vi.fn(), buscarPerimetro: vi.fn(), buscarVila: vi.fn(), vinculosParcelas: vi.fn(), dadosCabecalho: vi.fn() }));
 vi.mock('./mapasPdf', () => ({ cabecalho: vi.fn(), pdfDeHtml: vi.fn() }));
 
-import { juntarPontos, csvColetora, txtColetora, dxfColetora } from './paColetora';
+import { juntarPontos, csvColetora, txtColetora, dxfColetora, kmlColetora } from './paColetora';
 
 const v = (nome: string, E: number, N: number) => ({ nome, E, N, h: null, lat: -4.4, lon: -47.2 });
 
@@ -35,5 +35,11 @@ describe('pontos da coletora', () => {
     expect((dxf.match(/\r\nPOINT\r\n/g) || []).length).toBe(3);
     expect(dxf).toContain('M-007');
     expect(dxf.trim().endsWith('EOF')).toBe(true);
+    // v3.169.3: KML com todos os marcos e o contorno dos lotes (anel fechado, lon,lat)
+    const kml = kmlColetora(d, 'PA Teste & cia', [{ lote: '01', area_ha: 1.5, anel: [[-47.2, -4.4], [-47.1, -4.4], [-47.1, -4.3]], info: 'FULANO · vila 01' }]);
+    expect((kml.match(/<Point>/g) || []).length).toBe(3);
+    expect(kml).toContain('<name>LT-01</name>');
+    expect(kml).toContain('-47.20000000,-4.40000000,0 -47.10000000,-4.40000000,0 -47.10000000,-4.30000000,0 -47.20000000,-4.40000000,0');
+    expect(kml).toContain('PA Teste &amp; cia');
   });
 });
