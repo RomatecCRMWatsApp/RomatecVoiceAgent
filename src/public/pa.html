@@ -2996,6 +2996,9 @@ async function rLocacao(box){
   const qAM = quitadosAMedir(d), abertos = d.lotes.filter((l) => !l.fechado && !(l.pagamento && l.pagamento.quitado)), medidos = d.lotes.filter((l) => l.fechado);
   const contaFaixa = (id) => d.lotes.filter((l) => l.faixa === id);
   box.innerHTML = `${S.eu && S.eu.perfil === 'ADMIN' ? `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 220px" class="muted">Funcionários de campo: cadastre, escolha o perfil e libere o que cada um pode fazer.</span><button class="btn btn-gold btn-sm" id="cpEquipe" style="flex:0 0 auto">👷 Equipe e permissões</button> <button class="btn btn-ghost btn-sm" id="cpColetora" style="flex:0 0 auto">📥 Coletora e caderneta</button></div>` : `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 220px" class="muted">Arquivos para a coletora (CSV, TXT, DXF) e a caderneta de campo.</span><button class="btn btn-ghost btn-sm" id="cpColetora" style="flex:0 0 auto">📥 Coletora e caderneta</button></div>`}
+    ${S.eu && S.eu.perfil !== 'CAMPO' ? `<div class="card cp-bol"><div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><b style="flex:1 1 200px">📣 Boletim de campo para o grupo do PA</b>
+      <span style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="cpBolPdf" title="Boletim do dia: mapa com os lotes medidos e em medição, evolução por dia">📄 Boletim (PDF)</button> <button class="btn btn-primary btn-sm" id="cpBolShare" title="Enviar o PDF com o texto para o grupo do PA">📤 Enviar no grupo</button> <button class="btn btn-ghost btn-sm" id="cpBolTxt">📋 Copiar texto</button></span></div>
+      <div class="muted" style="margin-top:4px">Mapa todo branco com os lotes <b>em medição</b> (azul) e <b>medidos</b> (verde; amarelo = hoje) com o nome do associado e o OK, mais os lotes e marcos por dia, ritmo e previsão.</div></div>` : ''}
     <div class="card"><h2 style="margin-top:0">📍 Locação dos marcos</h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 10px">
         <div class="k2"><div><div class="l">Marcos a cravar</div><div class="v">${d.totais.marcados}/${d.totais.a_implantar}</div><div class="muted">${d.totais.existentes} já existem (perímetro)</div></div></div>
@@ -3024,9 +3027,8 @@ async function rLocacao(box){
         <td class="nowrap" data-l="Marcos">${l.marcados}/${l.exigidos.length}${l.existentes ? ` <span class="muted">+${l.existentes} existentes</span>` : ''}</td>
         <td data-l="Situação">${l.fechado ? chip('PAGO', '✅ MEDIDO') + `<div class="muted">${hBr(l.fechado.concluido_em)} · ${esc(l.fechado.usuario_nome || '')}</div>` : l.marcados ? chip('PARCIAL', 'em andamento') : '<span class="muted">pendente</span>'}</td></tr>`).join('')}
     </tbody></table></div></div>
-    <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">Produção de campo</h2>
-      <span style="flex:0 0 auto${S.eu && S.eu.perfil === 'CAMPO' ? ';display:none' : ''}"><button class="btn btn-gold btn-sm" id="cpBolPdf" title="Boletim do dia: mapa colorido, evolução por dia e fila de medição">📄 Boletim (PDF)</button> <button class="btn btn-primary btn-sm" id="cpBolShare" title="Enviar o PDF com o texto para o grupo do PA">📤 Enviar no grupo</button> <button class="btn btn-ghost btn-sm" id="cpBolTxt">📋 Copiar texto</button></span></div>
-      <div class="muted" style="margin:4px 0 8px">Boletim para o grupo do PA: lotes medidos e marcos cravados por dia, ritmo e previsão, e o mapa todo branco com os lotes medidos em destaque e o nome de cada associado com o OK.</div>${d.producao.length ? `<div class="tbl"><table><thead><tr><th>Dia</th><th>Funcionário</th><th class="right">Marcos</th><th class="right">Lotes fechados</th><th>Início → fim</th><th class="right">Horas</th></tr></thead><tbody>
+    <div class="card"><h2 style="margin-top:0">Produção de campo</h2>
+      ${d.producao.length ? `<div class="tbl"><table><thead><tr><th>Dia</th><th>Funcionário</th><th class="right">Marcos</th><th class="right">Lotes fechados</th><th>Início → fim</th><th class="right">Horas</th></tr></thead><tbody>
       ${d.producao.map((p) => `<tr><td class="nowrap">${dbr(p.dia)}</td><td>${esc(p.usuario)}</td><td class="right">${p.pontos}</td><td class="right">${p.lotes}</td><td class="nowrap">${hBr(p.primeiro).slice(-5)} → ${hBr(p.ultimo).slice(-5)}</td><td class="right">${String(p.horas).replace('.', ',')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum marco locado ainda.</div>'}</div>`;
   ['cpBase', 'cpRover'].forEach((k) => { $('#' + k).onchange = () => { try { localStorage.setItem('pa_campo_eqp', JSON.stringify({ base: $('#cpBase').value, rover: $('#cpRover').value })); } catch { /* ok */ } }; });
   // v3.173.0: atalhos para equipe/permissões e para os arquivos da coletora
@@ -3035,12 +3037,12 @@ async function rLocacao(box){
   // v3.172.0: boletim de campo (PDF + texto) para o grupo do PA
   // o fundo do mapa no PDF segue o que está escolhido na tela (Mapa / Satélite / Relevo); padrão satélite
   const baseBol = () => { const b = BASE_LEMBRADA['.cpBase [data-base]']; return b === 'mapa' || b === 'relevo' ? b : 'satelite'; };
-  $('#cpBolPdf').onclick = () => abrirPdf(`/projetos/${S.pid}/campo/boletim.pdf?base=${baseBol()}`);
-  $('#cpBolTxt').onclick = async () => {
+  if ($('#cpBolPdf')) $('#cpBolPdf').onclick = () => abrirPdf(`/projetos/${S.pid}/campo/boletim.pdf?base=${baseBol()}`);
+  if ($('#cpBolTxt')) $('#cpBolTxt').onclick = async () => {
     try { const r = await api(`/projetos/${S.pid}/campo/boletim`); await navigator.clipboard.writeText(r.texto); toast('Texto do boletim copiado — cole no grupo do PA'); }
     catch (e){ toast(e.message || 'Não foi possível copiar', true); }
   };
-  $('#cpBolShare').onclick = async (ev) => {
+  if ($('#cpBolShare')) $('#cpBolShare').onclick = async (ev) => {
     const bt = ev.currentTarget; bt.disabled = true;
     try {
       const [t, r] = await Promise.all([api(`/projetos/${S.pid}/campo/boletim`), api(`/projetos/${S.pid}/campo/boletim.pdf?base=${baseBol()}`)]);
