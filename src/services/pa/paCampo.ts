@@ -93,6 +93,8 @@ async function pagamentosPorAssociado(projetoId: number): Promise<Map<number, Pa
 }
 
 export async function estadoCampo(projetoId: number) {
+  // v3.188.1: lote que ficou completo sem um clique novo (ex.: correção dos vértices do LT-10) fecha aqui
+  await fecharCompletos(projetoId, { id: null, nome: 'Sistema (revisão dos vértices)' }, EQUIPAMENTOS_PADRAO.base, EQUIPAMENTOS_PADRAO.rover).catch((e) => console.warn('[pa-campo] fechamento automático:', (e as Error).message));
   const d = await pontosColetora(projetoId);
   const marcas = (await rows(pool, 'SELECT * FROM pa_campo_pontos WHERE projeto_id = ? ORDER BY marcado_em', [projetoId])).map((r): MarcaPonto => ({
     ponto: String(r.ponto), marcado_em: dt(r.marcado_em), usuario_nome: (r.usuario_nome as string) ?? null, base: (r.base_gnss as string) ?? null, rover: (r.rover_gnss as string) ?? null, usuario_id: (r.usuario_id as string) ?? null, obs: (r.obs as string) ?? null,
@@ -124,6 +126,57 @@ export async function estadoCampo(projetoId: number) {
   };
 }
 
+/**
+ * Fecha (como MEDIDO) os lotes cujos marcos exigidos estão todos marcados e ainda não fecharam.
+ * v3.188.1: para cada lote fechado → libera o dossiê (vai para a revisão do CEO quando quitado) e avisa
+ * o CEO no WhatsApp que o lote foi demarcado. `soLotes` limita aos lotes do ponto recém-marcado.
+ */
+export async function fecharCompletos(projetoId: number, u: Usuario, base: string, rover: string, soLotes: string[] | null = null) {
+  const d = await pontosColetora(projetoId);
+  const marcados = new Set((await rows(pool, 'SELECT ponto FROM pa_campo_pontos WHERE projeto_id = ?', [projetoId])).map((r) => String(r.ponto)));
+  const jaFechados = new Set((await rows(pool, 'SELECT lote FROM pa_campo_lotes WHERE projeto_id = ?', [projetoId])).map((r) => String(r.lote)));
+  const existentes = new Set(d.pontos.filter((x) => x.existente).map((x) => x.nome));
+  const candidatos = d.lotes.filter((l) => (!soLotes || soLotes.includes(l.lote)) && !jaFechados.has(l.lote)).map((l) => ({ ...l, vertices: exigidos(l.vertices, existentes) }));
+  const novos = lotesCompletos(candidatos, marcados);
+  const fechados: Array<{ lote: string; area_ha: number; associado: string | null }> = [];
+  if (!novos.length) return fechados;
+  const sub = await buscarSubdivisao(projetoId);
+  const ben = await vinculosParcelas(projetoId).catch((e) => { console.warn('[pa-campo] vínculos lote→associado indisponíveis:', (e as Error).message); return {} as Awaited<ReturnType<typeof vinculosParcelas>>; });
+  for (const lote of novos) {
+    const pc = sub?.parcelas.find((x) => x.lote === lote);
+    const vs = d.lotes.find((x) => x.lote === lote)!.vertices; const vsEx = exigidos(vs, existentes);
+    const ini = await one(pool, `SELECT MIN(marcado_em) m, MAX(marcado_em) f FROM pa_campo_pontos WHERE projeto_id = ? AND ponto IN (${vsEx.map(() => '?').join(',')})`, [projetoId, ...vsEx]);
+    const ins = await exec(pool, `INSERT IGNORE INTO pa_campo_lotes (projeto_id, lote, concluido_em, usuario_id, usuario_nome, inicio_em, pontos, area_ha, perimetro_m, associado_id, base_gnss, rover_gnss)
+      VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [projetoId, lote, u.id, u.nome, ini?.m ?? null, new Set(vs).size, pc?.perimetro.area_ha ?? null, pc?.perimetro.perimetro_m ?? null, ben[lote]?.associado_id ?? null, base, rover]);
+    if (!ins.affectedRows) continue; // outro pedido fechou ao mesmo tempo
+    await registrarEvento(pool, { projeto_id: projetoId, associado_id: ben[lote]?.associado_id ?? null, usuario: u.id, tipo: 'CAMPO_LOTE_MEDIDO', dados: { lote, pontos: new Set(vs).size, area_ha: pc?.perimetro.area_ha ?? null } });
+    fechados.push({ lote, area_ha: pc?.perimetro.area_ha ?? 0, associado: ben[lote]?.nome ?? null });
+    void avisarLoteDemarcado(projetoId, lote, { area_ha: pc?.perimetro.area_ha ?? null, perimetro_m: pc?.perimetro.perimetro_m ?? null, marcos: vs, quem: u.nome, ben: ben[lote] ?? null }).catch((e) => console.warn('[pa-campo] aviso CEO:', (e as Error).message));
+  }
+  return fechados;
+}
+
+/** v3.188.1: mensagem ao CEO "lote demarcado" + libera o dossiê (o PDF de revisão vem logo em seguida, se quitado). */
+async function avisarLoteDemarcado(projetoId: number, lote: string, o: { area_ha: number | null; perimetro_m: number | null; marcos: string[]; quem: string | null; ben: { associado_id: number; nome: string; lote_vila: string; denominacao?: string | null } | null }) {
+  const dz = await import('./paDossie');
+  const wa = await import('./paWhatsapp');
+  let situacao = '⚠️ Lote sem associado vinculado — dossiê não gerado.';
+  if (o.ben) {
+    try {
+      const r = await dz.criarDossie(projetoId, lote, null);
+      const pend = r.status === 'PRONTO' ? null : (await dz.listarDossies(projetoId)).find((x) => x.lote === lote)?.pendencia ?? null;
+      situacao = r.status === 'PRONTO' ? '📦 *Dossiê liberado* — o PDF chega a seguir para você revisar e tocar em *✅ Aprovar e enviar*.'
+        : `📦 Dossiê criado, *aguardando pagamento*${pend ? ` (${pend})` : ''} — libera sozinho quando quitar.`;
+    } catch (e) { situacao = `⚠️ Dossiê não gerado: ${(e as Error).message}`; }
+  }
+  const ha = o.area_ha != null ? `${o.area_ha.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ha` : '';
+  const txt = [`✅ *LT-${lote} DEMARCADO*`, o.ben ? `👤 ${o.ben.nome} · vila ${o.ben.lote_vila}${o.ben.denominacao ? ` · ${o.ben.denominacao}` : ''}` : null,
+    `📍 Perímetro fechado: ${o.marcos.length} vértices (${o.marcos.join(', ')})${ha ? ` · ${ha}` : ''}${o.perimetro_m != null ? ` · ${o.perimetro_m.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} m` : ''}`,
+    o.quem ? `👷 Fechado por ${o.quem}` : null, situacao].filter(Boolean).join('\n');
+  await wa.enviarWhatsAppNumero(dz.numeroCeo(), txt).catch((e) => console.warn('[pa-campo] WhatsApp CEO:', (e as Error).message));
+  if (o.ben) await dz.enviarProntos(projetoId, [o.ben.associado_id]).catch(() => undefined);
+}
+
 /** Marca um ponto como locado. Fecha (como MEDIDO) todo lote que ficar completo com ele. */
 export async function marcarPonto(projetoId: number, ponto: string, entrada: { gps?: { lat?: unknown; lon?: unknown; precisao?: unknown } | null; obs?: unknown; base?: unknown; rover?: unknown }, u: Usuario) {
   const base = eqp(entrada.base, EQUIPAMENTOS_PADRAO.base), rover = eqp(entrada.rover, EQUIPAMENTOS_PADRAO.rover);
@@ -136,28 +189,7 @@ export async function marcarPonto(projetoId: number, ponto: string, entrada: { g
   if (ja) throw new PaErro('PONTO_JA_MARCADO', `O ponto ${ponto} já está marcado`, 409);
   await exec(pool, `INSERT INTO pa_campo_pontos (projeto_id, ponto, e, n, marcado_em, usuario_id, usuario_nome, base_gnss, rover_gnss, gps_lat, gps_lon, gps_precisao, obs)
     VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?)`, [projetoId, ponto, p.E, p.N, u.id, u.nome, base, rover, g ? Number(g.lat) : null, g ? Number(g.lon) : null, g && g.precisao != null && Number.isFinite(Number(g.precisao)) ? Number(g.precisao) : null, obs]);
-  // lotes que fecharam agora
-  const marcados = new Set((await rows(pool, 'SELECT ponto FROM pa_campo_pontos WHERE projeto_id = ?', [projetoId])).map((r) => String(r.ponto)));
-  const jaFechados = new Set((await rows(pool, 'SELECT lote FROM pa_campo_lotes WHERE projeto_id = ?', [projetoId])).map((r) => String(r.lote)));
-  const existentes = new Set(d.pontos.filter((x) => x.existente).map((x) => x.nome));
-  const candidatos = d.lotes.filter((l) => p.lotes.includes(l.lote) && !jaFechados.has(l.lote)).map((l) => ({ ...l, vertices: exigidos(l.vertices, existentes) }));
-  const novos = lotesCompletos(candidatos, marcados);
-  const fechados: Array<{ lote: string; area_ha: number; associado: string | null }> = [];
-  if (novos.length) {
-    const sub = await buscarSubdivisao(projetoId);
-    const ben = await vinculosParcelas(projetoId).catch((e) => { console.warn('[pa-campo] vínculos lote→associado indisponíveis:', (e as Error).message); return {} as Awaited<ReturnType<typeof vinculosParcelas>>; });
-    for (const lote of novos) {
-      const pc = sub?.parcelas.find((x) => x.lote === lote);
-      const vs = d.lotes.find((x) => x.lote === lote)!.vertices; const vsEx = exigidos(vs, existentes);
-      const ini = await one(pool, `SELECT MIN(marcado_em) m FROM pa_campo_pontos WHERE projeto_id = ? AND ponto IN (${vsEx.map(() => '?').join(',')})`, [projetoId, ...vsEx]);
-      await exec(pool, `INSERT IGNORE INTO pa_campo_lotes (projeto_id, lote, concluido_em, usuario_id, usuario_nome, inicio_em, pontos, area_ha, perimetro_m, associado_id, base_gnss, rover_gnss)
-        VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [projetoId, lote, u.id, u.nome, ini?.m ?? null, new Set(vs).size, pc?.perimetro.area_ha ?? null, pc?.perimetro.perimetro_m ?? null, ben[lote]?.associado_id ?? null, base, rover]);
-      await registrarEvento(pool, { projeto_id: projetoId, associado_id: ben[lote]?.associado_id ?? null, usuario: u.id, tipo: 'CAMPO_LOTE_MEDIDO', dados: { lote, pontos: new Set(vs).size, area_ha: pc?.perimetro.area_ha ?? null } });
-      fechados.push({ lote, area_ha: pc?.perimetro.area_ha ?? 0, associado: ben[lote]?.nome ?? null });
-      // v3.169.0: lote medido → dossiê de pronta entrega (aguarda pagamento/autorização do CEO)
-      if (ben[lote]) { try { const dz = await import('./paDossie'); await dz.criarDossie(projetoId, lote, u.id); void dz.enviarProntos(projetoId, [ben[lote].associado_id]).catch(() => undefined); } catch (e) { console.warn('[pa-campo] dossiê:', (e as Error).message); } }
-    }
-  }
+  const fechados = await fecharCompletos(projetoId, u, base, rover, p.lotes);
   await registrarEvento(pool, { projeto_id: projetoId, usuario: u.id, tipo: 'CAMPO_PONTO_MARCADO', dados: { ponto, lotes: p.lotes, gps: !!g } });
   return { ponto, lotes_fechados: fechados };
 }

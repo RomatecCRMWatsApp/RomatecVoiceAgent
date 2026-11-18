@@ -74,6 +74,38 @@ export function juntarPontos(fontes: Array<{ origem: PontoColetora['origem']; lo
   return lista;
 }
 
+/** v3.188.1: tolerância (m) para um marco oficial coincidir com um vértice do desenho do lote. */
+export const TOL_VERTICE_M = 3;
+/**
+ * v3.188.1: confere marco ↔ lote pela GEOMETRIA — dos marcos que a planilha atribui ao lote, só é vértice o que
+ * cai num canto do polígono do lote (a coluna "lotes" também lista marcos vizinhos: o LT-10 de 5 vértices ficava
+ * com 10). Nunca acrescenta marco que a planilha não deu ao lote.
+ * Lote sem nenhum canto casado (desenho e planilha em referências diferentes) mantém a lista da planilha.
+ * Pura — testável.
+ */
+export function ligarMarcosAosLotes(marcos: MarcoOficial[], parcelas: Array<{ lote: string; vertices: Array<{ E: number; N: number }> }>, tol = TOL_VERTICE_M): { porLote: Map<string, string[]>; lotesDoMarco: Map<string, string[]> } {
+  const porLote = new Map<string, string[]>();
+  const geometricos = new Set<string>();
+  for (const pc of parcelas) {
+    const vs: string[] = [];
+    // só filtra: candidato = marco que a planilha atribui ao lote E que cai num canto do polígono
+    const daPlanilha = marcos.filter((m) => m.lotes.includes(pc.lote));
+    for (const v of pc.vertices) {
+      let melhor: MarcoOficial | null = null, dm = Infinity;
+      for (const m of daPlanilha) { const d = Math.hypot(m.E - v.E, m.N - v.N); if (d < dm) { dm = d; melhor = m; } }
+      if (melhor && dm <= tol && !vs.includes(melhor.codigo)) vs.push(melhor.codigo);
+    }
+    if (vs.length) geometricos.add(pc.lote);
+    porLote.set(pc.lote, vs.length ? vs : marcos.filter((m) => m.lotes.includes(pc.lote)).map((m) => m.codigo));
+  }
+  const lotesDoMarco = new Map<string, string[]>(marcos.map((m) => [m.codigo, [] as string[]]));
+  for (const [lote, vs] of porLote) for (const c of vs) lotesDoMarco.get(c)?.push(lote);
+  // marco que não é canto de nenhum lote (ex.: só perímetro) mantém a referência da planilha, menos os lotes
+  // já resolvidos pela geometria (nesses ele não é vértice)
+  for (const m of marcos) if (!lotesDoMarco.get(m.codigo)!.length) lotesDoMarco.set(m.codigo, m.lotes.filter((l) => !geometricos.has(l)));
+  return { porLote, lotesDoMarco };
+}
+
 export async function pontosColetora(projetoId: number): Promise<PontosColetora> {
   const [sub, per, vila] = await Promise.all([buscarSubdivisao(projetoId), buscarPerimetro(projetoId), buscarVila(projetoId)]);
   if (!sub && !per && !vila) throw new PaErro('SEM_PONTOS', 'Envie primeiro o DXF dos lotes, o perímetro ou a vila', 404);
@@ -86,11 +118,12 @@ export async function pontosColetora(projetoId: number): Promise<PontosColetora>
   const marcos = await buscarMarcos(projetoId);
   if (marcos?.length) {
     const ll = utmParaLonLat(fuso, hem);
-    const pm: PontoColetora[] = marcos.map((m) => { const [lon, lat] = ll(m.E, m.N); return { nome: m.codigo, E: m.E, N: m.N, h: null, lat, lon, tipo: m.tipo, lotes: m.lotes, origem: 'LOTE' as const, existente: !m.comprar, implantar_com: m.implantar_com }; });
+    const { porLote, lotesDoMarco } = ligarMarcosAosLotes(marcos, (sub?.parcelas ?? []).map((pc) => ({ lote: pc.lote, vertices: pc.perimetro.vertices })));
+    const pm: PontoColetora[] = marcos.map((m) => { const [lon, lat] = ll(m.E, m.N); return { nome: m.codigo, E: m.E, N: m.N, h: null, lat, lon, tipo: m.tipo, lotes: lotesDoMarco.get(m.codigo) ?? m.lotes, origem: 'LOTE' as const, existente: !m.comprar, implantar_com: m.implantar_com }; });
     const vilaPts = juntarPontos(fontes.filter((f) => f.origem === 'VILA'));
     return {
       pontos: [...pm, ...vilaPts], fuso, hemisferio: hem,
-      lotes: (sub?.parcelas ?? []).map((pc) => ({ lote: pc.lote, area_ha: pc.perimetro.area_ha, vertices: marcos.filter((m) => m.lotes.includes(pc.lote)).map((m) => m.codigo) })),
+      lotes: (sub?.parcelas ?? []).map((pc) => ({ lote: pc.lote, area_ha: pc.perimetro.area_ha, vertices: porLote.get(pc.lote) ?? [] })),
     };
   }
   const pontos = juntarPontos(fontes);

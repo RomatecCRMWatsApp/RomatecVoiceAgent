@@ -43,3 +43,25 @@ describe('pontos da coletora', () => {
     expect(kml).toContain('PA Teste &amp; cia');
   });
 });
+
+// v3.188.1: LT-10 tem 5 vértices; a planilha listava também marcos vizinhos fora do perímetro dele.
+import { ligarMarcosAosLotes } from './paColetora';
+describe('marcos ligados ao lote pela geometria', () => {
+  const mk = (codigo: string, E: number, N: number, lotes: string[], comprar = true) => ({ codigo, E, N, tipo: 'Marco', implantar_com: null, lotes, comprar });
+  const lt10 = [{ E: 1000, N: 1000 }, { E: 1300, N: 1250 }, { E: 1500, N: 1000 }, { E: 1520, N: 960 }, { E: 1200, N: 700 }];
+  const marcos = [
+    mk('M-036', 1000.4, 1000.2, ['10', '06']), mk('M-037', 1300, 1250, ['10', '09']), mk('M-040', 1500.8, 999.6, ['10'], false),
+    mk('M-044', 1520, 960, ['10']), mk('M-045', 1200, 700, ['10', '11']),
+    mk('M-043', 850, 900, ['10', '06', '11']), mk('M-046', 1100, 560, ['10', '11', '27']), // fora do LT-10
+  ];
+  it('só os 5 cantos do polígono contam como vértices do LT-10', () => {
+    const { porLote, lotesDoMarco } = ligarMarcosAosLotes(marcos, [{ lote: '10', vertices: lt10 }]);
+    expect(porLote.get('10')).toEqual(['M-036', 'M-037', 'M-040', 'M-044', 'M-045']);
+    expect(lotesDoMarco.get('M-036')).toEqual(['10']);
+    expect(lotesDoMarco.get('M-043')).toEqual(['06', '11']); // não é canto do LT-10 → sai do LT-10
+  });
+  it('lote sem nenhum canto casado mantém a lista da planilha', () => {
+    const { porLote } = ligarMarcosAosLotes(marcos, [{ lote: '10', vertices: [{ E: 0, N: 0 }, { E: 5, N: 5 }, { E: 9, N: 0 }] }]);
+    expect(porLote.get('10')).toHaveLength(7);
+  });
+});

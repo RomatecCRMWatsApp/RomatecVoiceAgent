@@ -285,7 +285,7 @@ export function textoEnvioDossie(nome: string, lote: string): string {
 }
 
 /** Número do CEO para a cópia do dossiê (mesma configuração do atendimento automático). */
-const numeroCeo = () => String(process.env.CEO_WHATSAPP_PHONE || process.env.PA_CONTATO_WHATSAPP || process.env.ROMATEC_CONTATO_WHATSAPP || '(99) 99181-1246').replace(/\D/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1');
+export const numeroCeo = () => String(process.env.CEO_WHATSAPP_PHONE || process.env.PA_CONTATO_WHATSAPP || process.env.ROMATEC_CONTATO_WHATSAPP || '(99) 99181-1246').replace(/\D/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1');
 
 /**
  * Envia o dossiê ao associado (WhatsApp cadastrado) e uma cópia ao CEO.
