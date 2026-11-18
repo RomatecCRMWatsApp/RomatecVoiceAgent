@@ -11,7 +11,7 @@ import { lancarPagamento, mensagemParaLancamentos, FORMAS, type Forma } from './
 import { centavos, statusAposRecebimento, type StatusLancamento } from './regrasFinanceiras';
 
 export type ModoAjuste = 'PAGO_POR_FORA' | 'NOVO_VALOR';
-export interface Ajuste { modo: ModoAjuste; valor: number; forma: Forma; pago_em: string | null; obs: string | null; enviar: boolean }
+export interface Ajuste { modo: ModoAjuste; valor: number; forma: Forma; pago_em: string | null; obs: string | null; enviar: boolean; url_recibo: string | null }
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -22,7 +22,8 @@ export function lerAjuste(b: Record<string, unknown>): Ajuste {
   const forma = String(b.forma ?? 'ESPECIE').toUpperCase() as Forma;
   if (!FORMAS.includes(forma)) throw new PaErro('CAMPO_INVALIDO', 'Forma de pagamento inválida', 400);
   const d = String(b.pago_em ?? '').slice(0, 10);
-  return { modo, valor, forma, pago_em: /^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 12:00:00` : null, obs: b.obs ? String(b.obs).slice(0, 500) : null, enviar: b.enviar === true };
+  return { modo, valor, forma, pago_em: /^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 12:00:00` : null, obs: b.obs ? String(b.obs).slice(0, 500) : null, enviar: b.enviar === true,
+    url_recibo: /^https:\/\/recibo\.infinitepay\.io\//.test(String(b.url_recibo ?? '')) ? String(b.url_recibo).slice(0, 400) : null };
 }
 
 /** Confere o ajuste contra o lançamento (pura — testável). Devolve o saldo que vai no boleto novo. */
@@ -44,14 +45,13 @@ export async function ajustarBoleto(boletoId: number, a: Ajuste, usuario: string
   if (!lr) throw new PaErro('LANCAMENTO_NAO_ENCONTRADO', 'Parcela do boleto não encontrada', 404);
   const l = { valor: num(lr.valor), recebido: num(lr.valor_recebido) };
   const plano = planejarAjuste(l, a);
+  if (a.modo === 'PAGO_POR_FORA' && a.forma === 'PIX' && !a.url_recibo) throw new PaErro('ID_TRANSACAO_OBRIGATORIO', 'Pix precisa do link do recibo InfinitePay (para não lançar em duplicidade) — ou escolha Espécie', 400);
 
-  // 1) cancela o boleto antigo (Asaas + sistema)
-  await cancelarBoleto(boletoId, usuario);
-  // 2) aplica o ajuste
+  // 1) aplica o ajuste (o pagamento primeiro: se o recibo for recusado, o boleto antigo continua valendo)
   if (a.modo === 'PAGO_POR_FORA') {
     await lancarPagamento(b.projeto_id, {
-      forma: a.forma, valor: a.valor, pago_em: a.pago_em ?? agoraBrasilSql(), id_transacao: null, pagador_nome: null, pagador_cpf_parcial: null,
-      pagador_instituicao: null, vinculo_pagador: null, url_recibo: null, comprovante_doc_id: null,
+      forma: a.url_recibo ? 'PIX' : a.forma, valor: a.valor, pago_em: a.url_recibo ? '' : (a.pago_em ?? agoraBrasilSql()), id_transacao: null, pagador_nome: null, pagador_cpf_parcial: null,
+      pagador_instituicao: null, vinculo_pagador: null, url_recibo: a.url_recibo, comprovante_doc_id: null,
       obs: a.obs ?? `Pago por fora (boleto #${boletoId} cancelado e reemitido com o saldo)`, associado_id: b.associado_id, rateio: [{ lancamento_id: b.lancamento_id, valor: a.valor }],
     }, usuario);
   } else {
@@ -60,6 +60,8 @@ export async function ajustarBoleto(boletoId: number, a: Ajuste, usuario: string
     await registrarEvento(pool, { projeto_id: b.projeto_id, associado_id: b.associado_id, usuario, tipo: 'PARCELA_VALOR_AJUSTADO',
       dados: { lancamento_id: b.lancamento_id, de: l.valor, para: plano.valor_parcela, boleto_cancelado: boletoId, obs: a.obs } });
   }
+  // 2) cancela o boleto antigo (Asaas + sistema)
+  await cancelarBoleto(boletoId, usuario);
   // 3) boleto novo com o saldo (se sobrou)
   let novo = null as Awaited<ReturnType<typeof emitirBoleto>> | null;
   let erro_emissao: string | null = null;
