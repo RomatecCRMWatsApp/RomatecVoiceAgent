@@ -36,6 +36,22 @@ export function textoMapaPublico(projetoNome: string, link: string): string {
   ].join('\n');
 }
 
+/** v3.184.0: mensagem individual (WhatsApp) com o link do mapa — nome, lote e chácara do associado. */
+export function mensagemMapaIndividual(nome: string, lote: string | null, chacara: string | null, projetoNome: string, link: string): string {
+  const p = nome.trim().split(/\s+/)[0] ?? '';
+  const primeiro = p.charAt(0) + p.slice(1).toLowerCase();
+  return [
+    `🗺️ *Mapa dos lotes — ${projetoNome}*`,
+    '',
+    `Olá, ${primeiro}! Agora você pode acompanhar a demarcação pelo celular.${lote ? ` O seu lote é o *LT-${lote}*${chacara ? ` (${chacara})` : ''}.` : ''}`,
+    '',
+    'No mapa dá para girar, aproximar, ver em 3D, satélite ou relevo. Os lotes *demarcados* ficam em verde e os *em demarcação* em azul — toque no seu lote para ver a situação:',
+    link,
+    '',
+    '_Romatec Consultoria Total — José Romário_',
+  ].join('\n');
+}
+
 type Feicao = { type: string; geometry: unknown; properties: Record<string, unknown> };
 /** Só o que pode ir para o público (pura — testável): sem área, perímetro, CPF, telefone, financeiro. */
 export function geoPublico(geo: { features: Feicao[] }): { type: 'FeatureCollection'; features: Feicao[] } {

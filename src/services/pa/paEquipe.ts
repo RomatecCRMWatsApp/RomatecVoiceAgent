@@ -97,7 +97,7 @@ const R = (m: Regra[0], re: string, k: Regra[2]): Regra => [m, new RegExp(re + '
 /** Rota → permissão exigida (caminho relativo a /api/pa). '*' = liberada para todos da equipe. */
 const REGRAS: Regra[] = [
   R('GET', '^\\/(eu|projetos)', '*'), R('GET', P, '*'), R('GET', P + '\\/campo', '*'), R('GET', P + '\\/campo\\/programacao', '*'),
-  R('GET', P + '\\/painel', 'ver_painel'), R('GET', P + '\\/mapa-publico', 'ver_mapa'), R('GET', P + '\\/pesquisa', 'ver_painel'), R('*', P + '\\/pesquisa\\/(link\\/\\d+|enviar)', 'whatsapp'),
+  R('GET', P + '\\/painel', 'ver_painel'), R('GET', P + '\\/mapa-publico', 'ver_mapa'), R('*', P + '\\/mapa-publico\\/(envio|enviar)', 'whatsapp'), R('GET', P + '\\/pesquisa', 'ver_painel'), R('*', P + '\\/pesquisa\\/(link\\/\\d+|enviar)', 'whatsapp'),
   R('GET', P + '\\/(subdivisao\\.(pdf|dxf)|mapa-geral\\.pdf|mapa-vila\\.pdf|vila-perimetro\\.pdf|divisa\\.dxf)', 'baixar_mapas'),
   R('GET', P + '\\/(subdivisao(\\.geojson|\\.svg)?|subdivisao\\/lotes\\/[\\w-]+(\\.svg)?|perimetro|vila-perimetro|divisa|lotes|lotes\\/[\\w-]+|desenho|memorial-vila|mapa-vila\\.svg|marcas)', 'ver_mapa'),
   R('ESCRITA', P + '\\/(perimetro|vila-perimetro|subdivisao|subdivisao\\/limpar|subdivisao\\/vinculo|divisa|lotes\\/[\\w-]+)', 'editar_mapas'),

@@ -645,10 +645,11 @@ function cardLinks(){
   box.innerHTML = `<div class="card lk-card"><h2 style="margin-top:0">🔗 Links para os associados (grupo do PA)</h2>
     <div class="lk-grid">
       ${mapaOk ? `<div class="lk"><b>🗺️ Mapa dos lotes</b><div class="muted">O associado navega no mapa (2D/3D, satélite, relevo) e toca no lote: vê número, associado, lote da vila e chácara — sem área nem financeiro.</div>
-        <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn btn-primary btn-sm" id="lkMapaEnv" style="flex:0 0 auto">📤 Enviar no grupo</button><button class="btn btn-ghost btn-sm" id="lkMapaCop" style="flex:0 0 auto">📋 Copiar link</button><button class="btn btn-gold btn-sm" id="lkMapaVer" style="flex:0 0 auto">👁️ Ver como o associado</button></div></div>` : ''}
+        <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">${pesqOk ? '<button class="btn btn-primary btn-sm" id="lkMapaInd" style="flex:0 0 auto">📲 Enviar para cada associado</button>' : ''}<button class="btn btn-ghost btn-sm" id="lkMapaEnv" style="flex:0 0 auto">📤 Enviar no grupo</button><button class="btn btn-ghost btn-sm" id="lkMapaCop" style="flex:0 0 auto">📋 Copiar link</button><button class="btn btn-gold btn-sm" id="lkMapaVer" style="flex:0 0 auto">👁️ Ver como o associado</button></div></div>` : ''}
       ${pesqOk ? `<div class="lk"><b>⭐ Pesquisa de satisfação</b><div class="muted">Link pessoal de cada associado: segue o @avalieimob e dá a nota de 0 a 10. Vai pelo WhatsApp individual de cada um (não é link de grupo).</div>
         <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn btn-primary btn-sm" id="lkPesqEnv" style="flex:0 0 auto">📲 Enviar para quem não respondeu</button><button class="btn btn-ghost btn-sm" id="lkPesqVer" style="flex:0 0 auto">📊 Ver resultado</button></div></div>` : ''}
-    </div></div>`;
+    </div><div id="envProg" style="margin-top:8px"></div></div>`;
+  acompanharFila(); // v3.184.0: progresso da fila do WhatsApp (mapa/pesquisa) aqui mesmo
   const mp = () => api(`/projetos/${S.pid}/mapa-publico`);
   if ($('#lkMapaCop')) $('#lkMapaCop').onclick = () => copiarTextoGrupo(`/projetos/${S.pid}/mapa-publico`);
   if ($('#lkMapaVer')) $('#lkMapaVer').onclick = async () => { const w = window.open('about:blank', '_blank'); try { const r = await mp(); if (w) w.location.href = r.link; else window.open(r.link, '_blank'); } catch (e){ if (w) w.close(); toast(e.message, true); } };
@@ -659,6 +660,19 @@ function cardLinks(){
       else window.open('https://wa.me/?text=' + encodeURIComponent(r.texto), '_blank');
     } catch (e){ toast(e.message, true); }
   };
+  if ($('#lkMapaInd')) {
+    api(`/projetos/${S.pid}/mapa-publico/envio`).then((r) => { const b = $('#lkMapaInd'); if (b) { b.textContent = `📲 Enviar para cada associado (${r.pendentes})`; b.title = `${r.enviados} já receberam · ${r.com_whatsapp} com WhatsApp de ${r.total}`; } }).catch(() => {});
+    $('#lkMapaInd').onclick = async (ev) => {
+      const bt = ev.currentTarget;
+      let r; try { r = await api(`/projetos/${S.pid}/mapa-publico/envio`); } catch (e){ return toast(e.message, true); }
+      const reenviar = !r.pendentes && r.enviados > 0 && confirm(`Todos com WhatsApp já receberam o link (${r.enviados}). Reenviar para todos?`);
+      if (!r.pendentes && !reenviar) return;
+      if (r.pendentes && !confirm(`Enviar o link do mapa no WhatsApp de ${r.pendentes} associado(s), um por vez, com intervalo entre os envios (evita bloqueio)?`)) return;
+      bt.disabled = true;
+      try { const x = await api(`/projetos/${S.pid}/mapa-publico/enviar`, { json: { reenviar } }); toast(`Envio iniciado: ${x.fila ? x.fila.total : 0} associado(s) na fila`); acompanharFila(); }
+      catch (e){ toast(e.message, true); bt.disabled = false; }
+    };
+  }
   if ($('#lkPesqVer')) $('#lkPesqVer').onclick = () => { const c = $('#pesqBox'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   if ($('#lkPesqEnv')) $('#lkPesqEnv').onclick = () => { const b = $('#pqEnviar'); if (b) b.click(); else toast('Abrindo a pesquisa…'); };
 }
@@ -688,7 +702,7 @@ async function cardPesquisa(){
   if ($('#pqEnviar')) $('#pqEnviar').onclick = async (ev) => {
     if (!confirm('Enviar a pesquisa pelo WhatsApp para quem ainda não respondeu (um por vez, com intervalo)?')) return;
     ev.currentTarget.disabled = true;
-    try { const x = await api(`/projetos/${S.pid}/pesquisa/enviar`, { json: {} }); toast(`Envio iniciado: ${x.fila ? x.fila.total : 0} associado(s) na fila`); } catch (e){ toast(e.message, true); ev.currentTarget.disabled = false; }
+    try { const x = await api(`/projetos/${S.pid}/pesquisa/enviar`, { json: {} }); toast(`Envio iniciado: ${x.fila ? x.fila.total : 0} associado(s) na fila`); acompanharFila(); } catch (e){ toast(e.message, true); ev.currentTarget.disabled = false; }
   };
   box.querySelectorAll('[data-pqum]').forEach((b) => b.onclick = async () => {
     b.disabled = true;

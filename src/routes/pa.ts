@@ -30,8 +30,9 @@ import * as caixa from '../services/pa/paCaixa';
 import * as carteirinha from '../services/pa/paCarteirinha';
 import * as ata from '../services/pa/paAta';
 import * as concessao from '../services/pa/paConcessao';
+import { pool, rows, registrarEvento } from '../services/pa/paDb';
 import * as pesquisa from '../services/pa/paPesquisa';
-import { linkMapaPublico, textoMapaPublico } from './paMapaPublico';
+import { linkMapaPublico, textoMapaPublico, mensagemMapaIndividual } from './paMapaPublico';
 import * as part from '../services/pa/paParticipantes';
 import * as relacao from '../services/pa/paRelacaoLotes';
 import * as marcos from '../services/pa/paMarcos';
@@ -471,6 +472,32 @@ router.get('/projetos/:id/ata-assembleia.pdf', h(async (req, res) => {
   return undefined;
 }));
 // v3.182.0: link público do mapa dos lotes (para o grupo dos associados)
+// v3.184.0: link do mapa no WhatsApp individual de cada associado (fila com intervalo, como a pesquisa)
+async function destinatariosMapa(pid: number) {
+  const r = await rows(pool, `SELECT a.id, a.nome, a.parcela, a.denominacao_terra, a.telefone_e164, a.whatsapp_status,
+      EXISTS(SELECT 1 FROM pa_eventos e WHERE e.associado_id = a.id AND e.tipo = 'MAPA_PUBLICO_ENVIADO') AS enviado
+    FROM pa_associados a WHERE a.projeto_id = ? AND a.ativo = 1 ORDER BY CAST(a.parcela AS UNSIGNED), a.nome`, [pid]);
+  return r.map((x) => ({ id: Number(x.id), nome: String(x.nome), lote: x.parcela ? String(x.parcela) : null, chacara: x.denominacao_terra ? String(x.denominacao_terra) : null,
+    whatsapp: x.whatsapp_status === 'VALIDO' || !!x.telefone_e164, enviado: Number(x.enviado) === 1 }));
+}
+router.get('/projetos/:id/mapa-publico/envio', h(async (req) => {
+  const d = await destinatariosMapa(id(req.params.id));
+  return { total: d.length, com_whatsapp: d.filter((x) => x.whatsapp).length, enviados: d.filter((x) => x.enviado).length, pendentes: d.filter((x) => x.whatsapp && !x.enviado).length };
+}));
+router.post('/projetos/:id/mapa-publico/enviar', h(async (req) => {
+  exigirEscrita(req);
+  const pid = id(req.params.id);
+  const p = await repo.buscarProjeto(pid);
+  const link = linkMapaPublico(pid);
+  const alvo = (await destinatariosMapa(pid)).filter((a) => a.whatsapp && (!a.enviado || req.body?.reenviar === true));
+  const usuario = ctx(req).sub;
+  const por = new Map(alvo.map((a) => [a.id, a]));
+  return { fila: waPa.iniciarFila(pid, alvo.map((a) => ({ associado_id: a.id, nome: a.nome, lancamento_ids: [a.id] })), usuario, async (it) => {
+    const a = por.get(it.associado_id)!;
+    await waPa.enviarWhatsAppAssociado(a.id, mensagemMapaIndividual(a.nome, a.lote, a.chacara, p.nome, link), 'MAPA_PUBLICO', usuario);
+    await registrarEvento(pool, { projeto_id: pid, associado_id: a.id, usuario, tipo: 'MAPA_PUBLICO_ENVIADO', dados: { link } });
+  }) };
+}));
 router.get('/projetos/:id/mapa-publico', h(async (req) => { const pid = id(req.params.id); const p = await repo.buscarProjeto(pid); const link = linkMapaPublico(pid); return { link, texto: textoMapaPublico(p.nome, link) }; }));
 // v3.181.0: pesquisa de satisfação — resultado, link pessoal e envio pelo WhatsApp (só quem não respondeu)
 router.get('/projetos/:id/pesquisa', h(async (req) => pesquisa.resultadoPesquisa(id(req.params.id))));

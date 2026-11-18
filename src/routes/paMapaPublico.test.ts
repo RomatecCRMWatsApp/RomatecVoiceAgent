@@ -49,3 +49,14 @@ describe('v3.183.0 — andamento da demarcação no mapa público', () => {
     expect(JSON.stringify(a)).not.toMatch(/usuario|equipe/i);
   });
 });
+
+import { mensagemMapaIndividual } from './paMapaPublico';
+describe('v3.184.0 — link do mapa no WhatsApp individual', () => {
+  it('mensagem com nome, lote, chácara e link', () => {
+    const m = mensagemMapaIndividual('GAELE FERREIRA', '43', 'Chácara São José II', 'PA Salete Moreno', 'https://x/pa/mapa/1-a');
+    expect(m).toContain('Olá, Gaele!');
+    expect(m).toContain('*LT-43* (Chácara São José II)');
+    expect(m).toContain('https://x/pa/mapa/1-a');
+    expect(mensagemMapaIndividual('JOSE', null, null, 'PA', 'L')).not.toContain('LT-');
+  });
+});
