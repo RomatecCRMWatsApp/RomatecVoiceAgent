@@ -9,7 +9,7 @@ import { geojsonSubdivisao, dadosCabecalho } from './paMapas';
 import { cabecalho, pdfDeHtml, type DadosMapaPA } from './mapasPdf';
 import { htmlMapaLotes, type BaseMapa, type RotuloLote } from './mapaTiles';
 import { hojeBrasil } from './paDb';
-import { estadoCampo, FAIXAS_PAGAMENTO, type PagamentoLote } from './paCampo';
+import { estadoCampo, diaBrasilia, FAIXAS_PAGAMENTO, type PagamentoLote } from './paCampo';
 
 export interface LoteBoletim {
   lote: string; area_ha: number; marcados: number; exigidos: string[]; prioridade: number | null; faixa: string;
@@ -34,7 +34,7 @@ export function montarBoletim(e: EstadoBoletim, hoje: string) {
   const porDia = new Map<string, { marcos: number; lotes: string[]; equipe: Set<string>; horas: number }>();
   const dia = (d: string) => { let r = porDia.get(d); if (!r) { r = { marcos: 0, lotes: [], equipe: new Set(), horas: 0 }; porDia.set(d, r); } return r; };
   for (const p of e.producao) { const r = dia(p.dia); r.marcos += p.pontos; if (p.usuario && p.usuario !== '—') r.equipe.add(p.usuario); r.horas = Math.max(r.horas, p.horas); }
-  for (const l of e.lotes) if (l.fechado) dia(l.fechado.concluido_em.slice(0, 10)).lotes.push(l.lote);
+  for (const l of e.lotes) if (l.fechado) dia(diaBrasilia(l.fechado.concluido_em)).lotes.push(l.lote);
   let acL = 0, acM = 0;
   const dias: DiaBoletim[] = [...porDia.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([d, r]) => {
     acL += r.lotes.length; acM += r.marcos;
@@ -80,7 +80,7 @@ export function textoBoletim(b: Boletim, projetoNome: string): string {
   L.push(`🪨 *Marcos cravados:* ${b.marcos.cravados} de ${b.marcos.total} (${nb(b.marcos.pct)}%)`);
   if (b.diaHoje) L.push(`📆 *Hoje:* ${b.diaHoje.lotes.length ? `${plural(b.diaHoje.lotes.length, 'lote medido', 'lotes medidos')} (${lts(b.diaHoje.lotes)})` : 'nenhum lote fechado ainda'} · ${plural(b.diaHoje.marcos, 'marco cravado', 'marcos cravados')}`);
   else if (b.ultimo) L.push(`📆 *Último dia de campo:* ${dbr(b.ultimo.dia)} — ${plural(b.ultimo.lotes.length, 'lote medido', 'lotes medidos')} · ${plural(b.ultimo.marcos, 'marco', 'marcos')}`);
-  if (b.emAndamento.length) L.push(`🚧 *Em andamento:* ${lts(b.emAndamento)}`);
+  if (b.emAndamento.length) L.push(`🚧 *Em medição:* ${lts(b.emAndamento)}`);
   if (b.diasCampo) L.push(`📈 *Ritmo:* média de ${plural(b.mediaLotes, 'lote', 'lotes')} por dia em ${plural(b.diasCampo, 'dia', 'dias')} de campo (${nb(b.mediaMarcos)} marcos/dia)`);
   if (b.previsaoDias) L.push(`⏳ *Previsão:* faltam ${b.restantes} lotes — cerca de ${plural(b.previsaoDias, 'dia', 'dias')} de campo no ritmo atual`);
   else if (!b.restantes) L.push('🏁 *Todos os lotes foram medidos!*');
@@ -129,7 +129,7 @@ function svgEvolucao(dias: DiaBoletim[], totalLotes: number): string {
 export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string {
   const k = (rot: string, v: string, s: string, cls = '') => `<div class="k ${cls}"><span>${rot}</span><b>${v}</b><i>${s}</i></div>`;
   const hojeTxt = b.diaHoje ? plural(b.diaHoje.lotes.length, 'lote', 'lotes') : '—';
-  const medidos = b.medidosLista.map((l) => `<tr class="${l.fechado && l.fechado.concluido_em.slice(0, 10) === b.hoje ? 'hj' : ''}"><td><b>LT-${esc(l.lote)}</b></td><td><b>${l.associado ? esc(l.associado.nome) : '—'}</b></td><td class="n">${ha(l.area_ha)} ha</td><td class="n">${l.fechado ? dbr(l.fechado.concluido_em.slice(0, 10)) : ''}</td><td><span class="tag q">✓ MEDIDO — OK</span></td></tr>`).join('');
+  const medidos = b.medidosLista.map((l) => `<tr class="${l.fechado && diaBrasilia(l.fechado.concluido_em) === b.hoje ? 'hj' : ''}"><td><b>LT-${esc(l.lote)}</b></td><td><b>${l.associado ? esc(l.associado.nome) : '—'}</b></td><td class="n">${ha(l.area_ha)} ha</td><td class="n">${l.fechado ? dbr(diaBrasilia(l.fechado.concluido_em)) : ''}</td><td><span class="tag q">✓ MEDIDO — OK</span></td></tr>`).join('');
   const refHtml = b.diaHoje && b.diaHoje.lotes.length ? { t: 'Medidos hoje', d: b.diaHoje } : b.ultimo && b.ultimo.lotes.length ? { t: `Medidos em ${dbr(b.ultimo.dia)}`, d: b.ultimo } : null;
   const diasTab = [...b.dias].reverse().map((d) => `<tr><td class="nw"><b>${dbr(d.dia)}</b><div class="m">${semana(d.dia)}</div></td><td>${esc(d.equipe.join(', ') || '—')}</td><td class="n">${d.marcos}</td>
     <td class="n"><b>${d.lotes.length}</b></td><td>${d.lotes.length ? esc(lts(d.lotes)) : '<span class="m">—</span>'}</td><td class="n">${d.acum_lotes}/${b.totalLotes}</td><td class="n"><b>${nb(d.pct)}%</b></td></tr>`).join('');
@@ -173,10 +173,10 @@ export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string 
     <div class="barra"><i style="width:${Math.min(100, b.pct)}%"></i><em>${b.medidos} de ${b.totalLotes} lotes medidos — ${nb(b.pct)}%</em></div>
     <div class="mapa">${mapa}</div>
     <div class="sob">
-      <div><div class="legg"><span><i style="background:#fff"></i>Ainda não medido</span><span><i style="background:#2E9D4F"></i>Medido — associado OK ✓</span><span><i style="background:#F2C94C"></i>Medido ${b.diaHoje ? 'hoje' : 'no último dia de campo'}</span></div>
+      <div><div class="legg"><span><i style="background:#fff"></i>Ainda não medido</span><span><i style="background:#5DA9E9"></i>Em medição</span><span><i style="background:#2E9D4F"></i>Medido — associado OK ✓</span><span><i style="background:#F2C94C"></i>Medido ${b.diaHoje ? 'hoje' : 'no último dia de campo'}</span></div>
         <div class="nota">No mapa, cada lote medido traz o nome do associado. Lista completa na página seguinte.</div></div>
       <div class="regra"><b>✅ ${refHtml ? esc(refHtml.t) : 'Lotes medidos'}</b><br>${refHtml && refHtml.d.lotes.length ? refHtml.d.lotes.map((lt) => { const l = b.medidosLista.find((x) => x.lote === lt); return `<b>LT-${esc(lt)}</b> — ${l?.associado ? esc(l.associado.nome) : 'sem associado vinculado'} <span class="ok">OK ✓</span>`; }).join('<br>') : '<span class="m">Nenhum lote medido ainda.</span>'}
-        ${b.emAndamento.length ? `<br><span class="m">Em andamento: ${esc(lts(b.emAndamento))}</span>` : ''}</div>
+        ${b.emAndamento.length ? `<br><span class="m">Em medição: ${esc(lts(b.emAndamento))}</span>` : ''}</div>
     </div>
     <div class="quebra"></div>
     ${cabecalho(cab, 'EVOLUÇÃO DIÁRIA DA MEDIÇÃO')}
@@ -191,13 +191,15 @@ export function htmlBoletim(cab: DadosMapaPA, b: Boletim, mapa: string): string 
 }
 
 const curto = (n: string) => { const p = n.trim().split(/\s+/); return p.length > 2 ? `${p[0]} ${p[p.length - 1]}` : n.trim(); };
-/** Mapa do grupo: todo branco; só os lotes medidos em destaque (verde; amarelo = medidos hoje), com o nome do associado e o OK. */
+/** Mapa do grupo: todo branco; em destaque os medidos (verde; amarelo = medidos hoje, com o nome do associado e o OK) e os em medição (azul). */
 export function temaMapa(b: Boletim, lotes: LoteBoletim[]): Record<string, RotuloLote> {
   const ref = b.diaHoje ?? null;
   const doDia = new Set(ref ? ref.lotes : b.ultimo ? b.ultimo.lotes : []);
   return Object.fromEntries(lotes.map((l) => [l.lote, l.fechado
     ? { cor: doDia.has(l.lote) ? '#F2C94C' : '#2E9D4F', opac: 0.85, destaque: true, rotulo: `LT-${l.lote} ✓`, sub: l.associado ? `${curto(l.associado.nome)} — OK` : 'medido' }
-    : { cor: '#FFFFFF', opac: 0.72, rotulo: `LT-${l.lote}` }]));
+    : l.marcados > 0 // v3.176.2: em medição (marcos já cravados, lote ainda não fechado)
+      ? { cor: '#5DA9E9', opac: 0.8, destaque: true, rotulo: `LT-${l.lote}`, sub: `em medição ${l.marcados}/${l.exigidos.length}` }
+      : { cor: '#FFFFFF', opac: 0.72, rotulo: `LT-${l.lote}` }]));
 }
 
 async function dados(projetoId: number) {

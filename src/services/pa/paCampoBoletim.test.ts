@@ -60,6 +60,6 @@ describe('v3.172.0 — boletim de campo', () => {
     expect(tm['02']).toMatchObject({ cor: '#F2C94C', rotulo: 'LT-02 ✓' }); // medido hoje
     expect(tm['05']).toMatchObject({ cor: '#FFFFFF', rotulo: 'LT-05' });
     expect(tm['05'].sub).toBeUndefined();
-    expect(tm['04'].cor).toBe('#FFFFFF'); // em andamento ainda não destaca
+    expect(tm['04']).toMatchObject({ cor: '#5DA9E9', sub: 'em medição 2/4' }); // v3.176.2: em medição em azul
   });
 });

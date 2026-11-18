@@ -414,6 +414,16 @@ const $ = (s, el) => (el || document).querySelector(s);
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
 const dbr = (iso) => iso ? `${iso.slice(8,10)}/${iso.slice(5,7)}/${iso.slice(0,4)}${iso.length > 10 ? ' ' + iso.slice(11,16) : ''}` : '—';
+// v3.176.2: data/hora gravada pelo servidor (NOW()/CURRENT_TIMESTAMP = UTC) → horário de Brasília.
+// Só data (ou meia-noite exata, que vem de data digitada/importada) não é convertida.
+const dhBr = (iso) => {
+  if (!iso) return '—';
+  const t = String(iso);
+  if (t.length <= 10 || /[ T]00:00(:00)?$/.test(t)) return dbr(t.slice(0, 10));
+  const d = new Date(t.replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(t) ? '' : 'Z'));
+  if (Number.isNaN(d.getTime())) return dbr(t);
+  return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(',', '');
+};
 const chip = (s, txt) => s ? `<span class="chip c-${esc(s)}">${esc(txt || String(s).replace(/_/g,' '))}</span>` : '';
 function toast(msg, err){ const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), err ? 6000 : 3200); }
 
@@ -1628,7 +1638,7 @@ function desenharCarteirinhas(){
   $('#ctLista').innerHTML = `<table><thead><tr><th><input type="checkbox" id="ctTodos" title="Marcar todos da lista"></th><th></th><th>Lote</th><th>Associado</th><th>Situação</th><th></th></tr></thead><tbody>
     ${lista.map((a) => `<tr><td><input type="checkbox" class="ctSel" data-id="${a.id}" ${CART.sel.has(a.id) ? 'checked' : ''}></td>
       <td>${fotoMini(a)}</td><td><b>${esc(a.lote)}</b></td><td>${esc(a.nome)}<div class="muted">${esc(a.numero)} · ${esc(a.cpf)}</div></td>
-      <td>${a.documentos.tem_foto ? '' : chip('PENDENTE', 'sem foto') + ' '}${a.carteirinha_emitida_em ? chip('VALIDO', 'emitida ' + dbr(a.carteirinha_emitida_em).slice(0, 10)) : chip('A_VENCER', 'não emitida')}</td>
+      <td>${a.documentos.tem_foto ? '' : chip('PENDENTE', 'sem foto') + ' '}${a.carteirinha_emitida_em ? chip('VALIDO', 'emitida ' + dhBr(a.carteirinha_emitida_em).slice(0, 10)) : chip('A_VENCER', 'não emitida')}</td>
       <td class="nowrap"><button class="btn btn-ghost btn-sm" data-ctprev="${a.id}" title="Ver carteirinha">👁</button>
         <button class="btn btn-ghost btn-sm" data-ctpdf="${a.id}" title="PDF individual">📄</button>
         ${podeEscrever() ? `<button class="btn btn-ghost btn-sm" data-ctfoto="${a.id}" title="Trocar a foto 3×4">📷</button>` : ''}
@@ -1873,7 +1883,7 @@ async function desenharGrupo(dados){
   const lotes = g.lotes.filter((l) => GRP.filtro === 'TODOS' || (GRP.filtro === 'FORA' ? !l.algum_no_grupo : l.algum_no_grupo));
   box.innerHTML = `<div class="avisos" style="margin-top:10px">
     <div class="row" style="align-items:end">
-      <div style="flex:1 1 260px"><b>👥 Grupo do WhatsApp do PA</b><div class="muted">${g.grupo.id ? `${esc(g.grupo.nome || g.grupo.id)}${g.grupo.sincronizado_em ? ' · lido em ' + dbr(g.grupo.sincronizado_em) : ' · ainda não lido'}` : 'Nenhum grupo escolhido — escolha abaixo ou use só a marcação manual.'}</div></div>
+      <div style="flex:1 1 260px"><b>👥 Grupo do WhatsApp do PA</b><div class="muted">${g.grupo.id ? `${esc(g.grupo.nome || g.grupo.id)}${g.grupo.sincronizado_em ? ' · lido em ' + dhBr(g.grupo.sincronizado_em) : ' · ainda não lido'}` : 'Nenhum grupo escolhido — escolha abaixo ou use só a marcação manual.'}</div></div>
       ${podeEscrever() ? `<div style="flex:0 0 auto"><button class="btn btn-ghost btn-sm" id="grpEscolher">⚙️ Escolher grupo</button> ${g.grupo.id ? '<button class="btn btn-primary btn-sm" id="grpSync">🔄 Ler membros do grupo</button>' : ''}</div>` : ''}
     </div>
     <div id="grpCfg"></div>
@@ -2002,7 +2012,7 @@ async function abrirAssociado(aid, avisos){
             <dt>Telefone</dt><dd>${esc(a.telefone || '—')} ${a.telefone_e164 ? `<a href="https://wa.me/${esc(a.telefone_e164.replace('+',''))}" target="_blank" rel="noopener">WhatsApp</a>` : ''} ${chip(a.whatsapp_status, WA_TXT[a.whatsapp_status])}</dd>
             <dt>E-mail</dt><dd>${esc(a.email || '—')}</dd><dt>Terra</dt><dd>${esc(a.denominacao_terra || '—')}</dd>
             <dt>Endereço</dt><dd>${esc(a.endereco || '—')}</dd><dt>Vencimento</dt><dd>dia ${esc(a.dia_vencimento || '—')}</dd>
-            <dt>Contrato</dt><dd>${chip(a.contrato_status)} ${a.contrato_assinado_em ? dbr(a.contrato_assinado_em) : ''}</dd>
+            <dt>Contrato</dt><dd>${chip(a.contrato_status)} ${a.contrato_assinado_em ? dhBr(a.contrato_assinado_em) : ''}</dd>
             <dt>Lote rural (PA)</dt><dd>${a.parcela ? 'LT-' + esc(a.parcela) : '<span class="muted">sem vínculo (Mapa → Lotes do PA)</span>'}</dd>
             <dt>Pendências</dt><dd>${esc(a.pendencias || '—')}</dd>
           </dl>
@@ -2037,7 +2047,7 @@ async function abrirAssociado(aid, avisos){
         </div>` : ''}
         ${d.entregas.length ? `<div class="card"><h2>Entregas</h2>${d.entregas.map((e) => `<div>${esc(e.protocolo)} ${chip(e.status)} ${e.entregue_em ? dbr(e.entregue_em) : ''}</div>`).join('')}</div>` : ''}
         <div class="card"><h2>Eventos</h2>
-          ${d.eventos.length ? `<div class="tbl"><table><tbody>${d.eventos.map((e) => `<tr><td class="nowrap">${dbr(e.criado_em)}</td><td>${chip('A_VENCER', e.tipo.replace(/_/g,' '))}</td><td class="muted">${esc(e.usuario || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted">Sem eventos.</div>'}
+          ${d.eventos.length ? `<div class="tbl"><table><tbody>${d.eventos.map((e) => `<tr><td class="nowrap">${dhBr(e.criado_em)}</td><td>${chip('A_VENCER', e.tipo.replace(/_/g,' '))}</td><td class="muted">${esc(e.usuario || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted">Sem eventos.</div>'}
         </div>
         ${S.eu.pode_excluir ? `<div style="text-align:right"><button class="btn btn-danger btn-sm" id="delAssoc">Excluir cadastro (sem pagamentos)</button></div>` : ''}
       </div>`;
@@ -2269,7 +2279,7 @@ async function rFinanceiro(){
         <table><thead><tr>${podeEscrever() ? '<th><input type="checkbox" id="cTodos" title="Marcar todos com WhatsApp válido"></th>' : ''}<th>Lote</th><th>Associado</th><th>Pendências (marque o que vai na mensagem)</th><th class="right">Total</th><th></th></tr></thead><tbody>
         ${c.lista.map((g, i) => `<tr data-g="${i}">${podeEscrever() ? `<td><input type="checkbox" class="cAssoc" data-g="${i}" ${g.whatsapp_status === 'VALIDO' ? 'checked' : 'disabled title="Sem WhatsApp válido"'}></td>` : ''}
           <td><b>${esc(g.lote)}</b></td><td>${esc(g.nome)}<div class="muted">${esc(g.telefone || 'sem telefone')} ${chip(g.whatsapp_status, WA_TXT[g.whatsapp_status])}</div></td>
-          <td>${g.itens.map((x) => `<label class="citem"><input type="checkbox" class="cItem" data-g="${i}" data-l="${x.lancamento_id}" data-tipo="${esc(x.tipo)}" data-parc="${x.parcela}" checked> ${esc(x.rotulo)} ${brl(x.saldo)} · ${dbr(x.vencimento)} ${chip(x.status)}${x.boleto ? ' ' + chip('PAGO', '🧾 boleto') + (x.boleto.enviado_em ? ' <span class="muted">enviado ' + dbr(x.boleto.enviado_em) + '</span>' : '') : ''}</label>`).join('')}</td>
+          <td>${g.itens.map((x) => `<label class="citem"><input type="checkbox" class="cItem" data-g="${i}" data-l="${x.lancamento_id}" data-tipo="${esc(x.tipo)}" data-parc="${x.parcela}" checked> ${esc(x.rotulo)} ${brl(x.saldo)} · ${dbr(x.vencimento)} ${chip(x.status)}${x.boleto ? ' ' + chip('PAGO', '🧾 boleto') + (x.boleto.enviado_em ? ' <span class="muted">enviado ' + dhBr(x.boleto.enviado_em) + '</span>' : '') : ''}</label>`).join('')}</td>
           <td class="right nowrap"><b>${brl(g.total)}</b></td>
           <td class="nowrap">${podeEscrever() ? `<button class="btn btn-primary btn-sm" data-env="${i}">${g.itens.some((x) => x.boleto && x.boleto.enviado_em) ? '↻ Reenviar' : '📤 Sistema'}</button>` : ''}
             ${g.whatsapp_url ? `<a class="btn btn-gold btn-sm" href="${esc(g.whatsapp_url)}" target="_blank" rel="noopener">WhatsApp</a>` : ''} <button class="btn btn-ghost btn-sm" data-pix="${i}">Pix</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nada em aberto até essa data. 🎉</div>';
@@ -2430,8 +2440,8 @@ function marcaSinal(si){
 // v3.147.2: situação do boleto e do envio pelo WhatsApp.
 function envioTag(bo){
   if (!bo) return '<span class="etag e-sem" title="Boleto ainda não emitido">🧾 sem boleto</span>';
-  const g = `<span class="etag e-ger" title="Boleto gerado em ${esc(dbr(bo.gerado_em))}">🧾 gerado</span>`;
-  return g + (bo.enviado_em ? ` <span class="etag e-env" title="Enviado pelo WhatsApp">📤 enviado ${esc(dbr(bo.enviado_em))}</span>` : ' <span class="etag e-nao">📤 não enviado</span>');
+  const g = `<span class="etag e-ger" title="Boleto gerado em ${esc(dhBr(bo.gerado_em))}">🧾 gerado</span>`;
+  return g + (bo.enviado_em ? ` <span class="etag e-env" title="Enviado pelo WhatsApp">📤 enviado ${esc(dhBr(bo.enviado_em))}</span>` : ' <span class="etag e-nao">📤 não enviado</span>');
 }
 function linhasBoletos(bs){
   if (!bs.length) return '<span class="muted">—</span>';
@@ -2492,7 +2502,7 @@ async function rMarcos(){
     if (!a.lancamento) return '<span class="muted">—</span>';
     if (a.lancamento.status === 'PAGO') return chip('PAGO');
     if (!a.boleto) return chip('A_PAGAR', 'sem boleto');
-    return chip(a.boleto.status, a.boleto.status === 'VENCIDO' ? 'vencido' : '🧾 gerado') + (a.boleto.enviado_em ? ' ' + chip('VALIDO', '📲 enviado ' + dbr(a.boleto.enviado_em)) : '');
+    return chip(a.boleto.status, a.boleto.status === 'VENCIDO' ? 'vencido' : '🧾 gerado') + (a.boleto.enviado_em ? ' ' + chip('VALIDO', '📲 enviado ' + dhBr(a.boleto.enviado_em)) : '');
   };
   const kpi = (l, v, extra) => `<div class="k2"><div><div class="l">${l}</div><div class="v">${v}</div>${extra ? `<div class="muted">${extra}</div>` : ''}</div></div>`;
   const form = podeEscrever() ? `<div class="grid3">

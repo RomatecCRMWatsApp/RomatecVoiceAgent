@@ -100,3 +100,13 @@ describe('envio para outro número (v3.175.4)', () => {
     expect(numeroDestino('9918112')).toBeNull();
   });
 });
+
+// v3.176.2: horário gravado em UTC (NOW()) → dia de Brasília
+import { diaBrasilia } from './paCampo';
+describe('dia em Brasília', () => {
+  it('converte UTC para o dia local (UTC-3)', () => {
+    expect(diaBrasilia('2026-11-18 12:29:00')).toBe('2026-11-18');
+    expect(diaBrasilia('2026-11-18 01:30:00')).toBe('2026-11-17'); // 22h30 do dia 17 em Brasília
+    expect(diaBrasilia('2026-11-18T02:59:59Z')).toBe('2026-11-17');
+  });
+});

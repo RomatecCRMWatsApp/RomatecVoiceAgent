@@ -27,9 +27,15 @@ export function lotesCompletos(lotes: Array<{ lote: string; vertices: string[] }
   return lotes.filter((l) => l.vertices.length > 0 && [...new Set(l.vertices)].every((v) => marcados.has(v))).map((l) => l.lote);
 }
 
+/** v3.176.2: data/hora gravada com NOW() (UTC) → dia no horário de Brasília (UTC-3). */
+export function diaBrasilia(isoUtc: string): string {
+  const t = Date.parse(String(isoUtc).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(isoUtc) ? '' : 'Z'));
+  return Number.isNaN(t) ? String(isoUtc).slice(0, 10) : new Date(t - 3 * 3600_000).toISOString().slice(0, 10);
+}
+
 /** Produção por dia e funcionário (pura — testável). Horas = do primeiro ao último ponto do dia. */
 export function producaoPorDia(marcas: Array<{ marcado_em: string; usuario_nome: string | null }>, fechados: Array<{ concluido_em: string; usuario_nome: string | null }>) {
-  const dia = (iso: string) => iso.slice(0, 10);
+  const dia = diaBrasilia;
   const m = new Map<string, { dia: string; usuario: string; pontos: number; lotes: number; primeiro: string; ultimo: string }>();
   const k = (d: string, u: string) => `${d}|${u}`;
   for (const x of marcas) {
