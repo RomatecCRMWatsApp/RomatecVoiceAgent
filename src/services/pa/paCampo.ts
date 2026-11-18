@@ -195,9 +195,12 @@ export async function avisarLoteDemarcado(projetoId: number, lote: string, forca
     if (ben) await dz.enviarProntos(projetoId, [ben.associado_id]).catch((e) => console.warn('[pa-campo] dossiê revisão:', (e as Error).message));
     return { enviado: true };
   } catch (e) {
-    const msg = (e as Error).message.slice(0, 250);
-    console.warn(`[pa-campo] aviso LT-${lote} falhou:`, msg);
-    await exec(pool, 'UPDATE pa_campo_lotes SET aviso_reservado_em = NULL, aviso_erro = ? WHERE projeto_id = ? AND lote = ?', [msg, projetoId, lote]).catch(() => undefined);
+    const bruto = (e as Error).message;
+    // v3.188.6: WhatsApp da instância desconectado na Z-API → não gasta tentativa (o vigia segue tentando até reconectar)
+    const desconectado = /disconnected|desconectad|not connected/i.test(bruto);
+    const msg = (desconectado ? 'WhatsApp do sistema DESCONECTADO na Z-API — reconecte a instância (QR code no painel da Z-API); o aviso sai sozinho depois' : bruto).slice(0, 250);
+    console.warn(`[pa-campo] aviso LT-${lote} falhou:`, bruto.slice(0, 250));
+    await exec(pool, `UPDATE pa_campo_lotes SET aviso_reservado_em = NULL, aviso_erro = ?${desconectado ? ', aviso_tentativas = GREATEST(aviso_tentativas - 1, 0)' : ''} WHERE projeto_id = ? AND lote = ?`, [msg, projetoId, lote]).catch(() => undefined);
     return { enviado: false, erro: msg };
   }
 }
