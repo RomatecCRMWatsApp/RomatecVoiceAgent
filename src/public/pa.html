@@ -303,6 +303,7 @@
   .cx-manual{position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;padding:12px}
   .cx-manual .cx-in{background:#fff;border-radius:14px;padding:14px;width:100%;max-width:560px;border:2px solid var(--gold)}
   .cx-manual textarea{width:100%;margin-top:6px;font-size:13px}
+  .mk-res{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.mk-res div{border:1px solid var(--line);border-radius:8px;padding:5px 8px}.mk-res span{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;font-weight:700}.mk-res b{font-size:13px;color:var(--green)}.mk-res .red b{color:var(--red)}
   /* v3.177.0: programação do dia */
   .cp-prog .pg-lista{display:flex;flex-direction:column;gap:4px;margin-top:8px}
   .cp-prog .pg-it{display:flex;align-items:center;gap:6px;flex-wrap:wrap;border:1px solid var(--line);border-left:5px solid #5DA9E9;border-radius:8px;padding:6px 8px;background:#fff}
@@ -639,10 +640,11 @@ async function rPainel(){
 
       <div class="kpis2">
         <div class="k2"><div class="k2i">📄</div><div><div class="l">Contratado</div><div class="v">${brl(f.contratado)}</div><div class="muted">${p.associados.total} associados</div></div></div>
-        <div class="k2 ok"><div class="k2i">✅</div><div><div class="l">Recebido</div><div class="v">${brl(f.recebido)}</div><div class="bar2"><i style="width:${pct}%"></i></div><div class="muted">${pct}% do contratado</div></div></div>
+        <div class="k2 ok"><div class="k2i">✅</div><div><div class="l">Recebido</div><div class="v">${brl(f.recebido)}</div><div class="bar2"><i style="width:${pct}%"></i></div><div class="muted">${pct}% do contratado (sem a taxa de marcos)</div></div></div>
         <div class="k2"><div class="k2i">⏳</div><div><div class="l">A receber</div><div class="v">${brl(f.a_receber)}</div><div class="muted">${(bol.PENDENTE || 0) + (bol.VENCIDO || 0)} boleto(s) em aberto</div></div></div>
         <div class="k2 red"><div class="k2i">⚠️</div><div><div class="l">Sinais pendentes</div><div class="v">${brl(f.sinais_pendentes)}</div><div class="muted">${f.sinais.a_pagar} a pagar · ${f.sinais.parciais} parcial</div></div></div>
         <div class="k2 ${f.vencido > 0 ? 'red' : 'ok'}"><div class="k2i">📆</div><div><div class="l">Vencido</div><div class="v">${brl(f.vencido)}</div><div class="muted">${f.vencido > 0 ? 'cobrar' : 'nada vencido'}</div></div></div>
+        ${p.marcos ? `<div class="k2 ${p.marcos.a_receber > 0.009 ? '' : 'ok'}"><div class="k2i">🪨</div><div><div class="l">Taxa de marcos</div><div class="v">${brl(p.marcos.recebido)}</div><div class="bar2"><i style="width:${p.marcos.valor ? Math.round(p.marcos.recebido / p.marcos.valor * 100) : 0}%"></i></div><div class="muted">recebido de ${brl(p.marcos.valor)} gerado · ${p.marcos.pagos}/${p.marcos.associados} pagos</div></div></div>` : ''}
         <div class="k2"><div class="k2i">🗂️</div><div><div class="l">Cadastro completo</div><div class="v">${cad.completos}/${cad.total}</div><div class="bar2"><i style="width:${pctCad}%"></i></div><div class="muted">${pctCad}% sem pendência de dados</div></div></div>
       </div>
 
@@ -651,6 +653,12 @@ async function rPainel(){
           { v: f.recebido, cor: '#1f7a4d', rotulo: 'Recebido', fmt: brl(f.recebido) },
           { v: f.a_receber, cor: '#E3D19A', rotulo: 'A receber', fmt: brl(f.a_receber) },
         ], pct + '%', 'recebido')}</div>
+        ${p.marcos && p.marcos.valor > 0 ? `<div class="card"><h2>🪨 Taxa de marcos de concreto</h2>${rosca([
+          { v: p.marcos.recebido, cor: '#1f7a4d', rotulo: 'Recebido', fmt: brl(p.marcos.recebido) },
+          { v: p.marcos.a_receber, cor: '#E3D19A', rotulo: 'A receber', fmt: brl(p.marcos.a_receber) },
+        ], (p.marcos.valor ? Math.round(p.marcos.recebido / p.marcos.valor * 1000) / 10 : 0).toLocaleString('pt-BR') + '%', 'recebido')}
+          <div class="mk-res"><div><span>Gerado</span><b>${brl(p.marcos.valor)}</b></div><div><span>Recebido</span><b>${brl(p.marcos.recebido)}</b></div><div><span>A receber</span><b>${brl(p.marcos.a_receber)}</b></div><div class="${p.marcos.vencido > 0.009 ? 'red' : ''}"><span>Vencido</span><b>${brl(p.marcos.vencido)}</b></div>
+            <div><span>Associados</span><b>${p.marcos.pagos} pagos / ${p.marcos.associados}</b></div><div><span>Boletos</span><b>${p.marcos.boletos.gerados} gerados · ${p.marcos.boletos.enviados} enviados</b></div></div></div>` : ''}
         <div class="card"><h2>Entradas (sinal / à vista)</h2>${rosca([
           { v: f.sinais.pagos, cor: '#1f7a4d', rotulo: 'Pagas' },
           { v: f.sinais.parciais, cor: '#C9A84C', rotulo: 'Parciais' },

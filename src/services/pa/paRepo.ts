@@ -120,17 +120,23 @@ export async function painel(projetoId: number) {
   const hoje = hojeBrasil();
   const fin = await one(pool, `
     SELECT
-      COALESCE(SUM(CASE WHEN l.status <> 'CANCELADO' THEN l.valor END), 0) AS contratado,
-      COALESCE(SUM(CASE WHEN l.status <> 'CANCELADO' THEN l.valor_recebido END), 0) AS recebido,
+      COALESCE(SUM(CASE WHEN l.status <> 'CANCELADO' AND l.tipo <> 'MARCO' THEN l.valor END), 0) AS contratado,
+      COALESCE(SUM(CASE WHEN l.status <> 'CANCELADO' AND l.tipo <> 'MARCO' THEN l.valor_recebido END), 0) AS recebido,
+      -- v3.179.0: taxa de marcos à parte (não entra no contratado)
+      COALESCE(SUM(CASE WHEN l.status <> 'CANCELADO' AND l.tipo = 'MARCO' THEN l.valor END), 0) AS marcos_valor,
+      COALESCE(SUM(CASE WHEN l.status <> 'CANCELADO' AND l.tipo = 'MARCO' THEN l.valor_recebido END), 0) AS marcos_recebido,
+      COUNT(DISTINCT CASE WHEN l.status <> 'CANCELADO' AND l.tipo = 'MARCO' THEN l.associado_id END) AS marcos_associados,
+      COUNT(DISTINCT CASE WHEN l.tipo = 'MARCO' AND l.status = 'PAGO' THEN l.associado_id END) AS marcos_pagos,
+      COALESCE(SUM(CASE WHEN l.tipo = 'MARCO' AND l.status NOT IN ('PAGO','CANCELADO') AND l.vencimento < ? THEN l.valor - l.valor_recebido END), 0) AS marcos_vencido,
       COALESCE(SUM(CASE WHEN l.tipo = 'SINAL' AND l.status NOT IN ('PAGO','CANCELADO') THEN l.valor - l.valor_recebido END), 0) AS sinais_pendentes,
-      COALESCE(SUM(CASE WHEN l.status NOT IN ('PAGO','CANCELADO') AND l.vencimento < ? THEN l.valor - l.valor_recebido END), 0) AS vencido,
+      COALESCE(SUM(CASE WHEN l.status NOT IN ('PAGO','CANCELADO') AND l.tipo <> 'MARCO' AND l.vencimento < ? THEN l.valor - l.valor_recebido END), 0) AS vencido,
       SUM(l.tipo IN ('SINAL','AVISTA') AND l.status = 'PAGO') AS sinais_pagos,
       SUM(l.tipo IN ('SINAL','AVISTA') AND l.status IN ('A_PAGAR','A_VENCER','VENCIDO')) AS sinais_a_pagar,
       SUM(l.tipo IN ('SINAL','AVISTA') AND l.status = 'PARCIAL') AS sinais_parciais,
       SUM(l.tipo = 'AVISTA' AND l.status = 'PAGO') AS quitados_avista
     FROM pa_lancamentos l
     JOIN pa_associados a ON a.id = l.associado_id AND a.ativo = 1
-    WHERE a.projeto_id = ?`, [hoje, projetoId]);
+    WHERE a.projeto_id = ?`, [hoje, hoje, projetoId]);
   const contratado = num(fin?.contratado);
   const recebido = num(fin?.recebido);
 
@@ -170,6 +176,12 @@ export async function painel(projetoId: number) {
     const bs = await rows(pool, "SELECT status, COUNT(*) AS n, SUM(valor) AS total FROM pa_boletos WHERE projeto_id = ? AND status <> 'CANCELADO' GROUP BY status", [projetoId]);
     boletosResumo = Object.fromEntries(bs.map((r) => [String(r.status), num(r.n)]));
   } catch { boletosResumo = {}; }
+  let boletosMarcos = { gerados: 0, enviados: 0 };
+  try {
+    const bm = await one(pool, `SELECT COUNT(*) AS gerados, SUM(b.enviado_em IS NOT NULL) AS enviados FROM pa_boletos b JOIN pa_lancamentos l ON l.id = b.lancamento_id
+      WHERE b.projeto_id = ? AND b.status <> 'CANCELADO' AND l.tipo = 'MARCO'`, [projetoId]);
+    boletosMarcos = { gerados: num(bm?.gerados), enviados: num(bm?.enviados) };
+  } catch { /* sem boletos */ }
   const cadastro = await pendenciasCadastrais(projetoId);
 
   return {
@@ -185,6 +197,10 @@ export async function painel(projetoId: number) {
       sinais: { pagos: num(fin?.sinais_pagos), a_pagar: num(fin?.sinais_a_pagar), parciais: num(fin?.sinais_parciais), quitados_avista: num(fin?.quitados_avista) },
       recebido_por_dia: porDia.map((r) => ({ dia: isoDate(r.dia), total: num(r.total), n: num(r.n) })),
       recebido_por_forma: porForma.map((r) => ({ forma: String(r.forma), total: num(r.total), n: num(r.n) })),
+    },
+    marcos: {
+      valor: num(fin?.marcos_valor), recebido: num(fin?.marcos_recebido), a_receber: centavos(num(fin?.marcos_valor) - num(fin?.marcos_recebido)),
+      vencido: num(fin?.marcos_vencido), associados: num(fin?.marcos_associados), pagos: num(fin?.marcos_pagos), boletos: boletosMarcos,
     },
     lotes: { total: Object.values(porTipo).reduce((s, n) => s + n, 0), por_tipo: porTipo, por_status_medicao: porMedicao },
     associados: { total: num(assoc?.total), contratos_assinados: num(assoc?.assinados), carteirinhas_emitidas: num(assoc?.carteirinhas) },
