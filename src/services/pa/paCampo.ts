@@ -202,7 +202,36 @@ export async function desmarcarPonto(projetoId: number, ponto: string, u: Usuari
   await exec(pool, 'DELETE FROM pa_campo_pontos WHERE id = ?', [r.id]);
   const d = await pontosColetora(projetoId);
   const lotes = d.pontos.find((x) => x.nome === ponto)?.lotes ?? [];
-  if (lotes.length) await exec(pool, `DELETE FROM pa_campo_lotes WHERE projeto_id = ? AND lote IN (${lotes.map(() => '?').join(',')})`, [projetoId, ...lotes]);
+  if (lotes.length) {
+    await exec(pool, `DELETE FROM pa_campo_lotes WHERE projeto_id = ? AND lote IN (${lotes.map(() => '?').join(',')})`, [projetoId, ...lotes]);
+    // v3.188.2: lote reaberto → dossiê ainda não enviado ao associado volta do zero (sai de novo ao fechar)
+    await exec(pool, `DELETE FROM pa_dossies WHERE projeto_id = ? AND enviado_em IS NULL AND entregue_em IS NULL AND lote IN (${lotes.map(() => '?').join(',')})`, [projetoId, ...lotes]);
+  }
   await registrarEvento(pool, { projeto_id: projetoId, usuario: u.id, tipo: 'CAMPO_PONTO_DESMARCADO', dados: { ponto, lotes_reabertos: lotes } });
   return { ponto, lotes_reabertos: lotes };
+}
+
+/**
+ * v3.188.2 (ADMIN): reabre um lote medido para refazer o fechamento — desfaz a última marcação de um marco
+ * exigido do lote (o lote e os vizinhos que dependem desse marco voltam para "em medição") e limpa o
+ * dossiê ainda não enviado. Ao marcar o marco de novo, o lote fecha e o aviso vai para o WhatsApp do CEO.
+ */
+export async function reabrirLote(projetoId: number, lote: string, u: Usuario) {
+  const fechado = await one(pool, 'SELECT id FROM pa_campo_lotes WHERE projeto_id = ? AND lote = ?', [projetoId, lote]);
+  if (!fechado) throw new PaErro('LOTE_NAO_FECHADO', `LT-${lote} não está medido`, 409);
+  const d = await pontosColetora(projetoId);
+  const l = d.lotes.find((x) => x.lote === lote);
+  if (!l) throw new PaErro('LOTE_NAO_ENCONTRADO', `LT-${lote} não está na subdivisão`, 404);
+  const existentes = new Set(d.pontos.filter((x) => x.existente).map((x) => x.nome));
+  const vs = exigidos(l.vertices, existentes);
+  const ult = vs.length ? await one(pool, `SELECT ponto FROM pa_campo_pontos WHERE projeto_id = ? AND ponto IN (${vs.map(() => '?').join(',')}) ORDER BY marcado_em DESC, id DESC LIMIT 1`, [projetoId, ...vs]) : null;
+  if (!ult) { // fechou sem marcação própria: só reabre
+    await exec(pool, 'DELETE FROM pa_campo_lotes WHERE projeto_id = ? AND lote = ?', [projetoId, lote]);
+    await exec(pool, 'DELETE FROM pa_dossies WHERE projeto_id = ? AND lote = ? AND enviado_em IS NULL AND entregue_em IS NULL', [projetoId, lote]);
+    await registrarEvento(pool, { projeto_id: projetoId, usuario: u.id, tipo: 'CAMPO_LOTE_REABERTO', dados: { lote, ponto: null } });
+    return { lote, ponto: null as string | null, lotes_reabertos: [lote] };
+  }
+  const r = await desmarcarPonto(projetoId, String(ult.ponto), u, true);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario: u.id, tipo: 'CAMPO_LOTE_REABERTO', dados: { lote, ponto: r.ponto, lotes_reabertos: r.lotes_reabertos } });
+  return { lote, ponto: r.ponto as string | null, lotes_reabertos: r.lotes_reabertos };
 }
