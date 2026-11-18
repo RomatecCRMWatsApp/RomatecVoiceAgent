@@ -48,3 +48,31 @@ describe('v3.177.0 — programação diária de campo', () => {
     expect(c['48']).toMatchObject({ cor: COR_PROG.pendente, sub: 'pendente' });
   });
 });
+
+// v3.189.0: relocação automática das 21 h — cenário de 18/11/2026 (quarta)
+import { planejarRelocacao, proximoDiaUtil } from './paCampoProgramacao';
+describe('relocação automática da programação de campo', () => {
+  const L = (lote: string, o: { fechado?: boolean; marcados?: number; tem_associado?: boolean } = {}) => ({ lote, fechado: false, marcados: 0, tem_associado: true, ...o });
+  // ordem de serviço: quitados primeiro
+  const ordem = [L('09', { marcados: 2 }), L('40'), L('43'), L('47'), L('48'), L('49'), L('51'), L('33'), L('10', { fechado: true }),
+    L('50'), L('32'), L('20'), L('21'), L('22'), L('23'), L('24'), L('60', { tem_associado: false })];
+  const dia18 = ['10', '33', '43', '47', '50', '51'];
+  it('pendentes do dia vão para o próximo dia útil, 6 por dia, em medição na frente, excedente cascateia', () => {
+    const p = planejarRelocacao('2026-11-18', ordem, dia18, { '2026-11-19': ['32', '09', '48'] }, 6, [1, 2, 3, 4, 5]);
+    expect(p['2026-11-19']).toEqual(['09', '33', '43', '47', '50', '51']);
+    expect(p['2026-11-20']).toEqual(['32', '48', '40', '49', '20', '21']); // excedente + completa pela ordem de serviço
+    expect(Object.values(p).flat()).not.toContain('10'); // medido sai
+    expect(Object.values(p).flat()).not.toContain('60'); // sem associado não entra sozinho
+  });
+  it('sexta → segunda (sábado e domingo sem campo)', () => {
+    expect(proximoDiaUtil('2026-11-20', [1, 2, 3, 4, 5])).toBe('2026-11-23');
+    const p = planejarRelocacao('2026-11-20', ordem, ['33', '43'], {}, 6, [1, 2, 3, 4, 5]);
+    expect(Object.keys(p)).toEqual(['2026-11-23']);
+    expect(p['2026-11-23'].slice(0, 3)).toEqual(['09', '33', '43']);
+    expect(p['2026-11-23']).toHaveLength(6);
+  });
+  it('dia sem programação: só completa o próximo dia útil', () => {
+    const p = planejarRelocacao('2026-11-22', ordem, [], {}, 6, [1, 2, 3, 4, 5]);
+    expect(p).toEqual({ '2026-11-23': ['09', '40', '43', '47', '48', '49'] });
+  });
+});

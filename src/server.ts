@@ -346,6 +346,9 @@ void (async () => {
   // v3.188.5: vigia dos avisos "lote demarcado" ao CEO (reenvia o que não saiu)
   try { const c = await import('./services/pa/paCampo'); c.iniciarVigiaAvisosCampo(); }
   catch (err) { console.error('[pa-campo] vigia avisos falhou:', err); }
+  // v3.189.0: relocação automática da programação de campo (21 h, Brasília)
+  try { const pr = await import('./services/pa/paCampoProgramacao'); pr.iniciarRelocacaoAutomatica(); }
+  catch (err) { console.error('[pa-relocacao] falhou:', err); }
   // v3.162.0: correção pontual (Silvana, lote 14 — pagou o boleto de dezembro no lugar do de novembro)
   try { const f = await import('./services/pa/paFinanceiro'); await f.corrigirCompensacoesConhecidas(); }
   catch (err) { console.error('[pa-compensacao] falhou:', err); }

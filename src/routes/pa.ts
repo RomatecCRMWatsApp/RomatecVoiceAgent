@@ -556,6 +556,7 @@ router.get('/projetos/:id/campo/boletim', h(async (req) => boletim.textoBoletimC
 // v3.177.0: programação diária (lotes do dia) e confirmação no fim do dia — texto + PDF com mapa para o grupo
 router.get('/projetos/:id/campo/programacao', h(async (req) => programacao.buscarProgramacao(id(req.params.id), req.query.dia)));
 router.put('/projetos/:id/campo/programacao', h(async (req) => { exigirEscrita(req); return programacao.salvarProgramacao(id(req.params.id), req.body?.dia, req.body?.lotes, ctx(req).sub); }));
+router.post('/projetos/:id/campo/programacao/relocar', h(async (req) => { exigirAdmin(req); return programacao.relocarProgramacao(id(req.params.id), req.body?.dia, ctx(req).sub); })); // v3.189.0
 router.get('/projetos/:id/campo/programacao.pdf', h(async (req, res) => { enviarPdf(res, await programacao.pdfDia(id(req.params.id), req.query.tipo, req.query.dia, baseValida(req.query.base))); return undefined; }));
 router.get('/projetos/:id/campo/programacao/texto', h(async (req) => programacao.textoDia(id(req.params.id), req.query.tipo, req.query.dia)));
 // v3.188.4: checklist do lote — marca vários vértices de uma vez e fecha a poligonal
