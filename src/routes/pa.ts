@@ -29,6 +29,7 @@ import * as mapas from '../services/pa/paMapas';
 import * as caixa from '../services/pa/paCaixa';
 import * as carteirinha from '../services/pa/paCarteirinha';
 import * as ata from '../services/pa/paAta';
+import * as concessao from '../services/pa/paConcessao';
 import * as part from '../services/pa/paParticipantes';
 import * as relacao from '../services/pa/paRelacaoLotes';
 import * as marcos from '../services/pa/paMarcos';
@@ -460,6 +461,13 @@ router.post('/whatsapp/grupo/manual', h(async (req) => {
 // ─── v3.149.0: ata da assembleia de aprovação da contratação (padrão INCRA) ─
 router.get('/projetos/:id/ata-assembleia.pdf', h(async (req, res) => {
   enviarPdf(res, await ata.pdfAta(id(req.params.id), ata.lerDadosAta(req.query as Record<string, unknown>), ctx(req).sub));
+  return undefined;
+}));
+// v3.176.0: termo de concessão de uso do lote (titular → outra pessoa, ou o inverso)
+router.get('/projetos/:id/concessao/lotes', h(async (req) => { exigirEscrita(req); exigirDocumentos(req); return concessao.opcoesConcessao(id(req.params.id)); }));
+router.post('/projetos/:id/concessao.pdf', h(async (req, res) => {
+  exigirEscrita(req); exigirDocumentos(req);
+  enviarPdf(res, await concessao.pdfConcessao(id(req.params.id), req.body ?? {}, ctx(req).sub));
   return undefined;
 }));
 // v3.168.0: taxa de marcos de concreto — um boleto por associado, gerar e enviar com um clique

@@ -1677,9 +1677,9 @@ function rDocumentosOficiais(){
   const v = $('#v-documentos');
   v.innerHTML = `<div class="card"><h2 style="margin-top:0">📜 Documentos oficiais do PA</h2>
       <div class="muted">Documentos gerados com os dados do projeto e do cadastro dos associados, em PDF (para imprimir) e DOC (Word, para ajustar).</div>
-      <div class="row" style="margin-top:10px"><button class="btn btn-primary btn-sm" data-doc-of="ata" style="flex:0 0 auto">📝 Ata da Assembleia — aprovação da contratação (INCRA)</button><button class="btn btn-gold btn-sm" id="docRelLotes" style="flex:0 0 auto">📋 Relação de associados por lote (conferência da diretoria)</button></div></div>
+      <div class="row" style="margin-top:10px"><button class="btn btn-primary btn-sm" data-doc-of="ata" style="flex:0 0 auto">📝 Ata da Assembleia — aprovação da contratação (INCRA)</button><button class="btn btn-gold btn-sm" id="docRelLotes" style="flex:0 0 auto">📋 Relação de associados por lote (conferência da diretoria)</button><button class="btn btn-primary btn-sm" data-doc-of="concessao" style="flex:0 0 auto">🤝 Termo de concessão de uso do lote</button></div></div>
     <div id="ataBox"></div>`;
-  v.querySelectorAll('[data-doc-of]').forEach((b) => b.onclick = () => formAta());
+  v.querySelectorAll('[data-doc-of]').forEach((b) => b.onclick = () => (b.dataset.docOf === 'concessao' ? formConcessao() : formAta()));
   // v3.156.0: relação lote → associado em PDF, com campo de conferência e assinatura da diretoria
   $('#docRelLotes').onclick = async () => {
     const janela = window.open('about:blank', '_blank'); toast('Gerando a relação…');
@@ -1693,6 +1693,64 @@ function rDocumentosOficiais(){
     } catch (e){ if (janela) janela.close(); toast(e.message, true); }
   };
   formAta();
+}
+// ─── v3.176.0: termo de concessão de uso (o titular concede o uso do lote a outra pessoa, ou o inverso) ─
+async function formConcessao(){
+  const box = $('#ataBox');
+  box.innerHTML = '<div class="card empty">Carregando os lotes…</div>';
+  let op; try { op = await api(`/projetos/${S.pid}/concessao/lotes`); } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  let sv = {}; try { sv = JSON.parse(localStorage.getItem('pa_concessao_' + S.pid) || '{}'); } catch { sv = {}; }
+  const o = sv.outra || {};
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const val = (v) => esc(v == null ? '' : v);
+  box.innerHTML = `<div class="card"><b>🤝 Termo de concessão de uso do lote</b>
+    <div class="muted" style="margin:4px 0 8px">Para quando o lote está no nome de um(a) (ex.: a filha, por segurança) e quem usa e mora de fato é outro(a) (ex.: o pai). Sai com o timbre do PA, a qualificação das partes, a área e as confrontações do lote, a anuência da Associação, testemunhas e espaço para digital. <b>Não transfere a titularidade</b> do lote.</div>
+    <div class="grid3">
+      <div style="grid-column:span 2"><label for="tcLote">Lote</label><select class="f" id="tcLote"><option value="">Escolha o lote</option>${op.lotes.map((l) => `<option value="${esc(l.lote)}" ${sv.lote === l.lote ? 'selected' : ''}>LT-${esc(l.lote)} · ${nbr(l.area_ha, 4)} ha · ${esc(l.titular)}${l.denominacao ? ' · ' + esc(l.denominacao) : ''}</option>`).join('')}</select></div>
+      <div><label for="tcSentido">Quem concede</label><select class="f" id="tcSentido"><option value="0">O titular do lote concede à outra pessoa</option><option value="1" ${sv.inverter ? 'selected' : ''}>A outra pessoa concede ao titular</option></select></div>
+      <div style="grid-column:1/-1" id="tcPartBox"></div>
+      <div style="grid-column:span 2"><label for="tcNome">Outra pessoa — nome completo</label><input id="tcNome" value="${val(o.nome)}"></div>
+      <div><label for="tcVinc">Vínculo com o titular</label><input id="tcVinc" placeholder="Ex.: pai, mãe, esposo" value="${val(sv.vinculo)}"></div>
+      <div><label for="tcCpf">CPF</label><input id="tcCpf" inputmode="numeric" value="${val(o.cpf)}"></div>
+      <div><label for="tcRg">RG e órgão</label><input id="tcRg" placeholder="Ex.: 048611212013-8 SSP/MA" value="${val(o.rg)}"></div>
+      <div><label for="tcNasc">Nascimento</label><input type="date" id="tcNasc" value="${val(o.nascimento)}"></div>
+      <div><label for="tcNat">Naturalidade</label><input id="tcNat" placeholder="Ex.: Floriano/PI" value="${val(o.naturalidade)}"></div>
+      <div><label for="tcCivil">Estado civil</label><input id="tcCivil" placeholder="Ex.: casado" value="${val(o.estado_civil)}"></div>
+      <div><label for="tcProf">Profissão</label><input id="tcProf" placeholder="Ex.: lavrador" value="${val(o.profissao)}"></div>
+      <div style="grid-column:span 2"><label for="tcFil">Filiação</label><input id="tcFil" placeholder="Pai e mãe" value="${val(o.filiacao)}"></div>
+      <div><label for="tcData">Data do termo</label><input type="date" id="tcData" value="${val(sv.data || hoje)}"></div>
+      <div style="grid-column:1/-1"><label for="tcEnd">Endereço</label><input id="tcEnd" placeholder="Ex.: Lote 43, PA Salete Moreno, zona rural de Açailândia/MA" value="${val(o.endereco)}"></div>
+      <div style="grid-column:1/-1"><label class="citem"><input type="checkbox" id="tcFormal" ${sv.titularidade_formal === false ? '' : 'checked'}> Declarar que o lote está no nome do titular só por segurança e que a posse e o uso de fato são do concessionário (concessão não revogável sozinha pelo titular)</label></div>
+      <div style="grid-column:1/-1"><label for="tcObs">Disposições especiais (opcional)</label><input id="tcObs" value="${val(sv.obs)}"></div>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="tcPdf" style="flex:0 0 auto">📄 Gerar termo em PDF</button></div></div>`;
+  const partes = () => {
+    const l = op.lotes.find((x) => x.lote === $('#tcLote').value);
+    $('#tcPartBox').innerHTML = l && l.participantes.length ? `<label>Participantes já cadastrados no lote (toque para preencher)</label><div class="row" style="gap:6px;flex-wrap:wrap">${l.participantes.map((x, i) => `<button class="btn btn-ghost btn-sm" data-tcp="${i}" style="flex:0 0 auto">${esc(x.nome)} · ${esc(x.vinculo)}</button>`).join('')}</div>` : '';
+    $('#tcPartBox').querySelectorAll('[data-tcp]').forEach((b) => b.onclick = () => {
+      const x = l.participantes[Number(b.dataset.tcp)];
+      $('#tcNome').value = x.nome; $('#tcVinc').value = x.vinculo || ''; $('#tcCpf').value = x.cpf || ''; $('#tcRg').value = x.rg || ''; $('#tcNasc').value = x.nascimento || '';
+    });
+  };
+  $('#tcLote').onchange = partes; partes();
+  $('#tcPdf').onclick = async (ev) => {
+    const body = { lote: $('#tcLote').value, inverter: $('#tcSentido').value === '1', vinculo: $('#tcVinc').value, data: $('#tcData').value, titularidade_formal: $('#tcFormal').checked, obs: $('#tcObs').value,
+      outra: { nome: $('#tcNome').value, cpf: $('#tcCpf').value, rg: $('#tcRg').value, nascimento: $('#tcNasc').value, naturalidade: $('#tcNat').value, estado_civil: $('#tcCivil').value, profissao: $('#tcProf').value, filiacao: $('#tcFil').value, endereco: $('#tcEnd').value } };
+    if (!body.lote) return toast('Escolha o lote', true);
+    if (!body.outra.nome.trim()) return toast('Informe o nome da outra pessoa', true);
+    try { localStorage.setItem('pa_concessao_' + S.pid, JSON.stringify(body)); } catch { /* ok */ }
+    const bt = ev.currentTarget; bt.disabled = true;
+    const janela = window.open('about:blank', '_blank'); toast('Gerando o termo…');
+    try {
+      const r = await fetch(`/api/pa/projetos/${S.pid}/concessao.pdf`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (r.status === 401){ location.href = '/login?next=' + encodeURIComponent(location.pathname); return; }
+      if (!r.ok){ let m = 'HTTP ' + r.status; try { m = (await r.json()).erro || m; } catch { /* ok */ } throw new Error(m); }
+      const url = URL.createObjectURL(await r.blob());
+      if (janela) janela.location.href = url; else window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
+    } catch (e){ if (janela) janela.close(); toast(e.message, true); }
+    bt.disabled = false;
+  };
 }
 function formAta(){
   const box = $('#ataBox');
