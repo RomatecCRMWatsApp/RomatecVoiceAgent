@@ -25,3 +25,27 @@ describe('v3.182.0 — mapa público dos lotes', () => {
     expect(h).not.toMatch(/area_ha|hectare|alqueire/i);
   });
 });
+
+import { andamentoPublico } from './paMapaPublico';
+describe('v3.183.0 — andamento da demarcação no mapa público', () => {
+  it('situação por lote e marcos só dos lotes em andamento/concluídos, sem equipe', () => {
+    const a = andamentoPublico({
+      lotes: [
+        { lote: '05', marcados: 4, exigidos: ['a', 'b', 'c', 'd'], fechado: { concluido_em: '2026-11-18 20:00:00' } },
+        { lote: '06', marcados: 2, exigidos: ['e', 'f', 'g', 'h'], fechado: null },
+        { lote: '07', marcados: 0, exigidos: ['i', 'j'], fechado: null },
+      ],
+      pontos: [
+        { nome: 'M-001', lat: -4.4, lon: -47.2, lotes: ['05'], existente: false, marca: { marcado_em: '2026-11-18 13:00:00' } },
+        { nome: 'M-002', lat: -4.4, lon: -47.2, lotes: ['06'], existente: false, marca: null },
+        { nome: 'M-003', lat: -4.4, lon: -47.2, lotes: ['07'], existente: false, marca: null },
+      ],
+    });
+    expect(a.lotes['05']).toEqual({ situacao: 'DEMARCADO', marcados: 4, exigidos: 4, concluido_em: '2026-11-18' });
+    expect(a.lotes['06'].situacao).toBe('EM_DEMARCACAO');
+    expect(a.lotes['07'].situacao).toBe('AGUARDANDO');
+    expect(a.pontos.map((p) => [p.nome, p.situacao])).toEqual([['M-001', 'LOCADO'], ['M-002', 'A_CRAVAR']]);
+    expect(a.resumo).toEqual({ total: 3, demarcados: 1, em_demarcacao: 1 });
+    expect(JSON.stringify(a)).not.toMatch(/usuario|equipe/i);
+  });
+});

@@ -10,6 +10,7 @@ import { buscarProjeto } from '../services/pa/paRepo';
 import { geojsonSubdivisao } from '../services/pa/paMapas';
 import { baseUrlPublica } from '../services/pa/paBoletoPdf';
 import { marcaUrls } from '../services/pa/marcaProjeto';
+import { estadoCampo, diaBrasilia } from '../services/pa/paCampo';
 
 const segredo = () => process.env.JWT_SECRET || process.env.PA_PESQUISA_SEGREDO || 'romatec-mapa';
 const assinatura = (pid: number) => createHmac('sha256', segredo()).update(`mapa-publico:${pid}`).digest('base64url').slice(0, 14);
@@ -48,6 +49,24 @@ export function geoPublico(geo: { features: Feicao[] }): { type: 'FeatureCollect
       return { type: 'Feature', geometry: f.geometry, properties: { tipo: f.properties.tipo, rotulo: f.properties.rotulo ?? null } };
     }),
   };
+}
+
+// v3.183.0: andamento da demarcação no mapa público (vem do mesmo dado que a equipe marca no Campo)
+export type SituacaoPublica = 'DEMARCADO' | 'EM_DEMARCACAO' | 'AGUARDANDO';
+interface LoteCampo { lote: string; marcados: number; exigidos: string[]; fechado: { concluido_em: string } | null }
+interface PontoCampo { nome: string; lat: number; lon: number; lotes: string[]; existente: boolean; marca: { marcado_em: string } | null }
+/** Situação por lote + marcos dos lotes em andamento/concluídos (pura — testável). Sem nomes da equipe. */
+export function andamentoPublico(e: { lotes: LoteCampo[]; pontos: PontoCampo[] }) {
+  const lotes: Record<string, { situacao: SituacaoPublica; marcados: number; exigidos: number; concluido_em: string | null }> = {};
+  for (const l of e.lotes) {
+    lotes[l.lote] = { situacao: l.fechado ? 'DEMARCADO' : l.marcados > 0 ? 'EM_DEMARCACAO' : 'AGUARDANDO', marcados: l.marcados, exigidos: l.exigidos.length, concluido_em: l.fechado ? diaBrasilia(l.fechado.concluido_em) : null };
+  }
+  const ativos = new Set(Object.entries(lotes).filter(([, v]) => v.situacao !== 'AGUARDANDO').map(([k]) => k));
+  const pontos = e.pontos.filter((p) => p.lotes.some((l) => ativos.has(l))).map((p) => ({
+    nome: p.nome, lon: p.lon, lat: p.lat, situacao: p.marca ? 'LOCADO' : p.existente ? 'EXISTENTE' : 'A_CRAVAR', em: p.marca ? diaBrasilia(p.marca.marcado_em) : null,
+  }));
+  const vs = Object.values(lotes);
+  return { lotes, pontos, resumo: { total: vs.length, demarcados: vs.filter((v) => v.situacao === 'DEMARCADO').length, em_demarcacao: vs.filter((v) => v.situacao === 'EM_DEMARCACAO').length } };
 }
 
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -93,12 +112,19 @@ body.ml-travado{overflow:hidden}
 .card-lote h2{margin:2px 0 8px;font-size:26px;color:#0C3320;font-family:Georgia,serif}
 .card-lote .g{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
 .card-lote .g div{border:1px solid #E5DFCD;border-radius:10px;padding:8px 10px;background:#FBFAF5}.card-lote .g span{display:block;font-size:11px;color:#6A6656;text-transform:uppercase;font-weight:700}.card-lote .g b{font-size:16px;color:#0C3320}
-.av{font-size:12px;color:#6A6656;margin-top:8px;text-align:center}`;
+.av{font-size:12px;color:#6A6656;margin-top:8px;text-align:center}
+.leg{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;margin:8px 4px 0}.leg i{display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid #0C3320;vertical-align:middle;margin-right:5px}
+.res{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.res b{color:#0C3320;font-size:18px}.res .bar{flex:1 1 160px;height:10px;border-radius:5px;background:#E7E2D2;overflow:hidden}.res .bar i{display:block;height:100%;background:#2E9D4F}
+.sit{display:inline-block;border-radius:999px;padding:4px 12px;font-weight:800;font-size:14px;margin-bottom:8px}.sit.ok{background:#E3F2E6;color:#1E7B34}.sit.em{background:#E3F0FB;color:#1C5D99}.sit.ag{background:#F1EFE6;color:#6A6656}
+.ml-vert{display:flex;align-items:center;gap:3px;cursor:pointer}.ml-vert i{width:9px;height:9px;border-radius:50%;background:var(--vc,#B3261E);border:1.5px solid #fff;box-shadow:0 0 2px #0006}
+.ml-vert span{color:var(--vc,#B3261E);font-weight:800;font-size:10px;text-shadow:0 0 3px #fff,0 0 3px #fff}.ml-vert.on i{width:15px;height:15px;background:#2F5FD0}
+.leaflet-tooltip.ml-rotv{color:#B3261E;font-size:10px}`;
 
 export function htmlMapaPublico(p: { nome: string; municipio: string; uf: string; associacao: string | null; emblema: string | null; brasao: string | null }, token: string): string {
   return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
   <meta name="theme-color" content="#0C3320"><title>Mapa dos lotes — ${esc(p.nome)}</title><style>${CSS}</style></head><body><div class="w">
   <div class="top">${p.emblema ? `<img src="${esc(p.emblema)}" alt="">` : ''}<div style="flex:1"><small>Mapa dos lotes</small><h1>${esc(p.nome)}</h1><p>${esc(p.associacao || '')}${p.associacao ? ' · ' : ''}${esc(p.municipio)}/${esc(p.uf)}</p></div>${p.brasao ? `<img src="${esc(p.brasao)}" alt="" style="border-radius:10px">` : ''}</div>
+  <div class="c" id="resumo" style="display:none"></div>
   <div class="c">
     <label for="busca">Procure pelo seu nome, chácara ou número do lote</label>
     <input id="busca" list="lista" placeholder="Ex.: Maria, São José, 43" autocomplete="off"><datalist id="lista"></datalist>
@@ -108,18 +134,24 @@ export function htmlMapaPublico(p: { nome: string; municipio: string; uf: string
     </div>
     <div class="ml-wrap"><div id="pMapa" class="ml-mapa"><div style="padding:120px 20px;text-align:center;color:#6A6656">Carregando o mapa…</div></div><div id="pCtl" class="ml-ctl" hidden></div></div>
   </div>
+  <div class="leg" id="leg" style="display:none"><span><i style="background:#2E9D4F"></i>Demarcado ✓</span><span><i style="background:#5DA9E9"></i>Em demarcação</span><span><i style="background:#fff"></i>Aguardando</span><span><i style="background:#2E9D4F;border-radius:50%"></i>Marco cravado</span><span><i style="background:#B3261E;border-radius:50%"></i>Marco a cravar</span></div>
   <div class="card-lote" id="cartao"></div>
   <p class="av">Toque num lote para ver o número, o associado, o lote da vila e o nome da chácara. Romatec Consultoria Total · Açailândia/MA</p></div>
   <script>const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));</script>
   <script src="/js/pa-mapa-motor.js"></script>
   <script>
   (function(){
-    var GEO = null, ATUAL = null, eng = null;
+    var GEO = null, ATUAL = null, eng = null, AND = null;
+    var COR = { DEMARCADO: '#2E9D4F', EM_DEMARCACAO: '#5DA9E9' };
+    var SIT = { DEMARCADO: ['ok', '✅ Demarcado'], EM_DEMARCACAO: ['em', '🚧 Em demarcação'], AGUARDANDO: ['ag', '⏳ Aguardando demarcação'] };
+    function dbr(d){ return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : ''; }
     var cartao = document.getElementById('cartao');
     function mostrarLote(f){
       var b = f.properties.beneficiario;
       cartao.style.display = 'block';
-      cartao.innerHTML = '<small>Lote de produção</small><h2>LT-' + esc(f.properties.lote) + '</h2><div class="g">'
+      var a = AND && AND.lotes[f.properties.lote];
+      var sit = a ? '<span class="sit ' + SIT[a.situacao][0] + '">' + SIT[a.situacao][1] + (a.situacao === 'DEMARCADO' && a.concluido_em ? ' em ' + dbr(a.concluido_em) : a.situacao === 'EM_DEMARCACAO' ? ' — ' + a.marcados + ' de ' + a.exigidos + ' marcos cravados' : '') + '</span>' : '';
+      cartao.innerHTML = '<small>Lote de produção</small><h2>LT-' + esc(f.properties.lote) + '</h2>' + sit + '<div class="g">'
         + '<div><span>Associado(a)</span><b>' + esc(b && b.nome ? b.nome : 'Sem associado vinculado') + '</b></div>'
         + '<div><span>Lote na vila</span><b>' + esc(b && b.lote_vila ? b.lote_vila : '—') + '</b></div>'
         + '<div><span>Chácara</span><b>' + esc(b && b.denominacao ? b.denominacao : '—') + '</b></div></div>';
@@ -135,9 +167,16 @@ export function htmlMapaPublico(p: { nome: string; municipio: string; uf: string
       if (eng && eng.mapa) { try { eng.mapa.remove(); } catch (e) {} }
       ctl.hidden = true; ctl.innerHTML = ''; box.innerHTML = '';
       (modo === '3d' ? carregarMapLibre() : carregarLeaflet()).then(function(lib){
-        var lotesF = GEO.features.filter(function(f){ return f.properties.tipo === 'LOTE'; });
+        var lotesF = GEO.features.filter(function(f){ return f.properties.tipo === 'LOTE'; }).map(function(f){
+          var a = AND && AND.lotes[f.properties.lote];
+          return a && COR[a.situacao] ? { type: f.type, geometry: f.geometry, properties: Object.assign({}, f.properties, { cor: COR[a.situacao] }) } : f;
+        });
+        var pontos = (AND ? AND.pontos : []).map(function(p){ return { id: p.nome, nome: p.nome, lngLat: [p.lon, p.lat], cor: p.situacao === 'LOCADO' ? '#2E9D4F' : p.situacao === 'EXISTENTE' ? '#6A6656' : '#B3261E', info: p }; });
         var porLote = {}; lotesF.forEach(function(f){ porLote[f.properties.lote] = f; });
-        var ctx = { geo: GEO, lotesF: lotesF, porLote: porLote, ctl: ctl, baseSel: '.pBase [data-base]', rotulo: function(f){ return 'LT-' + f.properties.lote; } };
+        var ctx = { geo: GEO, lotesF: lotesF, porLote: porLote, ctl: ctl, baseSel: '.pBase [data-base]', pontos: pontos, opacFill: AND ? .55 : undefined,
+          rotulo: function(f){ var a = AND && AND.lotes[f.properties.lote]; return 'LT-' + f.properties.lote + (a && a.situacao === 'DEMARCADO' ? ' ✓' : ''); } };
+        ctx.selPonto = function(id){ var p = pontos.find(function(x){ return x.id === id; }); if (!p) return; eng.marcarPonto(id);
+          cartao.style.display = 'block'; cartao.innerHTML = '<small>Marco</small><h2>' + esc(p.nome) + '</h2><span class="sit ' + (p.info.situacao === 'LOCADO' ? 'ok">✅ Cravado' + (p.info.em ? ' em ' + dbr(p.info.em) : '') : p.info.situacao === 'EXISTENTE' ? 'ag">Marco já existente (perímetro)' : 'ag">⏳ A cravar') + '</span>'; };
         ctx.selecionar = function(l, centralizar){ if (!porLote[l]) return; ATUAL = l; eng.marcar(l, centralizar); mostrarLote(porLote[l]); };
         eng = modo === '3d' ? mapaLotes3D(lib, box, ctx) : mapaLotes2D(lib, box, ctx);
         window.__sel = ctx.selecionar;
@@ -147,8 +186,17 @@ export function htmlMapaPublico(p: { nome: string; municipio: string; uf: string
         box.innerHTML = '<div style="padding:60px 20px;text-align:center">' + esc(e.message) + '</div>';
       });
     }
-    fetch('/pa/mapa/${esc(token)}/geo.json').then(function(r){ if (!r.ok) throw new Error('Não foi possível carregar o mapa'); return r.json(); }).then(function(g){
-      GEO = g;
+    function resumo(){
+      var box = document.getElementById('resumo');
+      if (!AND || !AND.resumo.total) { box.style.display = 'none'; return; }
+      var r = AND.resumo, pct = Math.round(r.demarcados / r.total * 100);
+      box.style.display = 'block';
+      box.innerHTML = '<div class="res"><span>📍 <b>' + r.demarcados + '</b> de ' + r.total + ' lotes demarcados' + (r.em_demarcacao ? ' · <b>' + r.em_demarcacao + '</b> em demarcação' : '') + '</span><div class="bar"><i style="width:' + pct + '%"></i></div><span style="font-size:12px;color:#6A6656">atualizado ' + new Date(GEO.atualizado_em || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + ' · <a href="#" id="atu">🔄 atualizar</a></span></div>';
+      document.getElementById('leg').style.display = 'flex';
+      document.getElementById('atu').onclick = function(ev){ ev.preventDefault(); carregar(); };
+    }
+    function carregar(){ fetch('/pa/mapa/${esc(token)}/geo.json', { cache: 'no-store' }).then(function(r){ if (!r.ok) throw new Error('Não foi possível carregar o mapa'); return r.json(); }).then(function(g){
+      GEO = g; AND = g.andamento || null; resumo();
       var lotes = g.features.filter(function(f){ return f.properties.tipo === 'LOTE'; });
       var opc = lotes.map(function(f){ var b = f.properties.beneficiario; return { lote: f.properties.lote, txt: 'LT-' + f.properties.lote + (b && b.nome ? ' · ' + b.nome : '') + (b && b.denominacao ? ' · ' + b.denominacao : '') }; });
       document.getElementById('lista').innerHTML = opc.map(function(o){ return '<option value="' + esc(o.txt) + '">'; }).join('');
@@ -156,7 +204,8 @@ export function htmlMapaPublico(p: { nome: string; municipio: string; uf: string
       busca.onchange = function(){ var o = opc.find(function(x){ return x.txt === busca.value; }) || opc.find(function(x){ return x.txt.toLowerCase().indexOf(busca.value.trim().toLowerCase()) >= 0; });
         if (o && window.__sel) { window.__sel(o.lote, true); document.getElementById('pMapa').scrollIntoView({ behavior: 'smooth', block: 'center' }); } };
       desenhar();
-    }).catch(function(e){ document.getElementById('pMapa').innerHTML = '<div style="padding:60px 20px;text-align:center">' + esc(e.message) + '</div>'; });
+    }).catch(function(e){ document.getElementById('pMapa').innerHTML = '<div style="padding:60px 20px;text-align:center">' + esc(e.message) + '</div>'; }); }
+    carregar();
   })();
   </script></body></html>`;
 }
@@ -180,10 +229,12 @@ router.get('/:token', async (req: Request, res: Response) => {
   }
 });
 router.get('/:token/geo.json', async (req: Request, res: Response) => {
-  res.setHeader('Cache-Control', 'private, max-age=300'); res.setHeader('X-Robots-Tag', 'noindex');
+  res.setHeader('Cache-Control', 'private, no-cache'); res.setHeader('X-Robots-Tag', 'noindex');
   try {
     const { pid } = await projetoDoToken(req.params.token);
-    res.json(geoPublico((await geojsonSubdivisao(pid)) as unknown as { features: Feicao[] }));
+    const geo = geoPublico((await geojsonSubdivisao(pid)) as unknown as { features: Feicao[] });
+    const and = await estadoCampo(pid).then((e) => andamentoPublico(e as unknown as { lotes: LoteCampo[]; pontos: PontoCampo[] })).catch(() => null);
+    res.json({ ...geo, andamento: and, atualizado_em: new Date().toISOString() });
   } catch (e) {
     const pe = e instanceof PaErro; if (!pe) console.error('[pa-mapa-publico]', e);
     res.status(pe ? e.http : 500).json({ erro: pe ? e.message : 'Mapa indisponível' });
