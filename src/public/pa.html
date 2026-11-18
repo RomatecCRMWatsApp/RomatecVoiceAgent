@@ -544,6 +544,17 @@ function mostrar(aba){
   ({ painel: rPainel, mapa: rMapa, associados: rAssociados, financeiro: rFinanceiro, carteirinhas: rCarteirinhas, documentos: rDocumentosOficiais, campo: rCampo, importar: rImportar, equipe: rEquipe, dossies: rDossies })[aba]();
 }
 const podeEscrever = () => S.eu && S.eu.pode_escrever;
+// v3.175.4: destino do envio — vem o WhatsApp cadastrado; dá para trocar por outro número só nesta vez.
+// Devolve undefined se cancelou, null se é o cadastrado, ou o número digitado.
+function perguntarNumero(nome, cadastrado){
+  const fmt = (n) => String(n || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+  const atual = fmt(cadastrado);
+  const r = prompt(`Enviar para ${nome}.\n\nNúmero de WhatsApp (já vem o cadastrado — troque se quiser mandar para outro):`, atual);
+  if (r === null) return undefined;
+  const d = r.replace(/\D/g, '');
+  if (!d) { toast('Informe o número', true); return undefined; }
+  return d === atual ? null : d;
+}
 
 // ─── Painel (v3.145.0: identidade do PA, KPIs, gráficos e pendências cadastrais) ─
 const CORES_FORMA = { PIX:'#1f7a4d', ESPECIE:'#C9A84C', CARTAO_DEBITO:'#2b5f8a', CARTAO_CREDITO:'#5b7fb0', BOLETO:'#14472B', MISTO:'#B3261E' };
@@ -2260,7 +2271,7 @@ async function rFinanceiro(){
           <td><b>${esc(g.lote)}</b></td><td>${esc(g.nome)}<div class="muted">${esc(g.telefone || 'sem telefone')} ${chip(g.whatsapp_status, WA_TXT[g.whatsapp_status])}</div></td>
           <td>${g.itens.map((x) => `<label class="citem"><input type="checkbox" class="cItem" data-g="${i}" data-l="${x.lancamento_id}" data-tipo="${esc(x.tipo)}" data-parc="${x.parcela}" checked> ${esc(x.rotulo)} ${brl(x.saldo)} · ${dbr(x.vencimento)} ${chip(x.status)}${x.boleto ? ' ' + chip('PAGO', '🧾 boleto') + (x.boleto.enviado_em ? ' <span class="muted">enviado ' + dbr(x.boleto.enviado_em) + '</span>' : '') : ''}</label>`).join('')}</td>
           <td class="right nowrap"><b>${brl(g.total)}</b></td>
-          <td class="nowrap">${podeEscrever() && g.whatsapp_status === 'VALIDO' ? `<button class="btn btn-primary btn-sm" data-env="${i}">${g.itens.some((x) => x.boleto && x.boleto.enviado_em) ? '↻ Reenviar' : '📤 Sistema'}</button>` : ''}
+          <td class="nowrap">${podeEscrever() ? `<button class="btn btn-primary btn-sm" data-env="${i}">${g.itens.some((x) => x.boleto && x.boleto.enviado_em) ? '↻ Reenviar' : '📤 Sistema'}</button>` : ''}
             ${g.whatsapp_url ? `<a class="btn btn-gold btn-sm" href="${esc(g.whatsapp_url)}" target="_blank" rel="noopener">WhatsApp</a>` : ''} <button class="btn btn-ghost btn-sm" data-pix="${i}">Pix</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nada em aberto até essa data. 🎉</div>';
       const box = $('#cobBox');
       acompanharFila();
@@ -2276,15 +2287,17 @@ async function rFinanceiro(){
       if ($('#cTodos')) { $('#cTodos').checked = true; $('#cTodos').onchange = () => { box.querySelectorAll('.cAssoc:not([disabled])').forEach((x) => { x.checked = $('#cTodos').checked; }); contar(); }; }
       contar();
       const previa = (g, ids) => api(`/associados/${g.associado_id}/whatsapp/cobranca`, { json: { lancamento_ids: ids, previa: true } });
-      const enviar = (g, ids) => api(`/associados/${g.associado_id}/whatsapp/cobranca`, { json: { lancamento_ids: ids } });
+      const enviar = (g, ids, numero) => api(`/associados/${g.associado_id}/whatsapp/cobranca`, { json: { lancamento_ids: ids, numero: numero || undefined } });
       box.querySelectorAll('[data-env]').forEach((b) => b.onclick = async () => {
         const i = Number(b.dataset.env); const g = c.lista[i]; const ids = idsDe(i);
         if (!ids.length) return toast('Marque ao menos uma parcela desse associado', true);
         try {
           const pv = await previa(g, ids);
           if (!confirm(`Enviar para ${g.nome} pelo WhatsApp do sistema?\n\n${pv.mensagem}`)) return;
+          const numero = perguntarNumero(g.nome, g.whatsapp_status === 'VALIDO' ? (g.whatsapp_numero || g.telefone) : '');
+          if (numero === undefined) return;
           b.disabled = true;
-          await enviar(g, ids); toast('Enviado para ' + g.nome); b.textContent = '↻ Reenviar';
+          await enviar(g, ids, numero); toast('Enviado para ' + g.nome + (numero ? ' (outro número)' : '')); b.textContent = '↻ Reenviar';
         } catch (e){ toast(e.message, true); }
         finally { b.disabled = false; }
       });
@@ -2496,7 +2509,7 @@ async function rMarcos(){
         ${j.erros.length ? `<ul>${j.erros.map((x) => `<li>${esc(x.nome)}: ${esc(x.erro)}</li>`).join('')}</ul>` : ''}</div>` : '';
   const filaHtml = f ? `<div class="avisos">📲 Envio pelo WhatsApp: <b>${esc(f.status)}</b> · ${f.enviados} enviado(s)${f.falhas ? ` · ${f.falhas} falha(s)` : ''} de ${f.total}${f.atual && f.status === 'RODANDO' ? ` · agora: ${esc(f.atual)}` : ''}</div>` : '';
   const linhas = L.map((a) => `<tr>${podeEscrever() ? `<td><input type="checkbox" class="mkCk" value="${a.associado_id}"></td>` : ''}<td><b>${esc(a.lote_vila)}</b></td><td class="nowrap">${a.parcela ? 'LT-' + esc(a.parcela) : '—'}</td><td>${esc(a.nome)}<div class="muted">${esc(a.numero)}</div></td>
-        <td>${a.whatsapp_valido ? chip('VALIDO', '✓') : '<span class="muted">sem WhatsApp</span>'}</td><td class="right nowrap">${a.lancamento ? brl(a.lancamento.valor) : '—'}</td><td class="nowrap">${a.lancamento ? dbr(a.lancamento.vencimento) : '—'}</td><td>${stBol(a)}${podeEscrever() && a.boleto && a.whatsapp_valido && a.lancamento && a.lancamento.status !== 'PAGO' ? ` <button class="btn btn-ghost btn-sm" data-mkum="${a.associado_id}" title="Enviar só para este associado">📲 ${a.boleto.enviado_em ? 'Reenviar' : 'Enviar'}</button>` : ''}</td></tr>`).join('');
+        <td>${a.whatsapp_valido ? chip('VALIDO', '✓') : '<span class="muted">sem WhatsApp</span>'}</td><td class="right nowrap">${a.lancamento ? brl(a.lancamento.valor) : '—'}</td><td class="nowrap">${a.lancamento ? dbr(a.lancamento.vencimento) : '—'}</td><td>${stBol(a)}${podeEscrever() && a.boleto && a.lancamento && a.lancamento.status !== 'PAGO' ? ` <button class="btn btn-ghost btn-sm" data-mkum="${a.associado_id}" title="Enviar só para este associado">📲 ${a.boleto.enviado_em ? 'Reenviar' : 'Enviar'}</button>` : ''}</td></tr>`).join('');
   box.innerHTML = `<div class="card"><h2 style="margin-top:0">🪨 Taxa de marcos de concreto</h2>
       <div class="muted">Um boleto por associado para os marcos de concreto cravados nos vértices do lote. Mesmo valor e mesmo vencimento para todos. Gera o boleto no Asaas e, com o envio marcado, manda pelo WhatsApp do sistema <b>um por vez, com 30 a 60 s entre associados</b> (anti-bloqueio).</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">${kpi('Associados', L.length)}${kpi('Com taxa lançada', com.length)}${kpi('Boleto gerado', bol.length)}${kpi('Enviado no WhatsApp', env.length)}${kpi('Pagos', pagos.length, brl(pagos.reduce((s, a) => s + a.lancamento.valor, 0)))}</div>
@@ -2523,9 +2536,10 @@ async function rMarcos(){
   // v3.175.3: envio manual, um associado por clique
   box.querySelectorAll('[data-mkum]').forEach((b) => b.onclick = async () => {
     const a = L.find((x) => x.associado_id === Number(b.dataset.mkum));
-    if (!confirm(`Enviar o boleto da taxa de marcos para ${a.nome} pelo WhatsApp?`)) return;
+    const numero = perguntarNumero(a.nome + ' — boleto da taxa de marcos', a.whatsapp_valido ? a.whatsapp_numero : '');
+    if (numero === undefined) return;
     b.disabled = true;
-    try { await api(`/projetos/${S.pid}/marcos/${a.associado_id}/enviar`, { json: {} }); toast(`Boleto enviado para ${a.nome.split(' ')[0]} ✅`); rMarcos(); }
+    try { await api(`/projetos/${S.pid}/marcos/${a.associado_id}/enviar`, { json: { numero: numero || undefined } }); toast(`Boleto enviado para ${a.nome.split(' ')[0]} ✅`); rMarcos(); }
     catch (e){ toast(e.message, true); b.disabled = false; }
   });
   if ($('#mkParar')) $('#mkParar').onclick = async () => { try { await api('/whatsapp/fila/parar', { json: {} }); toast('Envio parado'); rMarcos(); } catch (e){ toast(e.message, true); } };

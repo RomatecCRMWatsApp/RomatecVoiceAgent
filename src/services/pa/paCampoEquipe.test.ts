@@ -91,3 +91,12 @@ describe('planilha oficial de marcos', () => {
     expect(m[1].comprar).toBe(true);
   });
 });
+
+describe('envio para outro número (v3.175.4)', () => {
+  it('aceita DDD + número e põe o 55; recusa número curto', async () => {
+    const { numeroDestino } = await import('./paWhatsapp');
+    expect(numeroDestino('(99) 9 9181-1246')).toBe('5599991811246');
+    expect(numeroDestino('5599991811246')).toBe('5599991811246');
+    expect(numeroDestino('9918112')).toBeNull();
+  });
+});

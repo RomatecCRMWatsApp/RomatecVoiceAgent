@@ -113,10 +113,22 @@ export function variarSaudacao(texto: string, agora = new Date()): string {
 }
 
 /** Envia um texto ao associado pelo WhatsApp do sistema (só número VALIDO). */
-export async function enviarWhatsAppAssociado(aid: number, mensagem: string, tipo: string, usuario: string | null) {
+/** v3.175.4: número digitado na hora (outro destino) → só dígitos com DDI 55. null = inválido. Pura — testável. */
+export function numeroDestino(v: unknown): string | null {
+  const d = String(v ?? '').replace(/\D/g, '');
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  if ((d.length === 12 || d.length === 13) && d.startsWith('55')) return d;
+  return null;
+}
+
+/** Envia ao associado. Por padrão vai para o WhatsApp cadastrado; `outroNumero` manda para outro número (só nesta vez). */
+export async function enviarWhatsAppAssociado(aid: number, mensagem: string, tipo: string, usuario: string | null, outroNumero?: unknown) {
   const a = await one(pool, 'SELECT id, projeto_id, nome, whatsapp_status, whatsapp_numero FROM pa_associados WHERE id = ?', [aid]);
   if (!a) throw new PaErro('ASSOCIADO_NAO_ENCONTRADO', 'Associado não encontrado', 404);
-  if (a.whatsapp_status !== 'VALIDO' || !a.whatsapp_numero) {
+  const outro = outroNumero != null && String(outroNumero).trim() !== '' ? numeroDestino(outroNumero) : null;
+  if (outroNumero != null && String(outroNumero).trim() !== '' && !outro) throw new PaErro('CAMPO_INVALIDO', 'Número de WhatsApp inválido — use DDD + número', 400);
+  if (outro) a.whatsapp_numero = outro;
+  else if (a.whatsapp_status !== 'VALIDO' || !a.whatsapp_numero) {
     throw new PaErro('WHATSAPP_NAO_VALIDADO', `WhatsApp de ${a.nome} não está validado — rode "Verificar WhatsApps" antes`, 409);
   }
   const texto = String(mensagem || '').trim();
@@ -136,7 +148,7 @@ export async function enviarWhatsAppAssociado(aid: number, mensagem: string, tip
   } catch (err) {
     throw new PaErro('ZAPI_INDISPONIVEL', `Falha ao enviar pelo WhatsApp do sistema: ${(err as Error).message.slice(0, 200)}`, 502);
   }
-  await registrarEvento(pool, { projeto_id: num(a.projeto_id), associado_id: aid, usuario, tipo: `WHATSAPP_${tipo}`.slice(0, 40), dados: { message_id: r.messageId ?? null, chars: texto.length } });
+  await registrarEvento(pool, { projeto_id: num(a.projeto_id), associado_id: aid, usuario, tipo: `WHATSAPP_${tipo}`.slice(0, 40), dados: { message_id: r.messageId ?? null, chars: texto.length, ...(outro ? { outro_numero_final: outro.slice(-4) } : {}) } });
   return { enviado: true, message_id: r.messageId ?? null };
 }
 

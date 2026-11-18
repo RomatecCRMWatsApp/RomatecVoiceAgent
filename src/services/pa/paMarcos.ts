@@ -10,7 +10,7 @@ import { configAsaas } from './asaas';
 export const VALOR_MARCO_PADRAO = 27;
 
 export interface SituacaoMarco {
-  associado_id: number; nome: string; numero: string; lote_vila: string; parcela: string | null; whatsapp_valido: boolean;
+  associado_id: number; nome: string; numero: string; lote_vila: string; parcela: string | null; whatsapp_valido: boolean; whatsapp_numero: string | null;
   lancamento: { id: number; valor: number; vencimento: string | null; status: string; saldo: number } | null;
   boleto: { id: number; status: string; enviado_em: string | null } | null;
 }
@@ -29,7 +29,7 @@ export async function situacaoMarcos(projetoId: number): Promise<SituacaoMarco[]
     const l = x.id != null ? mapLancamento(x) : null;
     return {
       associado_id: num(x.aid), nome: String(x.nome), numero: String(x.numero), lote_vila: String(x.lote_vila), parcela: (x.parcela_rural as string) ?? null,
-      whatsapp_valido: x.whatsapp_status === 'VALIDO' && !!x.whatsapp_numero,
+      whatsapp_valido: x.whatsapp_status === 'VALIDO' && !!x.whatsapp_numero, whatsapp_numero: (x.whatsapp_numero as string) ?? null,
       lancamento: l ? { id: l.id, valor: l.valor, vencimento: isoDate(l.vencimento), status: l.status_efetivo, saldo: l.saldo } : null,
       boleto: l ? bol.get(l.id) ?? null : null,
     };
@@ -66,17 +66,18 @@ let job: JobMarcos | null = null;
 export const estadoJob = () => job;
 
 /** v3.175.3: envio manual de UM associado (sem cascata). Passa pela mesma vez/intervalo global do WhatsApp do sistema. */
-export async function enviarUm(projetoId: number, aid: number, usuario: string | null) {
+export async function enviarUm(projetoId: number, aid: number, usuario: string | null, outroNumero?: unknown) {
   const wa = await import('./paWhatsapp');
   if (wa.estadoFila()?.status === 'RODANDO') throw new PaErro('FILA_EM_ANDAMENTO', 'O envio automático está rodando — aguarde terminar ou pare a fila', 409);
   const s = (await situacaoMarcos(projetoId)).find((x) => x.associado_id === aid);
   if (!s?.lancamento || !s.boleto) throw new PaErro('SEM_BOLETO', 'Gere o boleto da taxa de marcos antes de enviar', 409);
   if (s.lancamento.saldo <= 0.009) throw new PaErro('SEM_SALDO', 'Taxa de marcos já paga', 409);
-  if (!s.whatsapp_valido) throw new PaErro('SEM_WHATSAPP', 'Associado sem WhatsApp válido', 409);
+  const temOutro = outroNumero != null && String(outroNumero).trim() !== '';
+  if (!s.whatsapp_valido && !temOutro) throw new PaErro('SEM_WHATSAPP', 'Associado sem WhatsApp válido — informe outro número', 409);
   const fin = await import('./paFinanceiro');
   const bol = await import('./paBoletos');
   const m = await fin.mensagemParaLancamentos(aid, [s.lancamento.id]);
-  await wa.enviarWhatsAppAssociado(aid, m.mensagem, 'COBRANCA_MARCO', usuario);
+  await wa.enviarWhatsAppAssociado(aid, m.mensagem, 'COBRANCA_MARCO', usuario, temOutro ? outroNumero : undefined);
   for (const b of m.boleto_ids) await bol.marcarEnviado(b);
   return { associado_id: aid, enviado: true };
 }
