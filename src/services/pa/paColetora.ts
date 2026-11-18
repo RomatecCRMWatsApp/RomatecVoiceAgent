@@ -181,13 +181,41 @@ export async function pdfCaderneta(projetoId: number): Promise<{ pdf: Buffer; no
   return { pdf: await pdfDeHtml(html), nome: `CADERNETA-CAMPO-LOCACAO-${p.codigo}.pdf` };
 }
 
-export async function arquivoColetora(projetoId: number, formato: 'csv' | 'txt' | 'dxf'): Promise<{ conteudo: string; nome: string; tipo: string }> {
+/** v3.169.3: KML (Google Earth / coletora / celular): todos os marcos + o contorno de todos os lotes. Pura — testável. */
+export function kmlColetora(d: PontosColetora, nomeDoc: string, lotes: Array<{ lote: string; area_ha: number; anel: Array<[number, number]>; info: string | null }>): string {
+  const x = (v: unknown) => esc(v).replace(/'/g, '&apos;');
+  const c = (lon: number, lat: number) => `${lon.toFixed(8)},${lat.toFixed(8)},0`;
+  const estilo = (id: string, cor: string) => `<Style id="${id}"><IconStyle><color>${cor}</color><scale>0.8</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle><LabelStyle><scale>0.7</scale></LabelStyle></Style>`;
+  const marcos = d.pontos.map((p) => `<Placemark><name>${x(p.nome)}</name><styleUrl>#${p.existente ? 'existente' : p.origem === 'VILA' ? 'vila' : 'cravar'}</styleUrl><description>${x(`${p.existente ? 'JÁ EXISTE · ' : ''}${p.tipo}${p.lotes.length ? ' · LT-' + p.lotes.join('/') : ''} · E ${f3(p.E)} N ${f3(p.N)}`)}</description><Point><coordinates>${c(p.lon, p.lat)}</coordinates></Point></Placemark>`).join('\n');
+  const polis = lotes.map((l) => `<Placemark><name>LT-${x(l.lote)}</name><styleUrl>#lote</styleUrl><description>${x(`${l.area_ha.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ha${l.info ? ' · ' + l.info : ''}`)}</description><Polygon><outerBoundaryIs><LinearRing><coordinates>${[...l.anel, l.anel[0]].map(([lon, lat]) => c(lon, lat)).join(' ')}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${x(nomeDoc)}</name>
+${estilo('cravar', 'ff1e26b3')}${estilo('existente', 'ff626b5b')}${estilo('vila', 'ffd0602f')}
+<Style id="lote"><LineStyle><color>ff00ffff</color><width>2</width></LineStyle><PolyStyle><color>2600ff00</color></PolyStyle></Style>
+<Folder><name>Marcos (${d.pontos.length})</name>
+${marcos}
+</Folder>
+<Folder><name>Lotes (${lotes.length})</name>
+${polis}
+</Folder></Document></kml>
+`;
+}
+
+export async function arquivoColetora(projetoId: number, formato: 'csv' | 'txt' | 'dxf' | 'kml'): Promise<{ conteudo: string; nome: string; tipo: string }> {
   const p = await buscarProjeto(projetoId);
   const d = await pontosColetora(projetoId);
   const base = `PONTOS-COLETORA-${p.codigo}-SIRGAS2000-UTM${d.fuso}${d.hemisferio}`;
   if (formato === 'csv') return { conteudo: csvColetora(d), nome: `${base}.csv`, tipo: 'text/csv; charset=utf-8' };
   if (formato === 'txt') return { conteudo: txtColetora(d), nome: `${base}.txt`, tipo: 'text/plain; charset=utf-8' };
   const sub = await buscarSubdivisao(projetoId);
+  if (formato === 'kml') {
+    const ben = await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>));
+    const lotes = (sub?.parcelas ?? []).map((pc) => {
+      const b = ben[pc.lote];
+      return { lote: pc.lote, area_ha: pc.perimetro.area_ha, anel: pc.perimetro.vertices.map((v) => [v.lon, v.lat] as [number, number]), info: b ? `${b.nome} · vila ${b.lote_vila}${b.denominacao ? ' · ' + b.denominacao : ''}` : null };
+    });
+    return { conteudo: kmlColetora(d, `${p.nome} — marcos e lotes`, lotes), nome: `MARCOS-LOTES-${p.codigo}.kml`, tipo: 'application/vnd.google-earth.kml+xml' };
+  }
   const contornos = (sub?.parcelas ?? []).map((pc) => ({ lote: pc.lote, pts: pc.perimetro.vertices.map((v) => [v.E, v.N] as [number, number]) }));
   return { conteudo: dxfColetora(d, contornos), nome: `${base}.dxf`, tipo: 'application/dxf' };
 }

@@ -64,7 +64,7 @@ export function rotaPaPermitidaCampo(metodo: string, caminho: string, p: Permiss
   if (/^\/projetos\/\d+\/campo\/boletim(\.pdf)?$/.test(c)) return false;
   if (/^\/projetos\/\d+\/campo(\/|$)/.test(c)) return m === 'GET' || p.marcar_campo;
   if (m !== 'GET') return false;
-  if (p.baixar_coletora && /^\/projetos\/\d+\/(coletora\.(csv|txt|dxf)|caderneta-campo\.pdf)$/.test(c)) return true;
+  if (p.baixar_coletora && /^\/projetos\/\d+\/(coletora\.(csv|txt|dxf|kml)|caderneta-campo\.pdf)$/.test(c)) return true;
   // mapa só para visualizar: dados JSON/GeoJSON/SVG, nunca PDF nem download de DXF
   if (p.ver_mapa && /^\/projetos\/\d+\/(subdivisao(\.geojson|\.svg)?|subdivisao\/lotes\/[\w-]+(\.svg)?|perimetro|vila-perimetro|divisa|lotes|desenho|memorial-vila|mapa-vila\.svg|marcas)$/.test(c)) return true;
   return false;
