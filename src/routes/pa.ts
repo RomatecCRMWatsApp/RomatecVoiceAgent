@@ -31,6 +31,7 @@ import * as carteirinha from '../services/pa/paCarteirinha';
 import * as ata from '../services/pa/paAta';
 import * as concessao from '../services/pa/paConcessao';
 import * as pesquisa from '../services/pa/paPesquisa';
+import { linkMapaPublico, textoMapaPublico } from './paMapaPublico';
 import * as part from '../services/pa/paParticipantes';
 import * as relacao from '../services/pa/paRelacaoLotes';
 import * as marcos from '../services/pa/paMarcos';
@@ -469,6 +470,8 @@ router.get('/projetos/:id/ata-assembleia.pdf', h(async (req, res) => {
   enviarPdf(res, await ata.pdfAta(id(req.params.id), ata.lerDadosAta(req.query as Record<string, unknown>), ctx(req).sub));
   return undefined;
 }));
+// v3.182.0: link público do mapa dos lotes (para o grupo dos associados)
+router.get('/projetos/:id/mapa-publico', h(async (req) => { const pid = id(req.params.id); const p = await repo.buscarProjeto(pid); const link = linkMapaPublico(pid); return { link, texto: textoMapaPublico(p.nome, link) }; }));
 // v3.181.0: pesquisa de satisfação — resultado, link pessoal e envio pelo WhatsApp (só quem não respondeu)
 router.get('/projetos/:id/pesquisa', h(async (req) => pesquisa.resultadoPesquisa(id(req.params.id))));
 router.get('/projetos/:id/pesquisa/link/:aid', h(async (req) => { const aid = id(req.params.aid, 'associado'); const a = await repo.buscarAssociado(aid); const link = pesquisa.linkPesquisa(aid); const mensagem = pesquisa.mensagemPesquisa(String((a as { nome?: string }).nome ?? ''), link); return { link, mensagem, texto: mensagem }; }));

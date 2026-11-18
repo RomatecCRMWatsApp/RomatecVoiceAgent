@@ -317,6 +317,7 @@
   .pq-k span{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;font-weight:700}.pq-k b{display:block;font-size:20px;color:var(--green)}.pq-k i{font-style:normal;font-size:12px;color:var(--muted)}
   .pq-dist{display:grid;grid-template-columns:repeat(11,1fr);gap:4px;align-items:end;margin-top:10px;height:100px}.pq-dist div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;font-size:11px}
   .pq-dist i{display:block;width:70%;border-radius:4px 4px 0 0;min-height:2px}.pq-dist span{color:var(--muted)}
+  .ico-marco{display:inline-block;width:.85em;height:1.35em;vertical-align:-.3em}.k2i .ico-marco{width:1.1em;height:1.7em}
   /* v3.177.0: programação do dia */
   .cp-prog .pg-lista{display:flex;flex-direction:column;gap:4px;margin-top:8px}
   .cp-prog .pg-it{display:flex;align-items:center;gap:6px;flex-wrap:wrap;border:1px solid var(--line);border-left:5px solid #5DA9E9;border-radius:8px;padding:6px 8px;background:#fff}
@@ -428,6 +429,7 @@
 <div class="menu-fundo" id="menuFundo"></div>
 <div class="drawer" id="drawer"><div class="pane" id="drawerPane"></div></div>
 
+<script src="/js/pa-mapa-motor.js"></script>
 <script>
 // v3.157.0: área sempre em hectare e alqueire (1 alqueire = 4,84 ha — padrão MA, igual ao backend services/pa/unidades.ts)
 const ALQ_HA = 4.84;
@@ -452,6 +454,8 @@ const dhBr = (iso) => {
   if (Number.isNaN(d.getTime())) return dbr(t);
   return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(',', '');
 };
+// v3.182.0: ícone do marco de concreto (prisma de base quadrada afinando no topo, com o furo do pino)
+const ICO_MARCO = '<svg class="ico-marco" viewBox="0 0 20 32" aria-hidden="true"><ellipse cx="10" cy="29.5" rx="7.5" ry="1.8" fill="#0003"/><polygon points="6.2,4.2 10.6,2.6 14,4 9.6,5.7" fill="#E4E3DD" stroke="#6b6b64" stroke-width=".5" stroke-linejoin="round"/><polygon points="6.2,4.2 9.6,5.7 8.9,29.6 4.4,27.6" fill="#C9C8C1" stroke="#6b6b64" stroke-width=".5" stroke-linejoin="round"/><polygon points="9.6,5.7 14,4 15.7,27.4 8.9,29.6" fill="#9A9991" stroke="#6b6b64" stroke-width=".5" stroke-linejoin="round"/><circle cx="10.1" cy="4.1" r=".7" fill="#6b6b64"/></svg>';
 const chip = (s, txt) => s ? `<span class="chip c-${esc(s)}">${esc(txt || String(s).replace(/_/g,' '))}</span>` : '';
 function toast(msg, err){ const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), err ? 6000 : 3200); }
 
@@ -697,7 +701,7 @@ async function rPainel(){
         <div class="k2"><div class="k2i">⏳</div><div><div class="l">A receber</div><div class="v">${brl(f.a_receber)}</div><div class="muted">${(bol.PENDENTE || 0) + (bol.VENCIDO || 0)} boleto(s) em aberto</div></div></div>
         <div class="k2 red"><div class="k2i">⚠️</div><div><div class="l">Sinais pendentes</div><div class="v">${brl(f.sinais_pendentes)}</div><div class="muted">${f.sinais.a_pagar} a pagar · ${f.sinais.parciais} parcial</div></div></div>
         <div class="k2 ${f.vencido > 0 ? 'red' : 'ok'}"><div class="k2i">📆</div><div><div class="l">Vencido</div><div class="v">${brl(f.vencido)}</div><div class="muted">${f.vencido > 0 ? 'cobrar' : 'nada vencido'}</div></div></div>
-        ${p.marcos ? `<div class="k2 ${p.marcos.a_receber > 0.009 ? '' : 'ok'}"><div class="k2i">🪨</div><div><div class="l">Taxa de marcos</div><div class="v">${brl(p.marcos.recebido)}</div><div class="bar2"><i style="width:${p.marcos.valor ? Math.round(p.marcos.recebido / p.marcos.valor * 100) : 0}%"></i></div><div class="muted">recebido de ${brl(p.marcos.valor)} gerado · ${p.marcos.pagos}/${p.marcos.associados} pagos</div></div></div>` : ''}
+        ${p.marcos ? `<div class="k2 ${p.marcos.a_receber > 0.009 ? '' : 'ok'}"><div class="k2i">${ICO_MARCO}</div><div><div class="l">Taxa de marcos</div><div class="v">${brl(p.marcos.recebido)}</div><div class="bar2"><i style="width:${p.marcos.valor ? Math.round(p.marcos.recebido / p.marcos.valor * 100) : 0}%"></i></div><div class="muted">recebido de ${brl(p.marcos.valor)} gerado · ${p.marcos.pagos}/${p.marcos.associados} pagos</div></div></div>` : ''}
         <div class="k2"><div class="k2i">🗂️</div><div><div class="l">Cadastro completo</div><div class="v">${cad.completos}/${cad.total}</div><div class="bar2"><i style="width:${pctCad}%"></i></div><div class="muted">${pctCad}% sem pendência de dados</div></div></div>
       </div>
 
@@ -706,7 +710,7 @@ async function rPainel(){
           { v: f.recebido, cor: '#1f7a4d', rotulo: 'Recebido', fmt: brl(f.recebido) },
           { v: f.a_receber, cor: '#E3D19A', rotulo: 'A receber', fmt: brl(f.a_receber) },
         ], pct + '%', 'recebido')}</div>
-        ${p.marcos && p.marcos.valor > 0 ? `<div class="card"><h2>🪨 Taxa de marcos de concreto</h2>${rosca([
+        ${p.marcos && p.marcos.valor > 0 ? `<div class="card"><h2>${ICO_MARCO} Taxa de marcos de concreto</h2>${rosca([
           { v: p.marcos.recebido, cor: '#1f7a4d', rotulo: 'Recebido', fmt: brl(p.marcos.recebido) },
           { v: p.marcos.a_receber, cor: '#E3D19A', rotulo: 'A receber', fmt: brl(p.marcos.a_receber) },
         ], (p.marcos.valor ? Math.round(p.marcos.recebido / p.marcos.valor * 1000) / 10 : 0).toLocaleString('pt-BR') + '%', 'recebido')}
@@ -996,6 +1000,8 @@ async function rSubdivisao(){
         <div class="k2"><div class="k2i">🌐</div><div><div class="l">Referência</div><div class="v" style="font-size:16px">SIRGAS 2000</div><div class="muted">UTM fuso ${sub.fuso} ${sub.hemisferio === 'S' ? 'Sul' : 'Norte'}</div></div></div>
         <div class="k2"><div class="k2i">🗓️</div><div><div class="l">Atualizado</div><div class="v" style="font-size:16px">${sub.atualizado_em ? new Date(sub.atualizado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'}</div><div class="muted">${esc(sub.arquivo || '')}</div></div></div>
       </div>
+      <div class="card" style="border-left:5px solid var(--gold)"><div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><div style="flex:1 1 260px"><b>🔗 Mapa público para os associados</b><div class="muted">Link para o grupo: o associado navega no mapa (2D/3D, satélite, relevo) e, ao tocar no lote, vê só o número, o nome do associado, o lote da vila e a chácara — <b>sem área, perímetro ou financeiro</b>.</div></div>
+          <span style="flex:0 0 auto"><button class="btn btn-primary btn-sm" id="mpEnviar">📤 Enviar no grupo</button> <button class="btn btn-ghost btn-sm" id="mpCopiar">📋 Copiar link</button> <button class="btn btn-gold btn-sm" id="mpAbrir">👁️ Ver como o associado</button></span></div></div>
       <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">🧩 Mapa da subdivisão</h2>
           <div style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="sdPdfGeral">📄 PDF — Mapa geral + quadro de áreas</button> <button class="btn btn-primary btn-sm" id="sdPdfTodos">📄 Todos os lotes — tradicional</button> <button class="btn btn-primary btn-sm" id="sdPdfTodosSigef">📄 Todos os lotes — modelo SIGEF</button> <a class="btn btn-ghost btn-sm" style="text-decoration:none;display:inline-block" href="/api/pa/projetos/${S.pid}/subdivisao.dxf" download>⬇️ DXF limpo</a>${podeEscrever() ? ' <button class="btn btn-ghost btn-sm" id="sdLimpar" title="Fecha cada poligonal no canto certo, tira pontos repetidos, traços soltos, frestas e sobreposições">🧹 Limpar poligonais</button>' : ''}${S.eu && S.eu.pode_excluir ? ' <button class="btn btn-danger btn-sm" id="sdRemover">Remover</button>' : ''}</div></div>
         ${quadroLimpeza(sub.limpeza)}
@@ -1078,6 +1084,19 @@ async function rSubdivisao(){
   $('#sdBusca').oninput = (e) => { SUBV.busca = e.target.value; lista(); };
   lista();
   if (SUBV.lote) verLote(SUBV.lote);
+  // v3.182.0: mapa público para os associados
+  if ($('#mpCopiar')) {
+    const mp = () => api(`/projetos/${S.pid}/mapa-publico`);
+    $('#mpCopiar').onclick = () => copiarTextoGrupo(`/projetos/${S.pid}/mapa-publico`);
+    $('#mpAbrir').onclick = async () => { const w = window.open('about:blank', '_blank'); try { const r = await mp(); if (w) w.location.href = r.link; else window.open(r.link, '_blank'); } catch (e){ if (w) w.close(); toast(e.message, true); } };
+    $('#mpEnviar').onclick = async () => {
+      try {
+        const r = await mp();
+        if (navigator.share) { try { await navigator.clipboard.writeText(r.texto); } catch { /* ok */ } await navigator.share({ text: r.texto }).catch((e) => { if (e && e.name !== 'AbortError') caixaManual(r.texto, 'Texto com o link do mapa — copie e cole no grupo'); }); }
+        else window.open('https://wa.me/?text=' + encodeURIComponent(r.texto), '_blank');
+      } catch (e){ toast(e.message, true); }
+    };
+  }
   mapaLotes(sub, verLote);
 }
 
@@ -1122,39 +1141,6 @@ function quadroLimpeza(l){
       ${l.relatorio.map((r) => `<tr><td><b>LT-${esc(r.lote)}</b></td><td class="right">${m2(r.area_antes_m2)}</td><td class="right">${m2(r.area_depois_m2)}</td><td class="right">${r.vertices_antes} → ${r.vertices_depois}</td><td>${r.acoes.map(esc).join('; ')}</td></tr>`).join('')}</tbody></table></div>` : ''}</details>`;
 }
 let MAPA_LOTES = {};
-function carregarLeaflet(){
-  if (window.L) return Promise.resolve(window.L);
-  if (carregarLeaflet.p) return carregarLeaflet.p;
-  carregarLeaflet.p = new Promise((ok, falha) => {
-    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(css);
-    const js = document.createElement('script'); js.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    js.onload = () => ok(window.L); js.onerror = () => { carregarLeaflet.p = null; falha(new Error('não foi possível carregar o mapa (sem internet?)')); };
-    document.head.appendChild(js);
-  });
-  return carregarLeaflet.p;
-}
-const BASES_MAPA = {
-  mapa: ['https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }],
-  satelite: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Imagem © Esri' }],
-  relevo: ['https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '© OpenTopoMap (CC-BY-SA) · relevo e curvas de nível' }],
-};
-// v3.156.0: Mapa 2D (Leaflet) e Mapa 3D (MapLibre — lotes em relevo; clicar sobe o lote, igual ao Mapa 3D do CRM)
-function carregarMapLibre(){
-  if (window.maplibregl) return Promise.resolve(window.maplibregl);
-  if (carregarMapLibre.p) return carregarMapLibre.p;
-  carregarMapLibre.p = new Promise((ok, falha) => {
-    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css'; document.head.appendChild(css);
-    const js = document.createElement('script'); js.src = 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js';
-    js.onload = () => ok(window.maplibregl); js.onerror = () => { carregarMapLibre.p = null; falha(new Error('não foi possível carregar o mapa 3D (sem internet?)')); };
-    document.head.appendChild(js);
-  });
-  return carregarMapLibre.p;
-}
-const TILES_3D = {
-  mapa: { tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png', 'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png', 'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'], maxzoom: 19, attribution: '© OpenStreetMap' },
-  satelite: { tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], maxzoom: 19, attribution: 'Imagem © Esri' },
-  relevo: { tiles: ['https://a.tile.opentopomap.org/{z}/{x}/{y}.png', 'https://b.tile.opentopomap.org/{z}/{x}/{y}.png', 'https://c.tile.opentopomap.org/{z}/{x}/{y}.png'], maxzoom: 17, attribution: '© OpenTopoMap (CC-BY-SA) · relevo e curvas de nível' },
-};
 let MAPA_SEL = null;
 // ─── v3.159.0: mapa geral do PA navegável (mesmas funções do mapa dos lotes) ─
 let MAPA_PG = {};
@@ -1314,73 +1300,6 @@ async function mapaDivisa(d, geo){
   MAPA_DV = { mapa: eng.mapa, parar: eng.parar };
 }
 // ─── v3.163.0: tela cheia de qualquer mapa ─────────────────────────────────
-const ICO_CHEIA = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
-const ICO_SAIR = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
-/** v3.163.1: botão de tela cheia dentro do mapa (canto de cima à direita, acima do zoom) — igual ao do CRM. */
-function controleTelaCheia(box, classe){
-  const el = document.createElement('div'); el.className = classe + ' ml-fsctl';
-  const cheia = !!(box.parentElement && box.parentElement.classList.contains('cheia'));
-  el.innerHTML = `<button type="button" class="ml-fsico" title="${cheia ? 'Sair da tela cheia' : 'Tela cheia'}" aria-label="Tela cheia">${cheia ? ICO_SAIR : ICO_CHEIA}</button>`;
-  el.querySelector('button').onclick = (e) => { e.preventDefault(); e.stopPropagation(); alternarTelaCheia(box.parentElement); };
-  return el;
-}
-const BASE_LEMBRADA = {};
-function aplicarBaseLembrada(ctx){
-  const b = BASE_LEMBRADA[ctx.baseSel];
-  if (!b || b === 'mapa') return;
-  const bt = document.querySelector(ctx.baseSel.replace('[data-base]', `[data-base="${b}"]`));
-  if (bt && bt.onclick) bt.onclick();
-}
-function redimensionarMapa(w){
-  const box = w.querySelector('.ml-mapa') || {}, m = box.__mapa;
-  [60, 350].forEach((t) => setTimeout(() => {
-    try { if (m && m.resize) m.resize(); if (m && m.invalidateSize) m.invalidateSize(); if (t === 350 && box.__ajustar) box.__ajustar(); } catch { /* ok */ }
-  }, t));
-}
-function alternarTelaCheia(w){
-  if (!w) return;
-  const sair = w.classList.contains('cheia');
-  const card = w.closest('.card');
-  const temBotaoCabecalho = !!(card && card.querySelector('.ml-fullbtn'));
-  let bt = w.querySelector(':scope > .ml-full');
-  if (!sair && !bt && !temBotaoCabecalho) { bt = document.createElement('button'); bt.type = 'button'; bt.className = 'ml-full'; bt.dataset.temp = '1'; w.appendChild(bt); }
-  if (sair) {
-    w.classList.remove('cheia'); document.body.classList.remove('ml-travado');
-    (w.__movidos || []).forEach(({ el, ph }) => ph.replaceWith(el)); w.__movidos = null;
-    w.querySelectorAll(':scope > .ml-fsbar').forEach((x) => x.remove());
-    if (document.fullscreenElement === w || document.webkitFullscreenElement === w) { try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch { /* ok */ } }
-    if (bt && bt.dataset.temp) bt.remove(); else if (bt) bt.textContent = '⛶ Tela cheia';
-    if (card) card.querySelectorAll('.ml-fullbtn').forEach((x) => { x.textContent = '⛶ Tela cheia'; });
-    w.querySelectorAll('.ml-fsico').forEach((x) => { x.innerHTML = ICO_CHEIA; x.title = 'Tela cheia'; });
-  } else {
-    w.classList.add('cheia'); document.body.classList.add('ml-travado');
-    // leva para dentro do mapa os botões Mapa/Satélite/Relevo e 2D/3D/Tela cheia (voltam ao sair)
-    const mover = card ? [card.querySelector('.ml-modo'), card.querySelector('.mlBase, .pgBase, .dvBase')].filter(Boolean) : [];
-    if (mover.length) {
-      const barra = document.createElement('div'); barra.className = 'ml-fsbar';
-      w.__movidos = mover.map((el) => { const ph = document.createComment('ml-fs'); el.replaceWith(ph); barra.appendChild(el); return { el, ph }; });
-      w.appendChild(barra);
-    }
-    if (bt) bt.textContent = '✕ Sair da tela cheia';
-    if (card) card.querySelectorAll('.ml-fullbtn').forEach((x) => { x.textContent = '✕ Sair da tela cheia'; });
-    w.querySelectorAll('.ml-fsico').forEach((x) => { x.innerHTML = ICO_SAIR; x.title = 'Sair da tela cheia'; });
-    const f = w.requestFullscreen || w.webkitRequestFullscreen; // computador/Android: esconde também a barra do navegador
-    if (f) { try { const r = f.call(w); if (r && r.catch) r.catch(() => {}); } catch { /* ok */ } }
-  }
-  redimensionarMapa(w);
-}
-document.addEventListener('click', (e) => {
-  if (!e.target.closest) return;
-  const b = e.target.closest('.ml-full');
-  if (b) { alternarTelaCheia(b.parentElement); return; }
-  const f = e.target.closest('.ml-fullbtn');
-  if (f) { const w = f.closest('.ml-wrap') || (f.closest('.card') && f.closest('.card').querySelector('.ml-wrap')); alternarTelaCheia(w); }
-});
-const aoSairFullscreen = () => { if (document.fullscreenElement || document.webkitFullscreenElement) return; document.querySelectorAll('.cheia').forEach((w) => alternarTelaCheia(w)); };
-document.addEventListener('fullscreenchange', aoSairFullscreen);
-document.addEventListener('webkitfullscreenchange', aoSairFullscreen);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('.cheia').forEach((w) => alternarTelaCheia(w)); });
-function modoMapaLotes(){ try { return localStorage.getItem('pa_mapa_modo') === '2d' ? '2d' : '3d'; } catch { return '3d'; } }
 async function mapaLotes(sub, verLote){
   const box = $('#mlMapa'); if (!box) return;
   const modo = modoMapaLotes();
@@ -1412,213 +1331,6 @@ async function mapaLotes(sub, verLote){
   MAPA_LOTES = { mapa: api3.mapa, parar: api3.parar, selecionar };
   const ini = MAPA_SEL && MAPA_SEL.pid === S.pid ? MAPA_SEL.lote : SUBV.lote;
   if (ini) selecionar(ini, false);
-}
-function mapaLotes2D(L, box, ctx){
-  const mapa = L.map(box, { zoomControl: true, scrollWheelZoom: true, zoomSnap: .25, zoomDelta: .5 });
-  box.__mapa = mapa;
-  const CtlCheia = L.Control.extend({ options: { position: 'topright' }, onAdd: () => { const el = controleTelaCheia(box, 'leaflet-bar ml-fsctl-l'); L.DomEvent.disableClickPropagation(el); return el; } });
-  new CtlCheia().addTo(mapa);
-  let base = L.tileLayer(...BASES_MAPA.mapa).addTo(mapa);
-  const camadas = {};
-  let atual = null;
-  document.querySelectorAll(ctx.baseSel).forEach((b) => {
-    b.className = 'btn btn-sm ' + (b.dataset.base === 'mapa' ? 'btn-primary' : 'btn-ghost');
-    b.onclick = () => {
-      mapa.removeLayer(base); base = L.tileLayer(...BASES_MAPA[b.dataset.base]).addTo(mapa); base.bringToBack();
-      BASE_LEMBRADA[ctx.baseSel] = b.dataset.base;
-      document.querySelectorAll(ctx.baseSel).forEach((x) => x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-ghost'));
-    };
-  });
-  const estilo = { APP: { color: '#3E8E41', weight: 1, fillColor: '#9FD08A', fillOpacity: .45 }, COMUNITARIA: { color: '#A07A10', weight: 1.5, fillColor: '#F1DFA4', fillOpacity: .75 },
-    ESTRADA: { color: '#8C5A2B', weight: 3 }, AGUA: { color: '#2B6CB0', weight: 1.6 }, OUTRA: { color: '#999', weight: 1 },
-    PERIMETRO: { color: '#0C3320', weight: 3, dashArray: '8 5', fill: false }, VILA: { color: '#B3261E', weight: 2, dashArray: '4 4', fill: false } };
-  estilo.LOTE_CTX = { color: '#ffffff', weight: 1.2, opacity: .9, fill: false };
-  estilo.DIVISA = { color: '#C62828', weight: 3.5, dashArray: '14 5 3 5' };
-  L.geoJSON({ type: 'FeatureCollection', features: ctx.outros || ctx.geo.features.filter((f) => f.properties.tipo !== 'LOTE') }, {
-    style: (f) => estilo[f.properties.tipo] || estilo.OUTRA, interactive: false,
-  }).addTo(mapa);
-  const corLote = (f, s) => s ? (f.properties.cor ? f.properties.cor : '#2F5FD0') : f.properties.cor || (f.properties.beneficiario ? '#9CC46A' : '#F3E3C3');
-  const borda = (f) => ctx.borda ? ctx.borda : f.properties.cor ? '#0C3320' : f.properties.beneficiario ? '#6E9E3A' : '#ffffff';
-  const opF = ctx.opacFill ?? .12;
-  const lotes = L.geoJSON({ type: 'FeatureCollection', features: ctx.lotesF }, {
-    style: (f) => ({ color: borda(f), weight: ctx.borda ? 3 : 1.8, dashArray: ctx.borda ? '8 5' : null, fillColor: corLote(f, false), fillOpacity: opF }),
-    onEachFeature: (f, ly) => {
-      camadas[f.properties.lote] = ly;
-      ly.bindTooltip(ctx.rotulo ? ctx.rotulo(f) : 'LT-' + f.properties.lote, { permanent: true, direction: 'center', className: 'ml-rot' });
-      ly.on('click', () => ctx.selecionar(f.properties.lote, true));
-    },
-  }).addTo(mapa);
-  mapa.fitBounds(lotes.getBounds(), { padding: [12, 12] });
-  box.__ajustar = () => mapa.fitBounds(lotes.getBounds(), { padding: [16, 16] });
-  aplicarBaseLembrada(ctx);
-  // v3.159.0: pontos clicáveis (vértices do perímetro)
-  const pts2 = {};
-  for (const pt of ctx.pontos || []) {
-    pts2[pt.id] = L.circleMarker([pt.lngLat[1], pt.lngLat[0]], { radius: pt.cor ? 6 : 5, color: '#fff', weight: 1.5, fillColor: pt.cor || '#B3261E', fillOpacity: 1 })
-      .bindTooltip(pt.nome, { permanent: true, direction: 'top', offset: [0, -4], className: 'ml-rot ml-rotv' }).on('click', () => ctx.selPonto(pt.id)).addTo(mapa);
-  }
-  let ptAtual = null;
-  return {
-    mapa, parar: () => {},
-    limpar(){
-      if (atual && camadas[atual]) camadas[atual].setStyle({ fillColor: corLote(camadas[atual].feature, false), color: borda(camadas[atual].feature), weight: ctx.borda ? 3 : 1.8, fillOpacity: opF });
-      atual = null;
-    },
-    marcarPonto(id){
-      if (ptAtual != null && pts2[ptAtual]) { const pa = (ctx.pontos || []).find((x) => x.id === ptAtual); pts2[ptAtual].setStyle({ radius: pa && pa.cor ? 6 : 5, fillColor: (pa && pa.cor) || '#B3261E' }); }
-      ptAtual = id; const m = pts2[id]; if (!m) return; m.setStyle({ radius: 9, fillColor: '#2F5FD0' }); m.bringToFront();
-      mapa.setView(m.getLatLng(), Math.max(mapa.getZoom(), 15));
-    },
-    marcar(lote, centralizar){
-      const ly = camadas[lote];
-      if (atual && camadas[atual]) camadas[atual].setStyle({ fillColor: corLote(camadas[atual].feature, false), color: borda(camadas[atual].feature), weight: ctx.borda ? 3 : 1.8, fillOpacity: opF });
-      atual = lote; ly.setStyle({ fillColor: corLote(ly.feature, true), color: '#1E3F99', weight: 3, fillOpacity: ctx.opacSel2d ?? .7 }); ly.bringToFront();
-      if (centralizar) mapa.fitBounds(ly.getBounds(), { padding: [60, 60], maxZoom: 16 });
-    },
-  };
-}
-function mapaLotes3D(maplibregl, box, ctx){
-  const anel = (f) => f.geometry.coordinates[0];
-  const bbox = (pts) => pts.reduce((b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)], [Infinity, Infinity, -Infinity, -Infinity]);
-  const centro = (pts) => { // centróide do polígono (cai fora só em lote muito côncavo; aí usa o centro do bbox)
-    let a = 0, cx = 0, cy = 0;
-    for (let i = 0; i < pts.length - 1; i++) { const [x0, y0] = pts[i], [x1, y1] = pts[i + 1]; const k = x0 * y1 - x1 * y0; a += k; cx += (x0 + x1) * k; cy += (y0 + y1) * k; }
-    if (Math.abs(a) < 1e-14) { const b = bbox(pts); return [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; }
-    return [cx / (3 * a), cy / (3 * a)];
-  };
-  const tot = bbox(ctx.lotesF.flatMap(anel));
-  // altura das placas proporcional ao tamanho do loteamento (lote rural de dezenas de ha ≠ lote urbano)
-  const diag = Math.hypot((tot[2] - tot[0]) * 111320 * Math.cos(((tot[1] + tot[3]) / 2) * Math.PI / 180), (tot[3] - tot[1]) * 110540);
-  const H = { relevo: Math.max(5, diag * .006), sobe: Math.max(15, diag * .022) };
-  let relevo = 'relevo', atual = null, girando = false, rafGiro = 0, rafSobe = 0, ptAtual = null;
-  const marcadores = {};
-  const cor = ['case', ['==', ['get', 'tem'], 1], '#9CC46A', '#FFFFFF'];
-  const lotesGeo = { type: 'FeatureCollection', features: ctx.lotesF.map((f) => ({ type: 'Feature', geometry: f.geometry, properties: { lote: f.properties.lote, tem: f.properties.beneficiario ? 1 : 0, cor: f.properties.cor || null } })) };
-  const outros = ctx.outros || ctx.geo.features.filter((f) => f.properties.tipo !== 'LOTE');
-  const fc = (tipos, poly) => ({ type: 'FeatureCollection', features: outros.filter((f) => tipos.includes(f.properties.tipo) && (poly === undefined || (f.geometry.type === 'Polygon') === poly)) });
-  const mapa = new maplibregl.Map({
-    container: box, attributionControl: { compact: true }, maxPitch: 75, antialias: true,
-    style: { version: 8, sources: { base: { type: 'raster', tileSize: 256, ...TILES_3D.mapa } },
-      layers: [{ id: 'fundo', type: 'background', paint: { 'background-color': '#DDE6CF' } },
-        { id: 'base', type: 'raster', source: 'base', paint: { 'raster-opacity': .55, 'raster-saturation': -.6 } }] },
-    bounds: [[tot[0], tot[1]], [tot[2], tot[3]]], fitBoundsOptions: { padding: 30 },
-  });
-  mapa.addControl({ onAdd: () => controleTelaCheia(box, 'maplibregl-ctrl maplibregl-ctrl-group'), onRemove: () => {} }, 'top-right');
-  mapa.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
-  box.__mapa = mapa;
-  box.__ajustar = () => {
-    const cam = mapa.cameraForBounds([[tot[0], tot[1]], [tot[2], tot[3]]], { padding: 40, bearing: mapa.getBearing() });
-    if (cam) mapa.easeTo({ center: cam.center, zoom: cam.zoom + (mapa.getPitch() > 20 ? (ctx.zoomExtra ?? .6) : 0), duration: 600 });
-  };
-  mapa.on('load', () => {
-    mapa.addSource('outros', { type: 'geojson', data: fc(['APP', 'COMUNITARIA', 'ESTRADA', 'AGUA', 'OUTRA', 'PERIMETRO', 'VILA', 'LOTE_CTX', 'DIVISA']) });
-    mapa.addLayer({ id: 'ctxlotes', type: 'line', source: 'outros', filter: ['==', ['get', 'tipo'], 'LOTE_CTX'], paint: { 'line-color': '#FFFFFF', 'line-width': 1.1, 'line-opacity': .85 } });
-    mapa.addSource('lotes', { type: 'geojson', data: lotesGeo });
-    mapa.addLayer({ id: 'app', type: 'fill', source: 'outros', filter: ['all', ['==', ['geometry-type'], 'Polygon'], ['==', ['get', 'tipo'], 'APP']], paint: { 'fill-color': '#9FD08A', 'fill-opacity': .35 } });
-    mapa.addLayer({ id: 'com', type: 'fill', source: 'outros', filter: ['all', ['==', ['geometry-type'], 'Polygon'], ['==', ['get', 'tipo'], 'COMUNITARIA']], paint: { 'fill-color': '#F1DFA4', 'fill-opacity': .5 } });
-    mapa.addLayer({ id: 'estrada', type: 'line', source: 'outros', filter: ['==', ['get', 'tipo'], 'ESTRADA'], paint: { 'line-color': '#8C5A2B', 'line-width': 3 } });
-    mapa.addLayer({ id: 'agua', type: 'line', source: 'outros', filter: ['==', ['get', 'tipo'], 'AGUA'], paint: { 'line-color': '#2B6CB0', 'line-width': 2 } });
-    mapa.addLayer({ id: 'per', type: 'line', source: 'outros', filter: ['==', ['get', 'tipo'], 'PERIMETRO'], paint: { 'line-color': '#0C3320', 'line-width': 2.5, 'line-dasharray': [3, 2] } });
-    mapa.addLayer({ id: 'divisa', type: 'line', source: 'outros', filter: ['==', ['get', 'tipo'], 'DIVISA'], paint: { 'line-color': '#C62828', 'line-width': 3.5, 'line-dasharray': [4, 1.5, 1, 1.5] } });
-    mapa.addLayer({ id: 'vila', type: 'line', source: 'outros', filter: ['==', ['get', 'tipo'], 'VILA'], paint: { 'line-color': '#B3261E', 'line-width': 2, 'line-dasharray': [2, 2] } });
-    // v3.157.0: lotes transparentes (vê-se a imagem por baixo); só o clicado sobe em azul
-    mapa.addLayer({ id: 'lotes3d', type: 'fill', source: 'lotes', filter: ['!=', ['get', 'lote'], ''], paint: { 'fill-color': ['coalesce', ['get', 'cor'], cor], 'fill-opacity': ctx.opacFill ?? .12 } });
-    mapa.addLayer({ id: 'lotesborda', type: 'line', source: 'lotes', paint: ctx.borda ? { 'line-color': ctx.borda, 'line-width': 3, 'line-dasharray': [3, 2] } : ctx.bordaCor ? { 'line-color': ctx.bordaCor, 'line-width': 2.5 } : { 'line-color': ['case', ['==', ['get', 'tem'], 1], '#9CC46A', '#FFFFFF'], 'line-width': 1.8, 'line-opacity': .95 } });
-    mapa.addLayer({ id: 'lotesel', type: 'fill-extrusion', source: 'lotes', filter: ['==', ['get', 'lote'], ''],
-      paint: { 'fill-extrusion-color': ['coalesce', ['get', 'cor'], '#2F5FD0'], 'fill-extrusion-height': H.relevo, 'fill-extrusion-base': 0, 'fill-extrusion-opacity': ctx.opacSel3d ?? .97, 'fill-extrusion-vertical-gradient': true } });
-    for (const id of ['lotes3d', 'lotesel']) {
-      mapa.on('click', id, (e) => { const f = e.features && e.features[0]; if (f) ctx.selecionar(f.properties.lote, true); });
-      mapa.on('mouseenter', id, () => { mapa.getCanvas().style.cursor = 'pointer'; });
-      mapa.on('mouseleave', id, () => { mapa.getCanvas().style.cursor = ''; });
-    }
-    for (const f of ctx.lotesF) {
-      const el = document.createElement('div'); el.className = 'ml-rot3d'; el.textContent = ctx.rotulo ? ctx.rotulo(f) : 'LT-' + f.properties.lote;
-      new maplibregl.Marker({ element: el }).setLngLat(centro(anel(f))).addTo(mapa);
-    }
-    // v3.159.0: pontos clicáveis (vértices do perímetro)
-    for (const pt of ctx.pontos || []) {
-      const el = document.createElement('div'); el.className = 'ml-vert'; el.innerHTML = `<i></i><span>${esc(pt.nome)}</span>`;
-      if (pt.cor) el.style.setProperty('--vc', pt.cor); // v3.169.0: cor por ponto (locado/existente)
-      el.onclick = (ev) => { ev.stopPropagation(); ctx.selPonto(pt.id); };
-      marcadores[pt.id] = new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(pt.lngLat).addTo(mapa);
-    }
-    mapa.easeTo({ pitch: 55, bearing: -18, zoom: mapa.getZoom() + (ctx.zoomExtra ?? .6), duration: 900 });
-    aplicarBaseLembrada(ctx);
-    if (atual) marcar(atual, false, true);
-  });
-  // controles por cima do mapa (Girar / Plano / Alto relevo / Vista de cima)
-  const ctl = ctx.ctl;
-  ctl.innerHTML = `<button class="pill" data-a="girar">🔄 Girar</button>
-    <div class="seg"><button data-a="plano">▱ Plano</button><button data-a="relevo" class="on">⛰️ Alto relevo</button><button data-a="cima">🧭 Vista de cima</button></div>`;
-  ctl.hidden = false;
-  const btn = (a) => ctl.querySelector(`[data-a="${a}"]`);
-  const altSel = () => relevo === 'plano' ? H.relevo : H.sobe; // Plano: sobe pouco · Alto relevo: sobe alto
-  const pronto = () => mapa.getLayer && mapa.getLayer('lotes3d');
-  const pintarSeg = (a) => ['plano', 'relevo', 'cima'].forEach((x) => btn(x).classList.toggle('on', x === a));
-  const animarSel = (de, ate, ms = 450) => {
-    cancelAnimationFrame(rafSobe); const t0 = performance.now();
-    const passo = (t) => { const k = Math.max(0, Math.min(1, (t - t0) / ms)); const e = 1 - Math.pow(1 - k, 3);
-      if (pronto()) mapa.setPaintProperty('lotesel', 'fill-extrusion-height', de + (ate - de) * e);
-      if (k < 1) rafSobe = requestAnimationFrame(passo); };
-    rafSobe = requestAnimationFrame(passo);
-  };
-  const aplicarRelevo = () => {
-    if (!pronto()) return;
-    if (atual) mapa.setPaintProperty('lotesel', 'fill-extrusion-height', altSel());
-  };
-  btn('plano').onclick = () => { relevo = 'plano'; pintarSeg('plano'); aplicarRelevo(); if (mapa.getPitch() < 20) mapa.easeTo({ pitch: 50, duration: 600 }); };
-  btn('relevo').onclick = () => { relevo = 'relevo'; pintarSeg('relevo'); aplicarRelevo(); if (mapa.getPitch() < 20) mapa.easeTo({ pitch: 55, duration: 600 }); };
-  btn('cima').onclick = () => { pintarSeg('cima'); pararGiro(); mapa.easeTo({ pitch: 0, bearing: 0, duration: 700 }); };
-  const pararGiro = () => { girando = false; cancelAnimationFrame(rafGiro); btn('girar').classList.remove('on'); };
-  btn('girar').onclick = () => {
-    if (girando) return pararGiro();
-    girando = true; btn('girar').classList.add('on');
-    if (mapa.getPitch() < 20) { pintarSeg(relevo); mapa.easeTo({ pitch: 55, duration: 500 }); }
-    let ult = performance.now();
-    const passo = (t) => { if (!girando) return; mapa.setBearing(mapa.getBearing() + (t - ult) * .012); ult = t; rafGiro = requestAnimationFrame(passo); };
-    rafGiro = requestAnimationFrame(passo);
-  };
-  mapa.on('dragstart', () => girando && pararGiro());
-  // bases Mapa / Satélite / Relevo
-  document.querySelectorAll(ctx.baseSel).forEach((b) => {
-    b.className = 'btn btn-sm ' + (b.dataset.base === 'mapa' ? 'btn-primary' : 'btn-ghost');
-    b.onclick = () => {
-      const t = TILES_3D[b.dataset.base];
-      if (mapa.getLayer('base')) mapa.removeLayer('base');
-      if (mapa.getSource('base')) mapa.removeSource('base');
-      mapa.addSource('base', { type: 'raster', tileSize: 256, ...t });
-      const antes = mapa.getLayer('ctxlotes') ? 'ctxlotes' : undefined;
-      mapa.addLayer({ id: 'base', type: 'raster', source: 'base', paint: b.dataset.base === 'mapa' ? { 'raster-opacity': .55, 'raster-saturation': -.6 } : { 'raster-opacity': 1 } }, antes);
-      BASE_LEMBRADA[ctx.baseSel] = b.dataset.base;
-      document.querySelectorAll(ctx.baseSel).forEach((x) => x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-ghost'));
-    };
-  });
-  function marcar(lote, centralizar, semAnim){
-    atual = lote;
-    if (!pronto()) return; // aplica no 'load'
-    mapa.setFilter('lotes3d', ['!=', ['get', 'lote'], lote]);
-    mapa.setFilter('lotesel', ['==', ['get', 'lote'], lote]);
-    if (semAnim) mapa.setPaintProperty('lotesel', 'fill-extrusion-height', altSel());
-    else animarSel(0, altSel());
-    if (centralizar) {
-      const b = bbox(anel(ctx.porLote[lote]));
-      const cam = mapa.cameraForBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 70, bearing: mapa.getBearing() });
-      if (cam) mapa.easeTo({ center: cam.center, zoom: Math.min(cam.zoom, 17), duration: 700 });
-    }
-  }
-  function limpar(){
-    atual = null;
-    if (!pronto()) return;
-    mapa.setFilter('lotes3d', ['!=', ['get', 'lote'], '']);
-    mapa.setFilter('lotesel', ['==', ['get', 'lote'], '']);
-  }
-  function marcarPonto(id){
-    if (ptAtual != null && marcadores[ptAtual]) marcadores[ptAtual].getElement().classList.remove('on');
-    ptAtual = id; const m = marcadores[id]; if (!m) return;
-    m.getElement().classList.add('on');
-    mapa.easeTo({ center: m.getLngLat(), zoom: Math.max(mapa.getZoom(), 14.5), duration: 700 });
-  }
-  return { mapa, parar: () => { pararGiro(); cancelAnimationFrame(rafSobe); }, marcar, marcarPonto, limpar };
 }
 function cartaoLote(pr, verLote){
   const fm = (v, d = 2) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -2274,7 +1986,7 @@ async function formNovoAssociado(){
 let FIN = { recibo: null, selecionados: [] };
 async function carregarAssoc(){ if (!S.assoc) S.assoc = (await api(`/projetos/${S.pid}/associados`)).associados; return S.assoc; }
 // v3.147.0: sub-abas do Financeiro — Lançamentos e cobrança | Extrato por associado | Fluxo de caixa.
-const FIN_VISOES = [['lancamentos', '💳 Lançamentos e cobrança'], ['extrato', '📋 Extrato por associado'], ['caixa', '📈 Fluxo de caixa'], ['marcos', '🪨 Taxa de marcos']];
+const FIN_VISOES = [['lancamentos', '💳 Lançamentos e cobrança'], ['extrato', '📋 Extrato por associado'], ['caixa', '📈 Fluxo de caixa'], ['marcos', ICO_MARCO + ' Taxa de marcos']];
 function barraFin(){
   return `<div class="subtabs">${FIN_VISOES.map(([k, t]) => `<button class="btn btn-sm ${S.finVisao === k ? 'btn-primary' : 'btn-ghost'}" data-fin="${k}">${t}</button>`).join('')}</div>`;
 }
@@ -2588,7 +2300,7 @@ async function rMarcos(){
         <div style="display:flex;align-items:end"><label class="citem" style="margin:0"><input type="checkbox" id="mkEnviar" checked> Enviar pelo WhatsApp automaticamente <span class="muted">(um por vez, 30–60 s entre cada — sem cascata)</span></label></div>
       </div>
       <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary" id="mkTodos" style="flex:0 0 auto" ${rodando ? 'disabled' : ''}>🪨 Gerar boleto do marco — todos (${L.length})</button>
+        <button class="btn btn-primary" id="mkTodos" style="flex:0 0 auto" ${rodando ? 'disabled' : ''}>${ICO_MARCO} Gerar boleto do marco — todos (${L.length})</button>
         <button class="btn btn-gold" id="mkMarcados" style="flex:0 0 auto" ${rodando ? 'disabled' : ''}>Gerar só para os marcados</button>
         ${f && f.status === 'RODANDO' ? '<button class="btn btn-ghost" id="mkParar" style="flex:0 0 auto">⏹ Parar envio</button>' : ''}
       </div>` : '';
@@ -2597,7 +2309,7 @@ async function rMarcos(){
   const filaHtml = f ? `<div class="avisos">📲 Envio pelo WhatsApp: <b>${esc(f.status)}</b> · ${f.enviados} enviado(s)${f.falhas ? ` · ${f.falhas} falha(s)` : ''} de ${f.total}${f.atual && f.status === 'RODANDO' ? ` · agora: ${esc(f.atual)}` : ''}</div>` : '';
   const linhas = L.map((a) => `<tr>${podeEscrever() ? `<td><input type="checkbox" class="mkCk" value="${a.associado_id}"></td>` : ''}<td><b>${esc(a.lote_vila)}</b></td><td class="nowrap">${a.parcela ? 'LT-' + esc(a.parcela) : '—'}</td><td>${esc(a.nome)}<div class="muted">${esc(a.numero)}</div></td>
         <td>${a.whatsapp_valido ? chip('VALIDO', '✓') : '<span class="muted">sem WhatsApp</span>'}</td><td class="right nowrap">${a.lancamento ? brl(a.lancamento.valor) : '—'}</td><td class="nowrap">${a.lancamento ? dbr(a.lancamento.vencimento) : '—'}</td><td>${stBol(a)}${podeEscrever() && a.boleto && a.lancamento && a.lancamento.status !== 'PAGO' ? ` <button class="btn btn-ghost btn-sm" data-mkum="${a.associado_id}" title="Enviar só para este associado">📲 ${a.boleto.enviado_em ? 'Reenviar' : 'Enviar'}</button>` : ''}</td></tr>`).join('');
-  box.innerHTML = `<div class="card"><h2 style="margin-top:0">🪨 Taxa de marcos de concreto</h2>
+  box.innerHTML = `<div class="card"><h2 style="margin-top:0">${ICO_MARCO} Taxa de marcos de concreto</h2>
       <div class="muted">Um boleto por associado para os marcos de concreto cravados nos vértices do lote. Mesmo valor e mesmo vencimento para todos. Gera o boleto no Asaas e, com o envio marcado, manda pelo WhatsApp do sistema <b>um por vez, com 30 a 60 s entre associados</b> (anti-bloqueio).</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">${kpi('Associados', L.length)}${kpi('Com taxa lançada', com.length)}${kpi('Boleto gerado', bol.length)}${kpi('Enviado no WhatsApp', env.length)}${kpi('Pagos', pagos.length, brl(pagos.reduce((s, a) => s + a.lancamento.valor, 0)))}</div>
       ${form}
@@ -3244,7 +2956,7 @@ async function rLocacao(box){
       <div id="cpCard"></div></div>
     <div class="card"><h2 style="margin-top:0">Lotes — ordem de serviço</h2><div class="muted" style="margin-bottom:6px">Quitados primeiro, depois pela proporção de parcelas pagas; os já medidos ficam no fim.</div><div class="tbl"><table class="tcard"><thead><tr><th># · Lote</th><th>Pagamento</th><th>Associado</th><th class="right">Área</th><th>Marcos</th><th>Situação</th></tr></thead><tbody>
       ${d.lotes.map((l) => `<tr class="click" data-cplote="${esc(l.lote)}" style="box-shadow:inset 5px 0 0 ${faixaCampo(d, l).cor}"><td class="nowrap tc-tit"><b>${l.prioridade ? '#' + l.prioridade : '—'}</b> · <b>${l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${esc(l.lote)}</b></td>
-        <td class="nowrap cp-pg" data-l="Pagamento" style="min-width:110px"><div class="pbar"><i style="width:${l.pagamento ? Math.min(100, l.pagamento.pct) : 0}%;background:${faixaCampo(d, l).cor}"></i></div><span class="muted">${esc(pagTxt(l))}</span>${l.pagamento && l.pagamento.parcelas ? `<div class="muted">🪨 marcos ${l.pagamento.marcos_pago ? 'pagos' : l.pagamento.marcos_lancados ? 'em aberto' : 'não lançados'}</div>` : ''}</td><td data-l="Associado">${l.associado ? esc(l.associado.nome) + `<div class="muted">vila ${esc(l.associado.lote_vila)}${l.associado.denominacao ? ' · ' + esc(l.associado.denominacao) : ''}</div>` : '—'}</td><td class="right nowrap" data-l="Área">${nbr(l.area_ha, 4)} ha</td>
+        <td class="nowrap cp-pg" data-l="Pagamento" style="min-width:110px"><div class="pbar"><i style="width:${l.pagamento ? Math.min(100, l.pagamento.pct) : 0}%;background:${faixaCampo(d, l).cor}"></i></div><span class="muted">${esc(pagTxt(l))}</span>${l.pagamento && l.pagamento.parcelas ? `<div class="muted">${ICO_MARCO} marcos ${l.pagamento.marcos_pago ? 'pagos' : l.pagamento.marcos_lancados ? 'em aberto' : 'não lançados'}</div>` : ''}</td><td data-l="Associado">${l.associado ? esc(l.associado.nome) + `<div class="muted">vila ${esc(l.associado.lote_vila)}${l.associado.denominacao ? ' · ' + esc(l.associado.denominacao) : ''}</div>` : '—'}</td><td class="right nowrap" data-l="Área">${nbr(l.area_ha, 4)} ha</td>
         <td class="nowrap" data-l="Marcos">${l.marcados}/${l.exigidos.length}${l.existentes ? ` <span class="muted">+${l.existentes} existentes</span>` : ''}</td>
         <td data-l="Situação">${l.fechado ? chip('PAGO', '✅ MEDIDO') + `<div class="muted">${hBr(l.fechado.concluido_em)} · ${esc(l.fechado.usuario_nome || '')}</div>` : l.marcados ? chip('PARCIAL', 'em andamento') : '<span class="muted">pendente</span>'}</td></tr>`).join('')}
     </tbody></table></div></div>
@@ -3388,7 +3100,7 @@ async function rDossies(){
     <div class="card">${lista.length ? `<div class="tbl"><table><thead><tr><th>Lote</th><th>Associado</th><th>Medido</th><th class="right">Em aberto</th><th>Situação</th><th></th></tr></thead><tbody>
       ${lista.map((d) => `<tr><td><b>LT-${esc(d.lote)}</b><div class="muted">vila ${esc(d.lote_vila)}</div></td><td>${esc(d.nome)}<div class="muted">${esc(d.numero)}${d.denominacao ? ' · ' + esc(d.denominacao) : ''}</div></td>
         <td class="nowrap">${d.medido_em ? hb(d.medido_em) + `<div class="muted">${esc(d.medidor || '')}</div>` : '—'}</td>
-        <td class="right nowrap">${d.saldo > 0.009 ? brl(d.saldo) : chip('QUITADO')}<div class="muted">${d.marcos_pagos ? '🪨 marcos pagos' : d.marcos_lancados ? '🪨 marcos em aberto' : '🪨 marcos não lançados'}</div></td>
+        <td class="right nowrap">${d.saldo > 0.009 ? brl(d.saldo) : chip('QUITADO')}<div class="muted">${d.marcos_pagos ? ICO_MARCO + ' marcos pagos' : d.marcos_lancados ? ICO_MARCO + ' marcos em aberto' : ICO_MARCO + ' marcos não lançados'}</div></td>
         <td>${chip(ST_DOSSIE[d.status][0], ST_DOSSIE[d.status][1])}${d.pendencia && d.status === 'AGUARDANDO_PAGAMENTO' ? `<div class="muted" style="color:var(--red)">🔒 ${esc(d.pendencia)}</div>` : ''}${d.enviado_em ? `<div class="muted">enviado ${hb(d.enviado_em)}</div>` : ''}
           ${d.status === 'ENVIADO' || d.status === 'ENTREGUE' ? `<div class="muted">📄 TRT: ${d.trt_paga_em ? `✅ paga ${hb(d.trt_paga_em)}` : d.trt_emitida_em ? `emitida ${hb(d.trt_emitida_em)} — aguardando pagamento` : 'a emitir'}${d.trt_numero ? ' · nº ' + esc(d.trt_numero) : ''}</div>` : ''}
           ${d.conclusao_enviada_em ? `<div class="muted">🙏 mensagem de conclusão enviada ${hb(d.conclusao_enviada_em)}</div>` : ''}${d.entregue_em ? `<div class="muted">entregue ${hb(d.entregue_em)} · ${esc(d.entregue_por || '')}${d.entregue_obs ? ' · ' + esc(d.entregue_obs) : ''}</div>` : ''}</td>
@@ -3442,7 +3154,7 @@ function rImportar(){
         <div><label for="iAcervo">Acervo digital (ZIP, opcional)</label><input type="file" id="iAcervo" accept=".zip,application/zip"></div></div>
       <div class="row" style="margin-top:10px"><button class="btn btn-primary" id="iBtn" style="flex:0 0 auto">📥 Importar</button><span class="muted" id="iProg"></span></div>
       <div id="iRel"></div></div>
-    ${S.pid ? `<div class="card"><h2>🪨 Planilha oficial de marcos</h2><p class="muted">QUANTITATIVO-MARCOS-POR-LOTE (.xlsx), aba "Coordenadas dos Marcos". Os códigos M-001… passam a valer na coletora, na caderneta e no mapa de campo; marcos do perímetro marcados "NÃO comprar" aparecem como já existentes.</p>
+    ${S.pid ? `<div class="card"><h2>${ICO_MARCO} Planilha oficial de marcos</h2><p class="muted">QUANTITATIVO-MARCOS-POR-LOTE (.xlsx), aba "Coordenadas dos Marcos". Os códigos M-001… passam a valer na coletora, na caderneta e no mapa de campo; marcos do perímetro marcados "NÃO comprar" aparecem como já existentes.</p>
       <div class="row" style="gap:8px;align-items:end"><div style="flex:1 1 260px"><input type="file" id="mkPlan" accept=".xlsx,.xls"></div><button class="btn btn-primary" id="mkPlanBtn" style="flex:0 0 auto">⬆️ Enviar planilha</button></div></div>` : ''}
     ${S.pid ? `<div class="card"><h2>📡 Pontos para a coletora (locação dos marcos)</h2><p class="muted">Todos os vértices dos lotes, do perímetro e da vila, sem repetir ponto (vértice comum a dois lotes sai uma vez). Coordenadas UTM SIRGAS 2000. Carregue na coletora e use na locação/cravação dos marcos; a caderneta de campo traz os pontos por lote, com caixa para marcar o que foi cravado.</p>
       <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn btn-primary" data-col="csv" style="flex:0 0 auto">⬇️ CSV (Nome, E, N, Cota, Código)</button><button class="btn btn-ghost" data-col="txt" style="flex:0 0 auto">⬇️ TXT (P,E,N,Z,D)</button><button class="btn btn-ghost" data-col="dxf" style="flex:0 0 auto">⬇️ DXF (pontos + lotes)</button><button class="btn btn-ghost" data-col="kml" style="flex:0 0 auto">⬇️ KML (Google Earth — marcos + lotes)</button><button class="btn btn-gold" id="colCad" style="flex:0 0 auto">📒 Caderneta de campo (PDF)</button></div></div>` : ''}

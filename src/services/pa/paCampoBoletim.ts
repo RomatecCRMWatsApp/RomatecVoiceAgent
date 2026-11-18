@@ -77,7 +77,7 @@ export function textoBoletim(b: Boletim, projetoNome: string): string {
   L.push(`📅 ${dbr(b.hoje)} (${semana(b.hoje)})`);
   L.push('');
   L.push(`✅ *Lotes medidos:* ${b.medidos} de ${b.totalLotes} (${nb(b.pct)}%)`);
-  L.push(`🪨 *Marcos cravados:* ${b.marcos.cravados} de ${b.marcos.total} (${nb(b.marcos.pct)}%)`);
+  L.push(`📍 *Marcos cravados:* ${b.marcos.cravados} de ${b.marcos.total} (${nb(b.marcos.pct)}%)`);
   if (b.diaHoje) L.push(`📆 *Hoje:* ${b.diaHoje.lotes.length ? `${plural(b.diaHoje.lotes.length, 'lote medido', 'lotes medidos')} (${lts(b.diaHoje.lotes)})` : 'nenhum lote fechado ainda'} · ${plural(b.diaHoje.marcos, 'marco cravado', 'marcos cravados')}`);
   else if (b.ultimo) L.push(`📆 *Último dia de campo:* ${dbr(b.ultimo.dia)} — ${plural(b.ultimo.lotes.length, 'lote medido', 'lotes medidos')} · ${plural(b.ultimo.marcos, 'marco', 'marcos')}`);
   if (b.emAndamento.length) L.push(`🚧 *Em medição:* ${lts(b.emAndamento)}`);
