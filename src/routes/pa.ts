@@ -30,6 +30,7 @@ import * as caixa from '../services/pa/paCaixa';
 import * as carteirinha from '../services/pa/paCarteirinha';
 import * as ata from '../services/pa/paAta';
 import * as concessao from '../services/pa/paConcessao';
+import * as ajuste from '../services/pa/paAjusteBoleto';
 import { pool, rows, registrarEvento } from '../services/pa/paDb';
 import * as pesquisa from '../services/pa/paPesquisa';
 import { linkMapaPublico, textoMapaPublico, mensagemMapaIndividual } from './paMapaPublico';
@@ -741,6 +742,11 @@ router.post('/boletos/:bid/link', h(async (req) => {
   exigirEscrita(req);
   const t = await boletoPdf.garantirToken(id(req.params.bid, 'boleto'));
   return { url_romatec: boletoPdf.urlBoletoRomatec(t) };
+}));
+// v3.185.0: ajustar boleto em aberto — pago em parte por fora ou novo valor da parcela → cancela e reemite com o saldo
+router.post('/boletos/:bid/ajustar', h(async (req) => {
+  exigirEscrita(req);
+  return ajuste.ajustarBoleto(id(req.params.bid, 'boleto'), ajuste.lerAjuste(req.body ?? {}), ctx(req).sub);
 }));
 router.delete('/boletos/:bid', h(async (req) => {
   exigirEscrita(req);

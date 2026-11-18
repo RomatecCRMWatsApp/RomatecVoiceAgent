@@ -302,6 +302,7 @@
   .cp-aviso{margin-top:8px;padding:8px 10px;border-radius:8px;font-size:13px}.cp-aviso.q{background:#E6F4EC;color:#1B5E20}.cp-aviso.p{background:#FFF4E5;color:#8A4B00;border:1px solid #F2C94C}
   .cx-manual{position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;padding:12px}
   .cx-manual .cx-in{background:#fff;border-radius:14px;padding:14px;width:100%;max-width:560px;border:2px solid var(--gold)}
+  .cx-manual .citem{display:flex;gap:8px;align-items:center;justify-content:flex-start;text-align:left;margin:5px 0;font-weight:400}.cx-manual .citem input{width:auto;flex:0 0 auto;margin:0}
   .cx-manual textarea{width:100%;margin-top:6px;font-size:13px}
   .mk-res{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.mk-res div{border:1px solid var(--line);border-radius:8px;padding:5px 8px}.mk-res span{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;font-weight:700}.mk-res b{font-size:13px;color:var(--green)}.mk-res .red b{color:var(--red)}
   /* v3.180.0: equipe — funções e acessos */
@@ -2317,6 +2318,99 @@ function desenharExtrato(){
 
 // ─── v3.168.0: Taxa de marcos de concreto — um boleto por associado, gerar e enviar com um clique ─
 let MARCOS_TIMER = null;
+// v3.185.0: 🧾 Gerar boleto de UM associado (sem boleto ativo). Valor menor que o saldo → pergunta se a
+// diferença foi paga por fora (lança o pagamento e o boleto sai com o saldo) ou se é o novo valor da taxa.
+function gerarBoletoMarcoForm(a, depois){
+  if (!a || !a.lancamento) return;
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const vencPad = $('#mkVenc') && $('#mkVenc').value >= hoje ? $('#mkVenc').value : (a.lancamento.vencimento && a.lancamento.vencimento >= hoje ? a.lancamento.vencimento : hoje);
+  const recebido = a.lancamento.valor - a.lancamento.saldo;
+  let m = document.getElementById('cxManual');
+  if (!m){ m = document.createElement('div'); m.id = 'cxManual'; m.className = 'cx-manual'; document.body.appendChild(m); }
+  m.innerHTML = `<div class="cx-in"><b>🧾 Gerar boleto — ${esc(a.nome)}</b>
+    <div class="muted" style="margin:4px 0 8px">Taxa ${brl(a.lancamento.valor)}${recebido > 0.009 ? ` · já recebido ${brl(recebido)}` : ''} · em aberto <b>${brl(a.lancamento.saldo)}</b>.</div>
+    <div class="grid3"><div><label for="gbValor">Valor do boleto (R$)</label><input id="gbValor" inputmode="decimal" value="${esc(String(a.lancamento.saldo).replace('.', ','))}"></div>
+      <div><label for="gbVenc">Vencimento</label><input type="date" id="gbVenc" value="${esc(vencPad)}" min="${hoje}"></div></div>
+    <div id="gbDif" style="display:none;margin-top:8px" class="avisos"><b id="gbDifTxt"></b>
+      <label class="citem"><input type="radio" name="gbModo" value="PAGO" checked> Foi paga por fora — lançar como pago</label>
+      <label class="citem"><input type="radio" name="gbModo" value="VALOR"> Não — este é o novo valor da taxa dele(a)</label>
+      <div class="grid3 gbPg"><div><label for="gbForma">Forma</label><select class="f" id="gbForma"><option value="ESPECIE">Espécie</option><option value="PIX">Pix</option><option value="CARTAO_DEBITO">Cartão débito</option><option value="CARTAO_CREDITO">Cartão crédito</option></select></div>
+        <div><label for="gbData">Data do pagamento</label><input type="date" id="gbData" value="${hoje}" max="${hoje}"></div></div></div>
+    <label class="citem" style="margin-top:8px"><input type="checkbox" id="gbEnviar" ${a.whatsapp_valido ? 'checked' : 'disabled'}> Enviar o boleto no WhatsApp dele(a)${a.whatsapp_valido ? '' : ' (sem WhatsApp)'}</label>
+    <div class="row" style="gap:6px;margin-top:10px"><button class="btn btn-primary" id="gbOk" style="flex:0 0 auto">Gerar boleto</button><button class="btn btn-ghost" id="gbFechar" style="flex:0 0 auto">Fechar</button></div></div>`;
+  const val = () => Number(String($('#gbValor').value).replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+  const modo = () => (m.querySelector('input[name=gbModo]:checked') || {}).value;
+  const atualizar = () => {
+    const v = val(), dif = Math.round((a.lancamento.saldo - v) * 100) / 100;
+    const temDif = v > 0 && dif > 0.009;
+    $('#gbDif').style.display = temDif ? '' : 'none';
+    if (temDif) $('#gbDifTxt').textContent = `A diferença de ${brl(dif)} (de ${brl(a.lancamento.saldo)} para ${brl(v)}) foi paga por fora?`;
+    m.querySelectorAll('.gbPg').forEach((x) => { x.style.display = modo() === 'PAGO' ? '' : 'none'; });
+  };
+  $('#gbValor').oninput = atualizar; m.querySelectorAll('input[name=gbModo]').forEach((r) => r.onchange = atualizar); atualizar();
+  $('#gbFechar').onclick = () => m.remove();
+  $('#gbOk').onclick = async (ev) => {
+    const v = val(); if (!(v > 0)) return toast('Informe o valor', true);
+    if (v > a.lancamento.saldo + 0.009 && recebido > 0.009) return toast(`Já tem ${brl(recebido)} recebido — o boleto não pode passar do saldo (${brl(a.lancamento.saldo)})`, true);
+    const dif = Math.round((a.lancamento.saldo - v) * 100) / 100;
+    if (dif > 0.009 && modo() === 'VALOR' && recebido > 0.009) return toast('Esta taxa já tem pagamento — para baixar o valor, gere o boleto do saldo e use ✏️ Ajustar → mudar o valor', true);
+    const venc = $('#gbVenc').value || hoje, enviar = $('#gbEnviar').checked;
+    ev.currentTarget.disabled = true;
+    try {
+      let valorGerar = v;
+      if (dif > 0.009 && modo() === 'PAGO') {
+        await api(`/projetos/${S.pid}/pagamentos`, { json: { forma: $('#gbForma').value, valor: dif, pago_em: $('#gbData').value || hoje, associado_id: a.associado_id,
+          rateio: [{ lancamento_id: a.lancamento.id, valor: dif }], obs: 'Taxa de marcos: parte paga por fora (lançada ao gerar o boleto do saldo)' } });
+        valorGerar = a.lancamento.valor; // com recebimento, o boleto sai com o saldo e a taxa mantém o valor
+      }
+      await api(`/projetos/${S.pid}/marcos/gerar`, { json: { valor: valorGerar, vencimento: venc, enviar, associado_ids: [a.associado_id] } });
+      m.remove();
+      toast(`Gerando o boleto de ${brl(v)} de ${a.nome.split(' ')[0]}${enviar ? ' — vai no WhatsApp dele(a)' : ''}…`);
+      if (depois) depois();
+    } catch (e){ toast(e.message, true); ev.currentTarget.disabled = false; }
+  };
+}
+// v3.185.0: ✏️ Ajustar boleto — pagou parte por fora (lança o pagamento) ou novo valor; cancela no Asaas e reemite com o saldo
+function ajustarBoletoForm(a, depois){
+  if (!a || !a.boleto) return;
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  let m = document.getElementById('cxManual');
+  if (!m){ m = document.createElement('div'); m.id = 'cxManual'; m.className = 'cx-manual'; document.body.appendChild(m); }
+  const recebido = a.lancamento.valor - a.lancamento.saldo;
+  m.innerHTML = `<div class="cx-in"><b>✏️ Ajustar boleto — ${esc(a.nome)}</b>
+    <div class="muted" style="margin:4px 0 8px">Taxa ${brl(a.lancamento.valor)}${recebido > 0.009 ? ` · já recebido ${brl(recebido)}` : ''} · boleto atual ${brl(a.lancamento.saldo)}. O boleto atual é <b>cancelado no Asaas</b> e sai um novo com o saldo.</div>
+    <label class="citem"><input type="radio" name="ajModo" value="PAGO_POR_FORA" checked> Pagou uma parte por fora (espécie/Pix) — lançar o pagamento</label>
+    <label class="citem"><input type="radio" name="ajModo" value="NOVO_VALOR"> Mudar o valor da taxa deste associado</label>
+    <div class="grid3" style="margin-top:6px">
+      <div><label for="ajValor" id="ajValorRot">Quanto já pagou (R$)</label><input id="ajValor" inputmode="decimal" placeholder="Ex.: 20,00"></div>
+      <div class="ajPg"><label for="ajForma">Forma</label><select class="f" id="ajForma"><option value="ESPECIE">Espécie</option><option value="PIX">Pix</option><option value="CARTAO_DEBITO">Cartão débito</option><option value="CARTAO_CREDITO">Cartão crédito</option></select></div>
+      <div class="ajPg"><label for="ajData">Data do pagamento</label><input type="date" id="ajData" value="${hoje}" max="${hoje}"></div>
+    </div>
+    <div class="muted" id="ajPrev" style="margin-top:6px"></div>
+    <label class="citem" style="margin-top:6px"><input type="checkbox" id="ajEnviar" ${a.whatsapp_valido ? 'checked' : 'disabled'}> Enviar o boleto novo no WhatsApp dele(a)${a.whatsapp_valido ? '' : ' (sem WhatsApp)'}</label>
+    <div class="row" style="gap:6px;margin-top:10px"><button class="btn btn-primary" id="ajOk" style="flex:0 0 auto">Cancelar e gerar o novo</button><button class="btn btn-ghost" id="ajFechar" style="flex:0 0 auto">Fechar</button></div></div>`;
+  const modo = () => m.querySelector('input[name=ajModo]:checked').value;
+  const val = () => Number(String($('#ajValor').value).replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+  const prev = () => {
+    const pg = modo() === 'PAGO_POR_FORA';
+    $('#ajValorRot').textContent = pg ? 'Quanto já pagou (R$)' : 'Novo valor da taxa (R$)';
+    m.querySelectorAll('.ajPg').forEach((x) => { x.style.display = pg ? '' : 'none'; });
+    const v = val();
+    $('#ajPrev').innerHTML = v > 0 ? `Boleto novo: <b>${brl(pg ? a.lancamento.saldo - v : v - recebido)}</b>` : '';
+  };
+  m.querySelectorAll('input[name=ajModo]').forEach((r) => r.onchange = prev); $('#ajValor').oninput = prev; prev();
+  $('#ajFechar').onclick = () => m.remove();
+  $('#ajOk').onclick = async (ev) => {
+    const v = val(); if (!(v > 0)) return toast('Informe o valor', true);
+    ev.currentTarget.disabled = true;
+    try {
+      const r = await api(`/boletos/${a.boleto.id}/ajustar`, { json: { modo: modo(), valor: v, forma: $('#ajForma').value, pago_em: $('#ajData').value, enviar: $('#ajEnviar').checked } });
+      m.remove();
+      toast(r.boleto_novo ? `Boleto novo de ${brl(r.saldo_novo)} gerado${r.enviado ? ' e enviado ✅' : r.erro_envio ? ' (não foi no WhatsApp: ' + r.erro_envio + ')' : ''}` : r.saldo_novo > 0.009 ? `Boleto antigo cancelado, mas o novo não saiu: ${r.erro_emissao}` : 'Taxa quitada — boleto antigo cancelado ✅', !r.boleto_novo && r.saldo_novo > 0.009);
+      if (depois) depois();
+    } catch (e){ toast(e.message, true); ev.currentTarget.disabled = false; }
+  };
+}
 async function rMarcos(){
   const box = $('#finSub');
   clearTimeout(MARCOS_TIMER);
@@ -2349,14 +2443,15 @@ async function rMarcos(){
   const jobHtml = j ? `<div class="avisos" style="margin-top:10px"><b>${esc(j.fase)}</b> — boletos emitidos: ${j.emitidos}${j.reemitidos ? ` (${j.reemitidos} reemitido(s) com o valor novo)` : ''}${j.ja_tinham ? ` · já tinham: ${j.ja_tinham}` : ''} de ${j.total}${j.erros.length ? ` · <span style="color:var(--red)">${j.erros.length} erro(s)</span>` : ''}${j.fila_erro ? `<br><span style="color:var(--red)">WhatsApp: ${esc(j.fila_erro)}</span>` : ''}
         ${j.erros.length ? `<ul>${j.erros.map((x) => `<li>${esc(x.nome)}: ${esc(x.erro)}</li>`).join('')}</ul>` : ''}</div>` : '';
   const filaHtml = f ? `<div class="avisos">📲 Envio pelo WhatsApp: <b>${esc(f.status)}</b> · ${f.enviados} enviado(s)${f.falhas ? ` · ${f.falhas} falha(s)` : ''} de ${f.total}${f.atual && f.status === 'RODANDO' ? ` · agora: ${esc(f.atual)}` : ''}</div>` : '';
-  const linhas = L.map((a) => `<tr>${podeEscrever() ? `<td><input type="checkbox" class="mkCk" value="${a.associado_id}"></td>` : ''}<td><b>${esc(a.lote_vila)}</b></td><td class="nowrap">${a.parcela ? 'LT-' + esc(a.parcela) : '—'}</td><td>${esc(a.nome)}<div class="muted">${esc(a.numero)}</div></td>
-        <td>${a.whatsapp_valido ? chip('VALIDO', '✓') : '<span class="muted">sem WhatsApp</span>'}</td><td class="right nowrap">${a.lancamento ? brl(a.lancamento.valor) : '—'}</td><td class="nowrap">${a.lancamento ? dbr(a.lancamento.vencimento) : '—'}</td><td>${stBol(a)}${podeEscrever() && a.boleto && a.lancamento && a.lancamento.status !== 'PAGO' ? ` <button class="btn btn-ghost btn-sm" data-mkum="${a.associado_id}" title="Enviar só para este associado">📲 ${a.boleto.enviado_em ? 'Reenviar' : 'Enviar'}</button>` : ''}</td></tr>`).join('');
+  const linhas = L.map((a) => `<tr data-mkbusca="${esc((a.nome + ' ' + a.lote_vila + ' lt-' + (a.parcela || '') + ' ' + (a.numero || '')).toLowerCase())}">${podeEscrever() ? `<td><input type="checkbox" class="mkCk" value="${a.associado_id}"></td>` : ''}<td><b>${esc(a.lote_vila)}</b></td><td class="nowrap">${a.parcela ? 'LT-' + esc(a.parcela) : '—'}</td><td>${esc(a.nome)}<div class="muted">${esc(a.numero)}</div></td>
+        <td>${a.whatsapp_valido ? chip('VALIDO', '✓') : '<span class="muted">sem WhatsApp</span>'}</td><td class="right nowrap">${a.lancamento ? brl(a.lancamento.valor) : '—'}</td><td class="nowrap">${a.lancamento ? dbr(a.lancamento.vencimento) : '—'}</td><td>${stBol(a)}${podeEscrever() && a.boleto && a.lancamento && a.lancamento.status !== 'PAGO' ? ` <button class="btn btn-ghost btn-sm" data-mkum="${a.associado_id}" title="Enviar só para este associado">📲 ${a.boleto.enviado_em ? 'Reenviar' : 'Enviar'}</button> <button class="btn btn-ghost btn-sm" data-mkaj="${a.associado_id}" title="Pagou parte por fora ou mudar o valor: cancela e gera outro">✏️ Ajustar</button>` : ''}${podeEscrever() && a.lancamento && a.lancamento.status !== 'PAGO' && !a.boleto ? ` <button class="btn btn-gold btn-sm" data-mkgerar="${a.associado_id}" title="Gerar o boleto só deste associado">🧾 Gerar boleto</button>` : ''}</td></tr>`).join('');
   box.innerHTML = `<div class="card"><h2 style="margin-top:0">${ICO_MARCO} Taxa de marcos de concreto</h2>
       <div class="muted">Um boleto por associado para os marcos de concreto cravados nos vértices do lote. Mesmo valor e mesmo vencimento para todos. Gera o boleto no Asaas e, com o envio marcado, manda pelo WhatsApp do sistema <b>um por vez, com 30 a 60 s entre associados</b> (anti-bloqueio).</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">${kpi('Associados', L.length)}${kpi('Com taxa lançada', com.length)}${kpi('Boleto gerado', bol.length)}${kpi('Enviado no WhatsApp', env.length)}${kpi('Pagos', pagos.length, brl(pagos.reduce((s, a) => s + a.lancamento.valor, 0)))}</div>
       ${form}
       <div id="mkJob">${jobHtml}${filaHtml}</div></div>
-    <div class="card"><div class="tbl"><table><thead><tr>${podeEscrever() ? '<th><input type="checkbox" id="mkTodosCk" title="Marcar todos"></th>' : ''}<th>Lote vila</th><th>Lote produção</th><th>Associado</th><th>WhatsApp</th><th class="right">Taxa</th><th>Vencimento</th><th>Boleto</th></tr></thead><tbody>${linhas}</tbody></table></div>
+    <div class="card"><div class="row" style="align-items:end;gap:8px;margin-bottom:8px"><div style="flex:1 1 240px"><label for="mkBusca">🔎 Buscar associado (nome, lote ou nº)</label><input id="mkBusca" placeholder="Ex.: Lucineide, 35, PASM-035" autocomplete="off"></div><span class="muted" style="flex:1 1 260px">Para um só associado: ache ele aqui e use <b>🧾 Gerar boleto</b> (sem boleto) ou <b>✏️ Ajustar</b> (pagou parte / outro valor) na linha dele.</span></div>
+      <div class="tbl"><table><thead><tr>${podeEscrever() ? '<th><input type="checkbox" id="mkTodosCk" title="Marcar todos"></th>' : ''}<th>Lote vila</th><th>Lote produção</th><th>Associado</th><th>WhatsApp</th><th class="right">Taxa</th><th>Vencimento</th><th>Boleto</th></tr></thead><tbody>${linhas}</tbody></table></div>
       <div class="muted" style="margin-top:6px">Quem está sem WhatsApp recebe o boleto pelo 🧾 na ficha do associado (imprimir ou mandar por outro meio).</div></div>`;
   if ($('#mkTodosCk')) $('#mkTodosCk').onchange = (e) => box.querySelectorAll('.mkCk').forEach((c) => { c.checked = e.target.checked; });
   const gerar = async (aids) => {
@@ -2383,6 +2478,11 @@ async function rMarcos(){
     try { await api(`/projetos/${S.pid}/marcos/${a.associado_id}/enviar`, { json: { numero: numero || undefined } }); toast(`Boleto enviado para ${a.nome.split(' ')[0]} ✅`); rMarcos(); }
     catch (e){ toast(e.message, true); b.disabled = false; }
   });
+  // v3.185.0: busca e ações de um associado só
+  const busca = $('#mkBusca');
+  if (busca) busca.oninput = () => { const q = semAcento(busca.value.trim()); box.querySelectorAll('tr[data-mkbusca]').forEach((tr) => { tr.style.display = !q || semAcento(tr.dataset.mkbusca).includes(q) ? '' : 'none'; }); };
+  box.querySelectorAll('[data-mkgerar]').forEach((b) => b.onclick = () => gerarBoletoMarcoForm(L.find((x) => x.associado_id === Number(b.dataset.mkgerar)), rMarcos));
+  box.querySelectorAll('[data-mkaj]').forEach((b) => b.onclick = () => ajustarBoletoForm(L.find((x) => x.associado_id === Number(b.dataset.mkaj)), rMarcos));
   if ($('#mkParar')) $('#mkParar').onclick = async () => { try { await api('/whatsapp/fila/parar', { json: {} }); toast('Envio parado'); rMarcos(); } catch (e){ toast(e.message, true); } };
   if (rodando) MARCOS_TIMER = setTimeout(() => { if (S.finVisao === 'marcos' && $('#mkJob')) rMarcos(); }, 5000);
 }

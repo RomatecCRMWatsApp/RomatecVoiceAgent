@@ -108,7 +108,7 @@ const REGRAS: Regra[] = [
   R('GET', P + '\\/(pagamentos|extrato|extrato\\.pdf|cobranca|caixa|boletos|boletos\\/elegiveis|pix|marcos)', 'ver_financeiro'),
   R('GET', '^\\/(associados\\/\\d+\\/boletos|boletos\\/\\d+\\/pdf|caixa\\/categorias|asaas\\/status)', 'ver_financeiro'),
   R('ESCRITA', P + '\\/(pagamentos(\\/.*)?|extrato\\/whatsapp|caixa|boletos\\/.*|lancamentos\\/.*|marcos\\/.*)', 'operar_financeiro'),
-  R('ESCRITA', '^\\/(associados\\/\\d+\\/(plano|whatsapp\\/cobranca)|boletos\\/\\d+(\\/link)?|caixa\\/\\d+|lancamentos\\/\\d+\\/boleto)', 'operar_financeiro'),
+  R('ESCRITA', '^\\/(associados\\/\\d+\\/(plano|whatsapp\\/cobranca)|boletos\\/\\d+(\\/link|\\/ajustar)?|caixa\\/\\d+|lancamentos\\/\\d+\\/boleto)', 'operar_financeiro'),
   R('GET', P + '\\/carteirinhas\\.(html|pdf)', 'carteirinhas'),
   R('*', P + '\\/(ata-assembleia\\.(pdf|docx)|relacao-lotes\\.pdf|concessao\\.pdf|concessao\\/lotes)', 'documentos_oficiais'),
   R('ESCRITA', P + '\\/campo\\/pontos(\\/[^/]+)?', 'marcar_campo'),
