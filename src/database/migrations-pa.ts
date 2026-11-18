@@ -159,7 +159,7 @@ const CREATE_PA_DOCUMENTOS = `
     associado_id     INT NULL,
     tipo             ENUM('FOTO_3X4','DOC_IDENTIFICACAO','CERTIDAO','DOC_CONJUGE','COMPROVANTE_SINAL',
                           'PROCESSO_FICHA_CONTRATO','PROCESSO_ASSINADO','CARTEIRINHA','MAPA_LOTE',
-                          'MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO') NOT NULL,
+                          'MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE') NOT NULL,
     versao           INT DEFAULT 1,
     caminho          VARCHAR(400) NOT NULL,
     nome_original    VARCHAR(255) NULL,
@@ -261,6 +261,24 @@ const CREATE_PA_CAMPO_LOTES = `
     base_gnss     VARCHAR(80) NULL,
     rover_gnss    VARCHAR(80) NULL,
     UNIQUE KEY uk_pa_campo_lote (projeto_id, lote)
+  ) DEFAULT CHARSET=utf8mb4
+`;
+
+// v3.188.0: lotes de produção (LT-NN) — cadastro próprio do lote; vazio = cai na subdivisão/medição
+const CREATE_PA_LOTES_PRODUCAO = `
+  CREATE TABLE IF NOT EXISTS pa_lotes_producao (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id     INT NOT NULL,
+    codigo         VARCHAR(12) NOT NULL,
+    associado_id   INT NULL,
+    area_ha        DECIMAL(12,4) NULL,
+    denominacao    VARCHAR(160) NULL,
+    geom_sirgas    LONGTEXT NULL,
+    status_medicao ENUM('PENDENTE','PROGRAMADO','EM_MEDICAO','MEDIDO','GEORREFERENCIADO') NOT NULL DEFAULT 'PENDENTE',
+    criado_em      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_pa_lote_prod (projeto_id, codigo),
+    INDEX idx_pa_lote_prod_assoc (associado_id)
   ) DEFAULT CHARSET=utf8mb4
 `;
 
@@ -459,6 +477,9 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_dossies.trt', sql: 'ALTER TABLE pa_dossies ADD COLUMN trt_numero VARCHAR(40) NULL, ADD COLUMN trt_emitida_em DATETIME NULL, ADD COLUMN trt_emitida_por VARCHAR(160) NULL, ADD COLUMN trt_paga_em DATETIME NULL, ADD COLUMN trt_paga_por VARCHAR(160) NULL, ADD COLUMN conclusao_enviada_em DATETIME NULL' },
   { label: 'pa_projetos.divisa_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN divisa_json JSON NULL' },
   // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
+  // v3.188.0: capa do dossiê do lote — novo tipo de documento e nome oficial da associação (também na carteirinha)
+  { label: 'pa_documentos.tipo +CAPA_DOSSIE_LOTE', sql: "ALTER TABLE pa_documentos MODIFY tipo ENUM('FOTO_3X4','DOC_IDENTIFICACAO','CERTIDAO','DOC_CONJUGE','COMPROVANTE_SINAL','PROCESSO_FICHA_CONTRATO','PROCESSO_ASSINADO','CARTEIRINHA','MAPA_LOTE','MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE') NOT NULL" },
+  { label: 'associacao_nome PA Salete Moreno', sql: "UPDATE pa_projetos SET associacao_nome = 'Associação dos Produtores Rurais do PA Salete Moreno' WHERE codigo = 'PA-SALETE-MORENO' AND (associacao_nome IS NULL OR associacao_nome NOT LIKE '%Produtores Rurais%')" },
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },
 ];
 
@@ -484,6 +505,7 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_acessos', sql: CREATE_PA_ACESSOS },
   { label: 'pa_pesquisa_respostas', sql: CREATE_PA_PESQUISA },
   { label: 'pa_dossies', sql: CREATE_PA_DOSSIES },
+  { label: 'pa_lotes_producao', sql: CREATE_PA_LOTES_PRODUCAO },
 ];
 
 export async function runPaMigrations(): Promise<void> {

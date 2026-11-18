@@ -1832,7 +1832,7 @@ async function abrirAssociado(aid, avisos){
         ${podeEscrever() && b.status !== 'PAGO' ? `<button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}`;
       return podeEscrever() && l.saldo > 0 ? `<button class="btn btn-ghost btn-sm" data-emitir="${l.id}">Emitir boleto</button>` : '';
     };
-    const tipoDoc = { FOTO_3X4:'Foto 3×4', DOC_IDENTIFICACAO:'Identificação', CERTIDAO:'Certidão', DOC_CONJUGE:'Doc. cônjuge', COMPROVANTE_SINAL:'Comprovante do sinal', PROCESSO_FICHA_CONTRATO:'Ficha + contrato', PROCESSO_ASSINADO:'Processo assinado', CARTEIRINHA:'Carteirinha', MAPA_LOTE:'Mapa do lote', MEMORIAL:'Memorial', TRT:'TRT', RELATORIO:'Relatório', ORIGINAL:'Original', OUTRO:'Outro' };
+    const tipoDoc = { FOTO_3X4:'Foto 3×4', DOC_IDENTIFICACAO:'Identificação', CERTIDAO:'Certidão', DOC_CONJUGE:'Doc. cônjuge', COMPROVANTE_SINAL:'Comprovante do sinal', PROCESSO_FICHA_CONTRATO:'Ficha + contrato', PROCESSO_ASSINADO:'Processo assinado', CARTEIRINHA:'Carteirinha', MAPA_LOTE:'Mapa do lote', MEMORIAL:'Memorial', TRT:'TRT', RELATORIO:'Relatório', ORIGINAL:'Original', OUTRO:'Outro', CAPA_DOSSIE_LOTE:'Capa do dossiê' };
     pane.innerHTML = `<div class="phead"><div><div style="font-size:11px;color:var(--gold-soft)">${esc(a.numero)} · Lote ${esc(a.lote)}</div><b>${esc(a.nome)}</b></div><button class="x" id="dx">✕</button></div>
       <div style="padding:14px">
         ${avisosHtml(avisos)}
@@ -1873,7 +1873,7 @@ async function abrirAssociado(aid, avisos){
         ${S.eu.ve_documentos ? `<div class="card"><h2>Documentos</h2>
           <div class="docs">${d.documentos.map((x) => `<div class="doc ${x.arquivo_presente ? '' : 'aus'}"><b>${esc(tipoDoc[x.tipo] || x.tipo)}${x.versao > 1 ? ' v' + x.versao : ''}</b>${esc(x.nome_original || '')}
             <div style="margin-top:4px">${x.arquivo_presente ? `<button class="btn btn-ghost btn-sm" data-doc="${x.id}">Abrir</button>` : '<span class="muted">arquivo não carregado</span>'}</div></div>`).join('') || '<div class="muted">Nenhum documento.</div>'}</div>
-          ${podeEscrever() ? `<div class="row" style="margin-top:10px"><div><label for="upTipo">Tipo</label><select class="f" id="upTipo">${Object.entries(tipoDoc).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></div>
+          ${podeEscrever() ? `<div class="row" style="margin-top:10px"><div><label for="upTipo">Tipo</label><select class="f" id="upTipo">${Object.entries(tipoDoc).filter(([k]) => k !== 'CAPA_DOSSIE_LOTE').map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></div>
             <div><label for="upArq">Arquivo (PDF/JPG/PNG)</label><input type="file" id="upArq" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.docx"></div>
             <div style="flex:0 0 auto"><button class="btn btn-primary" id="upBtn">Enviar</button></div></div>
             <div class="muted">PDF assinado no gov.br → tipo "Processo assinado" (marca o contrato como ASSINADO).</div>` : ''}
@@ -3290,7 +3290,9 @@ async function rDossies(){
           ${(d.status === 'ENVIADO' || d.status === 'PRONTO') && !d.trt_emitida_em ? `<button class="btn btn-ghost btn-sm" data-dstrt="emitida" data-lote="${esc(d.lote)}">📄 TRT emitida</button>` : ''}
           ${d.trt_emitida_em && !d.trt_paga_em ? `<button class="btn btn-ghost btn-sm" data-dstrt="paga" data-lote="${esc(d.lote)}">💳 TRT paga</button>` : ''}
           ${d.status !== 'ENTREGUE' && d.status !== 'AGUARDANDO_PAGAMENTO' ? `<button class="btn btn-gold btn-sm" data-dsent="${esc(d.lote)}" ${d.trt_paga_em ? '' : 'disabled title="Libera depois da TRT paga"'}>📦 Entregue fisicamente</button>` : ''}</td></tr>`).join('')}
-    </tbody></table></div>` : '<div class="empty">Nenhum dossiê nesta situação. Eles aparecem aqui quando um lote é fechado na aba Campo.</div>'}</div>`;
+    </tbody></table></div>` : '<div class="empty">Nenhum dossiê nesta situação. Eles aparecem aqui quando um lote é fechado na aba Campo.</div>'}</div>
+    <div class="card" id="capasBox"><div class="muted">Carregando capas…</div></div>`;
+  rCapasDossie();
   v.querySelectorAll('[data-dsf]').forEach((b) => b.onclick = () => { S.dossieFiltro = b.dataset.dsf; rDossies(); });
   v.querySelectorAll('[data-dsver]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dsver)}.pdf`));
   v.querySelectorAll('[data-dsenv]').forEach((b) => b.onclick = async () => {
@@ -3315,6 +3317,55 @@ async function rDossies(){
     try { const r = await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(lote)}/entregue`, { json: { obs } }); toast(`LT-${lote} marcado como entregue ✅${r.conclusao && r.conclusao.enviado ? ' · mensagem de conclusão enviada 🙏' : r.conclusao && r.conclusao.motivo ? ' · conclusão não enviada: ' + r.conclusao.motivo : ''}`); rDossies(); }
     catch (e){ toast(e.message, true); }
   });
+}
+
+// v3.188.0: capa do dossiê técnico do lote de produção (modelo aprovado LT-05) — ver, arquivar, editar e ZIP
+const ST_MEDICAO = { PENDENTE: 'Pendente', PROGRAMADO: 'Programado', EM_MEDICAO: 'Em medição', MEDIDO: 'Medido', GEORREFERENCIADO: 'Georreferenciado' };
+async function rCapasDossie(){
+  const box = $('#capasBox'); if (!box) return;
+  let ls; try { ls = (await api(`/projetos/${S.pid}/lotes-producao`)).lotes; } catch (e){ box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const ha = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  const comAssoc = ls.filter((l) => l.associado_id);
+  box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="flex:1 1 auto;margin:0;border:0">🏷 Capas do dossiê técnico do lote</h2>
+      ${comAssoc.length ? `<button class="btn btn-gold btn-sm" id="capasZip" style="flex:0 0 auto">📦 Baixar todas (ZIP · ${comAssoc.length})</button>` : ''}</div>
+    <div class="muted" style="margin:6px 0 10px">Capa padrão aprovada (modelo LT-05): associado, nº e lote da vila, denominação, área em ha e alqueires (48.400 m²), associação e data. Sem área cadastrada sai “a definir após o georreferenciamento”. A mesma capa abre o dossiê completo.</div>
+    ${ls.length ? `<div class="tbl"><table class="tcard"><thead><tr><th>Lote</th><th>Associado</th><th>Denominação</th><th class="right">Área</th><th>Medição</th><th>Capa</th><th></th></tr></thead><tbody>
+      ${ls.map((l) => `<tr><td class="tc-tit"><b>${esc(l.codigo)}</b>${l.lote_vila ? ` <span class="muted">· vila ${esc(l.lote_vila)}</span>` : ''}</td>
+        <td data-l="Associado">${l.associado_nome ? esc(l.associado_nome) + `<div class="muted">${esc(l.associado_numero || '')}</div>` : '<span class="muted">sem associado</span>'}</td>
+        <td data-l="Denominação">${l.denominacao ? '“' + esc(l.denominacao) + '”' : '—'}</td>
+        <td class="right nowrap" data-l="Área">${l.area_ha ? ha(l.area_ha) + ' ha' + `<div class="muted">${l.area_origem === 'CAMPO' ? 'da medição' : 'cadastrada'}</div>` : '<span class="muted">a definir</span>'}</td>
+        <td data-l="Medição">${esc(ST_MEDICAO[l.status_medicao] || l.status_medicao)}</td>
+        <td data-l="Capa">${l.capa_versao ? `v${l.capa_versao}<div class="muted">${esc(dhBr(l.capa_em))}</div>` : '<span class="muted">não arquivada</span>'}</td>
+        <td class="bol-acoes">${l.associado_id ? `<button class="btn btn-ghost btn-sm" data-cpver="${esc(l.codigo)}">👁 Capa</button>
+          ${podeEscrever() ? `<button class="btn btn-primary btn-sm" data-cpger="${l.id}" title="Gera e guarda nos documentos do associado (nova versão)">💾 Arquivar</button>` : ''}` : ''}
+          ${podeEscrever() ? `<button class="btn btn-ghost btn-sm" data-cped="${esc(l.codigo)}">✏️ Editar</button>` : ''}</td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="empty">Nenhum lote de produção ainda. Eles aparecem quando o lote é ligado ao associado na subdivisão ou medido em campo.</div>'}`;
+  box.querySelectorAll('[data-cpver]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/lotes-producao/${encodeURIComponent(b.dataset.cpver)}/capa.pdf`));
+  box.querySelectorAll('[data-cpger]').forEach((b) => b.onclick = async () => {
+    b.disabled = true; toast('Gerando a capa…');
+    try { const r = await api(`/lotes-producao/${b.dataset.cpger}/gerar/capa`, { json: {} }); toast(`Capa do ${r.codigo} arquivada (v${r.versao}) ✅`); rCapasDossie(); }
+    catch (e){ toast(e.message, true); b.disabled = false; }
+  });
+  box.querySelectorAll('[data-cped]').forEach((b) => b.onclick = async () => {
+    const l = ls.find((x) => x.codigo === b.dataset.cped); if (!l) return;
+    const den = prompt(`${l.codigo} — denominação da terra (ex.: Chácara Nosso Lar).\nDeixe vazio para "—":`, l.denominacao || ''); if (den === null) return;
+    const ar = prompt(`${l.codigo} — área oficial em hectares (ex.: 36 ou 36,0000).\nDeixe vazio para usar a área da medição${l.area_origem === 'CAMPO' ? ' (' + ha(l.area_ha) + ' ha)' : ''} ou "a definir":`, l.area_origem === 'CADASTRO' ? String(l.area_ha).replace('.', ',') : ''); if (ar === null) return;
+    const area = ar.trim() ? Number(ar.trim().replace(/\./g, '').replace(',', '.')) : null;
+    if (ar.trim() && !(area > 0)) { toast('Área inválida', true); return; }
+    try { await api(`/projetos/${S.pid}/lotes-producao/${encodeURIComponent(l.codigo)}`, { method: 'PATCH', json: { denominacao: den, area_ha: area } }); toast(`${l.codigo} atualizado ✅`); rCapasDossie(); }
+    catch (e){ toast(e.message, true); }
+  });
+  const z = $('#capasZip');
+  if (z) z.onclick = async () => {
+    z.disabled = true; toast(`Gerando ${comAssoc.length} capa(s)… pode levar alguns segundos.`);
+    try {
+      const r = await api(`/projetos/${S.pid}/gerar/capas-dossie`, { json: {} });
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a'); a.href = url; a.download = 'Capas_Dossie_Salete_Moreno.zip'; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (e){ toast(e.message, true); }
+    z.disabled = false;
+  };
 }
 
 // ─── Importar / exportar ────────────────────────────────────────────────

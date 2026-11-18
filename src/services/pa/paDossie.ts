@@ -107,38 +107,6 @@ const CSS = `@page{size:A4;margin:14mm}*{box-sizing:border-box}body{margin:0;fon
   ol.passos{margin:2mm 0 0;padding-left:6mm;line-height:1.6;font-size:10.5pt}`;
 const docHtml = (titulo: string, corpo: string) => `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>${CSS}</style></head><body>${corpo}</body></html>`;
 
-/** Capa do dossiê (página inteira). */
-function htmlCapa(o: { pa: string; municipio: string; associacao: string | null; lote: string; nome: string; numero: string; loteVila: string; denominacao: string | null; areaHa: number | null; rt: string; rtReg: string; data: string; logo: string; brasao: string }) {
-  const area = o.areaHa ? `${o.areaHa.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ha · ${(o.areaHa / 4.84).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} alqueires` : '';
-  return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><style>
-    @page{size:A4;margin:0}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    .pg{width:210mm;height:297mm;background:linear-gradient(160deg,#0C3320 0%,#14472B 62%,#1e5a36 100%);color:#fff;position:relative;display:flex;flex-direction:column;align-items:center;padding:22mm 18mm 16mm;text-align:center}
-    .faixa{position:absolute;left:0;right:0;top:0;height:5mm;background:#C9A84C}.faixa.b{top:auto;bottom:0}
-    .lg{background:#fff;border-radius:3mm;padding:2.5mm 5mm;display:inline-block}.lg img{height:20mm;display:block}
-    .bras{height:62mm;margin:12mm 0 6mm;filter:drop-shadow(0 1.5mm 3mm rgba(0,0,0,.4))}
-    .kick{color:#E3D19A;letter-spacing:3px;font-size:10pt;text-transform:uppercase;margin-top:10mm}
-    h1{font-size:26pt;margin:3mm 0 1mm;letter-spacing:.5px}h2{font-size:15pt;margin:0 0 6mm;color:#E3D19A;font-weight:400}
-    .box{background:rgba(255,255,255,.08);border:1px solid rgba(201,168,76,.7);border-radius:3mm;padding:6mm 8mm;width:150mm;text-align:left;font-size:11pt;line-height:1.7}
-    .box b{color:#E3D19A;font-weight:700;display:inline-block;width:42mm}
-    .rod{margin-top:auto;font-size:8.5pt;color:#d9e6dd;line-height:1.6}.rod b{color:#fff}
-  </style></head><body><div class="pg"><div class="faixa"></div><div class="faixa b"></div>
-    ${o.logo ? `<div class="lg"><img src="${o.logo}"></div>` : ''}
-    <div class="kick">Dossiê técnico do lote de produção</div>
-    <h1>LOTE LT-${esc(o.lote)}</h1><h2>${esc(o.pa)}</h2>
-    ${o.brasao ? `<img class="bras" src="${o.brasao}">` : '<div style="height:20mm"></div>'}
-    <div class="box">
-      <div><b>Associado(a)</b>${esc(o.nome)}</div>
-      <div><b>Nº do associado</b>${esc(o.numero)} · lote da vila ${esc(o.loteVila)}</div>
-      ${o.denominacao ? `<div><b>Denominação</b>“${esc(o.denominacao)}”</div>` : ''}
-      ${area ? `<div><b>Área</b>${area}</div>` : ''}
-      <div><b>Município</b>${esc(o.municipio)}</div>
-      ${o.associacao ? `<div><b>Associação</b>${esc(o.associacao)}</div>` : ''}
-      <div><b>Emissão</b>${esc(o.data)}</div>
-    </div>
-    <div class="rod"><b>Romatec Consultoria Total</b> · J R P BEZERRA LTDA · CNPJ 17.261.987/0001-09<br>${esc(ENDERECO_ROMATEC)}<br>Responsável técnico: ${esc(o.rt)} · ${esc(o.rtReg)}</div>
-  </div></body></html>`;
-}
-
 /** Peça do acervo e quantas páginas tem (para o sumário). */
 type Peca = { titulo: string; pdf: Buffer; paginas: number };
 async function peca(titulo: string, pdf: Buffer, soPrimeira = false): Promise<Peca> {
@@ -209,7 +177,6 @@ export async function pdfDossie(projetoId: number, lote: string): Promise<{ pdf:
   const cab = dadosCabecalho(p);
   const hoje = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: 'long', year: 'numeric' });
   const den = a?.denominacao_terra ? ` — "${esc(a.denominacao_terra)}"` : '';
-  const areaHa = c?.area_ha != null ? num(c.area_ha) : null;
 
   // 1) capa
   const { readFileSync, existsSync } = await import('node:fs');
@@ -219,11 +186,10 @@ export async function pdfDossie(projetoId: number, lote: string): Promise<{ pdf:
     const fp = [path.resolve(__dirname, '../../public/brand/pa', nome), path.resolve(process.cwd(), 'src/public/brand/pa', nome), path.resolve(process.cwd(), 'dist/public/brand/pa', nome)].find((x) => existsSync(x));
     return fp ? `data:${mime};base64,${readFileSync(fp).toString('base64')}` : '';
   };
-  const capa = await peca('Capa', await pdfDeHtml(htmlCapa({
-    pa: p.nome, municipio: `${p.municipio}/${p.uf}`, associacao: p.associacao_nome, lote, nome: String(a?.nome ?? ''), numero: String(a?.numero ?? ''), loteVila: String(a?.lote_vila ?? ''),
-    denominacao: (a?.denominacao_terra as string) ?? null, areaHa, rt: cab.rt.nome, rtReg: cab.rt.registro, data: hoje,
-    logo: asset('logo_romatec.jpg', 'image/jpeg'), brasao: asset(cab.marca.brasao, 'image/png'),
-  })));
+  // v3.188.0: capa padrão aprovada (Capa_Dossie_LT-05_Salete_Moreno_Romatec.pdf) — mesmo gerador da capa avulsa
+  const lp = await import('./paLotesProducao');
+  const { pdfCapaDossie } = await import('./paCapaDossie');
+  const capa = await peca('Capa', await pdfCapaDossie(await lp.dadosCapaLote(projetoId, await lp.buscarLoteProducao(projetoId, lote))));
 
   // v3.187.0: ordem do dossiê — capa → sumário → mapa e memorial (tradicional) → planta e memorial (SIGEF)
   // → contrato assinado → termo de quitação com extrato (contrato + taxa de marcos) → carteirinha → capa final

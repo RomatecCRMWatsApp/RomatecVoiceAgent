@@ -44,6 +44,7 @@ import * as boletim from '../services/pa/paCampoBoletim';
 import * as programacao from '../services/pa/paCampoProgramacao';
 import { baseValida } from '../services/pa/mapaTiles';
 import * as dossie from '../services/pa/paDossie';
+import * as lotesProd from '../services/pa/paLotesProducao';
 
 const router = Router();
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 10 } });
@@ -575,6 +576,24 @@ router.post('/projetos/:id/dossies/:lote/gerar', h(async (req) => { exigirAdmin(
 router.post('/projetos/:id/dossies/:lote/enviar', h(async (req) => { exigirAdmin(req); return dossie.enviarDossie(id(req.params.id), String(req.params.lote).slice(0, 10), ctx(req).sub); }));
 router.post('/projetos/:id/dossies/:lote/trt', h(async (req) => { exigirEscrita(req); return dossie.registrarTrt(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.acao, req.body?.numero, ctx(req).sub, ctx(req).nome); })); // v3.170.0
 router.post('/projetos/:id/dossies/:lote/entregue', h(async (req) => { exigirEscrita(req); return dossie.marcarEntregue(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.obs, ctx(req).sub, ctx(req).nome); }));
+// v3.188.0: lotes de produção (LT-NN) + capa do dossiê técnico do lote
+router.get('/projetos/:id/lotes-producao', h(async (req) => ({ lotes: await lotesProd.listarLotesProducao(id(req.params.id)) })));
+router.get('/projetos/:id/lotes-producao/:codigo', h(async (req) => ({ lote: await lotesProd.buscarLoteProducao(id(req.params.id), req.params.codigo) })));
+router.get('/projetos/:id/lotes-producao/:codigo/capa.pdf', h(async (req, res) => { enviarPdf(res, await lotesProd.pdfCapaLote(id(req.params.id), req.params.codigo)); return undefined; }));
+router.post('/projetos/:id/lotes-producao', h(async (req, res) => { exigirEscrita(req); res.status(201); return { lote: await lotesProd.salvarLoteProducao(id(req.params.id), req.body?.codigo, req.body ?? {}, ctx(req).sub, true) }; }));
+router.patch('/projetos/:id/lotes-producao/:codigo', h(async (req) => { exigirEscrita(req); return { lote: await lotesProd.salvarLoteProducao(id(req.params.id), req.params.codigo, req.body ?? {}, ctx(req).sub, false) }; }));
+router.post('/lotes-producao/:lid/gerar/capa', h(async (req, res) => { exigirEscrita(req); res.status(201); return lotesProd.gerarCapaLote(id(req.params.lid), ctx(req).sub); }));
+router.post('/projetos/:id/gerar/capas-dossie', h(async (req, res) => {
+  exigirEscrita(req);
+  const pid = id(req.params.id);
+  const p = await repo.buscarProjeto(pid);
+  // valida antes de abrir o ZIP (sem lote → 404 em JSON)
+  if (!(await lotesProd.listarLotesProducao(pid)).some((l) => l.associado_id)) throw new PaErro('SEM_LOTES', 'Nenhum lote com associado para gerar capa', 404);
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="Capas_Dossie_${p.codigo}.zip"`);
+  await lotesProd.zipCapasDossie(pid, req.body?.codigos, res, ctx(req).sub);
+  return undefined;
+}));
 
 // v3.169.0: planilha oficial de marcos (QUANTITATIVO-MARCOS-POR-LOTE) → códigos M-001… na coletora/caderneta/campo
 router.post('/projetos/:id/marcos-planilha', uploadMem.single('arquivo'), h(async (req) => {

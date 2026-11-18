@@ -115,6 +115,9 @@ const REGRAS: Regra[] = [
   R('*', P + '\\/campo\\/(programacao|programacao\\.pdf|programacao\\/texto|boletim|boletim\\.pdf)', 'programar_campo'),
   R('GET', P + '\\/(coletora\\.[a-z]+|caderneta-campo\\.pdf)', 'baixar_coletora'),
   R('*', P + '\\/dossies(\\/.*)?', 'dossies'),
+  // v3.188.0: lotes de produção + capa do dossiê do lote
+  R('GET', P + '\\/lotes-producao(\\/[\\w-]+(\\/capa\\.pdf)?)?', 'dossies'), R('ESCRITA', P + '\\/lotes-producao(\\/[\\w-]+)?', 'dossies'),
+  R('ESCRITA', P + '\\/gerar\\/capas-dossie', 'dossies'), R('ESCRITA', '^\\/lotes-producao\\/\\d+\\/gerar\\/capa', 'dossies'),
   R('*', P + '\\/whatsapp\\/.*', 'whatsapp'), R('*', '^\\/whatsapp\\/.*', 'whatsapp'), R('*', '^\\/associados\\/\\d+\\/whatsapp\\/enviar', 'whatsapp'),
 ];
 /** Permissão que a rota exige (null = rota sem regra: equipe, importar, exportar… — só ADMIN). Pura — testável. */

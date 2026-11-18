@@ -16,7 +16,7 @@ const archiver = require('archiver') as (formato: 'zip', opcoes?: { zlib?: { lev
 
 export const TIPOS_DOCUMENTO = [
   'FOTO_3X4', 'DOC_IDENTIFICACAO', 'CERTIDAO', 'DOC_CONJUGE', 'COMPROVANTE_SINAL', 'PROCESSO_FICHA_CONTRATO',
-  'PROCESSO_ASSINADO', 'CARTEIRINHA', 'MAPA_LOTE', 'MEMORIAL', 'TRT', 'RELATORIO', 'ORIGINAL', 'OUTRO',
+  'PROCESSO_ASSINADO', 'CARTEIRINHA', 'MAPA_LOTE', 'MEMORIAL', 'TRT', 'RELATORIO', 'ORIGINAL', 'OUTRO', 'CAPA_DOSSIE_LOTE', // v3.188.0
 ] as const;
 export type TipoDocumento = (typeof TIPOS_DOCUMENTO)[number];
 
