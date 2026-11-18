@@ -15,11 +15,14 @@ export const EQUIPAMENTOS_PADRAO = { base: 'S6 Plus (base)', rover: 'Jupiter Com
 const eqp = (v: unknown, padrao: string) => { const t = v == null ? '' : String(v).trim().slice(0, 80); return t || padrao; };
 export interface MarcaPonto { ponto: string; marcado_em: string; usuario_nome: string | null; base: string | null; rover: string | null; usuario_id: string | null; obs: string | null; gps: { lat: number; lon: number; precisao: number | null } | null }
 
-/** Marcos que o lote exige para fechar: os a cravar; se o lote só tem marcos já existentes (perímetro), confirma esses. */
-export function exigidos(vertices: string[], existentes: Set<string>): string[] {
-  const vs = [...new Set(vertices)];
-  const imp = vs.filter((v) => !existentes.has(v));
-  return imp.length ? imp : vs;
+/**
+ * Marcos que o lote exige para fechar a poligonal.
+ * v3.188.3: TODOS os vértices do lote — inclusive os de perímetro que já existem no chão. A equipe só crava os
+ * internos, mas tem que marcar (confirmar) todos os pontos para o lote fechar como MEDIDO; lote de perímetro não
+ * fecha mais sozinho só porque os marcos a cravar foram feitos por um vizinho. `existentes` fica só informativo.
+ */
+export function exigidos(vertices: string[], _existentes?: Set<string>): string[] {
+  return [...new Set(vertices)];
 }
 
 /** Lotes cujos vértices estão todos marcados (pura — testável). */
@@ -113,7 +116,7 @@ export async function estadoCampo(projetoId: number) {
     pontos: d.pontos.map((p) => ({ nome: p.nome, E: p.E, N: p.N, lat: p.lat, lon: p.lon, tipo: p.tipo, lotes: p.lotes, existente: !!p.existente, implantar_com: p.implantar_com ?? null, marca: porPonto.get(p.nome) ?? null })),
     lotes: ordemServico(d.lotes.map((l) => {
       const vs = [...new Set(l.vertices)];
-      const imp = exigidos(vs, existentes); // marcos a cravar (o perímetro já existe)
+      const imp = exigidos(vs); // v3.188.3: todos os vértices (cravar + confirmar os que já existem)
       const b = ben[l.lote];
       return { lote: l.lote, area_ha: l.area_ha, vertices: vs, exigidos: imp, a_implantar: vs.filter((v) => !existentes.has(v)).length, existentes: vs.filter((v) => existentes.has(v)).length, marcados: imp.filter((v) => porPonto.has(v)).length, fechado: fech.get(l.lote) ?? null,
         associado: b ? { nome: b.nome, lote_vila: b.lote_vila, denominacao: b.denominacao ?? null } : null,

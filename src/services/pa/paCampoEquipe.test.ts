@@ -56,8 +56,9 @@ describe('funcionário de campo — o que ele acessa', () => {
 describe('fechamento do lote e produção', () => {
   it('lote fecha com todos os marcos a cravar; o perímetro existente não conta', () => {
     const ex = new Set(['M-001']);
-    expect(exigidos(['M-001', 'M-002', 'M-003'], ex)).toEqual(['M-002', 'M-003']);
-    expect(exigidos(['M-001'], ex)).toEqual(['M-001']); // lote só de perímetro: confirma o existente
+    // v3.188.3: fecha a poligonal só com TODOS os vértices marcados (inclusive os já existentes)
+    expect(exigidos(['M-001', 'M-002', 'M-003', 'M-002'], ex)).toEqual(['M-001', 'M-002', 'M-003']);
+    expect(exigidos(['M-001'], ex)).toEqual(['M-001']);
     expect(lotesCompletos([{ lote: '01', vertices: ['M-002', 'M-003'] }], new Set(['M-002']))).toEqual([]);
     expect(lotesCompletos([{ lote: '01', vertices: ['M-002', 'M-003'] }], new Set(['M-002', 'M-003']))).toEqual(['01']);
   });
