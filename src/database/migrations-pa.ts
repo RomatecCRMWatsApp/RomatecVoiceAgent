@@ -203,6 +203,20 @@ const CREATE_PA_CAMPO_PONTOS = `
     INDEX idx_pa_campo_dia (projeto_id, marcado_em)
   ) DEFAULT CHARSET=utf8mb4
 `;
+// v3.177.0: programação diária de campo (lotes que a equipe vai medir em cada dia)
+const CREATE_PA_CAMPO_PROGRAMACAO = `
+  CREATE TABLE IF NOT EXISTS pa_campo_programacao (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id  INT NOT NULL,
+    dia         DATE NOT NULL,
+    lote        VARCHAR(10) NOT NULL,
+    ordem       INT NOT NULL DEFAULT 0,
+    criado_por  VARCHAR(64) NULL,
+    criado_em   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_pa_prog (projeto_id, dia, lote),
+    INDEX idx_pa_prog_dia (projeto_id, dia)
+  ) DEFAULT CHARSET=utf8mb4
+`;
 const CREATE_PA_CAMPO_LOTES = `
   CREATE TABLE IF NOT EXISTS pa_campo_lotes (
     id            INT AUTO_INCREMENT PRIMARY KEY,
@@ -435,6 +449,7 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_whatsapp_grupo_membros', sql: CREATE_PA_WA_GRUPO_MEMBROS },
   { label: 'pa_campo_pontos', sql: CREATE_PA_CAMPO_PONTOS },
   { label: 'pa_campo_lotes', sql: CREATE_PA_CAMPO_LOTES },
+  { label: 'pa_campo_programacao', sql: CREATE_PA_CAMPO_PROGRAMACAO },
   { label: 'pa_dossies', sql: CREATE_PA_DOSSIES },
 ];
 

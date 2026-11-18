@@ -38,6 +38,10 @@ describe('funcionário de campo — o que ele acessa', () => {
     expect(ok('GET', '/projetos/1/campo/boletim.pdf?base=satelite')).toBe(false);
     expect(ok('GET', '/projetos/1/campo/boletim')).toBe(false);
     expect(ok('GET', '/projetos/1/coletora.dxf')).toBe(true);
+    // v3.177.0: o operador vê a programação do dia, mas não gera PDF/texto do grupo nem altera
+    expect(ok('GET', '/projetos/1/campo/programacao')).toBe(true);
+    expect(ok('GET', '/projetos/1/campo/programacao.pdf')).toBe(false);
+    expect(ok('GET', '/projetos/1/campo/programacao/texto')).toBe(false);
   });
   it('permissões desligadas fecham as rotas', () => {
     const p = lerPermissoes({ ver_mapa: false, baixar_coletora: false, marcar_campo: false });

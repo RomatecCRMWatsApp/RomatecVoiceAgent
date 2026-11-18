@@ -298,6 +298,18 @@
   @media (max-width:700px){table.tcard td.cp-pg{flex-direction:column;align-items:stretch;text-align:left}table.tcard td.cp-pg::before{margin-bottom:2px}}
   .cp-leg i{display:inline-block;width:26px;height:14px;border-radius:4px;border:1px solid #0002;vertical-align:middle}
   .cp-aviso{margin-top:8px;padding:8px 10px;border-radius:8px;font-size:13px}.cp-aviso.q{background:#E6F4EC;color:#1B5E20}.cp-aviso.p{background:#FFF4E5;color:#8A4B00;border:1px solid #F2C94C}
+  .cx-manual{position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;padding:12px}
+  .cx-manual .cx-in{background:#fff;border-radius:14px;padding:14px;width:100%;max-width:560px;border:2px solid var(--gold)}
+  .cx-manual textarea{width:100%;margin-top:6px;font-size:13px}
+  /* v3.177.0: programação do dia */
+  .cp-prog .pg-lista{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+  .cp-prog .pg-it{display:flex;align-items:center;gap:6px;flex-wrap:wrap;border:1px solid var(--line);border-left:5px solid #5DA9E9;border-radius:8px;padding:6px 8px;background:#fff}
+  .cp-prog .pg-it > span:not(.chip){flex:1 1 180px;font-size:13px}
+  .pg-res{position:absolute;left:0;right:0;top:100%;z-index:30;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,.15);max-height:320px;overflow:auto}
+  .pg-res:empty{display:none}
+  .pg-op{display:block;width:100%;text-align:left;background:#fff;border:0;border-bottom:1px solid var(--line);padding:9px 10px;font-size:13px;cursor:pointer}
+  .pg-op:hover{background:#F4F1E6}
+  .pg-env{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
   .ml-alq{font-weight:700;color:#7A5B12;margin:-2px 0 4px}
   .ml-ben{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
   .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -2982,6 +2994,131 @@ function equipamentos(d){
   let s = {}; try { s = JSON.parse(localStorage.getItem('pa_campo_eqp') || '{}'); } catch { s = {}; }
   return { base: s.base || d.equipamentos.base, rover: s.rover || d.equipamentos.rover };
 }
+// ─── v3.177.0: compartilhar no grupo (PDF + texto) e programação diária de campo ─
+const baseBol = () => { const b = BASE_LEMBRADA['.cpBase [data-base]']; return b === 'mapa' || b === 'relevo' ? b : 'satelite'; };
+// v3.177.0: iPhone (Safari) só copia/compartilha dentro do toque — o texto vem do servidor numa
+// promessa entregue ao ClipboardItem (cópia no mesmo toque); se o navegador recusar, mostra o texto
+// selecionado / um botão novo para tocar de novo, em vez do erro.
+function caixaManual(texto, titulo){
+  let m = document.getElementById('cxManual');
+  if (!m){ m = document.createElement('div'); m.id = 'cxManual'; m.className = 'cx-manual'; document.body.appendChild(m); }
+  m.innerHTML = `<div class="cx-in"><b>${esc(titulo)}</b><textarea class="f" rows="12" readonly>${esc(texto)}</textarea><div class="row" style="gap:6px;margin-top:8px"><button class="btn btn-primary btn-sm" id="cxCopiar" style="flex:0 0 auto">📋 Copiar</button><button class="btn btn-ghost btn-sm" id="cxFechar" style="flex:0 0 auto">Fechar</button></div></div>`;
+  const ta = m.querySelector('textarea'); ta.focus(); ta.select(); ta.setSelectionRange(0, texto.length);
+  m.querySelector('#cxFechar').onclick = () => m.remove();
+  m.querySelector('#cxCopiar').onclick = async () => { try { await navigator.clipboard.writeText(texto); toast('Texto copiado — cole no grupo do PA'); m.remove(); } catch { ta.select(); try { document.execCommand('copy'); toast('Texto copiado'); m.remove(); } catch { toast('Toque e segure no texto → Copiar', true); } } };
+}
+async function copiarTextoGrupo(caminho){
+  let texto = null;
+  const busca = api(caminho).then((r) => { texto = r.texto; return r.texto; });
+  try {
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': busca.then((t) => new Blob([t], { type: 'text/plain' })) })]);
+    } else {
+      await navigator.clipboard.writeText(await busca);
+    }
+    toast('Texto copiado — cole no grupo do PA');
+    return texto;
+  } catch (e){
+    try { texto = texto || await busca; } catch (e2){ toast(e2.message, true); return null; }
+    caixaManual(texto, 'Texto para o grupo — toque em Copiar');
+    return texto;
+  }
+}
+async function compartilharGrupo(pdf, texto, bt){
+  if (bt) bt.disabled = true;
+  let t, arq;
+  try {
+    const [tt, r] = await Promise.all([api(texto), api(pdf)]);
+    t = tt; arq = new File([await r.blob()], t.nome, { type: 'application/pdf' });
+  } catch (e){ toast(e.message, true); if (bt) bt.disabled = false; return; }
+  if (bt) bt.disabled = false;
+  if (navigator.canShare && navigator.canShare({ files: [arq] })) {
+    const compartilhar = async () => {
+      try { await navigator.clipboard.writeText(t.texto); } catch { /* o texto também vai no compartilhar */ }
+      await navigator.share({ files: [arq], title: arq.name, text: t.texto });
+    };
+    try { await compartilhar(); }
+    catch (e){
+      if (e && e.name === 'AbortError') return;
+      // iPhone: o toque "venceu" enquanto o PDF era gerado — pede um toque novo, com tudo pronto
+      let m = document.getElementById('cxManual');
+      if (!m){ m = document.createElement('div'); m.id = 'cxManual'; m.className = 'cx-manual'; document.body.appendChild(m); }
+      m.innerHTML = `<div class="cx-in"><b>PDF pronto ✅</b><div class="muted" style="margin:6px 0">Toque para escolher o grupo do PA no WhatsApp.</div><div class="row" style="gap:6px"><button class="btn btn-primary" id="cxShare" style="flex:0 0 auto">📤 Compartilhar agora</button><button class="btn btn-ghost btn-sm" id="cxTexto" style="flex:0 0 auto">📋 Ver texto</button><button class="btn btn-ghost btn-sm" id="cxFechar" style="flex:0 0 auto">Fechar</button></div></div>`;
+      m.querySelector('#cxShare').onclick = async () => { try { await navigator.share({ files: [arq], title: arq.name, text: t.texto }); m.remove(); } catch (e2){ if (!e2 || e2.name !== 'AbortError') toast(e2.message, true); } };
+      m.querySelector('#cxTexto').onclick = () => caixaManual(t.texto, 'Texto para o grupo — toque em Copiar');
+      m.querySelector('#cxFechar').onclick = () => m.remove();
+    }
+  } else {
+    const url = URL.createObjectURL(arq); const a = document.createElement('a'); a.href = url; a.download = arq.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+    window.open('https://wa.me/?text=' + encodeURIComponent(t.texto + '\n\n(PDF baixado — anexe na conversa)'), '_blank');
+  }
+}
+const semAcento = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const PG = { dia: null, lotes: [], salvo: true, info: null };
+const SIT_PG = { MEDIDO: ['PAGO', '✓ medido'], EM_MEDICAO: ['PARCIAL', 'em medição'], PENDENTE: ['A_VENCER', 'pendente'] };
+async function cardProgramacao(d){
+  const box = $('#cpProg'); if (!box) return;
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  if (!PG.dia) PG.dia = hoje;
+  let info; try { info = await api(`/projetos/${S.pid}/campo/programacao?dia=${PG.dia}`); } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  PG.info = info; PG.lotes = info.lotes.slice(); PG.salvo = true;
+  const porLote = Object.fromEntries(d.lotes.map((l) => [l.lote, l]));
+  const campo = S.eu.perfil === 'CAMPO';
+  if (campo){ // operador: só vê os lotes do dia
+    box.innerHTML = info.itens.length ? `<div class="card cp-prog"><b>📅 Lotes programados para hoje (${info.itens.length})</b><div class="pg-lista">${info.itens.map((x) => `<div class="pg-it"><b>${x.ordem}. LT-${esc(x.lote)}</b> <span>${esc(x.associado || 'sem associado')}${x.chacara ? ' · ' + esc(x.chacara) : ''}</span> ${chip(SIT_PG[x.situacao][0], SIT_PG[x.situacao][1])}</div>`).join('')}</div></div>` : '';
+    return;
+  }
+  const desenhar = () => {
+    const itens = PG.lotes.map((lt, i) => { const l = porLote[lt] || {}; const it = info.itens.find((x) => x.lote === lt); return { ordem: i + 1, lote: lt, l, sit: l.fechado ? 'MEDIDO' : l.marcados ? 'EM_MEDICAO' : 'PENDENTE', it }; });
+    const pend = info.anterior && info.anterior.pendentes.filter((lt) => !PG.lotes.includes(lt));
+    box.innerHTML = `<div class="card cp-prog">
+      <h2 style="margin-top:0">📅 Programação de campo do dia</h2>
+      <div class="muted" style="margin-bottom:8px"><b>Manhã:</b> escolha os lotes que a equipe vai medir (pelo nome do associado, chácara ou lote), salve e envie a programação no grupo. <b>Fim do dia:</b> envie a confirmação — o sistema mostra o que foi medido, o que ficou em medição e o que ficou pendente para o dia seguinte.</div>
+      <div class="row" style="gap:8px;align-items:end;flex-wrap:wrap">
+        <div style="flex:0 0 170px"><label for="pgDia">Dia</label><input type="date" id="pgDia" value="${esc(PG.dia)}"></div>
+        <div style="flex:1 1 240px;position:relative"><label for="pgBusca">Adicionar lote — buscar associado, chácara ou lote</label><input id="pgBusca" placeholder="Ex.: Gaele, São José, 43" autocomplete="off"><div id="pgRes" class="pg-res"></div></div>
+      </div>
+      ${pend && pend.length ? `<div class="cp-aviso p" style="margin-top:8px">⏳ Ficaram de ${dbr(info.anterior.dia)} sem medir: <b>${pend.map((x) => 'LT-' + esc(x)).join(', ')}</b> <button class="btn btn-gold btn-sm" id="pgPend" style="margin-left:6px">➕ Incluir no dia</button></div>` : ''}
+      <div class="pg-lista" id="pgLista">${itens.length ? itens.map((x) => `<div class="pg-it"><b>${x.ordem}. LT-${esc(x.lote)}</b>
+          <span>${esc(x.l.associado ? x.l.associado.nome : 'sem associado vinculado')}${x.l.associado && x.l.associado.denominacao ? ' · 🏡 ' + esc(x.l.associado.denominacao) : ''}${x.l.associado && x.l.associado.lote_vila ? ' · vila ' + esc(x.l.associado.lote_vila) : ''}</span>
+          ${chip(SIT_PG[x.sit][0], SIT_PG[x.sit][1])}<button class="btn btn-ghost btn-sm" data-pgsobe="${esc(x.lote)}" title="Subir na ordem">▲</button><button class="btn btn-ghost btn-sm" data-pgtira="${esc(x.lote)}" title="Tirar da programação">✕</button></div>`).join('') : '<div class="muted">Nenhum lote escolhido para este dia.</div>'}</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn btn-primary btn-sm" id="pgSalvar" style="flex:0 0 auto" ${PG.salvo ? 'disabled' : ''}>💾 Salvar programação${PG.salvo ? ' (salva)' : ''}</button></div>
+      <div class="pg-env">
+        <div><b>☀️ Manhã — programação</b><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px"><button class="btn btn-primary btn-sm" data-pgenv="programacao" style="flex:0 0 auto">📤 Enviar no grupo</button><button class="btn btn-gold btn-sm" data-pgpdf="programacao" style="flex:0 0 auto">📄 PDF</button><button class="btn btn-ghost btn-sm" data-pgtxt="programacao" style="flex:0 0 auto">📋 Copiar texto</button></div></div>
+        <div><b>🌙 Fim do dia — confirmação</b><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px"><button class="btn btn-primary btn-sm" data-pgenv="confirmacao" style="flex:0 0 auto">📤 Enviar no grupo</button><button class="btn btn-gold btn-sm" data-pgpdf="confirmacao" style="flex:0 0 auto">📄 PDF</button><button class="btn btn-ghost btn-sm" data-pgtxt="confirmacao" style="flex:0 0 auto">📋 Copiar texto</button></div></div>
+        <div><b>📣 Boletim geral do PA</b><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px"><button class="btn btn-primary btn-sm" id="cpBolShare" style="flex:0 0 auto">📤 Enviar no grupo</button><button class="btn btn-gold btn-sm" id="cpBolPdf" style="flex:0 0 auto">📄 PDF</button><button class="btn btn-ghost btn-sm" id="cpBolTxt" style="flex:0 0 auto">📋 Copiar texto</button></div></div>
+      </div>
+      <div id="pgTexto"></div></div>`;
+    const mudou = () => { PG.salvo = false; desenhar(); };
+    $('#pgDia').onchange = () => { PG.dia = $('#pgDia').value || hoje; cardProgramacao(d); };
+    const busca = $('#pgBusca'), res = $('#pgRes');
+    busca.oninput = () => {
+      const q = semAcento(busca.value.trim());
+      if (q.length < 2){ res.innerHTML = ''; return; }
+      const achados = d.lotes.filter((l) => !PG.lotes.includes(l.lote) && (semAcento(l.associado && l.associado.nome).includes(q) || semAcento(l.associado && l.associado.denominacao).includes(q) || l.lote === q.replace(/\D/g, '').padStart(2, '0') || ('lt-' + l.lote).includes(q))).slice(0, 8);
+      res.innerHTML = achados.length ? achados.map((l) => `<button type="button" class="pg-op" data-pgadd="${esc(l.lote)}"><b>➕ LT-${esc(l.lote)}</b> ${esc(l.associado ? l.associado.nome : 'sem associado')}${l.associado && l.associado.denominacao ? ' · 🏡 ' + esc(l.associado.denominacao) : ''}${l.associado && l.associado.lote_vila ? ' · vila ' + esc(l.associado.lote_vila) : ''} ${l.fechado ? '<span class="muted">· já medido</span>' : l.marcados ? '<span class="muted">· em medição</span>' : ''}</button>`).join('') : '<div class="muted" style="padding:6px">Nada encontrado (ou já está na lista).</div>';
+      res.querySelectorAll('[data-pgadd]').forEach((b) => b.onclick = () => { PG.lotes.push(b.dataset.pgadd); mudou(); setTimeout(() => { const i = $('#pgBusca'); if (i) i.focus(); }, 0); });
+    };
+    if ($('#pgPend')) $('#pgPend').onclick = () => { PG.lotes.push(...pend); mudou(); };
+    box.querySelectorAll('[data-pgtira]').forEach((b) => b.onclick = () => { PG.lotes = PG.lotes.filter((x) => x !== b.dataset.pgtira); mudou(); });
+    box.querySelectorAll('[data-pgsobe]').forEach((b) => b.onclick = () => { const i = PG.lotes.indexOf(b.dataset.pgsobe); if (i > 0){ [PG.lotes[i - 1], PG.lotes[i]] = [PG.lotes[i], PG.lotes[i - 1]]; mudou(); } });
+    const salvar = async () => { const r = await api(`/projetos/${S.pid}/campo/programacao`, { method: 'PUT', json: { dia: PG.dia, lotes: PG.lotes } }); info = PG.info = r; PG.salvo = true; };
+    $('#pgSalvar').onclick = async () => { try { await salvar(); toast('Programação salva'); desenhar(); } catch (e){ toast(e.message, true); } };
+    const garantir = async () => { if (!PG.salvo){ await salvar(); desenhar(); } };
+    const q = (tipo) => `tipo=${tipo}&dia=${PG.dia}`;
+    box.querySelectorAll('[data-pgenv]').forEach((b) => b.onclick = async () => { try { await garantir(); } catch (e){ return toast(e.message, true); } compartilharGrupo(`/projetos/${S.pid}/campo/programacao.pdf?${q(b.dataset.pgenv)}&base=${baseBol()}`, `/projetos/${S.pid}/campo/programacao/texto?${q(b.dataset.pgenv)}`, b); });
+    box.querySelectorAll('[data-pgpdf]').forEach((b) => b.onclick = async () => { try { await garantir(); } catch (e){ return toast(e.message, true); } abrirPdf(`/projetos/${S.pid}/campo/programacao.pdf?${q(b.dataset.pgpdf)}&base=${baseBol()}`); });
+    box.querySelectorAll('[data-pgtxt]').forEach((b) => b.onclick = async () => {
+      try { await garantir(); } catch (e){ return toast(e.message, true); }
+      const t = await copiarTextoGrupo(`/projetos/${S.pid}/campo/programacao/texto?${q(b.dataset.pgtxt)}`);
+      if (t) $('#pgTexto').innerHTML = `<label style="margin-top:8px;display:block">Texto (já copiado — confira e cole no grupo)</label><textarea class="f" rows="10" style="width:100%" readonly>${esc(t)}</textarea>`;
+    });
+    $('#cpBolPdf').onclick = () => abrirPdf(`/projetos/${S.pid}/campo/boletim.pdf?base=${baseBol()}`);
+    $('#cpBolTxt').onclick = () => copiarTextoGrupo(`/projetos/${S.pid}/campo/boletim`);
+    $('#cpBolShare').onclick = (ev) => compartilharGrupo(`/projetos/${S.pid}/campo/boletim.pdf?base=${baseBol()}`, `/projetos/${S.pid}/campo/boletim`, ev.currentTarget);
+  };
+  desenhar();
+}
 async function rLocacao(box){
   if (MAPA_CP.parar) MAPA_CP.parar();
   let d; try { d = await api(`/projetos/${S.pid}/campo`); } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
@@ -2996,9 +3133,7 @@ async function rLocacao(box){
   const qAM = quitadosAMedir(d), abertos = d.lotes.filter((l) => !l.fechado && !(l.pagamento && l.pagamento.quitado)), medidos = d.lotes.filter((l) => l.fechado);
   const contaFaixa = (id) => d.lotes.filter((l) => l.faixa === id);
   box.innerHTML = `${S.eu && S.eu.perfil === 'ADMIN' ? `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 220px" class="muted">Funcionários de campo: cadastre, escolha o perfil e libere o que cada um pode fazer.</span><button class="btn btn-gold btn-sm" id="cpEquipe" style="flex:0 0 auto">👷 Equipe e permissões</button> <button class="btn btn-ghost btn-sm" id="cpColetora" style="flex:0 0 auto">📥 Coletora e caderneta</button></div>` : `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 220px" class="muted">Arquivos para a coletora (CSV, TXT, DXF) e a caderneta de campo.</span><button class="btn btn-ghost btn-sm" id="cpColetora" style="flex:0 0 auto">📥 Coletora e caderneta</button></div>`}
-    ${S.eu && S.eu.perfil !== 'CAMPO' ? `<div class="card cp-bol"><div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><b style="flex:1 1 200px">📣 Boletim de campo para o grupo do PA</b>
-      <span style="flex:0 0 auto"><button class="btn btn-gold btn-sm" id="cpBolPdf" title="Boletim do dia: mapa com os lotes medidos e em medição, evolução por dia">📄 Boletim (PDF)</button> <button class="btn btn-primary btn-sm" id="cpBolShare" title="Enviar o PDF com o texto para o grupo do PA">📤 Enviar no grupo</button> <button class="btn btn-ghost btn-sm" id="cpBolTxt">📋 Copiar texto</button></span></div>
-      <div class="muted" style="margin-top:4px">Mapa todo branco com os lotes <b>em medição</b> (azul) e <b>medidos</b> (verde; amarelo = hoje) com o nome do associado e o OK, mais os lotes e marcos por dia, ritmo e previsão.</div></div>` : ''}
+    <div id="cpProg"></div>
     <div class="card"><h2 style="margin-top:0">📍 Locação dos marcos</h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 10px">
         <div class="k2"><div><div class="l">Marcos a cravar</div><div class="v">${d.totais.marcados}/${d.totais.a_implantar}</div><div class="muted">${d.totais.existentes} já existem (perímetro)</div></div></div>
@@ -3034,30 +3169,7 @@ async function rLocacao(box){
   // v3.173.0: atalhos para equipe/permissões e para os arquivos da coletora
   if ($('#cpEquipe')) $('#cpEquipe').onclick = () => mostrar('equipe');
   if ($('#cpColetora')) $('#cpColetora').onclick = () => mostrar('importar');
-  // v3.172.0: boletim de campo (PDF + texto) para o grupo do PA
-  // o fundo do mapa no PDF segue o que está escolhido na tela (Mapa / Satélite / Relevo); padrão satélite
-  const baseBol = () => { const b = BASE_LEMBRADA['.cpBase [data-base]']; return b === 'mapa' || b === 'relevo' ? b : 'satelite'; };
-  if ($('#cpBolPdf')) $('#cpBolPdf').onclick = () => abrirPdf(`/projetos/${S.pid}/campo/boletim.pdf?base=${baseBol()}`);
-  if ($('#cpBolTxt')) $('#cpBolTxt').onclick = async () => {
-    try { const r = await api(`/projetos/${S.pid}/campo/boletim`); await navigator.clipboard.writeText(r.texto); toast('Texto do boletim copiado — cole no grupo do PA'); }
-    catch (e){ toast(e.message || 'Não foi possível copiar', true); }
-  };
-  if ($('#cpBolShare')) $('#cpBolShare').onclick = async (ev) => {
-    const bt = ev.currentTarget; bt.disabled = true;
-    try {
-      const [t, r] = await Promise.all([api(`/projetos/${S.pid}/campo/boletim`), api(`/projetos/${S.pid}/campo/boletim.pdf?base=${baseBol()}`)]);
-      const arq = new File([await r.blob()], t.nome, { type: 'application/pdf' });
-      if (navigator.canShare && navigator.canShare({ files: [arq] })) {
-        // o WhatsApp descarta o texto quando vai junto com arquivo em alguns celulares — copia antes para colar
-        try { await navigator.clipboard.writeText(t.texto); } catch { /* ok */ }
-        await navigator.share({ files: [arq], title: arq.name, text: t.texto }).catch((e) => { if (e && e.name !== 'AbortError') throw e; });
-      } else {
-        const url = URL.createObjectURL(arq); const a = document.createElement('a'); a.href = url; a.download = arq.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
-        window.open('https://wa.me/?text=' + encodeURIComponent(t.texto + '\n\n(PDF baixado — anexe na conversa)'), '_blank');
-      }
-    } catch (e){ toast(e.message, true); }
-    bt.disabled = false;
-  };
+  cardProgramacao(d);
   $('#cpLote').onchange = () => { CP.lote = $('#cpLote').value; CP.ponto = null; mapaCampo(d, podeMarcar); };
   box.querySelectorAll('[data-cplote]').forEach((tr) => tr.onclick = () => { CP.lote = tr.dataset.cplote; $('#cpLote').value = CP.lote; CP.ponto = null; mapaCampo(d, podeMarcar); $('#cpMapa').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
   mapaCampo(d, podeMarcar);
