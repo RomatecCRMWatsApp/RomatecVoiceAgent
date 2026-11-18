@@ -238,3 +238,27 @@ export async function reabrirLote(projetoId: number, lote: string, u: Usuario) {
   await registrarEvento(pool, { projeto_id: projetoId, usuario: u.id, tipo: 'CAMPO_LOTE_REABERTO', dados: { lote, ponto: r.ponto, lotes_reabertos: r.lotes_reabertos } });
   return { lote, ponto: r.ponto as string | null, lotes_reabertos: r.lotes_reabertos };
 }
+
+/** v3.188.4: marca vários vértices de uma vez (checklist do lote) e fecha a poligonal no fim. */
+export async function marcarPontos(projetoId: number, pontosRaw: unknown, entrada: { obs?: unknown; base?: unknown; rover?: unknown }, u: Usuario) {
+  const nomes = [...new Set((Array.isArray(pontosRaw) ? pontosRaw : []).map((x) => String(x ?? '').trim().slice(0, 40)).filter(Boolean))].slice(0, 60);
+  if (!nomes.length) throw new PaErro('CAMPO_INVALIDO', 'Selecione ao menos um marco', 400);
+  const base = eqp(entrada.base, EQUIPAMENTOS_PADRAO.base), rover = eqp(entrada.rover, EQUIPAMENTOS_PADRAO.rover);
+  const obs = entrada.obs ? String(entrada.obs).trim().slice(0, 255) || null : null;
+  const d = await pontosColetora(projetoId);
+  const desconhecidos = nomes.filter((n) => !d.pontos.some((p) => p.nome === n));
+  if (desconhecidos.length) throw new PaErro('PONTO_NAO_ENCONTRADO', `Marco(s) fora do levantamento: ${desconhecidos.join(', ')}`, 404);
+  const ja = new Set((await rows(pool, `SELECT ponto FROM pa_campo_pontos WHERE projeto_id = ? AND ponto IN (${nomes.map(() => '?').join(',')})`, [projetoId, ...nomes])).map((r) => String(r.ponto)));
+  const marcados: string[] = []; const lotes = new Set<string>();
+  for (const n of nomes) {
+    const p = d.pontos.find((x) => x.nome === n)!;
+    p.lotes.forEach((l) => lotes.add(l));
+    if (ja.has(n)) continue;
+    const ins = await exec(pool, `INSERT IGNORE INTO pa_campo_pontos (projeto_id, ponto, e, n, marcado_em, usuario_id, usuario_nome, base_gnss, rover_gnss, gps_lat, gps_lon, gps_precisao, obs)
+      VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, NULL, NULL, NULL, ?)`, [projetoId, n, p.E, p.N, u.id, u.nome, base, rover, obs]);
+    if (ins.affectedRows) marcados.push(n);
+  }
+  if (marcados.length) await registrarEvento(pool, { projeto_id: projetoId, usuario: u.id, tipo: 'CAMPO_PONTO_MARCADO', dados: { pontos: marcados, lotes: [...lotes], em_lote: true } });
+  const fechados = await fecharCompletos(projetoId, u, base, rover, [...lotes]);
+  return { marcados, ja_marcados: [...ja], lotes_fechados: fechados };
+}

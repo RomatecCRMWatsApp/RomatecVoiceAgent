@@ -558,6 +558,13 @@ router.get('/projetos/:id/campo/programacao', h(async (req) => programacao.busca
 router.put('/projetos/:id/campo/programacao', h(async (req) => { exigirEscrita(req); return programacao.salvarProgramacao(id(req.params.id), req.body?.dia, req.body?.lotes, ctx(req).sub); }));
 router.get('/projetos/:id/campo/programacao.pdf', h(async (req, res) => { enviarPdf(res, await programacao.pdfDia(id(req.params.id), req.query.tipo, req.query.dia, baseValida(req.query.base))); return undefined; }));
 router.get('/projetos/:id/campo/programacao/texto', h(async (req) => programacao.textoDia(id(req.params.id), req.query.tipo, req.query.dia)));
+// v3.188.4: checklist do lote — marca vários vértices de uma vez e fecha a poligonal
+router.post('/projetos/:id/campo/pontos/lote', h(async (req) => {
+  const p = ctx(req).perfil;
+  if (p === 'DIRECAO_ASSOCIACAO' || !(p === 'ADMIN' || ctx(req).permissoes.marcar_campo)) throw new PaErro('SEM_PERMISSAO', 'Sem permissão para marcar pontos', 403);
+  const b = req.body ?? {};
+  return campo.marcarPontos(id(req.params.id), b.pontos, { obs: b.obs, base: b.base, rover: b.rover }, usuarioCampo(req));
+}));
 router.post('/projetos/:id/campo/pontos', h(async (req) => {
   const p = ctx(req).perfil;
   if (p === 'DIRECAO_ASSOCIACAO' || !(p === 'ADMIN' || ctx(req).permissoes.marcar_campo)) throw new PaErro('SEM_PERMISSAO', 'Sem permissão para marcar pontos', 403);

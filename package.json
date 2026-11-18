@@ -1,6 +1,6 @@
 {
   "name": "romatec-voice-agent",
-  "version": "3.188.3",
+  "version": "3.188.4",
   "description": "Roma - Assistente executivo de voz da Romatec Consultoria Imobiliaria",
   "main": "dist/server.js",
   "scripts": {

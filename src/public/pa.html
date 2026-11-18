@@ -3211,15 +3211,53 @@ async function mapaCampo(d, podeMarcar){
   const vis = lote ? d.pontos.filter((p) => p.lotes.includes(lote.lote)) : d.pontos.filter((p) => p.lotes.length);
   const pontos = vis.map((p) => ({ id: p.nome, nome: p.nome, lngLat: [p.lon, p.lat], cor: corPonto(p) }));
   const sel = $('#cpSel');
-  sel.innerHTML = '<option value="">Selecione o marco</option>' + vis.map((p) => `<option value="${esc(p.nome)}">${p.marca ? '✅' : p.existente ? '◻️' : '🔴'} ${esc(p.nome)} · ${esc(p.tipo)}</option>`).join('');
+  // v3.188.4: a lista de marcos acompanha o lote escolhido (no celular o lote é escolhido tocando no mapa)
+  const preencherSel = (l) => {
+    const lo = l ? d.lotes.find((x) => x.lote === l) : null;
+    const ps = lo ? lo.vertices.map((n) => d.pontos.find((p) => p.nome === n)).filter(Boolean) : vis;
+    sel.innerHTML = `<option value="">${lo ? `Marcos do LT-${esc(lo.lote)} (${ps.length})` : 'Selecione o marco'}</option>` + ps.map((p) => `<option value="${esc(p.nome)}">${p.marca ? '✅' : p.existente ? '◻️' : '🔴'} ${esc(p.nome)} · ${esc(p.tipo)}</option>`).join('');
+  };
+  CP.podeMarcar = podeMarcar;
+  preencherSel(lote ? lote.lote : null);
   const ctx = { geo: { ...geo, features: [...lotesF, ...outros] }, lotesF, porLote, outros, pontos, ctl, baseSel: '.cpBase [data-base]',
     rotulo: (f) => { const l = porLoteCampo[f.properties.lote]; return `${l && l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${f.properties.lote}${fechados.has(f.properties.lote) ? ' ✅' : ''}`; }, opacFill: .5, opacSel3d: .45, opacSel2d: .65 };
   const eng = modo === '3d' ? mapaLotes3D(lib, box, ctx) : mapaLotes2D(lib, box, ctx);
-  ctx.selecionar = (l, centralizar) => { CP.lote = l; const s = $('#cpLote'); if (s) s.value = l; eng.marcar(l, centralizar); cartaoLoteCampo(d, l); };
+  ctx.selecionar = (l, centralizar) => { CP.lote = l; CP.ponto = null; const s = $('#cpLote'); if (s) s.value = l; preencherSel(l); eng.marcar(l, centralizar); cartaoLoteCampo(d, l); };
   ctx.selPonto = (id) => { CP.ponto = id; eng.marcarPonto(id); sel.value = id; cartaoPontoCampo(d, id, podeMarcar, eng); };
   sel.onchange = () => { if (sel.value) ctx.selPonto(sel.value); };
   MAPA_CP = { mapa: eng.mapa, parar: eng.parar };
   if (lote) setTimeout(() => { eng.marcar(lote.lote, true); if (CP.ponto) ctx.selPonto(CP.ponto); else cartaoLoteCampo(d, lote.lote); }, 300);
+}
+// v3.188.4: vértices do lote com caixas de seleção — marca vários de uma vez e fecha a poligonal
+function listaVerticesLote(d, lo){
+  const ps = lo.vertices.map((n) => d.pontos.find((p) => p.nome === n)).filter(Boolean);
+  const pend = ps.filter((p) => !p.marca);
+  return `<div class="cp-vt" style="margin-top:8px;border:1px solid var(--line,#ddd);border-radius:8px;padding:8px">
+    <div class="row" style="align-items:center;gap:6px;margin:0 0 6px"><b style="flex:1 1 auto">Vértices do LT-${esc(lo.lote)} (${ps.length})</b>${pend.length > 1 ? '<button type="button" class="btn btn-ghost btn-sm" id="cpVtTodos" style="flex:0 0 auto">☑️ Selecionar todos</button>' : ''}</div>
+    ${ps.map((p) => `<label style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-top:1px solid var(--line,#eee);font-size:15px;${p.marca ? 'opacity:.6' : ''}">
+      <input type="checkbox" data-cpvt="${esc(p.nome)}" ${p.marca ? 'checked disabled' : ''} style="width:22px;height:22px;flex:0 0 auto">
+      <span>${p.marca ? '✅' : p.existente ? '◻️' : '🔴'} <b>${esc(p.nome)}</b> · ${esc(p.tipo)}${p.existente && !p.marca ? ' <span class="muted">(já existe — confirmar)</span>' : ''}${p.marca ? ` <span class="muted">marcado ${hBr(p.marca.marcado_em)}</span>` : ''}</span></label>`).join('')}
+    ${pend.length ? `<button type="button" class="btn btn-primary" id="cpVtMarcar" style="margin-top:8px;width:100%;font-size:16px;padding:12px" disabled>✅ Marcar selecionados</button>` : ''}</div>`;
+}
+function ligarListaVertices(d, lo){
+  const box = document.querySelector('.cp-vt'); if (!box) return;
+  const bt = $('#cpVtMarcar');
+  const sel = () => [...box.querySelectorAll('[data-cpvt]:not(:disabled)')].filter((c) => c.checked).map((c) => c.dataset.cpvt);
+  const upd = () => { if (!bt) return; const n = sel().length; bt.disabled = !n; bt.textContent = n ? `✅ Marcar selecionados (${n})` : '✅ Marcar selecionados'; };
+  box.querySelectorAll('[data-cpvt]:not(:disabled)').forEach((c) => c.onchange = upd);
+  if ($('#cpVtTodos')) $('#cpVtTodos').onclick = () => { const cs = [...box.querySelectorAll('[data-cpvt]:not(:disabled)')]; const marcar = cs.some((c) => !c.checked); cs.forEach((c) => { c.checked = marcar; }); upd(); };
+  if (bt) bt.onclick = async () => {
+    const pontos = sel(); if (!pontos.length) return;
+    const faltam = box.querySelectorAll('[data-cpvt]:not(:checked)').length;
+    if (!confirm(`Confirmar ${pontos.length} marco(s) do LT-${lo.lote} como marcados?\n${pontos.join(', ')}${faltam ? '' : '\n\nCom isso a poligonal fecha: o lote vira MEDIDO, o aviso vai para o WhatsApp e o dossiê é liberado.'}`)) return;
+    bt.disabled = true; bt.textContent = 'Salvando…';
+    try {
+      const r = await api(`/projetos/${S.pid}/campo/pontos/lote`, { json: { pontos, base: $('#cpBase').value, rover: $('#cpRover').value } });
+      toast(`${r.marcados.length} marco(s) marcado(s) ✅`);
+      r.lotes_fechados.forEach((f) => toast(`🎉 LT-${f.lote} fechado como MEDIDO (${nbr(f.area_ha, 4)} ha)${f.associado ? ' — ' + f.associado : ''}`));
+      CP.ponto = null; rLocacao($('#cpBox'));
+    } catch (e){ toast(e.message, true); upd(); }
+  };
 }
 function cartaoLoteCampo(d, l){
   const lo = d.lotes.find((x) => x.lote === l); if (!lo) return;
@@ -3229,7 +3267,9 @@ function cartaoLoteCampo(d, l){
     ${!lo.fechado && lo.pagamento && lo.pagamento.quitado ? '<div class="cp-aviso q">★ Lote quitado — prioridade de medição.</div>' : ''}
     ${(() => { const q = quitadosAMedir(d); return !lo.fechado && !(lo.pagamento && lo.pagamento.quitado) && q.length ? `<div class="cp-aviso p">⚠️ <b>Preferência:</b> ainda há ${q.length} lote(s) quitado(s) a medir (${q.slice(0, 6).map((x) => 'LT-' + esc(x.lote)).join(', ')}${q.length > 6 ? '…' : ''}). Pode medir este, mas o ideal é começar pelos quitados.</div>` : ''; })()}
     <div style="margin-top:6px">Marcos: <b>${lo.marcados}/${lo.exigidos.length}</b> marcados${lo.existentes ? ` · ${lo.existentes} já existem no chão (confirmar também)` : ''}</div>
+    ${!lo.fechado && CP.podeMarcar ? listaVerticesLote(d, lo) : ''}
     ${lo.fechado ? `<div class="avisos" style="margin-top:8px">✅ <b>MEDIDO</b> em ${hBr(lo.fechado.concluido_em)} por ${esc(lo.fechado.usuario_nome || '—')} · ${nbr(lo.fechado.area_ha ?? lo.area_ha, 4)} ha · perímetro ${nbr(lo.fechado.perimetro_m ?? 0)} m${lo.fechado.base ? ` · ${esc(lo.fechado.base)} / ${esc(lo.fechado.rover || '')}` : ''}</div>${S.eu && S.eu.perfil === 'ADMIN' ? '<button class="btn btn-ghost btn-sm" id="cpReabrir" style="margin-top:6px">↺ Reabrir lote (refazer o fechamento)</button>' : ''}` : '<div class="muted" style="margin-top:6px">Marque <b>todos</b> os vértices: 🔴 cravar e ◻️ já existentes (confirmar). O lote fecha quando a poligonal estiver completa.</div>'}</div>`;
+  ligarListaVertices(d, lo);
   // v3.188.2: ADMIN reabre o lote — desfaz a última marcação; ao marcar de novo, fecha e avisa no WhatsApp
   if ($('#cpReabrir')) $('#cpReabrir').onclick = async () => {
     if (!confirm(`Reabrir o LT-${lo.lote}?\n\nDesfaz a última marcação do lote (o marco volta a vermelho), o lote volta para "em medição" e o dossiê ainda não enviado é limpo. Lotes vizinhos que usam o mesmo marco também reabrem.\n\nDepois é só marcar o marco de novo: o lote fecha e o aviso vai para o seu WhatsApp.`)) return;
