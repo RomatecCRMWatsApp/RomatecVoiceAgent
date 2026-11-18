@@ -105,6 +105,7 @@ export async function estadoCampo(projetoId: number) {
   }));
   const fechados = (await rows(pool, 'SELECT * FROM pa_campo_lotes WHERE projeto_id = ? ORDER BY concluido_em', [projetoId])).map((r) => ({
     lote: String(r.lote), concluido_em: dt(r.concluido_em), inicio_em: r.inicio_em ? dt(r.inicio_em) : null, usuario_nome: (r.usuario_nome as string) ?? null,
+    aviso_enviado_em: r.aviso_enviado_em ? dt(r.aviso_enviado_em) : null, aviso_erro: (r.aviso_erro as string) ?? null, aviso_tentativas: r.aviso_tentativas != null ? num(r.aviso_tentativas) : 0,
     base: (r.base_gnss as string) ?? null, rover: (r.rover_gnss as string) ?? null, pontos: num(r.pontos), area_ha: r.area_ha != null ? num(r.area_ha) : null, perimetro_m: r.perimetro_m != null ? num(r.perimetro_m) : null,
   }));
   const porPonto = new Map(marcas.map((x) => [x.ponto, x]));
@@ -154,30 +155,67 @@ export async function fecharCompletos(projetoId: number, u: Usuario, base: strin
     if (!ins.affectedRows) continue; // outro pedido fechou ao mesmo tempo
     await registrarEvento(pool, { projeto_id: projetoId, associado_id: ben[lote]?.associado_id ?? null, usuario: u.id, tipo: 'CAMPO_LOTE_MEDIDO', dados: { lote, pontos: new Set(vs).size, area_ha: pc?.perimetro.area_ha ?? null } });
     fechados.push({ lote, area_ha: pc?.perimetro.area_ha ?? 0, associado: ben[lote]?.nome ?? null });
-    void avisarLoteDemarcado(projetoId, lote, { area_ha: pc?.perimetro.area_ha ?? null, perimetro_m: pc?.perimetro.perimetro_m ?? null, marcos: vs, quem: u.nome, ben: ben[lote] ?? null }).catch((e) => console.warn('[pa-campo] aviso CEO:', (e as Error).message));
+    void avisarLoteDemarcado(projetoId, lote).catch((e) => console.warn('[pa-campo] aviso CEO:', (e as Error).message));
   }
   return fechados;
 }
 
-/** v3.188.1: mensagem ao CEO "lote demarcado" + libera o dossiê (o PDF de revisão vem logo em seguida, se quitado). */
-async function avisarLoteDemarcado(projetoId: number, lote: string, o: { area_ha: number | null; perimetro_m: number | null; marcos: string[]; quem: string | null; ben: { associado_id: number; nome: string; lote_vila: string; denominacao?: string | null } | null }) {
-  const dz = await import('./paDossie');
-  const wa = await import('./paWhatsapp');
-  let situacao = '⚠️ Lote sem associado vinculado — dossiê não gerado.';
-  if (o.ben) {
-    try {
-      const r = await dz.criarDossie(projetoId, lote, null);
-      const pend = r.status === 'PRONTO' ? null : (await dz.listarDossies(projetoId)).find((x) => x.lote === lote)?.pendencia ?? null;
-      situacao = r.status === 'PRONTO' ? '📦 *Dossiê liberado* — o PDF chega a seguir para você revisar e tocar em *✅ Aprovar e enviar*.'
-        : `📦 Dossiê criado, *aguardando pagamento*${pend ? ` (${pend})` : ''} — libera sozinho quando quitar.`;
-    } catch (e) { situacao = `⚠️ Dossiê não gerado: ${(e as Error).message}`; }
+/**
+ * v3.188.1/v3.188.5: mensagem ao CEO "lote demarcado" + libera o dossiê (o PDF de revisão vem logo em seguida, se quitado).
+ * Persistente: reserva a linha (um envio por vez), grava aviso_enviado_em no sucesso e aviso_erro na falha —
+ * o vigia tenta de novo (até 6x, nas 12 h seguintes ao fechamento) se a Z-API falhar ou o servidor reiniciar.
+ */
+export async function avisarLoteDemarcado(projetoId: number, lote: string, forcar = false): Promise<{ enviado: boolean; erro?: string }> {
+  const reserva = await exec(pool, `UPDATE pa_campo_lotes SET aviso_reservado_em = NOW(), aviso_tentativas = aviso_tentativas + 1
+    WHERE projeto_id = ? AND lote = ? AND (aviso_enviado_em IS NULL OR ?) AND (aviso_reservado_em IS NULL OR aviso_reservado_em < NOW() - INTERVAL 3 MINUTE)`, [projetoId, lote, forcar ? 1 : 0]);
+  if (!reserva.affectedRows) return { enviado: false, erro: 'já enviado ou envio em andamento' };
+  const cl = await one(pool, 'SELECT * FROM pa_campo_lotes WHERE projeto_id = ? AND lote = ?', [projetoId, lote]);
+  try {
+    const dz = await import('./paDossie');
+    const wa = await import('./paWhatsapp');
+    const d = await pontosColetora(projetoId);
+    const marcos = [...new Set(d.lotes.find((x) => x.lote === lote)?.vertices ?? [])];
+    const ben = (await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>)))[lote] ?? null;
+    let situacao = '⚠️ Lote sem associado vinculado — dossiê não gerado.';
+    if (ben) {
+      try {
+        const r = await dz.criarDossie(projetoId, lote, null);
+        const pend = r.status === 'PRONTO' ? null : (await dz.listarDossies(projetoId)).find((x) => x.lote === lote)?.pendencia ?? null;
+        situacao = r.status === 'PRONTO' ? '📦 *Dossiê liberado* — o PDF chega a seguir para você revisar e tocar em *✅ Aprovar e enviar*.'
+          : `📦 Dossiê criado, *aguardando pagamento*${pend ? ` (${pend})` : ''} — libera sozinho quando quitar.`;
+      } catch (e) { situacao = `⚠️ Dossiê não gerado: ${(e as Error).message}`; }
+    }
+    const area = cl?.area_ha != null ? num(cl.area_ha) : null, per = cl?.perimetro_m != null ? num(cl.perimetro_m) : null;
+    const txt = [`✅ *LT-${lote} DEMARCADO*`, ben ? `👤 ${ben.nome} · vila ${ben.lote_vila}${ben.denominacao ? ` · ${ben.denominacao}` : ''}` : null,
+      `📍 Poligonal fechada: ${marcos.length} vértices (${marcos.join(', ')})${area != null ? ` · ${area.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ha` : ''}${per != null ? ` · ${per.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} m` : ''}`,
+      cl?.usuario_nome ? `👷 Fechado por ${cl.usuario_nome}` : null, situacao].filter(Boolean).join('\n');
+    await wa.enviarWhatsAppNumero(dz.numeroCeo(), txt);
+    await exec(pool, 'UPDATE pa_campo_lotes SET aviso_enviado_em = NOW(), aviso_reservado_em = NULL, aviso_erro = NULL WHERE projeto_id = ? AND lote = ?', [projetoId, lote]);
+    await registrarEvento(pool, { projeto_id: projetoId, associado_id: ben?.associado_id ?? null, usuario: null, tipo: 'CAMPO_AVISO_CEO', dados: { lote, ok: true } });
+    if (ben) await dz.enviarProntos(projetoId, [ben.associado_id]).catch((e) => console.warn('[pa-campo] dossiê revisão:', (e as Error).message));
+    return { enviado: true };
+  } catch (e) {
+    const msg = (e as Error).message.slice(0, 250);
+    console.warn(`[pa-campo] aviso LT-${lote} falhou:`, msg);
+    await exec(pool, 'UPDATE pa_campo_lotes SET aviso_reservado_em = NULL, aviso_erro = ? WHERE projeto_id = ? AND lote = ?', [msg, projetoId, lote]).catch(() => undefined);
+    return { enviado: false, erro: msg };
   }
-  const ha = o.area_ha != null ? `${o.area_ha.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ha` : '';
-  const txt = [`✅ *LT-${lote} DEMARCADO*`, o.ben ? `👤 ${o.ben.nome} · vila ${o.ben.lote_vila}${o.ben.denominacao ? ` · ${o.ben.denominacao}` : ''}` : null,
-    `📍 Perímetro fechado: ${o.marcos.length} vértices (${o.marcos.join(', ')})${ha ? ` · ${ha}` : ''}${o.perimetro_m != null ? ` · ${o.perimetro_m.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} m` : ''}`,
-    o.quem ? `👷 Fechado por ${o.quem}` : null, situacao].filter(Boolean).join('\n');
-  await wa.enviarWhatsAppNumero(dz.numeroCeo(), txt).catch((e) => console.warn('[pa-campo] WhatsApp CEO:', (e as Error).message));
-  if (o.ben) await dz.enviarProntos(projetoId, [o.ben.associado_id]).catch(() => undefined);
+}
+
+/** v3.188.5: vigia — reenvia avisos de lote demarcado que não saíram (até 6 tentativas, nas 12 h seguintes). */
+export async function processarAvisosPendentes(): Promise<number> {
+  const ps = await rows(pool, `SELECT projeto_id, lote FROM pa_campo_lotes WHERE aviso_enviado_em IS NULL AND aviso_tentativas < 6
+    AND concluido_em >= NOW() - INTERVAL 12 HOUR AND (aviso_reservado_em IS NULL OR aviso_reservado_em < NOW() - INTERVAL 3 MINUTE) ORDER BY concluido_em LIMIT 10`);
+  for (const p of ps) await avisarLoteDemarcado(num(p.projeto_id), String(p.lote)).catch(() => undefined);
+  return ps.length;
+}
+let vigiaAvisos: NodeJS.Timeout | null = null;
+export function iniciarVigiaAvisosCampo(): void {
+  if (vigiaAvisos) return;
+  const rodar = () => { processarAvisosPendentes().catch((e) => console.error('[pa-campo] vigia avisos:', (e as Error).message)); };
+  setTimeout(rodar, 45_000);
+  vigiaAvisos = setInterval(rodar, 2 * 60_000);
+  vigiaAvisos.unref?.();
 }
 
 /** Marca um ponto como locado. Fecha (como MEDIDO) todo lote que ficar completo com ele. */

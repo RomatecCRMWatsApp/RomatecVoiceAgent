@@ -343,6 +343,9 @@ void (async () => {
   // v3.161.0: vigia das confirmações de pagamento no WhatsApp (reenvia o que ficou pendente)
   try { const n = await import('./services/pa/paNotificacoes'); n.iniciarVigiaNotificacoes(); }
   catch (err) { console.error('[pa-notificacao] falhou:', err); }
+  // v3.188.5: vigia dos avisos "lote demarcado" ao CEO (reenvia o que não saiu)
+  try { const c = await import('./services/pa/paCampo'); c.iniciarVigiaAvisosCampo(); }
+  catch (err) { console.error('[pa-campo] vigia avisos falhou:', err); }
   // v3.162.0: correção pontual (Silvana, lote 14 — pagou o boleto de dezembro no lugar do de novembro)
   try { const f = await import('./services/pa/paFinanceiro'); await f.corrigirCompensacoesConhecidas(); }
   catch (err) { console.error('[pa-compensacao] falhou:', err); }

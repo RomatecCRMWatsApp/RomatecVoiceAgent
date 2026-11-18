@@ -480,6 +480,10 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   // v3.188.0: capa do dossiê do lote — novo tipo de documento e nome oficial da associação (também na carteirinha)
   { label: 'pa_documentos.tipo +CAPA_DOSSIE_LOTE', sql: "ALTER TABLE pa_documentos MODIFY tipo ENUM('FOTO_3X4','DOC_IDENTIFICACAO','CERTIDAO','DOC_CONJUGE','COMPROVANTE_SINAL','PROCESSO_FICHA_CONTRATO','PROCESSO_ASSINADO','CARTEIRINHA','MAPA_LOTE','MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE') NOT NULL" },
   { label: 'associacao_nome PA Salete Moreno', sql: "UPDATE pa_projetos SET associacao_nome = 'Associação dos Produtores Rurais do PA Salete Moreno' WHERE codigo = 'PA-SALETE-MORENO' AND (associacao_nome IS NULL OR associacao_nome NOT LIKE '%Produtores Rurais%')" },
+  // v3.188.5: aviso "lote demarcado" ao CEO persistente (reenvio automático se a Z-API falhar ou o servidor reiniciar)
+  { label: 'pa_campo_lotes.aviso', sql: 'ALTER TABLE pa_campo_lotes ADD COLUMN aviso_enviado_em DATETIME NULL, ADD COLUMN aviso_tentativas INT NOT NULL DEFAULT 0, ADD COLUMN aviso_reservado_em DATETIME NULL, ADD COLUMN aviso_erro VARCHAR(255) NULL' },
+  // fechamentos antigos (antes do aviso persistente, mais de 12 h) não disparam aviso retroativo
+  { label: 'pa_campo_lotes.aviso legado', sql: "UPDATE pa_campo_lotes SET aviso_enviado_em = concluido_em, aviso_erro = 'anterior ao aviso persistente' WHERE aviso_enviado_em IS NULL AND aviso_tentativas = 0 AND concluido_em < NOW() - INTERVAL 12 HOUR" },
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },
 ];
 
