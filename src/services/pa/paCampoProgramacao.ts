@@ -48,7 +48,8 @@ export function resumoProg(itens: ItemProg[]) {
 }
 
 /** Texto para o grupo (manhã: programação; fim do dia: confirmação). */
-export function textoProgramacao(tipo: TipoBoletimDia, dia: string, itens: ItemProg[], projetoNome: string, totalPA: { medidos: number; lotes: number }): string {
+export type Previsao = Array<{ dia: string; itens: ItemProg[] }>;
+export function textoProgramacao(tipo: TipoBoletimDia, dia: string, itens: ItemProg[], projetoNome: string, totalPA: { medidos: number; lotes: number }, previsao: Previsao = []): string {
   const L: string[] = [];
   const r = resumoProg(itens);
   if (tipo === 'programacao') {
@@ -60,6 +61,13 @@ export function textoProgramacao(tipo: TipoBoletimDia, dia: string, itens: ItemP
     L.push('');
     L.push('🙏 Associados desses lotes: se possível, acompanhem a equipe no lote para indicar as divisas e os marcos.');
     L.push('🗺️ Mapa com os lotes do dia no PDF em anexo. No fim do dia enviamos a confirmação dos lotes medidos.');
+    // v3.190.0: previsão de medição dos quitados nos próximos dias
+    if (previsao.length) {
+      L.push('');
+      L.push(`🗓️ *Previsão de medição — associados quitados (${previsao.reduce((n, p) => n + p.itens.length, 0)} lotes):*`);
+      for (const p of previsao) { L.push(`*${dbr(p.dia)} (${semana(p.dia)}):*`); for (const x of p.itens) L.push(`• ${linhaLote(x)}`); }
+      L.push('_Previsão sujeita a chuva e ao andamento do campo; a ordem segue a data da quitação._');
+    }
   } else {
     L.push(`✅ *CONFIRMAÇÃO DO DIA — ${projetoNome.toUpperCase()}*`);
     L.push(`📅 ${dbr(dia)} (${semana(dia)})`);
@@ -101,7 +109,7 @@ export function temaProgramacao(tipo: TipoBoletimDia, itens: ItemProg[], lotes: 
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 const ha = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export function htmlProgramacao(cab: DadosMapaPA, tipo: TipoBoletimDia, dia: string, itens: ItemProg[], mapa: string, totalPA: { medidos: number; lotes: number }): string {
+export function htmlProgramacao(cab: DadosMapaPA, tipo: TipoBoletimDia, dia: string, itens: ItemProg[], mapa: string, totalPA: { medidos: number; lotes: number }, previsao: Previsao = []): string {
   const r = resumoProg(itens);
   const prog = tipo === 'programacao';
   const sit = (x: ItemProg) => x.situacao === 'MEDIDO' ? '<span class="tag ok">✓ MEDIDO — OK</span>' : x.situacao === 'EM_MEDICAO' ? `<span class="tag em">em medição ${x.marcados}/${x.exigidos}</span>` : '<span class="tag pe">pendente → próximo dia</span>';
@@ -140,6 +148,11 @@ export function htmlProgramacao(cab: DadosMapaPA, tipo: TipoBoletimDia, dia: str
       ${itens.map((x) => `<tr><td class="n"><b>${x.ordem}</b></td><td><b>LT-${esc(x.lote)}</b>${x.lote_vila ? `<div style="color:#777;font-size:6.8pt">vila ${esc(x.lote_vila)}</div>` : ''}</td><td><b>${esc(x.associado ?? 'sem associado vinculado')}</b></td><td>${esc(x.chacara ?? '—')}</td><td class="n">${ha(x.area_ha)} ha</td>${prog ? '' : `<td>${sit(x)}</td>`}</tr>`).join('')}
     </tbody></table>` : '<div class="nota">Nenhum lote programado para este dia.</div>'}
     ${prog ? '<div class="nota">Associados desses lotes: se possível, acompanhem a equipe no lote para indicar as divisas e os marcos. No fim do dia enviamos a confirmação dos lotes medidos.</div>' : (r.pendentes.length || r.em_medicao.length ? '<div class="nota">Os lotes pendentes e em medição ficam para o próximo dia de campo.</div>' : '')}
+    ${prog && previsao.length ? `<h2 style="page-break-before:auto">Previsão de medição — associados quitados (${previsao.reduce((n, p) => n + p.itens.length, 0)} lotes)</h2>
+    <table><thead><tr><th>Data prevista</th><th class="n">Nº</th><th>Lote</th><th>Associado</th><th>Chácara</th><th class="n">Área</th></tr></thead><tbody>
+      ${previsao.map((p) => p.itens.map((x, i) => `<tr><td>${i === 0 ? `<b>${dbr(p.dia)}</b><div style="color:#777;font-size:6.8pt">${semana(p.dia)}</div>` : ''}</td><td class="n">${x.ordem}</td><td><b>LT-${esc(x.lote)}</b>${x.lote_vila ? `<div style="color:#777;font-size:6.8pt">vila ${esc(x.lote_vila)}</div>` : ''}</td><td>${esc(x.associado ?? '—')}</td><td>${esc(x.chacara ?? '—')}</td><td class="n">${ha(x.area_ha)} ha</td></tr>`).join('')).join('')}
+    </tbody></table>
+    <div class="nota">Previsão sujeita a chuva e ao andamento do campo. A ordem segue a data da quitação: quem quitou antes mede antes; novos quitados entram no fim da fila.</div>` : ''}
     <div class="rod"><span>Responsável técnico: ${esc(cab.rt.nome)} · ${esc(cab.rt.registro)}</span><span>Romatec Consultoria Total · gerado em ${esc(cab.data)}</span></div>
   </body></html>`;
 }
@@ -163,7 +176,7 @@ export async function buscarProgramacao(projetoId: number, diaQ: unknown) {
     dia, lotes, itens: montarProgramacao(e.lotes as unknown as LoteBoletim[], lotes),
     // v3.189.0: pendentes do dia anterior que a relocação já pôs em outro dia (hoje ou adiante) não aparecem de novo
     anterior: diaAnt ? { dia: diaAnt, pendentes: itensAnt.filter((x) => x.situacao !== 'MEDIDO' && !jaAgendados.has(x.lote)).map((x) => x.lote) } : null,
-    relocacao: { automatica: relocacaoLigada(), hora: HORA_RELOCACAO, por_dia: lotesPorDia(), dias_uteis: diasUteis() },
+    relocacao: { automatica: await agendaAutomatica(projetoId), hora: HORA_RELOCACAO, por_dia: lotesPorDia(), dias_uteis: diasUteis() },
   };
 }
 
@@ -193,29 +206,37 @@ async function dadosDia(projetoId: number, tipoQ: unknown, diaQ: unknown) {
   const itens = montarProgramacao(lotes, await lotesDoDia(projetoId, dia));
   if (!itens.length) throw new PaErro('SEM_PROGRAMACAO', `Nenhum lote programado para ${dbr(dia)} — escolha os lotes e salve a programação`, 409);
   const totalPA = { medidos: lotes.filter((l) => l.fechado).length, lotes: lotes.length };
-  return { tipo, dia, p, lotes, itens, totalPA };
+  const previsao: Previsao = [];
+  if (tipo === 'programacao') {
+    const fut = await rows(pool, 'SELECT dia, lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia > ? AND dia <= ? + INTERVAL 60 DAY ORDER BY dia, ordem, id', [projetoId, dia, dia]);
+    const por: Record<string, string[]> = {};
+    for (const r of fut) (por[isoDate(r.dia)!] ??= []).push(String(r.lote));
+    for (const d of Object.keys(por).sort()) { const its = montarProgramacao(lotes, por[d]).filter((x) => x.situacao !== 'MEDIDO'); if (its.length) previsao.push({ dia: d, itens: its.map((x, i) => ({ ...x, ordem: i + 1 })) }); }
+  }
+  return { tipo, dia, p, lotes, itens, totalPA, previsao };
 }
 const nomeArq = (codigo: string, tipo: TipoBoletimDia, dia: string) => `${tipo === 'programacao' ? 'PROGRAMACAO' : 'CONFIRMACAO'}-CAMPO-${codigo}-${dia}.pdf`;
 
 export async function textoDia(projetoId: number, tipoQ: unknown, diaQ: unknown) {
-  const { tipo, dia, p, itens, totalPA } = await dadosDia(projetoId, tipoQ, diaQ);
-  return { texto: textoProgramacao(tipo, dia, itens, p.nome, totalPA), nome: nomeArq(p.codigo, tipo, dia) };
+  const { tipo, dia, p, itens, totalPA, previsao } = await dadosDia(projetoId, tipoQ, diaQ);
+  return { texto: textoProgramacao(tipo, dia, itens, p.nome, totalPA, previsao), nome: nomeArq(p.codigo, tipo, dia) };
 }
 
 export async function pdfDia(projetoId: number, tipoQ: unknown, diaQ: unknown, base: BaseMapa): Promise<{ pdf: Buffer; nome: string }> {
-  const { tipo, dia, p, lotes, itens, totalPA } = await dadosDia(projetoId, tipoQ, diaQ);
+  const { tipo, dia, p, lotes, itens, totalPA, previsao } = await dadosDia(projetoId, tipoQ, diaQ);
   const geo = (await geojsonSubdivisao(projetoId).catch(() => ({ features: [] }))) as unknown as { features: Array<{ geometry: { type: string; coordinates: unknown }; properties: Record<string, unknown> }> };
   const { html: mapa } = await htmlMapaLotes(geo, temaProgramacao(tipo, itens, lotes), { base, H: 520 });
-  return { pdf: await pdfDeHtml(htmlProgramacao(dadosCabecalho(p), tipo, dia, itens, mapa, totalPA)), nome: nomeArq(p.codigo, tipo, dia) };
+  return { pdf: await pdfDeHtml(htmlProgramacao(dadosCabecalho(p), tipo, dia, itens, mapa, totalPA, previsao)), nome: nomeArq(p.codigo, tipo, dia) };
 }
 
-// ─── v3.189.0: relocação automática (21 h, horário de Brasília) ──────────
-// Todo dia às 21 h: o que foi programado e não foi medido sai do dia e vai para o próximo dia útil
-// (em medição na frente), com até N lotes por dia (padrão 6); o excedente cascateia para os dias
-// seguintes, e cada dia planejado é completado pela ordem de serviço (quitados primeiro, depois pela
-// proporção paga). Sábado e domingo não recebem lotes automaticamente (configurável).
+// ─── v3.189.0/v3.190.0: agenda automática de campo (só lotes QUITADOS) ─────
+// Automática (padrão; o CEO pode passar para manual na tela):
+//  • durante o dia: quem quitar entra no FINAL da fila (ordem de quitação — quem pagou antes mede antes)
+//    e os dias seguintes são refeitos, até N lotes por dia (padrão 6), pulando sábado e domingo;
+//  • às 21 h (Brasília): o que estava no dia e não foi medido passa para o próximo dia útil, na frente
+//    (em medição primeiro), e o excedente cascateia. O dia de hoje nunca é mexido durante o dia.
+// Só entram lotes quitados (ou já em medição). Lote não quitado programado à mão não é relocado.
 export const HORA_RELOCACAO = 21;
-export const relocacaoLigada = () => process.env.PA_CAMPO_RELOCACAO !== '0';
 export const lotesPorDia = () => Math.max(1, Math.min(30, Number(process.env.PA_CAMPO_LOTES_DIA) || 6));
 /** Dias da semana com campo (0 = domingo … 6 = sábado). Padrão: segunda a sexta. */
 export const diasUteis = (): number[] => {
@@ -223,84 +244,127 @@ export const diasUteis = (): number[] => {
   return v.length ? [...new Set(v)] : [1, 2, 3, 4, 5];
 };
 const somaDia = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const diaSemana = (d: string) => new Date(`${d}T12:00:00Z`).getUTCDay();
 export function proximoDiaUtil(d: string, uteis: number[] = diasUteis()): string {
   let x = somaDia(d, 1);
-  for (let i = 0; i < 14 && !uteis.includes(new Date(`${x}T12:00:00Z`).getUTCDay()); i++) x = somaDia(x, 1);
+  for (let i = 0; i < 14 && !uteis.includes(diaSemana(x)); i++) x = somaDia(x, 1);
   return x;
 }
 
-export interface LoteAgenda { lote: string; fechado: boolean; marcados: number; tem_associado: boolean }
+export interface LoteAgenda { lote: string; fechado: boolean; marcados: number; quitado: boolean; quitado_em: string | null }
+/** Fila dos quitados a medir: quem quitou antes vem antes; empate pelo nº do lote (pura). */
+export function filaQuitados(lotes: LoteAgenda[]): string[] {
+  return lotes.filter((l) => !l.fechado && l.quitado)
+    .sort((a, b) => (a.quitado_em ?? '').localeCompare(b.quitado_em ?? '') || numLote(a.lote, b.lote)).map((l) => l.lote);
+}
 /**
- * Plano da relocação ao fechar o dia `dia` (pura — testável).
- * `ordem`: lotes na ordem de serviço (quitados primeiro). `progAte`: programação do dia que fecha (os não medidos = carry).
- * `futuro`: programação já existente dos dias > dia (dia → lotes, na ordem). Devolve o novo `futuro` (dia → lotes).
+ * Plano dos dias depois de `dia` (pura — testável).
+ * `carry`: lotes do `dia` que não foram medidos (fechamento das 21 h) — vão na frente. `excluir`: lotes que ficam
+ * no próprio `dia` (atualização durante o dia). `manuais`: dias futuros fora dos dias úteis com programação à mão
+ * (mantidos). Todos os quitados a medir são distribuídos, `porDia` por dia útil.
  */
-export function planejarRelocacao(dia: string, ordem: LoteAgenda[], progAte: string[], futuro: Record<string, string[]>, porDia = lotesPorDia(), uteis = diasUteis()): Record<string, string[]> {
-  const st = new Map(ordem.map((l) => [l.lote, l]));
-  const aberto = (lt: string) => !!st.get(lt) && !st.get(lt)!.fechado;
-  const fila: string[] = [];
-  const pôr = (lt: string) => { if (aberto(lt) && !fila.includes(lt)) fila.push(lt); };
-  const diasFut = Object.keys(futuro).sort();
-  ordem.filter((l) => !l.fechado && l.marcados > 0).forEach((l) => pôr(l.lote)); // em medição (campo começado) na frente
-  progAte.forEach(pôr);                                                      // ficaram do dia (e de antes)
-  diasFut.forEach((d) => futuro[d].forEach(pôr));                            // já programados adiante
+export function planejarAgenda(dia: string, lotes: LoteAgenda[], carry: string[], excluir: string[] = [], manuais: Record<string, string[]> = {}, porDia = lotesPorDia(), uteis = diasUteis()): Record<string, string[]> {
+  const st = new Map(lotes.map((l) => [l.lote, l]));
+  const ok = (lt: string) => { const l = st.get(lt); return !!l && !l.fechado && (l.quitado || l.marcados > 0); };
+  const fora = new Set(excluir);
   const out: Record<string, string[]> = {};
-  // dias de campo a partir do próximo útil; dias futuros não úteis com programação manual são mantidos como estão
-  for (const d of diasFut) if (!uteis.includes(new Date(`${d}T12:00:00Z`).getUTCDay())) { out[d] = futuro[d].filter(aberto); out[d].forEach((lt) => fila.splice(fila.indexOf(lt), 1)); }
+  for (const [d, ls] of Object.entries(manuais)) if (d > dia && !uteis.includes(diaSemana(d))) { out[d] = ls.filter(ok); out[d].forEach((x) => fora.add(x)); }
+  const fila: string[] = [];
+  const pôr = (lt: string) => { if (ok(lt) && !fora.has(lt) && !fila.includes(lt)) fila.push(lt); };
+  lotes.filter((l) => !l.fechado && l.marcados > 0).sort((a, b) => numLote(a.lote, b.lote)).forEach((l) => pôr(l.lote)); // em medição na frente
+  carry.forEach(pôr);
+  filaQuitados(lotes).forEach(pôr);
   let d = proximoDiaUtil(dia, uteis);
-  const ultimoFut = diasFut[diasFut.length - 1] ?? d;
-  const completar = ordem.filter((l) => !l.fechado && l.tem_associado).map((l) => l.lote);
-  do {
-    const lista = fila.splice(0, porDia);
-    for (const lt of completar) { if (lista.length >= porDia) break; if (!lista.includes(lt) && !fila.includes(lt) && !Object.values(out).some((x) => x.includes(lt))) lista.push(lt); }
-    out[d] = lista;
-    d = proximoDiaUtil(d, uteis);
-  } while (fila.length || d <= ultimoFut);
+  while (fila.length) { out[d] = fila.splice(0, porDia); d = proximoDiaUtil(d, uteis); }
   for (const k of Object.keys(out)) if (!out[k].length) delete out[k];
   return out;
 }
 
-/** Executa a relocação do dia `dia` (padrão: hoje em Brasília). Idempotente: refaz o plano a partir do estado atual. */
-export async function relocarProgramacao(projetoId: number, diaQ: unknown, usuario: string | null) {
-  const dia = diaValido(diaQ) ?? hojeBrasil();
+async function lotesAgenda(projetoId: number): Promise<LoteAgenda[]> {
   const e = await estadoCampo(projetoId);
-  const ordem: LoteAgenda[] = e.lotes.map((l) => ({ lote: l.lote, fechado: !!l.fechado, marcados: l.marcados, tem_associado: !!l.associado }));
-  const progAte = (await rows(pool, 'SELECT lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia = ? ORDER BY ordem, id', [projetoId, dia])).map((r) => String(r.lote));
+  return e.lotes.map((l) => ({ lote: l.lote, fechado: !!l.fechado, marcados: l.marcados, quitado: !!l.pagamento?.quitado, quitado_em: l.pagamento?.quitado_em ?? null }));
+}
+async function futuroAtual(projetoId: number, dia: string): Promise<Record<string, string[]>> {
   const fut = await rows(pool, 'SELECT dia, lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia > ? ORDER BY dia, ordem, id', [projetoId, dia]);
-  const futuro: Record<string, string[]> = {};
-  for (const r of fut) (futuro[isoDate(r.dia)!] ??= []).push(String(r.lote));
-  const plano = planejarRelocacao(dia, ordem, progAte, futuro);
+  const f: Record<string, string[]> = {};
+  for (const r of fut) (f[isoDate(r.dia)!] ??= []).push(String(r.lote));
+  return f;
+}
+const mesmoPlano = (a: Record<string, string[]>, b: Record<string, string[]>) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+async function gravarFuturo(projetoId: number, dia: string, plano: Record<string, string[]>, usuario: string | null) {
   await transacao(async (c) => {
     await exec(c, 'DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia > ?', [projetoId, dia]);
     for (const [d, lotes] of Object.entries(plano)) for (const [i, l] of lotes.entries())
-      await exec(c, 'INSERT INTO pa_campo_programacao (projeto_id, dia, lote, ordem, criado_por) VALUES (?, ?, ?, ?, ?)', [projetoId, d, l, i + 1, usuario ?? 'relocacao-automatica']);
+      await exec(c, 'INSERT INTO pa_campo_programacao (projeto_id, dia, lote, ordem, criado_por) VALUES (?, ?, ?, ?, ?)', [projetoId, d, l, i + 1, usuario ?? 'agenda-automatica']);
   });
+}
+
+/** Fecha o dia `dia` (21 h): não medidos do dia vão na frente do próximo dia útil; refaz os dias seguintes. */
+export async function relocarProgramacao(projetoId: number, diaQ: unknown, usuario: string | null) {
+  const dia = diaValido(diaQ) ?? hojeBrasil();
+  const lotes = await lotesAgenda(projetoId);
+  const carry = await lotesDoDia(projetoId, dia);
+  const plano = planejarAgenda(dia, lotes, carry, [], await futuroAtual(projetoId, dia));
+  await gravarFuturo(projetoId, dia, plano, usuario);
   await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'CAMPO_RELOCACAO', dados: { dia, plano } });
   return { dia, plano };
 }
+/** Durante o dia: novos quitados entram no fim da fila; refaz só os dias depois de hoje (hoje não muda). */
+export async function atualizarAgenda(projetoId: number, hoje = hojeBrasil()) {
+  const lotes = await lotesAgenda(projetoId);
+  const atual = await futuroAtual(projetoId, hoje);
+  const plano = planejarAgenda(hoje, lotes, [], await lotesDoDia(projetoId, hoje), atual);
+  if (mesmoPlano(plano, atual)) return { mudou: false, plano };
+  await gravarFuturo(projetoId, hoje, plano, null);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario: null, tipo: 'CAMPO_AGENDA_ATUALIZADA', dados: { dia: hoje, plano } });
+  return { mudou: true, plano };
+}
 
-/** Vigia: depois das 21 h (Brasília), reloca o dia uma vez por projeto; se o servidor estava fora, recupera o dia anterior. */
-export async function rodarRelocacaoAutomatica(agora = new Date()): Promise<number> {
-  if (!relocacaoLigada()) return 0;
+// modo automático por projeto (padrão: ligado)
+export async function agendaAutomatica(projetoId: number): Promise<boolean> {
+  const r = await rows(pool, 'SELECT campo_agenda_auto FROM pa_projetos WHERE id = ?', [projetoId]).catch(() => []);
+  return r.length ? Number(r[0].campo_agenda_auto ?? 1) === 1 : true;
+}
+export async function definirAgendaAutomatica(projetoId: number, ligado: unknown, usuario: string | null) {
+  const v = ligado === true || ligado === 1 || ligado === '1' || ligado === 'true';
+  await exec(pool, 'UPDATE pa_projetos SET campo_agenda_auto = ? WHERE id = ?', [v ? 1 : 0, projetoId]);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'CAMPO_AGENDA_MODO', dados: { automatica: v } });
+  if (v) await atualizarAgenda(projetoId).catch((e) => console.warn('[pa-agenda] ao ligar:', (e as Error).message));
+  return { automatica: v };
+}
+
+/** Vigia (a cada 10 min): projetos com agenda automática — fecha o dia às 21 h (uma vez) e mantém os dias seguintes em dia. */
+export async function rodarAgendaAutomatica(agora = new Date()): Promise<number> {
+  if (process.env.PA_CAMPO_RELOCACAO === '0') return 0;
   const hBr = (agora.getUTCHours() + 21) % 24;
   const hoje = hojeBrasil(agora);
-  const alvo = hBr >= HORA_RELOCACAO ? hoje : somaDia(hoje, -1);
-  const ps = await rows(pool, 'SELECT DISTINCT projeto_id FROM pa_campo_programacao WHERE dia >= ? - INTERVAL 30 DAY', [alvo]);
+  const ontem = somaDia(hoje, -1);
+  const ps = await rows(pool, 'SELECT id FROM pa_projetos WHERE COALESCE(campo_agenda_auto, 1) = 1 AND subdivisao_json IS NOT NULL').catch(() => []);
   let n = 0;
   for (const p of ps) {
-    const pid = Number(p.projeto_id);
-    const ja = await rows(pool, "SELECT id FROM pa_eventos WHERE projeto_id = ? AND tipo = 'CAMPO_RELOCACAO' AND JSON_UNQUOTE(JSON_EXTRACT(dados, '$.dia')) = ? AND usuario_id IS NULL LIMIT 1", [pid, alvo]);
-    if (ja.length) continue;
-    try { await relocarProgramacao(pid, alvo, null); n++; console.log(`[pa-relocacao] projeto ${pid}: dia ${alvo} relocado`); }
-    catch (err) { console.error(`[pa-relocacao] projeto ${pid}:`, (err as Error).message); }
+    const pid = Number(p.id);
+    try {
+      const fechado = async (d: string) => (await rows(pool, "SELECT id FROM pa_eventos WHERE projeto_id = ? AND tipo = 'CAMPO_RELOCACAO' AND JSON_UNQUOTE(JSON_EXTRACT(dados, '$.dia')) = ? LIMIT 1", [pid, d])).length > 0;
+      if (hBr >= HORA_RELOCACAO) {
+        if (!(await fechado(hoje))) { await relocarProgramacao(pid, hoje, null); n++; console.log(`[pa-agenda] projeto ${pid}: dia ${hoje} fechado e relocado`); }
+        else if ((await atualizarAgenda(pid, hoje)).mudou) n++;
+      } else {
+        // servidor fora às 21 h de ontem → fecha ontem na volta (até o meio-dia; depois disso o dia de hoje não é mexido)
+        if (!(await fechado(ontem)) && (await lotesDoDia(pid, ontem)).length) {
+          if (hBr < 12) { await relocarProgramacao(pid, ontem, null); n++; console.log(`[pa-agenda] projeto ${pid}: dia ${ontem} fechado na volta do servidor`); }
+          else await registrarEvento(pool, { projeto_id: pid, usuario: null, tipo: 'CAMPO_RELOCACAO', dados: { dia: ontem, recuperado: false } });
+        }
+        if ((await atualizarAgenda(pid, hoje)).mudou) n++;
+      }
+    } catch (err) { console.error(`[pa-agenda] projeto ${pid}:`, (err as Error).message); }
   }
   return n;
 }
-let vigiaReloc: NodeJS.Timeout | null = null;
+let vigiaAgenda: NodeJS.Timeout | null = null;
 export function iniciarRelocacaoAutomatica(): void {
-  if (vigiaReloc || !relocacaoLigada()) return;
-  const rodar = () => { rodarRelocacaoAutomatica().catch((e) => console.error('[pa-relocacao] vigia:', (e as Error).message)); };
+  if (vigiaAgenda || process.env.PA_CAMPO_RELOCACAO === '0') return;
+  const rodar = () => { rodarAgendaAutomatica().catch((e) => console.error('[pa-agenda] vigia:', (e as Error).message)); };
   setTimeout(rodar, 90_000);
-  vigiaReloc = setInterval(rodar, 10 * 60_000);
-  vigiaReloc.unref?.();
+  vigiaAgenda = setInterval(rodar, 10 * 60_000);
+  vigiaAgenda.unref?.();
 }

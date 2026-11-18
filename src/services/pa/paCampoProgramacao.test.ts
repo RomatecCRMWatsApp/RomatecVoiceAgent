@@ -49,30 +49,41 @@ describe('v3.177.0 — programação diária de campo', () => {
   });
 });
 
-// v3.189.0: relocação automática das 21 h — cenário de 18/11/2026 (quarta)
-import { planejarRelocacao, proximoDiaUtil } from './paCampoProgramacao';
-describe('relocação automática da programação de campo', () => {
-  const L = (lote: string, o: { fechado?: boolean; marcados?: number; tem_associado?: boolean } = {}) => ({ lote, fechado: false, marcados: 0, tem_associado: true, ...o });
-  // ordem de serviço: quitados primeiro
-  const ordem = [L('09', { marcados: 2 }), L('40'), L('43'), L('47'), L('48'), L('49'), L('51'), L('33'), L('10', { fechado: true }),
-    L('50'), L('32'), L('20'), L('21'), L('22'), L('23'), L('24'), L('60', { tem_associado: false })];
-  const dia18 = ['10', '33', '43', '47', '50', '51'];
-  it('pendentes do dia vão para o próximo dia útil, 6 por dia, em medição na frente, excedente cascateia', () => {
-    const p = planejarRelocacao('2026-11-18', ordem, dia18, { '2026-11-19': ['32', '09', '48'] }, 6, [1, 2, 3, 4, 5]);
+// v3.190.0: agenda automática — só quitados, na ordem em que quitaram; 6 por dia útil
+import { planejarAgenda, filaQuitados, proximoDiaUtil } from './paCampoProgramacao';
+describe('agenda automática de campo', () => {
+  const L = (lote: string, quitado_em: string | null, o: { fechado?: boolean; marcados?: number } = {}) => ({ lote, fechado: false, marcados: 0, quitado: quitado_em !== null, quitado_em, ...o });
+  // quitados em datas diferentes (o nº do lote NÃO define a ordem)
+  const lotes = [
+    L('51', '2026-10-01 10:00:00'), L('09', '2026-10-20 09:00:00', { marcados: 2 }), L('40', '2026-10-05 08:00:00'), L('43', '2026-10-02 08:00:00'),
+    L('47', '2026-10-03 08:00:00'), L('48', '2026-10-10 08:00:00'), L('49', '2026-10-11 08:00:00'), L('33', '2026-10-04 08:00:00'),
+    L('50', '2026-10-06 08:00:00'), L('10', '2026-09-30 08:00:00', { fechado: true }), L('32', null), L('20', null),
+  ];
+  it('fila dos quitados pela data da quitação (medidos e não quitados fora)', () => {
+    expect(filaQuitados(lotes)).toEqual(['51', '43', '47', '33', '40', '50', '48', '49', '09']);
+  });
+  it('fechamento das 21 h (qua 18/11): não medidos na frente, em medição primeiro, 6 por dia, não quitado sai', () => {
+    const p = planejarAgenda('2026-11-18', lotes, ['10', '33', '43', '47', '50', '51', '32'], [], {}, 6, [1, 2, 3, 4, 5]);
     expect(p['2026-11-19']).toEqual(['09', '33', '43', '47', '50', '51']);
-    expect(p['2026-11-20']).toEqual(['32', '48', '40', '49', '20', '21']); // excedente + completa pela ordem de serviço
-    expect(Object.values(p).flat()).not.toContain('10'); // medido sai
-    expect(Object.values(p).flat()).not.toContain('60'); // sem associado não entra sozinho
+    expect(p['2026-11-20']).toEqual(['40', '48', '49']);
+    expect(Object.values(p).flat()).not.toContain('32'); // não quitado programado à mão não é relocado
+    expect(Object.values(p).flat()).not.toContain('10'); // medido
   });
-  it('sexta → segunda (sábado e domingo sem campo)', () => {
+  it('quem quitar durante o dia entra no FINAL; o dia de hoje não muda', () => {
+    const novo = [...lotes, L('20', '2026-11-18 15:00:00')].filter((l, i, a) => a.findIndex((x) => x.lote === l.lote) === i || l.quitado);
+    const hoje = ['09', '33', '43', '47', '50', '51'];
+    const p = planejarAgenda('2026-11-19', novo.filter((l) => !(l.lote === '20' && !l.quitado)), [], hoje, {}, 6, [1, 2, 3, 4, 5]);
+    expect(p).toEqual({ '2026-11-20': ['40', '48', '49', '20'] });
+  });
+  it('sexta → segunda; excedente cascateia', () => {
     expect(proximoDiaUtil('2026-11-20', [1, 2, 3, 4, 5])).toBe('2026-11-23');
-    const p = planejarRelocacao('2026-11-20', ordem, ['33', '43'], {}, 6, [1, 2, 3, 4, 5]);
-    expect(Object.keys(p)).toEqual(['2026-11-23']);
-    expect(p['2026-11-23'].slice(0, 3)).toEqual(['09', '33', '43']);
-    expect(p['2026-11-23']).toHaveLength(6);
+    const p = planejarAgenda('2026-11-20', lotes, [], [], {}, 4, [1, 2, 3, 4, 5]);
+    expect(Object.keys(p)).toEqual(['2026-11-23', '2026-11-24', '2026-11-25']);
+    expect(p['2026-11-23']).toEqual(['09', '51', '43', '47']);
   });
-  it('dia sem programação: só completa o próximo dia útil', () => {
-    const p = planejarRelocacao('2026-11-22', ordem, [], {}, 6, [1, 2, 3, 4, 5]);
-    expect(p).toEqual({ '2026-11-23': ['09', '40', '43', '47', '48', '49'] });
+  it('sábado programado à mão é mantido', () => {
+    const p = planejarAgenda('2026-11-20', lotes, [], [], { '2026-11-21': ['48', '32'] }, 6, [1, 2, 3, 4, 5]);
+    expect(p['2026-11-21']).toEqual(['48']);
+    expect(p['2026-11-23']).not.toContain('48');
   });
 });

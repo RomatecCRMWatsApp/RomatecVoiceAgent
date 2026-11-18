@@ -484,6 +484,8 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_campo_lotes.aviso', sql: 'ALTER TABLE pa_campo_lotes ADD COLUMN aviso_enviado_em DATETIME NULL, ADD COLUMN aviso_tentativas INT NOT NULL DEFAULT 0, ADD COLUMN aviso_reservado_em DATETIME NULL, ADD COLUMN aviso_erro VARCHAR(255) NULL' },
   // fechamentos antigos (antes do aviso persistente, mais de 12 h) não disparam aviso retroativo
   { label: 'pa_campo_lotes.aviso legado', sql: "UPDATE pa_campo_lotes SET aviso_enviado_em = concluido_em, aviso_erro = 'anterior ao aviso persistente' WHERE aviso_enviado_em IS NULL AND aviso_tentativas = 0 AND concluido_em < NOW() - INTERVAL 12 HOUR" },
+  // v3.190.0: agenda de campo automática (padrão ligada; o CEO pode passar para manual)
+  { label: 'pa_projetos.campo_agenda_auto', sql: 'ALTER TABLE pa_projetos ADD COLUMN campo_agenda_auto TINYINT NOT NULL DEFAULT 1' },
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },
 ];
 
