@@ -54,10 +54,14 @@ async function contexto(req: ReqPa, res: Response, next: NextFunction) {
     const u = (req as AuthedRequest).user;
     const sub = u?.sub ? String(u.sub) : null;
     const a = await equipe.acessoPa(sub);
-    req.pa = { sub, perfil: a.perfil ?? perfilPorRole(u?.role), nome: a.nome ?? (u as { name?: string } | undefined)?.name ?? null, permissoes: a.permissoes };
-    // v3.169.0: funcionário de campo — só as rotas liberadas (o resto 403, inclusive PDF de mapa)
-    if (req.pa.perfil === 'CAMPO' && !equipe.rotaPaPermitidaCampo(req.method, req.path, a.permissoes)) {
-      throw new PaErro('SEM_PERMISSAO', 'Seu perfil (funcionário de campo) não tem acesso a isto', 403);
+    const perfil = a.perfil ?? perfilPorRole(u?.role);
+    // v3.180.0: sem cadastro na Equipe, vale o padrão do perfil (do role); com cadastro, o que o ADMIN marcou
+    req.pa = { sub, perfil, nome: a.nome ?? (u as { name?: string } | undefined)?.name ?? null, permissoes: a.perfil ? a.permissoes : equipe.lerPermissoes(null, perfil) };
+    if (sub) void equipe.registrarAcesso(sub, (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() || req.ip || null, req.headers['user-agent']);
+    // permissão por função: bloqueio no servidor (o que não está marcado → 403)
+    if (!equipe.rotaPaPermitida(perfil, req.method, req.path, req.pa.permissoes)) {
+      const k = equipe.permissaoDaRota(req.method, req.path);
+      throw new PaErro('SEM_PERMISSAO', k && k !== '*' ? `Sem permissão: ${equipe.rotuloPermissao(k)}. Peça ao administrador para liberar em Equipe e permissões.` : 'Seu perfil não tem acesso a isto', 403);
     }
     next();
   } catch (err) {
@@ -254,7 +258,7 @@ router.get('/projetos/:id/mapa-geral.pdf', h(async (req, res) => { enviarPdf(res
 router.get('/projetos/:id/lotes', h(async (req) => {
   const lotes = await repo.listarLotes(id(req.params.id));
   // v3.169.0: funcionário de campo não vê financeiro
-  return { lotes: ctx(req).perfil === 'CAMPO' ? lotes.map((l) => ({ ...l, financeiro: { saldo: 0, situacao: l.associado ? 'EM_DIA' : 'SEM_ASSOCIADO', sinal_status: null } })) : lotes };
+  return { lotes: !ctx(req).permissoes.ver_financeiro ? lotes.map((l) => ({ ...l, financeiro: { saldo: 0, situacao: l.associado ? 'EM_DIA' : 'SEM_ASSOCIADO', sinal_status: null } })) : lotes };
 }));
 router.get('/projetos/:id/lotes/:numero', h(async (req) => {
   const ls = await repo.listarLotes(id(req.params.id));
@@ -481,7 +485,8 @@ router.post('/projetos/:id/marcos/gerar', h(async (req) => {
   return { job: await marcos.gerarTaxaMarcos(id(req.params.id), { valor: Number(b.valor ?? marcos.VALOR_MARCO_PADRAO), vencimento: String(b.vencimento ?? ''), associado_ids: aids && aids.length ? aids : null, enviar: b.enviar !== false }, ctx(req).sub) };
 }));
 // ─── v3.169.0: Equipe do PA (cadastro + login pelo WhatsApp + permissões) ─
-router.get('/equipe', h(async (req) => { exigirAdmin(req); return { equipe: await equipe.listarEquipe(), perfis: equipe.PERFIS_EQUIPE }; }));
+router.get('/equipe', h(async (req) => { exigirAdmin(req); return { equipe: await equipe.listarEquipe(), perfis: equipe.PERFIS_EQUIPE, catalogo: equipe.CATALOGO_PERMISSOES, padroes: equipe.PADRAO_POR_PERFIL }; }));
+router.get('/equipe/:uid/acessos', h(async (req) => { exigirAdmin(req); return equipe.historicoAcessos(id(req.params.uid, 'usuário')); }));
 router.post('/equipe', h(async (req, res) => { exigirAdmin(req); res.status(201); return equipe.cadastrarMembro(req.body ?? {}, ctx(req).sub); }));
 router.post('/equipe/:uid/reenviar', h(async (req) => { exigirAdmin(req); return equipe.reenviarAcesso(id(req.params.uid, 'usuário'), ctx(req).sub); }));
 router.post('/equipe/:uid/ativo', h(async (req) => { exigirAdmin(req); return equipe.ativarMembro(id(req.params.uid, 'usuário'), req.body?.ativo === true, ctx(req).sub); }));
@@ -501,7 +506,7 @@ router.get('/projetos/:id/campo/programacao.pdf', h(async (req, res) => { enviar
 router.get('/projetos/:id/campo/programacao/texto', h(async (req) => programacao.textoDia(id(req.params.id), req.query.tipo, req.query.dia)));
 router.post('/projetos/:id/campo/pontos', h(async (req) => {
   const p = ctx(req).perfil;
-  if (!(p === 'ADMIN' || p === 'OPERADOR' || (p === 'CAMPO' && ctx(req).permissoes.marcar_campo))) throw new PaErro('SEM_PERMISSAO', 'Sem permissão para marcar pontos', 403);
+  if (p === 'DIRECAO_ASSOCIACAO' || !(p === 'ADMIN' || ctx(req).permissoes.marcar_campo)) throw new PaErro('SEM_PERMISSAO', 'Sem permissão para marcar pontos', 403);
   const b = req.body ?? {};
   return campo.marcarPonto(id(req.params.id), String(b.ponto ?? '').slice(0, 40), { gps: b.gps ?? null, obs: b.obs, base: b.base, rover: b.rover }, usuarioCampo(req));
 }));

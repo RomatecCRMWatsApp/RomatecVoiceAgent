@@ -203,6 +203,19 @@ const CREATE_PA_CAMPO_PONTOS = `
     INDEX idx_pa_campo_dia (projeto_id, marcado_em)
   ) DEFAULT CHARSET=utf8mb4
 `;
+// v3.180.0: sessões de acesso da equipe (início, última atividade, nº de requisições, dispositivo)
+const CREATE_PA_ACESSOS = `
+  CREATE TABLE IF NOT EXISTS pa_acessos (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    user_sub     VARCHAR(64) NOT NULL,
+    inicio       DATETIME NOT NULL,
+    fim          DATETIME NOT NULL,
+    requisicoes  INT NOT NULL DEFAULT 1,
+    ip           VARCHAR(64) NULL,
+    dispositivo  VARCHAR(160) NULL,
+    INDEX idx_pa_acessos_user (user_sub, inicio)
+  ) DEFAULT CHARSET=utf8mb4
+`;
 // v3.177.0: programação diária de campo (lotes que a equipe vai medir em cada dia)
 const CREATE_PA_CAMPO_PROGRAMACAO = `
   CREATE TABLE IF NOT EXISTS pa_campo_programacao (
@@ -385,7 +398,8 @@ const CREATE_PA_WA_GRUPO_MEMBROS = `
 export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   // v3.169.0: marcos oficiais (planilha de quantitativo) + perfil CAMPO com permissões
   { label: 'pa_projetos.marcos_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN marcos_json JSON NULL' },
-  { label: 'pa_usuarios_perfil +CAMPO', sql: "ALTER TABLE pa_usuarios_perfil MODIFY perfil ENUM('ADMIN','OPERADOR','DIRECAO_ASSOCIACAO','CAMPO') NOT NULL" },
+  // v3.180.0: + AGRIMENSOR no mesmo MODIFY (roda a cada boot — um MODIFY só, para um não desfazer o outro)
+  { label: 'pa_usuarios_perfil +CAMPO +AGRIMENSOR', sql: "ALTER TABLE pa_usuarios_perfil MODIFY perfil ENUM('ADMIN','OPERADOR','DIRECAO_ASSOCIACAO','CAMPO','AGRIMENSOR') NOT NULL" },
   { label: 'pa_usuarios_perfil.permissoes', sql: 'ALTER TABLE pa_usuarios_perfil ADD COLUMN permissoes JSON NULL, ADD COLUMN criado_por VARCHAR(64) NULL' },
   // v3.168.0: taxa de marcos de concreto (um boleto por associado)
   { label: 'pa_lancamentos.tipo +MARCO', sql: "ALTER TABLE pa_lancamentos MODIFY tipo ENUM('SINAL','BOLETO','AVISTA','AJUSTE','MARCO') NOT NULL" },
@@ -450,6 +464,7 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_campo_pontos', sql: CREATE_PA_CAMPO_PONTOS },
   { label: 'pa_campo_lotes', sql: CREATE_PA_CAMPO_LOTES },
   { label: 'pa_campo_programacao', sql: CREATE_PA_CAMPO_PROGRAMACAO },
+  { label: 'pa_acessos', sql: CREATE_PA_ACESSOS },
   { label: 'pa_dossies', sql: CREATE_PA_DOSSIES },
 ];
 

@@ -114,3 +114,35 @@ describe('dia em Brasília', () => {
     expect(diaBrasilia('2026-11-18T02:59:59Z')).toBe('2026-11-17');
   });
 });
+
+// v3.180.0: permissões por função para todos os perfis
+import { permissaoDaRota, rotaPaPermitida, PADRAO_POR_PERFIL, dispositivo, CATALOGO_PERMISSOES } from './paEquipe';
+describe('permissões por função', () => {
+  it('cada rota exige a permissão certa', () => {
+    const casos: Array<[string, string, string | null]> = [
+      ['GET', '/projetos/1/painel', 'ver_painel'], ['GET', '/projetos/1/subdivisao.geojson', 'ver_mapa'], ['GET', '/projetos/1/mapa-geral.pdf', 'baixar_mapas'],
+      ['POST', '/projetos/1/subdivisao/vinculo', 'editar_mapas'], ['GET', '/projetos/1/associados/7', 'ver_associados'], ['PATCH', '/projetos/1/associados/7', 'editar_associados'],
+      ['GET', '/projetos/1/pagamentos', 'ver_financeiro'], ['POST', '/projetos/1/pagamentos', 'operar_financeiro'], ['POST', '/projetos/1/marcos/9/enviar', 'operar_financeiro'],
+      ['GET', '/projetos/1/carteirinhas.pdf', 'carteirinhas'], ['POST', '/projetos/1/concessao.pdf', 'documentos_oficiais'], ['POST', '/projetos/1/campo/pontos', 'marcar_campo'],
+      ['PUT', '/projetos/1/campo/programacao', 'programar_campo'], ['GET', '/projetos/1/campo/boletim.pdf', 'programar_campo'], ['GET', '/projetos/1/coletora.kml', 'baixar_coletora'],
+      ['POST', '/projetos/1/dossies/05/enviar', 'dossies'], ['POST', '/projetos/1/whatsapp/grupo', 'whatsapp'], ['GET', '/projetos/1/campo', '*'], ['GET', '/eu', '*'],
+      ['POST', '/importar', null], ['GET', '/equipe', null],
+    ];
+    for (const [m, c, k] of casos) expect([m, c, permissaoDaRota(m, c)]).toEqual([m, c, k]);
+  });
+  it('perfis: padrões e o que bloqueia', () => {
+    expect(Object.values(PADRAO_POR_PERFIL.OPERADOR).every(Boolean)).toBe(true);
+    expect(PADRAO_POR_PERFIL.AGRIMENSOR).toMatchObject({ ver_mapa: true, baixar_mapas: true, programar_campo: true, ver_financeiro: false, operar_financeiro: false });
+    expect(Object.keys(PADRAO_POR_PERFIL.CAMPO)).toHaveLength(CATALOGO_PERMISSOES.length);
+    const op = { ...PADRAO_POR_PERFIL.OPERADOR, operar_financeiro: false };
+    expect(rotaPaPermitida('OPERADOR', 'POST', '/projetos/1/pagamentos', op)).toBe(false);
+    expect(rotaPaPermitida('OPERADOR', 'GET', '/projetos/1/pagamentos', op)).toBe(true);
+    expect(rotaPaPermitida('OPERADOR', 'POST', '/importar', op)).toBe(true); // rota sem regra: a trava ADMIN fica na própria rota
+    expect(rotaPaPermitida('AGRIMENSOR', 'POST', '/importar', PADRAO_POR_PERFIL.AGRIMENSOR)).toBe(false);
+    expect(rotaPaPermitida('ADMIN', 'GET', '/qualquer', PADRAO_POR_PERFIL.CAMPO)).toBe(true);
+  });
+  it('aparelho pelo user-agent', () => {
+    expect(dispositivo('Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36')).toBe('Android (tablet) · Chrome');
+    expect(dispositivo('Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1')).toBe('iPhone · Safari');
+  });
+});

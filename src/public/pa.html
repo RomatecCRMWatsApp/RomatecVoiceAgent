@@ -304,6 +304,15 @@
   .cx-manual .cx-in{background:#fff;border-radius:14px;padding:14px;width:100%;max-width:560px;border:2px solid var(--gold)}
   .cx-manual textarea{width:100%;margin-top:6px;font-size:13px}
   .mk-res{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.mk-res div{border:1px solid var(--line);border-radius:8px;padding:5px 8px}.mk-res span{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;font-weight:700}.mk-res b{font-size:13px;color:var(--green)}.mk-res .red b{color:var(--red)}
+  /* v3.180.0: equipe — funções e acessos */
+  .eq-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin-top:6px}
+  .eq-g{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:#FBFAF5}.eq-g b{display:block;color:var(--green);font-size:13px;margin-bottom:2px}
+  .eq-g .citem{display:flex;gap:6px;align-items:flex-start;justify-content:flex-start;text-align:left;font-size:13px;margin:3px 0;font-weight:400}.eq-g .citem input{flex:0 0 auto;width:auto;margin:2px 0 0}
+  .eq-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px;margin-top:6px}.eq-stats div{border:1px solid var(--line);border-radius:8px;padding:4px 8px}
+  .eq-stats span{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;font-weight:700}.eq-stats b{color:var(--green)}
+  .eq-on{color:#1f7a4d;font-weight:700;font-size:12px}.eq-off{color:var(--muted);font-size:12px}
+  .eq-det{margin-top:6px}.eq-det summary{cursor:pointer;font-weight:700;color:var(--green);padding:4px 0}
+  .eq-hist:not(:empty){margin-top:8px}
   /* v3.177.0: programação do dia */
   .cp-prog .pg-lista{display:flex;flex-direction:column;gap:4px;margin-top:8px}
   .cp-prog .pg-it{display:flex;align-items:center;gap:6px;flex-wrap:wrap;border:1px solid var(--line);border-left:5px solid #5DA9E9;border-radius:8px;padding:6px 8px;background:#fff}
@@ -516,8 +525,10 @@ async function boot(){
   mostrarVersao();
   try {
     S.eu = await api('/eu');
-    $('#perfilChip').textContent = (S.eu.nome ? S.eu.nome.split(' ').slice(0, 2).join(' ') + ' · ' : '') + ({ ADMIN: 'Administrador', OPERADOR: 'Operador', DIRECAO_ASSOCIACAO: 'Direção da associação', CAMPO: 'Funcionário de campo' }[S.eu.perfil] || S.eu.perfil); // v3.169.0
+    $('#perfilChip').textContent = (S.eu.nome ? S.eu.nome.split(' ').slice(0, 2).join(' ') + ' · ' : '') + ({ ADMIN: 'Administrador', OPERADOR: 'Operador', DIRECAO_ASSOCIACAO: 'Direção da associação', CAMPO: 'Topógrafo de campo', AGRIMENSOR: 'Agrimensor' }[S.eu.perfil] || S.eu.perfil); // v3.169.0
     if (S.eu.perfil !== 'ADMIN') document.querySelectorAll('[data-admin]').forEach((b) => b.classList.add('hide'));
+    // v3.180.0: abas conforme as permissões marcadas em Equipe e permissões
+    if (S.eu.perfil !== 'ADMIN') document.querySelectorAll('#tabs button').forEach((b) => { const k = ABA_PERM[b.dataset.t]; if (k && !pode(k)) b.classList.add('hide'); });
     if (S.eu.perfil === 'CAMPO') aplicarPerfilCampo(); // v3.169.0
     const { projetos } = await api('/projetos');
     S.projetos = projetos;
@@ -534,8 +545,9 @@ async function boot(){
     $('#menuFundo').onclick = () => document.body.classList.remove('menu-aberto');
     $('#btnVoltar').onclick = voltar;
     try { history.replaceState({ aba: S.aba }, ''); } catch { /* ok */ }
-    const abaIni = qs.get('aba') || (S.eu.perfil === 'CAMPO' ? 'campo' : S.pid ? 'painel' : 'importar');
-    mostrar(S.eu.perfil === 'CAMPO' && !['campo', 'mapa', 'importar'].includes(abaIni) ? 'campo' : abaIni);
+    const abaIni = qs.get('aba') || (pode('ver_painel') ? (S.pid ? 'painel' : 'importar') : 'campo');
+    const visivel = (t) => { const b = document.querySelector(`#tabs button[data-t="${t}"]`); return b && !b.classList.contains('hide'); };
+    mostrar(visivel(abaIni) ? abaIni : 'campo');
     if (qs.get('associado')) abrirAssociado(Number(qs.get('associado')));
   } catch (e){ $('#v-painel').innerHTML = `<div class="card empty">Erro ao carregar: ${esc(e.message)}</div>`; }
 }
@@ -569,6 +581,9 @@ function mostrar(aba){
   ({ painel: rPainel, mapa: rMapa, associados: rAssociados, financeiro: rFinanceiro, carteirinhas: rCarteirinhas, documentos: rDocumentosOficiais, campo: rCampo, importar: rImportar, equipe: rEquipe, dossies: rDossies })[aba]();
 }
 const podeEscrever = () => S.eu && S.eu.pode_escrever;
+// v3.180.0: permissão por função (ADMIN tudo; os demais, o que foi marcado em Equipe e permissões)
+const pode = (k) => !!S.eu && (S.eu.perfil === 'ADMIN' || !!(S.eu.permissoes || {})[k]);
+const ABA_PERM = { painel: 'ver_painel', mapa: 'ver_mapa', associados: 'ver_associados', financeiro: 'ver_financeiro', carteirinhas: 'carteirinhas', documentos: 'documentos_oficiais', dossies: 'dossies', importar: 'baixar_coletora' };
 // v3.175.4: destino do envio — vem o WhatsApp cadastrado; dá para trocar por outro número só nesta vez.
 // Devolve undefined se cancelou, null se é o cadastrado, ou o número digitado.
 function perguntarNumero(nome, cadastrado){
@@ -2908,7 +2923,7 @@ async function rCampo(){
 // ─── v3.169.0: perfil CAMPO (funcionário de campo) — só Campo, Mapa (ver) e arquivos da coletora ─
 function aplicarPerfilCampo(){
   const pe = S.eu.permissoes || {};
-  const libera = { campo: true, mapa: pe.ver_mapa !== false, importar: pe.baixar_coletora !== false };
+  const libera = { campo: true, mapa: pe.ver_mapa !== false, importar: pe.baixar_coletora !== false, painel: !!pe.ver_painel, associados: !!pe.ver_associados, financeiro: !!pe.ver_financeiro, carteirinhas: !!pe.carteirinhas, documentos: !!pe.documentos_oficiais, dossies: !!pe.dossies };
   document.querySelectorAll('#tabs button').forEach((b) => { b.classList.toggle('hide', !libera[b.dataset.t]); });
   document.body.classList.add('perfil-campo');
   // marca d'água com o nome de quem está logado (print vazado tem dono)
@@ -2935,34 +2950,41 @@ async function rEquipe(){
   if (!S.eu || S.eu.perfil !== 'ADMIN'){ v.innerHTML = '<div class="card empty">Somente ADMIN.</div>'; return; }
   v.innerHTML = '<div class="card empty">Carregando…</div>';
   let d; try { d = await api('/equipe'); } catch (e){ v.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
-  const permHtml = (p, pref) => `<label class="citem"><input type="checkbox" class="${pref}" data-p="ver_mapa" ${p.ver_mapa ? 'checked' : ''}> Ver os mapas</label>
-      <label class="citem"><input type="checkbox" class="${pref}" data-p="baixar_coletora" ${p.baixar_coletora ? 'checked' : ''}> Baixar arquivos da coletora e caderneta</label>
-      <label class="citem"><input type="checkbox" class="${pref}" data-p="marcar_campo" ${p.marcar_campo ? 'checked' : ''}> Marcar marcos locados no mapa</label>`;
+  // v3.180.0: todas as funções do sistema, agrupadas por aba; o perfil só preenche o padrão
+  const grupos = [...new Set(d.catalogo.map((x) => x.grupo))];
+  const permHtml = (p, pref) => `<div class="eq-grid">${grupos.map((g) => `<div class="eq-g"><b>${esc(g)}</b>${d.catalogo.filter((x) => x.grupo === g).map((x) => `<label class="citem"><input type="checkbox" class="${pref}" data-p="${x.id}" ${p[x.id] ? 'checked' : ''}> ${esc(x.rotulo)}</label>`).join('')}</div>`).join('')}</div>`;
   const lerPerm = (raiz, pref) => { const o = {}; raiz.querySelectorAll('.' + pref).forEach((c) => { o[c.dataset.p] = c.checked; }); return o; };
-  v.innerHTML = `<div class="card" style="border-left:5px solid var(--gold)"><b>Como liberar funções para os funcionários:</b> cadastre a pessoa abaixo (ou ache ela na lista <b>Equipe</b>), escolha o <b>perfil</b> e marque o que ela pode fazer — <b>ver os mapas</b>, <b>baixar arquivos da coletora e caderneta</b> (aba Importar / Exportar) e <b>marcar marcos no mapa</b> (aba Campo). Clique em <b>Salvar perfil e permissões</b>.</div>
+  const marcar = (raiz, pref, p) => raiz.querySelectorAll('.' + pref).forEach((c) => { c.checked = !!p[c.dataset.p]; });
+  const opPerfil = (atual) => Object.entries(d.perfis).map(([k, t]) => `<option value="${k}" ${k === atual ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  const qtdPerm = (p) => d.catalogo.filter((x) => p[x.id]).length;
+  const status = (m) => m.acessos.online ? '<span class="eq-on">🟢 online agora</span>' : m.acessos.ultima_atividade ? `<span class="eq-off">⚪ visto ${esc(dhBr(m.acessos.ultima_atividade))}</span>` : '<span class="eq-off">⚪ ainda não entrou</span>';
+  v.innerHTML = `<div class="card" style="border-left:5px solid var(--gold)"><b>Como liberar funções:</b> escolha o <b>perfil</b> (ele marca o padrão) e ajuste as caixinhas de cada função — o que ficar desmarcado some da tela da pessoa e é bloqueado no servidor. Clique em <b>Salvar perfil e permissões</b>; vale em até 30 segundos.</div>
     <div class="card"><h2 style="margin-top:0">👷 Convidar para a equipe do PA</h2>
       <div class="grid3">
-        <div><label for="eqPerfil">Perfil</label><select class="f" id="eqPerfil">${Object.entries(d.perfis).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join('')}</select></div>
+        <div><label for="eqPerfil">Perfil</label><select class="f" id="eqPerfil">${opPerfil('CAMPO')}</select></div>
         <div><label for="eqNome">Nome</label><input id="eqNome" placeholder="Nome completo"></div>
         <div><label for="eqCpf">CPF (será o login)</label><input id="eqCpf" inputmode="numeric" placeholder="000.000.000-00"></div>
         <div><label for="eqTel">WhatsApp</label><input id="eqTel" inputmode="tel" placeholder="(99) 9 9999-9999"></div>
-        <div style="grid-column:span 2" id="eqPermBox"><label>O que ele pode fazer</label><div class="eq-perm">${permHtml({ ver_mapa: true, baixar_coletora: true, marcar_campo: true }, 'eqPerm')}</div></div>
+        <div style="grid-column:1/-1"><label>O que a pessoa pode fazer</label>${permHtml(d.padroes.CAMPO, 'eqPerm')}</div>
       </div>
       <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" id="eqCriar" style="flex:0 0 auto">📲 Criar e enviar pelo WhatsApp</button><button class="btn btn-ghost" id="eqSoCriar" style="flex:0 0 auto">Só criar (mostrar a senha)</button></div>
-      <div class="muted" style="margin-top:6px">A pessoa recebe o link, o login (CPF) e uma senha provisória. <b>Funcionário de campo</b> entra só na Gestão de PA e vê apenas Campo, Mapa (sem PDF, sem imprimir, sem enviar) e a caderneta/arquivos da coletora — financeiro, carteirinhas, associados e documentos ficam fechados também no servidor.</div>
+      <div class="muted" style="margin-top:6px">A pessoa recebe o link, o login (CPF) e uma senha provisória. <b>Topógrafo de campo</b>: Campo, Mapa (sem PDF) e coletora. <b>Agrimensor</b>: técnico (mapas, campo, dossiês, documentos), sem financeiro. <b>Operador do escritório</b>: tudo, menos excluir. <b>Direção</b>: só leitura.</div>
       <div id="eqRes"></div></div>
-    <div class="card"><h2 style="margin-top:0">Equipe (${d.equipe.length})</h2>
+    <div class="card"><h2 style="margin-top:0">Equipe (${d.equipe.length}) · ${d.equipe.filter((m) => m.acessos.online).length} online agora</h2>
       ${d.equipe.length ? d.equipe.map((m) => `<div class="eq-item${m.ativo ? '' : ' off'}" data-uid="${m.user_id}">
           <div class="eq-top"><b>${esc(m.nome)}</b> <span class="muted">${esc(m.perfil_rotulo)} · login ${esc(m.login)}${m.telefone ? ' · ' + esc(m.telefone) : ''}</span>
-            ${m.ativo ? chip('VALIDO', 'Acesso ativo') : chip('CANCELADO', 'Desativado')}<span class="muted" style="margin-left:auto">${m.ultimo_acesso ? 'último acesso ' + dbr(m.ultimo_acesso) : 'ainda não entrou'}</span></div>
-          <div class="row" style="gap:8px;align-items:end;margin-top:6px"><div style="flex:0 1 260px"><label for="eqPf${m.user_id}">Perfil</label><select class="f eqPf" id="eqPf${m.user_id}" data-uid="${m.user_id}">${Object.entries(d.perfis).map(([k, t]) => `<option value="${k}" ${k === m.perfil ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div></div>
-          <div class="eq-perm" id="eqPb${m.user_id}" style="${m.perfil === 'CAMPO' ? '' : 'display:none'}">${permHtml(m.permissoes, 'eqP' + m.user_id)}</div>
-          <div class="muted eq-perfnota" id="eqPn${m.user_id}" style="${m.perfil === 'CAMPO' ? 'display:none' : ''}">Operador: usa todas as abas (sem excluir). Direção: só leitura. As caixinhas de permissão valem para o funcionário de campo.</div>
-          <button class="btn btn-primary btn-sm" data-eqsalvar="${m.user_id}" style="margin-top:6px">💾 Salvar perfil e permissões</button>
+            ${m.ativo ? chip('VALIDO', 'Acesso ativo') : chip('CANCELADO', 'Desativado')} ${status(m)}</div>
+          <div class="eq-stats"><div><span>Acessos</span><b>${m.acessos.total}</b></div><div><span>Últimos 7 dias</span><b>${m.acessos.d7}</b></div><div><span>Últimos 30 dias</span><b>${m.acessos.d30}</b></div><div><span>Último login</span><b>${m.ultimo_acesso ? esc(dhBr(m.ultimo_acesso)) : '—'}</b></div><div><span>Funções liberadas</span><b>${qtdPerm(m.permissoes)}/${d.catalogo.length}</b></div></div>
+          <div class="row" style="gap:8px;align-items:end;margin-top:6px"><div style="flex:0 1 260px"><label for="eqPf${m.user_id}">Perfil</label><select class="f eqPf" id="eqPf${m.user_id}" data-uid="${m.user_id}">${opPerfil(m.perfil)}</select></div>
+            <div style="flex:0 0 auto"><button class="btn btn-ghost btn-sm" data-eqpadrao="${m.user_id}" title="Marca as funções padrão do perfil escolhido">↺ Padrão do perfil</button></div></div>
+          <details class="eq-det"><summary>🔐 Funções liberadas (${qtdPerm(m.permissoes)}) — toque para ver/alterar</summary>${permHtml(m.permissoes, 'eqP' + m.user_id)}</details>
           <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" data-eqsalvar="${m.user_id}" style="flex:0 0 auto">💾 Salvar perfil e permissões</button>
+            <button class="btn btn-gold btn-sm" data-eqhist="${m.user_id}" style="flex:0 0 auto">📜 Histórico de acesso</button>
             <button class="btn btn-ghost btn-sm" data-eqreenv="${m.user_id}" style="flex:0 0 auto">🔁 Reenviar acesso (nova senha)</button>
-            <button class="btn btn-sm ${m.ativo ? 'btn-danger' : 'btn-ghost'}" data-eqativo="${m.user_id}" data-v="${m.ativo ? '0' : '1'}" style="flex:0 0 auto">${m.ativo ? '⛔ Desativar login' : '✅ Reativar login'}</button></div></div>`).join('') : '<div class="empty">Ninguém cadastrado ainda.</div>'}</div>`;
-  $('#eqPerfil').onchange = () => { $('#eqPermBox').style.display = $('#eqPerfil').value === 'CAMPO' ? '' : 'none'; };
+            <button class="btn btn-sm ${m.ativo ? 'btn-danger' : 'btn-ghost'}" data-eqativo="${m.user_id}" data-v="${m.ativo ? '0' : '1'}" style="flex:0 0 auto">${m.ativo ? '⛔ Desativar login' : '✅ Reativar login'}</button></div>
+          <div class="eq-hist" id="eqH${m.user_id}"></div></div>`).join('') : '<div class="empty">Ninguém cadastrado ainda.</div>'}</div>`;
+  $('#eqPerfil').onchange = () => marcar(v, 'eqPerm', d.padroes[$('#eqPerfil').value] || {});
   const resultado = (r) => {
     $('#eqRes').innerHTML = r.enviado ? `<div class="avisos">✅ Acesso criado e enviado pelo WhatsApp. Login: <b>${esc(r.login || '')}</b></div>`
       : `<div class="avisos">⚠️ ${r.erro_envio ? 'Não saiu pelo WhatsApp (' + esc(r.erro_envio) + '). ' : ''}Copie e mande para a pessoa:<textarea class="f" rows="8" style="width:100%;margin-top:6px" readonly>${esc(r.mensagem || '')}</textarea></div>`;
@@ -2974,6 +2996,8 @@ async function rEquipe(){
   };
   $('#eqCriar').onclick = () => criar(true);
   $('#eqSoCriar').onclick = () => criar(false);
+  v.querySelectorAll('.eqPf').forEach((sel) => sel.onchange = () => { marcar(v, 'eqP' + sel.dataset.uid, d.padroes[sel.value] || {}); const det = sel.closest('.eq-item').querySelector('details'); if (det) det.open = true; toast('Funções do perfil marcadas — confira e salve'); });
+  v.querySelectorAll('[data-eqpadrao]').forEach((b) => b.onclick = () => { const uid = b.dataset.eqpadrao; marcar(v, 'eqP' + uid, d.padroes[$('#eqPf' + uid).value] || {}); const det = b.closest('.eq-item').querySelector('details'); if (det) det.open = true; });
   v.querySelectorAll('[data-eqreenv]').forEach((b) => b.onclick = async () => {
     if (!confirm('Gerar uma nova senha e enviar pelo WhatsApp? A senha antiga deixa de valer.')) return;
     try { const r = await api(`/equipe/${b.dataset.eqreenv}/reenviar`, { json: {} }); resultado(r); toast(r.enviado ? 'Nova senha enviada' : 'Nova senha gerada'); } catch (e){ toast(e.message, true); }
@@ -2985,9 +3009,19 @@ async function rEquipe(){
   });
   v.querySelectorAll('[data-eqsalvar]').forEach((b) => b.onclick = async () => {
     const uid = b.dataset.eqsalvar;
-    try { await api(`/equipe/${uid}`, { method: 'PATCH', json: { perfil: $('#eqPf' + uid).value, permissoes: lerPerm(v, 'eqP' + uid) } }); toast('Perfil e permissões salvos — valem no próximo acesso (até 30 s)'); rEquipe(); } catch (e){ toast(e.message, true); }
+    try { await api(`/equipe/${uid}`, { method: 'PATCH', json: { perfil: $('#eqPf' + uid).value, permissoes: lerPerm(v, 'eqP' + uid) } }); toast('Perfil e permissões salvos — valem em até 30 s'); rEquipe(); } catch (e){ toast(e.message, true); }
   });
-  v.querySelectorAll('.eqPf').forEach((sel) => sel.onchange = () => { const c = sel.value === 'CAMPO'; $('#eqPb' + sel.dataset.uid).style.display = c ? '' : 'none'; $('#eqPn' + sel.dataset.uid).style.display = c ? 'none' : ''; });
+  v.querySelectorAll('[data-eqhist]').forEach((b) => b.onclick = async () => {
+    const box = $('#eqH' + b.dataset.eqhist);
+    if (box.innerHTML){ box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="muted">Carregando…</div>';
+    try {
+      const r = await api(`/equipe/${b.dataset.eqhist}/acessos`);
+      box.innerHTML = r.sessoes.length ? `<div class="tbl"><table class="tcard"><thead><tr><th>Entrou</th><th>Última atividade</th><th class="right">Tempo</th><th class="right">Ações</th><th>Aparelho</th><th>IP</th></tr></thead><tbody>
+        ${r.sessoes.map((x) => `<tr><td class="tc-tit nowrap">${esc(dhBr(x.inicio))}</td><td data-l="Última atividade" class="nowrap">${esc(dhBr(x.fim))}</td><td data-l="Tempo" class="right nowrap">${x.minutos >= 60 ? Math.floor(x.minutos / 60) + ' h ' + (x.minutos % 60) + ' min' : x.minutos + ' min'}</td><td data-l="Ações" class="right">${x.requisicoes}</td><td data-l="Aparelho">${esc(x.dispositivo || '—')}</td><td data-l="IP" class="muted">${esc(x.ip || '—')}</td></tr>`).join('')}
+        </tbody></table></div><div class="muted">Uma linha por acesso (uso contínuo; pausa de 30 min abre um novo). Últimos 60 acessos.</div>` : '<div class="muted">Nenhum acesso registrado ainda (o registro começou na v3.180.0).</div>';
+    } catch (e){ box.innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
+  });
 }
 
 // ─── v3.171.0: ordem de serviço de campo pelo pagamento (cor + prioridade; preferência sem bloqueio) ─
@@ -3073,7 +3107,7 @@ async function cardProgramacao(d){
   let info; try { info = await api(`/projetos/${S.pid}/campo/programacao?dia=${PG.dia}`); } catch (e){ box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
   PG.info = info; PG.lotes = info.lotes.slice(); PG.salvo = true;
   const porLote = Object.fromEntries(d.lotes.map((l) => [l.lote, l]));
-  const campo = S.eu.perfil === 'CAMPO';
+  const campo = !pode('programar_campo'); // v3.180.0: sem a permissão, só vê os lotes do dia
   if (campo){ // operador: só vê os lotes do dia
     box.innerHTML = info.itens.length ? `<div class="card cp-prog"><b>📅 Lotes programados para hoje (${info.itens.length})</b><div class="pg-lista">${info.itens.map((x) => `<div class="pg-it"><b>${x.ordem}. LT-${esc(x.lote)}</b> <span>${esc(x.associado || 'sem associado')}${x.chacara ? ' · ' + esc(x.chacara) : ''}</span> ${chip(SIT_PG[x.situacao][0], SIT_PG[x.situacao][1])}</div>`).join('')}</div></div>` : '';
     return;
@@ -3138,7 +3172,7 @@ async function rLocacao(box){
   const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
   const meuHoje = d.producao.filter((p) => p.dia === hoje);
   const pontosHoje = meuHoje.reduce((s, p) => s + p.pontos, 0), lotesHoje = meuHoje.reduce((s, p) => s + p.lotes, 0);
-  const podeMarcar = podeEscrever() || (S.eu.perfil === 'CAMPO' && (S.eu.permissoes || {}).marcar_campo !== false);
+  const podeMarcar = S.eu.perfil !== 'DIRECAO_ASSOCIACAO' && pode('marcar_campo');
   const optLote = (l) => `<option value="${esc(l.lote)}" ${CP.lote === l.lote ? 'selected' : ''}>${l.prioridade ? '#' + l.prioridade + ' · ' : ''}${l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${esc(l.lote)} · ${l.fechado ? '✅ MEDIDO' : `${l.marcados}/${l.exigidos.length} marcos · ${pagTxt(l)}`}${l.associado ? ' · ' + esc(l.associado.nome) : ''}</option>`;
   const grupo = (t, ls) => ls.length ? `<optgroup label="${esc(t)} (${ls.length})">${ls.map(optLote).join('')}</optgroup>` : '';
   const qAM = quitadosAMedir(d), abertos = d.lotes.filter((l) => !l.fechado && !(l.pagamento && l.pagamento.quitado)), medidos = d.lotes.filter((l) => l.fechado);
@@ -3190,7 +3224,7 @@ async function rLocacao(box){
     if (!id){ alvo.innerHTML = ''; return; }
     const f = (d.faixas || []).find((x) => x.id === id) || { rotulo: id, cor: '#ccc' };
     const ls = d.lotes.filter((l) => l.faixa === id);
-    const prog = S.eu.perfil !== 'CAMPO';
+    const prog = pode('programar_campo');
     const lin = (l) => {
       const ja = PG.lotes.includes(l.lote);
       return `<div class="pg-it" style="border-left-color:${f.cor}"><b>${l.prioridade ? '#' + l.prioridade + ' · ' : ''}${l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${esc(l.lote)}</b>

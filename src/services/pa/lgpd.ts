@@ -3,14 +3,15 @@
 //   ADMIN               tudo (inclui excluir e liberar entrega retida)
 //   OPERADOR            lê/escreve, sem exclusão
 //   DIRECAO_ASSOCIACAO  só leitura, CPF mascarado, sem documentos
-//   CAMPO               v3.169.0: funcionário de campo — Campo + Mapa (só ver) + coletora; nada mais
+//   CAMPO               v3.169.0: topógrafo de campo — Campo + Mapa (só ver) + coletora; nada mais
+//   AGRIMENSOR          v3.180.0: técnico — escreve como operador, limitado pelas permissões marcadas
 //
 // Perfil vem de pa_usuarios_perfil (override por usuário); sem linha, sai do
 // role do JWT: owner/admin → ADMIN, viewer → DIRECAO_ASSOCIACAO, resto → OPERADOR.
 import type { AuthRole } from '../auth';
 import { mascararCpf } from './validadores';
 
-export type PerfilPa = 'ADMIN' | 'OPERADOR' | 'DIRECAO_ASSOCIACAO' | 'CAMPO';
+export type PerfilPa = 'ADMIN' | 'OPERADOR' | 'DIRECAO_ASSOCIACAO' | 'CAMPO' | 'AGRIMENSOR';
 
 export function perfilPorRole(role: AuthRole | string | null | undefined): PerfilPa {
   if (role === 'owner' || role === 'admin') return 'ADMIN';
@@ -19,7 +20,7 @@ export function perfilPorRole(role: AuthRole | string | null | undefined): Perfi
 }
 
 export function podeEscrever(p: PerfilPa): boolean {
-  return p === 'ADMIN' || p === 'OPERADOR';
+  return p === 'ADMIN' || p === 'OPERADOR' || p === 'AGRIMENSOR';
 }
 export function podeExcluir(p: PerfilPa): boolean {
   return p === 'ADMIN';
