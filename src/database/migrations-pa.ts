@@ -203,6 +203,21 @@ const CREATE_PA_CAMPO_PONTOS = `
     INDEX idx_pa_campo_dia (projeto_id, marcado_em)
   ) DEFAULT CHARSET=utf8mb4
 `;
+// v3.181.0: pesquisa de satisfação dos associados (nota 0–10 + clique no Instagram do portal)
+const CREATE_PA_PESQUISA = `
+  CREATE TABLE IF NOT EXISTS pa_pesquisa_respostas (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    projeto_id          INT NOT NULL,
+    associado_id        INT NOT NULL,
+    nota                TINYINT NULL,
+    comentario          VARCHAR(600) NULL,
+    instagram_clicou_em DATETIME NULL,
+    respondido_em       DATETIME NULL,
+    atualizado_em       DATETIME NULL,
+    ip                  VARCHAR(64) NULL,
+    UNIQUE KEY uk_pa_pesquisa (projeto_id, associado_id)
+  ) DEFAULT CHARSET=utf8mb4
+`;
 // v3.180.0: sessões de acesso da equipe (início, última atividade, nº de requisições, dispositivo)
 const CREATE_PA_ACESSOS = `
   CREATE TABLE IF NOT EXISTS pa_acessos (
@@ -465,6 +480,7 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_campo_lotes', sql: CREATE_PA_CAMPO_LOTES },
   { label: 'pa_campo_programacao', sql: CREATE_PA_CAMPO_PROGRAMACAO },
   { label: 'pa_acessos', sql: CREATE_PA_ACESSOS },
+  { label: 'pa_pesquisa_respostas', sql: CREATE_PA_PESQUISA },
   { label: 'pa_dossies', sql: CREATE_PA_DOSSIES },
 ];
 

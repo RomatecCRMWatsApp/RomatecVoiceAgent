@@ -30,6 +30,7 @@ import * as caixa from '../services/pa/paCaixa';
 import * as carteirinha from '../services/pa/paCarteirinha';
 import * as ata from '../services/pa/paAta';
 import * as concessao from '../services/pa/paConcessao';
+import * as pesquisa from '../services/pa/paPesquisa';
 import * as part from '../services/pa/paParticipantes';
 import * as relacao from '../services/pa/paRelacaoLotes';
 import * as marcos from '../services/pa/paMarcos';
@@ -467,6 +468,27 @@ router.post('/whatsapp/grupo/manual', h(async (req) => {
 router.get('/projetos/:id/ata-assembleia.pdf', h(async (req, res) => {
   enviarPdf(res, await ata.pdfAta(id(req.params.id), ata.lerDadosAta(req.query as Record<string, unknown>), ctx(req).sub));
   return undefined;
+}));
+// v3.181.0: pesquisa de satisfação — resultado, link pessoal e envio pelo WhatsApp (só quem não respondeu)
+router.get('/projetos/:id/pesquisa', h(async (req) => pesquisa.resultadoPesquisa(id(req.params.id))));
+router.get('/projetos/:id/pesquisa/link/:aid', h(async (req) => { const aid = id(req.params.aid, 'associado'); const a = await repo.buscarAssociado(aid); const link = pesquisa.linkPesquisa(aid); const mensagem = pesquisa.mensagemPesquisa(String((a as { nome?: string }).nome ?? ''), link); return { link, mensagem, texto: mensagem }; }));
+router.post('/projetos/:id/pesquisa/enviar', h(async (req) => {
+  exigirEscrita(req);
+  const pid = id(req.params.id);
+  const r = await pesquisa.resultadoPesquisa(pid);
+  const pedidos = Array.isArray(req.body?.associado_ids) ? new Set((req.body.associado_ids as unknown[]).map(Number)) : null;
+  const alvo = r.associados.filter((a) => a.nota == null && a.whatsapp && (pedidos ? pedidos.has(a.id) : !a.enviado || req.body?.reenviar === true));
+  const usuario = ctx(req).sub;
+  if (alvo.length === 1 && pedidos) { // um só: envia na hora
+    const a = alvo[0];
+    const res = await waPa.enviarWhatsAppAssociado(a.id, pesquisa.mensagemPesquisa(a.nome, pesquisa.linkPesquisa(a.id)), 'PESQUISA', usuario, req.body?.numero);
+    await pesquisa.marcarEnviada(pid, a.id, usuario);
+    return { enviados: 1, resultado: res };
+  }
+  return { fila: waPa.iniciarFila(pid, alvo.map((a) => ({ associado_id: a.id, nome: a.nome, lancamento_ids: [a.id] })), usuario, async (it) => {
+    await waPa.enviarWhatsAppAssociado(it.associado_id, pesquisa.mensagemPesquisa(it.nome, pesquisa.linkPesquisa(it.associado_id)), 'PESQUISA', usuario);
+    await pesquisa.marcarEnviada(pid, it.associado_id, usuario);
+  }) };
 }));
 // v3.176.0: termo de concessão de uso do lote (titular → outra pessoa, ou o inverso)
 router.get('/projetos/:id/concessao/lotes', h(async (req) => { exigirEscrita(req); exigirDocumentos(req); return concessao.opcoesConcessao(id(req.params.id)); }));

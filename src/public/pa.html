@@ -313,6 +313,10 @@
   .eq-on{color:#1f7a4d;font-weight:700;font-size:12px}.eq-off{color:var(--muted);font-size:12px}
   .eq-det{margin-top:6px}.eq-det summary{cursor:pointer;font-weight:700;color:var(--green);padding:4px 0}
   .eq-hist:not(:empty){margin-top:8px}
+  .pq-k{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}.pq-k div{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#FBFAF5}
+  .pq-k span{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;font-weight:700}.pq-k b{display:block;font-size:20px;color:var(--green)}.pq-k i{font-style:normal;font-size:12px;color:var(--muted)}
+  .pq-dist{display:grid;grid-template-columns:repeat(11,1fr);gap:4px;align-items:end;margin-top:10px;height:100px}.pq-dist div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;font-size:11px}
+  .pq-dist i{display:block;width:70%;border-radius:4px 4px 0 0;min-height:2px}.pq-dist span{color:var(--muted)}
   /* v3.177.0: programação do dia */
   .cp-prog .pg-lista{display:flex;flex-direction:column;gap:4px;margin-top:8px}
   .cp-prog .pg-it{display:flex;align-items:center;gap:6px;flex-wrap:wrap;border:1px solid var(--line);border-left:5px solid #5DA9E9;border-radius:8px;padding:6px 8px;background:#fff}
@@ -628,6 +632,40 @@ function barras(itens, fmtV){
 }
 
 let PEND_FILTRO = '';
+// ─── v3.181.0: pesquisa de satisfação (Instagram @avalieimob + nota 0–10) ─
+async function cardPesquisa(){
+  const box = $('#pesqBox'); if (!box) return;
+  let r; try { r = await api(`/projetos/${S.pid}/pesquisa`); } catch (e){ box.innerHTML = ''; return; }
+  const corN = (n) => n <= 6 ? (n <= 3 ? '#B3261E' : '#E0703A') : n <= 8 ? '#D4A72C' : '#2E7D32';
+  const max = Math.max(1, ...r.distribuicao);
+  const pend = r.associados.filter((a) => a.nota == null);
+  const envia = pode('whatsapp') && podeEscrever();
+  box.innerHTML = `<div class="card"><div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="flex:1 1 auto;margin:0;border:0">⭐ Pesquisa de satisfação — Romatec Topografia</h2>
+      ${envia ? `<span style="flex:0 0 auto"><button class="btn btn-primary btn-sm" id="pqEnviar">📲 Enviar para quem não respondeu (${pend.filter((a) => a.whatsapp && !a.enviado).length})</button></span>` : ''}</div>
+    <div class="muted" style="margin:4px 0 8px">Cada associado recebe no WhatsApp um link pessoal: <b>segue o portal <a href="${esc(r.instagram)}" target="_blank" rel="noopener">@avalieimob</a></b> no Instagram e dá a nota de <b>0 a 10</b>.</div>
+    <div class="pq-k">
+      <div><span>Satisfação</span><b>${r.media == null ? '—' : r.media.toLocaleString('pt-BR') + '/10'}</b><i>${r.satisfacao_pct == null ? 'sem respostas ainda' : r.satisfacao_pct.toLocaleString('pt-BR') + '% de satisfação'}</i></div>
+      <div><span>NPS</span><b>${r.nps == null ? '—' : r.nps}</b><i>${r.promotores} promotores · ${r.neutros} neutros · ${r.detratores} detratores</i></div>
+      <div><span>Responderam</span><b>${r.respostas}/${r.total}</b><i>${r.enviados} link(s) enviados</i></div>
+      <div><span>Seguiram o portal</span><b>${r.instagram_cliques}</b><i>tocaram em seguir @avalieimob</i></div>
+    </div>
+    <div class="pq-dist">${r.distribuicao.map((n, i) => `<div><i style="height:${Math.round(n / max * 60)}px;background:${corN(i)}"></i><b>${n}</b><span>${i}</span></div>`).join('')}</div>
+    ${r.comentarios.length ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:700;color:var(--green)">💬 Comentários (${r.comentarios.length})</summary>${r.comentarios.map((c) => `<div class="pg-it" style="border-left-color:${corN(c.nota)}"><b>${c.nota}/10</b><span>${esc(c.comentario)} <span class="muted">— ${esc(c.nome.split(' ')[0])}, LT ${esc(c.lote)}, ${esc(dhBr(c.em))}</span></span></div>`).join('')}</details>` : ''}
+    <details style="margin-top:8px"><summary style="cursor:pointer;font-weight:700;color:var(--green)">👥 Associados (${r.respostas} responderam · ${pend.length} faltam)</summary>
+      <div class="pg-lista">${r.associados.map((a) => `<div class="pg-it" style="border-left-color:${a.nota == null ? '#ccc' : corN(a.nota)}"><b>LT ${esc(a.lote)}</b><span>${esc(a.nome)} ${a.seguiu ? '<span class="muted">· 📷 seguiu</span>' : ''}${a.enviado && a.nota == null ? ' <span class="muted">· link enviado</span>' : ''}</span>
+        ${a.nota != null ? `<span class="chip c-PAGO">${a.nota}/10</span>` : '<span class="chip c-A_VENCER">sem resposta</span>'}
+        ${envia && a.nota == null ? `<button class="btn btn-ghost btn-sm" data-pqum="${a.id}" title="Enviar o link pelo WhatsApp">📲</button>` : ''}<button class="btn btn-ghost btn-sm" data-pqlink="${a.id}" title="Copiar o link pessoal">🔗</button></div>`).join('')}</div></details></div>`;
+  if ($('#pqEnviar')) $('#pqEnviar').onclick = async (ev) => {
+    if (!confirm('Enviar a pesquisa pelo WhatsApp para quem ainda não respondeu (um por vez, com intervalo)?')) return;
+    ev.currentTarget.disabled = true;
+    try { const x = await api(`/projetos/${S.pid}/pesquisa/enviar`, { json: {} }); toast(`Envio iniciado: ${x.fila ? x.fila.total : 0} associado(s) na fila`); } catch (e){ toast(e.message, true); ev.currentTarget.disabled = false; }
+  };
+  box.querySelectorAll('[data-pqum]').forEach((b) => b.onclick = async () => {
+    b.disabled = true;
+    try { await api(`/projetos/${S.pid}/pesquisa/enviar`, { json: { associado_ids: [Number(b.dataset.pqum)] } }); toast('Pesquisa enviada ✅'); cardPesquisa(); } catch (e){ toast(e.message, true); b.disabled = false; }
+  });
+  box.querySelectorAll('[data-pqlink]').forEach((b) => b.onclick = () => copiarTextoGrupo(`/projetos/${S.pid}/pesquisa/link/${b.dataset.pqlink}`.replace(/$/, '')));
+}
 async function rPainel(){
   const v = $('#v-painel');
   v.innerHTML = '<div class="card empty">Carregando painel…</div>';
@@ -707,6 +745,7 @@ async function rPainel(){
         </div>
       </div>
 
+      <div id="pesqBox"></div>
       <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="flex:1 1 auto;margin:0;border:0">🗂️ Pendências cadastrais</h2>
           <span class="muted" style="flex:0 0 auto">${cad.lista.length} associado(s) com algo a completar</span></div>
         <div class="pchips" id="pChips">
@@ -715,6 +754,7 @@ async function rPainel(){
         </div>
         <div class="tbl" id="pTabela"></div>
       </div>`;
+    cardPesquisa(); // v3.181.0
     const desenharPend = () => {
       const lista = cad.lista.filter((x) => !PEND_FILTRO || x.faltando.includes(PEND_FILTRO));
       $('#pTabela').innerHTML = lista.length ? `<table><thead><tr><th>Lote</th><th>Associado</th><th>Telefone</th><th>O que falta</th></tr></thead><tbody>

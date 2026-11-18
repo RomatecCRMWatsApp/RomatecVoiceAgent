@@ -102,7 +102,8 @@ import arbitragemRouter from './routes/arbitragem'; // v3.129.0 — ZAYRA: divis
 import paRouter from './routes/pa'; // v3.142.0 — Gestão de PA / Loteamentos (lotes, associados, financeiro)
 import paWebhookAsaasRouter from './routes/paWebhookAsaas'; // v3.143.0 — baixa automática dos boletos Asaas do PA
 import paBoletoPublicoRouter from './routes/paBoletoPublico'; // v3.144.0 — link público do boleto Romatec
-import paPixPublicoRouter from './routes/paPixPublico'; // v3.161.0 — página pública que copia o Pix do boleto
+import paPixPublicoRouter from './routes/paPixPublico';
+import paPesquisaPublicaRouter from './routes/paPesquisaPublica'; // v3.181.0 — pesquisa de satisfação (link pessoal assinado) // v3.161.0 — página pública que copia o Pix do boleto
 
 const app = express();
 // Railway está atrás de proxy reverso — habilita pra que req.protocol respeite x-forwarded-proto
@@ -258,6 +259,7 @@ app.use('/api/pa', paRouter); // v3.142.0 — Gestão de PA / Loteamentos
 app.use('/webhook/asaas-pa', paWebhookAsaasRouter); // v3.143.0 — público, autenticado por asaas-access-token
 app.use('/pa/boleto', paBoletoPublicoRouter); // v3.144.0 — público por token aleatório (boleto do próprio associado)
 app.use('/pa/pix', paPixPublicoRouter); // v3.161.0 — Pix copia e cola do boleto (link do PDF), mesmo token
+app.use('/pa/pesquisa', paPesquisaPublicaRouter); // v3.181.0 — pesquisa de satisfação (Instagram + nota 0–10)
 // v3.128.1 FIX: a rota GET /api/obras/:obraId/diarios-obra saiu DAQUI. Usá-la no
 // topo, com requireAuth, causava TDZ no boot ("Cannot access 'auth_3' before
 // initialization") — o import de requireAuth só vem na ~linha 1023, então o
