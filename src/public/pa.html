@@ -296,6 +296,8 @@
   .cp-pref{background:#FBF4E0;border:1px solid #E8D59A;border-radius:10px;padding:8px 12px;font-size:13px;margin:4px 0 8px}
   .cp-leg{font-size:13px}.cp-leg td,.cp-leg th{padding:4px 6px}
   @media (max-width:700px){table.tcard td.cp-pg{flex-direction:column;align-items:stretch;text-align:left}table.tcard td.cp-pg::before{margin-bottom:2px}}
+  .cp-leg tr.cp-fx{cursor:pointer}.cp-leg tr.cp-fx:hover td{background:#F4F1E6}.cp-leg tr.cp-fx.on td{background:#FFF4DC;font-weight:700}
+  .sw-fx{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:middle;border:1px solid #0003}
   .cp-leg i{display:inline-block;width:26px;height:14px;border-radius:4px;border:1px solid #0002;vertical-align:middle}
   .cp-aviso{margin-top:8px;padding:8px 10px;border-radius:8px;font-size:13px}.cp-aviso.q{background:#E6F4EC;color:#1B5E20}.cp-aviso.p{background:#FFF4E5;color:#8A4B00;border:1px solid #F2C94C}
   .cx-manual{position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;padding:12px}
@@ -3090,6 +3092,7 @@ async function cardProgramacao(d){
       </div>
       <div id="pgTexto"></div></div>`;
     const mudou = () => { PG.salvo = false; desenhar(); };
+    PG.adicionar = (ls) => { for (const x of ls) if (!PG.lotes.includes(x)) PG.lotes.push(x); mudou(); };
     $('#pgDia').onchange = () => { PG.dia = $('#pgDia').value || hoje; cardProgramacao(d); };
     const busca = $('#pgBusca'), res = $('#pgRes');
     busca.oninput = () => {
@@ -3142,8 +3145,9 @@ async function rLocacao(box){
       </div>
       <div class="cp-pref">${qAM.length ? `<b>★ Preferência:</b> medir primeiro os <b>${qAM.length} lote(s) quitado(s)</b> ainda não medidos (${qAM.slice(0, 8).map((l) => 'LT-' + esc(l.lote)).join(', ')}${qAM.length > 8 ? '…' : ''}); depois os em aberto, pela ordem de pagamento. Não bloqueia — dá para medir qualquer lote.` : '✅ Todos os lotes quitados já foram medidos — siga a ordem de pagamento dos demais.'}</div>
       <div class="tbl" style="margin:6px 0 10px"><table class="cp-leg"><thead><tr><th>Cor</th><th>Parcelas do contrato pagas</th><th class="right">A medir</th><th class="right">Medidos</th></tr></thead><tbody>
-        ${(d.faixas || []).map((f) => { const ls = contaFaixa(f.id); return `<tr><td><i style="background:${f.cor}"></i></td><td>${esc(f.rotulo)}</td><td class="right">${ls.filter((l) => !l.fechado).length}</td><td class="right">${ls.filter((l) => l.fechado).length}</td></tr>`; }).join('')}
+        ${(d.faixas || []).map((f) => { const ls = contaFaixa(f.id); return `<tr class="cp-fx" data-faixa="${esc(f.id)}" title="Toque para ver os lotes desta faixa"><td><i style="background:${f.cor}"></i></td><td>${esc(f.rotulo)} <span class="muted">▸ ver lotes</span></td><td class="right">${ls.filter((l) => !l.fechado).length}</td><td class="right">${ls.filter((l) => l.fechado).length}</td></tr>`; }).join('')}
       </tbody></table></div>
+      <div id="cpFxLista"></div>
       <div class="grid3">
         <div style="grid-column:span 1"><label for="cpLote">Lote — ordem de serviço (quitados primeiro)</label><select class="f" id="cpLote"><option value="">Todos os lotes</option>${grupo('★ Quitados — medir primeiro', qAM)}${grupo('Em aberto — pela ordem de pagamento', abertos)}${grupo('✅ Já medidos', medidos)}</select></div>
         <div><label for="cpBase">Base GNSS</label><input id="cpBase" value="${esc(eq.base)}"></div>
@@ -3170,6 +3174,35 @@ async function rLocacao(box){
   if ($('#cpEquipe')) $('#cpEquipe').onclick = () => mostrar('equipe');
   if ($('#cpColetora')) $('#cpColetora').onclick = () => mostrar('importar');
   cardProgramacao(d);
+  // v3.178.0: toque numa faixa de pagamento → lista os lotes dela com ➕ para a programação do dia
+  let fxAberta = null;
+  const listarFaixa = (id) => {
+    const alvo = $('#cpFxLista'); if (!alvo) return;
+    box.querySelectorAll('.cp-fx').forEach((tr) => tr.classList.toggle('on', tr.dataset.faixa === id));
+    if (!id){ alvo.innerHTML = ''; return; }
+    const f = (d.faixas || []).find((x) => x.id === id) || { rotulo: id, cor: '#ccc' };
+    const ls = d.lotes.filter((l) => l.faixa === id);
+    const prog = S.eu.perfil !== 'CAMPO';
+    const lin = (l) => {
+      const ja = PG.lotes.includes(l.lote);
+      return `<div class="pg-it" style="border-left-color:${f.cor}"><b>${l.prioridade ? '#' + l.prioridade + ' · ' : ''}${l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${esc(l.lote)}</b>
+        <span>${esc(l.associado ? l.associado.nome : 'sem associado vinculado')}${l.associado && l.associado.denominacao ? ' · 🏡 ' + esc(l.associado.denominacao) : ''}${l.associado && l.associado.lote_vila ? ' · vila ' + esc(l.associado.lote_vila) : ''} <span class="muted">· ${esc(pagTxt(l))}</span></span>
+        ${l.fechado ? chip('PAGO', '✓ medido') : l.marcados ? chip('PARCIAL', 'em medição') : ''}
+        ${prog && !l.fechado ? (ja ? '<span class="chip c-VALIDO">📅 na programação</span>' : `<button class="btn btn-gold btn-sm" data-fxadd="${esc(l.lote)}">➕ Programar</button>`) : ''}
+        <button class="btn btn-ghost btn-sm" data-fxmapa="${esc(l.lote)}" title="Ver no mapa">🗺️</button></div>`;
+    };
+    const aMedir = ls.filter((l) => !l.fechado), med = ls.filter((l) => l.fechado);
+    alvo.innerHTML = `<div class="card cp-prog" style="margin:0 0 10px;border:2px solid ${f.cor}"><div class="row" style="align-items:center;gap:6px"><b style="flex:1 1 auto"><i class="sw-fx" style="background:${f.cor}"></i> ${esc(f.rotulo)} — ${ls.length} lote(s)</b>
+        ${prog && aMedir.some((l) => !PG.lotes.includes(l.lote)) ? '<button class="btn btn-primary btn-sm" id="fxTodos" style="flex:0 0 auto">➕ Programar todos a medir</button>' : ''}<button class="btn btn-ghost btn-sm" id="fxFechar" style="flex:0 0 auto">✕</button></div>
+      <div class="pg-lista">${aMedir.map(lin).join('') || '<div class="muted">Nenhum lote a medir nesta faixa.</div>'}</div>
+      ${med.length ? `<div class="muted" style="margin-top:8px"><b>Já medidos (${med.length})</b></div><div class="pg-lista">${med.map(lin).join('')}</div>` : ''}
+      ${prog ? '<div class="muted" style="margin-top:6px">➕ Programar põe o lote na <b>Programação de campo do dia</b> (lá em cima) — depois é só salvar e enviar no grupo.</div>' : ''}</div>`;
+    $('#fxFechar').onclick = () => { fxAberta = null; listarFaixa(null); };
+    alvo.querySelectorAll('[data-fxadd]').forEach((b) => b.onclick = () => { if (PG.adicionar) PG.adicionar([b.dataset.fxadd]); toast(`LT-${b.dataset.fxadd} na programação do dia — lembre de salvar`); listarFaixa(id); });
+    if ($('#fxTodos')) $('#fxTodos').onclick = () => { const n = aMedir.map((l) => l.lote).filter((x) => !PG.lotes.includes(x)); if (PG.adicionar) PG.adicionar(n); toast(`${n.length} lote(s) na programação do dia — lembre de salvar`); listarFaixa(id); };
+    alvo.querySelectorAll('[data-fxmapa]').forEach((b) => b.onclick = () => { CP.lote = b.dataset.fxmapa; $('#cpLote').value = CP.lote; CP.ponto = null; mapaCampo(d, podeMarcar); $('#cpMapa').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+  };
+  box.querySelectorAll('.cp-fx').forEach((tr) => tr.onclick = () => { fxAberta = fxAberta === tr.dataset.faixa ? null : tr.dataset.faixa; listarFaixa(fxAberta); if (fxAberta) $('#cpFxLista').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
   $('#cpLote').onchange = () => { CP.lote = $('#cpLote').value; CP.ponto = null; mapaCampo(d, podeMarcar); };
   box.querySelectorAll('[data-cplote]').forEach((tr) => tr.onclick = () => { CP.lote = tr.dataset.cplote; $('#cpLote').value = CP.lote; CP.ponto = null; mapaCampo(d, podeMarcar); $('#cpMapa').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
   mapaCampo(d, podeMarcar);
