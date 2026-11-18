@@ -58,7 +58,7 @@ async function financeiro(aid: number) {
   return {
     saldo: Math.max(0, Math.round((total - recebido) * 100) / 100), total, recebido, contrato: Math.round(contrato * 100) / 100,
     marcos: { lancados: marcosL.length, pagos: marcosL.length > 0 && marcosL.every((l) => lancamentoQuitado({ valor: l.valor, valor_recebido: l.valor_recebido, status: l.status })), valor: marcosL.reduce((s, l) => s + num(l.valor), 0) },
-    pagamentos: pags.map((p) => ({ data: isoDate(p.pago_em), forma: String(p.forma), valor: num(p.valor), item: `${ROT[String(p.tipo)] ?? p.tipo}${p.tipo === 'BOLETO' ? ' ' + num(p.parcela) : ''}` })),
+    pagamentos: pags.map((p) => ({ data: isoDate(p.pago_em), forma: String(p.forma), valor: num(p.valor), tipo: String(p.tipo), item: `${ROT[String(p.tipo)] ?? p.tipo}${p.tipo === 'BOLETO' ? ' ' + num(p.parcela) : ''}` })),
   };
 }
 
@@ -89,6 +89,7 @@ export async function listarDossies(projetoId: number) {
       gerado_em: isoDateTime(d.gerado_em), enviado_em: isoDateTime(d.enviado_em), enviado_por: (d.enviado_por as string) ?? null, entregue_em: isoDateTime(d.entregue_em), entregue_por: (d.entregue_por as string) ?? null, entregue_obs: (d.entregue_obs as string) ?? null,
       trt_numero: (d.trt_numero as string) ?? null, trt_emitida_em: isoDateTime(d.trt_emitida_em ?? null), trt_emitida_por: (d.trt_emitida_por as string) ?? null,
       trt_paga_em: isoDateTime(d.trt_paga_em ?? null), trt_paga_por: (d.trt_paga_por as string) ?? null, conclusao_enviada_em: isoDateTime(d.conclusao_enviada_em ?? null),
+      revisao_enviada_em: isoDateTime(d.revisao_enviada_em ?? null),
     });
   }
   return out.sort((a, b) => a.lote.localeCompare(b.lote, 'pt-BR', { numeric: true }));
@@ -153,6 +154,50 @@ async function peca(titulo: string, pdf: Buffer, soPrimeira = false): Promise<Pe
  * PDF do dossiê (acervo completo): capa · sumário e prazos · comunicado · mapa geral · mapa individual + memorial ·
  * planta + memorial SIGEF · carteirinha · termo de quitação.
  */
+/** v3.187.0: contrato assinado do associado (gov.br, ou a ficha + contrato digitalizada) como peça do dossiê. */
+async function contratoAssinado(aid: number): Promise<Peca | null> {
+  const d = await one(pool, `SELECT id, tipo, mime FROM pa_documentos WHERE associado_id = ? AND arquivo_presente = 1 AND tipo IN ('PROCESSO_ASSINADO','PROCESSO_FICHA_CONTRATO')
+    ORDER BY FIELD(tipo, 'PROCESSO_ASSINADO', 'PROCESSO_FICHA_CONTRATO'), versao DESC, id DESC LIMIT 1`, [aid]).catch(() => null);
+  if (!d) return null;
+  const f = await one<{ conteudo: Buffer }>(pool, 'SELECT conteudo FROM pa_documentos_arquivos WHERE documento_id = ?', [d.id]).catch(() => null);
+  if (!f?.conteudo) return null;
+  const titulo = d.tipo === 'PROCESSO_ASSINADO' ? 'Contrato assinado (gov.br)' : 'Ficha e contrato assinados';
+  const mime = String(d.mime || '');
+  try {
+    if (/pdf/i.test(mime) || f.conteudo.subarray(0, 4).toString() === '%PDF') return await peca(titulo, Buffer.from(f.conteudo));
+    if (/image\/(jpe?g|png)/i.test(mime)) {
+      const doc = await PDFDocument.create();
+      const img = /png/i.test(mime) ? await doc.embedPng(f.conteudo) : await doc.embedJpg(f.conteudo);
+      const pg = doc.addPage([595.28, 841.89]);
+      const esc2 = Math.min((595.28 - 56) / img.width, (841.89 - 56) / img.height);
+      pg.drawImage(img, { x: (595.28 - img.width * esc2) / 2, y: (841.89 - img.height * esc2) / 2, width: img.width * esc2, height: img.height * esc2 });
+      return await peca(titulo, Buffer.from(await doc.save()));
+    }
+  } catch (e) { console.warn('[pa-dossie] contrato:', (e as Error).message); }
+  return null;
+}
+
+/** v3.187.0: capa final (contracapa) com os próximos passos: TRT, pagamento e vias impressas. */
+function htmlCapaFinal(o: { pa: string; municipio: string; lote: string; nome: string; rt: string; rtReg: string; data: string; logo: string; brasao: string }): string {
+  return docHtml('Capa final', `<div style="min-height:262mm;display:flex;flex-direction:column;justify-content:space-between;border:2.5mm solid #0C3320;border-radius:4mm;padding:14mm 12mm;outline:.8mm solid #C9A84C;outline-offset:-5mm">
+    <div style="text-align:center">${o.brasao ? `<img src="${o.brasao}" style="height:30mm">` : ''}
+      <div style="font-size:11pt;letter-spacing:2px;color:#7A5B12;margin-top:6mm">${esc(o.pa.toUpperCase())} · ${esc(o.municipio)}</div>
+      <h1 style="color:#0C3320;font-size:22pt;margin:6mm 0 2mm">Próximos passos</h1>
+      <div style="font-size:12pt">Lote de produção <b>LT-${esc(o.lote)}</b> · ${esc(o.nome)}</div></div>
+    <div style="font-size:12pt;line-height:1.6">
+      <div style="background:#FFF4DC;border:1.2mm solid #C9A84C;border-radius:3mm;padding:6mm 7mm">
+        <b style="color:#0C3320;font-size:14pt">Compareça ao escritório da Romatec</b><br>${esc(ENDERECO_ROMATEC)}<br>Leve um <b>documento com foto</b>.
+        <ol style="margin:4mm 0 0;padding-left:6mm">
+          <li><b>Solicitar a TRT</b> — Termo de Responsabilidade Técnica do seu lote.</li>
+          <li><b>Recolher o valor da TRT</b> — você recebe o boleto e faz o pagamento.</li>
+          <li><b>Retirar as vias impressas e assinadas</b> do mapa e do memorial descritivo — prontas em até ${PRAZO_VIAS_DIAS_UTEIS} dias úteis após a confirmação do pagamento da TRT.</li>
+          <li><b>Retirar a carteirinha de associado(a)</b> impressa.</li>
+        </ol></div>
+      <p style="margin-top:6mm;font-size:10.5pt;color:#444">Este dossiê digital tem valor informativo. As vias oficiais são as impressas e assinadas pelo responsável técnico, entregues após a TRT.</p></div>
+    <div style="text-align:center">${o.logo ? `<img src="${o.logo}" style="height:16mm">` : ''}
+      <div style="margin-top:3mm;font-size:10.5pt"><b>${esc(o.rt)}</b><br>${esc(o.rtReg)}<br>Romatec Consultoria Total · Açailândia/MA · ${esc(o.data)}</div></div></div>`);
+}
+
 export async function pdfDossie(projetoId: number, lote: string): Promise<{ pdf: Buffer; nome: string; quitado: boolean }> {
   const p = await buscarProjeto(projetoId);
   const ben = (await vinculosParcelas(projetoId))[lote];
@@ -180,26 +225,11 @@ export async function pdfDossie(projetoId: number, lote: string): Promise<{ pdf:
     logo: asset('logo_romatec.jpg', 'image/jpeg'), brasao: asset(cab.marca.brasao, 'image/png'),
   })));
 
-  // 3) comunicado
-  const carta = await peca('Comunicado de conclusão da demarcação e próximos passos', await pdfDeHtml(docHtml(`Dossiê LT-${lote}`, `${cabecalho(cab, `DOSSIÊ DO LOTE LT-${lote}`)}
-    <h2>Comunicado de conclusão da demarcação</h2>
-    <p>Açailândia/MA, ${esc(hoje)}.</p>
-    <p>Prezado(a) <b>${esc(a?.nome)}</b>, associado(a) nº ${esc(a?.numero)} do ${esc(p.nome)} (lote da vila ${esc(a?.lote_vila)}),</p>
-    <p>Informamos que a <b>locação e demarcação do seu lote de produção LT-${esc(lote)}${den}</b> foi concluída em campo${c ? ` em ${dbr(isoDate(c.concluido_em))}` : ''}${areaHa ? `, com área de <b>${areaHa.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ha</b>` : ''}${c?.perimetro_m ? ` e perímetro de ${num(c.perimetro_m).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} m` : ''}, com os marcos de concreto cravados nos vértices.</p>
-    <p>Este dossiê reúne o <b>mapa geral do assentamento</b>, o <b>mapa e o memorial descritivo</b> do seu lote (modelo tradicional e <b>modelo SIGEF</b>), a sua <b>carteirinha de associado(a)</b> e o <b>termo de quitação</b> dos valores acordados.</p>
-    <div class="box"><b>Próximos passos:</b>
-      <ol class="passos">
-        <li>Compareça ao escritório da Romatec Consultoria Total — <b>${esc(ENDERECO_ROMATEC)}</b> — com um documento com foto, para <b>retirar a carteirinha de associado(a)</b> e solicitar a emissão da <b>TRT (Termo de Responsabilidade Técnica)</b> do seu lote.</li>
-        <li>Você receberá o <b>boleto da TRT</b> para pagamento.</li>
-        <li>Após a confirmação do pagamento da TRT, as <b>vias impressas e assinadas</b> do mapa e do memorial descritivo ficam prontas em até ${PRAZO_VIAS_DIAS_UTEIS} dias úteis — retorne ao escritório para retirá-las.</li>
-      </ol></div>
-    <p>Atenciosamente,</p>
-    <div class="ass"><div>${esc(cab.rt.nome)}</div>${esc(cab.rt.registro)}<br>Romatec Consultoria Total</div>`)));
-
-  // 4–6) mapas e memoriais
-  const geral = await peca('Mapa geral do assentamento (subdivisão em lotes)', (await pdfSubdivisao(projetoId, [], true, 'tradicional')).pdf, true);
-  const individual = await peca(`Mapa individual e memorial descritivo do LT-${lote}`, (await pdfSubdivisao(projetoId, [lote], false, 'tradicional')).pdf);
+  // v3.187.0: ordem do dossiê — capa → sumário → mapa e memorial (tradicional) → planta e memorial (SIGEF)
+  // → contrato assinado → termo de quitação com extrato (contrato + taxa de marcos) → carteirinha → capa final
+  const individual = await peca(`Mapa e memorial descritivo do LT-${lote} — modelo tradicional`, (await pdfSubdivisao(projetoId, [lote], false, 'tradicional')).pdf);
   const sigef = await peca(`Planta e memorial descritivo do LT-${lote} — modelo SIGEF`, (await pdfSubdivisao(projetoId, [lote], false, 'sigef')).pdf);
+  const contrato = await contratoAssinado(ben.associado_id);
 
   // 7) carteirinha (sem marcar "emitida" — só visualização dentro do dossiê)
   let carteirinha: Peca | null = null;
@@ -211,18 +241,29 @@ export async function pdfDossie(projetoId: number, lote: string): Promise<{ pdf:
     carteirinha = await peca('Carteirinha de associado(a)', await htmlToPdf(await ct.htmlCarteirinhas(projeto, itens, emissao, 'pdf'), { format: 'A4', printBackground: true, margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' } }));
   } catch (e) { console.warn('[pa-dossie] carteirinha:', (e as Error).message); }
 
-  // 8) termo de quitação (valor acordado no contrato + taxa de marcos)
-  const termo = quitado ? await peca('Termo de quitação', await pdfDeHtml(docHtml('Termo de quitação', `${cabecalho(cab, 'TERMO DE QUITAÇÃO')}
+  // 8) termo de quitação do contrato (valor acordado) com extrato dos pagamentos do contrato e da taxa de marcos
+  const pgContrato = f.pagamentos.filter((x) => x.tipo !== 'MARCO'), pgMarcos = f.pagamentos.filter((x) => x.tipo === 'MARCO');
+  const tabela = (ls: typeof f.pagamentos, rot: string) => `<table><thead><tr><th>Data</th><th>Referência</th><th>Forma</th><th style="text-align:right">Valor</th></tr></thead><tbody>
+      ${ls.map((x) => `<tr><td>${dbr(x.data)}</td><td>${esc(x.item)}</td><td>${esc(x.forma)}</td><td style="text-align:right">${brl(x.valor)}</td></tr>`).join('') || '<tr><td colspan="4">—</td></tr>'}
+      <tr><td colspan="3"><b>${rot}</b></td><td style="text-align:right"><b>${brl(ls.reduce((t, x) => t + x.valor, 0))}</b></td></tr></tbody></table>`;
+  const termo = quitado ? await peca('Termo de quitação e extrato de pagamentos', await pdfDeHtml(docHtml('Termo de quitação', `${cabecalho(cab, 'TERMO DE QUITAÇÃO')}
     <h2>Termo de quitação</h2>
-    <p>A <b>ROMATEC CONSULTORIA TOTAL</b> (J R P BEZERRA LTDA, CNPJ 17.261.987/0001-09), com sede em ${esc(ENDERECO_ROMATEC)}, declara para os devidos fins que recebeu de <b>${esc(a?.nome)}</b>, CPF ${esc(a?.cpf)}, associado(a) nº ${esc(a?.numero)} do ${esc(p.nome)}, a totalidade dos valores referentes ao serviço técnico de levantamento georreferenciado e demarcação do <b>lote de produção LT-${esc(lote)}${den}</b> (lote da vila ${esc(a?.lote_vila)}): o valor acordado no <b>contrato de prestação de serviços</b>${a?.contrato_status === 'ASSINADO' && a?.contrato_assinado_em ? ` assinado em ${dbr(isoDate(a.contrato_assinado_em))}` : ''}, de <b>${brl(f.contrato)}</b>${f.marcos.lancados ? `, e a <b>taxa dos marcos de concreto</b>, de <b>${brl(f.marcos.valor)}</b>` : ''} — total recebido de <b>${brl(f.recebido)}</b>, conforme os pagamentos abaixo — dando plena, geral e irrevogável quitação dos valores do serviço.</p>
-    <table><thead><tr><th>Data</th><th>Referência</th><th>Forma</th><th style="text-align:right">Valor</th></tr></thead><tbody>
-      ${f.pagamentos.map((x) => `<tr><td>${dbr(x.data)}</td><td>${esc(x.item)}</td><td>${esc(x.forma)}</td><td style="text-align:right">${brl(x.valor)}</td></tr>`).join('')}
-      <tr><td colspan="3"><b>Total recebido</b></td><td style="text-align:right"><b>${brl(f.recebido)}</b></td></tr></tbody></table>
-    <p>A quitação refere-se exclusivamente ao serviço técnico contratado; a TRT e serviços posteriores (certificação, CAR, CCIR, ITR e outros) serão cobrados à parte.</p>
+    <p>A <b>ROMATEC CONSULTORIA TOTAL</b> (J R P BEZERRA LTDA, CNPJ 17.261.987/0001-09), com sede em ${esc(ENDERECO_ROMATEC)}, declara para os devidos fins que <b>${esc(a?.nome)}</b>, CPF ${esc(a?.cpf)}, associado(a) nº ${esc(a?.numero)} do ${esc(p.nome)}, lote de produção <b>LT-${esc(lote)}</b>${den}, <b>quitou integralmente o valor do contrato de prestação de serviços técnicos de ${brl(f.contrato)}</b>${f.marcos.valor > 0 ? ` e a <b>taxa dos marcos de concreto de ${brl(f.marcos.valor)}</b>` : ''}, conforme o extrato abaixo, nada mais havendo a reclamar a esse título.</p>
+    <h2 style="margin-top:14px">Extrato — contrato (${brl(f.contrato)})</h2>
+    ${tabela(pgContrato, 'Total do contrato pago')}
+    ${f.marcos.valor > 0 ? `<h2 style="margin-top:14px">Extrato — taxa dos marcos de concreto (${brl(f.marcos.valor)})</h2>${tabela(pgMarcos, 'Total da taxa de marcos paga')}` : ''}
+    <p style="margin-top:12px"><b>Total recebido: ${brl(f.recebido)}</b></p>
+    <p>A quitação refere-se exclusivamente ao serviço técnico contratado e à taxa de marcos; a <b>TRT (Termo de Responsabilidade Técnica)</b> e serviços posteriores (certificação, CAR, CCIR, ITR e outros) são cobrados à parte.</p>
     <p>Açailândia/MA, ${esc(hoje)}.</p>
     <div class="ass"><div>ROMATEC CONSULTORIA TOTAL — J R P BEZERRA LTDA</div>CNPJ 17.261.987/0001-09</div>`))) : null;
 
-  const corpo = [carta, geral, individual, sigef, carteirinha, termo].filter((x): x is Peca => !!x);
+  // 9) capa final — encerramento com os próximos passos
+  const capaFinal = await peca('Capa final — próximos passos', await pdfDeHtml(htmlCapaFinal({
+    pa: p.nome, municipio: `${p.municipio}/${p.uf}`, lote, nome: String(a?.nome ?? ''), rt: cab.rt.nome, rtReg: cab.rt.registro, data: hoje,
+    logo: asset('logo_romatec.jpg', 'image/jpeg'), brasao: asset(cab.marca.brasao, 'image/png'),
+  })));
+
+  const corpo = [individual, sigef, contrato, termo, carteirinha, capaFinal].filter((x): x is Peca => !!x);
   // 2) sumário e prazos (as páginas contam a capa e o próprio sumário)
   let pagina = 3;
   const itens = corpo.map((x) => { const ini = pagina; pagina += x.paginas; return { titulo: x.titulo, de: ini, ate: pagina - 1 }; });
@@ -236,6 +277,7 @@ export async function pdfDossie(projetoId: number, lote: string): Promise<{ pdf:
     <table><thead><tr><th>Etapa</th><th>Situação / prazo</th></tr></thead><tbody>
       <tr><td>Demarcação do lote em campo</td><td>Concluída${c ? ` em ${dbr(isoDate(c.concluido_em))}` : ''}</td></tr>
       <tr><td>Pagamentos do contrato e taxa de marcos</td><td>${quitado ? 'Quitados' : 'Pendentes'}</td></tr>
+      <tr><td>Contrato assinado</td><td>${contrato ? 'Anexado a este dossiê' : 'Não anexado no sistema — via física no escritório'}</td></tr>
       <tr><td>Entrega digital deste dossiê</td><td>${esc(hoje)}</td></tr>
       <tr><td>Retirada da carteirinha e solicitação da TRT</td><td>No escritório da Romatec, com documento com foto</td></tr>
       <tr><td>Pagamento do boleto da TRT</td><td>Até o vencimento do boleto</td></tr>
@@ -256,18 +298,23 @@ export function textoEnvioDossie(nome: string, lote: string): string {
   return [
     `Olá, ${primeiroNome(nome)}! Aqui é a Zayra, da Romatec Consultoria Total. 🌱`,
     '',
-    `A demarcação do seu lote *LT-${lote}* foi concluída e os pagamentos estão quitados. Segue o seu *dossiê digital*, com:`,
-    '• mapa geral do assentamento;',
-    '• mapa e memorial descritivo do seu lote (modelo tradicional e modelo SIGEF);',
-    '• sua *carteirinha de associado(a)*;',
-    '• *termo de quitação* dos valores acordados.',
+    `A demarcação do seu lote *LT-${lote}* foi concluída e os pagamentos estão quitados. ✅ Segue o seu *dossiê digital* em PDF, com:`,
+    '• mapa e memorial descritivo do lote (modelo tradicional);',
+    '• planta e memorial descritivo no *modelo SIGEF*;',
+    '• o seu *contrato assinado*;',
+    '• *termo de quitação* com o extrato dos pagamentos (contrato e taxa de marcos);',
+    '• a sua *carteirinha de associado(a)*.',
     '',
-    '*Próximos passos:*',
-    `1️⃣ Compareça ao escritório da Romatec (${ENDERECO_ROMATEC}) com um documento com foto para *retirar a carteirinha* e solicitar a *TRT (Termo de Responsabilidade Técnica)* do seu lote.`,
-    '2️⃣ Você recebe o *boleto da TRT* para pagar.',
-    `3️⃣ Depois do pagamento da TRT, as *vias impressas e assinadas* do mapa e do memorial ficam prontas em até ${PRAZO_VIAS_DIAS_UTEIS} dias úteis — é só voltar ao escritório para retirar.`,
+    '⚠️ *IMPORTANTE — compareça ao escritório da Romatec*',
+    `📍 ${ENDERECO_ROMATEC}`,
+    'Leve um *documento com foto* para:',
+    '1️⃣ *Solicitar a TRT* (Termo de Responsabilidade Técnica) do seu lote;',
+    '2️⃣ *Recolher o valor da TRT e fazer o pagamento*;',
+    `3️⃣ *Pegar as vias impressas e assinadas* do mapa e do memorial — ficam prontas em até ${PRAZO_VIAS_DIAS_UTEIS} dias úteis após o pagamento da TRT.`,
     '',
-    'Obrigada pela confiança!',
+    'As vias oficiais são as impressas e assinadas pelo responsável técnico. Sem a TRT paga, elas não são liberadas.',
+    '',
+    'Obrigada pela confiança! 🙏',
   ].join('\n');
 }
 
@@ -294,7 +341,7 @@ export async function enviarDossie(projetoId: number, lote: string, usuario: str
     const wa = await import('./paWhatsapp');
     await wa.enviarDocumentoNumero(String(a?.whatsapp_numero ?? ''), r.pdf, r.nome, textoEnvioDossie(d.nome, lote));
     // cópia para o CEO (falha aqui não desfaz o envio ao associado)
-    try { await wa.enviarDocumentoNumero(numeroCeo(), r.pdf, r.nome, `📋 Cópia — dossiê do *LT-${lote}* enviado para *${d.nome}* (vila ${d.lote_vila})${automatico ? ' automaticamente após a quitação' : ''}.`); }
+    try { if (!d.revisao_enviada_em || automatico) await wa.enviarDocumentoNumero(numeroCeo(), r.pdf, r.nome, `📋 Cópia — dossiê do *LT-${lote}* enviado para *${d.nome}* (vila ${d.lote_vila})${automatico ? ' automaticamente após a quitação' : ''}.`); else await wa.enviarWhatsAppNumero(numeroCeo(), `✅ Dossiê do *LT-${lote}* aprovado e enviado para *${d.nome}*.`); }
     catch (e) { console.warn('[pa-dossie] cópia CEO:', (e as Error).message); }
     await registrarEvento(pool, { projeto_id: projetoId, associado_id: d.associado_id, usuario: quem, tipo: 'DOSSIE_ENVIADO', dados: { lote, automatico } });
     return { lote, status: 'ENVIADO' as StatusDossie, enviado: true };
@@ -306,13 +353,32 @@ export async function enviarDossie(projetoId: number, lote: string, usuario: str
   }
 }
 
-/** Dispara sozinho os dossiês que ficaram PRONTOS (lote medido + tudo pago). Chamado após pagamento e ao fechar lote. */
+/**
+ * v3.187.0: dossiê PRONTO (lote medido + tudo pago) é gerado sozinho e vai primeiro para a REVISÃO do CEO
+ * (PDF no WhatsApp dele); o associado só recebe depois do "✅ Aprovar e enviar" em Dossiês.
+ * PA_DOSSIE_SEM_APROVACAO=1 volta ao envio direto ao associado.
+ */
 export async function enviarProntos(projetoId: number, associadoIds: number[] | null = null) {
-  const ds = (await listarDossies(projetoId)).filter((d) => d.status === 'PRONTO' && d.whatsapp_valido && (!associadoIds || associadoIds.includes(d.associado_id)));
+  const ds = (await listarDossies(projetoId)).filter((d) => d.status === 'PRONTO' && (!associadoIds || associadoIds.includes(d.associado_id)));
   const out: Array<{ lote: string; ok: boolean; erro?: string }> = [];
+  const semAprovacao = process.env.PA_DOSSIE_SEM_APROVACAO === '1';
   for (const d of ds) {
-    try { const r = await enviarDossie(projetoId, d.lote, null, true); if (r.enviado) out.push({ lote: d.lote, ok: true }); }
-    catch (e) { out.push({ lote: d.lote, ok: false, erro: (e as Error).message.slice(0, 160) }); console.warn('[pa-dossie] envio automático LT-' + d.lote + ':', (e as Error).message); }
+    try {
+      if (semAprovacao) { if (!d.whatsapp_valido) continue; const r = await enviarDossie(projetoId, d.lote, null, true); if (r.enviado) out.push({ lote: d.lote, ok: true }); continue; }
+      if (d.revisao_enviada_em) continue;
+      const trava = await exec(pool, 'UPDATE pa_dossies SET revisao_enviada_em = NOW() WHERE projeto_id = ? AND lote = ? AND revisao_enviada_em IS NULL', [projetoId, d.lote]);
+      if (!trava.affectedRows) continue;
+      try {
+        const r = await pdfDossie(projetoId, d.lote);
+        const wa = await import('./paWhatsapp');
+        await wa.enviarDocumentoNumero(numeroCeo(), r.pdf, r.nome, `📋 *Dossiê pronto para aprovação* — *LT-${d.lote}* · ${d.nome} (vila ${d.lote_vila}).\n\nConfira o PDF. Se estiver certo, abra *Gestão de PA → Dossiês* e toque em *✅ Aprovar e enviar*${d.whatsapp_valido ? '' : ' (o associado está sem WhatsApp válido — entregue a via impressa)'}.`);
+        await registrarEvento(pool, { projeto_id: projetoId, associado_id: d.associado_id, usuario: 'automatico', tipo: 'DOSSIE_PARA_APROVACAO', dados: { lote: d.lote } });
+        out.push({ lote: d.lote, ok: true });
+      } catch (e) {
+        await exec(pool, 'UPDATE pa_dossies SET revisao_enviada_em = NULL WHERE projeto_id = ? AND lote = ?', [projetoId, d.lote]);
+        throw e;
+      }
+    } catch (e) { out.push({ lote: d.lote, ok: false, erro: (e as Error).message.slice(0, 160) }); console.warn('[pa-dossie] LT-' + d.lote + ':', (e as Error).message); }
   }
   return out;
 }

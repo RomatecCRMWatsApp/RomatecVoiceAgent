@@ -3260,7 +3260,7 @@ function cartaoPontoCampo(d, id, podeMarcar, eng){
 }
 
 // ─── v3.169.0: Dossiês de pronta entrega (lote medido → carta + quitação + mapa/memorial) ─
-const ST_DOSSIE = { AGUARDANDO_PAGAMENTO: ['VENCIDO', '⏳ aguardando pagamento'], PRONTO: ['PARCIAL', '🟡 pronto (envio automático)'], ENVIADO: ['VALIDO', '📲 enviado'], ENTREGUE: ['PAGO', '✅ entregue fisicamente'] };
+const ST_DOSSIE = { AGUARDANDO_PAGAMENTO: ['VENCIDO', '⏳ aguardando pagamento'], PRONTO: ['PARCIAL', '🟡 pronto — aguardando sua aprovação'], ENVIADO: ['VALIDO', '📲 enviado'], ENTREGUE: ['PAGO', '✅ entregue fisicamente'] };
 async function rDossies(){
   const v = $('#v-dossies');
   v.innerHTML = '<div class="card empty">Carregando…</div>';
@@ -3271,8 +3271,8 @@ async function rDossies(){
   const lista = ds.filter((d) => !f || d.status === f);
   const hb = (iso) => iso ? new Date(iso.replace(' ', 'T') + (/[zZ]$/.test(iso) ? '' : 'Z')).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
   v.innerHTML = `<div class="card"><h2 style="margin-top:0">📦 Dossiês de pronta entrega</h2>
-      <div class="muted" style="margin-bottom:6px"><b>v3.170.0:</b> o dossiê só libera com o <b>lote medido</b> + <b>contrato quitado</b> + <b>taxa de marcos paga</b>. O PDF reúne capa, sumário e prazos, comunicado, mapa geral, mapa e memorial (tradicional e <b>modelo SIGEF</b>), <b>carteirinha</b> e <b>termo de quitação</b>. Depois do envio: TRT emitida → TRT paga → entrega das vias impressas → <b>mensagem de conclusão</b> com versículo, em nome de José Romário, sai sozinha.</div>
-      <div class="muted">Quando a equipe fecha um lote em campo, o sistema monta o dossiê: <b>carta</b> pedindo para o associado comparecer ao escritório (anotação técnica e via impressa), <b>termo de quitação</b> e <b>mapa + memorial descritivo</b> do lote. <b>Sai sozinho pelo WhatsApp</b> do associado assim que o lote estiver medido e <b>todas as cobranças pagas</b>, com uma cópia no seu WhatsApp. O botão serve para reenviar ou enviar quem ficou travado.</div>
+      <div class="muted" style="margin-bottom:6px">O dossiê libera com o <b>lote medido</b> + <b>contrato quitado</b> + <b>taxa de marcos paga</b>. O sistema monta sozinho: <b>capa</b>, sumário e prazos, <b>mapa e memorial (tradicional)</b>, <b>planta e memorial (SIGEF)</b>, <b>contrato assinado</b>, <b>termo de quitação com extrato</b> (contrato + marcos), <b>carteirinha</b> e <b>capa final</b> com os próximos passos.</div>
+      <div class="muted">Quando o dossiê fica pronto, o PDF vai <b>primeiro para o seu WhatsApp</b> para revisar. Confira no 👁 PDF e toque em <b>✅ Aprovar e enviar</b>: o associado recebe o PDF com o aviso para comparecer ao escritório (solicitar a TRT, pagar e pegar as vias impressas).</div>
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
         <button class="btn btn-sm ${!f ? 'btn-primary' : 'btn-ghost'}" data-dsf="">Todos (${ds.length})</button>
         ${Object.entries(ST_DOSSIE).map(([k, [, t]]) => `<button class="btn btn-sm ${f === k ? 'btn-primary' : 'btn-ghost'}" data-dsf="${k}">${t} (${n(k)})</button>`).join('')}
@@ -3281,11 +3281,11 @@ async function rDossies(){
       ${lista.map((d) => `<tr><td><b>LT-${esc(d.lote)}</b><div class="muted">vila ${esc(d.lote_vila)}</div></td><td>${esc(d.nome)}<div class="muted">${esc(d.numero)}${d.denominacao ? ' · ' + esc(d.denominacao) : ''}</div></td>
         <td class="nowrap">${d.medido_em ? hb(d.medido_em) + `<div class="muted">${esc(d.medidor || '')}</div>` : '—'}</td>
         <td class="right nowrap">${d.saldo > 0.009 ? brl(d.saldo) : chip('QUITADO')}<div class="muted">${d.marcos_pagos ? ICO_MARCO + ' marcos pagos' : d.marcos_lancados ? ICO_MARCO + ' marcos em aberto' : ICO_MARCO + ' marcos não lançados'}</div></td>
-        <td>${chip(ST_DOSSIE[d.status][0], ST_DOSSIE[d.status][1])}${d.pendencia && d.status === 'AGUARDANDO_PAGAMENTO' ? `<div class="muted" style="color:var(--red)">🔒 ${esc(d.pendencia)}</div>` : ''}${d.enviado_em ? `<div class="muted">enviado ${hb(d.enviado_em)}</div>` : ''}
+        <td>${chip(ST_DOSSIE[d.status][0], ST_DOSSIE[d.status][1])}${d.pendencia && d.status === 'AGUARDANDO_PAGAMENTO' ? `<div class="muted" style="color:var(--red)">🔒 ${esc(d.pendencia)}</div>` : ''}${d.status === 'PRONTO' && d.revisao_enviada_em ? `<div class="muted">📋 PDF enviado para você revisar ${hb(d.revisao_enviada_em)}</div>` : ''}${d.enviado_em ? `<div class="muted">enviado ${hb(d.enviado_em)}</div>` : ''}
           ${d.status === 'ENVIADO' || d.status === 'ENTREGUE' ? `<div class="muted">📄 TRT: ${d.trt_paga_em ? `✅ paga ${hb(d.trt_paga_em)}` : d.trt_emitida_em ? `emitida ${hb(d.trt_emitida_em)} — aguardando pagamento` : 'a emitir'}${d.trt_numero ? ' · nº ' + esc(d.trt_numero) : ''}</div>` : ''}
           ${d.conclusao_enviada_em ? `<div class="muted">🙏 mensagem de conclusão enviada ${hb(d.conclusao_enviada_em)}</div>` : ''}${d.entregue_em ? `<div class="muted">entregue ${hb(d.entregue_em)} · ${esc(d.entregue_por || '')}${d.entregue_obs ? ' · ' + esc(d.entregue_obs) : ''}</div>` : ''}</td>
         <td class="nowrap"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button>
-          ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>📲 Enviar agora</button>` : ''}
+          ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>✅ Aprovar e enviar</button>` : ''}
           ${admin && d.status === 'ENVIADO' ? `<button class="btn btn-ghost btn-sm" data-dsenv="${esc(d.lote)}">🔁 Reenviar</button>` : ''}
           ${(d.status === 'ENVIADO' || d.status === 'PRONTO') && !d.trt_emitida_em ? `<button class="btn btn-ghost btn-sm" data-dstrt="emitida" data-lote="${esc(d.lote)}">📄 TRT emitida</button>` : ''}
           ${d.trt_emitida_em && !d.trt_paga_em ? `<button class="btn btn-ghost btn-sm" data-dstrt="paga" data-lote="${esc(d.lote)}">💳 TRT paga</button>` : ''}
@@ -3295,7 +3295,7 @@ async function rDossies(){
   v.querySelectorAll('[data-dsver]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dsver)}.pdf`));
   v.querySelectorAll('[data-dsenv]').forEach((b) => b.onclick = async () => {
     const d = ds.find((x) => x.lote === b.dataset.dsenv);
-    if (!confirm(`Enviar o dossiê do LT-${d.lote} para ${d.nome} pelo WhatsApp?\n\nVai: capa, sumário e prazos, comunicado (carteirinha + TRT + vias impressas), mapa geral, mapa e memorial (tradicional e SIGEF), carteirinha e termo de quitação.`)) return;
+    if (!confirm(`${d.status === 'PRONTO' ? 'Aprovar e enviar' : 'Reenviar'} o dossiê do LT-${d.lote} para ${d.nome} pelo WhatsApp?\n\nVai: capa, sumário e prazos, mapa e memorial (tradicional), planta e memorial (SIGEF), contrato assinado, termo de quitação com extrato, carteirinha e capa final — com o aviso para comparecer ao escritório (TRT, pagamento e vias impressas).\n\nDica: confira antes no 👁 PDF.`)) return;
     b.disabled = true; toast('Gerando e enviando o dossiê…');
     try { await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/enviar`, { json: {} }); toast(`Dossiê do LT-${d.lote} enviado ✅`); rDossies(); }
     catch (e){ toast(e.message, true); b.disabled = false; }

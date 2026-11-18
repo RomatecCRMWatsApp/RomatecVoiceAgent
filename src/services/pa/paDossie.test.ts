@@ -14,15 +14,18 @@ describe('dossiê v3.170.0', () => {
     expect(pendenciaDossie(27, { lancados: 1, pagos: false })).toMatch(/taxa de marcos em aberto · R\$\s?27,00 em aberto/);
     expect(pendenciaDossie(0, { lancados: 1, pagos: true })).toBeNull();
   });
-  it('mensagem do dossiê: carteirinha, TRT, boleto da TRT e vias impressas', () => {
+  it('mensagem do dossiê (v3.187.0): conteúdo e o aviso de comparecer ao escritório (TRT, pagamento, vias impressas)', () => {
     const t = textoEnvioDossie('MARIA DAS GRAÇAS', '14');
     expect(t).toMatch(/^Olá, Maria!/);
     expect(t).toContain('*LT-14*');
-    expect(t).toContain('modelo SIGEF');
+    expect(t).toContain('*modelo SIGEF*');
+    expect(t).toContain('*contrato assinado*');
+    expect(t).toContain('extrato dos pagamentos (contrato e taxa de marcos)');
     expect(t).toContain('*carteirinha de associado(a)*');
-    expect(t).toContain('*TRT (Termo de Responsabilidade Técnica)*');
-    expect(t).toContain('*boleto da TRT*');
-    expect(t).toContain('*vias impressas e assinadas*');
+    expect(t).toContain('⚠️ *IMPORTANTE — compareça ao escritório da Romatec*');
+    expect(t).toContain('*Solicitar a TRT* (Termo de Responsabilidade Técnica)');
+    expect(t).toContain('*Recolher o valor da TRT e fazer o pagamento*');
+    expect(t).toContain('*Pegar as vias impressas e assinadas*');
   });
   it('mensagem de conclusão em nome de José Romário, com versículo', () => {
     const t = textoConclusao('SILVANA DA SILVA GOMES', '14', 'Projeto de Assentamento Salete Moreno', 3);
