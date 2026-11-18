@@ -2427,7 +2427,7 @@ async function rMarcos(){
   const form = podeEscrever() ? `<div class="grid3">
         <div><label for="mkValor">Valor por associado (R$) — pode alterar</label><input id="mkValor" inputmode="decimal" value="${esc(String(valor0).replace('.', ','))}"></div>
         <div><label for="mkVenc">Vencimento (o mesmo para todos)</label><input type="date" id="mkVenc" value="${esc(venc0)}"></div>
-        <div style="display:flex;align-items:end"><label class="citem" style="margin:0"><input type="checkbox" id="mkEnviar" checked> Enviar pelo WhatsApp automaticamente</label></div>
+        <div style="display:flex;align-items:end"><label class="citem" style="margin:0"><input type="checkbox" id="mkEnviar" checked> Enviar pelo WhatsApp automaticamente <span class="muted">(um por vez, 30–60 s entre cada — sem cascata)</span></label></div>
       </div>
       <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
         <button class="btn btn-primary" id="mkTodos" style="flex:0 0 auto" ${rodando ? 'disabled' : ''}>🪨 Gerar boleto do marco — todos (${L.length})</button>
@@ -2438,7 +2438,7 @@ async function rMarcos(){
         ${j.erros.length ? `<ul>${j.erros.map((x) => `<li>${esc(x.nome)}: ${esc(x.erro)}</li>`).join('')}</ul>` : ''}</div>` : '';
   const filaHtml = f ? `<div class="avisos">📲 Envio pelo WhatsApp: <b>${esc(f.status)}</b> · ${f.enviados} enviado(s)${f.falhas ? ` · ${f.falhas} falha(s)` : ''} de ${f.total}${f.atual && f.status === 'RODANDO' ? ` · agora: ${esc(f.atual)}` : ''}</div>` : '';
   const linhas = L.map((a) => `<tr>${podeEscrever() ? `<td><input type="checkbox" class="mkCk" value="${a.associado_id}"></td>` : ''}<td><b>${esc(a.lote_vila)}</b></td><td class="nowrap">${a.parcela ? 'LT-' + esc(a.parcela) : '—'}</td><td>${esc(a.nome)}<div class="muted">${esc(a.numero)}</div></td>
-        <td>${a.whatsapp_valido ? chip('VALIDO', '✓') : '<span class="muted">sem WhatsApp</span>'}</td><td class="right nowrap">${a.lancamento ? brl(a.lancamento.valor) : '—'}</td><td class="nowrap">${a.lancamento ? dbr(a.lancamento.vencimento) : '—'}</td><td>${stBol(a)}</td></tr>`).join('');
+        <td>${a.whatsapp_valido ? chip('VALIDO', '✓') : '<span class="muted">sem WhatsApp</span>'}</td><td class="right nowrap">${a.lancamento ? brl(a.lancamento.valor) : '—'}</td><td class="nowrap">${a.lancamento ? dbr(a.lancamento.vencimento) : '—'}</td><td>${stBol(a)}${podeEscrever() && a.boleto && a.whatsapp_valido && a.lancamento && a.lancamento.status !== 'PAGO' ? ` <button class="btn btn-ghost btn-sm" data-mkum="${a.associado_id}" title="Enviar só para este associado">📲 ${a.boleto.enviado_em ? 'Reenviar' : 'Enviar'}</button>` : ''}</td></tr>`).join('');
   box.innerHTML = `<div class="card"><h2 style="margin-top:0">🪨 Taxa de marcos de concreto</h2>
       <div class="muted">Um boleto por associado para os marcos de concreto cravados nos vértices do lote. Mesmo valor e mesmo vencimento para todos. Gera o boleto no Asaas e, com o envio marcado, manda pelo WhatsApp do sistema <b>um por vez, com 30 a 60 s entre associados</b> (anti-bloqueio).</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">${kpi('Associados', L.length)}${kpi('Com taxa lançada', com.length)}${kpi('Boleto gerado', bol.length)}${kpi('Enviado no WhatsApp', env.length)}${kpi('Pagos', pagos.length, brl(pagos.reduce((s, a) => s + a.lancamento.valor, 0)))}</div>
@@ -2462,6 +2462,14 @@ async function rMarcos(){
   };
   if ($('#mkTodos')) $('#mkTodos').onclick = () => gerar(null);
   if ($('#mkMarcados')) $('#mkMarcados').onclick = () => gerar([...box.querySelectorAll('.mkCk:checked')].map((c) => Number(c.value)));
+  // v3.175.3: envio manual, um associado por clique
+  box.querySelectorAll('[data-mkum]').forEach((b) => b.onclick = async () => {
+    const a = L.find((x) => x.associado_id === Number(b.dataset.mkum));
+    if (!confirm(`Enviar o boleto da taxa de marcos para ${a.nome} pelo WhatsApp?`)) return;
+    b.disabled = true;
+    try { await api(`/projetos/${S.pid}/marcos/${a.associado_id}/enviar`, { json: {} }); toast(`Boleto enviado para ${a.nome.split(' ')[0]} ✅`); rMarcos(); }
+    catch (e){ toast(e.message, true); b.disabled = false; }
+  });
   if ($('#mkParar')) $('#mkParar').onclick = async () => { try { await api('/whatsapp/fila/parar', { json: {} }); toast('Envio parado'); rMarcos(); } catch (e){ toast(e.message, true); } };
   if (rodando) MARCOS_TIMER = setTimeout(() => { if (S.finVisao === 'marcos' && $('#mkJob')) rMarcos(); }, 5000);
 }

@@ -464,6 +464,7 @@ router.get('/projetos/:id/ata-assembleia.pdf', h(async (req, res) => {
 }));
 // v3.168.0: taxa de marcos de concreto — um boleto por associado, gerar e enviar com um clique
 router.get('/projetos/:id/marcos', h(async (req) => ({ valor_padrao: marcos.VALOR_MARCO_PADRAO, associados: visao(await marcos.situacaoMarcos(id(req.params.id)), ctx(req).perfil), job: marcos.estadoJob(), fila: waPa.estadoFila() })));
+router.post('/projetos/:id/marcos/:aid/enviar', h(async (req) => { exigirEscrita(req); return marcos.enviarUm(id(req.params.id), id(req.params.aid, 'associado'), ctx(req).sub); }));
 router.post('/projetos/:id/marcos/gerar', h(async (req) => {
   exigirEscrita(req);
   const b = req.body ?? {};
