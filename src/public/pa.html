@@ -318,6 +318,7 @@
   .pq-dist{display:grid;grid-template-columns:repeat(11,1fr);gap:4px;align-items:end;margin-top:10px;height:100px}.pq-dist div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;font-size:11px}
   .pq-dist i{display:block;width:70%;border-radius:4px 4px 0 0;min-height:2px}.pq-dist span{color:var(--muted)}
   .ico-marco{display:inline-block;width:.85em;height:1.35em;vertical-align:-.3em}.k2i .ico-marco{width:1.1em;height:1.7em}
+  .lk-card{border-left:5px solid var(--gold)}.lk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.lk{border:1px solid var(--line);border-radius:10px;padding:10px;background:#FBFAF5}.lk b{color:var(--green)}
   /* v3.177.0: programação do dia */
   .cp-prog .pg-lista{display:flex;flex-direction:column;gap:4px;margin-top:8px}
   .cp-prog .pg-it{display:flex;align-items:center;gap:6px;flex-wrap:wrap;border:1px solid var(--line);border-left:5px solid #5DA9E9;border-radius:8px;padding:6px 8px;background:#fff}
@@ -636,6 +637,31 @@ function barras(itens, fmtV){
 }
 
 let PEND_FILTRO = '';
+// ─── v3.182.1: links para os associados num lugar só (topo do Painel) ─
+function cardLinks(){
+  const box = $('#linksBox'); if (!box) return;
+  const mapaOk = pode('ver_mapa'), pesqOk = pode('whatsapp') && podeEscrever();
+  if (!mapaOk && !pesqOk) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="card lk-card"><h2 style="margin-top:0">🔗 Links para os associados (grupo do PA)</h2>
+    <div class="lk-grid">
+      ${mapaOk ? `<div class="lk"><b>🗺️ Mapa dos lotes</b><div class="muted">O associado navega no mapa (2D/3D, satélite, relevo) e toca no lote: vê número, associado, lote da vila e chácara — sem área nem financeiro.</div>
+        <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn btn-primary btn-sm" id="lkMapaEnv" style="flex:0 0 auto">📤 Enviar no grupo</button><button class="btn btn-ghost btn-sm" id="lkMapaCop" style="flex:0 0 auto">📋 Copiar link</button><button class="btn btn-gold btn-sm" id="lkMapaVer" style="flex:0 0 auto">👁️ Ver como o associado</button></div></div>` : ''}
+      ${pesqOk ? `<div class="lk"><b>⭐ Pesquisa de satisfação</b><div class="muted">Link pessoal de cada associado: segue o @avalieimob e dá a nota de 0 a 10. Vai pelo WhatsApp individual de cada um (não é link de grupo).</div>
+        <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn btn-primary btn-sm" id="lkPesqEnv" style="flex:0 0 auto">📲 Enviar para quem não respondeu</button><button class="btn btn-ghost btn-sm" id="lkPesqVer" style="flex:0 0 auto">📊 Ver resultado</button></div></div>` : ''}
+    </div></div>`;
+  const mp = () => api(`/projetos/${S.pid}/mapa-publico`);
+  if ($('#lkMapaCop')) $('#lkMapaCop').onclick = () => copiarTextoGrupo(`/projetos/${S.pid}/mapa-publico`);
+  if ($('#lkMapaVer')) $('#lkMapaVer').onclick = async () => { const w = window.open('about:blank', '_blank'); try { const r = await mp(); if (w) w.location.href = r.link; else window.open(r.link, '_blank'); } catch (e){ if (w) w.close(); toast(e.message, true); } };
+  if ($('#lkMapaEnv')) $('#lkMapaEnv').onclick = async () => {
+    try {
+      const r = await mp();
+      if (navigator.share) { try { await navigator.clipboard.writeText(r.texto); } catch { /* ok */ } await navigator.share({ text: r.texto }).catch((e) => { if (e && e.name !== 'AbortError') caixaManual(r.texto, 'Texto com o link do mapa — copie e cole no grupo'); }); }
+      else window.open('https://wa.me/?text=' + encodeURIComponent(r.texto), '_blank');
+    } catch (e){ toast(e.message, true); }
+  };
+  if ($('#lkPesqVer')) $('#lkPesqVer').onclick = () => { const c = $('#pesqBox'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  if ($('#lkPesqEnv')) $('#lkPesqEnv').onclick = () => { const b = $('#pqEnviar'); if (b) b.click(); else toast('Abrindo a pesquisa…'); };
+}
 // ─── v3.181.0: pesquisa de satisfação (Instagram @avalieimob + nota 0–10) ─
 async function cardPesquisa(){
   const box = $('#pesqBox'); if (!box) return;
@@ -695,6 +721,7 @@ async function rPainel(){
         ${p.marca && p.marca.brasao ? `<img class="hero-bras" src="${esc(p.marca.brasao)}" alt="Brasão do PA">` : ''}
       </div>
 
+      <div id="linksBox"></div>
       <div class="kpis2">
         <div class="k2"><div class="k2i">📄</div><div><div class="l">Contratado</div><div class="v">${brl(f.contratado)}</div><div class="muted">${p.associados.total} associados</div></div></div>
         <div class="k2 ok"><div class="k2i">✅</div><div><div class="l">Recebido</div><div class="v">${brl(f.recebido)}</div><div class="bar2"><i style="width:${pct}%"></i></div><div class="muted">${pct}% do contratado (sem a taxa de marcos)</div></div></div>
@@ -759,6 +786,7 @@ async function rPainel(){
         <div class="tbl" id="pTabela"></div>
       </div>`;
     cardPesquisa(); // v3.181.0
+    cardLinks(); // v3.182.1
     const desenharPend = () => {
       const lista = cad.lista.filter((x) => !PEND_FILTRO || x.faltando.includes(PEND_FILTRO));
       $('#pTabela').innerHTML = lista.length ? `<table><thead><tr><th>Lote</th><th>Associado</th><th>Telefone</th><th>O que falta</th></tr></thead><tbody>
