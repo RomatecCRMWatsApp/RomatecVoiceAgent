@@ -3088,8 +3088,8 @@ async function cardProgramacao(d){
       catch (e){ toast(e.message, true); }
     };
     if ($('#pgReloc')) $('#pgReloc').onclick = async () => {
-      if (!confirm(`Relocar agora o dia ${dbr(PG.dia)}?\n\nOs lotes não medidos deste dia vão na frente do próximo dia útil e os dias seguintes são refeitos com os quitados (ordem de quitação), ${info.relocacao ? info.relocacao.por_dia : 6} por dia.`)) return;
-      try { const r = await api(`/projetos/${S.pid}/campo/programacao/relocar`, { json: { dia: PG.dia } }); const ds = Object.keys(r.plano); toast(ds.length ? `Relocado: ${ds.map((k) => dbr(k) + ' (' + r.plano[k].length + ')').join(' · ')}` : 'Nada a relocar'); cardProgramacao(d); }
+      if (!confirm(`Relocar agora o dia ${dbr(PG.dia)}?\n\nOs lotes NÃO medidos saem deste dia (e de dias anteriores) e vão na frente do próximo dia útil; neste dia ficam só os medidos. Os dias seguintes são refeitos com os quitados (ordem de quitação), ${info.relocacao ? info.relocacao.por_dia : 6} por dia.`)) return;
+      try { const r = await api(`/projetos/${S.pid}/campo/programacao/relocar`, { json: { dia: PG.dia } }); const ds = Object.keys(r.plano); toast(ds.length ? `Relocado${r.retirados && r.retirados.length ? ` (${r.retirados.length} saíram de ${dbr(PG.dia)})` : ''}: ${ds.map((k) => dbr(k) + ' (' + r.plano[k].length + ')').join(' · ')}` : 'Nada a relocar'); if (ds.length) PG.dia = ds[0]; cardProgramacao(d); }
       catch (e){ toast(e.message, true); }
     };
     $('#pgSalvar').onclick = async () => { try { await salvar(); toast('Programação salva'); desenhar(); } catch (e){ toast(e.message, true); } };

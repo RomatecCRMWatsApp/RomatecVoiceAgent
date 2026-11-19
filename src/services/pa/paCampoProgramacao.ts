@@ -49,12 +49,18 @@ export function resumoProg(itens: ItemProg[]) {
 
 /** Texto para o grupo (manhã: programação; fim do dia: confirmação). */
 export type Previsao = Array<{ dia: string; itens: ItemProg[] }>;
-export function textoProgramacao(tipo: TipoBoletimDia, dia: string, itens: ItemProg[], projetoNome: string, totalPA: { medidos: number; lotes: number }, previsao: Previsao = []): string {
+export function textoProgramacao(tipo: TipoBoletimDia, dia: string, itens: ItemProg[], projetoNome: string, totalPA: { medidos: number; lotes: number }, previsao: Previsao = [], ultimo: { dia: string; itens: ItemProg[] } | null = null): string {
   const L: string[] = [];
   const r = resumoProg(itens);
   if (tipo === 'programacao') {
     L.push(`📍 *PROGRAMAÇÃO DE CAMPO — ${projetoNome.toUpperCase()}*`);
     L.push(`📅 ${dbr(dia)} (${semana(dia)})`);
+    if (ultimo && ultimo.itens.length) {
+      L.push('');
+      L.push(`✅ *Medidos em ${dbr(ultimo.dia)} (${semana(ultimo.dia)}) — ${ultimo.itens.length} lote(s):*`);
+      for (const x of ultimo.itens) L.push(`• ${linhaLote(x)} ✅`);
+      L.push(`📊 Total do PA: ${totalPA.medidos} de ${totalPA.lotes} lotes medidos (${nb(totalPA.lotes ? (totalPA.medidos / totalPA.lotes) * 100 : 0)}%).`);
+    }
     L.push('');
     L.push(`🚜 *Lotes que a equipe vai medir hoje (${itens.length}):*`);
     for (const x of itens) L.push(`${x.ordem}. ${linhaLote(x)}`);
@@ -109,7 +115,7 @@ export function temaProgramacao(tipo: TipoBoletimDia, itens: ItemProg[], lotes: 
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 const ha = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export function htmlProgramacao(cab: DadosMapaPA, tipo: TipoBoletimDia, dia: string, itens: ItemProg[], mapa: string, totalPA: { medidos: number; lotes: number }, previsao: Previsao = []): string {
+export function htmlProgramacao(cab: DadosMapaPA, tipo: TipoBoletimDia, dia: string, itens: ItemProg[], mapa: string, totalPA: { medidos: number; lotes: number }, previsao: Previsao = [], ultimo: { dia: string; itens: ItemProg[] } | null = null): string {
   const r = resumoProg(itens);
   const prog = tipo === 'programacao';
   const sit = (x: ItemProg) => x.situacao === 'MEDIDO' ? '<span class="tag ok">✓ MEDIDO — OK</span>' : x.situacao === 'EM_MEDICAO' ? `<span class="tag em">em medição ${x.marcados}/${x.exigidos}</span>` : '<span class="tag pe">pendente → próximo dia</span>';
@@ -143,6 +149,10 @@ export function htmlProgramacao(cab: DadosMapaPA, tipo: TipoBoletimDia, dia: str
       : `${k('Medidos hoje', `${r.medidos.length}/${r.total}`, 'dos programados', 'ok')}${k('Em medição', String(r.em_medicao.length), 'continuam no próximo dia')}${k('Pendentes', String(r.pendentes.length), 'vão para o próximo dia', 'pe')}${k('Total do PA', `${totalPA.medidos}/${totalPA.lotes}`, `${nb(totalPA.lotes ? (totalPA.medidos / totalPA.lotes) * 100 : 0)}% medido`)}`}</div>
     <div class="mapa">${mapa}</div>
     <div class="legg">${leg}</div>
+    ${prog && ultimo && ultimo.itens.length ? `<h2>Medidos em ${dbr(ultimo.dia)} (${semana(ultimo.dia)}) — ${ultimo.itens.length} lote(s) ✅</h2>
+    <table><thead><tr><th>Lote</th><th>Associado</th><th>Chácara</th><th class="n">Área</th><th>Situação</th></tr></thead><tbody>
+      ${ultimo.itens.map((x) => `<tr><td><b>LT-${esc(x.lote)}</b>${x.lote_vila ? `<div style="color:#777;font-size:6.8pt">vila ${esc(x.lote_vila)}</div>` : ''}</td><td><b>${esc(x.associado ?? '—')}</b></td><td>${esc(x.chacara ?? '—')}</td><td class="n">${ha(x.area_ha)} ha</td><td><span class="tag ok">✓ MEDIDO — OK</span></td></tr>`).join('')}
+    </tbody></table>` : ''}
     <h2>${prog ? `Lotes programados para ${dbr(dia)} (${r.total})` : `Programados para ${dbr(dia)} — situação no fim do dia`}</h2>
     ${itens.length ? `<table><thead><tr><th class="n">Nº</th><th>Lote</th><th>Associado</th><th>Chácara</th><th class="n">Área</th>${prog ? '' : '<th>Situação</th>'}</tr></thead><tbody>
       ${itens.map((x) => `<tr><td class="n"><b>${x.ordem}</b></td><td><b>LT-${esc(x.lote)}</b>${x.lote_vila ? `<div style="color:#777;font-size:6.8pt">vila ${esc(x.lote_vila)}</div>` : ''}</td><td><b>${esc(x.associado ?? 'sem associado vinculado')}</b></td><td>${esc(x.chacara ?? '—')}</td><td class="n">${ha(x.area_ha)} ha</td>${prog ? '' : `<td>${sit(x)}</td>`}</tr>`).join('')}
@@ -158,6 +168,19 @@ export function htmlProgramacao(cab: DadosMapaPA, tipo: TipoBoletimDia, dia: str
 }
 
 // ─── banco ────────────────────────────────────────────────────────────────
+/** v3.190.1: lotes do dia = programados + os medidos (fechados) naquele dia que não estavam na lista. */
+function comMedidosDoDia(lotes: LoteBoletim[], programados: string[], dia: string): string[] {
+  const med = lotes.filter((l) => l.fechado && diaBrasilia(l.fechado.concluido_em) === dia && !programados.includes(l.lote)).map((l) => l.lote).sort(numLote);
+  return [...programados, ...med];
+}
+/** v3.190.1: último dia de campo antes de `dia` com lote medido, e os lotes medidos nele. */
+function medidosUltimoDia(lotes: LoteBoletim[], dia: string): { dia: string; itens: ItemProg[] } | null {
+  const dias = lotes.filter((l) => l.fechado).map((l) => diaBrasilia(l.fechado!.concluido_em)).filter((d) => d < dia).sort();
+  const d = dias[dias.length - 1];
+  if (!d) return null;
+  const ls = lotes.filter((l) => l.fechado && diaBrasilia(l.fechado.concluido_em) === d).map((l) => l.lote).sort(numLote);
+  return { dia: d, itens: montarProgramacao(lotes, ls) };
+}
 async function lotesDoDia(projetoId: number, dia: string): Promise<string[]> {
   const r = await rows(pool, 'SELECT lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia = ? ORDER BY ordem, id', [projetoId, dia]);
   return r.map((x) => String(x.lote));
@@ -167,7 +190,7 @@ async function lotesDoDia(projetoId: number, dia: string): Promise<string[]> {
 export async function buscarProgramacao(projetoId: number, diaQ: unknown) {
   const dia = diaValido(diaQ) ?? hojeBrasil();
   const e = await estadoCampo(projetoId);
-  const lotes = await lotesDoDia(projetoId, dia);
+  const lotes = comMedidosDoDia(e.lotes as unknown as LoteBoletim[], await lotesDoDia(projetoId, dia), dia);
   const ant = await rows(pool, 'SELECT MAX(dia) AS d FROM pa_campo_programacao WHERE projeto_id = ? AND dia < ?', [projetoId, dia]);
   const diaAnt = ant[0]?.d ? isoDate(ant[0].d) : null;
   const jaAgendados = new Set((await rows(pool, 'SELECT DISTINCT lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia >= ?', [projetoId, dia])).map((r) => String(r.lote)));
@@ -203,7 +226,7 @@ async function dadosDia(projetoId: number, tipoQ: unknown, diaQ: unknown) {
   const p = await buscarProjeto(projetoId);
   const e = await estadoCampo(projetoId);
   const lotes = e.lotes as unknown as LoteBoletim[];
-  const itens = montarProgramacao(lotes, await lotesDoDia(projetoId, dia));
+  const itens = montarProgramacao(lotes, comMedidosDoDia(lotes, await lotesDoDia(projetoId, dia), dia));
   if (!itens.length) throw new PaErro('SEM_PROGRAMACAO', `Nenhum lote programado para ${dbr(dia)} — escolha os lotes e salve a programação`, 409);
   const totalPA = { medidos: lotes.filter((l) => l.fechado).length, lotes: lotes.length };
   const previsao: Previsao = [];
@@ -213,20 +236,21 @@ async function dadosDia(projetoId: number, tipoQ: unknown, diaQ: unknown) {
     for (const r of fut) (por[isoDate(r.dia)!] ??= []).push(String(r.lote));
     for (const d of Object.keys(por).sort()) { const its = montarProgramacao(lotes, por[d]).filter((x) => x.situacao !== 'MEDIDO'); if (its.length) previsao.push({ dia: d, itens: its.map((x, i) => ({ ...x, ordem: i + 1 })) }); }
   }
-  return { tipo, dia, p, lotes, itens, totalPA, previsao };
+  const ultimo = tipo === 'programacao' ? medidosUltimoDia(lotes, dia) : null;
+  return { tipo, dia, p, lotes, itens, totalPA, previsao, ultimo };
 }
 const nomeArq = (codigo: string, tipo: TipoBoletimDia, dia: string) => `${tipo === 'programacao' ? 'PROGRAMACAO' : 'CONFIRMACAO'}-CAMPO-${codigo}-${dia}.pdf`;
 
 export async function textoDia(projetoId: number, tipoQ: unknown, diaQ: unknown) {
-  const { tipo, dia, p, itens, totalPA, previsao } = await dadosDia(projetoId, tipoQ, diaQ);
-  return { texto: textoProgramacao(tipo, dia, itens, p.nome, totalPA, previsao), nome: nomeArq(p.codigo, tipo, dia) };
+  const { tipo, dia, p, itens, totalPA, previsao, ultimo } = await dadosDia(projetoId, tipoQ, diaQ);
+  return { texto: textoProgramacao(tipo, dia, itens, p.nome, totalPA, previsao, ultimo), nome: nomeArq(p.codigo, tipo, dia) };
 }
 
 export async function pdfDia(projetoId: number, tipoQ: unknown, diaQ: unknown, base: BaseMapa): Promise<{ pdf: Buffer; nome: string }> {
-  const { tipo, dia, p, lotes, itens, totalPA, previsao } = await dadosDia(projetoId, tipoQ, diaQ);
+  const { tipo, dia, p, lotes, itens, totalPA, previsao, ultimo } = await dadosDia(projetoId, tipoQ, diaQ);
   const geo = (await geojsonSubdivisao(projetoId).catch(() => ({ features: [] }))) as unknown as { features: Array<{ geometry: { type: string; coordinates: unknown }; properties: Record<string, unknown> }> };
   const { html: mapa } = await htmlMapaLotes(geo, temaProgramacao(tipo, itens, lotes), { base, H: 520 });
-  return { pdf: await pdfDeHtml(htmlProgramacao(dadosCabecalho(p), tipo, dia, itens, mapa, totalPA, previsao)), nome: nomeArq(p.codigo, tipo, dia) };
+  return { pdf: await pdfDeHtml(htmlProgramacao(dadosCabecalho(p), tipo, dia, itens, mapa, totalPA, previsao, ultimo)), nome: nomeArq(p.codigo, tipo, dia) };
 }
 
 // ─── v3.189.0/v3.190.0: agenda automática de campo (só lotes QUITADOS) ─────
@@ -300,14 +324,20 @@ async function gravarFuturo(projetoId: number, dia: string, plano: Record<string
 }
 
 /** Fecha o dia `dia` (21 h): não medidos do dia vão na frente do próximo dia útil; refaz os dias seguintes. */
-export async function relocarProgramacao(projetoId: number, diaQ: unknown, usuario: string | null) {
+export async function relocarProgramacao(projetoId: number, diaQ: unknown, usuario: string | null, fechamento = false) {
   const dia = diaValido(diaQ) ?? hojeBrasil();
   const lotes = await lotesAgenda(projetoId);
-  const carry = await lotesDoDia(projetoId, dia);
+  const medido = new Set(lotes.filter((l) => l.fechado).map((l) => l.lote));
+  // v3.190.1: carry = não medidos do dia (e sobras de dias anteriores), na ordem dos dias
+  const ant = await rows(pool, 'SELECT dia, lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia <= ? AND dia >= ? - INTERVAL 60 DAY ORDER BY dia DESC, ordem, id', [projetoId, dia, dia]);
+  const carry = [...new Set(ant.map((r) => String(r.lote)).filter((lt) => !medido.has(lt)))];
   const plano = planejarAgenda(dia, lotes, carry, [], await futuroAtual(projetoId, dia));
   await gravarFuturo(projetoId, dia, plano, usuario);
-  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'CAMPO_RELOCACAO', dados: { dia, plano } });
-  return { dia, plano };
+  // v3.190.1: no dia (e nos anteriores) ficam SÓ os medidos — os não medidos saíram para os próximos dias
+  const sair = carry.filter((lt) => Object.values(plano).some((x) => x.includes(lt)) || !lotes.find((l) => l.lote === lt)?.quitado);
+  if (sair.length) await exec(pool, `DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia <= ? AND dia >= ? - INTERVAL 60 DAY AND lote IN (${sair.map(() => '?').join(',')})`, [projetoId, dia, dia, ...sair]);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: fechamento ? 'CAMPO_FECHAMENTO_DIA' : 'CAMPO_RELOCACAO', dados: { dia, plano, retirados: sair } });
+  return { dia, plano, retirados: sair };
 }
 /** Durante o dia: novos quitados entram no fim da fila; refaz só os dias depois de hoje (hoje não muda). */
 export async function atualizarAgenda(projetoId: number, hoje = hojeBrasil()) {
@@ -344,15 +374,16 @@ export async function rodarAgendaAutomatica(agora = new Date()): Promise<number>
   for (const p of ps) {
     const pid = Number(p.id);
     try {
-      const fechado = async (d: string) => (await rows(pool, "SELECT id FROM pa_eventos WHERE projeto_id = ? AND tipo = 'CAMPO_RELOCACAO' AND JSON_UNQUOTE(JSON_EXTRACT(dados, '$.dia')) = ? LIMIT 1", [pid, d])).length > 0;
+      // v3.190.1: só o fechamento automático das 21 h conta — o "Relocar" manual durante o dia não bloqueia mais o das 21 h
+      const fechado = async (d: string) => (await rows(pool, "SELECT id FROM pa_eventos WHERE projeto_id = ? AND tipo = 'CAMPO_FECHAMENTO_DIA' AND JSON_UNQUOTE(JSON_EXTRACT(dados, '$.dia')) = ? LIMIT 1", [pid, d])).length > 0;
       if (hBr >= HORA_RELOCACAO) {
-        if (!(await fechado(hoje))) { await relocarProgramacao(pid, hoje, null); n++; console.log(`[pa-agenda] projeto ${pid}: dia ${hoje} fechado e relocado`); }
+        if (!(await fechado(hoje))) { await relocarProgramacao(pid, hoje, null, true); n++; console.log(`[pa-agenda] projeto ${pid}: dia ${hoje} fechado e relocado`); }
         else if ((await atualizarAgenda(pid, hoje)).mudou) n++;
       } else {
         // servidor fora às 21 h de ontem → fecha ontem na volta (até o meio-dia; depois disso o dia de hoje não é mexido)
         if (!(await fechado(ontem)) && (await lotesDoDia(pid, ontem)).length) {
-          if (hBr < 12) { await relocarProgramacao(pid, ontem, null); n++; console.log(`[pa-agenda] projeto ${pid}: dia ${ontem} fechado na volta do servidor`); }
-          else await registrarEvento(pool, { projeto_id: pid, usuario: null, tipo: 'CAMPO_RELOCACAO', dados: { dia: ontem, recuperado: false } });
+          if (hBr < 12) { await relocarProgramacao(pid, ontem, null, true); n++; console.log(`[pa-agenda] projeto ${pid}: dia ${ontem} fechado na volta do servidor`); }
+          else await registrarEvento(pool, { projeto_id: pid, usuario: null, tipo: 'CAMPO_FECHAMENTO_DIA', dados: { dia: ontem, recuperado: false } });
         }
         if ((await atualizarAgenda(pid, hoje)).mudou) n++;
       }
