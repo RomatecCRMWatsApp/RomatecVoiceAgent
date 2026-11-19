@@ -2965,6 +2965,10 @@ async function rEquipe(){
 
 // ─── v3.171.0: ordem de serviço de campo pelo pagamento (cor + prioridade; preferência sem bloqueio) ─
 const faixaCampo = (d, l) => (d.faixas || []).find((f) => f.id === l.faixa) || { cor: '#B8BDB9', rotulo: '—' };
+// v3.191.2: lote medido tem cor própria (não confunde com quitado): azul = medido; roxo = dossiê enviado/entregue
+const COR_MEDIDO = '#3D7FC1', COR_DOSSIE_ENV = '#7B5BA6';
+const dossieEnviado = (l) => l.dossie === 'ENVIADO' || l.dossie === 'ENTREGUE';
+const corLoteCampo = (d, l) => l.fechado ? (dossieEnviado(l) ? COR_DOSSIE_ENV : COR_MEDIDO) : faixaCampo(d, l).cor;
 const pagTxt = (l) => !l.pagamento ? 'sem associado' : !l.pagamento.parcelas ? 'sem parcelas' : l.pagamento.quitado ? '★ quitado' : `${l.pagamento.pct.toLocaleString('pt-BR')}% pago (${l.pagamento.pagas}/${l.pagamento.parcelas})`;
 const quitadosAMedir = (d) => d.lotes.filter((l) => !l.fechado && l.pagamento && l.pagamento.quitado);
 // ─── v3.169.0: locação dos marcos no mapa (aba Campo) ─
@@ -3141,7 +3145,10 @@ async function rLocacao(box){
       <div class="cp-pref">${qAM.length ? `<b>★ Preferência:</b> medir primeiro os <b>${qAM.length} lote(s) quitado(s)</b> ainda não medidos (${qAM.slice(0, 8).map((l) => 'LT-' + esc(l.lote)).join(', ')}${qAM.length > 8 ? '…' : ''}); depois os em aberto, pela ordem de pagamento. Não bloqueia — dá para medir qualquer lote.` : '✅ Todos os lotes quitados já foram medidos — siga a ordem de pagamento dos demais.'}</div>
       <div class="tbl" style="margin:6px 0 10px"><table class="cp-leg"><thead><tr><th>Cor</th><th>Parcelas do contrato pagas</th><th class="right">A medir</th><th class="right">Medidos</th></tr></thead><tbody>
         ${(d.faixas || []).map((f) => { const ls = contaFaixa(f.id); return `<tr class="cp-fx" data-faixa="${esc(f.id)}" title="Toque para ver os lotes desta faixa"><td><i style="background:${f.cor}"></i></td><td>${esc(f.rotulo)} <span class="muted">▸ ver lotes</span></td><td class="right">${ls.filter((l) => !l.fechado).length}</td><td class="right">${ls.filter((l) => l.fechado).length}</td></tr>`; }).join('')}
+        <tr><td><i style="background:${COR_MEDIDO}"></i></td><td><b>Medido</b> <span class="muted">(poligonal fechada ✅)</span></td><td class="right">—</td><td class="right">${d.lotes.filter((l) => l.fechado && !dossieEnviado(l)).length}</td></tr>
+        <tr><td><i style="background:${COR_DOSSIE_ENV}"></i></td><td><b>Medido · dossiê enviado/entregue</b></td><td class="right">—</td><td class="right">${d.lotes.filter((l) => l.fechado && dossieEnviado(l)).length}</td></tr>
       </tbody></table></div>
+      <div class="muted" style="margin:-4px 0 8px;font-size:12px">No mapa, o lote medido deixa a cor do pagamento e fica <b style="color:${COR_MEDIDO}">azul</b> (ou <b style="color:${COR_DOSSIE_ENV}">roxo</b> quando o dossiê já foi enviado/entregue).</div>
       <div id="cpFxLista"></div>
       <div class="grid3">
         <div style="grid-column:span 1"><label for="cpLote">Lote — ordem de serviço (quitados primeiro)</label><select class="f" id="cpLote"><option value="">Todos os lotes</option>${grupo('★ Quitados — medir primeiro', qAM)}${grupo('Em aberto — pela ordem de pagamento', abertos)}${grupo('✅ Já medidos', medidos)}</select></div>
@@ -3156,7 +3163,7 @@ async function rLocacao(box){
       <label style="display:block;margin-top:10px"><b>Ou escolha o marco:</b><select class="f" id="cpSel"></select></label>
       <div id="cpCard"></div></div>
     <div class="card"><h2 style="margin-top:0">Lotes — ordem de serviço</h2><div class="muted" style="margin-bottom:6px">Quitados primeiro, depois pela proporção de parcelas pagas; os já medidos ficam no fim.</div><div class="tbl"><table class="tcard"><thead><tr><th># · Lote</th><th>Pagamento</th><th>Associado</th><th class="right">Área</th><th>Marcos</th><th>Situação</th></tr></thead><tbody>
-      ${d.lotes.map((l) => `<tr class="click" data-cplote="${esc(l.lote)}" style="box-shadow:inset 5px 0 0 ${faixaCampo(d, l).cor}"><td class="nowrap tc-tit"><b>${l.prioridade ? '#' + l.prioridade : '—'}</b> · <b>${l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${esc(l.lote)}</b></td>
+      ${d.lotes.map((l) => `<tr class="click" data-cplote="${esc(l.lote)}" style="box-shadow:inset 5px 0 0 ${corLoteCampo(d, l)}"><td class="nowrap tc-tit"><b>${l.prioridade ? '#' + l.prioridade : '—'}</b> · <b>${l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${esc(l.lote)}</b></td>
         <td class="nowrap cp-pg" data-l="Pagamento" style="min-width:110px"><div class="pbar"><i style="width:${l.pagamento ? Math.min(100, l.pagamento.pct) : 0}%;background:${faixaCampo(d, l).cor}"></i></div><span class="muted">${esc(pagTxt(l))}</span>${l.pagamento && l.pagamento.parcelas ? `<div class="muted">${ICO_MARCO} marcos ${l.pagamento.marcos_pago ? 'pagos' : l.pagamento.marcos_lancados ? 'em aberto' : 'não lançados'}</div>` : ''}</td><td data-l="Associado">${l.associado ? esc(l.associado.nome) + `<div class="muted">vila ${esc(l.associado.lote_vila)}${l.associado.denominacao ? ' · ' + esc(l.associado.denominacao) : ''}</div>` : '—'}</td><td class="right nowrap" data-l="Área">${nbr(l.area_ha, 4)} ha</td>
         <td class="nowrap" data-l="Marcos">${l.marcados}/${l.exigidos.length}${l.existentes ? ` <span class="muted">(${l.existentes} já existem)</span>` : ''}</td>
         <td data-l="Situação">${l.fechado ? chip('PAGO', '✅ MEDIDO') + `<div class="muted">${hBr(l.fechado.concluido_em)} · ${esc(l.fechado.usuario_nome || '')}</div>` : l.marcados ? chip('PARCIAL', 'em andamento') : '<span class="muted">pendente</span>'}</td></tr>`).join('')}
@@ -3225,7 +3232,7 @@ async function mapaCampo(d, podeMarcar){
   const fechados = new Set(d.lotes.filter((l) => l.fechado).map((l) => l.lote));
   // v3.171.0: cor pela proporção de parcelas pagas (★ quitado); ✅ no rótulo = já medido
   const porLoteCampo = Object.fromEntries(d.lotes.map((l) => [l.lote, l]));
-  const lotesF = geo.features.filter((f) => f.properties.tipo === 'LOTE').map((f) => { const l = porLoteCampo[f.properties.lote]; return { ...f, properties: { ...f.properties, cor: l ? faixaCampo(d, l).cor : '#B8BDB9' } }; });
+  const lotesF = geo.features.filter((f) => f.properties.tipo === 'LOTE').map((f) => { const l = porLoteCampo[f.properties.lote]; return { ...f, properties: { ...f.properties, cor: l ? corLoteCampo(d, l) : '#B8BDB9' } }; });
   const porLote = Object.fromEntries(lotesF.map((f) => [f.properties.lote, f]));
   const outros = geo.features.filter((f) => f.properties.tipo !== 'LOTE');
   const lote = CP.lote ? d.lotes.find((l) => l.lote === CP.lote) : null;

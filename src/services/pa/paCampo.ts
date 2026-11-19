@@ -117,6 +117,8 @@ export async function estadoCampo(projetoId: number) {
   const fech = new Map(fechados.map((f) => [f.lote, f]));
   const ben = await vinculosParcelas(projetoId).catch((e) => { console.warn('[pa-campo] vínculos lote→associado indisponíveis:', (e as Error).message); return {} as Awaited<ReturnType<typeof vinculosParcelas>>; });
   const pags = await pagamentosPorAssociado(projetoId).catch((e) => { console.warn('[pa-campo] situação de pagamento indisponível:', (e as Error).message); return new Map<number, PagamentoLote>(); });
+  // v3.191.2: situação do dossiê do lote (cor própria no mapa: medido ≠ dossiê enviado ≠ quitado)
+  const dossies = new Map((await rows(pool, 'SELECT lote, status FROM pa_dossies WHERE projeto_id = ?', [projetoId]).catch(() => [])).map((r) => [String(r.lote), String(r.status)]));
   return {
     pontos: d.pontos.map((p) => ({ nome: p.nome, E: p.E, N: p.N, lat: p.lat, lon: p.lon, tipo: p.tipo, lotes: p.lotes, existente: !!p.existente, implantar_com: p.implantar_com ?? null, marca: porPonto.get(p.nome) ?? null })),
     lotes: ordemServico(d.lotes.map((l) => {
@@ -124,7 +126,7 @@ export async function estadoCampo(projetoId: number) {
       const imp = exigidos(vs); // v3.188.3: todos os vértices (cravar + confirmar os que já existem)
       const b = ben[l.lote];
       return { lote: l.lote, area_ha: l.area_ha, vertices: vs, exigidos: imp, a_implantar: vs.filter((v) => !existentes.has(v)).length, existentes: vs.filter((v) => existentes.has(v)).length, marcados: imp.filter((v) => porPonto.has(v)).length, fechado: fech.get(l.lote) ?? null,
-        associado: b ? { nome: b.nome, lote_vila: b.lote_vila, denominacao: b.denominacao ?? null } : null,
+        associado: b ? { nome: b.nome, lote_vila: b.lote_vila, denominacao: b.denominacao ?? null } : null, dossie: dossies.get(l.lote) ?? null,
         pagamento: b ? pags.get(b.associado_id) ?? { parcelas: 0, pagas: 0, pct: 0, quitado: false, marcos_lancados: false, marcos_pago: false } : null };
     })).map((l, i) => ({ ...l, prioridade: l.fechado ? null : i + 1, faixa: faixaPagamento(l.pagamento).id })),
     faixas: FAIXAS_PAGAMENTO,
