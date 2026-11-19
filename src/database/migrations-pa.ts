@@ -219,6 +219,15 @@ const CREATE_PA_PESQUISA = `
   ) DEFAULT CHARSET=utf8mb4
 `;
 // v3.180.0: sessões de acesso da equipe (início, última atividade, nº de requisições, dispositivo)
+// v3.192.0: foto do usuário (avatar no menu) — 320×320 JPEG/PNG/WebP, enviada já reduzida pelo navegador
+const CREATE_PA_USUARIOS_FOTO = `
+  CREATE TABLE IF NOT EXISTS pa_usuarios_foto (
+    usuario_id    VARCHAR(64) NOT NULL PRIMARY KEY,
+    mime          VARCHAR(40) NOT NULL,
+    conteudo      MEDIUMBLOB NOT NULL,
+    atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) DEFAULT CHARSET=utf8mb4
+`;
 const CREATE_PA_ACESSOS = `
   CREATE TABLE IF NOT EXISTS pa_acessos (
     id           INT AUTO_INCREMENT PRIMARY KEY,
@@ -512,6 +521,7 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_pesquisa_respostas', sql: CREATE_PA_PESQUISA },
   { label: 'pa_dossies', sql: CREATE_PA_DOSSIES },
   { label: 'pa_lotes_producao', sql: CREATE_PA_LOTES_PRODUCAO },
+  { label: 'pa_usuarios_foto', sql: CREATE_PA_USUARIOS_FOTO },
 ];
 
 export async function runPaMigrations(): Promise<void> {

@@ -44,6 +44,7 @@ import * as campo from '../services/pa/paCampo';
 import * as boletim from '../services/pa/paCampoBoletim';
 import * as programacao from '../services/pa/paCampoProgramacao';
 import * as relatorioCampo from '../services/pa/paCampoRelatorio';
+import { fotoUsuario, salvarFotoUsuario, removerFotoUsuario } from '../services/pa/paUsuarioFoto';
 import { baseValida } from '../services/pa/mapaTiles';
 import * as dossie from '../services/pa/paDossie';
 import * as lotesProd from '../services/pa/paLotesProducao';
@@ -138,6 +139,15 @@ function visao<T>(v: T, perfil: PerfilPa): T {
 
 // ─── Sessão ───────────────────────────────────────────────────────────────
 router.get('/eu', h(async (req) => ({ id: ctx(req).sub, nome: ctx(req).nome, permissoes: ctx(req).permissoes, perfil: ctx(req).perfil, pode_escrever: podeEscrever(ctx(req).perfil), pode_excluir: podeExcluir(ctx(req).perfil), ve_documentos: podeVerDocumentos(ctx(req).perfil) })));
+// v3.192.0: foto do usuário (avatar do menu)
+router.get('/eu/foto', h(async (req, res) => {
+  const f = await fotoUsuario(ctx(req).sub);
+  if (!f) { res.status(404).end(); return undefined; }
+  res.setHeader('Content-Type', f.mime); res.setHeader('Cache-Control', 'private, max-age=300'); res.end(f.conteudo);
+  return undefined;
+}));
+router.put('/eu/foto', h(async (req) => salvarFotoUsuario(ctx(req).sub, req.body?.imagem)));
+router.delete('/eu/foto', h(async (req) => removerFotoUsuario(ctx(req).sub)));
 
 // ─── Projetos ─────────────────────────────────────────────────────────────
 router.get('/projetos', h(async () => ({ projetos: await repo.listarProjetos() })));

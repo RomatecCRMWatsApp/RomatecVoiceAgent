@@ -30,6 +30,17 @@
   header select option{color:var(--ink)}
   .versao{font-size:11px;color:#fff;background:rgba(255,255,255,.08);border:1px solid rgba(201,168,76,.6);border-radius:8px;padding:4px 9px;white-space:nowrap;line-height:1.3}
   .versao b{color:var(--gold)}
+  /* v3.192.0: atualizar (nova versão) + foto do usuário */
+  .navbtn.atualizar{white-space:nowrap}
+  .navbtn.atualizar.nova{background:var(--gold);color:#0C3320;font-weight:700;border-color:var(--gold);animation:pulsaAtu 1.4s ease-in-out infinite}
+  @keyframes pulsaAtu{0%,100%{box-shadow:0 0 0 0 rgba(201,168,76,.7)}50%{box-shadow:0 0 0 6px rgba(201,168,76,0)}}
+  .eu-box{display:inline-flex;align-items:center;gap:7px;min-width:0}
+  .eu-av{flex:0 0 auto;width:38px;height:38px;border-radius:50%;border:2px solid var(--gold);background:#14472B center/cover no-repeat;color:#F4F0E3;font-weight:700;font-size:13px;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center;overflow:hidden}
+  .eu-av img{width:100%;height:100%;object-fit:cover;display:block}
+  .eu-modal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px}
+  .eu-modal .cx{background:#fff;border-radius:14px;max-width:360px;width:100%;padding:18px;text-align:center;color:#1C1C18}
+  .eu-modal .grande{width:150px;height:150px;border-radius:50%;margin:6px auto 12px;border:3px solid var(--gold);background:#14472B;color:#F4F0E3;font-size:46px;font-weight:700;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .eu-modal .grande img{width:100%;height:100%;object-fit:cover}
   .perfil{font-size:11px;border:1px solid var(--gold);color:var(--gold-soft);border-radius:12px;padding:2px 8px;white-space:nowrap}
   nav.tabs{display:flex;gap:2px;overflow-x:auto;margin-top:10px;scrollbar-width:none}
   nav.tabs button{background:transparent;border:0;color:#d9e6dd;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap}
@@ -396,9 +407,10 @@
     </div>
     <div class="row" style="flex:0 0 auto;align-items:center">
       <button class="navbtn hide" id="btnInstalar" title="Instalar o app no celular (ícone na tela inicial)">📲 Instalar app</button>
+      <button class="navbtn atualizar" id="btnAtualizar" title="Recarrega o app com a versão mais nova (limpa o cache)">🔄 Atualizar</button>
       <span class="versao" id="versaoChip" title="Versão e horário do último deploy (package.json via /api/version)">…</span>
       <select id="selProjeto" aria-label="Projeto"></select>
-      <span class="perfil" id="perfilChip">…</span>
+      <span class="eu-box"><button type="button" class="eu-av" id="euAv" title="Sua foto — toque para trocar">…</button><span class="perfil" id="perfilChip">…</span></span>
       <a href="/obras.html" class="navbtn fechar" title="Fechar e voltar para a Gestão da ZAYRA">✕ Voltar à Gestão</a>
     </div>
   </div>
@@ -524,19 +536,87 @@ const qs = new URLSearchParams(location.search);
 
 // ─── boot ───────────────────────────────────────────────────────────────
 // v3.143.1: versão + data/hora do deploy (fonte única: package.json → /api/version).
+let VERSAO_CARREGADA = null;
 async function mostrarVersao(){
   try {
     const r = await fetch('/api/version', { cache: 'no-store' });
     const v = await r.json();
+    if (!VERSAO_CARREGADA) VERSAO_CARREGADA = v.version; // v3.192.0: versão com que a página abriu
     const quando = v.buildTime ? new Date(v.buildTime).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
     $('#versaoChip').innerHTML = `<b>v${esc(v.version)}</b> · DEPLOY ${esc(quando)}`;
   } catch { $('#versaoChip').textContent = 'versão indisponível'; }
 }
+// v3.192.0: botão 🔄 Atualizar — confere a versão a cada minuto e ao voltar para a aba; fica dourado quando há deploy novo
+async function conferirVersaoNova(){
+  try {
+    const v = await (await fetch('/api/version', { cache: 'no-store' })).json();
+    const b = $('#btnAtualizar'); if (!b || !VERSAO_CARREGADA) return;
+    const nova = v.version && v.version !== VERSAO_CARREGADA;
+    b.classList.toggle('nova', !!nova);
+    b.textContent = nova ? `🔄 Nova versão v${v.version} — atualizar` : '🔄 Atualizar';
+  } catch { /* sem rede: tenta depois */ }
+}
+async function atualizarApp(){
+  const b = $('#btnAtualizar'); if (b){ b.disabled = true; b.textContent = '🔄 Atualizando…'; }
+  try { if (navigator.serviceWorker) { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.update().catch(() => undefined))); } } catch { /* ok */ }
+  try { if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } } catch { /* ok */ }
+  const u = new URL(location.href); u.searchParams.set('v', String(Date.now())); location.replace(u.toString());
+}
+// v3.192.0: foto do usuário
+const iniciais = (n) => String(n || '?').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('') || '?';
+function mostrarAvatar(temFoto){
+  const b = $('#euAv'); if (!b) return;
+  if (temFoto) b.innerHTML = `<img src="/api/pa/eu/foto?t=${Date.now()}" alt="Sua foto">`; else b.textContent = iniciais(S.eu && S.eu.nome);
+  S.euFoto = !!temFoto;
+}
+async function carregarAvatar(){
+  try { const r = await fetch('/api/pa/eu/foto', { credentials: 'include', cache: 'no-store' }); mostrarAvatar(r.ok); } catch { mostrarAvatar(false); }
+}
+function reduzirFoto(arquivo){
+  return new Promise((ok, erro) => {
+    const img = new Image(); const url = URL.createObjectURL(arquivo);
+    img.onload = () => {
+      const L = 320, lado = Math.min(img.naturalWidth, img.naturalHeight);
+      const c = document.createElement('canvas'); c.width = L; c.height = L;
+      c.getContext('2d').drawImage(img, (img.naturalWidth - lado) / 2, (img.naturalHeight - lado) / 2, lado, lado, 0, 0, L, L);
+      URL.revokeObjectURL(url); ok(c.toDataURL('image/jpeg', 0.86));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); erro(new Error('Não consegui ler essa imagem — tente uma foto JPG ou PNG')); };
+    img.src = url;
+  });
+}
+function abrirFotoUsuario(){
+  const m = document.createElement('div'); m.className = 'eu-modal';
+  const desenhar = () => {
+    m.innerHTML = `<div class="cx"><b style="font-size:16px">Sua foto</b><div class="muted" style="font-size:12px">${esc(S.eu && S.eu.nome || '')}</div>
+      <div class="grande">${S.euFoto ? `<img src="/api/pa/eu/foto?t=${Date.now()}" alt="">` : esc(iniciais(S.eu && S.eu.nome))}</div>
+      <input type="file" id="euArq" accept="image/*" hidden>
+      <div class="row" style="gap:6px;justify-content:center;flex-wrap:wrap"><button class="btn btn-primary" id="euEnviar" style="flex:0 0 auto">📷 ${S.euFoto ? 'Trocar foto' : 'Enviar foto'}</button>${S.euFoto ? '<button class="btn btn-ghost btn-sm" id="euRemover" style="flex:0 0 auto">🗑️ Remover</button>' : ''}<button class="btn btn-ghost btn-sm" id="euFechar" style="flex:0 0 auto">Fechar</button></div>
+      <div class="muted" style="font-size:11px;margin-top:8px">A foto é recortada no centro e reduzida no aparelho antes de enviar.</div></div>`;
+    m.querySelector('#euFechar').onclick = () => m.remove();
+    const arq = m.querySelector('#euArq');
+    m.querySelector('#euEnviar').onclick = () => arq.click();
+    arq.onchange = async () => {
+      const f = arq.files && arq.files[0]; if (!f) return;
+      const bt = m.querySelector('#euEnviar'); bt.disabled = true; bt.textContent = 'Enviando…';
+      try { const imagem = await reduzirFoto(f); await api('/eu/foto', { method: 'PUT', json: { imagem } }); mostrarAvatar(true); toast('Foto atualizada ✅'); desenhar(); }
+      catch (e){ toast(e.message, true); bt.disabled = false; bt.textContent = '📷 Tentar de novo'; }
+    };
+    if (m.querySelector('#euRemover')) m.querySelector('#euRemover').onclick = async () => { try { await api('/eu/foto', { method: 'DELETE' }); mostrarAvatar(false); toast('Foto removida'); desenhar(); } catch (e){ toast(e.message, true); } };
+  };
+  m.onclick = (ev) => { if (ev.target === m) m.remove(); };
+  desenhar(); document.body.appendChild(m);
+}
 async function boot(){
   mostrarVersao();
+  $('#btnAtualizar').onclick = atualizarApp;
+  setInterval(conferirVersaoNova, 60_000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) conferirVersaoNova(); });
+  $('#euAv').onclick = abrirFotoUsuario;
   try {
     S.eu = await api('/eu');
     $('#perfilChip').textContent = (S.eu.nome ? S.eu.nome.split(' ').slice(0, 2).join(' ') + ' · ' : '') + ({ ADMIN: 'Administrador', OPERADOR: 'Operador', DIRECAO_ASSOCIACAO: 'Direção da associação', CAMPO: 'Topógrafo de campo', AGRIMENSOR: 'Agrimensor' }[S.eu.perfil] || S.eu.perfil); // v3.169.0
+    carregarAvatar(); // v3.192.0
     if (S.eu.perfil !== 'ADMIN') document.querySelectorAll('[data-admin]').forEach((b) => b.classList.add('hide'));
     // v3.180.0: abas conforme as permissões marcadas em Equipe e permissões
     if (S.eu.perfil !== 'ADMIN') document.querySelectorAll('#tabs button').forEach((b) => { const k = ABA_PERM[b.dataset.t]; if (k && !pode(k)) b.classList.add('hide'); });
