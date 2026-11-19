@@ -181,7 +181,7 @@ function medidosUltimoDia(lotes: LoteBoletim[], dia: string): { dia: string; ite
   const ls = lotes.filter((l) => l.fechado && diaBrasilia(l.fechado.concluido_em) === d).map((l) => l.lote).sort(numLote);
   return { dia: d, itens: montarProgramacao(lotes, ls) };
 }
-async function lotesDoDia(projetoId: number, dia: string): Promise<string[]> {
+export async function lotesDoDia(projetoId: number, dia: string): Promise<string[]> {
   const r = await rows(pool, 'SELECT lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia = ? ORDER BY ordem, id', [projetoId, dia]);
   return r.map((x) => String(x.lote));
 }
@@ -304,11 +304,11 @@ export function planejarAgenda(dia: string, lotes: LoteAgenda[], carry: string[]
   return out;
 }
 
-async function lotesAgenda(projetoId: number): Promise<LoteAgenda[]> {
+export async function lotesAgenda(projetoId: number): Promise<LoteAgenda[]> {
   const e = await estadoCampo(projetoId);
   return e.lotes.map((l) => ({ lote: l.lote, fechado: !!l.fechado, marcados: l.marcados, quitado: !!l.pagamento?.quitado, quitado_em: l.pagamento?.quitado_em ?? null }));
 }
-async function futuroAtual(projetoId: number, dia: string): Promise<Record<string, string[]>> {
+export async function futuroAtual(projetoId: number, dia: string): Promise<Record<string, string[]>> {
   const fut = await rows(pool, 'SELECT dia, lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia > ? ORDER BY dia, ordem, id', [projetoId, dia]);
   const f: Record<string, string[]> = {};
   for (const r of fut) (f[isoDate(r.dia)!] ??= []).push(String(r.lote));

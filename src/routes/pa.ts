@@ -42,6 +42,7 @@ import * as equipe from '../services/pa/paEquipe';
 import * as campo from '../services/pa/paCampo';
 import * as boletim from '../services/pa/paCampoBoletim';
 import * as programacao from '../services/pa/paCampoProgramacao';
+import * as relatorioCampo from '../services/pa/paCampoRelatorio';
 import { baseValida } from '../services/pa/mapaTiles';
 import * as dossie from '../services/pa/paDossie';
 import * as lotesProd from '../services/pa/paLotesProducao';
@@ -558,6 +559,9 @@ router.get('/projetos/:id/campo/programacao', h(async (req) => programacao.busca
 router.put('/projetos/:id/campo/programacao', h(async (req) => { exigirEscrita(req); return programacao.salvarProgramacao(id(req.params.id), req.body?.dia, req.body?.lotes, ctx(req).sub); }));
 router.put('/projetos/:id/campo/programacao/automatico', h(async (req) => { exigirAdmin(req); return programacao.definirAgendaAutomatica(id(req.params.id), req.body?.ligado, ctx(req).sub); })); // v3.190.0
 router.post('/projetos/:id/campo/programacao/relocar', h(async (req) => { exigirAdmin(req); return programacao.relocarProgramacao(id(req.params.id), req.body?.dia, ctx(req).sub); })); // v3.189.0
+// v3.191.0: relatório do dia de campo (abre às 16 h, fecha às 21 h) — PDF único + texto para o grupo
+router.get('/projetos/:id/campo/relatorio.pdf', h(async (req, res) => { enviarPdf(res, await relatorioCampo.pdfRelatorioDia(id(req.params.id), req.query.dia, baseValida(req.query.base))); return undefined; }));
+router.get('/projetos/:id/campo/relatorio/texto', h(async (req) => relatorioCampo.textoRelatorioDia(id(req.params.id), req.query.dia)));
 router.get('/projetos/:id/campo/programacao.pdf', h(async (req, res) => { enviarPdf(res, await programacao.pdfDia(id(req.params.id), req.query.tipo, req.query.dia, baseValida(req.query.base))); return undefined; }));
 router.get('/projetos/:id/campo/programacao/texto', h(async (req) => programacao.textoDia(id(req.params.id), req.query.tipo, req.query.dia)));
 // v3.188.4: checklist do lote — marca vários vértices de uma vez e fecha a poligonal

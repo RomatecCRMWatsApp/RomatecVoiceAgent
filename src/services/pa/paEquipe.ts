@@ -112,7 +112,7 @@ const REGRAS: Regra[] = [
   R('GET', P + '\\/carteirinhas\\.(html|pdf)', 'carteirinhas'),
   R('*', P + '\\/(ata-assembleia\\.(pdf|docx)|relacao-lotes\\.pdf|concessao\\.pdf|concessao\\/lotes)', 'documentos_oficiais'),
   R('ESCRITA', P + '\\/campo\\/pontos(\\/[^/]+)?', 'marcar_campo'),
-  R('*', P + '\\/campo\\/(programacao|programacao\\.pdf|programacao\\/texto|boletim|boletim\\.pdf)', 'programar_campo'),
+  R('*', P + '\\/campo\\/(programacao|programacao\\.pdf|programacao\\/texto|relatorio\\.pdf|relatorio\\/texto|boletim|boletim\\.pdf)', 'programar_campo'),
   R('GET', P + '\\/(coletora\\.[a-z]+|caderneta-campo\\.pdf)', 'baixar_coletora'),
   R('*', P + '\\/dossies(\\/.*)?', 'dossies'),
   // v3.188.0: lotes de produção + capa do dossiê do lote
