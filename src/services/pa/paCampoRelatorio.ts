@@ -201,7 +201,9 @@ export async function dadosRelatorio(projetoId: number, diaQ: unknown, agora = n
   return { r: montarRelatorio(dia, lotes, await situacaoDossies(projetoId), plano, fechado), lotes, nome: p.nome, codigo: p.codigo };
 }
 
-const nomeArq = (codigo: string, dia: string) => `RELATORIO-CAMPO-${codigo}-${dia}.pdf`;
+// v3.191.1: nome do arquivo = relatório + PA + data (ex.: Relatorio_Campo_PA_Salete_Moreno_19-11-2026.pdf)
+export const siglaPa = (codigo: string) => codigo.split(/[-_\s]+/).filter(Boolean).map((w) => /^PA$/i.test(w) ? 'PA' : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('_');
+export const nomeArq = (codigo: string, dia: string) => `Relatorio_Campo_${siglaPa(codigo)}_${dia.slice(8, 10)}-${dia.slice(5, 7)}-${dia.slice(0, 4)}.pdf`;
 export async function textoRelatorioDia(projetoId: number, diaQ: unknown) {
   const { r, nome, codigo } = await dadosRelatorio(projetoId, diaQ);
   return { texto: textoRelatorio(r, nome), nome: nomeArq(codigo, r.dia) };

@@ -927,15 +927,22 @@ async function rMapa(){
   rMemorialVila();
 }
 
+// v3.191.1: abre o PDF direto do servidor (mesma sessão/cookie) — o navegador usa o nome do arquivo
+// (ex.: Relatorio_Campo_PA_Salete_Moreno_19-11-2026.pdf) ao baixar, em vez do código aleatório do "blob".
 async function abrirPdf(caminho){
-  const janela = window.open('about:blank', '_blank');
+  const url = '/api/pa' + caminho;
+  const janela = window.open(url, '_blank');
+  if (janela) return;
+  // bloqueador de pop-up: baixa com o nome certo
   try {
-    if (janela) janela.document.write('<p style="font-family:Arial;padding:20px">Gerando PDF…</p>');
     const r = await api(caminho);
-    const url = URL.createObjectURL(await r.blob());
-    if (janela) janela.location.href = url; else window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 120000);
-  } catch (e){ if (janela) janela.close(); toast(e.message, true); }
+    const cd = r.headers.get('content-disposition') || '';
+    const m = /filename="?([^";]+)"?/i.exec(cd);
+    const blob = await r.blob();
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = u; a.download = m ? m[1] : 'documento.pdf'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+  } catch (e){ toast(e.message, true); }
 }
 
 async function rMemorialVila(){

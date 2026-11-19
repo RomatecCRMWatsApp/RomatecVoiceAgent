@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import * as XLSX from 'xlsx';
 import type { AuthedRequest } from '../middleware/auth';
 import { PaErro } from '../services/pa/erros';
+import { hojeBrasil } from '../services/pa/paDb';
 import { perfilPorRole, podeEscrever, podeExcluir, podeVerDocumentos, filtrarPorPerfil, type PerfilPa } from '../services/pa/lgpd';
 import * as repo from '../services/pa/paRepo';
 import * as fin from '../services/pa/paFinanceiro';
@@ -104,7 +105,14 @@ function h(fn: (req: Request, res: Response) => Promise<unknown>) {
       if (!res.headersSent && out !== undefined) res.json(out);
     } catch (err) {
       if (err instanceof PaErro) {
-        if (!res.headersSent) res.status(err.http).json({ erro: err.message, codigo: err.codigo, detalhe: err.detalhe ?? null });
+        if (res.headersSent) return;
+        // v3.191.1: PDF aberto direto numa aba (navegação) → mensagem legível em vez de JSON
+        if (req.method === 'GET' && req.accepts(['json', 'html']) === 'html') {
+          const m = err.message.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+          res.status(err.http).type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aviso</title><body style="font-family:Arial,sans-serif;padding:28px;color:#1C1C18;background:#F7F4EC"><div style="max-width:520px;margin:auto;background:#fff;border:1px solid #C9A84C;border-radius:10px;padding:20px"><h2 style="color:#0C3320;margin-top:0">⚠️ ${m}</h2><p style="color:#555">Feche esta aba e volte para a Gestão de PA.</p></div></body>`);
+          return;
+        }
+        res.status(err.http).json({ erro: err.message, codigo: err.codigo, detalhe: err.detalhe ?? null });
         return;
       }
       console.error(`[pa] ${req.method} ${req.originalUrl}:`, err);
@@ -560,7 +568,15 @@ router.put('/projetos/:id/campo/programacao', h(async (req) => { exigirEscrita(r
 router.put('/projetos/:id/campo/programacao/automatico', h(async (req) => { exigirAdmin(req); return programacao.definirAgendaAutomatica(id(req.params.id), req.body?.ligado, ctx(req).sub); })); // v3.190.0
 router.post('/projetos/:id/campo/programacao/relocar', h(async (req) => { exigirAdmin(req); return programacao.relocarProgramacao(id(req.params.id), req.body?.dia, ctx(req).sub); })); // v3.189.0
 // v3.191.0: relatório do dia de campo (abre às 16 h, fecha às 21 h) — PDF único + texto para o grupo
-router.get('/projetos/:id/campo/relatorio.pdf', h(async (req, res) => { enviarPdf(res, await relatorioCampo.pdfRelatorioDia(id(req.params.id), req.query.dia, baseValida(req.query.base))); return undefined; }));
+// v3.191.1: o endereço termina com o nome do arquivo (visualizador do navegador / Acrobat salvam com esse nome)
+router.get('/projetos/:id/campo/relatorio.pdf', h(async (req, res) => {
+  const p = await repo.buscarProjeto(id(req.params.id));
+  const dia = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.dia ?? '')) ? String(req.query.dia) : hojeBrasil();
+  const qs = new URLSearchParams({ dia, base: String(baseValida(req.query.base)) }).toString();
+  res.redirect(302, `${req.baseUrl}/projetos/${p.id}/campo/relatorio/${encodeURIComponent(relatorioCampo.nomeArq(p.codigo, dia))}?${qs}`);
+  return undefined;
+}));
+router.get('/projetos/:id/campo/relatorio/:arquivo([\\w.\\-]+\\.pdf)', h(async (req, res) => { enviarPdf(res, await relatorioCampo.pdfRelatorioDia(id(req.params.id), req.query.dia, baseValida(req.query.base))); return undefined; }));
 router.get('/projetos/:id/campo/relatorio/texto', h(async (req) => relatorioCampo.textoRelatorioDia(id(req.params.id), req.query.dia)));
 router.get('/projetos/:id/campo/programacao.pdf', h(async (req, res) => { enviarPdf(res, await programacao.pdfDia(id(req.params.id), req.query.tipo, req.query.dia, baseValida(req.query.base))); return undefined; }));
 router.get('/projetos/:id/campo/programacao/texto', h(async (req) => programacao.textoDia(id(req.params.id), req.query.tipo, req.query.dia)));

@@ -50,3 +50,15 @@ describe('relatório do dia de campo', () => {
     expect(t).not.toMatch(/R\$/);
   });
 });
+
+import { nomeArq } from './paCampoRelatorio';
+import { permissaoDaRota } from './paEquipe';
+describe('nome do arquivo do relatório', () => {
+  it('relatório + PA + data', () => {
+    expect(nomeArq('PA-SALETE-MORENO', '2026-11-19')).toBe('Relatorio_Campo_PA_Salete_Moreno_19-11-2026.pdf');
+  });
+  it('rota com o nome do arquivo exige a permissão de programar o campo', () => {
+    expect(permissaoDaRota('GET', '/projetos/7/campo/relatorio/Relatorio_Campo_PA_Salete_Moreno_19-11-2026.pdf')).toBe('programar_campo');
+    expect(permissaoDaRota('GET', '/projetos/7/campo/relatorio.pdf')).toBe('programar_campo');
+  });
+});
