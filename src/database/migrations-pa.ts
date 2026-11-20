@@ -497,6 +497,8 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_campo_lotes.aviso legado', sql: "UPDATE pa_campo_lotes SET aviso_enviado_em = concluido_em, aviso_erro = 'anterior ao aviso persistente' WHERE aviso_enviado_em IS NULL AND aviso_tentativas = 0 AND concluido_em < NOW() - INTERVAL 12 HOUR" },
   // v3.190.0: agenda de campo automática (padrão ligada; o CEO pode passar para manual)
   { label: 'pa_projetos.campo_agenda_auto', sql: 'ALTER TABLE pa_projetos ADD COLUMN campo_agenda_auto TINYINT NOT NULL DEFAULT 1' },
+  // v3.194.0: bloqueio de lote (o campo não marca os vértices exclusivos dele e ele não fecha)
+  { label: 'pa_lotes_producao.bloqueio', sql: 'ALTER TABLE pa_lotes_producao ADD COLUMN bloqueado TINYINT NOT NULL DEFAULT 0, ADD COLUMN bloqueio_motivo VARCHAR(200) NULL, ADD COLUMN bloqueado_em DATETIME NULL, ADD COLUMN bloqueado_por VARCHAR(160) NULL' },
   { label: 'cep PA Salete Moreno', sql: "UPDATE pa_projetos SET cep_padrao = '65930000' WHERE codigo = 'PA-SALETE-MORENO' AND cep_padrao IS NULL" },
 ];
 

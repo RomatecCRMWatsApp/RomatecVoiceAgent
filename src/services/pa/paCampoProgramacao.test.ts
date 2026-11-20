@@ -87,3 +87,11 @@ describe('agenda automática de campo', () => {
     expect(p['2026-11-23']).not.toContain('48');
   });
 });
+
+describe('agenda ignora lote bloqueado', () => {
+  it('quitado bloqueado não entra na fila nem no carry', () => {
+    const lotes = [{ lote: '24', fechado: false, marcados: 0, quitado: true, quitado_em: '2026-10-01' }, { lote: '25', fechado: false, marcados: 2, quitado: true, quitado_em: '2026-09-01', bloqueado: true }];
+    const p = planejarAgenda('2026-11-18', lotes, ['25'], [], {}, 6, [1, 2, 3, 4, 5]);
+    expect(Object.values(p).flat()).toEqual(['24']);
+  });
+});

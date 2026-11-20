@@ -25,6 +25,28 @@ export function exigidos(vertices: string[], _existentes?: Set<string>): string[
   return [...new Set(vertices)];
 }
 
+// ─── v3.194.0: bloqueio de lote ────────────────────────────────────────────
+/** Lotes bloqueados pelo ADMIN (lote "05" → motivo). */
+export async function lotesBloqueados(projetoId: number): Promise<Map<string, string | null>> {
+  const r = await rows(pool, 'SELECT codigo, bloqueio_motivo FROM pa_lotes_producao WHERE projeto_id = ? AND bloqueado = 1', [projetoId]).catch(() => []);
+  return new Map(r.map((x) => [String(x.codigo).replace(/^LT-/i, ''), (x.bloqueio_motivo as string) ?? null]));
+}
+/** Marco só pode ser marcado se for vértice de ao menos um lote NÃO bloqueado (pura — testável). */
+export function marcoLiberado(lotesDoMarco: string[], bloqueados: Set<string> | Map<string, unknown>): boolean {
+  return !lotesDoMarco.length || lotesDoMarco.some((l) => !bloqueados.has(l));
+}
+export async function bloquearLote(projetoId: number, loteQ: unknown, bloquear: unknown, motivoQ: unknown, u: Usuario) {
+  const m = /^\s*(?:LT[\s-]*)?(\d{1,4}[A-Z]?)\s*$/i.exec(String(loteQ ?? ''));
+  if (!m) throw new PaErro('CAMPO_INVALIDO', 'Lote inválido', 400);
+  const lote = m[1].replace(/^(\d)$/, '0$1').toUpperCase();
+  const sim = bloquear === true || bloquear === 1 || bloquear === '1' || bloquear === 'true';
+  const motivo = sim ? (String(motivoQ ?? '').trim().slice(0, 200) || null) : null;
+  await exec(pool, `INSERT INTO pa_lotes_producao (projeto_id, codigo, bloqueado, bloqueio_motivo, bloqueado_em, bloqueado_por) VALUES (?, ?, ?, ?, ${sim ? 'NOW()' : 'NULL'}, ?)
+    ON DUPLICATE KEY UPDATE bloqueado = VALUES(bloqueado), bloqueio_motivo = VALUES(bloqueio_motivo), bloqueado_em = VALUES(bloqueado_em), bloqueado_por = VALUES(bloqueado_por)`, [projetoId, `LT-${lote}`, sim ? 1 : 0, motivo, sim ? u.nome : null]);
+  await registrarEvento(pool, { projeto_id: projetoId, usuario: u.id, tipo: sim ? 'CAMPO_LOTE_BLOQUEADO' : 'CAMPO_LOTE_DESBLOQUEADO', dados: { lote, motivo } });
+  return { lote, bloqueado: sim, motivo };
+}
+
 /** Lotes cujos vértices estão todos marcados (pura — testável). */
 export function lotesCompletos(lotes: Array<{ lote: string; vertices: string[] }>, marcados: Set<string>): string[] {
   return lotes.filter((l) => l.vertices.length > 0 && [...new Set(l.vertices)].every((v) => marcados.has(v))).map((l) => l.lote);
@@ -119,14 +141,15 @@ export async function estadoCampo(projetoId: number) {
   const pags = await pagamentosPorAssociado(projetoId).catch((e) => { console.warn('[pa-campo] situação de pagamento indisponível:', (e as Error).message); return new Map<number, PagamentoLote>(); });
   // v3.191.2: situação do dossiê do lote (cor própria no mapa: medido ≠ dossiê enviado ≠ quitado)
   const dossies = new Map((await rows(pool, 'SELECT lote, status FROM pa_dossies WHERE projeto_id = ?', [projetoId]).catch(() => [])).map((r) => [String(r.lote), String(r.status)]));
+  const bloq = await lotesBloqueados(projetoId); // v3.194.0
   return {
-    pontos: d.pontos.map((p) => ({ nome: p.nome, E: p.E, N: p.N, lat: p.lat, lon: p.lon, tipo: p.tipo, lotes: p.lotes, existente: !!p.existente, implantar_com: p.implantar_com ?? null, marca: porPonto.get(p.nome) ?? null })),
+    pontos: d.pontos.map((p) => ({ nome: p.nome, E: p.E, N: p.N, lat: p.lat, lon: p.lon, tipo: p.tipo, lotes: p.lotes, existente: !!p.existente, implantar_com: p.implantar_com ?? null, marca: porPonto.get(p.nome) ?? null, bloqueado: !marcoLiberado(p.lotes, bloq) })),
     lotes: ordemServico(d.lotes.map((l) => {
       const vs = [...new Set(l.vertices)];
       const imp = exigidos(vs); // v3.188.3: todos os vértices (cravar + confirmar os que já existem)
       const b = ben[l.lote];
       return { lote: l.lote, area_ha: l.area_ha, vertices: vs, exigidos: imp, a_implantar: vs.filter((v) => !existentes.has(v)).length, existentes: vs.filter((v) => existentes.has(v)).length, marcados: imp.filter((v) => porPonto.has(v)).length, fechado: fech.get(l.lote) ?? null,
-        associado: b ? { nome: b.nome, lote_vila: b.lote_vila, denominacao: b.denominacao ?? null } : null, dossie: dossies.get(l.lote) ?? null,
+        associado: b ? { nome: b.nome, lote_vila: b.lote_vila, denominacao: b.denominacao ?? null } : null, dossie: dossies.get(l.lote) ?? null, bloqueado: bloq.has(l.lote), bloqueio_motivo: bloq.get(l.lote) ?? null,
         pagamento: b ? pags.get(b.associado_id) ?? { parcelas: 0, pagas: 0, pct: 0, quitado: false, marcos_lancados: false, marcos_pago: false } : null };
     })).map((l, i) => ({ ...l, prioridade: l.fechado ? null : i + 1, faixa: faixaPagamento(l.pagamento).id })),
     faixas: FAIXAS_PAGAMENTO,
@@ -146,7 +169,8 @@ export async function fecharCompletos(projetoId: number, u: Usuario, base: strin
   const marcados = new Set((await rows(pool, 'SELECT ponto FROM pa_campo_pontos WHERE projeto_id = ?', [projetoId])).map((r) => String(r.ponto)));
   const jaFechados = new Set((await rows(pool, 'SELECT lote FROM pa_campo_lotes WHERE projeto_id = ?', [projetoId])).map((r) => String(r.lote)));
   const existentes = new Set(d.pontos.filter((x) => x.existente).map((x) => x.nome));
-  const candidatos = d.lotes.filter((l) => (!soLotes || soLotes.includes(l.lote)) && !jaFechados.has(l.lote)).map((l) => ({ ...l, vertices: exigidos(l.vertices, existentes) }));
+  const bloq = await lotesBloqueados(projetoId); // v3.194.0: bloqueado nunca fecha
+  const candidatos = d.lotes.filter((l) => (!soLotes || soLotes.includes(l.lote)) && !jaFechados.has(l.lote) && !bloq.has(l.lote)).map((l) => ({ ...l, vertices: exigidos(l.vertices, existentes) }));
   const novos = lotesCompletos(candidatos, marcados);
   const fechados: Array<{ lote: string; area_ha: number; associado: string | null }> = [];
   if (!novos.length) return fechados;
@@ -233,6 +257,7 @@ export async function marcarPonto(projetoId: number, ponto: string, entrada: { g
   const d = await pontosColetora(projetoId);
   const p = d.pontos.find((x) => x.nome === ponto);
   if (!p) throw new PaErro('PONTO_NAO_ENCONTRADO', `Ponto ${ponto} não existe no levantamento`, 404);
+  { const bloq = await lotesBloqueados(projetoId); if (!marcoLiberado(p.lotes, bloq)) throw new PaErro('LOTE_BLOQUEADO', `${ponto} é só do ${p.lotes.map((l) => 'LT-' + l).join('/')}, que está BLOQUEADO${bloq.get(p.lotes[0]) ? ` (${bloq.get(p.lotes[0])})` : ''} — não pode ser marcado`, 409); }
   const g = entrada.gps && Number.isFinite(Number(entrada.gps.lat)) && Number.isFinite(Number(entrada.gps.lon)) ? entrada.gps : null;
   const obs = entrada.obs ? String(entrada.obs).trim().slice(0, 255) || null : null;
   const ja = await one(pool, 'SELECT id FROM pa_campo_pontos WHERE projeto_id = ? AND ponto = ?', [projetoId, ponto]);
@@ -295,6 +320,9 @@ export async function marcarPontos(projetoId: number, pontosRaw: unknown, entrad
   const d = await pontosColetora(projetoId);
   const desconhecidos = nomes.filter((n) => !d.pontos.some((p) => p.nome === n));
   if (desconhecidos.length) throw new PaErro('PONTO_NAO_ENCONTRADO', `Marco(s) fora do levantamento: ${desconhecidos.join(', ')}`, 404);
+  const bloq = await lotesBloqueados(projetoId);
+  const travados = nomes.filter((n) => !marcoLiberado(d.pontos.find((p) => p.nome === n)!.lotes, bloq));
+  if (travados.length) throw new PaErro('LOTE_BLOQUEADO', `Marco(s) só de lote BLOQUEADO — não podem ser marcados: ${travados.join(', ')}`, 409);
   const ja = new Set((await rows(pool, `SELECT ponto FROM pa_campo_pontos WHERE projeto_id = ? AND ponto IN (${nomes.map(() => '?').join(',')})`, [projetoId, ...nomes])).map((r) => String(r.ponto)));
   const marcados: string[] = []; const lotes = new Set<string>();
   for (const n of nomes) {

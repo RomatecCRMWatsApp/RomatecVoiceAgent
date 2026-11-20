@@ -45,7 +45,7 @@ export function montarRelatorio(dia: string, lotes: LoteBoletim[], dossies: Map<
   const previsao = dias.map((d) => ({ dia: d, itens: plano[d].map((lt) => por.get(lt)).filter((l): l is LoteBoletim => !!l && !l.fechado).map(linha) })).filter((p) => p.itens.length);
   const naFila = new Set(previsao.flatMap((p) => p.itens.map((x) => x.lote)));
   const quitados = lotes.filter((l) => !l.fechado && l.pagamento?.quitado);
-  const abertos = lotes.filter((l) => !l.fechado && l.associado && !l.pagamento?.quitado && !naFila.has(l.lote));
+  const abertos = lotes.filter((l) => !l.fechado && l.associado && !l.pagamento?.quitado && !naFila.has(l.lote) && !(l as { bloqueado?: boolean }).bloqueado);
   const ultimo = previsao.length ? previsao[previsao.length - 1].dia : dia;
   return {
     dia, fechado, total: lotes.length, medidos_total: medidos.length, concluidos, hoje, em_medicao,

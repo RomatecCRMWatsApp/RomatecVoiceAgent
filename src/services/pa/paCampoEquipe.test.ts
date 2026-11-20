@@ -147,3 +147,12 @@ describe('permissões por função', () => {
     expect(dispositivo('Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1')).toBe('iPhone · Safari');
   });
 });
+
+// v3.194.0: lote bloqueado — marco exclusivo dele trava; marco dividido com vizinho liberado continua
+import { marcoLiberado } from './paCampo';
+describe('bloqueio de lote', () => {
+  const bloq = new Set(['25']);
+  it('marco só do lote bloqueado não pode ser marcado', () => { expect(marcoLiberado(['25'], bloq)).toBe(false); });
+  it('marco dividido com vizinho liberado continua marcável (fecha a poligonal do vizinho)', () => { expect(marcoLiberado(['25', '24'], bloq)).toBe(true); });
+  it('marco de perímetro sem lote fica liberado', () => { expect(marcoLiberado([], bloq)).toBe(true); });
+});

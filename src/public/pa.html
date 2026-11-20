@@ -3079,7 +3079,9 @@ const faixaCampo = (d, l) => (d.faixas || []).find((f) => f.id === l.faixa) || {
 // v3.191.2: lote medido tem cor própria (não confunde com quitado): azul = medido; roxo = dossiê enviado/entregue
 const COR_MEDIDO = '#3D7FC1', COR_DOSSIE_ENV = '#7B5BA6';
 const dossieEnviado = (l) => l.dossie === 'ENVIADO' || l.dossie === 'ENTREGUE';
-const corLoteCampo = (d, l) => l.fechado ? (dossieEnviado(l) ? COR_DOSSIE_ENV : COR_MEDIDO) : faixaCampo(d, l).cor;
+// v3.194.0: lote BLOQUEADO = preto (o campo não marca os vértices exclusivos dele)
+const COR_BLOQ = '#111111';
+const corLoteCampo = (d, l) => l.bloqueado ? COR_BLOQ : l.fechado ? (dossieEnviado(l) ? COR_DOSSIE_ENV : COR_MEDIDO) : faixaCampo(d, l).cor;
 const pagTxt = (l) => !l.pagamento ? 'sem associado' : !l.pagamento.parcelas ? 'sem parcelas' : l.pagamento.quitado ? '★ quitado' : `${l.pagamento.pct.toLocaleString('pt-BR')}% pago (${l.pagamento.pagas}/${l.pagamento.parcelas})`;
 const quitadosAMedir = (d) => d.lotes.filter((l) => !l.fechado && l.pagamento && l.pagamento.quitado);
 // ─── v3.169.0: locação dos marcos no mapa (aba Campo) ─
@@ -3258,6 +3260,7 @@ async function rLocacao(box){
         ${(d.faixas || []).map((f) => { const ls = contaFaixa(f.id); return `<tr class="cp-fx" data-faixa="${esc(f.id)}" title="Toque para ver os lotes desta faixa"><td><i style="background:${f.cor}"></i></td><td>${esc(f.rotulo)} <span class="muted">▸ ver lotes</span></td><td class="right">${ls.filter((l) => !l.fechado).length}</td><td class="right">${ls.filter((l) => l.fechado).length}</td></tr>`; }).join('')}
         <tr><td><i style="background:${COR_MEDIDO}"></i></td><td><b>Medido</b> <span class="muted">(poligonal fechada ✅)</span></td><td class="right">—</td><td class="right">${d.lotes.filter((l) => l.fechado && !dossieEnviado(l)).length}</td></tr>
         <tr><td><i style="background:${COR_DOSSIE_ENV}"></i></td><td><b>Medido · dossiê enviado/entregue</b></td><td class="right">—</td><td class="right">${d.lotes.filter((l) => l.fechado && dossieEnviado(l)).length}</td></tr>
+        <tr><td><i style="background:${COR_BLOQ}"></i></td><td><b>🔒 Bloqueado</b> <span class="muted">(não pode ser medido)</span></td><td class="right">${d.lotes.filter((l) => l.bloqueado).length}</td><td class="right">—</td></tr>
       </tbody></table></div>
       <div class="muted" style="margin:-4px 0 8px;font-size:12px">No mapa, o lote medido deixa a cor do pagamento e fica <b style="color:${COR_MEDIDO}">azul</b> (ou <b style="color:${COR_DOSSIE_ENV}">roxo</b> quando o dossiê já foi enviado/entregue).</div>
       <div id="cpFxLista"></div>
@@ -3359,7 +3362,7 @@ async function mapaCampo(d, podeMarcar){
   CP.podeMarcar = podeMarcar;
   preencherSel(lote ? lote.lote : null);
   const ctx = { geo: { ...geo, features: [...lotesF, ...outros] }, lotesF, porLote, outros, pontos, ctl, baseSel: '.cpBase [data-base]',
-    rotulo: (f) => { const l = porLoteCampo[f.properties.lote]; return `${l && l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${f.properties.lote}${fechados.has(f.properties.lote) ? ' ✅' : ''}`; }, opacFill: .5, opacSel3d: .45, opacSel2d: .65 };
+    rotulo: (f) => { const l = porLoteCampo[f.properties.lote]; return `${l && l.bloqueado ? '🔒 ' : l && l.pagamento && l.pagamento.quitado ? '★ ' : ''}LT-${f.properties.lote}${fechados.has(f.properties.lote) ? ' ✅' : ''}`; }, opacFill: .5, opacSel3d: .45, opacSel2d: .65 };
   const eng = modo === '3d' ? mapaLotes3D(lib, box, ctx) : mapaLotes2D(lib, box, ctx);
   ctx.selecionar = (l, centralizar) => { CP.lote = l; CP.ponto = null; const s = $('#cpLote'); if (s) s.value = l; preencherSel(l); eng.marcar(l, centralizar); cartaoLoteCampo(d, l); };
   ctx.selPonto = (id) => { CP.ponto = id; eng.marcarPonto(id); sel.value = id; cartaoPontoCampo(d, id, podeMarcar, eng); };
@@ -3374,7 +3377,7 @@ function listaVerticesLote(d, lo){
   return `<div class="cp-vt" style="margin-top:8px;border:1px solid var(--line,#ddd);border-radius:8px;padding:8px">
     <div class="row" style="align-items:center;gap:6px;margin:0 0 6px"><b style="flex:1 1 auto">Vértices do LT-${esc(lo.lote)} (${ps.length})</b>${pend.length > 1 ? '<button type="button" class="btn btn-ghost btn-sm" id="cpVtTodos" style="flex:0 0 auto">☑️ Selecionar todos</button>' : ''}</div>
     ${ps.map((p) => `<label style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-top:1px solid var(--line,#eee);font-size:15px;${p.marca ? 'opacity:.6' : ''}">
-      <input type="checkbox" data-cpvt="${esc(p.nome)}" ${p.marca ? 'checked disabled' : ''} style="width:22px;height:22px;flex:0 0 auto">
+      <input type="checkbox" data-cpvt="${esc(p.nome)}" ${p.marca ? 'checked disabled' : p.bloqueado ? 'disabled' : ''} style="width:22px;height:22px;flex:0 0 auto">
       <span>${p.marca ? '✅' : p.existente ? '◻️' : '🔴'} <b>${esc(p.nome)}</b> · ${esc(p.tipo)}${p.existente && !p.marca ? ' <span class="muted">(já existe — confirmar)</span>' : ''}${p.marca ? ` <span class="muted">marcado ${hBr(p.marca.marcado_em)}</span>` : ''}</span></label>`).join('')}
     ${pend.length ? `<button type="button" class="btn btn-primary" id="cpVtMarcar" style="margin-top:8px;width:100%;font-size:16px;padding:12px" disabled>✅ Marcar selecionados</button>` : ''}</div>`;
 }
@@ -3406,10 +3409,20 @@ function cartaoLoteCampo(d, l){
     ${!lo.fechado && lo.pagamento && lo.pagamento.quitado ? '<div class="cp-aviso q">★ Lote quitado — prioridade de medição.</div>' : ''}
     ${(() => { const q = quitadosAMedir(d); return !lo.fechado && !(lo.pagamento && lo.pagamento.quitado) && q.length ? `<div class="cp-aviso p">⚠️ <b>Preferência:</b> ainda há ${q.length} lote(s) quitado(s) a medir (${q.slice(0, 6).map((x) => 'LT-' + esc(x.lote)).join(', ')}${q.length > 6 ? '…' : ''}). Pode medir este, mas o ideal é começar pelos quitados.</div>` : ''; })()}
     <div style="margin-top:6px">Marcos: <b>${lo.marcados}/${lo.exigidos.length}</b> marcados${lo.existentes ? ` · ${lo.existentes} já existem no chão (confirmar também)` : ''}</div>
-    ${!lo.fechado && CP.podeMarcar ? listaVerticesLote(d, lo) : ''}
+    ${lo.bloqueado ? `<div class="cp-aviso" style="margin-top:8px;background:#111;color:#fff;border-color:#111">🔒 <b>LOTE BLOQUEADO</b>${lo.bloqueio_motivo ? ` — ${esc(lo.bloqueio_motivo)}` : ''}<br><span style="font-size:12px;opacity:.85">Não pode ser medido: os vértices só dele ficam travados. Os marcos que ele divide com lotes vizinhos continuam liberados para fechar a poligonal deles.</span></div>` : ''}
+    ${S.eu && S.eu.perfil === 'ADMIN' && !lo.fechado ? `<button class="btn ${lo.bloqueado ? 'btn-gold' : 'btn-ghost'} btn-sm" id="cpBloq" style="margin-top:6px">${lo.bloqueado ? '🔓 Desbloquear lote' : '🔒 Bloquear lote'}</button>` : ''}
+    ${!lo.fechado && !lo.bloqueado && CP.podeMarcar ? listaVerticesLote(d, lo) : ''}
     ${lo.fechado ? `<div class="avisos" style="margin-top:8px">✅ <b>MEDIDO</b> em ${hBr(lo.fechado.concluido_em)} por ${esc(lo.fechado.usuario_nome || '—')} · ${nbr(lo.fechado.area_ha ?? lo.area_ha, 4)} ha · perímetro ${nbr(lo.fechado.perimetro_m ?? 0)} m${lo.fechado.base ? ` · ${esc(lo.fechado.base)} / ${esc(lo.fechado.rover || '')}` : ''}</div><div class="muted" style="margin-top:6px">${lo.fechado.aviso_enviado_em ? `📲 Aviso no WhatsApp enviado ${hBr(lo.fechado.aviso_enviado_em)}` : lo.fechado.aviso_erro ? `⚠️ Aviso no WhatsApp não saiu (${lo.fechado.aviso_tentativas}x): ${esc(lo.fechado.aviso_erro)} — o sistema tenta de novo a cada 2 min` : '📲 Aviso no WhatsApp na fila de envio…'}</div>
     ${S.eu && S.eu.perfil === 'ADMIN' ? `<div class="row" style="gap:6px;margin-top:6px"><button class="btn btn-ghost btn-sm" id="cpAviso" style="flex:0 0 auto">📲 ${lo.fechado.aviso_enviado_em ? 'Reenviar' : 'Enviar agora'} o aviso</button><button class="btn btn-ghost btn-sm" id="cpReabrir" style="flex:0 0 auto">↺ Reabrir lote (refazer o fechamento)</button></div>` : ''}` : '<div class="muted" style="margin-top:6px">Marque <b>todos</b> os vértices: 🔴 cravar e ◻️ já existentes (confirmar). O lote fecha quando a poligonal estiver completa.</div>'}</div>`;
   ligarListaVertices(d, lo);
+  // v3.194.0: bloquear / desbloquear o lote (ADMIN)
+  if ($('#cpBloq')) $('#cpBloq').onclick = async () => {
+    let motivo = '';
+    if (!lo.bloqueado) { motivo = prompt(`Bloquear o LT-${lo.lote}?\n\nO campo não vai conseguir marcar os vértices só dele, e ele não fecha como medido. Os marcos divididos com vizinhos continuam liberados.\n\nMotivo (opcional — aparece para a equipe):`, ''); if (motivo === null) return; }
+    else if (!confirm(`Desbloquear o LT-${lo.lote}? Ele volta a poder ser medido e entra na agenda.`)) return;
+    try { await api(`/projetos/${S.pid}/campo/lotes/${encodeURIComponent(lo.lote)}/bloqueio`, { json: { bloquear: !lo.bloqueado, motivo } }); toast(lo.bloqueado ? `LT-${lo.lote} desbloqueado 🔓` : `LT-${lo.lote} bloqueado 🔒`); rLocacao($('#cpBox')); }
+    catch (e){ toast(e.message, true); }
+  };
   if ($('#cpAviso')) $('#cpAviso').onclick = async () => {
     const b = $('#cpAviso'); b.disabled = true; b.textContent = 'Enviando… (fila anti-bloqueio, até ~30 s)';
     try { const r = await api(`/projetos/${S.pid}/campo/lotes/${encodeURIComponent(lo.lote)}/aviso`, { json: {} }); toast(r.enviado ? `Aviso do LT-${lo.lote} enviado no seu WhatsApp ✅` : `Aviso não saiu: ${r.erro || 'tente de novo'}`, !r.enviado); rLocacao($('#cpBox')); }
@@ -3431,6 +3444,7 @@ function cartaoPontoCampo(d, id, podeMarcar, eng){
     <div>E ${nbr(p.E, 3)} · N ${nbr(p.N, 3)} · lotes ${p.lotes.map((x) => 'LT-' + esc(x)).join(', ') || '—'}${p.implantar_com ? ` · implantar com LT-${esc(p.implantar_com)}` : ''}</div>
     ${m ? `<div class="avisos" style="margin-top:8px">✅ Locado em <b>${hBr(m.marcado_em)}</b> por <b>${esc(m.usuario_nome || '—')}</b>${m.base ? `<br>${esc(m.base)} · ${esc(m.rover || '')}` : ''}${m.gps ? `<br>GPS do celular ±${m.gps.precisao ?? '?'} m` : ''}${m.obs ? `<br>Obs.: ${esc(m.obs)}` : ''}</div>
         ${podeMarcar ? '<button class="btn btn-ghost btn-sm" id="cpDesf" style="margin-top:6px">↩️ Desfazer marcação</button>' : ''}`
+      : p.bloqueado ? `<div class="cp-aviso" style="margin-top:8px;background:#111;color:#fff;border-color:#111">🔒 Este marco é só de lote <b>BLOQUEADO</b> (${p.lotes.map((x) => 'LT-' + esc(x)).join(', ')}) — não pode ser marcado.</div>`
       : podeMarcar ? `<input id="cpObs" placeholder="Observação (opcional)" style="margin-top:8px;width:100%"><button class="btn btn-primary" id="cpSalvar" style="margin-top:8px;width:100%;font-size:16px;padding:12px">✅ Salvar marcado</button>` : ''}</div>`;
   if ($('#cpSalvar')) $('#cpSalvar').onclick = async () => {
     const b = $('#cpSalvar'); b.disabled = true; b.textContent = 'Salvando…';

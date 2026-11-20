@@ -212,6 +212,8 @@ export async function salvarProgramacao(projetoId: number, diaQ: unknown, lotesQ
   const lotes = [...new Set(lotesQ.map((x) => String(x).trim()).filter(Boolean))];
   const fora = lotes.filter((l) => !existe.has(l));
   if (fora.length) throw new PaErro('LOTE_INVALIDO', `Lote(s) fora da subdivisão: ${fora.join(', ')}`, 400);
+  const bloqueados = lotes.filter((l) => (e.lotes.find((x) => x.lote === l) as { bloqueado?: boolean } | undefined)?.bloqueado);
+  if (bloqueados.length) throw new PaErro('LOTE_BLOQUEADO', `Lote(s) BLOQUEADO(S) não entram na programação: ${bloqueados.map((x) => 'LT-' + x).join(', ')}`, 409);
   await transacao(async (c) => {
     await exec(c, 'DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia = ?', [projetoId, dia]);
     for (const [i, l] of lotes.entries()) await exec(c, 'INSERT INTO pa_campo_programacao (projeto_id, dia, lote, ordem, criado_por) VALUES (?, ?, ?, ?, ?)', [projetoId, dia, l, i + 1, usuario]);
@@ -275,10 +277,10 @@ export function proximoDiaUtil(d: string, uteis: number[] = diasUteis()): string
   return x;
 }
 
-export interface LoteAgenda { lote: string; fechado: boolean; marcados: number; quitado: boolean; quitado_em: string | null }
+export interface LoteAgenda { lote: string; fechado: boolean; marcados: number; quitado: boolean; quitado_em: string | null; bloqueado?: boolean }
 /** Fila dos quitados a medir: quem quitou antes vem antes; empate pelo nº do lote (pura). */
 export function filaQuitados(lotes: LoteAgenda[]): string[] {
-  return lotes.filter((l) => !l.fechado && l.quitado)
+  return lotes.filter((l) => !l.fechado && l.quitado && !l.bloqueado)
     .sort((a, b) => (a.quitado_em ?? '').localeCompare(b.quitado_em ?? '') || numLote(a.lote, b.lote)).map((l) => l.lote);
 }
 /**
@@ -289,13 +291,13 @@ export function filaQuitados(lotes: LoteAgenda[]): string[] {
  */
 export function planejarAgenda(dia: string, lotes: LoteAgenda[], carry: string[], excluir: string[] = [], manuais: Record<string, string[]> = {}, porDia = lotesPorDia(), uteis = diasUteis()): Record<string, string[]> {
   const st = new Map(lotes.map((l) => [l.lote, l]));
-  const ok = (lt: string) => { const l = st.get(lt); return !!l && !l.fechado && (l.quitado || l.marcados > 0); };
+  const ok = (lt: string) => { const l = st.get(lt); return !!l && !l.fechado && !l.bloqueado && (l.quitado || l.marcados > 0); }; // v3.194.0: bloqueado fora da agenda
   const fora = new Set(excluir);
   const out: Record<string, string[]> = {};
   for (const [d, ls] of Object.entries(manuais)) if (d > dia && !uteis.includes(diaSemana(d))) { out[d] = ls.filter(ok); out[d].forEach((x) => fora.add(x)); }
   const fila: string[] = [];
   const pôr = (lt: string) => { if (ok(lt) && !fora.has(lt) && !fila.includes(lt)) fila.push(lt); };
-  lotes.filter((l) => !l.fechado && l.marcados > 0).sort((a, b) => numLote(a.lote, b.lote)).forEach((l) => pôr(l.lote)); // em medição na frente
+  lotes.filter((l) => !l.fechado && !l.bloqueado && l.marcados > 0).sort((a, b) => numLote(a.lote, b.lote)).forEach((l) => pôr(l.lote)); // em medição na frente
   carry.forEach(pôr);
   filaQuitados(lotes).forEach(pôr);
   let d = proximoDiaUtil(dia, uteis);
@@ -306,7 +308,7 @@ export function planejarAgenda(dia: string, lotes: LoteAgenda[], carry: string[]
 
 export async function lotesAgenda(projetoId: number): Promise<LoteAgenda[]> {
   const e = await estadoCampo(projetoId);
-  return e.lotes.map((l) => ({ lote: l.lote, fechado: !!l.fechado, marcados: l.marcados, quitado: !!l.pagamento?.quitado, quitado_em: l.pagamento?.quitado_em ?? null }));
+  return e.lotes.map((l) => ({ lote: l.lote, fechado: !!l.fechado, marcados: l.marcados, quitado: !!l.pagamento?.quitado, quitado_em: l.pagamento?.quitado_em ?? null, bloqueado: !!(l as { bloqueado?: boolean }).bloqueado }));
 }
 export async function futuroAtual(projetoId: number, dia: string): Promise<Record<string, string[]>> {
   const fut = await rows(pool, 'SELECT dia, lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia > ? ORDER BY dia, ordem, id', [projetoId, dia]);

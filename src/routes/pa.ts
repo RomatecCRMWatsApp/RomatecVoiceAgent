@@ -607,6 +607,7 @@ router.post('/projetos/:id/campo/pontos', h(async (req) => {
   return campo.marcarPonto(id(req.params.id), String(b.ponto ?? '').slice(0, 40), { gps: b.gps ?? null, obs: b.obs, base: b.base, rover: b.rover }, usuarioCampo(req));
 }));
 router.post('/projetos/:id/campo/lotes/:lote/aviso', h(async (req) => { exigirAdmin(req); return campo.avisarLoteDemarcado(id(req.params.id), String(req.params.lote).slice(0, 10), true); })); // v3.188.5
+router.post('/projetos/:id/campo/lotes/:lote/bloqueio', h(async (req) => { exigirAdmin(req); return campo.bloquearLote(id(req.params.id), req.params.lote, req.body?.bloquear, req.body?.motivo, usuarioCampo(req)); })); // v3.194.0
 router.post('/projetos/:id/campo/lotes/:lote/reabrir', h(async (req) => { exigirAdmin(req); return campo.reabrirLote(id(req.params.id), String(req.params.lote).slice(0, 10), usuarioCampo(req)); })); // v3.188.2
 router.delete('/projetos/:id/campo/pontos/:ponto', h(async (req) => {
   const p = ctx(req).perfil;
