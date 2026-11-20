@@ -3436,7 +3436,8 @@ async function rDossies(){
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
         <button class="btn btn-sm ${!f ? 'btn-primary' : 'btn-ghost'}" data-dsf="">Todos (${ds.length})</button>
         ${Object.entries(ST_DOSSIE).map(([k, [, t]]) => `<button class="btn btn-sm ${f === k ? 'btn-primary' : 'btn-ghost'}" data-dsf="${k}">${t} (${n(k)})</button>`).join('')}
-      </div></div>
+      </div>
+      ${admin && ds.some((d) => d.status === 'ENVIADO' || d.status === 'ENTREGUE') ? `<div class="row" style="margin-top:8px;align-items:center;gap:8px"><button class="btn btn-gold btn-sm" id="dsKmlTodos" style="flex:0 0 auto">🧭 Enviar o KML do lote a quem já recebeu o dossiê (${ds.filter((d) => d.status === 'ENVIADO' || d.status === 'ENTREGUE').length})</button><span class="muted" style="flex:1 1 200px">Os novos dossiês já saem com o KML da poligonal logo depois do PDF.</span></div>` : ''}</div>
     <div class="card">${lista.length ? `<div class="tbl"><table><thead><tr><th>Lote</th><th>Associado</th><th>Medido</th><th class="right">Em aberto</th><th>Situação</th><th></th></tr></thead><tbody>
       ${lista.map((d) => `<tr><td><b>LT-${esc(d.lote)}</b><div class="muted">vila ${esc(d.lote_vila)}</div></td><td>${esc(d.nome)}<div class="muted">${esc(d.numero)}${d.denominacao ? ' · ' + esc(d.denominacao) : ''}</div></td>
         <td class="nowrap">${d.medido_em ? hb(d.medido_em) + `<div class="muted">${esc(d.medidor || '')}</div>` : '—'}</td>
@@ -3447,6 +3448,7 @@ async function rDossies(){
         <td class="nowrap"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button>
           ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>✅ Aprovar e enviar</button>` : ''}
           ${admin && d.status === 'ENVIADO' ? `<button class="btn btn-ghost btn-sm" data-dsenv="${esc(d.lote)}">🔁 Reenviar</button>` : ''}
+          ${admin && (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && d.whatsapp_valido ? `<button class="btn btn-ghost btn-sm" data-dskml="${esc(d.lote)}" title="Manda só o KML da poligonal deste lote">🧭 KML</button>` : ''}
           ${(d.status === 'ENVIADO' || d.status === 'PRONTO') && !d.trt_emitida_em ? `<button class="btn btn-ghost btn-sm" data-dstrt="emitida" data-lote="${esc(d.lote)}">📄 TRT emitida</button>` : ''}
           ${d.trt_emitida_em && !d.trt_paga_em ? `<button class="btn btn-ghost btn-sm" data-dstrt="paga" data-lote="${esc(d.lote)}">💳 TRT paga</button>` : ''}
           ${d.status !== 'ENTREGUE' && d.status !== 'AGUARDANDO_PAGAMENTO' ? `<button class="btn btn-gold btn-sm" data-dsent="${esc(d.lote)}" ${d.trt_paga_em ? '' : 'disabled title="Libera depois da TRT paga"'}>📦 Entregue fisicamente</button>` : ''}</td></tr>`).join('')}
@@ -3455,6 +3457,13 @@ async function rDossies(){
   rCapasDossie();
   v.querySelectorAll('[data-dsf]').forEach((b) => b.onclick = () => { S.dossieFiltro = b.dataset.dsf; rDossies(); });
   v.querySelectorAll('[data-dsver]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dsver)}.pdf`));
+  // v3.176.2: KML da poligonal para quem já recebeu o dossiê (fila lenta, um por vez)
+  const enviarKml = async (lotes, txt) => {
+    if (!confirm(`${txt}\n\nVai pela fila lenta do WhatsApp (um por vez, 30–60 s entre cada).`)) return;
+    try { await api(`/projetos/${S.pid}/dossies/kml`, { json: { lotes } }); toast('Envio do KML iniciado (fila lenta)'); } catch (e){ toast(e.message, true); }
+  };
+  if ($('#dsKmlTodos')) $('#dsKmlTodos').onclick = () => enviarKml(null, 'Enviar o KML do lote para todos que já receberam o dossiê?');
+  v.querySelectorAll('[data-dskml]').forEach((b) => b.onclick = () => enviarKml([b.dataset.dskml], `Enviar o KML do LT-${b.dataset.dskml} para o associado?`));
   v.querySelectorAll('[data-dsenv]').forEach((b) => b.onclick = async () => {
     const d = ds.find((x) => x.lote === b.dataset.dsenv);
     if (!confirm(`${d.status === 'PRONTO' ? 'Aprovar e enviar' : 'Reenviar'} o dossiê do LT-${d.lote} para ${d.nome} pelo WhatsApp?\n\nVai: capa, sumário e prazos, mapa e memorial (tradicional), planta e memorial (SIGEF), contrato assinado, termo de quitação com extrato, carteirinha e capa final — com o aviso para comparecer ao escritório (TRT, pagamento e vias impressas).\n\nDica: confira antes no 👁 PDF.`)) return;

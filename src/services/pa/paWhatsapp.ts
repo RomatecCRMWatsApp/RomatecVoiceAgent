@@ -172,7 +172,7 @@ export async function enviarDocumentoNumero(numero: string, pdf: Buffer, nomeArq
     await naVez(async () => {
       const z = await zapi();
       if (texto) { await z.sendReply(n, texto.slice(0, 4000)); await dormir(sorteio(...RITMO.entreMensagensMs)); }
-      await z.sendDocument(n, pdf.toString('base64'), nomeArquivo, 'pdf');
+      await z.sendDocument(n, pdf.toString('base64'), nomeArquivo, nomeArquivo.split('.').pop() || 'pdf'); // v3.176.2: PDF ou KML
     });
   } catch (err) {
     throw new PaErro('ZAPI_INDISPONIVEL', `Falha ao enviar pelo WhatsApp do sistema: ${(err as Error).message.slice(0, 200)}`, 502);

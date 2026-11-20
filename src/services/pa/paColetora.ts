@@ -234,6 +234,21 @@ ${polis}
 `;
 }
 
+/** v3.176.2: KML de UM lote (poligonal + os marcos dele) — vai ao associado junto com o dossiê, para navegar no perímetro. */
+export async function kmlDoLote(projetoId: number, lote: string): Promise<{ conteudo: string; nome: string }> {
+  const p = await buscarProjeto(projetoId);
+  const [d, sub] = await Promise.all([pontosColetora(projetoId), buscarSubdivisao(projetoId)]);
+  const pc = sub?.parcelas.find((x) => x.lote === lote);
+  if (!pc) throw new PaErro('LOTE_NAO_ENCONTRADO', `LT-${lote} não está na subdivisão`, 404);
+  const b = (await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>)))[lote];
+  const so = { ...d, pontos: d.pontos.filter((x) => x.lotes.includes(lote)) };
+  const info = b ? `${b.nome} · vila ${b.lote_vila}${b.denominacao ? ' · ' + b.denominacao : ''}` : null;
+  return {
+    conteudo: kmlColetora(so, `LT-${lote} — ${p.nome}${b?.denominacao ? ' — ' + b.denominacao : ''}`, [{ lote, area_ha: pc.perimetro.area_ha, anel: pc.perimetro.vertices.map((v) => [v.lon, v.lat] as [number, number]), info }]),
+    nome: `LT-${lote}-PERIMETRO-${p.codigo}.kml`,
+  };
+}
+
 export async function arquivoColetora(projetoId: number, formato: 'csv' | 'txt' | 'dxf' | 'kml'): Promise<{ conteudo: string; nome: string; tipo: string }> {
   const p = await buscarProjeto(projetoId);
   const d = await pontosColetora(projetoId);

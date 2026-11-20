@@ -355,6 +355,7 @@ export async function sendDocument(to: string, docBase64: string, fileName: stri
     xls:  'application/vnd.ms-excel',
     txt:  'text/plain',
     csv:  'text/csv',
+    kml:  'application/vnd.google-earth.kml+xml',
   };
   const mime = mimeMap[ext] || 'application/octet-stream';
   const document = docBase64.startsWith('data:')

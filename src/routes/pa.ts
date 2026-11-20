@@ -614,6 +614,11 @@ router.delete('/projetos/:id/campo/pontos/:ponto', h(async (req) => {
 router.get('/projetos/:id/dossies', h(async (req) => { exigirEscrita(req); return { dossies: visao(await dossie.listarDossies(id(req.params.id)), ctx(req).perfil) }; }));
 router.get('/projetos/:id/dossies/:lote.pdf', h(async (req, res) => { exigirEscrita(req); const r = await dossie.pdfDossie(id(req.params.id), String(req.params.lote).slice(0, 10)); enviarPdf(res, r); return undefined; }));
 router.post('/projetos/:id/dossies/:lote/gerar', h(async (req) => { exigirAdmin(req); return dossie.criarDossie(id(req.params.id), String(req.params.lote).slice(0, 10), ctx(req).sub); }));
+router.post('/projetos/:id/dossies/kml', h(async (req) => {
+  exigirAdmin(req);
+  const lotes = Array.isArray(req.body?.lotes) ? req.body.lotes.map((x: unknown) => String(x).slice(0, 10)) : null;
+  return { fila: await dossie.enviarKmlDosEnviados(id(req.params.id), lotes && lotes.length ? lotes : null, ctx(req).sub) };
+}));
 router.post('/projetos/:id/dossies/:lote/enviar', h(async (req) => { exigirAdmin(req); return dossie.enviarDossie(id(req.params.id), String(req.params.lote).slice(0, 10), ctx(req).sub); }));
 router.post('/projetos/:id/dossies/:lote/trt', h(async (req) => { exigirEscrita(req); return dossie.registrarTrt(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.acao, req.body?.numero, ctx(req).sub, ctx(req).nome); })); // v3.170.0
 router.post('/projetos/:id/dossies/:lote/entregue', h(async (req) => { exigirEscrita(req); return dossie.marcarEntregue(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.obs, ctx(req).sub, ctx(req).nome); }));

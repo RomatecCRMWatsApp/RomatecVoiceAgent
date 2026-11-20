@@ -284,6 +284,35 @@ export function textoEnvioDossie(nome: string, lote: string): string {
   ].join('\n');
 }
 
+// ─── v3.176.2: KML da poligonal do lote, enviado logo depois do dossiê ─────
+export const TEXTO_KML = (lote: string) => [
+  `🧭 Segue também o arquivo *KML do seu lote LT-${lote}*: o perímetro com os marcos.`,
+  ``,
+  `📲 Baixe o aplicativo *Organic Maps* (gratuito, na Play Store ou na App Store) — ele *funciona sem internet*.`,
+  `Depois é só tocar neste arquivo e abrir com o Organic Maps: o lote aparece no mapa e você pode *caminhar por todo o perímetro* conferindo os limites e os marcos.`,
+  `Dica: abra o app uma vez com internet e baixe o mapa da região antes de ir para o lote.`,
+].join('\n');
+async function kmlParaEnvio(projetoId: number, lote: string): Promise<{ buf: Buffer; nome: string } | null> {
+  try { const { kmlDoLote } = await import('./paColetora'); const k = await kmlDoLote(projetoId, lote); return { buf: Buffer.from(k.conteudo, 'utf8'), nome: k.nome }; }
+  catch (e) { console.warn('[pa-dossie] KML do lote:', (e as Error).message); return null; }
+}
+
+/** Manda só o KML a quem já recebeu o dossiê (lotes enviados antes da v3.176.2). Pela fila lenta, sem cascata. */
+export async function enviarKmlDosEnviados(projetoId: number, lotes: string[] | null, usuario: string | null) {
+  const ds = (await listarDossies(projetoId)).filter((d) => (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && d.whatsapp_valido && (!lotes || lotes.includes(d.lote)));
+  if (!ds.length) throw new PaErro('NADA_SELECIONADO', 'Nenhum dossiê enviado com WhatsApp válido', 400);
+  const wa = await import('./paWhatsapp');
+  // shortcut: a fila foi feita para cobrança (exige lancamento_ids); aqui o id é só um marcador de 1 item por associado
+  return wa.iniciarFila(projetoId, ds.map((d) => ({ associado_id: d.associado_id, nome: `${d.nome} (KML LT-${d.lote})`, lancamento_ids: [1] })), usuario, async (it) => {
+    const d = ds.find((x) => x.associado_id === it.associado_id)!;
+    const a = await one(pool, 'SELECT whatsapp_numero FROM pa_associados WHERE id = ?', [d.associado_id]);
+    const kml = await kmlParaEnvio(projetoId, d.lote);
+    if (!kml) throw new Error('KML do lote indisponível');
+    await wa.enviarDocumentoNumero(String(a?.whatsapp_numero ?? ''), kml.buf, kml.nome, TEXTO_KML(d.lote));
+    await registrarEvento(pool, { projeto_id: projetoId, associado_id: d.associado_id, usuario, tipo: 'DOSSIE_KML_ENVIADO', dados: { lote: d.lote } });
+  });
+}
+
 /** Número do CEO para a cópia do dossiê (mesma configuração do atendimento automático). */
 export const numeroCeo = () => String(process.env.CEO_WHATSAPP_PHONE || process.env.PA_CONTATO_WHATSAPP || process.env.ROMATEC_CONTATO_WHATSAPP || '(99) 99181-1246').replace(/\D/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1');
 
@@ -306,9 +335,16 @@ export async function enviarDossie(projetoId: number, lote: string, usuario: str
     const r = await pdfDossie(projetoId, lote);
     const wa = await import('./paWhatsapp');
     await wa.enviarDocumentoNumero(String(a?.whatsapp_numero ?? ''), r.pdf, r.nome, textoEnvioDossie(d.nome, lote));
+    // v3.176.2: em seguida o KML da poligonal (falha no KML não desfaz o dossiê)
+    const kml = await kmlParaEnvio(projetoId, lote);
+    if (kml) { try { await wa.enviarDocumentoNumero(String(a?.whatsapp_numero ?? ''), kml.buf, kml.nome, TEXTO_KML(lote)); } catch (e) { console.warn('[pa-dossie] KML associado:', (e as Error).message); } }
     // cópia para o CEO (falha aqui não desfaz o envio ao associado)
-    try { if (!d.revisao_enviada_em || automatico) await wa.enviarDocumentoNumero(numeroCeo(), r.pdf, r.nome, `📋 Cópia — dossiê do *LT-${lote}* enviado para *${d.nome}* (vila ${d.lote_vila})${automatico ? ' automaticamente após a quitação' : ''}.`); else await wa.enviarWhatsAppNumero(numeroCeo(), `✅ Dossiê do *LT-${lote}* aprovado e enviado para *${d.nome}*.`); }
-    catch (e) { console.warn('[pa-dossie] cópia CEO:', (e as Error).message); }
+    try {
+      if (!d.revisao_enviada_em || automatico) {
+        await wa.enviarDocumentoNumero(numeroCeo(), r.pdf, r.nome, `📋 Cópia — dossiê do *LT-${lote}* enviado para *${d.nome}* (vila ${d.lote_vila})${automatico ? ' automaticamente após a quitação' : ''}.`);
+        if (kml) await wa.enviarDocumentoNumero(numeroCeo(), kml.buf, kml.nome);
+      } else await wa.enviarWhatsAppNumero(numeroCeo(), `✅ Dossiê do *LT-${lote}* aprovado e enviado para *${d.nome}* (com o KML do lote).`);
+    } catch (e) { console.warn('[pa-dossie] cópia CEO:', (e as Error).message); }
     await registrarEvento(pool, { projeto_id: projetoId, associado_id: d.associado_id, usuario: quem, tipo: 'DOSSIE_ENVIADO', dados: { lote, automatico } });
     return { lote, status: 'ENVIADO' as StatusDossie, enviado: true };
   } catch (e) {
