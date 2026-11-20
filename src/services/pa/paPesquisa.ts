@@ -89,7 +89,7 @@ export async function registrarCliqueInstagram(token: unknown) {
 
 /** Resultado para o Painel. */
 export async function resultadoPesquisa(projetoId: number) {
-  const ass = await rows(pool, `SELECT a.id, a.nome, lt.numero AS lote, a.telefone_e164, a.whatsapp_status, r.nota, r.comentario, r.respondido_em, r.atualizado_em, r.instagram_clicou_em
+  const ass = await rows(pool, `SELECT a.id, a.nome, lt.numero AS lote, a.telefone_e164, a.whatsapp_numero, a.whatsapp_status, r.nota, r.comentario, r.respondido_em, r.atualizado_em, r.instagram_clicou_em
     FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id LEFT JOIN pa_pesquisa_respostas r ON r.associado_id = a.id AND r.projeto_id = a.projeto_id
     WHERE a.projeto_id = ? AND a.ativo = 1 ORDER BY CAST(lt.numero AS UNSIGNED), lt.numero`, [projetoId]);
   const notas = ass.filter((x) => x.nota != null).map((x) => Number(x.nota));
@@ -100,10 +100,52 @@ export async function resultadoPesquisa(projetoId: number) {
     instagram_cliques: ass.filter((x) => x.instagram_clicou_em).length, enviados: env.size,
     comentarios: ass.filter((x) => x.comentario).map((x) => ({ nome: String(x.nome), lote: String(x.lote), nota: Number(x.nota), comentario: String(x.comentario), em: isoDateTime(x.atualizado_em ?? x.respondido_em) }))
       .sort((a, b) => String(b.em).localeCompare(String(a.em))).slice(0, 30),
-    associados: ass.map((x) => ({ id: Number(x.id), nome: String(x.nome), lote: String(x.lote), nota: x.nota != null ? Number(x.nota) : null, seguiu: !!x.instagram_clicou_em, enviado: env.has(Number(x.id)), whatsapp: x.whatsapp_status === 'VALIDO' || !!x.telefone_e164 })),
+    associados: ass.map((x) => ({ id: Number(x.id), nome: String(x.nome), lote: String(x.lote), nota: x.nota != null ? Number(x.nota) : null, seguiu: !!x.instagram_clicou_em, enviado: env.has(Number(x.id)), whatsapp: x.whatsapp_status === 'VALIDO' || !!x.telefone_e164, telefone: ((x.whatsapp_numero as string) || (x.telefone_e164 as string)) ?? null })),
   };
 }
 
 export async function marcarEnviada(projetoId: number, aid: number, usuario: string | null) {
   await registrarEvento(pool, { projeto_id: projetoId, associado_id: aid, usuario, tipo: 'PESQUISA_ENVIADA', dados: { link: linkPesquisa(aid) } });
+}
+
+// ─── v3.193.0: link geral (grupo do PA) + link individual para copiar + checagem de resposta ───
+const assinaturaGrupo = (pid: number) => createHmac('sha256', segredo()).update(`pesquisa-grupo:${pid}`).digest('base64url').slice(0, 12);
+export const tokenGrupoPesquisa = (pid: number) => `g${pid.toString(36)}-${assinaturaGrupo(pid)}`;
+export function lerTokenGrupoPesquisa(t: unknown): number | null {
+  const m = String(t ?? '').match(/^g([0-9a-z]{1,8})-([\w-]{12})$/);
+  if (!m) return null;
+  const pid = parseInt(m[1], 36);
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const a = Buffer.from(m[2]), b = Buffer.from(assinaturaGrupo(pid));
+  return a.length === b.length && timingSafeEqual(a, b) ? pid : null;
+}
+export const linkGrupoPesquisa = (pid: number) => `${baseUrlPublica()}/pa/pesquisa/grupo/${tokenGrupoPesquisa(pid)}`;
+export function mensagemGrupoPesquisa(projetoNome: string, link: string): string {
+  return [
+    `⭐ *Pesquisa de satisfação — ${projetoNome}*`,
+    '',
+    'Queremos saber o que vocês estão achando do nosso trabalho de topografia no PA (medição, atendimento e entrega dos documentos).',
+    '',
+    `👉 Toque no link, *procure o seu nome ou o número do seu lote*, siga o nosso portal ${INSTAGRAM_ARROBA} no Instagram e dê a sua nota de *0 a 10*. Leva menos de 1 minuto:`,
+    link,
+    '',
+    'Cada associado vota uma vez (dá para mudar a nota depois). Obrigado! 🙏',
+    '_Romatec Consultoria Total — José Romário_',
+  ].join('\n');
+}
+/** Página do link geral: cada associado escolhe o próprio nome/lote e vai para a pesquisa dele. Só primeiro nome + inicial. */
+export async function listaGrupoPesquisa(token: unknown) {
+  const pid = lerTokenGrupoPesquisa(token);
+  if (!pid) throw new PaErro('LINK_INVALIDO', 'Link da pesquisa inválido', 404);
+  const p = await one(pool, 'SELECT nome FROM pa_projetos WHERE id = ?', [pid]);
+  if (!p) throw new PaErro('LINK_INVALIDO', 'Link da pesquisa inválido', 404);
+  const ass = await rows(pool, `SELECT a.id, a.nome, lt.numero AS lote, r.nota FROM pa_associados a JOIN pa_lotes lt ON lt.id = a.lote_id
+    LEFT JOIN pa_pesquisa_respostas r ON r.associado_id = a.id AND r.projeto_id = a.projeto_id
+    WHERE a.projeto_id = ? AND a.ativo = 1 ORDER BY CAST(lt.numero AS UNSIGNED), lt.numero`, [pid]);
+  const curto = (n: string) => { const ps = n.trim().split(/\s+/); const t = (w: string) => w.charAt(0) + w.slice(1).toLowerCase(); return ps.length > 1 ? `${t(ps[0])} ${ps[ps.length - 1].charAt(0)}.` : t(ps[0] ?? ''); };
+  return { projeto: String(p.nome), itens: ass.map((a) => ({ nome: curto(String(a.nome)), lote: String(a.lote), respondeu: a.nota != null, token: tokenPesquisa(Number(a.id)) })) };
+}
+export async function jaRespondeu(aid: number): Promise<boolean> {
+  const r = await one(pool, 'SELECT nota FROM pa_pesquisa_respostas WHERE associado_id = ? AND nota IS NOT NULL LIMIT 1', [aid]);
+  return !!r;
 }

@@ -89,7 +89,7 @@ export async function listarDossies(projetoId: number) {
       gerado_em: isoDateTime(d.gerado_em), enviado_em: isoDateTime(d.enviado_em), enviado_por: (d.enviado_por as string) ?? null, entregue_em: isoDateTime(d.entregue_em), entregue_por: (d.entregue_por as string) ?? null, entregue_obs: (d.entregue_obs as string) ?? null,
       trt_numero: (d.trt_numero as string) ?? null, trt_emitida_em: isoDateTime(d.trt_emitida_em ?? null), trt_emitida_por: (d.trt_emitida_por as string) ?? null,
       trt_paga_em: isoDateTime(d.trt_paga_em ?? null), trt_paga_por: (d.trt_paga_por as string) ?? null, conclusao_enviada_em: isoDateTime(d.conclusao_enviada_em ?? null),
-      revisao_enviada_em: isoDateTime(d.revisao_enviada_em ?? null),
+      revisao_enviada_em: isoDateTime(d.revisao_enviada_em ?? null), kml_enviado_em: isoDateTime(d.kml_enviado_em ?? null), // v3.193.0
     });
   }
   return out.sort((a, b) => a.lote.localeCompare(b.lote, 'pt-BR', { numeric: true }));
@@ -335,6 +335,14 @@ export async function enviarDossie(projetoId: number, lote: string, usuario: str
     const r = await pdfDossie(projetoId, lote);
     const wa = await import('./paWhatsapp');
     await wa.enviarDocumentoNumero(String(a?.whatsapp_numero ?? ''), r.pdf, r.nome, textoEnvioDossie(d.nome, lote));
+    // v3.193.0: junto com o dossiê — KML do lote (Organic Maps, sem internet) e o link da pesquisa de satisfação.
+    // Falha aqui não desfaz o envio do dossiê.
+    try { const k = await import('./paKmlLote'); await k.enviarKmlLote(projetoId, lote, String(a?.whatsapp_numero ?? ''), d.nome, quem); }
+    catch (e) { console.warn('[pa-dossie] KML:', (e as Error).message); }
+    try {
+      const pq = await import('./paPesquisa');
+      if (!(await pq.jaRespondeu(d.associado_id))) { await wa.enviarWhatsAppNumero(String(a?.whatsapp_numero ?? ''), pq.mensagemPesquisa(d.nome, pq.linkPesquisa(d.associado_id))); await pq.marcarEnviada(projetoId, d.associado_id, quem); }
+    } catch (e) { console.warn('[pa-dossie] pesquisa:', (e as Error).message); }
     // v3.176.2: em seguida o KML da poligonal (falha no KML não desfaz o dossiê)
     const kml = await kmlParaEnvio(projetoId, lote);
     if (kml) { try { await wa.enviarDocumentoNumero(String(a?.whatsapp_numero ?? ''), kml.buf, kml.nome, TEXTO_KML(lote)); } catch (e) { console.warn('[pa-dossie] KML associado:', (e as Error).message); } }

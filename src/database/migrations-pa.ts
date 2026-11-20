@@ -482,6 +482,8 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_pagamentos.notificacao recupera pendentes', sql: 'UPDATE pa_pagamentos SET notificado_em = NULL WHERE notificacao_json IS NULL AND seed_chave IS NULL AND notificado_em = criado_em AND criado_em >= NOW() - INTERVAL 3 DAY' },
   // v3.170.0: dossiê — etapa da TRT (emitida → paga libera a entrega das vias impressas) e mensagem de conclusão.
   // v3.187.0: dossiê vai primeiro para a revisão do CEO (aprovação antes do envio ao associado)
+  // v3.193.0: KML do lote (Organic Maps) enviado junto com o dossiê
+  { label: 'pa_dossies.kml', sql: 'ALTER TABLE pa_dossies ADD COLUMN kml_enviado_em DATETIME NULL' },
   { label: 'pa_dossies.revisao', sql: 'ALTER TABLE pa_dossies ADD COLUMN revisao_enviada_em DATETIME NULL' },
   { label: 'pa_dossies.trt', sql: 'ALTER TABLE pa_dossies ADD COLUMN trt_numero VARCHAR(40) NULL, ADD COLUMN trt_emitida_em DATETIME NULL, ADD COLUMN trt_emitida_por VARCHAR(160) NULL, ADD COLUMN trt_paga_em DATETIME NULL, ADD COLUMN trt_paga_por VARCHAR(160) NULL, ADD COLUMN conclusao_enviada_em DATETIME NULL' },
   { label: 'pa_projetos.divisa_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN divisa_json JSON NULL' },

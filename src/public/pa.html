@@ -728,8 +728,10 @@ function cardLinks(){
     <div class="lk-grid">
       ${mapaOk ? `<div class="lk"><b>🗺️ Mapa dos lotes</b><div class="muted">O associado navega no mapa (2D/3D, satélite, relevo) e toca no lote: vê número, associado, lote da vila e chácara — sem área nem financeiro.</div>
         <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">${pesqOk ? '<button class="btn btn-primary btn-sm" id="lkMapaInd" style="flex:0 0 auto">📲 Enviar para cada associado</button>' : ''}<button class="btn btn-ghost btn-sm" id="lkMapaEnv" style="flex:0 0 auto">📤 Enviar no grupo</button><button class="btn btn-ghost btn-sm" id="lkMapaCop" style="flex:0 0 auto">📋 Copiar link</button><button class="btn btn-gold btn-sm" id="lkMapaVer" style="flex:0 0 auto">👁️ Ver como o associado</button></div></div>` : ''}
-      ${pesqOk ? `<div class="lk"><b>⭐ Pesquisa de satisfação</b><div class="muted">Link pessoal de cada associado: segue o @avalieimob e dá a nota de 0 a 10. Vai pelo WhatsApp individual de cada um (não é link de grupo).</div>
-        <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn btn-primary btn-sm" id="lkPesqEnv" style="flex:0 0 auto">📲 Enviar para quem não respondeu</button><button class="btn btn-ghost btn-sm" id="lkPesqVer" style="flex:0 0 auto">📊 Ver resultado</button></div></div>` : ''}
+      ${pesqOk ? `<div class="lk"><b>⭐ Pesquisa de satisfação</b><div class="muted">Segue o @avalieimob e dá a nota de 0 a 10. <b>Sem risco de bloqueio:</b> mande o <b>link geral no grupo</b> (cada um acha o próprio nome) ou copie o <b>link de um associado</b> e envie pelo seu WhatsApp. Também vai sozinho junto com o dossiê.</div>
+        <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn btn-primary btn-sm" id="lkPesqGrupo" style="flex:0 0 auto">📤 Enviar no grupo</button><button class="btn btn-ghost btn-sm" id="lkPesqCop" style="flex:0 0 auto">📋 Copiar link geral</button><button class="btn btn-gold btn-sm" id="lkPesqUm" style="flex:0 0 auto">👤 Link de um associado</button><button class="btn btn-ghost btn-sm" id="lkPesqVer" style="flex:0 0 auto">📊 Ver resultado</button></div>
+        <div id="lkPesqSel"></div>
+        <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn btn-ghost btn-sm" id="lkPesqEnv" style="flex:0 0 auto;font-size:11px">📲 Disparo pelo sistema (quem não respondeu)</button></div></div>` : ''}
     </div><div id="envProg" style="margin-top:8px"></div></div>`;
   acompanharFila(); // v3.184.0: progresso da fila do WhatsApp (mapa/pesquisa) aqui mesmo
   const mp = () => api(`/projetos/${S.pid}/mapa-publico`);
@@ -756,6 +758,35 @@ function cardLinks(){
     };
   }
   if ($('#lkPesqVer')) $('#lkPesqVer').onclick = () => { const c = $('#pesqBox'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  // v3.193.0: pesquisa — link geral para o grupo e link individual para mandar pelo próprio WhatsApp (sem disparo em massa)
+  if ($('#lkPesqCop')) $('#lkPesqCop').onclick = () => copiarTextoGrupo(`/projetos/${S.pid}/pesquisa/link-grupo`);
+  if ($('#lkPesqGrupo')) $('#lkPesqGrupo').onclick = async () => {
+    try {
+      const r = await api(`/projetos/${S.pid}/pesquisa/link-grupo`);
+      if (navigator.share) { try { await navigator.clipboard.writeText(r.texto); } catch { /* ok */ } await navigator.share({ text: r.texto }).catch((e) => { if (e && e.name !== 'AbortError') caixaManual(r.texto, 'Texto da pesquisa — copie e cole no grupo'); }); }
+      else window.open('https://wa.me/?text=' + encodeURIComponent(r.texto), '_blank');
+    } catch (e){ toast(e.message, true); }
+  };
+  if ($('#lkPesqUm')) $('#lkPesqUm').onclick = async () => {
+    const alvo = $('#lkPesqSel');
+    if (alvo.innerHTML) { alvo.innerHTML = ''; return; }
+    let r; try { r = await api(`/projetos/${S.pid}/pesquisa`); } catch (e){ return toast(e.message, true); }
+    alvo.innerHTML = `<div style="position:relative;margin-top:8px"><input id="pqBusca" placeholder="Digite o nome ou o lote (ex.: Maria, 14)" autocomplete="off" style="width:100%"><div id="pqRes" class="pg-lista" style="max-height:260px;overflow:auto"></div></div>`;
+    const sa = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const lista = () => {
+      const q = sa($('#pqBusca').value.trim());
+      const ls = r.associados.filter((a) => !q || sa(a.nome).includes(q) || String(a.lote) === q.replace(/\D/g, '') || String(a.lote).padStart(2, '0') === q.replace(/\D/g, '').padStart(2, '0')).slice(0, 40);
+      $('#pqRes').innerHTML = ls.map((a) => `<div class="pg-it" style="border-left-color:${a.nota == null ? '#ccc' : '#2E7D32'}"><b>LT ${esc(a.lote)}</b><span>${esc(a.nome)} ${a.nota != null ? `<span class="chip c-PAGO">${a.nota}/10</span>` : ''}</span>
+        <button class="btn btn-ghost btn-sm" data-pqcp="${a.id}" title="Copiar a mensagem com o link pessoal">📋 Copiar</button>${a.telefone ? `<button class="btn btn-primary btn-sm" data-pqwa="${a.id}" data-tel="${esc(a.telefone)}" title="Abre a conversa no SEU WhatsApp com a mensagem pronta">💬 WhatsApp</button>` : ''}</div>`).join('') || '<div class="muted" style="padding:8px">Ninguém com esse nome/lote.</div>';
+      $('#pqRes').querySelectorAll('[data-pqcp]').forEach((b) => b.onclick = () => copiarTextoGrupo(`/projetos/${S.pid}/pesquisa/link/${b.dataset.pqcp}`));
+      $('#pqRes').querySelectorAll('[data-pqwa]').forEach((b) => b.onclick = async () => {
+        const w = window.open('about:blank', '_blank');
+        try { const x = await api(`/projetos/${S.pid}/pesquisa/link/${b.dataset.pqwa}`); const u = `https://wa.me/${b.dataset.tel.replace(/\D/g, '')}?text=${encodeURIComponent(x.mensagem)}`; if (w) w.location.href = u; else window.open(u, '_blank'); }
+        catch (e){ if (w) w.close(); toast(e.message, true); }
+      });
+    };
+    $('#pqBusca').oninput = lista; lista(); $('#pqBusca').focus();
+  };
   if ($('#lkPesqEnv')) $('#lkPesqEnv').onclick = () => { const b = $('#pqEnviar'); if (b) b.click(); else toast('Abrindo a pesquisa…'); };
 }
 // ─── v3.181.0: pesquisa de satisfação (Instagram @avalieimob + nota 0–10) ─
@@ -3433,6 +3464,7 @@ async function rDossies(){
   v.innerHTML = `<div class="card"><h2 style="margin-top:0">📦 Dossiês de pronta entrega</h2>
       <div class="muted" style="margin-bottom:6px">O dossiê libera com o <b>lote medido</b> + <b>contrato quitado</b> + <b>taxa de marcos paga</b>. O sistema monta sozinho: <b>capa</b>, sumário e prazos, <b>mapa e memorial (tradicional)</b>, <b>planta e memorial (SIGEF)</b>, <b>contrato assinado</b>, <b>termo de quitação com extrato</b> (contrato + marcos), <b>carteirinha</b> e <b>capa final</b> com os próximos passos.</div>
       <div class="muted">Quando o dossiê fica pronto, o PDF vai <b>primeiro para o seu WhatsApp</b> para revisar. Confira no 👁 PDF e toque em <b>✅ Aprovar e enviar</b>: o associado recebe o PDF com o aviso para comparecer ao escritório (solicitar a TRT, pagar e pegar as vias impressas).</div>
+      ${(() => { const n = ds.filter((d) => (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && !d.kml_enviado_em && d.whatsapp_valido).length; return admin && n ? `<div class="cp-aviso p" style="margin-top:8px">🗺️ <b>${n} associado(s)</b> já receberam o dossiê mas ainda <b>não receberam o KML</b> do lote (Organic Maps). <button class="btn btn-gold btn-sm" id="dsKmlTodos" style="margin-left:6px">📲 Enviar o KML para eles</button></div>` : ''; })()}
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
         <button class="btn btn-sm ${!f ? 'btn-primary' : 'btn-ghost'}" data-dsf="">Todos (${ds.length})</button>
         ${Object.entries(ST_DOSSIE).map(([k, [, t]]) => `<button class="btn btn-sm ${f === k ? 'btn-primary' : 'btn-ghost'}" data-dsf="${k}">${t} (${n(k)})</button>`).join('')}
@@ -3445,7 +3477,7 @@ async function rDossies(){
         <td>${chip(ST_DOSSIE[d.status][0], ST_DOSSIE[d.status][1])}${d.pendencia && d.status === 'AGUARDANDO_PAGAMENTO' ? `<div class="muted" style="color:var(--red)">🔒 ${esc(d.pendencia)}</div>` : ''}${d.status === 'PRONTO' && d.revisao_enviada_em ? `<div class="muted">📋 PDF enviado para você revisar ${hb(d.revisao_enviada_em)}</div>` : ''}${d.enviado_em ? `<div class="muted">enviado ${hb(d.enviado_em)}</div>` : ''}
           ${d.status === 'ENVIADO' || d.status === 'ENTREGUE' ? `<div class="muted">📄 TRT: ${d.trt_paga_em ? `✅ paga ${hb(d.trt_paga_em)}` : d.trt_emitida_em ? `emitida ${hb(d.trt_emitida_em)} — aguardando pagamento` : 'a emitir'}${d.trt_numero ? ' · nº ' + esc(d.trt_numero) : ''}</div>` : ''}
           ${d.conclusao_enviada_em ? `<div class="muted">🙏 mensagem de conclusão enviada ${hb(d.conclusao_enviada_em)}</div>` : ''}${d.entregue_em ? `<div class="muted">entregue ${hb(d.entregue_em)} · ${esc(d.entregue_por || '')}${d.entregue_obs ? ' · ' + esc(d.entregue_obs) : ''}</div>` : ''}</td>
-        <td class="nowrap"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button>
+        <td class="nowrap"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button><button class="btn btn-ghost btn-sm" data-dskml="${esc(d.lote)}" title="Baixar o KML do lote (abre no Organic Maps / Google Earth)">🗺️ KML</button>${admin && (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && d.whatsapp_valido ? `<button class="btn btn-ghost btn-sm" data-dskmlenv="${esc(d.lote)}" title="Enviar o KML + passo a passo do Organic Maps no WhatsApp do associado">📲 KML${d.kml_enviado_em ? ' ✓' : ''}</button>` : ''}
           ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>✅ Aprovar e enviar</button>` : ''}
           ${admin && d.status === 'ENVIADO' ? `<button class="btn btn-ghost btn-sm" data-dsenv="${esc(d.lote)}">🔁 Reenviar</button>` : ''}
           ${admin && (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && d.whatsapp_valido ? `<button class="btn btn-ghost btn-sm" data-dskml="${esc(d.lote)}" title="Manda só o KML da poligonal deste lote">🧭 KML</button>` : ''}
@@ -3457,6 +3489,19 @@ async function rDossies(){
   rCapasDossie();
   v.querySelectorAll('[data-dsf]').forEach((b) => b.onclick = () => { S.dossieFiltro = b.dataset.dsf; rDossies(); });
   v.querySelectorAll('[data-dsver]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dsver)}.pdf`));
+  // v3.193.0: KML do lote (Organic Maps, sem internet)
+  v.querySelectorAll('[data-dskml]').forEach((b) => b.onclick = () => { window.location.href = `/api/pa/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dskml)}/lote.kml`; });
+  v.querySelectorAll('[data-dskmlenv]').forEach((b) => b.onclick = async () => {
+    if (!confirm(`Enviar o KML do LT-${b.dataset.dskmlenv} (mapa do lote para o Organic Maps) no WhatsApp do associado?`)) return;
+    b.disabled = true; toast('Enviando o KML… (fila anti-bloqueio, até ~30 s)');
+    try { await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dskmlenv)}/kml`, { json: {} }); toast(`KML do LT-${b.dataset.dskmlenv} enviado ✅`); rDossies(); }
+    catch (e){ toast(e.message, true); b.disabled = false; }
+  });
+  if ($('#dsKmlTodos')) $('#dsKmlTodos').onclick = async () => {
+    if (!confirm('Enviar o KML do lote (com o passo a passo do Organic Maps) para todos que já receberam o dossiê e ainda não têm o KML?\n\nVai um por vez, com intervalo (evita bloqueio). No fim chega um resumo no seu WhatsApp.')) return;
+    try { const r = await api(`/projetos/${S.pid}/dossies/kml/reenviar`, { json: {} }); toast(r.fila ? `Enviando o KML para ${r.fila} associado(s): ${r.lotes.map((x) => 'LT-' + x).join(', ')}` : 'Ninguém pendente'); }
+    catch (e){ toast(e.message, true); }
+  };
   // v3.176.2: KML da poligonal para quem já recebeu o dossiê (fila lenta, um por vez)
   const enviarKml = async (lotes, txt) => {
     if (!confirm(`${txt}\n\nVai pela fila lenta do WhatsApp (um por vez, 30–60 s entre cada).`)) return;

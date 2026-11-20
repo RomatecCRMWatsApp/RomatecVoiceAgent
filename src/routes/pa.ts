@@ -47,6 +47,7 @@ import * as relatorioCampo from '../services/pa/paCampoRelatorio';
 import { fotoUsuario, salvarFotoUsuario, removerFotoUsuario } from '../services/pa/paUsuarioFoto';
 import { baseValida } from '../services/pa/mapaTiles';
 import * as dossie from '../services/pa/paDossie';
+import * as kmlLote from '../services/pa/paKmlLote';
 import * as lotesProd from '../services/pa/paLotesProducao';
 
 const router = Router();
@@ -522,6 +523,8 @@ router.post('/projetos/:id/mapa-publico/enviar', h(async (req) => {
 router.get('/projetos/:id/mapa-publico', h(async (req) => { const pid = id(req.params.id); const p = await repo.buscarProjeto(pid); const link = linkMapaPublico(pid); return { link, texto: textoMapaPublico(p.nome, link) }; }));
 // v3.181.0: pesquisa de satisfação — resultado, link pessoal e envio pelo WhatsApp (só quem não respondeu)
 router.get('/projetos/:id/pesquisa', h(async (req) => pesquisa.resultadoPesquisa(id(req.params.id))));
+// v3.193.0: link geral da pesquisa (para o grupo) — cada um escolhe o próprio nome/lote
+router.get('/projetos/:id/pesquisa/link-grupo', h(async (req) => { const p = await repo.buscarProjeto(id(req.params.id)); const link = pesquisa.linkGrupoPesquisa(p.id); return { link, mensagem: pesquisa.mensagemGrupoPesquisa(p.nome, link), texto: pesquisa.mensagemGrupoPesquisa(p.nome, link) }; }));
 router.get('/projetos/:id/pesquisa/link/:aid', h(async (req) => { const aid = id(req.params.aid, 'associado'); const a = await repo.buscarAssociado(aid); const link = pesquisa.linkPesquisa(aid); const mensagem = pesquisa.mensagemPesquisa(String((a as { nome?: string }).nome ?? ''), link); return { link, mensagem, texto: mensagem }; }));
 router.post('/projetos/:id/pesquisa/enviar', h(async (req) => {
   exigirEscrita(req);
@@ -613,6 +616,22 @@ router.delete('/projetos/:id/campo/pontos/:ponto', h(async (req) => {
 // ─── v3.169.0: dossiês de pronta entrega ─
 router.get('/projetos/:id/dossies', h(async (req) => { exigirEscrita(req); return { dossies: visao(await dossie.listarDossies(id(req.params.id)), ctx(req).perfil) }; }));
 router.get('/projetos/:id/dossies/:lote.pdf', h(async (req, res) => { exigirEscrita(req); const r = await dossie.pdfDossie(id(req.params.id), String(req.params.lote).slice(0, 10)); enviarPdf(res, r); return undefined; }));
+// v3.193.0: KML do lote (Organic Maps) — baixar, enviar a um associado, reenviar aos já finalizados
+router.get('/projetos/:id/dossies/:lote/lote.kml', h(async (req, res) => {
+  const k = await kmlLote.kmlLote(id(req.params.id), String(req.params.lote).slice(0, 10));
+  res.setHeader('Content-Type', 'application/vnd.google-earth.kml+xml; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename="${k.nome}"`); res.end(k.kml);
+  return undefined;
+}));
+router.post('/projetos/:id/dossies/kml/reenviar', h(async (req) => { exigirAdmin(req); return kmlLote.reenviarKmlFinalizados(id(req.params.id), ctx(req).sub); }));
+router.post('/projetos/:id/dossies/:lote/kml', h(async (req) => {
+  exigirAdmin(req);
+  const pid = id(req.params.id), lote = String(req.params.lote).slice(0, 10);
+  const d = (await dossie.listarDossies(pid)).find((x) => x.lote === lote);
+  if (!d) throw new PaErro('DOSSIE_NAO_ENCONTRADO', 'Dossiê não encontrado', 404);
+  if (!d.whatsapp_valido) throw new PaErro('SEM_WHATSAPP', 'Associado sem WhatsApp válido', 409);
+  const a = await rows(pool, 'SELECT whatsapp_numero FROM pa_associados WHERE id = ?', [d.associado_id]);
+  return kmlLote.enviarKmlLote(pid, lote, String(a[0]?.whatsapp_numero ?? ''), d.nome, ctx(req).sub);
+}));
 router.post('/projetos/:id/dossies/:lote/gerar', h(async (req) => { exigirAdmin(req); return dossie.criarDossie(id(req.params.id), String(req.params.lote).slice(0, 10), ctx(req).sub); }));
 router.post('/projetos/:id/dossies/kml', h(async (req) => {
   exigirAdmin(req);

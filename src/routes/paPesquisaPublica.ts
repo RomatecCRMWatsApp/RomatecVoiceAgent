@@ -4,7 +4,7 @@
 // e dê a nota de 0 a 10 para a Romatec (topografia). Mostra só o primeiro nome e o lote.
 import { Router, type Request, type Response } from 'express';
 import { PaErro } from '../services/pa/erros';
-import { dadosPaginaPesquisa, registrarVoto, registrarCliqueInstagram, INSTAGRAM_PORTAL, INSTAGRAM_ARROBA } from '../services/pa/paPesquisa';
+import { dadosPaginaPesquisa, registrarVoto, registrarCliqueInstagram, listaGrupoPesquisa, INSTAGRAM_PORTAL, INSTAGRAM_ARROBA } from '../services/pa/paPesquisa';
 
 const router = Router();
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -79,6 +79,24 @@ export function htmlPesquisa(d: { nome: string; lote: string; projeto: string; n
 
 const erroHtml = (msg: string) => `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pesquisa — Romatec</title><style>${CSS}</style></head><body><div class="w"><div class="c"><b>${esc(msg)}</b><p class="av">Peça um novo link à Romatec.</p></div></div></body></html>`;
 
+// v3.193.0: link geral (grupo do PA) — cada um acha o próprio nome ou lote e vai para a pesquisa pessoal
+router.get('/grupo/:gtoken', async (req: Request, res: Response) => {
+  try {
+    const d = await listaGrupoPesquisa(req.params.gtoken);
+    const itens = d.itens.map((x) => `<a class="it" href="/pa/pesquisa/${esc(x.token)}" data-b="${esc((x.nome + ' ' + x.lote).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))}"><b>Lote ${esc(x.lote)}</b><span>${esc(x.nome)}</span>${x.respondeu ? '<em>✓ já votou</em>' : '<em class="v">votar ›</em>'}</a>`).join('');
+    res.setHeader('Cache-Control', 'no-store');
+    res.type('html').send(`<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Pesquisa de satisfação — Romatec</title><style>${CSS}
+      .busca{width:100%;border:2px solid #C9A84C;border-radius:12px;padding:14px;font-size:17px;margin-top:6px}
+      .it{display:flex;align-items:center;gap:10px;padding:13px 4px;border-bottom:1px solid #EEE7D2;color:#1C1C18;text-decoration:none;font-size:16px}
+      .it b{flex:0 0 78px;color:#0C3320}.it span{flex:1}.it em{font-style:normal;font-size:13px;color:#2E7D32;font-weight:700}.it em.v{color:#fff;background:#0C3320;border-radius:8px;padding:6px 10px}</style></head><body><div class="w">
+      <div class="top"><img src="/icons/pa-192.png" alt=""><div><small>Romatec · Topografia</small><h1>Pesquisa de satisfação</h1><p>${esc(d.projeto)}</p></div></div>
+      <div class="c"><div class="passo"><i>1</i> Procure o seu nome ou o nº do seu lote</div><input class="busca" id="q" placeholder="Ex.: Maria, 14" autocomplete="off" inputmode="search"><div id="l" style="margin-top:6px">${itens}</div>
+      <div class="av">Toque no seu nome para abrir a <b>sua</b> pesquisa (siga ${esc(INSTAGRAM_ARROBA)} e dê a nota de 0 a 10).</div></div></div>
+      <script>var q=document.getElementById('q');q.oninput=function(){var t=q.value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();document.querySelectorAll('.it').forEach(function(a){a.style.display=!t||a.getAttribute('data-b').indexOf(t)>=0?'':'none'})}</script></body></html>`);
+  } catch (e) {
+    res.status(e instanceof PaErro ? e.http : 500).type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:Arial;padding:24px">Link da pesquisa inválido.</body>`);
+  }
+});
 router.get('/:token', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'private, no-store');
   res.setHeader('X-Robots-Tag', 'noindex');
