@@ -25,7 +25,7 @@ export type SituacaoLote = 'ENTREGUE' | 'ENVIADO' | 'MEDIDO' | 'A_MEDIR';
 export interface LinhaQuadro { lote: string; associado: string | null; lote_vila: string | null; situacao: SituacaoLote }
 export const COR_SITUACAO: Record<SituacaoLote, { cor: string; rotulo: string }> = {
   ENTREGUE: { cor: '#1E9E4A', rotulo: 'Dossiê entregue' }, ENVIADO: { cor: '#3D7FC1', rotulo: 'Dossiê enviado' },
-  MEDIDO: { cor: '#F2C94C', rotulo: 'Medido' }, A_MEDIR: { cor: '#FFFFFF', rotulo: 'A medir' },
+  MEDIDO: { cor: '#3D7FC1', rotulo: 'Medido' }, A_MEDIR: { cor: '#FFFFFF', rotulo: 'A medir' }, // v3.196.3: medido também em azul (pedido do CEO)
 };
 /** Quadro dos lotes (pura — testável): todas as parcelas, ordenadas pelo nº do lote de produção, com a situação do dossiê. */
 export function quadroLotes(parcelas: string[], vinc: Record<string, { nome: string; lote_vila: string }>, sit: Record<string, SituacaoLote> = {}): LinhaQuadro[] {
@@ -56,7 +56,7 @@ export function htmlPrancha(o: {
     table{width:100%;border-collapse:collapse;font-size:9.4pt}th{background:#14472B;color:#fff;font-size:8.4pt;padding:1.5mm 1.8mm;text-align:left}
     td{padding:1.15mm 1.8mm;border-bottom:.3mm solid #E5DFCD}tr:nth-child(even) td{background:#FAF7EE}td.lt{font-weight:800;color:#0C3320;white-space:nowrap}td.c{text-align:center;font-weight:700;white-space:nowrap}
     tr.okv td{background:#DDF3E3 !important}tr.okv td.lt{color:#0E6B2E}
-    .tg{display:inline-block;border-radius:1.5mm;padding:.3mm 1.6mm;font-size:7.4pt;font-weight:800}.tg.en{background:#1E9E4A;color:#fff}.tg.ev{background:#3D7FC1;color:#fff}.tg.me{background:#F2C94C;color:#3d2a00}
+    .tg{display:inline-block;border-radius:1.5mm;padding:.3mm 1.6mm;font-size:7.4pt;font-weight:800}.tg.en{background:#1E9E4A;color:#fff}.tg.ev{background:#3D7FC1;color:#fff}.tg.me{background:#3D7FC1;color:#fff}
     .quadro{flex:1}.res{display:flex;gap:2mm;padding:2.5mm 3mm;font-size:9.4pt;flex-wrap:wrap;border-bottom:.3mm solid #E5DFCD}.res b{color:#0C3320}
     .mini{height:150mm;display:flex;align-items:center;justify-content:center;background:#F4F1E6}.mini svg{width:100%;height:100%}
     .legs{padding:3mm 4mm;font-size:10pt;display:grid;grid-template-columns:1fr 1fr;gap:1.8mm 4mm}
@@ -82,8 +82,8 @@ export function htmlPrancha(o: {
       <div class="box"><h2>DIVISA MUNICIPAL</h2><div class="mini">${o.divisa || '<span style="color:#888">Divisa municipal não cadastrada</span>'}</div>
         ${o.municipios?.length ? `<div class="legs" style="padding:2mm 4mm">${o.municipios.map((m) => leg(m.cor, esc(m.nome))).join('')}${leg('#C62828', 'Divisa municipal', 'tracejado')}</div>` : ''}</div>
       <div class="box"><h2>LEGENDA</h2><div class="legs">
-        ${leg(COR_SITUACAO.ENTREGUE.cor, 'Dossiê entregue')}${leg(COR_SITUACAO.ENVIADO.cor, 'Dossiê enviado')}
-        ${leg(COR_SITUACAO.MEDIDO.cor, 'Lote medido')}${leg('#FFFFFF', 'Lote a medir')}
+        ${leg(COR_SITUACAO.ENTREGUE.cor, 'Dossiê entregue')}${leg(COR_SITUACAO.ENVIADO.cor, 'Medido / dossiê enviado')}
+        ${leg('#FFFFFF', 'Lote a medir')}
         ${leg('#0C3320', 'Perímetro do PA', 'tracejado')}${leg('#B3261E', 'Área da vila', 'tracejado')}
         ${leg('#8C5A2B', 'Estrada', 'linha')}${leg('#2B6CB0', 'Córrego', 'linha')}
       </div>
