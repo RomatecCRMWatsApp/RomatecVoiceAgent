@@ -32,7 +32,7 @@ import * as carteirinha from '../services/pa/paCarteirinha';
 import * as ata from '../services/pa/paAta';
 import * as concessao from '../services/pa/paConcessao';
 import * as ajuste from '../services/pa/paAjusteBoleto';
-import { pool, rows, registrarEvento } from '../services/pa/paDb';
+import { pool, rows, exec, registrarEvento } from '../services/pa/paDb';
 import * as pesquisa from '../services/pa/paPesquisa';
 import { linkMapaPublico, textoMapaPublico, mensagemMapaIndividual } from './paMapaPublico';
 import * as part from '../services/pa/paParticipantes';
@@ -48,6 +48,7 @@ import { fotoUsuario, salvarFotoUsuario, removerFotoUsuario } from '../services/
 import { baseValida } from '../services/pa/mapaTiles';
 import * as dossie from '../services/pa/paDossie';
 import * as kmlLote from '../services/pa/paKmlLote';
+import * as protocolo from '../services/pa/paProtocoloEntrega';
 import * as prancha from '../services/pa/paPrancha';
 import * as entrega from '../services/pa/paEntrega';
 import * as lotesProd from '../services/pa/paLotesProducao';
@@ -636,6 +637,32 @@ router.get('/projetos/:id/dossies/kml/todos.zip', h(async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${await kmlLote.nomeZipKml(pid)}"`);
   await kmlLote.kmlTodosZip(pid, sel, res);
   return undefined;
+}));
+// v3.198.0: protocolo de entrega das vias físicas (link de confirmação no WhatsApp do associado)
+router.get('/projetos/:id/dossies/:lote/protocolo', h(async (req) => ({ protocolo: await protocolo.protocoloDoLote(id(req.params.id), String(req.params.lote).slice(0, 10)) })));
+router.post('/projetos/:id/dossies/:lote/protocolo', h(async (req) => {
+  exigirAdmin(req);
+  const pid = id(req.params.id), lote = String(req.params.lote).slice(0, 10);
+  if (req.body?.enviar) return { protocolo: await protocolo.enviarProtocolo(pid, lote, ctx(req).sub, ctx(req).nome) };
+  const p = await protocolo.criarProtocolo(pid, lote, ctx(req).sub, ctx(req).nome);
+  const a = await rows(pool, 'SELECT nome, whatsapp_numero FROM pa_associados WHERE id = ?', [p.associado_id]);
+  return { protocolo: p, whatsapp_numero: a[0]?.whatsapp_numero ?? null, texto: protocolo.textoProtocolo(String(a[0]?.nome ?? ''), lote, p.numero, p.link, p.sem_trt) };
+}));
+router.post('/projetos/:id/dossies/:lote/protocolo/enviado-manual', h(async (req) => {
+  exigirAdmin(req);
+  const pid = id(req.params.id), lote = String(req.params.lote).slice(0, 10);
+  const p = await protocolo.protocoloDoLote(pid, lote);
+  if (!p) throw new PaErro('PROTOCOLO_NAO_ENCONTRADO', 'Gere o protocolo primeiro', 404);
+  const a = await rows(pool, 'SELECT whatsapp_numero FROM pa_associados WHERE id = ?', [p.associado_id]);
+  await exec(pool, 'UPDATE pa_protocolos_entrega SET enviado_em = COALESCE(enviado_em, NOW()), enviado_para = COALESCE(enviado_para, ?) WHERE id = ?', [a[0]?.whatsapp_numero ?? null, p.id]);
+  return { ok: true };
+}));
+router.post('/projetos/:id/dossies/:lote/protocolo/cancelar', h(async (req) => { exigirAdmin(req); return protocolo.cancelarProtocolo(id(req.params.id), String(req.params.lote).slice(0, 10), ctx(req).sub); }));
+router.get('/projetos/:id/dossies/:lote/protocolo.pdf', h(async (req, res) => { const r = await protocolo.pdfProtocolo(id(req.params.id), String(req.params.lote).slice(0, 10)); enviarPdf(res, r); return undefined; }));
+router.post('/projetos/:id/dossies/protocolos/enviar', h(async (req) => {
+  exigirAdmin(req);
+  const lotes = Array.isArray(req.body?.lotes) ? req.body.lotes.map((x: unknown) => String(x).slice(0, 10)) : null;
+  return protocolo.enviarProtocolosPendentes(id(req.params.id), lotes, ctx(req).sub, ctx(req).nome);
 }));
 router.post('/projetos/:id/dossies/kml/reenviar', h(async (req) => { exigirAdmin(req); return kmlLote.reenviarKmlFinalizados(id(req.params.id), ctx(req).sub); }));
 router.post('/projetos/:id/dossies/:lote/kml', h(async (req) => {

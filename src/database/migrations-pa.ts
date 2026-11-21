@@ -159,7 +159,7 @@ const CREATE_PA_DOCUMENTOS = `
     associado_id     INT NULL,
     tipo             ENUM('FOTO_3X4','DOC_IDENTIFICACAO','CERTIDAO','DOC_CONJUGE','COMPROVANTE_SINAL',
                           'PROCESSO_FICHA_CONTRATO','PROCESSO_ASSINADO','CARTEIRINHA','MAPA_LOTE',
-                          'MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE','COMPROVANTE_TRT','DOSSIE_ENTREGA') NOT NULL,
+                          'MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE','COMPROVANTE_TRT','DOSSIE_ENTREGA','PROTOCOLO_ENTREGA') NOT NULL,
     versao           INT DEFAULT 1,
     caminho          VARCHAR(400) NOT NULL,
     nome_original    VARCHAR(255) NULL,
@@ -492,7 +492,7 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
   // v3.188.0: capa do dossiê do lote — novo tipo de documento e nome oficial da associação (também na carteirinha)
   // v3.196.0: + COMPROVANTE_TRT e DOSSIE_ENTREGA (vias assinadas) — um MODIFY só (roda a cada boot)
-  { label: 'pa_documentos.tipo +CAPA_DOSSIE_LOTE +COMPROVANTE_TRT +DOSSIE_ENTREGA', sql: "ALTER TABLE pa_documentos MODIFY tipo ENUM('FOTO_3X4','DOC_IDENTIFICACAO','CERTIDAO','DOC_CONJUGE','COMPROVANTE_SINAL','PROCESSO_FICHA_CONTRATO','PROCESSO_ASSINADO','CARTEIRINHA','MAPA_LOTE','MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE','COMPROVANTE_TRT','DOSSIE_ENTREGA') NOT NULL" },
+  { label: 'pa_documentos.tipo +CAPA_DOSSIE_LOTE +COMPROVANTE_TRT +DOSSIE_ENTREGA +PROTOCOLO_ENTREGA', sql: "ALTER TABLE pa_documentos MODIFY tipo ENUM('FOTO_3X4','DOC_IDENTIFICACAO','CERTIDAO','DOC_CONJUGE','COMPROVANTE_SINAL','PROCESSO_FICHA_CONTRATO','PROCESSO_ASSINADO','CARTEIRINHA','MAPA_LOTE','MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE','COMPROVANTE_TRT','DOSSIE_ENTREGA','PROTOCOLO_ENTREGA') NOT NULL" },
   { label: 'pa_dossies.entrega', sql: 'ALTER TABLE pa_dossies ADD COLUMN trt_doc_id INT NULL, ADD COLUMN comprovante_trt_doc_id INT NULL, ADD COLUMN assinado_doc_id INT NULL, ADD COLUMN assinado_em DATETIME NULL' },
   { label: 'pa_dossies.trt_assinada', sql: 'ALTER TABLE pa_dossies ADD COLUMN trt_assinada_doc_id INT NULL, ADD COLUMN trt_assinada_em DATETIME NULL' },
   { label: 'associacao_nome PA Salete Moreno', sql: "UPDATE pa_projetos SET associacao_nome = 'Associação dos Produtores Rurais do PA Salete Moreno' WHERE codigo = 'PA-SALETE-MORENO' AND (associacao_nome IS NULL OR associacao_nome NOT LIKE '%Produtores Rurais%')" },
@@ -537,6 +537,17 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
     valido_de DATETIME NOT NULL, valido_ate DATETIME NOT NULL, pfx_cifrado MEDIUMBLOB NOT NULL, iv VARBINARY(12) NOT NULL, tag VARBINARY(16) NOT NULL,
     ativo TINYINT(1) NOT NULL DEFAULT 1, criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_serial (serial)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4` },
+  // v3.198.0: protocolo de entrega das vias físicas confirmado pelo associado no WhatsApp
+  { label: 'pa_protocolos_entrega', sql: `CREATE TABLE IF NOT EXISTS pa_protocolos_entrega (
+    id INT AUTO_INCREMENT PRIMARY KEY, projeto_id INT NOT NULL, lote VARCHAR(10) NOT NULL, associado_id INT NOT NULL,
+    numero VARCHAR(40) NOT NULL, token VARCHAR(40) NOT NULL, sem_trt TINYINT(1) NOT NULL DEFAULT 1, trt_numero VARCHAR(40) NULL, itens JSON NOT NULL,
+    entregue_em DATETIME NULL, entregue_por VARCHAR(160) NULL, criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, criado_por VARCHAR(64) NULL,
+    enviado_em DATETIME NULL, enviado_para VARCHAR(20) NULL,
+    confirmado_em DATETIME NULL, confirmado_ip VARCHAR(64) NULL, confirmado_ua VARCHAR(255) NULL, confirmado_obs VARCHAR(500) NULL,
+    problema_em DATETIME NULL, problema_obs VARCHAR(500) NULL, hash_conteudo CHAR(64) NULL, doc_id INT NULL, cancelado_em DATETIME NULL,
+    UNIQUE KEY uk_pe_token (token), UNIQUE KEY uk_pe_numero (numero), KEY ix_pe_lote (projeto_id, lote)
+  ) DEFAULT CHARSET=utf8mb4` },
+  { label: 'pa_dossies.vias_entregues', sql: 'ALTER TABLE pa_dossies ADD COLUMN vias_entregues_em DATETIME NULL, ADD COLUMN vias_protocolo VARCHAR(40) NULL' },
 ];
 
 export async function runPaMigrations(): Promise<void> {

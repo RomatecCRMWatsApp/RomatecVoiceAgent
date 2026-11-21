@@ -104,6 +104,7 @@ import paWebhookAsaasRouter from './routes/paWebhookAsaas'; // v3.143.0 — baix
 import paBoletoPublicoRouter from './routes/paBoletoPublico'; // v3.144.0 — link público do boleto Romatec
 import paPixPublicoRouter from './routes/paPixPublico';
 import paPesquisaPublicaRouter from './routes/paPesquisaPublica';
+import paProtocoloPublicoRouter from './routes/paProtocoloPublico';
 import paMapaPublicoRouter from './routes/paMapaPublico'; // v3.182.0 — mapa público dos lotes (link assinado por projeto) // v3.181.0 — pesquisa de satisfação (link pessoal assinado) // v3.161.0 — página pública que copia o Pix do boleto
 
 const app = express();
@@ -261,6 +262,7 @@ app.use('/webhook/asaas-pa', paWebhookAsaasRouter); // v3.143.0 — público, au
 app.use('/pa/boleto', paBoletoPublicoRouter); // v3.144.0 — público por token aleatório (boleto do próprio associado)
 app.use('/pa/pix', paPixPublicoRouter); // v3.161.0 — Pix copia e cola do boleto (link do PDF), mesmo token
 app.use('/pa/mapa', paMapaPublicoRouter); // v3.182.0 — mapa dos lotes para os associados (sem área/financeiro)
+app.use('/pa/protocolo', paProtocoloPublicoRouter); // v3.198.0 — protocolo de entrega das vias físicas (confirmação do associado)
 app.use('/pa/pesquisa', paPesquisaPublicaRouter); // v3.181.0 — pesquisa de satisfação (Instagram + nota 0–10)
 // v3.128.1 FIX: a rota GET /api/obras/:obraId/diarios-obra saiu DAQUI. Usá-la no
 // topo, com requireAuth, causava TDZ no boot ("Cannot access 'auth_3' before

@@ -1133,6 +1133,42 @@ async function cartaoCertificado(){
   $('#certCad').onclick = () => cadastrarCertificado(() => cartaoCertificado());
   if ($('#certPdf')) $('#certPdf').onclick = assinarPdfAvulso;
 }
+// v3.198.0: protocolo de entrega das vias físicas — link de confirmação no WhatsApp do associado
+function abrirProtocolo(d){
+  if (!d) return;
+  const m = document.createElement('div'); m.className = 'eu-modal'; m.style.alignItems = 'flex-start'; m.style.overflow = 'auto';
+  const fechar = () => { m.remove(); rDossies(); };
+  const hb = (iso) => iso ? new Date(iso.replace(' ', 'T') + 'Z').toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  const base = `/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/protocolo`;
+  const desenhar = (r) => {
+    const p = r.protocolo;
+    m.innerHTML = `<div class="cx" style="max-width:560px;text-align:left;margin:20px auto">
+      <div class="row" style="align-items:center;gap:8px"><b style="flex:1 1 auto;font-size:17px">🧾 Protocolo de entrega — LT-${esc(d.lote)} · ${esc(d.nome)}</b><button class="btn btn-ghost btn-sm" id="ptF" style="flex:0 0 auto">✕</button></div>
+      <div class="muted" style="margin:6px 0 10px">O associado recebe um link no WhatsApp, confere as peças, digita os 3 primeiros números do CPF e confirma. Na confirmação o sistema gera o <b>PDF autenticado</b> (data, hora, IP, aparelho e código SHA-256), manda para ele e para você e guarda no acervo.</div>
+      <div class="cp-aviso ${p.confirmado_em ? '' : 'p'}" style="margin-bottom:10px">Nº <b>${esc(p.numero)}</b> · ${p.confirmado_em ? `✅ <b>recebimento confirmado</b> ${hb(p.confirmado_em)}` : p.enviado_em ? `📲 link enviado ${hb(p.enviado_em)} — aguardando o ok do associado` : '📝 gerado — ainda não enviado'}${p.sem_trt ? '<br>📄 TRT pendente (entra depois em via própria)' : ''}${p.problema_em ? `<br>⚠️ <b>problema relatado</b> ${hb(p.problema_em)}: ${esc(p.problema_obs || '')}` : ''}</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" id="ptPdf" style="flex:0 0 auto">📄 PDF do protocolo</button>
+        ${p.confirmado_em ? '' : `${d.whatsapp_valido ? `<button class="btn btn-primary btn-sm" id="ptEnv" style="flex:0 0 auto">📲 ${p.enviado_em ? 'Reenviar' : 'Enviar'} pelo WhatsApp do sistema</button>` : ''}
+        <button class="btn btn-ghost btn-sm" id="ptCop" style="flex:0 0 auto">📋 Copiar link</button>
+        ${r.whatsapp_numero ? '<button class="btn btn-ghost btn-sm" id="ptMeu" style="flex:0 0 auto">💬 Mandar do meu WhatsApp</button>' : ''}
+        <button class="btn btn-ghost btn-sm" id="ptAbr" style="flex:0 0 auto">🔗 Abrir a página</button>
+        <button class="btn btn-ghost btn-sm" id="ptCan" style="flex:0 0 auto;color:var(--red)">✕ Cancelar protocolo</button>`}
+      </div>
+      <div class="muted" style="margin-top:8px;word-break:break-all">${esc(p.link)}</div></div>`;
+    m.querySelector('#ptF').onclick = fechar;
+    m.querySelector('#ptPdf').onclick = () => abrirPdf(`${base}.pdf`);
+    const q = (s) => m.querySelector(s);
+    if (q('#ptEnv')) q('#ptEnv').onclick = async () => { q('#ptEnv').disabled = true; try { await api(base, { json: { enviar: true } }); toast(`Protocolo do LT-${d.lote} enviado no WhatsApp ✅`); carregar(); } catch (e){ toast(e.message, true); q('#ptEnv').disabled = false; } };
+    if (q('#ptCop')) q('#ptCop').onclick = async () => { await copiar(r.texto); try { await api(`${base}/enviado-manual`, { json: {} }); } catch { /* ok */ } };
+    if (q('#ptMeu')) q('#ptMeu').onclick = async () => { window.open(`https://wa.me/${String(r.whatsapp_numero).replace(/\D/g, '')}?text=${encodeURIComponent(r.texto)}`, '_blank'); try { await api(`${base}/enviado-manual`, { json: {} }); } catch { /* ok */ } };
+    if (q('#ptAbr')) q('#ptAbr').onclick = () => window.open(p.link, '_blank');
+    if (q('#ptCan')) q('#ptCan').onclick = async () => { if (!confirm(`Cancelar o protocolo ${p.numero}? O link enviado deixa de funcionar.`)) return; try { await api(`${base}/cancelar`, { json: {} }); toast('Protocolo cancelado'); fechar(); } catch (e){ toast(e.message, true); } };
+  };
+  const carregar = async () => { try { desenhar(await api(base, { json: {} })); } catch (e){ toast(e.message, true); m.remove(); } };
+  m.innerHTML = '<div class="cx" style="max-width:560px;margin:20px auto">Gerando o protocolo…</div>';
+  document.body.appendChild(m);
+  carregar();
+}
 function abrirEntrega(d, semTrt){
   if (!d) return;
   const m = document.createElement('div'); m.className = 'eu-modal'; m.style.alignItems = 'flex-start'; m.style.overflow = 'auto';
@@ -3686,6 +3722,7 @@ async function rDossies(){
       ${(() => { const n = ds.filter((d) => (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && !d.kml_enviado_em && d.whatsapp_valido).length; return admin && n ? `<div class="cp-aviso p" style="margin-top:8px">🗺️ <b>${n} associado(s)</b> já receberam o dossiê mas ainda <b>não receberam o KML</b> do lote (Organic Maps). <button class="btn btn-gold btn-sm" id="dsKmlTodos" style="margin-left:6px">📲 Enviar o KML para eles</button></div>` : ''; })()}
       <div id="kmlBox" class="cp-aviso" style="margin-top:8px;background:#EEF4F8;border-color:#3D7FC1">🗺️ <b>KML de qualquer lote</b> (Organic Maps / Google Earth) — baixe antes do dossiê para enviar a quem precisar.
         <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center"><select id="kmlSel" style="flex:1 1 220px;min-width:180px"><option value="">Carregando os lotes…</option></select><button class="btn btn-primary btn-sm" id="kmlUm" style="flex:0 0 auto">⬇️ Baixar KML do lote</button><button class="btn btn-gold btn-sm" id="kmlZip" style="flex:0 0 auto">📦 Todos os lotes (ZIP)</button></div></div>
+      ${(() => { const pend = ds.filter((d) => (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && d.whatsapp_valido && !(d.protocolo && (d.protocolo.confirmado_em || d.protocolo.enviado_em))); const conf = ds.filter((d) => d.protocolo && d.protocolo.confirmado_em).length; return admin && (pend.length || conf) ? `<div class="cp-aviso${pend.length ? ' p' : ''}" style="margin-top:8px">🧾 <b>Protocolo de entrega das vias físicas</b> — ${conf} confirmado(s) pelo associado.${pend.length ? ` <b>${pend.length}</b> dossiê(s) enviado(s) ainda sem protocolo: ${pend.map((d) => 'LT-' + esc(d.lote)).join(', ')}. <button class="btn btn-gold btn-sm" id="dsProtTodos" data-l="${pend.map((d) => esc(d.lote)).join(',')}" style="margin-left:6px">📲 Enviar o protocolo para eles</button>` : ''}</div>` : ''; })()}
       ${admin ? '<div id="certBox" class="cp-aviso" style="margin-top:8px;background:#F4F1E6;border-color:#C9A84C">🔐 Carregando o certificado digital…</div>' : ''}
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
         <button class="btn btn-sm ${!f ? 'btn-primary' : 'btn-ghost'}" data-dsf="">Todos (${ds.length})</button>
@@ -3697,11 +3734,13 @@ async function rDossies(){
         <td class="right nowrap">${d.saldo > 0.009 ? brl(d.saldo) : chip('QUITADO')}<div class="muted">${d.marcos_pagos ? ICO_MARCO + ' marcos pagos' : d.marcos_lancados ? ICO_MARCO + ' marcos em aberto' : ICO_MARCO + ' marcos não lançados'}</div></td>
         <td>${chip(ST_DOSSIE[d.status][0], ST_DOSSIE[d.status][1])}${d.pendencia && d.status === 'AGUARDANDO_PAGAMENTO' ? `<div class="muted" style="color:var(--red)">🔒 ${esc(d.pendencia)}</div>` : ''}${d.status === 'PRONTO' && d.revisao_enviada_em ? `<div class="muted">📋 PDF enviado para você revisar ${hb(d.revisao_enviada_em)}</div>` : ''}${d.enviado_em ? `<div class="muted">enviado ${hb(d.enviado_em)}</div>` : ''}
           ${d.status === 'ENVIADO' || d.status === 'ENTREGUE' ? `<div class="muted">📄 TRT: ${d.trt_paga_em ? `✅ paga ${hb(d.trt_paga_em)}` : d.trt_emitida_em ? `emitida ${hb(d.trt_emitida_em)} — aguardando pagamento` : 'a emitir'}${d.trt_numero ? ' · nº ' + esc(d.trt_numero) : ''}</div>` : ''}
+          ${d.protocolo ? `<div class="muted" style="${d.protocolo.confirmado_em ? 'color:#1E7A3A;font-weight:700' : d.protocolo.problema_em ? 'color:var(--red)' : ''}">🧾 ${d.protocolo.confirmado_em ? `vias físicas recebidas ✓ ${hb(d.protocolo.confirmado_em)} · ${esc(d.protocolo.numero)}` : d.protocolo.problema_em ? `problema relatado: ${esc(d.protocolo.problema_obs || '')}` : d.protocolo.enviado_em ? `protocolo enviado ${hb(d.protocolo.enviado_em)} — aguardando o ok` : `protocolo ${esc(d.protocolo.numero)} gerado`}</div>` : ''}
           ${d.conclusao_enviada_em ? `<div class="muted">🙏 mensagem de conclusão enviada ${hb(d.conclusao_enviada_em)}</div>` : ''}${d.entregue_em ? `<div class="muted">entregue ${hb(d.entregue_em)} · ${esc(d.entregue_por || '')}${d.entregue_obs ? ' · ' + esc(d.entregue_obs) : ''}</div>` : ''}</td>
         <td class="nowrap"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button><button class="btn btn-ghost btn-sm" data-dskml="${esc(d.lote)}" title="Baixar o KML do lote (abre no Organic Maps / Google Earth)">🗺️ KML</button>${admin && (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && d.whatsapp_valido ? `<button class="btn btn-ghost btn-sm" data-dskmlenv="${esc(d.lote)}" title="Enviar o KML + passo a passo do Organic Maps no WhatsApp do associado">📲 KML${d.kml_enviado_em ? ' ✓' : ''}</button>` : ''}
           ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>✅ Aprovar e enviar</button>` : ''}
           ${admin && d.status === 'ENVIADO' ? `<button class="btn btn-ghost btn-sm" data-dsenv="${esc(d.lote)}">🔁 Reenviar</button>` : ''}
           ${admin ? `<button class="btn btn-primary btn-sm" data-dsassinar="${esc(d.lote)}" title="Assina digitalmente o dossiê para imprimir (com a TRT se já anexada; sem ela = via de apresentação)">✍️ Assinar via${d.assinado_em ? ' ✓' : ''}</button>` : ''}
+          ${admin && (d.status === 'ENVIADO' || d.status === 'ENTREGUE') ? `<button class="btn ${d.protocolo && d.protocolo.confirmado_em ? 'btn-ghost' : 'btn-primary'} btn-sm" data-dsprot="${esc(d.lote)}" title="Protocolo de entrega das vias físicas — o associado confirma o recebimento pelo WhatsApp">🧾 Protocolo${d.protocolo && d.protocolo.confirmado_em ? ' ✓' : ''}</button>` : ''}
           ${d.status === 'ENVIADO' ? `<button class="btn btn-gold btn-sm" data-dsentrega="${esc(d.lote)}" title="TRT + comprovante → assinatura digital → impressão">📦 Entregar${d.trt_numero ? ' (TRT ✓)' : ''}</button>` : ''}
           ${d.status === 'ENTREGUE' && d.assinado_em ? `<button class="btn btn-ghost btn-sm" data-dsvias="${esc(d.lote)}">🖨️ Vias assinadas</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">Nenhum dossiê nesta situação. Eles aparecem aqui quando um lote é fechado na aba Campo.</div>'}</div>
@@ -3738,6 +3777,12 @@ async function rDossies(){
   });
   // v3.196.0: entrega — TRT + comprovante → posicionar assinaturas → assinar (A1) → imprimir → arquivar/entregue
   v.querySelectorAll('[data-dsentrega]').forEach((b) => b.onclick = () => abrirEntrega(ds.find((x) => x.lote === b.dataset.dsentrega)));
+  v.querySelectorAll('[data-dsprot]').forEach((b) => b.onclick = () => abrirProtocolo(ds.find((x) => x.lote === b.dataset.dsprot)));
+  if ($('#dsProtTodos')) $('#dsProtTodos').onclick = async () => {
+    const ls = $('#dsProtTodos').dataset.l.split(',').filter(Boolean);
+    if (!confirm(`Enviar o protocolo de entrega das vias físicas para ${ls.length} associado(s) (${ls.map((x) => 'LT-' + x).join(', ')})?\nCada um recebe o link no WhatsApp para confirmar o recebimento.`)) return;
+    try { const r = await api(`/projetos/${S.pid}/dossies/protocolos/enviar`, { json: { lotes: ls } }); toast(r.fila ? `Enviando ${r.fila} protocolo(s) — você recebe o resumo no WhatsApp` : 'Ninguém pendente'); rDossies(); } catch (e){ toast(e.message, true); }
+  };
   v.querySelectorAll('[data-dsassinar]').forEach((b) => b.onclick = () => abrirEntrega(ds.find((x) => x.lote === b.dataset.dsassinar), true));
   if (admin) cartaoCertificado();
   v.querySelectorAll('[data-dsvias]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dsvias)}/vias-assinadas.pdf`));

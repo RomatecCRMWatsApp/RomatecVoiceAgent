@@ -105,7 +105,7 @@ type Geo = { features: Array<{ geometry: { type: string; coordinates: unknown };
 export async function situacaoLotes(projetoId: number): Promise<Record<string, SituacaoLote>> {
   const out: Record<string, SituacaoLote> = {};
   for (const r of await rows(pool, 'SELECT lote FROM pa_campo_lotes WHERE projeto_id = ?', [projetoId]).catch(() => [])) out[String(r.lote)] = 'MEDIDO';
-  for (const r of await rows(pool, "SELECT lote, status FROM pa_dossies WHERE projeto_id = ? AND status IN ('ENVIADO','ENTREGUE')", [projetoId]).catch(() => [])) out[String(r.lote)] = String(r.status) === 'ENTREGUE' ? 'ENTREGUE' : 'ENVIADO';
+  for (const r of await rows(pool, "SELECT lote, status, vias_entregues_em FROM pa_dossies WHERE projeto_id = ? AND status IN ('ENVIADO','ENTREGUE')", [projetoId]).catch(() => [])) out[String(r.lote)] = String(r.status) === 'ENTREGUE' || r.vias_entregues_em ? 'ENTREGUE' : 'ENVIADO'; // v3.198.0: vias físicas confirmadas = entregue
   // v3.196.4: bloqueado pelo ADMIN (aba Campo) prevalece
   for (const r of await rows(pool, 'SELECT codigo FROM pa_lotes_producao WHERE projeto_id = ? AND bloqueado = 1', [projetoId]).catch(() => [])) out[String(r.codigo).replace(/^LT-/i, '')] = 'BLOQUEADO';
   return out;

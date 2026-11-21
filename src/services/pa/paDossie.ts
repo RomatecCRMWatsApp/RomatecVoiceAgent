@@ -47,7 +47,7 @@ export function pendenciaDossie(saldo: number, marcos: { lancados: number; pagos
   return p.length ? p.join(' · ') : null;
 }
 
-async function financeiro(aid: number) {
+export async function financeiro(aid: number) {
   const ls = await rows(pool, "SELECT tipo, parcela, valor, valor_recebido, status FROM pa_lancamentos WHERE associado_id = ? AND status <> 'CANCELADO' ORDER BY FIELD(tipo,'SINAL','AVISTA','BOLETO','AJUSTE','MARCO'), parcela", [aid]);
   const pags = await rows(pool, `SELECT p.pago_em, p.forma, r.valor, l.tipo, l.parcela FROM pa_pagamento_rateio r JOIN pa_pagamentos p ON p.id = r.pagamento_id
     JOIN pa_lancamentos l ON l.id = r.lancamento_id WHERE l.associado_id = ? ORDER BY p.pago_em`, [aid]);
@@ -77,8 +77,11 @@ export async function listarDossies(projetoId: number) {
   const ds = await rows(pool, `SELECT d.*, a.nome, a.numero, a.whatsapp_status, a.whatsapp_numero, a.denominacao_terra, lt.numero lote_vila, c.concluido_em, c.usuario_nome medidor
     FROM pa_dossies d JOIN pa_associados a ON a.id = d.associado_id JOIN pa_lotes lt ON lt.id = a.lote_id
     LEFT JOIN pa_campo_lotes c ON c.projeto_id = d.projeto_id AND c.lote = d.lote WHERE d.projeto_id = ?`, [projetoId]);
+  const { protocolosDoProjeto } = await import('./paProtocoloEntrega');
+  const prot = await protocolosDoProjeto(projetoId).catch(() => ({} as Awaited<ReturnType<typeof protocolosDoProjeto>>));
   const out = [];
   for (const d of ds) {
+    const pe = prot[String(d.lote)] ?? null;
     const f = await financeiro(num(d.associado_id));
     const st = statusPeloSaldo(d.status as StatusDossie, f.saldo, f.marcos.pagos);
     if (st !== d.status) await exec(pool, 'UPDATE pa_dossies SET status = ? WHERE id = ?', [st, d.id]);
@@ -91,6 +94,8 @@ export async function listarDossies(projetoId: number) {
       trt_paga_em: isoDateTime(d.trt_paga_em ?? null), trt_paga_por: (d.trt_paga_por as string) ?? null, conclusao_enviada_em: isoDateTime(d.conclusao_enviada_em ?? null),
       revisao_enviada_em: isoDateTime(d.revisao_enviada_em ?? null), kml_enviado_em: isoDateTime(d.kml_enviado_em ?? null), // v3.193.0
       tem_trt_doc: !!d.trt_doc_id, tem_comprovante_trt: !!d.comprovante_trt_doc_id, assinado_em: isoDateTime(d.assinado_em ?? null), trt_assinada_em: isoDateTime(d.trt_assinada_em ?? null), // v3.196.0
+      vias_entregues_em: isoDateTime(d.vias_entregues_em ?? null), // v3.198.0: protocolo das vias físicas
+      protocolo: pe ? { numero: pe.numero, link: pe.link, enviado_em: pe.enviado_em, confirmado_em: pe.confirmado_em, problema_em: pe.problema_em, problema_obs: pe.problema_obs, sem_trt: pe.sem_trt } : null,
     });
   }
   return out.sort((a, b) => a.lote.localeCompare(b.lote, 'pt-BR', { numeric: true }));
