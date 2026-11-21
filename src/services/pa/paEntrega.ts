@@ -241,6 +241,13 @@ export function posicoesAutomaticas(itens: ItemTexto[], nomes: string[]): Posica
   const out: PosicaoAssinatura[] = [];
   for (const it of itens) {
     const t = semAcento(it.str);
+    // v3.196.2: linha de assinatura da EMPRESA ("ROMATEC CONSULTORIA TOTAL — J R P BEZERRA LTDA" com o CNPJ abaixo)
+    const empresa = t.startsWith('romatec consultoria total') && t.includes('bezerra') && itens.some((o) => o.pagina === it.pagina && it.y - o.y > 3 && it.y - o.y < it.fs * 2.6 && /cnpj/.test(semAcento(o.str)));
+    if (empresa) {
+      const cx = it.x + it.w / 2, w = Math.min(it.pw * 0.34, 200), h = 38, topo = Math.min(it.ph - 4, it.y + it.fs + 1 + h);
+      if (!out.some((p) => p.pagina === it.pagina && Math.abs(p.y - (it.ph - topo) / it.ph) < 0.05)) out.push({ pagina: it.pagina, x: Math.max(4, Math.min(it.pw - w - 4, cx - w / 2)) / it.pw, y: (it.ph - topo) / it.ph, w: w / it.pw, h: h / it.ph });
+      continue;
+    }
     if (!alvo.some((n) => t.startsWith(n))) continue;
     if (it.str === it.str.toUpperCase()) continue;                 // valor de tabela (caixa alta)
     if (t.length > Math.max(...alvo.map((n) => n.length)) + 90) continue;
@@ -264,7 +271,7 @@ export function posicoesAutomaticas(itens: ItemTexto[], nomes: string[]): Posica
     const base = topoBloco + 1;                                        // logo acima do bloco, sobre a linha de assinatura
     const x = Math.max(4, Math.min(it.pw - w - 4, cx - w / 2));
     const topo = Math.min(it.ph - 4, base + h);
-    if (out.some((p) => p.pagina === it.pagina && Math.abs(p.y - (it.ph - topo) / it.ph) < 0.03)) continue;
+    if (out.some((p) => p.pagina === it.pagina && Math.abs(p.y - (it.ph - topo) / it.ph) < 0.05)) continue;
     out.push({ pagina: it.pagina, x: x / it.pw, y: (it.ph - topo) / it.ph, w: w / it.pw, h: h / it.ph });
   }
   return out;

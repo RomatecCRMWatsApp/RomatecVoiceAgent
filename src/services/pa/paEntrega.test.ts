@@ -47,3 +47,11 @@ describe('posicionamento automático', () => {
     expect((1 - r[0].y - r[0].h!) * 842).toBeGreaterThan(113 + 7.5);
   });
 });
+describe('linha de assinatura da empresa (termo de quitação)', () => {
+  const pg = (str: string, x: number, y: number, w: number, fs = 8): ItemTexto => ({ pagina: 0, str, x, y, w, fs, pw: 595, ph: 842 });
+  it('ROMATEC — J R P BEZERRA com CNPJ abaixo recebe selo (uma vez, mesmo com o nome do RT embaixo)', () => {
+    const r = posicoesAutomaticas([pg('ROMATEC CONSULTORIA TOTAL — J R P BEZERRA LTDA', 220, 300, 180), pg('CNPJ 17.261.987/0001-09', 260, 290, 90), pg('José Romário Pinto Bezerra · Responsável técnico · CFT 01209185369', 200, 280, 220)], ['José Romário Pinto Bezerra']);
+    expect(r).toHaveLength(1);
+    expect((1 - r[0].y - r[0].h!) * 842).toBeGreaterThan(300 + 8);
+  });
+});

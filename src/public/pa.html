@@ -1753,7 +1753,7 @@ async function rCarteirinhas(){
   v.innerHTML = `<div class="card"><div class="row" style="align-items:end">
       <h2 style="flex:1 1 220px;border:0;margin:0">🪪 Carteirinhas dos associados</h2>
       <div style="flex:1 1 200px"><label for="ctBusca">Buscar</label><input id="ctBusca" placeholder="Lote ou nome" value="${esc(CART.busca)}"></div>
-      <div style="flex:0 1 190px"><label for="ctFiltro">Mostrar</label><select class="f" id="ctFiltro"><option value="">Todos</option><option value="SEMFOTO">Sem foto</option><option value="NAOEMITIDA">Ainda não emitida</option><option value="EMITIDA">Já emitida</option></select></div>
+      <div style="flex:0 1 190px"><label for="ctFiltro">Mostrar</label><select class="f" id="ctFiltro"><option value="">Todos</option><option value="SEMFOTO">Sem foto</option><option value="NAOEMITIDA">Ainda não emitida</option><option value="EMITIDA">Já emitida</option><option value="DOSSIE">📦 Dossiê enviado</option></select></div>
     </div>
     <div class="muted" style="margin:8px 0">A carteirinha é montada na hora com os dados do cadastro. Mudou nome, telefone, chácara ou a foto 3×4, a próxima impressão já sai atualizada. PDF em A4 com 4 por página — frente e verso lado a lado: recorte, dobre na linha tracejada e plastifique.</div>
     <div class="row" style="align-items:center">
@@ -1773,16 +1773,19 @@ async function rCarteirinhas(){
   $('#ctPdfTodos').onclick = () => gerarPdfCarteirinhas(null, CART.lista.length);
   // v3.196.0: carteirinhas de quem já recebeu o dossiê (enviado/entregue) — A4, 4 por folha
   const idsDossie = async () => { try { const ds = (await api(`/projetos/${S.pid}/dossies`)).dossies; return [...new Set(ds.filter((d) => d.status === 'ENVIADO' || d.status === 'ENTREGUE').map((d) => d.associado_id))]; } catch { return []; } };
-  idsDossie().then((ids) => { const e = $('#ctNDos'); if (e) e.textContent = ids.length; CART.idsDossie = ids; });
+  idsDossie().then((ids) => { const e = $('#ctNDos'); if (e) e.textContent = ids.length; CART.idsDossie = ids; desenharCarteirinhas(); });
   $('#ctPdfDossie').onclick = async () => { const ids = CART.idsDossie || await idsDossie(); if (!ids.length) return toast('Nenhum dossiê enviado ainda', true); gerarPdfCarteirinhas(ids, ids.length); };
   $('#ctPdfSel').onclick = () => { if (!CART.sel.size) return toast('Marque ao menos um associado', true); gerarPdfCarteirinhas([...CART.sel], CART.sel.size); };
   $('#ctPrevSel').onclick = () => { if (!CART.sel.size) return toast('Marque ao menos um associado', true); previaCarteirinha([...CART.sel]); };
   desenharCarteirinhas();
 }
+const temDossie = (a) => !!(CART.idsDossie && CART.idsDossie.includes(a.id));
 function desenharCarteirinhas(){
   const q = CART.busca.trim().toLowerCase();
   const lista = CART.lista.filter((a) => (!q || a.nome.toLowerCase().includes(q) || a.lote === q.padStart(2, '0') || a.lote === q)
-    && (!CART.filtro || (CART.filtro === 'SEMFOTO' ? !a.documentos.tem_foto : CART.filtro === 'NAOEMITIDA' ? !a.carteirinha_emitida_em : !!a.carteirinha_emitida_em)));
+    && (!CART.filtro || (CART.filtro === 'SEMFOTO' ? !a.documentos.tem_foto : CART.filtro === 'NAOEMITIDA' ? !a.carteirinha_emitida_em : CART.filtro === 'DOSSIE' ? temDossie(a) : !!a.carteirinha_emitida_em)))
+    // v3.196.2: quem já recebeu o dossiê vem primeiro (pela ordem do lote)
+    .sort((x, y) => (temDossie(y) ? 1 : 0) - (temDossie(x) ? 1 : 0) || String(x.lote).localeCompare(String(y.lote), 'pt-BR', { numeric: true }));
   const semFoto = CART.lista.filter((a) => !a.documentos.tem_foto).length;
   const emitidas = CART.lista.filter((a) => a.carteirinha_emitida_em).length;
   $('#ctResumo').innerHTML = `${CART.lista.length} associado(s) · ${chip('VALIDO', emitidas + ' emitidas')} ${semFoto ? chip('PENDENTE', semFoto + ' sem foto') : chip('VALIDO', 'todos com foto')}`;
@@ -1791,7 +1794,7 @@ function desenharCarteirinhas(){
   $('#ctLista').innerHTML = `<table><thead><tr><th><input type="checkbox" id="ctTodos" title="Marcar todos da lista"></th><th></th><th>Lote</th><th>Associado</th><th>Situação</th><th></th></tr></thead><tbody>
     ${lista.map((a) => `<tr><td><input type="checkbox" class="ctSel" data-id="${a.id}" ${CART.sel.has(a.id) ? 'checked' : ''}></td>
       <td>${fotoMini(a)}</td><td><b>${esc(a.lote)}</b></td><td>${esc(a.nome)}<div class="muted">${esc(a.numero)} · ${esc(a.cpf)}</div></td>
-      <td>${a.documentos.tem_foto ? '' : chip('PENDENTE', 'sem foto') + ' '}${a.carteirinha_emitida_em ? chip('VALIDO', 'emitida ' + dhBr(a.carteirinha_emitida_em).slice(0, 10)) : chip('A_VENCER', 'não emitida')}</td>
+      <td>${temDossie(a) ? chip('PAGO', '📦 dossiê enviado') + ' ' : ''}${a.documentos.tem_foto ? '' : chip('PENDENTE', 'sem foto') + ' '}${a.carteirinha_emitida_em ? chip('VALIDO', 'emitida ' + dhBr(a.carteirinha_emitida_em).slice(0, 10)) : chip('A_VENCER', 'não emitida')}</td>
       <td class="nowrap"><button class="btn btn-ghost btn-sm" data-ctprev="${a.id}" title="Ver carteirinha">👁</button>
         <button class="btn btn-ghost btn-sm" data-ctpdf="${a.id}" title="PDF individual">📄</button>
         ${podeEscrever() ? `<button class="btn btn-ghost btn-sm" data-ctfoto="${a.id}" title="Trocar a foto 3×4">📷</button>` : ''}

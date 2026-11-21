@@ -222,7 +222,7 @@ export async function pdfDossie(projetoId: number, lote: string, opts: { trt?: s
     <p style="margin-top:12px"><b>Total recebido: ${brl(f.recebido)}</b></p>
     <p>A quitação refere-se exclusivamente ao serviço técnico contratado e à taxa de marcos; a <b>TRT (Termo de Responsabilidade Técnica)</b> e serviços posteriores (certificação, CAR, CCIR, ITR e outros) são cobrados à parte.</p>
     <p>Açailândia/MA, ${esc(hoje)}.</p>
-    <div class="ass"><div>ROMATEC CONSULTORIA TOTAL — J R P BEZERRA LTDA</div>CNPJ 17.261.987/0001-09</div>`))) : null;
+    <div class="ass"><div>ROMATEC CONSULTORIA TOTAL — J R P BEZERRA LTDA</div>CNPJ 17.261.987/0001-09<br>José Romário Pinto Bezerra · Responsável técnico · CFT 01209185369</div>`))) : null; // v3.196.2: nome do RT (assinatura digital)
 
   // 9) capa final — encerramento com os próximos passos
   const capaFinal = await peca('Capa final — próximos passos', await pdfDeHtml(htmlCapaFinal({
