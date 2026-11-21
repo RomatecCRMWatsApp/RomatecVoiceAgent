@@ -653,8 +653,12 @@ router.post('/projetos/:id/dossies/:lote/entrega/trt', uploadMem.fields([{ name:
 }));
 router.get('/projetos/:id/dossies/:lote/vias.pdf', h(async (req, res) => { enviarPdf(res, await entrega.viasEntrega(id(req.params.id), String(req.params.lote).slice(0, 10))); return undefined; }));
 router.post('/projetos/:id/dossies/:lote/entrega/assinar', h(async (req) => { exigirAdmin(req); return entrega.assinarEntrega(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.senha, req.body?.posicoes, ctx(req).sub); }));
+router.get('/projetos/:id/dossies/:lote/trt.pdf', h(async (req, res) => { enviarPdf(res, await entrega.pdfTrt(id(req.params.id), String(req.params.lote).slice(0, 10))); return undefined; }));
+router.get('/projetos/:id/dossies/:lote/trt-assinada.pdf', h(async (req, res) => { enviarPdf(res, await entrega.pdfTrt(id(req.params.id), String(req.params.lote).slice(0, 10), true)); return undefined; }));
+router.post('/projetos/:id/dossies/:lote/entrega/assinar-trt', h(async (req) => { exigirAdmin(req); return entrega.assinarTrt(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.senha, req.body?.posicoes, ctx(req).sub); }));
 router.get('/projetos/:id/dossies/:lote/vias-assinadas.pdf', h(async (req, res) => { enviarPdf(res, await entrega.viasAssinadas(id(req.params.id), String(req.params.lote).slice(0, 10))); return undefined; }));
 router.get('/certificado', h(async (req) => { exigirAdmin(req); return entrega.statusCertificadoPa(); }));
+router.post('/assinar-pdf', uploadMem.single('pdf'), h(async (req, res) => { exigirAdmin(req); const f = (req as Request & { file?: Express.Multer.File }).file; const r = await entrega.assinarPdfAvulso(f?.buffer, f?.originalname, req.body?.senha, req.body?.posicoes, ctx(req).sub); res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="${r.nome}"`); res.end(r.pdf); return undefined; })); // v3.196.0
 router.post('/certificado', uploadMem.single('pfx'), h(async (req) => { exigirAdmin(req); return entrega.importarCertificadoPa((req as Request & { file?: Express.Multer.File }).file?.buffer, req.body?.senha, ctx(req).sub); }));
 router.post('/projetos/:id/dossies/:lote/entregue', h(async (req) => { exigirEscrita(req); return dossie.marcarEntregue(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.obs, ctx(req).sub, ctx(req).nome); }));
 // v3.188.0: lotes de produção (LT-NN) + capa do dossiê técnico do lote

@@ -90,7 +90,7 @@ export async function listarDossies(projetoId: number) {
       trt_numero: (d.trt_numero as string) ?? null, trt_emitida_em: isoDateTime(d.trt_emitida_em ?? null), trt_emitida_por: (d.trt_emitida_por as string) ?? null,
       trt_paga_em: isoDateTime(d.trt_paga_em ?? null), trt_paga_por: (d.trt_paga_por as string) ?? null, conclusao_enviada_em: isoDateTime(d.conclusao_enviada_em ?? null),
       revisao_enviada_em: isoDateTime(d.revisao_enviada_em ?? null), kml_enviado_em: isoDateTime(d.kml_enviado_em ?? null), // v3.193.0
-      tem_trt_doc: !!d.trt_doc_id, tem_comprovante_trt: !!d.comprovante_trt_doc_id, assinado_em: isoDateTime(d.assinado_em ?? null), // v3.196.0
+      tem_trt_doc: !!d.trt_doc_id, tem_comprovante_trt: !!d.comprovante_trt_doc_id, assinado_em: isoDateTime(d.assinado_em ?? null), trt_assinada_em: isoDateTime(d.trt_assinada_em ?? null), // v3.196.0
     });
   }
   return out.sort((a, b) => a.lote.localeCompare(b.lote, 'pt-BR', { numeric: true }));

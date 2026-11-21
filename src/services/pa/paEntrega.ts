@@ -55,10 +55,10 @@ export async function registrarTrtEntrega(projetoId: number, lote: string, arq: 
   const quem = nomeUsuario ?? usuario;
   await exec(pool, `UPDATE pa_dossies SET trt_numero = ?, trt_emitida_em = COALESCE(trt_emitida_em, NOW()), trt_emitida_por = COALESCE(trt_emitida_por, ?),
     trt_paga_em = COALESCE(trt_paga_em, NOW()), trt_paga_por = COALESCE(trt_paga_por, ?), trt_doc_id = COALESCE(?, trt_doc_id), comprovante_trt_doc_id = COALESCE(?, comprovante_trt_doc_id),
-    assinado_doc_id = NULL, assinado_em = NULL WHERE id = ?`, [numero, quem, quem, trtDoc?.id ?? null, compDoc?.id ?? null, d.id]);
+    trt_assinada_doc_id = IF(? IS NULL, trt_assinada_doc_id, NULL), trt_assinada_em = IF(? IS NULL, trt_assinada_em, NULL) WHERE id = ?`, [numero, quem, quem, trtDoc?.id ?? null, compDoc?.id ?? null, trtDoc?.id ?? null, trtDoc?.id ?? null, d.id]); // v3.196.0: o dossiê já assinado fica como está — depois assina só a TRT
   cacheVias.delete(`${projetoId}:${lote}`);
   await registrarEvento(pool, { projeto_id: projetoId, associado_id: aid, usuario, tipo: 'DOSSIE_TRT_ANEXADA', dados: { lote, numero, lido_do_pdf: !numeroManual } });
-  return { lote, trt_numero: numero, lido_do_pdf: !numeroManual };
+  return { lote, trt_numero: numero, lido_do_pdf: !numeroManual, dossie_ja_assinado: !!d.assinado_doc_id };
 }
 
 // ─── vias com a TRT ────────────────────────────────────────────────────────
@@ -79,13 +79,13 @@ export async function carimbarTrt(pdf: Buffer, trt: string, rt: string): Promise
 }
 export async function viasEntrega(projetoId: number, lote: string): Promise<{ pdf: Buffer; nome: string; trt: string }> {
   const d = await one(pool, 'SELECT trt_numero FROM pa_dossies WHERE projeto_id = ? AND lote = ?', [projetoId, lote]);
+  // v3.196.0: sem TRT → "via de apresentação" (o mesmo dossiê, sem o número); com TRT → vias de entrega
   const trt = (d?.trt_numero as string) || '';
-  if (!trt) throw new PaErro('SEM_TRT', 'Anexe a TRT e o comprovante primeiro', 409);
   const k = `${projetoId}:${lote}`, c = cacheVias.get(k);
   if (c && c.trt === trt && Date.now() - c.em < 30 * 60_000) return { pdf: c.pdf, nome: c.nome, trt };
-  const r = await pdfDossie(projetoId, lote, { trt });
-  const pdf = await carimbarTrt(r.pdf, trt, 'José Romário Pinto Bezerra · CFT 01209185369');
-  const nome = r.nome.replace(/^DOSSIE-/, 'VIAS-ENTREGA-');
+  const r = await pdfDossie(projetoId, lote, { trt: trt || null });
+  const pdf = trt ? await carimbarTrt(r.pdf, trt, 'José Romário Pinto Bezerra · CFT 01209185369') : r.pdf;
+  const nome = r.nome.replace(/^DOSSIE-/, trt ? 'VIAS-ENTREGA-' : 'VIA-APRESENTACAO-');
   cacheVias.set(k, { trt, pdf, nome, em: Date.now() });
   return { pdf, nome, trt };
 }
@@ -130,15 +130,14 @@ export function validarPosicoes(v: unknown, paginas: number): PosicaoAssinatura[
   });
 }
 const VERDE = rgb(12 / 255, 51 / 255, 32 / 255), DOURADO = rgb(201 / 255, 168 / 255, 76 / 255);
-export async function assinarEntrega(projetoId: number, lote: string, senha: unknown, posicoesQ: unknown, usuario: string | null) {
+/** Núcleo: abre o certificado com a senha, desenha os selos nas posições e assina (PAdES, ICP-Brasil). */
+export async function assinarComSelos(pdfIn: Buffer, senha: unknown, posicoesQ: unknown, motivo: string): Promise<{ pdf: Buffer; selos: number; titular: string }> {
   const bloq = minutosBloqueado();
   if (bloq) throw new PaErro('SENHA_BLOQUEADA', `Muitas senhas erradas — tente de novo em ${bloq} min`, 429);
-  const d = await one(pool, 'SELECT * FROM pa_dossies WHERE projeto_id = ? AND lote = ?', [projetoId, lote]);
-  if (!d) throw new PaErro('DOSSIE_NAO_ENCONTRADO', 'Dossiê não encontrado', 404);
   const reg = await certAtivo();
   if (!reg) throw new PaErro('SEM_CERTIFICADO', 'Cadastre o certificado digital A1 (PFX) antes de assinar', 409);
-  const vias = await viasEntrega(projetoId, lote);
-  const doc = await PDFDocument.load(vias.pdf, { updateMetadata: false });
+  if (pdfIn.includes(Buffer.from('/ByteRange'))) throw new PaErro('PDF_JA_ASSINADO', 'Este PDF já tem assinatura digital — assinar de novo invalidaria a anterior', 409);
+  const doc = await PDFDocument.load(pdfIn, { updateMetadata: false });
   const posicoes = validarPosicoes(posicoesQ, doc.getPageCount());
   let cert: CertificadoCarregado;
   try { cert = abrirPfx(decifrar({ dados: reg.pfx_cifrado, iv: reg.iv, tag: reg.tag }, configAssinatura.masterKey), String(senha ?? '')); }
@@ -163,15 +162,57 @@ export async function assinarEntrega(projetoId: number, lote: string, senha: unk
       let ty = y + h - 4 - s;
       for (const [t, f, sz] of linhas) { pg.drawText(t.slice(0, 90), { x: x + 5, y: ty, size: sz, font: f, color: VERDE, maxWidth: w - 10 }); ty -= sz * 1.25; }
     }
-    pdflibAddPlaceholder({ pdfDoc: doc, reason: `Vias técnicas do LT-${lote} — TRT nº ${vias.trt}`, contactInfo: configAssinatura.contato, name: cert.titular, location: configAssinatura.local, signingTime: agora, signatureLength: 16384, subFilter: SUBFILTER_ETSI_CADES_DETACHED, appName: 'ZAYRA · Romatec Consultoria Total' });
+    pdflibAddPlaceholder({ pdfDoc: doc, reason: motivo.slice(0, 200), contactInfo: configAssinatura.contato, name: cert.titular, location: configAssinatura.local, signingTime: agora, signatureLength: 16384, subFilter: SUBFILTER_ETSI_CADES_DETACHED, appName: 'ZAYRA · Romatec Consultoria Total' });
     const comPlaceholder = Buffer.from(await doc.save({ useObjectStreams: false }));
-    const assinado = await new SignPdf().sign(comPlaceholder, new CadesSigner(cert), agora);
-    const nome = vias.nome.replace(/\.pdf$/i, '-ASSINADO.pdf');
-    const salvo = await uploadDocumento(num(d.associado_id), 'DOSSIE_ENTREGA', { buffer: assinado, originalname: nome, mimetype: 'application/pdf' }, usuario);
-    await exec(pool, 'UPDATE pa_dossies SET assinado_doc_id = ?, assinado_em = NOW() WHERE id = ?', [salvo.id, d.id]);
-    await registrarEvento(pool, { projeto_id: projetoId, associado_id: num(d.associado_id), usuario, tipo: 'DOSSIE_ASSINADO', dados: { lote, trt: vias.trt, assinaturas: posicoes.length, documento_id: salvo.id } });
-    return { lote, documento_id: salvo.id, nome, assinaturas: posicoes.length };
+    return { pdf: await new SignPdf().sign(comPlaceholder, new CadesSigner(cert), agora), selos: posicoes.length, titular: cert.titular };
   } finally { descartar(cert); }
+}
+
+export async function assinarEntrega(projetoId: number, lote: string, senha: unknown, posicoesQ: unknown, usuario: string | null) {
+  const d = await one(pool, 'SELECT * FROM pa_dossies WHERE projeto_id = ? AND lote = ?', [projetoId, lote]);
+  if (!d) throw new PaErro('DOSSIE_NAO_ENCONTRADO', 'Dossiê não encontrado', 404);
+  const vias = await viasEntrega(projetoId, lote);
+  const r = await assinarComSelos(vias.pdf, senha, posicoesQ, vias.trt ? `Vias técnicas do LT-${lote} — TRT nº ${vias.trt}` : `Dossiê técnico do LT-${lote} — via de apresentação`);
+  const nome = vias.nome.replace(/\.pdf$/i, '-ASSINADO.pdf');
+  const salvo = await uploadDocumento(num(d.associado_id), 'DOSSIE_ENTREGA', { buffer: r.pdf, originalname: nome, mimetype: 'application/pdf' }, usuario);
+  await exec(pool, 'UPDATE pa_dossies SET assinado_doc_id = ?, assinado_em = NOW() WHERE id = ?', [salvo.id, d.id]);
+  await registrarEvento(pool, { projeto_id: projetoId, associado_id: num(d.associado_id), usuario, tipo: 'DOSSIE_ASSINADO', dados: { lote, trt: vias.trt || null, assinaturas: r.selos, documento_id: salvo.id } });
+  return { lote, documento_id: salvo.id, nome, assinaturas: r.selos, com_trt: !!vias.trt };
+}
+
+/** v3.196.0: assinar qualquer PDF (avulso) com o certificado do RT — devolve o PDF assinado. */
+export async function assinarPdfAvulso(pdf: Buffer | undefined, nomeQ: unknown, senha: unknown, posicoesQ: unknown, usuario: string | null) {
+  if (!pdf?.length || pdf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new PaErro('SEM_PDF', 'Envie um arquivo PDF', 400);
+  const nome = String(nomeQ ?? 'documento.pdf').replace(/[^\w.\- ]+/g, '_').replace(/\.pdf$/i, '').slice(0, 100) + '-ASSINADO.pdf';
+  const posicoes = typeof posicoesQ === 'string' ? (() => { try { return JSON.parse(posicoesQ); } catch { return null; } })() : posicoesQ;
+  const r = await assinarComSelos(pdf, senha, posicoes, 'Documento técnico — Romatec Consultoria Total');
+  await registrarEvento(pool, { projeto_id: null, usuario, tipo: 'PDF_ASSINADO_AVULSO', dados: { nome, selos: r.selos } });
+  return { pdf: r.pdf, nome };
+}
+
+// ─── v3.196.0: dossiê já assinado → assina SÓ a TRT ───────────────────────
+async function arquivoDoc(id: unknown): Promise<{ conteudo: Buffer; nome: string; mime: string } | null> {
+  if (!id) return null;
+  const f = await one<{ conteudo: Buffer; nome_original: string; mime: string }>(pool, 'SELECT a.conteudo, d.nome_original, d.mime FROM pa_documentos_arquivos a JOIN pa_documentos d ON d.id = a.documento_id WHERE a.documento_id = ?', [id]);
+  return f ? { conteudo: f.conteudo, nome: f.nome_original, mime: f.mime } : null;
+}
+export async function pdfTrt(projetoId: number, lote: string, assinada = false): Promise<{ pdf: Buffer; nome: string }> {
+  const d = await one(pool, 'SELECT trt_doc_id, trt_assinada_doc_id, trt_numero FROM pa_dossies WHERE projeto_id = ? AND lote = ?', [projetoId, lote]);
+  const f = await arquivoDoc(assinada ? d?.trt_assinada_doc_id : d?.trt_doc_id);
+  if (!f) throw new PaErro(assinada ? 'TRT_NAO_ASSINADA' : 'SEM_TRT', assinada ? 'A TRT ainda não foi assinada' : 'Anexe a TRT primeiro', 404);
+  if (!/pdf/i.test(f.mime) && f.conteudo.subarray(0, 5).toString('latin1') !== '%PDF-') throw new PaErro('TRT_NAO_PDF', 'A TRT anexada é imagem — para assinar digitalmente anexe a TRT em PDF', 409);
+  return { pdf: f.conteudo, nome: assinada ? f.nome : `TRT-LT-${lote}${d?.trt_numero ? '-' + String(d.trt_numero) : ''}.pdf` };
+}
+export async function assinarTrt(projetoId: number, lote: string, senha: unknown, posicoesQ: unknown, usuario: string | null) {
+  const d = await one(pool, 'SELECT * FROM pa_dossies WHERE projeto_id = ? AND lote = ?', [projetoId, lote]);
+  if (!d) throw new PaErro('DOSSIE_NAO_ENCONTRADO', 'Dossiê não encontrado', 404);
+  const t = await pdfTrt(projetoId, lote);
+  const r = await assinarComSelos(t.pdf, senha, posicoesQ, `TRT nº ${d.trt_numero ?? ''} — LT-${lote}`);
+  const nome = `TRT-LT-${lote}${d.trt_numero ? '-' + String(d.trt_numero).replace(/[^\w.-]+/g, '') : ''}-ASSINADA.pdf`;
+  const salvo = await uploadDocumento(num(d.associado_id), 'TRT', { buffer: r.pdf, originalname: nome, mimetype: 'application/pdf' }, usuario);
+  await exec(pool, 'UPDATE pa_dossies SET trt_assinada_doc_id = ?, trt_assinada_em = NOW() WHERE id = ?', [salvo.id, d.id]);
+  await registrarEvento(pool, { projeto_id: projetoId, associado_id: num(d.associado_id), usuario, tipo: 'TRT_ASSINADA', dados: { lote, documento_id: salvo.id, selos: r.selos } });
+  return { lote, documento_id: salvo.id, nome, assinaturas: r.selos };
 }
 
 export async function viasAssinadas(projetoId: number, lote: string): Promise<{ pdf: Buffer; nome: string }> {
