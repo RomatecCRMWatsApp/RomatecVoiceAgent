@@ -3684,6 +3684,8 @@ async function rDossies(){
       <div class="muted" style="margin-bottom:6px">O dossiê libera com o <b>lote medido</b> + <b>contrato quitado</b> + <b>taxa de marcos paga</b>. O sistema monta sozinho: <b>capa</b>, sumário e prazos, <b>mapa e memorial (tradicional)</b>, <b>planta e memorial (SIGEF)</b>, <b>contrato assinado</b>, <b>termo de quitação com extrato</b> (contrato + marcos), <b>carteirinha</b> e <b>capa final</b> com os próximos passos.</div>
       <div class="muted">Quando o dossiê fica pronto, o PDF vai <b>primeiro para o seu WhatsApp</b> para revisar. Confira no 👁 PDF e toque em <b>✅ Aprovar e enviar</b>: o associado recebe o PDF com o aviso para comparecer ao escritório (solicitar a TRT, pagar e pegar as vias impressas).</div>
       ${(() => { const n = ds.filter((d) => (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && !d.kml_enviado_em && d.whatsapp_valido).length; return admin && n ? `<div class="cp-aviso p" style="margin-top:8px">🗺️ <b>${n} associado(s)</b> já receberam o dossiê mas ainda <b>não receberam o KML</b> do lote (Organic Maps). <button class="btn btn-gold btn-sm" id="dsKmlTodos" style="margin-left:6px">📲 Enviar o KML para eles</button></div>` : ''; })()}
+      <div id="kmlBox" class="cp-aviso" style="margin-top:8px;background:#EEF4F8;border-color:#3D7FC1">🗺️ <b>KML de qualquer lote</b> (Organic Maps / Google Earth) — baixe antes do dossiê para enviar a quem precisar.
+        <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center"><select id="kmlSel" style="flex:1 1 220px;min-width:180px"><option value="">Carregando os lotes…</option></select><button class="btn btn-primary btn-sm" id="kmlUm" style="flex:0 0 auto">⬇️ Baixar KML do lote</button><button class="btn btn-gold btn-sm" id="kmlZip" style="flex:0 0 auto">📦 Todos os lotes (ZIP)</button></div></div>
       ${admin ? '<div id="certBox" class="cp-aviso" style="margin-top:8px;background:#F4F1E6;border-color:#C9A84C">🔐 Carregando o certificado digital…</div>' : ''}
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
         <button class="btn btn-sm ${!f ? 'btn-primary' : 'btn-ghost'}" data-dsf="">Todos (${ds.length})</button>
@@ -3708,6 +3710,13 @@ async function rDossies(){
   v.querySelectorAll('[data-dsf]').forEach((b) => b.onclick = () => { S.dossieFiltro = b.dataset.dsf; rDossies(); });
   v.querySelectorAll('[data-dsver]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dsver)}.pdf`));
   // v3.193.0: KML do lote (Organic Maps, sem internet)
+  // v3.197.0: KML de qualquer lote da subdivisão + ZIP com todos
+  api(`/projetos/${S.pid}/dossies/kml/lotes`).then((r) => {
+    const sel = $('#kmlSel'); if (!sel) return;
+    sel.innerHTML = r.lotes.length ? r.lotes.map((l) => `<option value="${esc(l.lote)}">LT-${esc(l.lote)}${l.associado ? ' — ' + esc(l.associado) : ' — sem associado'}${l.lote_vila ? ' (vila ' + esc(l.lote_vila) + ')' : ''}</option>`).join('') : '<option value="">Nenhum lote na subdivisão</option>';
+  }).catch((e) => { const sel = $('#kmlSel'); if (sel) sel.innerHTML = `<option value="">${esc(e.message)}</option>`; });
+  if ($('#kmlUm')) $('#kmlUm').onclick = () => { const l = $('#kmlSel').value; if (!l) return toast('Escolha o lote', true); window.location.href = `/api/pa/projetos/${S.pid}/dossies/${encodeURIComponent(l)}/lote.kml`; };
+  if ($('#kmlZip')) $('#kmlZip').onclick = () => { window.location.href = `/api/pa/projetos/${S.pid}/dossies/kml/todos.zip`; };
   v.querySelectorAll('[data-dskml]').forEach((b) => b.onclick = () => { window.location.href = `/api/pa/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dskml)}/lote.kml`; });
   v.querySelectorAll('[data-dskmlenv]').forEach((b) => b.onclick = async () => {
     if (!confirm(`Enviar o KML do LT-${b.dataset.dskmlenv} (mapa do lote para o Organic Maps) no WhatsApp do associado?`)) return;

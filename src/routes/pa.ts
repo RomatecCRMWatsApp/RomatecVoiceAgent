@@ -626,6 +626,17 @@ router.get('/projetos/:id/dossies/:lote/lote.kml', h(async (req, res) => {
   res.setHeader('Content-Type', 'application/vnd.google-earth.kml+xml; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename="${k.nome}"`); res.end(k.kml);
   return undefined;
 }));
+// v3.197.0: KML de qualquer lote da subdivisão (antes do dossiê) — lista e ZIP com todos
+router.get('/projetos/:id/dossies/kml/lotes', h(async (req) => ({ lotes: await kmlLote.lotesKml(id(req.params.id)) })));
+router.get('/projetos/:id/dossies/kml/todos.zip', h(async (req, res) => {
+  const pid = id(req.params.id);
+  const sel = typeof req.query.lotes === 'string' && req.query.lotes.trim() ? req.query.lotes.split(',').map((x) => x.trim().replace(/^LT-/i, '').slice(0, 10)).filter(Boolean) : null;
+  if (!(await kmlLote.lotesKml(pid)).length) throw new PaErro('SEM_LOTES', 'Nenhum lote na subdivisão para gerar KML', 404);
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${await kmlLote.nomeZipKml(pid)}"`);
+  await kmlLote.kmlTodosZip(pid, sel, res);
+  return undefined;
+}));
 router.post('/projetos/:id/dossies/kml/reenviar', h(async (req) => { exigirAdmin(req); return kmlLote.reenviarKmlFinalizados(id(req.params.id), ctx(req).sub); }));
 router.post('/projetos/:id/dossies/:lote/kml', h(async (req) => {
   exigirAdmin(req);

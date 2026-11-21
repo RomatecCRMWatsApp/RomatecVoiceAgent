@@ -1,11 +1,16 @@
 // v3.193.0 — KML do lote para o associado navegar no celular, sem internet, com o Organic Maps:
 // contorno do lote (linha fechada — o Organic Maps desenha linhas; polígono vai junto para o Google Earth)
 // + um ponto em cada vértice com o código do marco. Vai junto com o dossiê no WhatsApp, com o passo a passo.
+import type { Writable } from 'node:stream';
+import type { Archiver } from 'archiver';
 import { PaErro } from './erros';
 import { pool, rows, exec, registrarEvento } from './paDb';
 import { buscarProjeto } from './paRepo';
 import { buscarSubdivisao, vinculosParcelas } from './paMapas';
 import { pontosColetora, TOL_VERTICE_M } from './paColetora';
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const archiver = require('archiver') as (formato: 'zip', opcoes?: { zlib?: { level?: number } }) => Archiver;
 
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c] as string));
 const slug = (s: string) => s.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '');
@@ -27,15 +32,20 @@ ${pts}
 `;
 }
 
-export async function kmlLote(projetoId: number, lote: string): Promise<{ kml: string; nome: string }> {
+type Contexto = { p: Awaited<ReturnType<typeof buscarProjeto>>; sub: Awaited<ReturnType<typeof buscarSubdivisao>>; ben: Awaited<ReturnType<typeof vinculosParcelas>>; marcos: Array<{ nome: string; E: number; N: number }> };
+async function contexto(projetoId: number): Promise<Contexto> {
   const p = await buscarProjeto(projetoId);
   const sub = await buscarSubdivisao(projetoId);
+  const ben = await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>));
+  const d = await pontosColetora(projetoId).catch(() => null);
+  return { p, sub, ben, marcos: (d?.pontos ?? []).filter((x) => x.origem === 'LOTE') };
+}
+function kmlDoContexto(c: Contexto, lote: string): { kml: string; nome: string } {
+  const { p, sub, marcos } = c;
   const pc = sub?.parcelas.find((x) => x.lote === lote);
   if (!pc) throw new PaErro('LOTE_NAO_ENCONTRADO', `LT-${lote} não está na subdivisão`, 404);
-  const ben = (await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>)))[lote] ?? null;
+  const ben = c.ben[lote] ?? null;
   // nome de cada vértice = código do marco no canto (até 3 m); senão o nome do vértice do desenho
-  const d = await pontosColetora(projetoId).catch(() => null);
-  const marcos = (d?.pontos ?? []).filter((x) => x.origem === 'LOTE');
   const vertices = pc.perimetro.vertices.map((v) => {
     let melhor: { nome: string; dist: number } | null = null;
     for (const m of marcos) { const dist = Math.hypot(m.E - v.E, m.N - v.N); if (dist <= TOL_VERTICE_M && (!melhor || dist < melhor.dist)) melhor = { nome: m.nome, dist }; }
@@ -45,6 +55,39 @@ export async function kmlLote(projetoId: number, lote: string): Promise<{ kml: s
   const titulo = `LT-${lote}${ben ? ` — ${ben.nome}` : ''}`;
   const descricao = `${p.nome} · ${p.municipio}/${p.uf} · ${area} ha · ${vertices.length} vértices${ben?.denominacao ? ` · ${ben.denominacao}` : ''} · SIRGAS 2000 · Romatec Consultoria Total`;
   return { kml: kmlDoLote({ lote, titulo, descricao, vertices }), nome: `LT-${lote}${ben ? '_' + slug(ben.nome) : ''}_${slug(p.nome.replace(/Projeto de Assentamento/i, 'PA')).replace(/^Pa_/, 'PA_')}.kml` };
+}
+export async function kmlLote(projetoId: number, lote: string): Promise<{ kml: string; nome: string }> {
+  return kmlDoContexto(await contexto(projetoId), lote);
+}
+
+const ordemLote = (a: string, b: string) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0) || a.localeCompare(b);
+/** v3.197.0: todos os lotes da subdivisão (com associado, se houver) — para baixar o KML de qualquer lote. */
+export async function lotesKml(projetoId: number): Promise<Array<{ lote: string; associado: string | null; lote_vila: string | null; area_ha: number }>> {
+  const sub = await buscarSubdivisao(projetoId);
+  if (!sub?.parcelas.length) return [];
+  const ben = await vinculosParcelas(projetoId).catch(() => ({} as Awaited<ReturnType<typeof vinculosParcelas>>));
+  return sub.parcelas.map((pc) => ({ lote: pc.lote, associado: ben[pc.lote]?.nome ?? null, lote_vila: ben[pc.lote]?.lote_vila ?? null, area_ha: pc.perimetro.area_ha }))
+    .sort((a, b) => ordemLote(a.lote, b.lote));
+}
+/** v3.197.0: ZIP com o KML de todos os lotes (ou dos escolhidos), cada um no nome do associado. */
+export async function kmlTodosZip(projetoId: number, lotes: string[] | null, destino: Writable): Promise<{ arquivos: number }> {
+  const c = await contexto(projetoId);
+  const todos = (c.sub?.parcelas ?? []).map((x) => x.lote).sort(ordemLote);
+  const sel = lotes && lotes.length ? todos.filter((l) => lotes.includes(l)) : todos;
+  if (!sel.length) throw new PaErro('SEM_LOTES', 'Nenhum lote na subdivisão para gerar KML', 404);
+  const arqs = sel.map((l) => kmlDoContexto(c, l));
+  const zip = archiver('zip', { zlib: { level: 6 } });
+  const fim = new Promise<void>((resolve, reject) => { destino.on('close', () => resolve()); destino.on('finish', () => resolve()); zip.on('error', reject); });
+  zip.pipe(destino);
+  for (const a of arqs) zip.append(Buffer.from(a.kml, 'utf8'), { name: a.nome });
+  await zip.finalize();
+  await fim;
+  return { arquivos: arqs.length };
+}
+/** Nome do ZIP: KML_Lotes_<codigo do projeto>.zip */
+export async function nomeZipKml(projetoId: number): Promise<string> {
+  const p = await buscarProjeto(projetoId);
+  return `KML_Lotes_${String(p.codigo || 'PA').replace(/[^A-Za-z0-9-]+/g, '_')}.zip`;
 }
 
 export const LINK_ORGANIC_ANDROID = 'https://play.google.com/store/apps/details?id=app.organicmaps';
