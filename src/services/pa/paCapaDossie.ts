@@ -20,6 +20,7 @@ export interface DadosCapa {
   subtitulo?: string | null;
   legenda_foto?: string | null;
   local?: string | null;
+  trt?: string | null; // v3.196.0: nº da TRT nas vias de entrega
 }
 export const ASSOCIACAO_PADRAO = 'Associação dos Produtores Rurais do PA Salete Moreno';
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
@@ -98,6 +99,7 @@ export function htmlCapaDossie(L: DadosCapa): string {
     <div style="position:absolute;left:${M}pt;top:522.4pt;width:${(W - 2 * M).toFixed(2)}pt;height:103.6pt;background:#194B36;border:.6pt solid rgba(209,183,103,.55);border-radius:6pt"></div>
     ${linhas}
     <div style="position:absolute;left:${M}pt;top:748.05pt;width:${(W - 2 * M).toFixed(2)}pt;height:0;border-top:.5pt solid rgba(209,183,103,.7)"></div>
+    ${L.trt ? `<div style="position:absolute;left:${M}pt;top:636pt;width:${(W - 2 * M).toFixed(2)}pt;height:26pt;border:.8pt solid ${GOLD};border-radius:5pt;background:rgba(209,183,103,.14)"></div>${t(M + 12, 653.5, 12, GOLD, 'TRT — TERMO DE RESPONSABILIDADE TÉCNICA', { bold: true })}${t(W - M - 12, 653.5, 13, CREAM, `Nº ${L.trt}`, { bold: true, right: true })}` : ''}
     ${t(M, 764.6, 9.2, GOLD, 'ROMATEC CONSULTORIA TOTAL', { bold: true })}
     ${rodape}
   </body></html>`;

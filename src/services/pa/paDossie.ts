@@ -90,6 +90,7 @@ export async function listarDossies(projetoId: number) {
       trt_numero: (d.trt_numero as string) ?? null, trt_emitida_em: isoDateTime(d.trt_emitida_em ?? null), trt_emitida_por: (d.trt_emitida_por as string) ?? null,
       trt_paga_em: isoDateTime(d.trt_paga_em ?? null), trt_paga_por: (d.trt_paga_por as string) ?? null, conclusao_enviada_em: isoDateTime(d.conclusao_enviada_em ?? null),
       revisao_enviada_em: isoDateTime(d.revisao_enviada_em ?? null), kml_enviado_em: isoDateTime(d.kml_enviado_em ?? null), // v3.193.0
+      tem_trt_doc: !!d.trt_doc_id, tem_comprovante_trt: !!d.comprovante_trt_doc_id, assinado_em: isoDateTime(d.assinado_em ?? null), // v3.196.0
     });
   }
   return out.sort((a, b) => a.lote.localeCompare(b.lote, 'pt-BR', { numeric: true }));
@@ -166,7 +167,7 @@ function htmlCapaFinal(o: { pa: string; municipio: string; lote: string; nome: s
       <div style="margin-top:3mm;font-size:10.5pt"><b>${esc(o.rt)}</b><br>${esc(o.rtReg)}<br>Romatec Consultoria Total · Açailândia/MA · ${esc(o.data)}</div></div></div>`);
 }
 
-export async function pdfDossie(projetoId: number, lote: string): Promise<{ pdf: Buffer; nome: string; quitado: boolean }> {
+export async function pdfDossie(projetoId: number, lote: string, opts: { trt?: string | null } = {}): Promise<{ pdf: Buffer; nome: string; quitado: boolean }> {
   const p = await buscarProjeto(projetoId);
   const ben = (await vinculosParcelas(projetoId))[lote];
   if (!ben) throw new PaErro('LOTE_SEM_ASSOCIADO', `LT-${lote} não tem associado vinculado`, 404);
@@ -189,7 +190,7 @@ export async function pdfDossie(projetoId: number, lote: string): Promise<{ pdf:
   // v3.188.0: capa padrão aprovada (Capa_Dossie_LT-05_Salete_Moreno_Romatec.pdf) — mesmo gerador da capa avulsa
   const lp = await import('./paLotesProducao');
   const { pdfCapaDossie } = await import('./paCapaDossie');
-  const capa = await peca('Capa', await pdfCapaDossie(await lp.dadosCapaLote(projetoId, await lp.buscarLoteProducao(projetoId, lote))));
+  const capa = await peca('Capa', await pdfCapaDossie({ ...(await lp.dadosCapaLote(projetoId, await lp.buscarLoteProducao(projetoId, lote))), trt: opts.trt ?? null }));
 
   // v3.187.0: ordem do dossiê — capa → sumário → mapa e memorial (tradicional) → planta e memorial (SIGEF)
   // → contrato assinado → termo de quitação com extrato (contrato + taxa de marcos) → carteirinha → capa final
@@ -309,6 +310,7 @@ export async function enviarKmlDosEnviados(projetoId: number, lotes: string[] | 
     const kml = await kmlParaEnvio(projetoId, d.lote);
     if (!kml) throw new Error('KML do lote indisponível');
     await wa.enviarDocumentoNumero(String(a?.whatsapp_numero ?? ''), kml.buf, kml.nome, TEXTO_KML(d.lote));
+    await exec(pool, 'UPDATE pa_dossies SET kml_enviado_em = NOW() WHERE projeto_id = ? AND lote = ?', [projetoId, d.lote]); // v3.196.0
     await registrarEvento(pool, { projeto_id: projetoId, associado_id: d.associado_id, usuario, tipo: 'DOSSIE_KML_ENVIADO', dados: { lote: d.lote } });
   });
 }
@@ -343,14 +345,11 @@ export async function enviarDossie(projetoId: number, lote: string, usuario: str
       const pq = await import('./paPesquisa');
       if (!(await pq.jaRespondeu(d.associado_id))) { await wa.enviarWhatsAppNumero(String(a?.whatsapp_numero ?? ''), pq.mensagemPesquisa(d.nome, pq.linkPesquisa(d.associado_id))); await pq.marcarEnviada(projetoId, d.associado_id, quem); }
     } catch (e) { console.warn('[pa-dossie] pesquisa:', (e as Error).message); }
-    // v3.176.2: em seguida o KML da poligonal (falha no KML não desfaz o dossiê)
-    const kml = await kmlParaEnvio(projetoId, lote);
-    if (kml) { try { await wa.enviarDocumentoNumero(String(a?.whatsapp_numero ?? ''), kml.buf, kml.nome, TEXTO_KML(lote)); } catch (e) { console.warn('[pa-dossie] KML associado:', (e as Error).message); } }
+    // v3.196.0: o KML vai uma vez só (acima, com o passo a passo do Organic Maps) — o envio duplicado da v3.192.1 saiu
     // cópia para o CEO (falha aqui não desfaz o envio ao associado)
     try {
       if (!d.revisao_enviada_em || automatico) {
         await wa.enviarDocumentoNumero(numeroCeo(), r.pdf, r.nome, `📋 Cópia — dossiê do *LT-${lote}* enviado para *${d.nome}* (vila ${d.lote_vila})${automatico ? ' automaticamente após a quitação' : ''}.`);
-        if (kml) await wa.enviarDocumentoNumero(numeroCeo(), kml.buf, kml.nome);
       } else await wa.enviarWhatsAppNumero(numeroCeo(), `✅ Dossiê do *LT-${lote}* aprovado e enviado para *${d.nome}* (com o KML do lote).`);
     } catch (e) { console.warn('[pa-dossie] cópia CEO:', (e as Error).message); }
     await registrarEvento(pool, { projeto_id: projetoId, associado_id: d.associado_id, usuario: quem, tipo: 'DOSSIE_ENVIADO', dados: { lote, automatico } });

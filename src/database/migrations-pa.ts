@@ -159,7 +159,7 @@ const CREATE_PA_DOCUMENTOS = `
     associado_id     INT NULL,
     tipo             ENUM('FOTO_3X4','DOC_IDENTIFICACAO','CERTIDAO','DOC_CONJUGE','COMPROVANTE_SINAL',
                           'PROCESSO_FICHA_CONTRATO','PROCESSO_ASSINADO','CARTEIRINHA','MAPA_LOTE',
-                          'MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE') NOT NULL,
+                          'MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE','COMPROVANTE_TRT','DOSSIE_ENTREGA') NOT NULL,
     versao           INT DEFAULT 1,
     caminho          VARCHAR(400) NOT NULL,
     nome_original    VARCHAR(255) NULL,
@@ -484,12 +484,16 @@ export const PA_ALTERS: ReadonlyArray<{ label: string; sql: string }> = [
   // v3.187.0: dossiê vai primeiro para a revisão do CEO (aprovação antes do envio ao associado)
   // v3.193.0: KML do lote (Organic Maps) enviado junto com o dossiê
   { label: 'pa_dossies.kml', sql: 'ALTER TABLE pa_dossies ADD COLUMN kml_enviado_em DATETIME NULL' },
+  // v3.196.0: quem já recebeu o KML pela fila da v3.192.1 (evento) conta como enviado — não reenviar
+  { label: 'pa_dossies.kml legado', sql: "UPDATE pa_dossies d SET kml_enviado_em = (SELECT MIN(e.criado_em) FROM pa_eventos e WHERE e.tipo = 'DOSSIE_KML_ENVIADO' AND e.associado_id = d.associado_id) WHERE d.kml_enviado_em IS NULL AND EXISTS (SELECT 1 FROM pa_eventos e2 WHERE e2.tipo = 'DOSSIE_KML_ENVIADO' AND e2.associado_id = d.associado_id)" },
   { label: 'pa_dossies.revisao', sql: 'ALTER TABLE pa_dossies ADD COLUMN revisao_enviada_em DATETIME NULL' },
   { label: 'pa_dossies.trt', sql: 'ALTER TABLE pa_dossies ADD COLUMN trt_numero VARCHAR(40) NULL, ADD COLUMN trt_emitida_em DATETIME NULL, ADD COLUMN trt_emitida_por VARCHAR(160) NULL, ADD COLUMN trt_paga_em DATETIME NULL, ADD COLUMN trt_paga_por VARCHAR(160) NULL, ADD COLUMN conclusao_enviada_em DATETIME NULL' },
   { label: 'pa_projetos.divisa_json', sql: 'ALTER TABLE pa_projetos ADD COLUMN divisa_json JSON NULL' },
   // CEP geral de Açailândia (zona rural) — confirmado pelo CEO em 13/10/2026.
   // v3.188.0: capa do dossiê do lote — novo tipo de documento e nome oficial da associação (também na carteirinha)
-  { label: 'pa_documentos.tipo +CAPA_DOSSIE_LOTE', sql: "ALTER TABLE pa_documentos MODIFY tipo ENUM('FOTO_3X4','DOC_IDENTIFICACAO','CERTIDAO','DOC_CONJUGE','COMPROVANTE_SINAL','PROCESSO_FICHA_CONTRATO','PROCESSO_ASSINADO','CARTEIRINHA','MAPA_LOTE','MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE') NOT NULL" },
+  // v3.196.0: + COMPROVANTE_TRT e DOSSIE_ENTREGA (vias assinadas) — um MODIFY só (roda a cada boot)
+  { label: 'pa_documentos.tipo +CAPA_DOSSIE_LOTE +COMPROVANTE_TRT +DOSSIE_ENTREGA', sql: "ALTER TABLE pa_documentos MODIFY tipo ENUM('FOTO_3X4','DOC_IDENTIFICACAO','CERTIDAO','DOC_CONJUGE','COMPROVANTE_SINAL','PROCESSO_FICHA_CONTRATO','PROCESSO_ASSINADO','CARTEIRINHA','MAPA_LOTE','MEMORIAL','TRT','RELATORIO','ORIGINAL','OUTRO','CAPA_DOSSIE_LOTE','COMPROVANTE_TRT','DOSSIE_ENTREGA') NOT NULL" },
+  { label: 'pa_dossies.entrega', sql: 'ALTER TABLE pa_dossies ADD COLUMN trt_doc_id INT NULL, ADD COLUMN comprovante_trt_doc_id INT NULL, ADD COLUMN assinado_doc_id INT NULL, ADD COLUMN assinado_em DATETIME NULL' },
   { label: 'associacao_nome PA Salete Moreno', sql: "UPDATE pa_projetos SET associacao_nome = 'Associação dos Produtores Rurais do PA Salete Moreno' WHERE codigo = 'PA-SALETE-MORENO' AND (associacao_nome IS NULL OR associacao_nome NOT LIKE '%Produtores Rurais%')" },
   // v3.188.5: aviso "lote demarcado" ao CEO persistente (reenvio automático se a Z-API falhar ou o servidor reiniciar)
   { label: 'pa_campo_lotes.aviso', sql: 'ALTER TABLE pa_campo_lotes ADD COLUMN aviso_enviado_em DATETIME NULL, ADD COLUMN aviso_tentativas INT NOT NULL DEFAULT 0, ADD COLUMN aviso_reservado_em DATETIME NULL, ADD COLUMN aviso_erro VARCHAR(255) NULL' },
@@ -526,6 +530,12 @@ export const PA_MIGRATIONS: ReadonlyArray<{ label: string; sql: string }> = [
   { label: 'pa_dossies', sql: CREATE_PA_DOSSIES },
   { label: 'pa_lotes_producao', sql: CREATE_PA_LOTES_PRODUCAO },
   { label: 'pa_usuarios_foto', sql: CREATE_PA_USUARIOS_FOTO },
+  // v3.196.0: certificado A1 do RT (mesma tabela do módulo de assinatura do CRM — só cria se ainda não existir)
+  { label: 'assinatura_certificados', sql: `CREATE TABLE IF NOT EXISTS assinatura_certificados (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, titular VARCHAR(255) NOT NULL, cpf CHAR(11) NULL, emissor VARCHAR(255) NOT NULL, serial VARCHAR(80) NOT NULL,
+    valido_de DATETIME NOT NULL, valido_ate DATETIME NOT NULL, pfx_cifrado MEDIUMBLOB NOT NULL, iv VARBINARY(12) NOT NULL, tag VARBINARY(16) NOT NULL,
+    ativo TINYINT(1) NOT NULL DEFAULT 1, criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_serial (serial)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4` },
 ];
 
 export async function runPaMigrations(): Promise<void> {

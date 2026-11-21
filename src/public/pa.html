@@ -1027,15 +1027,140 @@ async function rMapa(){
       <div style="flex:1 1 auto"><button class="btn btn-sm ${S.mapaVisao === 'vila' ? 'btn-primary' : 'btn-ghost'}" data-visao="vila">🏘️ Mapa da vila</button>
         <button class="btn btn-sm ${S.mapaVisao === 'geral' ? 'btn-primary' : 'btn-ghost'}" data-visao="geral">🌐 Mapa geral do PA</button>
         <button class="btn btn-sm ${S.mapaVisao === 'lotes' ? 'btn-primary' : 'btn-ghost'}" data-visao="lotes">🧩 Lotes do PA (subdivisão)</button>
-        <button class="btn btn-sm ${S.mapaVisao === 'divisa' ? 'btn-primary' : 'btn-ghost'}" data-visao="divisa">🏛️ Divisa municipal</button></div>
+        <button class="btn btn-sm ${S.mapaVisao === 'divisa' ? 'btn-primary' : 'btn-ghost'}" data-visao="divisa">🏛️ Divisa municipal</button>
+        <button class="btn btn-sm ${S.mapaVisao === 'prancha' ? 'btn-primary' : 'btn-ghost'}" data-visao="prancha">🖨️ Mapa geral do PA / Vila (A1)</button></div>
     </div><div id="vilaPerBox"></div><div id="mapaVilaBox"></div><div id="mapaGeralBox"></div><div id="subdivBox"></div><div id="divisaBox"></div>`;
   v.querySelectorAll('[data-visao]').forEach((b) => b.onclick = () => { S.mapaVisao = b.dataset.visao; rMapa(); });
   if (S.mapaVisao === 'geral') return rMapaGeral();
   if (S.mapaVisao === 'lotes') return rSubdivisao();
   if (S.mapaVisao === 'divisa') return rDivisa();
+  if (S.mapaVisao === 'prancha') return rPrancha();
   rVilaPerimetro();
   await rMapaVila();
   rMemorialVila();
+}
+
+// ─── v3.196.0: entrega das vias — TRT (nº lido do PDF) → assinaturas posicionadas → A1 → impressão ───
+const PDFJS_V = '3.11.174';
+function carregarPdfJs(){
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  return new Promise((ok, erro) => { const s = document.createElement('script'); s.src = `https://unpkg.com/pdfjs-dist@${PDFJS_V}/build/pdf.min.js`; s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${PDFJS_V}/build/pdf.worker.min.js`; ok(window.pdfjsLib); }; s.onerror = () => erro(new Error('Não consegui carregar o visualizador de PDF')); document.head.appendChild(s); });
+}
+function abrirEntrega(d){
+  if (!d) return;
+  const m = document.createElement('div'); m.className = 'eu-modal'; m.style.alignItems = 'flex-start'; m.style.overflow = 'auto';
+  const E = { passo: d.trt_numero && d.tem_trt_doc && d.tem_comprovante_trt ? 2 : 1, trt: d.trt_numero || '', pos: [], paginas: 0, assinado: !!d.assinado_em };
+  const fechar = () => { m.remove(); rDossies(); };
+  const desenhar = () => {
+    const passos = ['1 · TRT e comprovante', '2 · Posicionar assinaturas', '3 · Assinar e imprimir'];
+    m.innerHTML = `<div class="cx" style="max-width:980px;text-align:left;margin:20px auto">
+      <div class="row" style="align-items:center;gap:8px"><b style="flex:1 1 auto;font-size:17px">📦 Entrega das vias — LT-${esc(d.lote)} · ${esc(d.nome)}</b><button class="btn btn-ghost btn-sm" id="enFechar" style="flex:0 0 auto">✕</button></div>
+      <div class="row" style="gap:6px;margin:8px 0 12px;flex-wrap:wrap">${passos.map((t, i) => `<span class="chip ${E.passo === i + 1 ? 'c-VALIDO' : E.passo > i + 1 ? 'c-PAGO' : 'c-A_VENCER'}">${E.passo > i + 1 ? '✓ ' : ''}${t}</span>`).join('')}</div>
+      <div id="enCorpo"></div></div>`;
+    m.querySelector('#enFechar').onclick = fechar;
+    const c = m.querySelector('#enCorpo');
+    if (E.passo === 1) passo1(c); else if (E.passo === 2) passo2(c); else passo3(c);
+  };
+  const passo1 = (c) => {
+    c.innerHTML = `<div class="muted" style="margin-bottom:10px">Anexe a <b>TRT</b> (PDF) e o <b>boleto/comprovante pago</b>. O sistema lê o <b>número da TRT</b> no PDF e coloca nas peças (capa e rodapé de todas as páginas).</div>
+      <div class="row" style="gap:10px;flex-wrap:wrap"><div style="flex:1 1 260px"><label>📄 TRT (PDF)${d.tem_trt_doc ? ' — já anexada ✓' : ''}</label><input type="file" id="enTrt" accept="application/pdf,image/*"></div>
+        <div style="flex:1 1 260px"><label>💳 Boleto / comprovante pago${d.tem_comprovante_trt ? ' — já anexado ✓' : ''}</label><input type="file" id="enComp" accept="application/pdf,image/*"></div></div>
+      <div id="enNumBox" style="margin-top:8px;${E.trt ? '' : 'display:none'}"><label>Nº da TRT</label><input id="enNum" value="${esc(E.trt)}" placeholder="ex.: BR20261234567"></div>
+      <div class="row" style="gap:8px;margin-top:12px"><button class="btn btn-primary" id="enEnviar" style="flex:0 0 auto">📥 Anexar e ler a TRT</button>${E.trt && d.tem_trt_doc && d.tem_comprovante_trt ? '<button class="btn btn-ghost" id="enPular" style="flex:0 0 auto">Seguir com a TRT já anexada ›</button>' : ''}</div>`;
+    if (c.querySelector('#enPular')) c.querySelector('#enPular').onclick = () => { E.passo = 2; desenhar(); };
+    c.querySelector('#enEnviar').onclick = async () => {
+      const fd = new FormData(); const t = c.querySelector('#enTrt').files[0], cp = c.querySelector('#enComp').files[0];
+      if (t) fd.append('trt', t); if (cp) fd.append('comprovante', cp);
+      const n = c.querySelector('#enNum').value.trim(); if (n) fd.append('numero', n);
+      const b = c.querySelector('#enEnviar'); b.disabled = true; b.textContent = 'Lendo a TRT…';
+      try {
+        const r = await fetch(`/api/pa/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/entrega/trt`, { method: 'POST', body: fd, credentials: 'include' });
+        const j = await r.json(); if (!r.ok){ const e = new Error(j.erro || 'Falha'); e.codigo = j.codigo; throw e; }
+        E.trt = j.trt_numero; d.tem_trt_doc = true; d.tem_comprovante_trt = true; E.pos = []; E.assinado = false;
+        toast(`TRT nº ${j.trt_numero} ${j.lido_do_pdf ? 'lida do PDF' : 'registrada'} ✅`); E.passo = 2; desenhar();
+      } catch (e){ toast(e.message, true); if (e.codigo === 'TRT_NUMERO_NAO_LIDO') { c.querySelector('#enNumBox').style.display = ''; c.querySelector('#enNum').focus(); } b.disabled = false; b.textContent = '📥 Anexar e ler a TRT'; }
+    };
+  };
+  const passo2 = async (c) => {
+    c.innerHTML = `<div class="muted">TRT nº <b>${esc(E.trt)}</b>. <b>Toque na página</b> onde vai a assinatura do técnico (o selo fica com o canto superior esquerdo no ponto tocado). Toque num selo para tirar.</div>
+      <div class="row" style="gap:8px;margin:8px 0;flex-wrap:wrap"><span class="chip c-VALIDO" id="enN" style="flex:0 0 auto">0 assinatura(s)</span><button class="btn btn-ghost btn-sm" id="enRepetir" style="flex:0 0 auto" title="Copia a última posição para todas as páginas (menos a capa)">🔁 Repetir a última em todas as páginas</button><button class="btn btn-ghost btn-sm" id="enLimpar" style="flex:0 0 auto">🧹 Limpar</button><button class="btn btn-ghost btn-sm" id="enVoltar1" style="flex:0 0 auto">‹ TRT</button><button class="btn btn-primary btn-sm" id="enIr3" style="flex:0 0 auto">Seguir para assinar ›</button></div>
+      <div id="enPags" style="display:flex;flex-direction:column;gap:14px;align-items:center;background:#E9E5D8;padding:12px;border-radius:10px;max-height:70vh;overflow:auto"><div class="muted">Gerando as vias com a TRT… (alguns segundos)</div></div>`;
+    c.querySelector('#enVoltar1').onclick = () => { E.passo = 1; desenhar(); };
+    c.querySelector('#enIr3').onclick = () => { if (!E.pos.length) return toast('Posicione ao menos uma assinatura', true); E.passo = 3; desenhar(); };
+    c.querySelector('#enLimpar').onclick = () => { E.pos = []; marcar(); };
+    c.querySelector('#enRepetir').onclick = () => { const u = E.pos[E.pos.length - 1]; if (!u) return toast('Posicione uma primeiro', true); for (let i = 1; i < E.paginas; i++) if (!E.pos.some((p) => p.pagina === i && Math.abs(p.x - u.x) < .01 && Math.abs(p.y - u.y) < .01)) E.pos.push({ ...u, pagina: i }); marcar(); };
+    const W_SELO = 0.3, H_SELO = 0.075;
+    const marcar = () => {
+      c.querySelector('#enN').textContent = `${E.pos.length} assinatura(s)`;
+      c.querySelectorAll('.en-pg').forEach((pg) => {
+        const i = Number(pg.dataset.pg); pg.querySelectorAll('.en-selo').forEach((x) => x.remove());
+        E.pos.forEach((p, k) => { if (p.pagina !== i) return; const s = document.createElement('div'); s.className = 'en-selo'; s.style.cssText = `position:absolute;left:${p.x * 100}%;top:${p.y * 100}%;width:${W_SELO * 100}%;height:${H_SELO * 100}%;border:2px solid #0C3320;background:rgba(201,168,76,.35);border-top:4px solid #C9A84C;font:700 10px Arial;color:#0C3320;padding:2px 4px;cursor:pointer;box-sizing:border-box`; s.textContent = '✍️ Assinatura do técnico'; s.onclick = (ev) => { ev.stopPropagation(); E.pos.splice(k, 1); marcar(); }; pg.appendChild(s); });
+      });
+    };
+    try {
+      const lib = await carregarPdfJs();
+      const r = await fetch(`/api/pa/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/vias.pdf`, { credentials: 'include' });
+      if (!r.ok){ let msg = 'HTTP ' + r.status; try { msg = (await r.json()).erro || msg; } catch { /* ok */ } throw new Error(msg); }
+      const pdf = await lib.getDocument({ data: await r.arrayBuffer() }).promise;
+      E.paginas = pdf.numPages;
+      const box = c.querySelector('#enPags'); box.innerHTML = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i); const vp0 = page.getViewport({ scale: 1 }); const larg = Math.min(760, box.clientWidth - 30); const vp = page.getViewport({ scale: larg / vp0.width });
+        const wrap = document.createElement('div'); wrap.className = 'en-pg'; wrap.dataset.pg = String(i - 1); wrap.style.cssText = `position:relative;width:${vp.width}px;height:${vp.height}px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.2);cursor:crosshair`;
+        const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height; wrap.appendChild(cv);
+        const lab = document.createElement('div'); lab.textContent = `Página ${i} de ${pdf.numPages}`; lab.style.cssText = 'position:absolute;left:6px;top:-18px;font:700 11px Arial;color:#555'; wrap.appendChild(lab);
+        wrap.onclick = (ev) => { const r2 = wrap.getBoundingClientRect(); const x = Math.min(1 - W_SELO, Math.max(0, (ev.clientX - r2.left) / r2.width)), y = Math.min(1 - H_SELO, Math.max(0, (ev.clientY - r2.top) / r2.height)); E.pos.push({ pagina: i - 1, x, y, w: W_SELO, h: H_SELO }); marcar(); };
+        box.appendChild(wrap); await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+      }
+      marcar();
+    } catch (e){ c.querySelector('#enPags').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  };
+  const passo3 = async (c) => {
+    let cert = null; try { cert = await api('/certificado'); } catch (e){ cert = { erro: e.message }; }
+    if (cert && cert.configurado === false) {
+      c.innerHTML = `<div class="cp-aviso p">🔐 Nenhum certificado digital cadastrado. Envie o <b>arquivo .pfx / .p12 (A1)</b> do responsável técnico — ele fica guardado cifrado; a senha <b>não</b> é guardada e é pedida a cada assinatura.</div>
+        <div class="row" style="gap:10px;margin-top:10px;flex-wrap:wrap"><div style="flex:1 1 260px"><label>Certificado A1 (.pfx / .p12)</label><input type="file" id="enPfx" accept=".pfx,.p12,application/x-pkcs12"></div><div style="flex:1 1 200px"><label>Senha do certificado</label><input type="password" id="enPfxSenha" autocomplete="off"></div></div>
+        <button class="btn btn-primary" id="enPfxEnviar" style="margin-top:10px">🔐 Cadastrar certificado</button>`;
+      c.querySelector('#enPfxEnviar').onclick = async () => {
+        const f = c.querySelector('#enPfx').files[0]; if (!f) return toast('Escolha o arquivo .pfx', true);
+        const fd = new FormData(); fd.append('pfx', f); fd.append('senha', c.querySelector('#enPfxSenha').value);
+        try { const r = await fetch('/api/pa/certificado', { method: 'POST', body: fd, credentials: 'include' }); const j = await r.json(); if (!r.ok) throw new Error(j.erro || 'Falha'); toast(`Certificado de ${j.titular} cadastrado ✅`); passo3(c); } catch (e){ toast(e.message, true); }
+      };
+      return;
+    }
+    c.innerHTML = `${cert && cert.titular ? `<div class="muted" style="margin-bottom:8px">🔐 Certificado: <b>${esc(cert.titular)}</b> · válido até ${esc(dbr(cert.valido_ate))}${cert.dias_restantes < 30 ? ` <b style="color:var(--red)">(${cert.dias_restantes} dias)</b>` : ''}</div>` : ''}
+      <div class="muted">${E.pos.length} selo(s) de assinatura em ${new Set(E.pos.map((p) => p.pagina)).size} página(s) · TRT nº <b>${esc(E.trt)}</b>. A assinatura digital (ICP-Brasil, PAdES) cobre o documento inteiro.</div>
+      ${E.assinado ? '' : `<div class="row" style="gap:8px;margin-top:10px;align-items:end;flex-wrap:wrap"><div style="flex:0 1 260px"><label>Senha do certificado</label><input type="password" id="enSenha" autocomplete="off"></div><button class="btn btn-primary" id="enAssinar" style="flex:0 0 auto">✍️ Assinar</button><button class="btn btn-ghost btn-sm" id="enVoltar2" style="flex:0 0 auto">‹ Posições</button></div>`}
+      <div id="enFim" style="margin-top:12px"></div>`;
+    const fim = () => { c.querySelector('#enFim').innerHTML = `<div class="cp-aviso" style="background:#EEF6EF;border-color:#2E7D4F">✅ <b>Vias assinadas digitalmente.</b> Baixe e imprima; depois de impresso, arquive e marque como entregue.</div>
+      <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-gold" id="enImprimir" style="flex:0 0 auto">🖨️ Baixar / imprimir</button><button class="btn btn-primary" id="enArquivar" style="flex:0 0 auto">🗄️ Impresso — arquivar e marcar entregue</button></div>`;
+      c.querySelector('#enImprimir').onclick = () => abrirPdf(`/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/vias-assinadas.pdf`);
+      c.querySelector('#enArquivar').onclick = async () => { const obs = prompt(`Entrega das vias do LT-${d.lote}.\nObservação (quem recebeu, etc. — opcional):`, ''); if (obs === null) return; try { await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/entregue`, { json: { obs } }); toast(`LT-${d.lote} entregue e arquivado ✅`); fechar(); } catch (e){ toast(e.message, true); } };
+    };
+    if (E.assinado) { fim(); return; }
+    c.querySelector('#enVoltar2').onclick = () => { E.passo = 2; desenhar(); };
+    c.querySelector('#enAssinar').onclick = async () => {
+      const b = c.querySelector('#enAssinar'); b.disabled = true; b.textContent = 'Assinando…';
+      try { const r = await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/entrega/assinar`, { json: { senha: c.querySelector('#enSenha').value, posicoes: E.pos } }); toast(`Assinado ✅ (${r.assinaturas} selo(s))`); E.assinado = true; d.assinado_em = new Date().toISOString(); c.querySelector('#enSenha').value = ''; fim(); b.textContent = '✓ Assinado'; }
+      catch (e){ toast(e.message, true); b.disabled = false; b.textContent = '✍️ Assinar'; }
+    };
+  };
+  m.onclick = (ev) => { if (ev.target === m) fechar(); };
+  desenhar(); document.body.appendChild(m);
+}
+
+// v3.195.0: prancha A1 para impressão — planta geral, quadro dos lotes, situação (satélite), vila, legenda e carimbo
+function rPrancha(){
+  const box = $('#mapaGeralBox');
+  box.innerHTML = `<div class="card"><h2 style="margin-top:0">🖨️ Mapa geral do PA / Vila — prancha A1</h2>
+    <div class="muted" style="margin-bottom:10px">Folha <b>A1 (841 × 594 mm, paisagem)</b> para imprimir e apresentar aos associados, gerada na hora com os dados atuais:
+      <ul style="margin:6px 0 0 18px;padding:0"><li><b>Planta geral</b> com todas as parcelas numeradas (LT-NN), perímetro, APP, estradas e córregos;</li>
+      <li><b>Quadro dos lotes</b>: lote de produção · associado(a) · lote da vila (sem áreas);</li>
+      <li><b>Mapa de situação</b> em imagem de satélite, <b>mapa da vila</b>, <b>legenda</b> com a área total do PA e <b>carimbo</b> técnico (RT, SIRGAS 2000, NBR 13133).</li></ul></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn btn-gold" id="prA1" style="flex:0 0 auto">📄 Gerar prancha A1 (PDF)</button><button class="btn btn-ghost" id="prA1m" style="flex:0 0 auto">📄 A1 com situação em mapa de ruas</button></div>
+    <div class="muted" style="margin-top:8px;font-size:12px">Na gráfica: imprimir em A1, <b>tamanho real (100%)</b>, paisagem. A geração leva alguns segundos (baixa a imagem de satélite).</div></div>`;
+  $('#prA1').onclick = () => abrirPdf(`/projetos/${S.pid}/prancha-a1.pdf?base=satelite`);
+  $('#prA1m').onclick = () => abrirPdf(`/projetos/${S.pid}/prancha-a1.pdf?base=mapa`);
 }
 
 // v3.191.1: abre o PDF direto do servidor (mesma sessão/cookie) — o navegador usa o nome do arquivo
@@ -1563,6 +1688,7 @@ async function rCarteirinhas(){
       <span class="muted" style="flex:1 1 auto" id="ctResumo"></span>
       <button class="btn btn-ghost btn-sm" id="ctPrevSel" style="flex:0 0 auto">👁 Prévia dos marcados</button>
       <button class="btn btn-primary btn-sm" id="ctPdfSel" style="flex:0 0 auto">📄 PDF dos marcados (<span id="ctN">0</span>)</button>
+      <button class="btn btn-primary btn-sm" id="ctPdfDossie" style="flex:0 0 auto" title="Carteirinhas de quem já recebeu o dossiê — A4 com 4 por folha, pronto para imprimir">🪪 Dossiês enviados (<span id="ctNDos">…</span>)</button>
       <button class="btn btn-gold btn-sm" id="ctPdfTodos" style="flex:0 0 auto">📄 PDF de todos</button>
     </div></div>
     <div class="grid21 ctgrid"><div class="card" style="margin:0"><div id="ctLista" class="tbl"><div class="empty">Carregando…</div></div></div>
@@ -1573,6 +1699,10 @@ async function rCarteirinhas(){
   $('#ctBusca').oninput = (e) => { CART.busca = e.target.value; desenharCarteirinhas(); };
   $('#ctFiltro').onchange = (e) => { CART.filtro = e.target.value; desenharCarteirinhas(); };
   $('#ctPdfTodos').onclick = () => gerarPdfCarteirinhas(null, CART.lista.length);
+  // v3.196.0: carteirinhas de quem já recebeu o dossiê (enviado/entregue) — A4, 4 por folha
+  const idsDossie = async () => { try { const ds = (await api(`/projetos/${S.pid}/dossies`)).dossies; return [...new Set(ds.filter((d) => d.status === 'ENVIADO' || d.status === 'ENTREGUE').map((d) => d.associado_id))]; } catch { return []; } };
+  idsDossie().then((ids) => { const e = $('#ctNDos'); if (e) e.textContent = ids.length; CART.idsDossie = ids; });
+  $('#ctPdfDossie').onclick = async () => { const ids = CART.idsDossie || await idsDossie(); if (!ids.length) return toast('Nenhum dossiê enviado ainda', true); gerarPdfCarteirinhas(ids, ids.length); };
   $('#ctPdfSel').onclick = () => { if (!CART.sel.size) return toast('Marque ao menos um associado', true); gerarPdfCarteirinhas([...CART.sel], CART.sel.size); };
   $('#ctPrevSel').onclick = () => { if (!CART.sel.size) return toast('Marque ao menos um associado', true); previaCarteirinha([...CART.sel]); };
   desenharCarteirinhas();
@@ -3483,7 +3613,6 @@ async function rDossies(){
         <button class="btn btn-sm ${!f ? 'btn-primary' : 'btn-ghost'}" data-dsf="">Todos (${ds.length})</button>
         ${Object.entries(ST_DOSSIE).map(([k, [, t]]) => `<button class="btn btn-sm ${f === k ? 'btn-primary' : 'btn-ghost'}" data-dsf="${k}">${t} (${n(k)})</button>`).join('')}
       </div>
-      ${admin && ds.some((d) => d.status === 'ENVIADO' || d.status === 'ENTREGUE') ? `<div class="row" style="margin-top:8px;align-items:center;gap:8px"><button class="btn btn-gold btn-sm" id="dsKmlTodos" style="flex:0 0 auto">🧭 Enviar o KML do lote a quem já recebeu o dossiê (${ds.filter((d) => d.status === 'ENVIADO' || d.status === 'ENTREGUE').length})</button><span class="muted" style="flex:1 1 200px">Os novos dossiês já saem com o KML da poligonal logo depois do PDF.</span></div>` : ''}</div>
     <div class="card">${lista.length ? `<div class="tbl"><table><thead><tr><th>Lote</th><th>Associado</th><th>Medido</th><th class="right">Em aberto</th><th>Situação</th><th></th></tr></thead><tbody>
       ${lista.map((d) => `<tr><td><b>LT-${esc(d.lote)}</b><div class="muted">vila ${esc(d.lote_vila)}</div></td><td>${esc(d.nome)}<div class="muted">${esc(d.numero)}${d.denominacao ? ' · ' + esc(d.denominacao) : ''}</div></td>
         <td class="nowrap">${d.medido_em ? hb(d.medido_em) + `<div class="muted">${esc(d.medidor || '')}</div>` : '—'}</td>
@@ -3494,10 +3623,8 @@ async function rDossies(){
         <td class="nowrap"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button><button class="btn btn-ghost btn-sm" data-dskml="${esc(d.lote)}" title="Baixar o KML do lote (abre no Organic Maps / Google Earth)">🗺️ KML</button>${admin && (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && d.whatsapp_valido ? `<button class="btn btn-ghost btn-sm" data-dskmlenv="${esc(d.lote)}" title="Enviar o KML + passo a passo do Organic Maps no WhatsApp do associado">📲 KML${d.kml_enviado_em ? ' ✓' : ''}</button>` : ''}
           ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>✅ Aprovar e enviar</button>` : ''}
           ${admin && d.status === 'ENVIADO' ? `<button class="btn btn-ghost btn-sm" data-dsenv="${esc(d.lote)}">🔁 Reenviar</button>` : ''}
-          ${admin && (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && d.whatsapp_valido ? `<button class="btn btn-ghost btn-sm" data-dskml="${esc(d.lote)}" title="Manda só o KML da poligonal deste lote">🧭 KML</button>` : ''}
-          ${(d.status === 'ENVIADO' || d.status === 'PRONTO') && !d.trt_emitida_em ? `<button class="btn btn-ghost btn-sm" data-dstrt="emitida" data-lote="${esc(d.lote)}">📄 TRT emitida</button>` : ''}
-          ${d.trt_emitida_em && !d.trt_paga_em ? `<button class="btn btn-ghost btn-sm" data-dstrt="paga" data-lote="${esc(d.lote)}">💳 TRT paga</button>` : ''}
-          ${d.status !== 'ENTREGUE' && d.status !== 'AGUARDANDO_PAGAMENTO' ? `<button class="btn btn-gold btn-sm" data-dsent="${esc(d.lote)}" ${d.trt_paga_em ? '' : 'disabled title="Libera depois da TRT paga"'}>📦 Entregue fisicamente</button>` : ''}</td></tr>`).join('')}
+          ${d.status === 'ENVIADO' ? `<button class="btn btn-gold btn-sm" data-dsentrega="${esc(d.lote)}" title="TRT + comprovante → assinatura digital → impressão">📦 Entregar${d.assinado_em ? ' (assinado ✓)' : d.trt_numero ? ' (TRT ✓)' : ''}</button>` : ''}
+          ${d.status === 'ENTREGUE' && d.assinado_em ? `<button class="btn btn-ghost btn-sm" data-dsvias="${esc(d.lote)}">🖨️ Vias assinadas</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">Nenhum dossiê nesta situação. Eles aparecem aqui quando um lote é fechado na aba Campo.</div>'}</div>
     <div class="card" id="capasBox"><div class="muted">Carregando capas…</div></div>`;
   rCapasDossie();
@@ -3516,13 +3643,6 @@ async function rDossies(){
     try { const r = await api(`/projetos/${S.pid}/dossies/kml/reenviar`, { json: {} }); toast(r.fila ? `Enviando o KML para ${r.fila} associado(s): ${r.lotes.map((x) => 'LT-' + x).join(', ')}` : 'Ninguém pendente'); }
     catch (e){ toast(e.message, true); }
   };
-  // v3.176.2: KML da poligonal para quem já recebeu o dossiê (fila lenta, um por vez)
-  const enviarKml = async (lotes, txt) => {
-    if (!confirm(`${txt}\n\nVai pela fila lenta do WhatsApp (um por vez, 30–60 s entre cada).`)) return;
-    try { await api(`/projetos/${S.pid}/dossies/kml`, { json: { lotes } }); toast('Envio do KML iniciado (fila lenta)'); } catch (e){ toast(e.message, true); }
-  };
-  if ($('#dsKmlTodos')) $('#dsKmlTodos').onclick = () => enviarKml(null, 'Enviar o KML do lote para todos que já receberam o dossiê?');
-  v.querySelectorAll('[data-dskml]').forEach((b) => b.onclick = () => enviarKml([b.dataset.dskml], `Enviar o KML do LT-${b.dataset.dskml} para o associado?`));
   v.querySelectorAll('[data-dsenv]').forEach((b) => b.onclick = async () => {
     const d = ds.find((x) => x.lote === b.dataset.dsenv);
     if (!confirm(`${d.status === 'PRONTO' ? 'Aprovar e enviar' : 'Reenviar'} o dossiê do LT-${d.lote} para ${d.nome} pelo WhatsApp?\n\nVai: capa, sumário e prazos, mapa e memorial (tradicional), planta e memorial (SIGEF), contrato assinado, termo de quitação com extrato, carteirinha e capa final — com o aviso para comparecer ao escritório (TRT, pagamento e vias impressas).\n\nDica: confira antes no 👁 PDF.`)) return;
@@ -3530,6 +3650,9 @@ async function rDossies(){
     try { await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/enviar`, { json: {} }); toast(`Dossiê do LT-${d.lote} enviado ✅`); rDossies(); }
     catch (e){ toast(e.message, true); b.disabled = false; }
   });
+  // v3.196.0: entrega — TRT + comprovante → posicionar assinaturas → assinar (A1) → imprimir → arquivar/entregue
+  v.querySelectorAll('[data-dsentrega]').forEach((b) => b.onclick = () => abrirEntrega(ds.find((x) => x.lote === b.dataset.dsentrega)));
+  v.querySelectorAll('[data-dsvias]').forEach((b) => b.onclick = () => abrirPdf(`/projetos/${S.pid}/dossies/${encodeURIComponent(b.dataset.dsvias)}/vias-assinadas.pdf`));
   v.querySelectorAll('[data-dstrt]').forEach((b) => b.onclick = async () => {
     const lote = b.dataset.lote, acao = b.dataset.dstrt;
     let numero = null;

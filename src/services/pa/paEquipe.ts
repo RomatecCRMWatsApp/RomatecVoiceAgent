@@ -99,7 +99,7 @@ const REGRAS: Regra[] = [
   R('GET', '^\\/(eu|projetos)', '*'), R('*', '^\\/eu\\/foto', '*'), // v3.192.0: cada um cuida da própria foto
   R('GET', P, '*'), R('GET', P + '\\/campo', '*'), R('GET', P + '\\/campo\\/programacao', '*'),
   R('GET', P + '\\/painel', 'ver_painel'), R('GET', P + '\\/mapa-publico', 'ver_mapa'), R('*', P + '\\/mapa-publico\\/(envio|enviar)', 'whatsapp'), R('GET', P + '\\/pesquisa', 'ver_painel'), R('*', P + '\\/pesquisa\\/(link\\/\\d+|link-grupo|enviar)', 'whatsapp'),
-  R('GET', P + '\\/(subdivisao\\.(pdf|dxf)|mapa-geral\\.pdf|mapa-vila\\.pdf|vila-perimetro\\.pdf|divisa\\.dxf)', 'baixar_mapas'),
+  R('GET', P + '\\/(subdivisao\\.(pdf|dxf)|mapa-geral\\.pdf|prancha-a1\\.pdf|mapa-vila\\.pdf|vila-perimetro\\.pdf|divisa\\.dxf)', 'baixar_mapas'),
   R('GET', P + '\\/(subdivisao(\\.geojson|\\.svg)?|subdivisao\\/lotes\\/[\\w-]+(\\.svg)?|perimetro|vila-perimetro|divisa|lotes|lotes\\/[\\w-]+|desenho|memorial-vila|mapa-vila\\.svg|marcas)', 'ver_mapa'),
   R('ESCRITA', P + '\\/(perimetro|vila-perimetro|subdivisao|subdivisao\\/limpar|subdivisao\\/vinculo|divisa|lotes\\/[\\w-]+)', 'editar_mapas'),
   R('GET', P + '\\/(associados|associados\\/\\d+|documentos)', 'ver_associados'),

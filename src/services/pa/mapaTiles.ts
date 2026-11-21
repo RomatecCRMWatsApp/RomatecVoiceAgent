@@ -63,7 +63,7 @@ function centroide(pts: Pos[]): Pos {
  * HTML (div com as imagens de fundo + SVG por cima) do mapa dos lotes como no sistema.
  * `cores`: cor/rótulo por lote; lotes fora dele saem em contorno branco.
  */
-export async function htmlMapaLotes(geo: { features: Feicao[] }, cores: Record<string, RotuloLote>, opts: { base?: BaseMapa; W?: number; H?: number; buscar?: BuscarTile } = {}): Promise<{ html: string; imagem: boolean }> {
+export async function htmlMapaLotes(geo: { features: Feicao[] }, cores: Record<string, RotuloLote>, opts: { base?: BaseMapa; W?: number; H?: number; buscar?: BuscarTile; margem?: number; semRotulos?: boolean } = {}): Promise<{ html: string; imagem: boolean }> {
   const W = opts.W ?? 718, H = opts.H ?? 560;
   const base = BASES_MAPA[opts.base ?? 'satelite'];
   const lotes = geo.features.filter((f) => f.properties.tipo === 'LOTE' && f.geometry.type === 'Polygon');
@@ -71,7 +71,7 @@ export async function htmlMapaLotes(geo: { features: Feicao[] }, cores: Record<s
   const anel = (f: Feicao) => ((f.geometry.coordinates as Pos[][])[0] ?? []);
   const todos = lotes.flatMap(anel);
   if (!todos.length) return { html: '<div style="padding:20mm;text-align:center;color:#777">Subdivisão dos lotes ainda não carregada.</div>', imagem: false };
-  const g = enquadrar(todos, W, H, 0.03, base.max);
+  const g = enquadrar(todos, W, H, opts.margem ?? 0.03, base.max); // v3.195.0: margem maior = mapa de situação
 
   // imagens de fundo: zoom +1 desenhado na metade (fica nítido na impressão)
   const z = Math.max(0, Math.min(base.max, Math.floor(g.zf) + 1));
@@ -112,7 +112,7 @@ export async function htmlMapaLotes(geo: { features: Feicao[] }, cores: Record<s
   }).join('');
   const halo = 'stroke="#fff" stroke-width="3" paint-order="stroke" stroke-linejoin="round"';
   const fs = Math.max(7, Math.min(10, Math.sqrt((W * H) / Math.max(lotes.length, 1)) / 7));
-  const rots = lotes.map((f) => {
+  const rots = opts.semRotulos ? '' : lotes.map((f) => {
     const c = cores[String(f.properties.lote)];
     const [x, y] = g.px(centroide(anel(f)));
     const r = c?.rotulo ?? `LT-${f.properties.lote}`;

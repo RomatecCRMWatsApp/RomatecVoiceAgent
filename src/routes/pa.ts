@@ -48,6 +48,8 @@ import { fotoUsuario, salvarFotoUsuario, removerFotoUsuario } from '../services/
 import { baseValida } from '../services/pa/mapaTiles';
 import * as dossie from '../services/pa/paDossie';
 import * as kmlLote from '../services/pa/paKmlLote';
+import * as prancha from '../services/pa/paPrancha';
+import * as entrega from '../services/pa/paEntrega';
 import * as lotesProd from '../services/pa/paLotesProducao';
 
 const router = Router();
@@ -277,6 +279,7 @@ router.get('/projetos/:id/subdivisao.pdf', h(async (req, res) => {
   enviarPdf(res, await mapas.pdfSubdivisao(id(req.params.id), lotes, req.query.geral === '1', req.query.modelo === 'sigef' ? 'sigef' : 'tradicional'));
   return undefined;
 }));
+router.get('/projetos/:id/prancha-a1.pdf', h(async (req, res) => { enviarPdf(res, await prancha.pdfPrancha(id(req.params.id), baseValida(req.query.base))); return undefined; })); // v3.195.0: prancha A1 do PA
 router.get('/projetos/:id/mapa-geral.pdf', h(async (req, res) => { enviarPdf(res, await mapas.pdfMapaGeral(id(req.params.id), req.query.modelo === 'sigef' ? 'sigef' : 'tradicional')); return undefined; }));
 
 // ─── Lotes ────────────────────────────────────────────────────────────────
@@ -641,6 +644,18 @@ router.post('/projetos/:id/dossies/kml', h(async (req) => {
 }));
 router.post('/projetos/:id/dossies/:lote/enviar', h(async (req) => { exigirAdmin(req); return dossie.enviarDossie(id(req.params.id), String(req.params.lote).slice(0, 10), ctx(req).sub); }));
 router.post('/projetos/:id/dossies/:lote/trt', h(async (req) => { exigirEscrita(req); return dossie.registrarTrt(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.acao, req.body?.numero, ctx(req).sub, ctx(req).nome); })); // v3.170.0
+// v3.196.0: entrega — TRT + comprovante (o nº é lido do PDF), vias com a TRT, assinatura A1 posicionada, PDF assinado
+router.post('/projetos/:id/dossies/:lote/entrega/trt', uploadMem.fields([{ name: 'trt', maxCount: 1 }, { name: 'comprovante', maxCount: 1 }]), h(async (req) => {
+  exigirEscrita(req);
+  const fs = (req.files ?? {}) as Record<string, Express.Multer.File[]>;
+  const arq = (k: string) => fs[k]?.[0] ? { buffer: fs[k][0].buffer, originalname: fs[k][0].originalname, mimetype: fs[k][0].mimetype } : undefined;
+  return entrega.registrarTrtEntrega(id(req.params.id), String(req.params.lote).slice(0, 10), { trt: arq('trt'), comprovante: arq('comprovante') }, req.body?.numero, ctx(req).sub, ctx(req).nome);
+}));
+router.get('/projetos/:id/dossies/:lote/vias.pdf', h(async (req, res) => { enviarPdf(res, await entrega.viasEntrega(id(req.params.id), String(req.params.lote).slice(0, 10))); return undefined; }));
+router.post('/projetos/:id/dossies/:lote/entrega/assinar', h(async (req) => { exigirAdmin(req); return entrega.assinarEntrega(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.senha, req.body?.posicoes, ctx(req).sub); }));
+router.get('/projetos/:id/dossies/:lote/vias-assinadas.pdf', h(async (req, res) => { enviarPdf(res, await entrega.viasAssinadas(id(req.params.id), String(req.params.lote).slice(0, 10))); return undefined; }));
+router.get('/certificado', h(async (req) => { exigirAdmin(req); return entrega.statusCertificadoPa(); }));
+router.post('/certificado', uploadMem.single('pfx'), h(async (req) => { exigirAdmin(req); return entrega.importarCertificadoPa((req as Request & { file?: Express.Multer.File }).file?.buffer, req.body?.senha, ctx(req).sub); }));
 router.post('/projetos/:id/dossies/:lote/entregue', h(async (req) => { exigirEscrita(req); return dossie.marcarEntregue(id(req.params.id), String(req.params.lote).slice(0, 10), req.body?.obs, ctx(req).sub, ctx(req).nome); }));
 // v3.188.0: lotes de produção (LT-NN) + capa do dossiê técnico do lote
 router.get('/projetos/:id/lotes-producao', h(async (req) => ({ lotes: await lotesProd.listarLotesProducao(id(req.params.id)) })));
