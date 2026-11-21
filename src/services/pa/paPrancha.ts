@@ -21,11 +21,12 @@ function arte(nome: string, mime: string): string {
   return f ? `data:${mime};base64,${readFileSync(f).toString('base64')}` : '';
 }
 
-export type SituacaoLote = 'ENTREGUE' | 'ENVIADO' | 'MEDIDO' | 'A_MEDIR';
+export type SituacaoLote = 'ENTREGUE' | 'ENVIADO' | 'MEDIDO' | 'A_MEDIR' | 'BLOQUEADO';
 export interface LinhaQuadro { lote: string; associado: string | null; lote_vila: string | null; situacao: SituacaoLote }
 export const COR_SITUACAO: Record<SituacaoLote, { cor: string; rotulo: string }> = {
   ENTREGUE: { cor: '#1E9E4A', rotulo: 'Dossiê entregue' }, ENVIADO: { cor: '#3D7FC1', rotulo: 'Dossiê enviado' },
   MEDIDO: { cor: '#3D7FC1', rotulo: 'Medido' }, A_MEDIR: { cor: '#FFFFFF', rotulo: 'A medir' }, // v3.196.3: medido também em azul (pedido do CEO)
+  BLOQUEADO: { cor: '#111111', rotulo: 'Bloqueado' }, // v3.196.4: lote bloqueado (preto)
 };
 /** Quadro dos lotes (pura — testável): todas as parcelas, ordenadas pelo nº do lote de produção, com a situação do dossiê. */
 export function quadroLotes(parcelas: string[], vinc: Record<string, { nome: string; lote_vila: string }>, sit: Record<string, SituacaoLote> = {}): LinhaQuadro[] {
@@ -39,8 +40,8 @@ export function htmlPrancha(o: {
 }): string {
   const logo = arte('logo_romatec.jpg', 'image/jpeg'), bras = arte('brasao_salete_moreno.png', 'image/png');
   const n = (k: SituacaoLote) => o.quadro.filter((x) => x.situacao === k).length;
-  const tagS = (k: SituacaoLote) => k === 'ENTREGUE' ? '<span class="tg en">✓ ENTREGUE</span>' : k === 'ENVIADO' ? '<span class="tg ev">ENVIADO</span>' : k === 'MEDIDO' ? '<span class="tg me">medido</span>' : '';
-  const tab = `<table><thead><tr><th>Lote prod.</th><th>Associado(a)</th><th>Lote vila</th><th>Dossiê</th></tr></thead><tbody>${o.quadro.map((x) => `<tr class="${x.situacao === 'ENTREGUE' ? 'okv' : ''}"><td class="lt">LT-${esc(x.lote)}</td><td>${esc(x.associado ?? '—')}</td><td class="c">${esc(x.lote_vila ?? '—')}</td><td class="c">${tagS(x.situacao)}</td></tr>`).join('')}</tbody></table>`;
+  const tagS = (k: SituacaoLote) => k === 'BLOQUEADO' ? '<span class="tg bl">BLOQUEADO</span>' : k === 'ENTREGUE' ? '<span class="tg en">✓ ENTREGUE</span>' : k === 'ENVIADO' ? '<span class="tg ev">ENVIADO</span>' : k === 'MEDIDO' ? '<span class="tg me">medido</span>' : '';
+  const tab = `<table><thead><tr><th>Lote prod.</th><th>Associado(a)</th><th>Lote vila</th><th>Dossiê</th></tr></thead><tbody>${o.quadro.map((x) => `<tr class="${x.situacao === 'ENTREGUE' ? 'okv' : x.situacao === 'BLOQUEADO' ? 'blq' : ''}"><td class="lt">LT-${esc(x.lote)}</td><td>${esc(x.associado ?? '—')}</td><td class="c">${esc(x.lote_vila ?? '—')}</td><td class="c">${tagS(x.situacao)}</td></tr>`).join('')}</tbody></table>`;
   const leg = (cor: string, txt: string, tipo: 'area' | 'linha' | 'tracejado' = 'area') => `<div class="lg"><i class="${tipo}" style="${tipo === 'area' ? `background:${cor}` : `border-color:${cor}`}"></i>${txt}</div>`;
   return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><title>Planta geral — ${esc(o.projeto)}</title><style>
     @page{size:841mm 594mm;margin:0}*{box-sizing:border-box}
@@ -56,7 +57,7 @@ export function htmlPrancha(o: {
     table{width:100%;border-collapse:collapse;font-size:9.4pt}th{background:#14472B;color:#fff;font-size:8.4pt;padding:1.5mm 1.8mm;text-align:left}
     td{padding:1.15mm 1.8mm;border-bottom:.3mm solid #E5DFCD}tr:nth-child(even) td{background:#FAF7EE}td.lt{font-weight:800;color:#0C3320;white-space:nowrap}td.c{text-align:center;font-weight:700;white-space:nowrap}
     tr.okv td{background:#DDF3E3 !important}tr.okv td.lt{color:#0E6B2E}
-    .tg{display:inline-block;border-radius:1.5mm;padding:.3mm 1.6mm;font-size:7.4pt;font-weight:800}.tg.en{background:#1E9E4A;color:#fff}.tg.ev{background:#3D7FC1;color:#fff}.tg.me{background:#3D7FC1;color:#fff}
+    .tg{display:inline-block;border-radius:1.5mm;padding:.3mm 1.6mm;font-size:7.4pt;font-weight:800}.tg.en{background:#1E9E4A;color:#fff}.tg.ev{background:#3D7FC1;color:#fff}.tg.me{background:#3D7FC1;color:#fff}.tg.bl{background:#111;color:#fff}tr.blq td{background:#E6E6E6 !important}tr.blq td.lt{color:#111}
     .quadro{flex:1}.res{display:flex;gap:2mm;padding:2.5mm 3mm;font-size:9.4pt;flex-wrap:wrap;border-bottom:.3mm solid #E5DFCD}.res b{color:#0C3320}
     .mini{height:150mm;display:flex;align-items:center;justify-content:center;background:#F4F1E6}.mini svg{width:100%;height:100%}
     .legs{padding:3mm 4mm;font-size:10pt;display:grid;grid-template-columns:1fr 1fr;gap:1.8mm 4mm}
@@ -71,7 +72,7 @@ export function htmlPrancha(o: {
   </style></head><body><div class="folha">
     <div class="col">
       <div class="box quadro"><h2>LOTES DE PRODUÇÃO — ${o.quadro.length}</h2>
-        <div class="res"><span><b>${n('ENTREGUE')}</b> entregues</span>·<span><b>${n('ENVIADO')}</b> enviados</span>·<span><b>${n('MEDIDO')}</b> medidos</span>·<span><b>${n('A_MEDIR')}</b> a medir</span></div>${tab}</div>
+        <div class="res"><span><b>${n('ENTREGUE')}</b> entregues</span>·<span><b>${n('ENVIADO')}</b> enviados</span>·<span><b>${n('MEDIDO')}</b> medidos</span>·<span><b>${n('A_MEDIR')}</b> a medir</span>${n('BLOQUEADO') ? `·<span><b>${n('BLOQUEADO')}</b> bloqueados</span>` : ''}</div>${tab}</div>
     </div>
     <div class="col">
       <div class="tit">${logo ? `<img src="${logo}">` : ''}<div><h1>PLANTA GERAL — ${esc(o.projeto.toUpperCase())}</h1><p>Parcelamento em lotes de produção · ${esc(o.municipio)}${o.associacao ? ' · ' + esc(o.associacao) : ''}</p></div>${bras ? `<img class="br" src="${bras}">` : ''}</div>
@@ -83,7 +84,7 @@ export function htmlPrancha(o: {
         ${o.municipios?.length ? `<div class="legs" style="padding:2mm 4mm">${o.municipios.map((m) => leg(m.cor, esc(m.nome))).join('')}${leg('#C62828', 'Divisa municipal', 'tracejado')}</div>` : ''}</div>
       <div class="box"><h2>LEGENDA</h2><div class="legs">
         ${leg(COR_SITUACAO.ENTREGUE.cor, 'Dossiê entregue')}${leg(COR_SITUACAO.ENVIADO.cor, 'Medido / dossiê enviado')}
-        ${leg('#FFFFFF', 'Lote a medir')}
+        ${leg('#FFFFFF', 'Lote a medir')}${leg(COR_SITUACAO.BLOQUEADO.cor, 'Lote bloqueado')}
         ${leg('#0C3320', 'Perímetro do PA', 'tracejado')}${leg('#B3261E', 'Área da vila', 'tracejado')}
         ${leg('#8C5A2B', 'Estrada', 'linha')}${leg('#2B6CB0', 'Córrego', 'linha')}
       </div>
@@ -105,6 +106,8 @@ export async function situacaoLotes(projetoId: number): Promise<Record<string, S
   const out: Record<string, SituacaoLote> = {};
   for (const r of await rows(pool, 'SELECT lote FROM pa_campo_lotes WHERE projeto_id = ?', [projetoId]).catch(() => [])) out[String(r.lote)] = 'MEDIDO';
   for (const r of await rows(pool, "SELECT lote, status FROM pa_dossies WHERE projeto_id = ? AND status IN ('ENVIADO','ENTREGUE')", [projetoId]).catch(() => [])) out[String(r.lote)] = String(r.status) === 'ENTREGUE' ? 'ENTREGUE' : 'ENVIADO';
+  // v3.196.4: bloqueado pelo ADMIN (aba Campo) prevalece
+  for (const r of await rows(pool, 'SELECT codigo FROM pa_lotes_producao WHERE projeto_id = ? AND bloqueado = 1', [projetoId]).catch(() => [])) out[String(r.codigo).replace(/^LT-/i, '')] = 'BLOQUEADO';
   return out;
 }
 
@@ -120,7 +123,7 @@ export async function pdfPrancha(projetoId: number, base: BaseMapa = 'satelite')
   const geo = (await geojsonSubdivisao(projetoId).catch(() => ({ features: [] }))) as unknown as Geo;
   const cores: Record<string, RotuloLote> = Object.fromEntries(sub.parcelas.map((pc) => {
     const k = sit[pc.lote] ?? 'A_MEDIR';
-    return [pc.lote, { cor: COR_SITUACAO[k].cor, opac: k === 'A_MEDIR' ? 0.12 : 0.55, rotulo: `LT-${pc.lote}`, destaque: k === 'ENTREGUE' }];
+    return [pc.lote, { cor: COR_SITUACAO[k].cor, opac: k === 'A_MEDIR' ? 0.12 : k === 'BLOQUEADO' ? 0.78 : 0.55, rotulo: `LT-${pc.lote}${k === 'BLOQUEADO' ? ' · BLOQ.' : ''}`, destaque: k === 'ENTREGUE' || k === 'BLOQUEADO' }];
   }));
   const { html: geral } = await htmlMapaLotes(geo, cores, { base, W: 1740, H: 1660, margem: 0.02 });
   // divisa municipal: municípios coloridos + linha da divisa (mesmo desenho da aba Divisa)
