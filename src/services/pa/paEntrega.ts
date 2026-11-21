@@ -226,3 +226,74 @@ export async function situacaoEntrega(projetoId: number) {
   const ds = await listarDossies(projetoId);
   return ds;
 }
+
+// ─── v3.196.1: posicionamento automático — acha o nome do técnico nas linhas de assinatura ───
+export interface ItemTexto { pagina: number; str: string; x: number; y: number; w: number; fs: number; pw: number; ph: number }
+const semAcento = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+/**
+ * Posições dos selos (pura — testável): cada ocorrência do nome numa LINHA DE ASSINATURA (nome com
+ * "Técnico em Agrimensura"/CFT/Romatec logo abaixo ou na mesma linha). Fora: rodapé "Responsável técnico: …"
+ * e o nome em caixa alta de tabelas. O selo fica centralizado sobre o nome, acima da linha, todos do mesmo tamanho.
+ */
+export function posicoesAutomaticas(itens: ItemTexto[], nomes: string[]): PosicaoAssinatura[] {
+  const alvo = nomes.map(semAcento).filter(Boolean);
+  const papel = /tecnico em agrimensura|cft|romatec|responsavel tecnico|incra/;
+  const out: PosicaoAssinatura[] = [];
+  for (const it of itens) {
+    const t = semAcento(it.str);
+    if (!alvo.some((n) => t.startsWith(n))) continue;
+    if (it.str === it.str.toUpperCase()) continue;                 // valor de tabela (caixa alta)
+    if (t.length > Math.max(...alvo.map((n) => n.length)) + 90) continue;
+    const cx = it.x + it.w / 2;
+    const mesmaLinha = papel.test(t.slice(alvo.find((n) => t.startsWith(n))!.length));
+    const abaixo = itens.some((o) => o.pagina === it.pagina && o !== it && it.y - o.y > 3 && it.y - o.y < it.fs * 2.6 && Math.abs(o.x + o.w / 2 - cx) < 70 && papel.test(semAcento(o.str)));
+    if (!mesmaLinha && !abaixo) continue;
+    if (mesmaLinha && it.x < it.pw * 0.08) continue;                  // rodapé à esquerda ("Nome · Técnico … · CFT …")
+    if (it.fs > 9.5) continue;                                         // nome em destaque (capa final), não é linha de assinatura
+    const w = Math.min(it.pw * 0.34, 200), h = 38;
+    // topo do bloco da assinatura: rótulos curtos logo acima do nome ("CONTRATADA – …"), na mesma coluna
+    let topoBloco = it.y + it.fs;
+    for (let mudou = true; mudou;) {
+      mudou = false;
+      for (const o of itens) {
+        if (o.pagina !== it.pagina || o === it || o.str.length > 70) continue;
+        const dy = o.y - (topoBloco - o.fs);
+        if (dy > 0 && dy < o.fs * 1.6 && Math.abs(o.x + o.w / 2 - cx) < 60 && o.y + o.fs > topoBloco) { topoBloco = o.y + o.fs; mudou = true; }
+      }
+    }
+    const base = topoBloco + 1;                                        // logo acima do bloco, sobre a linha de assinatura
+    const x = Math.max(4, Math.min(it.pw - w - 4, cx - w / 2));
+    const topo = Math.min(it.ph - 4, base + h);
+    if (out.some((p) => p.pagina === it.pagina && Math.abs(p.y - (it.ph - topo) / it.ph) < 0.03)) continue;
+    out.push({ pagina: it.pagina, x: x / it.pw, y: (it.ph - topo) / it.ph, w: w / it.pw, h: h / it.ph });
+  }
+  return out;
+}
+async function itensDoPdf(pdf: Buffer): Promise<ItemTexto[]> {
+  // import ESM de verdade (o build é CommonJS: um import() comum vira require() e o .mjs não carrega no Node 20)
+  const importar = new Function('m', 'return import(m)') as (m: string) => Promise<typeof import('pdfjs-dist/legacy/build/pdf.mjs')>;
+  const pdfjs = await importar('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(pdf), isEvalSupported: false, useSystemFonts: false }).promise;
+  const out: ItemTexto[] = [];
+  try {
+    for (let i = 1; i <= doc.numPages; i++) {
+      const p = await doc.getPage(i); const vp = p.getViewport({ scale: 1 }); const tc = await p.getTextContent();
+      for (const it of tc.items as Array<{ str?: string; transform: number[]; width: number }>) {
+        if (!it.str?.trim()) continue;
+        out.push({ pagina: i - 1, str: it.str, x: it.transform[4], y: it.transform[5], w: it.width, fs: Math.abs(it.transform[3]) || 8, pw: vp.width, ph: vp.height });
+      }
+    }
+  } finally { await doc.destroy(); }
+  return out;
+}
+async function nomesDoTecnico(): Promise<string[]> {
+  const c = await certAtivo();
+  return [...new Set(['José Romário Pinto Bezerra', c?.titular ?? ''].filter(Boolean))];
+}
+export async function sugerirPosicoes(pdf: Buffer): Promise<PosicaoAssinatura[]> {
+  return posicoesAutomaticas(await itensDoPdf(pdf), await nomesDoTecnico());
+}
+export async function posicoesDoDossie(projetoId: number, lote: string, alvo: 'vias' | 'trt') {
+  const pdf = alvo === 'trt' ? (await pdfTrt(projetoId, lote)).pdf : (await viasEntrega(projetoId, lote)).pdf;
+  return { posicoes: await sugerirPosicoes(pdf) };
+}

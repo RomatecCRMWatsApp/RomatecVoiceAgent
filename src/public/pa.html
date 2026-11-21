@@ -1055,7 +1055,7 @@ async function montarPosicionador(box, arrayBuffer, E, aoMudar){
   const marcar = () => {
     box.querySelectorAll('.en-pg').forEach((pg) => {
       const i = Number(pg.dataset.pg); pg.querySelectorAll('.en-selo').forEach((x) => x.remove());
-      E.pos.forEach((p, k) => { if (p.pagina !== i) return; const s = document.createElement('div'); s.className = 'en-selo'; s.style.cssText = `position:absolute;left:${p.x * 100}%;top:${p.y * 100}%;width:${W_SELO * 100}%;height:${H_SELO * 100}%;border:2px solid #0C3320;background:rgba(201,168,76,.35);border-top:4px solid #C9A84C;font:700 10px Arial;color:#0C3320;padding:2px 4px;cursor:pointer;box-sizing:border-box`; s.textContent = '✍️ Assinatura do técnico (toque para tirar)'; s.onclick = (ev) => { ev.stopPropagation(); E.pos.splice(k, 1); marcar(); }; pg.appendChild(s); });
+      E.pos.forEach((p, k) => { if (p.pagina !== i) return; const s = document.createElement('div'); s.className = 'en-selo'; s.style.cssText = `position:absolute;left:${p.x * 100}%;top:${p.y * 100}%;width:${(p.w || W_SELO) * 100}%;height:${(p.h || H_SELO) * 100}%;border:2px solid #0C3320;background:rgba(201,168,76,.35);border-top:4px solid #C9A84C;font:700 10px Arial;color:#0C3320;padding:2px 4px;cursor:pointer;box-sizing:border-box`; s.textContent = '✍️ Assinatura do técnico (toque para tirar)'; s.onclick = (ev) => { ev.stopPropagation(); E.pos.splice(k, 1); marcar(); }; pg.appendChild(s); });
     });
     if (aoMudar) aoMudar();
   };
@@ -1094,7 +1094,7 @@ function assinarPdfAvulso(){
   const E = { pos: [], paginas: 0, arquivo: null };
   m.innerHTML = `<div class="cx" style="max-width:980px;text-align:left;margin:20px auto"><div class="row" style="align-items:center"><b style="flex:1 1 auto;font-size:17px">✍️ Assinar um PDF com o certificado digital</b><button class="btn btn-ghost btn-sm" id="apX" style="flex:0 0 auto">✕</button></div>
     <div class="row" style="gap:8px;margin:10px 0;align-items:end;flex-wrap:wrap"><div style="flex:1 1 260px"><label>PDF</label><input type="file" id="apPdf" accept="application/pdf"></div>
-      <span class="chip c-VALIDO" id="apN" style="flex:0 0 auto">0 assinatura(s)</span><button class="btn btn-ghost btn-sm" id="apRep" style="flex:0 0 auto">🔁 Repetir a última em todas</button>
+      <span class="chip c-VALIDO" id="apN" style="flex:0 0 auto">0 assinatura(s)</span><button class="btn btn-gold btn-sm" id="apAuto" style="flex:0 0 auto">🎯 Posicionar automaticamente</button><button class="btn btn-ghost btn-sm" id="apRep" style="flex:0 0 auto">🔁 Repetir a última em todas</button>
       <div style="flex:0 1 200px"><label>Senha do certificado</label><input type="password" id="apSenha" autocomplete="off"></div><button class="btn btn-primary" id="apOk" style="flex:0 0 auto">✍️ Assinar e baixar</button></div>
     <div class="muted">Escolha o PDF, <b>toque na página</b> onde vai a assinatura e depois em <b>Assinar</b>.</div>
     <div id="apPags" style="display:flex;flex-direction:column;align-items:center;background:#E9E5D8;padding:12px;border-radius:10px;max-height:70vh;overflow:auto;margin-top:8px"></div></div>`;
@@ -1102,7 +1102,15 @@ function assinarPdfAvulso(){
   const conta = () => { m.querySelector('#apN').textContent = `${E.pos.length} assinatura(s)`; };
   m.querySelector('#apX').onclick = () => m.remove();
   m.querySelector('#apRep').onclick = () => { const u = E.pos[E.pos.length - 1]; if (!u) return toast('Posicione uma primeiro', true); for (let i = 0; i < E.paginas; i++) if (i !== u.pagina) E.pos.push({ ...u, pagina: i }); E.marcar(); };
-  m.querySelector('#apPdf').onchange = async (ev) => { E.arquivo = ev.target.files[0]; E.pos = []; if (!E.arquivo) return; m.querySelector('#apPags').innerHTML = '<div class="muted">Abrindo…</div>'; try { await montarPosicionador(m.querySelector('#apPags'), await E.arquivo.arrayBuffer(), E, conta); } catch (e){ toast(e.message, true); } };
+  m.querySelector('#apPdf').onchange = async (ev) => { E.arquivo = ev.target.files[0]; E.pos = []; if (!E.arquivo) return; m.querySelector('#apPags').innerHTML = '<div class="muted">Abrindo…</div>'; try { await montarPosicionador(m.querySelector('#apPags'), await E.arquivo.arrayBuffer(), E, conta); autoAp(true); } catch (e){ toast(e.message, true); } };
+  const autoAp = async (avisar) => {
+    if (!E.arquivo) return toast('Escolha o PDF', true);
+    const fd = new FormData(); fd.append('pdf', E.arquivo);
+    try { const r = await fetch('/api/pa/assinar-pdf/posicoes', { method: 'POST', body: fd, credentials: 'include' }); const j = await r.json(); if (!r.ok) throw new Error(j.erro || 'Falha');
+      if (j.posicoes.length) { E.pos = j.posicoes; E.marcar(); if (avisar) toast(`${j.posicoes.length} assinatura(s) posicionada(s)`); } else if (avisar) toast('Não achei o seu nome numa linha de assinatura — toque na página', true); }
+    catch (e){ if (avisar) toast(e.message, true); }
+  };
+  m.querySelector('#apAuto').onclick = () => autoAp(true);
   m.querySelector('#apOk').onclick = async () => {
     if (!E.arquivo) return toast('Escolha o PDF', true); if (!E.pos.length) return toast('Posicione ao menos uma assinatura', true);
     const fd = new FormData(); fd.append('pdf', E.arquivo); fd.append('senha', m.querySelector('#apSenha').value); fd.append('posicoes', JSON.stringify(E.pos));
@@ -1164,7 +1172,7 @@ function abrirEntrega(d, semTrt){
   };
   const passo2 = async (c) => {
     c.innerHTML = `<div class="muted">${E.soTrt ? `O dossiê já está assinado — agora assina <b>só a TRT nº ${esc(E.trt)}</b>.` : E.trt ? `TRT nº <b>${esc(E.trt)}</b> (na capa e no rodapé).` : '<b>Via de apresentação</b> — sem o número da TRT.'} <b>Toque na página</b> onde vai a sua assinatura. Toque num selo para tirar.</div>
-      <div class="row" style="gap:8px;margin:8px 0;flex-wrap:wrap"><span class="chip c-VALIDO" id="enN" style="flex:0 0 auto">0 assinatura(s)</span><button class="btn btn-ghost btn-sm" id="enRepetir" style="flex:0 0 auto" title="Copia a última posição para todas as páginas (menos a capa)">🔁 Repetir a última em todas as páginas</button><button class="btn btn-ghost btn-sm" id="enLimpar" style="flex:0 0 auto">🧹 Limpar</button><button class="btn btn-ghost btn-sm" id="enVoltar1" style="flex:0 0 auto">‹ TRT</button><button class="btn btn-primary btn-sm" id="enIr3" style="flex:0 0 auto">Seguir para assinar ›</button></div>
+      <div class="row" style="gap:8px;margin:8px 0;flex-wrap:wrap"><span class="chip c-VALIDO" id="enN" style="flex:0 0 auto">0 assinatura(s)</span><button class="btn btn-gold btn-sm" id="enAuto" style="flex:0 0 auto" title="Acha o seu nome nas linhas de assinatura e posiciona os selos alinhados, acima do nome">🎯 Posicionar automaticamente</button><button class="btn btn-ghost btn-sm" id="enRepetir" style="flex:0 0 auto" title="Copia a última posição para todas as páginas (menos a capa)">🔁 Repetir a última em todas as páginas</button><button class="btn btn-ghost btn-sm" id="enLimpar" style="flex:0 0 auto">🧹 Limpar</button><button class="btn btn-ghost btn-sm" id="enVoltar1" style="flex:0 0 auto">‹ TRT</button><button class="btn btn-primary btn-sm" id="enIr3" style="flex:0 0 auto">Seguir para assinar ›</button></div>
       <div id="enPags" style="display:flex;flex-direction:column;align-items:center;background:#E9E5D8;padding:12px;border-radius:10px;max-height:70vh;overflow:auto"><div class="muted">Gerando o dossiê… (alguns segundos)</div></div>`;
     const conta = () => { const n = c.querySelector('#enN'); if (n) n.textContent = `${E.pos.length} assinatura(s)`; };
     c.querySelector('#enVoltar1').onclick = () => { E.passo = 1; desenhar(); };
@@ -1175,6 +1183,13 @@ function abrirEntrega(d, semTrt){
       const r = await fetch(`/api/pa/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/${E.soTrt ? 'trt' : 'vias'}.pdf`, { credentials: 'include' });
       if (!r.ok){ let msg = 'HTTP ' + r.status; try { msg = (await r.json()).erro || msg; } catch { /* ok */ } throw new Error(msg); }
       await montarPosicionador(c.querySelector('#enPags'), await r.arrayBuffer(), E, conta);
+      // v3.196.1: posicionamento automático (nome do técnico nas linhas de assinatura)
+      const auto = async (avisar) => {
+        try { const x = await api(`/projetos/${S.pid}/dossies/${encodeURIComponent(d.lote)}/posicoes?alvo=${E.soTrt ? 'trt' : 'vias'}`); if (x.posicoes.length) { E.pos = x.posicoes; E.marcar(); if (avisar) toast(`${x.posicoes.length} assinatura(s) posicionada(s) — confira e siga para assinar`); } else if (avisar) toast('Não achei o seu nome numa linha de assinatura — toque na página para posicionar', true); }
+        catch (e){ if (avisar) toast(e.message, true); }
+      };
+      c.querySelector('#enAuto').onclick = () => auto(true);
+      if (!E.pos.length) auto(true);
     } catch (e){ c.querySelector('#enPags').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   };
   const passo3 = async (c) => {
