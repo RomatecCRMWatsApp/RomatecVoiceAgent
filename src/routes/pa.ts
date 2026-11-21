@@ -643,7 +643,7 @@ router.get('/projetos/:id/dossies/:lote/protocolo', h(async (req) => ({ protocol
 router.post('/projetos/:id/dossies/:lote/protocolo', h(async (req) => {
   exigirAdmin(req);
   const pid = id(req.params.id), lote = String(req.params.lote).slice(0, 10);
-  if (req.body?.enviar) return { protocolo: await protocolo.enviarProtocolo(pid, lote, ctx(req).sub, ctx(req).nome) };
+  if (req.body?.enviar) return { protocolo: await protocolo.enviarProtocolo(pid, lote, ctx(req).sub, ctx(req).nome, req.body?.numero, !!req.body?.salvar) };
   const p = await protocolo.criarProtocolo(pid, lote, ctx(req).sub, ctx(req).nome);
   const a = await rows(pool, 'SELECT nome, whatsapp_numero FROM pa_associados WHERE id = ?', [p.associado_id]);
   return { protocolo: p, whatsapp_numero: a[0]?.whatsapp_numero ?? null, texto: protocolo.textoProtocolo(String(a[0]?.nome ?? ''), lote, p.numero, p.link, p.sem_trt) };

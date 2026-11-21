@@ -13,6 +13,9 @@ import { pool, rows, one, exec, num, isoDateTime, registrarEvento } from './paDb
 import { buscarProjeto } from './paRepo';
 import { baseUrlPublica } from './paBoletoPdf';
 
+/** v3.198.1: aviso da TRT (opcional, a pedido do associado) — no protocolo, na página e na mensagem. */
+export const AVISO_TRT_TITULO = 'TRT — NÃO É OBRIGATÓRIA';
+export const AVISO_TRT = 'A TRT (Termo de Responsabilidade Técnica) não é obrigatória. Se for da sua vontade tê-la, compareça ao escritório da Romatec (Rua São Raimundo, nº 10, Centro, Açailândia/MA) para a expedição da TRT e do boleto; após o pagamento, você retira a via assinada.';
 export const LEI_ASSINATURA = 'Lei nº 14.063/2020, art. 4º, I, e MP nº 2.200-2/2001, art. 10, § 2º';
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 const primeiroNome = (n: string) => { const p = String(n).trim().split(/\s+/)[0] || ''; return p.charAt(0) + p.slice(1).toLowerCase(); };
@@ -62,7 +65,7 @@ export function itensProtocolo(o: { lote: string; contratoAssinado: boolean; qui
   it.push({ item: 'Carteirinha de associado(a)' }, { item: 'Capa final — orientações e próximos passos' });
   it.push(o.trtNumero
     ? { item: 'TRT — Termo de Responsabilidade Técnica (CFT)', detalhe: `nº ${o.trtNumero}` }
-    : { item: 'TRT — Termo de Responsabilidade Técnica (CFT)', detalhe: 'entrega posterior, em via própria', pendente: true });
+    : { item: 'TRT — Termo de Responsabilidade Técnica (CFT)', detalhe: 'opcional — expedida no escritório a pedido do associado', pendente: true });
   return it;
 }
 
@@ -138,21 +141,30 @@ export function textoProtocolo(nome: string, lote: string, numero: string, link:
     link,
     '',
     `Protocolo nº *${numero}*. Depois da confirmação você recebe aqui o comprovante em PDF.`,
-    ...(semTrt ? ['', '📄 A *TRT* será emitida e entregue depois, em via própria. Avisaremos quando estiver pronta.'] : []),
+    ...(semTrt ? ['', `📄 *${AVISO_TRT_TITULO}* — ${AVISO_TRT.replace(/^A TRT \(Termo de Responsabilidade Técnica\) não é obrigatória\. /, '')}`] : []),
     '',
     '_Romatec Consultoria Total — José Romário_',
   ].join('\n');
 }
 
 /** Envia o link do protocolo no WhatsApp do associado (Z-API). */
-export async function enviarProtocolo(projetoId: number, lote: string, usuario: string | null, nomeUsuario: string | null) {
+export async function enviarProtocolo(projetoId: number, lote: string, usuario: string | null, nomeUsuario: string | null, outroNumero?: unknown, salvarNoCadastro = false) {
   const p = await criarProtocolo(projetoId, lote, usuario, nomeUsuario);
   if (p.confirmado_em) throw new PaErro('PROTOCOLO_CONFIRMADO', `O LT-${lote} já confirmou o recebimento em ${horaBrasilia(p.confirmado_em)}`, 409);
   const d = await dadosLote(projetoId, lote);
-  if (d.whatsapp_status !== 'VALIDO' || !d.whatsapp_numero) throw new PaErro('SEM_WHATSAPP', `${d.nome} está sem WhatsApp válido — copie o link e mande pelo seu WhatsApp`, 409);
   const wa = await import('./paWhatsapp');
-  await wa.enviarWhatsAppAssociado(num(d.associado_id), textoProtocolo(String(d.nome), lote, p.numero, p.link, p.sem_trt), 'PROTOCOLO_ENTREGA', usuario);
-  await exec(pool, 'UPDATE pa_protocolos_entrega SET enviado_em = NOW(), enviado_para = ? WHERE id = ?', [String(d.whatsapp_numero), p.id]);
+  // v3.198.1: número informado na hora (WhatsApp pessoal do associado) — opcionalmente grava no cadastro
+  const temOutro = outroNumero != null && String(outroNumero).trim() !== '';
+  const outro = temOutro ? wa.numeroDestino(outroNumero) : null;
+  if (temOutro && !outro) throw new PaErro('CAMPO_INVALIDO', 'Número de WhatsApp inválido — use DDD + número (ex.: 99 99999-9999)', 400);
+  if (!outro && (d.whatsapp_status !== 'VALIDO' || !d.whatsapp_numero)) throw new PaErro('SEM_WHATSAPP', `${d.nome} está sem WhatsApp no cadastro — informe o número para enviar`, 409);
+  await wa.enviarWhatsAppAssociado(num(d.associado_id), textoProtocolo(String(d.nome), lote, p.numero, p.link, p.sem_trt), 'PROTOCOLO_ENTREGA', usuario, outro ?? undefined);
+  const destino = outro ?? String(d.whatsapp_numero);
+  await exec(pool, 'UPDATE pa_protocolos_entrega SET enviado_em = NOW(), enviado_para = ? WHERE id = ?', [destino, p.id]);
+  if (outro && salvarNoCadastro) {
+    await exec(pool, "UPDATE pa_associados SET whatsapp_numero = ?, whatsapp_status = 'VALIDO', whatsapp_verificado_em = NOW() WHERE id = ?", [outro, num(d.associado_id)]);
+    await registrarEvento(pool, { projeto_id: projetoId, associado_id: num(d.associado_id), usuario, tipo: 'WHATSAPP_ATUALIZADO', dados: { origem: 'protocolo_entrega', final: outro.slice(-4) } });
+  }
   return { ...(await protocoloDoLote(projetoId, lote))!, enviado: true };
 }
 
@@ -310,11 +322,11 @@ export function htmlProtocolo(d: DadosPdfProtocolo): string {
   const ok = !!d.confirmado_em;
   const logo = img('brand/pa/logo_romatec.jpg', 'image/jpeg');
   const bras = img('brand/pa/capa_brasao_salete_moreno.png', 'image/png');
-  const linhas = d.itens.map((it, i) => `<tr class="${it.pendente ? 'pend' : ''}"><td class="n">${i + 1}</td><td>${esc(it.item)}${it.detalhe ? `<div class="dt">${esc(it.detalhe)}</div>` : ''}</td><td class="st">${it.pendente ? '<span class="tg p">PENDENTE</span>' : '<span class="tg e">✓ ENTREGUE</span>'}</td></tr>`).join('');
+  const linhas = d.itens.map((it, i) => `<tr class="${it.pendente ? 'pend' : ''}"><td class="n">${i + 1}</td><td>${esc(it.item)}${it.detalhe ? `<div class="dt">${esc(it.detalhe)}</div>` : ''}</td><td class="st">${it.pendente ? '<span class="tg p">OPCIONAL</span>' : '<span class="tg e">✓ ENTREGUE</span>'}</td></tr>`).join('');
   const entregues = d.itens.filter((i) => !i.pendente).length;
   return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><title>Protocolo de entrega ${esc(d.numero)}</title><style>
   @page{size:A4;margin:7mm 12mm 6mm}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#1C1C18;font-size:8.8pt;line-height:1.3}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#1C1C18;font-size:8.5pt;line-height:1.27}
   .cab{display:flex;align-items:center;gap:4mm;background:linear-gradient(120deg,#0C3320,#14472B);color:#fff;border-radius:2.5mm;padding:3mm 4mm;border-bottom:1.2mm solid #C9A84C}
   .cab img.l{height:12mm;background:#fff;border-radius:1.5mm;padding:.8mm}.cab img.b{height:14mm;width:auto;margin-left:auto;object-fit:contain}
   .cab small{color:#E8D9A8;letter-spacing:1.4px;font-size:7.4pt;text-transform:uppercase}.cab h1{margin:.6mm 0 .4mm;font-size:13pt;white-space:nowrap}.cab p{margin:0;color:#d9e6dd;font-size:8.6pt}
@@ -323,14 +335,15 @@ export function htmlProtocolo(d: DadosPdfProtocolo): string {
   h2{font-size:9.4pt;color:#0C3320;margin:1.9mm 0 .8mm;border-bottom:.35mm solid #C9A84C;padding-bottom:.8mm;text-transform:uppercase;letter-spacing:.4px}
   table{width:100%;border-collapse:collapse}td,th{padding:.75mm 1.6mm;vertical-align:top}
   .id td{border-bottom:.2mm solid #E6E1D0}.id td.k{width:29mm;white-space:nowrap;color:#5B5745;font-weight:700}
-  .it th{background:#0C3320;color:#fff;font-size:8.4pt;text-align:left}.it td{border-bottom:.2mm solid #E6E1D0;padding-top:.5mm;padding-bottom:.5mm}.it td.n{width:7mm;text-align:center;color:#5B5745}.it td.st{width:27mm;text-align:center}
+  .it th{background:#0C3320;color:#fff;font-size:8.4pt;text-align:left}.it td{border-bottom:.2mm solid #E6E1D0;padding-top:.3mm;padding-bottom:.3mm}.it td.n{width:7mm;text-align:center;color:#5B5745}.it td.st{width:27mm;text-align:center}
   .it tr.pend td{background:#FFF6E6}.dt{display:inline;font-size:7.8pt;color:#6A6656}.dt:before{content:' — '}
-  .tg{display:inline-block;font-size:7.4pt;font-weight:700;padding:.6mm 2mm;border-radius:1.2mm}.tg.e{background:#E3F2E7;color:#1E7A3A}.tg.p{background:#FCE9C8;color:#8A5A0B}
+  .tg{display:inline-block;font-size:7.4pt;font-weight:700;padding:.6mm 2mm;border-radius:1.2mm}.tg.e{background:#E3F2E7;color:#1E7A3A}.tg.p{background:#E8F1FB;color:#1F5FA8}
+  .trt{margin-top:1.4mm;border:.5mm solid #1F5FA8;background:#EEF4FC;color:#1F4E8C;border-radius:1.6mm;padding:1.6mm 2.6mm;font-size:8.6pt;font-weight:700;line-height:1.35}.trt b{display:block;color:#C62828;font-size:9.2pt;letter-spacing:.3px}
   p{margin:.8mm 0;text-align:justify}.decl{background:#F4F6F2;border-left:1.2mm solid #0C3320;padding:1.6mm 2.6mm;border-radius:1mm}
   .aut{display:flex;gap:4mm;border:.4mm solid ${ok ? '#1E7A3A' : '#C9A84C'};border-radius:2mm;padding:2mm 2.6mm;margin-top:1.2mm;background:${ok ? '#F1F8F3' : '#FFFBF0'}}
-  .aut table td{padding:.45mm 1.4mm;font-size:8.2pt}.aut td.k{color:#5B5745;font-weight:700;width:40mm}.aut .qr{text-align:center;font-size:7pt;color:#5B5745;width:30mm}.aut .qr img{width:22mm;height:22mm}
+  .aut table td{padding:.3mm 1.4mm;font-size:8pt}.aut td.k{color:#5B5745;font-weight:700;width:40mm}.aut .qr{text-align:center;font-size:7pt;color:#5B5745;width:30mm}.aut .qr img{width:20mm;height:20mm}
   .hash{font-family:'Courier New',monospace;font-size:7.6pt;word-break:break-all}
-  .ass{display:flex;gap:8mm;margin-top:6mm}.ass div{flex:1;text-align:center;font-size:8.4pt;border-top:.3mm solid #1C1C18;padding-top:1.2mm}
+  .ass{display:flex;gap:8mm;margin-top:5mm}.ass div{flex:1;text-align:center;font-size:8.4pt;border-top:.3mm solid #1C1C18;padding-top:1.2mm}
   .rod{margin-top:1.8mm;font-size:7pt;white-space:nowrap;color:#6A6656;text-align:center;border-top:.3mm solid #C9A84C;padding-top:1.6mm}
   </style></head><body>
   <div class="cab">${logo ? `<img class="l" src="${logo}">` : ''}<div><small>Romatec Consultoria Total · Topografia</small><h1>PROTOCOLO DE ENTREGA DE VIAS FÍSICAS</h1><p>Dossiê Técnico do Lote de Produção LT-${esc(d.lote)} · ${esc(d.projeto.replace(/Projeto de Assentamento/i, 'PA'))}</p></div>${bras ? `<img class="b" src="${bras}">` : ''}</div>
@@ -350,10 +363,10 @@ export function htmlProtocolo(d: DadosPdfProtocolo): string {
 
   <h2>3. Peças entregues (${entregues} de ${d.itens.length})</h2>
   <table class="it"><thead><tr><th>#</th><th>Documento</th><th style="text-align:center">Situação</th></tr></thead><tbody>${linhas}</tbody></table>
-  ${d.sem_trt ? '<p style="margin-top:1mm;font-size:8.2pt"><b>Pendência registrada:</b> a TRT (CFT) será emitida, assinada e entregue posteriormente, em via própria e mediante novo protocolo, sem prejuízo da validade das peças ora entregues.</p>' : ''}
+  ${d.sem_trt ? `<div class="trt"><b>⚠ ${AVISO_TRT_TITULO}</b>${esc(AVISO_TRT)}</div>` : ''}
 
   <h2>4. Declaração de recebimento</h2>
-  <div class="decl"><p>Declaro, para todos os fins, que recebi da ROMATEC CONSULTORIA TOTAL as vias físicas impressas relacionadas no item 3, em bom estado e legíveis, referentes ao meu lote de produção LT-${esc(d.lote)} no ${esc(d.projeto)}${d.sem_trt ? ', ciente de que a TRT será entregue em momento posterior' : ''}. Data da entrega: <b>${esc(horaBrasilia(d.entregue_em).split(' às ')[0])}</b>${d.entregue_por ? `, por ${esc(d.entregue_por)}` : ''}.</p></div>
+  <div class="decl"><p>Declaro, para todos os fins, que recebi da ROMATEC CONSULTORIA TOTAL as vias físicas impressas relacionadas no item 3, em bom estado e legíveis, referentes ao meu lote de produção LT-${esc(d.lote)} no ${esc(d.projeto)}${d.sem_trt ? ', ciente de que a TRT é opcional e, se for de minha vontade, será expedida a meu pedido no escritório da Romatec' : ''}. Data da entrega: <b>${esc(horaBrasilia(d.entregue_em).split(' às ')[0])}</b>${d.entregue_por ? `, por ${esc(d.entregue_por)}` : ''}.</p></div>
 
   <h2>5. Autenticação eletrônica da confirmação</h2>
   <div class="aut"><table>

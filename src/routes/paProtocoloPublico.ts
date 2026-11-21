@@ -4,7 +4,7 @@
 // confirma o recebimento. Depois da confirmação a mesma página serve de verificação (código SHA-256 + PDF).
 import { Router, type Request, type Response } from 'express';
 import { PaErro } from '../services/pa/erros';
-import { dadosPublicos, confirmarRecebimento, relatarProblema, pdfProtocoloPorToken, horaBrasilia, LEI_ASSINATURA, type DadosPublicos } from '../services/pa/paProtocoloEntrega';
+import { AVISO_TRT, AVISO_TRT_TITULO, dadosPublicos, confirmarRecebimento, relatarProblema, pdfProtocoloPorToken, horaBrasilia, LEI_ASSINATURA, type DadosPublicos } from '../services/pa/paProtocoloEntrega';
 
 const router = Router();
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -19,7 +19,8 @@ const CSS = `*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,s
 .passo{display:flex;align-items:center;gap:8px;font-weight:800;color:#0C3320;font-size:15px;margin-bottom:8px}.passo i{font-style:normal;background:#C9A84C;color:#0C3320;border-radius:50%;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex:0 0 auto}
 .id div{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #EEE7D2;font-size:14.5px}.id div b{flex:0 0 112px;color:#6A6656;font-size:13px}
 .it{list-style:none;margin:0;padding:0}.it li{display:flex;gap:9px;padding:9px 0;border-bottom:1px solid #EEE7D2;font-size:15px}.it li span{flex:1}.it li small{display:block;color:#6A6656;font-size:12.5px}
-.it li em{font-style:normal;font-size:12px;font-weight:800;color:#2E7D32;white-space:nowrap}.it li.p em{color:#8A5A0B}.it li.p{background:#FFF6E6}
+.it li em{font-style:normal;font-size:12px;font-weight:800;color:#2E7D32;white-space:nowrap}.it li.p em{color:#1F5FA8}.it li.p{background:#EEF4FC}
+.trt{margin-top:10px;border:2px solid #1F5FA8;background:#EEF4FC;color:#1F4E8C;border-radius:10px;padding:10px 12px;font-size:14.5px;font-weight:700;line-height:1.45}.trt b{display:block;color:#C62828;font-size:15px;margin-bottom:3px}
 .decl{background:#F4F6F2;border-left:5px solid #0C3320;padding:10px 12px;border-radius:6px;font-size:14.5px;line-height:1.45}
 label{display:block;font-weight:700;margin:12px 0 6px;font-size:14.5px}
 .cpf{width:100%;border:2px solid #C9A84C;border-radius:12px;padding:14px;font-size:24px;letter-spacing:8px;text-align:center}
@@ -34,7 +35,7 @@ textarea{width:100%;border:1px solid #CFC7AE;border-radius:10px;padding:10px;fon
 export function htmlProtocoloPublico(d: DadosPublicos, token: string): string {
   const p0 = d.nome.trim().split(/\s+/)[0] ?? '';
   const primeiro = p0.charAt(0) + p0.slice(1).toLowerCase();
-  const itens = d.itens.map((i) => `<li class="${i.pendente ? 'p' : ''}"><span>${esc(i.item)}${i.detalhe ? `<small>${esc(i.detalhe)}</small>` : ''}</span><em>${i.pendente ? 'PENDENTE' : '✓ entregue'}</em></li>`).join('');
+  const itens = d.itens.map((i) => `<li class="${i.pendente ? 'p' : ''}"><span>${esc(i.item)}${i.detalhe ? `<small>${esc(i.detalhe)}</small>` : ''}</span><em>${i.pendente ? 'OPCIONAL' : '✓ entregue'}</em></li>`).join('');
   const conf = d.confirmado_em
     ? `<div class="c ok"><div class="big">✅</div><div class="passo" style="justify-content:center">Recebimento confirmado</div>
         <div>Confirmado em <b>${esc(horaBrasilia(d.confirmado_em))}</b> (Brasília).</div>
@@ -43,7 +44,7 @@ export function htmlProtocoloPublico(d: DadosPublicos, token: string): string {
         <div class="av">O PDF também foi enviado no seu WhatsApp. Guarde junto com o dossiê.</div></div>`
     : `<div class="c" id="form">
         <div class="passo"><i>3</i> Confirme o recebimento</div>
-        <div class="decl">Declaro que recebi da <b>Romatec Consultoria Total</b> as vias impressas listadas acima, referentes ao meu lote <b>LT-${esc(d.lote)}</b>${d.sem_trt ? ', ciente de que a <b>TRT</b> será entregue depois' : ''}.</div>
+        <div class="decl">Declaro que recebi da <b>Romatec Consultoria Total</b> as vias impressas listadas acima, referentes ao meu lote <b>LT-${esc(d.lote)}</b>${d.sem_trt ? ', ciente de que a <b>TRT</b> é opcional e, se eu quiser, será expedida a meu pedido no escritório' : ''}.</div>
         ${d.pede_cpf ? `<label for="cpf">Digite os <u>3 primeiros números</u> do seu CPF</label><input class="cpf" id="cpf" inputmode="numeric" maxlength="3" autocomplete="off" placeholder="•••">` : ''}
         <label for="obs">Observação (opcional)</label><textarea id="obs" maxlength="500" placeholder="Ex.: recebido por mim no escritório"></textarea>
         <div class="chk"><input type="checkbox" id="ck"><label for="ck" style="margin:0;font-weight:400">Li a declaração acima e confirmo o recebimento.</label></div>
@@ -63,7 +64,7 @@ export function htmlProtocoloPublico(d: DadosPublicos, token: string): string {
     <div><b>Lote de produção</b><span>LT-${esc(d.lote)}${d.denominacao ? ` — “${esc(d.denominacao)}”` : ''}</span></div><div><b>Projeto</b><span>${esc(d.projeto)} · ${esc(d.municipio)}</span></div>
     <div><b>Entregue em</b><span>${esc(horaBrasilia(d.entregue_em).split(' às ')[0])}</span></div></div></div>
   <div class="c"><div class="passo"><i>2</i> Confira os documentos entregues</div><ul class="it">${itens}</ul>
-    ${d.sem_trt ? '<div class="av" style="text-align:left">📄 A <b>TRT</b> (Termo de Responsabilidade Técnica) será emitida e entregue depois, com um novo protocolo.</div>' : ''}</div>
+    ${d.sem_trt ? `<div class="trt"><b>⚠️ ${esc(AVISO_TRT_TITULO)}</b>${esc(AVISO_TRT)}</div>` : ''}</div>
   ${conf}
   <p class="av">Romatec Consultoria Total · Açailândia/MA · (99) 99181-1246</p></div>
   ${d.confirmado_em ? '' : `<script>
