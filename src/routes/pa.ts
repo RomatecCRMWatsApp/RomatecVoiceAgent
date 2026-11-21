@@ -659,11 +659,6 @@ router.post('/projetos/:id/dossies/:lote/protocolo/enviado-manual', h(async (req
 }));
 router.post('/projetos/:id/dossies/:lote/protocolo/cancelar', h(async (req) => { exigirAdmin(req); return protocolo.cancelarProtocolo(id(req.params.id), String(req.params.lote).slice(0, 10), ctx(req).sub); }));
 router.get('/projetos/:id/dossies/:lote/protocolo.pdf', h(async (req, res) => { const r = await protocolo.pdfProtocolo(id(req.params.id), String(req.params.lote).slice(0, 10)); enviarPdf(res, r); return undefined; }));
-router.post('/projetos/:id/dossies/protocolos/enviar', h(async (req) => {
-  exigirAdmin(req);
-  const lotes = Array.isArray(req.body?.lotes) ? req.body.lotes.map((x: unknown) => String(x).slice(0, 10)) : null;
-  return protocolo.enviarProtocolosPendentes(id(req.params.id), lotes, ctx(req).sub, ctx(req).nome);
-}));
 router.post('/projetos/:id/dossies/kml/reenviar', h(async (req) => { exigirAdmin(req); return kmlLote.reenviarKmlFinalizados(id(req.params.id), ctx(req).sub); }));
 router.post('/projetos/:id/dossies/:lote/kml', h(async (req) => {
   exigirAdmin(req);

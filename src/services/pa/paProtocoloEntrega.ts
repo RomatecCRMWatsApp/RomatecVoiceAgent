@@ -168,31 +168,7 @@ export async function enviarProtocolo(projetoId: number, lote: string, usuario: 
   return { ...(await protocoloDoLote(projetoId, lote))!, enviado: true };
 }
 
-/** Lote: protocolos para todos os dossiês enviados que ainda não confirmaram (fila em segundo plano). */
-let filaRodando = false;
-export async function enviarProtocolosPendentes(projetoId: number, lotes: string[] | null, usuario: string | null, nomeUsuario: string | null) {
-  if (filaRodando) throw new PaErro('ENVIO_EM_ANDAMENTO', 'O envio dos protocolos já está em andamento — aguarde terminar', 409);
-  const ds = await rows(pool, `SELECT d.lote FROM pa_dossies d JOIN pa_associados a ON a.id = d.associado_id
-    WHERE d.projeto_id = ? AND d.status IN ('ENVIADO','ENTREGUE') AND a.whatsapp_status = 'VALIDO' AND a.whatsapp_numero IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM pa_protocolos_entrega p WHERE p.projeto_id = d.projeto_id AND p.lote = d.lote AND p.cancelado_em IS NULL AND (p.confirmado_em IS NOT NULL OR p.enviado_em IS NOT NULL))
-    ORDER BY CAST(d.lote AS UNSIGNED)`, [projetoId]);
-  const sel = ds.map((x) => String(x.lote)).filter((l) => !lotes || !lotes.length || lotes.includes(l));
-  if (!sel.length) return { fila: 0, lotes: [] as string[] };
-  filaRodando = true;
-  void (async () => {
-    let ok = 0; const falhas: string[] = [];
-    try {
-      for (const l of sel) {
-        try { await enviarProtocolo(projetoId, l, usuario, nomeUsuario); ok++; }
-        catch (e) { falhas.push(`LT-${l}: ${(e as Error).message.slice(0, 120)}`); console.warn('[pa-protocolo]', l, (e as Error).message); }
-      }
-      const { numeroCeo } = await import('./paDossie');
-      const wa = await import('./paWhatsapp');
-      await wa.enviarWhatsAppNumero(numeroCeo(), `📦 Protocolos de entrega das vias físicas: *${ok}* de ${sel.length} enviado(s) para confirmação.${falhas.length ? `\n⚠️ ${falhas.join(' | ').slice(0, 900)}` : ''}`).catch(() => undefined);
-    } finally { filaRodando = false; }
-  })();
-  return { fila: sel.length, lotes: sel };
-}
+// v3.198.2: sem envio em lote — protocolo vai um por um, pelo botão de cada processo (evita bloqueio do WhatsApp)
 
 export async function cancelarProtocolo(projetoId: number, lote: string, usuario: string | null) {
   const p = await protocoloDoLote(projetoId, lote);
