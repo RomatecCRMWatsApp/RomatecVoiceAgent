@@ -278,6 +278,21 @@ export function proximoDiaUtil(d: string, uteis: number[] = diasUteis()): string
 }
 
 export interface LoteAgenda { lote: string; fechado: boolean; marcados: number; quitado: boolean; quitado_em: string | null; bloqueado?: boolean }
+/** v3.198.6: regra única da agenda — quitado, não medido, não bloqueado (pura). */
+export const agendavel = (l: LoteAgenda | undefined): boolean => !!l && l.quitado && !l.fechado && !l.bloqueado;
+/**
+ * v3.198.6: corrige a lista de um dia já montada (pura — testável): tira quem não é agendável (não quitado,
+ * bloqueado) — os já medidos no dia ficam — e completa até `porDia` com a fila dos quitados, na ordem da quitação.
+ */
+export function corrigirListaDia(atual: string[], lotes: LoteAgenda[], porDia = lotesPorDia()): { lista: string[]; retirados: string[]; incluidos: string[] } {
+  const st = new Map(lotes.map((l) => [l.lote, l]));
+  const ficam = atual.filter((lt) => { const l = st.get(lt); return !!l && (l.fechado || agendavel(l)); });
+  const retirados = atual.filter((lt) => !ficam.includes(lt));
+  if (!retirados.length) return { lista: atual, retirados, incluidos: [] };
+  const vagas = Math.max(0, porDia - ficam.length);
+  const incluidos = filaQuitados(lotes).filter((lt) => !ficam.includes(lt)).slice(0, vagas);
+  return { lista: [...ficam, ...incluidos], retirados, incluidos };
+}
 /** Fila dos quitados a medir: quem quitou antes vem antes; empate pelo nº do lote (pura). */
 export function filaQuitados(lotes: LoteAgenda[]): string[] {
   return lotes.filter((l) => !l.fechado && l.quitado && !l.bloqueado)
@@ -291,14 +306,17 @@ export function filaQuitados(lotes: LoteAgenda[]): string[] {
  */
 export function planejarAgenda(dia: string, lotes: LoteAgenda[], carry: string[], excluir: string[] = [], manuais: Record<string, string[]> = {}, porDia = lotesPorDia(), uteis = diasUteis()): Record<string, string[]> {
   const st = new Map(lotes.map((l) => [l.lote, l]));
-  const ok = (lt: string) => { const l = st.get(lt); return !!l && !l.fechado && !l.bloqueado && (l.quitado || l.marcados > 0); }; // v3.194.0: bloqueado fora da agenda
+  // v3.198.6: SÓ quitado entra na agenda (marco marcado não conta: os marcos são compartilhados com os vizinhos,
+  // e o lote vizinho não quitado aparecia "em medição"). Bloqueado e já medido ficam fora.
+  const ok = (lt: string) => agendavel(st.get(lt));
   const fora = new Set(excluir);
   const out: Record<string, string[]> = {};
   for (const [d, ls] of Object.entries(manuais)) if (d > dia && !uteis.includes(diaSemana(d))) { out[d] = ls.filter(ok); out[d].forEach((x) => fora.add(x)); }
   const fila: string[] = [];
   const pôr = (lt: string) => { if (ok(lt) && !fora.has(lt) && !fila.includes(lt)) fila.push(lt); };
-  lotes.filter((l) => !l.fechado && !l.bloqueado && l.marcados > 0).sort((a, b) => numLote(a.lote, b.lote)).forEach((l) => pôr(l.lote)); // em medição na frente
-  carry.forEach(pôr);
+  // não medidos do dia (quitados) na frente, na ordem da quitação; depois a fila dos quitados
+  const ordem = new Map(filaQuitados(lotes).map((lt, i) => [lt, i]));
+  [...carry].sort((a, b) => (ordem.get(a) ?? 1e9) - (ordem.get(b) ?? 1e9)).forEach(pôr);
   filaQuitados(lotes).forEach(pôr);
   let d = proximoDiaUtil(dia, uteis);
   while (fila.length) { out[d] = fila.splice(0, porDia); d = proximoDiaUtil(d, uteis); }
@@ -340,6 +358,19 @@ export async function relocarProgramacao(projetoId: number, diaQ: unknown, usuar
   if (sair.length) await exec(pool, `DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia <= ? AND dia >= ? - INTERVAL 60 DAY AND lote IN (${sair.map(() => '?').join(',')})`, [projetoId, dia, dia, ...sair]);
   await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: fechamento ? 'CAMPO_FECHAMENTO_DIA' : 'CAMPO_RELOCACAO', dados: { dia, plano, retirados: sair } });
   return { dia, plano, retirados: sair };
+}
+/** v3.198.6: aplica a correção na lista gravada do dia (não mexe nos medidos). */
+export async function corrigirDia(projetoId: number, dia = hojeBrasil(), usuario: string | null = null) {
+  const lotes = await lotesAgenda(projetoId);
+  const atual = await lotesDoDia(projetoId, dia);
+  const r = corrigirListaDia(atual, lotes);
+  if (!r.retirados.length) return { mudou: false, ...r };
+  await transacao(async (c) => {
+    await exec(c, 'DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia = ?', [projetoId, dia]);
+    for (const [i, l] of r.lista.entries()) await exec(c, 'INSERT INTO pa_campo_programacao (projeto_id, dia, lote, ordem, criado_por) VALUES (?, ?, ?, ?, ?)', [projetoId, dia, l, i + 1, usuario ?? 'agenda-automatica']);
+  });
+  await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'CAMPO_AGENDA_CORRIGIDA', dados: { dia, retirados: r.retirados, incluidos: r.incluidos } });
+  return { mudou: true, ...r };
 }
 /** Durante o dia: novos quitados entram no fim da fila; refaz só os dias depois de hoje (hoje não muda). */
 export async function atualizarAgenda(projetoId: number, hoje = hojeBrasil()) {
@@ -387,6 +418,7 @@ export async function rodarAgendaAutomatica(agora = new Date()): Promise<number>
           if (hBr < 12) { await relocarProgramacao(pid, ontem, null, true); n++; console.log(`[pa-agenda] projeto ${pid}: dia ${ontem} fechado na volta do servidor`); }
           else await registrarEvento(pool, { projeto_id: pid, usuario: null, tipo: 'CAMPO_FECHAMENTO_DIA', dados: { dia: ontem, recuperado: false } });
         }
+        if ((await corrigirDia(pid, hoje)).mudou) n++; // v3.198.6: tira do dia quem não está quitado e completa com a fila
         if ((await atualizarAgenda(pid, hoje)).mudou) n++;
       }
     } catch (err) { console.error(`[pa-agenda] projeto ${pid}:`, (err as Error).message); }

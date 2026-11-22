@@ -184,6 +184,10 @@
   td{padding:7px 6px;border-bottom:1px solid #eee8d8;vertical-align:top}
   tr.click{cursor:pointer} tr.click:hover td{background:var(--cream)}
   .tbl{overflow-x:auto}
+  .pg-quit{display:inline-flex;align-items:center;gap:5px;margin:5px 0 0;padding:2px 9px 2px 3px;border:2px solid #1E7A3A;border-radius:6px;color:#1E7A3A;font-weight:800;font-size:11.5px;letter-spacing:.6px;transform:rotate(-2deg);background:#F1F8F3;white-space:nowrap}
+  .pg-quit i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#1E7A3A;color:#fff;font-size:11px}
+  .pg-quit.nao{border-color:#B3261E;color:#B3261E;background:#FDF1F0}.pg-quit.nao i{background:#B3261E}
+  .pg-it > span .pg-quit{display:flex;width:max-content}
   /* v3.198.5: no celular toda tabela com cabeçalho vira cartão (rótulo da coluna em cima do valor) — sem rolagem lateral */
   @media (max-width:700px){
     table.tauto thead{display:none}
@@ -3449,6 +3453,13 @@ async function compartilharGrupo(pdf, texto, bt){
 }
 const semAcento = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const PG = { dia: null, lotes: [], salvo: true, info: null };
+// v3.198.6: carimbo verde "QUITADO em dd/mm/aaaa" (data da última parcela paga) — não quitado sai em vermelho
+function carimboQuit(l){
+  const p = l && l.pagamento;
+  if (!p) return '';
+  if (p.quitado) { const d = p.quitado_em ? new Date(String(p.quitado_em).replace(' ', 'T')).toLocaleDateString('pt-BR') : ''; return `<span class="pg-quit"><i>✓</i> QUITADO${d ? ' em ' + esc(d) : ''}</span>`; }
+  return '<span class="pg-quit nao"><i>!</i> NÃO QUITADO</span>';
+}
 const SIT_PG = { MEDIDO: ['PAGO', '✓ medido'], EM_MEDICAO: ['PARCIAL', 'em medição'], PENDENTE: ['A_VENCER', 'pendente'] };
 async function cardProgramacao(d){
   const box = $('#cpProg'); if (!box) return;
@@ -3463,7 +3474,7 @@ async function cardProgramacao(d){
     return;
   }
   const desenhar = () => {
-    const itens = PG.lotes.map((lt, i) => { const l = porLote[lt] || {}; const it = info.itens.find((x) => x.lote === lt); return { ordem: i + 1, lote: lt, l, sit: l.fechado ? 'MEDIDO' : l.marcados ? 'EM_MEDICAO' : 'PENDENTE', it }; });
+    const itens = PG.lotes.map((lt, i) => { const l = porLote[lt] || {}; const it = info.itens.find((x) => x.lote === lt); return { ordem: i + 1, lote: lt, l, sit: l.fechado ? 'MEDIDO' : l.marcados && l.pagamento && l.pagamento.quitado ? 'EM_MEDICAO' : 'PENDENTE', it }; });
     const pend = info.anterior && info.anterior.pendentes.filter((lt) => !PG.lotes.includes(lt));
     box.innerHTML = `<div class="card cp-prog">
       <h2 style="margin-top:0">📅 Programação de campo do dia</h2>
@@ -3474,7 +3485,7 @@ async function cardProgramacao(d){
       </div>
       ${pend && pend.length ? `<div class="cp-aviso p" style="margin-top:8px">⏳ Ficaram de ${dbr(info.anterior.dia)} sem medir: <b>${pend.map((x) => 'LT-' + esc(x)).join(', ')}</b> <button class="btn btn-gold btn-sm" id="pgPend" style="margin-left:6px">➕ Incluir no dia</button></div>` : ''}
       <div class="pg-lista" id="pgLista">${itens.length ? itens.map((x) => `<div class="pg-it"><b>${x.ordem}. LT-${esc(x.lote)}</b>
-          <span>${esc(x.l.associado ? x.l.associado.nome : 'sem associado vinculado')}${x.l.associado && x.l.associado.denominacao ? ' · 🏡 ' + esc(x.l.associado.denominacao) : ''}${x.l.associado && x.l.associado.lote_vila ? ' · vila ' + esc(x.l.associado.lote_vila) : ''}</span>
+          <span>${esc(x.l.associado ? x.l.associado.nome : 'sem associado vinculado')}${x.l.associado && x.l.associado.denominacao ? ' · 🏡 ' + esc(x.l.associado.denominacao) : ''}${x.l.associado && x.l.associado.lote_vila ? ' · vila ' + esc(x.l.associado.lote_vila) : ''}${carimboQuit(x.l)}</span>
           ${chip(SIT_PG[x.sit][0], SIT_PG[x.sit][1])}<button class="btn btn-ghost btn-sm" data-pgsobe="${esc(x.lote)}" title="Subir na ordem">▲</button><button class="btn btn-ghost btn-sm" data-pgtira="${esc(x.lote)}" title="Tirar da programação">✕</button></div>`).join('') : '<div class="muted">Nenhum lote escolhido para este dia.</div>'}</div>
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn btn-primary btn-sm" id="pgSalvar" style="flex:0 0 auto" ${PG.salvo ? 'disabled' : ''}>💾 Salvar programação${PG.salvo ? ' (salva)' : ''}</button>${S.eu && S.eu.perfil === 'ADMIN' ? `<button class="btn btn-ghost btn-sm" id="pgReloc" style="flex:0 0 auto" title="Fecha agora este dia: os não medidos vão para o próximo dia útil">🔁 Relocar agora</button><button class="btn btn-sm ${info.relocacao && info.relocacao.automatica ? 'btn-gold' : 'btn-ghost'}" id="pgAuto" style="flex:0 0 auto">${info.relocacao && info.relocacao.automatica ? '🤖 Agenda AUTOMÁTICA — tocar para passar a manual' : '✋ Agenda MANUAL — tocar para ligar o automático'}</button>` : ''}</div>
       ${info.relocacao ? (info.relocacao.automatica ? `<div class="muted" style="margin-top:6px">🤖 <b>Agenda automática:</b> só entram os <b>quitados</b>, na ordem em que quitaram — quem quitar hoje já entra no fim da fila dos próximos dias. Às ${info.relocacao.hora} h o que não for medido no dia passa para o próximo dia útil, na frente (em medição primeiro). ${info.relocacao.por_dia} lotes por dia; sábado e domingo pulados. O PDF da manhã já traz a previsão de medição dos próximos dias.</div>` : '<div class="muted" style="margin-top:6px">✋ <b>Agenda manual:</b> o sistema não mexe na programação — você monta cada dia (ou usa 🔁 Relocar agora).</div>') : ''}

@@ -50,7 +50,7 @@ describe('v3.177.0 — programação diária de campo', () => {
 });
 
 // v3.190.0: agenda automática — só quitados, na ordem em que quitaram; 6 por dia útil
-import { planejarAgenda, filaQuitados, proximoDiaUtil } from './paCampoProgramacao';
+import { planejarAgenda, filaQuitados, proximoDiaUtil, corrigirListaDia } from './paCampoProgramacao';
 describe('agenda automática de campo', () => {
   const L = (lote: string, quitado_em: string | null, o: { fechado?: boolean; marcados?: number } = {}) => ({ lote, fechado: false, marcados: 0, quitado: quitado_em !== null, quitado_em, ...o });
   // quitados em datas diferentes (o nº do lote NÃO define a ordem)
@@ -62,10 +62,10 @@ describe('agenda automática de campo', () => {
   it('fila dos quitados pela data da quitação (medidos e não quitados fora)', () => {
     expect(filaQuitados(lotes)).toEqual(['51', '43', '47', '33', '40', '50', '48', '49', '09']);
   });
-  it('fechamento das 21 h (qua 18/11): não medidos na frente, em medição primeiro, 6 por dia, não quitado sai', () => {
+  it('fechamento das 21 h (qua 18/11): não medidos (quitados) na frente pela ordem da quitação, 6 por dia, não quitado sai', () => {
     const p = planejarAgenda('2026-11-18', lotes, ['10', '33', '43', '47', '50', '51', '32'], [], {}, 6, [1, 2, 3, 4, 5]);
-    expect(p['2026-11-19']).toEqual(['09', '33', '43', '47', '50', '51']);
-    expect(p['2026-11-20']).toEqual(['40', '48', '49']);
+    expect(p['2026-11-19']).toEqual(['51', '43', '47', '33', '50', '40']);
+    expect(p['2026-11-20']).toEqual(['48', '49', '09']);
     expect(Object.values(p).flat()).not.toContain('32'); // não quitado programado à mão não é relocado
     expect(Object.values(p).flat()).not.toContain('10'); // medido
   });
@@ -79,7 +79,7 @@ describe('agenda automática de campo', () => {
     expect(proximoDiaUtil('2026-11-20', [1, 2, 3, 4, 5])).toBe('2026-11-23');
     const p = planejarAgenda('2026-11-20', lotes, [], [], {}, 4, [1, 2, 3, 4, 5]);
     expect(Object.keys(p)).toEqual(['2026-11-23', '2026-11-24', '2026-11-25']);
-    expect(p['2026-11-23']).toEqual(['09', '51', '43', '47']);
+    expect(p['2026-11-23']).toEqual(['51', '43', '47', '33']);
   });
   it('sábado programado à mão é mantido', () => {
     const p = planejarAgenda('2026-11-20', lotes, [], [], { '2026-11-21': ['48', '32'] }, 6, [1, 2, 3, 4, 5]);
@@ -93,5 +93,21 @@ describe('agenda ignora lote bloqueado', () => {
     const lotes = [{ lote: '24', fechado: false, marcados: 0, quitado: true, quitado_em: '2026-10-01' }, { lote: '25', fechado: false, marcados: 2, quitado: true, quitado_em: '2026-09-01', bloqueado: true }];
     const p = planejarAgenda('2026-11-18', lotes, ['25'], [], {}, 6, [1, 2, 3, 4, 5]);
     expect(Object.values(p).flat()).toEqual(['24']);
+  });
+});
+
+describe('v3.198.6 agenda só com quitados (marco compartilhado não conta)', () => {
+  const L = (lote: string, quitado_em: string | null, o: { fechado?: boolean; marcados?: number; bloqueado?: boolean } = {}) => ({ lote, fechado: false, marcados: 0, quitado: quitado_em !== null, quitado_em, ...o });
+  const lotes = [L('09', '2026-11-10 10:00:00', { marcados: 3 }), L('11', '2026-11-01 10:00:00', { marcados: 2, bloqueado: true }), L('12', null, { marcados: 2 }),
+    L('13', null, { marcados: 1 }), L('16', '2026-11-05 10:00:00'), L('20', null, { marcados: 4 }), L('24', '2026-11-02 10:00:00'), L('29', '2026-11-21 13:52:00'), L('30', '2026-11-03 09:00:00', { fechado: true })];
+  it('vizinho não quitado com marco marcado e lote bloqueado NÃO entram', () => {
+    const p = planejarAgenda('2026-11-22', lotes, [], [], {}, 6, [1, 2, 3, 4, 5]);
+    expect(p).toEqual({ '2026-11-23': ['24', '16', '09', '29'] });
+  });
+  it('corrige a lista do dia já montada: tira não quitados/bloqueados, mantém medidos, completa pela quitação', () => {
+    const r = corrigirListaDia(['09', '11', '12', '13', '16', '20'], lotes, 6);
+    expect(r.retirados).toEqual(['11', '12', '13', '20']);
+    expect(r.lista).toEqual(['09', '16', '24', '29']);
+    expect(corrigirListaDia(['24', '30'], lotes, 6)).toMatchObject({ lista: ['24', '30'], retirados: [] });
   });
 });
