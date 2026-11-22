@@ -217,6 +217,8 @@ export async function salvarProgramacao(projetoId: number, diaQ: unknown, lotesQ
   await transacao(async (c) => {
     await exec(c, 'DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia = ?', [projetoId, dia]);
     for (const [i, l] of lotes.entries()) await exec(c, 'INSERT INTO pa_campo_programacao (projeto_id, dia, lote, ordem, criado_por) VALUES (?, ?, ?, ?, ?)', [projetoId, dia, l, i + 1, usuario]);
+    // v3.198.8: um lote fica em UM dia só — sai de hoje/dias seguintes (o histórico dos dias passados não é mexido)
+    if (lotes.length) await exec(c, `DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia <> ? AND dia >= ? AND lote IN (${lotes.map(() => '?').join(',')})`, [projetoId, dia, hojeBrasil(), ...lotes]);
   });
   await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: 'CAMPO_PROGRAMACAO', dados: { dia, lotes } });
   return buscarProgramacao(projetoId, dia);
@@ -323,7 +325,7 @@ export function planejarAgenda(dia: string, lotes: LoteAgenda[], carry: string[]
   const ok = (lt: string) => agendavel(st.get(lt));
   const fora = new Set(excluir);
   const out: Record<string, string[]> = {};
-  for (const [d, ls] of Object.entries(manuais)) if (d > dia && !uteis.includes(diaSemana(d))) { out[d] = ls.filter(ok); out[d].forEach((x) => fora.add(x)); }
+  for (const [d, ls] of Object.entries(manuais)) if (d > dia && !uteis.includes(diaSemana(d))) { out[d] = ls.filter((x) => ok(x) && !fora.has(x)); out[d].forEach((x) => fora.add(x)); } // v3.198.8: sem repetir
   const base = filaAgenda(lotes);
   const ordem = new Map(base.map((lt, i) => [lt, i]));
   const sobrou = new Set(carry);
@@ -373,6 +375,19 @@ export async function relocarProgramacao(projetoId: number, diaQ: unknown, usuar
   if (sair.length) await exec(pool, `DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia <= ? AND dia >= ? - INTERVAL 60 DAY AND lote IN (${sair.map(() => '?').join(',')})`, [projetoId, dia, dia, ...sair]);
   await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: fechamento ? 'CAMPO_FECHAMENTO_DIA' : 'CAMPO_RELOCACAO', dados: { dia, plano, retirados: sair } });
   return { dia, plano, retirados: sair };
+}
+/** v3.198.8: repetições gravadas (mesmo lote em 2+ dias a partir de hoje) — fica o dia mais cedo (pura). */
+export function repetidos(linhas: Array<{ dia: string; lote: string }>): Array<{ dia: string; lote: string }> {
+  const visto = new Set<string>(); const out: Array<{ dia: string; lote: string }> = [];
+  for (const r of [...linhas].sort((a, b) => a.dia.localeCompare(b.dia))) { if (visto.has(r.lote)) out.push(r); else visto.add(r.lote); }
+  return out;
+}
+export async function limparRepetidos(projetoId: number, hoje = hojeBrasil()): Promise<number> {
+  const ls = (await rows(pool, 'SELECT dia, lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia >= ?', [projetoId, hoje])).map((r) => ({ dia: isoDate(r.dia)!, lote: String(r.lote) }));
+  const rep = repetidos(ls);
+  for (const r of rep) await exec(pool, 'DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia = ? AND lote = ?', [projetoId, r.dia, r.lote]);
+  if (rep.length) await registrarEvento(pool, { projeto_id: projetoId, usuario: null, tipo: 'CAMPO_AGENDA_CORRIGIDA', dados: { dia: hoje, repetidos: rep } });
+  return rep.length;
 }
 /** v3.198.6: aplica a correção na lista gravada do dia (não mexe nos medidos). */
 export async function corrigirDia(projetoId: number, dia = hojeBrasil(), usuario: string | null = null) {
@@ -426,13 +441,14 @@ export async function rodarAgendaAutomatica(agora = new Date()): Promise<number>
       const fechado = async (d: string) => (await rows(pool, "SELECT id FROM pa_eventos WHERE projeto_id = ? AND tipo = 'CAMPO_FECHAMENTO_DIA' AND JSON_UNQUOTE(JSON_EXTRACT(dados, '$.dia')) = ? LIMIT 1", [pid, d])).length > 0;
       if (hBr >= HORA_RELOCACAO) {
         if (!(await fechado(hoje))) { await relocarProgramacao(pid, hoje, null, true); n++; console.log(`[pa-agenda] projeto ${pid}: dia ${hoje} fechado e relocado`); }
-        else if ((await atualizarAgenda(pid, hoje)).mudou) n++;
+        else { if (await limparRepetidos(pid, somaDia(hoje, 1))) n++; if ((await atualizarAgenda(pid, hoje)).mudou) n++; }
       } else {
         // servidor fora às 21 h de ontem → fecha ontem na volta (até o meio-dia; depois disso o dia de hoje não é mexido)
         if (!(await fechado(ontem)) && (await lotesDoDia(pid, ontem)).length) {
           if (hBr < 12) { await relocarProgramacao(pid, ontem, null, true); n++; console.log(`[pa-agenda] projeto ${pid}: dia ${ontem} fechado na volta do servidor`); }
           else await registrarEvento(pool, { projeto_id: pid, usuario: null, tipo: 'CAMPO_FECHAMENTO_DIA', dados: { dia: ontem, recuperado: false } });
         }
+        if (await limparRepetidos(pid, hoje)) n++; // v3.198.8
         if ((await corrigirDia(pid, hoje)).mudou) n++; // v3.198.6: tira do dia quem não está quitado e completa com a fila
         if ((await atualizarAgenda(pid, hoje)).mudou) n++;
       }

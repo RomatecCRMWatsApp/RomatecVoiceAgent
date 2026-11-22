@@ -209,7 +209,8 @@ export async function dadosRelatorio(projetoId: number, diaQ: unknown, agora = n
   // dias seguintes: depois do fechamento, o que está gravado; antes, a projeção do fechamento (não grava nada)
   const relocado = (await rows(pool, "SELECT id FROM pa_eventos WHERE projeto_id = ? AND tipo IN ('CAMPO_FECHAMENTO_DIA','CAMPO_RELOCACAO') AND JSON_UNQUOTE(JSON_EXTRACT(dados, '$.dia')) = ? LIMIT 1", [projetoId, dia])).length > 0;
   const futuro = await futuroAtual(projetoId, dia);
-  const plano = relocado ? futuro : planejarAgenda(dia, await lotesAgenda(projetoId), await lotesDoDia(projetoId, dia), [], futuro);
+  // v3.198.8: antes do fechamento os lotes do dia ficam SÓ no dia (não são projetados para amanhã — não repete associado em 2 dias)
+  const plano = relocado ? futuro : planejarAgenda(dia, await lotesAgenda(projetoId), [], await lotesDoDia(projetoId, dia), futuro);
   return { r: montarRelatorio(dia, lotes, await situacaoDossies(projetoId), plano, fechado), lotes, nome: p.nome, codigo: p.codigo };
 }
 

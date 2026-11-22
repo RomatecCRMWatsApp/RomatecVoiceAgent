@@ -116,3 +116,25 @@ describe('v3.198.7 agenda: quitados → em dia → devedores (marco compartilhad
     expect(corrigirListaDia(['24', '30'], lotes, 6)).toMatchObject({ lista: ['24', '30'], retirados: [] });
   });
 });
+
+import { repetidos as repetidosAgenda } from './paCampoProgramacao';
+describe('v3.198.8 um lote, um dia só', () => {
+  const L = (lote: string, quitado_em: string | null) => ({ lote, fechado: false, marcados: 0, quitado: quitado_em !== null, quitado_em, associado: true });
+  const lotes = [L('09', '2026-11-01'), L('16', '2026-11-02'), L('24', '2026-11-03'), L('29', '2026-11-04')];
+  it('antes do fechamento os lotes de hoje NÃO aparecem no dia seguinte', () => {
+    const p = planejarAgenda('2026-11-23', lotes, [], ['09', '16'], {}, 6, [1, 2, 3, 4, 5]);
+    expect(Object.values(p).flat()).toEqual(['24', '29']);
+  });
+  it('só no fechamento (sobra do dia) o lote passa para o próximo dia', () => {
+    const p = planejarAgenda('2026-11-23', lotes, ['16'], [], {}, 6, [1, 2, 3, 4, 5]);
+    expect(p['2026-11-24'][0]).toBe('16');
+  });
+  it('sábado à mão não repete lote que já está no dia', () => {
+    const p = planejarAgenda('2026-11-20', lotes, [], ['09'], { '2026-11-21': ['09', '24'] }, 6, [1, 2, 3, 4, 5]);
+    expect(p['2026-11-21']).toEqual(['24']);
+    expect(Object.values(p).flat().filter((x) => x === '09')).toHaveLength(0);
+  });
+  it('repetição já gravada: fica o dia mais cedo', () => {
+    expect(repetidosAgenda([{ dia: '2026-11-24', lote: '09' }, { dia: '2026-11-23', lote: '09' }, { dia: '2026-11-24', lote: '16' }])).toEqual([{ dia: '2026-11-24', lote: '09' }]);
+  });
+});
