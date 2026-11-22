@@ -39,7 +39,7 @@ describe('relatório do dia de campo', () => {
     expect(r.previsao.map((p) => p.dia)).toEqual(['2026-11-20', '2026-11-23']);
   });
   it('parcelas em aberto: só a contagem e o início previsto (depois dos quitados)', () => {
-    expect(r.abertos).toEqual({ qtd: 2, inicio_previsto: '2026-11-24' });
+    expect(r.abertos).toMatchObject({ qtd: 2, em_dia: 2, atraso: 0, inicio_previsto: '2026-11-24' });
     expect(r.sem_associado).toBe(1);
     const t = textoRelatorio(r, 'PA Teste');
     expect(t).toContain('LOTES CONCLUÍDOS: 4 de 11');

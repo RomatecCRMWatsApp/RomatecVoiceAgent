@@ -25,7 +25,7 @@ export interface Relatorio {
   hoje: LinhaRel[]; em_medicao: Array<LinhaRel & { marcados: number; exigidos: number }>;
   proximo: { dia: string; itens: LinhaRel[] } | null;
   previsao: Array<{ dia: string; itens: LinhaRel[] }>; quitados_a_medir: number;
-  abertos: { qtd: number; inicio_previsto: string | null }; sem_associado: number;
+  abertos: { qtd: number; inicio_previsto: string | null; em_dia?: number; atraso?: number; inicio_atraso?: string | null }; sem_associado: number;
 }
 
 const numLote = (a: string, b: string) => a.localeCompare(b, 'pt-BR', { numeric: true });
@@ -41,17 +41,28 @@ export function montarRelatorio(dia: string, lotes: LoteBoletim[], dossies: Map<
     return { ...linha(l), medido_em: diaBrasilia(l.fechado!.concluido_em), dossie: d.situacao, dossie_em: d.em };
   }).sort((a, b) => ORDEM_DOSSIE[a.dossie] - ORDEM_DOSSIE[b.dossie] || a.medido_em.localeCompare(b.medido_em) || numLote(a.lote, b.lote));
   const hoje = medidos.filter((l) => diaBrasilia(l.fechado!.concluido_em) === dia).sort((a, b) => numLote(a.lote, b.lote)).map(linha);
-  const em_medicao = lotes.filter((l) => !l.fechado && l.marcados > 0).sort((a, b) => numLote(a.lote, b.lote)).map((l) => ({ ...linha(l), marcados: l.marcados, exigidos: l.exigidos.length }));
+  // v3.198.7: marco compartilhado com o vizinho não faz o vizinho "em medição" — só conta quitado ou lote da programação
+  const naProg = new Set(Object.values(plano).flat());
+  const em_medicao = lotes.filter((l) => !l.fechado && l.marcados > 0 && (l.pagamento?.quitado || naProg.has(l.lote))).sort((a, b) => numLote(a.lote, b.lote)).map((l) => ({ ...linha(l), marcados: l.marcados, exigidos: l.exigidos.length }));
   const dias = Object.keys(plano).filter((d) => d > dia).sort();
-  const previsao = dias.map((d) => ({ dia: d, itens: plano[d].map((lt) => por.get(lt)).filter((l): l is LoteBoletim => !!l && !l.fechado).map(linha) })).filter((p) => p.itens.length);
-  const naFila = new Set(previsao.flatMap((p) => p.itens.map((x) => x.lote)));
+  const vivo = (lt: string) => { const l = por.get(lt); return !!l && !l.fechado; };
+  // programação do próximo dia: todos os lotes do dia (o grupo precisa saber quem será medido)
+  const d1 = dias.find((d) => plano[d].some(vivo));
+  const proximo = d1 ? { dia: d1, itens: plano[d1].filter(vivo).map((lt) => linha(por.get(lt)!)) } : null;
+  // previsão: nominal só para QUITADOS (quem tem parcela em aberto aparece só na contagem — LGPD/constrangimento)
+  const previsao = dias.map((d) => ({ dia: d, itens: plano[d].filter(vivo).map((lt) => por.get(lt)!).filter((l) => l.pagamento?.quitado).map(linha) })).filter((p) => p.itens.length);
   const quitados = lotes.filter((l) => !l.fechado && l.pagamento?.quitado);
-  const abertos = lotes.filter((l) => !l.fechado && l.associado && !l.pagamento?.quitado && !naFila.has(l.lote) && !(l as { bloqueado?: boolean }).bloqueado);
-  const ultimo = previsao.length ? previsao[previsao.length - 1].dia : dia;
+  const bloq = (l: LoteBoletim) => !!(l as { bloqueado?: boolean }).bloqueado;
+  const abertos = lotes.filter((l) => !l.fechado && l.associado && !l.pagamento?.quitado && !bloq(l));
+  const atraso = abertos.filter((l) => (l.pagamento?.atrasadas ?? 0) > 0);
+  const diaDe = (f: (l: LoteBoletim) => boolean) => dias.find((d) => plano[d].some((lt) => { const l = por.get(lt); return !!l && !l.fechado && f(l); })) ?? null;
+  const ultimo = dias.length ? dias[dias.length - 1] : dia;
   return {
     dia, fechado, total: lotes.length, medidos_total: medidos.length, concluidos, hoje, em_medicao,
-    proximo: previsao[0] ?? null, previsao, quitados_a_medir: quitados.length,
-    abertos: { qtd: abertos.length, inicio_previsto: abertos.length ? proximoDiaUtil(ultimo, uteis) : null },
+    proximo, previsao, quitados_a_medir: quitados.length,
+    abertos: { qtd: abertos.length, em_dia: abertos.length - atraso.length, atraso: atraso.length,
+      inicio_previsto: abertos.length ? (diaDe((l) => !l.pagamento?.quitado && !(l.pagamento?.atrasadas ?? 0)) ?? diaDe((l) => !l.pagamento?.quitado) ?? proximoDiaUtil(ultimo, uteis)) : null,
+      inicio_atraso: atraso.length ? (diaDe((l) => (l.pagamento?.atrasadas ?? 0) > 0) ?? proximoDiaUtil(ultimo, uteis)) : null },
     sem_associado: lotes.filter((l) => !l.fechado && !l.associado).length,
   };
 }
@@ -93,7 +104,7 @@ export function textoRelatorio(r: Relatorio, projetoNome: string): string {
   }
   if (r.abertos.qtd) {
     L.push('');
-    L.push(`💳 *${r.abertos.qtd} lote(s) com parcelas em aberto:* entram na fila assim que quitarem${r.abertos.inicio_previsto ? ` — previsão de início a partir de ${dbr(r.abertos.inicio_previsto)} (${semana(r.abertos.inicio_previsto)}), depois dos quitados` : ''}.`);
+    L.push(`💳 *${r.abertos.qtd} lote(s) com parcelas em aberto* — ordem da medição: 1º quitados, 2º em dia com as parcelas${r.abertos.em_dia ? ` (${r.abertos.em_dia}${r.abertos.inicio_previsto ? `, a partir de ${dbr(r.abertos.inicio_previsto)}` : ''})` : ''}, 3º com parcela em atraso${r.abertos.atraso ? ` (${r.abertos.atraso}, no fim da fila${r.abertos.inicio_atraso ? `, a partir de ${dbr(r.abertos.inicio_atraso)}` : ''})` : ''}. Quem quita antes, mede antes.`);
     L.push('Quitou? Entra no fim da fila de medição — quem quita antes, mede antes.');
   }
   L.push('');
@@ -166,7 +177,7 @@ export function htmlRelatorio(cab: DadosMapaPA, r: Relatorio, mapa: string): str
     <h2>${r.em_medicao.length ? 4 : 3}. Programação de ${r.proximo ? `${dbr(r.proximo.dia)} (${semana(r.proximo.dia)}) — ${r.proximo.itens.length} lote(s)` : 'amanhã'}</h2>
     ${r.proximo ? tab(`<th class="n">Nº</th>${H}`, r.proximo.itens.map((x, i) => `<tr><td class="n"><b>${i + 1}</b></td>${cel(x)}</tr>`).join('')) + '<div class="nota">Associados desses lotes: se possível, acompanhem a equipe no lote para indicar as divisas e os marcos.</div>' : '<div class="nota">Nenhum lote quitado na fila no momento.</div>'}
     ${resto.length ? `<h2>Previsão de medição — quitados na fila, pela ordem de quitação</h2>${tab(`<th>Data prevista</th><th class="n">Nº</th>${H}`, resto.map((p) => p.itens.map((x, i) => `<tr><td>${i === 0 ? `<b>${dbr(p.dia)}</b><div class="mi">${semana(p.dia)}</div>` : ''}</td><td class="n">${i + 1}</td>${cel(x)}</tr>`).join('')).join(''))}` : ''}
-    ${r.abertos.qtd ? `<div class="aviso">💳 <b>${r.abertos.qtd} lote(s) com parcelas em aberto</b> entram na fila assim que quitarem${r.abertos.inicio_previsto ? ` — <b>previsão de início a partir de ${dbr(r.abertos.inicio_previsto)} (${semana(r.abertos.inicio_previsto)})</b>, depois dos quitados` : ''}. Quem quita antes, mede antes.</div>` : ''}
+    ${r.abertos.qtd ? `<div class="aviso">💳 <b>${r.abertos.qtd} lote(s) com parcelas em aberto.</b> Ordem da medição: <b>1º quitados</b> → <b>2º em dia com as parcelas</b>${r.abertos.em_dia ? ` (${r.abertos.em_dia}${r.abertos.inicio_previsto ? `, a partir de ${dbr(r.abertos.inicio_previsto)}` : ''})` : ''} → <b>3º com parcela em atraso</b>${r.abertos.atraso ? ` (${r.abertos.atraso}, no fim da fila${r.abertos.inicio_atraso ? `, a partir de ${dbr(r.abertos.inicio_atraso)}` : ''})` : ''}. Quem quita antes, mede antes.</div>` : ''}
     <div class="nota">Previsão sujeita a chuva e ao andamento do campo; ${lotesPorDia()} lotes por dia útil. Medição e cravação dos marcos — SIRGAS 2000 · NBR 13133.</div>
     <div class="rod"><span>Responsável técnico: ${esc(cab.rt.nome)} · ${esc(cab.rt.registro)}</span><span>Romatec Consultoria Total · gerado em ${esc(cab.data)}</span></div>
   </body></html>`;

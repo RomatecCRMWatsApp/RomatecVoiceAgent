@@ -62,18 +62,17 @@ describe('agenda automática de campo', () => {
   it('fila dos quitados pela data da quitação (medidos e não quitados fora)', () => {
     expect(filaQuitados(lotes)).toEqual(['51', '43', '47', '33', '40', '50', '48', '49', '09']);
   });
-  it('fechamento das 21 h (qua 18/11): não medidos (quitados) na frente pela ordem da quitação, 6 por dia, não quitado sai', () => {
+  it('fechamento das 21 h (qua 18/11): quitados não medidos na frente pela quitação, 6 por dia; em dia depois dos quitados', () => {
     const p = planejarAgenda('2026-11-18', lotes, ['10', '33', '43', '47', '50', '51', '32'], [], {}, 6, [1, 2, 3, 4, 5]);
     expect(p['2026-11-19']).toEqual(['51', '43', '47', '33', '50', '40']);
-    expect(p['2026-11-20']).toEqual(['48', '49', '09']);
-    expect(Object.values(p).flat()).not.toContain('32'); // não quitado programado à mão não é relocado
+    expect(p['2026-11-20']).toEqual(['48', '49', '09', '32', '20']); // 32 e 20: em dia (parcelas a vencer) — depois de todos os quitados
     expect(Object.values(p).flat()).not.toContain('10'); // medido
   });
   it('quem quitar durante o dia entra no FINAL; o dia de hoje não muda', () => {
     const novo = [...lotes, L('20', '2026-11-18 15:00:00')].filter((l, i, a) => a.findIndex((x) => x.lote === l.lote) === i || l.quitado);
     const hoje = ['09', '33', '43', '47', '50', '51'];
     const p = planejarAgenda('2026-11-19', novo.filter((l) => !(l.lote === '20' && !l.quitado)), [], hoje, {}, 6, [1, 2, 3, 4, 5]);
-    expect(p).toEqual({ '2026-11-20': ['40', '48', '49', '20'] });
+    expect(p['2026-11-20'].slice(0, 4)).toEqual(['40', '48', '49', '20']); // quitou hoje: último dos quitados, antes dos em dia
   });
   it('sexta → segunda; excedente cascateia', () => {
     expect(proximoDiaUtil('2026-11-20', [1, 2, 3, 4, 5])).toBe('2026-11-23');
@@ -83,7 +82,7 @@ describe('agenda automática de campo', () => {
   });
   it('sábado programado à mão é mantido', () => {
     const p = planejarAgenda('2026-11-20', lotes, [], [], { '2026-11-21': ['48', '32'] }, 6, [1, 2, 3, 4, 5]);
-    expect(p['2026-11-21']).toEqual(['48']);
+    expect(p['2026-11-21']).toEqual(['48', '32']);
     expect(p['2026-11-23']).not.toContain('48');
   });
 });
@@ -96,18 +95,24 @@ describe('agenda ignora lote bloqueado', () => {
   });
 });
 
-describe('v3.198.6 agenda só com quitados (marco compartilhado não conta)', () => {
-  const L = (lote: string, quitado_em: string | null, o: { fechado?: boolean; marcados?: number; bloqueado?: boolean } = {}) => ({ lote, fechado: false, marcados: 0, quitado: quitado_em !== null, quitado_em, ...o });
-  const lotes = [L('09', '2026-11-10 10:00:00', { marcados: 3 }), L('11', '2026-11-01 10:00:00', { marcados: 2, bloqueado: true }), L('12', null, { marcados: 2 }),
-    L('13', null, { marcados: 1 }), L('16', '2026-11-05 10:00:00'), L('20', null, { marcados: 4 }), L('24', '2026-11-02 10:00:00'), L('29', '2026-11-21 13:52:00'), L('30', '2026-11-03 09:00:00', { fechado: true })];
-  it('vizinho não quitado com marco marcado e lote bloqueado NÃO entram', () => {
+describe('v3.198.7 agenda: quitados → em dia → devedores (marco compartilhado não conta)', () => {
+  const L = (lote: string, quitado_em: string | null, o: { fechado?: boolean; marcados?: number; bloqueado?: boolean; atrasado?: boolean; pct?: number; associado?: boolean } = {}) => ({ lote, fechado: false, marcados: 0, quitado: quitado_em !== null, quitado_em, associado: true, ...o });
+  const lotes = [L('09', '2026-11-10 10:00:00', { marcados: 3 }), L('11', '2026-11-01 10:00:00', { marcados: 2, bloqueado: true }), L('12', null, { marcados: 2, atrasado: true, pct: 50 }),
+    L('13', null, { marcados: 1, pct: 50 }), L('16', '2026-11-05 10:00:00'), L('20', null, { marcados: 4, pct: 80 }), L('24', '2026-11-02 10:00:00'), L('29', '2026-11-21 13:52:00'),
+    L('30', '2026-11-03 09:00:00', { fechado: true }), L('31', null, { atrasado: true, pct: 90 }), L('60', null, { associado: false })];
+  it('ordem: quitados pela quitação, em dia por % pago, devedores no fim; bloqueado/medido/sem associado fora', () => {
     const p = planejarAgenda('2026-11-22', lotes, [], [], {}, 6, [1, 2, 3, 4, 5]);
-    expect(p).toEqual({ '2026-11-23': ['24', '16', '09', '29'] });
+    expect(p).toEqual({ '2026-11-23': ['24', '16', '09', '29', '20', '13'], '2026-11-24': ['31', '12'] });
   });
-  it('corrige a lista do dia já montada: tira não quitados/bloqueados, mantém medidos, completa pela quitação', () => {
+  it('devedor que sobrou do dia não fura a fila; quitado que sobrou vai na frente dos quitados', () => {
+    const p = planejarAgenda('2026-11-22', lotes, ['12', '29'], [], {}, 6, [1, 2, 3, 4, 5]);
+    expect(p['2026-11-23']).toEqual(['29', '24', '16', '09', '20', '13']);
+    expect(p['2026-11-24']).toEqual(['12', '31']);
+  });
+  it('corrige a lista do dia já montada: sai bloqueado e quem fura a fila; medido fica; completa na ordem', () => {
     const r = corrigirListaDia(['09', '11', '12', '13', '16', '20'], lotes, 6);
-    expect(r.retirados).toEqual(['11', '12', '13', '20']);
-    expect(r.lista).toEqual(['09', '16', '24', '29']);
+    expect(r.retirados).toEqual(['11', '12']); // bloqueado e devedor saem
+    expect(r.lista).toEqual(['09', '16', '24', '29', '20', '13']); // quitados que esperavam entram; os em dia voltam atrás deles
     expect(corrigirListaDia(['24', '30'], lotes, 6)).toMatchObject({ lista: ['24', '30'], retirados: [] });
   });
 });

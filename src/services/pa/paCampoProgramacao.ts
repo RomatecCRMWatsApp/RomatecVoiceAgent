@@ -236,7 +236,8 @@ async function dadosDia(projetoId: number, tipoQ: unknown, diaQ: unknown) {
     const fut = await rows(pool, 'SELECT dia, lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia > ? AND dia <= ? + INTERVAL 60 DAY ORDER BY dia, ordem, id', [projetoId, dia, dia]);
     const por: Record<string, string[]> = {};
     for (const r of fut) (por[isoDate(r.dia)!] ??= []).push(String(r.lote));
-    for (const d of Object.keys(por).sort()) { const its = montarProgramacao(lotes, por[d]).filter((x) => x.situacao !== 'MEDIDO'); if (its.length) previsao.push({ dia: d, itens: its.map((x, i) => ({ ...x, ordem: i + 1 })) }); }
+    for (const d of Object.keys(por).sort()) { const quit = new Set(lotes.filter((l) => l.pagamento?.quitado).map((l) => l.lote)); // v3.198.7: previsão nominal só de quitados
+      const its = montarProgramacao(lotes, por[d]).filter((x) => x.situacao !== 'MEDIDO' && quit.has(x.lote)); if (its.length) previsao.push({ dia: d, itens: its.map((x, i) => ({ ...x, ordem: i + 1 })) }); }
   }
   const ultimo = tipo === 'programacao' ? medidosUltimoDia(lotes, dia) : null;
   return { tipo, dia, p, lotes, itens, totalPA, previsao, ultimo };
@@ -277,21 +278,33 @@ export function proximoDiaUtil(d: string, uteis: number[] = diasUteis()): string
   return x;
 }
 
-export interface LoteAgenda { lote: string; fechado: boolean; marcados: number; quitado: boolean; quitado_em: string | null; bloqueado?: boolean }
-/** v3.198.6: regra única da agenda — quitado, não medido, não bloqueado (pura). */
-export const agendavel = (l: LoteAgenda | undefined): boolean => !!l && l.quitado && !l.fechado && !l.bloqueado;
+export interface LoteAgenda { lote: string; fechado: boolean; marcados: number; quitado: boolean; quitado_em: string | null; bloqueado?: boolean; associado?: boolean; atrasado?: boolean; pct?: number }
+/**
+ * v3.198.7: regra única da agenda — 1º quitados (pela data da quitação), 2º em dia (parcelas a vencer, nada
+ * atrasado; quem pagou mais primeiro), 3º devedores (parcela ou taxa de marcos vencida) no fim.
+ * Fora: já medido, bloqueado, sem associado. Marco marcado (compartilhado com vizinho) não conta.
+ */
+export const agendavel = (l: LoteAgenda | undefined): boolean => !!l && !l.fechado && !l.bloqueado && (l.quitado || l.associado !== false);
+export const faixaAgenda = (l: LoteAgenda): 0 | 1 | 2 => l.quitado ? 0 : l.atrasado ? 2 : 1;
+export function filaAgenda(lotes: LoteAgenda[]): string[] {
+  return lotes.filter((l) => agendavel(l))
+    .sort((a, b) => faixaAgenda(a) - faixaAgenda(b)
+      || (faixaAgenda(a) === 0 ? (a.quitado_em ?? '').localeCompare(b.quitado_em ?? '') : (b.pct ?? 0) - (a.pct ?? 0))
+      || numLote(a.lote, b.lote)).map((l) => l.lote);
+}
 /**
  * v3.198.6: corrige a lista de um dia já montada (pura — testável): tira quem não é agendável (não quitado,
  * bloqueado) — os já medidos no dia ficam — e completa até `porDia` com a fila dos quitados, na ordem da quitação.
  */
 export function corrigirListaDia(atual: string[], lotes: LoteAgenda[], porDia = lotesPorDia()): { lista: string[]; retirados: string[]; incluidos: string[] } {
   const st = new Map(lotes.map((l) => [l.lote, l]));
-  const ficam = atual.filter((lt) => { const l = st.get(lt); return !!l && (l.fechado || agendavel(l)); });
-  const retirados = atual.filter((lt) => !ficam.includes(lt));
-  if (!retirados.length) return { lista: atual, retirados, incluidos: [] };
-  const vagas = Math.max(0, porDia - ficam.length);
-  const incluidos = filaQuitados(lotes).filter((lt) => !ficam.includes(lt)).slice(0, vagas);
-  return { lista: [...ficam, ...incluidos], retirados, incluidos };
+  const fila = filaAgenda(lotes).filter((lt) => !atual.includes(lt));
+  const melhor = fila.length ? faixaAgenda(st.get(fila[0])!) : 3;
+  // fica: medido; agendável que não "fura a fila" (faixa pior que a do primeiro da fila → sai)
+  const ficam = atual.filter((lt) => { const l = st.get(lt); return !!l && (l.fechado || (agendavel(l) && faixaAgenda(l) <= melhor)); });
+  if (ficam.length === atual.length) return { lista: atual, retirados: [], incluidos: [] };
+  const lista = [...ficam, ...filaAgenda(lotes).filter((lt) => !ficam.includes(lt)).slice(0, Math.max(0, porDia - ficam.length))];
+  return { lista, retirados: atual.filter((lt) => !lista.includes(lt)), incluidos: lista.filter((lt) => !atual.includes(lt)) };
 }
 /** Fila dos quitados a medir: quem quitou antes vem antes; empate pelo nº do lote (pura). */
 export function filaQuitados(lotes: LoteAgenda[]): string[] {
@@ -306,18 +319,19 @@ export function filaQuitados(lotes: LoteAgenda[]): string[] {
  */
 export function planejarAgenda(dia: string, lotes: LoteAgenda[], carry: string[], excluir: string[] = [], manuais: Record<string, string[]> = {}, porDia = lotesPorDia(), uteis = diasUteis()): Record<string, string[]> {
   const st = new Map(lotes.map((l) => [l.lote, l]));
-  // v3.198.6: SÓ quitado entra na agenda (marco marcado não conta: os marcos são compartilhados com os vizinhos,
-  // e o lote vizinho não quitado aparecia "em medição"). Bloqueado e já medido ficam fora.
+  // v3.198.7: fila única — quitados (data da quitação) → em dia (% pago) → devedores; bloqueado/medido/sem associado fora
   const ok = (lt: string) => agendavel(st.get(lt));
   const fora = new Set(excluir);
   const out: Record<string, string[]> = {};
   for (const [d, ls] of Object.entries(manuais)) if (d > dia && !uteis.includes(diaSemana(d))) { out[d] = ls.filter(ok); out[d].forEach((x) => fora.add(x)); }
-  const fila: string[] = [];
-  const pôr = (lt: string) => { if (ok(lt) && !fora.has(lt) && !fila.includes(lt)) fila.push(lt); };
-  // não medidos do dia (quitados) na frente, na ordem da quitação; depois a fila dos quitados
-  const ordem = new Map(filaQuitados(lotes).map((lt, i) => [lt, i]));
-  [...carry].sort((a, b) => (ordem.get(a) ?? 1e9) - (ordem.get(b) ?? 1e9)).forEach(pôr);
-  filaQuitados(lotes).forEach(pôr);
+  const base = filaAgenda(lotes);
+  const ordem = new Map(base.map((lt, i) => [lt, i]));
+  const sobrou = new Set(carry);
+  // dentro da mesma faixa, quem ficou sem medir no dia vai na frente; nunca fura uma faixa melhor
+  const fila = base.filter((lt) => !fora.has(lt)).sort((a, b) => {
+    const fa = faixaAgenda(st.get(a)!), fb = faixaAgenda(st.get(b)!);
+    return fa - fb || (sobrou.has(a) ? 0 : 1) - (sobrou.has(b) ? 0 : 1) || ordem.get(a)! - ordem.get(b)!;
+  });
   let d = proximoDiaUtil(dia, uteis);
   while (fila.length) { out[d] = fila.splice(0, porDia); d = proximoDiaUtil(d, uteis); }
   for (const k of Object.keys(out)) if (!out[k].length) delete out[k];
@@ -326,7 +340,8 @@ export function planejarAgenda(dia: string, lotes: LoteAgenda[], carry: string[]
 
 export async function lotesAgenda(projetoId: number): Promise<LoteAgenda[]> {
   const e = await estadoCampo(projetoId);
-  return e.lotes.map((l) => ({ lote: l.lote, fechado: !!l.fechado, marcados: l.marcados, quitado: !!l.pagamento?.quitado, quitado_em: l.pagamento?.quitado_em ?? null, bloqueado: !!(l as { bloqueado?: boolean }).bloqueado }));
+  return e.lotes.map((l) => ({ lote: l.lote, fechado: !!l.fechado, marcados: l.marcados, quitado: !!l.pagamento?.quitado, quitado_em: l.pagamento?.quitado_em ?? null, bloqueado: !!(l as { bloqueado?: boolean }).bloqueado,
+    associado: !!l.associado, atrasado: (l.pagamento?.atrasadas ?? 0) > 0, pct: l.pagamento?.pct ?? 0 }));
 }
 export async function futuroAtual(projetoId: number, dia: string): Promise<Record<string, string[]>> {
   const fut = await rows(pool, 'SELECT dia, lote FROM pa_campo_programacao WHERE projeto_id = ? AND dia > ? ORDER BY dia, ordem, id', [projetoId, dia]);
@@ -354,7 +369,7 @@ export async function relocarProgramacao(projetoId: number, diaQ: unknown, usuar
   const plano = planejarAgenda(dia, lotes, carry, [], await futuroAtual(projetoId, dia));
   await gravarFuturo(projetoId, dia, plano, usuario);
   // v3.190.1: no dia (e nos anteriores) ficam SÓ os medidos — os não medidos saíram para os próximos dias
-  const sair = carry.filter((lt) => Object.values(plano).some((x) => x.includes(lt)) || !lotes.find((l) => l.lote === lt)?.quitado);
+  const sair = carry.filter((lt) => Object.values(plano).some((x) => x.includes(lt)) || !agendavel(lotes.find((l) => l.lote === lt)));
   if (sair.length) await exec(pool, `DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia <= ? AND dia >= ? - INTERVAL 60 DAY AND lote IN (${sair.map(() => '?').join(',')})`, [projetoId, dia, dia, ...sair]);
   await registrarEvento(pool, { projeto_id: projetoId, usuario, tipo: fechamento ? 'CAMPO_FECHAMENTO_DIA' : 'CAMPO_RELOCACAO', dados: { dia, plano, retirados: sair } });
   return { dia, plano, retirados: sair };
@@ -364,7 +379,7 @@ export async function corrigirDia(projetoId: number, dia = hojeBrasil(), usuario
   const lotes = await lotesAgenda(projetoId);
   const atual = await lotesDoDia(projetoId, dia);
   const r = corrigirListaDia(atual, lotes);
-  if (!r.retirados.length) return { mudou: false, ...r };
+  if (JSON.stringify(r.lista) === JSON.stringify(atual)) return { mudou: false, ...r };
   await transacao(async (c) => {
     await exec(c, 'DELETE FROM pa_campo_programacao WHERE projeto_id = ? AND dia = ?', [projetoId, dia]);
     for (const [i, l] of r.lista.entries()) await exec(c, 'INSERT INTO pa_campo_programacao (projeto_id, dia, lote, ordem, criado_por) VALUES (?, ?, ?, ?, ?)', [projetoId, dia, l, i + 1, usuario ?? 'agenda-automatica']);

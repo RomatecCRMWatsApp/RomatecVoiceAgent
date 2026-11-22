@@ -5,7 +5,7 @@
 // (do primeiro ao último ponto do dia).
 import { PaErro } from './erros';
 import { sqlLancamentoQuitado } from './regrasFinanceiras';
-import { pool, rows, one, exec, num, isoDateTime, registrarEvento } from './paDb';
+import { pool, rows, one, exec, num, isoDateTime, hojeBrasil, registrarEvento } from './paDb';
 import { pontosColetora } from './paColetora';
 import { buscarSubdivisao, vinculosParcelas } from './paMapas';
 
@@ -79,7 +79,7 @@ const dt = (v: unknown) => isoDateTime(v) ?? String(v);
 // ─── v3.171.0: ordem de serviço de campo pelo pagamento ───────────────────
 // Cor e prioridade de cada lote pela proporção de PARCELAS DO CONTRATO pagas (sem valores em R$ —
 // o funcionário de campo vê só a situação). Preferência (não bloqueia): medir primeiro os quitados.
-export interface PagamentoLote { parcelas: number; pagas: number; pct: number; quitado: boolean; marcos_lancados: boolean; marcos_pago: boolean; quitado_em?: string | null }
+export interface PagamentoLote { parcelas: number; pagas: number; pct: number; quitado: boolean; marcos_lancados: boolean; marcos_pago: boolean; quitado_em?: string | null; atrasadas?: number }
 export const FAIXAS_PAGAMENTO: ReadonlyArray<{ id: string; rotulo: string; cor: string; min: number }> = [
   { id: 'QUITADO', rotulo: 'Quitado ★', cor: '#1E7B34', min: 100 },
   { id: 'P75', rotulo: '75% a 99%', cor: '#8BC34A', min: 75 },
@@ -109,15 +109,17 @@ async function pagamentosPorAssociado(projetoId: number): Promise<Map<number, Pa
       SUM(l.tipo <> 'MARCO' AND ${sqlLancamentoQuitado('l')}) AS pagas,
       SUM(l.tipo = 'MARCO') AS marcos,
       SUM(l.tipo = 'MARCO' AND ${sqlLancamentoQuitado('l')}) AS marcos_pagos,
+      -- v3.198.7: lançamentos vencidos e não pagos (parcela ou taxa de marcos) → devedor vai para o fim da agenda
+      SUM(NOT ${sqlLancamentoQuitado('l')} AND l.vencimento IS NOT NULL AND l.vencimento < ?) AS atrasadas,
       -- v3.190.0: data da quitação = último pagamento rateado nas parcelas do contrato (ordem da agenda de campo)
       (SELECT MAX(pg.pago_em) FROM pa_lancamentos l2 JOIN pa_pagamento_rateio rt ON rt.lancamento_id = l2.id JOIN pa_pagamentos pg ON pg.id = rt.pagamento_id
         WHERE l2.associado_id = l.associado_id AND l2.tipo <> 'MARCO' AND l2.status <> 'CANCELADO') AS ultimo_pagamento
     FROM pa_lancamentos l JOIN pa_associados a ON a.id = l.associado_id
-    WHERE a.projeto_id = ? AND a.ativo = 1 AND l.status <> 'CANCELADO' GROUP BY l.associado_id`, [projetoId]);
+    WHERE a.projeto_id = ? AND a.ativo = 1 AND l.status <> 'CANCELADO' GROUP BY l.associado_id`, [hojeBrasil(), projetoId]);
   return new Map(r.map((x) => {
     const parcelas = num(x.parcelas), pagas = num(x.pagas), marcos = num(x.marcos);
     return [num(x.associado_id), { parcelas, pagas, pct: parcelas ? Math.round((pagas / parcelas) * 1000) / 10 : 0, quitado: parcelas > 0 && pagas >= parcelas, marcos_lancados: marcos > 0, marcos_pago: marcos > 0 && num(x.marcos_pagos) >= marcos,
-      quitado_em: parcelas > 0 && pagas >= parcelas ? (isoDateTime(x.ultimo_pagamento) ?? null) : null }];
+      quitado_em: parcelas > 0 && pagas >= parcelas ? (isoDateTime(x.ultimo_pagamento) ?? null) : null, atrasadas: num(x.atrasadas) }];
   }));
 }
 
