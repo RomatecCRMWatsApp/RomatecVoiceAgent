@@ -18,6 +18,9 @@ export interface ReciboInfinitePay {
   origem: { nome: string | null; cpf: string | null; instituicao: string | null };
   destino: { nome: string | null; cnpj: string | null; chave: string | null };
   id_transacao: string | null;
+  /** v3.198.3: recibo de cartão (InfiniteTap / maquininha) — https://recibo.infinitepay.io/<NSU> */
+  forma: 'PIX' | 'CARTAO_CREDITO' | 'CARTAO_DEBITO';
+  cartao: { meio: string | null; bandeira: string | null; final: string | null; pagamento: string | null; nsu: string | null; aut: string | null } | null;
 }
 
 const MESES: Record<string, string> = {
@@ -126,6 +129,23 @@ export function parseReciboHtml(html: string): ReciboInfinitePay {
   let idTx = campo(linhas, /id(?: da transa[çc][ãa]o)?|id\s*e2e|end\s*to\s*end|identificador/)?.replace(/\s+/g, '') ?? null;
   if (!idTx || !/^[A-Za-z0-9]{20,}$/.test(idTx)) idTx = texto.match(RE_E2E)?.[0] ?? idTx;
 
+  // v3.198.3: comprovante de venda no cartão (sem origem/Pix; identificado por NSU + AUT)
+  const meioLinha = campo(linhas, /meio(?: de pagamento)?/);
+  const ehCartao = /comprovante\s+de\s+venda/i.test(texto) || /cr[ée]dito|d[ée]bito/i.test(meioLinha ?? '') || /\bNSU\b/.test(texto) && !RE_E2E.test(texto);
+  let cartao: ReciboInfinitePay['cartao'] = null;
+  let forma: ReciboInfinitePay['forma'] = 'PIX';
+  if (ehCartao) {
+    const rot = (re: RegExp) => { for (let i = 0; i < linhas.length; i++) { const m = linhas[i].match(re); if (m) return (m[1] || linhas[i + 1] || '').trim() || null; } return null; };
+    const nsu = rot(/^NSU\b\s*:?\s*([0-9A-Za-z-]{6,})?\s*(?:ARQC.*)?$/i) ?? texto.match(/\bNSU\s*:?\s*([0-9A-Za-z-]{6,})/i)?.[1] ?? null;
+    const aut = rot(/^AUT\b\s*:?\s*([0-9A-Za-z]{4,})?$/i) ?? texto.match(/\bAUT\s*:?\s*([0-9A-Za-z]{4,})/i)?.[1] ?? null;
+    const meio = meioLinha ?? (texto.match(/\b(cr[ée]dito|d[ée]bito)\b/i)?.[1] ?? null);
+    forma = /d[ée]bito/i.test(meio ?? '') ? 'CARTAO_DEBITO' : 'CARTAO_CREDITO';
+    const final = (meio ?? '').match(/(\d{4})\s*$/)?.[1] ?? texto.match(/(?:•|\*|\.){2,}\s*(\d{4})\b/)?.[1] ?? null;
+    const bandeira = texto.match(/\b(VISA|MASTERCARD|MASTER|ELO|AMEX|AMERICAN EXPRESS|HIPERCARD|HIPER|CABAL|DINERS)\b/i)?.[1]?.toUpperCase() ?? null;
+    cartao = { meio: meio ? meio.replace(/\s+/g, ' ') : null, bandeira, final, pagamento: campo(linhas, /pagamento|parcelamento/), nsu, aut };
+    idTx = nsu ? `NSU-${nsu.toUpperCase()}` : aut ? `AUT-${aut}` : null;
+  }
+
   const r: ReciboInfinitePay = {
     valor: valor ?? 0,
     pago_em: pagoEm,
@@ -141,7 +161,14 @@ export function parseReciboHtml(html: string): ReciboInfinitePay {
       chave: campo(destino, /chave(?: pix)?/),
     },
     id_transacao: idTx,
+    forma,
+    cartao,
   };
+  // cartão: o bloco "Destino" traz o nome direto (sem rótulo "Nome") e o CNPJ
+  if (cartao && !r.destino.nome) {
+    r.destino.nome = destino.find((l) => !/^(cnpj|cpf|nsu|aut|arqc)\b/i.test(l) && !/^[\d./-]+$/.test(l)) ?? null;
+    r.destino.cnpj = r.destino.cnpj ?? (texto.match(/\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/)?.[0] ?? null);
+  }
 
   // Fallback: página que só traz os dados no JSON do Next.js.
   const nd = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
@@ -154,7 +181,10 @@ export function parseReciboHtml(html: string): ReciboInfinitePay {
         // amount inteiro grande = centavos (padrão de gateway)
         if (Number.isFinite(num) && num > 0) r.valor = centavos(Number.isInteger(num) && num >= 1000 && !String(v).includes('.') ? num / 100 : num);
       }
-      if (!r.id_transacao) r.id_transacao = textoOuNull(buscarChave(json, ['end_to_end_id', 'endtoendid', 'e2e_id', 'e2eid', 'transaction_id']));
+      if (!r.id_transacao) {
+        const nsu = r.cartao ? textoOuNull(buscarChave(json, ['nsu', 'host_nsu'])) : null;
+        r.id_transacao = nsu ? `NSU-${nsu.toUpperCase()}` : textoOuNull(buscarChave(json, ['end_to_end_id', 'endtoendid', 'e2e_id', 'e2eid', 'transaction_id']));
+      }
       if (!pagoEm) {
         const d = textoOuNull(buscarChave(json, ['created_at', 'paid_at', 'date', 'datetime']));
         if (d && /^\d{4}-\d{2}-\d{2}T/.test(d)) {
@@ -193,8 +223,9 @@ export function validarUrlRecibo(url: string): URL {
   } catch {
     throw new PaErro('URL_INVALIDA', 'Link de recibo inválido.', 400);
   }
-  if (u.protocol !== 'https:' || u.hostname !== 'recibo.infinitepay.io' || !/^\/statements\/[A-Za-z0-9_\-]+/.test(u.pathname)) {
-    throw new PaErro('URL_INVALIDA', 'O link precisa ser https://recibo.infinitepay.io/statements/…', 400);
+  // Pix: /statements/<token> · cartão (v3.198.3): /<NSU> (UUID)
+  if (u.protocol !== 'https:' || u.hostname !== 'recibo.infinitepay.io' || !(/^\/statements\/[A-Za-z0-9_\-]+/.test(u.pathname) || /^\/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\/?$/.test(u.pathname))) {
+    throw new PaErro('URL_INVALIDA', 'O link precisa ser https://recibo.infinitepay.io/statements/… (Pix) ou https://recibo.infinitepay.io/<NSU> (cartão)', 400);
   }
   return u;
 }

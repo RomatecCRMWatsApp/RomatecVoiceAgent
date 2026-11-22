@@ -2419,7 +2419,7 @@ async function rFinanceiro(){
   v.innerHTML = barraFin() + `
     ${podeEscrever() ? `<div class="card"><h2>Lançar pagamento</h2>
       <label for="urlRecibo">Link do recibo InfinitePay (opcional)</label>
-      <div class="row"><input id="urlRecibo" placeholder="https://recibo.infinitepay.io/statements/…" style="flex:4 1 300px"><button class="btn btn-ghost" id="prevBtn" style="flex:0 0 auto">🔍 Ler recibo</button></div>
+      <div class="row"><input id="urlRecibo" placeholder="Pix: recibo.infinitepay.io/statements/… · Cartão: recibo.infinitepay.io/<NSU>" style="flex:4 1 300px"><button class="btn btn-ghost" id="prevBtn" style="flex:0 0 auto">🔍 Ler recibo</button></div>
       <div id="prevBox"></div>
       <div class="grid3" style="margin-top:6px">
         <div><label for="pForma">Forma</label><select class="f" id="pForma"><option>PIX</option><option value="ESPECIE">ESPÉCIE</option><option value="CARTAO_DEBITO">CARTÃO DÉBITO</option><option value="CARTAO_CREDITO">CARTÃO CRÉDITO</option><option>BOLETO</option><option>MISTO</option></select></div>
@@ -3117,13 +3117,15 @@ async function lerRecibo(){
     const r = await api(`/projetos/${S.pid}/pagamentos/preview`, { json: { url_recibo: url } });
     FIN.recibo = r.recibo;
     const rc = r.recibo;
+    const cartao = rc.cartao; // v3.198.3: comprovante de venda no cartão
     $('#prevBox').innerHTML = `<div class="avisos"><b>${brl(rc.valor)}</b> · ${dbr(rc.pago_em)} · ${esc(rc.status || '')}<br>
-      Origem: ${esc(rc.origem.nome || '?')} · CPF ${esc(rc.origem.cpf || '?')} · ${esc(rc.origem.instituicao || '')}<br>
+      ${cartao ? `💳 <b>${rc.forma === 'CARTAO_DEBITO' ? 'Cartão de débito' : 'Cartão de crédito'}</b>${cartao.bandeira ? ' ' + esc(cartao.bandeira) : ''}${cartao.final ? ' final ' + esc(cartao.final) : ''}${cartao.pagamento ? ' · ' + esc(cartao.pagamento) : ''} · NSU ${esc(cartao.nsu || '—')} · AUT ${esc(cartao.aut || '—')}<br>
+      <span class="muted">Comprovante de cartão não traz o pagador: informe o associado abaixo.</span><br>` : `Origem: ${esc(rc.origem.nome || '?')} · CPF ${esc(rc.origem.cpf || '?')} · ${esc(rc.origem.instituicao || '')}<br>`}
       Destino: ${esc(rc.destino.nome || '?')} ${r.destino_ok ? chip('PAGO','Romatec ✓') : chip('VENCIDO','NÃO é a Romatec')}<br>
       <span class="pre">ID ${esc(rc.id_transacao || '—')}</span>
       ${r.ja_lancado ? `<div style="color:var(--red);font-weight:700;margin-top:4px">⚠️ Este ID já foi lançado (pagamento #${r.ja_lancado}).</div>` : ''}
-      ${r.candidatos.length ? `<div style="margin-top:4px">CPF parcial bate com: ${r.candidatos.map((c) => `<button class="btn btn-ghost btn-sm" data-cand="${c.id}">Lote ${esc(c.lote)} — ${esc(c.nome)}</button>`).join(' ')}</div>` : '<div style="margin-top:4px">CPF parcial não bate com nenhum associado → pagador terceiro: informe o vínculo.</div>'}</div>`;
-    $('#pForma').value = 'PIX'; $('#pValor').value = String(rc.valor).replace('.', ',');
+      ${cartao ? '' : r.candidatos.length ? `<div style="margin-top:4px">CPF parcial bate com: ${r.candidatos.map((c) => `<button class="btn btn-ghost btn-sm" data-cand="${c.id}">Lote ${esc(c.lote)} — ${esc(c.nome)}</button>`).join(' ')}</div>` : '<div style="margin-top:4px">CPF parcial não bate com nenhum associado → pagador terceiro: informe o vínculo.</div>'}</div>`;
+    $('#pForma').value = rc.forma || 'PIX'; $('#pValor').value = String(rc.valor).replace('.', ',');
     if (rc.pago_em) $('#pData').value = rc.pago_em.replace(' ', 'T').slice(0, 16);
     $('#pTx').value = rc.id_transacao || ''; $('#pPagador').value = rc.origem.nome || ''; $('#pCpf').value = rc.origem.cpf || '';
     $('#prevBox').querySelectorAll('[data-cand]').forEach((b) => b.onclick = () => adicionarAoRateio(Number(b.dataset.cand)));

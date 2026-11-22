@@ -73,7 +73,7 @@ export function lerNovoPagamento(body: Record<string, unknown>): NovoPagamento {
 export function aplicarRecibo(p: NovoPagamento, r: ReciboInfinitePay): NovoPagamento {
   return {
     ...p,
-    forma: 'PIX',
+    forma: r.forma ?? 'PIX', // v3.198.3: recibo de cartão → CARTAO_CREDITO/DEBITO
     valor: p.valor > 0 ? p.valor : r.valor,
     pago_em: p.pago_em || r.pago_em || agoraBrasilSql(),
     id_transacao: p.id_transacao ?? r.id_transacao,
