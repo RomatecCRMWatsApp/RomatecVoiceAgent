@@ -1,5 +1,5 @@
 // v3.191.0 — Relatório do dia de campo (fim do dia, para o grupo do PA): um PDF único + texto.
-// Abre às 16 h (parcial) e fecha às 21 h (junto com a relocação automática). Traz, sempre nesta ordem:
+// v3.198.4: abre a qualquer hora (parcial até o fechamento) e fecha às 21 h (junto com a relocação automática). Traz, sempre nesta ordem:
 //   1) lotes concluídos X/63 com a situação do dossiê (entregue → enviado → em revisão → aguardando pagamento);
 //   2) medidos hoje; 3) em medição; 4) programação do próximo dia útil (ordem de quitação);
 //   5) previsão de medição de todos os quitados (data a data); 6) lotes com parcelas em aberto: quantos
@@ -15,7 +15,8 @@ import { estadoCampo, diaBrasilia } from './paCampo';
 import type { LoteBoletim } from './paCampoBoletim';
 import { planejarAgenda, proximoDiaUtil, diasUteis, lotesPorDia, lotesAgenda, futuroAtual, lotesDoDia, HORA_RELOCACAO } from './paCampoProgramacao';
 
-export const HORA_ABRE_RELATORIO = 16;
+/** @deprecated v3.198.4: o relatório abre a qualquer hora; só o fechamento é às 21 h. */
+export const HORA_ABRE_RELATORIO = 0;
 export type SituacaoDossieRel = 'ENTREGUE' | 'ENVIADO' | 'REVISAO' | 'AGUARDANDO_PAGAMENTO' | 'SEM_DOSSIE';
 export interface LinhaRel { lote: string; associado: string | null; chacara: string | null; lote_vila: string | null; area_ha: number }
 export interface Relatorio {
@@ -188,7 +189,7 @@ export async function dadosRelatorio(projetoId: number, diaQ: unknown, agora = n
   const dia = /^\d{4}-\d{2}-\d{2}$/.test(String(diaQ ?? '').slice(0, 10)) ? String(diaQ).slice(0, 10) : hoje;
   const hBr = (agora.getUTCHours() + 21) % 24;
   if (dia > hoje) throw new PaErro('DIA_FUTURO', 'O relatório é do dia de campo — escolha hoje ou um dia anterior', 409);
-  if (dia === hoje && hBr < HORA_ABRE_RELATORIO) throw new PaErro('RELATORIO_FECHADO', `O relatório do dia abre às ${HORA_ABRE_RELATORIO} h (fecha às ${HORA_RELOCACAO} h)`, 409);
+  // v3.198.4: sem trava de horário — consulta a qualquer hora; antes das 21 h sai como parcial (projeção do fechamento)
   const p = await buscarProjeto(projetoId);
   const e = await estadoCampo(projetoId);
   const lotes = e.lotes as unknown as LoteBoletim[];

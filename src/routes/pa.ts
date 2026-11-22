@@ -584,7 +584,7 @@ router.get('/projetos/:id/campo/programacao', h(async (req) => programacao.busca
 router.put('/projetos/:id/campo/programacao', h(async (req) => { exigirEscrita(req); return programacao.salvarProgramacao(id(req.params.id), req.body?.dia, req.body?.lotes, ctx(req).sub); }));
 router.put('/projetos/:id/campo/programacao/automatico', h(async (req) => { exigirAdmin(req); return programacao.definirAgendaAutomatica(id(req.params.id), req.body?.ligado, ctx(req).sub); })); // v3.190.0
 router.post('/projetos/:id/campo/programacao/relocar', h(async (req) => { exigirAdmin(req); return programacao.relocarProgramacao(id(req.params.id), req.body?.dia, ctx(req).sub); })); // v3.189.0
-// v3.191.0: relatório do dia de campo (abre às 16 h, fecha às 21 h) — PDF único + texto para o grupo
+// v3.191.0: relatório do dia de campo (consulta a qualquer hora, fecha às 21 h) — PDF único + texto para o grupo
 // v3.191.1: o endereço termina com o nome do arquivo (visualizador do navegador / Acrobat salvam com esse nome)
 router.get('/projetos/:id/campo/relatorio.pdf', h(async (req, res) => {
   const p = await repo.buscarProjeto(id(req.params.id));
