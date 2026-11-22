@@ -33,7 +33,8 @@ describe('relatório do dia de campo', () => {
   });
   it('medidos hoje pelo dia de Brasília, em medição, próximo dia e previsão', () => {
     expect(r.hoje.map((x) => x.lote)).toEqual(['33', '43', '47']);
-    expect(r.em_medicao.map((x) => x.lote)).toEqual(['09']);
+    expect(r.em_medicao.map((x) => x.lote)).toEqual([]); // v3.198.9: o 09 continua no dia seguinte — aparece só lá
+    expect(r.proximo!.itens[0].continua).toMatch(/^continua/);
     expect(r.proximo).toEqual(expect.objectContaining({ dia: '2026-11-20' }));
     expect(r.proximo!.itens.map((x) => x.lote)).toEqual(['09', '50', '51']);
     expect(r.previsao.map((p) => p.dia)).toEqual(['2026-11-20', '2026-11-23']);
@@ -60,5 +61,19 @@ describe('nome do arquivo do relatório', () => {
   it('rota com o nome do arquivo exige a permissão de programar o campo', () => {
     expect(permissaoDaRota('GET', '/projetos/7/campo/relatorio/Relatorio_Campo_PA_Salete_Moreno_19-11-2026.pdf')).toBe('programar_campo');
     expect(permissaoDaRota('GET', '/projetos/7/campo/relatorio.pdf')).toBe('programar_campo');
+  });
+});
+
+describe('v3.198.9 relatório: em medição só da programação do dia e sem repetir com o dia seguinte', () => {
+  const B = (lote: string, o: Record<string, unknown> = {}) => ({ lote, area_ha: 30, marcados: 0, exigidos: ['a', 'b', 'c', 'd', 'e'], fechado: null, associado: { nome: 'X ' + lote, lote_vila: '1', denominacao: null }, pagamento: { parcelas: 2, pagas: 2, pct: 100, quitado: true, marcos_lancados: false, marcos_pago: false, quitado_em: '2026-11-01', atrasadas: 0 }, ...o });
+  const lotes = [B('09', { marcados: 2 }), B('11', { marcados: 2, bloqueado: true }), B('12', { marcados: 1, pagamento: { parcelas: 2, pagas: 1, pct: 50, quitado: false, marcos_lancados: true, marcos_pago: false, atrasadas: 1 } }), B('27', { marcados: 1 }), B('40')];
+  it('fechado: quem continua aparece só na programação seguinte, com "continua"', () => {
+    const r = montarRelatorio('2026-11-22', lotes as never, new Map(), { '2026-11-23': ['09', '40', '27'] }, true, [1, 2, 3, 4, 5], ['09', '27', '32']);
+    expect(r.em_medicao).toEqual([]);
+    expect(r.proximo!.itens.map((x) => [x.lote, x.continua])).toEqual([['09', 'continua — 2/5 marcos'], ['40', null], ['27', 'continua — 1/5 marcos']]);
+  });
+  it('parcial: em medição só o que é do dia (vizinho com marco compartilhado fora)', () => {
+    const r = montarRelatorio('2026-11-23', lotes as never, new Map(), { '2026-11-24': ['40'] }, false, [1, 2, 3, 4, 5], ['09', '40']);
+    expect(r.em_medicao.map((x) => x.lote)).toEqual(['09']);
   });
 });
