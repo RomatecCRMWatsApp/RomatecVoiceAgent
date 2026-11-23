@@ -184,6 +184,10 @@
   td{padding:7px 6px;border-bottom:1px solid #eee8d8;vertical-align:top}
   tr.click{cursor:pointer} tr.click:hover td{background:var(--cream)}
   .tbl{overflow-x:auto}
+  /* v3.198.10: célula com vários botões quebra linha (no computador não corta mais a coluna de ações) */
+  .tbl td:has(> .btn ~ .btn),.tbl td:has(> button ~ button){white-space:normal !important}
+  .tbl td > .btn{margin:2px 3px 2px 0;white-space:nowrap}
+  .tbl td.ds-acoes{min-width:200px;max-width:340px}
   .pg-quit{display:inline-flex;align-items:center;gap:5px;margin:5px 0 0;padding:2px 9px 2px 3px;border:2px solid #1E7A3A;border-radius:6px;color:#1E7A3A;font-weight:800;font-size:11.5px;letter-spacing:.6px;transform:rotate(-2deg);background:#F1F8F3;white-space:nowrap}
   .pg-quit i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#1E7A3A;color:#fff;font-size:11px}
   .pg-quit.nao{border-color:#B3261E;color:#B3261E;background:#FDF1F0}.pg-quit.nao i{background:#B3261E}
@@ -3810,7 +3814,7 @@ async function rDossies(){
           ${d.status === 'ENVIADO' || d.status === 'ENTREGUE' ? `<div class="muted">📄 TRT: ${d.trt_paga_em ? `✅ paga ${hb(d.trt_paga_em)}` : d.trt_emitida_em ? `emitida ${hb(d.trt_emitida_em)} — aguardando pagamento` : 'a emitir'}${d.trt_numero ? ' · nº ' + esc(d.trt_numero) : ''}</div>` : ''}
           ${d.protocolo ? `<div class="muted" style="${d.protocolo.confirmado_em ? 'color:#1E7A3A;font-weight:700' : d.protocolo.problema_em ? 'color:var(--red)' : ''}">🧾 ${d.protocolo.confirmado_em ? `vias físicas recebidas ✓ ${hb(d.protocolo.confirmado_em)} · ${esc(d.protocolo.numero)}` : d.protocolo.problema_em ? `problema relatado: ${esc(d.protocolo.problema_obs || '')}` : d.protocolo.enviado_em ? `protocolo enviado ${hb(d.protocolo.enviado_em)} — aguardando o ok` : `protocolo ${esc(d.protocolo.numero)} gerado`}</div>` : ''}
           ${d.conclusao_enviada_em ? `<div class="muted">🙏 mensagem de conclusão enviada ${hb(d.conclusao_enviada_em)}</div>` : ''}${d.entregue_em ? `<div class="muted">entregue ${hb(d.entregue_em)} · ${esc(d.entregue_por || '')}${d.entregue_obs ? ' · ' + esc(d.entregue_obs) : ''}</div>` : ''}</td>
-        <td class="nowrap"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button><button class="btn btn-ghost btn-sm" data-dskml="${esc(d.lote)}" title="Baixar o KML do lote (abre no Organic Maps / Google Earth)">🗺️ KML</button>${admin && (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && d.whatsapp_valido ? `<button class="btn btn-ghost btn-sm" data-dskmlenv="${esc(d.lote)}" title="Enviar o KML + passo a passo do Organic Maps no WhatsApp do associado">📲 KML${d.kml_enviado_em ? ' ✓' : ''}</button>` : ''}
+        <td class="ds-acoes"><button class="btn btn-ghost btn-sm" data-dsver="${esc(d.lote)}" title="Ver o PDF do dossiê">👁 PDF</button><button class="btn btn-ghost btn-sm" data-dskml="${esc(d.lote)}" title="Baixar o KML do lote (abre no Organic Maps / Google Earth)">🗺️ KML</button>${admin && (d.status === 'ENVIADO' || d.status === 'ENTREGUE') && d.whatsapp_valido ? `<button class="btn btn-ghost btn-sm" data-dskmlenv="${esc(d.lote)}" title="Enviar o KML + passo a passo do Organic Maps no WhatsApp do associado">📲 KML${d.kml_enviado_em ? ' ✓' : ''}</button>` : ''}
           ${admin && d.status === 'PRONTO' ? `<button class="btn btn-primary btn-sm" data-dsenv="${esc(d.lote)}" ${d.whatsapp_valido ? '' : 'disabled title="sem WhatsApp"'}>✅ Aprovar e enviar</button>` : ''}
           ${admin && d.status === 'ENVIADO' ? `<button class="btn btn-ghost btn-sm" data-dsenv="${esc(d.lote)}">🔁 Reenviar</button>` : ''}
           ${admin ? `<button class="btn btn-primary btn-sm" data-dsassinar="${esc(d.lote)}" title="Assina digitalmente o dossiê para imprimir (com a TRT se já anexada; sem ela = via de apresentação)">✍️ Assinar via${d.assinado_em ? ' ✓' : ''}</button>` : ''}
