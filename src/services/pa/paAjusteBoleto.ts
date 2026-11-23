@@ -83,3 +83,81 @@ export async function ajustarBoleto(boletoId: number, a: Ajuste, usuario: string
     dados: { modo: a.modo, valor: a.valor, boleto_antigo: boletoId, boleto_novo: novo?.id ?? null, saldo_novo: plano.saldo_novo } });
   return { boleto_cancelado: boletoId, saldo_novo: plano.saldo_novo, boleto_novo: novo, erro_emissao, enviado, erro_envio };
 }
+
+// ─── v3.199.0: ✂️ dividir a parcela em duas (ou mais) datas ───────────────────────────────────────
+// Ex.: parcela de R$ 325 → R$ 250 hoje + R$ 75 em 27/11. Cancela o boleto no Asaas, a parcela original
+// fica com a 1ª parte (valor e vencimento novos) e cada parte seguinte vira um lançamento AJUSTE
+// ("Parcela 2 — parte 2/2"), com boleto próprio. A soma das partes tem que dar o saldo da parcela.
+export interface ParteDivisao { valor: number; vencimento: string }
+export function lerDivisao(b: Record<string, unknown>): { partes: ParteDivisao[]; enviar: boolean } {
+  const ps = Array.isArray(b.partes) ? b.partes : [];
+  const partes = ps.map((p) => {
+    const o = (p ?? {}) as Record<string, unknown>;
+    const valor = centavos(typeof o.valor === 'number' ? o.valor : Number(String(o.valor ?? '').trim().replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.')));
+    const vencimento = String(o.vencimento ?? '').slice(0, 10);
+    return { valor, vencimento };
+  });
+  return { partes, enviar: b.enviar === true };
+}
+/** Confere a divisão (pura — testável). */
+export function planejarDivisao(saldo: number, partes: ParteDivisao[], hoje: string) {
+  if (partes.length < 2 || partes.length > 6) throw new PaErro('CAMPO_INVALIDO', 'Divida em 2 a 6 partes', 400);
+  for (const [i, p] of partes.entries()) {
+    if (!(p.valor > 0)) throw new PaErro('CAMPO_INVALIDO', `Informe o valor da parte ${i + 1}`, 400);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.vencimento)) throw new PaErro('CAMPO_INVALIDO', `Informe o vencimento da parte ${i + 1}`, 400);
+    if (p.vencimento < hoje) throw new PaErro('CAMPO_INVALIDO', `O vencimento da parte ${i + 1} já passou`, 400);
+  }
+  const soma = centavos(partes.reduce((s, p) => s + p.valor, 0));
+  if (Math.abs(soma - saldo) > 0.009) throw new PaErro('SOMA_DIFERENTE', `As partes somam ${brl(soma)}, mas o saldo da parcela é ${brl(saldo)}`, 400);
+  return [...partes].sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+}
+
+export async function dividirBoleto(boletoId: number, d: { partes: ParteDivisao[]; enviar: boolean }, usuario: string | null) {
+  const b = await buscarBoleto(boletoId);
+  if (b.status !== 'PENDENTE' && b.status !== 'VENCIDO') throw new PaErro('BOLETO_NAO_AJUSTAVEL', `Boleto ${b.status.toLowerCase()} não pode ser dividido`, 409);
+  const lr = await one(pool, 'SELECT id, associado_id, tipo, parcela, valor, valor_recebido, status, vencimento FROM pa_lancamentos WHERE id = ?', [b.lancamento_id]);
+  if (!lr) throw new PaErro('LANCAMENTO_NAO_ENCONTRADO', 'Parcela do boleto não encontrada', 404);
+  const recebido = num(lr.valor_recebido), saldo = centavos(num(lr.valor) - recebido);
+  const { hojeBrasil } = await import('./paDb');
+  const partes = planejarDivisao(saldo, d.partes, hojeBrasil());
+  const tipo = String(lr.tipo), parc = num(lr.parcela);
+  const nomeParc = tipo === 'BOLETO' ? `Parcela ${parc}` : tipo === 'SINAL' ? 'Sinal' : tipo === 'MARCO' ? 'Taxa de marcos' : tipo === 'AVISTA' ? 'Pagamento à vista' : `Ajuste ${parc}`;
+  // 1) cancela o boleto atual (Asaas + sistema) antes de mexer nos valores
+  await cancelarBoleto(boletoId, usuario);
+  // 2) parcela original = 1ª parte; partes seguintes = lançamentos AJUSTE
+  const ids: number[] = [b.lancamento_id];
+  const { transacao } = await import('./paDb');
+  await transacao(async (c) => {
+    const p0 = partes[0];
+    await exec(c, "UPDATE pa_lancamentos SET valor = ?, vencimento = ?, status = IF(valor_recebido > 0.009, 'PARCIAL', 'A_VENCER'), descricao = ? WHERE id = ?",
+      [centavos(recebido + p0.valor), p0.vencimento, `${nomeParc} — parte 1/${partes.length} (dividida)`, b.lancamento_id]);
+    const mx = await one(c, "SELECT COALESCE(MAX(parcela), 0) AS m FROM pa_lancamentos WHERE associado_id = ? AND tipo = 'AJUSTE' FOR UPDATE", [b.associado_id]);
+    let n = num(mx?.m);
+    for (const [i, p] of partes.slice(1).entries()) {
+      n++;
+      const ins = await exec(c, "INSERT INTO pa_lancamentos (associado_id, tipo, parcela, valor, vencimento, status, valor_recebido, descricao) VALUES (?, 'AJUSTE', ?, ?, ?, 'A_VENCER', 0, ?)",
+        [b.associado_id, n, p.valor, p.vencimento, `${nomeParc} — parte ${i + 2}/${partes.length} (dividida)`]);
+      ids.push(ins.insertId);
+    }
+  });
+  await registrarEvento(pool, { projeto_id: b.projeto_id, associado_id: b.associado_id, usuario, tipo: 'PARCELA_DIVIDIDA',
+    dados: { lancamento_id: b.lancamento_id, boleto_cancelado: boletoId, saldo, partes, lancamentos: ids } });
+  // 3) um boleto para cada parte
+  const novos: Array<{ lancamento_id: number; boleto_id: number | null; valor: number; vencimento: string; erro: string | null }> = [];
+  for (const [i, lid] of ids.entries()) {
+    try { const nb = await emitirBoleto(lid, usuario); novos.push({ lancamento_id: lid, boleto_id: nb?.id ?? null, valor: partes[i].valor, vencimento: partes[i].vencimento, erro: null }); }
+    catch (e) { novos.push({ lancamento_id: lid, boleto_id: null, valor: partes[i].valor, vencimento: partes[i].vencimento, erro: (e as Error).message.slice(0, 200) }); }
+  }
+  // 4) envio opcional no WhatsApp (os boletos novos numa mensagem só)
+  let enviado = false, erro_envio: string | null = null;
+  if (d.enviar && novos.some((x) => x.boleto_id)) {
+    try {
+      const m = await mensagemParaLancamentos(b.associado_id, ids);
+      const wa = await import('./paWhatsapp');
+      await wa.enviarWhatsAppAssociado(b.associado_id, m.mensagem, 'COBRANCA', usuario);
+      for (const id of m.boleto_ids) await marcarEnviado(id);
+      enviado = true;
+    } catch (e) { erro_envio = (e as Error).message; }
+  }
+  return { boleto_cancelado: boletoId, partes: novos, enviado, erro_envio };
+}

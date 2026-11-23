@@ -2248,7 +2248,7 @@ async function abrirAssociado(aid, avisos){
       if (b) return `${chip(b.status)}${b.ambiente === 'sandbox' ? ' ' + chip('A_VENCER', 'teste') : ''} ${b.linha_digitavel ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}" title="Carnê Romatec (mesmo código de barras e Pix do Asaas)">🧾 PDF</button>` : ''}
         ${b.linha_digitavel ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.linha_digitavel)}">Linha</button>` : ''}
         ${b.pix_copia_cola ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.pix_copia_cola)}">Pix</button>` : ''}
-        ${podeEscrever() && b.status !== 'PAGO' ? `<button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}`;
+        ${podeEscrever() && b.status !== 'PAGO' ? `<button class="btn btn-ghost btn-sm" data-divbol="${b.id}" title="Dividir esta parcela em 2 datas (ex.: uma parte hoje e o resto depois) — cancela no Asaas e gera um boleto por parte">✂️ Dividir</button> <button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}`;
       return podeEscrever() && l.saldo > 0 ? `<button class="btn btn-ghost btn-sm" data-emitir="${l.id}">Emitir boleto</button>` : '';
     };
     const tipoDoc = { FOTO_3X4:'Foto 3×4', DOC_IDENTIFICACAO:'Identificação', CERTIDAO:'Certidão', DOC_CONJUGE:'Doc. cônjuge', COMPROVANTE_SINAL:'Comprovante do sinal', PROCESSO_FICHA_CONTRATO:'Ficha + contrato', PROCESSO_ASSINADO:'Processo assinado', CARTEIRINHA:'Carteirinha', MAPA_LOTE:'Mapa do lote', MEMORIAL:'Memorial', TRT:'TRT', RELATORIO:'Relatório', ORIGINAL:'Original', OUTRO:'Outro', CAPA_DOSSIE_LOTE:'Capa do dossiê' };
@@ -2793,6 +2793,50 @@ function gerarBoletoMarcoForm(a, depois){
     } catch (e){ toast(e.message, true); ev.currentTarget.disabled = false; }
   };
 }
+// v3.199.0: ✂️ Dividir parcela — ex.: R$ 250 hoje + R$ 75 dia 27; cancela no Asaas e gera um boleto por parte
+function dividirBoletoForm(b, depois){
+  if (!b) return;
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  let m = document.getElementById('cxManual');
+  if (!m){ m = document.createElement('div'); m.id = 'cxManual'; m.className = 'cx-manual'; document.body.appendChild(m); }
+  const rot = b.tipo === 'BOLETO' ? 'parcela ' + b.parcela : b.tipo === 'MARCO' ? 'taxa de marcos' : b.tipo.toLowerCase();
+  const num = (v) => Number(String(v || '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.')) || 0;
+  m.innerHTML = `<div class="cx-in"><b>✂️ Dividir ${esc(rot)} — ${esc(b.associado_nome)}</b>
+    <div class="muted" style="margin:4px 0 8px">Boleto atual: <b>${brl(b.valor)}</b> (venc. ${dbr(b.vencimento)}). Ele é <b>cancelado no Asaas</b> e sai <b>um boleto para cada parte</b>. A soma tem que dar ${brl(b.valor)}.</div>
+    <div id="dvPartes"></div>
+    <button class="btn btn-ghost btn-sm" id="dvMais" style="margin-top:4px">➕ mais uma parte</button>
+    <div class="muted" id="dvSoma" style="margin-top:6px"></div>
+    <label class="citem" style="margin-top:6px"><input type="checkbox" id="dvEnviar"> Enviar os boletos novos no WhatsApp dele(a)</label>
+    <div class="row" style="gap:6px;margin-top:10px"><button class="btn btn-primary" id="dvOk" style="flex:0 0 auto">Cancelar e gerar os boletos</button><button class="btn btn-ghost" id="dvFechar" style="flex:0 0 auto">Fechar</button></div></div>`;
+  const P = [{ valor: '', vencimento: hoje }, { valor: '', vencimento: '' }];
+  const desenhar = () => {
+    $('#dvPartes').innerHTML = P.map((p, i) => `<div class="row" style="gap:6px;align-items:end;margin-bottom:4px"><div style="flex:1 1 120px"><label>Parte ${i + 1} — valor (R$)</label><input data-dvv="${i}" inputmode="decimal" value="${esc(p.valor)}" placeholder="Ex.: 250,00"></div><div style="flex:1 1 150px"><label>Vencimento</label><input type="date" data-dvd="${i}" value="${esc(p.vencimento)}" min="${hoje}"></div>${P.length > 2 ? `<button class="btn btn-ghost btn-sm" data-dvx="${i}" style="flex:0 0 auto">✕</button>` : ''}</div>`).join('');
+    const soma = P.reduce((t, p) => t + num(p.valor), 0), dif = Math.round((b.valor - soma) * 100) / 100;
+    $('#dvSoma').innerHTML = `Soma: <b>${brl(soma)}</b> de ${brl(b.valor)}${Math.abs(dif) > 0.009 ? ` — <span style="color:var(--red)">${dif > 0 ? 'faltam' : 'sobram'} ${brl(Math.abs(dif))}</span>` : ' ✓'}`;
+    m.querySelectorAll('[data-dvv]').forEach((x) => x.oninput = () => { P[+x.dataset.dvv].valor = x.value; const pos = x.selectionStart; desenhar(); const y = m.querySelector(`[data-dvv="${x.dataset.dvv}"]`); y.focus(); try { y.setSelectionRange(pos, pos); } catch { /* ok */ } });
+    m.querySelectorAll('[data-dvd]').forEach((x) => x.onchange = () => { P[+x.dataset.dvd].vencimento = x.value; });
+    m.querySelectorAll('[data-dvx]').forEach((x) => x.onclick = () => { P.splice(+x.dataset.dvx, 1); desenhar(); });
+  };
+  desenhar();
+  // atalho: ao digitar a 1ª parte, a última recebe o resto
+  m.addEventListener('focusout', (ev) => { if (ev.target && ev.target.dataset && ev.target.dataset.dvv === '0' && P.length === 2 && !P[1].valor && num(P[0].valor) > 0 && num(P[0].valor) < b.valor) { P[1].valor = (Math.round((b.valor - num(P[0].valor)) * 100) / 100).toFixed(2).replace('.', ','); desenhar(); } });
+  $('#dvMais').onclick = () => { if (P.length < 6) { P.push({ valor: '', vencimento: '' }); desenhar(); } };
+  $('#dvFechar').onclick = () => m.remove();
+  $('#dvOk').onclick = async (ev) => {
+    const partes = P.map((p) => ({ valor: num(p.valor), vencimento: p.vencimento }));
+    if (partes.some((p) => !(p.valor > 0) || !p.vencimento)) return toast('Preencha valor e vencimento de cada parte', true);
+    if (Math.abs(partes.reduce((t, p) => t + p.valor, 0) - b.valor) > 0.009) return toast(`A soma das partes tem que dar ${brl(b.valor)}`, true);
+    if (!confirm(`Cancelar o boleto de ${brl(b.valor)} no Asaas e gerar ${partes.length} boletos:\n${partes.map((p, i) => `${i + 1}) ${brl(p.valor)} — venc. ${dbr(p.vencimento)}`).join('\n')}?`)) return;
+    ev.currentTarget.disabled = true;
+    try {
+      const r = await api(`/boletos/${b.id}/dividir`, { json: { partes, enviar: $('#dvEnviar').checked } });
+      m.remove();
+      const falhas = r.partes.filter((x) => x.erro);
+      toast(falhas.length ? `Dividida, mas ${falhas.length} boleto(s) não saíram: ${falhas[0].erro}` : `Parcela dividida em ${r.partes.length} boletos ✅${r.enviado ? ' · enviados no WhatsApp' : r.erro_envio ? ' · não foi no WhatsApp: ' + r.erro_envio : ''}`, falhas.length > 0);
+      if (depois) depois();
+    } catch (e){ toast(e.message, true); ev.currentTarget.disabled = false; }
+  };
+}
 // v3.185.0: ✏️ Ajustar boleto — pagou parte por fora (lança o pagamento) ou novo valor; cancela no Asaas e reemite com o saldo
 function ajustarBoletoForm(a, depois){
   if (!a || !a.boleto) return;
@@ -3035,7 +3079,7 @@ async function rBoletos(){
       BOL.lista = resp.boletos;
       const boletos = BOL.aid ? todos.filter((b) => b.associado_id === BOL.aid) : todos;
       $('#bolBox').innerHTML = boletos.length ? `<div class="muted" style="margin-bottom:6px">${boletos.length} boleto(s) · ${brl(boletos.reduce((s, b) => s + b.valor, 0))}</div><table class="tcard"><thead><tr><th>Lote · Associado</th><th>Parcela</th><th>Venc.</th><th class="right">Valor</th><th>Status</th><th></th></tr></thead><tbody>
-        ${boletos.map((b) => `<tr><td class="tc-tit"><b>LT ${esc(b.lote)}</b> · ${esc(b.associado_nome)}</td><td data-l="Parcela">${esc(b.tipo === 'BOLETO' ? 'Parcela ' + b.parcela : b.tipo === 'SINAL' ? 'Sinal' : b.tipo === 'MARCO' ? 'Taxa de marcos' : b.tipo)}</td><td data-l="Vencimento">${dbr(b.vencimento)}</td>
+        ${boletos.map((b) => `<tr><td class="tc-tit"><b>LT ${esc(b.lote)}</b> · ${esc(b.associado_nome)}</td><td data-l="Parcela">${esc(b.descricao && /dividida/.test(b.descricao) ? b.descricao.replace(' (dividida)', '') : b.tipo === 'BOLETO' ? 'Parcela ' + b.parcela : b.tipo === 'SINAL' ? 'Sinal' : b.tipo === 'MARCO' ? 'Taxa de marcos' : b.tipo === 'AJUSTE' ? 'Ajuste' : b.tipo)}</td><td data-l="Vencimento">${dbr(b.vencimento)}</td>
           <td class="right nowrap" data-l="Valor">${brl(b.valor)}</td><td data-l="Status">${chip(b.status)}${b.ambiente === 'sandbox' ? ' ' + chip('A_VENCER', 'teste') : ''}${b.pago_em ? ' <span class="muted">' + dbr(b.pago_em).slice(0, 10) + '</span>' : ''}</td>
           <td class="bol-acoes">${b.linha_digitavel && b.status !== 'CANCELADO' ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}" title="Carnê Romatec (mesmo código de barras e Pix do Asaas)">🧾 PDF</button>` : ''}
             ${b.linha_digitavel ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.linha_digitavel)}">Linha</button>` : ''}
@@ -3054,6 +3098,7 @@ async function rBoletos(){
       });
       $('#bolBox').querySelectorAll('[data-copiar]').forEach((b) => b.onclick = () => copiar(b.dataset.copiar));
       $('#bolBox').querySelectorAll('[data-romatec]').forEach((b) => b.onclick = () => abrirBoletoRomatec(b));
+      $('#bolBox').querySelectorAll('[data-divbol]').forEach((bt) => bt.onclick = () => dividirBoletoForm(boletos.find((x) => x.id === Number(bt.dataset.divbol)), listar));
       $('#bolBox').querySelectorAll('[data-cancbol]').forEach((b) => b.onclick = async () => {
         if (!confirm('Cancelar este boleto no Asaas?')) return;
         try { await api(`/boletos/${b.dataset.cancbol}`, { method: 'DELETE' }); toast('Boleto cancelado'); listar(); } catch (e){ toast(e.message, true); }

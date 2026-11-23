@@ -29,12 +29,13 @@ export function mapBoleto(b: Record<string, unknown>) {
     ambiente_atual: String(b.ambiente ?? 'sandbox') === ambienteAtual(),
     lote: (b.lote as string) ?? null, associado_nome: (b.associado_nome as string) ?? null,
     tipo: (b.tipo as string) ?? null, parcela: b.parcela == null ? null : num(b.parcela),
+    descricao: (b.descricao as string) ?? null, // v3.199.0: parcela dividida ("Parcela 2 — parte 2/2")
   };
 }
 export type Boleto = ReturnType<typeof mapBoleto>;
 
 const SELECT_BOLETO = `
-  SELECT b.*, lt.numero AS lote, a.nome AS associado_nome, l.tipo, l.parcela
+  SELECT b.*, lt.numero AS lote, a.nome AS associado_nome, l.tipo, l.parcela, l.descricao
   FROM pa_boletos b JOIN pa_associados a ON a.id = b.associado_id JOIN pa_lotes lt ON lt.id = a.lote_id
   JOIN pa_lancamentos l ON l.id = b.lancamento_id`;
 

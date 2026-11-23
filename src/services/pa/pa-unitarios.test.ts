@@ -207,3 +207,17 @@ describe('regra única de parcela paga', () => {
     expect(sqlLancamentoQuitado('l')).toBe("(l.status = 'PAGO' OR l.valor_recebido >= l.valor - 0.009)");
   });
 });
+
+// v3.199.0: dividir parcela
+import { planejarDivisao } from './paAjusteBoleto';
+describe('dividir parcela', () => {
+  it('R$ 325 → 250 hoje + 75 dia 27 (ordenado por vencimento)', () => {
+    expect(planejarDivisao(325, [{ valor: 75, vencimento: '2026-11-27' }, { valor: 250, vencimento: '2026-11-23' }], '2026-11-23'))
+      .toEqual([{ valor: 250, vencimento: '2026-11-23' }, { valor: 75, vencimento: '2026-11-27' }]);
+  });
+  it('soma diferente do saldo, data passada ou parte única são recusadas', () => {
+    expect(() => planejarDivisao(325, [{ valor: 250, vencimento: '2026-11-23' }, { valor: 70, vencimento: '2026-11-27' }], '2026-11-23')).toThrow(/somam/);
+    expect(() => planejarDivisao(325, [{ valor: 250, vencimento: '2026-11-20' }, { valor: 75, vencimento: '2026-11-27' }], '2026-11-23')).toThrow(/passou/);
+    expect(() => planejarDivisao(325, [{ valor: 325, vencimento: '2026-11-23' }], '2026-11-23')).toThrow(/2 a 6/);
+  });
+});

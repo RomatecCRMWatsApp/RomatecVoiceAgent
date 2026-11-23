@@ -887,6 +887,11 @@ router.post('/boletos/:bid/ajustar', h(async (req) => {
   exigirEscrita(req);
   return ajuste.ajustarBoleto(id(req.params.bid, 'boleto'), ajuste.lerAjuste(req.body ?? {}), ctx(req).sub);
 }));
+// v3.199.0: ✂️ dividir a parcela (ex.: R$ 250 hoje + R$ 75 dia 27) — cancela no Asaas e gera um boleto por parte
+router.post('/boletos/:bid/dividir', h(async (req) => {
+  exigirEscrita(req);
+  return ajuste.dividirBoleto(id(req.params.bid, 'boleto'), ajuste.lerDivisao(req.body ?? {}), ctx(req).sub);
+}));
 router.delete('/boletos/:bid', h(async (req) => {
   exigirEscrita(req);
   return { boleto: await boletos.cancelarBoleto(id(req.params.bid, 'boleto'), ctx(req).sub) };
