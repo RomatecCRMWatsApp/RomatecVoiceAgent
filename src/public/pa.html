@@ -2314,6 +2314,7 @@ async function abrirAssociado(aid, avisos){
       try { await api(`/lancamentos/${b.dataset.emitir}/boleto`, { method: 'POST' }); toast('Boleto emitido no Asaas'); abrirAssociado(aid); }
       catch (e){ toast(e.message, true); b.disabled = false; }
     });
+    pane.querySelectorAll('[data-divbol]').forEach((bt) => bt.onclick = () => { const b = bol.boletos.find((x) => x.id === Number(bt.dataset.divbol)); if (b) dividirBoletoForm({ ...b, associado_nome: b.associado_nome || a.nome }, () => abrirAssociado(aid)); });
     pane.querySelectorAll('[data-cancbol]').forEach((b) => b.onclick = async () => {
       if (!confirm('Cancelar este boleto no Asaas? O associado não vai mais conseguir pagá-lo.')) return;
       try { await api(`/boletos/${b.dataset.cancbol}`, { method: 'DELETE' }); toast('Boleto cancelado'); abrirAssociado(aid); } catch (e){ toast(e.message, true); }
@@ -3084,7 +3085,7 @@ async function rBoletos(){
           <td class="bol-acoes">${b.linha_digitavel && b.status !== 'CANCELADO' ? `<button class="btn btn-gold btn-sm" data-romatec="${b.id}" data-url="${esc(b.url_romatec || '')}" title="Carnê Romatec (mesmo código de barras e Pix do Asaas)">🧾 PDF</button>` : ''}
             ${b.linha_digitavel ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.linha_digitavel)}">Linha</button>` : ''}
             ${b.pix_copia_cola ? `<button class="btn btn-ghost btn-sm" data-copiar="${esc(b.pix_copia_cola)}">Pix</button>` : ''}
-            ${podeEscrever() && (b.status === 'PENDENTE' || b.status === 'VENCIDO') ? `<button class="btn btn-primary btn-sm" data-envbol="${b.id}" title="Enviar este boleto no WhatsApp do associado">📲 ${b.enviado_em ? 'Reenviar' : 'Enviar'}</button>${b.enviado_em ? ` <span class="muted" style="font-size:11px">enviado ${esc(dhBr(b.enviado_em))}</span>` : ''} <button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${BOL.aid ? 'Nenhum boleto deste associado com esse status.' : 'Nenhum boleto emitido.'}</div>`;
+            ${podeEscrever() && (b.status === 'PENDENTE' || b.status === 'VENCIDO') ? `<button class="btn btn-primary btn-sm" data-envbol="${b.id}" title="Enviar este boleto no WhatsApp do associado">📲 ${b.enviado_em ? 'Reenviar' : 'Enviar'}</button>${b.enviado_em ? ` <span class="muted" style="font-size:11px">enviado ${esc(dhBr(b.enviado_em))}</span>` : ''} <button class="btn btn-ghost btn-sm" data-divbol="${b.id}" title="Dividir esta parcela em 2 datas — cancela no Asaas e gera um boleto por parte">✂️ Dividir</button> <button class="btn btn-danger btn-sm" data-cancbol="${b.id}">Cancelar</button>` : ''}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${BOL.aid ? 'Nenhum boleto deste associado com esse status.' : 'Nenhum boleto emitido.'}</div>`;
       $('#bolBox').querySelectorAll('[data-envbol]').forEach((bt) => bt.onclick = async () => {
         const b = boletos.find((x) => x.id === Number(bt.dataset.envbol)); if (!b) return;
         const r = prompt(`Enviar o boleto de ${b.associado_nome} — ${b.tipo === 'BOLETO' ? 'parcela ' + b.parcela : b.tipo === 'MARCO' ? 'taxa de marcos' : b.tipo.toLowerCase()} de ${brl(b.valor)}.\n\nDeixe EM BRANCO para mandar no WhatsApp cadastrado, ou digite outro número:`, '');
