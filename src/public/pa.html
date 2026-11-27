@@ -2628,7 +2628,7 @@ async function rExtrato(){
         <div style="flex:1 1 200px"><label for="exBusca">Buscar</label><input id="exBusca" placeholder="Lote ou nome" value="${esc(EXT.busca)}"></div>
         <div style="flex:0 1 160px"><label for="exSit">Situação</label><select class="f" id="exSit"><option value="">Todas</option>${Object.entries(SIT_TXT).map(([k, v]) => `<option value="${k}" ${EXT.sit === k ? 'selected' : ''}>${v}</option>`).join('')}<option value="PARCIAL" ${EXT.sit === 'PARCIAL' ? 'selected' : ''}>Com pagamento parcial</option><option value="SEM_BOLETO" ${EXT.sit === 'SEM_BOLETO' ? 'selected' : ''}>Boleto não gerado</option><option value="NAO_ENVIADO" ${EXT.sit === 'NAO_ENVIADO' ? 'selected' : ''}>Boleto gerado e não enviado</option></select></div>
         <div style="flex:0 1 180px"><label for="exOrdem">Ordenar por</label><select class="f" id="exOrdem">${[['lote', 'Lote'], ['nome', 'Nome'], ['aberto', 'Maior em aberto'], ['vencido', 'Maior vencido'], ['recebido', 'Maior recebido']].map(([k, v]) => `<option value="${k}" ${EXT.ordem === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
-        <div style="flex:0 0 auto"><button class="btn btn-ghost btn-sm" id="exXlsx">⬇️ XLSX</button> <button class="btn btn-gold btn-sm" id="exPdf" title="PDF com os dados da Romatec e do assentamento, com o filtro aplicado">📄 PDF</button>${podeEscrever() ? ' <button class="btn btn-primary btn-sm" id="exWa" title="Enviar o PDF (com o filtro aplicado) pelo WhatsApp">📲 WhatsApp</button>' : ''}</div>
+        <div style="flex:0 0 auto"><button class="btn btn-ghost btn-sm" id="exXlsx">⬇️ XLSX</button> <button class="btn btn-gold btn-sm" id="exPdf" title="PDF com os dados da Romatec e do assentamento, com o filtro aplicado">📄 PDF</button> <button class="btn btn-gold btn-sm" id="exDev" title="PDF para o grupo: associados com saldo em aberto — parcelas, taxa de marcos e total devedor">📋 Lista de devedores (PDF)</button> <button class="btn btn-ghost btn-sm" id="exDevAtr" title="Só quem tem parcela vencida">⏰ Só em atraso</button>${podeEscrever() ? ' <button class="btn btn-primary btn-sm" id="exWa" title="Enviar o PDF (com o filtro aplicado) pelo WhatsApp">📲 WhatsApp</button>' : ''}</div>
       </div>
       <div id="exWaBox"></div>
       <div class="muted" style="margin-bottom:6px">Posição em ${dbr(EXT.dados.posicao_em)} · clique na linha para ver as parcelas.</div>
@@ -2638,6 +2638,8 @@ async function rExtrato(){
   $('#exBusca').oninput = (e) => { EXT.busca = e.target.value; redesenhar(); };
   $('#exSit').onchange = (e) => { EXT.sit = e.target.value; redesenhar(); };
   $('#exOrdem').onchange = (e) => { EXT.ordem = e.target.value; redesenhar(); };
+  $('#exDev').onclick = () => abrirPdf(`/projetos/${S.pid}/extrato/devedores.pdf`); // v3.200.0
+  $('#exDevAtr').onclick = () => abrirPdf(`/projetos/${S.pid}/extrato/devedores.pdf?so=atraso`);
   $('#exXlsx').onclick = () => baixar(`/projetos/${S.pid}/extrato?formato=xlsx`, `EXTRATO-ASSOCIADOS-${EXT.dados.posicao_em}.xlsx`).catch((e) => toast(e.message, true));
   // v3.165.0: PDF personalizado (mesmo filtro da tela) e envio/compartilhamento pelo WhatsApp
   const filtroQs = () => new URLSearchParams({ busca: EXT.busca || '', sit: EXT.sit || '', ordem: EXT.ordem || 'lote' }).toString();

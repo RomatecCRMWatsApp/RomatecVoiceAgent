@@ -783,6 +783,12 @@ router.post('/projetos/:id/extrato/whatsapp', h(async (req) => {
   const numero = typeof b.numero === 'string' && b.numero.replace(/\D/g, '').length >= 10 ? b.numero : null;
   return mapas.enviarExtratoWhatsApp(id(req.params.id), filtroExtrato(b), numero, ctx(req).sub);
 }));
+// v3.200.0: lista dos associados com saldo em aberto (parcelas + taxa de marcos) em PDF, para o grupo
+router.get('/projetos/:id/extrato/devedores.pdf', h(async (req, res) => {
+  const { pdfDevedores } = await import('../services/pa/paDevedoresPdf');
+  enviarPdf(res, await pdfDevedores(id(req.params.id), req.query.so === 'atraso'));
+  return undefined;
+}));
 router.get('/projetos/:id/extrato', h(async (req, res) => {
   const e = await caixa.extratoAssociados(id(req.params.id));
   if (req.query.formato === 'xlsx') {

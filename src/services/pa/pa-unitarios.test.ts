@@ -221,3 +221,21 @@ describe('dividir parcela', () => {
     expect(() => planejarDivisao(325, [{ valor: 325, vencimento: '2026-11-23' }], '2026-11-23')).toThrow(/2 a 6/);
   });
 });
+
+// v3.200.0: lista de devedores (parcelas + marcos)
+import { montarDevedores } from './paDevedoresPdf';
+describe('lista de devedores', () => {
+  const P = (tipo: string, saldo: number) => ({ tipo, parcela: 1, saldo, valor: 350, recebido: 0, rotulo: '', lancamento_id: 1, vencimento: null, status: 'A_VENCER', boleto: null });
+  const e = { projeto: { nome: 'PA' }, posicao_em: '2026-11-27', lista: [
+    { associado_id: 1, numero: 'A1', nome: 'X', lote: '10', parcelas: [P('BOLETO', 350), P('MARCO', 30)], em_aberto: 380, vencido: 380 },
+    { associado_id: 2, numero: 'A2', nome: 'Y', lote: '5', parcelas: [P('BOLETO', 350), P('MARCO', 0)], em_aberto: 350, vencido: 0 },
+    { associado_id: 3, numero: 'A3', nome: 'Z', lote: '7', parcelas: [P('BOLETO', 0)], em_aberto: 0, vencido: 0 },
+  ] } as never;
+  const extra = new Map([[1, { parcela: '20', denominacao: 'Ch. A' }], [2, { parcela: '12', denominacao: null }]]);
+  it('só quem tem saldo, ordenado pelo lote de produção, com parcelas e marcos separados', () => {
+    const d = montarDevedores(e, extra);
+    expect(d.itens.map((x) => [x.lote_producao, x.parcelas, x.marcos, x.total])).toEqual([['12', 350, 0, 350], ['20', 350, 30, 380]]);
+    expect(d.totais).toMatchObject({ associados: 2, total: 730, em_atraso: 1 });
+  });
+  it('filtro só em atraso', () => { expect(montarDevedores(e, extra, true).itens.map((x) => x.lote_producao)).toEqual(['20']); });
+});

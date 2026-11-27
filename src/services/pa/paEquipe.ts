@@ -106,7 +106,7 @@ const REGRAS: Regra[] = [
   R('GET', '^\\/(associados\\/\\d+\\/(foto|participantes)|documentos\\/\\d+)', 'ver_associados'),
   R('ESCRITA', P + '\\/associados(\\/\\d+)?', 'editar_associados'),
   R('ESCRITA', '^\\/(associados\\/\\d+\\/(documentos|participantes)|participantes\\/\\d+)', 'editar_associados'),
-  R('GET', P + '\\/(pagamentos|extrato|extrato\\.pdf|cobranca|caixa|boletos|boletos\\/elegiveis|pix|marcos)', 'ver_financeiro'),
+  R('GET', P + '\\/(pagamentos|extrato|extrato\\.pdf|extrato\\/devedores\\.pdf|cobranca|caixa|boletos|boletos\\/elegiveis|pix|marcos)', 'ver_financeiro'),
   R('GET', '^\\/(associados\\/\\d+\\/boletos|boletos\\/\\d+\\/pdf|caixa\\/categorias|asaas\\/status)', 'ver_financeiro'),
   R('ESCRITA', P + '\\/(pagamentos(\\/.*)?|extrato\\/whatsapp|caixa|boletos\\/.*|lancamentos\\/.*|marcos\\/.*)', 'operar_financeiro'),
   R('ESCRITA', '^\\/(associados\\/\\d+\\/(plano|whatsapp\\/cobranca)|boletos\\/\\d+(\\/link|\\/ajustar)?|caixa\\/\\d+|lancamentos\\/\\d+\\/boleto)', 'operar_financeiro'),
