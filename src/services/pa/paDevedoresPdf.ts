@@ -72,15 +72,15 @@ export function htmlDevedores(d: ListaDevedores): string {
   .mi{font-size:7pt;color:#6A6656;font-weight:400}.ok{color:#1E7A3A;font-weight:700;font-size:7.6pt}
   .tg{display:inline-block;margin-top:.6mm;font-size:6.8pt;font-weight:700;color:#B3261E;background:#FDECEA;border-radius:1mm;padding:.2mm 1.2mm}
   tr.atr td.lt b{color:#B3261E}
-  tfoot td{background:#F1EBD6 !important;font-weight:700;border-top:.5mm solid #C9A84C}
+  tr.tot-l td{background:#F1EBD6 !important;font-weight:700;border-top:.5mm solid #C9A84C} /* v3.200.1: total só no fim (tfoot repetia em cada página) */
   .nota{margin-top:2.6mm;font-size:7.6pt;color:#3F3B2E;background:#F4F6F2;border-left:1.2mm solid #0C3320;padding:1.6mm 2.4mm;border-radius:1mm}
   .rod{margin-top:2mm;font-size:6.8pt;color:#6A6656;text-align:center}
   </style></head><body>
   <div class="cab">${logo ? `<img class="l" src="${logo}">` : ''}<div><small>Romatec Consultoria Total · ${esc(d.projeto)}</small><h1>${d.so_atraso ? 'Associados com parcela em atraso' : 'Associados com saldo em aberto'}</h1><p>Parcelas do contrato e taxa dos marcos de concreto · posição em ${dbr(d.posicao_em)}</p></div>${bras ? `<img class="b" src="${bras}">` : ''}</div>
   <div class="res"><div><span>Associados</span><b>${d.totais.associados}</b></div><div><span>Parcelas em aberto</span><b>${brl(d.totais.parcelas)}</b></div><div><span>Taxa de marcos em aberto</span><b>${brl(d.totais.marcos)}</b></div><div><span>Total em aberto</span><b>${brl(d.totais.total)}</b></div><div class="r"><span>Em atraso (${d.totais.em_atraso})</span><b>${brl(d.totais.vencido)}</b></div></div>
   <table><thead><tr><th>#</th><th>Lote</th><th>Associado(a)</th><th>Denominação</th><th class="v">Parcelas</th><th class="v">Taxa de marcos</th><th class="v">Total devedor</th></tr></thead>
-  <tbody>${linhas || '<tr><td colspan="7" style="text-align:center;padding:6mm">Nenhum associado com saldo em aberto. 🎉</td></tr>'}</tbody>
-  ${d.itens.length ? `<tfoot><tr><td></td><td colspan="3">TOTAL · ${d.totais.associados} associado(s)</td><td class="v">${brl(d.totais.parcelas)}</td><td class="v">${brl(d.totais.marcos)}</td><td class="v">${brl(d.totais.total)}</td></tr></tfoot>` : ''}</table>
+  <tbody>${linhas || '<tr><td colspan="7" style="text-align:center;padding:6mm">Nenhum associado com saldo em aberto. 🎉</td></tr>'}
+  ${d.itens.length ? `<tr class="tot-l"><td></td><td colspan="3">TOTAL · ${d.totais.associados} associado(s)</td><td class="v">${brl(d.totais.parcelas)}</td><td class="v">${brl(d.totais.marcos)}</td><td class="v">${brl(d.totais.total)}</td></tr>` : ''}</tbody></table>
   <div class="nota">A medição e a entrega do dossiê seguem a ordem de quitação: <b>1º quitados</b> → <b>2º em dia</b> → <b>3º com parcela em atraso</b>. Para regularizar ou pedir a 2ª via do boleto, fale com a Romatec: (99) 99181-1246.</div>
   <div class="rod">Romatec Consultoria Total · J R P BEZERRA LTDA · CNPJ 17.261.987/0001-09 · Açailândia/MA — gerado pelo sistema ZAYRA</div>
   </body></html>`;

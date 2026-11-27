@@ -1333,6 +1333,29 @@ function rPrancha(){
 
 // v3.191.1: abre o PDF direto do servidor (mesma sessão/cookie) — o navegador usa o nome do arquivo
 // (ex.: Relatorio_Campo_PA_Salete_Moreno_19-11-2026.pdf) ao baixar, em vez do código aleatório do "blob".
+// v3.200.1: baixar/compartilhar um PDF (iPhone no modo app não tem botão de baixar no visualizador)
+async function compartilharPdf(caminho, bt){
+  if (bt) bt.disabled = true;
+  let arq;
+  try {
+    const r = await api(caminho);
+    const m = /filename="?([^";]+)"?/i.exec(r.headers.get('content-disposition') || '');
+    arq = new File([await r.blob()], m ? m[1] : 'documento.pdf', { type: 'application/pdf' });
+  } catch (e){ toast(e.message, true); if (bt) bt.disabled = false; return; }
+  if (bt) bt.disabled = false;
+  const baixarArq = () => { const u = URL.createObjectURL(arq); const a = document.createElement('a'); a.href = u; a.download = arq.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 60000); };
+  if (!(navigator.canShare && navigator.canShare({ files: [arq] }))) { baixarArq(); toast('PDF baixado ✅'); return; }
+  try { await navigator.share({ files: [arq], title: arq.name }); }
+  catch (e){
+    if (e && e.name === 'AbortError') return;
+    let m = document.getElementById('cxManual');
+    if (!m){ m = document.createElement('div'); m.id = 'cxManual'; m.className = 'cx-manual'; document.body.appendChild(m); }
+    m.innerHTML = `<div class="cx-in"><b>PDF pronto ✅</b><div class="muted" style="margin:6px 0">${esc(arq.name)}</div><div class="row" style="gap:6px"><button class="btn btn-primary" id="cxShare" style="flex:0 0 auto">📤 Compartilhar / salvar</button><button class="btn btn-ghost btn-sm" id="cxBaixar" style="flex:0 0 auto">⬇️ Baixar</button><button class="btn btn-ghost btn-sm" id="cxFechar" style="flex:0 0 auto">Fechar</button></div></div>`;
+    m.querySelector('#cxShare').onclick = async () => { try { await navigator.share({ files: [arq], title: arq.name }); m.remove(); } catch (e2){ if (!e2 || e2.name !== 'AbortError') toast(e2.message, true); } };
+    m.querySelector('#cxBaixar').onclick = () => { baixarArq(); m.remove(); };
+    m.querySelector('#cxFechar').onclick = () => m.remove();
+  }
+}
 async function abrirPdf(caminho){
   const url = '/api/pa' + caminho;
   const janela = window.open(url, '_blank');
@@ -2628,7 +2651,7 @@ async function rExtrato(){
         <div style="flex:1 1 200px"><label for="exBusca">Buscar</label><input id="exBusca" placeholder="Lote ou nome" value="${esc(EXT.busca)}"></div>
         <div style="flex:0 1 160px"><label for="exSit">Situação</label><select class="f" id="exSit"><option value="">Todas</option>${Object.entries(SIT_TXT).map(([k, v]) => `<option value="${k}" ${EXT.sit === k ? 'selected' : ''}>${v}</option>`).join('')}<option value="PARCIAL" ${EXT.sit === 'PARCIAL' ? 'selected' : ''}>Com pagamento parcial</option><option value="SEM_BOLETO" ${EXT.sit === 'SEM_BOLETO' ? 'selected' : ''}>Boleto não gerado</option><option value="NAO_ENVIADO" ${EXT.sit === 'NAO_ENVIADO' ? 'selected' : ''}>Boleto gerado e não enviado</option></select></div>
         <div style="flex:0 1 180px"><label for="exOrdem">Ordenar por</label><select class="f" id="exOrdem">${[['lote', 'Lote'], ['nome', 'Nome'], ['aberto', 'Maior em aberto'], ['vencido', 'Maior vencido'], ['recebido', 'Maior recebido']].map(([k, v]) => `<option value="${k}" ${EXT.ordem === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
-        <div style="flex:0 0 auto"><button class="btn btn-ghost btn-sm" id="exXlsx">⬇️ XLSX</button> <button class="btn btn-gold btn-sm" id="exPdf" title="PDF com os dados da Romatec e do assentamento, com o filtro aplicado">📄 PDF</button> <button class="btn btn-gold btn-sm" id="exDev" title="PDF para o grupo: associados com saldo em aberto — parcelas, taxa de marcos e total devedor">📋 Lista de devedores (PDF)</button> <button class="btn btn-ghost btn-sm" id="exDevAtr" title="Só quem tem parcela vencida">⏰ Só em atraso</button>${podeEscrever() ? ' <button class="btn btn-primary btn-sm" id="exWa" title="Enviar o PDF (com o filtro aplicado) pelo WhatsApp">📲 WhatsApp</button>' : ''}</div>
+        <div style="flex:0 0 auto"><button class="btn btn-ghost btn-sm" id="exXlsx">⬇️ XLSX</button> <button class="btn btn-gold btn-sm" id="exPdf" title="PDF com os dados da Romatec e do assentamento, com o filtro aplicado">📄 PDF</button> <button class="btn btn-gold btn-sm" id="exDev" title="PDF para o grupo: associados com saldo em aberto — parcelas, taxa de marcos e total devedor">📋 Lista de devedores (PDF)</button> <button class="btn btn-primary btn-sm" id="exDevSh" title="Baixar ou compartilhar (WhatsApp, Arquivos) o PDF da lista de devedores">📤 Compartilhar / baixar</button> <button class="btn btn-ghost btn-sm" id="exDevAtr" title="Só quem tem parcela vencida">⏰ Só em atraso</button> <button class="btn btn-ghost btn-sm" id="exDevAtrSh" title="Compartilhar o PDF só dos em atraso">📤 Em atraso</button>${podeEscrever() ? ' <button class="btn btn-primary btn-sm" id="exWa" title="Enviar o PDF (com o filtro aplicado) pelo WhatsApp">📲 WhatsApp</button>' : ''}</div>
       </div>
       <div id="exWaBox"></div>
       <div class="muted" style="margin-bottom:6px">Posição em ${dbr(EXT.dados.posicao_em)} · clique na linha para ver as parcelas.</div>
@@ -2640,6 +2663,8 @@ async function rExtrato(){
   $('#exOrdem').onchange = (e) => { EXT.ordem = e.target.value; redesenhar(); };
   $('#exDev').onclick = () => abrirPdf(`/projetos/${S.pid}/extrato/devedores.pdf`); // v3.200.0
   $('#exDevAtr').onclick = () => abrirPdf(`/projetos/${S.pid}/extrato/devedores.pdf?so=atraso`);
+  $('#exDevSh').onclick = (ev) => compartilharPdf(`/projetos/${S.pid}/extrato/devedores.pdf`, ev.currentTarget);
+  $('#exDevAtrSh').onclick = (ev) => compartilharPdf(`/projetos/${S.pid}/extrato/devedores.pdf?so=atraso`, ev.currentTarget);
   $('#exXlsx').onclick = () => baixar(`/projetos/${S.pid}/extrato?formato=xlsx`, `EXTRATO-ASSOCIADOS-${EXT.dados.posicao_em}.xlsx`).catch((e) => toast(e.message, true));
   // v3.165.0: PDF personalizado (mesmo filtro da tela) e envio/compartilhamento pelo WhatsApp
   const filtroQs = () => new URLSearchParams({ busca: EXT.busca || '', sit: EXT.sit || '', ordem: EXT.ordem || 'lote' }).toString();
