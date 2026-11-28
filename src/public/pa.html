@@ -3529,6 +3529,74 @@ async function compartilharGrupo(pdf, texto, bt){
     window.open('https://wa.me/?text=' + encodeURIComponent(t.texto + '\n\n(PDF baixado — anexe na conversa)'), '_blank');
   }
 }
+// v3.201.0: convocação dos associados do dia — texto (WhatsApp) + áudio com a voz da ZAYRA (para quem não lê)
+const SEMANA_PG = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+const NUM_EXT = ['zero', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove'];
+function quandoConvocacao(dia){
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const am = new Date(Date.parse(hoje + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10);
+  const sem = SEMANA_PG[new Date(dia + 'T12:00:00Z').getUTCDay()];
+  const dm = `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
+  return dia === hoje ? { txt: `Hoje, *${sem}* (${dm})`, fala: `Hoje, ${sem}, dia ${Number(dia.slice(8, 10))}` }
+    : dia === am ? { txt: `Amanhã, *${sem}* (${dm})`, fala: `Amanhã, ${sem}, dia ${Number(dia.slice(8, 10))}` }
+    : { txt: `No dia *${dm}* (${sem})`, fala: `No dia ${Number(dia.slice(8, 10))}, ${sem}` };
+}
+const titulo = (n) => String(n || '').toLowerCase().replace(/(^|\s)(\S)/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(Da|De|Do|Das|Dos|E)\b/g, (m) => m.toLowerCase());
+const foneFalado = (f) => { const d = String(f).replace(/\D/g, '').replace(/^55/, ''); const ext = (x) => x.split('').map((c) => NUM_EXT[+c]).join(' '); return d.length >= 10 ? [d.slice(0, 2), d.slice(2, d.length - 4), d.slice(-4)].map(ext).join(', ') : ext(d); };
+const artigo = (den) => /^(rancho|s[ií]tio|recanto|lote)\b/i.test(den) ? 'do' : 'da';
+function textosConvocacao(lotes, dia, tecnico, hora, fone, pa){
+  const q = quandoConvocacao(dia);
+  const nums = lotes.map((l) => Number(l.lote));
+  const faixa = nums.length > 1 && nums.every((n, i) => !i || n === nums[i - 1] + 1) ? `do lote ${nums[0]} ao lote ${nums[nums.length - 1]}` : nums.length === 1 ? `do lote ${nums[0]}` : `dos lotes ${nums.join(', ')}`;
+  const emo = (i) => ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'][i] || '▪️';
+  const lin = lotes.map((l, i) => `${emo(i)} *Lote ${Number(l.lote)}* — ${l.associado ? titulo(l.associado.nome) : 'associado do lote'}${l.associado && l.associado.denominacao ? ` (${l.associado.denominacao})` : ''}`);
+  const texto = [`📢 *CONVOCAÇÃO — ${pa}*`, '', `${q.txt}${hora ? `, a partir das *${hora}*` : ''}, a equipe da *Romatec* vai concluir a *locação dos pontos, vértices e marcos de divisa* dos lotes de produção abaixo, para o *fechamento das medições*:`, '', ...lin, '',
+    `👉 Compareça ao seu lote e procure o nosso topógrafo de campo, *${tecnico}*. Sua presença é importante para indicar as divisas e acompanhar a colocação dos marcos.`, '', `Não pode ir? Avise pelo WhatsApp *${fone}*.`, '', '_Romatec Consultoria Total_'].join('\n');
+  const fala = [`Atenção, associados do ${pa.replace(/^PA /, 'Projeto de Assentamento ')}. Aqui é a Romatec Consultoria Total.`,
+    `${q.fala}${hora ? `, a partir das ${hora.replace(/h$/i, ' horas').replace(':', ' e ')}` : ''}, a nossa equipe de campo vai concluir a locação dos pontos, dos vértices e dos marcos de divisa ${faixa}, para o fechamento das medições desses lotes.`,
+    'Estão convocados:', ...lotes.map((l) => `Lote ${Number(l.lote)}: ${l.associado ? titulo(l.associado.nome) : 'o associado do lote'}${l.associado && l.associado.denominacao ? `, ${artigo(l.associado.denominacao)} ${l.associado.denominacao}` : ''}.`),
+    `Pedimos que cada um compareça ao seu lote e procure o nosso topógrafo de campo, ${tecnico}. A presença de vocês é muito importante para indicar as divisas e acompanhar a colocação dos marcos.`,
+    `Quem não puder comparecer, avise a Romatec pelo WhatsApp: ${foneFalado(fone)}.`, 'Obrigado, e até lá.'].join('\n\n');
+  return { texto, fala };
+}
+function convocacaoDia(lotes, dia){
+  const box = $('#pgConvBox'); if (!box) return;
+  if (!lotes.length) { toast('Nenhum lote na programação deste dia', true); return; }
+  let tec = ''; try { tec = localStorage.getItem('pgTecnico') || ''; } catch { /* ok */ }
+  const pa = (((S.projetos || []).find((p) => p.id === S.pid) || {}).nome || 'PA Salete Moreno').replace(/^Projeto de Assentamento/i, 'PA');
+  box.innerHTML = `<div class="card" style="margin-top:10px;border-left:5px solid var(--gold)"><b>📢 Convocação — ${lotes.length} lote(s) de ${dbr(dia)}</b>
+    <div class="grid3" style="margin-top:6px"><div><label>Topógrafo de campo</label><input id="cvTec" value="${esc(tec || 'Ruan Victor')}"></div><div><label>Horário (opcional)</label><input id="cvHora" placeholder="Ex.: 7h"></div><div><label>WhatsApp para avisos</label><input id="cvFone" value="(99) 99181-1246"></div></div>
+    <label style="margin-top:6px">Texto para o WhatsApp (pode editar)</label><textarea id="cvTxt" rows="12" style="width:100%;font-size:13px"></textarea>
+    <label style="margin-top:6px">O que a voz vai falar (pode editar)</label><textarea id="cvFala" rows="7" style="width:100%;font-size:13px"></textarea>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn btn-primary" id="cvAudio" style="flex:0 0 auto">🔊 Gerar áudio e compartilhar</button><button class="btn btn-ghost" id="cvCopiar" style="flex:0 0 auto">📋 Copiar texto</button><button class="btn btn-ghost" id="cvZap" style="flex:0 0 auto">💬 Abrir no WhatsApp</button></div>
+    <div class="muted" style="margin-top:4px">Mande os dois no grupo: o <b>texto</b> e o <b>áudio</b> (para quem não lê).</div></div>`;
+  const montar = () => { const t = textosConvocacao(lotes, dia, $('#cvTec').value.trim() || 'Ruan Victor', $('#cvHora').value.trim(), $('#cvFone').value.trim() || '(99) 99181-1246', pa); $('#cvTxt').value = t.texto; $('#cvFala').value = t.fala; };
+  montar();
+  ['#cvTec', '#cvHora', '#cvFone'].forEach((s) => { $(s).onchange = () => { try { localStorage.setItem('pgTecnico', $('#cvTec').value.trim()); } catch { /* ok */ } montar(); }; });
+  $('#cvCopiar').onclick = () => copiar($('#cvTxt').value);
+  $('#cvZap').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent($('#cvTxt').value), '_blank');
+  $('#cvAudio').onclick = async (ev) => {
+    const bt = ev.currentTarget; bt.disabled = true; bt.textContent = '⏳ Gerando o áudio…';
+    let arq;
+    try {
+      const r = await api(`/projetos/${S.pid}/campo/convocacao/audio`, { json: { texto: $('#cvFala').value, nome: `Convocacao_${dia}` } });
+      arq = new File([await r.blob()], `Convocacao_${dia.split('-').reverse().join('-')}.mp3`, { type: 'audio/mpeg' });
+    } catch (e){ toast(e.message, true); bt.disabled = false; bt.textContent = '🔊 Gerar áudio e compartilhar'; return; }
+    bt.disabled = false; bt.textContent = '🔊 Gerar de novo';
+    try { await navigator.clipboard.writeText($('#cvTxt').value); } catch { /* ok */ }
+    const baixar = () => { const u = URL.createObjectURL(arq); const a = document.createElement('a'); a.href = u; a.download = arq.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 60000); };
+    const share = () => navigator.share({ files: [arq], title: arq.name, text: $('#cvTxt').value });
+    if (navigator.canShare && navigator.canShare({ files: [arq] })) {
+      try { await share(); return; } catch (e){ if (e && e.name === 'AbortError') return; }
+      let m = document.getElementById('cxManual'); if (!m){ m = document.createElement('div'); m.id = 'cxManual'; m.className = 'cx-manual'; document.body.appendChild(m); }
+      m.innerHTML = `<div class="cx-in"><b>Áudio pronto ✅</b><div class="muted" style="margin:6px 0">O texto já foi copiado. Toque para mandar o áudio no grupo.</div><div class="row" style="gap:6px"><button class="btn btn-primary" id="cxShare" style="flex:0 0 auto">📤 Compartilhar áudio</button><button class="btn btn-ghost btn-sm" id="cxBaixar" style="flex:0 0 auto">⬇️ Baixar</button><button class="btn btn-ghost btn-sm" id="cxFechar" style="flex:0 0 auto">Fechar</button></div></div>`;
+      m.querySelector('#cxShare').onclick = async () => { try { await share(); m.remove(); } catch (e2){ if (!e2 || e2.name !== 'AbortError') toast(e2.message, true); } };
+      m.querySelector('#cxBaixar').onclick = () => { baixar(); m.remove(); };
+      m.querySelector('#cxFechar').onclick = () => m.remove();
+    } else { baixar(); toast('Áudio baixado ✅ — o texto já está copiado'); }
+  };
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 const semAcento = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const PG = { dia: null, lotes: [], salvo: true, info: null };
 // v3.198.6: carimbo verde "QUITADO em dd/mm/aaaa" (data da última parcela paga) — não quitado sai em vermelho
@@ -3571,8 +3639,9 @@ async function cardProgramacao(d){
       <div class="pg-env">
         <div><b>🌙 Relatório do dia de campo</b> <span class="muted">· consulta a qualquer hora · fecha às 21 h</span><div class="muted" style="font-size:12px">Concluídos X/63 com o dossiê · medidos hoje · programação de amanhã · previsão dos quitados · parcelas em aberto</div><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px"><button class="btn btn-primary btn-sm" data-pgenv="relatorio" style="flex:0 0 auto">📤 Enviar no grupo</button><button class="btn btn-gold btn-sm" data-pgpdf="relatorio" style="flex:0 0 auto">📄 PDF</button><button class="btn btn-ghost btn-sm" data-pgtxt="relatorio" style="flex:0 0 auto">📋 Copiar texto</button></div></div>
         <div><b>📣 Boletim geral do PA</b><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px"><button class="btn btn-primary btn-sm" id="cpBolShare" style="flex:0 0 auto">📤 Enviar no grupo</button><button class="btn btn-gold btn-sm" id="cpBolPdf" style="flex:0 0 auto">📄 PDF</button><button class="btn btn-ghost btn-sm" id="cpBolTxt" style="flex:0 0 auto">📋 Copiar texto</button></div></div>
+        <div><b>📢 Convocação dos associados do dia</b> <span class="muted">· texto + áudio para quem não lê</span><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px"><button class="btn btn-primary btn-sm" id="pgConv" style="flex:0 0 auto">📢 Montar convocação</button></div></div>
       </div>
-      <div id="pgTexto"></div></div>`;
+      <div id="pgTexto"></div><div id="pgConvBox"></div></div>`;
     const mudou = () => { PG.salvo = false; desenhar(); };
     PG.adicionar = (ls) => { for (const x of ls) if (!PG.lotes.includes(x)) PG.lotes.push(x); mudou(); };
     $('#pgDia').onchange = () => { PG.dia = $('#pgDia').value || hoje; cardProgramacao(d); };
@@ -3607,6 +3676,7 @@ async function cardProgramacao(d){
     const rotaTxt = (t) => t === 'relatorio' ? `/projetos/${S.pid}/campo/relatorio/texto?dia=${PG.dia}` : `/projetos/${S.pid}/campo/programacao/texto?${q(t)}`;
     box.querySelectorAll('[data-pgenv]').forEach((b) => b.onclick = async () => { try { await garantir(); } catch (e){ return toast(e.message, true); } compartilharGrupo(rotaPdf(b.dataset.pgenv), rotaTxt(b.dataset.pgenv), b); });
     box.querySelectorAll('[data-pgpdf]').forEach((b) => b.onclick = async () => { try { await garantir(); } catch (e){ return toast(e.message, true); } abrirPdf(rotaPdf(b.dataset.pgpdf)); });
+    if ($('#pgConv')) $('#pgConv').onclick = () => convocacaoDia(PG.lotes.map((lt) => porLote[lt]).filter(Boolean), PG.dia);
     box.querySelectorAll('[data-pgtxt]').forEach((b) => b.onclick = async () => {
       try { await garantir(); } catch (e){ return toast(e.message, true); }
       const t = await copiarTextoGrupo(rotaTxt(b.dataset.pgtxt));

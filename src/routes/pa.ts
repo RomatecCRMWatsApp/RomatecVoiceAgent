@@ -594,6 +594,19 @@ router.get('/projetos/:id/campo/relatorio.pdf', h(async (req, res) => {
   return undefined;
 }));
 router.get('/projetos/:id/campo/relatorio/:arquivo([\\w.\\-]+\\.pdf)', h(async (req, res) => { enviarPdf(res, await relatorioCampo.pdfRelatorioDia(id(req.params.id), req.query.dia, baseValida(req.query.base))); return undefined; }));
+// v3.201.0: áudio (voz da ZAYRA) de um texto de convocação — para quem não lê; vai junto com o texto no WhatsApp
+router.post('/projetos/:id/campo/convocacao/audio', h(async (req, res) => {
+  const texto = String(req.body?.texto ?? '').trim();
+  if (texto.length < 10) throw new PaErro('CAMPO_INVALIDO', 'Texto do áudio vazio', 400);
+  if (texto.length > 4000) throw new PaErro('CAMPO_INVALIDO', 'Texto longo demais para o áudio (máx. 4.000 caracteres)', 400);
+  const { speak } = await import('../agent/speak');
+  let mp3: Buffer;
+  try { mp3 = await speak(texto); } catch (e) { throw new PaErro('TTS_INDISPONIVEL', `Não consegui gerar o áudio agora: ${(e as Error).message.slice(0, 160)}`, 502); }
+  const nome = String(req.body?.nome ?? 'Convocacao').replace(/[^\w\-]+/g, '_').slice(0, 80) || 'Convocacao';
+  res.setHeader('Content-Type', 'audio/mpeg'); res.setHeader('Content-Disposition', `attachment; filename="${nome}.mp3"`); res.setHeader('Cache-Control', 'no-store');
+  res.end(mp3);
+  return undefined;
+}));
 router.get('/projetos/:id/campo/relatorio/texto', h(async (req) => relatorioCampo.textoRelatorioDia(id(req.params.id), req.query.dia)));
 router.get('/projetos/:id/campo/programacao.pdf', h(async (req, res) => { enviarPdf(res, await programacao.pdfDia(id(req.params.id), req.query.tipo, req.query.dia, baseValida(req.query.base))); return undefined; }));
 router.get('/projetos/:id/campo/programacao/texto', h(async (req) => programacao.textoDia(id(req.params.id), req.query.tipo, req.query.dia)));
