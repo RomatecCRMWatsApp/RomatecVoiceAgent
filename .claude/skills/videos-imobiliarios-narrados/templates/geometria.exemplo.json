@@ -1,0 +1,21 @@
+{
+  "marca": "Bom Jardims",
+  "titulo": "OLHA A DIFERENÇA DE ESPAÇO!",
+  "duracao_s": 8.05,
+  "fps": 30,
+  "lote": {
+    "rotulo": "LOTE URBANO",
+    "largura_m": 12,
+    "comprimento_m": 25,
+    "area_anunciada_m2": 300,
+    "preco_texto": null
+  },
+  "chacara": {
+    "rotulo": "CHÁCARA BOM JARDIMS",
+    "largura_m": 55,
+    "comprimento_m": 55,
+    "area_anunciada_m2": 3025,
+    "preco_texto": null
+  },
+  "rodape": "Comparação geométrica em mesma escala."
+}

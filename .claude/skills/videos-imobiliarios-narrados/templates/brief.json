@@ -1,0 +1,25 @@
+{
+  "empreendimento": null,
+  "objetivo": "Cadastro de interessados",
+  "publico": null,
+  "idioma": "pt-BR",
+  "formato": {"largura": 1080, "altura": 1920, "fps": 30},
+  "duracao_alvo_s": null,
+  "marca": {"logo_arquivo": null, "vinheta_arquivo": null, "slogan": null},
+  "referencia": {"url_ou_arquivo": null, "observacoes_verificadas": []},
+  "materiais_reais": [],
+  "lancamento": {"data_iso": null, "confirmado_em": null, "fonte": null},
+  "contato": {"nome": null, "whatsapp": null, "registro_profissional": null, "confirmado_em": null},
+  "alegacoes": [
+    {"texto": null, "tipo": "obra|acesso|visitas|natureza|localizacao", "fonte": null, "data_fonte": null, "confirmada": false}
+  ],
+  "comparacao": {
+    "lote": {"largura_m": null, "comprimento_m": null, "area_m2": null, "preco_min": null, "preco_max": null, "fonte": null, "data_base": null},
+    "chacara": {"largura_m": null, "comprimento_m": null, "area_m2": null, "preco_a_partir": null, "fonte": null, "data_base": null},
+    "dimensoes_confirmadas": false
+  },
+  "financiamento": {"entrada": null, "prazo_meses": null, "taxa": null, "parcela": null, "total": null, "fonte": null, "confirmado": false},
+  "mapa": {"arquivo_ou_url": null, "vendidas_confirmadas": [], "data_confirmacao": null, "fonte": null, "lista_completa": false},
+  "cta": "Cadastre-se e consulte as unidades disponíveis",
+  "aprovacoes": {"roteiro": false, "materiais": false, "video": false, "publicacao_externa": false}
+}

@@ -1,0 +1,29 @@
+{
+  "versao": "v1",
+  "versao_anterior_arquivo": null,
+  "escopo_da_revisao": null,
+  "brief_arquivo": null,
+  "fontes": [],
+  "narracao": {"arquivo": null, "voz_referencia": null, "duracao_medida_s": null, "transcricao_arquivo": null, "verificada": false},
+  "musica": {"arquivo": null, "origem_autorizada": null, "duracao_medida_s": null, "ajuste": null},
+  "cenas": [
+    {
+      "id": "cena_01",
+      "arquivo_fonte": null,
+      "inicio_fonte_s": null,
+      "fim_fonte_s": null,
+      "inicio_saida_s": null,
+      "fim_saida_s": null,
+      "tratamento_orientacao": null,
+      "mensagem": null,
+      "fonte_da_alegacao": null,
+      "posicao_legenda": null
+    }
+  ],
+  "comparacao": {"config_arquivo": null, "auditoria_arquivo": null, "dimensoes_confirmadas_por": null, "data_confirmacao": null},
+  "mapa": {"unidades_marcadas": [], "fonte_status": null, "data_status": null, "lista_completa": false},
+  "exportacoes": {"master": null, "leve_whatsapp": null},
+  "checagem": {"parametros_tecnicos": false, "geometria": false, "legendas": false, "audio_ouvido": false, "marca_e_contato": false, "data_e_precos": false, "transicoes": false},
+  "publicacao_externa_executada": false,
+  "observacoes": []
+}

@@ -3,7 +3,10 @@ dist/
 .env
 .env.local
 .env.*.local
-.claude/
+.claude/*
+# skills do projeto vão para o repositório (valem em toda sessão); o resto do .claude/ fica local
+!.claude/skills/
+.claude/skills/untangle-codebase-safe/
 *.log
 knowledge-pdfs/
 data/loteamentos/

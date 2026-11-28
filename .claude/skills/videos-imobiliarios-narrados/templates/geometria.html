@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Comparação geométrica</title>
+<style>
+@font-face{font-family:GeometriaLocal;src:url('fonts/DejaVuSans.ttf') format('truetype');font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:GeometriaLocal;src:url('fonts/DejaVuSans-Bold.ttf') format('truetype');font-weight:700;font-style:normal;font-display:block}
+html,body{margin:0;padding:0;width:1080px;height:1920px;overflow:hidden;background:#06251A}
+canvas{display:block;width:1080px;height:1920px}
+</style>
+</head>
+<body>
+<canvas id="canvas" width="1080" height="1920"></canvas>
+<script>
+(() => {
+  'use strict';
+  const W = 1080;
+  const H = 1920;
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', {alpha:false, desynchronized:false});
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  const COLORS = {
+    deep: '#06251A',
+    green: '#0B3424',
+    cream: '#F5EFD8',
+    creamBright: '#FFFDF5',
+    creamDim: '#D8D4C2',
+    gold: '#D5B365',
+    goldBright: '#F0D38A',
+    muted: '#AEB9AA',
+    urban: '#DCE9D7',
+    urbanFill: '#BFD9C2',
+    goldFill: '#D5B365'
+  };
+  const meterFormat = new Intl.NumberFormat('pt-BR', {maximumFractionDigits: 2});
+  const areaFormat = new Intl.NumberFormat('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  let CONFIG = null;
+
+  const clamp = (v, a=0, b=1) => Math.max(a, Math.min(b, v));
+  const smooth = (v) => { const t = clamp(v); return t*t*(3-2*t); };
+  const easeOut = (v) => 1 - Math.pow(1-clamp(v), 3);
+  const font = (size, weight=400) => `${weight} ${size}px GeometriaLocal, DejaVu Sans, sans-serif`;
+  const safe = (value) => value == null ? '' : String(value);
+  const meter = (value) => `${meterFormat.format(value)} m`;
+  const area = (value) => `${areaFormat.format(value)} m²`;
+
+  function drawText(value, x, y, size, color=COLORS.cream, weight=400, align='left', alpha=1) {
+    const label = safe(value);
+    if (!label || alpha <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = clamp(alpha);
+    ctx.font = font(size, weight);
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x, y);
+    ctx.restore();
+  }
+
+  function fitText(value, x, y, maxWidth, size, color=COLORS.cream, weight=700, align='center', alpha=1) {
+    const label = safe(value);
+    if (!label || alpha <= 0) return size;
+    let fitted = size;
+    ctx.font = font(fitted, weight);
+    while (ctx.measureText(label).width > maxWidth && fitted > 14) {
+      fitted -= 1;
+      ctx.font = font(fitted, weight);
+    }
+    drawText(label, x, y, fitted, color, weight, align, alpha);
+    return fitted;
+  }
+
+  function strokeLine(x1, y1, x2, y2, color=COLORS.gold, width=2, alpha=1, blur=0) {
+    ctx.save();
+    ctx.globalAlpha = clamp(alpha);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    if (blur) { ctx.shadowColor = color; ctx.shadowBlur = blur; }
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function roundRect(x, y, width, height, radius, fill, stroke, strokeWidth=2, alpha=1) {
+    const r = Math.min(radius, width/2, height/2);
+    ctx.save();
+    ctx.globalAlpha = clamp(alpha);
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+width, y, x+width, y+height, r);
+    ctx.arcTo(x+width, y+height, x, y+height, r);
+    ctx.arcTo(x, y+height, x, y, r);
+    ctx.arcTo(x, y, x+width, y, r);
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = strokeWidth; ctx.stroke(); }
+    ctx.restore();
+  }
+
+  function background(t) {
+    const gradient = ctx.createLinearGradient(0, 0, W, H);
+    gradient.addColorStop(0, COLORS.deep);
+    gradient.addColorStop(0.5, COLORS.green);
+    gradient.addColorStop(1, '#08291D');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.globalAlpha = 0.07;
+    ctx.strokeStyle = COLORS.gold;
+    ctx.lineWidth = 2;
+    for (let i=0; i<7; i++) {
+      ctx.beginPath();
+      for (let x=-40; x<=W+40; x+=20) {
+        const y = 280 + i*58 + Math.sin(x*0.007 + t*0.18 + i)*15 + Math.cos(x*0.0024 - t*0.11)*10;
+        if (x === -40) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = 0.11;
+    ctx.fillStyle = COLORS.gold;
+    for (let i=0; i<20; i++) {
+      const x = (i*151 + Math.sin(i+t*0.16)*32) % W;
+      const y = (i*89 + Math.cos(i*0.8-t*0.13)*38) % H;
+      ctx.beginPath();
+      ctx.arc(x, y, 1+(i%3)*0.55, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function timing(duration) {
+    // Both outlines close early and retain a readable hold. Relative timing
+    // naturally expands when the supplied audio makes duration_s larger.
+    return {
+      urbanStart: duration*0.08,
+      urbanDuration: duration*0.28,
+      urbanEnd: duration*0.36,
+      farmStart: duration*0.20,
+      farmDuration: duration*0.36,
+      farmEnd: duration*0.56
+    };
+  }
+
+  function buildLayout(config) {
+    const lotWidth = Math.max(config.lote.largura_m, config.chacara.largura_m);
+    const lotHeight = Math.max(config.lote.comprimento_m, config.chacara.comprimento_m);
+    // One scale is shared by both cards: dimensions are never independently stretched.
+    const scale = Math.min(340/lotWidth, 390/lotHeight);
+    const y = 548;
+    const make = (lot, cx, side, color, bright, fill) => {
+      const width = lot.largura_m * scale;
+      const height = lot.comprimento_m * scale;
+      return {
+        ...lot,
+        x: cx - width/2,
+        y,
+        width,
+        height,
+        cx,
+        side,
+        color,
+        bright,
+        fill,
+        areaValue: Number(lot.area_anunciada_m2)
+      };
+    };
+    const urban = make(config.lote, 280, 'right', COLORS.urban, COLORS.creamBright, COLORS.urbanFill);
+    const farm = make(config.chacara, 800, 'left', COLORS.goldBright, '#FFF1B0', COLORS.goldFill);
+    const bottom = Math.max(urban.y + urban.height, farm.y + farm.height);
+    return {scale, urban, farm, bottom, areaY: bottom+78};
+  }
+
+  function header(config, t, duration) {
+    const alpha = easeOut(t/Math.max(duration*0.12, 0.08));
+    drawText(`${safe(config.marca)}  ·  COMPARAÇÃO GEOMÉTRICA`, 82, 62, 22, COLORS.gold, 700, 'left', alpha);
+    strokeLine(82, 91, 998, 91, COLORS.gold, 2, 0.52*alpha);
+    fitText(config.titulo, W/2, 137, 960, 58, COLORS.creamBright, 700, 'center', alpha);
+    const subtitle = config.subtitulo || 'DUAS GEOMETRIAS  ·  UMA MESMA ESCALA LINEAR';
+    fitText(subtitle, W/2, 198, 910, 24, COLORS.muted, 400, 'center', alpha*0.9);
+    strokeLine(82, 232, 998, 232, COLORS.gold, 2, 0.36*alpha);
+  }
+
+  function pathPoints(lot) {
+    return [
+      {x:lot.x, y:lot.y},
+      {x:lot.x+lot.width, y:lot.y},
+      {x:lot.x+lot.width, y:lot.y+lot.height},
+      {x:lot.x, y:lot.y+lot.height},
+      {x:lot.x, y:lot.y}
+    ];
+  }
+
+  function segmentInfo(points, progress) {
+    const lengths = [];
+    let total = 0;
+    for (let i=0; i<points.length-1; i++) {
+      const dx = points[i+1].x-points[i].x;
+      const dy = points[i+1].y-points[i].y;
+      const length = Math.hypot(dx, dy);
+      lengths.push(length);
+      total += length;
+    }
+    const distance = clamp(progress)*total;
+    let remain = distance;
+    let active = lengths.length-1;
+    let local = 1;
+    for (let i=0; i<lengths.length; i++) {
+      if (remain <= lengths[i]) {
+        active = i;
+        local = lengths[i] === 0 ? 1 : remain/lengths[i];
+        break;
+      }
+      remain -= lengths[i];
+    }
+    return {lengths, total, active, local};
+  }
+
+  function drawPathProgress(points, progress, color, width, alpha=1, blur=0) {
+    const info = segmentInfo(points, progress);
+    const end = Math.min(points.length-1, info.active+1);
+    ctx.save();
+    ctx.globalAlpha = clamp(alpha);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (blur) { ctx.shadowColor = color; ctx.shadowBlur = blur; }
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i=1; i<=end; i++) {
+      if (i === info.active+1 && info.local < 1) {
+        const q = points[i-1];
+        const r = points[i];
+        ctx.lineTo(q.x+(r.x-q.x)*info.local, q.y+(r.y-q.y)*info.local);
+      } else {
+        ctx.lineTo(points[i].x, points[i].y);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+    const q = points[info.active];
+    const r = points[info.active+1] || q;
+    return {
+      x: q.x+(r.x-q.x)*info.local,
+      y: q.y+(r.y-q.y)*info.local,
+      info
+    };
+  }
+
+  function corner(x, y, alpha, color) {
+    ctx.save();
+    ctx.globalAlpha = clamp(alpha);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(x, y, 5.5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function dimensionHorizontal(x1, x2, edgeY, dimensionY, label, progress, color, alpha) {
+    const p = easeOut(progress);
+    if (p <= 0) return;
+    const xx = x1+(x2-x1)*p;
+    strokeLine(x1, edgeY, x1, dimensionY, color, 1.6, alpha*0.74);
+    strokeLine(x2, edgeY, x2, dimensionY, color, 1.6, alpha*0.74);
+    strokeLine(x1, dimensionY, xx, dimensionY, color, 2.2, alpha*0.9, 2);
+    if (p > 0.8) drawText(label, (x1+x2)/2, dimensionY-22, 22, color, 700, 'center', smooth((p-0.8)/0.2)*alpha);
+  }
+
+  function dimensionVertical(edgeX, dimensionX, y1, y2, label, progress, color, alpha, side) {
+    const p = easeOut(progress);
+    if (p <= 0) return;
+    const yy = y1+(y2-y1)*p;
+    strokeLine(edgeX, y1, dimensionX, y1, color, 1.6, alpha*0.74);
+    strokeLine(edgeX, y2, dimensionX, y2, color, 1.6, alpha*0.74);
+    strokeLine(dimensionX, y1, dimensionX, yy, color, 2.2, alpha*0.9, 2);
+    if (p > 0.8) {
+      const labelAlpha = smooth((p-0.8)/0.2)*alpha;
+      const tx = side === 'left' ? dimensionX-14 : dimensionX+14;
+      drawText(label, tx, (y1+y2)/2, 22, color, 700, side === 'left' ? 'right' : 'left', labelAlpha);
+    }
+  }
+
+  function drawLot(lot, t, start, animationDuration, showDimensions) {
+    const raw = clamp((t-start)/Math.max(animationDuration, 0.001));
+    if (raw <= 0) return;
+    const progress = easeOut(raw);
+    const points = pathPoints(lot);
+    const info = segmentInfo(points, progress);
+    const fillAlpha = smooth((progress-0.74)/0.26)*0.28;
+    if (fillAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = fillAlpha;
+      ctx.fillStyle = lot.fill;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i=1; i<points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.save();
+    ctx.globalAlpha = 0.15*progress;
+    ctx.strokeStyle = lot.color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 12]);
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i=1; i<points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+    ctx.stroke();
+    ctx.restore();
+
+    drawPathProgress(points, progress, lot.color, 7, 1, 10);
+    drawPathProgress(points, progress, lot.color, 2.4, 1, 0);
+    const dot = drawPathProgress(points, progress, lot.bright, 1.2, 1, 3);
+
+    for (let i=0; i<4; i++) {
+      const before = info.lengths.slice(0, i).reduce((sum, value) => sum+value, 0);
+      const sideProgress = info.lengths[i] === 0 ? 1 : clamp((progress*info.total-before)/info.lengths[i]);
+      if (sideProgress > 0.97) corner(points[i+1].x, points[i+1].y, smooth((sideProgress-0.97)/0.03), lot.bright);
+    }
+
+    const topProgress = info.lengths[0] === 0 ? 1 : clamp(progress*info.total/info.lengths[0]);
+    const rightBefore = info.lengths[0];
+    const rightProgress = info.lengths[1] === 0 ? 1 : clamp((progress*info.total-rightBefore)/info.lengths[1]);
+    const dimAlpha = smooth((progress-0.08)/0.4);
+    if (showDimensions) {
+      dimensionHorizontal(lot.x, lot.x+lot.width, lot.y, lot.y-39, `${meter(lot.largura_m)}  ·  FRENTE`, topProgress, lot.bright, dimAlpha);
+      const dimensionX = lot.side === 'left' ? lot.x-29 : lot.x+lot.width+29;
+      dimensionVertical(lot.side === 'left' ? lot.x : lot.x+lot.width, dimensionX, lot.y, lot.y+lot.height, `${meter(lot.comprimento_m)}  ·  LADO`, rightProgress, lot.bright, dimAlpha, lot.side);
+    }
+
+    ctx.save();
+    ctx.globalAlpha = 0.96;
+    ctx.fillStyle = lot.bright;
+    ctx.shadowColor = lot.bright;
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, 6, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function cardCopy(lot, t, timingData, areaY, showAreas, duration) {
+    const headerAlpha = easeOut(t/Math.max(duration*0.16, 0.1));
+    fitText(lot.rotulo, lot.cx, 302, 430, 27, lot.color, 700, 'center', headerAlpha);
+    fitText(`${meter(lot.largura_m)} × ${meter(lot.comprimento_m)}`, lot.cx, 348, 360, 35, COLORS.creamBright, 700, 'center', headerAlpha);
+    const end = lot === timingData.urbanLot ? timingData.urbanEnd : timingData.farmEnd;
+    const stable = smooth((t-end+duration*0.02)/Math.max(duration*0.12, 0.08));
+    if (showAreas) drawText(area(lot.areaValue), lot.cx, areaY, 43, COLORS.creamBright, 700, 'center', stable);
+    const price = lot.preco_texto;
+    if (typeof price === 'string' && price.length > 0) {
+      fitText(price, lot.cx, areaY+45, 430, 25, COLORS.creamDim, 400, 'center', stable*0.96);
+    }
+  }
+
+  function badge(config, ratio, t, duration) {
+    if (config.mostrar_badge === false || !(ratio > 10)) return;
+    const alpha = smooth((t-duration*0.60)/Math.max(duration*0.10, 0.08));
+    if (alpha <= 0) return;
+    roundRect(150, 1260, 780, 78, 39, 'rgba(213,179,101,.18)', COLORS.goldBright, 2.5, alpha);
+    fitText(config.badge_texto || 'Mais de 10× a área', W/2, 1299, 710, 30, COLORS.goldBright, 700, 'center', alpha);
+  }
+
+  function footer(config, t, duration) {
+    const alpha = smooth((t-duration*0.66)/Math.max(duration*0.12, 0.08));
+    if (alpha <= 0) return;
+    strokeLine(82, 1655, 998, 1655, COLORS.gold, 2, 0.34*alpha);
+    fitText(config.rodape, W/2, 1710, 900, 24, COLORS.creamDim, 400, 'center', alpha);
+  }
+
+  function render(config, frame) {
+    const duration = Math.max(0.1, Number(config.duracao_s));
+    const t = frame/Number(config.fps);
+    const timingData = timing(duration);
+    const layout = buildLayout(config);
+    timingData.urbanLot = layout.urban;
+    timingData.farmLot = layout.farm;
+    background(t);
+    header(config, t, duration);
+    cardCopy(layout.urban, t, timingData, layout.areaY, config.mostrar_areas !== false, duration);
+    cardCopy(layout.farm, t, timingData, layout.areaY, config.mostrar_areas !== false, duration);
+    drawLot(layout.urban, t, timingData.urbanStart, timingData.urbanDuration, config.mostrar_dimensoes !== false);
+    drawLot(layout.farm, t, timingData.farmStart, timingData.farmDuration, config.mostrar_dimensoes !== false);
+    const ratio = Number(config.chacara.area_anunciada_m2)/Number(config.lote.area_anunciada_m2);
+    badge(config, ratio, t, duration);
+    footer(config, t, duration);
+  }
+
+  window.setConfig = (config) => { CONFIG = config; };
+  window.renderFrame = (frame) => {
+    ctx.clearRect(0, 0, W, H);
+    if (CONFIG) render(CONFIG, Number(frame) || 0);
+  };
+  window.renderFrame(0);
+})();
+</script>
+</body>
+</html>
